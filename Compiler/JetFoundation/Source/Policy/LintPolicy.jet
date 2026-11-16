@@ -306,11 +306,11 @@ lint_top_level_commas: fn(body: String) -> [String] Never! {
 }
 
 // Rust `key_value_entries`: `key: value` pairs, trimmed.
-lint_key_value_entries: fn(body: String) -> [(key: String, value: String)] Never! {
-    out := [(key: String, value: String)]{}
+lint_key_value_entries: fn(body: String) -> [{key: String, value: String}] Never! {
+    out := [{key: String, value: String}]{}
     loop entry in lint_top_level_commas(body) {
         parts: entry.trim().split_once(":") ?? next
-        out.push((key: parts.before.trim(), value: parts.after.trim()))
+        out.push({key: parts.before.trim(), value: parts.after.trim()})
     }
     out
 }

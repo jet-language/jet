@@ -52,9 +52,9 @@ ir_trait_key_free: fn(table: IRTraitKeys, identity: String, first: Int) -> Int N
 // candidate key: in identity order each takes its first candidate no
 // identity before it holds (ir_trait_key_free), so no two types share a
 // key and no key depends on the order the program declared its types in.
-ir_trait_key_table: fn(identities: &&[(identity: String, first: Int)]) -> IRTraitKeys Never! {
+ir_trait_key_table: fn(identities: &&[{identity: String, first: Int}]) -> IRTraitKeys Never! {
     order := identities.move()
-    order.sort_by(fn(left: (identity: String, first: Int), right: (identity: String, first: Int)) { left.identity <=> right.identity })
+    order.sort_by(fn(left: {identity: String, first: Int}, right: {identity: String, first: Int}) { left.identity <=> right.identity })
     table := IRTraitKeys{keys: [String:Int]{}, held: [Int:Bool]{}}
     loop entry in order.move() {
         if table.keys.get(entry.identity) != None -> next
@@ -585,8 +585,8 @@ ir_trait_unreachable: fn(m: &IRModule, b: &IRBuilder) Never! {
 }
 
 #Test("two types whose first payload keys collide each get a key of their own, whatever order they are declared in") {
-    forward := [(identity: String, first: Int)]{(identity: "main::Point", first: 7), (identity: "main::Line", first: 7), (identity: "main::Point", first: 7)}
-    backward := [(identity: String, first: Int)]{(identity: "main::Line", first: 7), (identity: "main::Point", first: 7)}
+    forward := [{identity: String, first: Int}]{{identity: "main::Point", first: 7}, {identity: "main::Line", first: 7}, {identity: "main::Point", first: 7}}
+    backward := [{identity: String, first: Int}]{{identity: "main::Line", first: 7}, {identity: "main::Point", first: 7}}
     tables := [IRTraitKeys]{ir_trait_key_table(forward), ir_trait_key_table(backward)}
     loop table in tables {
         line: table.keys.get("main::Line") ?? -1

@@ -73,15 +73,15 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
     tools: cli_native_dev_tool_paths([String:String]{"JET": "/opt/jet/bin/jet", "JETPACK": "/opt/jetpack/bin/jetpack", "PATH": "/usr/bin"})
     assert_eq(
         tools,
-        [(command: String, binary: String)]{
-            (command: "jet", binary: "/opt/jet/bin/jet"),
-            (command: "jetpack", binary: "/opt/jetpack/bin/jetpack"),
+        [{command: String, binary: String}]{
+            {command: "jet", binary: "/opt/jet/bin/jet"},
+            {command: "jetpack", binary: "/opt/jetpack/bin/jetpack"},
         },
     )
     assert_eq(
         cli_native_dev_tool_paths([String:String]{"JET": "/opt/jet/bin/jet", "JETPACK": ""}),
-        [(command: String, binary: String)]{
-            (command: "jet", binary: "/opt/jet/bin/jet"),
+        [{command: String, binary: String}]{
+            {command: "jet", binary: "/opt/jet/bin/jet"},
         },
     )
 }
@@ -89,13 +89,13 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
 #Test("cli native projection derives root timezone and loader paths") {
     projection: cli_native_environment_projection(
         "/workspace/jet",
-        [(name: String, output: LeaseText)]{
-            (name: "tzdata", output: LeaseText.plain("/hangar/tzdata-1")),
-            (name: "vulkan-loader", output: LeaseText.plain("/hangar/vulkan-1")),
+        [{name: String, output: LeaseText}]{
+            {name: "tzdata", output: LeaseText.plain("/hangar/tzdata-1")},
+            {name: "vulkan-loader", output: LeaseText.plain("/hangar/vulkan-1")},
         },
-        [(command: String, binary: String)]{
-            (command: "jet", binary: "/opt/jet/bin/jet"),
-            (command: "jetpack", binary: "/opt/jet/bin/jetpack"),
+        [{command: String, binary: String}]{
+            {command: "jet", binary: "/opt/jet/bin/jet"},
+            {command: "jetpack", binary: "/opt/jet/bin/jetpack"},
         },
         Val("/host/lib"),
     )

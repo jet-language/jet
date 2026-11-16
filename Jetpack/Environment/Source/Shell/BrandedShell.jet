@@ -95,7 +95,7 @@ ShellKind: enum {
 // the outer command; `cleanup` runs once the caller's blocking wait returns.
 BrandedShell: struct {
     command_tail: [String]
-    env_vars: [(name: String, value: String)]
+    env_vars: [{name: String, value: String}]
     priv cleanup_file: String?
     priv cleanup_dir: String?
 
@@ -119,7 +119,7 @@ BrandedShell: struct {
                 rc: env_shell_write_temp("jetpack-bashrc", env_shell_bash_rc(label, path, strip))
                 BrandedShell{
                     command_tail: [String]{"bash", "--rcfile", rc, "-i"},
-                    env_vars: [(name: String, value: String)]{(name: ENV_SHELL_PROMPT_LABEL_ENV, value: label)},
+                    env_vars: [{name: String, value: String}]{{name: ENV_SHELL_PROMPT_LABEL_ENV, value: label}},
                     cleanup_file: Val(rc),
                     cleanup_dir: None,
                 }
@@ -129,9 +129,9 @@ BrandedShell: struct {
                 env_shell_write_best_effort(files.join(dir, ".zshrc"), env_shell_zsh_rc(label, path, strip))
                 BrandedShell{
                     command_tail: [String]{"zsh", "-i"},
-                    env_vars: [(name: String, value: String)]{
-                        (name: "ZDOTDIR", value: dir),
-                        (name: ENV_SHELL_PROMPT_LABEL_ENV, value: label),
+                    env_vars: [{name: String, value: String}]{
+                        {name: "ZDOTDIR", value: dir},
+                        {name: ENV_SHELL_PROMPT_LABEL_ENV, value: label},
                     },
                     cleanup_file: None,
                     cleanup_dir: Val(dir),
@@ -139,7 +139,7 @@ BrandedShell: struct {
             }
             .Fish -> BrandedShell{
                 command_tail: [String]{"fish", "-C", env_shell_fish_init(label, path, strip), "-i"},
-                env_vars: [(name: String, value: String)]{(name: ENV_SHELL_PROMPT_LABEL_ENV, value: label)},
+                env_vars: [{name: String, value: String}]{{name: ENV_SHELL_PROMPT_LABEL_ENV, value: label}},
                 cleanup_file: None,
                 cleanup_dir: None,
             }

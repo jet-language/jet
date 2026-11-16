@@ -51,7 +51,7 @@ provider_core_test_git: fn(dir: String, args: [String]) -[Exec, Time.Wait]> Proc
 
 // Init a git repo at `dir` with `files_to_write` and one commit; false when
 // `git` is not installed.
-provider_core_test_git_repo: fn(dir: String, files_to_write: [(path: String, text: String)]) -[FS, Exec, Time.Wait]> Bool {
+provider_core_test_git_repo: fn(dir: String, files_to_write: [{path: String, text: String}]) -[FS, Exec, Time.Wait]> Bool {
     if !provider_core_test_git_available() -> return false
     loop entry in files_to_write {
         provider_core_test_write(files.join(dir, entry.path), entry.text)
@@ -250,10 +250,10 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 #Test("provider direct ecosystem roots do not default to nix") {
     verification := StoreVerification.new()
     ctx: provider_core_test_ctx(".", true, None, None)
-    cases: [(raw: String, kind: ProviderKind, flake: String)]{
-        (raw: "hello@jet-registry#version=1.0.0", kind: ProviderKind.JetRegistry, flake: "jet-registry:hello#version=1.0.0"),
-        (raw: "left-pad@npm#version=1.3.0", kind: ProviderKind.Npm, flake: "npm:left-pad#version=1.3.0"),
-        (raw: "serde@cargo#version=1.0.200", kind: ProviderKind.Cargo, flake: "cargo:serde#version=1.0.200"),
+    cases: [{raw: String, kind: ProviderKind, flake: String}]{
+        {raw: "hello@jet-registry#version=1.0.0", kind: ProviderKind.JetRegistry, flake: "jet-registry:hello#version=1.0.0"},
+        {raw: "left-pad@npm#version=1.3.0", kind: ProviderKind.Npm, flake: "npm:left-pad#version=1.3.0"},
+        {raw: "serde@cargo#version=1.0.200", kind: ProviderKind.Cargo, flake: "cargo:serde#version=1.0.200"},
     }
     loop case in cases {
         spec: provider_core_test_spec(case.raw)
@@ -564,7 +564,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     repo: files.join(base, "remote")
     store: files.join(base, "store")
     files.create_dir_all(store) ?? panic("store")
-    written: [(path: String, text: String)]{(path: "pkgs/hello/hello.jet", text: "hello: module {{ }}\n"), (path: "pkgs/hello/bin/hello", text: "#!/bin/sh\necho remote\n")}
+    written: [{path: String, text: String}]{{path: "pkgs/hello/hello.jet", text: "hello: module {{ }}\n"}, {path: "pkgs/hello/bin/hello", text: "#!/bin/sh\necho remote\n"}}
     if !provider_core_test_git_repo(repo, written) {
         print("note: skipping remote core provider test (git not found)")
         return
@@ -582,7 +582,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     store: files.join(base, "store")
     files.create_dir_all(store) ?? panic("store")
     with: files.join(base, "with-pack")
-    marker: [(path: String, text: String)]{(path: "package.jet", text: "name: \"p\"\nversion: \"0.1.0\"\n")}
+    marker: [{path: String, text: String}]{{path: "package.jet", text: "name: \"p\"\nversion: \"0.1.0\"\n"}}
     if !provider_core_test_git_repo(with, marker) {
         print("note: skipping remote probe test (git not found)")
         return
@@ -591,7 +591,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     with_spec: provider_core_test_spec_in("hello@mine", with_table)
     assert_eq(provider_resolve_kind(with_spec, with_table, false, store), ProviderKind.Core)
     without: files.join(base, "no-pack")
-    provider_core_test_git_repo(without, [(path: String, text: String)]{(path: "flake.nix", text: "{{}}\n")})
+    provider_core_test_git_repo(without, [{path: String, text: String}]{{path: "flake.nix", text: "{{}}\n"}})
     without_table: provider_core_test_table("plain", "file://{without}", ProviderKind.Infer)
     assert_eq(provider_resolve_kind(provider_core_test_spec_in("fd@plain", without_table), without_table, false, store), ProviderKind.Nix)
     // Offline with no cached checkout cannot probe.
@@ -606,7 +606,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     store: files.join(base, "store")
     files.create_dir_all(store) ?? panic("store")
     repo: files.join(base, "repo")
-    if !provider_core_test_git_repo(repo, [(path: String, text: String)]{(path: "package.jet", text: "name: \"p\"\nversion: \"0.1.0\"\n")}) {
+    if !provider_core_test_git_repo(repo, [{path: String, text: String}]{{path: "package.jet", text: "name: \"p\"\nversion: \"0.1.0\"\n"}}) {
         print("note: skipping commit-sha probe test (git not found)")
         return
     }
@@ -624,10 +624,10 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     repo: files.join(base, "remote")
     store: files.join(base, "store")
     files.create_dir_all(store) ?? panic("store")
-    written: [(path: String, text: String)]{
-        (path: "package.jet", text: "name: \"p\"\nversion: \"0.1.0\"\n"),
-        (path: "pkgs/hello/hello.jet", text: "hello: module {{ }}\n"),
-        (path: "pkgs/hello/bin/hello", text: "#!/bin/sh\necho hi-infer\n"),
+    written: [{path: String, text: String}]{
+        {path: "package.jet", text: "name: \"p\"\nversion: \"0.1.0\"\n"},
+        {path: "pkgs/hello/hello.jet", text: "hello: module {{ }}\n"},
+        {path: "pkgs/hello/bin/hello", text: "#!/bin/sh\necho hi-infer\n"},
     }
     if !provider_core_test_git_repo(repo, written) {
         print("note: skipping inferred remote build test (git not found)")
@@ -647,13 +647,13 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     repo: files.join(base, "mono")
     store: files.join(base, "store")
     files.create_dir_all(store) ?? panic("store")
-    written: [(path: String, text: String)]{
-        (path: "package.jet", text: "name: \"workspace\"\nmembers: find(\"./packages\")\n"),
-        (path: "packages/hello/package.jet", text: "name: \"hello\"\nversion: \"0.1.0\"\n"),
-        (path: "packages/hello/hello.jet", text: "hello: module {{ }}\n"),
-        (path: "packages/hello/bin/hello", text: "#!/bin/sh\necho hi\n"),
-        (path: "packages/world/package.jet", text: "name: \"world\"\nversion: \"0.1.0\"\n"),
-        (path: "packages/world/world.jet", text: "world: module {{ }}\n"),
+    written: [{path: String, text: String}]{
+        {path: "package.jet", text: "name: \"workspace\"\nmembers: find(\"./packages\")\n"},
+        {path: "packages/hello/package.jet", text: "name: \"hello\"\nversion: \"0.1.0\"\n"},
+        {path: "packages/hello/hello.jet", text: "hello: module {{ }}\n"},
+        {path: "packages/hello/bin/hello", text: "#!/bin/sh\necho hi\n"},
+        {path: "packages/world/package.jet", text: "name: \"world\"\nversion: \"0.1.0\"\n"},
+        {path: "packages/world/world.jet", text: "world: module {{ }}\n"},
     }
     if !provider_core_test_git_repo(repo, written) {
         print("note: skipping sparse fetch test (git not found)")
@@ -679,14 +679,14 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     files.create_dir_all(store) ?? panic("store")
     // `app` depends on the in-repo `logging` member through an alias (`log`)
     // that differs from the member name: resolution is by path target.
-    written: [(path: String, text: String)]{
-        (path: "package.jet", text: "name: \"workspace\"\nmembers: find(\"./packages\")\n"),
-        (path: "packages/app/package.jet", text: "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ log: ../logging }}\n"),
-        (path: "packages/app/app.jet", text: "app: module {{ }}\n"),
-        (path: "packages/logging/package.jet", text: "name: \"logging\"\nversion: \"0.1.0\"\n"),
-        (path: "packages/logging/logging.jet", text: "logging: module {{ }}\n"),
-        (path: "packages/unrelated/package.jet", text: "name: \"unrelated\"\nversion: \"0.1.0\"\n"),
-        (path: "packages/unrelated/unrelated.jet", text: "unrelated: module {{ }}\n"),
+    written: [{path: String, text: String}]{
+        {path: "package.jet", text: "name: \"workspace\"\nmembers: find(\"./packages\")\n"},
+        {path: "packages/app/package.jet", text: "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ log: ../logging }}\n"},
+        {path: "packages/app/app.jet", text: "app: module {{ }}\n"},
+        {path: "packages/logging/package.jet", text: "name: \"logging\"\nversion: \"0.1.0\"\n"},
+        {path: "packages/logging/logging.jet", text: "logging: module {{ }}\n"},
+        {path: "packages/unrelated/package.jet", text: "name: \"unrelated\"\nversion: \"0.1.0\"\n"},
+        {path: "packages/unrelated/unrelated.jet", text: "unrelated: module {{ }}\n"},
     }
     if !provider_core_test_git_repo(repo, written) {
         print("note: skipping sparse dep test (git not found)")
@@ -709,11 +709,11 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     repo: files.join(base, "mono")
     store: files.join(base, "store")
     files.create_dir_all(store) ?? panic("store")
-    written: [(path: String, text: String)]{
-        (path: "workspace.jet", text: "workspace: module {{ members: find(\"./packages\") }}\n"),
-        (path: "packages/app/package.jet", text: "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ ghost: ../ghost }}\n"),
-        (path: "packages/app/app.jet", text: "app: module {{ }}\n"),
-        (path: "packages/ghost/notes.txt", text: "not a package\n"),
+    written: [{path: String, text: String}]{
+        {path: "workspace.jet", text: "workspace: module {{ members: find(\"./packages\") }}\n"},
+        {path: "packages/app/package.jet", text: "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ ghost: ../ghost }}\n"},
+        {path: "packages/app/app.jet", text: "app: module {{ }}\n"},
+        {path: "packages/ghost/notes.txt", text: "not a package\n"},
     }
     if !provider_core_test_git_repo(repo, written) {
         print("note: skipping E1233 test (git not found)")
@@ -831,7 +831,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 // Distinct package trees hash differently; identical trees hash the same.
 #Test("provider tree fingerprint reflects contents") {
     base: provider_core_test_dir("jpk-fp")
-    cases: [(name: String, body: String)]{(name: "a", body: "one"), (name: "b", body: "two"), (name: "c", body: "one")}
+    cases: [{name: String, body: String}]{{name: "a", body: "one"}, {name: "b", body: "two"}, {name: "c", body: "one"}}
     loop case in cases -> provider_core_test_write(files.join(base, "{case.name}/bin/x"), case.body)
     a: provider_tree_fingerprint(files.join(base, "a")) ?? panic("a")
     b: provider_tree_fingerprint(files.join(base, "b")) ?? panic("b")

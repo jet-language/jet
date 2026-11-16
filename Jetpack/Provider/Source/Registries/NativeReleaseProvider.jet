@@ -339,10 +339,10 @@ provider_native_release_facts: fn(spec: RefSpec, table: SourceTable, ctx: Provid
 }
 
 // `base#selector` split at the last `#`.
-provider_native_split_upstream: fn(upstream: String) -> (base: String, selector: String?) Never! {
+provider_native_split_upstream: fn(upstream: String) -> {base: String, selector: String?} Never! {
     if provider_registry_rsplit_once(upstream, "#") == {
-        .Val(pair) -> (base: pair.before, selector: Val(pair.after))
-        .None -> (base: upstream, selector: None)
+        .Val(pair) -> {base: pair.before, selector: Val(pair.after)}
+        .None -> {base: upstream, selector: None}
     }
 }
 

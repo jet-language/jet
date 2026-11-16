@@ -50,11 +50,11 @@ parser_protocol_message: fn(state: &JetParserState) -> ProtocolMessage {
     start: parser_current(state)
     sender: parser_expect_name(state, "for a protocol message sender")
     endpoint: if parser_value(state, sender) == {
-        "client" -> (direction: ProtocolDirection.ClientToServer, expected: "server")
-        "server" -> (direction: ProtocolDirection.ServerToClient, expected: "client")
+        "client" -> {direction: ProtocolDirection.ClientToServer, expected: "server"}
+        "server" -> {direction: ProtocolDirection.ServerToClient, expected: "client"}
         else -> {
             parser_protocol_error(state, sender.span, "protocol messages start with `client` or `server`", "the sender determines the protocol direction", "write `client: Message(...)` or `server: Message(...)`")
-            (direction: ProtocolDirection.ClientToServer, expected: "server")
+            {direction: ProtocolDirection.ClientToServer, expected: "server"}
         }
     }
     if parser_current_kind(state) == TOKEN_UNIFIED_ARROW {

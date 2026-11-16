@@ -284,11 +284,11 @@ NixTestProgress: struct {
             .Err(_) -> true
         },
     )
-    changes: [(needle: String, replacement: String)]{
-        (needle: "ripgrep-15.2.0", replacement: "ripgrep-15.2.1"),
-        (needle: "7088584", replacement: "7088585"),
-        (needle: "0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67", replacement: "0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-68"),
-        (needle: "NarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\n", replacement: "NarHash: sha256:{store_test_repeat("0", 52)}\n"),
+    changes: [{needle: String, replacement: String}]{
+        {needle: "ripgrep-15.2.0", replacement: "ripgrep-15.2.1"},
+        {needle: "7088584", replacement: "7088585"},
+        {needle: "0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67", replacement: "0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-68"},
+        {needle: "NarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\n", replacement: "NarHash: sha256:{store_test_repeat("0", 52)}\n"},
     }
     loop change in changes {
         changed: NixNarInfo.parse(STORE_NIX_TEST_STANDARD_NARINFO.replace(change.needle, change.replacement)) ?? panic("changed narinfo parses")
@@ -603,10 +603,10 @@ NixTestProgress: struct {
 
     // Under the Nix name law only `/`, NUL, and `.`/`..` stay illegal;
     // control bytes are legal Nix names.
-    invalid_names: [(label: String, name: [U8])]{
-        (label: "slash", name: "bad/name".bytes()),
-        (label: "nul", name: store_nix_test_bytes_with_nul("bad", "name")),
-        (label: "dotdot", name: "..".bytes()),
+    invalid_names: [{label: String, name: [U8]}]{
+        {label: "slash", name: "bad/name".bytes()},
+        {label: "nul", name: store_nix_test_bytes_with_nul("bad", "name")},
+        {label: "dotdot", name: "..".bytes()},
     }
     loop invalid in invalid_names {
         invalid_nar: store_nix_test_nar_with_directory_entries([[U8]]{invalid.name})
@@ -618,13 +618,13 @@ NixTestProgress: struct {
 #Test("store nix cache admits sibling store relative symlink and host escape") {
     verification := StoreVerification.new()
     seed: store_nix_test_seed(15)
-    targets: [(label: String, store_path: String, target: String)]{
-        (label: "sibling-link", store_path: "/nix/store/66666666666666666666666666666666-sibling-link", target: "../../77777777777777777777777777777777-sibling/bin/tool"),
+    targets: [{label: String, store_path: String, target: String}]{
+        {label: "sibling-link", store_path: "/nix/store/66666666666666666666666666666666-sibling-link", target: "../../77777777777777777777777777777777-sibling/bin/tool"},
         // Escaped relative targets are inert link data in Nix admission
         // (systemd ships `../../../../../etc/environment`).
-        (label: "host-escape", store_path: "/nix/store/88888888888888888888888888888888-host-escape", target: "../../../../../etc/environment"),
+        {label: "host-escape", store_path: "/nix/store/88888888888888888888888888888888-host-escape", target: "../../../../../etc/environment"},
         // Absolute host targets are inert link data too (`/bin/sh`).
-        (label: "abs-host", store_path: "/nix/store/98888888888888888888888888888888-abs-host", target: "/etc/passwd"),
+        {label: "abs-host", store_path: "/nix/store/98888888888888888888888888888888-abs-host", target: "/etc/passwd"},
     }
     loop case in targets {
         nar: store_nix_test_nar_with_nested_symlink(case.target.bytes())
@@ -900,10 +900,10 @@ NixTestProgress: struct {
 #Test("store nix cache failures are e1350 and classify nar errors") {
     kinds: [NixCacheErrorKind]{.Metadata, .WrongKey, .Signature, .Transport, .UnsupportedCompression, .CompressedCorruption, .NarCorruption, .MissingReference, .PathTraversal, .DuplicateEntry, .Admission}
     loop kind in kinds -> assert_eq(NixCacheError.new(kind, "test").code(), "E1350")
-    cases: [(detail: String, kind: NixCacheErrorKind)]{
-        (detail: "NAR stream directory contains duplicate names", kind: .DuplicateEntry),
-        (detail: "NAR name is not one safe path component", kind: .PathTraversal),
-        (detail: "zstd data corruption detected", kind: .CompressedCorruption),
+    cases: [{detail: String, kind: NixCacheErrorKind}]{
+        {detail: "NAR stream directory contains duplicate names", kind: .DuplicateEntry},
+        {detail: "NAR name is not one safe path component", kind: .PathTraversal},
+        {detail: "zstd data corruption detected", kind: .CompressedCorruption},
     }
     loop case in cases {
         assert_eq(store_nix_classify_nar_error(case.detail), case.kind)

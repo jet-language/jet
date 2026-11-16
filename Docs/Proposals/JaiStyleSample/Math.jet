@@ -291,17 +291,17 @@ round :: fn(n: Float) -> Int Never! {
 }
 to_bits :: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
 from_bits :: fn(bits: Int) -> Float Never! { core.math.from_bits(bits) }
-sin_cos :: fn(n: Float) -> (cos: Float, sin: Float) Never! {
+sin_cos :: fn(n: Float) -> {cos: Float, sin: Float} Never! {
     pair :: core.math.sin_cos(n)
-    (cos: pair.cos, sin: pair.sin)
+    {cos: pair.cos, sin: pair.sin}
 }
-modf :: fn(n: Float) -> (fract: Float, whole: Float) Never! {
-    (fract: fract(n), whole: trunc(n))
+modf :: fn(n: Float) -> {fract: Float, whole: Float} Never! {
+    {fract: fract(n), whole: trunc(n)}
 }
-frexp :: fn(n: Float) -> (exp: Int, frac: Float) Never! {
+frexp :: fn(n: Float) -> {exp: Int, frac: Float} Never! {
     exponent :: ilogb(n) ?? 0
-    if n == 0.0 || !is_finite(n) -> return (exp: exponent, frac: n)
-    (exp: exponent, frac: ldexp(n, -exponent))
+    if n == 0.0 || !is_finite(n) -> return {exp: exponent, frac: n}
+    {exp: exponent, frac: ldexp(n, -exponent)}
 }
 
 checked_abs :: fn(n: Int) -> Int? Never! {
@@ -426,18 +426,18 @@ powmod :: fn(base: Int, exponent: Int, modulus: Int) -> Int? Never! {
     Val(result)
 }
 
-div_mod :: fn(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
+div_mod :: fn(a: Int, b: Int) -> {quot: Int, rem: Int} Never! {
     rem := a %% b
     if rem < 0 {
         if b > 0 -> rem = rem + b
         if b < 0 -> rem = rem - b
     }
-    (quot: (a - rem) /% b, rem: rem)
+    {quot: (a - rem) /% b, rem: rem}
 }
 
-div_rem :: fn(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
+div_rem :: fn(a: Int, b: Int) -> {quot: Int, rem: Int} Never! {
     rem :: a %% b
-    (quot: (a - rem) /% b, rem: rem)
+    {quot: (a - rem) /% b, rem: rem}
 }
 
 digits :: fn(n: Int) -> Int Never! {
@@ -2016,25 +2016,25 @@ impl Delta2.Sub {
 // Not exported from Core's public type table: payload extraction for the
 // existing geometry call contracts checked by sema, not a new coordinate API.
 GeometryPoint :: trait {
-    __coordinates :: fn(self) -> (x: Float, y: Float, frame_id: Int) Never!
+    __coordinates :: fn(self) -> {x: Float, y: Float, frame_id: Int} Never!
 }
 impl ScreenPoint.GeometryPoint {
-    __coordinates :: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    __coordinates :: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! { {x: self.x, y: self.y, frame_id: self.frame_id} }
 }
 impl WorldPoint.GeometryPoint {
-    __coordinates :: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    __coordinates :: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! { {x: self.x, y: self.y, frame_id: self.frame_id} }
 }
 impl ViewPoint.GeometryPoint {
-    __coordinates :: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    __coordinates :: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! { {x: self.x, y: self.y, frame_id: self.frame_id} }
 }
 impl CameraPoint.GeometryPoint {
-    __coordinates :: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    __coordinates :: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! { {x: self.x, y: self.y, frame_id: self.frame_id} }
 }
 impl DevicePoint.GeometryPoint {
-    __coordinates :: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    __coordinates :: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! { {x: self.x, y: self.y, frame_id: self.frame_id} }
 }
 impl Point2.GeometryPoint {
-    __coordinates :: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    __coordinates :: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! { {x: self.x, y: self.y, frame_id: self.frame_id} }
 }
 Ray2 :: struct<T, From, To> {
     origin: Point2<T, To>

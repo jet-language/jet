@@ -16,7 +16,7 @@ CRAN_DEFAULT_REPOSITORY: "https://cloud.r-project.org"
 // `(operator version)` requirement.
 CranDependency: struct {
     name: String
-    requirement: (operator: String, wanted: String)?
+    requirement: {operator: String, wanted: String}?
 }
 
 // One `PACKAGES` paragraph.
@@ -177,7 +177,7 @@ provider_cran_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, 
 
 // `name#version=<exact>` (or `name#<exact>`); a bare name is mutable and
 // refused so the first fetch is reviewable.
-provider_cran_parse_ref: fn(raw: String) -> (name: String, version: String) RegistryError! {
+provider_cran_parse_ref: fn(raw: String) -> {name: String, version: String} RegistryError! {
     halves: raw.split_once("#")
     name: if halves == {
         .Val(pair) -> pair.before
@@ -193,7 +193,7 @@ provider_cran_parse_ref: fn(raw: String) -> (name: String, version: String) Regi
     if selector == "" {
         return Err(RegistryError.Reason("CRAN ref `{raw}` is mutable; use `{name}#version=<exact>` so the first fetch is reviewable"))
     }
-    Ok((name: name, version: selector.removeprefix("version=")))
+    Ok({name: name, version: selector.removeprefix("version=")})
 }
 
 // Parse a Debian-control `PACKAGES` index into records by package name.
@@ -283,7 +283,7 @@ provider_cran_parse_dependency: fn(raw_item: String) -> CranDependency? Never! {
             rest := pair.after
             loop rest.ends_with(")") -> rest = rest.removesuffix(")")
             words: provider_registry_words(rest)
-            if words.len() == 2 -> Val((operator: words[0], wanted: words[1])) else -> None
+            if words.len() == 2 -> Val({operator: words[0], wanted: words[1]}) else -> None
         }
         .None -> None
     }

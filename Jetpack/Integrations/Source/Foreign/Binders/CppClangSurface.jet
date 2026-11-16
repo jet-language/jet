@@ -76,7 +76,7 @@ CppClass: struct {
 CppFunctionTemplate: struct {
     cpp_name: String
     type_params: [String]
-    params: [(name: String, spelling: String)]
+    params: [{name: String, spelling: String}]
     result: String
 }
 
@@ -277,8 +277,8 @@ pkg_cpp_parse_params: fn(map: [String:Dyn], substitutions: [String:String]) -> [
 }
 
 // `ParmVarDecl` children: the declared name (or `argN`) and clang's type.
-pkg_cpp_raw_params: fn(map: [String:Dyn]) -> [(name: String, spelling: String)] ForeignBindError! {
-    out := [(name: String, spelling: String)]{}
+pkg_cpp_raw_params: fn(map: [String:Dyn]) -> [{name: String, spelling: String}] ForeignBindError! {
+    out := [{name: String, spelling: String}]{}
     index := 0
     loop raw_child in pkg_cpp_children(map) {
         child: pkg_json_object(raw_child) ?? next
@@ -287,7 +287,7 @@ pkg_cpp_raw_params: fn(map: [String:Dyn]) -> [(name: String, spelling: String)] 
         declared: pkg_cpp_string(child, "name") ?? ""
         name: if pkg_binder_is_ident(declared) -> declared else -> "arg{index}"
         spelling: pkg_cpp_qual_type(child)
-        out.push((name: name, spelling: spelling))
+        out.push({name: name, spelling: spelling})
     }
     Ok(out)
 }

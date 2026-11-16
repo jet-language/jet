@@ -141,12 +141,12 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
     rsp_publish(store, claim, "ok")
     assert(rsp_current(store, claim))
 
-    cases: [(path: String, replacement: String, original: String)]{
-        (path: workspace, replacement: "workspace: module {{ members: [] }}\n", original: "workspace: module {{ members: [\"packages/app\"] }}\n"),
-        (path: package_manifest, replacement: "name: \"changed\"\n", original: "name: \"app\"\nversion: \"0.1.0\"\n"),
-        (path: workspace_lock, replacement: "workspace-lock-v2\n", original: "workspace-lock-v1\n"),
-        (path: package_lock, replacement: "package-lock-v2\n", original: "package-lock-v1\n"),
-        (path: generated, replacement: "generated-v2\n", original: "generated-v1\n"),
+    cases: [{path: String, replacement: String, original: String}]{
+        {path: workspace, replacement: "workspace: module {{ members: [] }}\n", original: "workspace: module {{ members: [\"packages/app\"] }}\n"},
+        {path: package_manifest, replacement: "name: \"changed\"\n", original: "name: \"app\"\nversion: \"0.1.0\"\n"},
+        {path: workspace_lock, replacement: "workspace-lock-v2\n", original: "workspace-lock-v1\n"},
+        {path: package_lock, replacement: "package-lock-v2\n", original: "package-lock-v1\n"},
+        {path: generated, replacement: "generated-v2\n", original: "generated-v1\n"},
     }
     loop case in cases {
         rsp_write(case.path, case.replacement)

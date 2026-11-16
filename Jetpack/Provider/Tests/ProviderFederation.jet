@@ -197,7 +197,7 @@ provider_test_locked_facts: fn(record: SemanticRecord) -> ProviderFacts {
     pypi: "{{\"info\":{{\"name\":\"sample\",\"version\":\"1.2.3\",\"license\":\"MIT\",\"requires_dist\":[\"httpx>=0.27\"]}},\"urls\":[{{\"filename\":\"sample.whl\",\"digests\":{{\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"yanked\":false}}]}}"
     swiftpm: "{{\"version\":1,\"pins\":[{{\"package\":\"swift-log\",\"state\":{{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}}}]}}"
     maven: "<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.2.3</version><dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>3.0.0</version></dependency></dependencies></project>"
-    cases: [(family: ProviderFamily, document: String)]{(family: ProviderFamily.PyPI, document: pypi), (family: ProviderFamily.SwiftPM, document: swiftpm), (family: ProviderFamily.Maven, document: maven)}
+    cases: [{family: ProviderFamily, document: String}]{{family: ProviderFamily.PyPI, document: pypi}, {family: ProviderFamily.SwiftPM, document: swiftpm}, {family: ProviderFamily.Maven, document: maven}}
     loop entry in cases {
         report: provider_normalize_document(entry.family, entry.document)
         provider_test_valid(report, "provider report is lossless")
@@ -241,10 +241,10 @@ provider_test_locked_facts: fn(record: SemanticRecord) -> ProviderFacts {
     nuget: "<package>\n  <metadata>\n    <id>widget</id>\n    <version>1.2.3</version>\n    <licenseExpression>MIT</licenseExpression>\n    <repository type=\"git\" url=\"https://example.invalid/widget\" commit=\"abc\" />\n    <dependencies><group targetFramework=\"net8.0\"><dependency id=\"serde\" version=\"[1.0.0]\" /></group></dependencies>\n  </metadata>\n</package>"
     conan: "from conan import ConanFile\nclass Widget(ConanFile):\n    name = \"widget\"\n    version = \"1.2.3\"\n    license = \"MIT\"\n    settings = \"os\", \"arch\", \"compiler\", \"build_type\"\n    options = {{\"shared\": [True, False]}}\n    generators = \"CMakeDeps\"\n    def requirements(self):\n        self.requires(\"zlib/1.3.1\")\n"
     vcpkg: "{{\n  \"name\": \"widget\",\n  \"version-string\": \"1.2.3\",\n  \"license\": \"MIT\",\n  \"builtin-baseline\": \"0123456789abcdef0123456789abcdef01234567\",\n  \"supports\": \"!uwp\",\n  \"dependencies\": [{{\"name\":\"zlib\",\"version>=\":\"1.3.0\",\"features\":[\"core\"]}}],\n  \"features\": {{\"tools\": [\"fmt\"]}}\n}}"
-    cases: [(family: ProviderFamily, document: String, reference: String)]{
-        (family: ProviderFamily.NuGet, document: nuget, reference: "widget@nuget#version=1.2.3"),
-        (family: ProviderFamily.Conan, document: conan, reference: "widget@conan#version=1.2.3"),
-        (family: ProviderFamily.Vcpkg, document: vcpkg, reference: "widget@vcpkg#version=1.2.3"),
+    cases: [{family: ProviderFamily, document: String, reference: String}]{
+        {family: ProviderFamily.NuGet, document: nuget, reference: "widget@nuget#version=1.2.3"},
+        {family: ProviderFamily.Conan, document: conan, reference: "widget@conan#version=1.2.3"},
+        {family: ProviderFamily.Vcpkg, document: vcpkg, reference: "widget@vcpkg#version=1.2.3"},
     }
     loop entry in cases {
         report: provider_normalize_document(entry.family, entry.document)
@@ -282,12 +282,12 @@ provider_test_locked_facts: fn(record: SemanticRecord) -> ProviderFacts {
     ruby: "{{\"name\":\"rake\",\"version\":\"13.2.1\",\"platform\":\"ruby\",\"licenses\":[\"MIT\"],\"sha\":\"{hash}\",\"dependencies\":{{\"development\":[{{\"name\":\"minitest\",\"requirements\":\">= 5\"}}],\"runtime\":[]}}}}"
     perl: "{{\"_source\":{{\"distribution\":\"Try-Tiny\",\"version\":\"0.31\",\"download_url\":\"https://cpan.metacpan.org/authors/id/E/ET/ETHER/Try-Tiny-0.31.tar.gz\",\"checksum_sha256\":\"{hash}\",\"license\":[\"mit\"],\"dependency\":[{{\"relationship\":\"requires\",\"phase\":\"runtime\",\"module\":\"Exporter\",\"version\":\"5.57\"}},{{\"relationship\":\"requires\",\"phase\":\"runtime\",\"module\":\"perl\",\"version\":\"5.006\"}}]}}}}"
     php: "{{\"packages\":{{\"acme/widget\":[{{\"name\":\"acme/widget\",\"version\":\"v1.2.3\",\"license\":[\"MIT\"],\"dist\":{{\"type\":\"zip\",\"url\":\"https://example.invalid/widget.zip\",\"shasum\":\"0123456789abcdef0123456789abcdef01234567\",\"reference\":\"abc\"}},\"require\":{{\"php\":\">=8.1\",\"psr/log\":\"^3.0\"}},\"autoload\":{{\"psr-4\":{{\"Acme\\\\Widget\\\\\":\"src/\"}}}}}}]}}}}"
-    cases: [(family: ProviderFamily, document: String, format: String, reference: String)]{
-        (family: ProviderFamily.Cran, document: cran, format: "dcf", reference: "glue@cran#version=1.7.0"),
-        (family: ProviderFamily.LuaRocks, document: luarocks, format: "rockspec", reference: "inspect@luarocks#version=3.1.3-0"),
-        (family: ProviderFamily.RubyGems, document: ruby, format: "json", reference: "rake@ruby#version=13.2.1"),
-        (family: ProviderFamily.Cpan, document: perl, format: "json", reference: "Try-Tiny@perl#version=0.31"),
-        (family: ProviderFamily.Packagist, document: php, format: "json", reference: "acme/widget@php#version=1.2.3"),
+    cases: [{family: ProviderFamily, document: String, format: String, reference: String}]{
+        {family: ProviderFamily.Cran, document: cran, format: "dcf", reference: "glue@cran#version=1.7.0"},
+        {family: ProviderFamily.LuaRocks, document: luarocks, format: "rockspec", reference: "inspect@luarocks#version=3.1.3-0"},
+        {family: ProviderFamily.RubyGems, document: ruby, format: "json", reference: "rake@ruby#version=13.2.1"},
+        {family: ProviderFamily.Cpan, document: perl, format: "json", reference: "Try-Tiny@perl#version=0.31"},
+        {family: ProviderFamily.Packagist, document: php, format: "json", reference: "acme/widget@php#version=1.2.3"},
     }
     loop entry in cases {
         report: provider_normalize_document(entry.family, entry.document)

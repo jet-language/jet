@@ -113,7 +113,7 @@ summary: fn(manifest: Manifest) -> String Never! {
 
 // Generate and self-validate; a manifest that breaks its own contract is
 // never written.
-generate: fn(root: String) -[FS]> (manifest: Manifest, text: String) Err! {
+generate: fn(root: String) -[FS]> {manifest: Manifest, text: String} Err! {
     inputs: load_inputs(root) ?? return Err(err)
     manifest: build_manifest(inputs) ?? return Err(err)
     problems: validate_manifest(manifest)
@@ -121,7 +121,7 @@ generate: fn(root: String) -[FS]> (manifest: Manifest, text: String) Err! {
         return Err("generated manifest breaks its contract:\n{problems.join("\n")}")
     }
     text: render_manifest(manifest) ?? return Err(err)
-    Ok((manifest: manifest, text: text))
+    Ok({manifest: manifest, text: text})
 }
 
 read_bundle: fn(path: String) -[FS]> Dyn Err! {

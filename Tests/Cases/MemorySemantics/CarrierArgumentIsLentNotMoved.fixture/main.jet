@@ -35,7 +35,7 @@ maybe_named: fn(item: Named?) -> String {
 
 opened: fn(item: Directory IOError!) -> String { if item == .Ok(_) -> "ok" else -> "err" }
 
-numbered: fn(item: (directory: Directory, number: Int)) -> Int { item.number }
+numbered: fn(item: {directory: Directory, number: Int}) -> Int { item.number }
 
 // The descriptor this process holds `name` open at (Linux /proc), or -1.
 own_number: fn(name: String) -[FS.Read]> Int {
@@ -79,7 +79,9 @@ result_twice: fn(path: String) -[FS, IO]> Int {
 tuple_twice: fn(path: String) -[FS, IO]> Int {
     directory: files.open_directory(path)
     open_at: own_number("held")
-    print("tuple: {numbered((directory: directory, number: 1))}, {numbered((directory: directory, number: 2))}, open after both calls: {open_at >= 0 && own_number("held") == open_at}")
+    first: numbered({directory: directory, number: 1})
+    second: numbered({directory: directory, number: 2})
+    print("tuple: {first}, {second}, open after both calls: {open_at >= 0 && own_number("held") == open_at}")
     open_at
 }
 

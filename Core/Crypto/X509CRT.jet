@@ -143,13 +143,13 @@ x509_crt_get_version: fn(data: [U8], p: &Int, end: Int) -> Int x509.X509Error! {
 }
 
 // x509_get_dates: Validity, notBefore then notAfter.
-x509_crt_get_dates: fn(data: [U8], p: &Int, end: Int) -> (from: x509.X509Time, to: x509.X509Time) x509.X509Error! {
+x509_crt_get_dates: fn(data: [U8], p: &Int, end: Int) -> {from: x509.X509Time, to: x509.X509Time} x509.X509Error! {
     len: asn1.get_tag(data, p, end, X509CRT_SEQUENCE) ?? return Err(.InvalidDate(Val(err)))
     d_end: p + len
     from: x509.x509_get_time(data, p, d_end)
     to: x509.x509_get_time(data, p, d_end)
     if p != d_end -> return Err(.InvalidDate(Val(.LengthMismatch)))
-    Ok((from: from, to: to))
+    Ok({from: from, to: to})
 }
 
 // x509_get_uid: an implicit [n] unique identifier, kept unparsed; none
@@ -172,16 +172,16 @@ x509_crt_get_uid: fn(data: [U8], p: &Int, end: Int, n: Int) -> asn1.ASN1Buf x509
 
 // x509_get_basic_constraints: cA, which must be a BOOLEAN when the
 // SEQUENCE is not empty, and the pathLenConstraint plus one.
-x509_crt_get_basic_constraints: fn(data: [U8], p: &Int, end: Int) -> (ca: Bool, max_pathlen: Int) x509.X509Error! {
+x509_crt_get_basic_constraints: fn(data: [U8], p: &Int, end: Int) -> {ca: Bool, max_pathlen: Int} x509.X509Error! {
     len: asn1.get_tag(data, p, end, X509CRT_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
-    if p == end -> return Ok((ca: false, max_pathlen: 0))
+    if p == end -> return Ok({ca: false, max_pathlen: 0})
     if end - p != len -> return Err(.InvalidExtensions(None))
     ca: asn1.get_bool(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
-    if p == end -> return Ok((ca: ca, max_pathlen: 0))
+    if p == end -> return Ok({ca: ca, max_pathlen: 0})
     max_pathlen: asn1.get_int(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
     if p != end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
     if max_pathlen == 0x7FFFFFFF -> return Err(.InvalidExtensions(Val(.InvalidLength)))
-    Ok((ca: ca, max_pathlen: max_pathlen + 1))
+    Ok({ca: ca, max_pathlen: max_pathlen + 1})
 }
 
 // x509_get_ext_key_usage: one or more KeyPurposeId OIDs.

@@ -134,20 +134,20 @@ cli_validate_cached_job_metadata: fn(project_dir: String, metadata: JobMetadata)
     if metadata.inputs.len() == 0 {
         return Err(CLIError.Other("strict cached jobs must declare at least one project input; undeclared reads cannot be proven safe"))
     }
-    outputs := [(name: String, path: String)]{}
+    outputs := [{name: String, path: String}]{}
     loop output in metadata.outputs {
         cli_reject_cache_sensitive_path(output, "output")
         path: cli_job_path(project_dir, Val(output), "output", true)
         cli_reject_cache_sensitive_resolved_path(project_dir, path, output, "output")
-        outputs.push((name: output, path: path))
+        outputs.push({name: output, path: path})
     }
-    inputs := [(name: String, path: String)]{}
+    inputs := [{name: String, path: String}]{}
     loop input in metadata.inputs {
         cli_reject_cache_sensitive_path(input, "input")
         path: cli_job_path(project_dir, Val(input), "input", true)
         cli_reject_cache_sensitive_resolved_path(project_dir, path, input, "input")
         cli_reject_cache_sensitive_descendants(path, input, "input")
-        inputs.push((name: input, path: path))
+        inputs.push({name: input, path: path})
     }
     loop output in outputs {
         loop input in inputs {
@@ -221,15 +221,15 @@ cli_reject_cache_sensitive_descendants: fn(root: String, relative: String, field
 // `target`, and secret-bearing or Jet state, so an unlisted file change
 // invalidates the strict key (`jet-job-project-scope-v1`).
 cli_task_project_scope_fingerprint: fn(project_dir: String, metadata: JobMetadata) -[FS]> String CLIError! {
-    found := [(path: String, digest: String)]{}
+    found := [{path: String, digest: String}]{}
     cli_collect_job_scope_files(project_dir, project_dir, metadata, found)
-    found.sort_by(fn(left: (path: String, digest: String), right: (path: String, digest: String)) { left.path <=> right.path })
+    found.sort_by(fn(left: {path: String, digest: String}, right: {path: String, digest: String}) { left.path <=> right.path })
     identity := "jet-job-project-scope-v1\n"
     loop file in found -> identity = "{identity}{file.path}={file.digest}\n"
     Ok(cli_sha256_hex(identity.bytes()))
 }
 
-cli_collect_job_scope_files: fn(root: String, directory: String, metadata: JobMetadata, found: &[(path: String, digest: String)]) -[FS]> CLIError! {
+cli_collect_job_scope_files: fn(root: String, directory: String, metadata: JobMetadata, found: &[{path: String, digest: String}]) -[FS]> CLIError! {
     entries: files.list_dir(directory) ?? return Err(CLIError.Other("couldn't read job cache scope `{directory}`: {err}"))
     loop item in entries {
         relative: item.path.removeprefix(root).removeprefix("/")
@@ -242,7 +242,7 @@ cli_collect_job_scope_files: fn(root: String, directory: String, metadata: JobMe
             info.is_dir -> cli_collect_job_scope_files(root, item.path, metadata, found)
             info.is_file -> {
                 digest: foundation_sha256_file_hex(item.path) ?? return Err(CLIError.Other("couldn't hash job scope `{relative}`: {err}"))
-                found.push((path: relative.replace("\\", "/"), digest: digest))
+                found.push({path: relative.replace("\\", "/"), digest: digest})
             }
             else -> {}
         }

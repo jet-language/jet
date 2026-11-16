@@ -12,7 +12,7 @@ use {
     functions: pkg_perl_parse_function_names("sub Fail {{ }}\nsub Sleep {{ }}\nsub Transform {{ }}\n".bytes()) ?? panic("Perl subs parse")
     jet: pkg_perl_render_jet("ops", functions)
     worker: pkg_perl_render_worker(functions)
-    cases: [(foreign: String, projected: String)]{(foreign: "Fail", projected: "fail"), (foreign: "Sleep", projected: "sleep"), (foreign: "Transform", projected: "transform")}
+    cases: [{foreign: String, projected: String}]{{foreign: "Fail", projected: "fail"}, {foreign: "Sleep", projected: "sleep"}, {foreign: "Transform", projected: "transform"}}
     loop case in cases {
         assert(jet.contains("\n{case.projected}: fn("))
         assert(!jet.contains("\n{case.foreign}: fn("))

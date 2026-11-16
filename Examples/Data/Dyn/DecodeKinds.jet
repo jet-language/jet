@@ -23,17 +23,17 @@ run: fn() {
     stamp: Dyn.DateTime(time.zoned(time.from_unix_seconds(0), time.utc()))
     // Strict JSON keeps a number as its exact lexeme, the Dyn number variant.
     number: json.parse("2") ?? panic("a JSON number: {err}")
-    trees: [(name: String, tree: Dyn)]{
-        (name: "Null", tree: Dyn.Null),
-        (name: "Bool", tree: Dyn.Bool(true)),
-        (name: "Int", tree: Dyn.Int(1)),
-        (name: "Float", tree: Dyn.Float(1.5)),
-        (name: "Number", tree: number),
-        (name: "Text", tree: Dyn.Text("a")),
-        (name: "Bytes", tree: Dyn.Bytes([U8]{104, 105})),
-        (name: "DateTime", tree: stamp),
-        (name: "Array", tree: Dyn.Array([Dyn]{})),
-        (name: "Object", tree: Dyn.object()),
+    trees: [{name: String, tree: Dyn}]{
+        {name: "Null", tree: Dyn.Null},
+        {name: "Bool", tree: Dyn.Bool(true)},
+        {name: "Int", tree: Dyn.Int(1)},
+        {name: "Float", tree: Dyn.Float(1.5)},
+        {name: "Number", tree: number},
+        {name: "Text", tree: Dyn.Text("a")},
+        {name: "Bytes", tree: Dyn.Bytes([U8]{104, 105})},
+        {name: "DateTime", tree: stamp},
+        {name: "Array", tree: Dyn.Array([Dyn]{})},
+        {name: "Object", tree: Dyn.object()},
     }
     loop entry in trees {
         print(entry.name)

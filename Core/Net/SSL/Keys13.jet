@@ -153,14 +153,14 @@ ssl_tls13_hkdf_expand_label: fn(md: hashes.Md, secret: [#Secret U8], label: [U8]
 /// One side's traffic key and IV from its secret (ssl_tls13_make_traffic_key).
 /// Both lengths are checked before either is derived, so no error leaves a
 /// key to wipe.
-ssl_tls13_make_traffic_key: fn(md: hashes.Md, secret: [#Secret U8], key_len: Int, iv_len: Int) -> (key: [U8], iv: [U8]) ssldefs.SSLError! {
+ssl_tls13_make_traffic_key: fn(md: hashes.Md, secret: [#Secret U8], key_len: Int, iv_len: Int) -> {key: [U8], iv: [U8]} ssldefs.SSLError! {
     key_label: "key".bytes()
     iv_label: "iv".bytes()
     ssl_tls13_expand_label_check(md, secret.len(), key_label, [U8]{}, key_len) ?? return Err(err)
     ssl_tls13_expand_label_check(md, secret.len(), iv_label, [U8]{}, iv_len) ?? return Err(err)
     key: ssl_tls13_expand_label_bytes(md, secret, key_label, [U8]{}, key_len)
     iv: ssl_tls13_expand_label_bytes(md, secret, iv_label, [U8]{}, iv_len)
-    Ok((key: key, iv: iv))
+    Ok({key: key, iv: iv})
 }
 
 /// Both sides' write keys and IVs from their traffic secrets
@@ -414,10 +414,10 @@ ssl_tls13_key_cipher: fn(ctx: &layer.CipherContext, key: [U8], op: layer.CipherO
 
 /// The key and IV lengths of a TLS 1.3 ciphersuite's AEAD; its nonce is
 /// always 12 bytes (ssl_tls13_get_cipher_key_info).
-ssl_tls13_get_cipher_key_info: fn(cs: suites.SSLCiphersuite) -> (key_len: Int, iv_len: Int) ssldefs.SSLError! {
+ssl_tls13_get_cipher_key_info: fn(cs: suites.SSLCiphersuite) -> {key_len: Int, iv_len: Int} ssldefs.SSLError! {
     // mbedtls_ssl_cipher_to_psa knows no cipher the table does not name.
     info: suites.ssl_ciphersuite_cipher_info(cs) ?? return Err(.FeatureUnavailable)
-    Ok((key_len: info.key_bits /% 8, iv_len: 12))
+    Ok({key_len: info.key_bits /% 8, iv_len: 12})
 }
 
 /// Hand one TLS 1.3 secret to the key export callback, if any; TLS 1.3

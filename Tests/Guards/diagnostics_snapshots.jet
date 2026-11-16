@@ -6,12 +6,12 @@ use ds_files: core.files
 
 // tests/diagnostics_coverage.rs:843-849: direct fixture directories that carry
 // rendered CLI and tool reports.
-DS_REPORT_FIXTURE_DIRS: [(directory: String, suffix: String)]{
-    (directory: "Tests/CLI", suffix: ".txt"),
-    (directory: "Tests/Release", suffix: ".txt"),
-    (directory: "Tests/Fixtures/CLIDiagnostics", suffix: ".stderr"),
-    (directory: "Tests/Fixtures/JetpackDiagnostics", suffix: ".stderr"),
-    (directory: "Tests/Fixtures/ModuleEvalDiagnostics", suffix: ".stderr"),
+DS_REPORT_FIXTURE_DIRS: [{directory: String, suffix: String}]{
+    {directory: "Tests/CLI", suffix: ".txt"},
+    {directory: "Tests/Release", suffix: ".txt"},
+    {directory: "Tests/Fixtures/CLIDiagnostics", suffix: ".stderr"},
+    {directory: "Tests/Fixtures/JetpackDiagnostics", suffix: ".stderr"},
+    {directory: "Tests/Fixtures/ModuleEvalDiagnostics", suffix: ".stderr"},
 }
 
 // Whether a UI source is an imported fixture module (`// @fixture_module`),
@@ -204,7 +204,7 @@ ds_part: fn(line: String, label: String) -> Bool {
 }
 
 // The codes only `left` holds and the codes only `right` holds, each sorted.
-ds_set_diff: fn(left: [String], right: [String]) -> (left_only: [String], right_only: [String]) {
+ds_set_diff: fn(left: [String], right: [String]) -> {left_only: [String], right_only: [String]} {
     left_only := [String]{}
     right_only := [String]{}
     loop code in left {
@@ -215,7 +215,7 @@ ds_set_diff: fn(left: [String], right: [String]) -> (left_only: [String], right_
     }
     left_only.sort()
     right_only.sort()
-    (left_only: left_only, right_only: right_only)
+    {left_only: left_only, right_only: right_only}
 }
 
 // tests/diagnostics_coverage.rs:1114-1126: the reverse coverage diff names a

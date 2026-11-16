@@ -238,7 +238,7 @@ provider_render_import_env: fn(packages: [String]) -> String Never! {
 // Map devShell packages onto catalog names; everything unmappable becomes a
 // gap with its nearest candidate. Packages sorted; gaps sorted and unique by
 // item.
-provider_import_projection: fn(facts: DevShellFacts, catalog: ImportCatalog) -> (packages: [String], gaps: [ImportGap]) Never! {
+provider_import_projection: fn(facts: DevShellFacts, catalog: ImportCatalog) -> {packages: [String], gaps: [ImportGap]} Never! {
     packages := [String]{}
     gaps := [ImportGap]{}
     loop package in facts.packages {
@@ -259,7 +259,7 @@ provider_import_projection: fn(facts: DevShellFacts, catalog: ImportCatalog) -> 
         gaps.push(ImportGap{item: item, candidate: catalog.nearest(item, packages)})
     }
     packages.sort()
-    (packages: packages, gaps: provider_sorted_unique_gaps(gaps))
+    {packages: packages, gaps: provider_sorted_unique_gaps(gaps)}
 }
 
 // Gaps ordered by item; the first of equal items is kept.

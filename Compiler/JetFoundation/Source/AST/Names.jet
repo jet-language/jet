@@ -429,10 +429,10 @@ name_rows_value: fn(map: NameRows, text: String) -> Int? Never! {
 }
 
 // The bound keys and values in ascending key order (removed keys left out).
-name_rows_sorted: fn(map: NameRows) -> [(key: String, local: Int)] Never! {
-    run := [(key: String, local: Int)]{}
+name_rows_sorted: fn(map: NameRows) -> [{key: String, local: Int}] Never! {
+    run := [{key: String, local: Int}]{}
     loop (key, text) in map.texts {
-        if map.rows[key] >= 0 -> run.push((key: text.copy(), local: map.rows[key]))
+        if map.rows[key] >= 0 -> run.push({key: text.copy(), local: map.rows[key]})
     }
     run.sort()
     run

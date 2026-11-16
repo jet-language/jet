@@ -380,7 +380,7 @@ isprintable: fn(text: String) -> Bool Never! {
 // ported: String.slice exposes no borrowed str extent with checked `from text`
 // provenance until #4392 (E2307), so `.trim_view()` keeps its Rust route.
 
-trim_bounds: fn(text: String, left: Bool, right: Bool) -> (start: Int, end: Int) Never! {
+trim_bounds: fn(text: String, left: Bool, right: Bool) -> {start: Int, end: Int} Never! {
     whitespace_asset: text_unicode_white_space.UNICODE_WHITE_SPACE
     raw: utf8_bytes(text)
     start := 0
@@ -401,7 +401,7 @@ trim_bounds: fn(text: String, left: Bool, right: Bool) -> (start: Int, end: Int)
     if !left -> start = 0
     if !right -> end = scalar
     if end < start -> end = start
-    (start: start, end: end)
+    {start: start, end: end}
 }
 
 // Rust jet_unicode_trim_start:96-98, jet_unicode_trim_end:100-102, trim:104-106.
@@ -453,7 +453,7 @@ byte_at: fn(bytes: [U8], at: Int, reverse: Bool) -> U8 Never! {
     bytes[at]
 }
 
-maximal_suffix: fn(needle: [U8], reverse: Bool, order: Bool) -> (split: Int, period: Int) Never! {
+maximal_suffix: fn(needle: [U8], reverse: Bool, order: Bool) -> {split: Int, period: Int} Never! {
     suffix := -1
     candidate := 0
     offset := 1
@@ -479,7 +479,7 @@ maximal_suffix: fn(needle: [U8], reverse: Bool, order: Bool) -> (split: Int, per
             }
         }
     }
-    (split: suffix + 1, period: period)
+    {split: suffix + 1, period: period}
 }
 
 find_bytes: fn(hay: [U8], needle: [U8], from: Int, reverse: Bool) -> Int? {
@@ -578,22 +578,22 @@ count: fn(text: String, needle: String) -> Int Never! {
 
 // Rust jet_unicode_split_once:131-142, cut_last:144-155: absent, never success
 // with invented empty fields. UTF-8 byte offsets are converted to scalar bounds.
-split_once: fn(text: String, sep: String) -> (before: String, after: String)? {
+split_once: fn(text: String, sep: String) -> {before: String, after: String}? {
     split_at(text, sep, false)
 }
 
-cut_last: fn(text: String, sep: String) -> (before: String, after: String)? {
+cut_last: fn(text: String, sep: String) -> {before: String, after: String}? {
     split_at(text, sep, true)
 }
 
-split_at: fn(text: String, sep: String, reverse: Bool) -> (before: String, after: String)? {
+split_at: fn(text: String, sep: String, reverse: Bool) -> {before: String, after: String}? {
     raw: utf8_bytes(text)
     separator: utf8_bytes(sep)
     at: find_bytes(raw, separator, 0, reverse) ?? return None
     head: scalar_offset(raw, at)
     tail: scalar_offset(raw, at + separator.len())
     end: scalar_offset(raw, raw.len())
-    Val((before: text.slice(0, head), after: text.slice(tail, end)))
+    Val({before: text.slice(0, head), after: text.slice(tail, end)})
 }
 
 utf8_width_at: fn(raw: [U8], at: Int) -> Int Never! {

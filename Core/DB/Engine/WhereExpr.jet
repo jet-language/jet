@@ -535,32 +535,32 @@ operator_mask: fn(op: Int) -> Int Never! {
 // sqlite3IsLikeFunction (func.c): whether function call `e` is a LIKE or
 // GLOB, its wildcards (matchAll, matchOne, matchSet, then the escape, 0 for
 // none) and whether case is insignificant.
-is_like_function: fn(db: conn.Conn, a: ast.AST, e: Int) -> (ok: Bool, no_case: Bool, wc: [Int]) Never! {
+is_like_function: fn(db: conn.Conn, a: ast.AST, e: Int) -> {ok: Bool, no_case: Bool, wc: [Int]} Never! {
     list: a.exprs[e].x
-    if list < 0 -> return (ok: false, no_case: false, wc: [Int]{})
+    if list < 0 -> return {ok: false, no_case: false, wc: [Int]{}}
     n_expr: ast.list_len(a, list)
-    def := cat.find_function(db, a.exprs[e].token ?? [U8]{}, n_expr, base.UTF8) ?? return (ok: false, no_case: false, wc: [Int]{})
-    if def.flags & conn.FUNC_LIKE == 0 -> return (ok: false, no_case: false, wc: [Int]{})
+    def := cat.find_function(db, a.exprs[e].token ?? [U8]{}, n_expr, base.UTF8) ?? return {ok: false, no_case: false, wc: [Int]{}}
+    if def.flags & conn.FUNC_LIKE == 0 -> return {ok: false, no_case: false, wc: [Int]{}}
     wc := if def.user_data == cat.LIKE_INFO_GLOB -> [Int]{42, 63, 91, 0} else -> [Int]{37, 95, 0, 0}
     if n_expr >= 3 {
         esc: ast.list_expr(a, list, 2)
-        if a.exprs[esc].op != tk.TK_STRING -> return (ok: false, no_case: false, wc: [Int]{})
+        if a.exprs[esc].op != tk.TK_STRING -> return {ok: false, no_case: false, wc: [Int]{}}
         z: a.exprs[esc].token ?? [U8]{}
         c0: util.sql_byte(z, 0)
-        if c0 == 0 || util.sql_byte(z, 1) != 0 -> return (ok: false, no_case: false, wc: [Int]{})
-        if c0 == wc[0] || c0 == wc[1] -> return (ok: false, no_case: false, wc: [Int]{})
+        if c0 == 0 || util.sql_byte(z, 1) != 0 -> return {ok: false, no_case: false, wc: [Int]{}}
+        if c0 == wc[0] || c0 == wc[1] -> return {ok: false, no_case: false, wc: [Int]{}}
         wc[3] = c0
     }
-    (ok: true, no_case: def.flags & conn.FUNC_CASE == 0, wc: wc)
+    {ok: true, no_case: def.flags & conn.FUNC_CASE == 0, wc: wc}
 }
 
 // isLikeOrGlob: whether LIKE or GLOB call `e` can be optimized with
 // inequality constraints: then the TK_STRING of its pattern prefix, whether
 // the pattern ends with its only wildcard (complete) and whether case is
 // insignificant.
-is_like_or_glob: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (ok: Bool, prefix: Int, complete: Bool, no_case: Bool) Never! {
+is_like_or_glob: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> {ok: Bool, prefix: Int, complete: Bool, no_case: Bool} Never! {
     lf: is_like_function(p.db, a, e)
-    if !lf.ok -> return (ok: false, prefix: -1, complete: false, no_case: false)
+    if !lf.ok -> return {ok: false, prefix: -1, complete: false, no_case: false}
     wc: lf.wc
     list: a.exprs[e].x
     left: ast.list_expr(a, list, 1)
@@ -583,7 +583,7 @@ is_like_or_glob: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (ok: Bool, prefix:
         z = pg.c_string(a.exprs[right].token ?? [U8]{})
         has_z = true
     }
-    if !has_z -> return (ok: false, prefix: -1, complete: false, no_case: false)
+    if !has_z -> return {ok: false, prefix: -1, complete: false, no_case: false}
     // The prefix before the first wildcard.
     cnt := 0
     c := 0
@@ -594,7 +594,7 @@ is_like_or_glob: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (ok: Bool, prefix:
         if c == wc[3] && util.sql_byte(z, cnt) != 0 -> cnt += 1
     }
     if !((cnt > 1 || (cnt > 0 && util.sql_byte(z, 0) != wc[3])) && util.sql_byte(z, cnt - 1) != 255) {
-        return (ok: false, prefix: -1, complete: false, no_case: false)
+        return {ok: false, prefix: -1, complete: false, no_case: false}
     }
     complete: c == wc[0] && util.sql_byte(z, cnt + 1) == 0
     // The prefix with its escapes removed.
@@ -618,7 +618,7 @@ is_like_or_glob: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (ok: Bool, prefix:
                 is_num = util.atof(bumped, base.UTF8).kind
             }
         }
-        if is_num > 0 -> return (ok: false, prefix: -1, complete: false, no_case: false)
+        if is_num > 0 -> return {ok: false, prefix: -1, complete: false, no_case: false}
     }
     prefix: ast.expr(a, tk.TK_STRING, pg.c_string(znew))
     // A bound pattern: reprepare when it is rebound.
@@ -634,7 +634,7 @@ is_like_or_glob: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (ok: Bool, prefix:
             cg.release_temp_reg(p, r1)
         }
     }
-    (ok: true, prefix: prefix, complete: complete, no_case: lf.no_case)
+    {ok: true, prefix: prefix, complete: complete, no_case: lf.no_case}
 }
 
 // ExprIsVtab: a column of a virtual table.
@@ -646,11 +646,11 @@ expr_is_vtab: fn(db: conn.Conn, a: ast.AST, x: Int) -> Bool Never! {
 // the operators virtual tables see but the planner does not otherwise use:
 // 1 or 2 (2 when both sides are virtual table columns), with the
 // SQLITE_INDEX_CONSTRAINT_* op2, the column and the expression; 0 if not.
-is_auxiliary_vtab_operator: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (n: Int, op2: Int, left: Int, right: Int) Never! {
+is_auxiliary_vtab_operator: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> {n: Int, op2: Int, left: Int, right: Int} Never! {
     op: a.exprs[e].op
     if op == tk.TK_FUNCTION {
         list: a.exprs[e].x
-        if list < 0 || ast.list_len(a, list) != 2 -> return (n: 0, op2: 0, left: -1, right: -1)
+        if list < 0 || ast.list_len(a, list) != 2 -> return {n: 0, op2: 0, left: -1, right: -1}
         tok: a.exprs[e].token ?? [U8]{}
         col: ast.list_expr(a, list, 1)
         if expr_is_vtab(p.db, a, col) {
@@ -658,7 +658,7 @@ is_auxiliary_vtab_operator: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (n: Int
             ops: [Int]{conn.INDEX_CONSTRAINT_MATCH, conn.INDEX_CONSTRAINT_GLOB, conn.INDEX_CONSTRAINT_LIKE, conn.INDEX_CONSTRAINT_REGEXP}
             loop i in 0..<4 {
                 if util.str_icmp(tok, names[i].bytes()) == 0 {
-                    return (n: 1, op2: ops[i], left: col, right: ast.list_expr(a, list, 0))
+                    return {n: 1, op2: ops[i], left: col, right: ast.list_expr(a, list, 0)}
                 }
             }
         }
@@ -667,7 +667,7 @@ is_auxiliary_vtab_operator: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (n: Int
             g := p.up
             i: g.vtab_find_function(p, a, a.exprs[col0].y, 2, tok)
             if i >= conn.INDEX_CONSTRAINT_FUNCTION {
-                return (n: 1, op2: i & 255, left: col0, right: ast.list_expr(a, list, 1))
+                return {n: 1, op2: i & 255, left: col0, right: ast.list_expr(a, list, 1)}
             }
         }
     } else if op == tk.TK_NE || op == tk.TK_ISNOT || op == tk.TK_NOTNULL {
@@ -684,9 +684,9 @@ is_auxiliary_vtab_operator: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (n: Int
         op2 := conn.INDEX_CONSTRAINT_NE
         if op == tk.TK_ISNOT -> op2 = conn.INDEX_CONSTRAINT_ISNOT
         if op == tk.TK_NOTNULL -> op2 = conn.INDEX_CONSTRAINT_ISNOTNULL
-        return (n: res, op2: op2, left: l, right: r)
+        return {n: res, op2: op2, left: l, right: r}
     }
-    (n: 0, op2: 0, left: -1, right: -1)
+    {n: 0, op2: 0, left: -1, right: -1}
 }
 
 // transferJoinMarkings: `derived`, from the ON or USING clause `base_e`
@@ -936,7 +936,7 @@ term_is_equivalence: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> Bool Never! {
 
 // exprMightBeIndexed2: whether `e` is a key expression of an index on a
 // table of FROM list `src` from item j0 on: its cursor and XN_EXPR.
-might_be_indexed2: fn(db: conn.Conn, a: &ast.AST, src: Int, e: Int, j0: Int) -> (ok: Bool, cur: Int, col: Int) Never! {
+might_be_indexed2: fn(db: conn.Conn, a: &ast.AST, src: Int, e: Int, j0: Int) -> {ok: Bool, cur: Int, col: Int} Never! {
     j := j0
     loop {
         si: ast.src_item(a, src, j)
@@ -949,7 +949,7 @@ might_be_indexed2: fn(db: conn.Conn, a: &ast.AST, src: Int, e: Int, j0: Int) -> 
                     if db.indexes[ix].ai_column[i] != conn.XN_EXPR -> next
                     ce: ast.list_expr(a, ce_list, i)
                     if ast.expr_compare_skip(a, e, ce, i_cur) == 0 && a.exprs[e].op != tk.TK_STRING {
-                        return (ok: true, cur: i_cur, col: conn.XN_EXPR)
+                        return {ok: true, cur: i_cur, col: conn.XN_EXPR}
                     }
                 }
             }
@@ -958,19 +958,19 @@ might_be_indexed2: fn(db: conn.Conn, a: &ast.AST, src: Int, e: Int, j0: Int) -> 
         j += 1
         if j >= ast.src_len(a, src) -> break
     }
-    (ok: false, cur: 0, col: 0)
+    {ok: false, cur: 0, col: 0}
 }
 
 // exprMightBeIndexed: whether comparison operand `e0` might be indexed: a
 // column always is (an automatic index may come later); its cursor and
 // column (XN_EXPR for an indexed expression).
-might_be_indexed: fn(db: conn.Conn, a: &ast.AST, src: Int, e0: Int, op: Int) -> (ok: Bool, cur: Int, col: Int) Never! {
+might_be_indexed: fn(db: conn.Conn, a: &ast.AST, src: Int, e0: Int, op: Int) -> {ok: Bool, cur: Int, col: Int} Never! {
     e := e0
     if a.exprs[e].op == tk.TK_VECTOR && op >= tk.TK_GT && op <= tk.TK_GE {
         e = ast.list_expr(a, a.exprs[e].x, 0)
     }
     if a.exprs[e].op == tk.TK_COLUMN {
-        return (ok: true, cur: a.exprs[e].itable, col: a.exprs[e].icolumn)
+        return {ok: true, cur: a.exprs[e].itable, col: a.exprs[e].icolumn}
     }
     loop i in 0..<ast.src_len(a, src) {
         ix := db.tables[a.items[ast.src_item(a, src, i)].tab].index
@@ -979,7 +979,7 @@ might_be_indexed: fn(db: conn.Conn, a: &ast.AST, src: Int, e0: Int, op: Int) -> 
             ix = db.indexes[ix].next
         }
     }
-    (ok: false, cur: 0, col: 0)
+    {ok: false, cur: 0, col: 0}
 }
 
 // exprAnalyze: fill in term idx_term of clause wc from its expression,
@@ -1050,7 +1050,7 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
             wi.terms[t].e_operator = operator_mask(op) & op_mask
         }
         if op == tk.TK_IS -> add_wt_flags(wi, t, TERM_IS)
-        mr := (ok: false, cur: 0, col: 0)
+        mr := {ok: false, cur: 0, col: 0}
         if right >= 0 -> mr = might_be_indexed(p.db, a, src, right, op)
         if right >= 0 && mr.ok && !ast.has(a, right, ast.EP_FIXED_COL) {
             e_extra_op := 0

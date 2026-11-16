@@ -5,58 +5,58 @@ use text_width: core.text
 
 #Test("pinned default display width regression matrix") {
     cases: [
-        (text: "", width: 0),
-        (text: "a", width: 1),
-        (text: "★", width: 1), // U+2605, Ambiguous, not Emoji_Presentation
-        (text: "​", width: 0), // U+200B
-        (text: "ְ", width: 0), // Hebrew Mn, U+05B0
-        (text: "ً", width: 0), // Arabic Mn, U+064B
-        (text: "ऀ", width: 0), // Mn, CCC zero, U+0900
-        (text: "⃝", width: 0), // Me, U+20DD
-        (text: "؜", width: 0), // Cf and Default_Ignorable, U+061C
-        (text: "؀", width: 1), // Cf Prepend, not Default_Ignorable, U+0600
-        (text: "؀a", width: 1),
-        (text: "aְ", width: 1),
-        (text: "aً", width: 1),
-        (text: String.from_bytes([U8]{0}) ?? panic("control fixture"), width: 0),
-        (text: String.from_bytes([U8]{9, 13, 10, 127}) ?? panic("control fixture"), width: 0),
-        (text: "界", width: 2),
-        (text: "Ａ", width: 2),
-        (text: "©", width: 1),
-        (text: "©️", width: 2),
-        (text: "a️", width: 1), // VS16 alone does not select emoji width
-        (text: "́‍", width: 0), // U+0301 U+200D
-        (text: "1⃣", width: 2), // U+0031 U+20E3
-        (text: "1️⃣", width: 2),
-        (text: "#️⃣", width: 2),
-        (text: "*️⃣", width: 2),
-        (text: "a⃣", width: 1), // exact keycap base rule
-        (text: "⃣", width: 0),
-        (text: "🇺🇸", width: 2),
-        (text: "👩‍💻", width: 2),
-        (text: "a★界​b", width: 5),
+        {text: "", width: 0},
+        {text: "a", width: 1},
+        {text: "★", width: 1}, // U+2605, Ambiguous, not Emoji_Presentation
+        {text: "​", width: 0}, // U+200B
+        {text: "ְ", width: 0}, // Hebrew Mn, U+05B0
+        {text: "ً", width: 0}, // Arabic Mn, U+064B
+        {text: "ऀ", width: 0}, // Mn, CCC zero, U+0900
+        {text: "⃝", width: 0}, // Me, U+20DD
+        {text: "؜", width: 0}, // Cf and Default_Ignorable, U+061C
+        {text: "؀", width: 1}, // Cf Prepend, not Default_Ignorable, U+0600
+        {text: "؀a", width: 1},
+        {text: "aְ", width: 1},
+        {text: "aً", width: 1},
+        {text: String.from_bytes([U8]{0}) ?? panic("control fixture"), width: 0},
+        {text: String.from_bytes([U8]{9, 13, 10, 127}) ?? panic("control fixture"), width: 0},
+        {text: "界", width: 2},
+        {text: "Ａ", width: 2},
+        {text: "©", width: 1},
+        {text: "©️", width: 2},
+        {text: "a️", width: 1}, // VS16 alone does not select emoji width
+        {text: "́‍", width: 0}, // U+0301 U+200D
+        {text: "1⃣", width: 2}, // U+0031 U+20E3
+        {text: "1️⃣", width: 2},
+        {text: "#️⃣", width: 2},
+        {text: "*️⃣", width: 2},
+        {text: "a⃣", width: 1}, // exact keycap base rule
+        {text: "⃣", width: 0},
+        {text: "🇺🇸", width: 2},
+        {text: "👩‍💻", width: 2},
+        {text: "a★界​b", width: 5},
     ]
     loop row in cases -> assert_eq(text_width.display_width(row.text), row.width)
 }
 
 #Test("pinned Alphabetic and Numeric regression matrix") {
     cases: [
-        (text: "", alphabetic: false, numeric: false),
-        (text: "aZ", alphabetic: true, numeric: false),
-        (text: ";", alphabetic: false, numeric: false), // U+037E GREEK QUESTION MARK
-        (text: "a;b", alphabetic: false, numeric: false),
-        (text: "²", alphabetic: false, numeric: true), // No, U+00B2
-        (text: "٣", alphabetic: false, numeric: true), // Nd
-        (text: "Ⅻ", alphabetic: true, numeric: true), // Nl
-        (text: "½", alphabetic: false, numeric: true),
-        (text: "ͅ", alphabetic: true, numeric: false), // Other_Alphabetic Mn, U+0345
-        (text: "ְ", alphabetic: true, numeric: false), // U+05B0
-        (text: "Ж界", alphabetic: true, numeric: false),
-        (text: "𐐀", alphabetic: true, numeric: false), // U+10400
-        (text: "𝟎", alphabetic: false, numeric: true), // U+1D7CE
-        (text: "2²٣", alphabetic: false, numeric: true),
-        (text: "x²", alphabetic: false, numeric: false),
-        (text: "★", alphabetic: false, numeric: false),
+        {text: "", alphabetic: false, numeric: false},
+        {text: "aZ", alphabetic: true, numeric: false},
+        {text: ";", alphabetic: false, numeric: false}, // U+037E GREEK QUESTION MARK
+        {text: "a;b", alphabetic: false, numeric: false},
+        {text: "²", alphabetic: false, numeric: true}, // No, U+00B2
+        {text: "٣", alphabetic: false, numeric: true}, // Nd
+        {text: "Ⅻ", alphabetic: true, numeric: true}, // Nl
+        {text: "½", alphabetic: false, numeric: true},
+        {text: "ͅ", alphabetic: true, numeric: false}, // Other_Alphabetic Mn, U+0345
+        {text: "ְ", alphabetic: true, numeric: false}, // U+05B0
+        {text: "Ж界", alphabetic: true, numeric: false},
+        {text: "𐐀", alphabetic: true, numeric: false}, // U+10400
+        {text: "𝟎", alphabetic: false, numeric: true}, // U+1D7CE
+        {text: "2²٣", alphabetic: false, numeric: true},
+        {text: "x²", alphabetic: false, numeric: false},
+        {text: "★", alphabetic: false, numeric: false},
     ]
     loop row in cases {
         assert_eq(text_width.is_alphabetic(row.text), row.alphabetic)

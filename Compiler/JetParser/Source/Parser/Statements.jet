@@ -596,10 +596,11 @@ parser_parse_statement: fn(state: &JetParserState) -> Stmt {
             }
         }
         else -> {
-            if (token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN) && parser_pattern_binding_ahead(state) {
+            if token.kind == TOKEN_LBRACKET && parser_pattern_binding_ahead(state) {
                 return parser_parse_pattern_binding_statement(state)
             }
-            // `{ member: local, … }: tuple` renames tuple members.
+            // `{min, max}: record` destructures a record by member name, and
+            // `{ member: local, … }: record` renames its members.
             if token.kind == TOKEN_LBRACE && parser_kind_at(state, 1) == TOKEN_IDENT && parser_pattern_binding_ahead(state) {
                 return parser_parse_pattern_binding_statement(state)
             }
@@ -1549,7 +1550,7 @@ parser_parse_prep_loop: fn(state: &JetParserState) -> Stmt {
 }
 
 // S74 (Rust `looks_like_sigil_binding` destructuring arms): a
-// `[ … ]`, `( … )` or `Type{ … }` target whose matching close is followed by
+// `[ … ]`, `{ … }` or `Type{ … }` target whose matching close is followed by
 // `:` or `:=`. Bounded by the bracket depth.
 parser_pattern_binding_ahead: fn(state: &JetParserState) -> Bool Never! {
     offset := 0
@@ -1560,12 +1561,7 @@ parser_pattern_binding_ahead: fn(state: &JetParserState) -> Bool Never! {
     open: parser_kind_at(state, offset)
     close := TOKEN_RBRACE
     if open == TOKEN_LBRACKET -> close = TOKEN_RBRACKET
-    if open == TOKEN_LPAREN -> close = TOKEN_RPAREN
-    if open != TOKEN_LBRACKET && open != TOKEN_LPAREN && open != TOKEN_LBRACE -> return false
-    // Rust `try_bind_pattern`: `( name: … )` opens a named tuple, never a pattern.
-    if open == TOKEN_LPAREN && parser_kind_at(state, offset + 1) == TOKEN_IDENT && parser_kind_at(state, offset + 2) == TOKEN_COLON {
-        return false
-    }
+    if open != TOKEN_LBRACKET && open != TOKEN_LBRACE -> return false
     depth := 0
     loop {
         kind: parser_kind_at(state, offset)
@@ -1584,7 +1580,7 @@ parser_pattern_binding_ahead: fn(state: &JetParserState) -> Bool Never! {
 }
 
 // S74 (Rust `sigil_binding` + `try_bind_pattern`): a destructuring binding
-// `[a, b]: list`, `(a, b): tuple`, `{ a: x, b: y }: tuple` or
+// `[a, b]: list`, `{a, b}: record`, `{ a: x, b: y }: record` or
 // `Type{x, y: local, ..}: value`.
 parser_parse_pattern_binding_statement: fn(state: &JetParserState) -> Stmt {
     start: parser_current(state)
@@ -1595,12 +1591,6 @@ parser_parse_pattern_binding_statement: fn(state: &JetParserState) -> Stmt {
             elems: parser_pattern_binding_names(state, TOKEN_RBRACKET, "for a list-pattern binding")
             close: parser_expect(state, TOKEN_RBRACKET, "`]` to close the list pattern")
             pattern = BindPattern.List{elems: elems, span: parser_cover(start.span, close.span)}
-        }
-        TOKEN_LPAREN -> {
-            parser_bump(state)
-            elems: parser_pattern_binding_names(state, TOKEN_RPAREN, "for a tuple-pattern binding")
-            close: parser_expect(state, TOKEN_RPAREN, "`)` to close the tuple pattern")
-            pattern = BindPattern.Tuple{elems: elems, span: parser_cover(start.span, close.span)}
         }
         TOKEN_LBRACE -> {
             parser_bump(state)

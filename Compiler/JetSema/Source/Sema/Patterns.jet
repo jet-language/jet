@@ -1236,11 +1236,11 @@ sema_pattern_binary: fn(subject_ty: Type, parts: [BinMatchPart], span: Span, dia
     SemaPatternValidation{shape: TPatternShape.Binary{parts: typed_parts, span: span}, enum_type: None, bindings: facts, complete: complete}
 }
 
-sema_pattern_normalize_contextual_binding: fn(slot: PatSlot, fallback: Span) -> (name: String, span: Span) Never! {
+sema_pattern_normalize_contextual_binding: fn(slot: PatSlot, fallback: Span) -> {name: String, span: Span} Never! {
     if slot == {
-        .Bind(name, binding_span) -> (name: name, span: binding_span)
-        .Wildcard -> (name: "_", span: fallback)
-        .Range(_, _) | .Nested(_) | .Named(_, _, _) | .Rest(_) | .Value(_) -> (name: "", span: fallback)
+        .Bind(name, binding_span) -> {name: name, span: binding_span}
+        .Wildcard -> {name: "_", span: fallback}
+        .Range(_, _) | .Nested(_) | .Named(_, _, _) | .Rest(_) | .Value(_) -> {name: "", span: fallback}
     }
 }
 

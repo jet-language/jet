@@ -141,7 +141,7 @@ root: fn(tree: Dyn) -> Dyn XMLError! {
     kernel.document_root(tree) ?? return Err(kernel.public_error(err))
 }
 
-expanded_name: fn(node: Dyn) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLError! {
+expanded_name: fn(node: Dyn) -> {raw: String, prefix: String?, local: String, namespace_uri: String?} XMLError! {
     kernel.expanded_name_parts(node) ?? return Err(kernel.public_error(err))
 }
 
@@ -435,7 +435,7 @@ value_heap_cost: fn(value: Dyn) -> Int Never! {
         }
         .Object(_) -> {
             entries: stream.object_entries(value)
-            cost := entries.len() * (mem.__type_size<(key: String, value: Dyn)>() + dyn_heap_cost() - mem.__type_size<Dyn>())
+            cost := entries.len() * (mem.__type_size<{key: String, value: Dyn}>() + dyn_heap_cost() - mem.__type_size<Dyn>())
             loop entry in entries -> cost += entry.key.count_bytes() + value_heap_cost(entry.value)
             cost
         }

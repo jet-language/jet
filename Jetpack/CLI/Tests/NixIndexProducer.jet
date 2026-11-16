@@ -130,16 +130,16 @@ cli_nix_index_test_revision: fn(value: Int) -> String {
 }
 
 #Test("nix index manifest retention marks newest twelve per system") {
-    targets := [(released: Int, system: String, revision: String)]{}
+    targets := [{released: Int, system: String, revision: String}]{}
     loop revision in 0..<13 {
-        targets.push((released: revision, system: "x86_64-linux", revision: cli_nix_index_test_revision(revision)))
+        targets.push({released: revision, system: "x86_64-linux", revision: cli_nix_index_test_revision(revision)})
     }
-    targets.push((released: 1, system: "aarch64-linux", revision: cli_nix_index_test_revision(90)))
+    targets.push({released: 1, system: "aarch64-linux", revision: cli_nix_index_test_revision(90)})
     targets.reverse()
 
     discoverable: cli_nix_index_newest_discoverable_targets(targets)
     assert_eq(discoverable.len(), 13)
-    assert(discoverable.contains((system: "x86_64-linux", revision: cli_nix_index_test_revision(12))))
-    assert(!discoverable.contains((system: "x86_64-linux", revision: cli_nix_index_test_revision(0))))
-    assert(discoverable.contains((system: "aarch64-linux", revision: cli_nix_index_test_revision(90))))
+    assert(discoverable.contains({system: "x86_64-linux", revision: cli_nix_index_test_revision(12)}))
+    assert(!discoverable.contains({system: "x86_64-linux", revision: cli_nix_index_test_revision(0)}))
+    assert(discoverable.contains({system: "aarch64-linux", revision: cli_nix_index_test_revision(90)}))
 }

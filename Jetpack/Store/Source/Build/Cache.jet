@@ -155,7 +155,7 @@ build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction) -[
     task.group snapshots(limit: sys.cpu_count()) {
         reads: loop input in action.inputs -> task build_snapshot_input(base, input)
         loop (index, handle) in reads {
-            read: handle.join() ?? (capture: None, error: Val(BuildIOError.new(.Other, "reading `{action.inputs[index]}` stopped")))
+            read: handle.join() ?? {capture: None, error: Val(BuildIOError.new(.Other, "reading `{action.inputs[index]}` stopped"))}
             if failure != None -> next
             if read.capture == {
                 .Val(capture) -> {
@@ -178,10 +178,10 @@ build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction) -[
 
 // One declared input, read under `base` at the per-file limit, and hashed;
 // else why it can't be.
-build_snapshot_input: fn(base: String, input: String) -[FS]> (capture: ActionInputCapture?, error: BuildIOError?) Never! {
+build_snapshot_input: fn(base: String, input: String) -[FS]> {capture: ActionInputCapture?, error: BuildIOError?} Never! {
     if build_capture_input(base, input) == {
-        .Ok(capture) -> (capture: Val(capture), error: None)
-        .Err(error) -> (capture: None, error: Val(error))
+        .Ok(capture) -> {capture: Val(capture), error: None}
+        .Err(error) -> {capture: None, error: Val(error)}
     }
 }
 
@@ -788,17 +788,17 @@ build_record_cache_event: fn(action: String, key: String, status: ActionCacheSta
         }
     }
     labels: if status == {
-        .Hit(.LocalActionRecordMatched) -> (status: "hit", reason: "local_action_record_matched")
-        .Hit(.DeclaredOutputsRestored) -> (status: "hit", reason: "declared_outputs_restored")
-        .Miss(.NoLocalActionRecord) -> (status: "miss", reason: "no_local_action_record")
-        .Miss(.ActionKeyChanged) -> (status: "miss", reason: "action_key_changed")
-        .Miss(.DeclaredOutputMissing) -> (status: "miss", reason: "declared_output_missing")
-        .Miss(.CacheRecordInvalid) -> (status: "miss", reason: "cache_record_invalid")
-        .Miss(.CacheRestoreFailed) -> (status: "miss", reason: "cache_restore_failed")
-        .Miss(.RemoteDenied) -> (status: "miss", reason: "remote_denied")
-        .Miss(.AmbientEffect) -> (status: "miss", reason: "ambient_effect")
-        .Miss(.FrontEndIncomplete) -> (status: "miss", reason: "front_end_incomplete")
-        .Miss(.ReuseOff) -> (status: "miss", reason: "reuse_off")
+        .Hit(.LocalActionRecordMatched) -> {status: "hit", reason: "local_action_record_matched"}
+        .Hit(.DeclaredOutputsRestored) -> {status: "hit", reason: "declared_outputs_restored"}
+        .Miss(.NoLocalActionRecord) -> {status: "miss", reason: "no_local_action_record"}
+        .Miss(.ActionKeyChanged) -> {status: "miss", reason: "action_key_changed"}
+        .Miss(.DeclaredOutputMissing) -> {status: "miss", reason: "declared_output_missing"}
+        .Miss(.CacheRecordInvalid) -> {status: "miss", reason: "cache_record_invalid"}
+        .Miss(.CacheRestoreFailed) -> {status: "miss", reason: "cache_restore_failed"}
+        .Miss(.RemoteDenied) -> {status: "miss", reason: "remote_denied"}
+        .Miss(.AmbientEffect) -> {status: "miss", reason: "ambient_effect"}
+        .Miss(.FrontEndIncomplete) -> {status: "miss", reason: "front_end_incomplete"}
+        .Miss(.ReuseOff) -> {status: "miss", reason: "reuse_off"}
     }
     rendered_outcome: if outcome == {
         .Val(value) -> Dyn.Text(build_encode_outcome(value))
@@ -852,40 +852,40 @@ build_report_tree: fn(report: DiagnosticBuildError) -> Dyn BuildIOError! {
             Dyn.Array(causes)
         }
     }
-    fields := [(key: String, value: Dyn)]{
-        (key: "schema", value: Dyn.Text("jet.err/v1")),
-        (key: "message", value: Dyn.Text(report.message.copy())),
-        (key: "code", value: code),
-        (key: "cause", value: cause),
+    fields := [{key: String, value: Dyn}]{
+        {key: "schema", value: Dyn.Text("jet.err/v1")},
+        {key: "message", value: Dyn.Text(report.message.copy())},
+        {key: "code", value: code},
+        {key: "cause", value: cause},
     }
     if report.typed_identity == .Val(identity) {
-        fields.push((key: "typed_identity", value: Dyn.Text(identity)))
+        fields.push({key: "typed_identity", value: Dyn.Text(identity)})
     }
     if report.context_frames.len() > 0 {
         frames := [Dyn]{}
         loop frame in report.context_frames {
             frames.push(Dyn.Object(["text": Dyn.Text(frame.text), "file": Dyn.Text(frame.file), "line": Dyn.Int(frame.line)]))
         }
-        fields.push((key: "context_frames", value: Dyn.Array(frames)))
+        fields.push({key: "context_frames", value: Dyn.Array(frames)})
     }
     if report.conversion_history.len() > 0 {
         conversions := [Dyn]{}
         loop conversion in report.conversion_history {
             conversions.push(Dyn.Object(["source": Dyn.Text(conversion.source), "target": Dyn.Text(conversion.target)]))
         }
-        fields.push((key: "conversion_history", value: Dyn.Array(conversions)))
+        fields.push({key: "conversion_history", value: Dyn.Array(conversions)})
     }
     if report.details == .Val(details) {
-        detail_fields := [(key: String, value: Dyn)]{}
+        detail_fields := [{key: String, value: Dyn}]{}
         loop field in details.fields {
             value: json.parse(field.value) ?? return Err(build_report_invalid("error report field `{field.name}` is not JSON: {err.reason}"))
-            detail_fields.push((key: field.name, value: value))
+            detail_fields.push({key: field.name, value: value})
         }
         span: if details.source_span == {
             .Val(range) -> Dyn.Object(["start": Dyn.Int(range.start), "end": Dyn.Int(range.end)])
             .None -> Dyn.Null
         }
-        fields.push((key: "details", value: Dyn.Object(["variant": Dyn.Text(details.variant), "fields": Dyn.Object(detail_fields), "source_span": span])))
+        fields.push({key: "details", value: Dyn.Object(["variant": Dyn.Text(details.variant), "fields": Dyn.Object(detail_fields), "source_span": span])})
     }
     Ok(Dyn.Object(fields))
 }

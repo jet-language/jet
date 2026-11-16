@@ -76,7 +76,7 @@ BinderToolOutput: struct {
 // Run `argv` with captured, bounded output under `timeout`. A tool that does
 // not exist is `ToolMissing(tool)`; any other launch failure is `IO`. The
 // caller decides what a timeout or a failing status means.
-pkg_binder_supervise: fn(argv: [String], cwd: String?, env: [(name: String, value: String)], limit: Int, timeout: Duration, tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
+pkg_binder_supervise: fn(argv: [String], cwd: String?, env: [{name: String, value: String}], limit: Int, timeout: Duration, tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
     spec := binder_core_process.cmd(argv).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(limit)
     if cwd == {
         .Val(directory) -> { spec = spec.cwd(directory) }
@@ -101,10 +101,10 @@ pkg_binder_supervise: fn(argv: [String], cwd: String?, env: [(name: String, valu
 
 // The common 64 KiB / 60 s supervision; a timeout is a `ToolFailed`.
 pkg_binder_capture: fn(argv: [String], cwd: String?, tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
-    pkg_binder_capture_env(argv, cwd, [(name: String, value: String)]{}, tool, action)
+    pkg_binder_capture_env(argv, cwd, [{name: String, value: String}]{}, tool, action)
 }
 
-pkg_binder_capture_env: fn(argv: [String], cwd: String?, env: [(name: String, value: String)], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
+pkg_binder_capture_env: fn(argv: [String], cwd: String?, env: [{name: String, value: String}], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
     output: pkg_binder_supervise(argv, cwd, env, BINDER_TOOL_CAPTURE_LIMIT, 60s, tool)
     if output.timed_out {
         return Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: BINDER_TOOL_TIMEOUT_DETAIL})

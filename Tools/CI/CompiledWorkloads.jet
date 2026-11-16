@@ -684,17 +684,17 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
     if first_line(toolchains) != TOOLCHAIN_HEADER {
         return Err(problem("toolchain contract schema drifted"))
     }
-    widths: [(text: String, name: String, width: Int)]{
-        (text: manifest.copy(), name: "manifest.tsv", width: 13),
-        (text: domain_contract.copy(), name: "domain_contract.tsv", width: 6),
-        (text: peer_ledger.copy(), name: "peer_ledger.tsv", width: 13),
-        (text: peer_adapters.copy(), name: "peer_adapter_ledger.tsv", width: 8),
-        (text: adapter_ledger.copy(), name: "adapter_ledger.tsv", width: 7),
-        (text: metric_contract.copy(), name: "metric_contract.tsv", width: 5),
-        (text: policy.copy(), name: "measurement_policy.tsv", width: 9),
-        (text: tier_matrix.copy(), name: "tier_matrix.tsv", width: 9),
-        (text: canaries.copy(), name: "canaries.tsv", width: 4),
-        (text: toolchains.copy(), name: "toolchain_contract.tsv", width: 4),
+    widths: [{text: String, name: String, width: Int}]{
+        {text: manifest.copy(), name: "manifest.tsv", width: 13},
+        {text: domain_contract.copy(), name: "domain_contract.tsv", width: 6},
+        {text: peer_ledger.copy(), name: "peer_ledger.tsv", width: 13},
+        {text: peer_adapters.copy(), name: "peer_adapter_ledger.tsv", width: 8},
+        {text: adapter_ledger.copy(), name: "adapter_ledger.tsv", width: 7},
+        {text: metric_contract.copy(), name: "metric_contract.tsv", width: 5},
+        {text: policy.copy(), name: "measurement_policy.tsv", width: 9},
+        {text: tier_matrix.copy(), name: "tier_matrix.tsv", width: 9},
+        {text: canaries.copy(), name: "canaries.tsv", width: 4},
+        {text: toolchains.copy(), name: "toolchain_contract.tsv", width: 4},
     }
     loop item in widths {
         if !width_ok(item.text, item.width, true) {
@@ -1310,17 +1310,17 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
     if first_line(peer_measurements) != PEER_MEASUREMENT_HEADER {
         return Err(problem("peer measurement report schema drifted"))
     }
-    widths: [(text: String, name: String, width: Int)]{
-        (text: identity.copy(), name: "identity.tsv", width: 3),
-        (text: samples.copy(), name: "samples.tsv", width: 11),
-        (text: statistics.copy(), name: "statistics.tsv", width: 18),
-        (text: outcomes.copy(), name: "outcomes.tsv", width: 17),
-        (text: measurements.copy(), name: "measurements.tsv", width: 13),
-        (text: tiers.copy(), name: "tiers.tsv", width: 9),
-        (text: receipts.copy(), name: "receipts.tsv", width: 20),
-        (text: tier_receipts.copy(), name: "tier_receipts.tsv", width: 10),
-        (text: peer_coverage.copy(), name: "peer_coverage.tsv", width: 20),
-        (text: peer_measurements.copy(), name: "peer_measurements.tsv", width: 17),
+    widths: [{text: String, name: String, width: Int}]{
+        {text: identity.copy(), name: "identity.tsv", width: 3},
+        {text: samples.copy(), name: "samples.tsv", width: 11},
+        {text: statistics.copy(), name: "statistics.tsv", width: 18},
+        {text: outcomes.copy(), name: "outcomes.tsv", width: 17},
+        {text: measurements.copy(), name: "measurements.tsv", width: 13},
+        {text: tiers.copy(), name: "tiers.tsv", width: 9},
+        {text: receipts.copy(), name: "receipts.tsv", width: 20},
+        {text: tier_receipts.copy(), name: "tier_receipts.tsv", width: 10},
+        {text: peer_coverage.copy(), name: "peer_coverage.tsv", width: 20},
+        {text: peer_measurements.copy(), name: "peer_measurements.tsv", width: 17},
     }
     loop item in widths {
         if !width_ok(item.text, item.width, false) {
@@ -2846,7 +2846,7 @@ canaries: fn(state: SelfCheck) -[FS]> [Canary] Never! {
     }
     // Rust is judged like every other peer: Jet/Rust 1.00 and 1.05 are losses.
     loop rust_case in
-        ([(ratio: String, value: String)]{(ratio: "1.00", value: "1"), (ratio: "1.05", value: "0.952381")}) {
+        ([{ratio: String, value: String}]{{ratio: "1.00", value: "1"}, {ratio: "1.05", value: "0.952381"}}) {
         list.push(canary("rust-selected-{rust_case.ratio}", "Jet metric loss is not recorded", true, [Edit]{set("measurements.tsv", 5, rust_case.value, "rust-runtime={rust_task}")}))
         list.push(
             canary(
@@ -3070,9 +3070,9 @@ write_synthetic_report: fn(state: SelfCheck) -[Env, Exec, FS, IO, Time, Time.Wai
         jet_evidence: if jet_status == "pass" -> "artifact={jet_artifact};output={jet_output};command=validator-self-check-tier" else -> not_run(scope, row[6], row[7], row[8])
         peer_evidence: if peer_status == "pass" -> "artifact={peer_artifact};output={peer_output};command=validator-self-check-tier" else -> not_run(peer_scope, row[6], row[7], row[8])
         loop side in
-            ([(language: String, status: String, evidence: String, artifact: String, output: String)]{
-            (language: "jet", status: jet_status.copy(), evidence: jet_evidence.copy(), artifact: jet_artifact.copy(), output: jet_output.copy()),
-            (language: peer.copy(), status: peer_status.copy(), evidence: peer_evidence.copy(), artifact: peer_artifact.copy(), output: peer_output.copy()),
+            ([{language: String, status: String, evidence: String, artifact: String, output: String}]{
+            {language: "jet", status: jet_status.copy(), evidence: jet_evidence.copy(), artifact: jet_artifact.copy(), output: jet_output.copy()},
+            {language: peer.copy(), status: peer_status.copy(), evidence: peer_evidence.copy(), artifact: peer_artifact.copy(), output: peer_output.copy()},
         }) {
             tiers.push([String]{"1", id.copy(), side.language.copy(), platform.copy(), target.copy(), tier.copy(), side.status.copy(), side.evidence.copy(), "-"}.join("\t"))
             measured: side.status == "pass"

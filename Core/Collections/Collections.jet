@@ -480,9 +480,9 @@ heappush: fn(xs: [Int], value: Int) -> [Int] Never! {
     out
 }
 
-heappop: fn(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
-    if xs.len() == 0 -> return (heap: [Int]{}, value: None)
-    if xs.len() == 1 -> return (heap: [Int]{}, value: Val(xs[0]))
+heappop: fn(xs: [Int]) -> {heap: [Int], value: Int?} Never! {
+    if xs.len() == 0 -> return {heap: [Int]{}, value: None}
+    if xs.len() == 1 -> return {heap: [Int]{}, value: Val(xs[0])}
     last := xs[xs.len() - 1]
     rest := [Int]{last}
     i := 1
@@ -492,11 +492,11 @@ heappop: fn(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
     }
     rest_len := rest.len()
     sift_down(rest, 0, rest_len)
-    (heap: rest, value: Val(xs[0]))
+    {heap: rest, value: Val(xs[0])}
 }
 
-heappushpop: fn(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
-    if xs.len() == 0 || value <= xs[0] -> return (heap: copy_ints(xs), value: value)
+heappushpop: fn(xs: [Int], value: Int) -> {heap: [Int], value: Int} Never! {
+    if xs.len() == 0 || value <= xs[0] -> return {heap: copy_ints(xs), value: value}
     popped := xs[0]
     rest := [Int]{value}
     i := 1
@@ -506,11 +506,11 @@ heappushpop: fn(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
     }
     rest_len := rest.len()
     sift_down(rest, 0, rest_len)
-    (heap: rest, value: popped)
+    {heap: rest, value: popped}
 }
 
-heapreplace: fn(xs: [Int], value: Int) -> (heap: [Int], value: Int?) Never! {
-    if xs.len() == 0 -> return (heap: [Int]{value}, value: None)
+heapreplace: fn(xs: [Int], value: Int) -> {heap: [Int], value: Int?} Never! {
+    if xs.len() == 0 -> return {heap: [Int]{value}, value: None}
     popped := xs[0]
     rest := [Int]{value}
     i := 1
@@ -520,7 +520,7 @@ heapreplace: fn(xs: [Int], value: Int) -> (heap: [Int], value: Int?) Never! {
     }
     rest_len := rest.len()
     sift_down(rest, 0, rest_len)
-    (heap: rest, value: Val(popped))
+    {heap: rest, value: Val(popped)}
 }
 
 max_sift_down: fn(xs: &[Int], start: Int, end: Int) {
@@ -576,9 +576,9 @@ max_heapreplace: fn(xs: [Int], value: Int) -> [Int] {
     out
 }
 
-max_heappop: fn(xs: [Int]) -> (heap: [Int], value: Int?) {
-    if xs.len() == 0 -> return (heap: [Int]{}, value: None)
-    if xs.len() == 1 -> return (heap: [Int]{}, value: Val(xs[0]))
+max_heappop: fn(xs: [Int]) -> {heap: [Int], value: Int?} {
+    if xs.len() == 0 -> return {heap: [Int]{}, value: None}
+    if xs.len() == 1 -> return {heap: [Int]{}, value: Val(xs[0])}
     popped := xs[0]
     last := xs[xs.len() - 1]
     rest := [Int]{last}
@@ -589,7 +589,7 @@ max_heappop: fn(xs: [Int]) -> (heap: [Int], value: Int?) {
     }
     rest_len := rest.len()
     max_sift_down(rest, 0, rest_len)
-    (heap: rest, value: Val(popped))
+    {heap: rest, value: Val(popped)}
 }
 
 nsmallest: fn(n: Int, xs: [Int]) -> [Int] Never! {

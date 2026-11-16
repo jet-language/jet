@@ -143,11 +143,11 @@ cli_nix_index_generate: fn(args: [String], write_signature_request: Bool) -[FS, 
             return Err(CLIToolError.new("generation report is not a JSON object"))
         }
     }
-    report.push((key: "target_sha256", value: Dyn.Text(digest)))
-    report.push((key: "target", value: Dyn.Text(target)))
+    report.push({key: "target_sha256", value: Dyn.Text(digest)})
+    report.push({key: "target", value: Dyn.Text(target)})
     if write_signature_request {
-        report.push((key: "signature_request", value: Dyn.Text("{target}.sig.request")))
-    } else { report.push((key: "trust_tier", value: Dyn.Text("local-unofficial"))) }
+        report.push({key: "signature_request", value: Dyn.Text("{target}.sig.request")})
+    } else { report.push({key: "trust_tier", value: Dyn.Text("local-unofficial")}) }
     cli_nix_index_write_immutable(files.join(target_dir, "{digest}.json.zst.generation-report.json"), pkg_json_render(Dyn.Object(report)).bytes())
     if native_recipes == {
         .Val(recipes) -> {
@@ -184,7 +184,7 @@ cli_nix_index_released_unix: fn(options: [String:String], release_metadata_path:
 // `local-unofficial` tier at its top level; nested matches do not count.
 cli_nix_index_validate_local_provenance: fn(value: Dyn, revision: String, system: String) CLIToolError! {
     object: pkg_json_object(value) ?? [String:Dyn]{}
-    expected: [(field: String, value: String)]{(field: "revision", value: revision), (field: "system", value: system), (field: "trust_tier", value: "local-unofficial")}
+    expected: [{field: String, value: String}]{{field: "revision", value: revision}, {field: "system", value: system}, {field: "trust_tier", value: "local-unofficial"}}
     loop entry in expected {
         found: pkg_json_text(object.get(entry.field) ?? Dyn.Null) ?? ""
         if found != entry.value || !object.has_key(entry.field) {
@@ -301,15 +301,15 @@ cli_nix_index_manifest: fn(args: [String]) -[IO, FS, Env]> CLIToolError! {
             }
         }
     }
-    listed := [(released: Int, system: String, revision: String)]{}
+    listed := [{released: Int, system: String, revision: String}]{}
     loop entry in staged {
-        listed.push((released: entry.released_unix, system: entry.target.system, revision: entry.target.revision))
+        listed.push({released: entry.released_unix, system: entry.target.system, revision: entry.target.revision})
     }
     discoverable: cli_nix_index_newest_discoverable_targets(listed)
     targets := [NixIndexManifestTarget]{}
     loop entry in staged {
         target := entry.target
-        target.discoverable = discoverable.contains((system: target.system, revision: target.revision))
+        target.discoverable = discoverable.contains({system: target.system, revision: target.revision})
         targets.push(target)
     }
     target_count: targets.len()
@@ -364,14 +364,14 @@ cli_nix_index_trim_trailing_slashes: fn(value: String) -> String Never! {
 
 // The newest NIX_INDEX_DISCOVERABLE_PER_SYSTEM (system, revision) targets
 // of each system: newest release first, ties by system then revision bytes.
-cli_nix_index_newest_discoverable_targets: fn(targets: [(released: Int, system: String, revision: String)]) -> [(system: String, revision: String)] Never! {
+cli_nix_index_newest_discoverable_targets: fn(targets: [{released: Int, system: String, revision: String}]) -> [{system: String, revision: String}] Never! {
     ordered := targets
-    ordered.sort_by(fn(left: (released: Int, system: String, revision: String), right: (released: Int, system: String, revision: String)) { (right.released <=> left.released).then(left.system <=> right.system).then(left.revision <=> right.revision) })
+    ordered.sort_by(fn(left: {released: Int, system: String, revision: String}, right: {released: Int, system: String, revision: String}) { (right.released <=> left.released).then(left.system <=> right.system).then(left.revision <=> right.revision) })
     counts := [String:Int]{}
-    discoverable := [(system: String, revision: String)]{}
+    discoverable := [{system: String, revision: String}]{}
     loop entry in ordered {
         count: counts.get(entry.system) ?? 0
-        pair: (system: entry.system, revision: entry.revision)
+        pair: {system: entry.system, revision: entry.revision}
         if count < NIX_INDEX_DISCOVERABLE_PER_SYSTEM && !discoverable.contains(pair) {
             discoverable.push(pair)
         }

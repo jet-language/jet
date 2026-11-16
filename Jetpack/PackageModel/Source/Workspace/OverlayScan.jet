@@ -121,7 +121,7 @@ pkg_overlay_find_char: fn(raw: [U8], start: Int, wanted: Int) -> Int? Never! {
 // bytes consumed through its closing brace. Comments and string literals are
 // kept in the body and never close the block. An unclosed block consumes
 // the rest of the input.
-pkg_overlay_balanced: fn(raw: [U8], start: Int) -> (body: String, consumed: Int) Never! {
+pkg_overlay_balanced: fn(raw: [U8], start: Int) -> {body: String, consumed: Int} Never! {
     depth := 1
     out := [U8]{}
     quoted := false
@@ -169,15 +169,15 @@ pkg_overlay_balanced: fn(raw: [U8], start: Int) -> (body: String, consumed: Int)
         if code == OVERLAY_OPEN_BRACE -> depth += 1
         if code == OVERLAY_CLOSE_BRACE {
             depth -= 1
-            if depth == 0 -> return (body: String.from_bytes(out) ?? "", consumed: cursor - start)
+            if depth == 0 -> return {body: String.from_bytes(out) ?? "", consumed: cursor - start}
         }
         out.push(byte)
     }
-    (body: String.from_bytes(out) ?? "", consumed: cursor - start)
+    {body: String.from_bytes(out) ?? "", consumed: cursor - start}
 }
 
 // `balanced_with_len` for callers holding the text after an opening `{`.
-pkg_overlay_balanced_with_len: fn(text: String) -> (body: String, consumed: Int) Never! {
+pkg_overlay_balanced_with_len: fn(text: String) -> {body: String, consumed: Int} Never! {
     pkg_overlay_balanced(text.bytes(), 0)
 }
 
@@ -219,7 +219,7 @@ pkg_overlay_code_depth_at: fn(raw: [U8], stop: Int) -> Int? Never! {
 }
 
 // Split on the first `:` outside string literals and brackets.
-pkg_overlay_split_colon: fn(value: String) -> (before: String, after: String)? Never! {
+pkg_overlay_split_colon: fn(value: String) -> {before: String, after: String}? Never! {
     raw: value.bytes()
     depth := 0
     quoted := false
@@ -239,7 +239,7 @@ pkg_overlay_split_colon: fn(value: String) -> (before: String, after: String)? N
             code == OVERLAY_QUOTE -> quoted = true
             pkg_overlay_is_open(code) -> depth += 1
             pkg_overlay_is_close(code) -> depth -= 1
-            code == OVERLAY_COLON && depth == 0 -> return Val((after: pkg_bytes_text(raw, index + 1, raw.len()), before: pkg_bytes_text(raw, 0, index)))
+            code == OVERLAY_COLON && depth == 0 -> return Val({after: pkg_bytes_text(raw, index + 1, raw.len()), before: pkg_bytes_text(raw, 0, index)})
             else -> {}
         }
     }
@@ -415,13 +415,13 @@ pkg_overlay_top_level_statements: fn(source: String) -> [String] Never! {
 
 // An identifier at `at`: an ASCII letter or `_`, then letters, digits, `_`,
 // or `-`. Returns the identifier and the offset after it.
-pkg_overlay_read_ident: fn(raw: [U8], at: Int) -> (ident: String, end: Int)? Never! {
+pkg_overlay_read_ident: fn(raw: [U8], at: Int) -> {ident: String, end: Int}? Never! {
     first: pkg_bytes_code(raw, at)
     starts: (first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95
     if !starts -> return None
     end := at + 1
     loop end < raw.len() && (pkg_bytes_is_word(Int{raw[end]}) || Int{raw[end]} == 45) -> end += 1
-    Val((end: end, ident: pkg_bytes_text(raw, at, end)))
+    Val({end: end, ident: pkg_bytes_text(raw, at, end)})
 }
 
 // Trim, drop trailing commas, and strip one pair of surrounding quotes.

@@ -12,7 +12,7 @@ run: fn() {
     }
 
     udp: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
-    (udp_ready_tx, udp_ready_rx): channel<Int>()
+    {udp_ready_tx, udp_ready_rx}: channel<Int>()
     udp_wait: task {
         udp_ready_tx.send(1) ?? panic("udp ready")
         if net.udp_receive(udp, 8) == {
@@ -25,7 +25,7 @@ run: fn() {
     udp_wait.join() ?? panic("udp wait task failed")
 
     listener: net.unix_listen("{work}/i.sock") ?? panic("unix listen")
-    (unix_ready_tx, unix_ready_rx): channel<Int>()
+    {unix_ready_tx, unix_ready_rx}: channel<Int>()
     unix_wait: task {
         unix_ready_tx.send(1) ?? panic("unix ready")
         if net.unix_accept(listener) == {

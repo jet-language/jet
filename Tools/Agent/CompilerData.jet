@@ -261,7 +261,7 @@ compiler_data_params_end: fn(bytes: [U8], open: CompilerDataToken) -> Int {
 // variant stands where a member may: at the body's start, after a `,`, a
 // marker, or another variant and its payload; never after a method, an
 // `impl` or a discriminant.
-compiler_data_enum_body: fn(bytes: [U8], from: Int) -> (payload: Bool, end: Int) {
+compiler_data_enum_body: fn(bytes: [U8], from: Int) -> {payload: Bool, end: Int} {
     cursor := from
     depth := 1
     member := true
@@ -270,7 +270,7 @@ compiler_data_enum_body: fn(bytes: [U8], from: Int) -> (payload: Bool, end: Int)
     payload := false
     loop {
         token: compiler_data_token(bytes, cursor)
-        if token.kind == COMPILER_DATA_END -> return (payload: payload, end: cursor)
+        if token.kind == COMPILER_DATA_END -> return {payload: payload, end: cursor}
         cursor = token.end
         value: if token.kind == COMPILER_DATA_PUNCT -> compiler_data_at(bytes, token.start) else -> 0
         if value == 123 || value == 40 || value == 91 {
@@ -283,7 +283,7 @@ compiler_data_enum_body: fn(bytes: [U8], from: Int) -> (payload: Bool, end: Int)
         }
         if value == 125 || value == 41 || value == 93 {
             depth -= 1
-            if depth == 0 -> return (payload: payload, end: cursor)
+            if depth == 0 -> return {payload: payload, end: cursor}
             if depth == 1 -> member = resume
             next
         }

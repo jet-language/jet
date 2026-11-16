@@ -1021,11 +1021,11 @@ parse_qsl: fn(query: String) -> [[String]] URLError! {
 
 urlencode: fn(pairs: [[String]]) -> String Never! { encode_query(pairs) }
 
-split_fragment: fn(url: String) -> (fragment: String, url: String) Never! {
+split_fragment: fn(url: String) -> {fragment: String, url: String} Never! {
     raw: url.bytes()
     i: index_of(raw, 35)
-    if i < 0 -> return (fragment: "", url: url)
-    (fragment: slice(raw, i + 1, raw.len()), url: slice(raw, 0, i))
+    if i < 0 -> return {fragment: "", url: url}
+    {fragment: slice(raw, i + 1, raw.len()), url: slice(raw, 0, i)}
 }
 
 quote: fn(text: String) -> String Never! { encode_component(text, true, false) }
@@ -1053,11 +1053,11 @@ urlunparse: fn(url: URL) -> String Never! { unparse(url) }
 
 urlunsplit: fn(url: URL) -> String Never! { unparse(url) }
 
-urldefrag: fn(text: String) -> (url: String, fragment: String) Never! {
+urldefrag: fn(text: String) -> {url: String, fragment: String} Never! {
     raw: text.bytes()
     i: index_of(raw, 35)
-    if i < 0 -> return (url: text, fragment: "")
-    (url: slice(raw, 0, i), fragment: slice(raw, i + 1, raw.len()))
+    if i < 0 -> return {url: text, fragment: ""}
+    {url: slice(raw, 0, i), fragment: slice(raw, i + 1, raw.len())}
 }
 
 parse_qs: fn(query: String) -> [[String]] URLError! { parse_qsl(query) }

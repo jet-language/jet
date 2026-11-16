@@ -44,9 +44,9 @@ cli_package_profile_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme, pa
     loaded: cli_load_package_profile_plan(cache, theme, name) ?? return EXIT_USAGE
     plan: loaded.plan
     if parsed.flags.json {
-        facts := [(key: String, value: Dyn)]{}
+        facts := [{key: String, value: Dyn}]{}
         loop raw in cli_sorted_provider_fact_keys(plan.provider_facts) {
-            facts.push((key: raw, value: plan.provider_facts[raw].to_json_tree()))
+            facts.push({key: raw, value: plan.provider_facts[raw].to_json_tree()})
         }
         packages := [Dyn]{}
         loop package in plan.packages {
@@ -65,9 +65,9 @@ cli_package_profile_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme, pa
                 ),
             )
         }
-        collisions := [(key: String, value: Dyn)]{}
+        collisions := [{key: String, value: Dyn}]{}
         loop path in cli_sorted_map_keys(plan.collisions) {
-            collisions.push((key: path, value: Dyn.Text(plan.collisions[path])))
+            collisions.push({key: path, value: Dyn.Text(plan.collisions[path])})
         }
         print(
             cli_json_render(

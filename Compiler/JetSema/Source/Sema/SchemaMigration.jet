@@ -41,7 +41,7 @@ sema_schema_decodable: fn(ty: Type, environment: SemaScopeEnvironment?, program:
 check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?, program: SemaProgramTables) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     migrations := [String:[MigrationOp]]{}
-    conversions := [(from_ty: String, to_ty: String)]{}
+    conversions := [{from_ty: String, to_ty: String}]{}
     // A checked program holds each accepted top-level conversion into a
     // failure domain as its lowered routine (sema_error_conversion_items); a
     // parsed one, a nested one and every value conversion
@@ -55,12 +55,12 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                 migrations[migration.type_name] = operations.move()
             }
             .ErrorConv(conversion) -> {
-                conversions.push((from_ty: conversion.from_ty, to_ty: conversion.to_ty))
+                conversions.push({from_ty: conversion.from_ty, to_ty: conversion.to_ty})
             }
             .Impl(definition) -> {
                 if definition.trait_name == .Val(trait_name) {
                     if owned_trait_conversion(trait_name) && definition.operator_rhs == .Val(source) {
-                        conversions.push((from_ty: type_name(source), to_ty: definition.type_name))
+                        conversions.push({from_ty: type_name(source), to_ty: definition.type_name})
                     }
                 }
             }
@@ -68,14 +68,14 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
             .Struct(definition) -> {
                 loop block in definition.trait_impls {
                     if owned_trait_conversion(block.trait_name) && block.operator_rhs == .Val(source) {
-                        conversions.push((from_ty: type_name(source), to_ty: definition.name))
+                        conversions.push({from_ty: type_name(source), to_ty: definition.name})
                     }
                 }
             }
             .Enum(definition) -> {
                 loop block in definition.trait_impls {
                     if owned_trait_conversion(block.trait_name) && block.operator_rhs == .Val(source) {
-                        conversions.push((from_ty: type_name(source), to_ty: definition.name))
+                        conversions.push({from_ty: type_name(source), to_ty: definition.name})
                     }
                 }
             }
@@ -291,9 +291,9 @@ sema_schema_check_registered_module: fn(environment: SemaScopeEnvironment?, prog
 
 // Module entry borrows the schema pass's one program graph; it only replaces
 // the selected scope facts and never takes fields from either borrowed owner.
-sema_check_schema_migration_graph: fn(registration: &&SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
+sema_check_schema_migration_graph: fn(registration: &&SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> {registration: SemaRegistrationGraph, diagnostics: [Diagnostic]} Never! {
     if snapshots.len() == 0 {
-        return (diagnostics: [Diagnostic]{}, registration: registration.move())
+        return {diagnostics: [Diagnostic]{}, registration: registration.move()}
     }
     module_count: registration.modules.len()
     types := [TTypeDef]{}
@@ -323,5 +323,5 @@ sema_check_schema_migration_graph: fn(registration: &&SemaRegistrationGraph, che
     }
     graph_out := program.registration_graph.move()
     restored: graph_out.move() ?? panic("a completed schema pass lost its registration graph")
-    (diagnostics: diagnostics.move(), registration: restored.move())
+    {diagnostics: diagnostics.move(), registration: restored.move()}
 }

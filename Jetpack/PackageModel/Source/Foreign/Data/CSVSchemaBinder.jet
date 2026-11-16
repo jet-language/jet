@@ -127,13 +127,13 @@ pkg_data_parse_csv: fn(input: String) -> [[String]] DataBindError! {
 
 // Bool, then Int, then Float when every non-empty cell parses as one;
 // otherwise String. Any empty cell makes the field optional.
-pkg_data_csv_type: fn(values: [String]) -> (ty: BoundType, optional: Bool) Never! {
+pkg_data_csv_type: fn(values: [String]) -> {ty: BoundType, optional: Bool} Never! {
     optional := false
     nonempty := [String]{}
     loop value in values {
         if value == "" -> optional = true else -> nonempty.push(value.copy())
     }
-    if nonempty.len() == 0 -> return (optional: optional, ty: BoundType.Scalar("String"))
+    if nonempty.len() == 0 -> return {optional: optional, ty: BoundType.Scalar("String")}
     all_bool := true
     all_int := true
     all_float := true
@@ -151,8 +151,8 @@ pkg_data_csv_type: fn(values: [String]) -> (ty: BoundType, optional: Bool) Never
             0.0
         }
     }
-    if all_bool -> return (optional: optional, ty: BoundType.Scalar("Bool"))
-    if all_int -> return (optional: optional, ty: BoundType.Scalar("Int"))
-    if all_float -> return (optional: optional, ty: BoundType.Scalar("Float"))
-    (optional: optional, ty: BoundType.Scalar("String"))
+    if all_bool -> return {optional: optional, ty: BoundType.Scalar("Bool")}
+    if all_int -> return {optional: optional, ty: BoundType.Scalar("Int")}
+    if all_float -> return {optional: optional, ty: BoundType.Scalar("Float")}
+    {optional: optional, ty: BoundType.Scalar("String")}
 }

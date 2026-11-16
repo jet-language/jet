@@ -1236,11 +1236,11 @@ sema_call_core_source: fn(module_name: String, member: String, values: [TExpr], 
 
 // The Core module and function a source-owned row's `member` names: the row's
 // own module, or the module a dotted `core.` source target names.
-sema_call_core_source_path: fn(module_name: String, member: String) -> (module_name: String, member: String)? Never! {
-    if !member.starts_with("core.") -> return Val((module_name: module_name, member: member))
+sema_call_core_source_path: fn(module_name: String, member: String) -> {module_name: String, member: String}? Never! {
+    if !member.starts_with("core.") -> return Val({module_name: module_name, member: member})
     parts := member.split(".").to_list()
     function: parts.pop() ?? return None
-    Val((module_name: parts.join("."), member: function))
+    Val({module_name: parts.join("."), member: function})
 }
 
 // Push the effects the Core declaration of a source-owned record writes;
@@ -1582,7 +1582,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         return None
     }
     params := sema_call_core_parameter_records(signature, resolved_type_args, span, type_args.len() == 0)
-    (lowered, pins) := sema_call_check_bound_arguments_owned(state, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, local_args, environment, program, scopes, tail_store, context, span, diagnostics) ?? return None
+    {lowered, pins} := sema_call_check_bound_arguments_owned(state, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, local_args, environment, program, scopes, tail_store, context, span, diagnostics) ?? return None
     // A `&` argument keeps its Write borrow of the caller's place: a Core leaf
     // that lends a buffer or handle (wipe, reserve, stream writers) works
     // on the original, never on a copy.

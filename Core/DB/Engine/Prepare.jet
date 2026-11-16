@@ -563,8 +563,8 @@ EngineGen: struct {
             def.copy()
         }
 
-        vtab_best_index: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! {
-            (rc: base.ERROR, err: Val("Virtual tables are not supported in this build".bytes()))
+        vtab_best_index: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never! {
+            {rc: base.ERROR, err: Val("Virtual tables are not supported in this build".bytes())}
         }
 
         vtab_find_function: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {
@@ -1218,7 +1218,7 @@ finalize_stmt_in: fn<H: aux.Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Neve
 // openDatabase with sqlite3_open_v2's flags: the connection to the
 // database file at path (":memory:" for an in-memory database). On failure
 // the connection holds the error; close it with close_v2.
-open_v2: fn(path: String, flags_in: Int) -[DB]> (rc: Int, db: conn.Conn) Never! {
+open_v2: fn(path: String, flags_in: Int) -[DB]> {rc: Int, db: conn.Conn} Never! {
     db := conn.conn_new()
     flags := flags_in
     // SQLITE_OPEN_PRIVATECACHE drops SHAREDCACHE; shared cache is not
@@ -1250,7 +1250,7 @@ open_v2: fn(path: String, flags_in: Int) -[DB]> (rc: Int, db: conn.Conn) Never! 
     }
     rc = db.err_code
     if rc != base.OK -> db.open_state = conn.STATE_SICK
-    (rc: rc, db: db)
+    {rc: rc, db: db}
 }
 
 // openDatabase from sqlite3BtreeOpen of the main database to the end.
@@ -1361,12 +1361,12 @@ changes: fn(db: conn.Conn) -> Int Never! { db.n_change }
 // sqlite3_prepare_v3: compile the first statement of sql; stmt is -1 when
 // it holds none (white space or a comment), tail the byte offset of the
 // rest.
-prepare_v3: fn(db: &conn.Conn, sql: [U8], flags: Int) -[DB]> (rc: Int, stmt: Int, tail: Int) Never! {
+prepare_v3: fn(db: &conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt: Int, tail: Int} Never! {
     h := EngineHost{unused: 0}
     a := cg.take_ast(db)
     r: lock_and_prepare<EngineHost>(h, db, a, sql, sql.len(), conn.PREPARE_SAVESQL | flags & conn.PREPARE_MASK, None)
     db.ast = a
-    (rc: r.rc, stmt: r.stmt, tail: r.tail)
+    {rc: r.rc, stmt: r.stmt, tail: r.tail}
 }
 
 // sqlite3_step.

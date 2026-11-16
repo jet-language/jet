@@ -46,9 +46,9 @@ array_index: fn(key: String) -> Int? Never! {
 
 // An object's keys in JavaScript property order: array indices ascending,
 // then the rest in first-seen order; a duplicated key keeps its last value.
-ordered: fn(entries: [(key: String, value: Dyn)]) -> [(key: String, value: Dyn)] Never! {
-    indexed := [(index: Int, key: String, value: Dyn)]{}
-    named := [(key: String, value: Dyn)]{}
+ordered: fn(entries: [{key: String, value: Dyn}]) -> [{key: String, value: Dyn}] Never! {
+    indexed := [{index: Int, key: String, value: Dyn}]{}
+    named := [{key: String, value: Dyn}]{}
     loop entry in entries {
         index: array_index(entry.key) ?? -1
         at := -1
@@ -56,20 +56,20 @@ ordered: fn(entries: [(key: String, value: Dyn)]) -> [(key: String, value: Dyn)]
             loop i in 0..<indexed.len() {
                 if indexed[i].index == index -> at = i
             }
-            if at >= 0 -> indexed[at] = (index: index, key: entry.key, value: entry.value) else {
-                indexed.push((index: index, key: entry.key, value: entry.value))
+            if at >= 0 -> indexed[at] = {index: index, key: entry.key, value: entry.value} else {
+                indexed.push({index: index, key: entry.key, value: entry.value})
             }
             next
         }
         loop i in 0..<named.len() {
             if named[i].key == entry.key -> at = i
         }
-        if at >= 0 -> named[at] = (key: entry.key, value: entry.value) else {
-            named.push((key: entry.key, value: entry.value))
+        if at >= 0 -> named[at] = {key: entry.key, value: entry.value} else {
+            named.push({key: entry.key, value: entry.value})
         }
     }
     indexed.sort_by(fn(row) { row.index })
-    out := indexed.map(fn(row) { (key: row.key, value: row.value) })
+    out := indexed.map(fn(row) { {key: row.key, value: row.value} })
     out.extend(named)
     out
 }

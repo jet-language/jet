@@ -196,7 +196,7 @@ s3cas_find: fn(bytes: [U8], old: [U8], start: Int) -> Int {
     -1
 }
 
-s3cas_replace_all: fn(bytes: [U8], old: [U8], replacement: [U8]) -> (bytes: [U8], count: Int) {
+s3cas_replace_all: fn(bytes: [U8], old: [U8], replacement: [U8]) -> {bytes: [U8], count: Int} {
     assert(old.len() > 0)
     assert_eq(old.len(), replacement.len())
     out := [U8]{}
@@ -211,7 +211,7 @@ s3cas_replace_all: fn(bytes: [U8], old: [U8], replacement: [U8]) -> (bytes: [U8]
         count += 1
     }
     s3cas_add(out, bytes[cursor..<bytes.len()])
-    (bytes: out, count: count)
+    {bytes: out, count: count}
 }
 
 s3cas_copy_nofollow: fn(source: String, destination: String) {
@@ -344,7 +344,7 @@ s3cas_ctx: fn(roots: HangarRoots, project: String) -> ProviderCtx {
     control[relative_target.len() /% 2] = U8{1}
     backslash := relative_target.bytes()
     backslash[relative_target.len() /% 2] = U8{92}
-    targets: [(label: String, target: [U8], message: String)]{(label: "escape", target: escape, message: "archive link target escapes its output root"), (label: "control", target: control, message: "archive link target is not portable"), (label: "backslash", target: backslash, message: "archive link target is not portable")}
+    targets: [{label: String, target: [U8], message: String}]{{label: "escape", target: escape, message: "archive link target escapes its output root"}, {label: "control", target: control, message: "archive link target is not portable"}, {label: "backslash", target: backslash, message: "archive link target is not portable"}}
     loop hostile in targets {
         bytes: s3cas_replace_link(bundle, relative_target.bytes(), hostile.target)
         hostile_roots: s3cas_roots("nix-cas-generic-{hostile.label}")

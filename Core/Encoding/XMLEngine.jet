@@ -343,7 +343,7 @@ optional_text: fn(value: String?) -> Dyn Never! {
     }
 }
 
-object: fn(entries: &&[(key: String, value: Dyn)]) -> Dyn Never! {
+object: fn(entries: &&[{key: String, value: Dyn}]) -> Dyn Never! {
     stream.object_from_entries(entries)
 }
 
@@ -357,11 +357,11 @@ field: fn(value: Dyn, key: String) -> Dyn? Never! {
 }
 
 name_value: fn(name: Name) -> Dyn Never! {
-    object([(key: "raw", value: text(name.raw)), (key: "prefix", value: optional_text(name.prefix)), (key: "local", value: text(name.local)), (key: "namespace_uri", value: optional_text(name.namespace_uri))])
+    object([{key: "raw", value: text(name.raw)}, {key: "prefix", value: optional_text(name.prefix)}, {key: "local", value: text(name.local)}, {key: "namespace_uri", value: optional_text(name.namespace_uri)}])
 }
 
 lexical: fn(raw: String, semantic: &&Dyn) -> Dyn Never! {
-    object([(key: "raw_text", value: text(raw)), (key: "raw_bytes", value: Dyn.Null), (key: "semantic", value: semantic)])
+    object([{key: "raw_text", value: text(raw)}, {key: "raw_bytes", value: Dyn.Null}, {key: "semantic", value: semantic}])
 }
 
 strip_lexical: fn(value: Dyn) -> Dyn Never! {
@@ -372,10 +372,10 @@ strip_lexical: fn(value: Dyn) -> Dyn Never! {
             Dyn.Array(out)
         }
         .Object(_) -> {
-            out := [(key: String, value: Dyn)]{}
+            out := [{key: String, value: Dyn}]{}
             loop entry in stream.object_entries(value) {
                 if entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" {
-                    out.push((key: entry.key.copy(), value: strip_lexical(entry.value)))
+                    out.push({key: entry.key.copy(), value: strip_lexical(entry.value)})
                 }
             }
             object(out)
@@ -384,7 +384,7 @@ strip_lexical: fn(value: Dyn) -> Dyn Never! {
     }
 }
 
-has_exact_xml_keys: fn(entries: View<(key: String, value: Dyn)>, keys: [String]) -> Bool Never! {
+has_exact_xml_keys: fn(entries: View<{key: String, value: Dyn}>, keys: [String]) -> Bool Never! {
     if entries.len() != keys.len() -> return false
     loop key in keys {
         found := false
@@ -396,7 +396,7 @@ has_exact_xml_keys: fn(entries: View<(key: String, value: Dyn)>, keys: [String])
     true
 }
 
-xml_entry: fn(entries: View<(key: String, value: Dyn)>, key: String) -> Dyn? Never! {
+xml_entry: fn(entries: View<{key: String, value: Dyn}>, key: String) -> Dyn? Never! {
     loop entry in entries {
         if entry.key == key -> return Val(entry.value.copy())
     }
@@ -431,7 +431,7 @@ field_kind: fn(value: Dyn?) -> String Never! {
     }
 }
 
-xml_schema_order: fn(entries: View<(key: String, value: Dyn)>) -> [String]? Never! {
+xml_schema_order: fn(entries: View<{key: String, value: Dyn}>) -> [String]? Never! {
     order := [String]{}
     if text_value(xml_entry(entries, "$xml")) == .Val(kind) {
         order = if kind == {
@@ -494,28 +494,28 @@ xml_byte_array: fn(value: Dyn?) -> Bool Never! {
 // Schema checks for one entry; free functions, not local closures, so the
 // engine's effect summary stays pure (a call through a closure binding is an
 // open function-value call).
-entry_has: fn(entries: View<(key: String, value: Dyn)>, key: String) -> Bool Never! {
+entry_has: fn(entries: View<{key: String, value: Dyn}>, key: String) -> Bool Never! {
     !(xml_entry(entries, key) == .None)
 }
 
-entry_is: fn(entries: View<(key: String, value: Dyn)>, key: String, kind: String) -> Bool Never! {
+entry_is: fn(entries: View<{key: String, value: Dyn}>, key: String, kind: String) -> Bool Never! {
     field_kind(xml_entry(entries, key)) == kind
 }
 
-entry_is_or_null: fn(entries: View<(key: String, value: Dyn)>, key: String, kind: String) -> Bool Never! {
+entry_is_or_null: fn(entries: View<{key: String, value: Dyn}>, key: String, kind: String) -> Bool Never! {
     found: field_kind(xml_entry(entries, key))
     found == kind || found == "null"
 }
 
-entry_bytes: fn(entries: View<(key: String, value: Dyn)>, key: String) -> Bool Never! {
+entry_bytes: fn(entries: View<{key: String, value: Dyn}>, key: String) -> Bool Never! {
     xml_byte_array(xml_entry(entries, key))
 }
 
-entry_lexical: fn(entries: View<(key: String, value: Dyn)>, key: String) -> Bool Never! {
+entry_lexical: fn(entries: View<{key: String, value: Dyn}>, key: String) -> Bool Never! {
     !entry_has(entries, key) || entry_is(entries, key, "object")
 }
 
-xml_schema_types_are_valid: fn(entries: View<(key: String, value: Dyn)>) -> Bool Never! {
+xml_schema_types_are_valid: fn(entries: View<{key: String, value: Dyn}>) -> Bool Never! {
     if text_value(xml_entry(entries, "$xml")) == .Val(kind) {
         return if kind == {
             "document" -> entry_is_or_null(entries, "encoding", "text") && entry_bytes(entries, "bom") && entry_is(entries, "children", "array")
@@ -618,16 +618,16 @@ lexical_semantic: fn(value: Dyn, key: String) -> Dyn? Never! {
         return Val(strip_lexical(
             object(
                 [
-                    (key: "name", value: field(value, "name") ?? return None),
-                    (key: "namespaces", value: field(value, "namespaces") ?? return None),
-                    (key: "attributes", value: field(value, "attributes") ?? return None),
-                    (key: "empty_style", value: field(value, "empty_style") ?? return None),
+                    {key: "name", value: field(value, "name") ?? return None},
+                    {key: "namespaces", value: field(value, "namespaces") ?? return None},
+                    {key: "attributes", value: field(value, "attributes") ?? return None},
+                    {key: "empty_style", value: field(value, "empty_style") ?? return None},
                 ],
             ),
         ))
     }
     if key == "close_lexical" && ((whole_kind ?? "") == "element" || (event_kind ?? "") == "element_end") {
-        return Val(object([(key: "name", value: field(value, "name") ?? return None)]))
+        return Val(object([{key: "name", value: field(value, "name") ?? return None}]))
     }
     if key != "lexical" -> return None
     legal: ["document_whitespace", "declaration", "doctype", "namespace", "attribute", "text", "cdata", "entity_ref", "comment", "processing_instruction"]
@@ -635,10 +635,10 @@ lexical_semantic: fn(value: Dyn, key: String) -> Dyn? Never! {
         if !legal.contains(kind) -> return None
         semantic := strip_lexical(value)
         if kind != "namespace" && kind != "attribute" && field_kind(field(field(value, key) ?? return None, "raw_bytes")) == "array" {
-            fields := [(key: String, value: Dyn)]{}
+            fields := [{key: String, value: Dyn}]{}
             loop entry in stream.object_entries(semantic) {
                 if entry.key != "$xml" {
-                    fields.push((key: entry.key.copy(), value: entry.value.copy()))
+                    fields.push({key: entry.key.copy(), value: entry.value.copy()})
                 }
             }
             semantic = object(fields)
@@ -647,10 +647,10 @@ lexical_semantic: fn(value: Dyn, key: String) -> Dyn? Never! {
     }
     kind: event_kind ?? return None
     if kind == "namespace" || kind == "attribute" || !legal.contains(kind) -> return None
-    out := [(key: String, value: Dyn)]{}
+    out := [{key: String, value: Dyn}]{}
     loop entry in stream.object_entries(value) {
         if entry.key != "$xml_event" && entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" {
-            out.push((key: entry.key.copy(), value: strip_lexical(entry.value)))
+            out.push({key: entry.key.copy(), value: strip_lexical(entry.value)})
         }
     }
     Val(object(out))
@@ -664,7 +664,7 @@ clean: fn(value: Dyn) -> Dyn Never! {
             Dyn.Array(out)
         }
         .Object(_) -> {
-            out := [(key: String, value: Dyn)]{}
+            out := [{key: String, value: Dyn}]{}
             loop entry in stream.object_entries(value) {
                 lexical: entry.key == "lexical" || entry.key == "open_lexical" || entry.key == "close_lexical"
                 trusted: if lexical -> {
@@ -675,14 +675,14 @@ clean: fn(value: Dyn) -> Dyn Never! {
                 } else -> true
                 item := clean(entry.value)
                 if !trusted && item == .Object(_) {
-                    fields := [(key: String, value: Dyn)]{}
+                    fields := [{key: String, value: Dyn}]{}
                     loop slot in stream.object_entries(item) {
                         body: if slot.key == "raw_text" || slot.key == "raw_bytes" -> Dyn.Null else -> slot.value.copy()
-                        fields.push((key: slot.key.copy(), value: body))
+                        fields.push({key: slot.key.copy(), value: body})
                     }
                     item = object(fields)
                 }
-                out.push((key: entry.key.copy(), value: item))
+                out.push({key: entry.key.copy(), value: item})
             }
             object(out)
         }
@@ -690,31 +690,31 @@ clean: fn(value: Dyn) -> Dyn Never! {
     }
 }
 
-leaf: fn(kind: String, fields: &&[(key: String, value: Dyn)], raw: String) -> Dyn Never! {
-    semantic_fields := [(key: String, value: Dyn)]{(key: "$xml", value: text(kind))}
+leaf: fn(kind: String, fields: &&[{key: String, value: Dyn}], raw: String) -> Dyn Never! {
+    semantic_fields := [{key: String, value: Dyn}]{{key: "$xml", value: text(kind)}}
     loop entry in fields -> semantic_fields.push(entry.copy())
     semantic: strip_lexical(object(semantic_fields))
-    node_fields := [(key: String, value: Dyn)]{(key: "$xml", value: text(kind))}
+    node_fields := [{key: String, value: Dyn}]{{key: "$xml", value: text(kind)}}
     loop entry in fields -> node_fields.push(entry)
-    node_fields.push((key: "lexical", value: lexical(raw, semantic)))
+    node_fields.push({key: "lexical", value: lexical(raw, semantic)})
     object(node_fields)
 }
 
 part_value: fn(part: Part) -> Dyn Never! {
     if part == {
-        .Text(value, raw) -> leaf("text", [(key: "value", value: text(value))], raw)
-        .Entity(name, resolved, raw) -> leaf("entity_ref", [(key: "name", value: text(name)), (key: "resolved_value", value: optional_text(resolved))], raw)
+        .Text(value, raw) -> leaf("text", [{key: "value", value: text(value)}], raw)
+        .Entity(name, resolved, raw) -> leaf("entity_ref", [{key: "name", value: text(name)}, {key: "resolved_value", value: optional_text(resolved)}], raw)
     }
 }
 
 namespace_value: fn(namespace: Namespace) -> Dyn Never! {
-    leaf("namespace", [(key: "prefix", value: optional_text(namespace.prefix)), (key: "namespace_uri", value: text(namespace.namespace_uri)), (key: "quote", value: text(if namespace.quote == "'" -> "single" else -> "double"))], namespace.raw)
+    leaf("namespace", [{key: "prefix", value: optional_text(namespace.prefix)}, {key: "namespace_uri", value: text(namespace.namespace_uri)}, {key: "quote", value: text(if namespace.quote == "'" -> "single" else -> "double")}], namespace.raw)
 }
 
 attribute_value: fn(attribute: Attribute) -> Dyn Never! {
     parts := [Dyn]{}
     loop part in attribute.parts -> parts.push(part_value(part))
-    leaf("attribute", [(key: "name", value: name_value(attribute.name)), (key: "parts", value: Dyn.Array(parts)), (key: "normalized_value", value: optional_text(attribute.normalized)), (key: "quote", value: text(if attribute.quote == "'" -> "single" else -> "double"))], attribute.raw)
+    leaf("attribute", [{key: "name", value: name_value(attribute.name)}, {key: "parts", value: Dyn.Array(parts)}, {key: "normalized_value", value: optional_text(attribute.normalized)}, {key: "quote", value: text(if attribute.quote == "'" -> "single" else -> "double")}], attribute.raw)
 }
 
 wire_bytes: fn(text: String, encoding: WireEncoding) -> [U8] Never! {
@@ -729,14 +729,14 @@ wire_bytes: fn(text: String, encoding: WireEncoding) -> [U8] Never! {
 byte_lexical: fn(raw: &&[U8], semantic: &&Dyn) -> Dyn Never! {
     bytes := [Dyn]{}
     loop byte in raw -> bytes.push(Dyn.Int(Int{byte}))
-    object([(key: "raw_text", value: Dyn.Null), (key: "raw_bytes", value: Dyn.Array(bytes)), (key: "semantic", value: semantic)])
+    object([{key: "raw_text", value: Dyn.Null}, {key: "raw_bytes", value: Dyn.Array(bytes)}, {key: "semantic", value: semantic}])
 }
 
 lexical_value_to_wire: fn(value: &&Dyn, encoding: WireEncoding) -> Dyn Never! {
     if value == .Object(_) {
 
     } else { return value.move() }
-    output := [(key: String, value: Dyn)]{}
+    output := [{key: String, value: Dyn}]{}
     loop entry in stream.object_entries(value) {
         item := entry.value.copy()
         if entry.key == "lexical" && item == .Object(_) {
@@ -745,15 +745,15 @@ lexical_value_to_wire: fn(value: &&Dyn, encoding: WireEncoding) -> Dyn Never! {
                 bytes: wire_bytes(text, encoding)
                 payload := [Dyn]{}
                 loop byte in bytes -> payload.push(Dyn.Int(Int{byte}))
-                lexical := [(key: String, value: Dyn)]{}
+                lexical := [{key: String, value: Dyn}]{}
                 loop slot in stream.object_entries(item) {
                     body: if slot.key == "raw_text" -> Dyn.Null else if slot.key == "raw_bytes" -> Dyn.Array(payload.copy()) else -> slot.value.copy()
-                    lexical.push((key: slot.key.copy(), value: body))
+                    lexical.push({key: slot.key.copy(), value: body})
                 }
                 item = object(lexical)
             }
         }
-        output.push((key: entry.key.copy(), value: item))
+        output.push({key: entry.key.copy(), value: item})
     }
     object(output)
 }
@@ -769,30 +769,30 @@ stream_event_value: fn(item: StreamEvent) -> Dyn Never! {
                 .UTF16Le -> "UTF-16LE"
                 .UTF16Be -> "UTF-16BE"
             }
-            object([(key: "$xml_event", value: text("document_start")), (key: "encoding", value: text(label)), (key: "bom", value: Dyn.Array(bom))])
+            object([{key: "$xml_event", value: text("document_start")}, {key: "encoding", value: text(label)}, {key: "bom", value: Dyn.Array(bom)}])
         }
-        .DocumentEnd -> object([(key: "$xml_event", value: text("document_end"))])
+        .DocumentEnd -> object([{key: "$xml_event", value: text("document_end")}])
         .Declaration(version, declared, standalone, _) -> {
             standalone_value: if standalone == {
                 .Val(b) -> Dyn.Bool(b)
                 .None -> Dyn.Null
             }
-            fields := [(key: String, value: Dyn)]{(key: "version", value: text(version)), (key: "encoding", value: optional_text(declared)), (key: "standalone", value: standalone_value)}
-            out := [(key: String, value: Dyn)]{(key: "$xml_event", value: text("declaration"))}
+            fields := [{key: String, value: Dyn}]{{key: "version", value: text(version)}, {key: "encoding", value: optional_text(declared)}, {key: "standalone", value: standalone_value}}
+            out := [{key: String, value: Dyn}]{{key: "$xml_event", value: text("declaration")}}
             loop entry in fields -> out.push(entry.copy())
-            out.push((key: "lexical", value: byte_lexical(item.raw_bytes.copy(), strip_lexical(object(fields)))))
+            out.push({key: "lexical", value: byte_lexical(item.raw_bytes.copy(), strip_lexical(object(fields)))})
             object(out)
         }
-        .DocumentWhitespace(value, _) -> leaf_event("document_whitespace", [(key: "value", value: text(value))], item.raw_bytes.copy())
-        .Text(value, _) -> leaf_event("text", [(key: "value", value: text(value))], item.raw_bytes.copy())
-        .Cdata(value, _) -> leaf_event("cdata", [(key: "value", value: text(value))], item.raw_bytes.copy())
-        .Comment(value, _) -> leaf_event("comment", [(key: "value", value: text(value))], item.raw_bytes.copy())
-        .EntityRef(name, resolved, _) -> leaf_event("entity_ref", [(key: "name", value: text(name)), (key: "resolved_value", value: optional_text(resolved))], item.raw_bytes.copy())
-        .ProcessingInstruction(target, value, _) -> leaf_event("processing_instruction", [(key: "target", value: text(target)), (key: "value", value: text(value))], item.raw_bytes.copy())
-        .Doctype(name, public_id, system_id, internal_subset, _) -> leaf_event("doctype", [(key: "name", value: text(name)), (key: "public_id", value: optional_text(public_id)), (key: "system_id", value: optional_text(system_id)), (key: "internal_subset", value: optional_text(internal_subset))], item.raw_bytes.copy())
+        .DocumentWhitespace(value, _) -> leaf_event("document_whitespace", [{key: "value", value: text(value)}], item.raw_bytes.copy())
+        .Text(value, _) -> leaf_event("text", [{key: "value", value: text(value)}], item.raw_bytes.copy())
+        .Cdata(value, _) -> leaf_event("cdata", [{key: "value", value: text(value)}], item.raw_bytes.copy())
+        .Comment(value, _) -> leaf_event("comment", [{key: "value", value: text(value)}], item.raw_bytes.copy())
+        .EntityRef(name, resolved, _) -> leaf_event("entity_ref", [{key: "name", value: text(name)}, {key: "resolved_value", value: optional_text(resolved)}], item.raw_bytes.copy())
+        .ProcessingInstruction(target, value, _) -> leaf_event("processing_instruction", [{key: "target", value: text(target)}, {key: "value", value: text(value)}], item.raw_bytes.copy())
+        .Doctype(name, public_id, system_id, internal_subset, _) -> leaf_event("doctype", [{key: "name", value: text(name)}, {key: "public_id", value: optional_text(public_id)}, {key: "system_id", value: optional_text(system_id)}, {key: "internal_subset", value: optional_text(internal_subset)}], item.raw_bytes.copy())
         .ElementEnd(name, _) -> {
-            semantic: object([(key: "name", value: name_value(name))])
-            object([(key: "$xml_event", value: text("element_end")), (key: "name", value: name_value(name)), (key: "close_lexical", value: byte_lexical(item.raw_bytes.copy(), semantic))])
+            semantic: object([{key: "name", value: name_value(name)}])
+            object([{key: "$xml_event", value: text("element_end")}, {key: "name", value: name_value(name)}, {key: "close_lexical", value: byte_lexical(item.raw_bytes.copy(), semantic)}])
         }
         .ElementStart(name, namespaces, attributes, empty, _) -> {
             ns_values := [Dyn]{}
@@ -806,17 +806,17 @@ stream_event_value: fn(item: StreamEvent) -> Dyn Never! {
             ns: Dyn.Array(ns_values)
             attrs: Dyn.Array(attr_values)
             style: text(if empty -> "empty" else -> "explicit")
-            semantic: strip_lexical(object([(key: "name", value: name_value(name)), (key: "namespaces", value: ns.copy()), (key: "attributes", value: attrs.copy()), (key: "empty_style", value: style.copy())]))
-            object([(key: "$xml_event", value: text("element_start")), (key: "name", value: name_value(name)), (key: "namespaces", value: ns), (key: "attributes", value: attrs), (key: "empty_style", value: style), (key: "open_lexical", value: byte_lexical(item.raw_bytes.copy(), semantic))])
+            semantic: strip_lexical(object([{key: "name", value: name_value(name)}, {key: "namespaces", value: ns.copy()}, {key: "attributes", value: attrs.copy()}, {key: "empty_style", value: style.copy()}]))
+            object([{key: "$xml_event", value: text("element_start")}, {key: "name", value: name_value(name)}, {key: "namespaces", value: ns}, {key: "attributes", value: attrs}, {key: "empty_style", value: style}, {key: "open_lexical", value: byte_lexical(item.raw_bytes.copy(), semantic)}])
         }
     }
 }
 
-leaf_event: fn(kind: String, fields: &&[(key: String, value: Dyn)], raw: &&[U8]) -> Dyn Never! {
+leaf_event: fn(kind: String, fields: &&[{key: String, value: Dyn}], raw: &&[U8]) -> Dyn Never! {
     semantic: strip_lexical(object(fields.copy()))
-    out := [(key: String, value: Dyn)]{(key: "$xml_event", value: text(kind))}
+    out := [{key: String, value: Dyn}]{{key: "$xml_event", value: text(kind)}}
     loop entry in fields -> out.push(entry)
-    out.push((key: "lexical", value: byte_lexical(raw, semantic)))
+    out.push({key: "lexical", value: byte_lexical(raw, semantic)})
     object(out)
 }
 
@@ -841,16 +841,16 @@ finish_element: fn(frame: &&ElementFrame, close_raw: String?) -> Dyn Never! {
     empty: close_raw == None
     name: name_value(frame.name)
     style: text(if empty -> "empty" else -> "explicit")
-    semantic: strip_lexical(object([(key: "name", value: name.copy()), (key: "namespaces", value: Dyn.Array(frame.namespaces.copy())), (key: "attributes", value: Dyn.Array(frame.attributes.copy())), (key: "empty_style", value: style.copy())]))
+    semantic: strip_lexical(object([{key: "name", value: name.copy()}, {key: "namespaces", value: Dyn.Array(frame.namespaces.copy())}, {key: "attributes", value: Dyn.Array(frame.attributes.copy())}, {key: "empty_style", value: style.copy()}]))
     close: if close_raw == {
-        .Val(raw) -> lexical(raw, object([(key: "name", value: name_value(frame.name))]))
+        .Val(raw) -> lexical(raw, object([{key: "name", value: name_value(frame.name)}]))
         .None -> Dyn.Null
     }
-    object([(key: "$xml", value: text("element")), (key: "name", value: name), (key: "namespaces", value: Dyn.Array(frame.namespaces.move())), (key: "attributes", value: Dyn.Array(frame.attributes.move())), (key: "children", value: Dyn.Array(frame.children.move())), (key: "empty_style", value: style), (key: "open_lexical", value: lexical(frame.open_raw, semantic)), (key: "close_lexical", value: close)])
+    object([{key: "$xml", value: text("element")}, {key: "name", value: name}, {key: "namespaces", value: Dyn.Array(frame.namespaces.move())}, {key: "attributes", value: Dyn.Array(frame.attributes.move())}, {key: "children", value: Dyn.Array(frame.children.move())}, {key: "empty_style", value: style}, {key: "open_lexical", value: lexical(frame.open_raw, semantic)}, {key: "close_lexical", value: close}])
 }
 
 finish_byte_element: fn(frame: &&ByteElementFrame, close_lexical: &&Dyn) -> Dyn Never! {
-    object([(key: "$xml", value: text("element")), (key: "name", value: frame.name.move()), (key: "namespaces", value: frame.namespaces.move()), (key: "attributes", value: frame.attributes.move()), (key: "children", value: Dyn.Array(frame.children.move())), (key: "empty_style", value: frame.empty_style.move()), (key: "open_lexical", value: frame.open_lexical.move()), (key: "close_lexical", value: close_lexical)])
+    object([{key: "$xml", value: text("element")}, {key: "name", value: frame.name.move()}, {key: "namespaces", value: frame.namespaces.move()}, {key: "attributes", value: frame.attributes.move()}, {key: "children", value: Dyn.Array(frame.children.move())}, {key: "empty_style", value: frame.empty_style.move()}, {key: "open_lexical", value: frame.open_lexical.move()}, {key: "close_lexical", value: close_lexical}])
 }
 
 parse_document: fn(source: String) -> Dyn XMLFault! {
@@ -881,10 +881,10 @@ parse_document_with: fn(source: String, options: ParseOptions) -> Dyn XMLFault! 
                     .Val(b) -> Dyn.Bool(b)
                     .None -> Dyn.Null
                 }
-                Val(leaf("declaration", [(key: "version", value: text(version)), (key: "encoding", value: optional_text(encoding)), (key: "standalone", value: standalone_value)], raw))
+                Val(leaf("declaration", [{key: "version", value: text(version)}, {key: "encoding", value: optional_text(encoding)}, {key: "standalone", value: standalone_value}], raw))
             }
-            .DocumentWhitespace(value, raw) -> Val(leaf("document_whitespace", [(key: "value", value: text(value))], raw))
-            .Doctype(name, public_id, system_id, internal_subset, raw) -> Val(leaf("doctype", [(key: "name", value: text(name)), (key: "public_id", value: optional_text(public_id)), (key: "system_id", value: optional_text(system_id)), (key: "internal_subset", value: optional_text(internal_subset))], raw))
+            .DocumentWhitespace(value, raw) -> Val(leaf("document_whitespace", [{key: "value", value: text(value)}], raw))
+            .Doctype(name, public_id, system_id, internal_subset, raw) -> Val(leaf("doctype", [{key: "name", value: text(name)}, {key: "public_id", value: optional_text(public_id)}, {key: "system_id", value: optional_text(system_id)}, {key: "internal_subset", value: optional_text(internal_subset)}], raw))
             .ElementStart(name, namespaces, attributes, empty, raw) -> {
                 ns := [Dyn]{}
                 loop n in namespaces -> ns.push(namespace_value(n))
@@ -896,11 +896,11 @@ parse_document_with: fn(source: String, options: ParseOptions) -> Dyn XMLFault! 
                     None
                 }
             }
-            .Text(value, raw) -> Val(leaf("text", [(key: "value", value: text(value))], raw))
-            .Cdata(value, raw) -> Val(leaf("cdata", [(key: "value", value: text(value))], raw))
-            .EntityRef(name, resolved, raw) -> Val(leaf("entity_ref", [(key: "name", value: text(name)), (key: "resolved_value", value: optional_text(resolved))], raw))
-            .Comment(value, raw) -> Val(leaf("comment", [(key: "value", value: text(value))], raw))
-            .ProcessingInstruction(target, value, raw) -> Val(leaf("processing_instruction", [(key: "target", value: text(target)), (key: "value", value: text(value))], raw))
+            .Text(value, raw) -> Val(leaf("text", [{key: "value", value: text(value)}], raw))
+            .Cdata(value, raw) -> Val(leaf("cdata", [{key: "value", value: text(value)}], raw))
+            .EntityRef(name, resolved, raw) -> Val(leaf("entity_ref", [{key: "name", value: text(name)}, {key: "resolved_value", value: optional_text(resolved)}], raw))
+            .Comment(value, raw) -> Val(leaf("comment", [{key: "value", value: text(value)}], raw))
+            .ProcessingInstruction(target, value, raw) -> Val(leaf("processing_instruction", [{key: "target", value: text(target)}, {key: "value", value: text(value)}], raw))
             .ElementEnd(_, raw) -> {
                 frame: stack.pop() ?? return Err(XMLFault.at(scanner.offset, "element stack underflow"))
                 Val(finish_element(frame, Val(raw)))
@@ -912,7 +912,7 @@ parse_document_with: fn(source: String, options: ParseOptions) -> Dyn XMLFault! 
             }
         }
     }
-    object([(key: "$xml", value: text("document")), (key: "encoding", value: Dyn.Null), (key: "bom", value: Dyn.Array([])), (key: "children", value: Dyn.Array(document_children))])
+    object([{key: "$xml", value: text("document")}, {key: "encoding", value: Dyn.Null}, {key: "bom", value: Dyn.Array([])}, {key: "children", value: Dyn.Array(document_children)}])
 }
 
 parse_document_bytes: fn(bytes: [U8]) -> Dyn XMLFault! {
@@ -1007,14 +1007,14 @@ fold_events: fn(events: [Dyn]) -> Dyn XMLFault! {
 
                 } else { return Err(XMLFault.shape("XML event must be an Object")) }
                 found := false
-                entries := [(key: String, value: Dyn)]{}
+                entries := [{key: String, value: Dyn}]{}
                 loop entry in stream.object_entries(event) {
                     key := entry.key.copy()
                     if key == "$xml_event" {
                         key = "$xml"
                         found = true
                     }
-                    entries.push((key: key, value: entry.value.copy()))
+                    entries.push({key: key, value: entry.value.copy()})
                 }
                 if !found -> return Err(XMLFault.shape("XML event lacks $xml_event"))
                 Val(object(entries))
@@ -1038,7 +1038,7 @@ fold_events: fn(events: [Dyn]) -> Dyn XMLFault! {
     if roots != 1 {
         return Err(XMLFault.shape("XML document must contain exactly one root element"))
     }
-    object([(key: "$xml", value: text("document")), (key: "encoding", value: start.encoding.move()), (key: "bom", value: start.bom.move()), (key: "children", value: Dyn.Array(document_children))])
+    object([{key: "$xml", value: text("document")}, {key: "encoding", value: start.encoding.move()}, {key: "bom", value: start.bom.move()}, {key: "children", value: Dyn.Array(document_children)}])
 }
 
 event_from_node: fn(value: Dyn) -> Dyn XMLFault! {
@@ -1046,14 +1046,14 @@ event_from_node: fn(value: Dyn) -> Dyn XMLFault! {
 
     } else { return Err(XMLFault.shape("XML node must be an Object")) }
     found := false
-    entries := [(key: String, value: Dyn)]{}
+    entries := [{key: String, value: Dyn}]{}
     loop entry in stream.object_entries(value) {
         key := entry.key.copy()
         if key == "$xml" {
             key = "$xml_event"
             found = true
         }
-        entries.push((key: key, value: entry.value.copy()))
+        entries.push({key: key, value: entry.value.copy()})
     }
     if !found -> return Err(XMLFault.shape("XML node lacks $xml"))
     object(entries)
@@ -1082,12 +1082,12 @@ push_node: fn(value: Dyn, output: &[Dyn]) XMLFault! {
         output.push(
             object(
                 [
-                    (key: "$xml_event", value: text("element_start")),
-                    (key: "name", value: field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))),
-                    (key: "namespaces", value: field(value, "namespaces") ?? return Err(XMLFault.shape("element lacks namespaces"))),
-                    (key: "attributes", value: field(value, "attributes") ?? return Err(XMLFault.shape("element lacks attributes"))),
-                    (key: "empty_style", value: text(style)),
-                    (key: "open_lexical", value: field(value, "open_lexical") ?? return Err(XMLFault.shape("element lacks open_lexical"))),
+                    {key: "$xml_event", value: text("element_start")},
+                    {key: "name", value: field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))},
+                    {key: "namespaces", value: field(value, "namespaces") ?? return Err(XMLFault.shape("element lacks namespaces"))},
+                    {key: "attributes", value: field(value, "attributes") ?? return Err(XMLFault.shape("element lacks attributes"))},
+                    {key: "empty_style", value: text(style)},
+                    {key: "open_lexical", value: field(value, "open_lexical") ?? return Err(XMLFault.shape("element lacks open_lexical"))},
                 ],
             ),
         )
@@ -1096,9 +1096,9 @@ push_node: fn(value: Dyn, output: &[Dyn]) XMLFault! {
             output.push(
                 object(
                     [
-                        (key: "$xml_event", value: text("element_end")),
-                        (key: "name", value: field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))),
-                        (key: "close_lexical", value: field(value, "close_lexical") ?? return Err(XMLFault.shape("element lacks close_lexical"))),
+                        {key: "$xml_event", value: text("element_end")},
+                        {key: "name", value: field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))},
+                        {key: "close_lexical", value: field(value, "close_lexical") ?? return Err(XMLFault.shape("element lacks close_lexical"))},
                     ],
                 ),
             )
@@ -1119,14 +1119,14 @@ unfold_events: fn(value: Dyn) -> [Dyn] XMLFault! {
     output := [Dyn]{
         object(
             [
-                (key: "$xml_event", value: text("document_start")),
-                (key: "encoding", value: field(value, "encoding") ?? return Err(XMLFault.shape("document lacks encoding"))),
-                (key: "bom", value: field(value, "bom") ?? return Err(XMLFault.shape("document lacks bom"))),
+                {key: "$xml_event", value: text("document_start")},
+                {key: "encoding", value: field(value, "encoding") ?? return Err(XMLFault.shape("document lacks encoding"))},
+                {key: "bom", value: field(value, "bom") ?? return Err(XMLFault.shape("document lacks bom"))},
             ],
         ),
     }
     loop child in children -> push_node(child, output) ?? return Err(err)
-    output.push(object([(key: "$xml_event", value: text("document_end"))]))
+    output.push(object([{key: "$xml_event", value: text("document_end")}]))
     output.move()
 }
 
@@ -1310,13 +1310,13 @@ render_node: fn(value: Dyn, output: &String) XMLFault! {
         namespaces: field(value, "namespaces") ?? return Err(XMLFault.shape("XML element lacks namespaces"))
         attributes: field(value, "attributes") ?? return Err(XMLFault.shape("XML element lacks attributes"))
         style: field(value, "empty_style") ?? return Err(XMLFault.shape("XML element lacks empty_style"))
-        open_semantic: strip_lexical(object([(key: "name", value: name.copy()), (key: "namespaces", value: namespaces.copy()), (key: "attributes", value: attributes.copy()), (key: "empty_style", value: style.copy())]))
+        open_semantic: strip_lexical(object([{key: "name", value: name.copy()}, {key: "namespaces", value: namespaces.copy()}, {key: "attributes", value: attributes.copy()}, {key: "empty_style", value: style.copy()}]))
         if lexical_raw(value, "open_lexical", open_semantic) == .Val(raw) -> output += raw else {
             render_element_open(value, output) ?? return Err(err)
         }
         children: array_value(field(value, "children")) ?? return Err(XMLFault.shape("XML element children must be an array"))
         loop child in children -> render_node(child, output) ?? return Err(err)
-        close_semantic: object([(key: "name", value: name.copy())])
+        close_semantic: object([{key: "name", value: name.copy()}])
         if lexical_raw(value, "close_lexical", close_semantic) == .Val(raw) -> output += raw else if style == (Dyn.Text("explicit")) {
             raw_name: required_text(name, "raw") ?? return Err(err)
             output += "</{raw_name}>"
@@ -1690,11 +1690,11 @@ validate_start: fn(event: Dyn, name: Name, inherited: &&NamespaceScope) -> Names
 event_element_node: fn(event: Dyn) -> Dyn XMLFault! {
     object(
         [
-            (key: "$xml", value: text("element")),
-            (key: "name", value: field(event, "name") ?? return Err(XMLFault.shape("element lacks name"))),
-            (key: "namespaces", value: field(event, "namespaces") ?? return Err(XMLFault.shape("element lacks namespaces"))),
-            (key: "attributes", value: field(event, "attributes") ?? return Err(XMLFault.shape("element lacks attributes"))),
-            (key: "empty_style", value: field(event, "empty_style") ?? return Err(XMLFault.shape("element lacks empty_style"))),
+            {key: "$xml", value: text("element")},
+            {key: "name", value: field(event, "name") ?? return Err(XMLFault.shape("element lacks name"))},
+            {key: "namespaces", value: field(event, "namespaces") ?? return Err(XMLFault.shape("element lacks namespaces"))},
+            {key: "attributes", value: field(event, "attributes") ?? return Err(XMLFault.shape("element lacks attributes"))},
+            {key: "empty_style", value: field(event, "empty_style") ?? return Err(XMLFault.shape("element lacks empty_style"))},
         ],
     )
 }
@@ -1703,10 +1703,10 @@ deterministic_event_node: fn(event: Dyn, kind: String) -> String XMLFault! {
     if event == .Object(_) {
 
     } else { return Err(XMLFault.shape("XML event must be an Object")) }
-    fields := [(key: String, value: Dyn)]{(key: "$xml", value: text(kind))}
+    fields := [{key: String, value: Dyn}]{{key: "$xml", value: text(kind)}}
     loop entry in stream.object_entries(event) {
         if entry.key != "$xml_event" && entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" {
-            fields.push((key: entry.key.copy(), value: entry.value.copy()))
+            fields.push({key: entry.key.copy(), value: entry.value.copy()})
         }
     }
     deterministic_leaf(object(fields), kind) ?? return Err(err)
@@ -2101,7 +2101,7 @@ document_root: fn(document: Dyn) -> Dyn XMLFault! {
     root ?? return Err(projection_err("$", "XML document must contain exactly one root element"))
 }
 
-expanded_name_parts: fn(node: Dyn) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLFault! {
+expanded_name_parts: fn(node: Dyn) -> {raw: String, prefix: String?, local: String, namespace_uri: String?} XMLFault! {
     kind: xml_tag_of(node) ?? return Err(projection_err("$", "expanded_name requires a tagged XML node"))
     if kind == {
         "element" | "attribute" | "namespace" -> {}
@@ -2109,7 +2109,7 @@ expanded_name_parts: fn(node: Dyn) -> (raw: String, prefix: String?, local: Stri
     }
     name: field(node, "name") ?? return Err(projection_err("$", "XML name object missing"))
     parts: read_name_parts(name, "$") ?? return Err(err)
-    (raw: parts.raw.move(), prefix: parts.prefix.move(), local: parts.local.move(), namespace_uri: parts.namespace_uri.move())
+    {raw: parts.raw.move(), prefix: parts.prefix.move(), local: parts.local.move(), namespace_uri: parts.namespace_uri.move()}
 }
 
 lookup_attribute: fn(element: Dyn, name: String) -> String? XMLFault! {
@@ -2174,7 +2174,7 @@ project_element_value: fn(element: Dyn, path: String) -> Dyn XMLFault! {
             return Err(projection_err(path, "XML element children must be an array"))
         }
     }
-    entries := [(key: String, value: Dyn)]{}
+    entries := [{key: String, value: Dyn}]{}
     loop attribute in attributes {
         if xml_tag_of(attribute) != Val("attribute") {
             return Err(projection_err(path, "XML attributes array must contain attribute nodes"))
@@ -2191,7 +2191,7 @@ project_element_value: fn(element: Dyn, path: String) -> Dyn XMLFault! {
             }
         }
         content: normalized ?? return Err(entity_err(child_path, "attribute has an unresolved entity"))
-        entries.push((key: key, value: Dyn.Text(content)))
+        entries.push({key: key, value: Dyn.Text(content)})
     }
     if is_simple_content(children) {
         content := ""
@@ -2207,10 +2207,10 @@ project_element_value: fn(element: Dyn, path: String) -> Dyn XMLFault! {
             }
         }
         if entries.is_empty() -> return Dyn.Text(content)
-        entries.push((key: "$text", value: Dyn.Text(content)))
+        entries.push({key: "$text", value: Dyn.Text(content)})
         return object(entries)
     }
-    child_keys := [(key: String, value: Dyn)]{}
+    child_keys := [{key: String, value: Dyn}]{}
     key_index := [String:Int]{}
     content := [Dyn]{}
     loop child in children {
@@ -2235,15 +2235,15 @@ project_element_value: fn(element: Dyn, path: String) -> Dyn XMLFault! {
                 }
                 .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Dyn.Array([Dyn]{prior.move(), projected})
             }
-            child_keys.push((key: entry_key, value: combined))
+            child_keys.push({key: entry_key, value: combined})
             child_keys.__swap(index, last)
         } else {
             key_index[key] = child_keys.len()
-            child_keys.push((key: key, value: projected))
+            child_keys.push({key: key, value: projected})
         }
     }
     loop entry in child_keys -> entries.push(entry)
-    entries.push((key: "$content", value: Dyn.Array(content)))
+    entries.push({key: "$content", value: Dyn.Array(content)})
     object(entries)
 }
 
@@ -3860,13 +3860,13 @@ declaration_matches_input: fn(name: String, encoding: WireEncoding?) -> Bool Nev
 }
 
 #Test("XML optional text keeps null distinct from typed shape failures") {
-    value: object([(key: "encoding", value: Dyn.Null)])
+    value: object([{key: "encoding", value: Dyn.Null}])
     if optional_text_field(value, "encoding") == {
         .None -> {}
         .Val(_) -> { panic("null became text") }
         .Err(_) -> panic("null became a failure")
     }
-    invalid: object([(key: "encoding", value: Dyn.Bool(true))])
+    invalid: object([{key: "encoding", value: Dyn.Bool(true)}])
     if optional_text_field(invalid, "encoding") == {
         .Err(error) -> {
             assert_eq(error.kind, Reason.Shape)
@@ -3890,9 +3890,9 @@ declaration_matches_input: fn(name: String, encoding: WireEncoding?) -> Bool Nev
 #Test("XML deterministic rendering preserves optional null declaration fields") {
     declaration: object(
         [
-            (key: "version", value: text("1.0")),
-            (key: "encoding", value: Dyn.Null),
-            (key: "standalone", value: Dyn.Null),
+            {key: "version", value: text("1.0")},
+            {key: "encoding", value: Dyn.Null},
+            {key: "standalone", value: Dyn.Null},
         ],
     )
     assert_eq(
@@ -3901,9 +3901,9 @@ declaration_matches_input: fn(name: String, encoding: WireEncoding?) -> Bool Nev
     )
     invalid: object(
         [
-            (key: "version", value: text("1.0")),
-            (key: "encoding", value: Dyn.Bool(true)),
-            (key: "standalone", value: Dyn.Null),
+            {key: "version", value: text("1.0")},
+            {key: "encoding", value: Dyn.Bool(true)},
+            {key: "standalone", value: Dyn.Null},
         ],
     )
     if deterministic_leaf(invalid, "declaration") == {
@@ -3913,7 +3913,7 @@ declaration_matches_input: fn(name: String, encoding: WireEncoding?) -> Bool Nev
 }
 
 #Test("XML field presence does not compare Dyn payloads") {
-    entries: [(key: String, value: Dyn)]{(key: "value", value: Dyn.Null)}
+    entries: [{key: String, value: Dyn}]{{key: "value", value: Dyn.Null}}
     assert(!(xml_entry(entries[0..<entries.len()], "value") == .None))
     assert(xml_entry(entries[0..<entries.len()], "absent") == .None)
 }

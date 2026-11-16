@@ -140,7 +140,7 @@ jet_cli_import_split_commas: fn(raw: String) -> [String] Never! {
 }
 
 // Rust `split_top` (3402-3430); unlike foreign quote scanners, no backtick quote.
-jet_cli_import_split_top: fn(raw: String, needle: String) -> (left: String, right: String)? Never! {
+jet_cli_import_split_top: fn(raw: String, needle: String) -> {left: String, right: String}? Never! {
     bytes: raw.bytes()
     wanted: needle.bytes()
     depth := 0
@@ -159,7 +159,7 @@ jet_cli_import_split_top: fn(raw: String, needle: String) -> (left: String, righ
         if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
         if byte == (U8{41}) || byte == (U8{93}) -> depth -= 1
         if depth == 0 && jet_cli_import_byte_match(bytes, at, wanted) {
-            return Val((left: jet_cli_import_byte_slice(bytes, 0, at), right: jet_cli_import_byte_slice(bytes, at + wanted.len(), bytes.len())))
+            return Val({left: jet_cli_import_byte_slice(bytes, 0, at), right: jet_cli_import_byte_slice(bytes, at + wanted.len(), bytes.len())})
         }
         at += 1
     }
@@ -334,13 +334,13 @@ jet_cli_import_foreign_expression: fn(language: String, raw: String, float_liter
     if language == "ts" || language == "js" {
         expression = expression.replace("!==", "!=").replace("===", "==")
     }
-    replacements: [(foreign: String, jet: String)]{
-        (foreign: "System.out.println(", jet: "print("),
-        (foreign: "System.Console.WriteLine(", jet: "print("),
-        (foreign: "Console.WriteLine(", jet: "print("),
-        (foreign: "fmt.Println(", jet: "print("),
-        (foreign: "println(", jet: "print("),
-        (foreign: "console.log(", jet: "print("),
+    replacements: [{foreign: String, jet: String}]{
+        {foreign: "System.out.println(", jet: "print("},
+        {foreign: "System.Console.WriteLine(", jet: "print("},
+        {foreign: "Console.WriteLine(", jet: "print("},
+        {foreign: "fmt.Println(", jet: "print("},
+        {foreign: "println(", jet: "print("},
+        {foreign: "console.log(", jet: "print("},
     }
     loop pair in replacements {
         expression = jet_cli_import_replace_unquoted(expression, pair.foreign, pair.jet)
@@ -712,12 +712,12 @@ jet_cli_import_push_piece: fn(output: &[U8], piece: String) Never! {
     loop byte in piece.bytes() -> output.push(byte)
 }
 
-jet_cli_import_assignment: fn(line: String) -> (left: String, right: String)? Never! {
+jet_cli_import_assignment: fn(line: String) -> {left: String, right: String}? Never! {
     pair: jet_cli_import_split_top(line, "=") ?? return None
     if pair.right.starts_with("=") || pair.left.ends_with("!") || pair.left.ends_with("<") || pair.left.ends_with(">") {
         return None
     }
-    Val((left: pair.left.trim().copy(), right: pair.right.trim().copy()))
+    Val({left: pair.left.trim().copy(), right: pair.right.trim().copy()})
 }
 
 // Rust `indentation`, spaces/tabs only, measured in bytes.

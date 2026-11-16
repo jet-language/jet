@@ -363,11 +363,11 @@ cli_ensure_tool_generation_roots: fn(verification: &StoreVerification, generatio
     }
     store_roots := authorities.keys().to_list()
     store_roots.sort()
-    prepared := [(roots: HangarRoots, receipt: PreparedProfileGenerationRoot)]{}
+    prepared := [{roots: HangarRoots, receipt: PreparedProfileGenerationRoot}]{}
     loop root in store_roots {
         roots: HangarRoots{root: root, dev_mode: true}
         if store_reconcile_profile_generation_root(verification, roots, TOOL_PROFILE_OWNER, TOOL_PROFILE_NAME, generation, witness, authorities[root], cli_now_secs()) == {
-            .Val(pending) -> prepared.push((roots: roots, receipt: pending))
+            .Val(pending) -> prepared.push({roots: roots, receipt: pending})
             .None -> {}
             .Err(error) -> return Err(CLIError.Store(error))
         }

@@ -2196,9 +2196,9 @@ json_convert_text_to_blob: fn(db: &conn.Conn, v: &conn.Vdbe, p: &JSONParse) -> B
 // jsonbPayloadSize: the header bytes n and payload bytes sz of the JSONB
 // node at a[i]; n 0 when the header is malformed or the payload runs past
 // the end.
-jsonb_payload_size: fn(a: [U8], i: Int) -> (n: Int, sz: Int) Never! {
+jsonb_payload_size: fn(a: [U8], i: Int) -> {n: Int, sz: Int} Never! {
     n_blob: a.len()
-    if i >= n_blob -> return (n: 0, sz: 0)
+    if i >= n_blob -> return {n: 0, sz: 0}
     x: Int{a[i]} >> 4
     sz := 0
     n := 0
@@ -2206,26 +2206,26 @@ jsonb_payload_size: fn(a: [U8], i: Int) -> (n: Int, sz: Int) Never! {
         sz = x
         n = 1
     } else if x == 12 {
-        if i + 1 >= n_blob -> return (n: 0, sz: 0)
+        if i + 1 >= n_blob -> return {n: 0, sz: 0}
         sz = Int{a[i + 1]}
         n = 2
     } else if x == 13 {
-        if i + 2 >= n_blob -> return (n: 0, sz: 0)
+        if i + 2 >= n_blob -> return {n: 0, sz: 0}
         sz = (Int{a[i + 1]} << 8) + Int{a[i + 2]}
         n = 3
     } else if x == 14 {
-        if i + 4 >= n_blob -> return (n: 0, sz: 0)
+        if i + 4 >= n_blob -> return {n: 0, sz: 0}
         sz = (Int{a[i + 1]} << 24) + (Int{a[i + 2]} << 16) + (Int{a[i + 3]} << 8) + Int{a[i + 4]}
         n = 5
     } else {
         if i + 8 >= n_blob || a[i + 1] != (U8{0}) || a[i + 2] != (U8{0}) || a[i + 3] != (U8{0}) || a[i + 4] != (U8{0}) {
-            return (n: 0, sz: 0)
+            return {n: 0, sz: 0}
         }
         sz = (Int{a[i + 5]} << 24) + (Int{a[i + 6]} << 16) + (Int{a[i + 7]} << 8) + Int{a[i + 8]}
         n = 9
     }
-    if i + sz + n > n_blob -> return (n: 0, sz: 0)
-    (n: n, sz: sz)
+    if i + sz + n > n_blob -> return {n: 0, sz: 0}
+    {n: n, sz: sz}
 }
 
 // jsonAppendRaw: the n bytes of a at `from`.

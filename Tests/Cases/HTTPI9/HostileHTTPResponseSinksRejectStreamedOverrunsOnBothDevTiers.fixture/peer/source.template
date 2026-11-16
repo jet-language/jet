@@ -61,7 +61,7 @@ reverse_bits: fn(code: Int, count: Int) -> Int {
     }
     return reversed
 }
-fixed_code: fn(symbol: Int) -> (code: Int, count: Int) {
+fixed_code: fn(symbol: Int) -> {code: Int, count: Int} {
     code := 0
     count := 0
     if {
@@ -83,7 +83,7 @@ fixed_code: fn(symbol: Int) -> (code: Int, count: Int) {
         }
         else -> panic("fixed DEFLATE symbol")
     }
-    return (code: reverse_bits(code, count), count: count)
+    return {code: reverse_bits(code, count), count: count}
 }
 gzip_bomb: fn() -> [U8] {
     length: 8388609

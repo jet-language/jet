@@ -201,7 +201,7 @@ personal_problems: fn(root: String, dir: String, paths: [String], literals: [Str
         if literal.len() > 1 -> literal_args.extend([String]{"-e", literal.copy()})
     }
     problems := [Problem]{}
-    passes: [(flags: [String], args: [String])]{(flags: [String]{"-P"}, args: path_args), (flags: [String]{"-i", "-P"}, args: word_args), (flags: [String]{"-F"}, args: literal_args)}
+    passes: [{flags: [String], args: [String]}]{{flags: [String]{"-P"}, args: path_args}, {flags: [String]{"-i", "-P"}, args: word_args}, {flags: [String]{"-F"}, args: literal_args}}
     loop pass in passes {
         if pass.args.len() == 0 -> next
         argv := [String]{"git", "grep", "--no-index", "-a", "-l"}
@@ -563,11 +563,11 @@ candidate_step: fn(dir: String, root: String, evidence: [String], signer: Signer
         if sign_digest(signer.seed_path, signer.public_key, digest) == {
             .Ok(signature) -> {
                 sealed: sealed_record(record) ?? ""
-                writes: [(path: String, text: String)]{
-                    (path: files.join(dir, CANDIDATE_FILE), text: sealed),
-                    (path: files.join(stage, CANDIDATE_FILE), text: sealed),
-                    (path: files.join(dir, SIGNATURE_FILE), text: "{signature}\n"),
-                    (path: files.join(stage, SIGNATURE_FILE), text: "{signature}\n"),
+                writes: [{path: String, text: String}]{
+                    {path: files.join(dir, CANDIDATE_FILE), text: sealed},
+                    {path: files.join(stage, CANDIDATE_FILE), text: sealed},
+                    {path: files.join(dir, SIGNATURE_FILE), text: "{signature}\n"},
+                    {path: files.join(stage, SIGNATURE_FILE), text: "{signature}\n"},
                 }
                 loop write in writes {
                     files.write(write.path, write.text) ?? problems.push(problem(INPUT, "cannot write {write.path}: {err}"))

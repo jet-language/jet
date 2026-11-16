@@ -35,7 +35,7 @@ term: module {
 
     // One stdin line without its terminator: whether input ended first, the
     // line, and the read's failure, if any.
-    #Import(c) terminal8_line: fn() -[Time.Wait]> (eof: Bool, line: String, read_error: String?) = "jet_terminal8_line"
+    #Import(c) terminal8_line: fn() -[Time.Wait]> {eof: Bool, line: String, read_error: String?} = "jet_terminal8_line"
 
     // Writes `text` to stdout, or stderr, flushed when asked; the write's
     // failure, if any.
@@ -49,7 +49,7 @@ term: module {
     #Import(c) terminal8_env_has: fn(name: String) -[IO]> Bool = "jet_terminal8_env_has"
 
     // stdin's terminal size, rows then columns, when both are positive.
-    #Import(c) terminal8_stty: fn() -[IO]> (h: Int, w: Int)? = "jet_terminal8_stty"
+    #Import(c) terminal8_stty: fn() -[IO]> {h: Int, w: Int}? = "jet_terminal8_stty"
 
     // The color mode the environment selects.
     #Import(c) terminal8_color_mode: fn() -[IO]> Int = "jet_terminal8_color_mode"
@@ -72,13 +72,13 @@ term: module {
 
     // The rest of stdin, or stdin up to and through `delimiter`, and the
     // read's failure, if any.
-    #Import(c) terminal8_read_all: fn() -[Time.Wait]> (input: String, read_error: String?) = "jet_terminal8_read_all"
+    #Import(c) terminal8_read_all: fn() -[Time.Wait]> {input: String, read_error: String?} = "jet_terminal8_read_all"
 
-    #Import(c) terminal8_read_until: fn(delimiter: String) -[Time.Wait]> (input: String, read_error: String?) = "jet_terminal8_read_until"
+    #Import(c) terminal8_read_until: fn(delimiter: String) -[Time.Wait]> {input: String, read_error: String?} = "jet_terminal8_read_until"
 
     // One stdin read of up to `n` bytes, and the read's failure, if any.
-    #Import(c) terminal8_take: fn(n: Int) -[IO]> (bytes: [U8], read_error: String?) = "jet_terminal8_take"
+    #Import(c) terminal8_take: fn(n: Int) -[IO]> {bytes: [U8], read_error: String?} = "jet_terminal8_take"
 
     // One stdin read of up to six key bytes, and the key decoder's platform.
-    #Import(c) terminal8_key_bytes: fn() -[Time.Wait]> (bytes: [U8], platform: Int) = "jet_terminal8_key_bytes"
+    #Import(c) terminal8_key_bytes: fn() -[Time.Wait]> {bytes: [U8], platform: Int} = "jet_terminal8_key_bytes"
 }

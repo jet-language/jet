@@ -128,10 +128,10 @@ store_explain_generation_packages: fn(entry: StoreEntry, profile_name: String, n
         store_explain_report_provider_facts(facts, reports)
         store_explain_report_provider_validation(facts, "profile", reports)
         provider: store_explain_json_text(package, "provider") ?? ""
-        comparisons: [(field: String, expected: String, actual: String)]{
-            (field: "reference", expected: raw_reference, actual: facts.reference),
-            (field: "target", expected: target, actual: facts.target),
-            (field: "provider", expected: provider, actual: facts.provider),
+        comparisons: [{field: String, expected: String, actual: String}]{
+            {field: "reference", expected: raw_reference, actual: facts.reference},
+            {field: "target", expected: target, actual: facts.target},
+            {field: "provider", expected: provider, actual: facts.provider},
         }
         loop item_check in comparisons {
             if item_check.expected != "" && item_check.expected != item_check.actual {

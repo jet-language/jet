@@ -35,7 +35,7 @@ use {
 }
 
 #Test("rejects generated powershell helper and alias collisions") {
-    cases: [(name: String, jet: String)]{(name: "Take-Error", jet: "take_error"), (name: "ABI", jet: "abi")}
+    cases: [{name: String, jet: String}]{{name: "Take-Error", jet: "take_error"}, {name: "ABI", jet: "abi"}}
     loop case in cases {
         error: if pkg_powershell_parse_function_names(case.name.bytes()) == {
             .Ok(_) -> panic("generated PowerShell name collision was accepted")

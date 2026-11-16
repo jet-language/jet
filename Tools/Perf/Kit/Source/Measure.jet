@@ -595,14 +595,14 @@ kind_order: fn(kinds: [KindSpans]) -> [Int] Never! {
 
 // phaseTable's object, as JSON.stringify writes it.
 phase_table_json: fn(table: PhaseTable) -> Dyn Never! {
-    rows := [(key: String, value: Dyn)]{}
+    rows := [{key: String, value: Dyn}]{}
     loop row in table.phases {
-        rows.push((key: row.kind.copy(), value: Dyn.Object([(key: "wall_ns", value: Dyn.Float(row.wall_ns)), (key: "span_ns", value: Dyn.Float(row.span_ns)), (key: "cpu_ns", value: Dyn.Float(row.cpu_ns)), (key: "count", value: Dyn.Int(row.count)), (key: "items", value: row.items.copy() ?? Dyn.Null)])))  // copy: the table keeps its kinds and items
+        rows.push({key: row.kind.copy(), value: Dyn.Object([{key: "wall_ns", value: Dyn.Float(row.wall_ns)}, {key: "span_ns", value: Dyn.Float(row.span_ns)}, {key: "cpu_ns", value: Dyn.Float(row.cpu_ns)}, {key: "count", value: Dyn.Int(row.count)}, {key: "items", value: row.items.copy() ?? Dyn.Null}])})  // copy: the table keeps its kinds and items
     }
     first: if table.first_begin_ns == .Val(at) -> Dyn.Float(at) else -> Dyn.Null
     unclosed := [Dyn]{}
     loop kind in table.unclosed -> unclosed.push(Dyn.Text(kind.copy()))  // copy: the table keeps its kinds
-    Dyn.Object([(key: "phases", value: Dyn.Object(rows)), (key: "firstBeginNs", value: first), (key: "unclosed", value: Dyn.Array(unclosed))])
+    Dyn.Object([{key: "phases", value: Dyn.Object(rows)}, {key: "firstBeginNs", value: first}, {key: "unclosed", value: Dyn.Array(unclosed)}])
 }
 
 Counter: struct {
@@ -681,9 +681,9 @@ parse_counters: fn(output: String) -> [Counter] MeasureError! {
             next
         }
         parsed: json.parse(body) ?? return Err(MeasureError{message: "{err}", syntax: true})
-        entries: if parsed == .Object(members) -> ordered(members) else -> [(key: String, value: Dyn)]{}
+        entries: if parsed == .Object(members) -> ordered(members) else -> [{key: String, value: Dyn}]{}
         phase := Dyn?{None}
-        values := [(key: String, value: Dyn)]{}
+        values := [{key: String, value: Dyn}]{}
         loop entry in entries {
             if entry.key == "phase" {
                 phase = Val(entry.value)
@@ -713,9 +713,9 @@ parse_counters: fn(output: String) -> [Counter] MeasureError! {
 
 // parseCounters' object, as JSON.stringify writes it.
 counters_json: fn(counters: [Counter]) -> Dyn Never! {
-    entries := [(key: String, value: Dyn)]{}
+    entries := [{key: String, value: Dyn}]{}
     loop counter in counters {
-        entries.push((key: counter.key.copy(), value: Dyn.Float(counter.value)))  // copy: the list keeps its keys
+        entries.push({key: counter.key.copy(), value: Dyn.Float(counter.value)})  // copy: the list keeps its keys
     }
     Dyn.Object(entries)
 }

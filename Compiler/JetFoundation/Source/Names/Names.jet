@@ -3,11 +3,11 @@
 
 NameLedger: struct {
     facts: NameFacts
-    declarations: [(module_index: Int, name: String):Int]
-    aliases: [(module_index: Int, name: String):Int]
+    declarations: [{module_index: Int, name: String}:Int]
+    aliases: [{module_index: Int, name: String}:Int]
     declaration_names: [String:[Int]]
     alias_names: [String:[Int]]
-    display_paths: [(module_index: Int, path: String):String]
+    display_paths: [{module_index: Int, path: String}:String]
     // The run's symbol table: it names the SymbolIDs the facts the ledger
     // presents carry (a call fact's callee, a body's constant).
     symbols: SymbolTable{symbol_table()}
@@ -25,7 +25,7 @@ name_facts_leaf: fn(name: String) -> String Never! {
 // order would cost time quadratic in the rows. A repeated key keeps its last
 // row, as a fill in row order does.
 name_ledger_from_facts: fn(facts: &&NameFacts) -> NameLedger Never! {
-    ledger := NameLedger{facts: facts.move(), declarations: [(module_index: Int, name: String):Int]{}, aliases: [(module_index: Int, name: String):Int]{}, declaration_names: [String:[Int]]{}, alias_names: [String:[Int]]{}, display_paths: [(module_index: Int, path: String):String]{}}
+    ledger := NameLedger{facts: facts.move(), declarations: [{module_index: Int, name: String}:Int]{}, aliases: [{module_index: Int, name: String}:Int]{}, declaration_names: [String:[Int]]{}, alias_names: [String:[Int]]{}, display_paths: [{module_index: Int, path: String}:String]{}}
     modules := [Int]{}
     names := [String]{}
     leaves := [String]{}
@@ -35,7 +35,7 @@ name_ledger_from_facts: fn(facts: &&NameFacts) -> NameLedger Never! {
         leaves.push(name_facts_leaf(row.name))
     }
     loop index in name_rows_by_key(modules, names) {
-        ledger.declarations[(module_index: modules[index], name: names[index])] = index
+        ledger.declarations[{module_index: modules[index], name: names[index]}] = index
     }
     ledger.declaration_names = name_leaf_positions(leaves)
     modules = [Int]{}
@@ -47,7 +47,7 @@ name_ledger_from_facts: fn(facts: &&NameFacts) -> NameLedger Never! {
         leaves.push(name_facts_leaf(row.name))
     }
     loop index in name_rows_by_key(modules, names) {
-        ledger.aliases[(module_index: modules[index], name: names[index])] = index
+        ledger.aliases[{module_index: modules[index], name: names[index]}] = index
     }
     ledger.alias_names = name_leaf_positions(leaves)
     modules = [Int]{}
@@ -57,7 +57,7 @@ name_ledger_from_facts: fn(facts: &&NameFacts) -> NameLedger Never! {
         names.push(row.internal_path)
     }
     loop index in name_rows_by_key(modules, names) {
-        ledger.display_paths[(module_index: modules[index], path: names[index])] = ledger.facts.display_paths[index].display_path
+        ledger.display_paths[{module_index: modules[index], path: names[index]}] = ledger.facts.display_paths[index].display_path
     }
     ledger
 }
@@ -92,12 +92,12 @@ name_leaf_positions: fn(leaves: [String]) -> [String:[Int]] Never! {
 }
 
 name_ledger_declaration: fn(ledger: NameLedger, module_index: Int, name: String) -> NameDeclaration? Never! {
-    index: ledger.declarations.get((module_index: module_index, name: name)) ?? return None
+    index: ledger.declarations.get({module_index: module_index, name: name}) ?? return None
     Val(ledger.facts.declarations[index])
 }
 
 name_ledger_alias: fn(ledger: NameLedger, module_index: Int, name: String) -> NameAlias? Never! {
-    index: ledger.aliases.get((module_index: module_index, name: name)) ?? return None
+    index: ledger.aliases.get({module_index: module_index, name: name}) ?? return None
     Val(ledger.facts.aliases[index])
 }
 
@@ -133,7 +133,7 @@ name_ledger_visible: fn(ledger: NameLedger, from: Int, module_index: Int, name: 
 
 name_ledger_display_declaration_path: fn(ledger: NameLedger, module_index: Int, name: String) -> String? Never! {
     row: name_ledger_declaration(ledger, module_index, name) ?? return None
-    Val(ledger.display_paths.get((module_index: module_index, path: row.path)) ?? row.path)
+    Val(ledger.display_paths.get({module_index: module_index, path: row.path}) ?? row.path)
 }
 
 name_ledger_display_path: fn(ledger: NameLedger, from: Int, name: String, resolved_module: Int?) -> String? Never! {
@@ -149,7 +149,7 @@ name_ledger_display_path: fn(ledger: NameLedger, from: Int, name: String, resolv
             if path != previous -> ambiguous = true
             if path < previous -> least = Val(path)
         } else { least = Val(path) }
-        if ledger.display_paths.get((module_index: row.module_index, path: row.path)) != None {
+        if ledger.display_paths.get({module_index: row.module_index, path: row.path}) != None {
             projected = true
         }
     }

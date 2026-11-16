@@ -39,10 +39,10 @@ impl ResidentDevSession {
         if !(kind == "graph" || kind == "debugger" || kind == "runtime") || revision == "" || payload == "" || payload.bytes().len() > SESSION_MAX_RETAINED_VIEW_BYTES -> return
         self.last_good_views[kind] = RetainedView{revision: revision, source_id: source_id, payload: payload}
     }
-    last_good_view: fn(self, kind: String, source_id: String) -> (revision: String, payload: String)? Never! {
+    last_good_view: fn(self, kind: String, source_id: String) -> {revision: String, payload: String}? Never! {
         view: self.last_good_views.get(kind) ?? return None
         if view.source_id != source_id -> return None
-        Val((revision: view.revision, payload: view.payload))
+        Val({revision: view.revision, payload: view.payload})
     }
     clear_last_good_view: fn(&self, kind: String) { _: self.last_good_views.remove(kind) }
     accept_transaction: fn(&self, request: String, revision: String) {
@@ -315,7 +315,7 @@ impl ResidentDevSession {
     set_devtools_selection: fn(&self, request: String) Err! {
         root: foundation_parse_protocol_json(request) ?? return Err("devtools selection must be valid JSON")
         object: recording_object_fields(root) ?? return Err("devtools selection must be an object")
-        nested := [(key: String, value: Dyn)]{}
+        nested := [{key: String, value: Dyn}]{}
         clear := false
         if recording_lookup(object, "selection") == .Val(selection) {
             if selection == .Null -> clear = true
@@ -504,18 +504,18 @@ session_count: fn(value: Dyn) -> Int? Never! {
     Val(number)
 }
 
-session_field_text: fn(fields: [(key: String, value: Dyn)], key: String) -> String? Never! {
+session_field_text: fn(fields: [{key: String, value: Dyn}], key: String) -> String? Never! {
     value: recording_lookup(fields, key) ?? return None
     recording_text(value)
 }
 
-session_field_count: fn(fields: [(key: String, value: Dyn)], key: String) -> Int? Never! {
+session_field_count: fn(fields: [{key: String, value: Dyn}], key: String) -> Int? Never! {
     value: recording_lookup(fields, key) ?? return None
     session_count(value)
 }
 
 // A selection field at the top level, else inside `selection`.
-session_selection_field: fn(fields: [(key: String, value: Dyn)], nested: [(key: String, value: Dyn)], key: String) -> String? Never! {
+session_selection_field: fn(fields: [{key: String, value: Dyn}], nested: [{key: String, value: Dyn}], key: String) -> String? Never! {
     if session_field_text(fields, key) == .Val(text) -> return Val(text)
     session_field_text(nested, key)
 }

@@ -66,7 +66,7 @@ use {
     }
     env: KitEnv{root: "", scratch: "", jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
     loop row in
-        [(condition: "process 1 alive timeout 1s", wall: 10000000000), (condition: "process 1 alive timeout 3s", wall: 13000000000), (condition: "file: x exists timeout 3s", wall: 3000000000)] {
+        [{condition: "process 1 alive timeout 1s", wall: 10000000000}, {condition: "process 1 alive timeout 3s", wall: 13000000000}, {condition: "file: x exists timeout 3s", wall: 3000000000}] {
         plan: kit_steps_parse_case("repeat while {row.condition} every 1ms fail \"x\"\nend repeat\n")
         assert_eq(plan.error, "")
         assert_eq(kit_steps_repeat_wall(plan.steps[0], env), row.wall)

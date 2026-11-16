@@ -6,9 +6,9 @@
 
 ticket_message: fn(ticket: &&Ticket) -> String { return ticket.message.copy() }
 
-ticket_payload: fn(ticket: &&Ticket) -> (value: Int, tag: Int) Err! {
+ticket_payload: fn(ticket: &&Ticket) -> {value: Int, tag: Int} Err! {
     message: ticket_message(ticket)
-    return Ok((value: message.len(), tag: 0))
+    return Ok({value: message.len(), tag: 0})
 }
 
 outer_ticket: fn(flag: Bool, ticket: &&Ticket) -> Int {
@@ -34,7 +34,7 @@ local_ticket: fn(flag: Bool) -> Int {
 }
 
 // Coverage and each arm must share the one checked taking call.
-counted_ticket_payload: fn(ticket: &&Ticket, calls: &Int) -> (value: Int, tag: Int) Err! {
+counted_ticket_payload: fn(ticket: &&Ticket, calls: &Int) -> {value: Int, tag: Int} Err! {
     calls += 1
     ticket_payload(ticket)
 }

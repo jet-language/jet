@@ -194,10 +194,10 @@ cli_plan_downloads: fn(verification: &StoreVerification, theme: Theme, roots: Ha
 
 // Realize one ref, recording it in the store and printing progress. `table`
 // resolves named sources it is empty for direct CLI refs.
-cli_realize_ref: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState)? Never! {
+cli_realize_ref: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {entry: StoreEntry, state: SourceState}? Never! {
     live := LiveRegion?{None}
     if cli_realize_ref_outcome(verification, theme, roots, flags, table, spec, name_w, RowStyle.Ledger, live, RealizeScope.Project) == {
-        .Realized(entry, state, _, _) -> Val((entry: entry, state: state))
+        .Realized(entry, state, _, _) -> Val({entry: entry, state: state})
         .NeedsNix(need) -> {
             cli_report_nix_bridge_required(theme, flags, [NixBridgeNeed]{need}, [String]{})
             None
@@ -469,7 +469,7 @@ cli_report_nix_bridge_required: fn(theme: Theme, flags: CLIFlags, holes: [NixBri
 
 // Realize one U20 adapter package. `consume` pins its executable through the
 // lease so the caller can run it.
-cli_realize_adapter: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: AdapterPlan, table: SourceTable, consume: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState, lease: CacheLease)? Never! {
+cli_realize_adapter: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: AdapterPlan, table: SourceTable, consume: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {entry: StoreEntry, state: SourceState, lease: CacheLease}? Never! {
     theme.status("Adapting {theme.bold(plan.name)} …")
     ctx: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), cli_current_project_dir(), None, Val(roots))
     expectation: provider_adapter_cache_expectation(plan, table, ctx) ?? {
@@ -496,7 +496,7 @@ cli_realize_adapter: fn(verification: &StoreVerification, theme: Theme, roots: H
             }
             theme.ok("{theme.bold(entry.name)} {parts.source_state.label()}")
             theme.detail(theme.gray(entry.out))
-            Val((entry: entry, state: parts.source_state, lease: parts.lease.move()))
+            Val({entry: entry, state: parts.source_state, lease: parts.lease.move()})
         }
         .Err(error) -> {
             if error == {

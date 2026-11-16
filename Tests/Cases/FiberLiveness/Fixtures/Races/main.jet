@@ -22,7 +22,7 @@ RACERS: 50
 receiver: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
 
 // Cancel against send: the task either got the value or was cancelled.
-cancel_vs_send: fn(rounds: Int) -> (received: Int, cancelled: Int) {
+cancel_vs_send: fn(rounds: Int) -> {received: Int, cancelled: Int} {
     received := 0
     cancelled := 0
     loop i in 0..<rounds {
@@ -36,7 +36,7 @@ cancel_vs_send: fn(rounds: Int) -> (received: Int, cancelled: Int) {
             .Err(_) -> cancelled += 1
         }
     }
-    (received: received, cancelled: cancelled)
+    {received: received, cancelled: cancelled}
 }
 
 napper: fn() -> Int {
@@ -45,7 +45,7 @@ napper: fn() -> Int {
 }
 
 // Cancel against a timer: the sleep either ran out or was cancelled.
-cancel_vs_timer: fn(rounds: Int) -> (woke: Int, cancelled: Int) {
+cancel_vs_timer: fn(rounds: Int) -> {woke: Int, cancelled: Int} {
     woke := 0
     cancelled := 0
     loop i in 0..<rounds {
@@ -57,7 +57,7 @@ cancel_vs_timer: fn(rounds: Int) -> (woke: Int, cancelled: Int) {
             .Err(_) -> cancelled += 1
         }
     }
-    (woke: woke, cancelled: cancelled)
+    {woke: woke, cancelled: cancelled}
 }
 
 deadline_receiver: fn(rx: Receiver<Int>) -> Int {
@@ -67,7 +67,7 @@ deadline_receiver: fn(rx: Receiver<Int>) -> Int {
 }
 
 // Deadline against send: the receive either got the value or its deadline blew.
-deadline_vs_send: fn(rounds: Int) -> (received: Int, expired: Int) {
+deadline_vs_send: fn(rounds: Int) -> {received: Int, expired: Int} {
     received := 0
     expired := 0
     loop _ in 0..<rounds {
@@ -80,7 +80,7 @@ deadline_vs_send: fn(rounds: Int) -> (received: Int, expired: Int) {
             .Err(_) -> expired += 1
         }
     }
-    (received: received, expired: expired)
+    {received: received, expired: expired}
 }
 
 racer: fn() -> Int {
@@ -96,14 +96,14 @@ idler: fn(nap: Duration) -> Int {
 }
 
 // CPU spent while 1000 tasks sleep for `nap`, and how many woke.
-parked_cpu: fn(nap: Duration) -[Env, Time.Wait]> (spent: Duration, woke: Int) {
+parked_cpu: fn(nap: Duration) -[Env, Time.Wait]> {spent: Duration, woke: Int} {
     before: sys.usage() ?? panic("usage")
     idle := [Task<Int>]{}
     loop _ in 0..<1000 -> idle.push(task idler(nap))
     woke := 0
     loop handle in idle -> woke += handle.join() ?? 0
     after: sys.usage() ?? panic("usage")
-    (spent: (after.user + after.system) - (before.user + before.system), woke: woke)
+    {spent: (after.user + after.system) - (before.user + before.system), woke: woke}
 }
 
 run: fn() {

@@ -93,14 +93,14 @@ MetadataFacts: struct {
     // The selector key and value that identify this package exactly: a
     // binary's digest, a SwiftPM revision, a GitHub release revision when
     // unversioned, else the version, else the digest. Empty when none.
-    identity_selector: fn(self) -> (key: String, value: String) Never! {
+    identity_selector: fn(self) -> {key: String, value: String} Never! {
         if self.family == ProviderFamily.Binary {
-            return (key: "digest", value: self.integrity_hash)
+            return {key: "digest", value: self.integrity_hash}
         }
         if self.family == ProviderFamily.SwiftPM {
             if self.first_typed("provider.revision") == {
                 .Val(revision) -> {
-                    if revision != "" -> return (key: "revision", value: revision)
+                    if revision != "" -> return {key: "revision", value: revision}
                 }
                 .None -> {}
             }
@@ -109,15 +109,15 @@ MetadataFacts: struct {
             if self.first_typed("provider.github.revision") == {
                 .Val(revision) -> {
                     if ProviderSelector.parse("#revision={revision}").is_exact() {
-                        return (key: "revision", value: revision)
+                        return {key: "revision", value: revision}
                     }
                 }
                 .None -> {}
             }
         }
-        if self.version != "" -> return (key: "version", value: self.version)
-        if self.integrity_hash != "" -> return (key: "digest", value: self.integrity_hash)
-        (key: "version", value: "")
+        if self.version != "" -> return {key: "version", value: self.version}
+        if self.integrity_hash != "" -> return {key: "digest", value: self.integrity_hash}
+        {key: "version", value: ""}
     }
 }
 

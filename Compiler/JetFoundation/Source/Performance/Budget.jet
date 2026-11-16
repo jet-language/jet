@@ -62,11 +62,11 @@ perf_integer_parse_source: fn(text: String) -> Int PerfBudgetError! {
 }
 
 // Rust BigInt::div_rem_abs.
-perf_integer_div_rem_abs: fn(left: Int, right: Int) -> (quotient: Int, remainder: Int) PerfBudgetError! {
+perf_integer_div_rem_abs: fn(left: Int, right: Int) -> {quotient: Int, remainder: Int} PerfBudgetError! {
     if right == 0 -> return Err(perf_error("integer division by zero"))
     a: if { left < 0 -> -left, else -> left }
     b: if { right < 0 -> -right, else -> right }
-    Ok((quotient: a /% b, remainder: a % b))
+    Ok({quotient: a /% b, remainder: a % b})
 }
 
 // Rust BigInt::exact_div.

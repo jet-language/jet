@@ -1660,11 +1660,11 @@ key_event: fn(c: &Connection, serial: Int, code: Int, state: Int) -[Time]> {
 
 // A key press or release (wl_keyboard.key's `state`) through the keymap,
 // else the US table: the key and, on a press, the text it types.
-press: fn(c: &Connection, code: Int, state: Int) -> (key: Key, text: String) {
+press: fn(c: &Connection, code: Int, state: Int) -> {key: Key, text: String} {
     down: state == KEY_PRESSED
     map := c.keymap.pop() ?? {
         text: if down -> evdev_text(code, c.modifiers) else -> ""
-        return (key: evdev_key(code), text: text)
+        return {key: evdev_key(code), text: text}
     }
     pressed: map.press(code, down)
     c.keymap.push(map)

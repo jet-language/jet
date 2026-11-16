@@ -593,7 +593,7 @@ pkg_dart_signature: fn(function: DartFunction, native: Bool) -> String Never! {
 // Breadth-first search below `root` for an entry named `name`, bounded by
 // depth and total entries seen.
 pkg_dart_find_named: fn(root: String, name: String) -[FS]> String? ForeignBindError! {
-    queue := [(dir: String, depth: Int)]{(dir: root, depth: 0)}
+    queue := [{dir: String, depth: Int}]{{dir: root, depth: 0}}
     head := 0
     seen := 0
     loop head < queue.len() {
@@ -605,7 +605,7 @@ pkg_dart_find_named: fn(root: String, name: String) -[FS]> String? ForeignBindEr
             seen += 1
             if entry.name == name -> return Ok(Val(entry.path))
             if current.depth < DART_SDK_SEARCH_DEPTH && entry.is_dir {
-                queue.push((dir: entry.path, depth: current.depth + 1))
+                queue.push({dir: entry.path, depth: current.depth + 1})
             }
         }
     }

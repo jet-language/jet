@@ -856,14 +856,24 @@ core_decl_lang_type_problem: fn(declared: CoreDeclarations, type_name: String, c
     "{CORE_DECLARATIONS_CORE_PATH}:{owner.line}: the `core.compiler.lang` declaration has no `{type_name}:plain(…)` type; write `{type_name}:plain({cases.join("|")})`"
 }
 
-// The `{ … }` body of the Jet list literal declared at `anchor`.
+// The `{ … }` body of the Jet list literal declared at `anchor`: the first
+// `{` outside the list type's `[ … ]`, which may hold a record type's braces.
 core_decl_list_body: fn(source: String, anchor: String, path: String) -> String CoreDeclarationError! {
     start: source.find(anchor)
     if start < 0 -> return Err(core_decl_fail("{path} has no `{anchor}`"))
-    found: core_decl_tail(source, start).find("{{")
-    if found < 0 -> return Err(core_decl_fail("{path}: `{anchor}` has no list body"))
-    open: start + found
     bytes: source.bytes()
+    open := -1
+    brackets := 0
+    loop index in start..<bytes.len() {
+        code: Int{bytes[index]}
+        if code == 91 -> brackets += 1
+        if code == 93 -> brackets -= 1
+        if code == 123 && brackets == 0 {
+            open = index
+            break
+        }
+    }
+    if open < 0 -> return Err(core_decl_fail("{path}: `{anchor}` has no list body"))
     depth := 0
     quoted := false
     escaped := false
@@ -950,7 +960,7 @@ core_decl_mem_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFi
 // Audit are exactly core.mem's `#Unsafe` functions.
 core_decl_mem_tier_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFile], sources: [CoreDeclarationFile]) -> String CoreDeclarationError! {
     body: core_decl_mem_tiers_body(syntax) ?? return Err(err)
-    audit_entries: loop entry in body.split("(field_0:") if entry.find("CoreMemGate.Audit") >= 0 -> entry
+    audit_entries: loop entry in body.split("{{field_0:") if entry.find("CoreMemGate.Audit") >= 0 -> entry
     tiered: core_decl_resolve_items(audit_entries.join("\n"), core_decl_syntax_constants(syntax) ?? return Err(err))
     text := ""
     loop row in declared.source_rows {

@@ -113,7 +113,7 @@ sema_call_value_checked_from_type: fn(state: &SemaOwnershipState, callee: Expr, 
             sema_ownership_check_closure_write_views(state, written, callee_name, callee_span, scopes, diagnostics)
         }
     }
-    (lowered, pins) := sema_call_check_bound_arguments_owned(state, shown_callee, params, None, false, resolved_binding, checked_args, environment, program, scopes, tail_store, context, span, diagnostics) ?? return None
+    {lowered, pins} := sema_call_check_bound_arguments_owned(state, shown_callee, params, None, false, resolved_binding, checked_args, environment, program, scopes, tail_store, context, span, diagnostics) ?? return None
     call_callee := callee_value
     if pins.len() > 0 {
         owner: sema_scope_function_owner_key(scopes)

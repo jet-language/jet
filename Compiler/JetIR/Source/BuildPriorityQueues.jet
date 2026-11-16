@@ -168,11 +168,11 @@ ir_heap_sift_down: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, d
 
 // The order word of the queue header `heap` and whether it is a key order;
 // an element without a native order has only key orders.
-ir_heap_order: fn(m: &IRModule, a: &IRBuilder, heap: Int) -> (order: Int, keyed: Int) Never! {
+ir_heap_order: fn(m: &IRModule, a: &IRBuilder, heap: Int) -> {order: Int, keyed: Int} Never! {
     pointer_row: ir_pointer_row(m)
     order: ir_load_at(m, a, heap, 24, pointer_row)
     none: ir_word_const(m, a, 0)
-    (order: order, keyed: ir_bool_op(m, a, IROp.Ne, order, none))
+    {order: order, keyed: ir_bool_op(m, a, IROp.Ne, order, none)}
 }
 
 // priority_queue.push(heap, value): under a key order, the value moves in

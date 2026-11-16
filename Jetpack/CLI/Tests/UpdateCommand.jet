@@ -2,18 +2,18 @@
 // the failed-build shell guard (Rust jetpack::CLI::update_search_info tests).
 use files: core.files
 
-cli_update_test_scope: fn(args: [String]) -> (deps: Bool, tools: Bool) {
+cli_update_test_scope: fn(args: [String]) -> {deps: Bool, tools: Bool} {
     scopes: cli_update_scopes(cli_parse_args_for("update", args))
-    (deps: scopes.deps, tools: scopes.tools)
+    {deps: scopes.deps, tools: scopes.tools}
 }
 
 #Test("cli update scope flags select only the requested context") {
-    assert_eq(cli_update_test_scope([String]{}), (deps: true, tools: true))
-    assert_eq(cli_update_test_scope([String]{"--deps"}), (deps: true, tools: false))
-    assert_eq(cli_update_test_scope([String]{"--tools"}), (deps: false, tools: true))
-    assert_eq(cli_update_test_scope([String]{"--deps", "--tools"}), (deps: true, tools: true))
-    assert_eq(cli_update_test_scope([String]{"tools"}), (deps: false, tools: true))
-    assert_eq(cli_update_test_scope([String]{"default"}), (deps: true, tools: false))
+    assert_eq(cli_update_test_scope([String]{}), {deps: true, tools: true})
+    assert_eq(cli_update_test_scope([String]{"--deps"}), {deps: true, tools: false})
+    assert_eq(cli_update_test_scope([String]{"--tools"}), {deps: false, tools: true})
+    assert_eq(cli_update_test_scope([String]{"--deps", "--tools"}), {deps: true, tools: true})
+    assert_eq(cli_update_test_scope([String]{"tools"}), {deps: false, tools: true})
+    assert_eq(cli_update_test_scope([String]{"default"}), {deps: true, tools: false})
 }
 
 #Test("cli update sees env sources from every module") {

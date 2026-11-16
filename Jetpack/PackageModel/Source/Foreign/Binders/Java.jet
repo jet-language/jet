@@ -150,25 +150,25 @@ pkg_java_bind: fn(source_path: String, source: String, lib: String, cache: Strin
     builder.field("ar", ar_identity.bytes())
     identity: builder.finish()
     source_digest: pkg_bridge_sha_file(path) ?? return Err(pkg_binder_scalar_bridge_error(err))
-    fields: [(name: String, value: String)]{
-        (name: "language", value: language),
-        (name: "abi", value: abi),
-        (name: "transport", value: "embedded-jvm-jni"),
-        (name: "binder-schema", value: "jet-java-bind-v1"),
-        (name: "descriptor", value: descriptor.stamp()),
-        (name: "class", value: class),
-        (name: "source", value: path),
-        (name: "source-sha256", value: source_digest),
-        (name: "javap-sha256", value: pkg_sha256_hex(javap.stdout)),
-        (name: "classes", value: classes),
-        (name: "jvm", value: jvm_dir),
-        (name: "javac-toolchain", value: javac_identity),
-        (name: "javap-toolchain", value: javap_identity),
-        (name: "cc", value: cc_identity),
-        (name: "ar", value: ar_identity),
+    fields: [{name: String, value: String}]{
+        {name: "language", value: language},
+        {name: "abi", value: abi},
+        {name: "transport", value: "embedded-jvm-jni"},
+        {name: "binder-schema", value: "jet-java-bind-v1"},
+        {name: "descriptor", value: descriptor.stamp()},
+        {name: "class", value: class},
+        {name: "source", value: path},
+        {name: "source-sha256", value: source_digest},
+        {name: "javap-sha256", value: pkg_sha256_hex(javap.stdout)},
+        {name: "classes", value: classes},
+        {name: "jvm", value: jvm_dir},
+        {name: "javac-toolchain", value: javac_identity},
+        {name: "javap-toolchain", value: javap_identity},
+        {name: "cc", value: cc_identity},
+        {name: "ar", value: ar_identity},
     }
     archive_digest: pkg_bridge_sha_file(archive) ?? return Err(pkg_binder_scalar_bridge_error(err))
-    artifacts: [(name: String, digest: String)]{(name: files.basename(archive), digest: archive_digest)}
+    artifacts: [{name: String, digest: String}]{{name: files.basename(archive), digest: archive_digest}}
     provenance: pkg_bridge_render_provenance(identity, fields, artifacts) ?? return Err(pkg_binder_scalar_bridge_error(err))
     bound := [String]{}
     loop method in surface.methods -> bound.push(method.name)

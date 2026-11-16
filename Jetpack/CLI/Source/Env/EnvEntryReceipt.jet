@@ -128,7 +128,7 @@ cli_u64_le: fn(value: Int) -> [U8] Never! {
 // The (definition fingerprint, prompt-hook fingerprint) of one entry.
 // Typed plans already carry the exact source graph and lifecycle facts the
 // activation fingerprint uses; legacy `pkg.*` plans keep the parser path.
-cli_environment_entry_definition_fingerprint: fn(project_dir: String, requested_preset: String?, requested_environment: String?, plan: RunPlan, secret_identity: String?) -[FS, Env, Exec, Time.Wait]> (definition: String, hook: String?) Never! {
+cli_environment_entry_definition_fingerprint: fn(project_dir: String, requested_preset: String?, requested_environment: String?, plan: RunPlan, secret_identity: String?) -[FS, Env, Exec, Time.Wait]> {definition: String, hook: String?} Never! {
     hook: if plan.environment.source_files.len() == 0 -> env_hook_definition_fingerprint_with_selections(project_dir, requested_preset, requested_environment) else -> env_hook_definition_fingerprint_from_facts(project_dir, requested_preset, requested_environment, plan.environment)
     cli_environment_entry_definition_fingerprint_with_hook(requested_preset, requested_environment, plan, secret_identity, hook)
 }
@@ -136,7 +136,7 @@ cli_environment_entry_definition_fingerprint: fn(project_dir: String, requested_
 // `jetpack-env-definition-v3\0` then every field as a little-endian u64
 // length and its bytes: hook fingerprint, semantic hash, preset,
 // environment, `JET_TARGET`, and secret identity.
-cli_environment_entry_definition_fingerprint_with_hook: fn(requested_preset: String?, requested_environment: String?, plan: RunPlan, secret_identity: String?, hook_fingerprint: String?) -[Env]> (definition: String, hook: String?) Never! {
+cli_environment_entry_definition_fingerprint_with_hook: fn(requested_preset: String?, requested_environment: String?, plan: RunPlan, secret_identity: String?, hook_fingerprint: String?) -[Env]> {definition: String, hook: String?} Never! {
     semantic: trust_environment_definition_hash(plan.refs, plan.table, plan.secrets, plan.environment)
     fields: [String]{
         hook_fingerprint ?? "",
@@ -152,7 +152,7 @@ cli_environment_entry_definition_fingerprint_with_hook: fn(requested_preset: Str
         loop byte in cli_u64_le(field.bytes().len()) -> canonical.push(byte)
         loop byte in field.bytes() -> canonical.push(byte)
     }
-    (definition: crypto.sha256(canonical).hex(), hook: hook_fingerprint)
+    {definition: crypto.sha256(canonical).hex(), hook: hook_fingerprint}
 }
 
 // Fresh cache expectations for every plan member, so a stale composite stamp
@@ -226,7 +226,7 @@ cli_package_label: fn(name: String, version: String) -> String Never! {
 
 // The `what changed:` banner between two `(name, version)` sets: the first
 // update, addition, and removal, each with its count when more than one.
-cli_format_env_changes: fn(previous: [(name: String, version: String)], current: [(name: String, version: String)]) -> String? Never! {
+cli_format_env_changes: fn(previous: [{name: String, version: String}], current: [{name: String, version: String}]) -> String? Never! {
     before := [String:String]{}
     loop pair in previous -> before[pair.name] = pair.version
     after := [String:String]{}
@@ -239,18 +239,18 @@ cli_format_env_changes: fn(previous: [(name: String, version: String)], current:
         if !names.contains(pair.name) -> names.push(pair.name)
     }
     names.sort()
-    updated := [(name: String, old: String, new: String)]{}
-    added := [(name: String, version: String)]{}
-    removed := [(name: String, version: String)]{}
+    updated := [{name: String, old: String, new: String}]{}
+    added := [{name: String, version: String}]{}
+    removed := [{name: String, version: String}]{}
     loop name in names {
         old: before.get(name)
         new: after.get(name)
         if old == .Val(old_version) && new == .Val(new_version) {
             if old_version != new_version {
-                updated.push((name: name, old: old_version, new: new_version))
+                updated.push({name: name, old: old_version, new: new_version})
             }
-        } else if new == .Val(version) { added.push((name: name, version: version)) } else if old == .Val(version) {
-            removed.push((name: name, version: version))
+        } else if new == .Val(version) { added.push({name: name, version: version}) } else if old == .Val(version) {
+            removed.push({name: name, version: version})
         }
     }
     parts := [String]{}
@@ -288,10 +288,10 @@ cli_record_env_entry_receipt: fn(theme: Theme, project_dir: String, roots: Hanga
     selections: stats.realized_entries()
     stamp: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, selections) ?? return Err(CLIError.Store(err))
     if cli_read_env_entry_receipt(project_dir) == .Val(previous) {
-        previous_display := [(name: String, version: String)]{}
+        previous_display := [{name: String, version: String}]{}
         loop package in previous.packages {
             version: if package.version == "" -> cli_version_from_out(package.name, package.output_hash) ?? "" else -> package.version
-            previous_display.push((name: package.name, version: version))
+            previous_display.push({name: package.name, version: version})
         }
         if cli_format_env_changes(previous_display, current) == .Val(changes) {
             theme.status("what changed: {changes}")

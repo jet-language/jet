@@ -48,12 +48,12 @@ pkg_ffi_test_wrapper_lib: fn(entries: [ExternEntry]) -> String Never! {
     pkg_ffi_emit_wrapper_lib_with_handles(entries, [String]{}, CRecordDefinitions.empty())
 }
 
-pkg_ffi_test_entry: fn(jet_name: String, rust_path: String, params: [(convention: AccessConvention, ty: Type)], param_names: [String], return_type: Type?, line_hint: String) -> ExternEntry Never! {
+pkg_ffi_test_entry: fn(jet_name: String, rust_path: String, params: [{convention: AccessConvention, ty: Type}], param_names: [String], return_type: Type?, line_hint: String) -> ExternEntry Never! {
     ExternEntry{jet_name: jet_name, rust_path: rust_path, wrapper_name: "jet_ffi_{jet_name}", params: params, param_names: param_names, return_type: return_type, crate_spec: "std", line_hint: line_hint, inline: None, c_abi: false, generated: false, c_module: false, close: None}
 }
 
 pkg_ffi_test_asm_entry: fn() -> ExternEntry Never! {
-    entry := pkg_ffi_test_entry("add_one", "", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Int)}, [String]{"value"}, Val(Type.Int), "`#FFI(asm) add_one: fn`")
+    entry := pkg_ffi_test_entry("add_one", "", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "`#FFI(asm) add_one: fn`")
     contract: InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Register{name: "rax"}), clobbers: [String]{}}
     entry.inline = Val(InlineEntry{lang: "asm", source: "mov rax, {{value}}; -> return", param_names: [String]{"value"}, asm_contract: Val(contract)})
     entry
@@ -100,8 +100,8 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 
 #Test("over budget asm push rail keeps early clobbers with one memory carrier") {
     names: [String]{"address", "a", "b", "c", "d", "e"}
-    params := [(convention: AccessConvention, ty: Type)]{}
-    loop _ in names -> params.push((convention: AccessConvention.Read, ty: Type.Int))
+    params := [{convention: AccessConvention, ty: Type}]{}
+    loop _ in names -> params.push({convention: AccessConvention.Read, ty: Type.Int})
     entry := pkg_ffi_test_entry("call5", "", params, names, Val(Type.Int), "audited word call")
     contract: InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Register{name: "rax"}), clobbers: [String]{"rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}}
     source: "push {{address}}\npush {{a}}\npush {{b}}\npush {{c}}\npush {{d}}\npush {{e}}\npop r8\npop rcx\npop rdx\npop rsi\npop rdi\npop r11\ncall r11\nmov rax, rax ; -> return"
@@ -216,7 +216,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("generated rust bridge carries the canonical descriptor stamp") {
-    entry: pkg_ffi_test_entry("rust_max", "std::cmp::max", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Int)}, [String]{"value"}, Val(Type.Int), "extern rust rust_max")
+    entry: pkg_ffi_test_entry("rust_max", "std::cmp::max", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "extern rust rust_max")
     source: pkg_ffi_test_wrapper_lib([ExternEntry]{entry})
     assert(source.contains("// jet-ffi-descriptor={pkg_ffi_foreign_descriptor_stamp(ForeignLanguage.Rust)}"))
 }
@@ -235,7 +235,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("generated com bridge carries the com descriptor stamp") {
-    entry := pkg_ffi_test_entry("open", "jet_com_office_open", [(convention: AccessConvention, ty: Type)]{}, [String]{}, Val(Type.Int), "`open` in COM module `jet_com_office`")
+    entry := pkg_ffi_test_entry("open", "jet_com_office_open", [{convention: AccessConvention, ty: Type}]{}, [String]{}, Val(Type.Int), "`open` in COM module `jet_com_office`")
     entry.c_abi = true
     entry.c_module = true
     source: pkg_ffi_test_wrapper_lib([ExternEntry]{entry})
@@ -261,7 +261,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("cabi trampoline validates text and preserves capability boundaries") {
-    value_entry: pkg_ffi_test_entry("echo", "std::convert::identity", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.String)}, [String]{"value"}, Val(Type.String), "extern rust echo")
+    value_entry: pkg_ffi_test_entry("echo", "std::convert::identity", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.String}}, [String]{"value"}, Val(Type.String), "extern rust echo")
     source: pkg_ffi_emit_cabi_trampoline(value_entry, [String]{}, CRecordDefinitions.empty()) ?? panic("value-shaped trampoline")
     assert(source.contains("String::from_utf8(p0_bytes)"))
     assert(source.contains("p0_ptr.is_null()"))
@@ -270,12 +270,12 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
     assert(source.contains("out.ptr"))
     assert(!source.contains("from_utf8_unchecked"))
     capability_entry := value_entry
-    capability_entry.params = [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Write, ty: Type.String)}
+    capability_entry.params = [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.String}}
     assert(pkg_ffi_emit_cabi_trampoline(capability_entry, [String]{}, CRecordDefinitions.empty()) == None)
 }
 
 #Test("inline capability wrapper keeps exclusive pointer shape") {
-    entry := pkg_ffi_test_entry("edit", "", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Write, ty: Type.Int)}, [String]{"value"}, None, "#FFI(c) edit")
+    entry := pkg_ffi_test_entry("edit", "", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.Int}}, [String]{"value"}, None, "#FFI(c) edit")
     inline: InlineEntry{lang: "c", source: "void edit(int64_t* value) {{ *value += 1; }}", param_names: [String]{"value"}, asm_contract: None}
     entry.inline = Val(inline)
     wrapper: pkg_ffi_emit_inline_wrapper_fn(entry, inline)
@@ -303,15 +303,15 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("intn width family round trip") {
-    rows: [(signed: Bool, bits: Int, expected: String)]{
-        (signed: false, bits: 8, expected: "u8"),
-        (signed: true, bits: 8, expected: "i8"),
-        (signed: false, bits: 16, expected: "u16"),
-        (signed: true, bits: 16, expected: "i16"),
-        (signed: false, bits: 32, expected: "u32"),
-        (signed: true, bits: 32, expected: "i32"),
-        (signed: false, bits: 64, expected: "u64"),
-        (signed: true, bits: 64, expected: "i64"),
+    rows: [{signed: Bool, bits: Int, expected: String}]{
+        {signed: false, bits: 8, expected: "u8"},
+        {signed: true, bits: 8, expected: "i8"},
+        {signed: false, bits: 16, expected: "u16"},
+        {signed: true, bits: 16, expected: "i16"},
+        {signed: false, bits: 32, expected: "u32"},
+        {signed: true, bits: 32, expected: "i32"},
+        {signed: false, bits: 64, expected: "u64"},
+        {signed: true, bits: 64, expected: "i64"},
     }
     loop row in rows {
         assert_eq(pkg_ffi_rust_type(Type.IntN{signed: row.signed, bits: row.bits}, [String]{}), row.expected)
@@ -325,7 +325,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("inline native toolchain keys the bridge") {
-    entry := pkg_ffi_test_entry("probe", "", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Int)}, [String]{"value"}, Val(Type.Int), "`#FFI(c) probe: fn`")
+    entry := pkg_ffi_test_entry("probe", "", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "`#FFI(c) probe: fn`")
     entry.inline = Val(InlineEntry{lang: "c", source: "int64_t probe(int64_t value) {{ return value; }}", param_names: [String]{"value"}, asm_contract: None})
     cpp_entry := entry
     cpp_entry.jet_name = "cpp_probe"
@@ -349,7 +349,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("c wrapper escapes native symbol as link name") {
-    entry := pkg_ffi_test_entry("host_add", "host-add$raw", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Int)}, [String]{"value"}, Val(Type.Int), "`#Import(c) host_add: fn`")
+    entry := pkg_ffi_test_entry("host_add", "host-add$raw", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "`#Import(c) host_add: fn`")
     entry.wrapper_name = "jet_ffi_guest___jet_mod__host_add"
     entry.c_abi = true
     entry.c_module = true
@@ -361,7 +361,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("c handle cabi uses native pointer for checked nominal type") {
-    entry := pkg_ffi_test_entry("gzclose", "gzclose", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Move, ty: Type.Named{name: "GzFile"})}, [String]{"file"}, None, "generated zlib close")
+    entry := pkg_ffi_test_entry("gzclose", "gzclose", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Move, ty: Type.Named{name: "GzFile"}}}, [String]{"file"}, None, "generated zlib close")
     entry.c_abi = true
     entry.generated = true
     entry.c_module = true
@@ -372,7 +372,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("c handle cabi preserves writable pointee abi") {
-    params: [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Write, ty: Type.Named{name: "HbFont"}), (convention: AccessConvention.Read, ty: Type.Int), (convention: AccessConvention.Read, ty: Type.Int)}
+    params: [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.Named{name: "HbFont"}}, {convention: AccessConvention.Read, ty: Type.Int}, {convention: AccessConvention.Read, ty: Type.Int}}
     entry := pkg_ffi_test_entry("hb_font_set_scale", "hb_font_set_scale", params, [String]{"font", "x_scale", "y_scale"}, None, "generated harfbuzz scale")
     entry.c_abi = true
     entry.generated = true
@@ -383,38 +383,38 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("cabi trampoline emits mutable scalar and string pointer abi") {
-    scalar := pkg_ffi_test_entry("out_scalar", "out_scalar", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Write, ty: Type.Int)}, [String]{"value"}, None, "portable scalar write fixture")
+    scalar := pkg_ffi_test_entry("out_scalar", "out_scalar", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.Int}}, [String]{"value"}, None, "portable scalar write fixture")
     scalar.c_abi = true
     scalar.generated = true
     scalar.c_module = true
     scalar_source: pkg_ffi_emit_cabi_trampoline(scalar, [String]{}, CRecordDefinitions.empty()) ?? panic("scalar trampoline")
     assert(scalar_source.contains("fn jet_ffi_out_scalar_native(p0: *mut i64);"))
     assert(scalar_source.contains("p0_ptr as *mut i64"))
-    cases: [(ty: Type, native: String)]{
-        (ty: Type.IntN{signed: false, bits: 16}, native: "u16"),
-        (ty: Type.Float, native: "f64"),
-        (ty: Type.Float32, native: "f32"),
-        (ty: Type.Bool, native: "bool"),
-        (ty: Type.Char, native: "u32"),
-        (ty: Type.InlineRange{base: Type.Int, lo: 0, hi: 10}, native: "i64"),
-        (ty: Type.Tagged{marker: TagMarker.User{name: "ffi"}, inner: Type.Float32}, native: "f32"),
-        (ty: Type.Quantity{base: Type.Float, dimension: Dimension{axes: [DimensionAxis]{}}}, native: "f64"),
+    cases: [{ty: Type, native: String}]{
+        {ty: Type.IntN{signed: false, bits: 16}, native: "u16"},
+        {ty: Type.Float, native: "f64"},
+        {ty: Type.Float32, native: "f32"},
+        {ty: Type.Bool, native: "bool"},
+        {ty: Type.Char, native: "u32"},
+        {ty: Type.InlineRange{base: Type.Int, lo: 0, hi: 10}, native: "i64"},
+        {ty: Type.Tagged{marker: TagMarker.User{name: "ffi"}, inner: Type.Float32}, native: "f32"},
+        {ty: Type.Quantity{base: Type.Float, dimension: Dimension{axes: [DimensionAxis]{}}}, native: "f64"},
     }
     loop index in 0..<cases.len() {
         entry := scalar
         entry.jet_name = "out_scalar_{index}"
         entry.rust_path = entry.jet_name
         entry.wrapper_name = "jet_ffi_{entry.jet_name}"
-        entry.params = [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Write, ty: cases[index].ty)}
+        entry.params = [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: cases[index].ty}}
         source: pkg_ffi_emit_cabi_trampoline(entry, [String]{}, CRecordDefinitions.empty()) ?? panic("mutable scalar trampoline")
         assert(source.contains("fn {entry.wrapper_name}_native(p0: *mut {cases[index].native});"))
     }
     generated: pkg_ffi_test_wrapper_lib([ExternEntry]{scalar})
     assert(generated.contains("jet_ffi_out_scalar_cabi"))
     nominal := scalar
-    nominal.params = [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Named{name: "Nominal"})}
+    nominal.params = [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Named{name: "Nominal"}}}
     assert(pkg_ffi_emit_cabi_trampoline(nominal, [String]{}, CRecordDefinitions.empty()) == None)
-    string_entry := pkg_ffi_test_entry("out_string", "out_string", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Write, ty: Type.String)}, [String]{"value"}, None, "portable string write fixture")
+    string_entry := pkg_ffi_test_entry("out_string", "out_string", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.String}}, [String]{"value"}, None, "portable string write fixture")
     string_entry.c_abi = true
     string_entry.generated = true
     string_entry.c_module = true

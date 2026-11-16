@@ -5983,7 +5983,7 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
     if reads.len() < 2 {
         return
     }
-    moved := [(position: Int, diagnostic: Diagnostic)]{}
+    moved := [{position: Int, diagnostic: Diagnostic}]{}
     loop (position, diagnostic) in module_result.diagnostics {
         failed: sema_module_value_failed_read(reads, raw, segments, diagnostic) ?? next
         read: reads[failed]
@@ -6000,7 +6000,7 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
         updated.what = "`{read.consumer}` and `{agreeing.consumer}` disagree about `{read.name}`: {diagnostic.what}"
         updated.labels.push(DiagnosticLabel{span: read.span, message: "`{read.consumer}` reads `{read.name}` here"})
         updated.labels.push(DiagnosticLabel{span: agreeing.span, message: "`{agreeing.consumer}` reads it here{shown}"})
-        moved.push((position: position, diagnostic: sema_diagnostic_with_source_location(updated, segments)))
+        moved.push({position: position, diagnostic: sema_diagnostic_with_source_location(updated, segments)})
     }
     loop row in moved -> module_result.diagnostics[row.position] = row.diagnostic.copy()
 }
@@ -6123,7 +6123,7 @@ sema_module_value_read_agrees: fn(diagnostics: [Diagnostic], reads: [SemaModuleV
     true
 }
 
-sema_soft_public_warn: fn(leaf: (start: Int, name: String), seen: &[Int:Bool], diagnostics: &[Diagnostic]) {
+sema_soft_public_warn: fn(leaf: {start: Int, name: String}, seen: &[Int:Bool], diagnostics: &[Diagnostic]) {
     if classify_identifier(leaf.name) != IdentifierClass.SoftPublic || seen.has_key(leaf.start) {
         return
     }
@@ -6190,7 +6190,7 @@ sema_check_soft_public_signature: fn(function: Func, declared: [String:Int], raw
             name: String.from_bytes(raw[start..<at]) ?? next
             qualified: start > 0 && raw[start - 1] == 46
             if !qualified && (declared.has_key(name) || local.contains(name)) -> next
-            sema_soft_public_warn((start: start, name: name), seen, diagnostics)
+            sema_soft_public_warn({start: start, name: name}, seen, diagnostics)
         }
     }
 }
@@ -6202,7 +6202,7 @@ sema_check_soft_public_signature: fn(function: Func, declared: [String:Int], raw
 // closes (type arguments skipped). A written name is a whole token of the
 // source, so a span that cuts an identifier is no use site of this text (a
 // span another source owns) and names nothing.
-sema_soft_public_written_leaf: fn(raw: [U8], span: Span) -> (start: Int, name: String)? Never! {
+sema_soft_public_written_leaf: fn(raw: [U8], span: Span) -> {start: Int, name: String}? Never! {
     if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return None
     end := span.end
     loop end > span.start && (raw[end - 1] == 32 || raw[end - 1] == 10) -> end -= 1
@@ -6238,7 +6238,7 @@ sema_soft_public_written_leaf: fn(raw: [U8], span: Span) -> (start: Int, name: S
         return None
     }
     name: String.from_bytes(raw[start..<end]) ?? return None
-    Val((start: start, name: name))
+    Val({start: start, name: name})
 }
 
 sema_soft_public_word_byte: fn(byte: U8) -> Bool Never! {
@@ -8771,13 +8771,13 @@ sema_comptime_close_key_add: fn(graph: SemaRegistrationGraph, keys: &[String], k
 // type `ty` holds, itself or as an element, member or argument. A generated
 // codec the body pass has not demanded yet is checked with the body its
 // demand would give it (sema_codec_pending_body).
-sema_comptime_codec_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID, encode: Bool, decode: Bool) -> [(module_identity: ModuleID, key: String)] {
-    found := [(module_identity: ModuleID, key: String)]{}
+sema_comptime_codec_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID, encode: Bool, decode: Bool) -> [{module_identity: ModuleID, key: String}] {
+    found := [{module_identity: ModuleID, key: String}]{}
     sema_comptime_codec_methods_add(graph, ty, module_identity, encode, decode, found)
     found
 }
 
-sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID, encode: Bool, decode: Bool, found: &[(module_identity: ModuleID, key: String)]) {
+sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID, encode: Bool, decode: Bool, found: &[{module_identity: ModuleID, key: String}]) {
     if ty == {
         .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .Case(_, element) | .FixedList(element, _) -> {
             sema_comptime_codec_methods_add(graph, element, module_identity, encode, decode, found)
@@ -8825,7 +8825,7 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
                 }
                 loop method in implementation.methods {
                     if method.symbol.name == method_name {
-                        found.push((module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+                        found.push({module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
                     }
                 }
             }
@@ -8843,7 +8843,7 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
                         if method.symbol.name != method_name -> next
                         loop written in block.methods {
                             if written.span == method.declaration.span {
-                                found.push((module_identity: graph.modules[row.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+                                found.push({module_identity: graph.modules[row.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
                             }
                         }
                     }
@@ -8865,7 +8865,7 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
 // values change constant rows only.
 SemaComptimeRenderMemo: struct {
     ids: [U32:Int]{[U32:Int]{}}
-    methods: [[(module_identity: ModuleID, key: String)]]{[[(module_identity: ModuleID, key: String)]]{}}
+    methods: [[{module_identity: ModuleID, key: String}]]{[[{module_identity: ModuleID, key: String}]]{}}
     children: [[Int]]{[[Int]]{}}
 }
 
@@ -8876,8 +8876,8 @@ SemaComptimeRenderMemo: struct {
 // order, and no call fact records them. Each nominal type
 // `ty` holds, itself or as an element, member, argument, field or payload,
 // adds its own; `seen` holds the nominals (rows of `memo`) already read.
-sema_comptime_render_methods: fn(graph: SemaRegistrationGraph, memo: &SemaComptimeRenderMemo, ty: Type, module_identity: ModuleID, seen: &[Int:Bool]) -> [(module_identity: ModuleID, key: String)] {
-    found := [(module_identity: ModuleID, key: String)]{}
+sema_comptime_render_methods: fn(graph: SemaRegistrationGraph, memo: &SemaComptimeRenderMemo, ty: Type, module_identity: ModuleID, seen: &[Int:Bool]) -> [{module_identity: ModuleID, key: String}] {
+    found := [{module_identity: ModuleID, key: String}]{}
     loop nominal in sema_comptime_render_nominals(graph, memo, ty, module_identity) {
         sema_comptime_render_visit(memo, nominal, seen, found)
     }
@@ -8886,7 +8886,7 @@ sema_comptime_render_methods: fn(graph: SemaRegistrationGraph, memo: &SemaCompti
 
 // Adds nominal `nominal`'s methods, then those of the nominals it holds,
 // unless `seen` holds it.
-sema_comptime_render_visit: fn(memo: SemaComptimeRenderMemo, nominal: Int, seen: &[Int:Bool], found: &[(module_identity: ModuleID, key: String)]) {
+sema_comptime_render_visit: fn(memo: SemaComptimeRenderMemo, nominal: Int, seen: &[Int:Bool], found: &[{module_identity: ModuleID, key: String}]) {
     if seen.get(nominal) != None {
         return
     }
@@ -8948,7 +8948,7 @@ sema_comptime_render_nominal: fn(graph: SemaRegistrationGraph, memo: &SemaCompti
     if memo.ids.get(nominal.symbol.id.id) == .Val(known) -> return known
     id: memo.methods.len()
     memo.ids[nominal.symbol.id.id] = id
-    found := [(module_identity: ModuleID, key: String)]{}
+    found := [{module_identity: ModuleID, key: String}]{}
     loop reference in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[reference.module_index].impls[reference.row]
         symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
@@ -8960,7 +8960,7 @@ sema_comptime_render_nominal: fn(graph: SemaRegistrationGraph, memo: &SemaCompti
         }
         loop method in implementation.methods {
             if method.symbol.name == method_name && !sema_comptime_derived_compare(method_name, method.declaration.compiler_generated) {
-                found.push((module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+                found.push({module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
             }
         }
     }
@@ -8977,7 +8977,7 @@ sema_comptime_render_nominal: fn(graph: SemaRegistrationGraph, memo: &SemaCompti
                 if method.symbol.name != method_name -> next
                 loop written in block.methods {
                     if written.span == method.declaration.span {
-                        found.push((module_identity: graph.modules[row.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+                        found.push({module_identity: graph.modules[row.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
                     }
                 }
             }
@@ -9023,8 +9023,8 @@ sema_comptime_derived_compare: fn(method_name: String, compiler_generated: Bool)
 // `ty` is. Lowering calls it by owner type, for a `close(value)`, a deferred
 // close and the drop that ends the value's scope, and no call fact records
 // it (sema_call_check_ambient_close).
-sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> [(module_identity: ModuleID, key: String)] {
-    found := [(module_identity: ModuleID, key: String)]{}
+sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> [{module_identity: ModuleID, key: String}] {
+    found := [{module_identity: ModuleID, key: String}]{}
     owner: sema_expr_unwrap_tag(ty)
     if !(owner == .Named(_) || owner == .Apply(_, _)) -> return found
     row: sema_type_resolve_nominal_row(graph, owner, module_identity) ?? return found
@@ -9038,7 +9038,7 @@ sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_i
         }
         loop method in implementation.methods {
             if method.symbol.name == "close" {
-                found.push((module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+                found.push({module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
             }
         }
     }
@@ -9051,7 +9051,7 @@ sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_i
                 if method.symbol.name != "close" -> next
                 loop written in block.methods {
                     if written.span == method.declaration.span {
-                        found.push((module_identity: graph.modules[row.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+                        found.push({module_identity: graph.modules[row.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
                     }
                 }
             }
@@ -9066,8 +9066,8 @@ sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_i
 // (`math.floor<Float>` calls Float's `rounded`), and no call fact records
 // them, so a compile-time closure queues the argument's implementation of
 // each bound like a callee.
-sema_comptime_bound_methods: fn(graph: SemaRegistrationGraph, tree: BodyTree, module_identity: ModuleID) -> [(module_identity: ModuleID, key: String)] {
-    found := [(module_identity: ModuleID, key: String)]{}
+sema_comptime_bound_methods: fn(graph: SemaRegistrationGraph, tree: BodyTree, module_identity: ModuleID) -> [{module_identity: ModuleID, key: String}] {
+    found := [{module_identity: ModuleID, key: String}]{}
     loop node in tree.nodes {
         if node.kind == .Call(callee, type_args, _) {
             if type_args.len() == 0 -> next
@@ -9091,7 +9091,7 @@ sema_comptime_bound_methods: fn(graph: SemaRegistrationGraph, tree: BodyTree, mo
 // `module_identity`, added to `found`: a standalone `impl` row's, or an
 // `impl Trait { … }` block's in the type's own body, whose methods the
 // nominal registers.
-sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, bound: String, module_identity: ModuleID, found: &[(module_identity: ModuleID, key: String)]) {
+sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, bound: String, module_identity: ModuleID, found: &[{module_identity: ModuleID, key: String}]) {
     owner: sema_expr_unwrap_tag(ty)
     parts: bound.split(".").to_list()
     trait_name: parts[parts.len() - 1]
@@ -9110,7 +9110,7 @@ sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, boun
                 loop method in declared.methods {
                     loop body_method in block.methods {
                         if body_method.span == method.declaration.span {
-                            found.push((module_identity: graph.modules[row.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+                            found.push({module_identity: graph.modules[row.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
                         }
                     }
                 }
@@ -9125,7 +9125,7 @@ sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, boun
         implemented: if nominal == .Val(id) -> sema_type_graph_impl_target_nominal(graph, implementation) == Val((id)) else -> implementation.target_type == owner
         if !implemented -> next
         loop method in implementation.methods {
-            found.push((module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+            found.push({module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
         }
     }
 }

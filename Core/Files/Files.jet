@@ -1985,7 +1985,7 @@ priv walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, igno
         return Err(walk_error(.Read, opened.status, opened.status_code, opened.status_reason, root))
     }
     entries := [WalkEntry]{}
-    children := [(key: String, directory: Int)]{}
+    children := [{key: String, directory: Int}]{}
     loop {
         entry: rt.walk_next(context, directory)
         if entry.status_reason != None {
@@ -2006,10 +2006,10 @@ priv walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, igno
         }
         if ignore != None -> rt.walk_inherit(context, entry.child, directory)
         // The walk joins a child's name to its directory with `/`.
-        children.push((key: "{entry.path}/", directory: entry.child))
+        children.push({key: "{entry.path}/", directory: entry.child})
     }
     entries.sort_by(fn(left: WalkEntry, right: WalkEntry) { right.path <=> left.path })
-    children.sort_by(fn(left: (key: String, directory: Int), right: (key: String, directory: Int)) { right.key <=> left.key })
+    children.sort_by(fn(left: {key: String, directory: Int}, right: {key: String, directory: Int}) { right.key <=> left.key })
     Ok(WalkFrame{entries: entries, children: children, depth: depth})
 }
 
@@ -2017,7 +2017,7 @@ priv walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, igno
 // has still to yield, each in reverse walk order.
 priv WalkFrame: struct {
     entries: [WalkEntry]
-    children: [(key: String, directory: Int)]
+    children: [{key: String, directory: Int}]
     depth: Int
 }
 
@@ -2614,15 +2614,15 @@ slice_path: fn(text: String, start: Int, end: Int) -> String Never! {
     }
 }
 
-splitext: fn(path: String) -> (ext: String, root: String) Never! {
+splitext: fn(path: String) -> {ext: String, root: String} Never! {
     ext: suffix(path)
-    if ext.bytes().len() == 0 -> return (root: path.copy(), ext: "")
+    if ext.bytes().len() == 0 -> return {root: path.copy(), ext: ""}
     root: slice_path(path, 0, path.bytes().len() - ext.bytes().len())
-    (root: root, ext: ext)
+    {root: root, ext: ext}
 }
 
-split: fn(path: String) -> (dir: String, name: String) Never! {
-    (dir: dirname(path), name: basename(path))
+split: fn(path: String) -> {dir: String, name: String} Never! {
+    {dir: dirname(path), name: basename(path)}
 }
 
 normpath: fn(path: String) -> String Never! { collapse(path) }
@@ -3292,14 +3292,14 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 // only FS.Write, so each schedule selects exactly the probe under test; the
 // injected branch prints a marker a captured `jet test` run can find. The
 // fixture returns its TempDir so the directory outlives the fixture call.
-metadata_fault_fixture: fn(prefix: String) -[FS]> (root: TempDir, dir: String, file: String, link: String)? Never! {
+metadata_fault_fixture: fn(prefix: String) -[FS]> {root: TempDir, dir: String, file: String, link: String}? Never! {
     root: temp_dir(prefix) ?? return None
     file: join(root.path, "file")
     write(file, "x") ?? return None
     link: join(root.path, "link")
     symlink(file, link) ?? return None
     dir: root.path.copy()
-    Val((root: root, dir: dir, file: file, link: link))
+    Val({root: root, dir: dir, file: file, link: link})
 }
 
 metadata_fault_seen: fn(probe: String, error: IOError) {

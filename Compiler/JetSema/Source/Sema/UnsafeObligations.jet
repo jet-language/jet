@@ -282,8 +282,8 @@ sema_unsafe_memory_refusal: fn(result: &UnsafeInspection, source: String, path: 
 // checkout path, as a composed runtime unit's source marks name it (the
 // runtime unit holds the OS layer too). Core's Region keeps its own; Core
 // is never inspected.
-SEMA_MAPPING_KEEPERS: [(package: String, path: String, checkout: String)]{
-    (package: "package:11:jet_backend:", path: "Source/OS/Linux.jet", checkout: "Compiler/JetBackend/Source/OS/Linux.jet"),
+SEMA_MAPPING_KEEPERS: [{package: String, path: String, checkout: String}]{
+    {package: "package:11:jet_backend:", path: "Source/OS/Linux.jet", checkout: "Compiler/JetBackend/Source/OS/Linux.jet"},
 }
 
 // E3113 for each `mem.mapped` / `mem.unmapping` in `row`'s gates that does
@@ -697,14 +697,14 @@ sema_unsafe_expert_diagnostic: fn(result: &UnsafeInspection, source: String, sub
     sema_unsafe_diagnostic(result, source, "E2960", span, "Package policy `policy.expert` rejects `{subject}` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.expert` in `package.jet`.")
 }
 
-sema_unsafe_expert_function: fn(function: Func) -> (name: String, span: Span)? Never! {
+sema_unsafe_expert_function: fn(function: Func) -> {name: String, span: Span}? Never! {
     if function.is_replayable {
-        return Val((name: "#Replayable", span: function.replayable_span ?? function.name_span))
+        return Val({name: "#Replayable", span: function.replayable_span ?? function.name_span})
     }
     sema_unsafe_expert_body(function.body)
 }
 
-sema_unsafe_expert_item: fn(item: Item) -> (name: String, span: Span)? Never! {
+sema_unsafe_expert_item: fn(item: Item) -> {name: String, span: Span}? Never! {
     if item == {
         .Func(function) -> return sema_unsafe_expert_function(function)
         .Struct(definition) -> {
@@ -745,19 +745,19 @@ sema_unsafe_expert_item: fn(item: Item) -> (name: String, span: Span)? Never! {
     None
 }
 
-sema_unsafe_expert_body: fn(body: [Stmt]) -> (name: String, span: Span)? Never! {
+sema_unsafe_expert_body: fn(body: [Stmt]) -> {name: String, span: Span}? Never! {
     loop statement in body {
         if statement == {
-            .Impure(_, _, _, span) -> return Val((name: "#Impure", span: span))
-            .Shield(_, span) -> return Val((name: "#Shield", span: span))
-            .Region(_, _, _, span) -> return Val((name: "#Region", span: span))
-            .AuthorityScope(_, _, _, _, span) -> return Val((name: "#FX", span: span))
-            .ContextBlock(_, _, span) -> return Val((name: "#Context", span: span))
-            .Transact(_, _, _, _, span) -> return Val((name: "#Transact", span: span))
-            .Live(_, span) -> return Val((name: "#Live", span: span))
-            .AssumeDet(_, _, _, span) -> return Val((name: "assume_deterministic", span: span))
+            .Impure(_, _, _, span) -> return Val({name: "#Impure", span: span})
+            .Shield(_, span) -> return Val({name: "#Shield", span: span})
+            .Region(_, _, _, span) -> return Val({name: "#Region", span: span})
+            .AuthorityScope(_, _, _, _, span) -> return Val({name: "#FX", span: span})
+            .ContextBlock(_, _, span) -> return Val({name: "#Context", span: span})
+            .Transact(_, _, _, _, span) -> return Val({name: "#Transact", span: span})
+            .Live(_, span) -> return Val({name: "#Live", span: span})
+            .AssumeDet(_, _, _, span) -> return Val({name: "assume_deterministic", span: span})
             .Val(binding) -> {
-                if binding.uninit -> return Val((name: "uninit", span: binding.name_span))
+                if binding.uninit -> return Val({name: "uninit", span: binding.name_span})
             }
             .Expr(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Reactive(_, _) | .Switched(_, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) | .Defer(_, _) -> {}
         }
@@ -933,7 +933,7 @@ sema_unsafe_mode: fn(value: PolicyValue) -> String Never! {
     }
 }
 
-sema_unsafe_assertion: fn(statement: Stmt) -> (names: [String], span: Span)? Never! {
+sema_unsafe_assertion: fn(statement: Stmt) -> {names: [String], span: Span}? Never! {
     // copy: `value` is a payload of read parameter `statement`, which keeps the original; the Val carrier owns this one
     expression: (if statement == .Expr(value) -> Val(value.copy()) else -> Expr?{None}) ?? return None
     call: (if expression == .Call(value, _) -> Val(value) else -> Call?{None}) ?? return None
@@ -942,7 +942,7 @@ sema_unsafe_assertion: fn(statement: Stmt) -> (names: [String], span: Span)? Nev
     loop argument in call.args {
         if argument.expr == .Ident(name, _, _) -> names.push(name)
     }
-    Val((names: names, span: call.name_span))
+    Val({names: names, span: call.name_span})
 }
 
 // Whether `statement` is an obligation assertion (`assert valid_ptr,

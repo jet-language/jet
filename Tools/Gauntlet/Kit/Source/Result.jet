@@ -243,9 +243,9 @@ comparison_issues: fn(entry: Dyn, name: String, language: String, comparison: Dy
         issues.push("{prefix}: comparison applicability does not match peer row")
     }
     tiers: value_at(comparison, "tiers") ?? Dyn.Null
-    scopes := [(scope: String, sample: Dyn)]{(scope: "comparison", sample: value_at(comparison, "peer_sample") ?? Dyn.Null)}
+    scopes := [{scope: String, sample: Dyn}]{{scope: "comparison", sample: value_at(comparison, "peer_sample") ?? Dyn.Null}}
     loop tier in members(tiers) {
-        scopes.push((scope: "{tier.key} tier", sample: value_at(tier.value, "peer_sample") ?? Dyn.Null))
+        scopes.push({scope: "{tier.key} tier", sample: value_at(tier.value, "peer_sample") ?? Dyn.Null})
     }
     peer_source: member(peer_row, "metrics/source_sha256") ?? Dyn.Null
     loop scope in scopes {
@@ -350,12 +350,12 @@ selection_issues: fn(value: Dyn, prefix: String) -> [String] {
 
 // The members of an object, or the elements of an array keyed by index; none
 // for another value.
-members: fn(value: Dyn) -> [(key: String, value: Dyn)] {
+members: fn(value: Dyn) -> [{key: String, value: Dyn}] {
     if value == {
         .Object(rows) -> rows
         .Array(list) -> {
-            out := [(key: String, value: Dyn)]{}
-            loop (index, item) in list -> out.push((key: "{index}", value: item))
+            out := [{key: String, value: Dyn}]{}
+            loop (index, item) in list -> out.push({key: "{index}", value: item})
             out
         }
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> []

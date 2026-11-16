@@ -111,8 +111,8 @@ cli_schema_elf_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] RecordD
         }
     }
     layout: if class == {
-        CLI_SCHEMA_ELF_CLASS_1 -> (header: 52, sh_offset_at: 16, sh_size_at: 20, shentsize_at: 46, shnum_at: 48, shoff_at: 32, shoff_width: 4, shstr_at: 50, value_width: 4)
-        CLI_SCHEMA_ELF_CLASS_2 -> (header: 64, sh_offset_at: 24, sh_size_at: 32, shentsize_at: 58, shnum_at: 60, shoff_at: 40, shoff_width: 8, shstr_at: 62, value_width: 8)
+        CLI_SCHEMA_ELF_CLASS_1 -> {header: 52, sh_offset_at: 16, sh_size_at: 20, shentsize_at: 46, shnum_at: 48, shoff_at: 32, shoff_width: 4, shstr_at: 50, value_width: 4}
+        CLI_SCHEMA_ELF_CLASS_2 -> {header: 64, sh_offset_at: 24, sh_size_at: 32, shentsize_at: 58, shnum_at: 60, shoff_at: 40, shoff_width: 8, shstr_at: 62, value_width: 8}
         else -> {
             return Err(RecordDecodeError.Malformed{why: "unsupported ELF class"})
         }
@@ -142,13 +142,13 @@ cli_schema_elf_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] RecordD
     Ok(found)
 }
 
-cli_schema_elf_section: fn(bytes: View<U8>, index: Int, shoff: Int, entsize: Int, sh_offset_at: Int, sh_size_at: Int, value_width: Int, little: Bool, maximum: U64) -> (name: Int, offset: Int, size: Int) RecordDecodeError! {
+cli_schema_elf_section: fn(bytes: View<U8>, index: Int, shoff: Int, entsize: Int, sh_offset_at: Int, sh_size_at: Int, value_width: Int, little: Bool, maximum: U64) -> {name: Int, offset: Int, size: Int} RecordDecodeError! {
     relative: cli_schema_size_mul(index, entsize, maximum) ?? return Err(RecordDecodeError.Malformed{why: "ELF section offset overflow"})
     base: cli_schema_size_add(shoff, relative, maximum) ?? return Err(RecordDecodeError.Malformed{why: "ELF section offset overflow"})
     name: cli_schema_usize_num(cli_schema_read_num(bytes, base, 4, little, maximum), maximum)
     offset: cli_schema_usize_num(cli_schema_read_num(bytes, base + sh_offset_at, value_width, little, maximum), maximum)
     size: cli_schema_usize_num(cli_schema_read_num(bytes, base + sh_size_at, value_width, little, maximum), maximum)
-    Ok((name: name, offset: offset, size: size))
+    Ok({name: name, offset: offset, size: size})
 }
 
 cli_schema_pe_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] RecordDecodeError! from bytes {

@@ -46,7 +46,7 @@ wide_symbols: fn(listing: String) -> [String] {
 
 // Builds `name`.jet in `dir` with `flags`: the image's size and its
 // arbitrary-precision Int symbols.
-image: fn(jet: String, dir: String, name: String, flags: [String]) -> (size: Int, wide: [String]) {
+image: fn(jet: String, dir: String, name: String, flags: [String]) -> {size: Int, wide: [String]} {
     out: "{dir}/out"
     argv := [jet.copy(), "build"]
     argv.extend(flags.copy())
@@ -61,7 +61,7 @@ image: fn(jet: String, dir: String, name: String, flags: [String]) -> (size: Int
     named: if fs.exists("{path}.debug") -> "{path}.debug" else -> path.copy()
     listing: process.cmd(["nm", named]).output_limit(268435456).run() ?? fail("nm could not start")
     if !listing.success -> fail("nm {named} failed (exit {listing.code}): {listing.errors}")
-    (size: size, wide: wide_symbols(listing.output))
+    {size: size, wide: wide_symbols(listing.output)}
 }
 
 run: fn() {

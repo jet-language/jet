@@ -26,7 +26,7 @@ WebVirtualWindow: struct {
 
     contains: fn(self, index: Int) -> Bool Never! { index >= self.start && index < self.end }
 
-    range: fn(self) -> (start: Int, end: Int) Never! { (start: self.start, end: self.end) }
+    range: fn(self) -> {start: Int, end: Int} Never! { {start: self.start, end: self.end} }
 
     within_frame_budget: fn(self, maximum: Int) -> Bool Never! {
         self.visible_count() <= if maximum < 0 -> 0 else -> maximum
@@ -318,7 +318,7 @@ sat_mul: fn(a: Int, b: Int) -> Int Never! {
     assert_eq(w.visible_count(), 9223372036854775807)
     assert(!w.is_empty())
     assert(w.contains(0))
-    assert_eq(w.range(), (start: -9223372036854775808, end: 9223372036854775807))
+    assert_eq(w.range(), {start: -9223372036854775808, end: 9223372036854775807})
     assert(!w.within_frame_budget(-1))
     unchanged: w.with_measurement(-1, 1)
     assert_eq(unchanged.start, w.start)

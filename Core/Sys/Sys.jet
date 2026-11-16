@@ -99,20 +99,20 @@ environment: fn() -[Env]> [String:String] Never! {
 }
 
 // Immutable host bytes are not the logical process environment.
-__startup_env: fn() -> [(name: [U8], value: [U8])] Never! {
+__startup_env: fn() -> [{name: [U8], value: [U8]}] Never! {
     env_columns(core.sys.__startup_env_columns())
 }
 
 // Snapshot once, under the existing host cell's lock. No per-name rereads.
-__env_snapshot: fn() -> [(name: [U8], value: [U8])] Never! { env_columns(core.sys.__env_columns()) }
+__env_snapshot: fn() -> [{name: [U8], value: [U8]}] Never! { env_columns(core.sys.__env_columns()) }
 
 __env_present: fn(name: String) -[Env]> Bool Never! { core.sys.__env_value(name) != None }
 
-env_columns: fn(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
-    entries := [(name: [U8], value: [U8])]{}
+env_columns: fn(columns: [[U8]]) -> [{name: [U8], value: [U8]}] Never! {
+    entries := [{name: [U8], value: [U8]}]{}
     index := 0
     loop index < columns.len() {
-        entries.push((name: columns[index], value: columns[index + 1]))
+        entries.push({name: columns[index], value: columns[index + 1]})
         index += 2
     }
     entries
@@ -121,14 +121,14 @@ env_columns: fn(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
 // Prepare the child environment entirely in source. Explicit sets are applied
 // in order, then every removal.
 __env_compose: fn(
-    snapshot: [(name: [U8], value: [U8])],
+    snapshot: [{name: [U8], value: [U8]}],
     clear: Bool,
     names: [String],
     values: [String],
     removals: [String],
-) -> [(name: [U8], value: [U8])] IOError! {
+) -> [{name: [U8], value: [U8]}] IOError! {
     assert(names.len() == values.len())
-    entries := if clear -> [(name: [U8], value: [U8])]{} else -> snapshot.copy()
+    entries := if clear -> [{name: [U8], value: [U8]}]{} else -> snapshot.copy()
     loop index in 0..<names.len() {
         name: names[index]
         if validate_env_name(name) == {
@@ -138,7 +138,7 @@ __env_compose: fn(
         value: values[index]
         if has_nul(value) -> return Err(env_process_error(name, EnvError.InvalidValue))
         remove_process_entries(entries, name.bytes())
-        entries.push((name: name.bytes(), value: value.bytes()))
+        entries.push({name: name.bytes(), value: value.bytes()})
     }
     loop name in removals {
         if validate_env_name(name) == {
@@ -161,7 +161,7 @@ env_process_error: fn(name: String, error: EnvError) -> IOError Never! {
     )
 }
 
-remove_process_entries: fn(entries: &[(name: [U8], value: [U8])], name: [U8]) Never! {
+remove_process_entries: fn(entries: &[{name: [U8], value: [U8]}], name: [U8]) Never! {
     loop {
         if !remove_entry(entries, name) {
             return
@@ -181,32 +181,32 @@ env_key_compare: fn(left: [U8], right: [U8]) -> Int Never! {
     core.sys.__env_key_compare(left, right)
 }
 
-entry_index: fn(entries: [(name: [U8], value: [U8])], key: [U8]) -> Int Never! {
+entry_index: fn(entries: [{name: [U8], value: [U8]}], key: [U8]) -> Int Never! {
     loop index in 0..<entries.len() {
         if env_key_compare(entries[index].name, key) == 0 -> return index
     }
     -1
 }
 
-read_entry: fn(entries: [(name: [U8], value: [U8])], key: [U8]) -> String? Never! {
+read_entry: fn(entries: [{name: [U8], value: [U8]}], key: [U8]) -> String? Never! {
     index: entry_index(entries, key)
     if index < 0 -> return None
     Val(String.from_bytes(entries[index].value) ?? return None)
 }
 
-remove_entry: fn(entries: &[(name: [U8], value: [U8])], key: [U8]) -> Bool Never! {
+remove_entry: fn(entries: &[{name: [U8], value: [U8]}], key: [U8]) -> Bool Never! {
     index: entry_index(entries, key)
     if index < 0 -> return false
     _: entries.remove(index, .Slot)
     true
 }
 
-replace_entry: fn(entries: &[(name: [U8], value: [U8])], key: [U8], value: [U8]) Never! {
+replace_entry: fn(entries: &[{name: [U8], value: [U8]}], key: [U8], value: [U8]) Never! {
     _: remove_entry(entries, key)
-    entries.push((name: key, value: value))
+    entries.push({name: key, value: value})
 }
 
-entry_names: fn(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
+entry_names: fn(entries: [{name: [U8], value: [U8]}]) -> [String] EnvError! {
     raw := [[U8]]{}
     names := [String]{}
     loop entry in entries {
@@ -253,16 +253,16 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 }
 
 #Test("environment names enumerate in key order, odd counts and runs included") {
-    entries := [(name: [U8], value: [U8])]{}
+    entries := [{name: [U8], value: [U8]}]{}
     loop name in ([String]{"PATH", "B", "HOME", "A", "TERM", "C", "A_1"}) {
-        entries.push((name: name.bytes(), value: "v".bytes()))
+        entries.push({name: name.bytes(), value: "v".bytes()})
     }
     assert_eq(entry_names(entries) ?? panic("Unicode names enumerate"), [String]{"A", "A_1", "B", "C", "HOME", "PATH", "TERM"})
-    assert_eq(entry_names([(name: [U8], value: [U8])]{}) ?? panic("no names enumerate"), [String]{})
+    assert_eq(entry_names([{name: [U8], value: [U8]}]{}) ?? panic("no names enumerate"), [String]{})
 }
 
 #Test("logical environment replacement and removal retain one last spelling") {
-    entries := [(name: [U8], value: [U8])]{}
+    entries := [{name: [U8], value: [U8]}]{}
     replace_entry(entries, "JET_ENV_A".bytes(), "old".bytes())
     replace_entry(entries, "JET_ENV_B".bytes(), "other".bytes())
     replace_entry(entries, "JET_ENV_A".bytes(), "".bytes())
@@ -274,7 +274,7 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 }
 
 #Test("logical environment presence and Unicode enumeration differ") {
-    entries: [(name: [U8], value: [U8])]{(name: "NO_COLOR".bytes(), value: [U8]{255})}
+    entries: [{name: [U8], value: [U8]}]{{name: "NO_COLOR".bytes(), value: [U8]{255}}}
     assert_eq(entry_index(entries, "NO_COLOR".bytes()), 0)
     assert_eq(read_entry(entries, "NO_COLOR".bytes()), None)
     if entry_names(entries) == {
@@ -286,17 +286,17 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 #Test("logical environment validates names and sorts names, not values") {
     if validate_env_name("") == { .Err(_) -> {}, .Ok(_) -> assert(false) }
     if validate_env_name("A=B") == { .Err(_) -> {}, .Ok(_) -> assert(false) }
-    entries: [(name: [U8], value: [U8])]{
-        (name: "JET_ENV_Z".bytes(), value: "".bytes()),
-        (name: "JET_ENV_A".bytes(), value: "z".bytes()),
+    entries: [{name: [U8], value: [U8]}]{
+        {name: "JET_ENV_Z".bytes(), value: "".bytes()},
+        {name: "JET_ENV_A".bytes(), value: "z".bytes()},
     }
     assert_eq(entry_names(entries) ?? panic("Unicode entries"), [String]{"JET_ENV_A", "JET_ENV_Z"})
 }
 
 #Test("child environment applies sets before removals and retains raw values") {
-    snapshot: [(name: [U8], value: [U8])]{
-        (name: "JET_ENV_A".bytes(), value: [U8]{255}),
-        (name: "JET_ENV_B".bytes(), value: "old".bytes()),
+    snapshot: [{name: [U8], value: [U8]}]{
+        {name: "JET_ENV_A".bytes(), value: [U8]{255}},
+        {name: "JET_ENV_B".bytes(), value: "old".bytes()},
     }
     composed: __env_compose(
         snapshot,
@@ -305,8 +305,8 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
         [String]{"first", "second"},
         [String]{"JET_ENV_B"},
     ) ?? panic("valid overlay")
-    assert_eq(composed, [(name: [U8], value: [U8])]{snapshot[0]})
-    assert_eq(__env_compose(snapshot, true, [String]{}, [String]{}, [String]{}) ?? panic("clear"), [(name: [U8], value: [U8])]{})
+    assert_eq(composed, [{name: [U8], value: [U8]}]{snapshot[0]})
+    assert_eq(__env_compose(snapshot, true, [String]{}, [String]{}, [String]{}) ?? panic("clear"), [{name: [U8], value: [U8]}]{})
 }
 
 current_dir: fn() -[FS, Env]> String IOError! {
@@ -624,7 +624,7 @@ env_line: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
 /// ```
 env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
     keyword: env_keyword(line)
-    later := [(name: String, value: String?)]{}
+    later := [{name: String, value: String?}]{}
     count := 0
     loop {
         env_blanks(line)
@@ -644,7 +644,7 @@ env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
             if keyword == "" {
                 return Val("`{name}` is a command, which an env file does not run: quote a value that holds a space")
             }
-            later.push((name: name, value: None))
+            later.push({name: name, value: None})
             next
         }
         line.at += 1
@@ -656,7 +656,7 @@ env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
         if reason != None -> return reason
         text: String.from_bytes(value) ?? return Val("the value of {name} is not UTF-8")
         if keyword != "" {
-            later.push((name: name, value: Val(text)))
+            later.push({name: name, value: Val(text)})
             next
         }
         refused: env_assign(scope, name, text)
@@ -1095,28 +1095,28 @@ SYS_LIMIT_AS: 9
 
 /// This program's CPU-time limit; None is unlimited. The kernel counts whole
 /// seconds, so a fractional Duration rounds up when set.
-cpu_time_limit: fn() -[Env]> (soft: Duration?, hard: Duration?) IOError! {
+cpu_time_limit: fn() -[Env]> {soft: Duration?, hard: Duration?} IOError! {
     row: limit_read(SYS_LIMIT_CPU, "cpu_time_limit")
-    Ok((soft: limit_duration(row.soft), hard: limit_duration(row.hard)))
+    Ok({soft: limit_duration(row.soft), hard: limit_duration(row.hard)})
 }
 
 /// This program's address-space limit in bytes; None is unlimited.
-memory_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! {
+memory_limit: fn() -[Env]> {soft: Int?, hard: Int?} IOError! {
     limit_read(SYS_LIMIT_AS, "memory_limit")
 }
 
 /// This program's open-file limit; None is unlimited.
-open_file_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! {
+open_file_limit: fn() -[Env]> {soft: Int?, hard: Int?} IOError! {
     limit_read(SYS_LIMIT_NOFILE, "open_file_limit")
 }
 
 /// This program's core-file size limit in bytes; None is unlimited.
-core_file_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! {
+core_file_limit: fn() -[Env]> {soft: Int?, hard: Int?} IOError! {
     limit_read(SYS_LIMIT_CORE, "core_file_limit")
 }
 
 /// This program's stack size limit in bytes; None is unlimited.
-stack_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! {
+stack_limit: fn() -[Env]> {soft: Int?, hard: Int?} IOError! {
     limit_read(SYS_LIMIT_STACK, "stack_limit")
 }
 
@@ -1224,11 +1224,11 @@ scheduling: fn(pid: Int{0}) -[Env]> Scheduling IOError! {
 set_scheduling: fn(policy: Scheduling, pid: Int{0}) -[Env, Exec]> IOError! {
     // SCHED_OTHER 0, SCHED_FIFO 1, SCHED_RR 2, SCHED_BATCH 3, SCHED_IDLE 5.
     row: if policy == {
-        .Normal -> (kind: 0, priority: 0)
-        .Batch -> (kind: 3, priority: 0)
-        .Idle -> (kind: 5, priority: 0)
-        .Fifo(priority) -> (kind: 1, priority: priority)
-        .RoundRobin(priority) -> (kind: 2, priority: priority)
+        .Normal -> {kind: 0, priority: 0}
+        .Batch -> {kind: 3, priority: 0}
+        .Idle -> {kind: 5, priority: 0}
+        .Fifo(priority) -> {kind: 1, priority: priority}
+        .RoundRobin(priority) -> {kind: 2, priority: priority}
     }
     if (row.kind == 1 || row.kind == 2) && (row.priority < 1 || row.priority > 99) {
         return Err(
@@ -1384,11 +1384,11 @@ priv process_errors: module {
     }
 }
 
-limit_read: fn(resource: Int, operation: String) -[Env]> (soft: Int?, hard: Int?) IOError! {
+limit_read: fn(resource: Int, operation: String) -[Env]> {soft: Int?, hard: Int?} IOError! {
     row: core.sys.__rlimit(resource)
     if !row.available -> return Err(unsupported(operation))
     if row.errno != 0 -> return Err(limit_error(.Read, operation, row.errno))
-    Ok((soft: limit_value(row.soft), hard: limit_value(row.hard)))
+    Ok({soft: limit_value(row.soft), hard: limit_value(row.hard)})
 }
 
 limit_write: fn(resource: Int, soft: Int?, hard: Int?, operation: String) IOError! {
@@ -1499,7 +1499,7 @@ set_current_dir: fn(path: String) -[FS, Env]> IOError! {
 #Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once")
 pipe: fn() -[FS, Env]> [Int] IOError! {
     row: core.sys.__pipe()
-    _: call_value((available: row.available, value: row.value, errno: row.errno), "pipe", .Resolve, None)
+    _: call_value({available: row.available, value: row.value, errno: row.errno}, "pipe", .Resolve, None)
     Ok([Int]{row.read_fd, row.write_fd})
 }
 
@@ -1824,14 +1824,14 @@ setsid: fn() -[Env, Exec]> Int IOError! { call_value(core.sys.__setsid(), "setsi
 #Unsafe("posix wait: the caller owns the child processes it reaps")
 wait: fn() -[Env, Time.Wait]> Int IOError! {
     row: core.sys.__wait()
-    _: call_value((available: row.available, value: row.value, errno: row.errno), "wait", .Close, None)
+    _: call_value({available: row.available, value: row.value, errno: row.errno}, "wait", .Close, None)
     Ok(row.status)
 }
 
 #Unsafe("posix waitpid: the caller owns the child process it reaps")
 waitpid: fn(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
     row: core.sys.__waitpid(pid, options)
-    _: call_value((available: row.available, value: row.value, errno: row.errno), "waitpid", .Close, None)
+    _: call_value({available: row.available, value: row.value, errno: row.errno}, "waitpid", .Close, None)
     Ok(row.status)
 }
 
@@ -2329,13 +2329,13 @@ command_fact: fn(argv: [String]) -[Exec, Time.Wait]> String Never! {
     assert_eq(release_field("VERSION_ID=6.1{carriage}", "VERSION_ID="), Val("6.1{carriage}"))
 }
 
-call_value: fn(row: (available: Bool, value: Int, errno: Int), operation: String, kind: IOOperation, resource: String?) -> Int IOError! {
+call_value: fn(row: {available: Bool, value: Int, errno: Int}, operation: String, kind: IOOperation, resource: String?) -> Int IOError! {
     if !row.available -> return Err(unsupported(operation))
     if row.value < 0 -> return Err(syscall_error(kind, resource, row.errno))
     Ok(row.value)
 }
 
-call_unit: fn(row: (available: Bool, value: Int, errno: Int), operation: String, kind: IOOperation, resource: String?) IOError! {
+call_unit: fn(row: {available: Bool, value: Int, errno: Int}, operation: String, kind: IOOperation, resource: String?) IOError! {
     if !row.available -> return Err(unsupported(operation))
     if row.value != 0 -> return Err(syscall_error(kind, resource, row.errno))
     Ok()
@@ -2363,8 +2363,8 @@ has_nul: fn(value: String) -> Bool {
 }
 
 #Test("POSIX result policy preserves zero, errors, and availability") {
-    assert((call_value((available: true, value: 0, errno: 0), "fork", .Resolve, None) ?? -1) == 0)
-    assert((call_value((available: false, value: 0, errno: 0), "fork", .Resolve, None) ?? -1) == -1)
+    assert((call_value({available: true, value: 0, errno: 0}, "fork", .Resolve, None) ?? -1) == 0)
+    assert((call_value({available: false, value: 0, errno: 0}, "fork", .Resolve, None) ?? -1) == -1)
     assert(has_nul(String.from_bytes([U8]{65, 0, 66}) ?? ""))
 }
 
@@ -2393,7 +2393,7 @@ decode: fn<T: Decode>(prefix: String, file: String, allow: [String]) -[FS, Env, 
     }
 }
 
-__decode_tree: fn(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> (tree: Dyn, origins: [(name: String, path: String)]) [FieldError]! {
+__decode_tree: fn(prefix: String, file: String, allow: [String], names: [{env_name: String, key: String}]) -[FS, Env, Exec]> {tree: Dyn, origins: [{name: String, path: String}]} [FieldError]! {
     platform: if core.files.__path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
     path: host_path.from_text(file, platform)
     if host_path.is_absolute(path) {
@@ -2417,15 +2417,15 @@ __decode_tree: fn(prefix: String, file: String, allow: [String], names: [(env_na
             }
         }
     }
-    process := [(name: String, value: String)]{}
+    process := [{name: String, value: String}]{}
     loop entry in __env_snapshot() {
         name: String.from_bytes(entry.name) ?? next
         value: String.from_bytes(entry.value) ?? next
-        process.push((name: name, value: value))
+        process.push({name: name, value: value})
     }
     values: config_entries(prefix, dotenv, allow, process) ?? return Err(err)
-    tree := ConfigTree.Object([(key: String, value: ConfigTree)]{})
-    origins := [(name: String, path: String)]{}
+    tree := ConfigTree.Object([{key: String, value: ConfigTree}]{})
+    origins := [{name: String, path: String}]{}
     loop entry in values {
         segments := entry.segments
         loop rename in names {
@@ -2436,17 +2436,17 @@ __decode_tree: fn(prefix: String, file: String, allow: [String], names: [(env_na
                 break
             }
         }
-        origins.push((name: entry.name, path: segments.join(".")))
+        origins.push({name: entry.name, path: segments.join(".")})
         tree = config_insert(tree, segments, 0, entry.value)
     }
-    Ok((tree: config_tree(tree), origins: origins))
+    Ok({tree: config_tree(tree), origins: origins})
 }
 
 // Frames each decode failure with its variable: the one that supplied the
 // value, else, for a value that is missing, the variable that would have
 // supplied it. The value is hidden when the field path or the variable's
 // name after the prefix contains a secret word (`db_password`, `api_key`).
-__decode_errors: fn(errors: [FieldError], origins: [(name: String, path: String)], prefix: String, names: [(env_name: String, key: String)]) -> [FieldError] Never! {
+__decode_errors: fn(errors: [FieldError], origins: [{name: String, path: String}], prefix: String, names: [{env_name: String, key: String}]) -> [FieldError] Never! {
     framed := [FieldError]{}
     loop error in errors {
         variable := String?{None}
@@ -2482,7 +2482,7 @@ priv decode_secret: fn(text: String) -> Bool Never! {
 // The variable that supplies the field at `path`: the checked env name of a
 // top-level field (a full name or one the prefix starts), else the prefix and
 // the upper-cased segments joined by `__`. A list element has none.
-priv decode_variable: fn(path: String, prefix: String, names: [(env_name: String, key: String)]) -> String? Never! {
+priv decode_variable: fn(path: String, prefix: String, names: [{env_name: String, key: String}]) -> String? Never! {
     if path.len() == 0 -> return None
     loop byte in path.bytes() {
         if byte == (U8{91}) || byte == (U8{93}) -> return None
@@ -2519,7 +2519,7 @@ ConfigValue: struct {
 
 ConfigTree: enum {
     Text(String)
-    Object([(key: String, value: ConfigTree)])
+    Object([{key: String, value: ConfigTree}])
 }
 
 ascii_upper: fn(value: String) -> String Never! {
@@ -2582,7 +2582,7 @@ config_dotenv_value: fn(value: String) -> String Never! {
 
 // Dotenv syntax joins the same typed FieldError domain as Decode failures.
 
-config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [(name: String, value: String)]) -> [ConfigEntry] [FieldError]! {
+config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [{name: String, value: String}]) -> [ConfigEntry] [FieldError]! {
     values := [ConfigValue]{}
     if dotenv == .Val(contents) {
         raw: contents.bytes()
@@ -2658,18 +2658,18 @@ config_insert: fn(tree: &&ConfigTree, segments: [String], at: Int, value: String
                 matches: ascii_lower(out[index].key) == ascii_lower(segment)
                 if matches && at + 1 == segments.len() {
                     pair: out.remove(index, .Slot) ?? panic("checked config entry")
-                    out.insert(index, (key: pair.key.move(), value: ConfigTree.Text(value)))
+                    out.insert(index, {key: pair.key.move(), value: ConfigTree.Text(value)})
                     return ConfigTree.Object(out)
                 }
                 if matches && out[index].value == .Object(_) {
                     pair: out.remove(index, .Slot) ?? panic("checked config entry")
                     child: config_insert(pair.value.move(), segments, at + 1, value)
-                    out.insert(index, (key: pair.key.move(), value: child))
+                    out.insert(index, {key: pair.key.move(), value: child})
                     return ConfigTree.Object(out)
                 }
             }
-            child: if at + 1 == segments.len() -> ConfigTree.Text(value) else -> config_insert(ConfigTree.Object([(key: String, value: ConfigTree)]{}), segments, at + 1, value)
-            out.push((key: segment, value: child))
+            child: if at + 1 == segments.len() -> ConfigTree.Text(value) else -> config_insert(ConfigTree.Object([{key: String, value: ConfigTree}]{}), segments, at + 1, value)
+            out.push({key: segment, value: child})
             ConfigTree.Object(out)
         }
         .Text(text) -> ConfigTree.Text(text)
@@ -2681,9 +2681,9 @@ config_tree: fn(tree: &&ConfigTree) -> Dyn Never! {
     if owned.move() == {
         .Text(text) -> Dyn.Text(text)
         .Object(pairs) -> {
-            encoded := [(key: String, value: Dyn)]{}
+            encoded := [{key: String, value: Dyn}]{}
             loop pair in pairs.move() {
-                encoded.push((key: pair.key, value: config_tree(pair.value.move())))
+                encoded.push({key: pair.key, value: config_tree(pair.value.move())})
             }
             Dyn.Object(encoded)
         }
@@ -2691,7 +2691,7 @@ config_tree: fn(tree: &&ConfigTree) -> Dyn Never! {
 }
 
 #Test("Dotenv overlay preserves folded order, process precedence, empty values and nested names") {
-    process: [(name: String, value: String)]{(name: "App_PORT", value: "9000")}
+    process: [{name: String, value: String}]{{name: "App_PORT", value: "9000"}}
     entries: config_entries("APP_", Val("APP_PORT=8000\nAPP_DB__HOST='local'\nAPP_EMPTY=\n"), [String]{}, process) ?? panic("valid config")
     assert_eq(entries[0].name, "APP_DB__HOST")
     assert_eq(entries[0].segments, [String]{"db", "host"})
@@ -2701,32 +2701,32 @@ config_tree: fn(tree: &&ConfigTree) -> Dyn Never! {
 }
 
 #Test("Dotenv malformed unallowed lines still error and decoder secret errors are redacted") {
-    if config_entries("", Val("not an assignment"), [String]{"ONLY_THIS"}, [(name: String, value: String)]{}) == {
+    if config_entries("", Val("not an assignment"), [String]{"ONLY_THIS"}, [{name: String, value: String}]{}) == {
         .Err(errors) -> { assert_eq(errors[0].reason, "E2416: invalid .env line 1") }
         .Ok(_) -> assert(false)
     }
-    no_names: [(env_name: String, key: String)]{}
-    errors: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [(name: String, path: String)]{(name: "APP_DB__PASSWORD", path: "db.password")}, "APP_", no_names)
+    no_names: [{env_name: String, key: String}]{}
+    errors: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [{name: String, path: String}]{{name: "APP_DB__PASSWORD", path: "db.password"}}, "APP_", no_names)
     assert_eq(errors[0].reason, "E2416: env var APP_DB__PASSWORD -> db.password: secret value rejected")
-    joined: __decode_errors([FieldError]{FieldError{path: "db_password", reason: "expected Int, found text \"hunter2\""}, FieldError{path: "api_key", reason: "expected Int, found text \"sk-live\""}, FieldError{path: "port", reason: "expected Int, found text \"x\""}}, [(name: String, path: String)]{(name: "APP_DB_PASSWORD", path: "db_password"), (name: "APP_API_KEY", path: "api_key"), (name: "APP_PORT", path: "port")}, "APP_", no_names)
+    joined: __decode_errors([FieldError]{FieldError{path: "db_password", reason: "expected Int, found text \"hunter2\""}, FieldError{path: "api_key", reason: "expected Int, found text \"sk-live\""}, FieldError{path: "port", reason: "expected Int, found text \"x\""}}, [{name: String, path: String}]{{name: "APP_DB_PASSWORD", path: "db_password"}, {name: "APP_API_KEY", path: "api_key"}, {name: "APP_PORT", path: "port"}}, "APP_", no_names)
     assert_eq(joined[0].reason, "E2416: env var APP_DB_PASSWORD -> db_password: secret value rejected")
     assert_eq(joined[1].reason, "E2416: env var APP_API_KEY -> api_key: secret value rejected")
     assert_eq(joined[2].reason, "E2416: env var APP_PORT -> port: expected Int, found text \"x\"")
     // A renamed variable whose name holds the secret word hides the value too.
-    renamed: [(env_name: String, key: String)]{(env_name: "STRIPE_SECRET", key: "stripe"), (env_name: "DB_URL", key: "db_url"), (env_name: "SERVICE_HOST", key: "host")}
-    hidden: __decode_errors([FieldError]{FieldError{path: "stripe", reason: "expected Int, found text \"sk\""}}, [(name: String, path: String)]{(name: "APP_STRIPE_SECRET", path: "stripe")}, "APP_", renamed)
+    renamed: [{env_name: String, key: String}]{{env_name: "STRIPE_SECRET", key: "stripe"}, {env_name: "DB_URL", key: "db_url"}, {env_name: "SERVICE_HOST", key: "host"}}
+    hidden: __decode_errors([FieldError]{FieldError{path: "stripe", reason: "expected Int, found text \"sk\""}}, [{name: String, path: String}]{{name: "APP_STRIPE_SECRET", path: "stripe"}}, "APP_", renamed)
     assert_eq(hidden[0].reason, "E2416: env var APP_STRIPE_SECRET -> stripe: secret value rejected")
     // A missing value names the variable that would have supplied it.
-    missing: __decode_errors([FieldError]{FieldError{path: "db_url", reason: "missing"}, FieldError{path: "db.host", reason: "missing"}, FieldError{path: "hosts[0]", reason: "missing"}}, [(name: String, path: String)]{}, "APP_", renamed)
+    missing: __decode_errors([FieldError]{FieldError{path: "db_url", reason: "missing"}, FieldError{path: "db.host", reason: "missing"}, FieldError{path: "hosts[0]", reason: "missing"}}, [{name: String, path: String}]{}, "APP_", renamed)
     assert_eq(missing[0].reason, "E2416: env var APP_DB_URL -> db_url: missing")
     assert_eq(missing[1].reason, "E2416: env var APP_DB__HOST -> db.host: missing")
     assert_eq(missing[2].reason, "E2416: config field hosts[0]: missing")
-    full: __decode_errors([FieldError]{FieldError{path: "host", reason: "missing"}}, [(name: String, path: String)]{}, "SERVICE_", renamed)
+    full: __decode_errors([FieldError]{FieldError{path: "host", reason: "missing"}}, [{name: String, path: String}]{}, "SERVICE_", renamed)
     assert_eq(full[0].reason, "E2416: env var SERVICE_HOST -> host: missing")
 }
 
 #Test("Dotenv tree replacement preserves sibling order and nested values") {
-    tree := ConfigTree.Object([(key: String, value: ConfigTree)]{})
+    tree := ConfigTree.Object([{key: String, value: ConfigTree}]{})
     tree = config_insert(tree, [String]{"first"}, 0, "one")
     tree = config_insert(tree, [String]{"db", "host"}, 0, "local")
     tree = config_insert(tree, [String]{"last"}, 0, "three")

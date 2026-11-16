@@ -1241,14 +1241,14 @@ path_trim_end: fn(raw: [U8], end: Int) -> Int {
 
 // Path::file_name, the last normal component: [start, end), or start -1
 // for none ("", "/", a lone ".", a trailing "..").
-file_name: fn(raw: [U8]) -> (start: Int, end: Int) {
+file_name: fn(raw: [U8]) -> {start: Int, end: Int} {
     end: path_trim_end(raw, raw.len())
     start := end
     loop start > 0 && byte_at(raw, start - 1) != 47 -> start -= 1
     dot: end - start == 1 && byte_at(raw, start) == 46
     dotdot: end - start == 2 && byte_at(raw, start) == 46 && byte_at(raw, start + 1) == 46
-    if end == start || dot || dotdot -> return (start: -1, end: end)
-    (start: start, end: end)
+    if end == start || dot || dotdot -> return {start: -1, end: end}
+    {start: start, end: end}
 }
 
 // Path::file_stem's end: the name before its last ".", unless that dot

@@ -39,16 +39,16 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     print(web.openapi(mux) ?? panic("openapi: {err}"))
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
-    sends: [(method: String, path: String)]{
-        (method: "GET", path: "/cache/a"),
-        (method: "PURGE", path: "/cache/a"),
-        (method: "get", path: "/cache/a"),
-        (method: "Purge", path: "/cache/a"),
-        (method: "BAN", path: "/cache/a"),
-        (method: "PURGE", path: "/files/b"),
-        (method: "PURGE", path: "/region/eu/c"),
-        (method: "GET", path: "/marked/d"),
-        (method: "PURGE", path: "/marked/d"),
+    sends: [{method: String, path: String}]{
+        {method: "GET", path: "/cache/a"},
+        {method: "PURGE", path: "/cache/a"},
+        {method: "get", path: "/cache/a"},
+        {method: "Purge", path: "/cache/a"},
+        {method: "BAN", path: "/cache/a"},
+        {method: "PURGE", path: "/files/b"},
+        {method: "PURGE", path: "/region/eu/c"},
+        {method: "GET", path: "/marked/d"},
+        {method: "PURGE", path: "/marked/d"},
     }
     serving: task {
         loop _ in 0..<9 { mux.serve_once(listener) }

@@ -212,14 +212,14 @@ ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> I
 // the call and retires it once through the returned release helper
 // (lazy.release): a fresh box moves over, a held one gains an owner for it.
 // (-1, -1) with `b` failed on an error.
-ir_closure_handover: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, closure: Int, span: Span) -> (held: Int, release: Int) Never! {
+ir_closure_handover: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, closure: Int, span: Span) -> {held: Int, release: Int} Never! {
     closure_ty: m.types[b.f.slot_type[closure]].ty.copy()
     held: if b.fresh[closure] -> closure else -> ir_copy_value(m, p, b, closure, span)
-    if ir_failed(b) -> return (held: -1, release: -1)
+    if ir_failed(b) -> return {held: -1, release: -1}
     b.fresh[held] = false
     release_id: ir_lazy_helper(m, p, b, "release", closure_ty, span)
-    if release_id < 0 -> return (held: -1, release: -1)
-    (held: held, release: ir_lazy_address(m, b, release_id))
+    if release_id < 0 -> return {held: -1, release: -1}
+    {held: held, release: ir_lazy_address(m, b, release_id)}
 }
 
 // Ends the function value in `slot` when it is a fresh temporary a call

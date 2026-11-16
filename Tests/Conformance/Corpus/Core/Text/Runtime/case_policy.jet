@@ -12,19 +12,19 @@ use {
 
 #Test("full title mappings distinguish title from uppercase") {
     rows: [
-        (input: "", expected: ""),
-        (input: "ß ﬃ և", expected: "Ss Ffi Եւ"),
-        (input: "ǄǄ ǆǆ ǅǅ", expected: "ǅǆ ǅǆ ǅǆ"),
-        (input: "ŉabc", expected: "ʼNabc"),
-        (input: "ΐabc", expected: "Ϊ́abc"),
-        (input: "ᾀabc", expected: "ᾈabc"),
-        (input: "ΟΣ ΟΣΑ", expected: "Οσ Οσα"),  // interior scalar-local sigma
-        (input: "123ABC ²ABC", expected: "123abc ²abc"),  // Numeric starts word
-        (input: "abc-def don't", expected: "Abc-Def Don'T"),
-        (input: "áBC", expected: "ÁBc"),  // non-Alphabetic Mn resets word
-        (input: "aͅBC", expected: "Aͅbc"),  // Other_Alphabetic Mn stays in word
-        (input: "界ABC", expected: "界abc"),
-        (input: "𐐨𐐀", expected: "𐐀𐐨"),
+        {input: "", expected: ""},
+        {input: "ß ﬃ և", expected: "Ss Ffi Եւ"},
+        {input: "ǄǄ ǆǆ ǅǅ", expected: "ǅǆ ǅǆ ǅǆ"},
+        {input: "ŉabc", expected: "ʼNabc"},
+        {input: "ΐabc", expected: "Ϊ́abc"},
+        {input: "ᾀabc", expected: "ᾈabc"},
+        {input: "ΟΣ ΟΣΑ", expected: "Οσ Οσα"},  // interior scalar-local sigma
+        {input: "123ABC ²ABC", expected: "123abc ²abc"},  // Numeric starts word
+        {input: "abc-def don't", expected: "Abc-Def Don'T"},
+        {input: "áBC", expected: "ÁBc"},  // non-Alphabetic Mn resets word
+        {input: "aͅBC", expected: "Aͅbc"},  // Other_Alphabetic Mn stays in word
+        {input: "界ABC", expected: "界abc"},
+        {input: "𐐨𐐀", expected: "𐐀𐐨"},
     ]
     loop row in rows {
         assert_eq(case_kernel.title(row.input), row.expected)
@@ -34,18 +34,18 @@ use {
 
 #Test("lowercase FinalSigma context and full multiscalar expansions") {
     rows: [
-        (input: "ΟΣ", expected: "ος"),
-        (input: "Σ", expected: "σ"),
-        (input: "ΟΣΑ", expected: "οσα"),
-        (input: "ΌΣ́", expected: "ός́"),
-        (input: "ΌΣ́Α", expected: "όσ́α"),
-        (input: "Ο Σ", expected: "ο σ"),
-        (input: "Ο'Σ", expected: "ο'ς"),
-        (input: "ΟΣ'Α", expected: "οσ'α"),
-        (input: "İ", expected: "i̇"),
-        (input: "꟎", expected: "꟏"),  // pinned Unicode 17
-        (input: "𐐀", expected: "𐐨"),
-        (input: "", expected: ""),
+        {input: "ΟΣ", expected: "ος"},
+        {input: "Σ", expected: "σ"},
+        {input: "ΟΣΑ", expected: "οσα"},
+        {input: "ΌΣ́", expected: "ός́"},
+        {input: "ΌΣ́Α", expected: "όσ́α"},
+        {input: "Ο Σ", expected: "ο σ"},
+        {input: "Ο'Σ", expected: "ο'ς"},
+        {input: "ΟΣ'Α", expected: "οσ'α"},
+        {input: "İ", expected: "i̇"},
+        {input: "꟎", expected: "꟏"},  // pinned Unicode 17
+        {input: "𐐀", expected: "𐐨"},
+        {input: "", expected: ""},
     ]
     loop row in rows -> assert_eq(case_parse.lower(row.input), row.expected)
     assert_eq(case_parse.upper("ßևﬃǆ𐐨"), "SSԵՒFFIǄ𐐀")
@@ -54,17 +54,17 @@ use {
 
 #Test("capitalize title-first and suffix-only FinalSigma") {
     rows: [
-        (input: "", expected: ""),
-        (input: "ßABC", expected: "Ssabc"),
-        (input: "ﬃABC", expected: "Ffiabc"),
-        (input: "ǆABC", expected: "ǅabc"),
-        (input: "ևABC", expected: "Եւabc"),
-        (input: "ΟΣ", expected: "Οσ"),  // first scalar excluded from suffix context
-        (input: "AΟΣ", expected: "Aος"),
-        (input: "ΣΟΣ", expected: "Σος"),
-        (input: "1ABC", expected: "1abc"),
-        (input: "界ABC", expected: "界abc"),
-        (input: "𐐨ABC", expected: "𐐀abc"),
+        {input: "", expected: ""},
+        {input: "ßABC", expected: "Ssabc"},
+        {input: "ﬃABC", expected: "Ffiabc"},
+        {input: "ǆABC", expected: "ǅabc"},
+        {input: "ևABC", expected: "Եւabc"},
+        {input: "ΟΣ", expected: "Οσ"},  // first scalar excluded from suffix context
+        {input: "AΟΣ", expected: "Aος"},
+        {input: "ΣΟΣ", expected: "Σος"},
+        {input: "1ABC", expected: "1abc"},
+        {input: "界ABC", expected: "界abc"},
+        {input: "𐐨ABC", expected: "𐐀abc"},
     ]
     loop row in rows -> assert_eq(case_parse.capitalize(row.input), row.expected)
 }
@@ -78,28 +78,28 @@ use {
 
 #Test("literal Rust cased predicates and title-state owner gate") {
     rows: [
-        (input: "", lower: false, upper: false, title: false),
-        (input: "AB", lower: false, upper: true, title: true),
-        (input: "ABC abc", lower: false, upper: false, title: false),
-        (input: "ǅ", lower: true, upper: true, title: false),
-        (input: "ǅabc", lower: true, upper: false, title: false),
-        (input: "界", lower: false, upper: false, title: false),
-        (input: "abc", lower: true, upper: false, title: false),
-        (input: "Abc", lower: false, upper: false, title: true),
-        (input: "123!?", lower: false, upper: false, title: false),
-        (input: "é界1", lower: true, upper: false, title: false),
-        (input: "É界1", lower: false, upper: true, title: false),
-        (input: "ß", lower: true, upper: false, title: false),
-        (input: "ẞ", lower: false, upper: true, title: true),
-        (input: "ª", lower: false, upper: false, title: false),
-        (input: "ᴬ", lower: false, upper: false, title: false),  // Other_Lowercase despite name CAPITAL A
-        (input: "Aᴬ", lower: false, upper: false, title: true),
-        (input: "Ⅻ", lower: false, upper: true, title: true),  // Other_Uppercase Nl
-        (input: "Ⓐ", lower: false, upper: true, title: true),  // Other_Uppercase So
-        (input: "Aª", lower: false, upper: false, title: true),  // Other_Lowercase
-        (input: "Aͅ", lower: false, upper: false, title: true),  // Mn Lowercase
-        (input: "𐐨", lower: true, upper: false, title: false),
-        (input: "𐐀", lower: false, upper: true, title: true),
+        {input: "", lower: false, upper: false, title: false},
+        {input: "AB", lower: false, upper: true, title: true},
+        {input: "ABC abc", lower: false, upper: false, title: false},
+        {input: "ǅ", lower: true, upper: true, title: false},
+        {input: "ǅabc", lower: true, upper: false, title: false},
+        {input: "界", lower: false, upper: false, title: false},
+        {input: "abc", lower: true, upper: false, title: false},
+        {input: "Abc", lower: false, upper: false, title: true},
+        {input: "123!?", lower: false, upper: false, title: false},
+        {input: "é界1", lower: true, upper: false, title: false},
+        {input: "É界1", lower: false, upper: true, title: false},
+        {input: "ß", lower: true, upper: false, title: false},
+        {input: "ẞ", lower: false, upper: true, title: true},
+        {input: "ª", lower: false, upper: false, title: false},
+        {input: "ᴬ", lower: false, upper: false, title: false},  // Other_Lowercase despite name CAPITAL A
+        {input: "Aᴬ", lower: false, upper: false, title: true},
+        {input: "Ⅻ", lower: false, upper: true, title: true},  // Other_Uppercase Nl
+        {input: "Ⓐ", lower: false, upper: true, title: true},  // Other_Uppercase So
+        {input: "Aª", lower: false, upper: false, title: true},  // Other_Lowercase
+        {input: "Aͅ", lower: false, upper: false, title: true},  // Mn Lowercase
+        {input: "𐐨", lower: true, upper: false, title: false},
+        {input: "𐐀", lower: false, upper: true, title: true},
     ]
     loop row in rows {
         if case_kernel.is_lower(row.input) != row.lower {
@@ -175,20 +175,20 @@ use {
 
 #Test("default caseless is NFD fold NFD without compatibility or locale") {
     rows: [
-        (left: "Straße", right: "STRASSE", equal: true),
-        (left: "É", right: "é", equal: true),
-        (left: "Å", right: "å", equal: true),
-        (left: "Ạ̊", right: "ạ̊", equal: true),  // final NFD ordering
-        (left: "Άͅ", right: "άι", equal: true),  // initial NFD before fold U+0345
-        (left: "İ", right: "i̇", equal: true),
-        (left: "İ", right: "i", equal: false),
-        (left: "I", right: "ı", equal: false),
-        (left: "ς", right: "σ", equal: true),
-        (left: "ﬃ", right: "FFI", equal: true),
-        (left: "Ａ", right: "a", equal: false),  // NOT NFKD
-        (left: "각", right: "각", equal: true),
-        (left: "", right: "", equal: true),
-        (left: "a", right: "", equal: false),
+        {left: "Straße", right: "STRASSE", equal: true},
+        {left: "É", right: "é", equal: true},
+        {left: "Å", right: "å", equal: true},
+        {left: "Ạ̊", right: "ạ̊", equal: true},  // final NFD ordering
+        {left: "Άͅ", right: "άι", equal: true},  // initial NFD before fold U+0345
+        {left: "İ", right: "i̇", equal: true},
+        {left: "İ", right: "i", equal: false},
+        {left: "I", right: "ı", equal: false},
+        {left: "ς", right: "σ", equal: true},
+        {left: "ﬃ", right: "FFI", equal: true},
+        {left: "Ａ", right: "a", equal: false},  // NOT NFKD
+        {left: "각", right: "각", equal: true},
+        {left: "", right: "", equal: true},
+        {left: "a", right: "", equal: false},
     ]
     loop row in rows {
         assert_eq(case_text.caseless_eq(row.left, row.right), row.equal)

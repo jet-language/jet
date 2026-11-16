@@ -181,22 +181,22 @@ jet_driver_foreign_library_from_cpp_header: fn(path: String) -> String? {
     Val(library)
 }
 
-jet_driver_foreign_import_library: fn(declaration: ImportDecl) -> (library: String?, form: String) Never! {
+jet_driver_foreign_import_library: fn(declaration: ImportDecl) -> {library: String?, form: String} Never! {
     if declaration.kind == {
-        .Module(name, _) -> (form: "module", library: jet_driver_foreign_library_from_c_path(name))
-        .File(path, _) -> (form: "header", library: jet_driver_foreign_library_from_header(path))
+        .Module(name, _) -> {form: "module", library: jet_driver_foreign_library_from_c_path(name)}
+        .File(path, _) -> {form: "header", library: jet_driver_foreign_library_from_header(path)}
         .Unqualified(module_alias, _, items, _, _) -> {
             direct := jet_driver_foreign_library_from_c_path(module_alias)
             if {
-                direct != None -> (form: "module", library: direct)
-                module_alias == "c" && items.len() > 0 -> (form: "module", library: jet_driver_foreign_library_from_c_path("c.{items[0].original}"))
-                else -> (form: "module", library: None)
+                direct != None -> {form: "module", library: direct}
+                module_alias == "c" && items.len() > 0 -> {form: "module", library: jet_driver_foreign_library_from_c_path("c.{items[0].original}")}
+                else -> {form: "module", library: None}
             }
         }
     }
 }
 
-jet_driver_foreign_import_libraries: fn(declaration: ImportDecl) -> (libraries: [String], form: String) Never! {
+jet_driver_foreign_import_libraries: fn(declaration: ImportDecl) -> {libraries: [String], form: String} Never! {
     imported: jet_driver_foreign_import_library(declaration)
     libraries := [String]{}
     if declaration.kind == .Unqualified(module_alias, _, items, _, _) {
@@ -205,11 +205,11 @@ jet_driver_foreign_import_libraries: fn(declaration: ImportDecl) -> (libraries: 
                 library: jet_driver_foreign_library_from_c_path("c.{item.original}") ?? next
                 libraries.push(library)
             }
-            return (form: "module", libraries: libraries)
+            return {form: "module", libraries: libraries}
         }
     }
     if imported.library == .Val(library) -> libraries.push(library)
-    (form: imported.form, libraries: libraries)
+    {form: imported.form, libraries: libraries}
 }
 
 jet_driver_foreign_import_header: fn(declaration: ImportDecl) -> String Never! {
@@ -443,9 +443,9 @@ jet_driver_foreign_find_file: fn(files: [JetDriverAuthorizedSourceFile], relativ
 
 // The cache records carry their display path (`jet_driver_display_path`) from
 // here on: the driver names them only in source identities and diagnostics.
-jet_driver_foreign_find_cache: fn(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, language: String, library: String) -> (cache: JetDriverAuthorizedSourceFile?, metadata: JetDriverAuthorizedSourceFile?, provenance: JetDriverAuthorizedSourceFile?) Never! {
+jet_driver_foreign_find_cache: fn(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, language: String, library: String) -> {cache: JetDriverAuthorizedSourceFile?, metadata: JetDriverAuthorizedSourceFile?, provenance: JetDriverAuthorizedSourceFile?} Never! {
     if root_index < 0 || root_index >= snapshot.roots.len() {
-        return (cache: None, metadata: None, provenance: None)
+        return {cache: None, metadata: None, provenance: None}
     }
     root: snapshot.roots[root_index]
     entry_root: jet_driver_entry_root_path(snapshot)
@@ -453,7 +453,7 @@ jet_driver_foreign_find_cache: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     cache: jet_driver_foreign_display_file(entry_root, jet_driver_foreign_find_file(cache_files, jet_driver_foreign_cache_relative(language, library)))
     metadata: jet_driver_foreign_display_file(entry_root, jet_driver_foreign_find_file(cache_files, jet_driver_foreign_sidecar_relative(language, library, "metadata")))
     provenance: jet_driver_foreign_display_file(entry_root, jet_driver_foreign_find_file(cache_files, jet_driver_foreign_sidecar_relative(language, library, "provenance")))
-    (cache: cache, metadata: metadata, provenance: provenance)
+    {cache: cache, metadata: metadata, provenance: provenance}
 }
 
 jet_driver_foreign_display_file: fn(entry_root: String, file: JetDriverAuthorizedSourceFile?) -> JetDriverAuthorizedSourceFile? Never! {
@@ -571,16 +571,16 @@ jet_driver_foreign_unescape: fn(value: String) -> String? {
     Val(decoded)
 }
 
-jet_driver_foreign_line_parts: fn(line: String) -> (name: String, value: String, valid: Bool) Never! {
+jet_driver_foreign_line_parts: fn(line: String) -> {name: String, value: String, valid: Bool} Never! {
     bytes: line.bytes()
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{61}) {
             name: String.from_bytes(bytes[0..<index]) ?? ""
             value: String.from_bytes(bytes[index + 1..<bytes.len()]) ?? ""
-            return (name: name, valid: name.len() > 0 && value.len() > 0, value: value)
+            return {name: name, valid: name.len() > 0 && value.len() > 0, value: value}
         }
     }
-    (name: "", valid: false, value: "")
+    {name: "", valid: false, value: ""}
 }
 
 jet_driver_foreign_metadata_error: fn(path: String, reason: String, diagnostics: &[Diagnostic]) {
@@ -845,7 +845,7 @@ jet_driver_foreign_parse_cache: fn(file: JetDriverAuthorizedSourceFile, diagnost
     Val(parsed.program.move())
 }
 
-jet_driver_foreign_find_generated_module: fn(program: Program, language: String, library: String) -> (functions: [ExternFn], span: Span, module_library: String) Never! {
+jet_driver_foreign_find_generated_module: fn(program: Program, language: String, library: String) -> {functions: [ExternFn], span: Span, module_library: String} Never! {
     functions := [ExternFn]{}
     span := jet_driver_foreign_span_zero()
     module_library := ""
@@ -868,7 +868,7 @@ jet_driver_foreign_find_generated_module: fn(program: Program, language: String,
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    (functions: functions, module_library: module_library, span: span)
+    {functions: functions, module_library: module_library, span: span}
 }
 
 // The close adapter over a raw close `raw_function` that returns a status:
@@ -912,7 +912,7 @@ jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: Strin
     None
 }
 
-jet_driver_foreign_prepare_functions: fn(functions: [ExternFn], handles: [SemaForeignHandleInput], surface: JetDriverForeignSurface, diagnostics: &[Diagnostic]) -> (functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func]) Never! {
+jet_driver_foreign_prepare_functions: fn(functions: [ExternFn], handles: [SemaForeignHandleInput], surface: JetDriverForeignSurface, diagnostics: &[Diagnostic]) -> {functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func]} Never! {
     prepared := functions
     adapters := [SemaForeignCloseAdapterInput]{}
     adapter_functions := [Func]{}
@@ -940,7 +940,7 @@ jet_driver_foreign_prepare_functions: fn(functions: [ExternFn], handles: [SemaFo
             adapter_functions.push(adapter)
         }
     }
-    (adapter_functions: adapter_functions, adapters: adapters, functions: prepared)
+    {adapter_functions: adapter_functions, adapters: adapters, functions: prepared}
 }
 
 jet_driver_foreign_package_for_root: fn(load: JetDriverLoadResult, root_index: Int) -> String Never! {

@@ -109,9 +109,9 @@ sema_output_string: fn(value: Expr) -> String? Never! {
     None
 }
 
-sema_output_path: fn(value: Expr) -> (root: String, root_span: Span, members: [ExprMember])? Never! {
+sema_output_path: fn(value: Expr) -> {root: String, root_span: Span, members: [ExprMember]}? Never! {
     if value == {
-        .Ident(name, span, _) -> Val((members: [ExprMember]{}, root: name.copy(), root_span: span))
+        .Ident(name, span, _) -> Val({members: [ExprMember]{}, root: name.copy(), root_span: span})
         .Field(base, member, span, _) -> {
             path := sema_output_path(base) ?? return None
             path.members.push(ExprMember{name: member.copy(), span: span})
@@ -407,7 +407,7 @@ sema_output_entry_contract: fn(graph: SemaRegistrationGraph, module_index: Int, 
     false
 }
 
-sema_output_fact: fn(graph: SemaRegistrationGraph, declaring_index: Int, address: String, kind: OutputKind, output_name: String, entry: Expr, diagnostics: &[Diagnostic]) -> (fact: ResolvedOutput, references: [SemaNameReferenceFact])? Never! {
+sema_output_fact: fn(graph: SemaRegistrationGraph, declaring_index: Int, address: String, kind: OutputKind, output_name: String, entry: Expr, diagnostics: &[Diagnostic]) -> {fact: ResolvedOutput, references: [SemaNameReferenceFact]}? Never! {
     target := sema_output_callable_target(graph, declaring_index, entry, diagnostics) ?? return None
     module_row: graph.modules[target.module_index]
     function: module_row.functions[target.function_index]
@@ -431,7 +431,7 @@ sema_output_fact: fn(graph: SemaRegistrationGraph, declaring_index: Int, address
     // read-only graph rows.
     fact: ResolvedOutput{address: address.copy(), kind: kind, output_name: output_name.copy(), module_id: target.module_index, source_path: module_row.module_path.copy(), source_name: target.source_name.copy(), semantic_name: function.declaration.name.copy(), lowered_name: lowered_name.move(), params: params.move(), return_type: function.declaration.return_type.copy(), failure_contract: failure_contract_of_function(function.declaration.return_type, function.declaration.return_type_span), reference: expr_span(entry), definition: function.symbol.span, authority: OutputCallableAuthority.SafeJet, effects: [String]{}, selected: false, selection_reason: "not selected"}
     target.references.push(sema_name_reference(expr_span(entry), function.symbol, Val(SymbolKind.Function)))
-    Val((fact: fact.move(), references: target.references.move()))
+    Val({fact: fact.move(), references: target.references.move()})
 }
 
 sema_output_default: fn(graph: SemaRegistrationGraph, entry_index: Int, diagnostics: &[Diagnostic]) -> String? Never! {

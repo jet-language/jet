@@ -11,7 +11,7 @@ Labeled: struct {
     tags: [String]
 }
 
-make_tuple: fn(n: Int) -> (items: [Int], name: String) { (items: [Int]{n, n + 1}, name: "t{n}") }
+make_tuple: fn(n: Int) -> {items: [Int], name: String} { {items: [Int]{n, n + 1}, name: "t{n}"} }
 
 make_pair: fn(n: Int) -> Pair { Pair{items: [Int]{n}, name: "p{n}"} }
 
@@ -20,7 +20,7 @@ make_labeled: fn(n: Int) -> Labeled {
 }
 
 from_tuple: fn(n: Int) -> Int {
-    (items, name): make_tuple(n)
+    {items, name}: make_tuple(n)
     items.len() + name.len()
 }
 

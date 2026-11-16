@@ -319,14 +319,14 @@ parser_parse_pipe: fn(state: &JetParserState, head: ParsedExpr, depth: Int, allo
 
 // One step's expression, parsed with `name` open as its `<>`, and how often
 // it reads `<>`.
-parser_parse_pipe_step: fn(state: &JetParserState, name: String, depth: Int, allow_struct_lit: Bool) -> (value: ParsedExpr, reads: Int) {
+parser_parse_pipe_step: fn(state: &JetParserState, name: String, depth: Int, allow_struct_lit: Bool) -> {value: ParsedExpr, reads: Int} {
     // copy: the open-step stack keeps the name; the caller's step keeps it too.
     state.pipe_step_names.push(name.copy())
     state.pipe_step_reads.push(0)
     value: parser_parse_expression_restricted(state, 1, depth + 1, allow_struct_lit, false)
     reads: state.pipe_step_reads.pop() ?? 0
     _ := state.pipe_step_names.pop()
-    (value: value, reads: reads)
+    {value: value, reads: reads}
 }
 
 // Whether the tokens from `start` to the cursor write `name` themselves, in
@@ -1503,42 +1503,10 @@ parser_parse_parenthesized: fn(state: &JetParserState, depth: Int) -> ParsedExpr
         return ParsedExpr{expr: Expr.Unit{span: span, id: parser_node_id(state)}, span: span}
     }
 
-    fields := [TupleField]{}
-    first_name := ""
-    if parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON {
-        name: parser_bump(state)
-        first_name = parser_value(state, name)
-        parser_bump(state)
-    }
-    first: parser_parse_expression(state, 1, depth + 1)
-    fields.push(TupleField{name: first_name, value: first.expr})
-    if parser_current_kind(state) != TOKEN_COMMA {
-        close: parser_expect(state, TOKEN_RPAREN, "`)` after the expression")
-        span := parser_cover(open.span, close.span)
-        if first_name != "" {
-            parser_add_error(state, span, "a tuple needs at least two named members", "a single `(name: value)` would be ambiguous with grouping — use a one-field `struct` instead", "add another member: `(x: 1, y: 2)`")
-        }
-        return ParsedExpr{expr: Expr.Paren{value: first.expr, span: span, id: parser_node_id(state)}, span: span}
-    }
-    parser_bump(state)
-    if first_name == "" {
-        parser_add_error(state, first.span, "expected `name:` before this tuple member", "every tuple member is written `name: value`", "write the members as `(x: 1, y: 2)`")
-    }
-    // Rust `parse_tuple_lit`: every later member is `name: value` too.
-    loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
-        label: parser_expect_name(state, "for a tuple member name")
-        parser_expect(state, TOKEN_COLON, "after each tuple member name")
-        value: parser_parse_expression(state, 1, depth + 1)
-        fields.push(TupleField{name: parser_value(state, label), value: value.expr})
-        if parser_current_kind(state) != TOKEN_COMMA -> break
-        parser_bump(state)
-    }
-    close: parser_expect(state, TOKEN_RPAREN, "`)` after the tuple")
+    value: parser_parse_expression(state, 1, depth + 1)
+    close: parser_expect(state, TOKEN_RPAREN, "`)` after the expression")
     span := parser_cover(open.span, close.span)
-    if fields.len() < 2 {
-        parser_add_error(state, span, "a tuple needs at least two named members", "a single `(name: value)` would be ambiguous with grouping — use a one-field `struct` instead", "add another member: `(x: 1, y: 2)`")
-    }
-    ParsedExpr{expr: Expr.TupleLit{fields: fields, span: span, ty: None, id: parser_node_id(state)}, span: span}
+    ParsedExpr{expr: Expr.Paren{value: value.expr, span: span, id: parser_node_id(state)}, span: span}
 }
 
 // Whether the `{` at offset `at` opens a record value where a braced block

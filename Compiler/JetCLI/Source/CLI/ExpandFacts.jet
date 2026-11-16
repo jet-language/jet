@@ -51,12 +51,12 @@ jet_cli_expand_location: fn(fields: &[JetCLIStatusField], modules: [JetDriverDoc
     }
 }
 
-jet_cli_expand_memory_status: fn(projection: SemaMemoryProjection?) -> (text: String, value: JetCLIStatusValue) Never! {
+jet_cli_expand_memory_status: fn(projection: SemaMemoryProjection?) -> {text: String, value: JetCLIStatusValue} Never! {
     if projection == {
-        .Val(.Proven) -> (text: "proven", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("proven"))}))
-        .Val(.Violated(path, operation)) -> (text: "violated by {operation} through {path.join(" -> ")}", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("violated")), jet_cli_status_field("operation", jet_cli_status_text(operation)), jet_cli_status_field("call_path", jet_cli_status_array(loop name in path -> jet_cli_status_text(name)))}))
-        .Val(.OpenWorld(path, reason)) -> (text: "open through {path.join(" -> ")}: {reason}", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("open_world")), jet_cli_status_field("reason", jet_cli_status_text(reason)), jet_cli_status_field("call_path", jet_cli_status_array(loop name in path -> jet_cli_status_text(name)))}))
-        .None -> (text: "not projected", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("not_projected"))}))
+        .Val(.Proven) -> {text: "proven", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("proven"))})}
+        .Val(.Violated(path, operation)) -> {text: "violated by {operation} through {path.join(" -> ")}", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("violated")), jet_cli_status_field("operation", jet_cli_status_text(operation)), jet_cli_status_field("call_path", jet_cli_status_array(loop name in path -> jet_cli_status_text(name)))})}
+        .Val(.OpenWorld(path, reason)) -> {text: "open through {path.join(" -> ")}: {reason}", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("open_world")), jet_cli_status_field("reason", jet_cli_status_text(reason)), jet_cli_status_field("call_path", jet_cli_status_array(loop name in path -> jet_cli_status_text(name)))})}
+        .None -> {text: "not projected", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("not_projected"))})}
     }
 }
 
@@ -68,14 +68,14 @@ jet_cli_expand_memory: fn(modules: [JetDriverDocModule], index: SemIndex) -> [Je
         }
     } ?? return [JetCLIExpandFact]{}
     permit: storage.guard_read()
-    projections := [(fact: String, root: String):Int]{}
+    projections := [{fact: String, root: String}:Int]{}
     loop (position, row) in permit.value.projections {
-        projections[(fact: row.fact, root: row.root)] = position
+        projections[{fact: row.fact, root: row.root}] = position
     }
     facts := [JetCLIExpandFact]{}
     loop declaration in permit.value.declarations {
         loop root in declaration.roots {
-            projection: if projections.get((fact: declaration.fact, root: root)) == .Val(position) -> Val(permit.value.projections[position].projection) else -> SemaMemoryProjection?{None}
+            projection: if projections.get({fact: declaration.fact, root: root}) == .Val(position) -> Val(permit.value.projections[position].projection) else -> SemaMemoryProjection?{None}
             status: jet_cli_expand_memory_status(projection)
             fields := [JetCLIStatusField]{
                 jet_cli_status_field("fact", jet_cli_status_text(declaration.fact)),
@@ -262,7 +262,7 @@ jet_cli_expand_reflect_names_end: fn(tree: BodyTree, args: [Int], names: Int) ->
 // the stored fields, then the enum cases with their payload fields. The level
 // as text (`{field: Type} [Case {member: Type}]`), its fields and cases as
 // JSON, and the argument index after it.
-jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> (text: String, fields: JetCLIStatusValue, cases: JetCLIStatusValue, next: Int) Never! {
+jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> {text: String, fields: JetCLIStatusValue, cases: JetCLIStatusValue, next: Int} Never! {
     fields: jet_cli_expand_reflect_fields(tree, args, at)
     count := 0
     if fields.next < args.len() {
@@ -292,12 +292,12 @@ jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> (text:
         cases_text: "[{texts.join(", ")}]"
         text = if text == "" -> cases_text else -> "{text} {cases_text}"
     }
-    (text: text, fields: fields.value, cases: jet_cli_status_array(values), next: next)
+    {text: text, fields: fields.value, cases: jet_cli_status_array(values), next: next}
 }
 
 // A field list of one level, read from the arguments at `at`: a count, then
 // each field's name and names followed by its own level.
-jet_cli_expand_reflect_fields: fn(tree: BodyTree, args: [Int], at: Int) -> (text: String, value: JetCLIStatusValue, next: Int) Never! {
+jet_cli_expand_reflect_fields: fn(tree: BodyTree, args: [Int], at: Int) -> {text: String, value: JetCLIStatusValue, next: Int} Never! {
     count := 0
     if at < args.len() {
         if body_node(tree, args[at]).kind == .IntLit(value, _) -> count = value
@@ -325,7 +325,7 @@ jet_cli_expand_reflect_fields: fn(tree: BodyTree, args: [Int], at: Int) -> (text
         next = nested.next
     }
     text: if texts.len() == 0 -> "" else -> "{{{texts.join(", ")}}}"
-    (text: text, value: jet_cli_status_array(values), next: next)
+    {text: text, value: jet_cli_status_array(values), next: next}
 }
 
 // Each checked `reflect.of(x)` call below `id`: the type it retains and every

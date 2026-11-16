@@ -65,7 +65,7 @@ Interval: struct {
 // Symbol counts in first-seen order; `at` is each symbol's row.
 Counts: struct {
     at: [String:Int]
-    rows: [(symbol: String, count: Int)]
+    rows: [{symbol: String, count: Int}]
 }
 
 PhaseCounts: struct {
@@ -99,7 +99,7 @@ number: fn(value: Dyn, key: String) -> Float Never! {
 phase_intervals: fn(events: [Dyn]) -> [Interval] Never! {
     origin: if events.find(fn(event) { shown(event, "name") == "trace.start" }) == .Val(start) -> number(start.get("args") ?? Dyn.Null, "unix_ms") / Float{1000.0} else -> Float{0.0}
     slots := [String:Int]{}
-    open := [(phase: String, starts: [Float])]{}
+    open := [{phase: String, starts: [Float]}]{}
     intervals := [Interval]{}
     loop event in events {
         ph: shown(event, "ph")
@@ -113,7 +113,7 @@ phase_intervals: fn(events: [Dyn]) -> [Interval] Never! {
         if ph == "B" {
             if !slots.has_key(key) {
                 slots[key] = open.len()
-                open.push((phase: phase, starts: [Float]{}))
+                open.push({phase: phase, starts: [Float]{}})
             }
             open[slots[key]].starts.push(t)
             next
@@ -200,7 +200,7 @@ count: fn(counts: &Counts, symbol: String) {
     row: counts.at.get(symbol) ?? counts.rows.len()
     if row == counts.rows.len() {
         counts.at[symbol.copy()] = row
-        counts.rows.push((symbol: symbol.copy(), count: 0))
+        counts.rows.push({symbol: symbol.copy(), count: 0})
     }
     counts.rows[row].count += 1
 }
@@ -257,11 +257,11 @@ profile: fn(dir: String, trace_file: String, wanted: [String], repo: String) -> 
         if slots.has_key(interval.phase) -> intervals.push(interval)
     }
     child: process.cmd([perf_binary(), "script", "-i", files.join(dir, "perf.data"), "-F", "time,ip,sym", "--ns"]).stdout(.Stream).stderr(.Capture).spawn()
-    samples := [(t: Float, frames: [String])]{}
+    samples := [{t: Float, frames: [String]}]{}
     loop line in child.stdout.lines() {
         header: if FRAME_ADDRESS.is_match(line) -> None else -> SAMPLE_LINE.match(line)
         if header == .Val(found) {
-            samples.push((t: Float.parse(found.group(1) ?? "") ?? math.NAN, frames: [String]{}))
+            samples.push({t: Float.parse(found.group(1) ?? "") ?? math.NAN, frames: [String]{}})
             next
         }
         frame: FRAME_LINE.match(line) ?? next

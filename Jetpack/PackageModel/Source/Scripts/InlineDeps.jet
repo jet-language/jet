@@ -213,19 +213,19 @@ pkg_inline_deps_resolve: fn(dep: InlineDep, script_dir: String, batteries: Strin
 
 // The first-party battery `<batteries>/<name>` and the version its
 // package.jet declares, or None when no battery there declares that name.
-pkg_inline_deps_battery: fn(batteries: String, name: String) -[FS]> (version: String, dir: String)? Never! {
+pkg_inline_deps_battery: fn(batteries: String, name: String) -[FS]> {version: String, dir: String}? Never! {
     dir: files.join(batteries, name)
     manifest_path: files.join(dir, "package.jet")
     text: files.read(manifest_path) ?? return None
     manifest: pkg_manifest_parse(manifest_path, text) ?? return None
     if manifest.package.name != name -> return None
-    Val((version: manifest.package.version, dir: dir))
+    Val({version: manifest.package.version, dir: dir})
 }
 
 // Every version directory under `<root>/<name>`, or None when `<name>` does
 // not exist under `root`. File-system errors and links fail closed: a
 // missing source is not interchangeable with another source root.
-pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [(version: String, dir: String)]? InlineDepUnresolved! {
+pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [{version: String, dir: String}]? InlineDepUnresolved! {
     root_stat: if files.stat(root) == {
         .Ok(stat) -> stat
         .Err(error) -> if error == {
@@ -265,7 +265,7 @@ pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [(version: 
             return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"}))
         }
     }
-    out := [(version: String, dir: String)]{}
+    out := [{version: String, dir: String}]{}
     loop entry in entries {
         stat: if files.stat(entry.path) == {
             .Ok(found) -> found
@@ -273,16 +273,16 @@ pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [(version: 
                 return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: entry.path, detail: "{error}"}))
             }
         }
-        if stat.is_dir || stat.is_symlink -> out.push((version: entry.name, dir: entry.path))
+        if stat.is_dir || stat.is_symlink -> out.push({version: entry.name, dir: entry.path})
     }
     Ok(Val(out))
 }
 
 // The highest version whose dotted prefix matches `selector` (`1.4` matches
 // `1.4.2`); an exact `1.4.2` selector matches only that version.
-pkg_inline_deps_best_match: fn(selector: String, candidates: [(version: String, dir: String)]) -> (version: String, dir: String)? Never! {
+pkg_inline_deps_best_match: fn(selector: String, candidates: [{version: String, dir: String}]) -> {version: String, dir: String}? Never! {
     selector_parts: pkg_inline_deps_numeric_version(selector) ?? return None
-    matches := [(version: String, dir: String)]{}
+    matches := [{version: String, dir: String}]{}
     loop candidate in candidates {
         version_parts: pkg_inline_deps_numeric_version(candidate.version) ?? next
         accepted: if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
@@ -368,11 +368,11 @@ pkg_inline_deps_framed_count: fn(bytes: &[U8], count: Int) Never! {
 // version satisfies the selector.
 pkg_inline_deps_e1253: fn(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnostic Never! {
     explanation: if reason == {
-        .InvalidName -> (fix: "use a single package name without path separators.", why: "`{dep.name}` is not a safe local package name.")
-        .InvalidSelector -> (fix: "use `major`, `major.minor`, or `major.minor.patch`.", why: "`{dep.selector}` is not a supported dotted numeric version selector.")
-        .UnknownPackage -> (fix: "run the script with `jet run`, which fetches and locks `{dep.name}` from the configured package registry on its first run, or commit a copy at `.jet/inline-deps/{dep.name}/<version>/`.", why: "no local copy under `.jet/inline-deps/{dep.name}/` holds `{dep.name}`, and only `jet run` and `jet fetch --lock` fetch a missing inline dependency.")
-        .NoMatch -> (fix: "commit a matching version under `.jet/inline-deps/{dep.name}/`, or loosen the selector to one you have.", why: "`{dep.name}` is available locally, but no version satisfies `#{dep.selector}`.")
-        .InvalidTree(error) -> (fix: "remove the hostile or oversized entry from `.jet/inline-deps/{dep.name}/`, then try again.", why: "the local source for `{dep.name}` cannot be hashed safely: {error.message()}.")
+        .InvalidName -> {fix: "use a single package name without path separators.", why: "`{dep.name}` is not a safe local package name."}
+        .InvalidSelector -> {fix: "use `major`, `major.minor`, or `major.minor.patch`.", why: "`{dep.selector}` is not a supported dotted numeric version selector."}
+        .UnknownPackage -> {fix: "run the script with `jet run`, which fetches and locks `{dep.name}` from the configured package registry on its first run, or commit a copy at `.jet/inline-deps/{dep.name}/<version>/`.", why: "no local copy under `.jet/inline-deps/{dep.name}/` holds `{dep.name}`, and only `jet run` and `jet fetch --lock` fetch a missing inline dependency."}
+        .NoMatch -> {fix: "commit a matching version under `.jet/inline-deps/{dep.name}/`, or loosen the selector to one you have.", why: "`{dep.name}` is available locally, but no version satisfies `#{dep.selector}`."}
+        .InvalidTree(error) -> {fix: "remove the hostile or oversized entry from `.jet/inline-deps/{dep.name}/`, then try again.", why: "the local source for `{dep.name}` cannot be hashed safely: {error.message()}."}
     }
     diagnostic_from_registry("E1253", Val(dep.span), "inline dependency `{dep.name}#{dep.selector}` didn't resolve", explanation.why, explanation.fix)
 }
@@ -380,7 +380,7 @@ pkg_inline_deps_e1253: fn(dep: InlineDep, reason: InlineDepUnresolved) -> Diagno
 // L0203 an inline dependency with a loose selector
 // (anything but an exact `major.minor.patch`).
 pkg_inline_deps_l0203_unpinned: fn(dep: InlineDep) -> Diagnostic Never! {
-    pkg_diagnostic_from_row("L0203", [(name: String, value: String)]{(name: "name", value: dep.name), (name: "selector", value: dep.selector)}, Val(dep.span))
+    pkg_diagnostic_from_row("L0203", [{name: String, value: String}]{{name: "name", value: dep.name}, {name: "selector", value: dep.selector}}, Val(dep.span))
 }
 
 // SHA-256 of a script file's bytes as `sha256-<hex>`: the `content_hash`

@@ -83,7 +83,7 @@ store_closure_graph_structure_read_only: fn(verification: &StoreVerification, ro
 // The cleanup/lifecycle inputs: every closure object digest and the closure
 // head (a digest over every journal transaction). Rust memoized this per
 // process on the WAL identity stamp; each call here recomputes it.
-store_lifecycle_inputs_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> (known: [String], closure_head: String) StoreError! {
+store_lifecycle_inputs_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> {known: [String], closure_head: String} StoreError! {
     _: store_recover_closure_journal_unlocked(verification, roots)
     graph: store_load_graph_mode(verification, roots, true)
     paths := store_journal_transaction_paths(store_journal_dir(roots))
@@ -98,7 +98,7 @@ store_lifecycle_inputs_unlocked: fn(verification: &StoreVerification, roots: Han
     }
     known := graph.objects.keys().to_list()
     known.sort()
-    Ok((known: known, closure_head: "sha256-{store_sha256_hex(canonical)}"))
+    Ok({known: known, closure_head: "sha256-{store_sha256_hex(canonical)}"})
 }
 
 store_load_graph_mode: fn(verification: &StoreVerification, roots: HangarRoots, allow_legacy: Bool) -> ClosureGraph StoreError! {

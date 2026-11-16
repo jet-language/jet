@@ -222,10 +222,10 @@ sema_footprint_solve_owner: fn(tables: ASTTables, owner: SemaFootprintOwner, kno
             }
         }
         if !named_fields -> next
-        outside := (what: "", span: Span{start: 0, end: 0})
+        outside := {what: "", span: Span{start: 0, end: 0}}
         found := false
         if footprint.whole == .Val(whole_span) {
-            outside = (what: "all of `self`", span: whole_span)
+            outside = {what: "all of `self`", span: whole_span}
             found = true
         } else {
             // The first field outside the stated set, in field-name order.
@@ -234,7 +234,7 @@ sema_footprint_solve_owner: fn(tables: ASTTables, owner: SemaFootprintOwner, kno
             order.sort_by(fn(at: Int) { sorted_names[at] })
             loop at in order {
                 if !stated_names.contains(footprint.names[at]) {
-                    outside = (what: "`self.{footprint.names[at]}`", span: footprint.spans[at])
+                    outside = {what: "`self.{footprint.names[at]}`", span: footprint.spans[at]}
                     found = true
                     break
                 }

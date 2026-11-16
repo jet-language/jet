@@ -308,7 +308,7 @@ NixIndexClient: struct {
 
     // The one intact target of a local catalog revision/system directory and
     // its digest.
-    load_local_index: fn(self, key: NixIndexKey) -[FS]> (digest: String, document: NixIndexDocument) NixIndexError! {
+    load_local_index: fn(self, key: NixIndexKey) -[FS]> {digest: String, document: NixIndexDocument} NixIndexError! {
         target_dir: files.join(files.join(files.join(self.root, NIX_INDEX_LOCAL_INDEX_ROOT), key.revision), key.system)
         if !nix_index_path_exists(target_dir) {
             return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target for {key.revision} on {key.system}"))
@@ -343,7 +343,7 @@ NixIndexClient: struct {
         }
         digest: found_digest ?? return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target file in {target_dir}"))
         document: found_document ?? return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target file in {target_dir}"))
-        Ok((digest: digest, document: document))
+        Ok({digest: digest, document: document})
     }
 
     resolve_local_catalog: fn(self, key: NixIndexKey) -[FS]> NixVerifiedIndexRecord NixIndexError! {
@@ -413,7 +413,7 @@ NixIndexClient: struct {
         }
     }
 
-    load_target: fn(self, key: NixIndexKey, target: NixIndexManifestTarget) -[FS]> (compressed: [U8], signature: [U8])? NixIndexError! {
+    load_target: fn(self, key: NixIndexKey, target: NixIndexManifestTarget) -[FS]> {compressed: [U8], signature: [U8]}? NixIndexError! {
         bytes_path: self.target_path(key, target.sha256)
         signature_path: "{bytes_path}.sig.json"
         bytes_exists: nix_index_path_exists(bytes_path)
@@ -428,7 +428,7 @@ NixIndexClient: struct {
         if pkg_sha256_hex(signature) != target.signature_sha256 {
             return Err(NixIndexError.Invalid("cached nix index signature sidecar digest disagrees with manifest"))
         }
-        Ok(Val((compressed: bytes, signature: signature)))
+        Ok(Val({compressed: bytes, signature: signature}))
     }
 
     cache_manifest_atomically: fn(self, channel: String, manifest: NixIndexCachedManifest) -[FS, Env]> NixIndexError! {
@@ -459,7 +459,7 @@ NixIndexClient: struct {
         nix_index_write_atomic(files.join(directory, "highest"), state.bytes(), true)
     }
 
-    load_highest_generation: fn(self, channel: String) -[FS]> (generation: Int, digest: String)? NixIndexError! {
+    load_highest_generation: fn(self, channel: String) -[FS]> {generation: Int, digest: String}? NixIndexError! {
         path: files.join(self.generation_dir(channel), "highest")
         if !nix_index_path_exists(path) -> return Ok(None)
         bytes: nix_index_read_regular(path, 256)
@@ -475,7 +475,7 @@ NixIndexClient: struct {
         if lines.len() > 2 {
             return Err(NixIndexError.Invalid("nix index rollback state has trailing data"))
         }
-        Ok(Val((generation: generation, digest: lines[1])))
+        Ok(Val({generation: generation, digest: lines[1]}))
     }
 
     manifest_dir: fn(self, channel: String) -> String NixIndexError! {
@@ -557,7 +557,7 @@ nix_index_content_length: fn(response: HTTPResponse) -> Int? Never! {
 }
 
 // The scheme, host and port of an index URL.
-nix_index_parse_network_url: fn(url: String) -> (scheme: String, host: String, port: Int) NixIndexError! {
+nix_index_parse_network_url: fn(url: String) -> {scheme: String, host: String, port: Int} NixIndexError! {
     parts: url.split_once("://") ?? return Err(NixIndexError.Invalid("nix index URL has no scheme"))
     scheme: pkg_ascii_lower(parts.before)
     if scheme != "http" && scheme != "https" {
@@ -591,7 +591,7 @@ nix_index_parse_network_url: fn(url: String) -> (scheme: String, host: String, p
     if host == "" || (!bracketed && host.contains(":")) || nix_text_has_whitespace(host) {
         return Err(NixIndexError.Invalid("nix index host is malformed"))
     }
-    Ok((scheme: scheme, host: host, port: port))
+    Ok({scheme: scheme, host: host, port: port})
 }
 
 nix_index_parse_index_port: fn(text: String) -> Int NixIndexError! {

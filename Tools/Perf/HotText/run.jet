@@ -237,8 +237,8 @@ ranked_names: fn(entries: [[String]]) -> [String] Never! {
             counts[name.copy()] = count + 1
         }
     }
-    rows := loop (at, name) in order -> (name: name.copy(), count: counts[name], at: at)
-    rows.sort_by(fn(left: (name: String, count: Int, at: Int), right: (name: String, count: Int, at: Int)) { (right.count <=> left.count).then(left.at <=> right.at) })
+    rows := loop (at, name) in order -> {name: name.copy(), count: counts[name], at: at}
+    rows.sort_by(fn(left: {name: String, count: Int, at: Int}, right: {name: String, count: Int, at: Int}) { (right.count <=> left.count).then(left.at <=> right.at) })
     loop row in rows -> row.name.copy()
 }
 

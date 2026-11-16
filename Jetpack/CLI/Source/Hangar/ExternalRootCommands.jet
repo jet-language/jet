@@ -201,11 +201,11 @@ cli_duration_unit_seconds: fn(unit: String) -> Int? Never! {
 // The largest whole unit that divides `seconds`: `2 weeks`, `1 day`, ….
 cli_render_duration: fn(seconds: Int) -> String Never! {
     unit: if {
-        seconds %% 604800 == 0 -> (amount: seconds /% 604800, name: "week")
-        seconds %% 86400 == 0 -> (amount: seconds /% 86400, name: "day")
-        seconds %% 3600 == 0 -> (amount: seconds /% 3600, name: "hour")
-        seconds %% 60 == 0 -> (amount: seconds /% 60, name: "minute")
-        else -> (amount: seconds, name: "second")
+        seconds %% 604800 == 0 -> {amount: seconds /% 604800, name: "week"}
+        seconds %% 86400 == 0 -> {amount: seconds /% 86400, name: "day"}
+        seconds %% 3600 == 0 -> {amount: seconds /% 3600, name: "hour"}
+        seconds %% 60 == 0 -> {amount: seconds /% 60, name: "minute"}
+        else -> {amount: seconds, name: "second"}
     }
     plural: if unit.amount == 1 -> "" else -> "s"
     "{unit.amount} {unit.name}{plural}"

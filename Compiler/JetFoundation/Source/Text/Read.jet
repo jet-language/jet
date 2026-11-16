@@ -58,9 +58,9 @@ foundation_read_bytes_at: fn(source: [U8], index: Int) -> Int Never! { Int{sourc
 // End-of-input is checked by the caller, not represented by a new scalar.
 // Use the existing diagnostics decoder, including its next-byte calculation,
 // rather than a second UTF-8 algorithm or a temporary scalar String.
-foundation_read_bytes_scalar_at: fn(source: [U8], index: Int) -> (codepoint: Int, next_byte: Int) Never! {
+foundation_read_bytes_scalar_at: fn(source: [U8], index: Int) -> {codepoint: Int, next_byte: Int} Never! {
     width: diagnostic_utf8_width(source, index)
-    (codepoint: diagnostic_codepoint_at(source, index, width), next_byte: index + width)
+    {codepoint: diagnostic_codepoint_at(source, index, width), next_byte: index + width}
 }
 
 // The caller supplies 0 <= start <= end <= source.len() and lends a distinct

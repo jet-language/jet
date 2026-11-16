@@ -60,11 +60,11 @@ PS_HISTORY: ["Tools/Gauntlet/performance-surface-evidence-20260906T154128Z.json"
 PS_DEFINITION_FIELDS: ["id", "surface", "plain", "workload", "surface_program", "plain_program", "surface_source", "plain_source", "input_range", "expected_output"]
 
 // The interval bounds a confidence holds, with the words a finding uses.
-PS_BOUNDS: [(field: "ratio_lower95", label: "ratio lower bound"), (field: "ratio_upper95", label: "ratio upper bound"), (field: "difference_lower95", label: "difference lower bound"), (field: "difference_upper95", label: "difference upper bound")]
+PS_BOUNDS: [{field: "ratio_lower95", label: "ratio lower bound"}, {field: "ratio_upper95", label: "ratio upper bound"}, {field: "difference_lower95", label: "difference lower bound"}, {field: "difference_upper95", label: "difference upper bound"}]
 
 // The members of a measured pair row copied from the pair, each with the
 // pair member it copies.
-PS_ROW_FIELDS: [(name: "id", from: "id"), (name: "canonical", from: "surface"), (name: "alternate", from: "plain"), (name: "surface", from: "surface"), (name: "plain", from: "plain"), (name: "workload", from: "workload"), (name: "surface_program", from: "surface_program"), (name: "plain_program", from: "plain_program"), (name: "expected_output", from: "expected_output"), (name: "surface_source", from: "surface_source"), (name: "plain_source", from: "plain_source")]
+PS_ROW_FIELDS: [{name: "id", from: "id"}, {name: "canonical", from: "surface"}, {name: "alternate", from: "plain"}, {name: "surface", from: "surface"}, {name: "plain", from: "plain"}, {name: "workload", from: "workload"}, {name: "surface_program", from: "surface_program"}, {name: "plain_program", from: "plain_program"}, {name: "expected_output", from: "expected_output"}, {name: "surface_source", from: "surface_source"}, {name: "plain_source", from: "plain_source"}]
 
 PS_SETUP: "one jet build -O2 per arm into a fresh directory; each warmup/trial runs that executable as a fresh process in a fresh empty directory"
 
@@ -859,21 +859,21 @@ command_text: fn(command: [String], cwd: String) -> Dyn {
 
 // The CPUs this process may run on and where that was read: $JET_CPU_AFFINITY,
 // else taskset, else /proc's status.
-cpu_affinity: fn(repo_dir: String) -> (value: Dyn, source: Dyn) {
+cpu_affinity: fn(repo_dir: String) -> {value: Dyn, source: Dyn} {
     configured: (process.env_get("JET_CPU_AFFINITY") ?? "").trim()
     if configured != "" {
-        return (value: Dyn.Text(configured), source: Dyn.Text("JET_CPU_AFFINITY"))
+        return {value: Dyn.Text(configured), source: Dyn.Text("JET_CPU_AFFINITY")}
     }
     listed: (text_at(command_text(["taskset", "-pc", "{sys.pid()}"], repo_dir), "") ?? "").partition(":").tail.trim()
-    if listed != "" -> return (value: Dyn.Text(listed), source: Dyn.Text("taskset"))
+    if listed != "" -> return {value: Dyn.Text(listed), source: Dyn.Text("taskset")}
     status: files.read("/proc/{sys.pid()}/status") ?? ""
     loop line in status.lines() {
         allowed: line.removeprefix("Cpus_allowed_list:").trim()
         if line.starts_with("Cpus_allowed_list:") && allowed != "" {
-            return (value: Dyn.Text(allowed), source: Dyn.Text("/proc/status"))
+            return {value: Dyn.Text(allowed), source: Dyn.Text("/proc/status")}
         }
     }
-    (value: Dyn.Null, source: Dyn.Null)
+    {value: Dyn.Null, source: Dyn.Null}
 }
 
 // The file at `path` as a receipt names a compiler artifact: its path in
@@ -1323,14 +1323,14 @@ History: struct {
 // The prior canonical receipt at `canonical_path`, the snapshot it is
 // preserved as (its path in `repo`), and why it could not be preserved;
 // null with no links when there is none.
-preserve_prior: fn(canonical_path: String, generated_at: String, repo: String) -> (prior: Dyn, links: [String], issue: String?) {
+preserve_prior: fn(canonical_path: String, generated_at: String, repo: String) -> {prior: Dyn, links: [String], issue: String?} {
     failed: "prior canonical receipt could not be preserved"
-    if !files.exists(canonical_path) -> return (prior: Dyn.Null, links: [String]{}, issue: None)
-    bytes: files.read_bytes(canonical_path) ?? return (prior: Dyn.Null, links: [String]{}, issue: Val("{failed}: {err}"))
+    if !files.exists(canonical_path) -> return {prior: Dyn.Null, links: [String]{}, issue: None}
+    bytes: files.read_bytes(canonical_path) ?? return {prior: Dyn.Null, links: [String]{}, issue: Val("{failed}: {err}")}
     snapshot: unique_path(snapshot_path(canonical_path, generated_at))
-    prior: json.parse(String.from_bytes(bytes) ?? "") ?? return (prior: Dyn.Null, links: [String]{}, issue: Val("{failed}: {err}"))
-    files.write_bytes(snapshot, bytes) ?? return (prior: prior, links: [String]{}, issue: Val("{failed}: {err}"))
-    (prior: prior, links: [files.relative(snapshot, repo)], issue: None)
+    prior: json.parse(String.from_bytes(bytes) ?? "") ?? return {prior: Dyn.Null, links: [String]{}, issue: Val("{failed}: {err}")}
+    files.write_bytes(snapshot, bytes) ?? return {prior: prior, links: [String]{}, issue: Val("{failed}: {err}")}
+    {prior: prior, links: [files.relative(snapshot, repo)], issue: None}
 }
 
 prepare_history: fn(canonical_path: String, generated_at: String, repo: String, default_links: [String]) -> History {

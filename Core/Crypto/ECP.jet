@@ -1632,7 +1632,7 @@ comb_select: fn(f: Field, w: &FeWork, table: [U64], ts: Int, i: #Secret U64, rx:
 /// N - m (ecp_comb_recode_scalar). N must be odd and m in [1, N): both
 /// candidates are positive, so only their limbs are chosen, and N - m is a
 /// fixed-width subtraction over N's limbs.
-comb_recode_scalar: fn(grp: EcpGroup, m: bn.Mpi, d: Int, wnd: Int) -> (k: [U64], parity: U64) EcpError! {
+comb_recode_scalar: fn(grp: EcpGroup, m: bn.Mpi, d: Int, wnd: Int) -> {k: [U64], parity: U64} EcpError! {
     if bn.get_bit(grp.n, 0) != 1 -> return Err(.BadInput)
     parity: bn.limb_bit(m, 0) ~ U64{1}
     limbs: grp.n.p.len()
@@ -1648,7 +1648,7 @@ comb_recode_scalar: fn(grp: EcpGroup, m: bn.Mpi, d: Int, wnd: Int) -> (k: [U64],
     cipher.wipe_words(mm)
     k: comb_recode_core(d, wnd, chosen)
     cipher.wipe_words(chosen.p)
-    Ok((k: k, parity: parity))
+    Ok({k: k, parity: parity})
 }
 
 /// R = m P with the comb over `table` (ecp_mul_comb_core and
@@ -1986,14 +1986,14 @@ gen_privkey: fn<R: RNG>(grp: EcpGroup, rng: &R) -> bn.Mpi EcpError! {
 }
 
 /// A key pair (d, d G') for base point g (mbedtls_ecp_gen_keypair_base).
-gen_keypair_base: fn<R: RNG>(grp: EcpGroup, g: Point, rng: &R) -> (d: bn.Mpi, q: Point) EcpError! {
+gen_keypair_base: fn<R: RNG>(grp: EcpGroup, g: Point, rng: &R) -> {d: bn.Mpi, q: Point} EcpError! {
     d: gen_privkey(grp, rng)
     q: ecp_mul(grp, d, g, rng)
-    Ok((d: d, q: q))
+    Ok({d: d, q: q})
 }
 
 /// A key pair (d, d G) (mbedtls_ecp_gen_keypair).
-gen_keypair: fn<R: RNG>(grp: EcpGroup, rng: &R) -> (d: bn.Mpi, q: Point) EcpError! {
+gen_keypair: fn<R: RNG>(grp: EcpGroup, rng: &R) -> {d: bn.Mpi, q: Point} EcpError! {
     gen_keypair_base(grp, grp.g, rng)
 }
 
@@ -2107,9 +2107,9 @@ calc_public: fn<R: RNG>(key: &Keypair, rng: &R) EcpError! {
 }
 
 /// The group, private key and public point of key (mbedtls_ecp_export).
-export: fn(key: Keypair) -> (grp: EcpGroup, d: bn.Mpi, q: Point) EcpError! {
+export: fn(key: Keypair) -> {grp: EcpGroup, d: bn.Mpi, q: Point} EcpError! {
     grp: group_load(key.grp.id)
-    Ok((grp: grp, d: bn.copy_mpi_ct(key.d), q: point_copy(key.q)))
+    Ok({grp: grp, d: bn.copy_mpi_ct(key.d), q: point_copy(key.q)})
 }
 
 // ---------------------------------------------------------------------------
@@ -2192,12 +2192,12 @@ point_read_binary: fn(grp: EcpGroup, buf: [U8]) -> Point EcpError! {
 
 /// The point of a TLS ECPoint (RFC 8422 section 5.4): a length byte and that
 /// many bytes, and the count of bytes used (mbedtls_ecp_tls_read_point).
-tls_read_point: fn(grp: EcpGroup, buf: [U8]) -> (pt: Point, used: Int) EcpError! {
+tls_read_point: fn(grp: EcpGroup, buf: [U8]) -> {pt: Point, used: Int} EcpError! {
     if buf.len() < 2 -> return Err(.BadInput)
     data_len: Int{buf[0]}
     if data_len < 1 || data_len > buf.len() - 1 -> return Err(.BadInput)
     pt: point_read_binary(grp, cipher.bytes_of(buf, 1, data_len))
-    Ok((pt: pt, used: 1 + data_len))
+    Ok({pt: pt, used: 1 + data_len})
 }
 
 /// pt as a TLS ECPoint (mbedtls_ecp_tls_write_point).
@@ -2211,20 +2211,20 @@ tls_write_point: fn(grp: EcpGroup, pt: Point, format: PointFormat, blen: Int) ->
 
 /// The curve of a TLS ECParameters of type named_curve, and the bytes used
 /// (mbedtls_ecp_tls_read_group_id).
-tls_read_group_id: fn(buf: [U8]) -> (id: GroupID, used: Int) EcpError! {
+tls_read_group_id: fn(buf: [U8]) -> {id: GroupID, used: Int} EcpError! {
     if buf.len() < 3 -> return Err(.BadInput)
     if (Int{buf[0]}) != TLS_NAMED_CURVE -> return Err(.BadInput)
     tls_id: Int{buf[1]} * 256 + Int{buf[2]}
     info: curve_info_from_tls_id(tls_id) ?? return Err(.FeatureUnavailable)
-    Ok((id: info.grp_id, used: 3))
+    Ok({id: info.grp_id, used: 3})
 }
 
 /// The group a TLS ECParameters names, and the bytes used
 /// (mbedtls_ecp_tls_read_group).
-tls_read_group: fn(buf: [U8]) -> (grp: EcpGroup, used: Int) EcpError! {
+tls_read_group: fn(buf: [U8]) -> {grp: EcpGroup, used: Int} EcpError! {
     r: tls_read_group_id(buf)
     grp: group_load(r.id)
-    Ok((grp: grp, used: r.used))
+    Ok({grp: grp, used: r.used})
 }
 
 /// grp as a TLS ECParameters of type named_curve (mbedtls_ecp_tls_write_group).

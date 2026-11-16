@@ -34,7 +34,7 @@ run: fn() {
 
 // How many of the descriptors listed under `directory` are memfds and how
 // many sockets.
-kinds: fn(directory: String) -> (memfds: Int, sockets: Int) {
+kinds: fn(directory: String) -> {memfds: Int, sockets: Int} {
     memfds := 0
     sockets := 0
     loop name in files.listdir(directory) ?? panic("listing descriptors: {err}") {
@@ -42,5 +42,5 @@ kinds: fn(directory: String) -> (memfds: Int, sockets: Int) {
         if target.starts_with("/memfd:") -> memfds += 1
         if target.starts_with("socket:") -> sockets += 1
     }
-    (memfds: memfds, sockets: sockets)
+    {memfds: memfds, sockets: sockets}
 }

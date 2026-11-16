@@ -297,11 +297,11 @@ environment_rows_main: fn(args: [String]) -[FS]> String EnvironmentRowsError! {
     if files.is_file(KIT_PATH) -> kit = read_text(KIT_PATH) ?? return Err(err)
     runtime := ""
     if files.is_file(RUNTIME_PATH) -> runtime = read_text(RUNTIME_PATH) ?? return Err(err)
-    outputs: [(path: String, current: String, generated: String)]{
-        (path: PAGE_PATH, current: page, generated: render_page(registry, page) ?? return Err(err)),
-        (path: FOUNDATION_PATH, current: foundation, generated: render_constants(registry, FOUNDATION_HEADER) ?? return Err(err)),
-        (path: KIT_PATH, current: kit, generated: render_kit(registry, controls) ?? return Err(err)),
-        (path: RUNTIME_PATH, current: runtime, generated: render_runtime(registry) ?? return Err(err)),
+    outputs: [{path: String, current: String, generated: String}]{
+        {path: PAGE_PATH, current: page, generated: render_page(registry, page) ?? return Err(err)},
+        {path: FOUNDATION_PATH, current: foundation, generated: render_constants(registry, FOUNDATION_HEADER) ?? return Err(err)},
+        {path: KIT_PATH, current: kit, generated: render_kit(registry, controls) ?? return Err(err)},
+        {path: RUNTIME_PATH, current: runtime, generated: render_runtime(registry) ?? return Err(err)},
     }
     stale := [String]{}
     loop output in outputs {

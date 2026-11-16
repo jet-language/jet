@@ -750,7 +750,7 @@ leads_to_block_or_function: fn(source: [U8], start: Int) -> Bool {
 }
 
 // Line and scalar column of `index`; calls must not move backwards.
-locate: fn(source: [U8], cursor: &LineCursor, index: Int) -> (line: Int, column: Int) {
+locate: fn(source: [U8], cursor: &LineCursor, index: Int) -> {line: Int, column: Int} {
     loop cursor.offset < index {
         if (Int{source[cursor.offset]}) == NEWLINE {
             cursor.line += 1
@@ -762,7 +762,7 @@ locate: fn(source: [U8], cursor: &LineCursor, index: Int) -> (line: Int, column:
     loop offset in cursor.line_start..<index {
         if !is_continuation(Int{source[offset]}) -> column += 1
     }
-    (line: cursor.line, column: column)
+    {line: cursor.line, column: column}
 }
 
 // Every `#Unsafe` region marker in `source`, in source order.
@@ -1461,7 +1461,7 @@ scan_corelib: fn(root: String) -[FS]> CoreLibScan RatchetError! {
     Ok(result)
 }
 
-object_fields: fn(value: Dyn) -> [(key: String, value: Dyn)]? {
+object_fields: fn(value: Dyn) -> [{key: String, value: Dyn}]? {
     if value == {
         .Object(fields) -> return Val(fields.copy())
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return None
@@ -1469,7 +1469,7 @@ object_fields: fn(value: Dyn) -> [(key: String, value: Dyn)]? {
 }
 
 // The last value of `key`, as JSON.parse keeps the last duplicate.
-field: fn(fields: [(key: String, value: Dyn)], key: String) -> Dyn? {
+field: fn(fields: [{key: String, value: Dyn}], key: String) -> Dyn? {
     index := fields.len() - 1
     loop index >= 0 {
         if fields[index].key == key -> return Val(fields[index].value.copy())
@@ -1478,7 +1478,7 @@ field: fn(fields: [(key: String, value: Dyn)], key: String) -> Dyn? {
     None
 }
 
-text_field: fn(fields: [(key: String, value: Dyn)], key: String) -> String? {
+text_field: fn(fields: [{key: String, value: Dyn}], key: String) -> String? {
     value: field(fields, key) ?? return None
     if value == {
         .Text(text) -> return Val(text.copy())
@@ -1498,7 +1498,7 @@ integer: fn(value: Dyn) -> Int? {
     }
 }
 
-int_field: fn(fields: [(key: String, value: Dyn)], key: String) -> Int? {
+int_field: fn(fields: [{key: String, value: Dyn}], key: String) -> Int? {
     value: field(fields, key) ?? return None
     integer(value)
 }
@@ -1540,7 +1540,7 @@ read_abstractions: fn(text: String) -> [AbstractionRow] RatchetError! {
     }
     rows := [AbstractionRow]{}
     loop item in items {
-        fields: object_fields(item) ?? [(key: String, value: Dyn)]{}
+        fields: object_fields(item) ?? [{key: String, value: Dyn}]{}
         file: text_field(fields, "file")
         function: text_field(fields, "function")
         proof: text_field(fields, "proof")
@@ -1685,11 +1685,11 @@ render_section: fn(census: Census) -> String RatchetError! {
 }
 
 // Byte offsets of the generated section's markers, or None.
-section_bounds: fn(text: String) -> (begin: Int, end: Int)? {
+section_bounds: fn(text: String) -> {begin: Int, end: Int}? {
     begin: text.find(BEGIN)
     end: text.find(END)
     if begin < 0 || end < 0 || end < begin -> return None
-    Val((begin: begin, end: end))
+    Val({begin: begin, end: end})
 }
 
 baseline_document: fn(text: String, census: Census) -> String RatchetError! {

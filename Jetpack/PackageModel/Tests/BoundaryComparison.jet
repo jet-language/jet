@@ -132,7 +132,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("boundary comparison canonical verdict vocabulary and assertion rendering") {
-    cases: [(status: ComparisonStatus, text: String)]{(status: ComparisonStatus.Matched, text: "matched"), (status: ComparisonStatus.Mismatch, text: "mismatch"), (status: ComparisonStatus.Empty, text: "empty"), (status: ComparisonStatus.Unsupported, text: "unsupported"), (status: ComparisonStatus.Unavailable, text: "unavailable"), (status: ComparisonStatus.Timeout, text: "timeout"), (status: ComparisonStatus.Cancelled, text: "cancelled"), (status: ComparisonStatus.InvalidOracle, text: "invalid_oracle"), (status: ComparisonStatus.Contaminated, text: "contaminated")}
+    cases: [{status: ComparisonStatus, text: String}]{{status: ComparisonStatus.Matched, text: "matched"}, {status: ComparisonStatus.Mismatch, text: "mismatch"}, {status: ComparisonStatus.Empty, text: "empty"}, {status: ComparisonStatus.Unsupported, text: "unsupported"}, {status: ComparisonStatus.Unavailable, text: "unavailable"}, {status: ComparisonStatus.Timeout, text: "timeout"}, {status: ComparisonStatus.Cancelled, text: "cancelled"}, {status: ComparisonStatus.InvalidOracle, text: "invalid_oracle"}, {status: ComparisonStatus.Contaminated, text: "contaminated"}}
     loop row in cases {
         text: row.text
         assert_eq(comparison_status_as_str(row.status), text)
@@ -230,7 +230,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
     assert_eq(receipt.first_difference, None)
     assert_eq(receipt.comparison_reason, record.reason)
     fields: receipt.provenance_fields()
-    assert(fields.contains((name: "source-receipt-evidence", value: "report/replacement/observation")))
+    assert(fields.contains({name: "source-receipt-evidence", value: "report/replacement/observation"}))
     rendered: receipt.render() ?? panic("render receipt")
     assert(rendered.contains("source-receipt-comparison-artifact={receipt.comparison_artifact_id}\n"))
     assert(rendered.contains("source-receipt-boundary-source=source\nsource-receipt-boundary-overlay=overlay\nsource-receipt-boundary-generator=generator\nsource-receipt-boundary-implementation=implementation\nsource-receipt-boundary-toolchain=toolchain\nsource-receipt-boundary-target=target\n"))

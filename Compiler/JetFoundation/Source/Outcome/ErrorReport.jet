@@ -156,21 +156,21 @@ jet_error_journey_json: fn(frame: JetErrorJourneyFrame) -> String Never! {
     "{{\"fn_name\":{foundation_json_quote(frame.fn_name)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line},\"column\":{frame.column},\"note\":{foundation_json_quote(frame.note)},\"hops\":{frame.hops}}}"
 }
 
-jet_error_json_object: fn(value: Dyn, name: String) -> [(key: String, value: Dyn)] JetErrorReportError! {
+jet_error_json_object: fn(value: Dyn, name: String) -> [{key: String, value: Dyn}] JetErrorReportError! {
     if value == {
         .Object(fields) -> Ok(fields)
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> Err(jet_error_report_error("error report {name} is not an object"))
     }
 }
 
-jet_error_json_lookup: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? Never! {
+jet_error_json_lookup: fn(fields: [{key: String, value: Dyn}], name: String) -> Dyn? Never! {
     loop field in fields {
         if field.key == name -> return Val(field.value)
     }
     None
 }
 
-jet_error_json_field: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn JetErrorReportError! {
+jet_error_json_field: fn(fields: [{key: String, value: Dyn}], name: String) -> Dyn JetErrorReportError! {
     Ok(jet_error_json_lookup(fields, name) ?? return Err(jet_error_report_error("error report lacks {name}")))
 }
 
@@ -181,14 +181,14 @@ jet_error_json_text: fn(value: Dyn, name: String) -> String JetErrorReportError!
     }
 }
 
-jet_error_json_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? JetErrorReportError! {
+jet_error_json_optional_text: fn(fields: [{key: String, value: Dyn}], name: String) -> String? JetErrorReportError! {
     if jet_error_json_lookup(fields, name) == {
         .Val(value) -> Ok(Val(jet_error_json_text(value, name)))
         .None -> Ok(None)
     }
 }
 
-jet_error_json_optional_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] JetErrorReportError! {
+jet_error_json_optional_array: fn(fields: [{key: String, value: Dyn}], name: String) -> [Dyn] JetErrorReportError! {
     value: jet_error_json_lookup(fields, name) ?? return Ok([Dyn]{})
     if value == {
         .Array(values) -> Ok(values)

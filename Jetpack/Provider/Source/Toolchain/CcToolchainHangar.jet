@@ -156,11 +156,11 @@ provider_cc_validate_descriptor: fn(descriptor: CcToolchainDescriptor, entry: St
     provider_cc_validate_text_field(descriptor.abi, "ABI") ?? {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has an invalid {err.message()}"))
     }
-    paths: [(name: String, path: String)]{
-        (name: "compiler", path: descriptor.compiler),
-        (name: "c++ compiler", path: descriptor.cxx),
-        (name: "linker", path: descriptor.linker),
-        (name: "sysroot", path: descriptor.sysroot),
+    paths: [{name: String, path: String}]{
+        {name: "compiler", path: descriptor.compiler},
+        {name: "c++ compiler", path: descriptor.cxx},
+        {name: "linker", path: descriptor.linker},
+        {name: "sysroot", path: descriptor.sysroot},
     }
     loop item in paths {
         provider_cc_validate_relative_path(item.path) ?? {

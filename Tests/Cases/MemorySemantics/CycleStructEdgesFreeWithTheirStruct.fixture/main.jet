@@ -44,7 +44,7 @@ Tree: struct {
 // A struct reaching itself through a tuple field and an enum.
 Pairing: struct {
     name: String
-    pair: (label: String, link: Link)
+    pair: {label: String, link: Link}
 }
 
 Link: enum {
@@ -184,10 +184,10 @@ pairing_size: fn(pairing: Pairing) -> Int {
 via_tuple: fn(from: Int, to: Int) -> Int {
     total := 0
     loop i in from..<to {
-        inner: Pairing{name: "i{i}", pair: (label: "l{i}", link: Link.End)}
-        w: Pairing{name: "o", pair: (label: "m", link: Link.To{pairing: inner})}
+        inner: Pairing{name: "i{i}", pair: {label: "l{i}", link: Link.End}}
+        w: Pairing{name: "o", pair: {label: "m", link: Link.To{pairing: inner}}}
         v := w.copy()
-        v.pair = (label: "n{i}", link: Link.End)
+        v.pair = {label: "n{i}", link: Link.End}
         total += pairing_size(w) + pairing_size(v)
     }
     total

@@ -245,27 +245,27 @@ ForeignSourceReceipt: struct {
     }
 
     // Queryable fields for the existing provenance/receipt channels.
-    provenance_fields: fn(self) -> [(name: String, value: String)] Never! {
-        fields := [(name: String, value: String)]{
-            (name: "source-receipt-schema", value: self.schema),
-            (name: "source-receipt-boundary", value: self.boundary_digest),
-            (name: "source-receipt-coverage", value: self.artifact_coverage_digest),
-            (name: "source-receipt-authority", value: self.source_authority.as_str()),
-            (name: "source-receipt-source", value: self.source_identity),
-            (name: "source-receipt-replacement", value: self.replacement_identity),
-            (name: "source-receipt-derivation", value: self.derivation.id),
-            (name: "source-receipt-comparison-artifact", value: self.comparison_artifact_id),
-            (name: "source-receipt-comparison-schema", value: self.comparison_schema_version.to_string()),
-            (name: "source-receipt-comparison-status", value: self.comparison_status),
-            (name: "source-receipt-comparison-relation", value: self.comparison_relation),
-            (name: "source-receipt-compared-samples", value: self.compared_samples.to_string()),
-            (name: "source-receipt-discarded-cases", value: self.discarded_cases.to_string()),
+    provenance_fields: fn(self) -> [{name: String, value: String}] Never! {
+        fields := [{name: String, value: String}]{
+            {name: "source-receipt-schema", value: self.schema},
+            {name: "source-receipt-boundary", value: self.boundary_digest},
+            {name: "source-receipt-coverage", value: self.artifact_coverage_digest},
+            {name: "source-receipt-authority", value: self.source_authority.as_str()},
+            {name: "source-receipt-source", value: self.source_identity},
+            {name: "source-receipt-replacement", value: self.replacement_identity},
+            {name: "source-receipt-derivation", value: self.derivation.id},
+            {name: "source-receipt-comparison-artifact", value: self.comparison_artifact_id},
+            {name: "source-receipt-comparison-schema", value: self.comparison_schema_version.to_string()},
+            {name: "source-receipt-comparison-status", value: self.comparison_status},
+            {name: "source-receipt-comparison-relation", value: self.comparison_relation},
+            {name: "source-receipt-compared-samples", value: self.compared_samples.to_string()},
+            {name: "source-receipt-discarded-cases", value: self.discarded_cases.to_string()},
         }
         loop evidence in self.evidence {
-            fields.push((name: "source-receipt-evidence", value: pkg_bridge_evidence_key(evidence)))
+            fields.push({name: "source-receipt-evidence", value: pkg_bridge_evidence_key(evidence)})
         }
         if self.comparison_reason == .Val(reason) {
-            fields.push((name: "source-receipt-comparison-reason", value: reason))
+            fields.push({name: "source-receipt-comparison-reason", value: reason})
         }
         fields
     }
@@ -711,60 +711,60 @@ ForeignBoundaryContract: struct {
     }
 
     // Queryable fields merged into the bridge provenance record.
-    provenance_fields: fn(self) -> [(name: String, value: String)] Never! {
+    provenance_fields: fn(self) -> [{name: String, value: String}] Never! {
         coverage: self.artifact_coverage
-        fields := [(name: String, value: String)]{
-            (name: "boundary-schema", value: self.schema),
-            (name: "boundary-digest", value: self.digest()),
-            (name: "boundary-language", value: self.language.root()),
-            (name: "boundary-library", value: self.library),
-            (name: "boundary-descriptor", value: self.descriptor),
-            (name: "boundary-disposition", value: self.disposition.as_str()),
-            (name: "boundary-source-import", value: if self.source_import -> "true" else -> "false"),
-            (name: "boundary-source-authority", value: self.source_authority.as_str()),
-            (name: "boundary-alignment", value: self.alignment),
-            (name: "boundary-ownership", value: self.ownership),
-            (name: "boundary-cleanup", value: self.cleanup),
-            (name: "boundary-encoding", value: self.encoding),
-            (name: "boundary-nullability", value: self.nullability),
-            (name: "boundary-errors", value: self.errors),
-            (name: "boundary-exceptions", value: self.exceptions),
-            (name: "boundary-callbacks", value: self.callbacks),
-            (name: "boundary-task-thread", value: self.task_thread),
-            (name: "boundary-target-availability", value: self.target_availability),
-            (name: "boundary-copy-cost", value: self.copy_cost),
-            (name: "boundary-effects", value: self.effects),
-            (name: "boundary-effect-root", value: self.effect_root),
-            (name: "boundary-artifact-coverage", value: coverage.digest()),
-            (name: "boundary-loaded-artifact", value: coverage.loaded_artifact),
-            (name: "boundary-transitive-dependencies", value: pkg_bridge_provenance_optional_strings(coverage.transitive_dependencies)),
-            (name: "boundary-reachable-callbacks", value: pkg_bridge_provenance_optional_strings(coverage.reachable_callbacks)),
-            (name: "boundary-compiler-flags", value: pkg_bridge_provenance_optional_strings(coverage.compiler_flags)),
-            (name: "boundary-coverage-target", value: coverage.target),
-            (name: "boundary-coverage-generator", value: coverage.generator),
-            (name: "boundary-overlay-identity", value: self.identity.overlay),
-            (name: "boundary-generator-identity", value: self.identity.generator),
-            (name: "boundary-implementation-identity", value: self.identity.implementation),
-            (name: "boundary-toolchain-identity", value: self.identity.toolchain),
-            (name: "boundary-target-identity", value: self.identity.target),
+        fields := [{name: String, value: String}]{
+            {name: "boundary-schema", value: self.schema},
+            {name: "boundary-digest", value: self.digest()},
+            {name: "boundary-language", value: self.language.root()},
+            {name: "boundary-library", value: self.library},
+            {name: "boundary-descriptor", value: self.descriptor},
+            {name: "boundary-disposition", value: self.disposition.as_str()},
+            {name: "boundary-source-import", value: if self.source_import -> "true" else -> "false"},
+            {name: "boundary-source-authority", value: self.source_authority.as_str()},
+            {name: "boundary-alignment", value: self.alignment},
+            {name: "boundary-ownership", value: self.ownership},
+            {name: "boundary-cleanup", value: self.cleanup},
+            {name: "boundary-encoding", value: self.encoding},
+            {name: "boundary-nullability", value: self.nullability},
+            {name: "boundary-errors", value: self.errors},
+            {name: "boundary-exceptions", value: self.exceptions},
+            {name: "boundary-callbacks", value: self.callbacks},
+            {name: "boundary-task-thread", value: self.task_thread},
+            {name: "boundary-target-availability", value: self.target_availability},
+            {name: "boundary-copy-cost", value: self.copy_cost},
+            {name: "boundary-effects", value: self.effects},
+            {name: "boundary-effect-root", value: self.effect_root},
+            {name: "boundary-artifact-coverage", value: coverage.digest()},
+            {name: "boundary-loaded-artifact", value: coverage.loaded_artifact},
+            {name: "boundary-transitive-dependencies", value: pkg_bridge_provenance_optional_strings(coverage.transitive_dependencies)},
+            {name: "boundary-reachable-callbacks", value: pkg_bridge_provenance_optional_strings(coverage.reachable_callbacks)},
+            {name: "boundary-compiler-flags", value: pkg_bridge_provenance_optional_strings(coverage.compiler_flags)},
+            {name: "boundary-coverage-target", value: coverage.target},
+            {name: "boundary-coverage-generator", value: coverage.generator},
+            {name: "boundary-overlay-identity", value: self.identity.overlay},
+            {name: "boundary-generator-identity", value: self.identity.generator},
+            {name: "boundary-implementation-identity", value: self.identity.implementation},
+            {name: "boundary-toolchain-identity", value: self.identity.toolchain},
+            {name: "boundary-target-identity", value: self.identity.target},
         }
         loop name in self.sorted_width_names() {
-            fields.push((name: "boundary-width-{name}", value: self.scalar_widths[name]))
+            fields.push({name: "boundary-width-{name}", value: self.scalar_widths[name]})
         }
         if self.derivation == .Val(derivation) {
-            fields.push((name: "boundary-derivation", value: derivation.id))
+            fields.push({name: "boundary-derivation", value: derivation.id})
         }
         loop evidence in self.evidence {
-            fields.push((name: "boundary-evidence", value: pkg_bridge_evidence_key(evidence)))
+            fields.push({name: "boundary-evidence", value: pkg_bridge_evidence_key(evidence)})
         }
         loop assumption in self.assumptions {
-            fields.push((name: "boundary-assumption", value: assumption))
+            fields.push({name: "boundary-assumption", value: assumption})
         }
         loop obligation in self.obligations {
-            fields.push((name: "boundary-obligation", value: "{obligation.obligation}\t{obligation.basis.as_str()}\t{obligation.checker}\t{obligation.coverage_digest}\t{obligation.assumptions.join("|")}"))
+            fields.push({name: "boundary-obligation", value: "{obligation.obligation}\t{obligation.basis.as_str()}\t{obligation.checker}\t{obligation.coverage_digest}\t{obligation.assumptions.join("|")}"})
         }
         loop observation in self.observations {
-            fields.push((name: "boundary-comparison", value: "{observation.case_id}\t{observation.input}\t{observation.outcome}\t{observation.foreign}\t{observation.replacement}"))
+            fields.push({name: "boundary-comparison", value: "{observation.case_id}\t{observation.input}\t{observation.outcome}\t{observation.foreign}\t{observation.replacement}"})
         }
         if self.source_receipt == .Val(receipt) {
             loop field in receipt.provenance_fields() -> fields.push(field)
@@ -772,50 +772,50 @@ ForeignBoundaryContract: struct {
         fields
     }
 
-    stable_fields: fn(self) -> [(name: String, value: String)] Never! {
+    stable_fields: fn(self) -> [{name: String, value: String}] Never! {
         coverage: self.artifact_coverage
         obligation_rows := [String]{}
         loop obligation in self.obligations {
             obligation_rows.push("{obligation.obligation}:{obligation.basis.as_str()}:{obligation.checker}:{obligation.coverage_digest}:{obligation.assumptions.join("|")}")
         }
-        fields := [(name: String, value: String)]{
-            (name: "schema", value: self.schema),
-            (name: "language", value: self.language.root()),
-            (name: "library", value: self.library),
-            (name: "descriptor", value: self.descriptor),
-            (name: "abi", value: self.abi.stamp()),
-            (name: "alignment", value: self.alignment),
-            (name: "ownership", value: self.ownership),
-            (name: "cleanup", value: self.cleanup),
-            (name: "encoding", value: self.encoding),
-            (name: "nullability", value: self.nullability),
-            (name: "errors", value: self.errors),
-            (name: "exceptions", value: self.exceptions),
-            (name: "callbacks", value: self.callbacks),
-            (name: "task_thread", value: self.task_thread),
-            (name: "target_availability", value: self.target_availability),
-            (name: "copy_cost", value: self.copy_cost),
-            (name: "effects", value: self.effects),
-            (name: "effect_root", value: self.effect_root),
-            (name: "artifact_coverage", value: coverage.digest()),
-            (name: "loaded_artifact", value: coverage.loaded_artifact),
-            (name: "transitive_dependencies", value: pkg_bridge_stable_optional_strings(coverage.transitive_dependencies)),
-            (name: "reachable_callbacks", value: pkg_bridge_stable_optional_strings(coverage.reachable_callbacks)),
-            (name: "compiler_flags", value: pkg_bridge_stable_optional_strings(coverage.compiler_flags)),
-            (name: "coverage_target", value: coverage.target),
-            (name: "coverage_generator", value: coverage.generator),
-            (name: "obligations", value: obligation_rows.join("\n")),
-            (name: "source_import", value: if self.source_import -> "true" else -> "false"),
-            (name: "source_authority", value: self.source_authority.as_str()),
-            (name: "source_identity", value: self.identity.source),
-            (name: "overlay_identity", value: self.identity.overlay),
-            (name: "generator_identity", value: self.identity.generator),
-            (name: "implementation_identity", value: self.identity.implementation),
-            (name: "toolchain_identity", value: self.identity.toolchain),
-            (name: "target_identity", value: self.identity.target),
+        fields := [{name: String, value: String}]{
+            {name: "schema", value: self.schema},
+            {name: "language", value: self.language.root()},
+            {name: "library", value: self.library},
+            {name: "descriptor", value: self.descriptor},
+            {name: "abi", value: self.abi.stamp()},
+            {name: "alignment", value: self.alignment},
+            {name: "ownership", value: self.ownership},
+            {name: "cleanup", value: self.cleanup},
+            {name: "encoding", value: self.encoding},
+            {name: "nullability", value: self.nullability},
+            {name: "errors", value: self.errors},
+            {name: "exceptions", value: self.exceptions},
+            {name: "callbacks", value: self.callbacks},
+            {name: "task_thread", value: self.task_thread},
+            {name: "target_availability", value: self.target_availability},
+            {name: "copy_cost", value: self.copy_cost},
+            {name: "effects", value: self.effects},
+            {name: "effect_root", value: self.effect_root},
+            {name: "artifact_coverage", value: coverage.digest()},
+            {name: "loaded_artifact", value: coverage.loaded_artifact},
+            {name: "transitive_dependencies", value: pkg_bridge_stable_optional_strings(coverage.transitive_dependencies)},
+            {name: "reachable_callbacks", value: pkg_bridge_stable_optional_strings(coverage.reachable_callbacks)},
+            {name: "compiler_flags", value: pkg_bridge_stable_optional_strings(coverage.compiler_flags)},
+            {name: "coverage_target", value: coverage.target},
+            {name: "coverage_generator", value: coverage.generator},
+            {name: "obligations", value: obligation_rows.join("\n")},
+            {name: "source_import", value: if self.source_import -> "true" else -> "false"},
+            {name: "source_authority", value: self.source_authority.as_str()},
+            {name: "source_identity", value: self.identity.source},
+            {name: "overlay_identity", value: self.identity.overlay},
+            {name: "generator_identity", value: self.identity.generator},
+            {name: "implementation_identity", value: self.identity.implementation},
+            {name: "toolchain_identity", value: self.identity.toolchain},
+            {name: "target_identity", value: self.identity.target},
         }
         loop name in self.sorted_width_names() {
-            fields.push((name: name, value: self.scalar_widths[name]))
+            fields.push({name: name, value: self.scalar_widths[name]})
         }
         fields
     }

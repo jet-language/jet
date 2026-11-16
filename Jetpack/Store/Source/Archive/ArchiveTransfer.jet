@@ -15,13 +15,13 @@ use {
 }
 
 // Export a package closure into the canonical signed archive.
-store_export_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, key: String?) -> (bytes: [U8], report: HangarArchiveReport) StoreError! {
+store_export_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, key: String?) -> {bytes: [U8], report: HangarArchiveReport} StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
     archive: store_archive_build_unlocked(verification, roots, target, include_closure, false)
     signer: store_archive_signing_key(roots, key, true)
     signed: store_archive_sign_decoded(archive, signer)
     bytes: signed.encode()
-    Ok((bytes: bytes, report: signed.report()))
+    Ok({bytes: bytes, report: signed.report()})
 }
 
 // Export a closure without a signer secret for an authenticated broker

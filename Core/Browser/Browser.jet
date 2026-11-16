@@ -262,7 +262,7 @@ Browser: struct {
     // A BiDi event; CDP events go through `protocol("cdp").subscribe`.
     subscribe: fn(self, event: String) -[Net, Time]> BrowserError! {
         if event.starts_with("goog:cdp") -> return Err(BrowserError{kind: "unsupported protocol"})
-        browser_command(self, "session.subscribe", obj([(key: "events", value: Dyn.Array([Dyn]{Dyn.Text(event.copy())}))]))
+        browser_command(self, "session.subscribe", obj([{key: "events", value: Dyn.Array([Dyn]{Dyn.Text(event.copy())})}]))
         Ok()
     }
 
@@ -278,21 +278,21 @@ Browser: struct {
 
     add_intercept: fn(self, phase: String) -[Net, Time]> BrowserIntercept BrowserError! {
         if !phase_ok(phase) -> return Err(BrowserError{kind: "protocol"})
-        result: browser_command(self, "network.addIntercept", obj([(key: "phases", value: Dyn.Array([Dyn]{Dyn.Text(phase.copy())}))]))
+        result: browser_command(self, "network.addIntercept", obj([{key: "phases", value: Dyn.Array([Dyn]{Dyn.Text(phase.copy())})}]))
         id: browser_string(result, "intercept")
         Ok(BrowserIntercept{__browser: self, __scope: new_scope(id)})
     }
 
     add_intercept_url: fn(self, phase: String, url_pattern: String) -[Net, Time]> BrowserIntercept BrowserError! {
         if !phase_ok(phase) || url_pattern.len() == 0 -> return Err(BrowserError{kind: "protocol"})
-        pattern: obj([(key: "type", value: Dyn.Text("string")), (key: "pattern", value: Dyn.Text(url_pattern.copy()))])
+        pattern: obj([{key: "type", value: Dyn.Text("string")}, {key: "pattern", value: Dyn.Text(url_pattern.copy())}])
         result: browser_command(
             self,
             "network.addIntercept",
             obj(
                 [
-                    (key: "phases", value: Dyn.Array([Dyn]{Dyn.Text(phase.copy())})),
-                    (key: "urlPatterns", value: Dyn.Array([Dyn]{pattern.move()})),
+                    {key: "phases", value: Dyn.Array([Dyn]{Dyn.Text(phase.copy())})},
+                    {key: "urlPatterns", value: Dyn.Array([Dyn]{pattern.move()})},
                 ],
             ),
         )
@@ -302,13 +302,13 @@ Browser: struct {
 
     continue_request: fn(self, request_id: String) -[Net, Time]> BrowserError! {
         if request_id.len() == 0 -> return Err(BrowserError{kind: "protocol"})
-        browser_command(self, "network.continueRequest", obj([(key: "request", value: Dyn.Text(request_id.copy()))]))
+        browser_command(self, "network.continueRequest", obj([{key: "request", value: Dyn.Text(request_id.copy())}]))
         Ok()
     }
 
     fail_request: fn(self, request_id: String) -[Net, Time]> BrowserError! {
         if request_id.len() == 0 -> return Err(BrowserError{kind: "protocol"})
-        browser_command(self, "network.failRequest", obj([(key: "request", value: Dyn.Text(request_id.copy())), (key: "errorReason", value: Dyn.Text("Failed"))]))
+        browser_command(self, "network.failRequest", obj([{key: "request", value: Dyn.Text(request_id.copy())}, {key: "errorReason", value: Dyn.Text("Failed")}]))
         Ok()
     }
 
@@ -321,9 +321,9 @@ Browser: struct {
             "network.provideResponse",
             obj(
                 [
-                    (key: "request", value: Dyn.Text(request_id.copy())),
-                    (key: "statusCode", value: Dyn.Int(status)),
-                    (key: "body", value: string_value(body)),
+                    {key: "request", value: Dyn.Text(request_id.copy())},
+                    {key: "statusCode", value: Dyn.Int(status)},
+                    {key: "body", value: string_value(body)},
                 ],
             ),
         )
@@ -333,8 +333,8 @@ Browser: struct {
     // Allow downloads into an absolute destination folder.
     allow_downloads: fn(self, folder: String) -[Net, Time]> BrowserError! {
         if folder.len() == 0 -> return Err(BrowserError{kind: "protocol"})
-        behavior: obj([(key: "type", value: Dyn.Text("allowed")), (key: "destinationFolder", value: Dyn.Text(folder.copy()))])
-        browser_command(self, "browser.setDownloadBehavior", obj([(key: "downloadBehavior", value: behavior)]))
+        behavior: obj([{key: "type", value: Dyn.Text("allowed")}, {key: "destinationFolder", value: Dyn.Text(folder.copy())}])
+        browser_command(self, "browser.setDownloadBehavior", obj([{key: "downloadBehavior", value: behavior}]))
         Ok()
     }
 
@@ -385,7 +385,7 @@ BrowserContext: struct {
     close: fn(self) -[Net, Time]> BrowserError! {
         if scope_closed(self.__scope) -> return Ok()
         if !browser_closed(self.__browser) {
-            browser_command(self.__browser, "browser.removeUserContext", obj([(key: "userContext", value: Dyn.Text(scope_id(self.__scope)))]))
+            browser_command(self.__browser, "browser.removeUserContext", obj([{key: "userContext", value: Dyn.Text(scope_id(self.__scope))}]))
         }
         scope_close(self.__scope)
         Ok()
@@ -405,9 +405,9 @@ BrowserPage: struct {
             "browsingContext.navigate",
             obj(
                 [
-                    (key: "context", value: Dyn.Text(scope_id(self.__scope))),
-                    (key: "url", value: Dyn.Text(target)),
-                    (key: "wait", value: Dyn.Text("complete")),
+                    {key: "context", value: Dyn.Text(scope_id(self.__scope))},
+                    {key: "url", value: Dyn.Text(target)},
+                    {key: "wait", value: Dyn.Text("complete")},
                 ],
             ),
         )
@@ -417,7 +417,7 @@ BrowserPage: struct {
     close: fn(self) -[Net, Time]> BrowserError! {
         if scope_closed(self.__scope) -> return Ok()
         if !scope_closed(self.__context) && !browser_closed(self.__browser) {
-            browser_command(self.__browser, "browsingContext.close", obj([(key: "context", value: Dyn.Text(scope_id(self.__scope)))]))
+            browser_command(self.__browser, "browsingContext.close", obj([{key: "context", value: Dyn.Text(scope_id(self.__scope))}]))
         }
         scope_close(self.__scope)
         Ok()
@@ -442,7 +442,7 @@ BrowserPage: struct {
 
     frames: fn(self) -[Net, Time]> [BrowserFrame] BrowserError! {
         page_live(self)
-        result: browser_command(self.__browser, "browsingContext.getTree", obj([(key: "root", value: Dyn.Text(scope_id(self.__scope)))]))
+        result: browser_command(self.__browser, "browsingContext.getTree", obj([{key: "root", value: Dyn.Text(scope_id(self.__scope))}]))
         contexts: browser_get(result, "contexts") ?? return Err(BrowserError{kind: "protocol"})
         ids := [String]{}
         if contexts == .Array(nodes) {
@@ -456,31 +456,31 @@ BrowserPage: struct {
     // A viewport PNG, decoded from the protocol's base64; never traced.
     screenshot: fn(self) -[Net, Time]> [U8] BrowserError! {
         page_live(self)
-        format: obj([(key: "type", value: Dyn.Text("image/png"))])
-        result: browser_command(self.__browser, "browsingContext.captureScreenshot", obj([(key: "context", value: Dyn.Text(scope_id(self.__scope))), (key: "format", value: format)]))
+        format: obj([{key: "type", value: Dyn.Text("image/png")}])
+        result: browser_command(self.__browser, "browsingContext.captureScreenshot", obj([{key: "context", value: Dyn.Text(scope_id(self.__scope))}, {key: "format", value: format}]))
         decode_data(result)
     }
 
     // A print-to-PDF document, decoded from the protocol's base64; never traced.
     pdf: fn(self) -[Net, Time]> [U8] BrowserError! {
         page_live(self)
-        result: browser_command(self.__browser, "browsingContext.print", obj([(key: "context", value: Dyn.Text(scope_id(self.__scope)))]))
+        result: browser_command(self.__browser, "browsingContext.print", obj([{key: "context", value: Dyn.Text(scope_id(self.__scope))}]))
         decode_data(result)
     }
 
     set_cookie: fn(self, name: String, value: String, domain: String) -[Net, Time]> BrowserError! {
         page_live(self)
         if name.len() == 0 || domain.len() == 0 -> return Err(BrowserError{kind: "protocol"})
-        cookie: obj([(key: "name", value: Dyn.Text(name.copy())), (key: "value", value: string_value(value)), (key: "domain", value: Dyn.Text(domain.copy()))])
-        browser_command(self.__browser, "storage.setCookie", obj([(key: "cookie", value: cookie), (key: "partition", value: page_partition(self))]))
+        cookie: obj([{key: "name", value: Dyn.Text(name.copy())}, {key: "value", value: string_value(value)}, {key: "domain", value: Dyn.Text(domain.copy())}])
+        browser_command(self.__browser, "storage.setCookie", obj([{key: "cookie", value: cookie}, {key: "partition", value: page_partition(self)}]))
         Ok()
     }
 
     cookie: fn(self, name: String) -[Net, Time]> String? BrowserError! {
         page_live(self)
         if name.len() == 0 -> return Err(BrowserError{kind: "protocol"})
-        filter: obj([(key: "name", value: Dyn.Text(name.copy()))])
-        result: browser_command(self.__browser, "storage.getCookies", obj([(key: "filter", value: filter), (key: "partition", value: page_partition(self))]))
+        filter: obj([{key: "name", value: Dyn.Text(name.copy())}])
+        result: browser_command(self.__browser, "storage.getCookies", obj([{key: "filter", value: filter}, {key: "partition", value: page_partition(self)}]))
         cookies: browser_get(result, "cookies") ?? return Err(BrowserError{kind: "protocol"})
         if cookies == .Array(items) {
             if items.len() == 0 -> return Ok(None)
@@ -492,7 +492,7 @@ BrowserPage: struct {
 
     clear_cookies: fn(self) -[Net, Time]> BrowserError! {
         page_live(self)
-        browser_command(self.__browser, "storage.deleteCookies", obj([(key: "partition", value: page_partition(self))]))
+        browser_command(self.__browser, "storage.deleteCookies", obj([{key: "partition", value: page_partition(self)}]))
         Ok()
     }
 
@@ -571,7 +571,7 @@ BrowserFrame: struct {
             return Ok()
         }
         id: scope_id(self.__scope)
-        browser_command(self.__browser, "browsingContext.close", obj([(key: "context", value: Dyn.Text(id))]))
+        browser_command(self.__browser, "browsingContext.close", obj([{key: "context", value: Dyn.Text(id)}]))
         scope_close(self.__scope)
         if id == scope_id(self.__page) -> scope_close(self.__page)
         Ok()
@@ -625,17 +625,17 @@ BrowserLocator: struct {
     // Clear, then assign through the DOM value path; no page data enters the trace.
     fill: fn(self, value: String) -[Net, Time]> BrowserError! {
         shared_id: self.resolve()
-        target: obj([(key: "context", value: Dyn.Text(scope_id(self.__page)))])
-        node: obj([(key: "type", value: Dyn.Text("node")), (key: "sharedId", value: Dyn.Text(shared_id))])
+        target: obj([{key: "context", value: Dyn.Text(scope_id(self.__page))}])
+        node: obj([{key: "type", value: Dyn.Text("node")}, {key: "sharedId", value: Dyn.Text(shared_id)}])
         browser_command(
             self.__browser,
             "script.callFunction",
             obj(
                 [
-                    (key: "functionDeclaration", value: Dyn.Text(C_FILL_FUNCTION)),
-                    (key: "awaitPromise", value: Dyn.Bool(false)),
-                    (key: "target", value: target),
-                    (key: "arguments", value: Dyn.Array([Dyn]{node.move(), string_value(value)})),
+                    {key: "functionDeclaration", value: Dyn.Text(C_FILL_FUNCTION)},
+                    {key: "awaitPromise", value: Dyn.Bool(false)},
+                    {key: "target", value: target},
+                    {key: "arguments", value: Dyn.Array([Dyn]{node.move(), string_value(value)})},
                 ],
             ),
         )
@@ -645,25 +645,25 @@ BrowserLocator: struct {
     press: fn(self, key: String) -[Net, Time]> BrowserError! {
         shared_id: self.resolve()
         locator_pointer(self, shared_id, true)
-        down: obj([(key: "type", value: Dyn.Text("keyDown")), (key: "value", value: Dyn.Text(key.copy()))])
-        up: obj([(key: "type", value: Dyn.Text("keyUp")), (key: "value", value: Dyn.Text(key.copy()))])
-        source: obj([(key: "type", value: Dyn.Text("key")), (key: "id", value: Dyn.Text("keyboard")), (key: "actions", value: Dyn.Array([Dyn]{down.move(), up.move()}))])
-        browser_command(self.__browser, "input.performActions", obj([(key: "context", value: Dyn.Text(scope_id(self.__page))), (key: "actions", value: Dyn.Array([Dyn]{source.move()}))]))
+        down: obj([{key: "type", value: Dyn.Text("keyDown")}, {key: "value", value: Dyn.Text(key.copy())}])
+        up: obj([{key: "type", value: Dyn.Text("keyUp")}, {key: "value", value: Dyn.Text(key.copy())}])
+        source: obj([{key: "type", value: Dyn.Text("key")}, {key: "id", value: Dyn.Text("keyboard")}, {key: "actions", value: Dyn.Array([Dyn]{down.move(), up.move()})}])
+        browser_command(self.__browser, "input.performActions", obj([{key: "context", value: Dyn.Text(scope_id(self.__page))}, {key: "actions", value: Dyn.Array([Dyn]{source.move()})}]))
         Ok()
     }
 
     set_files: fn(self, path: String) -[Net, Time]> BrowserError! {
         if path.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         shared_id: self.resolve()
-        element: obj([(key: "sharedId", value: Dyn.Text(shared_id))])
+        element: obj([{key: "sharedId", value: Dyn.Text(shared_id)}])
         browser_command(
             self.__browser,
             "input.setFiles",
             obj(
                 [
-                    (key: "context", value: Dyn.Text(scope_id(self.__page))),
-                    (key: "element", value: element),
-                    (key: "files", value: Dyn.Array([Dyn]{Dyn.Text(path.copy())})),
+                    {key: "context", value: Dyn.Text(scope_id(self.__page))},
+                    {key: "element", value: element},
+                    {key: "files", value: Dyn.Array([Dyn]{Dyn.Text(path.copy())})},
                 ],
             ),
         )
@@ -677,7 +677,7 @@ BrowserIntercept: struct {
 
     remove: fn(self) -[Net, Time]> BrowserError! {
         if scope_closed(self.__scope) -> return Ok()
-        browser_command(self.__browser, "network.removeIntercept", obj([(key: "intercept", value: Dyn.Text(scope_id(self.__scope)))]))
+        browser_command(self.__browser, "network.removeIntercept", obj([{key: "intercept", value: Dyn.Text(scope_id(self.__scope))}]))
         scope_close(self.__scope)
         Ok()
     }
@@ -713,8 +713,8 @@ BrowserProtocol: struct {
         }
         if !cdp_method_ok(method) -> return Err(BrowserError{kind: "protocol"})
         page_session: protocol_session(self)
-        request := [(key: String, value: Dyn)]{(key: "method", value: Dyn.Text(method.copy())), (key: "params", value: params)}
-        if page_session == .Val(session) -> request.push((key: "session", value: Dyn.Text(session)))
+        request := [{key: String, value: Dyn}]{{key: "method", value: Dyn.Text(method.copy())}, {key: "params", value: params}}
+        if page_session == .Val(session) -> request.push({key: "session", value: Dyn.Text(session)})
         result: browser_command(self.__browser, "goog:cdp.sendCommand", obj(request))
         Ok(json.dumps(result) ?? return Err(BrowserError{kind: "protocol"}))
     }
@@ -728,9 +728,9 @@ BrowserProtocol: struct {
             return Err(BrowserError{kind: "unsupported protocol"})
         }
         if !cdp_method_ok(event) -> return Err(BrowserError{kind: "protocol"})
-        request := [(key: String, value: Dyn)]{(key: "events", value: Dyn.Array([Dyn]{Dyn.Text("goog:cdp.{event}")}))}
+        request := [{key: String, value: Dyn}]{{key: "events", value: Dyn.Array([Dyn]{Dyn.Text("goog:cdp.{event}")})}}
         if protocol_session(self) != None {
-            request.push((key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(scope_id(self.__page))})))
+            request.push({key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(scope_id(self.__page))})})
         }
         browser_command(self.__browser, "session.subscribe", obj(request))
         Ok()
@@ -765,7 +765,7 @@ priv protocol_session: fn(protocol: BrowserProtocol) -[Net, Time]> String? Brows
     }
     known: scope_id(protocol.__session)
     if known != "" -> return Ok(Val(known))
-    result: browser_command(protocol.__browser, "goog:cdp.getSession", obj([(key: "context", value: Dyn.Text(page))]))
+    result: browser_command(protocol.__browser, "goog:cdp.getSession", obj([{key: "context", value: Dyn.Text(page)}]))
     session: browser_string(result, "session")
     if session == "" -> return Err(BrowserError{kind: "protocol"})
     scope_set_id(protocol.__session, session)
@@ -1062,9 +1062,9 @@ priv launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net,
     if port <= 0 || port > 65535 -> return Err(BrowserError{kind: "transport"})
     driver_url: "http://127.0.0.1:{port}"
     args: Dyn.Array([Dyn]{Dyn.Text("--headless=new"), Dyn.Text("--no-first-run"), Dyn.Text("--user-data-dir={dir.path}")})
-    options: obj([(key: "binary", value: Dyn.Text(pin.binary.copy())), (key: "args", value: args)])
-    always: obj([(key: "browserName", value: Dyn.Text("chrome")), (key: "webSocketUrl", value: Dyn.Bool(true)), (key: "goog:chromeOptions", value: options)])
-    request: json.dumps(obj([(key: "capabilities", value: obj([(key: "alwaysMatch", value: always)]))])) ?? return Err(BrowserError{kind: "protocol"})
+    options: obj([{key: "binary", value: Dyn.Text(pin.binary.copy())}, {key: "args", value: args}])
+    always: obj([{key: "browserName", value: Dyn.Text("chrome")}, {key: "webSocketUrl", value: Dyn.Bool(true)}, {key: "goog:chromeOptions", value: options}])
+    request: json.dumps(obj([{key: "capabilities", value: obj([{key: "alwaysMatch", value: always}])}])) ?? return Err(BrowserError{kind: "protocol"})
     response: http.post("{driver_url}/session", request) ?? return Err(BrowserError{kind: "transport"})
     body: response.body.text(C_MAX_SOURCE_BYTES) ?? return Err(BrowserError{kind: "transport"})
     reply: json.parse(body) ?? return Err(BrowserError{kind: "protocol"})
@@ -1157,8 +1157,8 @@ connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Ne
     if !browser_true_field(status, "ready") || !browser_text_field(status, "message") {
         return Err(BrowserError{kind: "protocol"})
     }
-    always: obj([(key: "alwaysMatch", value: empty_object())])
-    session: browser_command(browser, "session.new", obj([(key: "capabilities", value: always)]))
+    always: obj([{key: "alwaysMatch", value: empty_object()}])
+    session: browser_command(browser, "session.new", obj([{key: "capabilities", value: always}]))
     // The session counts as started before reply validation, so a failed
     // sessionId/capability check still ends the started session on close.
     browser_mark_started(browser)
@@ -1345,7 +1345,7 @@ browser_command_with_timeout: fn(browser: Browser, method: String, params: &&Dyn
     started: time.instant()
     browser_ws_timeout(browser, remaining_ms(started, timeout_ms))
     id: browser_next_id(browser)
-    request: obj([(key: "id", value: Dyn.Int(id)), (key: "method", value: Dyn.Text(method.copy())), (key: "params", value: params)])
+    request: obj([{key: "id", value: Dyn.Int(id)}, {key: "method", value: Dyn.Text(method.copy())}, {key: "params", value: params}])
     wire: json.dumps(request) ?? return Err(BrowserError{kind: "protocol"})
     method_hash: fact_hash(method)
     browser_trace_push(browser, "send:{id}:{method_hash}")
@@ -1526,12 +1526,12 @@ phase_ok: fn(phase: String) -> Bool Never! {
 
 // ---- Dyn helpers ------------------------------------------------------------
 
-obj: fn(entries: &&[(key: String, value: Dyn)]) -> Dyn Never! { tree.object_from_entries(entries) }
+obj: fn(entries: &&[{key: String, value: Dyn}]) -> Dyn Never! { tree.object_from_entries(entries) }
 
-empty_object: fn() -> Dyn Never! { tree.object_from_entries([(key: String, value: Dyn)]{}) }
+empty_object: fn() -> Dyn Never! { tree.object_from_entries([{key: String, value: Dyn}]{}) }
 
 string_value: fn(value: String) -> Dyn Never! {
-    obj([(key: "type", value: Dyn.Text("string")), (key: "value", value: Dyn.Text(value.copy()))])
+    obj([{key: "type", value: Dyn.Text("string")}, {key: "value", value: Dyn.Text(value.copy())}])
 }
 
 // The first field named `key` of an object; any other value has no fields.
@@ -1673,7 +1673,7 @@ priv scope_set_id: fn(scope: Shared<BrowserScope>, id: String) Never! {
 
 context_create_tab: fn(context: BrowserContext) -[Net, Time]> BrowserPage BrowserError! {
     if scope_closed(context.__scope) -> return Err(BrowserError{kind: "closed"})
-    result: browser_command(context.__browser, "browsingContext.create", obj([(key: "type", value: Dyn.Text("tab")), (key: "userContext", value: Dyn.Text(scope_id(context.__scope)))]))
+    result: browser_command(context.__browser, "browsingContext.create", obj([{key: "type", value: Dyn.Text("tab")}, {key: "userContext", value: Dyn.Text(scope_id(context.__scope))}]))
     id: browser_string(result, "context")
     Ok(BrowserPage{__browser: context.__browser, __context: context.__scope, __scope: new_scope(id)})
 }
@@ -1701,7 +1701,7 @@ collect_frame_ids: fn(node: Dyn, out: &[String]) BrowserError! {
 }
 
 page_partition: fn(page: BrowserPage) -> Dyn Never! {
-    obj([(key: "type", value: Dyn.Text("context")), (key: "context", value: Dyn.Text(scope_id(page.__scope)))])
+    obj([{key: "type", value: Dyn.Text("context")}, {key: "context", value: Dyn.Text(scope_id(page.__scope))}])
 }
 
 decode_data: fn(result: Dyn) -> [U8] BrowserError! {
@@ -1725,16 +1725,16 @@ storage_name: fn(kind: String) -> String? Never! {
 
 page_storage_call: fn(page: BrowserPage, function: String, arguments: &&[Dyn]) -[Net, Time]> Dyn BrowserError! {
     page_live(page)
-    target: obj([(key: "context", value: Dyn.Text(scope_id(page.__scope)))])
+    target: obj([{key: "context", value: Dyn.Text(scope_id(page.__scope))}])
     browser_command(
         page.__browser,
         "script.callFunction",
         obj(
             [
-                (key: "functionDeclaration", value: Dyn.Text(function.copy())),
-                (key: "awaitPromise", value: Dyn.Bool(false)),
-                (key: "target", value: target),
-                (key: "arguments", value: Dyn.Array(arguments)),
+                {key: "functionDeclaration", value: Dyn.Text(function.copy())},
+                {key: "awaitPromise", value: Dyn.Bool(false)},
+                {key: "target", value: target},
+                {key: "arguments", value: Dyn.Array(arguments)},
             ],
         ),
     )
@@ -1752,16 +1752,16 @@ remote_string: fn(result: Dyn) -> String? BrowserError! {
 // A fixed caller expression evaluated in the page; its result stays out of the trace.
 page_evaluate_text: fn(page: BrowserPage, expression: String) -[Net, Time]> String BrowserError! {
     page_live(page)
-    target: obj([(key: "context", value: Dyn.Text(scope_id(page.__scope)))])
+    target: obj([{key: "context", value: Dyn.Text(scope_id(page.__scope))}])
     result: browser_command(
         page.__browser,
         "script.evaluate",
         obj(
             [
-                (key: "expression", value: Dyn.Text(expression.copy())),
-                (key: "awaitPromise", value: Dyn.Bool(false)),
-                (key: "resultOwnership", value: Dyn.Text("none")),
-                (key: "target", value: target),
+                {key: "expression", value: Dyn.Text(expression.copy())},
+                {key: "awaitPromise", value: Dyn.Bool(false)},
+                {key: "resultOwnership", value: Dyn.Text("none")},
+                {key: "target", value: target},
             ],
         ),
     )
@@ -1813,18 +1813,18 @@ page_locator: fn(page: BrowserPage, kind: String, role: String, name: String, va
 
 locator_wire: fn(locator: BrowserLocator) -> Dyn BrowserError! {
     if locator.__kind == "accessibility" {
-        value := [(key: String, value: Dyn)]{}
+        value := [{key: String, value: Dyn}]{}
         if locator.__role.len() > 0 {
-            value.push((key: "role", value: Dyn.Text(locator.__role.copy())))
+            value.push({key: "role", value: Dyn.Text(locator.__role.copy())})
         }
         if locator.__name.len() > 0 {
-            value.push((key: "name", value: Dyn.Text(locator.__name.copy())))
+            value.push({key: "name", value: Dyn.Text(locator.__name.copy())})
         }
         if value.len() == 0 -> return Err(BrowserError{kind: "protocol"})
-        return Ok(obj([(key: "type", value: Dyn.Text("accessibility")), (key: "value", value: obj(value))]))
+        return Ok(obj([{key: "type", value: Dyn.Text("accessibility")}, {key: "value", value: obj(value)}]))
     }
     if locator.__kind == "css" || locator.__kind == "innerText" {
-        return Ok(obj([(key: "type", value: Dyn.Text(locator.__kind.copy())), (key: "value", value: Dyn.Text(locator.__value.copy()))]))
+        return Ok(obj([{key: "type", value: Dyn.Text(locator.__kind.copy())}, {key: "value", value: Dyn.Text(locator.__value.copy())}]))
     }
     Err(BrowserError{kind: "protocol"})
 }
@@ -1839,9 +1839,9 @@ locator_query: fn(locator: BrowserLocator, timeout_ms: Int) -[Net, Time]> String
         "browsingContext.locateNodes",
         obj(
             [
-                (key: "context", value: Dyn.Text(scope_id(locator.__page))),
-                (key: "locator", value: wire),
-                (key: "maxNodeCount", value: Dyn.Int(1)),
+                {key: "context", value: Dyn.Text(scope_id(locator.__page))},
+                {key: "locator", value: wire},
+                {key: "maxNodeCount", value: Dyn.Int(1)},
             ],
         ),
         timeout_ms,
@@ -1856,16 +1856,16 @@ locator_query: fn(locator: BrowserLocator, timeout_ms: Int) -[Net, Time]> String
 }
 
 locator_pointer: fn(locator: BrowserLocator, shared_id: String, down_up: Bool) -[Net, Time]> BrowserError! {
-    element: obj([(key: "sharedId", value: Dyn.Text(shared_id.copy()))])
-    origin: obj([(key: "type", value: Dyn.Text("element")), (key: "element", value: element)])
-    actions := [Dyn]{obj([(key: "type", value: Dyn.Text("pointerMove")), (key: "x", value: Dyn.Int(0)), (key: "y", value: Dyn.Int(0)), (key: "origin", value: origin)])}
+    element: obj([{key: "sharedId", value: Dyn.Text(shared_id.copy())}])
+    origin: obj([{key: "type", value: Dyn.Text("element")}, {key: "element", value: element}])
+    actions := [Dyn]{obj([{key: "type", value: Dyn.Text("pointerMove")}, {key: "x", value: Dyn.Int(0)}, {key: "y", value: Dyn.Int(0)}, {key: "origin", value: origin}])}
     if down_up {
-        actions.push(obj([(key: "type", value: Dyn.Text("pointerDown")), (key: "button", value: Dyn.Int(0))]))
-        actions.push(obj([(key: "type", value: Dyn.Text("pointerUp")), (key: "button", value: Dyn.Int(0))]))
+        actions.push(obj([{key: "type", value: Dyn.Text("pointerDown")}, {key: "button", value: Dyn.Int(0)}]))
+        actions.push(obj([{key: "type", value: Dyn.Text("pointerUp")}, {key: "button", value: Dyn.Int(0)}]))
     }
-    parameters: obj([(key: "pointerType", value: Dyn.Text("mouse"))])
-    source: obj([(key: "type", value: Dyn.Text("pointer")), (key: "id", value: Dyn.Text("mouse")), (key: "parameters", value: parameters), (key: "actions", value: Dyn.Array(actions))])
-    browser_command(locator.__browser, "input.performActions", obj([(key: "context", value: Dyn.Text(scope_id(locator.__page))), (key: "actions", value: Dyn.Array([Dyn]{source.move()}))]))
+    parameters: obj([{key: "pointerType", value: Dyn.Text("mouse")}])
+    source: obj([{key: "type", value: Dyn.Text("pointer")}, {key: "id", value: Dyn.Text("mouse")}, {key: "parameters", value: parameters}, {key: "actions", value: Dyn.Array(actions)}])
+    browser_command(locator.__browser, "input.performActions", obj([{key: "context", value: Dyn.Text(scope_id(locator.__page))}, {key: "actions", value: Dyn.Array([Dyn]{source.move()})}]))
     Ok()
 }
 
@@ -2002,44 +2002,44 @@ report_summary: fn(report: BrowserTestReport) -> String Never! {
 }
 
 report_source_value: fn(source: BrowserTestSource) -> Dyn Never! {
-    obj([(key: "path", value: Dyn.Text(source.path.copy())), (key: "line", value: Dyn.Int(source.line)), (key: "column", value: Dyn.Int(source.column))])
+    obj([{key: "path", value: Dyn.Text(source.path.copy())}, {key: "line", value: Dyn.Int(source.line)}, {key: "column", value: Dyn.Int(source.column)}])
 }
 
 report_attempt_value: fn(attempt: BrowserTestAttempt) -> Dyn Never! {
     actions := [Dyn]{}
     loop action in attempt.actions {
-        actions.push(obj([(key: "sequence", value: Dyn.Int(action.sequence)), (key: "kind", value: Dyn.Text(action.kind)), (key: "fact", value: Dyn.Text(action.fact)), (key: "source", value: report_source_value(attempt.source))]))
+        actions.push(obj([{key: "sequence", value: Dyn.Int(action.sequence)}, {key: "kind", value: Dyn.Text(action.kind)}, {key: "fact", value: Dyn.Text(action.fact)}, {key: "source", value: report_source_value(attempt.source)}]))
     }
     snapshots := [Dyn]{}
     loop snapshot in attempt.snapshots {
-        snapshots.push(obj([(key: "kind", value: Dyn.Text(snapshot.kind)), (key: "hash", value: Dyn.Text(snapshot.hash)), (key: "bytes", value: Dyn.Int(snapshot.bytes)), (key: "path", value: Dyn.Text(snapshot.path)), (key: "source", value: report_source_value(snapshot.source))]))
+        snapshots.push(obj([{key: "kind", value: Dyn.Text(snapshot.kind)}, {key: "hash", value: Dyn.Text(snapshot.hash)}, {key: "bytes", value: Dyn.Int(snapshot.bytes)}, {key: "path", value: Dyn.Text(snapshot.path)}, {key: "source", value: report_source_value(snapshot.source)}]))
     }
     events := [Dyn]{}
     loop event in attempt.events {
-        events.push(obj([(key: "kind", value: Dyn.Text(event.kind)), (key: "requestIdHash", value: Dyn.Text(event.request_id_hash)), (key: "requestMethod", value: Dyn.Text(event.request_method)), (key: "urlHash", value: Dyn.Text(event.url_hash)), (key: "statusCode", value: Dyn.Int(event.status_code)), (key: "isBlocked", value: Dyn.Bool(event.is_blocked))]))
+        events.push(obj([{key: "kind", value: Dyn.Text(event.kind)}, {key: "requestIdHash", value: Dyn.Text(event.request_id_hash)}, {key: "requestMethod", value: Dyn.Text(event.request_method)}, {key: "urlHash", value: Dyn.Text(event.url_hash)}, {key: "statusCode", value: Dyn.Int(event.status_code)}, {key: "isBlocked", value: Dyn.Bool(event.is_blocked)}]))
     }
     artifacts := [Dyn]{}
     loop artifact in attempt.artifacts {
-        artifacts.push(obj([(key: "name", value: Dyn.Text(artifact.name)), (key: "path", value: Dyn.Text(artifact.path)), (key: "mime", value: Dyn.Text(artifact.mime)), (key: "bytes", value: Dyn.Int(artifact.bytes)), (key: "hash", value: Dyn.Text(artifact.hash)), (key: "source", value: report_source_value(artifact.source))]))
+        artifacts.push(obj([{key: "name", value: Dyn.Text(artifact.name)}, {key: "path", value: Dyn.Text(artifact.path)}, {key: "mime", value: Dyn.Text(artifact.mime)}, {key: "bytes", value: Dyn.Int(artifact.bytes)}, {key: "hash", value: Dyn.Text(artifact.hash)}, {key: "source", value: report_source_value(artifact.source)}]))
     }
     trace := [Dyn]{}
     loop entry in attempt.trace -> trace.push(Dyn.Text(entry))
     error: if attempt.error.len() == 0 -> Dyn.Null else -> Dyn.Text(attempt.error.copy())
     obj(
         [
-            (key: "test", value: Dyn.Text(attempt.test.copy())),
-            (key: "engine", value: Dyn.Text(attempt.engine.copy())),
-            (key: "attempt", value: Dyn.Int(attempt.attempt)),
-            (key: "passed", value: Dyn.Bool(attempt.passed)),
-            (key: "expectedFailure", value: Dyn.Bool(attempt.expected_failure)),
-            (key: "durationMs", value: Dyn.Int(attempt.duration_ms)),
-            (key: "source", value: report_source_value(attempt.source)),
-            (key: "actions", value: Dyn.Array(actions)),
-            (key: "snapshots", value: Dyn.Array(snapshots)),
-            (key: "events", value: Dyn.Array(events)),
-            (key: "artifacts", value: Dyn.Array(artifacts)),
-            (key: "trace", value: Dyn.Array(trace)),
-            (key: "error", value: error),
+            {key: "test", value: Dyn.Text(attempt.test.copy())},
+            {key: "engine", value: Dyn.Text(attempt.engine.copy())},
+            {key: "attempt", value: Dyn.Int(attempt.attempt)},
+            {key: "passed", value: Dyn.Bool(attempt.passed)},
+            {key: "expectedFailure", value: Dyn.Bool(attempt.expected_failure)},
+            {key: "durationMs", value: Dyn.Int(attempt.duration_ms)},
+            {key: "source", value: report_source_value(attempt.source)},
+            {key: "actions", value: Dyn.Array(actions)},
+            {key: "snapshots", value: Dyn.Array(snapshots)},
+            {key: "events", value: Dyn.Array(events)},
+            {key: "artifacts", value: Dyn.Array(artifacts)},
+            {key: "trace", value: Dyn.Array(trace)},
+            {key: "error", value: error},
         ],
     )
 }
@@ -2050,18 +2050,18 @@ report_json: fn(report: BrowserTestReport) -> String Never! {
     loop case in report.cases {
         attempts := [Dyn]{}
         loop attempt in case.attempts -> attempts.push(report_attempt_value(attempt))
-        cases.push(obj([(key: "name", value: Dyn.Text(case.name)), (key: "selected", value: Dyn.Bool(case.selected)), (key: "attempts", value: Dyn.Array(attempts))]))
+        cases.push(obj([{key: "name", value: Dyn.Text(case.name)}, {key: "selected", value: Dyn.Bool(case.selected)}, {key: "attempts", value: Dyn.Array(attempts)}]))
     }
     document: obj(
         [
-            (key: "schema", value: Dyn.Text("jet.browser.test/v1")),
-            (key: "sourceRoot", value: Dyn.Text(report.source_root.copy())),
-            (key: "reporter", value: Dyn.Text(report.reporter.copy())),
-            (key: "ui", value: Dyn.Bool(report.ui)),
-            (key: "watch", value: Dyn.Bool(report.watch)),
-            (key: "summary", value: Dyn.Text(report_summary(report))),
-            (key: "exitCode", value: Dyn.Int(report_exit_code(report))),
-            (key: "cases", value: Dyn.Array(cases)),
+            {key: "schema", value: Dyn.Text("jet.browser.test/v1")},
+            {key: "sourceRoot", value: Dyn.Text(report.source_root.copy())},
+            {key: "reporter", value: Dyn.Text(report.reporter.copy())},
+            {key: "ui", value: Dyn.Bool(report.ui)},
+            {key: "watch", value: Dyn.Bool(report.watch)},
+            {key: "summary", value: Dyn.Text(report_summary(report))},
+            {key: "exitCode", value: Dyn.Int(report_exit_code(report))},
+            {key: "cases", value: Dyn.Array(cases)},
         ],
     )
     // The document holds no Float, so rendering cannot fail.
@@ -2180,17 +2180,17 @@ server_wait_ready: fn(url: String, timeout_ms: Int) -[Net, Time, Time.Wait]> Bro
 }
 
 // The host and port of an http:// or https:// URL without credentials.
-server_host_port: fn(url: String) -> (host: String, port: Int)? Never! {
+server_host_port: fn(url: String) -> {host: String, port: Int}? Never! {
     scheme: parse.split_once(url, "://")
     if !scheme.found || (scheme.head != "http" && scheme.head != "https") -> return None
     authority: parse.split_once(scheme.tail, "/").head
     if authority.len() == 0 || authority.contains("@") -> return None
     colon: parse.rpartition(authority, ":")
-    if colon.sep.len() == 0 -> return Val((host: authority, port: 80))
+    if colon.sep.len() == 0 -> return Val({host: authority, port: 80})
     if colon.head.len() == 0 -> return None
     port: parse_i64(colon.tail) ?? return None
     if port < 0 || port > 65535 -> return None
-    Val((host: colon.head, port: port))
+    Val({host: colon.head, port: port})
 }
 
 bounded_text: fn(value: String, limit: Int) -> String Never! {
@@ -2318,8 +2318,8 @@ C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElemen
     assert(trace_redacted([String]{"connect", "send:1:{hash}", "recv:1:{hash}", "event:{hash}"}))
     assert(!trace_redacted([String]{"send:x:{hash}"}))
     assert(!trace_redacted([String]{"goto:{hash}"}))
-    assert_eq(server_host_port("http://127.0.0.1:8080/app"), Val((host: "127.0.0.1", port: 8080)))
-    assert_eq(server_host_port("https://example.test"), Val((host: "example.test", port: 80)))
+    assert_eq(server_host_port("http://127.0.0.1:8080/app"), Val({host: "127.0.0.1", port: 8080}))
+    assert_eq(server_host_port("https://example.test"), Val({host: "example.test", port: 80}))
     assert_eq(server_host_port("http://user@host:1"), None)
     assert_eq(server_host_port("ftp://host"), None)
     assert_eq(css_attr_equals("data-testid", "a\"b"), "[data-testid=\"a\\\"b\"]")
@@ -2428,7 +2428,7 @@ config_value: fn(root: String, key: String) -[FS]> String? Never! {
     None
 }
 
-env_value: fn(env: [(name: [U8], value: [U8])], variable: String) -> String? Never! {
+env_value: fn(env: [{name: [U8], value: [U8]}], variable: String) -> String? Never! {
     key: variable.bytes()
     loop entry in env {
         if entry.name == key {
@@ -2439,12 +2439,12 @@ env_value: fn(env: [(name: [U8], value: [U8])], variable: String) -> String? Nev
     None
 }
 
-setting: fn(root: String, env: [(name: [U8], value: [U8])], variable: String, key: String) -[FS]> String? Never! {
+setting: fn(root: String, env: [{name: [U8], value: [U8]}], variable: String, key: String) -[FS]> String? Never! {
     if env_value(env, variable) == Val(value) -> return Val(value)
     config_value(root, key)
 }
 
-env_bool: fn(env: [(name: [U8], value: [U8])], variable: String, default: Bool) -> Bool Never! {
+env_bool: fn(env: [{name: [U8], value: [U8]}], variable: String, default: Bool) -> Bool Never! {
     value: env_value(env, variable) ?? return default
     normalized: parse.lower(text.trim(value))
     if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on" {
@@ -2509,7 +2509,7 @@ split_command: fn(raw: String) -> [String] Never! {
     command
 }
 
-config_from_snapshot: fn(root: String, env: [(name: [U8], value: [U8])]) -[FS]> BrowserTestConfig BrowserError! {
+config_from_snapshot: fn(root: String, env: [{name: [U8], value: [U8]}]) -[FS]> BrowserTestConfig BrowserError! {
     browsers: env_value(env, "JET_TEST_BROWSERS") ?? setting(root, env, "JET_TEST_BROWSER", "browsers") ?? "chromium"
     engines: test_engines(browsers)
     retries: parse_i64(setting(root, env, "JET_TEST_RETRIES", "retries") ?? "") ?? 0
@@ -2629,9 +2629,9 @@ strip_quotes: fn(raw: String) -> String Never! {
 
 #Test("browser handshake checks preserve native first-match and protocol rules") {
     ready: tree.object_from_entries(
-        [(key: String, value: Dyn)]{
-            (key: "ready", value: Dyn.Bool(true)),
-            (key: "message", value: Dyn.Text("ready")),
+        [{key: String, value: Dyn}]{
+            {key: "ready", value: Dyn.Bool(true)},
+            {key: "message", value: Dyn.Text("ready")},
         },
     )
     assert(browser_true_field(ready, "ready"))
@@ -2639,30 +2639,30 @@ strip_quotes: fn(raw: String) -> String Never! {
     assert(!browser_true_field(Dyn.Null, "ready"))
     assert(!browser_text_field(Dyn.Null, "message"))
     duplicate_ready: tree.object_from_entries(
-        [(key: String, value: Dyn)]{
-            (key: "ready", value: Dyn.Bool(false)),
-            (key: "ready", value: Dyn.Bool(true)),
+        [{key: String, value: Dyn}]{
+            {key: "ready", value: Dyn.Bool(false)},
+            {key: "ready", value: Dyn.Bool(true)},
         },
     )
     assert(!browser_true_field(duplicate_ready, "ready"))
     caps: tree.object_from_entries(
-        [(key: String, value: Dyn)]{
-            (key: "goog:cdp", value: Dyn.Bool(false)),
-            (key: "goog:cdp", value: Dyn.Bool(true)),
+        [{key: String, value: Dyn}]{
+            {key: "goog:cdp", value: Dyn.Bool(false)},
+            {key: "goog:cdp", value: Dyn.Bool(true)},
         },
     )
     session: tree.object_from_entries(
-        [(key: String, value: Dyn)]{
-            (key: "sessionId", value: Dyn.Text("")),
-            (key: "capabilities", value: caps),
+        [{key: String, value: Dyn}]{
+            {key: "sessionId", value: Dyn.Text("")},
+            {key: "capabilities", value: caps},
         },
     )
     assert_eq(browser_session_cdp(session) ?? panic("duplicate cdp session reads"), false)
     typed_text: tree.typed_string("typed")
     typed_session: tree.object_from_entries(
-        [(key: String, value: Dyn)]{
-            (key: "sessionId", value: typed_text),
-            (key: "capabilities", value: tree.object_from_entries([(key: String, value: Dyn)]{})),
+        [{key: String, value: Dyn}]{
+            {key: "sessionId", value: typed_text},
+            {key: "capabilities", value: tree.object_from_entries([{key: String, value: Dyn}]{})},
         },
     )
     assert_eq(browser_session_cdp(typed_session) ?? panic("typed session reads"), false)

@@ -1052,11 +1052,11 @@ sema_app_cron_error: fn(text: String) -> String? {
     loop (index, field) in fields {
         // The field's name, and the values it allows.
         allowed: if index == {
-            0 -> (name: "minute", low: 0, high: 59)
-            1 -> (name: "hour", low: 0, high: 23)
-            2 -> (name: "day of the month", low: 1, high: 31)
-            3 -> (name: "month", low: 1, high: 12)
-            else -> (name: "day of the week", low: 0, high: 7)
+            0 -> {name: "minute", low: 0, high: 59}
+            1 -> {name: "hour", low: 0, high: 23}
+            2 -> {name: "day of the month", low: 1, high: 31}
+            3 -> {name: "month", low: 1, high: 12}
+            else -> {name: "day of the week", low: 0, high: 7}
         }
         if !sema_app_cron_field_valid(field, allowed.low, allowed.high) {
             return Val("its {allowed.name} field `{field}` is not `*`, a number from {allowed.low} to {allowed.high}, a range of those or a list of these, each optionally stepped")

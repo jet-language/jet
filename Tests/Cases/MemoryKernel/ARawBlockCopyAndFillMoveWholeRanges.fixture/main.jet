@@ -1,7 +1,7 @@
 use core.mem
 
 run: fn() {
-    values := (a: 1, b: 2, c: 3, d: 4, e: 5)
+    values := {a: 1, b: 2, c: 3, d: 4, e: 5}
     #Unsafe("every range stays inside the `values` tuple, which outlives each access") {
         first: mem.Ptr<Int>.from_addr(mem.address_of(values))
         mem.copy(first.offset(1), first, 3)
@@ -12,7 +12,7 @@ run: fn() {
         mem.fill(first, 0, 0)
         print("{first.*} {first.offset(1).*} {first.offset(2).*} {first.offset(3).*} {first.offset(4).*}")
     }
-    names := (a: "left", b: "right")
+    names := {a: "left", b: "right"}
     #Unsafe("both Strings stay inside `names`; the static texts they replace need no drop") {
         name: mem.Ptr<String>.from_addr(mem.address_of(names))
         mem.fill(name, "mid", 2)

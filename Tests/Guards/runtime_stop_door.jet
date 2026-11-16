@@ -159,7 +159,7 @@ stop_door_reach: fn(name: String, calls: [String:[String]], ends: [String], exem
 #Test("every_runtime_stop_serves_comptime_through_trap_stop") {
     guards_enter_root()
     calls := [String:[String]]{}
-    exported := [(name: String, file: String)]{}
+    exported := [{name: String, file: String}]{}
     readers := [String]{}
     files := [String]{}
     loop child in
@@ -180,7 +180,7 @@ stop_door_reach: fn(name: String, calls: [String:[String]], ends: [String], exem
                 body = [String]{}
                 if declared == "" -> next
                 if line.starts_with("#Export(c) ") {
-                    exported.push((name: declared.copy(), file: file.copy()))
+                    exported.push({name: declared.copy(), file: file.copy()})
                 }
                 stop_door_line_calls(stop_door_slice(line, (line.split(": fn").to_list()[0]).count_bytes() + 4, line.count_bytes()), body)
             } else if current != "" {

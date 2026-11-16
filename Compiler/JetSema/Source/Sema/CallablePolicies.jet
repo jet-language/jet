@@ -167,7 +167,7 @@ sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, 
         defaults: if program.registration_graph == .Val(graph) -> sema_call_registration_defaults(graph, binding) ?? return None else -> sema_call_local_default_values(wrapper, binding, environment, program, scopes) ?? return None
         binding = sema_call_materialize_defaults(params, binding, arguments, defaults, policy.name_span, diagnostics) ?? return None
     }
-    (lowered, pins) := sema_call_check_bound_arguments_owned(state, policy.name, params, None, true, binding, arguments, environment, program, scopes, tail_store, context, policy.name_span, diagnostics) ?? return None
+    {lowered, pins} := sema_call_check_bound_arguments_owned(state, policy.name, params, None, true, binding, arguments, environment, program, scopes, tail_store, context, policy.name_span, diagnostics) ?? return None
     captured := callee
     captured_ty: all_params[count].ty ?? return None
     tree_expr_retype(captured, captured_ty)

@@ -272,7 +272,7 @@ exec_op: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int N
 
 // A ready statement of the ops `ops` (no P4) after the OP_Init that
 // vdbe_create starts it with, over n_mem registers, running.
-exec_test_stmt: fn(db: &conn.Conn, ops: [(op: Int, p1: Int, p2: Int, p3: Int)], n_mem: Int) -> conn.Vdbe Never! {
+exec_test_stmt: fn(db: &conn.Conn, ops: [{op: Int, p1: Int, p2: Int, p3: Int}], n_mem: Int) -> conn.Vdbe Never! {
     v := aux.vdbe_create(db)
     loop o in ops -> _: aux.add_op3(db, v, o.op, o.p1, o.p2, o.p3)
     aux.make_ready(db, v, 0, n_mem, 0, 0, false)
@@ -284,7 +284,7 @@ exec_test_stmt: fn(db: &conn.Conn, ops: [(op: Int, p1: Int, p2: Int, p3: Int)], 
 #Test("a program yields its row, then halts, counting its steps") {
     db := conn.conn_new()
     h := TestHost{interrupt_at: 0, progress_calls: 0}
-    v := exec_test_stmt(db, [(op: Int, p1: Int, p2: Int, p3: Int)]{(op: opc.OP_INTEGER, p1: 7, p2: 1, p3: 0), (op: opc.OP_RESULT_ROW, p1: 1, p2: 1, p3: 0), (op: opc.OP_HALT, p1: 0, p2: 0, p3: 0)}, 2)
+    v := exec_test_stmt(db, [{op: Int, p1: Int, p2: Int, p3: Int}]{{op: opc.OP_INTEGER, p1: 7, p2: 1, p3: 0}, {op: opc.OP_RESULT_ROW, p1: 1, p2: 1, p3: 0}, {op: opc.OP_HALT, p1: 0, p2: 0, p3: 0}}, 2)
     assert_eq(exec<TestHost>(h, db, v), base.ROW)
     assert_eq(v.result_row, 1)
     assert_eq(v.mem[1].i, 7)
@@ -298,7 +298,7 @@ exec_test_stmt: fn(db: &conn.Conn, ops: [(op: Int, p1: Int, p2: Int, p3: Int)], 
 #Test("a failing op aborts the statement with the message of its code") {
     db := conn.conn_new()
     h := TestHost{interrupt_at: 0, progress_calls: 0}
-    v := exec_test_stmt(db, [(op: Int, p1: Int, p2: Int, p3: Int)]{(op: opc.OP_NULL, p1: 0, p2: 1, p3: 0), (op: opc.OP_MUST_BE_INT, p1: 1, p2: 0, p3: 0), (op: opc.OP_HALT, p1: 0, p2: 0, p3: 0)}, 2)
+    v := exec_test_stmt(db, [{op: Int, p1: Int, p2: Int, p3: Int}]{{op: opc.OP_NULL, p1: 0, p2: 1, p3: 0}, {op: opc.OP_MUST_BE_INT, p1: 1, p2: 0, p3: 0}, {op: opc.OP_HALT, p1: 0, p2: 0, p3: 0}}, 2)
     assert_eq(exec<TestHost>(h, db, v), base.ERROR)
     assert_eq(v.rc, base.MISMATCH)
     assert_eq(String.from_bytes(v.err_msg ?? [U8]{}) ?? "", "datatype mismatch")
@@ -309,7 +309,7 @@ exec_test_stmt: fn(db: &conn.Conn, ops: [(op: Int, p1: Int, p2: Int, p3: Int)], 
     db := conn.conn_new()
     db.n_progress_ops = 2
     h := TestHost{interrupt_at: 3, progress_calls: 0}
-    v := exec_test_stmt(db, [(op: Int, p1: Int, p2: Int, p3: Int)]{(op: opc.OP_INTEGER, p1: 100, p2: 1, p3: 0), (op: opc.OP_DECR_JUMP_ZERO, p1: 1, p2: 4, p3: 0), (op: opc.OP_GOTO, p1: 0, p2: 2, p3: 0), (op: opc.OP_HALT, p1: 0, p2: 0, p3: 0)}, 2)
+    v := exec_test_stmt(db, [{op: Int, p1: Int, p2: Int, p3: Int}]{{op: opc.OP_INTEGER, p1: 100, p2: 1, p3: 0}, {op: opc.OP_DECR_JUMP_ZERO, p1: 1, p2: 4, p3: 0}, {op: opc.OP_GOTO, p1: 0, p2: 2, p3: 0}, {op: opc.OP_HALT, p1: 0, p2: 0, p3: 0}}, 2)
     assert_eq(exec<TestHost>(h, db, v), base.ERROR)
     assert_eq(v.rc, base.INTERRUPT)
     assert_eq(h.progress_calls, 3)
@@ -321,7 +321,7 @@ exec_test_stmt: fn(db: &conn.Conn, ops: [(op: Int, p1: Int, p2: Int, p3: Int)], 
 #Test("an interrupted connection or a failed allocation stops before the first op") {
     db := conn.conn_new()
     h := TestHost{interrupt_at: 0, progress_calls: 0}
-    ops: [(op: Int, p1: Int, p2: Int, p3: Int)]{(op: opc.OP_HALT, p1: 0, p2: 0, p3: 0)}
+    ops: [{op: Int, p1: Int, p2: Int, p3: Int}]{{op: opc.OP_HALT, p1: 0, p2: 0, p3: 0}}
     v := exec_test_stmt(db, ops, 1)
     db.is_interrupted = true
     assert_eq(exec<TestHost>(h, db, v), base.ERROR)

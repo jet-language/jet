@@ -26,7 +26,7 @@ PackageCapabilitySnapshot: struct {
 
 // The kind and name a snapshot signature line declares: the kind keyword and
 // the dotted path after it, up to the first `<`, `(`, `{`, `[`, `:`, `=` or space.
-pkg_api_snapshot_line_name: fn(line: String) -> (kind: String, name: String)? Never! {
+pkg_api_snapshot_line_name: fn(line: String) -> {kind: String, name: String}? Never! {
     loop kind in PKG_API_SNAPSHOT_KINDS {
         if !line.starts_with("{kind} ") -> next
         name := line.removeprefix("{kind} ")
@@ -34,7 +34,7 @@ pkg_api_snapshot_line_name: fn(line: String) -> (kind: String, name: String)? Ne
             if name.split_once(marker) == .Val(pair) -> name = pair.before
         }
         if name == "" -> return None
-        return Val((kind: kind.copy(), name: name))
+        return Val({kind: kind.copy(), name: name})
     }
     None
 }

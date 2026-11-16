@@ -73,15 +73,15 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
 }
 
 #Test("JetOS clean values and symbols preserve literal content") {
-    cases: [(input: String, value: String, symbol: String)]{
-        (input: "  \"hello\"  ", value: "hello", symbol: "hello"),
-        (input: "\"\"", value: "", symbol: ""),
-        (input: "\"", value: "\"", symbol: "\""),
-        (input: "\"unfinished", value: "\"unfinished", symbol: "\"unfinished"),
-        (input: "...users.user", value: "...users.user", symbol: "user"),
-        (input: " \" .users.users.user \" ", value: " .users.users.user ", symbol: "users.user"),
-        (input: "users", value: "users", symbol: "users"),
-        (input: "\"a\\nb\"", value: "a\\nb", symbol: "a\\nb"),
+    cases: [{input: String, value: String, symbol: String}]{
+        {input: "  \"hello\"  ", value: "hello", symbol: "hello"},
+        {input: "\"\"", value: "", symbol: ""},
+        {input: "\"", value: "\"", symbol: "\""},
+        {input: "\"unfinished", value: "\"unfinished", symbol: "\"unfinished"},
+        {input: "...users.user", value: "...users.user", symbol: "user"},
+        {input: " \" .users.users.user \" ", value: " .users.users.user ", symbol: "users.user"},
+        {input: "users", value: "users", symbol: "users"},
+        {input: "\"a\\nb\"", value: "a\\nb", symbol: "a\\nb"},
     }
     loop case in cases {
         assert_eq(jetos_clean_value(case.input), case.value)
@@ -124,13 +124,13 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
 }
 
 #Test("JetOS tier metadata is first-writer and explicit priority overrides tier") {
-    cases: [(tier: String, priority: Int)]{
-        (tier: ".Default", priority: 100),
-        (tier: "Force", priority: 10000),
-        (tier: "Normal", priority: 1000),
-        (tier: "force", priority: 1000),
-        (tier: "", priority: 1000),
-        (tier: "\"...users.Force\"", priority: 10000),
+    cases: [{tier: String, priority: Int}]{
+        {tier: ".Default", priority: 100},
+        {tier: "Force", priority: 10000},
+        {tier: "Normal", priority: 1000},
+        {tier: "force", priority: 1000},
+        {tier: "", priority: 1000},
+        {tier: "\"...users.Force\"", priority: 10000},
     }
     loop case in cases {
         system := jetos_test_system(
@@ -156,19 +156,19 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
 }
 
 #Test("JetOS priority honors i64 boundaries and falls back on invalid text") {
-    cases: [(text: String, expected: Int)]{
-        (text: "9223372036854775807", expected: 9223372036854775807),
-        (text: "-9223372036854775808", expected: -9223372036854775808),
-        (text: "+0007", expected: 7),
-        (text: "0", expected: 0),
-        (text: "9223372036854775808", expected: 10000),
-        (text: "-9223372036854775809", expected: 10000),
-        (text: "\" 7 \"", expected: 10000),
-        (text: "+", expected: 10000),
-        (text: "1_000", expected: 10000),
-        (text: "１２", expected: 10000),
-        (text: "", expected: 10000),
-        (text: "1.0", expected: 10000),
+    cases: [{text: String, expected: Int}]{
+        {text: "9223372036854775807", expected: 9223372036854775807},
+        {text: "-9223372036854775808", expected: -9223372036854775808},
+        {text: "+0007", expected: 7},
+        {text: "0", expected: 0},
+        {text: "9223372036854775808", expected: 10000},
+        {text: "-9223372036854775809", expected: 10000},
+        {text: "\" 7 \"", expected: 10000},
+        {text: "+", expected: 10000},
+        {text: "1_000", expected: 10000},
+        {text: "１２", expected: 10000},
+        {text: "", expected: 10000},
+        {text: "1.0", expected: 10000},
     }
     loop case in cases {
         system: jetos_test_system([OptionPlan]{jetos_test_option("k", "x"), jetos_test_option("k.tier", "Force"), jetos_test_option("k.priority", case.text)})
@@ -192,19 +192,19 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
 }
 
 #Test("JetOS type inference uses exact order and i64 grammar") {
-    cases: [(value: String, ty: String)]{
-        (value: " [broken", ty: "List"),
-        (value: " true ", ty: "Bool"),
-        (value: "false", ty: "Bool"),
-        (value: "True", ty: "String"),
-        (value: "+01", ty: "Int"),
-        (value: "-9223372036854775808", ty: "Int"),
-        (value: "9223372036854775808", ty: "String"),
-        (value: "1_0", ty: "String"),
-        (value: "1.0", ty: "String"),
-        (value: ".Force", ty: "Enum"),
-        (value: "\"false\"", ty: "String"),
-        (value: "", ty: "String"),
+    cases: [{value: String, ty: String}]{
+        {value: " [broken", ty: "List"},
+        {value: " true ", ty: "Bool"},
+        {value: "false", ty: "Bool"},
+        {value: "True", ty: "String"},
+        {value: "+01", ty: "Int"},
+        {value: "-9223372036854775808", ty: "Int"},
+        {value: "9223372036854775808", ty: "String"},
+        {value: "1_0", ty: "String"},
+        {value: "1.0", ty: "String"},
+        {value: ".Force", ty: "Enum"},
+        {value: "\"false\"", ty: "String"},
+        {value: "", ty: "String"},
     }
     loop case in cases -> assert_eq(jetos_option_type(case.value), case.ty)
     loop suffix in ([String]{".tier", ".priority", ".override", ".disabled"}) {
@@ -216,22 +216,22 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
 }
 
 #Test("JetOS namespace defaults and docs are byte-exact") {
-    cases: [(ns: String, default: String, doc: String)]{
-        (ns: "network", default: "dhcp-and-closed-firewall", doc: "Network identity, DNS, wireless, and firewall policy."),
-        (ns: "services", default: "disabled", doc: "System service declaration projected to systemd units and proof."),
-        (ns: "users", default: "absent", doc: "System account identity used by login and generated roots."),
-        (ns: "user", default: "absent", doc: "Per-user generation applied by jetos-user-apply."),
-        (ns: "filesystem", default: "guided-root", doc: "Mounted filesystems, swap, timezone, and root projection."),
-        (ns: "storage", default: "guided-root", doc: "Installer and activation storage tree."),
-        (ns: "boot", default: "safe-profile", doc: "Bootloader, kernel, initrd, firmware, and driver selection."),
-        (ns: "kernel", default: "safe-profile", doc: "Bootloader, kernel, initrd, firmware, and driver selection."),
-        (ns: "performance", default: "safe", doc: "Safe performance profile plus expert sysctl/zram/scheduler overrides."),
-        (ns: "theme", default: "default", doc: "Reusable theme projection for GTK, terminals, editors, DM, and Studio."),
-        (ns: "apps", default: "none", doc: "Foreign app ecosystem policy and app permissions."),
-        (ns: "workload", default: "none", doc: "Container or microVM workload declaration."),
-        (ns: "deploy", default: "unset", doc: "Fleet deploy target, rollout, health, and rollback policy."),
-        (ns: "other", default: "unset", doc: "JetOS system option."),
-        (ns: "", default: "unset", doc: "JetOS system option."),
+    cases: [{ns: String, default: String, doc: String}]{
+        {ns: "network", default: "dhcp-and-closed-firewall", doc: "Network identity, DNS, wireless, and firewall policy."},
+        {ns: "services", default: "disabled", doc: "System service declaration projected to systemd units and proof."},
+        {ns: "users", default: "absent", doc: "System account identity used by login and generated roots."},
+        {ns: "user", default: "absent", doc: "Per-user generation applied by jetos-user-apply."},
+        {ns: "filesystem", default: "guided-root", doc: "Mounted filesystems, swap, timezone, and root projection."},
+        {ns: "storage", default: "guided-root", doc: "Installer and activation storage tree."},
+        {ns: "boot", default: "safe-profile", doc: "Bootloader, kernel, initrd, firmware, and driver selection."},
+        {ns: "kernel", default: "safe-profile", doc: "Bootloader, kernel, initrd, firmware, and driver selection."},
+        {ns: "performance", default: "safe", doc: "Safe performance profile plus expert sysctl/zram/scheduler overrides."},
+        {ns: "theme", default: "default", doc: "Reusable theme projection for GTK, terminals, editors, DM, and Studio."},
+        {ns: "apps", default: "none", doc: "Foreign app ecosystem policy and app permissions."},
+        {ns: "workload", default: "none", doc: "Container or microVM workload declaration."},
+        {ns: "deploy", default: "unset", doc: "Fleet deploy target, rollout, health, and rollback policy."},
+        {ns: "other", default: "unset", doc: "JetOS system option."},
+        {ns: "", default: "unset", doc: "JetOS system option."},
     }
     loop case in cases {
         assert_eq(jetos_option_default(case.ns), case.default)
@@ -272,8 +272,8 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
     assert_eq(boot.to_json(), "{{\"loader\":{quoted},\"kernel\":{quoted},\"init\":{quoted},\"initrd_modules\":[{quoted}]}}")
     resolved: JetOSResolvedOption{key: controls, value: controls, tier: controls, priority: 1, contenders: [JetOSOptionContender]{JetOSOptionContender{value: controls, tier: controls, priority: 1, source_order: 0, winner: true}}}
     assert_eq(resolved.to_json(), "{{\"key\":{quoted},\"value\":{quoted},\"tier\":{quoted},\"priority\":1,\"contenders\":[{{\"value\":{quoted},\"tier\":{quoted},\"priority\":1,\"source_order\":0,\"winner\":true}}]}}")
-    assert_eq(pkg_json_render(jetos_option_rows_dyn([(key: String, value: String)]{(key: controls, value: controls)})), "[{{\"key\":{quoted},\"value\":{quoted}}}]")
-    assert_eq(jetos_render_user_profile_json_parts(controls, controls, controls, [String]{}, [String]{}, [(key: String, value: String)]{}), "{{\"kind\":\"jetos.user-generation\",\"user\":{quoted},\"home\":{quoted},\"shell\":{quoted},\"packages\":[],\"services\":[],\"files\":[],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
+    assert_eq(pkg_json_render(jetos_option_rows_dyn([{key: String, value: String}]{{key: controls, value: controls}})), "[{{\"key\":{quoted},\"value\":{quoted}}}]")
+    assert_eq(jetos_render_user_profile_json_parts(controls, controls, controls, [String]{}, [String]{}, [{key: String, value: String}]{}), "{{\"kind\":\"jetos.user-generation\",\"user\":{quoted},\"home\":{quoted},\"shell\":{quoted},\"packages\":[],\"services\":[],\"files\":[],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
 }
 
 #Test("JetOS boot profile defaults empty lists and honors explicit aliases") {
@@ -315,7 +315,7 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
     )
     assert_eq(jetos_render_user_profile_json(system, "user"), "{{\"kind\":\"jetos.user-generation\",\"user\":\"user\",\"home\":\"/new\",\"shell\":\"/run/current-system/sw/bin/fish\",\"packages\":[\"hello\",\"a,b\"],\"services\":[\"syncthing\"],\"files\":[{{\"path\":\"a\\\"b\",\"source\":\"source\\\\n\"}},{{\"path\":\"a\\\"b\",\"source\":\"second\"}}],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}")
     plural: jetos_test_system([OptionPlan]{jetos_test_option("users.user.home", "/home/other"), jetos_test_option("users.user.shell", "/bin/zsh"), jetos_test_option("users.user.packages", "[.hello]"), jetos_test_option("user.user.services", "[.syncthing]")})
-    assert_eq(jetos_render_user_profile_json(plural, "user"), jetos_render_user_profile_json_parts("user", "/home/other", "/bin/zsh", [String]{"hello"}, [String]{"syncthing"}, [(key: String, value: String)]{}))
+    assert_eq(jetos_render_user_profile_json(plural, "user"), jetos_render_user_profile_json_parts("user", "/home/other", "/bin/zsh", [String]{"hello"}, [String]{"syncthing"}, [{key: String, value: String}]{}))
     assert_eq(jetos_package_path_or_literal("packages."), "/run/current-system/sw/bin/")
     assert_eq(jetos_package_path_or_literal("/bin/sh"), "/bin/sh")
     assert_eq(jetos_package_path_or_literal(" packages.sh"), " packages.sh")

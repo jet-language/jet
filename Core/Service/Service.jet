@@ -3365,13 +3365,13 @@ group: fn(tree: &ServiceTree, name: String, workers: [String]) ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot add groups after start"))
     known := [String]{}
     loop worker in tree.workers -> known.push(worker.name)
-    groups := [(name: String, workers: [String])]{}
-    loop existing in tree.groups -> groups.push((name: existing.name, workers: existing.workers))
+    groups := [{name: String, workers: [String]}]{}
+    loop existing in tree.groups -> groups.push({name: existing.name, workers: existing.workers})
     validate_group(name, workers, known, groups)
     tree.groups.push(TreeGroup{name: name, restart: tree.restart, budget_max: tree.budget_max, budget_per_ms: tree.budget_per_ms, workers: workers})
 }
 
-validate_group: fn(name: String, workers: [String], known: [String], groups: [(name: String, workers: [String])]) ServiceError! {
+validate_group: fn(name: String, workers: [String], known: [String], groups: [{name: String, workers: [String]}]) ServiceError! {
     if name.trim().len() == 0 || !valid_service_text(name, 256) || workers.len() == 0 || workers.len() > 4096 {
         return Err(ServiceError.Policy("service group needs a visible name and at least one worker"))
     }
@@ -3464,12 +3464,12 @@ valid_record_payload: fn(text: String) -> Bool Never! {
 
 #Test("service group policy preserves native error precedence") {
     assert(
-        if validate_group("", [String]{}, [String]{}, [(name: String, workers: [String])]{}) == {
+        if validate_group("", [String]{}, [String]{}, [{name: String, workers: [String]}]{}) == {
             .Err(.Policy(message)) -> message == "service group needs a visible name and at least one worker"
             .Ok(_) | .Err(_) -> false
         },
     )
-    existing: [(name: String, workers: [String])]{(name: "g", workers: [String]{"w"})}
+    existing: [{name: String, workers: [String]}]{{name: "g", workers: [String]{"w"}}}
     assert(
         if validate_group("g", [String]{"unknown"}, [String]{"w"}, existing) == {
             .Err(.Policy(message)) -> message == "group `g` already exists"
@@ -3489,7 +3489,7 @@ valid_record_payload: fn(text: String) -> Bool Never! {
         },
     )
     assert(
-        if validate_group("new", [String]{"w", "w"}, [String]{"w"}, [(name: String, workers: [String])]{}) == {
+        if validate_group("new", [String]{"w", "w"}, [String]{"w"}, [{name: String, workers: [String]}]{}) == {
             .Err(.Policy(message)) -> message == "group `new` lists a worker more than once"
             .Ok(_) | .Err(_) -> false
         },
@@ -4980,7 +4980,7 @@ worker_supervisor: fn(groups: [[String]], worker: String) -> Int Never! {
     groups.len()
 }
 
-worker_scope: fn(names: [String], groups: [[String]], worker: String) -> (supervisor: Int, scope: [Int]) Never! {
+worker_scope: fn(names: [String], groups: [[String]], worker: String) -> {supervisor: Int, scope: [Int]} Never! {
     supervisor: worker_supervisor(groups, worker)
     if supervisor < groups.len() {
         scope := [Int]{}
@@ -4990,7 +4990,7 @@ worker_scope: fn(names: [String], groups: [[String]], worker: String) -> (superv
                 .None -> {}
             }
         }
-        return (supervisor: supervisor, scope: scope)
+        return {supervisor: supervisor, scope: scope}
     }
     scope := [Int]{}
     loop i in 0..<names.len() {
@@ -5000,7 +5000,7 @@ worker_scope: fn(names: [String], groups: [[String]], worker: String) -> (superv
         }
         if !grouped -> scope.push(i)
     }
-    (supervisor: groups.len(), scope: scope)
+    {supervisor: groups.len(), scope: scope}
 }
 
 worker_targets: fn(restart: ServiceRestart, scope: [Int], failed: Int) -> [Int] Never! {

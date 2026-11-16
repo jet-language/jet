@@ -77,8 +77,8 @@ ir_heap_block_fill: fn(bytes: Int) -> Int Never! {
 // of B bytes holds (B - header) / stride slots, B / stride - ceil(header /
 // stride), and the next block twice that plus the step. Any other stride
 // doubles from its first capacity.
-ir_list_growth: fn(stride: Int) -> (first: Int, step: Int) Never! {
-    if stride <= 0 -> return (first: 4, step: 0)
+ir_list_growth: fn(stride: Int) -> {first: Int, step: Int} Never! {
+    if stride <= 0 -> return {first: 4, step: 0}
     four := 32
     loop four < 4 * stride + IR_HEAP_BLOCK_HEADER -> four *= 2
     one := IR_LIST_FIRST_BLOCK
@@ -87,7 +87,7 @@ ir_list_growth: fn(stride: Int) -> (first: Int, step: Int) Never! {
     first: (block - IR_HEAP_BLOCK_HEADER) /% stride
     power := 1
     loop power < stride -> power *= 2
-    (first: first, step: if power == stride -> (IR_HEAP_BLOCK_HEADER + stride - 1) /% stride else -> 0)
+    {first: first, step: if power == stride -> (IR_HEAP_BLOCK_HEADER + stride - 1) /% stride else -> 0}
 }
 
 // The largest first List buffer that holds more than one slot
@@ -98,7 +98,7 @@ IR_LIST_FIRST_BLOCK: 256
 // (element row `row`), whose buffer first grows (ir_list_growth) when full,
 // and the List's length; the caller stores the element there, then counts
 // it (ir_list_counted).
-ir_list_slot: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> (address: Int, length: Int) Never! {
+ir_list_slot: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> {address: Int, length: Int} Never! {
     stride: ir_list_stride(m, row)
     growth: ir_list_growth(stride)
     width: ir_word_const(m, b, stride)
@@ -122,7 +122,7 @@ ir_list_slot: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> (address: 
     ir_emit(b.f, IROp.Store, -1, list, 8, grown, b.line)
     ir_end(b.f, b.line)
     elements: ir_load_word(m, b, list, 16)
-    (address: ir_element_address(m, b, elements, length, stride), length: length)
+    {address: ir_element_address(m, b, elements, length, stride), length: length}
 }
 
 // Twice `capacity` plus `step` (ir_list_growth), in a fresh slot.
@@ -3458,7 +3458,7 @@ ir_closure_sort: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: I
         b.stopping = true
         called: ir_call_closure(m, b, callback, [Int]{fill.item}, ret_row)
         b.stopping = stopping
-        ir_sort_key_stop(m, b, keys, key_row, key_stride, computed, close_glue, [(data: Int, bytes: Int)]{(data: order, bytes: order_bytes), (data: keys, bytes: key_bytes)})
+        ir_sort_key_stop(m, b, keys, key_row, key_stride, computed, close_glue, [{data: Int, bytes: Int}]{{data: order, bytes: order_bytes}, {data: keys, bytes: key_bytes}})
         b.fresh[called] = false
         key_address: ir_element_address(m, b, keys, fill.index, key_stride)
         if fallible {
@@ -3664,7 +3664,7 @@ ir_sort_keys_drop: fn(m: &IRModule, b: &IRBuilder, keys: Int, key_row: Int, key_
 // The stop point after a key callback (ir_stop_point): a stop first closes
 // and drops the keys computed before it (`count`, in input order) and frees
 // the sort's buffers, then leaves by the stop edge.
-ir_sort_key_stop: fn(m: &IRModule, b: &IRBuilder, keys: Int, key_row: Int, key_stride: Int, count: Int, glue: Int, buffers: [(data: Int, bytes: Int)]) Never! {
+ir_sort_key_stop: fn(m: &IRModule, b: &IRBuilder, keys: Int, key_row: Int, key_stride: Int, count: Int, glue: Int, buffers: [{data: Int, bytes: Int}]) Never! {
     if !m.stop_points || b.stopping {
         return
     }
@@ -6276,25 +6276,25 @@ ir_reflect_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [In
 // The Value record of `value` (of `value_ty`, borrowed), its names the
 // arguments at `at` (sema_call_reflection_names, read by ir_reflect_name) and
 // its level after them: the new record and the index after the level.
-ir_reflect_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, record_row: Int, args: [Int], at: Int, span: Span) -> (record: Int, after: Int) Never! {
+ir_reflect_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, record_row: Int, args: [Int], at: Int, span: Span) -> {record: Int, after: Int} Never! {
     after_names: ir_reflect_names_end(p, b, args, at)
     if after_names < 0 {
-        return (record: ir_fail_slot(b, span, "reflect.of names of {ir_type_name(value_ty)}"), after: at)
+        return {record: ir_fail_slot(b, span, "reflect.of names of {ir_type_name(value_ty)}"), after: at}
     }
     shown: ir_render(m, p, b, value_ty, value, IRRender.Display, span)
-    if ir_failed(b) || shown < 0 -> return (record: -1, after: at)
+    if ir_failed(b) || shown < 0 -> return {record: -1, after: at}
     fields: ir_reflect_fields(m, p, b, value_ty, value, args, after_names, span)
-    if ir_failed(b) || fields.fields < 0 -> return (record: -1, after: fields.after)
+    if ir_failed(b) || fields.fields < 0 -> return {record: -1, after: fields.after}
     type_text: ir_reflect_name(m, p, b, value_ty, value, args, at, 0)
     path_text: ir_reflect_name(m, p, b, value_ty, value, args, at, 1)
-    if ir_failed(b) -> return (record: -1, after: fields.after)
+    if ir_failed(b) -> return {record: -1, after: fields.after}
     record: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{type_text, path_text, shown, fields.fields}, record_row)
     ir_reflect_hold(m, b, record, value_ty, value)
     ir_release(m, b, shown)
     ir_release(m, b, type_text)
     ir_release(m, b, path_text)
     after: ir_reflect_cases(m, p, b, value_ty, value, record, args, fields.after, span)
-    (record: record, after: after)
+    {record: record, after: after}
 }
 
 // The index after the names that start at `args[names]` (the type name, the
@@ -6321,13 +6321,13 @@ ir_reflect_name: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, v
 
 // The fields of one reflect.of level, read from `args` at `at`: the new
 // field list of `value` (of `value_ty`) and the index after them.
-ir_reflect_fields: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, args: [Int], at: Int, span: Span) -> (fields: Int, after: Int) Never! {
+ir_reflect_fields: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, args: [Int], at: Int, span: Span) -> {fields: Int, after: Int} Never! {
     if at >= args.len() {
-        return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), after: at)
+        return {fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), after: at}
     }
     count: ir_reflect_count(p, b, args[at])
     if count < 0 {
-        return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), after: at)
+        return {fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), after: at}
     }
     pointer_row: ir_pointer_row(m)
     capacity: ir_word_const(m, b, count)
@@ -6335,19 +6335,19 @@ ir_reflect_fields: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type,
     cursor := at + 1
     loop _ in 0..<count {
         if cursor >= args.len() {
-            return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), after: cursor)
+            return {fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), after: cursor}
         }
         name: ir_reflect_literal(p, b, args[cursor])
-        field_ty: ir_declared_field_type(m, p, value_ty, name) ?? return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), after: cursor)
+        field_ty: ir_declared_field_type(m, p, value_ty, name) ?? return {fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), after: cursor}
         if value < 0 || ir_kind_of(m, b, value) != .Aggregate {
-            return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), after: cursor)
+            return {fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), after: cursor}
         }
-        member: ir_member_of(m, p, b, value, name) ?? return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), after: cursor)
+        member: ir_member_of(m, p, b, value, name) ?? return {fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), after: cursor}
         read: ir_member_read(m, b, value, member)
         cursor = ir_reflect_field(m, p, b, fields, field_ty, read, args, cursor, span)
-        if ir_failed(b) -> return (fields: -1, after: cursor)
+        if ir_failed(b) -> return {fields: -1, after: cursor}
     }
-    (fields: fields, after: cursor)
+    {fields: fields, after: cursor}
 }
 
 // One field entry at `at` (its name, then the names and level of
@@ -7202,7 +7202,7 @@ ir_dyn_len: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: In
         ir_end(b.f, b.line)
     }
     // The remaining variants name their DynKind kind in the stop detail.
-    unsized: [(kind: String, name: String)]{(kind: "null", name: "Null"), (kind: "Bool", name: "Bool"), (kind: "Int", name: "Int"), (kind: "Float", name: "Float"), (kind: "number", name: "Number")}
+    unsized: [{kind: String, name: String}]{{kind: "null", name: "Null"}, {kind: "Bool", name: "Bool"}, {kind: "Int", name: "Int"}, {kind: "Float", name: "Float"}, {kind: "number", name: "Number"}}
     loop entry in unsized {
         found: ir_variant_index(p, dyn_row, entry.name) ?? return ir_fail_slot(b, span, "Dyn.len has no {entry.name} variant")
         expected: ir_word_const(m, b, found)

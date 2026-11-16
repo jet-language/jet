@@ -284,10 +284,10 @@ program: fn(battery: Battery, arm: String) -> String Never! {
 sections: fn(binary: String) -> Dyn {
     ran: timed(process.cmd([String]{"size", "-A", binary}))
     if ran.status != Val(0) -> return "unavailable".encode()
-    out := [(key: String, value: Dyn)]{}
+    out := [{key: String, value: Dyn}]{}
     loop line in ran.stdout.split("\n") {
         found: regex.match(Regex{"^(\.\S+)\s+(\d+)\s+\d+"}, line) ?? next
-        out.push((key: found.groups[0].copy(), value: (Int.parse(found.groups[1]) ?? 0).encode()))  // copy: the match keeps its groups
+        out.push({key: found.groups[0].copy(), value: (Int.parse(found.groups[1]) ?? 0).encode()})  // copy: the match keeps its groups
     }
     Dyn.Object(out)
 }
@@ -332,10 +332,10 @@ allocations: fn(binary: String, lib: String, dir: String) -> Dyn Err! {
     if ran.status != Val(0) || !files.exists(out_file) {
         return Ok(unavailable("exit {shown(ran.status)}"))
     }
-    fields := [(key: String, value: Dyn)]{(key: "status", value: "measured".encode())}
+    fields := [{key: String, value: Dyn}]{{key: "status", value: "measured".encode()}}
     loop pair in files.read(out_file).trim().split(" ") {
         parts: pair.split("=").to_list()
-        fields.push((key: parts[0].copy(), value: number(parts.get(1))))  // copy: the split keeps its parts
+        fields.push({key: parts[0].copy(), value: number(parts.get(1))})  // copy: the split keeps its parts
     }
     if fields.any(fn(field) { field.key == "allocations" && field.value == 0.encode() }) {
         return Ok(unavailable("binary does not use the preloadable libc allocator"))

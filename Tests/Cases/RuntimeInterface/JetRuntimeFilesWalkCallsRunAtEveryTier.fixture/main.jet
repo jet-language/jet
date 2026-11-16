@@ -10,7 +10,7 @@ tree: fn(key: Int, slot: Int, output: &[String]) -[FS]> Bool {
     if rules.status_reason != None -> return false
     opened: files.walk_read_dir(key, slot)
     if opened.status_reason != None -> return false
-    kept := [(path: String, child: Int, directory: Bool)]{}
+    kept := [{path: String, child: Int, directory: Bool}]{}
     loop {
         entry: files.walk_next(key, slot)
         if entry.status_reason != None -> return false
@@ -20,9 +20,9 @@ tree: fn(key: Int, slot: Int, output: &[String]) -[FS]> Bool {
             next
         }
         if entry.directory -> files.walk_inherit(key, entry.child, slot)
-        kept.push((path: entry.path, child: entry.child, directory: entry.directory))
+        kept.push({path: entry.path, child: entry.child, directory: entry.directory})
     }
-    kept.sort_by(fn(left: (path: String, child: Int, directory: Bool), right: (path: String, child: Int, directory: Bool)) { left.path <=> right.path })
+    kept.sort_by(fn(left: {path: String, child: Int, directory: Bool}, right: {path: String, child: Int, directory: Bool}) { left.path <=> right.path })
     loop entry in kept {
         output.push(entry.path)
         if entry.directory {

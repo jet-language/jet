@@ -31,7 +31,7 @@ JetCLIPinFixtureRoot: struct {
     root: cli_files.tmpdir("jet-cli-pin-modes-") ?? panic("temporary pin project")
     owner: JetCLIPinFixtureRoot{path: root}
     defer close(owner)
-    modes: [(json: Bool, quiet: Bool)]{(json: true, quiet: false), (json: false, quiet: true), (json: true, quiet: true)}
+    modes: [{json: Bool, quiet: Bool}]{{json: true, quiet: false}, {json: false, quiet: true}, {json: true, quiet: true}}
     loop mode in modes {
         output: jet_cli_update_jet_pin(root, Val("a0.4.2"), "a0.4.2", false, mode.json, mode.quiet)
         assert_eq(output.stdout, "")

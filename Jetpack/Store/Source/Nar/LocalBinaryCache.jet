@@ -6,14 +6,14 @@ use files: core.files
 // Publish a verified, signed NAR and narinfo into a local cache directory.
 // `info.url` is the relative NAR location; the narinfo is stored beside it
 // with a `.narinfo` suffix. Existing bytes must match exactly.
-store_publish_local: fn(cache: String, info: NarInfo, nar: [U8], key: TrustKey) -> (nar_path: String, info_path: String) StoreError! {
+store_publish_local: fn(cache: String, info: NarInfo, nar: [U8], key: TrustKey) -> {nar_path: String, info_path: String} StoreError! {
     signed: info.signed(key)
     store_verify_nar_info_bytes(signed, nar)
     nar_path: files.join(cache, signed.url)
     info_path: files.join(cache, store_narinfo_name(signed.store_path))
     store_nar_write_or_match(nar_path, nar)
     store_nar_write_or_match(info_path, signed.to_text().bytes())
-    Ok((nar_path: nar_path, info_path: info_path))
+    Ok({nar_path: nar_path, info_path: info_path})
 }
 
 // Substitute a local NAR only after narinfo trust and byte identity checks.

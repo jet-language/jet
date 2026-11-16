@@ -299,30 +299,30 @@ pkg_lock_record_rust_bridge: fn(project_root: String, bridge_identity: String, p
 // The complete recorded Nix realization for `reference`.
 // The output is a content digest, never a host path; the closure record
 // carries everything offline replay and cache validation need.
-pkg_lock_nix_realization: fn(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? {
+pkg_lock_nix_realization: fn(project_root: String, reference: String) -[FS]> {closure: NixClosureRecord, envelope: LockEnvelope}? {
     found: pkg_lock_nix_realization_strict(project_root, reference) ?? return None
     found
 }
 
 // Strict `pkg_lock_nix_realization`: a present but malformed lock is a
 // trust-state failure, never a cache miss.
-pkg_lock_nix_realization_strict: fn(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? LockError! {
+pkg_lock_nix_realization_strict: fn(project_root: String, reference: String) -[FS]> {closure: NixClosureRecord, envelope: LockEnvelope}? LockError! {
     // `??` would fold a LockError into the miss; let the error propagate.
     found: pkg_lock_locked_nix_package_strict(project_root, reference)
     record: found ?? return Ok(None)
-    Ok(Val((closure: record.closure, envelope: record.envelope)))
+    Ok(Val({closure: record.closure, envelope: record.envelope}))
 }
 
 // The package identity with its complete portable Nix lock record; None
 // when the lock has no record for `reference`.
-pkg_lock_locked_nix_package: fn(project_root: String, reference: String) -[FS]> (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope)? {
+pkg_lock_locked_nix_package: fn(project_root: String, reference: String) -[FS]> {name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope}? {
     found: pkg_lock_locked_nix_package_strict(project_root, reference) ?? return None
     found
 }
 
 // Strict `pkg_lock_locked_nix_package`: a present but malformed lock is a
 // trust-state failure, never a cache miss.
-pkg_lock_locked_nix_package_strict: fn(project_root: String, reference_input: String) -[FS]> (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope)? LockError! {
+pkg_lock_locked_nix_package_strict: fn(project_root: String, reference_input: String) -[FS]> {name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope}? LockError! {
     loaded: pkg_lock_load_strict(project_root)
     lock: loaded ?? return Ok(None)
     reference: pkg_canonical_locked_ref(reference_input)
@@ -343,7 +343,7 @@ pkg_lock_locked_nix_package_strict: fn(project_root: String, reference_input: St
                     return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
                 }
                 envelope.validate_nix_catalog()
-                return Ok(Val((closure: closure, envelope: envelope, name: package.name, version: package.version)))
+                return Ok(Val({closure: closure, envelope: envelope, name: package.name, version: package.version}))
             }
             .Root | .Path(_) | .Git(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {}
         }
@@ -392,14 +392,14 @@ pkg_lock_record_cran_realization: fn(project_root: String, name: String, version
 }
 
 // Exact CRAN realization trust root for online integrity and offline replay.
-pkg_lock_cran_realization: fn(project_root: String, reference: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
+pkg_lock_cran_realization: fn(project_root: String, reference: String) -[FS]> {output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope}? {
     lock: pkg_lock_load(project_root) ?? return None
     loop package in lock.packages {
         if package.source == {
             .Cran(locked_reference, output, source_hash, repository, authority) -> {
                 if locked_reference == reference {
                     envelope: package.envelope ?? return None
-                    return Val((authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash))
+                    return Val({authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash})
                 }
             }
             .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {}
@@ -416,14 +416,14 @@ pkg_lock_record_luarocks_realization: fn(project_root: String, name: String, ver
 
 // Exact LuaRocks realization trust root for online integrity and offline
 // replay.
-pkg_lock_luarocks_realization: fn(project_root: String, reference: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
+pkg_lock_luarocks_realization: fn(project_root: String, reference: String) -[FS]> {output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope}? {
     lock: pkg_lock_load(project_root) ?? return None
     loop package in lock.packages {
         if package.source == {
             .LuaRocks(locked_reference, output, source_hash, repository, authority) -> {
                 if locked_reference == reference {
                     envelope: package.envelope ?? return None
-                    return Val((authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash))
+                    return Val({authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash})
                 }
             }
             .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {}
@@ -441,7 +441,7 @@ pkg_lock_record_registry_realization: fn(project_root: String, registry: String,
 
 // Exact scripting-registry trust root for online drift checks and offline
 // replay.
-pkg_lock_registry_realization: fn(project_root: String, registry: String, reference_input: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
+pkg_lock_registry_realization: fn(project_root: String, registry: String, reference_input: String) -[FS]> {output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope}? {
     lock: pkg_lock_load(project_root) ?? return None
     reference: pkg_canonical_locked_ref(reference_input)
     loop package in lock.packages {
@@ -449,7 +449,7 @@ pkg_lock_registry_realization: fn(project_root: String, registry: String, refere
             .Registry(locked_registry, locked_reference, output, source_hash, repository, authority, _, _) -> {
                 if locked_registry == registry && locked_reference == reference {
                     envelope: package.envelope ?? return None
-                    return Val((authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash))
+                    return Val({authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash})
                 }
             }
             .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Foreign(_, _, _) -> {}

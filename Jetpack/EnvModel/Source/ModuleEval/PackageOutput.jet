@@ -180,7 +180,7 @@ envmodel_project_host: fn(path: String, name: String, value: OutputPayload) -> H
         .None -> fields.get(ENVMODEL_OUTPUT_FIELD_NAME)
     }
     system: envmodel_normalize_system_name(envmodel_output_text(named, "{path}.system"))
-    overrides := [(name: String, value: HostOverrideValue)]{}
+    overrides := [{name: String, value: HostOverrideValue}]{}
     provenance := [HostOverrideProvenance]{}
     loop field in envmodel_sorted_payload_keys(fields) {
         if field == ENVMODEL_HOST_FIELD_SYSTEM || field == ENVMODEL_OUTPUT_FIELD_NAME -> next
@@ -193,7 +193,7 @@ envmodel_project_host: fn(path: String, name: String, value: OutputPayload) -> H
             ENVMODEL_SYSTEM_FIELD_OPTIONS -> HostOverrideValue.Options{values: envmodel_project_options(Val(field_value), field_path)}
             else -> HostOverrideValue.Value{value: envmodel_payload_ct_value(field_value)}
         }
-        overrides.push((name: field, value: projected))
+        overrides.push({name: field, value: projected})
         provenance.push(HostOverrideProvenance{field: field, dependencies: [String]{}, pure: true, source: envmodel_payload_display(field_value)})
     }
     if overrides.len() == 0 {

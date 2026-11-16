@@ -161,14 +161,14 @@ status: fn(o: Options) -> Dyn Failure! {
 }
 
 set_offline: fn(d: Driver, offline: Bool) Failure! {
-    conditions: if offline -> Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("offline"))}) else -> Dyn.Null
+    conditions: if offline -> Dyn.Object([{key: String, value: Dyn}]{{key: "type", value: Dyn.Text("offline")}}) else -> Dyn.Null
     command(
         d.bidi,
         "emulation.setNetworkConditions",
         Dyn.Object(
-            [(key: String, value: Dyn)]{
-                (key: "networkConditions", value: conditions),
-                (key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})),
+            [{key: String, value: Dyn}]{
+                {key: "networkConditions", value: conditions},
+                {key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})},
             },
         ),
     )
@@ -176,16 +176,16 @@ set_offline: fn(d: Driver, offline: Bool) Failure! {
 }
 
 press: fn(d: Driver, key: String) Failure! {
-    down: Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("keyDown")), (key: "value", value: Dyn.Text(key.copy()))})
-    up: Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("keyUp")), (key: "value", value: Dyn.Text(key.copy()))})
-    source: Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("key")), (key: "id", value: Dyn.Text("keyboard")), (key: "actions", value: Dyn.Array([Dyn]{down, up}))})
+    down: Dyn.Object([{key: String, value: Dyn}]{{key: "type", value: Dyn.Text("keyDown")}, {key: "value", value: Dyn.Text(key.copy())}})
+    up: Dyn.Object([{key: String, value: Dyn}]{{key: "type", value: Dyn.Text("keyUp")}, {key: "value", value: Dyn.Text(key.copy())}})
+    source: Dyn.Object([{key: String, value: Dyn}]{{key: "type", value: Dyn.Text("key")}, {key: "id", value: Dyn.Text("keyboard")}, {key: "actions", value: Dyn.Array([Dyn]{down, up})}})
     command(
         d.bidi,
         "input.performActions",
         Dyn.Object(
-            [(key: String, value: Dyn)]{
-                (key: "context", value: Dyn.Text(d.context.copy())),
-                (key: "actions", value: Dyn.Array([Dyn]{source})),
+            [{key: String, value: Dyn}]{
+                {key: "context", value: Dyn.Text(d.context.copy())},
+                {key: "actions", value: Dyn.Array([Dyn]{source})},
             },
         ),
     )
@@ -233,11 +233,11 @@ perform: fn(d: Driver, expression: String) Failure! {
 // None when the page threw.
 evaluate: fn(d: Driver, expression: String) -> String? Failure! {
     params: Dyn.Object(
-        [(key: String, value: Dyn)]{
-            (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
-            (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
-            (key: "awaitPromise", value: Dyn.Bool(true)),
-            (key: "resultOwnership", value: Dyn.Text("none")),
+        [{key: String, value: Dyn}]{
+            {key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")},
+            {key: "target", value: Dyn.Object([{key: String, value: Dyn}]{{key: "context", value: Dyn.Text(d.context.copy())}})},
+            {key: "awaitPromise", value: Dyn.Bool(true)},
+            {key: "resultOwnership", value: Dyn.Text("none")},
         },
     )
     reply: command(d.bidi, "script.evaluate", params)
@@ -250,10 +250,10 @@ navigate: fn(d: Driver, address: String) Failure! {
         d.bidi,
         "browsingContext.navigate",
         Dyn.Object(
-            [(key: String, value: Dyn)]{
-                (key: "context", value: Dyn.Text(d.context.copy())),
-                (key: "url", value: Dyn.Text(address.copy())),
-                (key: "wait", value: Dyn.Text("complete")),
+            [{key: String, value: Dyn}]{
+                {key: "context", value: Dyn.Text(d.context.copy())},
+                {key: "url", value: Dyn.Text(address.copy())},
+                {key: "wait", value: Dyn.Text("complete")},
             },
         ),
     )
@@ -264,7 +264,7 @@ navigate: fn(d: Driver, address: String) Failure! {
 open: fn(engine: String) -> Driver Failure! {
     session: browser.launch(engine) ?? return Err(Failure{message: "{engine} launch failed: {err}"})
     bidi: session.protocol("bidi") ?? return Err(Failure{message: "BiDi protocol unavailable: {err}"})
-    created: command(bidi, "browsingContext.create", Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("tab"))}))
+    created: command(bidi, "browsingContext.create", Dyn.Object([{key: String, value: Dyn}]{{key: "type", value: Dyn.Text("tab")}}))
     context: text(field(created, "context"))
     if context == "" -> return Err(Failure{message: "browsingContext.create returned no context"})
     Ok(Driver{session: session, bidi: bidi, context: context})

@@ -77,14 +77,14 @@ run: fn() -> Never Err! {
     )
     bench: vars["BENCH"]
     strip: process.which("strip") ?? STRIP_FALLBACK
-    sources: [String:(file: String, text: String)]{
-        "c": (file: "main.c", text: "#include <stdio.h>\nint main(void){{puts(\"hello\");return 0;}}\n"),
-        "zig": (file: "main.zig", text: "const std = @import(\"std\");\npub fn main() void {{ std.debug.print(\"hello\\n\", .{{}}); }}\n"),
-        "rs": (file: "main.rs", text: "fn main(){{println!(\"hello\");}}\n"),
-        "go": (file: "main.go", text: "package main\nimport \"fmt\"\nfunc main(){{fmt.Println(\"hello\")}}\n"),
-        "odin": (file: "main.odin", text: "package main\nimport \"core:fmt\"\nmain :: proc() {{ fmt.println(\"hello\") }}\n"),
-        "jet": (file: "main.jet", text: "run: fn() {{\n    print(\"hello\")\n}}\n"),
-        "asm": (file: "hello.S", text: files.read(files.join(files.dirname(files.dirname(sys.executable())), "hello.S"))),
+    sources: [String:{file: String, text: String}]{
+        "c": {file: "main.c", text: "#include <stdio.h>\nint main(void){{puts(\"hello\");return 0;}}\n"},
+        "zig": {file: "main.zig", text: "const std = @import(\"std\");\npub fn main() void {{ std.debug.print(\"hello\\n\", .{{}}); }}\n"},
+        "rs": {file: "main.rs", text: "fn main(){{println!(\"hello\");}}\n"},
+        "go": {file: "main.go", text: "package main\nimport \"fmt\"\nfunc main(){{fmt.Println(\"hello\")}}\n"},
+        "odin": {file: "main.odin", text: "package main\nimport \"core:fmt\"\nmain :: proc() {{ fmt.println(\"hello\") }}\n"},
+        "jet": {file: "main.jet", text: "run: fn() {{\n    print(\"hello\")\n}}\n"},
+        "asm": {file: "hello.S", text: files.read(files.join(files.dirname(files.dirname(sys.executable())), "hello.S"))},
     }
     results := [Row]{}
     loop toolchain in toolchains(vars["JET"]) {
@@ -181,13 +181,13 @@ resident: fn(pid: String, group: Int) -> Int Err! {
 
 // The binary's size as built and after `strip` on a copy, or None when it is
 // missing.
-size: fn(binary: String?, strip: String) -> (built: Int?, stripped: Int?) Err! {
-    path: binary ?? return Ok((built: None, stripped: None))
-    if !files.exists(path) -> return Ok((built: None, stripped: None))
+size: fn(binary: String?, strip: String) -> {built: Int?, stripped: Int?} Err! {
+    path: binary ?? return Ok({built: None, stripped: None})
+    if !files.exists(path) -> return Ok({built: None, stripped: None})
     target: "{path}.stripped"
     files.copy(path, target)
     _: process.cmd([strip, target]).run()
-    Ok((built: Val(files.stat(path).size), stripped: Val(files.stat(target).size)))
+    Ok({built: Val(files.stat(path).size), stripped: Val(files.stat(target).size)})
 }
 
 // The binary's fastest run of five in milliseconds, or None when it is

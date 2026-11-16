@@ -180,14 +180,14 @@ Cursor: struct {
     }
 
     // The next Thrift field header as (id, kind); kind 0 ends the struct.
-    field: fn(&self, input: [U8], last: Int) -> (id: Int, kind: Int) ParquetFailure! {
+    field: fn(&self, input: [U8], last: Int) -> {id: Int, kind: Int} ParquetFailure! {
         head: self.byte(input) ?? return Err(err)
         kind: head & 15
-        if kind == 0 -> return Ok((id: 0, kind: 0))
+        if kind == 0 -> return Ok({id: 0, kind: 0})
         delta: head >> 4
-        if delta != 0 -> return Ok((id: last + delta, kind: kind))
+        if delta != 0 -> return Ok({id: last + delta, kind: kind})
         id: self.zigzag(input) ?? return Err(err)
-        Ok((id: id, kind: kind))
+        Ok({id: id, kind: kind})
     }
 
     int: fn(&self, input: [U8], kind: Int) -> Int ParquetFailure! {
@@ -217,7 +217,7 @@ Cursor: struct {
 
     // A list header as (size, element kind); every element takes at least
     // one byte, so a size past the region is refused before any loop.
-    list: fn(&self, input: [U8], kind: Int) -> (size: Int, kind: Int) ParquetFailure! {
+    list: fn(&self, input: [U8], kind: Int) -> {size: Int, kind: Int} ParquetFailure! {
         if kind != THRIFT_LIST && kind != 10 {
             return Err(decode_failure("Thrift field of type {kind} where a list belongs"))
         }
@@ -227,7 +227,7 @@ Cursor: struct {
         if size < 0 || size > self.end - self.pos {
             return Err(decode_failure("Thrift list of {size} elements runs past its region"))
         }
-        Ok((size: size, kind: head & 15))
+        Ok({size: size, kind: head & 15})
     }
 
     // Skips one value of `kind`; a Bool element of a list or map is one byte.
@@ -950,9 +950,9 @@ read_rows: fn(input: [U8], max_rows: Int, max_page_bytes: Int) -> Dyn ParquetFai
             columns.push(values)
         }
         loop row in 0..<group.rows {
-            entries := [(key: String, value: Dyn)]{}
+            entries := [{key: String, value: Dyn}]{}
             loop (index, leaf) in leaves {
-                entries.push((key: leaf.name.copy(), value: columns[index][row].copy()))
+                entries.push({key: leaf.name.copy(), value: columns[index][row].copy()})
             }
             rows.push(stream.object_from_entries(entries))
         }
@@ -1095,7 +1095,7 @@ test_file: fn(column: TestColumn) -> [U8] Never! {
 test_rows: fn(values: [Dyn]) -> Dyn Never! {
     rows := [Dyn]{}
     loop value in values {
-        entries := [(key: String, value: Dyn)]{(key: "v", value: value.copy())}
+        entries := [{key: String, value: Dyn}]{{key: "v", value: value.copy()}}
         rows.push(stream.object_from_entries(entries))
     }
     Dyn.Array(rows)

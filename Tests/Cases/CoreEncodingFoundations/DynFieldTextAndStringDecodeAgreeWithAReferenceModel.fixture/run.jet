@@ -38,14 +38,14 @@ build: fn(encoded: Dyn) -> Dyn {
                 values: loop item in items -> build(item)
                 return Dyn.Array(values)
             }
-            pairs := [(key: String, value: Dyn)]{}
+            pairs := [{key: String, value: Dyn}]{}
             loop item in items {
                 if item == .Array(pair) {
                     key: if pair[0] == {
                         .Text(k) -> k
                         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("encoded key")
                     }
-                    pairs.push((key: key, value: build(pair[1])))
+                    pairs.push({key: key, value: build(pair[1])})
                 }
             }
             return Dyn.Object(pairs)

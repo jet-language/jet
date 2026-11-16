@@ -742,7 +742,7 @@ parser_skip_named_pattern_line_breaks: fn(state: &JetParserState) Never! {
 // Each entry is `field: slot` or the shorthand `field` (binds `field`); an
 // optional `..` ends the list. Sema places the entries on the case's
 // positional payload slots.
-parser_parse_named_pattern_slots: fn(state: &JetParserState, variant: String, depth: Int) -> (slots: [PatSlot], end: Span) {
+parser_parse_named_pattern_slots: fn(state: &JetParserState, variant: String, depth: Int) -> {slots: [PatSlot], end: Span} {
     parser_bump(state)
     slots := [PatSlot]{}
     loop {
@@ -777,7 +777,7 @@ parser_parse_named_pattern_slots: fn(state: &JetParserState, variant: String, de
         parser_bump(state)
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after named-field pattern entries")
-    (end: close.span, slots: slots)
+    {end: close.span, slots: slots}
 }
 
 parser_parse_struct_pattern: fn(state: &JetParserState, type_span: Span, depth: Int, type_name: PatternTypeHead?) -> ParsedPattern {

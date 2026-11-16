@@ -16,10 +16,10 @@ text_size: fn(value: String) -> Int { value.len() }
 
 run: fn() {
     total := 0
-    loop (package, name) in [(package: "a", name: "bc")] {
+    loop (package, name) in [{package: "a", name: "bc"}] {
         total += text_size(name) + text_size(package)
     }
-    rows: [(package: "x", name: "y")]
+    rows: [{package: "x", name: "y"}]
     loop (name, package) in rows {
         total += text_size("{package}{name}")
     }
@@ -39,7 +39,7 @@ run: fn() {
 #Test("a_loop_tuple_pattern_with_an_unknown_name_is_e0313") {
     errors: loop_tuple_errors(
         `run: fn() {
-    loop (package, nme) in [(package: "a", name: "b")] {
+    loop (package, nme) in [{package: "a", name: "b"}] {
         print(package)
     }
 }
@@ -51,7 +51,7 @@ run: fn() {
 #Test("a_loop_tuple_pattern_with_the_wrong_count_is_e0315") {
     errors: loop_tuple_errors(
         `run: fn() {
-    loop (package, name) in [(package: "a", name: "b", version: 1)] {
+    loop (package, name) in [{package: "a", name: "b", version: 1}] {
         print("{package}{name}")
     }
 }

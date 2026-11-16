@@ -4895,7 +4895,7 @@ sema_stmt_category_heads: fn(condition: Expr, raw: [U8], heads: &[String]) -> Bo
 // A guard's body after its condition: an arrow body is the rest of its line,
 // a braced body with one line becomes an arrow body, and a longer braced body
 // stays braced one level deeper.
-sema_stmt_guard_body_text: fn(raw: [U8], from: Int, indent: String) -> (text: String, end: Int)? {
+sema_stmt_guard_body_text: fn(raw: [U8], from: Int, indent: String) -> {text: String, end: Int}? {
     at := from
     loop at < raw.len() && (raw[at] == (U8{32}) || raw[at] == (U8{9})) -> at += 1
     if at + 1 < raw.len() && raw[at] == (U8{45}) && raw[at + 1] == (U8{62}) {
@@ -4909,7 +4909,7 @@ sema_stmt_guard_body_text: fn(raw: [U8], from: Int, indent: String) -> (text: St
         }
         if trimmed == at -> return None
         text: String.from_bytes(raw[at..<trimmed]) ?? return None
-        return Val((text: text, end: trimmed))
+        return Val({text: text, end: trimmed})
     }
     if at >= raw.len() || raw[at] != (U8{123}) -> return None
     close := at + 1
@@ -4935,11 +4935,11 @@ sema_stmt_guard_body_text: fn(raw: [U8], from: Int, indent: String) -> (text: St
     loop line in inner.split("\n") {
         if line.trim().len() > 0 -> lines.push(line.trim_end())
     }
-    if lines.len() == 0 -> return Val((text: "{{}}", end: close + 1))
-    if lines.len() == 1 -> return Val((text: lines[0].trim(), end: close + 1))
+    if lines.len() == 0 -> return Val({text: "{{}}", end: close + 1})
+    if lines.len() == 1 -> return Val({text: lines[0].trim(), end: close + 1})
     text := "{{\n"
     loop line in lines -> text = "{text}    {line}\n"
-    Val((text: "{text}{indent}    }}", end: close + 1))
+    Val({text: "{text}{indent}    }}", end: close + 1})
 }
 
 // The local a classic else-less one-arm `if` compares with literals, when
@@ -6280,7 +6280,7 @@ sema_stmt_tuple_destructure_by_name: fn(elements: [BindName], fields: [TypeTuple
         }
     }
     rename: "{{ {renames.join(", ")} }}"
-    diagnostic: sema_error("E0313", span, "`{written}` isn't a member of {type_name(ty)}", "a tuple destructure binds each member by its name, never by position", "name the members, `({members.join(", ")}): …`, or rename them: `{rename}: …`")
+    diagnostic: sema_error("E0313", span, "`{written}` isn't a member of {type_name(ty)}", "a tuple destructure binds each member by its name, never by position", "name the members, `{{{members.join(", ")}}}: …`, or rename them: `{rename}: …`")
     if !fixable -> return diagnostic
     diagnostic_with_edit(diagnostic, TextEdit{span: pattern_span, new_text: rename})
 }

@@ -142,7 +142,7 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
 }
 
 // Rust `parse_javascript_param_doc` (1742-1748).
-jet_cli_import_parse_javascript_param_doc: fn(raw: String) -> (ty: String, name: String)? Never! {
+jet_cli_import_parse_javascript_param_doc: fn(raw: String) -> {ty: String, name: String}? Never! {
     text: raw.trim().copy()
     if !text.starts_with("{{") -> return None
     close: jet_cli_import_find_bytes(text.bytes(), "}}", false) ?? return None
@@ -151,7 +151,7 @@ jet_cli_import_parse_javascript_param_doc: fn(raw: String) -> (ty: String, name:
     if words.is_empty() -> return None
     name: jet_cli_import_trim_edge_bytes(words[0], U8{91}, U8{93})
     if !jet_cli_import_identifier(name) -> return None
-    Val((ty: ty, name: name))
+    Val({ty: ty, name: name})
 }
 
 // Rust `map_javascript_doc_type` (1750-1761).
@@ -456,7 +456,7 @@ jet_cli_import_parse_header: fn(line: String) -> JetCLIImportFunction JetCLIImpo
         return Err(jet_cli_import_text_error("function needs a return annotation"))
     }
     result: jet_cli_import_map_type(jet_cli_import_byte_slice(suffix.bytes(), 2, suffix.bytes().len()).trim().copy())
-    params := [(name: String, ty: String)]{}
+    params := [{name: String, ty: String}]{}
     raw_params: jet_cli_import_byte_slice(body.bytes(), open + 1, close).trim().copy()
     if !raw_params.is_empty() {
         loop raw in jet_cli_import_split_commas(raw_params) {
@@ -466,7 +466,7 @@ jet_cli_import_parse_header: fn(line: String) -> JetCLIImportFunction JetCLIImpo
                 return Err(jet_cli_import_text_error("parameter {param} has no safe importer mapping"))
             }
             ty: jet_cli_import_map_type(jet_cli_import_byte_slice(raw.bytes(), colon + 1, raw.bytes().len()).trim().copy())
-            params.push((name: jet_cli_import_canonical_identifier(param), ty: ty))
+            params.push({name: jet_cli_import_canonical_identifier(param), ty: ty})
         }
     }
     Ok(JetCLIImportFunction{name: name, params: params, result: result, body: []})

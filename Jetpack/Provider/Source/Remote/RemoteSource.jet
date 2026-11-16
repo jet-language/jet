@@ -44,10 +44,10 @@ RemoteSource: struct {
 }
 
 // `base#rev` with an empty revision meaning none.
-provider_remote_split_ref: fn(upstream: String) -> (base: String, rev: String?) Never! {
-    halves: upstream.split_once("#") ?? return (base: upstream, rev: None)
-    if halves.after == "" -> return (base: halves.before, rev: None)
-    (base: halves.before, rev: Val(halves.after))
+provider_remote_split_ref: fn(upstream: String) -> {base: String, rev: String?} Never! {
+    halves: upstream.split_once("#") ?? return {base: upstream, rev: None}
+    if halves.after == "" -> return {base: halves.before, rev: None}
+    {base: halves.before, rev: Val(halves.after)}
 }
 
 // A revision may never be empty, carry control characters, or start with

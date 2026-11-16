@@ -7,7 +7,7 @@ package: {
 hot: fn(tx: Sender<Int>) -[!Time]> { tx.send(1) }
 
 run: fn() {
-    (tx, rx): channel<Int>(capacity: 1)
+    {tx, rx}: channel<Int>(capacity: 1)
     tx.send(0)
     #Deadline(5ms) { hot(tx) }
     print(rx.receive() ?? 0)

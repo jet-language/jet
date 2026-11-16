@@ -33,7 +33,7 @@ decode_devtools_envelope: fn(payload: String) -> JetDevtoolsDecodedEnvelope Err!
     Ok(JetDevtoolsDecodedEnvelope.Events{envelope: events})
 }
 
-devtools_decode_events: fn(object: [(key: String, value: Dyn)], &&session_id: String, started_at_ms: Int) -> JetDevtoolsEnvelope Err! {
+devtools_decode_events: fn(object: [{key: String, value: Dyn}], &&session_id: String, started_at_ms: Int) -> JetDevtoolsEnvelope Err! {
     items: devtools_decode_array(object, "events")
     if items.len() > JET_DEVTOOLS_MAX_EVENTS -> return Err("devtools envelope exceeds the retained event limit")
     envelope := JetDevtoolsEnvelope.new(session_id, started_at_ms)
@@ -122,7 +122,7 @@ devtools_decode_event: fn(value: Dyn) -> JetDevtoolsEvent Err! {
 
 // The typed first-party body of an event, or None when `kind` has none or its
 // fields are not exactly that body's (the event then stays untyped).
-devtools_decode_body: fn(kind: String, object: [(key: String, value: Dyn)]) -> JetDevtoolsEventBody? Err! {
+devtools_decode_body: fn(kind: String, object: [{key: String, value: Dyn}]) -> JetDevtoolsEventBody? Err! {
     if devtools_decode_expected_fields(kind) == .Val(expected) {
         if !devtools_decode_exact(object, expected) -> return Ok(None)
     }
@@ -243,7 +243,7 @@ devtools_decode_expected_fields: fn(kind: String) -> [String]? Never! {
     }
 }
 
-devtools_decode_commands: fn(object: [(key: String, value: Dyn)], &&session_id: String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Err! {
+devtools_decode_commands: fn(object: [{key: String, value: Dyn}], &&session_id: String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Err! {
     if !devtools_decode_exact(object, [String]{"protocol", "session_id", "started_at_ms", "direction", "commands"}) -> return Err("devtools command envelope has unexpected top-level fields")
     items: devtools_decode_array(object, "commands")
     if items.len() > JET_DEVTOOLS_MAX_COMMANDS -> return Err("devtools envelope exceeds the retained command limit")
@@ -354,12 +354,12 @@ devtools_decode_trace_kind: fn(value: String) -> JetDevtoolsTraceKind Err! {
     }
 }
 
-devtools_decode_has: fn(object: [(key: String, value: Dyn)], key: String) -> Bool Never! {
+devtools_decode_has: fn(object: [{key: String, value: Dyn}], key: String) -> Bool Never! {
     recording_lookup(object, key) != None
 }
 
 // The object's distinct keys are exactly `expected`.
-devtools_decode_exact: fn(object: [(key: String, value: Dyn)], expected: [String]) -> Bool Never! {
+devtools_decode_exact: fn(object: [{key: String, value: Dyn}], expected: [String]) -> Bool Never! {
     loop field in object {
         if !expected.contains(field.key) -> return false
     }
@@ -369,18 +369,18 @@ devtools_decode_exact: fn(object: [(key: String, value: Dyn)], expected: [String
     true
 }
 
-devtools_decode_require_exact: fn(object: [(key: String, value: Dyn)], expected: [String]) Err! {
+devtools_decode_require_exact: fn(object: [{key: String, value: Dyn}], expected: [String]) Err! {
     if !devtools_decode_exact(object, expected) -> return Err("devtools event fields do not match the typed body")
     Ok()
 }
 
-devtools_decode_array: fn(object: [(key: String, value: Dyn)], key: String) -> [Dyn] Err! {
+devtools_decode_array: fn(object: [{key: String, value: Dyn}], key: String) -> [Dyn] Err! {
     value: recording_lookup(object, key) ?? return Err("devtools envelope `{key}` must be an array")
     if value == .Array(items) -> return Ok(items)
     Err("devtools envelope `{key}` must be an array")
 }
 
-devtools_decode_string: fn(object: [(key: String, value: Dyn)], key: String) -> String Err! {
+devtools_decode_string: fn(object: [{key: String, value: Dyn}], key: String) -> String Err! {
     value: recording_lookup(object, key) ?? return Err("devtools envelope missing `{key}`")
     devtools_decode_value_string(value, key)
 }
@@ -391,13 +391,13 @@ devtools_decode_value_string: fn(value: Dyn, key: String) -> String Err! {
     Ok(text)
 }
 
-devtools_decode_optional_string: fn(object: [(key: String, value: Dyn)], key: String) -> String? Err! {
+devtools_decode_optional_string: fn(object: [{key: String, value: Dyn}], key: String) -> String? Err! {
     value: recording_lookup(object, key) ?? return Ok(None)
     if value == .Null -> return Ok(None)
     Ok(Val(devtools_decode_value_string(value, key)))
 }
 
-devtools_decode_string_array: fn(object: [(key: String, value: Dyn)], key: String) -> [String] Err! {
+devtools_decode_string_array: fn(object: [{key: String, value: Dyn}], key: String) -> [String] Err! {
     items: devtools_decode_array(object, key)
     strings := [String]{}
     loop item in items {
@@ -408,14 +408,14 @@ devtools_decode_string_array: fn(object: [(key: String, value: Dyn)], key: Strin
     Ok(strings)
 }
 
-devtools_decode_int: fn(object: [(key: String, value: Dyn)], key: String) -> Int Err! {
+devtools_decode_int: fn(object: [{key: String, value: Dyn}], key: String) -> Int Err! {
     value: recording_lookup(object, key) ?? return Err("devtools envelope missing `{key}`")
     number: foundation_json_integer(value) ?? return Err("devtools envelope `{key}` must be an integer")
     if number < 0 -> return Err("devtools envelope `{key}` must be non-negative")
     Ok(number)
 }
 
-devtools_decode_optional_int: fn(object: [(key: String, value: Dyn)], key: String) -> Int? Err! {
+devtools_decode_optional_int: fn(object: [{key: String, value: Dyn}], key: String) -> Int? Err! {
     value: recording_lookup(object, key) ?? return Ok(None)
     if value == .Null -> return Ok(None)
     number: foundation_json_integer(value) ?? return Err("devtools event `{key}` must be an integer or null")
@@ -423,36 +423,36 @@ devtools_decode_optional_int: fn(object: [(key: String, value: Dyn)], key: Strin
     Ok(Val(number))
 }
 
-devtools_decode_u64: fn(object: [(key: String, value: Dyn)], key: String) -> U64 Err! {
+devtools_decode_u64: fn(object: [{key: String, value: Dyn}], key: String) -> U64 Err! {
     number: devtools_decode_int(object, key)
     checked(U64{number}) ?? return Err("devtools envelope `{key}` must be non-negative")
 }
 
-devtools_decode_optional_u64: fn(object: [(key: String, value: Dyn)], key: String) -> U64? Err! {
+devtools_decode_optional_u64: fn(object: [{key: String, value: Dyn}], key: String) -> U64? Err! {
     number: devtools_decode_optional_int(object, key) ?? return Ok(None)
     unsigned: checked(U64{number}) ?? return Err("devtools event `{key}` must be non-negative")
     Ok(Val(unsigned))
 }
 
-devtools_decode_u32: fn(object: [(key: String, value: Dyn)], key: String) -> U32 Err! {
+devtools_decode_u32: fn(object: [{key: String, value: Dyn}], key: String) -> U32 Err! {
     number: devtools_decode_int(object, key)
     if number > 4294967295 -> return Err("devtools event `{key}` is outside the u32 range")
     checked(U32{number}) ?? return Err("devtools event `{key}` is outside the u32 range")
 }
 
-devtools_decode_u16: fn(object: [(key: String, value: Dyn)], key: String) -> U16 Err! {
+devtools_decode_u16: fn(object: [{key: String, value: Dyn}], key: String) -> U16 Err! {
     number: devtools_decode_int(object, key)
     if number > 65535 -> return Err("devtools event `{key}` is outside the u16 range")
     checked(U16{number}) ?? return Err("devtools event `{key}` is outside the u16 range")
 }
 
-devtools_decode_bool: fn(object: [(key: String, value: Dyn)], key: String) -> Bool Err! {
+devtools_decode_bool: fn(object: [{key: String, value: Dyn}], key: String) -> Bool Err! {
     value: recording_lookup(object, key) ?? return Err("devtools envelope missing `{key}`")
     if value == .Bool(flag) -> return Ok(flag)
     Err("devtools envelope `{key}` must be a boolean")
 }
 
-devtools_decode_function: fn(object: [(key: String, value: Dyn)], key: String) -> JetDevtoolsFunctionIdentity Err! {
+devtools_decode_function: fn(object: [{key: String, value: Dyn}], key: String) -> JetDevtoolsFunctionIdentity Err! {
     value: recording_lookup(object, key) ?? return Err("devtools event `{key}` must be an object")
     function: recording_object_fields(value) ?? return Err("devtools event `{key}` must be an object")
     source_value: recording_lookup(function, "source") ?? return Err("devtools event `{key}.source` must be an object")
@@ -461,14 +461,14 @@ devtools_decode_function: fn(object: [(key: String, value: Dyn)], key: String) -
     Ok(jet_devtools_function_identity_new(devtools_decode_string(function, "function_id"), devtools_decode_string(function, "name"), span))
 }
 
-devtools_decode_optional_function: fn(object: [(key: String, value: Dyn)], key: String) -> JetDevtoolsFunctionIdentity? Err! {
+devtools_decode_optional_function: fn(object: [{key: String, value: Dyn}], key: String) -> JetDevtoolsFunctionIdentity? Err! {
     value: recording_lookup(object, key) ?? return Ok(None)
     if value == .Null -> return Ok(None)
     if value == .Object(_) -> return Ok(Val(devtools_decode_function(object, key)))
     Err("devtools event `{key}` must be an object or null")
 }
 
-devtools_decode_launch_phases: fn(object: [(key: String, value: Dyn)], key: String) -> [JetDevtoolsGameLaunchPhase] Err! {
+devtools_decode_launch_phases: fn(object: [{key: String, value: Dyn}], key: String) -> [JetDevtoolsGameLaunchPhase] Err! {
     items: devtools_decode_array(object, key)
     if items.len() > JET_DEVTOOLS_MAX_LAUNCH_PHASES -> return Err("devtools event `{key}` exceeds {JET_DEVTOOLS_MAX_LAUNCH_PHASES} entries")
     phases := [JetDevtoolsGameLaunchPhase]{}

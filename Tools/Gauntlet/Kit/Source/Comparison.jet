@@ -221,7 +221,7 @@ unjudged_cell: fn(status: String, applicability: Dyn) -> Dyn {
 // so the cell wins only when every gated state wins.
 run_tier_cell: fn(entry: Dyn, language: String, metric: String, run_tier: Dyn, context: CellContext) -> Dyn {
     run_ok: text_at(run_tier, "status") == Val("ok")
-    ordered := [(state: String, cell: Dyn)]{}
+    ordered := [{state: String, cell: Dyn}]{}
     loop state in GATED_RUN_CACHE_STATES {
         measured: member(run_tier, "cache_states/{state}") ?? Dyn.Null
         state_context: CellContext{
@@ -232,7 +232,7 @@ run_tier_cell: fn(entry: Dyn, language: String, metric: String, run_tier: Dyn, c
             peer: context.peer,
             configuration: context.configuration,
         }
-        ordered.push((state: state, cell: metric_cell(entry, language, metric, "run", state_context)))
+        ordered.push({state: state, cell: metric_cell(entry, language, metric, "run", state_context)})
     }
     chosen := ordered[0]
     unsettled: ordered.filter(fn(item) { text_at(item.cell, "status") != Val("measured") && text_at(item.cell, "status") != Val("not_applicable") })

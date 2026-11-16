@@ -387,11 +387,11 @@ value: fn(d: Driver, expression: String) -> String Failure! {
 // None when the page threw.
 evaluate: fn(d: Driver, expression: String) -> String? Failure! {
     params: Dyn.Object(
-        [(key: String, value: Dyn)]{
-            (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
-            (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
-            (key: "awaitPromise", value: Dyn.Bool(true)),
-            (key: "resultOwnership", value: Dyn.Text("none")),
+        [{key: String, value: Dyn}]{
+            {key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")},
+            {key: "target", value: Dyn.Object([{key: String, value: Dyn}]{{key: "context", value: Dyn.Text(d.context.copy())}})},
+            {key: "awaitPromise", value: Dyn.Bool(true)},
+            {key: "resultOwnership", value: Dyn.Text("none")},
         },
     )
     reply: command(d.bidi, "script.evaluate", params)
@@ -404,10 +404,10 @@ navigate: fn(d: Driver, address: String) Failure! {
         d.bidi,
         "browsingContext.navigate",
         Dyn.Object(
-            [(key: String, value: Dyn)]{
-                (key: "context", value: Dyn.Text(d.context.copy())),
-                (key: "url", value: Dyn.Text(address.copy())),
-                (key: "wait", value: Dyn.Text("complete")),
+            [{key: String, value: Dyn}]{
+                {key: "context", value: Dyn.Text(d.context.copy())},
+                {key: "url", value: Dyn.Text(address.copy())},
+                {key: "wait", value: Dyn.Text("complete")},
             },
         ),
     )
@@ -418,7 +418,7 @@ navigate: fn(d: Driver, address: String) Failure! {
 open: fn(engine: String) -> Driver Failure! {
     session: browser.launch(engine) ?? return Err(Failure{message: "{engine} launch failed: {err}"})
     bidi: session.protocol("bidi") ?? return Err(Failure{message: "BiDi protocol unavailable: {err}"})
-    created: command(bidi, "browsingContext.create", Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("tab"))}))
+    created: command(bidi, "browsingContext.create", Dyn.Object([{key: String, value: Dyn}]{{key: "type", value: Dyn.Text("tab")}}))
     context: text(field(created, "context"))
     if context == "" -> return Err(Failure{message: "browsingContext.create returned no context"})
     Ok(Driver{session: session, bidi: bidi, context: context})

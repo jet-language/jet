@@ -1270,10 +1270,15 @@ type_name: fn(ty: Type) -> String Never! {
                 }
             }
         }
+        // A record is written in braces, `{min: Int, max: Int}`; a
+        // positional tuple keeps its parens, `(Int, String)`.
         .Tuple(fields) -> {
-            names := [String]{}
-            loop field in fields -> names.push("{field.name}: {type_name(field.ty)}")
-            "({names.join(", ")})"
+            if fields.len() > 0 && fields[0].name == "" {
+                types: loop field in fields -> type_name(field.ty)
+                return "({types.join(", ")})"
+            }
+            names: loop field in fields -> "{field.name}: {type_name(field.ty)}"
+            "{{{names.join(", ")}}}"
         }
         .List(inner) -> "[{type_name(inner)}]"
         .Map(key, _, value) -> "[{type_name(key)}:{type_name(value)}]"

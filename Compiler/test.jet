@@ -820,12 +820,12 @@ core_rows: fn(rows: TestRows) {
     // `at[i]` is (file, level).
     ids := [String]{}
     held := [[String]]{}
-    at := [(file: Int, level: Int)]{}
+    at := [{file: Int, level: Int}]{}
     loop (level, name) in CORE_LEVELS {
         loop (index, path) in tested {
             ids.push("{path} [{name}]")
             held.push(names[index].copy())  // copy: each level's run holds the file's tests.
-            at.push((file: index, level: level))
+            at.push({file: index, level: level})
         }
     }
     runs: kit_exec_select_runs(ids, held, rows.filter)

@@ -31,7 +31,7 @@ drop_prefix: fn(text: String, count: Int) -> String { slice_str(text, count, tex
 
 decode_argv: fn(argv: [String]) -> Dyn Never! {
     // Options keep their argv order.
-    entries := [(key: String, value: Dyn)]{}
+    entries := [{key: String, value: Dyn}]{}
     positionals := [Dyn]{}
     i := 0
     // Skip argv[0] (program name) when present.
@@ -94,7 +94,7 @@ decode_argv: fn(argv: [String]) -> Dyn Never! {
         i += 1
     }
     if argv.len() > 0 -> put_entry(entries, "0", Dyn.Text(argv[0].copy()))
-    entries.push((key: "_", value: Dyn.Array(positionals)))
+    entries.push({key: "_", value: Dyn.Array(positionals)})
     Dyn.Object(entries)
 }
 
@@ -135,7 +135,7 @@ negative_number: fn(text: String) -> Bool {
 }
 
 // The first value named `key`, scanning the object's ordered pairs.
-object_get: fn(entries: [(key: String, value: Dyn)], key: String) -> Dyn? {
+object_get: fn(entries: [{key: String, value: Dyn}], key: String) -> Dyn? {
     loop pair in entries {
         if pair.key == key -> return Val(pair.value)
     }
@@ -143,17 +143,17 @@ object_get: fn(entries: [(key: String, value: Dyn)], key: String) -> Dyn? {
 }
 
 // Bind `key` to `value`: an existing key keeps its place, a new key goes last.
-object_set: fn(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
+object_set: fn(entries: &[{key: String, value: Dyn}], key: String, value: Dyn) {
     loop i in 0..<entries.len() {
         if entries[i].key == key {
-            entries[i] = (key: key, value: value)
+            entries[i] = {key: key, value: value}
             return
         }
     }
-    entries.push((key: key, value: value))
+    entries.push({key: key, value: value})
 }
 
-add_flag_entry: fn(entries: &[(key: String, value: Dyn)], key: String, old: Dyn, value: Dyn) {
+add_flag_entry: fn(entries: &[{key: String, value: Dyn}], key: String, old: Dyn, value: Dyn) {
     if old == {
         .Bool(previous) -> {
             if previous -> object_set(entries, key, Dyn.Int(2)) else {
@@ -171,10 +171,10 @@ add_flag_entry: fn(entries: &[(key: String, value: Dyn)], key: String, old: Dyn,
     }
 }
 
-put_entry: fn(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
+put_entry: fn(entries: &[{key: String, value: Dyn}], key: String, value: Dyn) {
     old: object_get(entries, key)
     if old == .None {
-        entries.push((key: key, value: value))
+        entries.push({key: key, value: value})
         return
     }
     previous: old
@@ -191,9 +191,9 @@ put_entry: fn(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
 }
 
 #Test("repeated value options replace their tuple slot without changing order") {
-    entries := [(key: String, value: Dyn)]{
-        (key: "first", value: Dyn.Text("old")),
-        (key: "second", value: Dyn.Int(2)),
+    entries := [{key: String, value: Dyn}]{
+        {key: "first", value: Dyn.Text("old")},
+        {key: "second", value: Dyn.Int(2)},
     }
     put_entry(entries, "first", Dyn.Text("new"))
     assert(entries.len() == 2)
@@ -414,7 +414,7 @@ apply_defaults: fn(tree: Dyn, defs: [ArgDef]) -> Dyn Never! {
             .Object(entries) -> {
                 if object_get(entries, d.dest) == .None && object_get(entries, d.name) == .None {
                     next_entries := entries.copy()
-                    next_entries.push((key: d.dest, value: parse_atom(d.default_text)))
+                    next_entries.push({key: d.dest, value: parse_atom(d.default_text)})
                     out = Dyn.Object(next_entries)
                 }
             }

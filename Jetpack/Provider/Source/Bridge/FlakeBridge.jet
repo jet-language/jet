@@ -339,7 +339,7 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
             return Val(1)
         }
     }
-    derivations := [(name: String, system: String, derivation: NixNativeDerivation)]{}
+    derivations := [{name: String, system: String, derivation: NixNativeDerivation}]{}
     loop output in graph.outputs {
         if output.kind != FlakeOutputKind.Package -> next
         if output.system == "" {
@@ -357,7 +357,7 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
         }
         if nix_evaluate_derivation_output_with_import_authority(source, output.system, output.attribute, Val(authority.move())) == {
             .Ok(derivation) -> {
-                derivations.push((name: output.name, system: output.system, derivation: derivation))
+                derivations.push({name: output.name, system: output.system, derivation: derivation})
             }
             .Err(error) -> {
                 if output.system != system {
@@ -371,15 +371,15 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
         }
     }
     default_facts: facts.copy()
-    shells := [(name: String, facts: DevShellFacts)]{}
+    shells := [{name: String, facts: DevShellFacts}]{}
     loop output in graph.named_dev_shells() {
         if output.system != system -> next
         if output.attribute == "default" {
-            shells.push((name: output.name, facts: default_facts))
+            shells.push({name: output.name, facts: default_facts})
             next
         }
         if provider_read_devshell_output_facts(dir, None, output.attribute) == {
-            .Ok(named) -> { shells.push((name: output.name, facts: named)) }
+            .Ok(named) -> { shells.push({name: output.name, facts: named}) }
             .Err(error) -> {
                 error.report(theme)
                 return Val(1)

@@ -56,14 +56,14 @@ EnvReadyStats: struct {
     }
 
     // The distinct realized `(name, version)` pairs in order.
-    realized_set: fn(self) -> [(name: String, version: String)] Never! {
-        pairs := [(name: String, version: String)]{}
+    realized_set: fn(self) -> [{name: String, version: String}] Never! {
+        pairs := [{name: String, version: String}]{}
         loop selection in self.realized {
             version: if selection.version == "" -> cli_version_from_out(selection.name, selection.output_hash) ?? "" else -> selection.version
-            pair: (name: selection.name, version: version)
+            pair: {name: selection.name, version: version}
             if !pairs.contains(pair) -> pairs.push(pair)
         }
-        pairs.sort_by(fn(left: (name: String, version: String), right: (name: String, version: String)) { (left.name <=> right.name).then(left.version <=> right.version) })
+        pairs.sort_by(fn(left: {name: String, version: String}, right: {name: String, version: String}) { (left.name <=> right.name).then(left.version <=> right.version) })
         pairs
     }
 
@@ -177,7 +177,7 @@ NativeEnvironmentProjection: struct {
     loader_paths: [LeaseText]
     activation: NativeActivation
 
-    from_realized: fn(project_root: String, realized: [(name: String, output: LeaseText)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+    from_realized: fn(project_root: String, realized: [{name: String, output: LeaseText}], dev_tools: [{command: String, binary: String}], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
         native_bin_dirs := [String]{}
         loop tool in dev_tools {
             directory: files.dirname(tool.binary)
@@ -226,7 +226,7 @@ NativeEnvironmentProjection: struct {
     }
 }
 
-cli_native_output_path: fn(realized: [(name: String, output: LeaseText)], fact: NativeOutputFact) -[Env]> LeaseText? Never! {
+cli_native_output_path: fn(realized: [{name: String, output: LeaseText}], fact: NativeOutputFact) -[Env]> LeaseText? Never! {
     if !fact.platform.applies() -> return None
     loop pair in realized {
         if pair.name == fact.package -> return Val(pair.output.child(fact.relative))
@@ -236,11 +236,11 @@ cli_native_output_path: fn(realized: [(name: String, output: LeaseText)], fact: 
 
 // The admitted dev tool binaries among `bound` (variable -> binary); an unset
 // or empty variable projects nothing.
-cli_native_dev_tool_paths: fn(bound: [String:String]) -> [(command: String, binary: String)] Never! {
-    tools := [(command: String, binary: String)]{}
+cli_native_dev_tool_paths: fn(bound: [String:String]) -> [{command: String, binary: String}] Never! {
+    tools := [{command: String, binary: String}]{}
     loop tool in CLI_NATIVE_DEV_TOOLS {
         binary: bound.get(tool.variable) ?? next
-        if binary != "" -> tools.push((command: tool.command, binary: binary))
+        if binary != "" -> tools.push({command: tool.command, binary: binary})
     }
     tools
 }
@@ -256,7 +256,7 @@ cli_native_dev_tool_bindings: fn() -[Env]> [String:String] Never! {
 
 // Native projection for the repository dev-shell contract, derived from
 // the project root, the admitted dev tools, and realized package outputs.
-cli_native_environment_projection: fn(project_root: String, realized: [(name: String, output: LeaseText)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+cli_native_environment_projection: fn(project_root: String, realized: [{name: String, output: LeaseText}], dev_tools: [{command: String, binary: String}], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
     NativeEnvironmentProjection.from_realized(project_root, realized, dev_tools, inherited_loader_path)
 }
 
@@ -273,7 +273,7 @@ cli_compose_env_scoped: fn(verification: &StoreVerification, theme: Theme, roots
     Ok(composed.env.move())
 }
 
-cli_compose_env_scoped_with_stats: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+cli_compose_env_scoped_with_stats: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {env: ShellEnv, stats: EnvReadyStats} CLIError! {
     cli_compose_env_scoped_with_warm(verification, theme, roots, flags, plan, scope, confirm_download, None, true)
 }
 
@@ -294,7 +294,7 @@ cli_warm_complete: fn(warm: [String:[VerifiedRealization]], plan: RunPlan) -> Bo
 // The composer with optional warm realizations from a verified environment
 // receipt. Cold or partial project composition still collects selections
 // for the receipt and producer sealing.
-cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: &&[VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: &&[VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {env: ShellEnv, stats: EnvReadyStats} CLIError! {
     warm_given: warm != None
     warm_pool := if warm.move() == {
         .Val(list) -> cli_index_warm_realizations(list)
@@ -338,7 +338,7 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
     provider_var_order := [String]{}
     nix_vars := [String:String]{}
     realized_refs := [String]{}
-    realized_outputs := [(name: String, output: LeaseText)]{}
+    realized_outputs := [{name: String, output: LeaseText}]{}
     holes := [NixBridgeNeed]{}
     failed := false
     unavailable := false
@@ -415,7 +415,7 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
                         nix_vars[runtime.key] = runtime.value
                     }
                 }
-                realized_outputs.push((name: entry.name, output: leased_output))
+                realized_outputs.push({name: entry.name, output: leased_output})
                 realized_refs.push(entry.reference)
                 cache_leases.push(lease.move())
             }
@@ -435,7 +435,7 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
         adapter_outcome: if warm_hit == {
             .Val(realized) -> {
                 parts: realized.into_parts()
-                Val((entry: parts.entry, state: parts.source_state, lease: parts.lease.move()))
+                Val({entry: parts.entry, state: parts.source_state, lease: parts.lease.move()})
             }
             .None -> cli_realize_adapter(verification, theme, roots, flags, adapter, plan.table, true)
         }
@@ -560,7 +560,7 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
         cache_leases: cache_leases,
         lease_vars: lease_vars,
     }
-    Ok((env: env, stats: ready_stats))
+    Ok({env: env, stats: ready_stats})
 }
 
 // One provider metadata file and the variable it feeds.

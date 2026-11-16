@@ -345,14 +345,14 @@ ir_event_out_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, expo
 
 // The lent slot of a call's payload argument (a word 0 for Unit) and the
 // payload value to release after the call (-1 for none).
-ir_event_lent_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, arg: Int) -> (slot: Int, value: Int) Never! {
+ir_event_lent_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, arg: Int) -> {slot: Int, value: Int} Never! {
     if ir_unit_type(ir_ty(p, b, arg)) {
         _ := ir_expr(m, p, b, arg)
-        return (slot: ir_word_const(m, b, 0), value: -1)
+        return {slot: ir_word_const(m, b, 0), value: -1}
     }
     value: ir_expr(m, p, b, arg)
-    if ir_failed(b) || value < 0 -> return (slot: -1, value: -1)
-    (slot: ir_lazy_value_slot(m, b, value), value: value)
+    if ir_failed(b) || value < 0 -> return {slot: -1, value: -1}
+    {slot: ir_lazy_value_slot(m, b, value), value: value}
 }
 
 // Hook.run(payload, fallback): the payload is lent to every handler, the
@@ -380,12 +380,12 @@ ir_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
 
 // The (variant index, single payload offset) of `variant` in enum row
 // `row` applied to `args`; a payload-free variant's offset is 0.
-ir_event_variant: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], variant: String) -> (index: Int, offset: Int)? Never! {
+ir_event_variant: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], variant: String) -> {index: Int, offset: Int}? Never! {
     index: ir_variant_index(p, row, variant) ?? return None
     members: ir_variant_members(m, p, row, args, index) ?? return None
-    if members.len() == 0 -> return Val((index: index, offset: 0))
+    if members.len() == 0 -> return Val({index: index, offset: 0})
     if members.len() != 1 || members[0].boxed -> return None
-    Val((index: index, offset: members[0].offset))
+    Val({index: index, offset: members[0].offset})
 }
 
 // DecisionHook.run(payload): the provider folds the decisions and builds the

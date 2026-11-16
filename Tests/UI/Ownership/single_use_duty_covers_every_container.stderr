@@ -37,7 +37,7 @@ More: jet-lang.dev/e/E0140
 Error [jet.SingleUseDropped]: `pair` still owes `consume`
   --> Tests/UI/Ownership/single_use_duty_covers_every_container.jet:18:5
     |
- 18 |     pair: (first: acquire("tuple"), count: 1)
+ 18 |     pair: {first: acquire("tuple"), count: 1}
     |     ^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
  Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(pair) }` to discard it deliberately

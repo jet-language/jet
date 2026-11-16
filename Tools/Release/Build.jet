@@ -230,12 +230,12 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     )
     encoded: json.to_string_pretty(record) ?? return build_fail(1, "BUILD.json cannot be encoded: {err}")
     failed: write_all(
-        [(path: String, text: String)]{
-            (path: files.join(out, "IDENTITY"), text: "{s2.identity}\n"),
-            (path: files.join(out, "VERSION"), text: "{jet_version} {sha} {short(time.isoformat(time.now_utc()), 10)}\n"),
-            (path: files.join(out, "COMMIT"), text: "{sha}\n"),
-            (path: files.join(out, "SEED"), text: "{seed_identity}\n"),
-            (path: files.join(out, "BUILD.json"), text: "{encoded}\n"),
+        [{path: String, text: String}]{
+            {path: files.join(out, "IDENTITY"), text: "{s2.identity}\n"},
+            {path: files.join(out, "VERSION"), text: "{jet_version} {sha} {short(time.isoformat(time.now_utc()), 10)}\n"},
+            {path: files.join(out, "COMMIT"), text: "{sha}\n"},
+            {path: files.join(out, "SEED"), text: "{seed_identity}\n"},
+            {path: files.join(out, "BUILD.json"), text: "{encoded}\n"},
         },
     )
     if failed == .Val(why) -> return build_fail(1, why)

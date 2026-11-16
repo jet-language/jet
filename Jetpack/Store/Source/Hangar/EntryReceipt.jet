@@ -32,7 +32,7 @@ store_prepare_entry_receipt_with_status: fn(roots: HangarRoots, entry: &StoreEnt
 // The receipt digest and whether this call actually wrote it. The recovery
 // counter needs the second half: an already-present receipt is not a
 // recovery, and the digest alone cannot tell the two apart.
-store_materialize_receipt: fn(roots: HangarRoots, entry: StoreEntry) -> (digest: String, wrote: Bool) StoreError! {
+store_materialize_receipt: fn(roots: HangarRoots, entry: StoreEntry) -> {digest: String, wrote: Bool} StoreError! {
     bytes: store_render_receipt(entry).bytes()
     digest: "sha256-{store_sha256_hex(bytes)}"
     if entry.receipt != "" && entry.receipt != digest {
@@ -49,7 +49,7 @@ store_materialize_receipt: fn(roots: HangarRoots, entry: StoreEntry) -> (digest:
             if files.read_bytes(path) != bytes {
                 return Err(StoreError.InvalidData("Hangar receipt `{digest}` is corrupt; restore the exact object or remove the unreferenced receipt"))
             }
-            return Ok((digest: digest, wrote: false))
+            return Ok({digest: digest, wrote: false})
         }
         .Err(error) -> {
             if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
@@ -69,13 +69,13 @@ store_materialize_receipt: fn(roots: HangarRoots, entry: StoreEntry) -> (digest:
                 if files.read_bytes(path) != bytes {
                     return Err(StoreError.InvalidData("Hangar receipt `{digest}` changed during publication"))
                 }
-                return Ok((digest: digest, wrote: false))
+                return Ok({digest: digest, wrote: false})
             }
             .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(StoreError.IO(err))
         }
     }
     store_sync_store_directory(receipts)
-    Ok((digest: digest, wrote: true))
+    Ok({digest: digest, wrote: true})
 }
 
 // Create `path` exclusively and make its bytes durable.
@@ -121,16 +121,16 @@ store_render_receipt: fn(entry: StoreEntry) -> String Never! {
     }
     if ProducerRecord.decode(entry.producer_record) == {
         .Ok(producer) -> {
-            named: [(name: String, key: String)]{
-                (name: "catalog-tier", key: "nix.index.tier"),
-                (name: "catalog-trust", key: "nix.index.trust"),
-                (name: "signature-chain", key: "nix.index.signature-chain"),
-                (name: "fallback-provenance", key: "nix.fallback.provenance"),
-                (name: "fallback-request", key: "nix.fallback.request"),
-                (name: "fallback-policy", key: "nix.fallback.policy.receipt"),
-                (name: "fallback-graph", key: "nix.fallback.graph"),
-                (name: "fallback-losses", key: "nix.fallback.losses"),
-                (name: "fallback-proof", key: "nix.fallback.proof"),
+            named: [{name: String, key: String}]{
+                {name: "catalog-tier", key: "nix.index.tier"},
+                {name: "catalog-trust", key: "nix.index.trust"},
+                {name: "signature-chain", key: "nix.index.signature-chain"},
+                {name: "fallback-provenance", key: "nix.fallback.provenance"},
+                {name: "fallback-request", key: "nix.fallback.request"},
+                {name: "fallback-policy", key: "nix.fallback.policy.receipt"},
+                {name: "fallback-graph", key: "nix.fallback.graph"},
+                {name: "fallback-losses", key: "nix.fallback.losses"},
+                {name: "fallback-proof", key: "nix.fallback.proof"},
             }
             loop fact in named {
                 value: producer.facts.get(fact.key) ?? next

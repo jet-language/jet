@@ -1188,7 +1188,7 @@ sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistr
 
 // The named function an App registration argument passes, after an E2810
 // when it is not one.
-sema_app_named_handler: fn(method: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> (name: String, function: SemaRegistrationFunction)? {
+sema_app_named_handler: fn(method: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> {name: String, function: SemaRegistrationFunction}? {
     name: sema_http_mux_callee(argument.expr) ?? {
         diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a named handler", "the statically checked App graph retains the handler's typed input and effect contract", "declare the handler as a function and pass its name"))
         return None
@@ -1197,7 +1197,7 @@ sema_app_named_handler: fn(method: String, argument: CallArg, environment: SemaS
         diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a function handler, and `{name}` is not a declared function", "the registered handler must be callable through its checked input contract", "pass the name of a declared function"))
         return None
     }
-    Val((name: name, function: function))
+    Val({name: name, function: function})
 }
 
 sema_app_route_wire_type: fn(ty: Type) -> String Never! {

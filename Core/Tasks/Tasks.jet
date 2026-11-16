@@ -37,9 +37,9 @@ interval_milliseconds: fn(period: time.Duration) -> Int Never! {
 scheduler: module {
     use core: core
 
-    channel: fn<T>() -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+    channel: fn<T>() -> {sender: Sender<T>, receiver: Receiver<T>} Never! {
         pair: core.tasks.__channel_new<T>()
-        (sender: pair.sender, receiver: pair.receiver)
+        {sender: pair.sender, receiver: pair.receiver}
     }
 
     #Test("scheduler channel preserves its named sender and receiver") {
@@ -49,10 +49,10 @@ scheduler: module {
         pair.sender.close()
     }
 
-    bounded: fn<T>(capacity: Int) -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+    bounded: fn<T>(capacity: Int) -> {sender: Sender<T>, receiver: Receiver<T>} Never! {
         limit: if capacity < 1 -> 1 else -> capacity
         pair: core.tasks.__channel_bounded<T>(limit)
-        (sender: pair.sender, receiver: pair.receiver)
+        {sender: pair.sender, receiver: pair.receiver}
     }
 
     #Test("scheduler bounded channel preserves its named sender and receiver") {
@@ -231,12 +231,12 @@ waitall: fn<T>(receivers: [Receiver<T>]) -[Time.Wait]> [T?] Never! {
 
 /// The index of the receiver that answered and its value (None when that
 /// channel closed drained). The list must not be empty.
-waitany: fn<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?) Never! {
+waitany: fn<T>(receivers: [Receiver<T>]) -[Time.Wait]> {index: Int, value: T?} Never! {
     if receivers.len() == 0 -> panic("waitany needs at least one receiver")
     // Receiver readiness is owned by the scheduler's opaque handle. This
     // convenience rail keeps the deterministic first-arm selection; callers
     // needing a true race should use the host select surface.
-    (index: 0, value: recv(receivers[0]))
+    {index: 0, value: recv(receivers[0])}
 }
 
 host_sleep_ms: fn(ms: Int) -[Time.Wait]> {

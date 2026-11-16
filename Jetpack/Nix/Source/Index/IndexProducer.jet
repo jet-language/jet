@@ -152,13 +152,13 @@ nix_index_validate_oracle_record: fn(record: NixIndexRecord) NixIndexError! {
 }
 
 // Generate from the oracle and the channel's store-path inventory.
-nix_index_producer_generate: fn(channel: String, system: String, revision: String, released_unix: Int, oracle: [NixIndexOracleCandidate], store_paths: [String]) -> (decoded: [U8], compressed: [U8], report: String) NixIndexError! {
+nix_index_producer_generate: fn(channel: String, system: String, revision: String, released_unix: Int, oracle: [NixIndexOracleCandidate], store_paths: [String]) -> {decoded: [U8], compressed: [U8], report: String} NixIndexError! {
     nix_index_producer_generate_with_hydra_paths(channel, system, revision, released_unix, oracle, store_paths, [String]{})
 }
 
 // Generate, additionally requiring Hydra-built output paths when that
 // inventory is non-empty.
-nix_index_producer_generate_with_hydra_paths: fn(channel: String, system: String, revision: String, released_unix: Int, oracle: [NixIndexOracleCandidate], store_paths: [String], hydra_output_paths: [String]) -> (decoded: [U8], compressed: [U8], report: String) NixIndexError! {
+nix_index_producer_generate_with_hydra_paths: fn(channel: String, system: String, revision: String, released_unix: Int, oracle: [NixIndexOracleCandidate], store_paths: [String], hydra_output_paths: [String]) -> {decoded: [U8], compressed: [U8], report: String} NixIndexError! {
     nix_index_validate_channel(channel)
     nix_index_validate_system(system)
     nix_index_validate_revision(revision)
@@ -179,7 +179,7 @@ nix_index_producer_generate_with_hydra_paths: fn(channel: String, system: String
     if compressed.len() > NIX_INDEX_MAX_COMPRESSED_BYTES || decoded.len() > NIX_INDEX_MAX_DECODED_BYTES {
         return Err(NixIndexError.Invalid("generated nix index exceeds format bounds"))
     }
-    Ok((decoded: decoded, compressed: compressed, report: nix_index_generation_report(decoded, compressed, document)))
+    Ok({decoded: decoded, compressed: compressed, report: nix_index_generation_report(decoded, compressed, document)})
 }
 
 // Why a candidate is not indexed, or None when it is.
@@ -253,15 +253,15 @@ nix_index_decode_index_records_for_producer: fn(bytes: [U8]) -> [NixIndexRecord]
     Ok(records)
 }
 
-nix_index_producer_index_identity: fn(bytes: [U8]) -> (channel: String, revision: String, system: String) NixIndexError! {
+nix_index_producer_index_identity: fn(bytes: [U8]) -> {channel: String, revision: String, system: String} NixIndexError! {
     document: NixIndexDocument.parse(nix_index_maybe_decode(bytes))
-    Ok((channel: document.channel, revision: document.revision, system: document.system))
+    Ok({channel: document.channel, revision: document.revision, system: document.system})
 }
 
-nix_index_producer_target_measurements: fn(bytes: [U8]) -> (decoded_length: Int, record_count: Int) NixIndexError! {
+nix_index_producer_target_measurements: fn(bytes: [U8]) -> {decoded_length: Int, record_count: Int} NixIndexError! {
     decoded: nix_index_maybe_decode(bytes)
     document: NixIndexDocument.parse(decoded)
-    Ok((decoded_length: decoded.len(), record_count: document.records.len()))
+    Ok({decoded_length: decoded.len(), record_count: document.records.len()})
 }
 
 // The canonical channel manifest over `targets`.
@@ -272,10 +272,10 @@ nix_index_producer_manifest_bytes: fn(channel: String, generation: Int, issued_u
 
 // A canonical index and its compressed target for fixtures (Rust
 // `canonical_test_index`).
-nix_index_canonical_test_index: fn(channel: String, revision: String, system: String, released_unix: Int, records: [NixIndexRecord], not_indexed: [NixIndexCoverageMiss]) -> (decoded: [U8], compressed: [U8]) NixIndexError! {
+nix_index_canonical_test_index: fn(channel: String, revision: String, system: String, released_unix: Int, records: [NixIndexRecord], not_indexed: [NixIndexCoverageMiss]) -> {decoded: [U8], compressed: [U8]} NixIndexError! {
     document: nix_index_generated_document(channel, revision, system, released_unix, records, not_indexed)
     decoded: document.canonical_bytes()
-    Ok((decoded: decoded, compressed: nix_index_zstd_encode(decoded)))
+    Ok({decoded: decoded, compressed: nix_index_zstd_encode(decoded)})
 }
 
 // The manifest target describing one published index under `endpoint`

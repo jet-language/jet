@@ -18,7 +18,7 @@ process: module {
     // no subscription holds it, as a sample: `disposition` is 0 when set and
     // -1 when not, with its `errno` (EBUSY while a subscription holds the
     // signal, EINVAL for one no handler can catch).
-    #Import(c) signal_disposition: fn(number: Int, ignore: Bool) -[Exec]> (available: Bool, disposition: Int, errno: Int) = "jet_process_signal_disposition_raw"
+    #Import(c) signal_disposition: fn(number: Int, ignore: Bool) -[Exec]> {available: Bool, disposition: Int, errno: Int} = "jet_process_signal_disposition_raw"
 
     // The program's words, argv[0] first; a non-UTF-8 word panics. `priv`:
     // only Core reads it (`process.args()` drops the program name), and a

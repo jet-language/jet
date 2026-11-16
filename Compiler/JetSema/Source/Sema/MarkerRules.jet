@@ -1284,7 +1284,7 @@ sema_marker_rules_note_meta_field: fn(name: String, expression: Expr, field_span
     diagnostics.push(sema_error("E0347", value_span, "`#Meta` category needs plain quoted text", why, "write a string literal, e.g. `category: \"Movement\"`"))
 }
 
-sema_marker_rules_declared_signature: fn(rule: SemaScopeMembersMarkerRule) -> (signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?) Never! {
+sema_marker_rules_declared_signature: fn(rule: SemaScopeMembersMarkerRule) -> {signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?} Never! {
     params := [TAppliedRuleParameter]{}
     expected_types := [Type?]{}
     variadic := TAppliedRuleArgKind?{None}
@@ -1304,7 +1304,7 @@ sema_marker_rules_declared_signature: fn(rule: SemaScopeMembersMarkerRule) -> (s
         params.push(TAppliedRuleParameter{name: parameter.name, kind: kind, source_type: source_type, default_source: default_source})
         expected_types.push(parameter.ty)
     }
-    (expected_types: expected_types, signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type}, variadic_expected_type: variadic_expected_type)
+    {expected_types: expected_types, signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type}, variadic_expected_type: variadic_expected_type}
 }
 
 sema_marker_rules_declared_site_error: fn(marker: Marker, rule: SemaScopeMembersMarkerRule) -> Diagnostic {

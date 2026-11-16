@@ -18,7 +18,7 @@ LUAROCKS_DEFAULT_REPOSITORY: "https://luarocks.org"
 // One rockspec dependency: a rock and its `(operator, version)` constraints.
 LuaRocksDependency: struct {
     name: String
-    requirements: [(operator: String, wanted: String)]
+    requirements: [{operator: String, wanted: String}]
 }
 
 // The rockspec facts the provider installs from.
@@ -197,7 +197,7 @@ provider_luarocks_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Ex
 }
 
 // `name#version=<exact>` (or `name#<exact>`); a bare name is mutable.
-provider_luarocks_parse_ref: fn(raw: String) -> (name: String, version: String) RegistryError! {
+provider_luarocks_parse_ref: fn(raw: String) -> {name: String, version: String} RegistryError! {
     halves: raw.split_once("#")
     name: if halves == {
         .Val(pair) -> pair.before
@@ -217,7 +217,7 @@ provider_luarocks_parse_ref: fn(raw: String) -> (name: String, version: String) 
     if !provider_luarocks_valid_component(version) {
         return Err(RegistryError.Reason("invalid LuaRocks version `{version}`"))
     }
-    Ok((name: name, version: version))
+    Ok({name: name, version: version})
 }
 
 // Non-empty ASCII letters, digits, `.`, `-`, and `_`, never `.` or `..`.
@@ -342,7 +342,7 @@ provider_luarocks_parse_dependencies: fn(raw: String) -> [LuaRocksDependency] Re
         if !provider_luarocks_valid_component(name) {
             return Err(RegistryError.Reason("unsafe LuaRocks dependency `{name}`"))
         }
-        requirements := [(operator: String, wanted: String)]{}
+        requirements := [{operator: String, wanted: String}]{}
         rest: provider_registry_tail(item, name.bytes().len()).trim()
         pieces: rest.split(",").to_list()
         loop piece in pieces {
@@ -358,7 +358,7 @@ provider_luarocks_parse_dependencies: fn(raw: String) -> [LuaRocksDependency] Re
             if parts.len() > 2 || !known || !provider_luarocks_valid_component(wanted) {
                 return Err(RegistryError.Reason("unsupported LuaRocks constraint `{requirement}`"))
             }
-            requirements.push((operator: operator, wanted: wanted))
+            requirements.push({operator: operator, wanted: wanted})
         }
         out.push(LuaRocksDependency{name: name, requirements: requirements})
     }
@@ -514,7 +514,7 @@ provider_luarocks_ensure_platform_supported: fn(platforms: [String]) -[Env]> Reg
     }
 }
 
-provider_luarocks_requirements_satisfied: fn(version: String, requirements: [(operator: String, wanted: String)]) -> Bool Never! {
+provider_luarocks_requirements_satisfied: fn(version: String, requirements: [{operator: String, wanted: String}]) -> Bool Never! {
     loop requirement in requirements {
         order: provider_luarocks_compare_versions(version, requirement.wanted)
         satisfied: if requirement.operator == {
@@ -552,7 +552,7 @@ provider_luarocks_compare_versions: fn(left: String, right: String) -> Ordering 
     Ordering.Equal
 }
 
-provider_luarocks_render_requirements: fn(requirements: [(operator: String, wanted: String)]) -> String Never! {
+provider_luarocks_render_requirements: fn(requirements: [{operator: String, wanted: String}]) -> String Never! {
     if requirements.len() == 0 -> return "any version"
     parts := [String]{}
     loop requirement in requirements -> parts.push("{requirement.operator} {requirement.wanted}")
@@ -611,7 +611,7 @@ provider_luarocks_table_table: fn(raw: String, key: String) -> String RegistryEr
 
 // A `'…'` or `"…"` string with backslash escapes taken literally; `used` is
 // the byte count consumed from the (whitespace-trimmed) input.
-provider_luarocks_parse_quoted: fn(input: String) -> (value: String, used: Int) RegistryError! {
+provider_luarocks_parse_quoted: fn(input: String) -> {value: String, used: Int} RegistryError! {
     raw: input.trim_start().bytes()
     if raw.len() == 0 -> return Err(RegistryError.Reason("missing quoted value"))
     quote: Int{raw[0]}
@@ -631,7 +631,7 @@ provider_luarocks_parse_quoted: fn(input: String) -> (value: String, used: Int) 
             escaped = true
             next
         }
-        if code == quote -> return Ok((value: pkg_bytes_text(out, 0, out.len()), used: index + 1))
+        if code == quote -> return Ok({value: pkg_bytes_text(out, 0, out.len()), used: index + 1})
         out.push(raw[index])
     }
     Err(RegistryError.Reason("unterminated provider metadata string"))
@@ -639,7 +639,7 @@ provider_luarocks_parse_quoted: fn(input: String) -> (value: String, used: Int) 
 
 // The inside of a leading `{ … }` table, skipping quoted text and `--`
 // comments; `used` counts leading whitespace and both braces.
-provider_luarocks_balanced_table: fn(input: String) -> (inner: String, used: Int) RegistryError! {
+provider_luarocks_balanced_table: fn(input: String) -> {inner: String, used: Int} RegistryError! {
     trimmed: input.trim_start()
     offset: input.bytes().len() - trimmed.bytes().len()
     if !trimmed.starts_with("{{") {
@@ -670,7 +670,7 @@ provider_luarocks_balanced_table: fn(input: String) -> (inner: String, used: Int
                 code == 125 -> {
                     depth -= 1
                     if depth == 0 {
-                        return Ok((inner: pkg_bytes_text(bytes, 1, index), used: offset + index + 1))
+                        return Ok({inner: pkg_bytes_text(bytes, 1, index), used: offset + index + 1})
                     }
                 }
                 else -> {}

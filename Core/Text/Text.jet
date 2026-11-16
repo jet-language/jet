@@ -536,9 +536,9 @@ is_digit_cp: fn(cp: Int, table: View<U8>) -> Bool Never! {
 
 // Callers pass bytes of a valid UTF-8 String and an offset at a scalar start.
 // Read one scalar in place instead of materializing both decoder vectors.
-unicode_scalar_at: fn(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
+unicode_scalar_at: fn(raw: View<U8>, at: Int) -> {cp: Int, end: Int} Never! {
     first: Int{raw[at]}
-    if first < 128 -> return (cp: first, end: at + 1)
+    if first < 128 -> return {cp: first, end: at + 1}
     width := 2
     cp := first & 31
     if first >= 240 {
@@ -549,7 +549,7 @@ unicode_scalar_at: fn(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
         cp = first & 15
     }
     loop offset in 1..<width -> cp = (cp << 6) | (Int{raw[at + offset]} & 63)
-    (cp: cp, end: at + width)
+    {cp: cp, end: at + width}
 }
 
 is_space_cp: fn(cp: Int) -> Bool {
@@ -1532,26 +1532,26 @@ collation_single_elements: fn(out: &[Int], singles: View<U8>, pool: View<U8>, id
 }
 
 // UTS #10 (UCA 17.0.0) section 10.1.3: [.AAAA.0020.0002][.BBBB.0000.0000].
-collation_implicit: fn(ideographs: View<U8>, scalar: Int) -> (base: Int, trail: Int) Never! {
+collation_implicit: fn(ideographs: View<U8>, scalar: Int) -> {base: Int, trail: Int} Never! {
     if (scalar >= 94208 && scalar <= 100351) || (scalar >= 101632 && scalar <= 101759) {
-        return (base: 64256, trail: (scalar - 94208) | 32768)
+        return {base: 64256, trail: (scalar - 94208) | 32768}
     }
     if (scalar >= 100352 && scalar <= 101119) || (scalar >= 101760 && scalar <= 101887) {
-        return (base: 64257, trail: (scalar - 100352) | 32768)
+        return {base: 64257, trail: (scalar - 100352) | 32768}
     }
     if scalar >= 110960 && scalar <= 111359 {
-        return (base: 64258, trail: (scalar - 110960) | 32768)
+        return {base: 64258, trail: (scalar - 110960) | 32768}
     }
     if scalar >= 101120 && scalar <= 101631 {
-        return (base: 64259, trail: (scalar - 101120) | 32768)
+        return {base: 64259, trail: (scalar - 101120) | 32768}
     }
     trail: scalar & 32767 | 32768
     if !text_asset.contains(ideographs, scalar) {
-        return (base: 64448 + (scalar >> 15), trail: trail)
+        return {base: 64448 + (scalar >> 15), trail: trail}
     }
     // Core Han: the CJK Unified Ideographs and CJK Compatibility Ideographs blocks.
     core_han: (scalar >= 19968 && scalar <= 40959) || (scalar >= 63744 && scalar <= 64255)
-    (base: (if core_han -> 64320 else -> 64384) + (scalar >> 15), trail: trail)
+    {base: (if core_han -> 64320 else -> 64384) + (scalar >> 15), trail: trail}
 }
 
 #Test("decode_latin1 keeps every byte as the scalar of its number") {

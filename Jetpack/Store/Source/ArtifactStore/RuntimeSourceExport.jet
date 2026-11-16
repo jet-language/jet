@@ -412,7 +412,7 @@ store_runtime_all_hashes: fn(bytes: [U8], start: Int, count: Int) -> Bool Never!
 
 // A raw string opener at `at` (`r"`, `r#"`, `br##"`, ...): the opener's byte
 // length and its hash count.
-store_runtime_raw_string_start: fn(bytes: [U8], at: Int) -> (prefix_len: Int, hashes: Int)? Never! {
+store_runtime_raw_string_start: fn(bytes: [U8], at: Int) -> {prefix_len: Int, hashes: Int}? Never! {
     first: pkg_bytes_code(bytes, at)
     byte_string: first == 98 && pkg_bytes_code(bytes, at + 1) == 114
     if first != 114 && !byte_string -> return None
@@ -420,7 +420,7 @@ store_runtime_raw_string_start: fn(bytes: [U8], at: Int) -> (prefix_len: Int, ha
     index := start
     loop pkg_bytes_code(bytes, at + index) == 35 -> index += 1
     if pkg_bytes_code(bytes, at + index) != 34 -> return None
-    Val((prefix_len: index + 1, hashes: index - start))
+    Val({prefix_len: index + 1, hashes: index - start})
 }
 
 // The offset (from `at`) of the closing quote of a character literal opening

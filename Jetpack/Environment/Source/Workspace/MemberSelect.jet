@@ -102,7 +102,7 @@ env_dependency_order_checked: fn(resolver: AuthorityResolver, members: [Workspac
 // Members in dependency order with the package snapshots used to inspect
 // their dependencies. Callers pass these snapshots through to realization;
 // reopening a member by path after ordering would open a validation gap.
-env_dependency_order_packages_checked: fn(resolver: AuthorityResolver, members: [WorkspacePlanMember]) -[FS, Env]> [(member: WorkspacePlanMember, package: CheckedPackage)] AuthorityError! {
+env_dependency_order_packages_checked: fn(resolver: AuthorityResolver, members: [WorkspacePlanMember]) -[FS, Env]> [{member: WorkspacePlanMember, package: CheckedPackage}] AuthorityError! {
     count: members.len()
     dependents := [[Int]]{}
     indegree := [Int]{}
@@ -153,10 +153,10 @@ env_dependency_order_packages_checked: fn(resolver: AuthorityResolver, members: 
         if !emitted[index] -> order.push(index)
     }
     resolver.revalidate_root()
-    out := [(member: WorkspacePlanMember, package: CheckedPackage)]{}
+    out := [{member: WorkspacePlanMember, package: CheckedPackage}]{}
     loop index in order {
         package: packages.remove(index) ?? panic("each member is ordered exactly once")
-        out.push((member: members[index], package: package.move()))
+        out.push({member: members[index], package: package.move()})
     }
     Ok(out)
 }

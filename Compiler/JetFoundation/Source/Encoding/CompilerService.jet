@@ -267,8 +267,8 @@ compiler_service_tagged: fn(value: Dyn) -> CompilerServiceTagged? Never! {
 }
 
 compiler_service_tag: fn(label: String, payload: Dyn) -> Dyn Never! {
-    fields := [(key: String, value: Dyn)]{}
-    fields.push((key: label, value: payload))
+    fields := [{key: String, value: Dyn}]{}
+    fields.push({key: label, value: payload})
     Dyn.Object(fields)
 }
 
@@ -517,10 +517,10 @@ compiler_service_comptime_request: fn(program: &&String, base_dir: &&String) -> 
 }
 
 // The `{program, base_dir}` of a comptime-evaluate request, or None.
-compiler_service_comptime_request_from: fn(request: Dyn) -> (program: String, base_dir: String)? Never! {
+compiler_service_comptime_request_from: fn(request: Dyn) -> {program: String, base_dir: String}? Never! {
     program: compiler_service_text(request, "program") ?? return None
     base_dir: compiler_service_text(request, "base_dir") ?? return None
-    Val((base_dir: base_dir, program: program))
+    Val({base_dir: base_dir, program: program})
 }
 
 // A value that no wire spelling carries is refused as the evaluator refuses
@@ -591,10 +591,10 @@ compiler_service_check_request: fn(file: &&String, source: &&String) -> String N
 }
 
 // The `{file, source}` of a check-entry request, or None.
-compiler_service_check_request_from: fn(request: Dyn) -> (file: String, source: String)? Never! {
+compiler_service_check_request_from: fn(request: Dyn) -> {file: String, source: String}? Never! {
     file: compiler_service_text(request, "file") ?? return None
     source: compiler_service_text(request, "source") ?? return None
-    Val((file: file, source: source))
+    Val({file: file, source: source})
 }
 
 compiler_service_check_response: fn(diagnostics: &&[Diagnostic]) -> String Never! {

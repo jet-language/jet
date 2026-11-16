@@ -169,100 +169,100 @@ sys: module {
     #Import(c) priv groups_fill: fn(capacity: Int) -[Env]> [Int] = "jet_sys_groups_fill_raw"
 
     // The 1, 5 and 15 minute load averages, `count` of them read.
-    #Import(c) priv loadavg: fn() -[Env]> (available: Bool, count: Int, first: Float, second: Float, third: Float) = "jet_sys_loadavg_raw"
+    #Import(c) priv loadavg: fn() -[Env]> {available: Bool, count: Int, first: Float, second: Float, third: Float} = "jet_sys_loadavg_raw"
 
     // This process's and its waited children's CPU times and the elapsed
     // time, in `ticks` a second.
-    #Import(c) priv times: fn() -[Env]> (available: Bool, child_system: Int, child_user: Int, elapsed: Int, system: Int, ticks: Int, user: Int) = "jet_sys_times_raw"
+    #Import(c) priv times: fn() -[Env]> {available: Bool, child_system: Int, child_user: Int, elapsed: Int, system: Int, ticks: Int, user: Int} = "jet_sys_times_raw"
 
     // The soft and hard limits of the RLIMIT_* `resource` (-1 unlimited), and
     // setting them (-1 unlimited).
-    #Import(c) priv rlimit: fn(resource: Int) -[Env]> (available: Bool, errno: Int, hard: Int, soft: Int) = "jet_sys_rlimit_raw"
+    #Import(c) priv rlimit: fn(resource: Int) -[Env]> {available: Bool, errno: Int, hard: Int, soft: Int} = "jet_sys_rlimit_raw"
 
-    #Import(c) priv set_rlimit: fn(resource: Int, soft: Int, hard: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_set_rlimit_raw"
+    #Import(c) priv set_rlimit: fn(resource: Int, soft: Int, hard: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_set_rlimit_raw"
 
     // The user and system CPU microseconds and peak resident bytes of `who`
     // (0 this process, -1 its waited children).
-    #Import(c) priv rusage: fn(who: Int) -[Env]> (available: Bool, errno: Int, peak: Int, system: Int, user: Int) = "jet_sys_rusage_raw"
+    #Import(c) priv rusage: fn(who: Int) -[Env]> {available: Bool, errno: Int, peak: Int, system: Int, user: Int} = "jet_sys_rusage_raw"
 
     // The process group and the session of the process `pid`.
-    #Import(c) priv getpgid: fn(pid: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_getpgid_raw"
+    #Import(c) priv getpgid: fn(pid: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_getpgid_raw"
 
-    #Import(c) priv getsid: fn(pid: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_getsid_raw"
+    #Import(c) priv getsid: fn(pid: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_getsid_raw"
 
     // Sets the file-creation mask to `mask`; the previous mask.
     #Import(c) priv umask: fn(mask: Int) -[Env]> Int? = "jet_sys_umask_raw"
 
     // The scheduling priority of `who`, and setting it to `priority`.
-    #Import(c) priv getpriority: fn(who: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_getpriority_raw"
+    #Import(c) priv getpriority: fn(who: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_getpriority_raw"
 
-    #Import(c) priv setpriority: fn(who: Int, priority: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_setpriority_raw"
+    #Import(c) priv setpriority: fn(who: Int, priority: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_setpriority_raw"
 
     // Sets the access and modification times of `path`, in seconds.
-    #Import(c) priv utime: fn(path: String, atime: Int, mtime: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_utime_raw"
+    #Import(c) priv utime: fn(path: String, atime: Int, mtime: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_utime_raw"
 
     // The text of the errno `errno`.
     #Import(c) priv errno_text: fn(errno: Int) -[Env]> String = "jet_sys_errno_text_raw"
 
     // Forks this process (`value` is the child's id, 0 in the child), and
     // starts a new session.
-    #Import(c) priv fork: fn() -[Exec]> (available: Bool, errno: Int, value: Int) = "jet_sys_fork_raw"
+    #Import(c) priv fork: fn() -[Exec]> {available: Bool, errno: Int, value: Int} = "jet_sys_fork_raw"
 
-    #Import(c) priv setsid: fn() -[Exec]> (available: Bool, errno: Int, value: Int) = "jet_sys_setsid_raw"
+    #Import(c) priv setsid: fn() -[Exec]> {available: Bool, errno: Int, value: Int} = "jet_sys_setsid_raw"
 
     // Sets the user id, the group id, the process group of `pid`, and this
     // process's process group.
-    #Import(c) priv setuid: fn(uid: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_setuid_raw"
+    #Import(c) priv setuid: fn(uid: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_setuid_raw"
 
-    #Import(c) priv setgid: fn(gid: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_setgid_raw"
+    #Import(c) priv setgid: fn(gid: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_setgid_raw"
 
-    #Import(c) priv setpgid: fn(pid: Int, pgid: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_setpgid_raw"
+    #Import(c) priv setpgid: fn(pid: Int, pgid: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_setpgid_raw"
 
-    #Import(c) priv setpgrp: fn() -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_setpgrp_raw"
+    #Import(c) priv setpgrp: fn() -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_setpgrp_raw"
 
     // Sets the supplementary groups to those of `user`, plus `group`.
-    #Import(c) priv initgroups: fn(user: String, group: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_initgroups_raw"
+    #Import(c) priv initgroups: fn(user: String, group: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_initgroups_raw"
 
     // Sends `signal` to `pid`, and resets `signal` to its default action.
-    #Import(c) priv kill: fn(pid: Int, signal: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_kill_raw"
+    #Import(c) priv kill: fn(pid: Int, signal: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_kill_raw"
 
-    #Import(c) priv reset_signal: fn(signal: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_reset_signal_raw"
+    #Import(c) priv reset_signal: fn(signal: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_reset_signal_raw"
 
     // Waits for any child, or for `pid` with `options`: the child's id and
     // its wait status.
-    #Import(c) priv wait: fn() -[Env]> (available: Bool, errno: Int, status: Int, value: Int) = "jet_sys_wait_raw"
+    #Import(c) priv wait: fn() -[Env]> {available: Bool, errno: Int, status: Int, value: Int} = "jet_sys_wait_raw"
 
-    #Import(c) priv waitpid: fn(pid: Int, options: Int) -[Env]> (available: Bool, errno: Int, status: Int, value: Int) = "jet_sys_waitpid_raw"
+    #Import(c) priv waitpid: fn(pid: Int, options: Int) -[Env]> {available: Bool, errno: Int, status: Int, value: Int} = "jet_sys_waitpid_raw"
 
     // A new pipe's read and write descriptors.
-    #Import(c) priv pipe: fn() -[Env]> (available: Bool, errno: Int, read_fd: Int, value: Int, write_fd: Int) = "jet_sys_pipe_raw"
+    #Import(c) priv pipe: fn() -[Env]> {available: Bool, errno: Int, read_fd: Int, value: Int, write_fd: Int} = "jet_sys_pipe_raw"
 
     // Makes the FIFO `path` with `mode`, and the node `path` with `mode` and
     // device `dev`.
-    #Import(c) priv mkfifo: fn(path: String, mode: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_mkfifo_raw"
+    #Import(c) priv mkfifo: fn(path: String, mode: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_mkfifo_raw"
 
-    #Import(c) priv mknod: fn(path: String, mode: Int, dev: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_mknod_raw"
+    #Import(c) priv mknod: fn(path: String, mode: Int, dev: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_mknod_raw"
 
     // Locks this process's memory in RAM (mlockall `flags`).
-    #Import(c) priv mlockall: fn(flags: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_mlockall_raw"
+    #Import(c) priv mlockall: fn(flags: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_mlockall_raw"
 
     // The scheduling policy and priority of `pid`, setting them, and its
     // round-robin interval in nanoseconds.
-    #Import(c) priv sched_get: fn(pid: Int) -[Env]> (available: Bool, errno: Int, policy: Int, priority: Int) = "jet_sys_sched_get_raw"
+    #Import(c) priv sched_get: fn(pid: Int) -[Env]> {available: Bool, errno: Int, policy: Int, priority: Int} = "jet_sys_sched_get_raw"
 
-    #Import(c) priv sched_set: fn(pid: Int, policy: Int, priority: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_sched_set_raw"
+    #Import(c) priv sched_set: fn(pid: Int, policy: Int, priority: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_sched_set_raw"
 
-    #Import(c) priv sched_rr_interval: fn(pid: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_sched_rr_interval_raw"
+    #Import(c) priv sched_rr_interval: fn(pid: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_sched_rr_interval_raw"
 
     // The CPU-time clock of `pid` in nanoseconds, and setting the wall clock
     // to `ns` nanoseconds after the epoch.
-    #Import(c) priv cpu_clock: fn(pid: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_cpu_clock_raw"
+    #Import(c) priv cpu_clock: fn(pid: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_cpu_clock_raw"
 
-    #Import(c) priv clock_set: fn(ns: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_clock_set_raw"
+    #Import(c) priv clock_set: fn(ns: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_clock_set_raw"
 
     // The real, effective and saved user ids (`group` 0) or group ids
     // (`group` 1), and setting them (-1 keeps one).
-    #Import(c) priv resid: fn(group: Int) -[Env]> (available: Bool, effective: Int, errno: Int, real: Int, saved: Int) = "jet_sys_resid_raw"
+    #Import(c) priv resid: fn(group: Int) -[Env]> {available: Bool, effective: Int, errno: Int, real: Int, saved: Int} = "jet_sys_resid_raw"
 
-    #Import(c) priv set_resid: fn(group: Int, real: Int, effective: Int, saved: Int) -[Env]> (available: Bool, errno: Int, value: Int) = "jet_sys_set_resid_raw"
+    #Import(c) priv set_resid: fn(group: Int, real: Int, effective: Int, saved: Int) -[Env]> {available: Bool, errno: Int, value: Int} = "jet_sys_set_resid_raw"
 }

@@ -129,7 +129,7 @@ is_map_entry: fn(text: String) -> Bool Never! {
     false
 }
 
-parse_block_scalar: fn(rows: [String], start: Int, parent_indent: Int, folded: Bool) -> (value: String, next: Int) Never! {
+parse_block_scalar: fn(rows: [String], start: Int, parent_indent: Int, folded: Bool) -> {value: String, next: Int} Never! {
     lines := [String]{}
     i := start + 1
     content_indent := -1
@@ -158,7 +158,7 @@ parse_block_scalar: fn(rows: [String], start: Int, parent_indent: Int, folded: B
         out = "{out}{lines[j]}"
     }
     if lines.len() > 0 -> out = "{out}\n"
-    (value: out, next: i)
+    {value: out, next: i}
 }
 
 strip_indent: fn(text: String, columns: Int) -> String Never! {
@@ -185,7 +185,7 @@ strip_indent: fn(text: String, columns: Int) -> String Never! {
 parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
     // Keys keep arrival order; the temporary key set
     // rejects a repeated name and is freed with the map.
-    entries := [(key: String, value: Dyn)]{}
+    entries := [{key: String, value: Dyn}]{}
     seen := [String:Bool]{}
     i := 0
     loop i < rows.len() {
@@ -216,7 +216,7 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
         i += 1
         if rest == "|" || rest == ">" {
             block: parse_block_scalar(rows, i - 1, pad, rest == ">")
-            entries.push((key: key, value: Dyn.Text(block.value)))
+            entries.push({key: key, value: Dyn.Text(block.value)})
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -230,8 +230,8 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
                 child_rows.push(child.copy())
                 i += 1
             }
-            entries.push((key: key, value: parse_block(join_lines(child_rows))))
-        } else { entries.push((key: key, value: parse_scalar(rest))) }
+            entries.push({key: key, value: parse_block(join_lines(child_rows))})
+        } else { entries.push({key: key, value: parse_scalar(rest)}) }
     }
     Ok(stream.object_from_entries(entries))
 }
@@ -602,7 +602,7 @@ is_blank_or_comment: fn(line: String) -> Bool Never! {
     s.bytes()[0] == (U8{35})
 }
 
-split_once: fn(text: String, sep: U8) -> (after: String, before: String) Never! {
+split_once: fn(text: String, sep: U8) -> {after: String, before: String} Never! {
     raw: text.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == sep {
@@ -610,10 +610,10 @@ split_once: fn(text: String, sep: U8) -> (after: String, before: String) Never! 
             if i > 0 -> before = String.from_bytes(raw[0..i - 1]) ?? ""
             after := ""
             if i + 1 < raw.len() -> after = String.from_bytes(raw[i + 1..raw.len() - 1]) ?? ""
-            return (before: before, after: after)
+            return {before: before, after: after}
         }
     }
-    (before: text.copy(), after: "")
+    {before: text.copy(), after: ""}
 }
 
 drop_prefix: fn(text: String, n: Int) -> String Never! {

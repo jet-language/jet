@@ -320,7 +320,7 @@ summarize: fn(text: String) -> Summary {
     top := [Total]{}
     counters := [Total]{}
     open := [Open]{}
-    bodies := [(start: Int, end: Int)]{}
+    bodies := [{start: Int, end: Int}]{}
     lane := -1
     first := -1
     end_us := 0
@@ -355,7 +355,7 @@ summarize: fn(text: String) -> Summary {
         if at < 0 -> next
         open[at].closed = true
         start: open[at].start_us
-        if event.name == "comptime.bodies" -> bodies.push((start: start, end: ts))
+        if event.name == "comptime.bodies" -> bodies.push({start: start, end: ts})
         if open[at].top {
             found := 0
             loop found < top.len() && top[found].name != event.name -> found += 1

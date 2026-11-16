@@ -79,12 +79,12 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
 #Test("diagnoses_empty_duplicate_mismatch_and_header_position") {
     loop testcase in
         [
-        (source: `run: fn() { <: :>: 1 }`, code: "E0368"),
-        (source: `run: fn() { <: a, a :>: 1 }`, code: "E0369"),
-        (source: `run: fn() { <: f(x), g :>: 1 }`, code: "E0371"),
-        (source: `run: fn() { call(<: a, b :>, <: c :>) }`, code: "E0370"),
-        (source: `run: fn() { if <: a, b :> { print(a) } }`, code: "E0371"),
-        (source: `run: fn() { f() :> 1 }`, code: "E0371"),
+        {source: `run: fn() { <: :>: 1 }`, code: "E0368"},
+        {source: `run: fn() { <: a, a :>: 1 }`, code: "E0369"},
+        {source: `run: fn() { <: f(x), g :>: 1 }`, code: "E0371"},
+        {source: `run: fn() { call(<: a, b :>, <: c :>) }`, code: "E0370"},
+        {source: `run: fn() { if <: a, b :> { print(a) } }`, code: "E0371"},
+        {source: `run: fn() { f() :> 1 }`, code: "E0371"},
     ] {
         code: testcase.code
         lexed := lex(testcase.source.bytes())

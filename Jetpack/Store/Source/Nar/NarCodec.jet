@@ -92,7 +92,7 @@ NarByteSource: struct {
 store_nar_invalid: fn(message: String) -> StoreError Never! { StoreError.InvalidData(message) }
 
 // Serialize a store tree into canonical NAR bytes.
-store_write_nar: fn(root: String) -> (bytes: [U8], stats: NarStats) StoreError! {
+store_write_nar: fn(root: String) -> {bytes: [U8], stats: NarStats} StoreError! {
     if files.stat(root).is_symlink {
         return Err(store_nar_invalid("NAR source root cannot be a symlink"))
     }
@@ -101,7 +101,7 @@ store_write_nar: fn(root: String) -> (bytes: [U8], stats: NarStats) StoreError! 
     store_nar_put_text(output, STORE_NAR_MAGIC)
     nodes := 0
     store_nar_encode_node(canonical, canonical, output, nodes, 0)
-    Ok((bytes: output, stats: NarStats{digest: store_nar_digest_for(output), bytes: output.len(), nodes: nodes}))
+    Ok({bytes: output, stats: NarStats{digest: store_nar_digest_for(output), bytes: output.len(), nodes: nodes}})
 }
 
 // Serialize a tree and write it atomically to a regular file.
@@ -134,7 +134,7 @@ store_nar_digest: fn(bytes: [U8]) -> String Never! { store_nar_digest_for(bytes)
 
 store_nar_digest_for: fn(bytes: [U8]) -> String Never! { "sha256:{store_sha256_hex(bytes)}" }
 
-store_decode_nar_with_mode: fn(bytes: [U8], allow_nix_store_symlinks: Bool) -> (node: NarNode, stats: NarStats) StoreError! {
+store_decode_nar_with_mode: fn(bytes: [U8], allow_nix_store_symlinks: Bool) -> {node: NarNode, stats: NarStats} StoreError! {
     if bytes.len() > STORE_MAX_NAR_BYTES {
         return Err(store_nar_invalid("NAR exceeds the 1 GiB limit"))
     }
@@ -144,7 +144,7 @@ store_decode_nar_with_mode: fn(bytes: [U8], allow_nix_store_symlinks: Bool) -> (
     }
     node: reader.node(0, 0)
     if reader.remaining() != 0 -> return Err(store_nar_invalid("NAR has trailing data"))
-    Ok((node: node, stats: NarStats{digest: store_nar_digest_for(bytes), bytes: bytes.len(), nodes: reader.nodes}))
+    Ok({node: node, stats: NarStats{digest: store_nar_digest_for(bytes), bytes: bytes.len(), nodes: reader.nodes}})
 }
 
 store_nar_encode_node: fn(path: String, root: String, out: &[U8], nodes: &Int, depth: Int) StoreError! {

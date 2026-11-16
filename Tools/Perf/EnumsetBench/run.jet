@@ -64,7 +64,7 @@ Ran: struct {
 // One arm's report keys in the original's order, with its stdout and phase
 // medians when it was measured.
 Arm: struct {
-    fields: [(key: String, value: Dyn)]
+    fields: [{key: String, value: Dyn}]
     stdout: String?
     phase_ns: [Int]
 }
@@ -101,28 +101,28 @@ run: fn(args: Args) Err! {
     }
     version: sh(process.cmd([String]{bench.jet, "--version"}).cwd(root), 1800s)
     version_text: (if version.out != "" -> version.out else -> version.err).trim()
-    report := [(key: String, value: Dyn)]{
-        (key: "card", value: Dyn.Int(3133)),
-        (key: "finding", value: Dyn.Text("ENUM-F05")),
-        (key: "commit", value: Dyn.Text(sh(process.cmd([String]{"git", "rev-parse", "HEAD"}).cwd(root), 1800s).out.trim())),
-        (key: "dirty_tree", value: Dyn.Bool(sh(process.cmd([String]{"git", "status", "--porcelain"}).cwd(root), 1800s).out.trim() != "")),
-        (key: "jet", value: Dyn.Text(bench.jet)),
-        (key: "jet_version", value: Dyn.Text(version_text.slice(0, min(200, version_text.len())))),
-        (key: "rustc", value: Dyn.Text(sh(process.cmd([String]{files.join(root, "Tools/Agent/JetEnv.jet"), "rustc", "--version"}).cwd(root), 1800s).out.trim())),
-        (
+    report := [{key: String, value: Dyn}]{
+        {key: "card", value: Dyn.Int(3133)},
+        {key: "finding", value: Dyn.Text("ENUM-F05")},
+        {key: "commit", value: Dyn.Text(sh(process.cmd([String]{"git", "rev-parse", "HEAD"}).cwd(root), 1800s).out.trim())},
+        {key: "dirty_tree", value: Dyn.Bool(sh(process.cmd([String]{"git", "status", "--porcelain"}).cwd(root), 1800s).out.trim() != "")},
+        {key: "jet", value: Dyn.Text(bench.jet)},
+        {key: "jet_version", value: Dyn.Text(version_text.slice(0, min(200, version_text.len())))},
+        {key: "rustc", value: Dyn.Text(sh(process.cmd([String]{files.join(root, "Tools/Agent/JetEnv.jet"), "rustc", "--version"}).cwd(root), 1800s).out.trim())},
+        {
             key: "machine",
             value: Dyn.Object(
-                [(key: String, value: Dyn)]{
-                    (key: "platform", value: Dyn.Text(sys.platform())),
-                    (key: "cpu", value: Dyn.Text(sys.machine())),
-                    (key: "cpus", value: Dyn.Int(sys.cpu_count())),
+                [{key: String, value: Dyn}]{
+                    {key: "platform", value: Dyn.Text(sys.platform())},
+                    {key: "cpu", value: Dyn.Text(sys.machine())},
+                    {key: "cpus", value: Dyn.Int(sys.cpu_count())},
                 },
             ),
-        ),
-        (key: "samples", value: Dyn.Int(args.samples)),
-        (key: "rounds", value: Dyn.Int(args.rounds)),
-        (key: "phases", value: Dyn.Array(PHASES.map(fn(phase) { Dyn.Text(phase.copy()) }))),  // copy: the report keeps its own
-        (key: "win_rule", value: Dyn.Text("Jet/rust_native < 1.00 on every phase")),
+        },
+        {key: "samples", value: Dyn.Int(args.samples)},
+        {key: "rounds", value: Dyn.Int(args.rounds)},
+        {key: "phases", value: Dyn.Array(PHASES.map(fn(phase) { Dyn.Text(phase.copy()) }))},  // copy: the report keeps its own
+        {key: "win_rule", value: Dyn.Text("Jet/rust_native < 1.00 on every phase")},
     }
     cells := [Dyn]{}
     loop k in sizes {
@@ -134,7 +134,7 @@ run: fn(args: Args) Err! {
         }
         cells.extend(compare(row))
     }
-    report.push((key: "cells", value: Dyn.Array(cells)))
+    report.push({key: "cells", value: Dyn.Array(cells)})
     target: files.normalize(args.json)
     files.create_dir_all(files.normalize("{target}/.."))
     files.write(target, json.stringify(Dyn.Object(report), 2))
@@ -169,28 +169,28 @@ arm_cell: fn(bench: Bench, arm: String, k: Int) -> Arm Err! {
         arm.starts_with("rust_") -> {
             files.write(files.join(dir, "{stem}.rs"), rust_source(arm, k, bench.rounds))
             binary: files.join(dir, stem)
-            (binary: binary, built: sh(process.cmd([String]{files.join(bench.root, "Tools/Agent/JetEnv.jet"), "rustc", "-C", "opt-level=3", "-C", "codegen-units=1", files.join(dir, "{stem}.rs"), "-o", binary}).cwd(bench.root), 1800s))
+            {binary: binary, built: sh(process.cmd([String]{files.join(bench.root, "Tools/Agent/JetEnv.jet"), "rustc", "-C", "opt-level=3", "-C", "codegen-units=1", files.join(dir, "{stem}.rs"), "-o", binary}).cwd(bench.root), 1800s)}
         }
         else -> {
             files.write(files.join(dir, "package.jet"), PACKAGE)
             files.write(files.join(dir, "{stem}.jet"), jet_source(arm, k, bench.rounds))
             binary: files.join(dir, ".jet/build/{stem}")
             files.remove(binary) ?? ()
-            (binary: binary, built: sh(process.cmd([String]{bench.jet, "build", "--release", "{stem}.jet"}).cwd(dir), 1800s))
+            {binary: binary, built: sh(process.cmd([String]{bench.jet, "build", "--release", "{stem}.jet"}).cwd(dir), 1800s)}
         }
     }
     binary: made.binary
     built: made.built
-    fields: [(key: String, value: Dyn)]{(key: "k", value: Dyn.Int(k)), (key: "arm", value: Dyn.Text(arm.copy())), (key: "build_ns", value: Dyn.Int(built.wall_ns))}  // copy: the caller prints the arm too
+    fields: [{key: String, value: Dyn}]{{key: "k", value: Dyn.Int(k)}, {key: "arm", value: Dyn.Text(arm.copy())}, {key: "build_ns", value: Dyn.Int(built.wall_ns)}}  // copy: the caller prints the arm too
     if built.code != 0 || !files.is_file(binary) {
         tail: "{built.err}{built.out}".replace("{CR}\n", "\n").replace(CR, "\n")
         return Ok(
             Arm{
                 fields: fields.concat(
-                    [(key: String, value: Dyn)]{
-                        (key: "status", value: Dyn.Text("unavailable")),
-                        (key: "reason", value: Dyn.Text("build failed")),
-                        (key: "error_tail", value: Dyn.Text(tail.slice(max(0, tail.len() - 1500), tail.len()))),
+                    [{key: String, value: Dyn}]{
+                        {key: "status", value: Dyn.Text("unavailable")},
+                        {key: "reason", value: Dyn.Text("build failed")},
+                        {key: "error_tail", value: Dyn.Text(tail.slice(max(0, tail.len() - 1500), tail.len()))},
                     },
                 ),
                 stdout: None,
@@ -204,7 +204,7 @@ arm_cell: fn(bench: Bench, arm: String, k: Int) -> Arm Err! {
 // The arm `fields` begin, measured: the binary runs samples + 1 times, the
 // first a warm-up, then once for its peak RSS and once under the allocation
 // counter.
-measure: fn(bench: Bench, binary: String, fields: [(key: String, value: Dyn)]) -> Arm Err! {
+measure: fn(bench: Bench, binary: String, fields: [{key: String, value: Dyn}]) -> Arm Err! {
     runs := [Ran]{}
     timings := [[Int]]{}
     loop _ in 0..<(bench.samples + 1) {
@@ -212,10 +212,10 @@ measure: fn(bench: Bench, binary: String, fields: [(key: String, value: Dyn)]) -
         phases: (if ran.code == 0 -> phase_line(ran.err) else -> None) ?? return Ok(
             Arm{
                 fields: fields.concat(
-                    [(key: String, value: Dyn)]{
-                        (key: "status", value: Dyn.Text("unavailable")),
-                        (key: "reason", value: Dyn.Text(if ran.code != 0 -> "exit {ran.code}" else -> "phase timings missing from stderr")),
-                        (key: "stderr_tail", value: Dyn.Text(ran.err.slice(max(0, ran.err.len() - 800), ran.err.len()))),
+                    [{key: String, value: Dyn}]{
+                        {key: "status", value: Dyn.Text("unavailable")},
+                        {key: "reason", value: Dyn.Text(if ran.code != 0 -> "exit {ran.code}" else -> "phase timings missing from stderr")},
+                        {key: "stderr_tail", value: Dyn.Text(ran.err.slice(max(0, ran.err.len() - 800), ran.err.len()))},
                     },
                 ),
                 stdout: None,
@@ -228,24 +228,24 @@ measure: fn(bench: Bench, binary: String, fields: [(key: String, value: Dyn)]) -
     kept: runs.slice(1, runs.len())
     first: kept[0].out.copy()  // copy: the stability check compares every run with it
     phase_ns := [Int]{}
-    medians := [(key: String, value: Dyn)]{}
+    medians := [{key: String, value: Dyn}]{}
     loop i in 0..<PHASES.len() {
         phase_ns.push(checked(Int{math.trunc(stats.median(timings.slice(1, timings.len()).map(fn(row) { Float.from_int(row[i]) })) ?? 0.0)}) ?? 0)
-        medians.push((key: PHASES[i], value: Dyn.Int(phase_ns[i])))
+        medians.push({key: PHASES[i], value: Dyn.Int(phase_ns[i])})
     }
     rss: sh(process.cmd([String]{binary}), 900s)
     Ok(
         Arm{
             fields: fields.concat(
-                [(key: String, value: Dyn)]{
-                    (key: "status", value: Dyn.Text("measured")),
-                    (key: "stdout", value: Dyn.Text(kept[0].out.copy())),  // copy: the stability check reads it too
-                    (key: "stable_stdout", value: Dyn.Bool(kept.filter(fn(ran) { ran.out != first }).len() == 0)),
-                    (key: "wall_median_ns", value: Dyn.Int(checked(Int{math.trunc(stats.median(kept.map(fn(ran) { Float.from_int(ran.wall_ns) })) ?? 0.0)}) ?? 0)),
-                    (key: "phase_median_ns", value: Dyn.Object(medians)),
-                    (key: "peak_rss_kib", value: if rss.code == 0 && rss.peak_kib > 0 -> Dyn.Int(rss.peak_kib) else -> Dyn.Text("unavailable")),
-                    (key: "binary_bytes", value: Dyn.Int(files.getsize(binary))),
-                    (key: "allocations", value: allocations(bench, binary)),
+                [{key: String, value: Dyn}]{
+                    {key: "status", value: Dyn.Text("measured")},
+                    {key: "stdout", value: Dyn.Text(kept[0].out.copy())},  // copy: the stability check reads it too
+                    {key: "stable_stdout", value: Dyn.Bool(kept.filter(fn(ran) { ran.out != first }).len() == 0)},
+                    {key: "wall_median_ns", value: Dyn.Int(checked(Int{math.trunc(stats.median(kept.map(fn(ran) { Float.from_int(ran.wall_ns) })) ?? 0.0)}) ?? 0)},
+                    {key: "phase_median_ns", value: Dyn.Object(medians)},
+                    {key: "peak_rss_kib", value: if rss.code == 0 && rss.peak_kib > 0 -> Dyn.Int(rss.peak_kib) else -> Dyn.Text("unavailable")},
+                    {key: "binary_bytes", value: Dyn.Int(files.getsize(binary))},
+                    {key: "allocations", value: allocations(bench, binary)},
                 },
             ),
             stdout: Val(kept[0].out.copy()),  // copy: the report keeps it too
@@ -277,22 +277,22 @@ phase_line: fn(stderr: String) -> [Int]? {
 // The counted run under the LD_PRELOAD allocation counter.
 allocations: fn(bench: Bench, binary: String) -> Dyn Err! {
     status: Dyn.Text("unavailable")
-    lib: bench.counter ?? return Ok(Dyn.Object([(key: String, value: Dyn)]{(key: "status", value: status), (key: "reason", value: Dyn.Text("allocation counter did not build"))}))
+    lib: bench.counter ?? return Ok(Dyn.Object([{key: String, value: Dyn}]{{key: "status", value: status}, {key: "reason", value: Dyn.Text("allocation counter did not build")}}))
     count: files.join(bench.work, "alloc.count")
     files.remove(count) ?? ()
     ran: sh(process.cmd([String]{binary}).env("LD_PRELOAD", lib).env("ALLOCCOUNT_OUT", count), 900s)
     if ran.code != 0 || !files.is_file(count) {
-        return Ok(Dyn.Object([(key: String, value: Dyn)]{(key: "status", value: status), (key: "reason", value: Dyn.Text("counted run exit {ran.code}"))}))
+        return Ok(Dyn.Object([{key: String, value: Dyn}]{{key: "status", value: status}, {key: "reason", value: Dyn.Text("counted run exit {ran.code}")}}))
     }
-    counted := [(key: String, value: Dyn)]{(key: "status", value: Dyn.Text("measured"))}
+    counted := [{key: String, value: Dyn}]{{key: "status", value: Dyn.Text("measured")}}
     allocated := 0
     loop pair in files.read(count).words() {
         number: Int.parse(pair.partition("=").tail) ?? process.fail(1, "{PROGRAM}: ValueError: invalid literal for int() with base 10: '{pair}'")
         if pair.partition("=").head == "allocations" -> allocated = number
-        counted.push((key: pair.partition("=").head, value: Dyn.Int(number)))
+        counted.push({key: pair.partition("=").head, value: Dyn.Int(number)})
     }
     if allocated == 0 {
-        return Ok(Dyn.Object([(key: String, value: Dyn)]{(key: "status", value: status), (key: "reason", value: Dyn.Text("binary bypasses the preloadable libc allocator"))}))
+        return Ok(Dyn.Object([{key: String, value: Dyn}]{{key: "status", value: status}, {key: "reason", value: Dyn.Text("binary bypasses the preloadable libc allocator")}}))
     }
     Ok(Dyn.Object(counted))
 }
@@ -307,20 +307,20 @@ compare: fn(row: [Arm]) -> [Dyn] {
     loop cell in row {
         fields := cell.fields.copy()  // copy: the parity keys extend the cell
         if cell.stdout == None || reference.stdout == None {
-            fields.push((key: "parity", value: Dyn.Text("unknown")))
+            fields.push({key: "parity", value: Dyn.Text("unknown")})
             unknown.push(Dyn.Object(fields))
             next
         }
-        fields.push((key: "parity", value: Dyn.Text(if cell.stdout == reference.stdout -> "match" else -> "MISMATCH")))
-        ratios := [(key: String, value: Dyn)]{}
+        fields.push({key: "parity", value: Dyn.Text(if cell.stdout == reference.stdout -> "match" else -> "MISMATCH")})
+        ratios := [{key: String, value: Dyn}]{}
         losing := [Dyn]{}
         loop i in 0..<PHASES.len() {
             ratio: Float.from_int(cell.phase_ns[i]) / Float.from_int(max(1, reference.phase_ns[i]))
-            ratios.push((key: PHASES[i], value: Dyn.Float(math.round_even(ratio * 1000.0) / 1000.0)))
+            ratios.push({key: PHASES[i], value: Dyn.Float(math.round_even(ratio * 1000.0) / 1000.0)})
             if ratio >= 1.0 -> losing.push(Dyn.Text(PHASES[i]))
         }
-        fields.push((key: "ratio_to_rust_native", value: Dyn.Object(ratios)))
-        fields.push((key: "losing_phases", value: Dyn.Array(losing)))
+        fields.push({key: "ratio_to_rust_native", value: Dyn.Object(ratios)})
+        fields.push({key: "losing_phases", value: Dyn.Array(losing)})
         compared.push(Dyn.Object(fields))
     }
     compared.extend(unknown)
@@ -338,10 +338,10 @@ jet_source: fn(arm: String, k: Int, rounds: Int) -> String {
     all: members.join(", ")
     kbits: min(k, 63)
     shape: if arm == {
-        "jet_set_enum" -> (rep: jet_set_enum_rep(k), ty: "Set<Case>")
-        "jet_bits" -> (rep: jet_bits_rep(k), ty: "Bits")
-        "jet_int_mask" -> (rep: jet_int_mask_rep(), ty: "Int")
-        else -> (rep: jet_packed_fields_rep(), ty: "Word")
+        "jet_set_enum" -> {rep: jet_set_enum_rep(k), ty: "Set<Case>"}
+        "jet_bits" -> {rep: jet_bits_rep(k), ty: "Bits"}
+        "jet_int_mask" -> {rep: jet_int_mask_rep(), ty: "Int"}
+        else -> {rep: jet_packed_fields_rep(), ty: "Word"}
     }
     "{jet_common(cases, all, full_mask(k), kbits)}{shape.rep}{jet_driver(shape.ty, k, kbits, rounds)}"
 }

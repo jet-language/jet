@@ -110,22 +110,22 @@ non_tower_changes: fn(status: String) -> [String] Never! {
 
 // The milestone whose closeout token opens `head`: the requested one (it must
 // be eligible), else the single eligible one.
-select_closeout: fn(milestones: [Dyn], head: String, requested: String) -> (id: String, problem: String) Never! {
+select_closeout: fn(milestones: [Dyn], head: String, requested: String) -> {id: String, problem: String} Never! {
     eligible: milestones.filter(fn(milestone) { eligible(milestone, head) }).map(fn(milestone) { text_field(milestone, "id") })
     if requested != "" {
         if !milestones.any(fn(milestone) { text_field(milestone, "id") == requested }) {
-            return (id: "", problem: "unknown milestone {requested}")
+            return {id: "", problem: "unknown milestone {requested}"}
         }
         if !eligible.contains(requested) {
-            return (id: "", problem: "milestone {requested} has no valid closeout token for source commit {head}")
+            return {id: "", problem: "milestone {requested} has no valid closeout token for source commit {head}"}
         }
-        return (id: requested.copy(), problem: "")
+        return {id: requested.copy(), problem: ""}
     }
-    if eligible.len() == 1 -> return (id: eligible[0].copy(), problem: "")
+    if eligible.len() == 1 -> return {id: eligible[0].copy(), problem: ""}
     if eligible.len() == 0 {
-        return (id: "", problem: "no review-ready milestone has a closeout token for source commit {head}")
+        return {id: "", problem: "no review-ready milestone has a closeout token for source commit {head}"}
     }
-    (id: "", problem: "multiple closeout tokens match {head}; set JET_CLOSEOUT_MILESTONE to one of: {eligible.join(", ")}")
+    {id: "", problem: "multiple closeout tokens match {head}; set JET_CLOSEOUT_MILESTONE to one of: {eligible.join(", ")}"}
 }
 
 eligible: fn(milestone: Dyn, head: String) -> Bool Never! {

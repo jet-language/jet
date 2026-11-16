@@ -341,16 +341,16 @@ native_suites_of: fn(text: String) -> [String] Never! {
 
 // COMMIT `sha`'s native suites (native_suites_of its NATIVE_SUITES_SOURCE in
 // `repo`), or why there are none.
-native_suites: fn(repo: String, sha: String) -[Exec, Time.Wait]> (suites: [String], error: String) Never! {
+native_suites: fn(repo: String, sha: String) -[Exec, Time.Wait]> {suites: [String], error: String} Never! {
     shown: git_in(repo, [String]{"show", "{sha}:{NATIVE_SUITES_SOURCE}"})
     if shown.rc != 0 {
-        return (suites: [String]{}, error: "git show {short(sha, 10)}:{NATIVE_SUITES_SOURCE} failed: {shown.err}")
+        return {suites: [String]{}, error: "git show {short(sha, 10)}:{NATIVE_SUITES_SOURCE} failed: {shown.err}"}
     }
     suites: native_suites_of(shown.out)
     if suites.len() == 0 {
-        return (suites: suites, error: "{short(sha, 10)}:{NATIVE_SUITES_SOURCE} declares no one-line `{NATIVE_SUITES_DECL}...}}` of quoted suite names")
+        return {suites: suites, error: "{short(sha, 10)}:{NATIVE_SUITES_SOURCE} declares no one-line `{NATIVE_SUITES_DECL}...}}` of quoted suite names"}
     }
-    (suites: suites, error: "")
+    {suites: suites, error: ""}
 }
 
 // The native suites the kit pool runs: every one but REGISTRY_SUITE.
@@ -1084,7 +1084,7 @@ chain_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 
 // The regular files of the tree `root` that differ from `other`, and how
 // many `root` holds.
-tree_differences: fn(root: String, other: String) -[FS]> (differ: [String], files: Int) Never! {
+tree_differences: fn(root: String, other: String) -[FS]> {differ: [String], files: Int} Never! {
     left := [Artifact]{}
     right := [Artifact]{}
     tree_artifacts(root, "", left)
@@ -1102,7 +1102,7 @@ tree_differences: fn(root: String, other: String) -[FS]> (differ: [String], file
     loop artifact in right {
         if !ours.has_key(artifact.path) -> differ.push(artifact.path.removeprefix("/").copy())
     }
-    (differ: differ, files: left.len())
+    {differ: differ, files: left.len()}
 }
 
 pack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
@@ -2106,11 +2106,11 @@ registries_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 
 // The registries row of a CompilerRegistries.jet receipt `text` for COMMIT
 // `sha`: PASS only when it pins `sha` and every one of its entries passed.
-registries_verdict: fn(text: String, sha: String) -> (status: String, detail: String) Never! {
-    receipt: json.parse(text) ?? return (status: "FAIL", detail: "no registry receipt: {err}")
+registries_verdict: fn(text: String, sha: String) -> {status: String, detail: String} Never! {
+    receipt: json.parse(text) ?? return {status: "FAIL", detail: "no registry receipt: {err}"}
     head: text_field(receipt, "head")
     if head != sha {
-        return (status: "FAIL", detail: "the registry receipt pins {if head == "" -> "no commit" else -> head}, not {sha}")
+        return {status: "FAIL", detail: "the registry receipt pins {if head == "" -> "no commit" else -> head}, not {sha}"}
     }
     entries: array_field(receipt, "entries")
     failing := [String]{}
@@ -2121,10 +2121,10 @@ registries_verdict: fn(text: String, sha: String) -> (status: String, detail: St
     total: int_field(receipt, "total") ?? -1
     passed: int_field(receipt, "passed") ?? -1
     if text_field(receipt, "status") == "PASS" && entries.len() > 0 && total == entries.len() && passed == total && failing.len() == 0 {
-        return (status: "PASS", detail: "{total} registry entries pass")
+        return {status: "PASS", detail: "{total} registry entries pass"}
     }
     shown: if failing.len() > 6 -> "{failing[0..<6].join(" | ")} | ..." else -> failing.join(" | ")
-    (status: "FAIL", detail: "{passed} of {total} registry entries pass ({entries.len()} listed, status {text_field(receipt, "status")}){if failing.len() > 0 -> "; not passing: {shown}" else -> ""}")
+    {status: "FAIL", detail: "{passed} of {total} registry entries pass ({entries.len()} listed, status {text_field(receipt, "status")}){if failing.len() > 0 -> "; not passing: {shown}" else -> ""}"}
 }
 
 // The train speed gate (#5479 c5) and the compile-throughput record (#5479
@@ -2185,7 +2185,7 @@ speed_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // table (the rows under its `mode quantity` header, up to a blank line): the
 // CPU change of each mode, then every quantity that failed or could not be
 // judged.
-speed_detail: fn(text: String) -> (verdict: String, detail: String) Never! {
+speed_detail: fn(text: String) -> {verdict: String, detail: String} Never! {
     verdict := ""
     in_gate := false
     cpu := [String]{}
@@ -2216,7 +2216,7 @@ speed_detail: fn(text: String) -> (verdict: String, detail: String) Never! {
     detail := "speed gate {if verdict == "" -> "missing" else -> verdict}"
     if cpu.len() > 0 -> detail = "{detail}, {cpu.join(", ")}"
     if flagged.len() > 0 -> detail = "{detail}; {shown}"
-    (verdict: verdict, detail: detail)
+    {verdict: verdict, detail: detail}
 }
 
 // Who owns a flaky row: its disposition; with none, a row whose retry
@@ -2461,7 +2461,7 @@ Assembled: struct {
     scope: String
 }
 
-write_all: fn(writes: [(path: String, text: String)]) -[FS]> String? Never! {
+write_all: fn(writes: [{path: String, text: String}]) -[FS]> String? Never! {
     loop entry in writes {
         files.write(entry.path, entry.text) ?? return Val("cannot write {entry.path}: {err}")
     }
@@ -2508,14 +2508,14 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
     // work directory and reaches dest only once the release is published.
     env_text: "# Newest verified self-hosted compiler (written by Tools/Release admit; jet-use installs it).\nLABEL=\"{ctx.next} (dev {short(ctx.sha, 9)}, {date}, verified: s2 == s3 {short(ctx.candidate.sha, 16)}, no Rust; {gains.total} gains, {lost.len()} lost over {ctx.baseline.name})\"\nJET={dest}/jet\nJET_IDENTITY={ctx.candidate.identity}\n"
     failed: write_all(
-        [(path: String, text: String)]{
-            (path: files.join(temp, "IDENTITY"), text: "{ctx.candidate.identity}\n"),
-            (path: files.join(temp, "RELEASE"), text: "{ctx.next}\n"),
-            (path: files.join(temp, "VERSION"), text: "{ctx.next} {ctx.sha} {date}\n"),
-            (path: files.join(temp, "SOURCE"), text: "{ctx.sha} (dev, {ctx.next}: self-hosted s2 of {short(ctx.sha, 9)} from seed {ctx.release.name}; {verified}; Tools/Release admit {date})\n"),
-            (path: files.join(ctx.work, "current.env"), text: env_text),
-            (path: files.join(temp, "MERGE_MSG"), text: "Merge dev: {ctx.next} {summary}\n\n{body}\n"),
-            (path: files.join(temp, "TAG_MSG"), text: "{ctx.next}: {summary}\n\n{body}\n"),
+        [{path: String, text: String}]{
+            {path: files.join(temp, "IDENTITY"), text: "{ctx.candidate.identity}\n"},
+            {path: files.join(temp, "RELEASE"), text: "{ctx.next}\n"},
+            {path: files.join(temp, "VERSION"), text: "{ctx.next} {ctx.sha} {date}\n"},
+            {path: files.join(temp, "SOURCE"), text: "{ctx.sha} (dev, {ctx.next}: self-hosted s2 of {short(ctx.sha, 9)} from seed {ctx.release.name}; {verified}; Tools/Release admit {date})\n"},
+            {path: files.join(ctx.work, "current.env"), text: env_text},
+            {path: files.join(temp, "MERGE_MSG"), text: "Merge dev: {ctx.next} {summary}\n\n{body}\n"},
+            {path: files.join(temp, "TAG_MSG"), text: "{ctx.next}: {summary}\n\n{body}\n"},
         },
     )
     if failed == .Val(why) -> return Err(assembly(why))
@@ -2531,10 +2531,10 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
     }
     record: json.to_string_pretty(release_record(ctx, plan, summary, scope, created)) ?? return Err(assembly("RELEASE.json cannot be encoded: {err}"))
     again: write_all(
-        [(path: String, text: String)]{
-            (path: files.join(temp, "RELEASE.json"), text: "{record}\n"),
-            (path: files.join(temp, "RELEASE.md"), text: report(ctx, "PASS", plan)),
-            (path: files.join(temp, "SHA256SUMS"), text: sums_text(shipped_artifacts(temp))),
+        [{path: String, text: String}]{
+            {path: files.join(temp, "RELEASE.json"), text: "{record}\n"},
+            {path: files.join(temp, "RELEASE.md"), text: report(ctx, "PASS", plan)},
+            {path: files.join(temp, "SHA256SUMS"), text: sums_text(shipped_artifacts(temp))},
         },
     )
     if again == .Val(why) -> return Err(assembly(why))
@@ -2563,13 +2563,13 @@ publish_release: fn(ctx: Ctx, dest: String) -[Env, Exec, FS, IO, Time, Time.Wait
     log: files.join(ctx.work, "logs/publish.log")
     vars: [Var]{set_var("PATH", "{dest}:{process.env_nonempty("PATH") ?? ""}"), set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), drop_var("JET"), drop_var("JET_TOOLCHAIN_ROOT")}
     release: [String]{files.join(dest, "jet"), "run", "Tools/Release/Main.jet", "--"}
-    steps: [(name: String, argv: [String])]{
-        (name: "fetch origin dev", argv: [String]{"git", "-C", ctx.root.copy(), "fetch", "--quiet", "origin", "+refs/heads/dev:refs/remotes/origin/dev"}),
-        (name: "on origin/dev", argv: [String]{"git", "-C", ctx.root.copy(), "merge-base", "--is-ancestor", ctx.sha.copy(), "refs/remotes/origin/dev"}),
-        (name: "tag", argv: [String]{"git", "-C", ctx.root.copy(), "tag", "-a", ctx.next.copy(), "-F", files.join(dest, "TAG_MSG"), ctx.sha.copy()}),
-        (name: "push tag", argv: [String]{"git", "-C", ctx.root.copy(), "push", "origin", ctx.next.copy()}),
-        (name: "candidate", argv: joined(release, [String]{"candidate", dest.copy()})),
-        (name: "publish", argv: joined(release, [String]{"publish", dest.copy()})),
+    steps: [{name: String, argv: [String]}]{
+        {name: "fetch origin dev", argv: [String]{"git", "-C", ctx.root.copy(), "fetch", "--quiet", "origin", "+refs/heads/dev:refs/remotes/origin/dev"}},
+        {name: "on origin/dev", argv: [String]{"git", "-C", ctx.root.copy(), "merge-base", "--is-ancestor", ctx.sha.copy(), "refs/remotes/origin/dev"}},
+        {name: "tag", argv: [String]{"git", "-C", ctx.root.copy(), "tag", "-a", ctx.next.copy(), "-F", files.join(dest, "TAG_MSG"), ctx.sha.copy()}},
+        {name: "push tag", argv: [String]{"git", "-C", ctx.root.copy(), "push", "origin", ctx.next.copy()}},
+        {name: "candidate", argv: joined(release, [String]{"candidate", dest.copy()})},
+        {name: "publish", argv: joined(release, [String]{"publish", dest.copy()})},
     }
     state := Published{ok: false, tagged: false, pushed: false, step: "", detail: "", log: log.copy(), left: [String]{}}
     loop (index, step) in steps {

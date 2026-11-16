@@ -230,7 +230,7 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
 }
 
 // `name#version=<exact>`; anything else is mutable and refused.
-provider_script_parse_ref: fn(kind: ScriptRegistryKind, raw: String) -> (name: String, version: String) RegistryError! {
+provider_script_parse_ref: fn(kind: ScriptRegistryKind, raw: String) -> {name: String, version: String} RegistryError! {
     halves: raw.split_once("#")
     name: if halves == {
         .Val(pair) -> pair.before
@@ -247,7 +247,7 @@ provider_script_parse_ref: fn(kind: ScriptRegistryKind, raw: String) -> (name: S
     if version == "" || !provider_script_safe_piece(version, "+_-.") {
         return Err(RegistryError.Reason("{kind.title} ref `{raw}` is mutable; use `{name}#version=<exact>`"))
     }
-    Ok((name: name, version: version))
+    Ok({name: name, version: version})
 }
 
 // ── Solver ──
@@ -586,18 +586,18 @@ SCRIPT_REGISTRY_COMPOSER_OPERATORS: [String]{">=", "<=", "!=", "==", "=", ">", "
 
 // One constraint token: an operator token with its version in the next
 // token, or an operator-prefixed version, or a bare version (`=`).
-provider_script_constraint_at: fn(tokens: [String], index: Int, operators: [String]) -> (operator: String, wanted: String, consumed: Int)? Never! {
+provider_script_constraint_at: fn(tokens: [String], index: Int, operators: [String]) -> {operator: String, wanted: String, consumed: Int}? Never! {
     token: tokens[index]
     if provider_script_is_operator(token) {
         if index + 1 >= tokens.len() -> return None
-        return Val((operator: token, wanted: tokens[index + 1], consumed: 2))
+        return Val({operator: token, wanted: tokens[index + 1], consumed: 2})
     }
     loop operator in operators {
         if token.starts_with(operator) {
-            return Val((operator: operator, wanted: token.removeprefix(operator), consumed: 1))
+            return Val({operator: operator, wanted: token.removeprefix(operator), consumed: 1})
         }
     }
-    Val((operator: "=", wanted: token, consumed: 1))
+    Val({operator: "=", wanted: token, consumed: 1})
 }
 
 // RubyGems/CPAN requirements: `||` alternatives of comma- or space-separated

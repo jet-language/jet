@@ -680,7 +680,7 @@ JetCLIPerfFlameFunction: struct {
     symbol: String
     clock: String
     weight: Int
-    lines: [(line: Int, weight: Int)]
+    lines: [{line: Int, weight: Int}]
 }
 
 // The profile rows by function and clock, hottest first: each function's
@@ -701,11 +701,11 @@ jet_cli_perf_flame_profile: fn(items: View<CanonicalJSON>) -> [String] Never! {
         }
         if found < 0 {
             found = functions.len()
-            functions.push(JetCLIPerfFlameFunction{symbol: symbol, clock: clock, weight: 0, lines: [(line: Int, weight: Int)]{}})
+            functions.push(JetCLIPerfFlameFunction{symbol: symbol, clock: clock, weight: 0, lines: [{line: Int, weight: Int}]{}})
         }
         functions[found].weight += weight
         if jet_cli_perf_row_line(item) == .Val(line) {
-            functions[found].lines.push((line: line, weight: weight))
+            functions[found].lines.push({line: line, weight: weight})
         }
     }
     functions.sort_by(fn(left: JetCLIPerfFlameFunction, right: JetCLIPerfFlameFunction) { right.weight <=> left.weight })
@@ -719,7 +719,7 @@ jet_cli_perf_flame_profile: fn(items: View<CanonicalJSON>) -> [String] Never! {
         weight: functions[index].weight
         share: if total > 0 -> weight * 100 /% total else -> 0
         out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight} share={share}%")
-        functions[index].lines.sort_by(fn(left: (line: Int, weight: Int), right: (line: Int, weight: Int)) { (right.weight <=> left.weight).then(left.line <=> right.line) })
+        functions[index].lines.sort_by(fn(left: {line: Int, weight: Int}, right: {line: Int, weight: Int}) { (right.weight <=> left.weight).then(left.line <=> right.line) })
         shown: if functions[index].lines.len() > 3 -> 3 else -> functions[index].lines.len()
         loop at in 0..<shown {
             out.push("  line {functions[index].lines[at].line} samples={functions[index].lines[at].weight}")

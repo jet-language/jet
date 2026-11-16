@@ -213,11 +213,11 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 #Test("adjacent_marker_stacks_share_one_ordered_e0999_rewrite") {
     loop testcase in
         [
-        (source: "#Job(every: 1s)\n#Doc(\"tick\")\ntick: fn() {{}}\n", expected: "#[Job(every: 1s), Doc(\"tick\")]"),
-        (source: "use core.mem\n#Unsafe(\"register ABI\")\n#FFI(c)\nadd: fn() {{ \"\"\"void add(void) {{}}\"\"\" }}\n", expected: "#[Unsafe(\"register ABI\"), FFI(c)]"),
-        (source: "#Target(Web)\n#HTML(\"index.html\")\nmain: fn() {{}}\n", expected: "#[Target(Web), HTML(\"index.html\")]"),
-        (source: "#PubFile\n#NoPrelude\nmain: fn() {{}}\n", expected: "#[PubFile, NoPrelude]"),
-        (source: "#Codable\n#Rename(.Camel)\nParticle: struct {{ x: Float }}\n", expected: "#[Codable, Rename(.Camel)]"),
+        {source: "#Job(every: 1s)\n#Doc(\"tick\")\ntick: fn() {{}}\n", expected: "#[Job(every: 1s), Doc(\"tick\")]"},
+        {source: "use core.mem\n#Unsafe(\"register ABI\")\n#FFI(c)\nadd: fn() {{ \"\"\"void add(void) {{}}\"\"\" }}\n", expected: "#[Unsafe(\"register ABI\"), FFI(c)]"},
+        {source: "#Target(Web)\n#HTML(\"index.html\")\nmain: fn() {{}}\n", expected: "#[Target(Web), HTML(\"index.html\")]"},
+        {source: "#PubFile\n#NoPrelude\nmain: fn() {{}}\n", expected: "#[PubFile, NoPrelude]"},
+        {source: "#Codable\n#Rename(.Camel)\nParticle: struct {{ x: Float }}\n", expected: "#[Codable, Rename(.Camel)]"},
     ] {
         expected: testcase.expected
         ds: entry02_errors(testcase.source)
@@ -228,8 +228,8 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 #Test("ordered_function_and_file_groups_format_idempotently") {
     loop testcase in
         [
-        (source: "use core.mem\n#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]\nadd: fn() {{\n    \"\"\"void add(void) {{}}\"\"\"\n}}\n", expected: "#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]"),
-        (source: "#[HTML(\"index.html\"), PubFile, Target(Wasm), NoPrelude]\nmain: fn() {{}}\n", expected: "#[HTML(\"index.html\"), PubFile, Target(Wasm), NoPrelude]"),
+        {source: "use core.mem\n#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]\nadd: fn() {{\n    \"\"\"void add(void) {{}}\"\"\"\n}}\n", expected: "#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]"},
+        {source: "#[HTML(\"index.html\"), PubFile, Target(Wasm), NoPrelude]\nmain: fn() {{}}\n", expected: "#[HTML(\"index.html\"), PubFile, Target(Wasm), NoPrelude]"},
     ] {
         expected: testcase.expected
         once: entry02_format(testcase.source)
@@ -244,10 +244,10 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 #Test("grouped_retired_function_markers_reach_sema_as_written") {
     loop testcase in
         [
-        (source: "#[Pure, Job]\nwork: fn() {{}}\n", name: "Pure"),
-        (source: "#[InlineAlways, Job]\nwork: fn() {{}}\n", name: "InlineAlways"),
-        (source: "#[Pure(), Job]\nwork: fn() {{}}\n", name: "Pure"),
-        (source: "#[InlineAlways(), Job]\nwork: fn() {{}}\n", name: "InlineAlways"),
+        {source: "#[Pure, Job]\nwork: fn() {{}}\n", name: "Pure"},
+        {source: "#[InlineAlways, Job]\nwork: fn() {{}}\n", name: "InlineAlways"},
+        {source: "#[Pure(), Job]\nwork: fn() {{}}\n", name: "Pure"},
+        {source: "#[InlineAlways(), Job]\nwork: fn() {{}}\n", name: "InlineAlways"},
     ] {
         f: entry02_func(entry02_program(testcase.source), "work")
         assert(
@@ -457,7 +457,7 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 }
 
 #Test("suffix_contract_reaches_nested_general_type_positions") {
-    p: entry02_program("Holder: struct {{\nmap: [String: IOError!]\ntuple: (entry: Entry? StoreError!, failure: Err!)\ncallback: fn(Int? StoreError!) IOError!\n}}\nCallback: fn(Int? StoreError!) IOError!\nrun: fn() {{}}\n")
+    p: entry02_program("Holder: struct {{\nmap: [String: IOError!]\ntuple: {{entry: Entry? StoreError!, failure: Err!}}\ncallback: fn(Int? StoreError!) IOError!\n}}\nCallback: fn(Int? StoreError!) IOError!\nrun: fn() {{}}\n")
     holder: entry02_struct(p, "Holder")
     assert(
         if holder.fields[0].ty == {

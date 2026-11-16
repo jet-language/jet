@@ -50,9 +50,9 @@ use files: core.files
     words: cli_package_dependency_words(raw, false, false) ?? panic("add takes value flags")
     assert_eq(words, [String]{"add", "local"})
     selected: cli_package_dependency_add_spec(raw, words.get(1), false, false) ?? panic("path wins")
-    assert_eq(selected, (name: "local", spec: DepSpec.Path{path: "../local"}))
+    assert_eq(selected, {name: "local", spec: DepSpec.Path{path: "../local"}})
     git: cli_package_dependency_add_spec([String]{"add", "local", "--git", "url", "--rev", "rev", "--branch", "branch", "--tag", "tag"}, Val("local"), false, false) ?? panic("tag wins")
-    assert_eq(git, (name: "local", spec: DepSpec.Git{url: "url", selector: GitSelector.Tag("tag")}))
+    assert_eq(git, {name: "local", spec: DepSpec.Git{url: "url", selector: GitSelector.Tag("tag")}})
     if cli_package_dependency_add_spec([String]{"add"}, None, false, false) == {
         .Ok(_) -> { panic("missing dependency name") }
         .Err(error) -> {

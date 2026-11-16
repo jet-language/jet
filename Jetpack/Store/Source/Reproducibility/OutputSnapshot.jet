@@ -250,13 +250,13 @@ store_repro_node_difference: fn(path: String, left: NodeObservation, right: Node
 }
 
 store_repro_metadata_difference: fn(left: StoreEntry, right: StoreEntry) -> FirstDifference? Never! {
-    checks: [(kind: DifferenceKind, left: String, right: String)]{
-        (kind: .Provenance, left: left.envelope.provenance, right: right.envelope.provenance),
-        (kind: .SourceFingerprint, left: left.cache_identity.source_fingerprint, right: right.cache_identity.source_fingerprint),
-        (kind: .RecipeFingerprint, left: left.cache_identity.recipe_fingerprint, right: right.cache_identity.recipe_fingerprint),
-        (kind: .PolicyFingerprint, left: left.cache_identity.policy_fingerprint, right: right.cache_identity.policy_fingerprint),
-        (kind: .Platform, left: left.cache_identity.platform, right: right.cache_identity.platform),
-        (kind: .PlatformArtifactKind, left: left.platform_artifact_kind, right: right.platform_artifact_kind),
+    checks: [{kind: DifferenceKind, left: String, right: String}]{
+        {kind: .Provenance, left: left.envelope.provenance, right: right.envelope.provenance},
+        {kind: .SourceFingerprint, left: left.cache_identity.source_fingerprint, right: right.cache_identity.source_fingerprint},
+        {kind: .RecipeFingerprint, left: left.cache_identity.recipe_fingerprint, right: right.cache_identity.recipe_fingerprint},
+        {kind: .PolicyFingerprint, left: left.cache_identity.policy_fingerprint, right: right.cache_identity.policy_fingerprint},
+        {kind: .Platform, left: left.cache_identity.platform, right: right.cache_identity.platform},
+        {kind: .PlatformArtifactKind, left: left.platform_artifact_kind, right: right.platform_artifact_kind},
     }
     loop check in checks {
         if check.left != check.right {

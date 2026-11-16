@@ -167,7 +167,7 @@ kkp_read: fn(md: hashes.Md, grp: ecp.EcpGroup, format: ecp.PointFormat, g: ecp.P
 }
 
 /// A fresh key pair (x, X = x G) as an ECJPAKEKeyKP appended to out.
-kkp_write: fn<R: RNG>(md: hashes.Md, grp: ecp.EcpGroup, format: ecp.PointFormat, g: ecp.Point, id: [U8], out: &[U8], limit: Int, rng: &R) -> (d: bn.Mpi, q: ecp.Point) ecp.EcpError! {
+kkp_write: fn<R: RNG>(md: hashes.Md, grp: ecp.EcpGroup, format: ecp.PointFormat, g: ecp.Point, id: [U8], out: &[U8], limit: Int, rng: &R) -> {d: bn.Mpi, q: ecp.Point} ecp.EcpError! {
     pair: ecp.gen_keypair_base(grp, g, rng)
     pt: ecp.tls_write_point(grp, pair.q, format, limit - out.len())
     loop b in pt -> out.push(b)

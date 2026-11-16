@@ -50,7 +50,7 @@ impl ProviderFactReport {
         facts.platforms = provider_sorted_unique(facts.platforms)
         facts.source_identity = "pypi:{facts.name}@{facts.version}"
         report := ProviderFactReport.with_identity(facts)
-        identity_fields: [(field: String, values: [String])]{(field: "Name", values: names), (field: "Version", values: versions)}
+        identity_fields: [{field: String, values: [String]}]{{field: "Name", values: names}, {field: "Version", values: versions}}
         loop identity in identity_fields {
             distinct: provider_distinct_values(identity.values)
             if distinct.len() > 1 {
@@ -105,7 +105,7 @@ impl ProviderFactReport {
         if report.facts.version != "" && !provider_exact_version(report.facts.version) {
             report.losses.push("Conan package version is not an exact identity")
         }
-        requirement_fields: [(field: String, parsed: Bool)]{(field: "requires", parsed: report.facts.dependencies.len() > 0), (field: "tool_requires", parsed: report.facts.build_dependencies.len() > 0)}
+        requirement_fields: [{field: String, parsed: Bool}]{{field: "requires", parsed: report.facts.dependencies.len() > 0}, {field: "tool_requires", parsed: report.facts.build_dependencies.len() > 0}}
         loop requirement in requirement_fields {
             if requirement.parsed -> next
             loop raw_line in lines {
@@ -151,25 +151,25 @@ provider_has_range_mark: fn(value: String) -> Bool Never! {
 
 // RFC 822-style `Key: value` fields; an indented line continues the
 // previous field's value after one space.
-provider_metadata_fields: fn(document: String) -> [(key: String, value: String)] Never! {
-    fields := [(key: String, value: String)]{}
+provider_metadata_fields: fn(document: String) -> [{key: String, value: String}] Never! {
+    fields := [{key: String, value: String}]{}
     loop line in provider_lines(document) {
         if pkg_bytes_space_width(line.bytes(), 0) > 0 {
             if fields.len() > 0 {
                 last: fields.len() - 1
-                fields[last] = (key: fields[last].key, value: "{fields[last].value} {line.trim()}")
+                fields[last] = {key: fields[last].key, value: "{fields[last].value} {line.trim()}"}
             }
             next
         }
         pair: line.split_once(":") ?? next
         key: pair.before.trim()
-        if key != "" -> fields.push((key: key, value: pair.after.trim()))
+        if key != "" -> fields.push({key: key, value: pair.after.trim()})
     }
     fields
 }
 
 // Values of every field named `key`, ignoring ASCII case.
-provider_metadata_values: fn(fields: [(key: String, value: String)], key: String) -> [String] Never! {
+provider_metadata_values: fn(fields: [{key: String, value: String}], key: String) -> [String] Never! {
     wanted: pkg_ascii_lower(key)
     values := [String]{}
     loop field in fields {

@@ -47,10 +47,10 @@ ecdh_new: fn() -> ECDHContext Never! {
 }
 
 /// A private key d and public key d G (mbedtls_ecdh_gen_public).
-ecdh_gen_public: fn<R: RNG>(grp: ecp.EcpGroup, rng: &R) -> (d: bn.Mpi, q: ecp.Point) ecp.EcpError! {
+ecdh_gen_public: fn<R: RNG>(grp: ecp.EcpGroup, rng: &R) -> {d: bn.Mpi, q: ecp.Point} ecp.EcpError! {
     d: ecp.gen_privkey(grp, rng)
     q: ecp.ecp_mul(grp, d, grp.g, rng)
-    Ok((d: d, q: q))
+    Ok({d: d, q: q})
 }
 
 /// The shared secret x(d Q), with the multiplication blinded from rng

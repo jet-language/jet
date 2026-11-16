@@ -132,13 +132,13 @@ pkcs7_get_version: fn(data: [U8], p: &Int, end: Int) -> Int PKCS7Error! {
 
 // pkcs7_get_content_info_type: the contentType OID of a ContentInfo, and
 // where the ContentInfo ends.
-pkcs7_get_content_info_type: fn(data: [U8], p: &Int, end: Int) -> (seq_end: Int, content_type: asn1.ASN1Buf) PKCS7Error! {
+pkcs7_get_content_info_type: fn(data: [U8], p: &Int, end: Int) -> {seq_end: Int, content_type: asn1.ASN1Buf} PKCS7Error! {
     len := asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidContentInfo(Val(err)))
     seq_end: p + len
     len = asn1.get_tag(data, p, seq_end, asn1.ASN1_OID) ?? return Err(.InvalidContentInfo(Val(err)))
     content_type: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
     p += len
-    Ok((seq_end: seq_end, content_type: content_type))
+    Ok({seq_end: seq_end, content_type: content_type})
 }
 
 // pkcs7_get_digest_algorithm: an AlgorithmIdentifier with NULL or no

@@ -418,7 +418,7 @@ reader: fn<R: Reader>(input: &&R, limits: EncodingLimits) -> CBORPull<R> Encodin
 WriteFrame: struct {
     object: Bool
     items: [[U8]]
-    entries: [(key: [U8], value: [U8])]
+    entries: [{key: [U8], value: [U8]}]
     key: [U8]?
 }
 
@@ -467,7 +467,7 @@ byte_before: fn(left: [U8], right: [U8]) -> Bool Never! {
 
 // In-place heapsort: native close_object sorts its existing entry table
 // without allocating a second key/index table or copying encoded payloads.
-sift_entries: fn(entries: &[(key: [U8], value: [U8])], root: Int, end: Int) Never! {
+sift_entries: fn(entries: &[{key: [U8], value: [U8]}], root: Int, end: Int) Never! {
     at := root
     loop at * 2 + 1 < end {
         child := at * 2 + 1
@@ -480,7 +480,7 @@ sift_entries: fn(entries: &[(key: [U8], value: [U8])], root: Int, end: Int) Neve
     }
 }
 
-sort_entries: fn(entries: &[(key: [U8], value: [U8])]) Never! {
+sort_entries: fn(entries: &[{key: [U8], value: [U8]}]) Never! {
     start := entries.len() /% 2
     loop start > 0 {
         start -= 1
@@ -498,7 +498,7 @@ sort_entries: fn(entries: &[(key: [U8], value: [U8])]) Never! {
 frame_heap: fn(frame: WriteFrame) -> Int Never! {
     total := 0
     if frame.object {
-        total = mem.__list_capacity<(key: [U8], value: [U8])>(frame.entries) * mem.__type_size<(key: [U8], value: [U8])>()
+        total = mem.__list_capacity<{key: [U8], value: [U8]}>(frame.entries) * mem.__type_size<{key: [U8], value: [U8]}>()
         loop entry in frame.entries {
             total += mem.__list_capacity<U8>(entry.key) + mem.__list_capacity<U8>(entry.value)
         }
@@ -612,14 +612,14 @@ CBORPush: struct<W: Writer> {
                     release<U8>(self.allocation, bytes)
                     return Err(error(.State, self.total, "$", "CBOR object value written before Key"))
                 }
-                _: reserve<(key: [U8], value: [U8])>(self.allocation, self.frames[at].entries, 1, self.total, "$", "CBOR object table allocation failed") ?? {
+                _: reserve<{key: [U8], value: [U8]}>(self.allocation, self.frames[at].entries, 1, self.total, "$", "CBOR object table allocation failed") ?? {
                     release<U8>(self.allocation, bytes)
                     return Err(err)
                 }
                 frame := self.frames.pop() ?? panic("checked CBOR object")
                 key: frame.key.move() ?? panic("checked CBOR key")
                 frame.key = None
-                frame.entries.push((key: key, value: bytes))
+                frame.entries.push({key: key, value: bytes})
                 self.frames.push(frame)
             } else {
                 _: reserve<[U8]>(self.allocation, self.frames[at].items, 1, self.total, "$", "CBOR array table allocation failed") ?? {
@@ -682,14 +682,14 @@ CBORPush: struct<W: Writer> {
         count: if frame.object -> frame.entries.len() else -> frame.items.len()
         size: length_size(count) + old
         self.replacement(old, size) ?? {
-            frame = WriteFrame{object: false, items: [[U8]]{}, entries: [(key: [U8], value: [U8])]{}, key: None}
+            frame = WriteFrame{object: false, items: [[U8]]{}, entries: [{key: [U8], value: [U8]}]{}, key: None}
             self.retained -= old
             self.allocation.release(heap)
             return Err(err)
         }
         if frame.object -> sort_entries(frame.entries)
         out := self.allocate(size) ?? {
-            frame = WriteFrame{object: false, items: [[U8]]{}, entries: [(key: [U8], value: [U8])]{}, key: None}
+            frame = WriteFrame{object: false, items: [[U8]]{}, entries: [{key: [U8], value: [U8]}]{}, key: None}
             self.retained -= old
             self.allocation.release(heap)
             return Err(err)
@@ -705,7 +705,7 @@ CBORPush: struct<W: Writer> {
                 loop byte in item -> out.push(byte)
             }
         }
-        frame = WriteFrame{object: false, items: [[U8]]{}, entries: [(key: [U8], value: [U8])]{}, key: None}
+        frame = WriteFrame{object: false, items: [[U8]]{}, entries: [{key: [U8], value: [U8]}]{}, key: None}
         self.retained -= old
         self.allocation.release(heap)
         self.accept(out)
@@ -719,7 +719,7 @@ CBORPush: struct<W: Writer> {
                     return Err(error(.Limit, self.total, "$", "max_depth {self.limits.max_depth} exceeded"))
                 }
                 _: reserve<WriteFrame>(self.allocation, self.frames, 1, self.total, "$", "CBOR writer frame allocation failed") ?? return Err(err)
-                self.frames.push(WriteFrame{object: event == .ObjectStart, items: [[U8]]{}, entries: [(key: [U8], value: [U8])]{}, key: None})
+                self.frames.push(WriteFrame{object: event == .ObjectStart, items: [[U8]]{}, entries: [{key: [U8], value: [U8]}]{}, key: None})
             }
             .Key(text) -> { self.write_key(text) ?? return Err(err) }
             .ArrayEnd -> {
@@ -809,17 +809,17 @@ writer: fn<W: Writer>(output: &&W, limits: EncodingLimits) -> CBORPush<W> Encodi
 }
 
 #Test("CBOR entry heapsort preserves key order and paired payloads") {
-    entries := [(key: [U8], value: [U8])]{
-        (key: [U8]{3}, value: [U8]{30}),
-        (key: [U8]{1}, value: [U8]{10}),
-        (key: [U8]{2}, value: [U8]{20}),
+    entries := [{key: [U8], value: [U8]}]{
+        {key: [U8]{3}, value: [U8]{30}},
+        {key: [U8]{1}, value: [U8]{10}},
+        {key: [U8]{2}, value: [U8]{20}},
     }
     sort_entries(entries)
     loop index in 0..<entries.len() {
         assert_eq(entries[index].key, [U8]{U8{index + 1}})
         assert_eq(entries[index].value, [U8]{U8{(index + 1) * 10}})
     }
-    entries.push((key: [U8]{0}, value: [U8]{0}))
+    entries.push({key: [U8]{0}, value: [U8]{0}})
     sort_entries(entries)
     assert_eq(entries[0].key, [U8]{0})
     assert_eq(entries[3].value, [U8]{30})

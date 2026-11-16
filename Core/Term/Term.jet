@@ -586,13 +586,13 @@ terminal_secret_write: fn(text: String) -[IO, Time.Wait]> String? Never! {
     rt.terminal8_write_stdout(text, true)
 }
 
-terminal_secret_read: fn() -[IO, Time.Wait]> (eof: Bool, line: String, cause: String?) Never! {
+terminal_secret_read: fn() -[IO, Time.Wait]> {eof: Bool, line: String, cause: String?} Never! {
     _guard: core.mem.scope.guard(fn() { rt.terminal8_mode_leave() })
     if rt.terminal8_fault("IO.Read") {
-        return (eof: false, line: "", cause: Val("fault injected: IO.Read"))
+        return {eof: false, line: "", cause: Val("fault injected: IO.Read")}
     }
     read: rt.terminal8_line()
-    (eof: read.eof, line: read.line, cause: read.read_error)
+    {eof: read.eof, line: read.line, cause: read.read_error}
 }
 
 choose_menu: fn(prompt: String, options: [String]) -> String Never! {

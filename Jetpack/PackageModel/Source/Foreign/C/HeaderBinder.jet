@@ -33,11 +33,11 @@ CBindResult: struct {
     // Function names successfully bound.
     bound: [String]
     // Prototypes skipped because a type is not bindable, with the reason.
-    skipped: [(name: String, reason: String)]
+    skipped: [{name: String, reason: String}]
     // Opaque typedefs that became owned nominal Jet handle facts.
     handles: [HandleFact]
     // Opaque typedefs withheld because ownership was not resolvable.
-    handle_skipped: [(reason: String, typedef_name: String)]
+    handle_skipped: [{reason: String, typedef_name: String}]
     // Explicit primary plus transitive native libraries for this binding.
     link_closure: LinkClosure
     // Exact descriptor identity embedded in the generated cache.
@@ -93,10 +93,10 @@ CBindFiles: struct {
     hash: String
     // Function names bound, and prototypes skipped with their reason.
     bound: [String]
-    skipped: [(name: String, reason: String)]
+    skipped: [{name: String, reason: String}]
     // Opaque typedefs withheld because their ownership was not resolvable;
     // neither the command nor the compiler publishes a bind that has any.
-    handle_skipped: [(reason: String, typedef_name: String)]
+    handle_skipped: [{reason: String, typedef_name: String}]
     // What the `<lib>.provenance` record adds (pkg_cbind_provenance): the
     // handle facts' stable keys (sorted, unique), the link closure's stable
     // key, and the boundary row the cache stamps.
@@ -150,32 +150,32 @@ pkg_cbind_provenance: fn(bound: CBindFiles, lib: String, stem: String, header_pa
         .None -> identity.field("dependency_missing", "true".bytes())
     }
     pkg_bridge_add_archive_inputs(identity, archives.copy())
-    fields := [(name: String, value: String)]{
-        (name: "language", value: language),
-        (name: "abi", value: "c_{lib}"),
-        (name: "transport", value: "direct-c-abi"),
-        (name: "binder-schema", value: C_BINDER_SCHEMA),
-        (name: "descriptor", value: descriptor.stamp()),
-        (name: "source", value: header_path),
-        (name: "source-sha256", value: header_sha),
-        (name: "cache", value: cache_path),
-        (name: "cache-sha256", value: cache_sha),
+    fields := [{name: String, value: String}]{
+        {name: "language", value: language},
+        {name: "abi", value: "c_{lib}"},
+        {name: "transport", value: "direct-c-abi"},
+        {name: "binder-schema", value: C_BINDER_SCHEMA},
+        {name: "descriptor", value: descriptor.stamp()},
+        {name: "source", value: header_path},
+        {name: "source-sha256", value: header_sha},
+        {name: "cache", value: cache_path},
+        {name: "cache-sha256", value: cache_sha},
     }
     loop field in bound.boundary.provenance_fields() -> fields.push(field)
     // One `handle-fact` row per handle: a stable key is itself a
     // `key=value;...` record, never folded into one multi-line value.
-    loop key in bound.handle_keys -> fields.push((name: "handle-fact", value: key))
-    fields.push((name: "link-closure", value: bound.link_closure))
-    if dependency == .Val(target) -> fields.push((name: "dependency", value: target))
+    loop key in bound.handle_keys -> fields.push({name: "handle-fact", value: key})
+    fields.push({name: "link-closure", value: bound.link_closure})
+    if dependency == .Val(target) -> fields.push({name: "dependency", value: target})
     loop input in archives {
-        fields.push((name: "linked-library", value: input.library))
-        fields.push((name: "linked-archive", value: input.path))
+        fields.push({name: "linked-library", value: input.library})
+        fields.push({name: "linked-archive", value: input.path})
         digest: if input.bytes == .Val(bytes) -> pkg_sha256_hex(bytes) else -> "missing"
-        fields.push((name: "linked-archive-sha256", value: digest))
+        fields.push({name: "linked-archive-sha256", value: digest})
     }
-    artifacts := [(name: String, digest: String)]{(name: "{stem}.jet", digest: cache_sha)}
+    artifacts := [{name: String, digest: String}]{{name: "{stem}.jet", digest: cache_sha}}
     if bound.metadata == .Val(text) {
-        artifacts.push((name: "{stem}.metadata", digest: pkg_sha256_hex(text.bytes())))
+        artifacts.push({name: "{stem}.metadata", digest: pkg_sha256_hex(text.bytes())})
     }
     pkg_bridge_render_provenance(identity.finish(), fields, artifacts)
 }
@@ -336,7 +336,7 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
     discovery: OpaqueHandleDiscovery.discover(cleaned, lib, overlay)
     catalog: CTypeCatalog.parse(cleaned, discovery)
     bound := [String]{}
-    skipped := [(name: String, reason: String)]{}
+    skipped := [{name: String, reason: String}]{}
     lines := [String]{}
     used_names := [String]{}
     loop handle in discovery.handles {
@@ -362,7 +362,7 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
                     lines.push("    emit_async: fn(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
                 }
             }
-            .Err(skip) -> skipped.push((name: proto.name, reason: skip.reason))
+            .Err(skip) -> skipped.push({name: proto.name, reason: skip.reason})
         }
     }
 

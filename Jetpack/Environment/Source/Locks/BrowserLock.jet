@@ -48,9 +48,9 @@ env_browser_validate_protocol: fn(protocol: String) BrowserLockError! {
 }
 
 // `sha256-<hex>` and the byte size of the file at `path`.
-env_browser_hash_file: fn(path: String) -[FS]> (digest: String, size: Int) BrowserLockError! {
+env_browser_hash_file: fn(path: String) -[FS]> {digest: String, size: Int} BrowserLockError! {
     bytes: files.read_bytes(path) ?? return Err(BrowserLockError.IO("could not read {path}: {err}"))
-    Ok((digest: "sha256-{pkg_sha256_hex(bytes)}", size: bytes.len()))
+    Ok({digest: "sha256-{pkg_sha256_hex(bytes)}", size: bytes.len()})
 }
 
 // Lock a local browser binary into the project lock (a deterministic pin).

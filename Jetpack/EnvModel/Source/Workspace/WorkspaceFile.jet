@@ -441,10 +441,10 @@ envmodel_workspace_plan_members: fn(plan: &EnvValueProgram, expr: Expr, globals:
 
 // The first build-time input (`embed_file`, `embed_bytes`, `find`, `fetch`)
 // `expr` calls, which the workspace lock cannot record yet.
-envmodel_workspace_locked_input: fn(expr: Expr) -> (name: String, span: Span)? Never! {
+envmodel_workspace_locked_input: fn(expr: Expr) -> {name: String, span: Span}? Never! {
     loop site in comptime_walk_calls(expr) {
         if site.name == "embed_file" || site.name == "embed_bytes" || site.name == BUILTIN_FIND || site.name == "fetch" {
-            return Val((name: site.name, span: site.span))
+            return Val({name: site.name, span: site.span})
         }
     }
     None
