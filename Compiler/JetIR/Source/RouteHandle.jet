@@ -38,18 +38,6 @@ ir_handle_type_without_tags: fn(ty: Type) -> Type Never! {
     }
 }
 
-// The core.mem allocator family a checked allocator method's receiver names
-// (`Arena`, `Bump`, `Pool` or `Fixed`, bare or `<corelib>/core.mem::`).
-ir_handle_allocator_name: fn(receiver: Type) -> String? Never! {
-    if ir_handle_type_without_tags(receiver) == .Named(name) {
-        families: [String]{"Arena", "Bump", "Pool", "Fixed"}
-        loop family in families {
-            if name == family || name == ("<corelib>/core.mem::{family}") -> return Val(family)
-        }
-    }
-    None
-}
-
 ir_handle_nominal_name: fn(ty: Type) -> String Never! {
     if ir_handle_type_without_tags(ty) == {
         .Named(name) | .Apply(name, _) -> return name
