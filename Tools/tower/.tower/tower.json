@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108368,
+    "rev": 108373,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96052,6 +96052,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T03:24:28.570Z"
+        },
+        {
+          "n": 9,
+          "text": "A Float passed where a trait it does not implement is expected (as an argument or a list item, with or without default methods) gets E0905 from sema, as String and Int already do; today it is an internal compiler error (found by the D-PRIM-ANY1 redesign on p201, probes b9, b9b, b9c and b9d in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes). Proof: a UI snapshot of E0905 for each form.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T03:48:29.662Z"
         }
       ],
       "refs": [],
@@ -96062,9 +96071,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-16T03:24:28.570Z",
+      "updated": "2026-11-16T03:48:29.662Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0qzu2ay",
@@ -97771,6 +97780,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "c20 receipt on the p202 batch compiler (dev 7fbaac6e87, jet a0.0.45-dev, identity 89ba7aff…907e): Tools/perf/core-strace/run.jet. Out of tree, jet run hello.jet: 507 file calls, 0 on the toolchain tree, PASS. Checkout, jet run Examples/Basics/Hello.jet: 830 file calls, 0 on the tree, PASS. Golden half, p202 suite: 4965 PASS, 3 FAIL; all 3 are Examples/Apps/Web/AppTypedArgs.jet o0/o1/o2 (exit -1 at serve(port: 9000)). That is a golden-runner host-port spawn fault since p201, not Core, and it is being fixed. c20 is met once a golden run on O0/O1/O2 is clean (target: p203)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "Owner order 2026-11-15 ~23:00: no more time on precompiled-Core tail optimizations; speed and size work goes to G11. c2 (load+finalize < 0.3 s), c4 (cold peak scales with reach), c9 (scaling-corpora budgets) and c15 (hello user CPU on user code) are now G11 work. Precompiled Core closes on c20 and c1, with #6501 c15's receipts. Parked for G11: the lazy Core body plan (accessor SUB written; the bodies stay packed until demanded, facts precomputed by the Core check with an equality test, a counted fallback)."
         },
         {
@@ -97953,11 +97967,11 @@
         {
           "n": 1,
           "text": "comptime.bodies costs one compile-and-run for the whole compilation, not one per comptime program: every comptime body of a compilation is built into one image at O0 and run in one child, keeping each body's own failure report (collect-all) and its I9 meaning. Proof: the phase trace of jet run for the jetc-trace and run-cold-context twins shows a single comptime child, and comptime.bodies falls at least 4x from 0.29 s and 1.26 s on seed-b9, with every comptime case and golden unchanged.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T04:08:30.923Z"
+          "evidence": "p202 batch compiler (dev 7fbaac6e87, jet a0.0.45-dev). Trace (jet run --trace, 3 cold runs, empty store): comptime.bodies is 0.1 ms on run-cold-context (Tools/agent-eval/RunColdContext.jet; 1.26 s on seed-b9) and 0.0-0.1 ms on jetc-trace (Tools/perf/jetc-trace/Summarize.jet; 0.29 s on seed-b9), far past the 4x bar. Child count (strace -f, execve plus non-thread clone): RunColdContext 1 execve and 0 forks; it needs no child. Every Examples/Metaprogramming/Comptime program with comptime bodies forks exactly one process per compilation: ComptimeIf 1 fork with 37 ms bodies, PrepBlock 1 fork with 51 ms, ComptimeTiers 1 fork. All 20 Comptime examples' outputs match their .out files. p202 suite: no new failure in any comptime case or golden (suite-p202/new.txt empty; comptime_diff's 3 rows are registered KNOWN-FAILING).",
+          "at": "2026-11-16T03:48:03.754Z"
         },
         {
           "n": 2,
@@ -98168,7 +98182,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-16T03:21:01.426Z",
+      "updated": "2026-11-16T03:48:03.754Z",
       "updatedBy": "Main",
       "criteriaLastN": 23
     },
@@ -103301,6 +103315,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T03:24:35.372Z"
+        },
+        {
+          "n": 28,
+          "text": "A typed list head naming an unknown type ([Nope]{14}) reports E0119 (unknown type), not E0112 (found by the D-PRIM-ANY1 redesign on p201, probe e0 in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes). Proof: the UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T03:48:30.593Z"
         }
       ],
       "refs": [],
@@ -103311,9 +103334,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T03:24:35.372Z",
+      "updated": "2026-11-16T03:48:30.594Z",
       "updatedBy": "Main",
-      "criteriaLastN": 27
+      "criteriaLastN": 28
     },
     {
       "id": "c0c3gh6u",
@@ -119938,7 +119961,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Moved G6 → G11 (owner order 2026-11-15 ~23:00: speed/size work goes to G11). The card's payoff is self-compile speed (c2). PrecompiledCore-4 sized the remaining part as days of type-directed hand work, not a codemod: about 5.6k sema Type lines, 1584 construction sites, 157 Type fields, about 1.4k IR lines, about 100 fields across IR/driver/foundation, and a writable &Interner chain with about 25 fork/merge task sites. s33-1 (the single Interner in TypeIDs.jet) lands in p203. s33-2 (the 4992-function interner threading codemod) is held for this card's G11 batch, because alone it adds 525 unused-parameter warnings."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -119960,14 +119989,16 @@
         }
       ],
       "refs": [],
-      "tags": [],
+      "tags": [
+        "G11-speed"
+      ],
       "goals": [
-        "G6"
+        "G11"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T01:32:51.109Z",
-      "updated": "2026-11-16T01:33:06.314Z",
+      "updated": "2026-11-16T03:48:28.717Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -221103,6 +221134,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T03:48:30.594Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#28 A typed list head naming an unknown type ([Nope]{14}) report"
+    },
+    {
+      "at": "2026-11-16T03:48:29.662Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0j3st66",
+      "note": "#9 A Float passed where a trait it does not implement is expect"
+    },
+    {
+      "at": "2026-11-16T03:48:28.717Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05hrwee",
+      "note": "logEntry,goals,addTags,tags"
+    },
+    {
+      "at": "2026-11-16T03:48:03.754Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ssy5wy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-16T03:45:55.319Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-16T03:24:42.385Z",
       "by": "Main",
