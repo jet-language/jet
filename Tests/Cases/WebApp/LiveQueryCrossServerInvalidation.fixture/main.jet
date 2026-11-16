@@ -1,0 +1,84 @@
+// Two servers of one app, each its own process, over one database file.
+// Server B holds a live query over `tasks`. Server A, a child process that
+// shares nothing with B but the file, inserts a task and ends. The live
+// registry is per process, so B learns of A's write only through the file's
+// version map, which B polls once a second: within that second B's binding
+// re-runs and reads A's task. No broker runs.
+use {
+    app
+    db: core.db
+    fs: core.files
+    process: core.process
+    sys: core.sys
+    time: core.time
+    core.reactive.loadable.[Loadable]
+}
+
+FILE: "cross_server.db"
+
+titles: fn(state: Loadable<[[String:db.DBValue]], db.DBError>) -> String {
+    if state == {
+        .Loaded(rows) -> {
+            out := [String]{}
+            loop row in rows -> out.push(db.row_text(row, "title") ?? "?")
+            "[{out.join(",")}]"
+        }
+        .Failed(reason) -> "failed {reason.message()}"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+// The registry's invalidations and stored-result changes, from live_stats.
+counts: fn() -> String {
+    stats: app.live_stats()
+    invalidations: stats.split("invalidations=").to_list()[1].split(",").to_list()[0]
+    changes: stats.split("changes=").to_list()[1].split(",").to_list()[0]
+    "invalidations={invalidations} changes={changes}"
+}
+
+alice_on: fn(store: db.Store) -> db.DBScope {
+    policy: db.policy("tasks", "owner == user") ?? panic("policy")
+    store.with_policy(policy, "alice")
+}
+
+insert: fn(scope: db.DBScope, title: String) {
+    owner: "alice"
+    _: scope.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}) ?? panic("insert")
+}
+
+// Server A: writes one task and ends.
+server_a: fn() {
+    insert(alice_on(db.open(FILE)), "from server a")
+    print("server a wrote a task")
+}
+
+run: fn() {
+    if (process.args().get(0) ?? "") == "--server-a" {
+        server_a()
+        return
+    }
+    leftovers: [String]{FILE, "{FILE}-journal", "{FILE}-wal", "{FILE}-shm"}
+    loop leftover in leftovers {
+        if fs.exists(leftover) -> fs.remove(leftover) ?? panic("clear {leftover}")
+    }
+    alice: alice_on(db.open(FILE))
+    _: db.migrate(alice, "tasks-v1", [db.SQL]{SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}}) ?? panic("migrate")
+    insert(alice, "from server b")
+    mine: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live")
+    print("server b binds {titles(app.state(mine))}, {counts()}")
+
+    other: process.cmd([sys.executable(), "--server-a"])
+        .stdout(.Stream)
+        .spawn() ?? panic("start server a")
+    loop line in other.stdout.lines() -> print(line.trim())
+    _: other.wait() ?? panic("server a ends")
+
+    // B's next poll re-runs its binding; it reads until it does, or 3 s.
+    waited := 0
+    loop titles(app.state(mine)) != "[from server a,from server b]" && waited < 3000 {
+        time.sleep(20ms)
+        waited += 20
+    }
+    print("server b reads {titles(app.state(mine))}, {counts()}")
+    print("within the one-second poll: {waited <= 1500}")
+}

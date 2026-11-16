@@ -6704,6 +6704,19 @@ counts it as `ws_pushes`. Nothing re-runs a binding but a read: a connection
 that closes stops watching, so a write after that reaches it no longer and
 re-runs nothing until the binding is read again.
 
+The live registry is per process, so a write reaches another server's
+bindings through the database file instead (#6868 c4). When a binding on a
+file store reads a table, its process records that table in the file's
+version map (the `__jet_live_versions` table, one row per such table) and
+polls the map once a second. Each committed write to a recorded table, from
+any process, adds one to its row; a poll that finds a table's version moved
+past what it saw and its own process's writes re-runs every binding there
+over that table, as the write itself would have. So a write on one server
+reaches a binding on another within about a second, and no broker has to
+run. The map does not grow with writes, and an in-memory store has no map.
+A Postgres `LISTEN/NOTIFY` wake-up that makes the poll run at once waits for
+a Postgres client in Core.
+
 `DBPool.acquire(deadline:)` admits waiters first come, first served. A waiter
 leaves the queue when it gets a lease, when its deadline passes, when the pool
 starts draining, or when its task is cancelled at the wait, so a cancelled

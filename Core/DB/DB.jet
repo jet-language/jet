@@ -834,7 +834,10 @@ priv DBState: struct {
     // the stored rows the write replaced, removed or added, or None when it
     // does not name them (DBWritten).
     priv wrote: fn(&self, table: String, rows: [String]?) Never! {
-        if self.open == 0 -> return db_live_wrote(self.driver, table, rows)
+        if self.open == 0 {
+            db_live_wrote(self.driver, table, rows)
+            return db_live_bump(self, table)
+        }
         loop at in 0..<self.written.len() {
             if self.written[at].table == table {
                 if self.written[at].rows == .Val(held) && rows == .Val(more) {
@@ -1215,6 +1218,7 @@ priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table:
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
+    if app.live_reads.running() -> db_live_watch(guard.value, table.state, table.name)
     every: "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\""
     if filter.len() == 0 -> return table_read(guard.value.driver, table.name, every, values, None)
     if narrowed == .Val(bound) {
@@ -1513,6 +1517,7 @@ priv db_commit: fn(state: Shared<DBState>) DBError! {
     if !committed -> _: __driver_rollback(guard.value.driver)
     loop written in guard.value.written {
         db_live_wrote(guard.value.driver, written.table, written.rows)
+        if committed -> db_live_bump(guard.value, written.table)
     }
     guard.value.written = [DBWritten]{}
     if !committed -> return Err(db_error("could not commit, so the transaction was rolled back"))
@@ -2172,13 +2177,13 @@ priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBEr
 // set first (app.live_reads), so a write to its table re-runs the binding.
 priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:DBValue]] DBError! {
     scoped: policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
-    if app.live_reads.running() && sql_table(scoped) == .Val(table) {
-        app.live_reads.record(live_source(table))
-    }
+    read: if app.live_reads.running() -> sql_table(scoped) else -> None
+    if read == .Val(table) -> app.live_reads.record(live_source(table))
     guard := scope.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, scope.state, call) ?? return Err(err)
+    if read == .Val(table) -> db_live_watch(guard.value, scope.state, table)
     __driver_query(guard.value.driver, scoped.text, scoped.values)
 }
 
@@ -2188,6 +2193,161 @@ priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:D
 // its SELECT reads; a write to that table re-runs every binding over it, and
 // every binding whose source read it (app.live_reads).
 priv live_source: fn(table: String) -> String Never! { "core.db.live:{table}" }
+
+// ---- live queries across servers (#6868 c4) --------------------------------
+
+// The live registry is per process, so `db_live_wrote` re-runs only this
+// process's bindings. Other servers learn of a write through the version
+// map, a table in the database file itself: one row per table a live
+// binding on some server read, holding the count of committed writes to
+// it. A write to such a table adds one once it commits (`db_live_bump`);
+// each process that holds a binding over it polls the map
+// (`db_live_poll`) and re-runs its bindings of each table another process
+// wrote since its last poll. The map does not grow with writes, and a
+// server that misses nothing it polls loses no invalidation; the bound is
+// the poll interval. An in-memory database is no other server's.
+priv LIVE_VERSIONS: "__jet_live_versions"
+
+priv LIVE_VERSIONS_TABLE: "CREATE TABLE IF NOT EXISTS __jet_live_versions (name TEXT PRIMARY KEY, version INTEGER NOT NULL)"
+
+// How often a process polls the version map, in milliseconds: one second.
+priv LIVE_POLL_MS: 1000
+
+// A table of a database file this process's live bindings read: the map
+// version its last poll saw, and this process's writes to it since, which
+// re-ran its bindings already.
+priv LiveWatched: struct {
+    table: String
+    version: Int
+    own: Int
+}
+
+// A database file whose version map this process polls, through `state`,
+// the connection that first read it for a live binding.
+priv LiveWatch: struct {
+    path: String
+    state: Shared<DBState>
+    tables: [LiveWatched]
+}
+
+priv LIVE_WATCH: Shared{[LiveWatch]{}}
+
+// Has this process poll the version of `table` in the file `held` reads,
+// as a live binding reads it: the map gets the table's row, and the poll
+// its version now, before the read, so every later write reaches the poll.
+// Starts the file's poll on its first table. A connection inside a
+// transaction, or a busy file, leaves it to a later read.
+priv db_live_watch: fn(held: &DBState, state: Shared<DBState>, table: String) Never! {
+    if held.path == ":memory:" || held.open != 0 || held.call != 0 {
+        return
+    }
+    watch := LIVE_WATCH.guard_edit()
+    at := -1
+    loop index in 0..<watch.value.len() {
+        if watch.value[index].path == held.path -> at = index
+    }
+    if at >= 0 {
+        loop known in watch.value[at].tables {
+            if known.table == table {
+                return
+            }
+        }
+    }
+    _: __driver_execute(held.driver, LIVE_VERSIONS_TABLE, [DBValue]{}) ?? return
+    _: __driver_execute(held.driver, "INSERT OR IGNORE INTO {LIVE_VERSIONS} (name, version) VALUES (?, 0)", [DBValue]{.Text(table.copy())}) ?? return
+    version: db_live_version(held.driver, table) ?? return
+    seen: LiveWatched{table: table.copy(), version: version, own: 0}
+    if at >= 0 {
+        watch.value[at].tables.push(seen)
+        return
+    }
+    path: held.path.copy()
+    watch.value.push(LiveWatch{path: path.copy(), state: state.copy(), tables: [LiveWatched]{seen}})
+    polling: task { db_live_poll(path) }
+    polling.detach()
+}
+
+// `table`'s version in the map of the file `driver` holds; None when the
+// map has no row for it.
+priv db_live_version: fn(driver: &DBDriver, table: String) -> Int? Never! {
+    rows: __driver_query(driver, "SELECT version FROM {LIVE_VERSIONS} WHERE name = ?", [DBValue]{.Text(table.copy())}) ?? return None
+    if rows.len() == 0 -> return None
+    Val(row_int(rows[0], "version") ?? return None)
+}
+
+// Adds one to `table`'s version in the map of the file `held` reads, once a
+// write to it committed, when some process polls the table. This process
+// counts the write as its own, so its poll skips it.
+priv db_live_bump: fn(held: &DBState, table: String) Never! {
+    if held.path == ":memory:" || !table_exists(held.driver, LIVE_VERSIONS) {
+        return
+    }
+    watch := LIVE_WATCH.guard_edit()
+    bumped: __driver_execute(held.driver, "UPDATE {LIVE_VERSIONS} SET version = version + 1 WHERE name = ?", [DBValue]{.Text(table.copy())}) ?? return
+    if bumped == 0 {
+        return
+    }
+    loop index in 0..<watch.value.len() {
+        if watch.value[index].path != held.path -> next
+        loop at in 0..<watch.value[index].tables.len() {
+            if watch.value[index].tables[at].table == table {
+                watch.value[index].tables[at].own += 1
+            }
+        }
+    }
+}
+
+// Polls the version map of the file `path` once each LIVE_POLL_MS, and
+// re-runs this process's bindings over each table another process wrote.
+// Ends once the connection it polls through closes; the next live read of
+// the file starts it again.
+priv db_live_poll: fn(path: String) Never! {
+    loop {
+        core.tasks.sleep(LIVE_POLL_MS)
+        written: db_live_polled(path) ?? return
+        loop table in written -> app.__live_invalidate_all(live_source(table))
+    }
+}
+
+// The connection this process polls the file `path` through, if it polls it.
+priv db_live_watched: fn(path: String) -> Shared<DBState>? Never! {
+    watch: LIVE_WATCH.guard_read()
+    loop known in watch.value {
+        if known.path == path -> return Val(known.state.copy())
+    }
+    None
+}
+
+// One poll of the file `path`: the tables whose version moved past the one
+// the last poll saw and this process's own writes since; None, and the file
+// forgotten, once its connection closed.
+priv db_live_polled: fn(path: String) -> [String]? Never! {
+    held: db_live_watched(path) ?? return None
+    guard := held.guard_edit()
+    if driver_closed(guard.value.driver) {
+        watch := LIVE_WATCH.guard_edit()
+        kept := [LiveWatch]{}
+        loop known in watch.value {
+            if known.path != path -> kept.push(known.copy())
+        }
+        watch.value = kept
+        return None
+    }
+    guard.wait(db_ended(guard.value), fn(open) { db_free(open, 0) }) ?? return Val([String]{})
+    written := [String]{}
+    watch := LIVE_WATCH.guard_edit()
+    loop index in 0..<watch.value.len() {
+        if watch.value[index].path != path -> next
+        loop at in 0..<watch.value[index].tables.len() {
+            seen: watch.value[index].tables[at].copy()
+            version: db_live_version(guard.value.driver, seen.table) ?? next
+            if version > seen.version + seen.own -> written.push(seen.table.copy())
+            watch.value[index].tables[at].version = version
+            watch.value[index].tables[at].own = 0
+        }
+    }
+    Val(written)
+}
 
 #Codable
 priv LiveTestChore: struct {
@@ -2259,6 +2419,51 @@ priv live_test_team: fn(chores: Table<Int, LiveTestChore>, team: String, narrowe
     _: chores.add(LiveTestChore{id: 5, team: "jet"}) ?? panic("add 5")
     second.commit() ?? panic("commit 4 and 5")
     assert_eq(seen(), "[1,5] runs=4 [1,5] runs=7")
+}
+
+// The titles `binding` holds.
+priv live_test_titles: fn(binding: Live<[[String:DBValue]], DBError>) -> String {
+    if app.state(binding) == {
+        .Loaded(rows) -> {
+            shown := [String]{}
+            loop row in rows -> shown.push(row_text(row, "title") ?? "?")
+            "[{shown.join(",")}]"
+        }
+        .Failed(failure) -> "failed: {failure}"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+#Test("a write another server commits to a database file re-runs this server's live bindings over its table at the next poll, and this server's own write is not counted twice") {
+    dir: core.files.temp_dir("jet-db-live-") ?? panic("temp dir: {err}")
+    path: "{dir.path}/board.db"
+    store: open(path)
+    tasks: policy("tasks", "owner == user") ?? panic("policy: {err}")
+    alice: store.with_policy(tasks, "alice")
+    _: migrate(alice, "tasks-v1", [SQL]{SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}}) ?? panic("migrate: {err}")
+    one: "one"
+    _: alice.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({"alice"}, {one})"}) ?? panic("insert one: {err}")
+    mine: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live: {err}")
+    assert_eq(live_test_titles(mine), "[one]")
+    // This server's own write re-ran its binding already; the poll skips it.
+    two: "two"
+    _: alice.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({"alice"}, {two})"}) ?? panic("insert two: {err}")
+    assert_eq(live_test_titles(mine), "[one,two]")
+    assert_eq(db_live_polled(path) ?? panic("the poll"), [String]{})
+    // Another server writes through a connection of its own, which this
+    // process's live registry never hears, and bumps the table's version.
+    other := __driver_open(path) ?? panic("the other server opens")
+    _: __driver_execute(other, "INSERT INTO tasks (owner, title) VALUES ('alice', 'three')", [DBValue]{}) ?? panic("the other server writes: {err}")
+    _: __driver_execute(other, "UPDATE {LIVE_VERSIONS} SET version = version + 1 WHERE name = 'tasks'", [DBValue]{}) ?? panic("the other server bumps: {err}")
+    _: __driver_shutdown(other)
+    assert_eq(live_test_titles(mine), "[one,two]")
+    // The poll (this one, or the background one if it came first) re-runs it.
+    loop table in db_live_polled(path) ?? panic("the poll") {
+        app.__live_invalidate_all(live_source(table))
+    }
+    assert_eq(live_test_titles(mine), "[one,three,two]")
+    _: store.close()
+    assert(db_live_polled(path) == None)
 }
 
 // The table `sql` reads or writes: the target of SELECT, INSERT, UPDATE or

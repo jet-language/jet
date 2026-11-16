@@ -1,0 +1,21 @@
+# A write on one server reaches a live query's subscriber on another. Server
+# B (the program) binds a live query over `tasks` in a database file; server
+# A (the same program run again as a child process, sharing only the file)
+# inserts a task and ends. The live registry is per process, so B hears of
+# the write only through the file's version map, which it polls once a
+# second, with no broker running: B's binding re-runs within that second and
+# reads A's task, at O0, in a debug build and with --release.
+requires: os:unix
+fixture: LiveQueryCrossServerInvalidation.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = live_query_cross_server_invalidation.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default
