@@ -978,6 +978,21 @@ export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) Land
     Ok()
 }
 
+// Makes the exported `dir` a git view of COMMIT: an index of its tree whose
+// objects are borrowed from `repo`, so a check that lists tracked files
+// (`git ls-files`) sees exactly what it sees in a checkout. No object is
+// copied and nothing is checked out.
+git_view: fn(repo: String, commit: String, dir: String) LandError! -[Exec, FS, Time.Wait]> {
+    common: git(repo, [String]{"rev-parse", "--path-format=absolute", "--git-common-dir"})
+    if common.code != 0 -> return Err(LandError{message: "git rev-parse --git-common-dir failed: {first_line(common)}"})
+    made: git(dir, [String]{"init", "-q"})
+    if made.code != 0 -> return Err(LandError{message: "git init in {dir} failed: {first_line(made)}"})
+    files.write("{dir}/.git/objects/info/alternates", "{common.output.trim()}/objects\n") ?? return Err(LandError{message: "the snapshot's alternates cannot be written: {err}"})
+    indexed: git(dir, [String]{"read-tree", commit})
+    if indexed.code != 0 -> return Err(LandError{message: "git read-tree {commit} in {dir} failed: {first_line(indexed)}"})
+    Ok()
+}
+
 dev_worktree: fn() -[Exec, Env, FS, Time.Wait]> String Never! {
     root("JET_DEV_WORKTREE", checkout_top())
 }
@@ -1088,6 +1103,10 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     }
     head: parsed.output.trim()
     export_tree(worktree, head, snap, [String]{}) ?? {
+        print("EXPORT FAILED: {err.message}")
+        return 2
+    }
+    git_view(worktree, head, snap) ?? {
         print("EXPORT FAILED: {err.message}")
         return 2
     }
