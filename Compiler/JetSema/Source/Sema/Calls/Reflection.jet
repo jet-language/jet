@@ -235,9 +235,14 @@ sema_call_reflection_is_displayable: fn(ty: Type, environment: SemaScopeEnvironm
         .TraitObject(bounds) -> {
             if sema_call_reflection_has_name(bounds, "Renderable") -> return true
             graph: program.registration_graph ?? return false
-            impls: sema_call_reflection_trait_impls(graph, bounds) ?? return false
-            loop reference in graph.impl_trait_name_buckets[impls] {
+            holders: sema_call_reflection_trait_holders(graph, bounds) ?? return false
+            loop reference in holders.impls {
                 if !sema_call_reflection_is_displayable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
+                    return false
+                }
+            }
+            loop reference in holders.nominals {
+                if !sema_call_reflection_is_displayable(graph.modules[reference.module_index].nominals[reference.row].ty, environment, program) {
                     return false
                 }
             }
@@ -263,14 +268,52 @@ sema_call_reflection_has_name: fn(names: [String], wanted: String) -> Bool Never
     false
 }
 
-// The impls of the single trait `bounds`: their bucket in the graph's
-// by-name impl index (`impl_trait_name_buckets`), or None when `bounds` is
-// not one implemented trait. A trait value renders as the concrete value its
-// box holds, so it shows one way (print, `{value}` or Debug) exactly when the
-// type of every one of these impls does.
-sema_call_reflection_trait_impls: fn(graph: SemaRegistrationGraph, bounds: [String]) -> Int? Never! {
+// The rows of the types a value of the single trait `bounds` may hold, or
+// None when `bounds` is not one trait. A trait value renders as the concrete
+// value its box holds, so it shows one way (print, `{value}` or Debug)
+// exactly when the type of every one of these rows does.
+SemaCallTraitHolders: struct {
+    // Each `impl Owner.Trait`, from the graph's by-name impl index
+    // (`impl_trait_name_buckets`).
+    impls: [SemaRegistrationRowRef]
+    // Each struct or enum nominal whose own body implements the trait,
+    // which that index does not hold.
+    nominals: [SemaRegistrationRowRef]
+}
+
+sema_call_reflection_trait_holders: fn(graph: SemaRegistrationGraph, bounds: [String]) -> SemaCallTraitHolders? Never! {
     if bounds.len() != 1 -> return None
-    graph.impl_trait_name_slots.get(sema_call_reflection_leaf_name(bounds[0]))
+    leaf: sema_call_reflection_leaf_name(bounds[0])
+    holders := SemaCallTraitHolders{impls: [SemaRegistrationRowRef]{}, nominals: [SemaRegistrationRowRef]{}}
+    if graph.impl_trait_name_slots.get(leaf) == .Val(slot) {
+        loop reference in graph.impl_trait_name_buckets[slot] {
+            holders.impls.push(SemaRegistrationRowRef{module_index: reference.module_index, row: reference.row})
+        }
+    }
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].nominals.len() {
+            // Matched in place: a pattern on the indexed path copies the whole item.
+            nominal: graph.modules[module_index].nominals[row]
+            if nominal.source == .SourceAST(item) {
+                if sema_call_reflection_body_implements(item, leaf) {
+                    holders.nominals.push(SemaRegistrationRowRef{module_index: module_index, row: row})
+                }
+            }
+        }
+    }
+    Val(holders)
+}
+
+// Whether the struct or enum `item` implements the trait named `leaf` in an
+// `impl` block of its own body or by a derive.
+sema_call_reflection_body_implements: fn(item: Item, leaf: String) -> Bool Never! {
+    if item == .Struct(definition) {
+        return sema_type_blocks_or_derives_name(definition.trait_impls, definition.derives, leaf)
+    }
+    if item == .Enum(definition) {
+        return sema_type_blocks_or_derives_name(definition.trait_impls, definition.derives, leaf)
+    }
+    false
 }
 
 // Apply the runtime reflection gate after the normal Core argument checker has
