@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108532,
+    "rev": 108537,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -87233,224 +87233,6 @@
       "criteriaLastN": 2
     },
     {
-      "id": "c0ofw8u4",
-      "num": 6586,
-      "title": "Owner reballot: memory marks in signatures only, && for take, name: value declarations",
-      "body": "Owner ask 2026-11-06: (1) reballot call-site memory marks so marks live in signatures only and calls carry none (D-CALLSITE-MARK2); (2) investigate & for edit and && for take, freeing ^ (D-MOVE-SIGIL1); (3) every declaration written name: value (D-DECL-COLON1). Proposals: Docs/proposals/2026-11-06-memory-marks-in-signatures.md and Docs/proposals/2026-11-06-colon-declarations.md. On ratification each outcome becomes a one-commit greenfield cutover (jet fix over the parse tree, grammars, syntax registry, spec, examples, snapshots, editor highlighting). Supersedes #3452's open criteria if D-CALLSITE-MARK2=A.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "c4 (2026-11-12): G6Meta-6586c4 lands the last 15 `::`-quoting snapshots (direct land on seed-b13 at 8453c8b584 + patch, 16/16 lines rc 0). Matched against actual output: matrix_measure_inner_mismatch, project_module_{duplicate,invalid,missing}, explicit_file_without_owning_project_context_teaches_missing_context (PASS). Still unverified: 8 rows whose targets are unbuilt (wasip2 x5, freestanding x2, parallel_check_matches_serial_check #4310), so c4 stays open until they run."
-        },
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "c4 state (G6Meta-4, base dev 70c6aec4b5): G6Meta-92 re-blesses 6 of the 19 stale snapshots that print ::. Of the other 13, 7 are wasm/no-OS fixtures that wait on the targets (seed-b13 answers E2104, #5201/#6418). 6 show lost sema checks, and each is a defect to fix, not to re-bless: arrow_batch_use_after_move (E0904 instead of E0209 for a moved name), crypto_release_entropy_seam (E2702 no longer fires with a Secret argument), crypto_secret_nested_provenance (a tag before a qualified call gives E0629, and E0119 is lost), matrix_measure_inner_mismatch (E0109 instead of E2512), mutable_view_extraction_retires_the_source_aggregate (E0220 instead of E0121 after fixture change 5ef77a52ad; the fixture's name sets the intended meaning) and task_spawn_parameters (the task-lambda form is a parse error, E0003). Owner of the 6: G6Meta-4."
-        },
-        {
-          "at": "2026-11-07",
-          "by": "Main",
-          "text": "Unlanded work in SyntaxOwner's lane scratch (lanes/SyntaxOwner), recorded so it is not lost: (1) c10, a parser edit to Compiler/JetParser/Source/Parser/Types.jet so fn-type parameters accept & and && marks, plus two untracked ui fixtures, in lanes/SyntaxOwner/tree; (2) the c9 overlay c9/merged4 with its commit message msg-c9.txt (c9 has since been split: the audit/policy half stays on this card, the editor half is on #6418). SyntaxOwner is the owner's agent; Main does not land this work without the owner's word."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): SyntaxOwner (owner's syntax slot) takes over from DeclColon; DeclColon's unlanded tree was rescued from tmpfs to the scratch lane DeclColon/tdev-rescue/g1. Then the seven #6251 decisions."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner deconfliction 2026-11-06: added the full ratified content of D-CALLSITE-MARK2, D-MOVE-SIGIL1 and D-DECL-COLON1 as criteria (c8-c11), including the requirements carried over from #3452's superseded call-mark criteria; c6 now follows the owner's no-teaching order."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner order (greenfield): retired spellings get no teaching diagnostics. After the one-time conversion, ::, &x/^x call marks and ^ take are simply not Jet, and fall through to the ordinary parse and type errors. There is no registered retired-form code, UI snapshot or jet fix rewrite. Codes that exist only to teach the old call marks are deleted. c6 is read as: the parser no longer accepts the old forms, with no dedicated diagnostic."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Seed a0_027 released and rotated: dev dfc887571e, which contains A2 cced341fd5; s2==s3 4f1306092c375912. Every gate PASSES: chain, cc-pack, pack, jetpack, jetpack-engine. golden 4754 rows (0 lost), ui 2420 (0 lost), cases 4492 (0 lost); 27 gains over a0_026. The B–D landing window is open."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "A2 cced341fd5 (DeclColon, pushed): every compiler-binary text and token detector reads both spellings. Covered: build, run, workspace-module, #Job, use-alias, registry, plugin, capability, Output and C-facade, each with #Tests for both forms. chain full on d728fb362c+A2 with a0_025: FIXED_POINT (jet 55f7fa3c676f65d5). The official seed a0_027 will be cut on a HEAD that contains A2; B–D (the converted tree) lands only after a0_027 rotates."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Commit A landed (DeclColon): 7bb6b7ee8d makes the parser accept both name: value and the retired :: form, maps each new spelling onto the existing AST nodes, and registers E0397 (registered, not yet reported); 4bfcc132f9 lists ColonDeclarations.jet in sources.list. Proof on an export of 7bb6b7ee8d: chain full FIXED_POINT (s2 == s3, jet 506047775323c6eb); census on HEAD: check, build and selfcheck 0 rows, runtime 0 issues; lane check CHECK OK; both forms parse with no diagnostics and jet fmt still prints the old form (the formatter switch lands with the conversion). The conversion builds with seed C_a (cA s2 + pack2) inside DeclColon's trees only."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner 2026-11-06 night: scope is every declaration (D-DECL-COLON1=A ratified): constants, aliases, locals, modules, fns, methods, structs, enums, traits, use and package all name: value; generic params on the kind word (D-DECL-COLON1 is newer than D-DECL-BINDING1=B, which put them on the name and spelled ::). Assigned to DeclColon (brief $JET_STATE_ROOT/scratch/Main/declcolon-brief.md)."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner instruction 2026-11-06 (night): convert every name :: value in the repo to name: value overnight, using jet fix/jet fmt, done by morning. Scope taken literally: the :: binding sigil everywhere it binds a name (constants, locals, aliases, use x ::, module x :: instances, fences). fn/struct/enum/trait/module headers keep their form until D-DECL-COLON1 is voted. Owner said he is not worried about : vs := differing by one character."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Data/Syntax registry entry updated",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "7b12f92268 and 0b9ad6cd47. Main on dev c9470eea21: Compiler/JetFoundation/Data/Syntax/CoreSurface.jet has SIGIL_MOVE \"&&\" (take) beside SIGIL_WRITE \"&\" and documents plain calls; MathLayout.jet marks OP_CARET \"^\" as free (\"no grammar rule reads it (a take is &&)\"); Spellings.jet rows teach \"&&T / &&self\" and \"x.move()\"; Highlights.jet colours the take mark apart from logical and.",
-          "at": "2026-11-06T22:54:52.620Z"
-        },
-        {
-          "n": 2,
-          "text": "syntax-decisions.md log entry",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "c92bf872eb: Docs/spec/syntax-decisions.md logs D-DECL-COLON1=A (line 2994; table row 21 cites it for ':') and lists E0202 among the retired call-mark codes of D-CALLSITE-MARK2.",
-          "at": "2026-11-06T19:40:50.873Z"
-        },
-        {
-          "n": 3,
-          "text": "editor grammars regenerated (editor-grammars.mjs --write)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "7b12f92268: prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/grammar/editor_grammars_match_generated_sections.case, tests/cases/grammar/seeded_tree_sitter_drift_fails_the_generated_section_guard.case PASS",
-          "at": "2026-11-06T20:53:18.450Z"
-        },
-        {
-          "n": 4,
-          "text": "snapshots re-blessed",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 0196c51a3e (G6Meta-6586c4b-r2 with G6Meta-6586c4; Lander5 g6-fold): ui arrow_batch_use_after_move, crypto_release_entropy_seam, crypto_secret_nested_provenance, ownership/mutable_view_extraction_retires_the_source_aggregate and task_spawn_parameters pass. `git grep -nE \"^ *[0-9]+ *\\| .*[A-Za-z_]+ :: \" -- tests/` finds 0 quoted `::` declarations on dev ea1caf0d11.",
-          "at": "2026-11-13T09:33:59.545Z"
-        },
-        {
-          "n": 5,
-          "text": "Every name :: value binding in the repo (.jet sources, Prelude, Core, Jetpack, Examples, tests and fixtures, generators and generated files, compiler string templates, diagnostics text, syntax registry, editor grammars, spec and site docs) is written name: value; Docs/audits and dated research/proposals keep their historical text",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "5ef77a52ad (+529e9d9ddd). Main proof on the 529e9d9ddd tree: no line binds with name :: value in any .jet file outside Docs/audits, Docs/research and Docs/proposals, and none in Docs/spec, Tools/editors or the READMEs; the dated audits keep their text.",
-          "at": "2026-11-06T19:34:01.967Z"
-        },
-        {
-          "n": 6,
-          "text": "The parser no longer accepts a :: binding, a ^ mark, or a call-site & or ^ mark outside #Policy(writes: .Explicit). Per the owner's order these retired spellings get no registered diagnostic, snapshot or jet fix rule (the E0397 and E0435 teaching is removed); the in-repo conversion is the whole cutover.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "5ef77a52ad deletes E0203/E0224/E0226/E0397/E0434/E0435. Main probes with s1 jet@0.0.1#bd1b1baa… at 529e9d9ddd: 'x :: 1', 'keep(^xs)' and 'grow(&xs)' each fail as a plain parse error (jet.InvalidStatement, no teaching text, rc=1); the same program with plain calls, a &&-typed parameter and xs.move() runs and prints 3 (rc=0).",
-          "at": "2026-11-06T19:34:03.071Z"
-        },
-        {
-          "n": 7,
-          "text": "The converted tree reaches chain full FIXED_POINT, the seed every lane builds with parses the new form, and focused goldens/cases/ui A/B against the pre-conversion commit show 0 regressions",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Met 2026-11-12 from release-gate records (G6Meta-4 evidence, $JET_SCRATCH_ROOT/lanes/G6Meta/c7/EVIDENCE.md, checked by Main). (1) FIXED_POINT: a0_030 (dev 2c40493778, first gate containing conversion 5ef77a52ad) reached level=full s2 == s3 (jet 67e8f7bd7431477e), and every gate through a0.0.44 (dev 9755703c76, jet 31f1d62666d05338) is full-fixed ($JET_STATE_ROOT seeds a0_030/RELEASE.md, a0.0.44/RELEASE.md). (2) seed-b13 (jet@a0.0.45) parses the name: value tree: jet check 0 errors on CoreRecordRows.jet, SemanticIndex.jet, BuildAdapter.jet, CheckProgram.jet, Contracts.jet; jet test Compiler --profile cases tests/cases/fmt/fmt_target_web_marker_stability.case PASS. (3) A/B a0_030 against a0_029 (tree 42f746371b, ancestor of 5ef77a52ad): golden 4350 rows 0 lost, ui 2391 rows 0 lost, cases 4516 rows 0 lost. The 96 rows a0_028/a0_029 lost under #6586 dispositions: 72 PASS in the a0.0.44 candidate kit, 24 (19 files) deleted by 5ef77a52ad as teaching tests of retired marks per c6 (list: c7/ab.out).",
-          "at": "2026-11-12T22:55:01.548Z"
-        },
-        {
-          "n": 8,
-          "text": "D-CALLSITE-MARK2=A: every call is plain, with no & or && on arguments or receivers, and sema takes each argument's convention from the callee. E0202 and E0224 retire. The changeability error quotes the signature line; two overlapping inputs with one edited stay an error; a use after a call that took the value names that call, with the fix x.copy() or a reorder; a call never copies on its own; values.push(values.len()) stays legal; a part of a list passed to a writing parameter is a write window. Marks remain only on a named write window (edit: &values[2..3]), a writing match (if &shape == { … }) and a task that takes a name. UI snapshots for each error; goldens on o0, o1 and o2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "8fe1586eaa (E0202 deleted; E0111/E0205 quote the signature line). Main focused proof with s1 built from c92bf872eb (jet 34ee7338c11f776c): cases 13/13 PASS (hardening, determinism, corelib, ownership, compute_views, explain_syntax today-52-45, syntax_reconciliation retired_authority…), ui 9/9 PASS (plain_call_changes_colon_binding, plain_call_changes_read_parameter, param_read_write_fix, read_param_method_write_fix, write_window…, iter_*, pool_read_only_param_mutation, range_write_window_list_param), golden memory/parameter_modes and memory/write_param_forward PASS on O0/O1/O2. Pre-existing failures carried elsewhere: corelib/game_run_needs_mutable_scene_lvalue (CoreCliLead), the multi_trait …_2 ui row (KF #6425).",
-          "at": "2026-11-06T19:45:32.239Z"
-        },
-        {
-          "n": 9,
-          "text": "D-CALLSITE-MARK2=A tooling: the editor shows & and && as inlay hints at calls and the language server underlines a changed argument; jet audit writes lists every call that edits or takes a named value; #Policy(writes: .Explicit) requires the marks on arguments and receivers, with a Safe fix that inserts them (UI snapshot).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, second cut questions): split: the audit/policy half is the criterion added on #6586, and the editor half moved to #6418 with the language-server rows.",
-          "at": "2026-11-07T01:03:57.433Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 10,
-          "text": "D-MOVE-SIGIL1=A: && marks a taken input in parameter types, before self and after task (fn seal(&&self), file: &&GzFile, task &&job { … }, fn(&&Map)); value positions use x.move(); ^ has no meaning and stays an error under D-SIGIL-FREED2 with no teaching diagnostic; the registry's move sigil is &&, and the editor grammars colour the take mark apart from logical and.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadC-2. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). fn(&&T) function types parse, check, format and run on every tier.",
-          "at": "2026-11-10T16:28:14.152Z"
-        },
-        {
-          "n": 11,
-          "text": "D-DECL-COLON1=A: every name-introducing form is name: value: constants, functions, struct, enum, trait and module, imports (use process: core.process), the package header (package: { … }) and instances (int_cache: cache<Int>(32)). Kind parameters go on the kind word (first: fn<T>(xs: [T]) -> T?, Box: struct<T> { … }). Inside struct, trait, enum and foreign-module braces, name: Type lists members. impl and #Test blocks keep their form; associated types are Output: type and Output: T; a name: fn binding may call itself; {x:Debug} is unchanged; a brace group of only name: value entries is a record; a file-level x: Int is an alias, and using it as a number is a registered error with the fix x: Int{0} (UI snapshot); a bodiless fn(…) at file level is a function type.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "0b9ad6cd47: prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): golden tests/run/language_features/bodiless_file_level_fn_names_a_function_type.jet PASS o0/o1/o2; ui tests/ui/bodiless_file_level_fn_is_a_function_type.jet, tests/ui/brace_group_of_name_value_entries_is_a_record_literal.jet, tests/ui/e0081_fn_without_body.jet PASS",
-          "at": "2026-11-06T20:53:19.290Z"
-        },
-        {
-          "n": 12,
-          "text": "D-CALLSITE-MARK2=A tooling: `jet audit writes` lists every call that edits or takes a named value; #Policy(writes: .Explicit) requires the marks on arguments and receivers, with a Safe fix that inserts them (UI snapshot). (split from c9; the editor half moved to #6418)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev e75850d064 (train t16a, 8327f5ae47..e75850d064), SUB G6LeadC-14 + G6LeadC-14fix. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t16a/REPORT.md: the census is clean after the integration fixes G1Lead-4-cefix, G6LeadC-14fix, G1Lead-4-closedelsefix, G6LeadE-4fix, G8Fix-5fix and TlsLead-69fix). `jet audit writes` lists every call that edits or takes a named value; #Policy(writes: .Explicit) requires the marks and refuses a missing one with E0228 jet.CallMarkRequired (UI snapshot), with a Safe fix that inserts it.",
-          "at": "2026-11-10T23:56:32.654Z"
-        },
-        {
-          "n": 13,
-          "text": "D-FNVAL-WRITE1=A in the spellings of D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A: a function type marks inputs with & (write) or && (take), as declarations do (action: fn(&Mobj)); a function or lambda fits only when its marks match; a stored function is called plainly (st.action(m)), with no .call and no call-site mark; read-only function types and calls are unchanged; an example with golden output on o0, o1 and o2. (moved from #5036 c9)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Already holds on dev b4df632fbb; Main ran it on seed-b14 in the dev worktree. language_features/fn_type_names_a_borrowed_parameter_on_every_tier gives PASS 1 (o0, o1, o2 and build all print field 2, passed 4, list 10, called 11, the stored holder.step(s) called plainly). memory_semantics/function_type_take_param_runs_on_every_tier gives PASS 1 (the fn(&&Words) take). ui marked_function_value gives PASS 1 (E0227: a function fits only when its marks match). Each run has REFUSED 0. Found by the G6Meta-4 sweep.",
-          "at": "2026-11-13T08:42:14.028Z"
-        },
-        {
-          "n": 14,
-          "text": "Data/Syntax registry entry updated (moved from #5036 c5)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 8e0521995a (G6Meta-6586c14, Lander5 directq on seed-b14): Spellings.jet has a ledger row for `fn(&T) / fn(&&T)`. LexicalLedger --check reports up to date (72 rows), tests/guards/example_names.jet gives 147 passed, syntax_reconciliation.jet gives 147 passed, and jet check is ok on both files.",
-          "at": "2026-11-13T08:46:37.751Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "syntax"
-      ],
-      "goals": [
-        "G6"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T02:04:25.306Z",
-      "updated": "2026-11-13T09:34:01.602Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 14,
-      "completedAt": "2026-11-13T09:34:01.602Z"
-    },
-    {
       "id": "c0g93joj",
       "num": 6592,
       "title": "First jet cc pack install hashes the 450 MB tree about four times with pure-Jet SHA-256",
@@ -98324,57 +98106,6 @@
       "criteriaLastN": 2
     },
     {
-      "id": "c0vj3f8z",
-      "num": 6776,
-      "title": "I9: string interpolation of a Display type prints a struct dump while compiling but its Display text at run time",
-      "body": "A user struct with impl Display interpolated as \"{value}\" prints its Display text at run time (default level and --optimize=none) but the derived dump (Failure { query: query, code: 7 }) when the same interpolation runs under #run. One spelling, two meanings across tiers (I9). Repro: $JET_SCRATCH_ROOT/lanes/G6Meta/r6/diag/d.jet on seed-b13. Found by G6Meta-4 in the G6Meta-36 query program, which now calls .display() explicitly as a stopgap.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The root is named and fixed: interpolation while compiling formats a value through the same Display path as run time, in one shared runtime mechanism, not a second formatter. A case interpolates a Display struct, an enum with Display, a nested field and a value without Display, and prints identical text under #run and at run time on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev d2c2ca67de (G6Meta-6776; Lander5 g6-fold, lines green on the fold tree): the case comptime_core_pure_parity/display_interpolation_reads_the_same_while_compiling_and_running passes (Display struct, Display enum, nested field and a value without Display, identical under #run and at run time, O0/O1/O2), and jet check of CheckProgram, Pipeline, CoreReach and InspectFacts passes.",
-          "at": "2026-11-13T09:33:56.106Z"
-        },
-        {
-          "n": 2,
-          "text": "The stopgap explicit .display() calls in the G6Meta-36, 40 and 43 query programs and 43 fixture main.jet are reverted to plain \"{err}\", and inspect_facts_program_store_is_the_build_query still passes on every tier.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev d2c2ca67de (G6Meta-6776): the stopgap .display() calls are reverted; `! git grep -F \".display()\"` over InspectFacts.jet and the receipt-query fixture passes (0 hits on dev ea1caf0d11). The cases inspect_facts_program_store_is_the_build_query, inspect_facts_run_store_is_the_receipt_query and inspect_facts_is_the_core_query_on_every_tier pass.",
-          "at": "2026-11-13T09:33:57.089Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G6"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-12T16:31:06.531Z",
-      "updated": "2026-11-13T09:33:58.652Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-13T09:33:58.652Z"
-    },
-    {
       "id": "c0cwefog",
       "num": 6777,
       "title": "Let-bound rt_static_text in runtime code lowers to the constant 0 (SIGSEGV at 0x8)",
@@ -104297,11 +104028,11 @@
         {
           "n": 18,
           "text": "A type-key collision between two types is a registered build diagnostic naming both types, never a process-stopping panic (AGENTS.md collect-all rule). Today Compiler BuildTraits.jet:21-24 panics (found by reading, D-PRIM-ANY1 review 5; no probe can force a collision). Proof: a unit test that feeds two colliding keys to the key table and gets the diagnostic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T05:54:16.805Z"
+          "evidence": "Landed 7d09f2d053 (p213, dev 78f4541780). p213 gate: jet test Compiler/JetIR/Source/BuildTraits.jet rc=0 (the unit test feeds two colliding type keys to the key table and gets the registered build diagnostic naming both types; the panic at BuildTraits.jet:21-24 is gone); cases traits/ 1/0, trait_value_prints 1/0, erased_trait_value_reflects_its_type 1/0.",
+          "at": "2026-11-16T09:46:43.435Z"
         }
       ],
       "refs": [],
@@ -104316,7 +104047,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-16T08:25:01.509Z",
+      "updated": "2026-11-16T09:46:43.435Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -104494,6 +104225,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "n14 (c), the registered #run stop for dma.start/dma.wait, is dropped from n14: DMA is unreachable on dev 78f4541780. No program reaches DMAStart/DMAWait: (1) sema needs a channel path from an imported `board.<profile>` module, and `use { sensor: board.sensor_v1 }` is E0603 whether board/ is a sibling directory or a dependency package; no repository fixture imports a `board.` module; (2) no shipped TargetMachine declares a DMA channel (hardware.dma_channels is empty for sensor_v1, virt_aarch64, wasm and hosted). A stop that no program reaches can have no I4 UI snapshot, so the comptime refusal (E3010 family) lands with the first reachable DMA path, in the same change that makes it reachable. Probe: PrecompiledCore-4 g7/n14/dma (E0603 output)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "c16 (a) landed in p210 (7f6c05586e, 7f902dd915): by hand on the p210 gate tree, JET=<p210 jet> JETPACK_TEST_REPO_ROOT=<tree> jet test Jetpack/EnvModel/Tests/ModuleValueParity.jet passes 158 of 158. c16 stays open for (b): b1 is queued for p211, then b2-b7."
         },
         {
@@ -104656,11 +104392,11 @@
         {
           "n": 16,
           "text": "I8/I9 one evaluator: Jetpack's EnvModel evaluates no compile-time value itself; every module value it reads (literals, names, list, struct, enum and map values, calls and operators) comes from the compiler's evaluation through the compiler service, so the environment, system, image and fleet consumers see the value the build sees. Today EnvModel is a partial second evaluator (found by PrecompiledCore-4 on dev a1c3325a65):\n- calls already go to the compiler (Jetpack/EnvModel/Source/ModuleEval/CompilerService.jet:77);\n- literals and names are evaluated in ComputedFields.jet:131-181, with no type check and no field defaults (E1333 for map keys);\n- its own dependency graph and cycle check report E0338 at the name span, where the compiler reports at the value (:207-253);\n- its own I/O gate gives E3402 by builtin name, where the compiler gives E3410 (:57-71);\n- it collects only #run module values as globals, where the compiler builds every module value (ModuleEval.jet:165-182).\nProof: cases rows where a typed struct with field defaults, a map value, a cycle and an I/O-reading value each give the same value or the same diagnostic (code and span) through jet build and through the EnvModel consumer, plus a git grep showing ComputedFields.jet no longer evaluates expressions.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T06:52:19.337Z"
+          "evidence": "p213 gate (dev 78f4541780; b1 7fe39baa66, b2-b7a and b7b 58fec0380f): JETPACK_TEST_REPO_ROOT=<tree> jet test Jetpack/EnvModel/Tests/ModuleValueParity.jet -> 178 passed, 0 failed. Rows for each named shape, each comparing the compiler's evaluation (the program) with the EnvModel consumer: typed struct with field defaults (module_value_typed_struct_with_field_defaults_matches_the_program); map value (environment_schema_types_the_programs_values + module_value_of_a_schema_type_is_its_written_fields, LANGS map); cycle at the value (module_value_cycle_is_the_programs_cycle_at_the_value, env_field_cycle_names_the_fields_at_the_field); I/O-reading value (ambient io in an env field is the compilers refusal at the call). git grep -n -E 'envmodel_evaluate_expression|envmodel_comptime_evaluate|envmodel_evaluate_named_fields|comptime_evaluate' 78f4541780 -- Jetpack -> 0 lines; Jetpack/EnvModel/Source/ComputedFields.jet no longer exists.",
+          "at": "2026-11-16T09:42:25.255Z"
         }
       ],
       "refs": [],
@@ -104675,7 +104411,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-16T08:01:18.197Z",
+      "updated": "2026-11-16T09:48:36.181Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -188363,533 +188099,6 @@
       "ratifiedAt": "2026-11-06"
     },
     {
-      "id": "D-CALLSITE-MARK2",
-      "cardId": "c0ofw8u4",
-      "group": "syntax",
-      "title": "Memory marks live in signatures only; calls carry no & or ^",
-      "situation": "Today a Jet call repeats what the called function's signature already says. An argument the function edits carries &, so you write grow(&c). A method that edits its receiver was ratified to need no mark, but the compiler still demands &values.push(3). A take carries ^ in four special cases and not at a last use. You said marks at every call are ugly, tedious and distracting, and that the split rule is hard to teach. We recommend one rule: the signature says what happens, and calls carry no marks.",
-      "gist": "Should & and ^ appear only in function signatures, so every call is written plainly?",
-      "lesson": "A function's signature already says whether it edits or takes each input. Writing the same mark again at every call repeats that fact about 105,000 times in Jet's code. Under this rule the signature carries the mark, calls look like reads, and the editor shows the marks as faint hints.",
-      "explainer": "",
-      "story": "Mia writes scores.push(10) and bump(score), with no marks, exactly as she would in Python. Her editor shows a faint & before score. When she declares score :: 0 by mistake, the error says bump edits its input and score is fixed, and offers score := 0.",
-      "inWild": "Mojo: a parameter says mut or owned in the signature, and the call is plain. Source: https://docs.modular.com/mojo/manual/values/ownership\n\nKotlin, Java, Python and C++ references: calls carry no edit marks. Rust and Swift mark changed arguments but not receivers. Source: Docs/research/2026-10-29-write-sigil-at-call-sites.md",
-      "detail": "WHAT YOU ASKED\n\nOn 2026-11-06 you said marks belong in declarations, that marks at every call are ugly, tedious and distracting, and that a split rule is hard to teach. The full proposal, with counts and examples, is Docs/proposals/2026-11-06-memory-marks-in-signatures.md.\n\nTODAY\n\nD-CALLSITE-MARK1=A keeps & on edited arguments and drops ^ at a last use, except for four kinds of take. D-RECEIVER-MARK1=A drops & on receivers, but that is not built: the compiler still reports E0224. D-COPY-MOVE-SPELL1=A spells an early move x.move(), also not built.\n\nCounts on dev b486d6c09a: 69,758 & marks on arguments, about 29,800 on receivers, 4,222 ^ on arguments, about 1,230 ^ in value positions. Signatures hold 14,246 & and 3,147 ^ marks.\n\nTHE RULE UNDER A\n\nA signature says what a function does to each input: fn bump(c: &Counter), fn seal(^self). Every call is plain: bump(score), items.push(3), buf.seal(). A mark stays only where no signature decides. Those places are a write window bound to a name (edit :: &values[2..3]), a match that writes into its subject (if &shape == { … }), and a task that takes a name.\n\nAn early move is x.move(), as already ratified, and the ^x value form retires. A part of a list passed to a writing parameter becomes a write window by itself.\n\nWHAT STAYS CHECKED\n\nSafety never depended on the call mark. A call that edits a value needs a changeable value, declared := or received as a & parameter. Two overlapping inputs, one edited, stay an error. A value used after a call took it is an error that names the call, with the fix x.copy() or a reorder. A call never copies on its own.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Seeing changes in plain text. The editor shows & and ^ as faint hints at each call, and the language server underlines a changed argument. In the terminal, jet audit writes lists every call that edits or takes a named value, as jet audit copies lists copies.\n\n2. Teams that want marks in text. #Policy(writes: .Explicit), already ratified for receivers, extends to arguments. It requires the marks everywhere, with a Safe fix that inserts them. No new mechanism is added.\n\n3. A value with cleanup closing at a plain call. The take is in the signature and shown as a hint, and any later use is an error naming the closing call.\n\n4. Errors losing the mark they pointed at. Each memory error quotes the signature line that causes it.\n\n5. The cutover. The compiler knows every mark, so jet fix removes about 105,000 in one commit, with grammars, spec, examples and snapshots.\n\nNo loss remains.\n\nEDGE CASES\n\n- values.push(values.len()) stays legal: the length is read before the push writes.\n- A function value keeps its marks in its type, fn(&Map), and is called plainly.\n- A foreign function keeps its marks in its signature.\n\nWHY NOT B OR C\n\nB keeps today's split, which you called messy: arguments marked, receivers not, and four take cases marked. C marks every call again, which is the 105,000 repeated marks you called tedious.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Signatures only",
-          "detail": "Marks appear in signatures and on the few places no signature decides: a named write window, a writing match, a task that takes a name. Every call is plain. The editor shows marks as hints, and #Policy(writes: .Explicit) restores them for teams that want them.",
-          "technical": "Sema already resolves each argument's convention from the callee. E0202 (missing write mark) and E0224 (missing receiver mark) retire; the changeability checks they guarded quote the parameter instead. jet fix strips call marks from the parse tree. jet audit gains writes.",
-          "code": "fn grow(list: &[Int], extra: ^[Int]) { … }\nfn run() {\n    xs := [1, 2]\n    more :: [3]\n    grow(xs, more)\n    xs.push(4)\n}"
-        },
-        {
-          "key": "B",
-          "name": "Keep today's split",
-          "detail": "Edited arguments keep &, receivers are plain, a last-use take is plain, and four kinds of take keep ^. This is D-CALLSITE-MARK1 with D-RECEIVER-MARK1, once built.",
-          "technical": "Build D-RECEIVER-MARK1's receiver change; argument checks stay as they are.",
-          "code": "fn run() {\n    xs := [1, 2]\n    grow(&xs, more)\n    xs.push(4)\n}"
-        },
-        {
-          "key": "C",
-          "name": "Mark every call",
-          "detail": "Every argument and receiver that a call edits or takes carries & or ^, as D-CAP-RECEIVER1=D first ratified. Nothing is inferred at calls.",
-          "technical": "Revert D-RECEIVER-MARK1 and D-CALLSITE-MARK1's last-use rule; keep E0224 and E0202.",
-          "code": "fn run() {\n    xs := [1, 2]\n    grow(&xs, ^more)\n    &xs.push(4)\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Mojo",
-          "note": "Signatures say mut or owned; calls are plain. Source: https://docs.modular.com/mojo/manual/values/ownership",
-          "code": "fn grow(mut list: List[Int]): ...\ngrow(xs)"
-        },
-        {
-          "lang": "Rust",
-          "note": "Changed arguments carry &mut, receivers do not. Source: https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html",
-          "code": "grow(&mut xs);\nxs.push(4);"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "It is one rule, the one you asked for: the signature says what happens, and calls read plainly. Safety is unchanged because every check reads the signature, not the call mark.",
-        "gains": [
-          "One rule for arguments and receivers.",
-          "About 105,000 repeated marks leave the code.",
-          "Calls read like Python or Kotlin."
-        ],
-        "losses": [
-          {
-            "loss": "Plain text does not show which call changes a value.",
-            "mitigation": "Editor hints, an underline, and jet audit writes show every change; a package may require marks by policy."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B keeps the split you called messy and hard to teach."
-          },
-          {
-            "key": "C",
-            "reason": "C repeats the signature at about 105,000 calls, the tedium you named."
-          }
-        ],
-        "tradeoff": "A trades marks in plain text for one rule and plain calls, with hints and a policy for readers who want the marks."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: claude (Main). Adversarial model family: claude. Fresh agent: Main. The pass added the resource-close and error-quoting fixes and kept named write windows marked. It found no case where removing a call mark weakens a check."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should & and ^ appear only in function signatures, so every call is written plainly?",
-        "lesson": "A function's signature already says whether it edits or takes each input. Repeating that mark at every call adds about 105,000 marks to Jet's code. Under A, only signatures carry marks. Calls look like reads, and the editor shows the marks as hints.",
-        "trio": {
-          "current": {
-            "note": "Today edited arguments and receivers carry marks at every call.",
-            "code": "fn run() {\n    xs := [1, 2]\n    grow(&xs, ^more)\n    &xs.push(4)\n}"
-          },
-          "wild": {
-            "lang": "Mojo",
-            "note": "Mojo puts mut in the signature; the call is plain.",
-            "code": "fn grow(mut list: List[Int]): ...\ngrow(xs)\nxs.append(4)"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Signatures only",
-            "gist": "Marks live in signatures; calls are plain; the editor shows hints.",
-            "gains": [
-              "One rule for arguments and receivers.",
-              "Calls read like Python."
-            ],
-            "losses": [
-              "Plain text hides which call changes a value."
-            ],
-            "proposed": {
-              "code": "fn grow(list: &[Int], extra: ^[Int]) { … }\nfn run() {\n    xs := [1, 2]\n    grow(xs, more)\n    xs.push(4)\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Keep today's split",
-            "gist": "Arguments keep &, receivers are plain, some takes keep ^.",
-            "gains": [
-              "Edited arguments stay visible in text."
-            ],
-            "losses": [
-              "Two rules for the same act.",
-              "Four special take cases to learn."
-            ],
-            "proposed": {
-              "code": "grow(&xs, more)\nxs.push(4)"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Mark every call",
-            "gist": "Every edited or taken argument and receiver carries a mark.",
-            "gains": [
-              "Every change is visible in plain text."
-            ],
-            "losses": [
-              "About 105,000 repeated marks.",
-              "push and pop need marks."
-            ],
-            "proposed": {
-              "code": "grow(&xs, ^more)\n&xs.push(4)"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "One rule: the signature says what happens and calls read plainly. Every safety check reads the signature, so nothing becomes unsafe.",
-          "gains": [
-            "One rule to teach.",
-            "About 105,000 marks leave the code."
-          ],
-          "losses": [
-            {
-              "loss": "Plain text hides which call changes a value.",
-              "mitigation": "Editor hints, jet audit writes, and an opt-in policy show the marks."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Keeps the split rule you called messy."
-            },
-            {
-              "key": "C",
-              "reason": "Repeats every signature mark at every call."
-            }
-          ],
-          "tradeoff": "Marks in plain text, for one rule and plain calls."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-06T02:04:36.305Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-06"
-    },
-    {
-      "id": "D-MOVE-SIGIL1",
-      "cardId": "c0ofw8u4",
-      "group": "syntax",
-      "title": "&& marks an input a function takes, and ^ becomes free",
-      "situation": "A signature marks an input the function edits with & and one it takes for good with ^. You asked us to study && for taking instead, which would free ^. If marks move to signatures only, the take mark appears about 3,150 times in signatures and in tasks that take a name. Value positions already use x.move(). We recommend &&, because it pairs with &, matches C++'s move parameter, and avoids a dead key.",
-      "gist": "Should a signature mark an input it takes with && instead of ^, freeing ^?",
-      "lesson": "A function can borrow an input to change it, or take it for good. Jet marks the first with &. Marking the second with && makes the pair one family: & changes it, && keeps it. C++ already writes its move parameter as T&&.",
-      "explainer": "",
-      "story": "Ravi reads fn close(file: &&GzFile) and guesses right away that close keeps the file, because && looks like a stronger &. On his German keyboard he no longer types ^ followed by a space.",
-      "inWild": "C++: a move parameter is written T&&, an rvalue reference that std::move hands over. Source: https://en.cppreference.com/w/cpp/language/reference\n\nSwift writes consuming, Mojo owned and Hylo sink for the same idea. Source: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0377-parameter-ownership-modifiers.md",
-      "detail": "WHAT YOU ASKED\n\nOn 2026-11-06 you asked us to investigate & for editing and && for moving as prefix marks, judged on frequency, readability and intuitiveness. The full study is section 5 of Docs/proposals/2026-11-06-memory-marks-in-signatures.md.\n\nFREQUENCY\n\nOn dev b486d6c09a, signatures hold 14,246 & marks and 3,147 ^ marks, so takes are 18% of signature marks. The rarer mark gets the longer symbol, which matches how often each is typed and read.\n\nCLASHES\n\n&& is also logical and, used 23,545 times. Under D-CALLSITE-MARK2=A the take mark appears only in a parameter type, before self, and after the word task. Logical and always sits between two values. No && appears in any type today, so the parser and the reader never meet both meanings in one place.\n\nIf calls keep marks (D-CALLSITE-MARK2 B or C), f(&&x) becomes possible beside a && b. In that case && is a weaker choice, and B or C on this ballot fits better.\n\nREADABILITY AND INTUITION\n\n& reads as this function changes it, and && as more than that: it keeps it. C++ programmers already link && with moving. In Rust &&T is a reference to a reference, but Jet has no reference types, so that reading has nothing to attach to. Hover text says takes the value.\n\nTYPING\n\n^ is a dead key on German, French, Spanish, Portuguese, Swiss and Nordic keyboards: it waits for the next key, so ^self needs an extra space. && is one key pressed twice on every common layout.\n\nFREEING ^\n\nWith && for takes and x.move() in value positions, ^ has no meaning left. Under D-SIGIL-FREED2 a freed symbol stays an error until a new ballot gives it a job.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Two meanings of &&. Kept apart by position, and the editor colours them differently. A take mark can never start an expression, so a b &&c typo still means and.\n\n2. Two keystrokes. Takes are 18% of marks, and ^ already costs two keystrokes on most non-US keyboards.\n\n3. Rust's double reference. Jet has no storable reference type, so there is nothing to confuse it with.\n\nNo loss remains.\n\nEDGE CASES\n\n- task &&job { … } takes job into the task.\n- fn(&&Map) is a function type that takes its input.\n- A foreign function writes file: &&GzFile, as it writes file: ^GzFile today.\n- An early move inside an expression stays x.move().",
-      "options": [
-        {
-          "key": "A",
-          "name": "&& for take",
-          "detail": "A taken input is written &&: fn seal(&&self), file: &&GzFile, task &&job { … }. Value positions use x.move(). ^ has no meaning left and stays free.",
-          "technical": "The lexer already has the && token; the parameter, self and task-capture parsers accept it where they accept ^ today. The syntax registry renames SIGIL_MOVE to &&. jet fix rewrites ^ marks.",
-          "code": "fn seal(&&self) { … }\nfn gzclose(file: &&GzFile) -> Int = \"gzclose\"\ntask &&job { job.run() }"
-        },
-        {
-          "key": "B",
-          "name": "The word move",
-          "detail": "A taken input is written with a word: fn seal(move self), file: move GzFile, task move job { … }. Clearest for a beginner, five letters per use, and one more keyword.",
-          "technical": "A contextual keyword in parameter, self and task-capture position. ^ is freed.",
-          "code": "fn seal(move self) { … }\nfn gzclose(file: move GzFile) -> Int = \"gzclose\""
-        },
-        {
-          "key": "C",
-          "name": "Keep ^",
-          "detail": "Nothing changes: fn seal(^self), file: ^GzFile. ^ stays taken, and stays a dead key on many keyboards.",
-          "technical": "No change.",
-          "code": "fn seal(^self) { … }\nfn gzclose(file: ^GzFile) -> Int = \"gzclose\""
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "C++",
-          "note": "A move parameter is T&&. Source: https://en.cppreference.com/w/cpp/language/reference",
-          "code": "void close(File&& file);\nclose(std::move(f));"
-        },
-        {
-          "lang": "Swift",
-          "note": "A taken parameter is marked consuming. Source: SE-0377",
-          "code": "func close(_ file: consuming File)"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "& and && read as one family, change and keep. C++ already writes moves as &&, the symbol never meets logical and once calls are plain, and ^ is freed.",
-        "gains": [
-          "One family of marks: & changes, && keeps.",
-          "Frees ^ for a later use.",
-          "No dead key on European keyboards."
-        ],
-        "losses": [
-          {
-            "loss": "&& also means logical and.",
-            "mitigation": "The take mark only appears in signatures and after task, never between two values."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "A word is clearest but adds a keyword and five letters to every take."
-          },
-          {
-            "key": "C",
-            "reason": "C keeps ^ taken and keeps the dead key on many keyboards."
-          }
-        ],
-        "tradeoff": "A reuses a symbol that means and elsewhere, kept apart by position, for a short paired mark and a free ^."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: claude (Main). Adversarial model family: claude. Fresh agent: Main. The pass found that && is weak if calls keep marks, so the ballot states that dependency. It confirmed no && appears in any type today."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should a signature mark an input it takes with && instead of ^, freeing ^?",
-        "lesson": "A function can borrow an input to change it, or take it for good. Jet marks the first with &. Under A the second is &&, so the pair reads as one family. C++ already writes its move parameter as T&&.",
-        "trio": {
-          "current": {
-            "note": "Today a taken input is marked ^.",
-            "code": "fn seal(^self) { … }\nfn gzclose(file: ^GzFile) -> Int = \"gzclose\""
-          },
-          "wild": {
-            "lang": "C++",
-            "note": "C++ writes its move parameter with &&.",
-            "code": "void close(File&& file);\nclose(std::move(f));"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "&& for take",
-            "gist": "& changes an input, && keeps it; ^ becomes free.",
-            "gains": [
-              "One family of marks.",
-              "Frees ^.",
-              "No dead key on European keyboards."
-            ],
-            "losses": [
-              "&& also means logical and elsewhere."
-            ],
-            "proposed": {
-              "code": "fn seal(&&self) { … }\nfn gzclose(file: &&GzFile) -> Int = \"gzclose\"\ntask &&job { job.run() }"
-            }
-          },
-          {
-            "key": "B",
-            "name": "The word move",
-            "gist": "Write move before a taken input.",
-            "gains": [
-              "Clearest for a beginner."
-            ],
-            "losses": [
-              "A new keyword.",
-              "Five letters on every take."
-            ],
-            "proposed": {
-              "code": "fn seal(move self) { … }\nfn gzclose(file: move GzFile) -> Int = \"gzclose\""
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep ^",
-            "gist": "Nothing changes.",
-            "gains": [
-              "No cutover."
-            ],
-            "losses": [
-              "^ stays taken.",
-              "A dead key on many keyboards."
-            ],
-            "proposed": {
-              "code": "fn seal(^self) { … }"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "& changes and && keeps read as one family, C++ already uses && for moves, and ^ is freed.",
-          "gains": [
-            "One family of marks.",
-            "Frees ^."
-          ],
-          "losses": [
-            {
-              "loss": "&& also means logical and.",
-              "mitigation": "The take mark appears only in signatures and after task."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Adds a keyword and five letters per take."
-            },
-            {
-              "key": "C",
-              "reason": "Keeps ^ taken and the dead key."
-            }
-          ],
-          "tradeoff": "A shared symbol, kept apart by position, for a paired mark and a free ^."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-06T02:04:37.673Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-06"
-    },
-    {
-      "id": "D-DECL-COLON1",
-      "cardId": "c0ofw8u4",
-      "group": "syntax",
-      "title": "Every declaration is written name: value",
-      "situation": "Jet writes a constant as limit :: 100, a function as fn area(…), and a type as struct Point { … }. Package files, struct literals, named arguments and fields already write name: value. You asked for name: value everywhere: fewer characters, a feel closer to Python, a natural configuration language like Lua or Nix, and one shape for every declaration. We recommend writing every declaration that way, with := still marking a value you may change.",
-      "gist": "Should every declaration, from constants to functions, types and modules, be written name: value?",
-      "lesson": "Jet already writes name: value in package files, struct literals and named arguments. Source files use :: for constants and keywords first for functions and types. Under A every declaration reads the same: the name, a colon, then what it is. A value you may change still uses :=.",
-      "explainer": "",
-      "story": "Lena opens a Jet file for the first time. limit: 100, area: fn(r: Float) -> Float, Point: struct { x: Int, y: Int }: every line starts with the name she is looking for. Her deploy settings file reads the same, so she never learns a second format.",
-      "inWild": "CUE and Jsonnet write name: value for data and definitions alike. Source: https://cuelang.org/docs/tour/basics/\n\nJavaScript objects and JSON write name: value. Nix and Lua write name = value for settings and functions alike. Source: https://nix.dev/manual/nix/2.24/language/",
-      "detail": "WHAT YOU ASKED\n\nOn 2026-11-06 you asked for name: value instead of name :: value, for constants, functions and modules, with example files and every downside designed away. The full proposal with five complete example files is Docs/proposals/2026-11-06-colon-declarations.md.\n\nTHE RULE UNDER A\n\nEverything that introduces a name is written name: value; a value you may change is name := value. limit: 100. area: fn(r: Float) -> Float { … }. Point: struct { x: Int, y: Int }. Mode: enum { Fast, Safe }. Shape: trait { area: fn(self) -> Float }. math: module { … }. int_cache: cache<Int>(32). use process: core.process. package: { name: \"x\" }.\n\nKind parameters go on the kind word, never on the name: first: fn<T>(xs: [T]) -> T?, Box: struct<T> { value: T }, cache: module<K>(capacity: Int).\n\nInside the braces after struct, trait, enum or a foreign #Import module, name: Type describes what each value holds. Everywhere else, name: thing makes name that thing. The word before the brace always says which.\n\nWHY\n\nPackage files, struct literals, named arguments and fields already write name: value, so source and settings become one language. :: came from Jai's x : Type : value; typed bindings are retired, so the type slot between the colons is gone.\n\nEach of 141,892 :: bindings loses two characters. fn name(…) and name :: fn(…) are two ways to write a function today (891 uses of the second), and A makes them one.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Readers from TypeScript, Python or Rust read x: T as a type. In Jet a declaration has no separate type, so name: thing always declares. Where thing is a type, the familiar reading is right. Where it is a value, limit: 100, a type reading is impossible, so nobody misreads it silently.\n\n2. { a: 1 } as block or record. A brace group whose entries are all name: value is a record. A block that only binds names produces nothing, so no meaningful program changes.\n\n3. x: Int at file level makes an alias, as x :: Int does today. Using it as a number gets a registered error with the fix x: Int{0}.\n\n4. Foreign functions have no body. Inside a foreign module every entry is a signature with its symbol, as today. At file level a bodiless fn(…) is a function type, as on the right of :: today.\n\n5. Searching for a definition. fn area becomes area:, still one search; outlines and go-to-definition read the parser.\n\n6. Headers grow by one character: fn run() is 8, run: fn() is 9. Bindings save two characters each and outnumber headers, and every name starts at the left margin.\n\n7. The cutover. About 225,000 declaration lines change. jet fix rewrites them from the parse tree in one commit, with grammars, registry, spec, examples and snapshots. Meaning does not change, so the run-time tests prove the rewrite.\n\nEDGE CASES\n\n- impl blocks and #Test blocks introduce no name and keep their form.\n- An associated type is Output: type in a trait and Output: T in an impl.\n- A name: fn binding may call itself, at file level and inside a function.\n- String interpolation such as {x:Debug} is unchanged.\n\nWHY NOT B OR C\n\nB changes only constants, so functions and types still read differently and the two function forms stay. C keeps the :: that no longer has a job.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Every declaration",
-          "detail": "Constants, functions, types, modules, aliases, imports and the package header are all name: value. Changeable values use :=. Shape bodies list name: Type. Kind parameters go on the kind word.",
-          "technical": "The parser reads Ident ':' at an item or statement start as a declaration and dispatches on the right side's head (fn, struct, enum, trait, module, or an expression). D-BIND1's :: row retires from the syntax registry. jet fix migrates from the parse tree.",
-          "code": "limit: 100\narea: fn(r: Float) -> Float { 3.14159 * r * r }\nPoint: struct { x: Int, y: Int }\nmath: module {\n    double: fn(n: Int) -> Int { n * 2 }\n}\nrun: fn() {\n    total := 0\n    origin: Point{x: 0, y: 0}\n}"
-        },
-        {
-          "key": "B",
-          "name": "Constants only",
-          "detail": "name :: value becomes name: value, and module aliases follow. fn, struct, enum, trait and module keep their keyword-first form.",
-          "technical": "Only the binding and alias forms change; item parsers stay.",
-          "code": "limit: 100\nfn area(r: Float) -> Float { 3.14159 * r * r }\nstruct Point { x: Int, y: Int }"
-        },
-        {
-          "key": "C",
-          "name": "Keep ::",
-          "detail": "Nothing changes: limit :: 100, fn area(…), struct Point { … }.",
-          "technical": "No change.",
-          "code": "limit :: 100\nfn area(r: Float) -> Float { 3.14159 * r * r }"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "CUE",
-          "note": "Data, types and definitions all use name: value. Source: https://cuelang.org/docs/tour/basics/",
-          "code": "limit: 100\nPoint: { x: int, y: int }"
-        },
-        {
-          "lang": "Nix",
-          "note": "Settings and functions are both name = value. Source: https://nix.dev/manual/nix/2.24/language/",
-          "code": "{\n  limit = 100;\n  area = r: 3.14159 * r * r;\n}"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "Every declaration reads the same, source and settings files become one language, and the two ways to write a function become one.",
-        "gains": [
-          "One shape for every declaration.",
-          "Source and settings files share one language.",
-          "Two characters saved on every constant."
-        ],
-        "losses": [
-          {
-            "loss": "Readers from typed languages may read x: T as a type.",
-            "mitigation": "Jet declarations have no separate type, so a value on the right cannot be misread."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Functions and types still read differently, and the two function forms stay."
-          },
-          {
-            "key": "C",
-            "reason": "Keeps a :: whose type slot was retired."
-          }
-        ],
-        "tradeoff": "A large one-commit rewrite, for one declaration shape across code and settings."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: claude (Main). Adversarial model family: claude. Fresh agent: Main. The pass added the record-or-block rule, the shape-body rule and the foreign-function case. It found no program whose meaning silently changes."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should every declaration, from constants to functions, types and modules, be written name: value?",
-        "lesson": "Package files, struct literals and named arguments already write name: value. Source files use :: and keyword-first forms instead. Under A every declaration is the name, a colon, then what it is. A value you may change still uses :=.",
-        "trio": {
-          "current": {
-            "note": "Today each kind of declaration has its own form.",
-            "code": "limit :: 100\nfn area(r: Float) -> Float { 3.14159 * r * r }\nstruct Point { x: Int, y: Int }\nmodule math { … }"
-          },
-          "wild": {
-            "lang": "CUE",
-            "note": "CUE writes data and definitions as name: value.",
-            "code": "limit: 100\nPoint: { x: int, y: int }"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Every declaration",
-            "gist": "Constants, functions, types and modules are all name: value.",
-            "gains": [
-              "One shape for every declaration.",
-              "Source and settings share one language.",
-              "One way to write a function."
-            ],
-            "losses": [
-              "Function headers grow by one character."
-            ],
-            "proposed": {
-              "code": "limit: 100\narea: fn(r: Float) -> Float { 3.14159 * r * r }\nPoint: struct { x: Int, y: Int }\nmath: module {\n    double: fn(n: Int) -> Int { n * 2 }\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Constants only",
-            "gist": "Only :: becomes a colon; functions and types keep keywords first.",
-            "gains": [
-              "Smaller rewrite."
-            ],
-            "losses": [
-              "Functions and types still read differently.",
-              "Two ways to write a function stay."
-            ],
-            "proposed": {
-              "code": "limit: 100\nfn area(r: Float) -> Float { 3.14159 * r * r }"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep ::",
-            "gist": "Nothing changes.",
-            "gains": [
-              "No rewrite."
-            ],
-            "losses": [
-              "Two characters more on every constant.",
-              "Settings and code read differently."
-            ],
-            "proposed": {
-              "code": "limit :: 100"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Every declaration reads the same, settings and code share one language, and functions get one form.",
-          "gains": [
-            "One declaration shape.",
-            "Shorter constants."
-          ],
-          "losses": [
-            {
-              "loss": "Typed-language readers may read x: T as a type.",
-              "mitigation": "A value on the right cannot be a type, so nothing is misread."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Functions and types still read differently."
-            },
-            {
-              "key": "C",
-              "reason": "Keeps a :: with no job left."
-            }
-          ],
-          "tradeoff": "A one-commit rewrite for one declaration shape."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-06T02:04:39.043Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-06"
-    },
-    {
       "id": "D-ENUM-DOT1",
       "cardId": "c0rqt0kq",
       "group": "syntax",
@@ -220947,6 +220156,41 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T09:49:23.768Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0plzhyf",
+      "note": "Cycle p213: 24 landings, 5 criteria met, 3 regressions sent back"
+    },
+    {
+      "at": "2026-11-16T09:49:22.835Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0a6n0e5",
+      "note": "Cycle p212: the TitleCase cutover's census failed; nothing landed"
+    },
+    {
+      "at": "2026-11-16T09:48:36.181Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07ywjvi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T09:46:43.435Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-16T09:42:25.255Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07ywjvi",
+      "note": "#16"
+    },
+    {
       "at": "2026-11-16T09:32:03.770Z",
       "by": "Main",
       "action": "briefing.post",
@@ -225811,6 +225055,22 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0plzhyf",
+      "title": "Cycle p213: 24 landings, 5 criteria met, 3 regressions sent back",
+      "body": "# Cycle p213: 24 landings, 5 criteria met, 3 regressions sent back\n\n**Landed on dev** (d6d482c5f7 → 78f4541780; the census was clean; master carries it):\n\n| Area | Commits | Card |\n|---|---|---|\n| HTTP/2 framing, HPACK and requests | ec236d7b1e, cc8a6e7c74 | G9 #6800 c1 |\n| Push device registry and senders (APNs, FCM, Web Push) | 46c9c124e4, ea477f83a7 | G9 #6800 c1 |\n| Core enums declared in Core sources (ReduceOp, NetShutdown/NetReadyInterest, ProcessStreamMode/TerminalMode, CasePayload), host carriers read from Core rows | 6cbacb7d4c, e25a3b7f6d, 0e3dee69b1, 1d254089af, 3d332e2712 | G6 #3147 n15 step 3 |\n| EnvModel's own evaluator deleted: every module value is the compiler's | 58fec0380f | G6 #6847 c16 |\n| `#run` runs Shared values, tasks, select, kernels, fixed backing and Core's kept closures like a run | 09ad940e3f, dc3bd79942 | G6 #6847 n13, n14 |\n| on_drop registration on text inputs | dc3bd79942 | G6 #6847 n14 (a1) |\n| `#Inline(Always)` refuses a foreign body (E1021) | c9a590769f | G6 #6979 |\n| A type-key collision is a build diagnostic, not a panic | 7d09f2d053 | G6 #6845 c18 |\n| Lambda probe reports the argument's own error, not E0904 | f8091b88ff | G9 |\n| Workspace members, app-as-caller test copies, regenerated diagnostics | ead8ae2f9c, 9f0c1abd4a, 78f4541780 | |\n\n**Met:** #6800 c4, #6825 n6/n7/n8, #3147 c25, #6855 c4 (recorded earlier), and now #6847 c16 (ModuleValueParity 178/0; each shape the criterion names compares the program with EnvModel; the evaluator grep is empty) and #6845 c18 (the BuildTraits unit test; traits cases pass).\n\n**Suites against p211:** core 2,499/0; golden 0 FAIL, with 3 ERRORs; UI 10 new failures; cases still running. The ModuleValueParity failures were my harness: it ran without `JETPACK_TEST_REPO_ROOT`, and with the variable set the test gives 178/0.\n\n**Sent back, each as its owner's top priority:**\n- f8091b88ff (Speed-3-2): `dispatch_hole_type_ambiguous` now reports the downstream `None` error instead of the ambiguous call, and eight `taint/*` snapshots print E1004 twice. An argument's recorded error must be reported once, with the root cause first.\n- 1d254089af (GoalsA-1-4): `Examples/Metaprogramming/Reflection/EnumCases.jet` gets an ICE on every tier (\"payload for a payload-free enum constant\" while building `FIRST_CASE`).\n- `arrow_batch_use_after_move`: E0209 is the canonical diagnostic now; Speed's snapshot SUB is queued.\n\n**Decisions:**\n- #6847 n14 (c), the `#run` stop for dma, is dropped. DMA is unreachable today (no `board.` module import resolves, and no machine declares DMA channels), so the stop lands with the first reachable DMA path.\n- MemKernel-6-2 finished #6845 (c15, c16 and c17 are queued; c11 is blocked). A new worker, DeclTypes-6-1, takes #6849 (c11, c9, c10, then c6). The team stays at 4.\n\n**TitleCase (#6733):** the cutover is regenerated from its scripts on 78f4541780 (tree e72914e11a, 0 collisions, 39,856 files moved). Two driver defects were fixed:\n- the reference rewrite now runs before the moves;\n- the folders the test kit looks up by name (`state`, `fixture-state`) keep their names.\n\nThe bridge build, census and suites run next as one collect-all validation.\n\n**Next:** validate the cutover; then p214 lands the queue (Speed's E0209 snapshot, GoalsA 3f/3g, MemKernel c15/c16/c17, PC4 a2 and (b), and the any audit). The cutover is regenerated on p214's tip.\n",
+      "by": "Main",
+      "created": "2026-11-16T09:49:23.768Z",
+      "sections": []
+    },
+    {
+      "id": "briefing0a6n0e5",
+      "title": "Cycle p212: the TitleCase cutover's census failed; nothing landed",
+      "body": "# Cycle p212: the TitleCase cutover's census failed; nothing landed\n\n**What ran:** the cutover (#6733) as one commit on d6d482c5f7, built by a bridge compiler, then the collect-all census. The census failed, so nothing landed, and dev stayed at d6d482c5f7.\n\n**Failure classes the census found** (each one is fixed in the cutover scripts, not by hand):\n- Lookup file names were renamed: UI fixtures' `main.jet`, `module.jet`, `stderr` and `stdout`, which the harness opens by name. They now keep their names.\n- Tool-required folder layouts were renamed: tree-sitter `src/` and `test/`, Zed `languages/` and `grammars/`. They now keep their names and are listed in the AcronymPathCase guard's `PATH_CASE_TOOL_LAYOUTS`, each with the tool that requires it.\n- References the path passes cannot see stayed stale: string interpolations (`{toolchain}/tests/...`), bare corpus names in guards and gate scripts (`core_declarations`), and the `root:tests` selector. A new post-pass rewrites these from the move list only.\n- Guards still named old paths: closed-list baselines, allowlists, the example-names guard, and the manifest, corpus and closeout guards.\n\n**Plan change:** the queued submissions land first, on the old layout (p213). The cutover is then regenerated from its scripts on the new tip, so no landing has to be rebased across 40,000 moved files. Every pass is idempotent and reads paths only from the move list.\n\n**Next:** p213 lands the 24 queued submissions. The cutover is regenerated on its tip and validated in collect-all mode (bridge build, census, guards, every suite) before it lands.\n",
+      "by": "Main",
+      "created": "2026-11-16T09:49:22.835Z",
+      "sections": []
+    },
     {
       "id": "briefing0xuc18v",
       "title": "Cycle p211: 8 landings, 6 criteria met, the App test sent back",

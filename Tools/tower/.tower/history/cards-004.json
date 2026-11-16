@@ -102653,6 +102653,279 @@
         }
       ],
       "retiredAt": "2026-11-16T09:32:04.241Z"
+    },
+    {
+      "id": "c0ofw8u4",
+      "num": 6586,
+      "title": "Owner reballot: memory marks in signatures only, && for take, name: value declarations",
+      "body": "Owner ask 2026-11-06: (1) reballot call-site memory marks so marks live in signatures only and calls carry none (D-CALLSITE-MARK2); (2) investigate & for edit and && for take, freeing ^ (D-MOVE-SIGIL1); (3) every declaration written name: value (D-DECL-COLON1). Proposals: Docs/proposals/2026-11-06-memory-marks-in-signatures.md and Docs/proposals/2026-11-06-colon-declarations.md. On ratification each outcome becomes a one-commit greenfield cutover (jet fix over the parse tree, grammars, syntax registry, spec, examples, snapshots, editor highlighting). Supersedes #3452's open criteria if D-CALLSITE-MARK2=A.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c4 (2026-11-12): G6Meta-6586c4 lands the last 15 `::`-quoting snapshots (direct land on seed-b13 at 8453c8b584 + patch, 16/16 lines rc 0). Matched against actual output: matrix_measure_inner_mismatch, project_module_{duplicate,invalid,missing}, explicit_file_without_owning_project_context_teaches_missing_context (PASS). Still unverified: 8 rows whose targets are unbuilt (wasip2 x5, freestanding x2, parallel_check_matches_serial_check #4310), so c4 stays open until they run."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c4 state (G6Meta-4, base dev 70c6aec4b5): G6Meta-92 re-blesses 6 of the 19 stale snapshots that print ::. Of the other 13, 7 are wasm/no-OS fixtures that wait on the targets (seed-b13 answers E2104, #5201/#6418). 6 show lost sema checks, and each is a defect to fix, not to re-bless: arrow_batch_use_after_move (E0904 instead of E0209 for a moved name), crypto_release_entropy_seam (E2702 no longer fires with a Secret argument), crypto_secret_nested_provenance (a tag before a qualified call gives E0629, and E0119 is lost), matrix_measure_inner_mismatch (E0109 instead of E2512), mutable_view_extraction_retires_the_source_aggregate (E0220 instead of E0121 after fixture change 5ef77a52ad; the fixture's name sets the intended meaning) and task_spawn_parameters (the task-lambda form is a parse error, E0003). Owner of the 6: G6Meta-4."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Unlanded work in SyntaxOwner's lane scratch (lanes/SyntaxOwner), recorded so it is not lost: (1) c10, a parser edit to Compiler/JetParser/Source/Parser/Types.jet so fn-type parameters accept & and && marks, plus two untracked ui fixtures, in lanes/SyntaxOwner/tree; (2) the c9 overlay c9/merged4 with its commit message msg-c9.txt (c9 has since been split: the audit/policy half stays on this card, the editor half is on #6418). SyntaxOwner is the owner's agent; Main does not land this work without the owner's word."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): SyntaxOwner (owner's syntax slot) takes over from DeclColon; DeclColon's unlanded tree was rescued from tmpfs to the scratch lane DeclColon/tdev-rescue/g1. Then the seven #6251 decisions."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: added the full ratified content of D-CALLSITE-MARK2, D-MOVE-SIGIL1 and D-DECL-COLON1 as criteria (c8-c11), including the requirements carried over from #3452's superseded call-mark criteria; c6 now follows the owner's no-teaching order."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner order (greenfield): retired spellings get no teaching diagnostics. After the one-time conversion, ::, &x/^x call marks and ^ take are simply not Jet, and fall through to the ordinary parse and type errors. There is no registered retired-form code, UI snapshot or jet fix rewrite. Codes that exist only to teach the old call marks are deleted. c6 is read as: the parser no longer accepts the old forms, with no dedicated diagnostic."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Seed a0_027 released and rotated: dev dfc887571e, which contains A2 cced341fd5; s2==s3 4f1306092c375912. Every gate PASSES: chain, cc-pack, pack, jetpack, jetpack-engine. golden 4754 rows (0 lost), ui 2420 (0 lost), cases 4492 (0 lost); 27 gains over a0_026. The B–D landing window is open."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "A2 cced341fd5 (DeclColon, pushed): every compiler-binary text and token detector reads both spellings. Covered: build, run, workspace-module, #Job, use-alias, registry, plugin, capability, Output and C-facade, each with #Tests for both forms. chain full on d728fb362c+A2 with a0_025: FIXED_POINT (jet 55f7fa3c676f65d5). The official seed a0_027 will be cut on a HEAD that contains A2; B–D (the converted tree) lands only after a0_027 rotates."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Commit A landed (DeclColon): 7bb6b7ee8d makes the parser accept both name: value and the retired :: form, maps each new spelling onto the existing AST nodes, and registers E0397 (registered, not yet reported); 4bfcc132f9 lists ColonDeclarations.jet in sources.list. Proof on an export of 7bb6b7ee8d: chain full FIXED_POINT (s2 == s3, jet 506047775323c6eb); census on HEAD: check, build and selfcheck 0 rows, runtime 0 issues; lane check CHECK OK; both forms parse with no diagnostics and jet fmt still prints the old form (the formatter switch lands with the conversion). The conversion builds with seed C_a (cA s2 + pack2) inside DeclColon's trees only."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 night: scope is every declaration (D-DECL-COLON1=A ratified): constants, aliases, locals, modules, fns, methods, structs, enums, traits, use and package all name: value; generic params on the kind word (D-DECL-COLON1 is newer than D-DECL-BINDING1=B, which put them on the name and spelled ::). Assigned to DeclColon (brief $JET_STATE_ROOT/scratch/Main/declcolon-brief.md)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner instruction 2026-11-06 (night): convert every name :: value in the repo to name: value overnight, using jet fix/jet fmt, done by morning. Scope taken literally: the :: binding sigil everywhere it binds a name (constants, locals, aliases, use x ::, module x :: instances, fences). fn/struct/enum/trait/module headers keep their form until D-DECL-COLON1 is voted. Owner said he is not worried about : vs := differing by one character."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Data/Syntax registry entry updated",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7b12f92268 and 0b9ad6cd47. Main on dev c9470eea21: Compiler/JetFoundation/Data/Syntax/CoreSurface.jet has SIGIL_MOVE \"&&\" (take) beside SIGIL_WRITE \"&\" and documents plain calls; MathLayout.jet marks OP_CARET \"^\" as free (\"no grammar rule reads it (a take is &&)\"); Spellings.jet rows teach \"&&T / &&self\" and \"x.move()\"; Highlights.jet colours the take mark apart from logical and.",
+          "at": "2026-11-06T22:54:52.620Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "c92bf872eb: Docs/spec/syntax-decisions.md logs D-DECL-COLON1=A (line 2994; table row 21 cites it for ':') and lists E0202 among the retired call-mark codes of D-CALLSITE-MARK2.",
+          "at": "2026-11-06T19:40:50.873Z"
+        },
+        {
+          "n": 3,
+          "text": "editor grammars regenerated (editor-grammars.mjs --write)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7b12f92268: prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/grammar/editor_grammars_match_generated_sections.case, tests/cases/grammar/seeded_tree_sitter_drift_fails_the_generated_section_guard.case PASS",
+          "at": "2026-11-06T20:53:18.450Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0196c51a3e (G6Meta-6586c4b-r2 with G6Meta-6586c4; Lander5 g6-fold): ui arrow_batch_use_after_move, crypto_release_entropy_seam, crypto_secret_nested_provenance, ownership/mutable_view_extraction_retires_the_source_aggregate and task_spawn_parameters pass. `git grep -nE \"^ *[0-9]+ *\\| .*[A-Za-z_]+ :: \" -- tests/` finds 0 quoted `::` declarations on dev ea1caf0d11.",
+          "at": "2026-11-13T09:33:59.545Z"
+        },
+        {
+          "n": 5,
+          "text": "Every name :: value binding in the repo (.jet sources, Prelude, Core, Jetpack, Examples, tests and fixtures, generators and generated files, compiler string templates, diagnostics text, syntax registry, editor grammars, spec and site docs) is written name: value; Docs/audits and dated research/proposals keep their historical text",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "5ef77a52ad (+529e9d9ddd). Main proof on the 529e9d9ddd tree: no line binds with name :: value in any .jet file outside Docs/audits, Docs/research and Docs/proposals, and none in Docs/spec, Tools/editors or the READMEs; the dated audits keep their text.",
+          "at": "2026-11-06T19:34:01.967Z"
+        },
+        {
+          "n": 6,
+          "text": "The parser no longer accepts a :: binding, a ^ mark, or a call-site & or ^ mark outside #Policy(writes: .Explicit). Per the owner's order these retired spellings get no registered diagnostic, snapshot or jet fix rule (the E0397 and E0435 teaching is removed); the in-repo conversion is the whole cutover.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "5ef77a52ad deletes E0203/E0224/E0226/E0397/E0434/E0435. Main probes with s1 jet@0.0.1#bd1b1baa… at 529e9d9ddd: 'x :: 1', 'keep(^xs)' and 'grow(&xs)' each fail as a plain parse error (jet.InvalidStatement, no teaching text, rc=1); the same program with plain calls, a &&-typed parameter and xs.move() runs and prints 3 (rc=0).",
+          "at": "2026-11-06T19:34:03.071Z"
+        },
+        {
+          "n": 7,
+          "text": "The converted tree reaches chain full FIXED_POINT, the seed every lane builds with parses the new form, and focused goldens/cases/ui A/B against the pre-conversion commit show 0 regressions",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Met 2026-11-12 from release-gate records (G6Meta-4 evidence, $JET_SCRATCH_ROOT/lanes/G6Meta/c7/EVIDENCE.md, checked by Main). (1) FIXED_POINT: a0_030 (dev 2c40493778, first gate containing conversion 5ef77a52ad) reached level=full s2 == s3 (jet 67e8f7bd7431477e), and every gate through a0.0.44 (dev 9755703c76, jet 31f1d62666d05338) is full-fixed ($JET_STATE_ROOT seeds a0_030/RELEASE.md, a0.0.44/RELEASE.md). (2) seed-b13 (jet@a0.0.45) parses the name: value tree: jet check 0 errors on CoreRecordRows.jet, SemanticIndex.jet, BuildAdapter.jet, CheckProgram.jet, Contracts.jet; jet test Compiler --profile cases tests/cases/fmt/fmt_target_web_marker_stability.case PASS. (3) A/B a0_030 against a0_029 (tree 42f746371b, ancestor of 5ef77a52ad): golden 4350 rows 0 lost, ui 2391 rows 0 lost, cases 4516 rows 0 lost. The 96 rows a0_028/a0_029 lost under #6586 dispositions: 72 PASS in the a0.0.44 candidate kit, 24 (19 files) deleted by 5ef77a52ad as teaching tests of retired marks per c6 (list: c7/ab.out).",
+          "at": "2026-11-12T22:55:01.548Z"
+        },
+        {
+          "n": 8,
+          "text": "D-CALLSITE-MARK2=A: every call is plain, with no & or && on arguments or receivers, and sema takes each argument's convention from the callee. E0202 and E0224 retire. The changeability error quotes the signature line; two overlapping inputs with one edited stay an error; a use after a call that took the value names that call, with the fix x.copy() or a reorder; a call never copies on its own; values.push(values.len()) stays legal; a part of a list passed to a writing parameter is a write window. Marks remain only on a named write window (edit: &values[2..3]), a writing match (if &shape == { … }) and a task that takes a name. UI snapshots for each error; goldens on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "8fe1586eaa (E0202 deleted; E0111/E0205 quote the signature line). Main focused proof with s1 built from c92bf872eb (jet 34ee7338c11f776c): cases 13/13 PASS (hardening, determinism, corelib, ownership, compute_views, explain_syntax today-52-45, syntax_reconciliation retired_authority…), ui 9/9 PASS (plain_call_changes_colon_binding, plain_call_changes_read_parameter, param_read_write_fix, read_param_method_write_fix, write_window…, iter_*, pool_read_only_param_mutation, range_write_window_list_param), golden memory/parameter_modes and memory/write_param_forward PASS on O0/O1/O2. Pre-existing failures carried elsewhere: corelib/game_run_needs_mutable_scene_lvalue (CoreCliLead), the multi_trait …_2 ui row (KF #6425).",
+          "at": "2026-11-06T19:45:32.239Z"
+        },
+        {
+          "n": 9,
+          "text": "D-CALLSITE-MARK2=A tooling: the editor shows & and && as inlay hints at calls and the language server underlines a changed argument; jet audit writes lists every call that edits or takes a named value; #Policy(writes: .Explicit) requires the marks on arguments and receivers, with a Safe fix that inserts them (UI snapshot).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, second cut questions): split: the audit/policy half is the criterion added on #6586, and the editor half moved to #6418 with the language-server rows.",
+          "at": "2026-11-07T01:03:57.433Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 10,
+          "text": "D-MOVE-SIGIL1=A: && marks a taken input in parameter types, before self and after task (fn seal(&&self), file: &&GzFile, task &&job { … }, fn(&&Map)); value positions use x.move(); ^ has no meaning and stays an error under D-SIGIL-FREED2 with no teaching diagnostic; the registry's move sigil is &&, and the editor grammars colour the take mark apart from logical and.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadC-2. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). fn(&&T) function types parse, check, format and run on every tier.",
+          "at": "2026-11-10T16:28:14.152Z"
+        },
+        {
+          "n": 11,
+          "text": "D-DECL-COLON1=A: every name-introducing form is name: value: constants, functions, struct, enum, trait and module, imports (use process: core.process), the package header (package: { … }) and instances (int_cache: cache<Int>(32)). Kind parameters go on the kind word (first: fn<T>(xs: [T]) -> T?, Box: struct<T> { … }). Inside struct, trait, enum and foreign-module braces, name: Type lists members. impl and #Test blocks keep their form; associated types are Output: type and Output: T; a name: fn binding may call itself; {x:Debug} is unchanged; a brace group of only name: value entries is a record; a file-level x: Int is an alias, and using it as a number is a registered error with the fix x: Int{0} (UI snapshot); a bodiless fn(…) at file level is a function type.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "0b9ad6cd47: prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): golden tests/run/language_features/bodiless_file_level_fn_names_a_function_type.jet PASS o0/o1/o2; ui tests/ui/bodiless_file_level_fn_is_a_function_type.jet, tests/ui/brace_group_of_name_value_entries_is_a_record_literal.jet, tests/ui/e0081_fn_without_body.jet PASS",
+          "at": "2026-11-06T20:53:19.290Z"
+        },
+        {
+          "n": 12,
+          "text": "D-CALLSITE-MARK2=A tooling: `jet audit writes` lists every call that edits or takes a named value; #Policy(writes: .Explicit) requires the marks on arguments and receivers, with a Safe fix that inserts them (UI snapshot). (split from c9; the editor half moved to #6418)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev e75850d064 (train t16a, 8327f5ae47..e75850d064), SUB G6LeadC-14 + G6LeadC-14fix. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t16a/REPORT.md: the census is clean after the integration fixes G1Lead-4-cefix, G6LeadC-14fix, G1Lead-4-closedelsefix, G6LeadE-4fix, G8Fix-5fix and TlsLead-69fix). `jet audit writes` lists every call that edits or takes a named value; #Policy(writes: .Explicit) requires the marks and refuses a missing one with E0228 jet.CallMarkRequired (UI snapshot), with a Safe fix that inserts it.",
+          "at": "2026-11-10T23:56:32.654Z"
+        },
+        {
+          "n": 13,
+          "text": "D-FNVAL-WRITE1=A in the spellings of D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A: a function type marks inputs with & (write) or && (take), as declarations do (action: fn(&Mobj)); a function or lambda fits only when its marks match; a stored function is called plainly (st.action(m)), with no .call and no call-site mark; read-only function types and calls are unchanged; an example with golden output on o0, o1 and o2. (moved from #5036 c9)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Already holds on dev b4df632fbb; Main ran it on seed-b14 in the dev worktree. language_features/fn_type_names_a_borrowed_parameter_on_every_tier gives PASS 1 (o0, o1, o2 and build all print field 2, passed 4, list 10, called 11, the stored holder.step(s) called plainly). memory_semantics/function_type_take_param_runs_on_every_tier gives PASS 1 (the fn(&&Words) take). ui marked_function_value gives PASS 1 (E0227: a function fits only when its marks match). Each run has REFUSED 0. Found by the G6Meta-4 sweep.",
+          "at": "2026-11-13T08:42:14.028Z"
+        },
+        {
+          "n": 14,
+          "text": "Data/Syntax registry entry updated (moved from #5036 c5)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 8e0521995a (G6Meta-6586c14, Lander5 directq on seed-b14): Spellings.jet has a ledger row for `fn(&T) / fn(&&T)`. LexicalLedger --check reports up to date (72 rows), tests/guards/example_names.jet gives 147 passed, syntax_reconciliation.jet gives 147 passed, and jet check is ok on both files.",
+          "at": "2026-11-13T08:46:37.751Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T02:04:25.306Z",
+      "updated": "2026-11-13T09:34:01.602Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-13T09:34:01.602Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T09:42:25.417Z"
+    },
+    {
+      "id": "c0vj3f8z",
+      "num": 6776,
+      "title": "I9: string interpolation of a Display type prints a struct dump while compiling but its Display text at run time",
+      "body": "A user struct with impl Display interpolated as \"{value}\" prints its Display text at run time (default level and --optimize=none) but the derived dump (Failure { query: query, code: 7 }) when the same interpolation runs under #run. One spelling, two meanings across tiers (I9). Repro: $JET_SCRATCH_ROOT/lanes/G6Meta/r6/diag/d.jet on seed-b13. Found by G6Meta-4 in the G6Meta-36 query program, which now calls .display() explicitly as a stopgap.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root is named and fixed: interpolation while compiling formats a value through the same Display path as run time, in one shared runtime mechanism, not a second formatter. A case interpolates a Display struct, an enum with Display, a nested field and a value without Display, and prints identical text under #run and at run time on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev d2c2ca67de (G6Meta-6776; Lander5 g6-fold, lines green on the fold tree): the case comptime_core_pure_parity/display_interpolation_reads_the_same_while_compiling_and_running passes (Display struct, Display enum, nested field and a value without Display, identical under #run and at run time, O0/O1/O2), and jet check of CheckProgram, Pipeline, CoreReach and InspectFacts passes.",
+          "at": "2026-11-13T09:33:56.106Z"
+        },
+        {
+          "n": 2,
+          "text": "The stopgap explicit .display() calls in the G6Meta-36, 40 and 43 query programs and 43 fixture main.jet are reverted to plain \"{err}\", and inspect_facts_program_store_is_the_build_query still passes on every tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev d2c2ca67de (G6Meta-6776): the stopgap .display() calls are reverted; `! git grep -F \".display()\"` over InspectFacts.jet and the receipt-query fixture passes (0 hits on dev ea1caf0d11). The cases inspect_facts_program_store_is_the_build_query, inspect_facts_run_store_is_the_receipt_query and inspect_facts_is_the_core_query_on_every_tier pass.",
+          "at": "2026-11-13T09:33:57.089Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T16:31:06.531Z",
+      "updated": "2026-11-13T09:33:58.652Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-13T09:33:58.652Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T09:42:25.418Z"
     }
   ]
 }
