@@ -11,10 +11,11 @@ typedef struct { int64_t start,end,exclusive; } Range;
 typedef struct { int64_t seed,checked,failures; } Solver;
 typedef struct Field Field;
 typedef struct { int64_t length,capacity; Field **data; } List;
-typedef struct { Text *type_name,*path,*display; List *fields; int64_t kind,scalar; } Value;
+typedef struct { Text *name,*path; List *fields; } Case;
+typedef struct { Text *type_name,*path,*display; List *fields; int64_t kind,scalar; Case *held; } Value;
 struct Field { Text *name; Value *value; };
 _Static_assert(sizeof(Range)==24 && sizeof(Solver)==24,"scalar ABI");
-_Static_assert(sizeof(Value)==48 && offsetof(Value,fields)==24 && offsetof(Value,kind)==32 && sizeof(Field)==16 && sizeof(List)==24,"reflection ABI");
+_Static_assert(sizeof(Value)==56 && offsetof(Value,fields)==24 && offsetof(Value,kind)==32 && offsetof(Value,held)==48 && sizeof(Field)==16 && sizeof(List)==24 && sizeof(Case)==24,"reflection ABI");
 extern void jet_rt_alloc_init(void);
 extern void jet_rt_host_init(void);
 extern void *jet_std_io_stdout(void);
@@ -73,6 +74,15 @@ extern int64_t jet_rt_reflect_value_float(Value *,int64_t *);
 extern int64_t jet_rt_reflect_value_bool(Value *,int64_t *);
 extern int64_t jet_rt_reflect_value_char(Value *,int64_t *);
 extern int64_t jet_rt_reflect_value_string(Value *,int64_t *);
+extern Case *jet_rt_record_new_jet_reflect_case(Text *,Text *,List *);
+extern Case *jet_rt_handle_clone_jet_reflect_case(Case *);
+extern void jet_rt_handle_drop_jet_reflect_case(Case *);
+extern Text *jet_rt_record_get_jet_reflect_case_name(Case *);
+extern Text *jet_rt_record_get_jet_reflect_case_path(Case *);
+extern List *jet_rt_record_get_jet_reflect_case_fields(Case *);
+extern Text *jet_rt_handle_show_jet_reflect_case(Case *);
+extern void jet_rt_reflect_value_set_case(Value *,Case *);
+extern int64_t jet_rt_reflect_value_case(Value *,int64_t *);
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[256];
 static size_t count;
 static unsigned intercepted;
@@ -143,11 +153,16 @@ static Field *field(const char *name,Value *v) {
 }
 static void watch_value(Value *v);
 static void watch_field(Field *f) { watch(f,16,8); watch_text(f->name); watch_value(f->value); }
-static void watch_value(Value *v) {
-    watch(v,48,8); watch_text(v->type_name); watch_text(v->path); watch_text(v->display);
-    if(v->kind==5) watch_text((Text *)v->scalar);
-    List *l=v->fields; watch(l,24,8); if(l->capacity) watch(l->data,l->capacity*8,8);
+static void watch_list(List *l) {
+    watch(l,24,8); if(l->capacity) watch(l->data,l->capacity*8,8);
     for(int64_t i=0;i<l->length;++i) watch_field(l->data[i]);
+}
+static void watch_case(Case *c) { watch(c,24,8); watch_text(c->name); watch_text(c->path); watch_list(c->fields); }
+static void watch_value(Value *v) {
+    watch(v,56,8); watch_text(v->type_name); watch_text(v->path); watch_text(v->display);
+    if(v->kind==5) watch_text((Text *)v->scalar);
+    watch_list(v->fields);
+    if(v->held) watch_case(v->held);
 }
 static void reflections(void) {
     List *empty=jet_rt_record_seq_list_rec_jet_reflect_field_new(0);
@@ -181,6 +196,35 @@ static void reflections(void) {
     text_is(tn,"Record"); text_is(p,"root"); text_is(d,"{x: 42}"); text_is(name,"x");
     jet_rt_string_drop(tn); jet_rt_string_drop(p); jet_rt_string_drop(d); jet_rt_string_drop(name); done();
     jet_rt_handle_drop_jet_reflect_value(NULL); jet_rt_handle_drop_jet_reflect_field(NULL);
+}
+// A Value owns the Case it was given: a read hands out a copy, a clone copies
+// it, and a Value with none reads absent.
+static void cases(void) {
+    int64_t out=0;
+    Value *plain=value("Int","Int","1",jet_rt_record_seq_list_rec_jet_reflect_field_new(0));
+    assert(plain->held==NULL && !jet_rt_reflect_value_case(plain,&out));
+    List *payload=jet_rt_record_seq_list_rec_jet_reflect_field_new(1);
+    jet_rt_record_seq_list_rec_jet_reflect_field_push(payload,field("radius",value("Int","Int","2",jet_rt_record_seq_list_rec_jet_reflect_field_new(0))));
+    Text *n=text("Circle"), *p=text("shapes.Shape.Circle");
+    Case *c=jet_rt_record_new_jet_reflect_case(n,p,payload);
+    assert(c->name==n && c->path==p && c->fields==payload && owners(n)==2 && owners(p)==2);
+    jet_rt_string_drop(n); jet_rt_string_drop(p);
+    Value *shape=value("Shape","shapes.Shape","Circle(radius: 2)",jet_rt_record_seq_list_rec_jet_reflect_field_new(0));
+    jet_rt_reflect_value_set_case(shape,c); assert(shape->held==c);
+    Value *twin=jet_rt_handle_clone_jet_reflect_value(shape);
+    assert(twin->held!=c && twin->held->name==c->name && owners(c->name)==2 && twin->held->fields!=payload);
+    assert(jet_rt_reflect_value_case(shape,&out)==1);
+    Case *read=(Case *)out; assert(read!=c && read->path==c->path && owners(c->path)==3);
+    assert(jet_rt_record_get_jet_reflect_case_fields(read)==read->fields && read->fields->length==1);
+    Text *name=jet_rt_record_get_jet_reflect_case_name(read), *path=jet_rt_record_get_jet_reflect_case_path(read);
+    text_is(name,"Circle"); text_is(path,"shapes.Shape.Circle"); jet_rt_string_drop(name); jet_rt_string_drop(path);
+    owned_text_is(jet_rt_handle_show_jet_reflect_case(read),"Case(Circle)");
+    Case *copy=jet_rt_handle_clone_jet_reflect_case(read);
+    watch_case(read); watch_case(copy); watch_value(plain); watch_value(shape); watch_value(twin);
+    jet_rt_handle_drop_jet_reflect_case(read); jet_rt_handle_drop_jet_reflect_case(copy);
+    jet_rt_handle_drop_jet_reflect_value(plain); jet_rt_handle_drop_jet_reflect_value(shape); jet_rt_handle_drop_jet_reflect_value(twin);
+    done();
+    jet_rt_handle_drop_jet_reflect_case(NULL);
 }
 // A held scalar is the Value's own owner: a read hands out one more, a clone
 // shares it, and a read of another kind (or of a Value with none) is absent.
@@ -231,5 +275,5 @@ int main(int argc,char **argv) {
         }
         assert(!"stop mode returned"); return 1;
     }
-    ranges(); solvers(); reflections(); scalars(); puts("ScalarReflect ownership/equality/render OK"); return 0;
+    ranges(); solvers(); reflections(); cases(); scalars(); puts("ScalarReflect ownership/equality/render OK"); return 0;
 }

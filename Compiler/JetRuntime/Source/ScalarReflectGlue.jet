@@ -196,6 +196,7 @@ reflect_sequence_drop: fn(sequence: I64) {
     scalar_reflect_store(wrapping(result + REFLECT_VALUE_FIELDS), fields)  // consumes List
     scalar_reflect_store(wrapping(result + REFLECT_VALUE_KIND), REFLECT_SCALAR_NONE)
     scalar_reflect_store(wrapping(result + REFLECT_VALUE_SCALAR), I64{0})
+    scalar_reflect_store(wrapping(result + REFLECT_VALUE_CASE), I64{0})
     result
 }
 
@@ -269,10 +270,28 @@ reflect_scalar_read: fn(value: I64, kind: I64, some: I64) -> I64 {
     reflect_scalar_read(value, REFLECT_SCALAR_STRING, some)
 }
 
+// The case an enum value held, set once on a Value just made (consuming
+// `held`), and `value.case()` as an Option route result: 1 and an owned copy
+// of the Case through `some`, or 0 for a Value of any other type.
+#Export(c) jet_rt_reflect_value_set_case: fn(value: I64, held: I64) {
+    scalar_reflect_store(wrapping(value + REFLECT_VALUE_CASE), held)
+}
+
+#Export(c) jet_rt_reflect_value_case: fn(value: I64, some: I64) -> I64 {
+    held: scalar_reflect_word(wrapping(value + REFLECT_VALUE_CASE))
+    if (held == I64{0}) { return I64{0} }
+    scalar_reflect_store(some, jet_rt_handle_clone_jet_reflect_case(held))
+    I64{1}
+}
+
 #Export(c) jet_rt_handle_clone_jet_reflect_value: fn(value: I64) -> I64 {
     fields: reflect_sequence_clone(scalar_reflect_word(wrapping(value + REFLECT_VALUE_FIELDS)))
     result: jet_rt_record_new_jet_reflect_value(scalar_reflect_word(wrapping(value + REFLECT_VALUE_TYPE)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_PATH)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_DISPLAY)), fields)
     reflect_scalar_hold(result, scalar_reflect_word(wrapping(value + REFLECT_VALUE_KIND)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_SCALAR)))
+    held: scalar_reflect_word(wrapping(value + REFLECT_VALUE_CASE))
+    if (held != I64{0}) {
+        jet_rt_reflect_value_set_case(result, jet_rt_handle_clone_jet_reflect_case(held))
+    }
     result
 }
 
@@ -285,6 +304,7 @@ reflect_scalar_read: fn(value: I64, kind: I64, some: I64) -> I64 {
     jet_rt_string_drop(scalar_reflect_word(wrapping(value + REFLECT_VALUE_DISPLAY)))
     reflect_sequence_drop(scalar_reflect_word(wrapping(value + REFLECT_VALUE_FIELDS)))
     reflect_scalar_drop(scalar_reflect_word(wrapping(value + REFLECT_VALUE_KIND)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_SCALAR)))
+    jet_rt_handle_drop_jet_reflect_case(scalar_reflect_word(wrapping(value + REFLECT_VALUE_CASE)))
     jet_rt_free(value, REFLECT_VALUE_BYTES, I64{8})
 }
 
@@ -364,6 +384,62 @@ reflect_scalar_read: fn(value: I64, kind: I64, some: I64) -> I64 {
     rt_text_push_word(target, I64{8250}, I64{2})
     value: scalar_reflect_word(wrapping(field + REFLECT_FIELD_VALUE))
     jet_rt_string_builder_push(target, scalar_reflect_word(wrapping(value + REFLECT_VALUE_DISPLAY)))
+    rt_text_push_word(target, I64{41}, I64{1})
+    jet_rt_string_builder_finish(target)
+}
+
+// A captured enum value's case: its name (a grouped case's last segment),
+// its `module.Enum.Case` path and one Field per payload member, a lone
+// unnamed payload as the field `value`.
+#Export(c) jet_rt_record_new_jet_reflect_case: fn(name: I64, path: I64, fields: I64) -> I64 {
+    result: jet_rt_alloc(REFLECT_CASE_BYTES, I64{8})
+    scalar_reflect_store(wrapping(result + REFLECT_CASE_NAME), jet_rt_string_clone(name))
+    scalar_reflect_store(wrapping(result + REFLECT_CASE_PATH), jet_rt_string_clone(path))
+    scalar_reflect_store(wrapping(result + REFLECT_CASE_FIELDS), fields)  // consumes List
+    result
+}
+
+#Export(c) jet_rt_handle_clone_jet_reflect_case: fn(held: I64) -> I64 {
+    fields: reflect_sequence_clone(scalar_reflect_word(wrapping(held + REFLECT_CASE_FIELDS)))
+    jet_rt_record_new_jet_reflect_case(scalar_reflect_word(wrapping(held + REFLECT_CASE_NAME)), scalar_reflect_word(wrapping(held + REFLECT_CASE_PATH)), fields)
+}
+
+#Export(c) jet_rt_handle_drop_jet_reflect_case: fn(held: I64) {
+    if (held == I64{0}) {
+        return
+    }
+    jet_rt_string_drop(scalar_reflect_word(wrapping(held + REFLECT_CASE_NAME)))
+    jet_rt_string_drop(scalar_reflect_word(wrapping(held + REFLECT_CASE_PATH)))
+    reflect_sequence_drop(scalar_reflect_word(wrapping(held + REFLECT_CASE_FIELDS)))
+    jet_rt_free(held, REFLECT_CASE_BYTES, I64{8})
+}
+
+#Export(c) jet_rt_record_get_jet_reflect_case_name: fn(held: I64) -> I64 {
+    jet_rt_string_clone(scalar_reflect_word(wrapping(held + REFLECT_CASE_NAME)))
+}
+
+#Export(c) jet_rt_record_get_jet_reflect_case_path: fn(held: I64) -> I64 {
+    jet_rt_string_clone(scalar_reflect_word(wrapping(held + REFLECT_CASE_PATH)))
+}
+
+#Export(c) jet_rt_record_get_jet_reflect_case_fields: fn(held: I64) -> I64 {
+    scalar_reflect_word(wrapping(held + REFLECT_CASE_FIELDS))
+}
+
+// `case.fields()` as a List route result, as jet_rt_reflect_value_fields.
+#Export(c) jet_rt_reflect_case_fields: fn(held: I64, out: I64) -> I64 {
+    owned: reflect_sequence_clone(scalar_reflect_word(wrapping(held + REFLECT_CASE_FIELDS)))
+    length: scalar_reflect_word(wrapping(owned + DATA_SEQUENCE_LENGTH))
+    scalar_reflect_store(out, scalar_reflect_word(wrapping(owned + DATA_SEQUENCE_DATA)))
+    jet_rt_free(owned, DATA_SEQUENCE_BYTES, I64{8})
+    length
+}
+
+#Export(c) jet_rt_handle_show_jet_reflect_case: fn(held: I64) -> I64 {
+    // Case(name), not its path or payload.
+    target: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{173500752195}, I64{5})
+    jet_rt_string_builder_push(target, scalar_reflect_word(wrapping(held + REFLECT_CASE_NAME)))
     rt_text_push_word(target, I64{41}, I64{1})
     jet_rt_string_builder_finish(target)
 }

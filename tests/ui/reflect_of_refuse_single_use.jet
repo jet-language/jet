@@ -1,0 +1,20 @@
+// E0112: `reflect.of(x)` keeps its own copy of `x`, so it refuses a value
+// that can't be copied. A `#SingleUse` ticket carries one duty, and a copy
+// would carry it twice.
+use reflect: core.reflect
+
+#SingleUse Ticket: struct {
+    id: String
+
+    impl Display {
+        display: fn(self) -> String { "Ticket({self.id})" }
+    }
+}
+
+redeem: fn(ticket: &&Ticket) { print("redeemed {ticket.id}") }
+
+run: fn() {
+    ticket: Ticket{id: "A"}
+    _: reflect.of(ticket)
+    redeem(ticket)
+}
