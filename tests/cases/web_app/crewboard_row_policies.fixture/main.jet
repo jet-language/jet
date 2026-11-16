@@ -3,6 +3,7 @@
 // of their own, so every refusal below is a policy's.
 use {
     app
+    auth: core.auth
     db: core.db
 }
 
@@ -10,19 +11,19 @@ use {
 Project: struct {
     id: Int
     name: String
-    created_by: String
+    created_by: auth.AccountID
 }
 
 #[Codable, Comparable]
 MemberKey: struct {
     project: Int
-    account: String
+    account: auth.AccountID
 }
 
 #Codable
 Member: struct {
     project: Int
-    account: String
+    account: auth.AccountID
     owner: Bool
 }
 
@@ -32,6 +33,12 @@ Task: struct {
     project: Int
     title: String
 }
+
+mia: fn() -> auth.AccountID { auth.AccountID.from_string("mia") }
+
+ben: fn() -> auth.AccountID { auth.AccountID.from_string("ben") }
+
+carol: fn() -> auth.AccountID { auth.AccountID.from_string("carol") }
 
 projects_in: fn(store: db.Store) -> db.Table<Int, Project> {
     store.table("projects", key: fn(row: Project) { row.id })
@@ -45,7 +52,7 @@ tasks_in: fn(store: db.Store) -> db.Table<Int, Task> {
     store.table("tasks", key: fn(row: Task) { row.id })
 }
 
-account_of: fn(who: db.Who) -> String? {
+account_of: fn(who: db.Who) -> auth.AccountID? {
     if who == {
         .Account(account) -> Val(account)
         .System -> None
@@ -54,7 +61,7 @@ account_of: fn(who: db.Who) -> String? {
 }
 
 // The account's member row in `project`, read with the system's rights.
-member_of: fn(store: db.Store, project: Int, account: String) -[DB.Read]> Member? db.DBError! {
+member_of: fn(store: db.Store, project: Int, account: auth.AccountID) -[DB.Read]> Member? db.DBError! {
     members_in(store).get(MemberKey{project: project, account: account})
 }
 
@@ -97,7 +104,7 @@ project_policy: fn(row: Project, op: db.Op, who: db.Who, store: db.Store) -[DB.R
 // create_project the project row is the transaction's earlier write, so the
 // policy sees it. No other account can claim a project, and its creator
 // can't claim it again while it has members.
-first_owner: fn(store: db.Store, row: Member, account: String) -[DB.Read]> Bool db.DBError! {
+first_owner: fn(store: db.Store, row: Member, account: auth.AccountID) -[DB.Read]> Bool db.DBError! {
     if !row.owner -> return Ok(false)
     if projects_in(store).get(row.project) == {
         .Val(found) -> {
@@ -260,34 +267,34 @@ step: fn(label: String, outcome: String) { print("{label}: {outcome}") }
 run: fn() {
     keep(db.open_memory())
 
-    step("mia creates launch", app.as_caller("mia", fn() { create_project(1, "launch") }))
-    step("mia adds ben as a Member", app.as_caller("mia", fn() { member_wrote(board().members.add(Member{project: 1, account: "ben", owner: false})) }))
-    step("ben adds a task", app.as_caller("ben", fn() { task_wrote(board().tasks.add(Task{id: 1, project: 1, title: "ship the beta"})) }))
+    step("mia creates launch", app.as_caller(mia(), fn() { create_project(1, "launch") }))
+    step("mia adds ben as a Member", app.as_caller(mia(), fn() { member_wrote(board().members.add(Member{project: 1, account: ben(), owner: false})) }))
+    step("ben adds a task", app.as_caller(ben(), fn() { task_wrote(board().tasks.add(Task{id: 1, project: 1, title: "ship the beta"})) }))
 
     // A Member's update of its own row to Owner, judged on the stored row.
-    step("ben makes his own row Owner", app.as_caller("ben", fn() { member_wrote(board().members.put(Member{project: 1, account: "ben", owner: true})) }))
+    step("ben makes his own row Owner", app.as_caller(ben(), fn() { member_wrote(board().members.put(Member{project: 1, account: ben(), owner: true})) }))
 
     // The creator rule: an Owner insert only for a project whose row names
     // the caller and that has no members.
-    step("carol adds herself as launch's Owner", app.as_caller("carol", fn() { member_wrote(board().members.add(Member{project: 1, account: "carol", owner: true})) }))
-    step("ben, a Member, adds carol as launch's Owner", app.as_caller("ben", fn() { member_wrote(board().members.add(Member{project: 1, account: "carol", owner: true})) }))
-    step("carol adds a project in mia's name", app.as_caller("carol", fn() { project_wrote(board().projects.add(Project{id: 2, name: "forged", created_by: "mia"})) }))
-    step("mia adds plans without an owner", app.as_caller("mia", fn() { project_wrote(board().projects.add(Project{id: 2, name: "plans", created_by: "mia"})) }))
-    step("carol adds herself as the Owner of plans, which has no members", app.as_caller("carol", fn() { member_wrote(board().members.add(Member{project: 2, account: "carol", owner: true})) }))
-    step("mia, plans' creator, adds herself as its Owner", app.as_caller("mia", fn() { member_wrote(board().members.add(Member{project: 2, account: "mia", owner: true})) }))
-    step("ben creates side", app.as_caller("ben", fn() { create_project(3, "side") }))
-    step("ben adds mia as side's Owner", app.as_caller("ben", fn() { member_wrote(board().members.add(Member{project: 3, account: "mia", owner: true})) }))
-    step("ben leaves side", app.as_caller("ben", fn() { member_deleted(MemberKey{project: 3, account: "ben"}) }))
-    step("ben, side's creator, adds himself as its Owner while it has members", app.as_caller("ben", fn() { member_wrote(board().members.add(Member{project: 3, account: "ben", owner: true})) }))
-    step("carol reads launch's members", app.as_caller("carol", fn() { members_read(1) }))
+    step("carol adds herself as launch's Owner", app.as_caller(carol(), fn() { member_wrote(board().members.add(Member{project: 1, account: carol(), owner: true})) }))
+    step("ben, a Member, adds carol as launch's Owner", app.as_caller(ben(), fn() { member_wrote(board().members.add(Member{project: 1, account: carol(), owner: true})) }))
+    step("carol adds a project in mia's name", app.as_caller(carol(), fn() { project_wrote(board().projects.add(Project{id: 2, name: "forged", created_by: mia()})) }))
+    step("mia adds plans without an owner", app.as_caller(mia(), fn() { project_wrote(board().projects.add(Project{id: 2, name: "plans", created_by: mia()})) }))
+    step("carol adds herself as the Owner of plans, which has no members", app.as_caller(carol(), fn() { member_wrote(board().members.add(Member{project: 2, account: carol(), owner: true})) }))
+    step("mia, plans' creator, adds herself as its Owner", app.as_caller(mia(), fn() { member_wrote(board().members.add(Member{project: 2, account: mia(), owner: true})) }))
+    step("ben creates side", app.as_caller(ben(), fn() { create_project(3, "side") }))
+    step("ben adds mia as side's Owner", app.as_caller(ben(), fn() { member_wrote(board().members.add(Member{project: 3, account: mia(), owner: true})) }))
+    step("ben leaves side", app.as_caller(ben(), fn() { member_deleted(MemberKey{project: 3, account: ben()}) }))
+    step("ben, side's creator, adds himself as its Owner while it has members", app.as_caller(ben(), fn() { member_wrote(board().members.add(Member{project: 3, account: ben(), owner: true})) }))
+    step("carol reads launch's members", app.as_caller(carol(), fn() { members_read(1) }))
     step("launch's members", app.as_system(fn() { members_read(1) }))
     step("plans' members", app.as_system(fn() { members_read(2) }))
     step("side's members", app.as_system(fn() { members_read(3) }))
 
     // What each caller finds.
-    step("carol searches", app.as_caller("carol", fn() { search("ship") }))
-    step("carol's projects", app.as_caller("carol", fn() { my_projects() }))
-    step("mia searches", app.as_caller("mia", fn() { search("ship") }))
-    step("mia's projects", app.as_caller("mia", fn() { my_projects() }))
-    step("ben's projects", app.as_caller("ben", fn() { my_projects() }))
+    step("carol searches", app.as_caller(carol(), fn() { search("ship") }))
+    step("carol's projects", app.as_caller(carol(), fn() { my_projects() }))
+    step("mia searches", app.as_caller(mia(), fn() { search("ship") }))
+    step("mia's projects", app.as_caller(mia(), fn() { my_projects() }))
+    step("ben's projects", app.as_caller(ben(), fn() { my_projects() }))
 }

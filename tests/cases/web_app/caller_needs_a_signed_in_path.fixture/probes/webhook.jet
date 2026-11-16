@@ -8,7 +8,7 @@ use {
 Hooks: struct {
     #App.Webhook(path: "/hooks/:project", signature: app.Signature.Stripe, key: "webhook_secret") on_event: fn(self, project: String, event: String) -> Int {
         who: app.caller()
-        who.len() + project.len() + event.len()
+        who.raw().len() + project.len() + event.len()
     }
 
     #App.SigningKey webhook_secret: fn(self, project: String) -> String? { Val(project.copy()) }

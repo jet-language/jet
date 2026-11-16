@@ -4,13 +4,16 @@
 // certain, so the program checks.
 use {
     app
+    auth: core.auth
     web: core.web
 }
 
 Crew: struct {
     #App.SignedIn mine: fn(self) -> String { owner_name() }
 
-    #App.Public whoever: fn(self) -> String { app.maybe_caller() ?? "anyone" }
+    #App.Public whoever: fn(self) -> String {
+        if app.maybe_caller() == .Val(who) -> who.raw() else -> "anyone"
+    }
 }
 
 // Reached from the signed-in `mine` and from inside `app.as_caller`.
@@ -22,5 +25,5 @@ owner_name: fn() -> String {
 run: fn() { _: web.app().mount(Crew{}) }
 
 #Test("a test reads its caller inside as_caller") {
-    assert_eq(app.as_caller("ben", fn() { owner_name() }), "owner ben")
+    assert_eq(app.as_caller(auth.AccountID.from_string("ben"), fn() { owner_name() }), "owner ben")
 }

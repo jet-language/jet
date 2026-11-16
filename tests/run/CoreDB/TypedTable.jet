@@ -9,6 +9,7 @@ package: {
 
 use {
     app
+    auth: core.auth
     db: core.db
 }
 
@@ -55,7 +56,10 @@ open_only: fn(task: Task, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> B
 
 judged: fn(tasks: db.Table<Int, Task>) -> db.Table<Int, Task> { tasks.guard(open_only) }
 
-acting: fn() -> String { app.maybe_caller() ?? "no one" }
+acting: fn() -> String {
+    if app.maybe_caller() == .Val(account) -> return account.raw()
+    "no one"
+}
 
 // What an account sees of `guarded`, and its delete of task 3.
 account_acts: fn(guarded: db.Table<Int, Task>) -[DB.Read, DB.Write, IO]> {
@@ -83,7 +87,7 @@ run: fn() {
     }
     // A lambda owns what it captures, so each run gets its own guarded table.
     for_ann: judged(tasks)
-    app.as_caller("ann", fn() { account_acts(for_ann) })
+    app.as_caller(auth.AccountID.from_string("ann"), fn() { account_acts(for_ann) })
     print("acting for {acting()}")
     for_system: judged(tasks)
     seen: app.as_system(fn() { show(for_system) })

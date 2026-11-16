@@ -12,6 +12,7 @@ package: {
 // Live bindings live in one process-wide registry below; sync sessions are
 // records of that registry under LIVE_SYNC_SOURCE.
 use {
+    auth: core.auth
     unicode: core.text
     http: core.http
     crypto: core.crypto
@@ -616,7 +617,7 @@ live_running: fn(task: TaskID) -> Int? {
 // and as no one, never as the system, when there is none. A live binding
 // runs as the caller that made it.
 Acting: enum {
-    Account(String)
+    Account(auth.AccountID)
     System
 }
 
@@ -637,7 +638,7 @@ ACTING: Shared{ActingRuns{runs: [ActingRun]{}}}
 // Runs `run` acting for the account `account` and gives what it gives; the
 // account is `maybe_caller()` within it. `run` handles its own failures, so
 // a caller with any failure contract may call this.
-as_caller: fn<R>(account: String, run: fn() -> R Never!) -> R Never! {
+as_caller: fn<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never! {
     acting_within(Val(Acting.Account(account.copy())), run)
 }
 
@@ -648,7 +649,7 @@ as_system: fn<R>(run: fn() -> R Never!) -> R Never! { acting_within(Val(Acting.S
 
 // The account this task acts for: None when it acts for the system or for
 // no one.
-maybe_caller: fn() -> String? Never! {
+maybe_caller: fn() -> auth.AccountID? Never! {
     if acting_now(tasks.current_task()) == .Val(.Account(account)) -> return Val(account)
     None
 }
@@ -657,7 +658,9 @@ maybe_caller: fn() -> String? Never! {
 // accepts a call only on a path that starts at an `#App.SignedIn` method or
 // inside `as_caller`. A path the compiler can't follow (a function value
 // another task runs) that reaches it acting for no account stops here.
-caller: fn() -> String Never! { maybe_caller() ?? panic("app.caller() ran acting for no account") }
+caller: fn() -> auth.AccountID Never! {
+    maybe_caller() ?? panic("app.caller() ran acting for no account")
+}
 
 priv acting_within: fn<R>(acting: Acting?, run: fn() -> R Never!) -> R Never! {
     me: tasks.current_task()
@@ -697,7 +700,7 @@ priv acting_now: fn(task: TaskID) -> Acting? {
 // A binding's registry name for the caller `acting`: empty for no one.
 priv acting_tag: fn(acting: Acting?) -> String {
     if acting == {
-        .Val(.Account(account)) -> "account:{account}"
+        .Val(.Account(account)) -> "account:{account.raw()}"
         .Val(.System) -> "system"
         .None -> ""
     }
@@ -712,7 +715,7 @@ priv(package) callers: module {
     }
 
     // The account this task acts for: None for the system or no one.
-    account: fn() -> String? Never! { maybe_caller() }
+    account: fn() -> auth.AccountID? Never! { maybe_caller() }
 
     // This task acts for the system until `end`, as a row policy's own
     // reads do.
@@ -723,25 +726,27 @@ priv(package) callers: module {
 }
 
 #Test("a task acts for its innermost run's caller, and a task it spawns for no one") {
-    assert_eq(maybe_caller(), String?{None})
-    seen: as_caller<String>("ann", fn() {
+    ann: auth.AccountID.from_string("ann")
+    ben: auth.AccountID.from_string("ben")
+    assert_eq(maybe_caller(), auth.AccountID?{None})
+    seen: as_caller<String>(ann, fn() {
         assert(as_system(fn() { callers.system() }))
-        assert_eq(as_system(fn() { maybe_caller() }), String?{None})
-        assert_eq(as_caller("ben", fn() { maybe_caller() }), Val("ben"))
-        spawned: task { maybe_caller() ?? "no one" }
+        assert_eq(as_system(fn() { maybe_caller() }), auth.AccountID?{None})
+        assert_eq(as_caller(ben, fn() { maybe_caller() }), Val(ben))
+        spawned: task { (maybe_caller() ?? auth.AccountID.from_string("no one")).raw() }
         assert_eq(spawned.join() ?? panic("the spawned task runs"), "no one")
         assert(!callers.system())
-        maybe_caller() ?? "no one"
+        (maybe_caller() ?? auth.AccountID.from_string("no one")).raw()
     })
     assert_eq(seen, "ann")
-    assert_eq(maybe_caller(), String?{None})
-    as_caller("ben", fn() {
-        assert_eq(maybe_caller(), Val("ben"))
-        assert_eq(caller(), "ben")
+    assert_eq(maybe_caller(), auth.AccountID?{None})
+    as_caller(ben, fn() {
+        assert_eq(maybe_caller(), Val(ben))
+        assert_eq(caller(), ben)
         assert(!callers.system())
     })
-    assert_eq(maybe_caller(), String?{None})
-    assert_eq(acting_tag(Val(Acting.Account("ann"))), "account:ann")
+    assert_eq(maybe_caller(), auth.AccountID?{None})
+    assert_eq(acting_tag(Val(Acting.Account(ann))), "account:ann")
     assert_eq(acting_tag(None), "")
 }
 
@@ -1184,7 +1189,9 @@ priv(package) jobs: module {
     // deletes its row or records a failure, and their rows are no longer
     // held, so a serving server runs them again once their time passes.
     stop: fn(wait_ms: Int) Never! {
-        if !jobs_unserve() -> return
+        if !jobs_unserve() {
+            return
+        }
         end: rt.clock_mono_ns() + wait_ms * 1000000
         loop jobs_busy() && rt.clock_mono_ns() < end -> tasks.sleep(10)
         jobs_leave()
@@ -1212,7 +1219,9 @@ priv jobs_busy: fn() -> Bool Never! {
 priv jobs_leave: fn() Never! {
     runtime := JOBS.guard_edit()
     loop index in 0..<runtime.value.stores.len() {
-        loop key in runtime.value.stores[index].running -> runtime.value.stores[index].left.push(key.copy())
+        loop key in runtime.value.stores[index].running {
+            runtime.value.stores[index].left.push(key.copy())
+        }
         runtime.value.stores[index].running = [String]{}
     }
 }

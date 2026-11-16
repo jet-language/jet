@@ -2230,6 +2230,15 @@ empty, so a world and its tasks never read or change the process store.
 | `auth(users_table)` / `auth_oauth(auth, providers)` | `Auth` | An app's auth configuration: its users table and the comma- or space-separated OAuth providers, deduplicated and bounded. |
 | `auth_routes(auth)` / `auth_show(auth)` | `String` | Render the routes the configuration serves, or its summary. |
 
+`AccountID` is an account, by the id its account store gave it, and the one
+type Core names an account by: `app.caller()`, `app.maybe_caller()` and
+`app.as_caller` give and take it, a row policy is asked as
+`db.Who.Account(AccountID)`, and a table column holds it. It is a distinct
+`String`: `AccountID.from_string(id)` makes one, `.raw()` gives the id back,
+two are equal when their ids are, it keys a map and orders by its id, and it
+encodes, decodes and prints as the id itself, so a stored or sent account is
+that `String`.
+
 JWT accepts only HS256 and requires a key of at least 32 bytes. PASETO accepts
 only `v4.public`, a 32-byte key, a non-empty normalized audience, and canonical
 base64url segments. Unknown algorithms, malformed JSON, wrong signatures,
@@ -5486,10 +5495,10 @@ tasks never read or change the process registry. The module source is
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
 | `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
-| `as_caller<R>(account: String, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
+| `as_caller<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
 | `as_system<R>(run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for the server itself, which no row policy limits, as a job or a schedule does. |
-| `maybe_caller() -> String?` | account | The account this task acts for: `None` for the system or no one. |
-| `caller() -> String` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
+| `maybe_caller() -> auth.AccountID?` | account | The account this task acts for: `None` for the system or no one. |
+| `caller() -> auth.AccountID` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
 | `enqueue(fn() { self.job(args...) })` | — | Queue one call of the service's `#App.Job` method `job`, with its arguments evaluated and encoded here; it runs after the call that queued it commits. See below. |
 | `endpoints<S>() -> [String]` | names | The methods of the service `S` that `#App.SignedIn` or `#App.Public` marks, in the order `S` declares them. A job, a schedule, a webhook, a signing key and an unmarked method are server-only and never listed. |
 
@@ -6560,7 +6569,8 @@ is not covered: the key columns stay as the table was created.
 
 A row policy, attached with `table.guard(policy)`, is a function from a row,
 the operation (`Op`: `Read`, `Insert`, `Update` or `Delete`), the caller
-(`Who`: `Account(id)`, `System` or `Anonymous`) and a store to a `Bool`.
+(`Who`: `Account(id)`, an `auth.AccountID`, `System` or `Anonymous`) and a
+store to a `Bool`.
 The table asks it about every call, as the caller the calling task acts for:
 `Account(id)` inside `app.as_caller(id, run)`, and `Anonymous` in a task
 that acts for no one, which is every task that runs neither `as_caller` nor

@@ -31,6 +31,8 @@ use {
     // DBScope.live bindings share app's process-wide live registry.
     app
     app.[Live]
+    // A row policy is asked as an account by its id.
+    auth: core.auth
 }
 
 // core.db owns its SQL values, typed row selection and conversion. The private
@@ -955,7 +957,7 @@ Op: enum {
 // does. No row policy limits `System`, and a guarded table never asks it.
 #Equatable
 Who: enum {
-    Account(String)
+    Account(auth.AccountID)
     System
     Anonymous
 }
