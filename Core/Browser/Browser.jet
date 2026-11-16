@@ -916,6 +916,8 @@ BrowserTestReport: struct {
     html: fn(self) -> String Never! { report_html(self) }
 
     exit_code: fn(self) -> Int Never! { report_exit_code(self) }
+
+    failures: fn(self) -> [String] Never! { report_failures(self) }
 }
 
 // One named test attempt's live session: its browser, isolated context, and
@@ -1958,6 +1960,57 @@ fixture_context: fn(fixture: BrowserTestFixture) -> BrowserContext Never! { fixt
 
 fixture_page: fn(fixture: BrowserTestFixture) -> BrowserPage Never! { fixture.__page }
 
+// One browser test, run on each configured engine in the configured order.
+// Each attempt gets its own browser, isolated context and page: it runs
+// `body` on the page and then closes all three, so no attempt sees another's
+// state. A failed attempt runs again on the same engine, up to
+// `config.retries` more times. The test's source position is the call's. A
+// test the filter doesn't select runs nothing.
+run_case: fn(config: BrowserTestConfig, test: String, body: fn(BrowserPage) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserError!, at: SourceLocation{#caller}) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserTestCase Never! {
+    case := BrowserTestCase{name: test.copy(), selected: selected(config, test), attempts: [BrowserTestAttempt]{}}
+    if !case.selected -> return case
+    source: BrowserTestSource{path: at.file.copy(), line: source_position(at.line), column: source_position(at.column)}
+    loop engine in config.engines {
+        loop attempt in 0..<config.retries + 1 {
+            started: time.instant()
+            error: run_attempt(config, test, engine, attempt, source, body)
+            case.attempts.push(
+                BrowserTestAttempt{
+                    test: test.copy(),
+                    engine: engine.copy(),
+                    attempt: attempt,
+                    passed: error == "",
+                    expected_failure: false,
+                    duration_ms: started.elapsed_millis(),
+                    source: source.copy(),
+                    actions: [BrowserTestAction]{},
+                    snapshots: [BrowserTestSnapshot]{},
+                    events: [BrowserTestEventFact]{},
+                    artifacts: [BrowserTestArtifact]{},
+                    trace: [String]{},
+                    error: error,
+                },
+            )
+            if error == "" -> break
+        }
+    }
+    case
+}
+
+// One attempt: "" when `body` passed on a fresh page, else what failed.
+priv run_attempt: fn(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source: BrowserTestSource, body: fn(BrowserPage) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserError!) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> String Never! {
+    fixture: begin_named(config, test, engine, attempt, source.path, source.line, source.column) ?? return "{err}"
+    failure: if body(fixture.__page) == {
+        .Ok(_) -> ""
+        .Err(err) -> "{err}"
+    }
+    // The attempt's outcome is the one reported; closing is best effort.
+    fixture.__page.close() ?? ()
+    fixture.__context.close() ?? ()
+    fixture.__browser.close() ?? ()
+    failure
+}
+
 fixture_source: fn(name: String, body: String) -> String BrowserError! {
     generate_source(name, body, "")
 }
@@ -1987,13 +2040,11 @@ report_add_case: fn(report: BrowserTestReport, case: BrowserTestCase) -> Browser
     out
 }
 
+// A selected case passes when each engine's last attempt passed; a case that
+// ran no attempt fails.
 report_exit_code: fn(report: BrowserTestReport) -> Int Never! {
-    // A selected case fails unless its last attempt passed.
     loop case in report.cases {
-        if case.selected {
-            if case.attempts.len() == 0 -> return 1
-            if !case.attempts[case.attempts.len() - 1].passed -> return 1
-        }
+        if case.selected && !case_passed(case) -> return 1
     }
     0
 }
@@ -2003,11 +2054,45 @@ report_summary: fn(report: BrowserTestReport) -> String Never! {
     failed := 0
     skipped := 0
     loop case in report.cases {
-        if !case.selected -> skipped += 1 else if case.attempts.len() > 0 && case.attempts[case.attempts.len() - 1].passed {
-            passed += 1
-        } else { failed += 1 }
+        if !case.selected -> skipped += 1 else if case_passed(case) -> passed += 1 else {
+            failed += 1
+        }
     }
     "{passed} passed, {failed} failed, {skipped} skipped"
+}
+
+// One line per failure, in report order, each at the test's source position:
+// every engine whose last attempt failed, and a selected case that ran no
+// attempt. Empty when the run passed.
+report_failures: fn(report: BrowserTestReport) -> [String] Never! {
+    lines := [String]{}
+    loop case in report.cases {
+        if !case.selected -> next
+        if case.attempts.len() == 0 {
+            lines.push("`{case.name}` ran no attempt")
+            next
+        }
+        loop failed in engine_failures(case) {
+            tries: if failed.attempt == 0 -> "1 attempt" else -> "{failed.attempt + 1} attempts"
+            lines.push("{failed.source.path}:{failed.source.line}:{failed.source.column}: `{failed.test}` failed on {failed.engine} after {tries}: {failed.error}")
+        }
+    }
+    lines
+}
+
+priv case_passed: fn(case: BrowserTestCase) -> Bool Never! {
+    case.attempts.len() > 0 && engine_failures(case).len() == 0
+}
+
+// Each engine's last attempt that failed, in attempt order.
+priv engine_failures: fn(case: BrowserTestCase) -> [BrowserTestAttempt] Never! {
+    failed := [BrowserTestAttempt]{}
+    loop at in 0..<case.attempts.len() {
+        attempt: case.attempts[at]
+        last: at + 1 == case.attempts.len() || case.attempts[at + 1].engine != attempt.engine
+        if last && !attempt.passed -> failed.push(attempt.copy())
+    }
+    failed
 }
 
 report_source_value: fn(source: BrowserTestSource) -> Dyn Never! {
@@ -2261,7 +2346,7 @@ esc_source: fn(text: String) -> String Never! {
 
 C_REPORT_HTML_HEAD: "<!doctype html><html><head><meta charset=\"utf-8\"><title>Jet browser tests</title><style>:root{{color-scheme:dark;font:14px system-ui,sans-serif;background:#10151d;color:#e7edf5}}body{{margin:0;padding:24px;max-width:1400px;margin-inline:auto}}header{{display:flex;gap:16px;align-items:end;justify-content:space-between;border-bottom:1px solid #344052;padding-bottom:16px}}input{{background:#171f2b;border:1px solid #40506a;color:inherit;padding:8px;border-radius:5px;min-width:260px}}main{{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(0,2fr);gap:18px;margin-top:18px}}section{{border:1px solid #344052;border-radius:8px;background:#151c27;padding:14px;margin-bottom:12px}}.tree button{{display:block;width:100%;text-align:left;background:none;border:0;color:inherit;padding:8px;border-radius:4px;cursor:pointer}}.tree button:hover,.tree button.active{{background:#26364b}}.pass{{color:#6ee7a8}}.fail{{color:#ff8e8e}}.muted{{color:#9aabc0}}pre{{white-space:pre-wrap;overflow:auto;background:#0d1118;border-radius:5px;padding:10px;font-size:12px}}.chip{{display:inline-block;border:1px solid #40506a;border-radius:999px;padding:2px 7px;margin:2px;font-size:12px}}@media(max-width:760px){{main{{display:block}}body{{padding:14px}}input{{min-width:0;width:100%}}}}</style></head><body><header><div><div class=\"muted\">Jet browser test viewer</div><h1 id=\"summary\">Loading</h1></div><label>Filter <input id=\"filter\" placeholder=\"test or engine\"></label></header><main><section class=\"tree\"><h2>Test tree</h2><div id=\"tree\"></div></section><section><div id=\"details\"><p class=\"muted\">Select a test.</p></div></section></main><script id=\"jet-browser-data\" type=\"application/json\">"
 
-C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElementById('jet-browser-data').textContent);\nconst tree=document.getElementById('tree'), details=document.getElementById('details'), filter=document.getElementById('filter');\nconst text=(tag,value,cls='')=>{{const e=document.createElement(tag);e.textContent=value??'';if(cls)e.className=cls;return e;}};\nconst allAttempts=c=>c.attempts||[];\nfunction renderTree(){{tree.replaceChildren();const q=filter.value.toLowerCase();for(const c of data.cases){{if(q&&!(`${{c.name}} ${{allAttempts(c).map(a=>a.engine).join(' ')}}`.toLowerCase().includes(q)))continue;const b=document.createElement('button');const last=allAttempts(c).at(-1);b.append(text('span',c.selected?(last&&last.passed?'PASS ':'FAIL '):'SKIP ','',c.selected?(last&&last.passed?'pass':'fail'):'muted'),text('span',c.name));b.onclick=()=>renderDetails(c);tree.append(b);}}}}\nfunction renderDetails(c){{details.replaceChildren();details.append(text('h2',c.name));for(const a of allAttempts(c)){{const s=document.createElement('section');s.append(text('h3',`${{a.passed?'PASS':'FAIL'}} · ${{a.engine}} · attempt ${{a.attempt}}`,a.passed?'pass':'fail'));s.append(text('p',`Duration ${{a.durationMs}} ms · source ${{a.source.path}}:${{a.source.line}}:${{a.source.column}}`,'muted'));if(a.error)s.append(text('p',`Error: ${{a.error}}`,'fail'));const timeline=document.createElement('div');timeline.append(text('h4','Timeline'));for(const x of a.actions||[])timeline.append(text('span',`${{x.sequence}} ${{x.kind}} ${{x.fact}}`,'chip'));for(const x of a.trace||[])timeline.append(text('span',x,'chip'));s.append(timeline);const dom=document.createElement('div');dom.append(text('h4','DOM snapshots'));for(const x of a.snapshots||[])dom.append(text('p',`${{x.kind}}: ${{x.hash}} · ${{x.bytes}} bytes${{x.path?' · '+x.path:''}}`));s.append(dom);const source=document.createElement('div');source.append(text('h4','Source'));source.append(text('p',`${{a.source.path}}:${{a.source.line}}:${{a.source.column}}`));s.append(source);const logs=document.createElement('div');logs.append(text('h4','Logs / console'));for(const x of (a.events||[]).filter(x=>x.kind==='console'))logs.append(text('p',`${{x.requestMethod||'console'}} · ${{x.urlHash||''}}`));s.append(logs);const network=document.createElement('div');network.append(text('h4','Network'));for(const x of (a.events||[]).filter(x=>x.kind==='network'))network.append(text('p',`${{x.requestMethod||''}} · ${{x.urlHash||''}} · ${{x.statusCode}} · blocked=${{x.isBlocked}}`));s.append(network);const attachments=document.createElement('div');attachments.append(text('h4','Attachments'));for(const x of a.artifacts||[])attachments.append(text('p',`${{x.name}} · ${{x.path}} · ${{x.mime}} · ${{x.bytes}} bytes`));s.append(attachments);details.append(s);}}}}\nsummary.textContent=`${{data.summary}} · exit ${{data.exitCode}}`;filter.addEventListener('input',renderTree);renderTree();if(data.watch)setInterval(()=>location.reload(),1000);\n</script></body></html>"
+C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElementById('jet-browser-data').textContent);\nconst tree=document.getElementById('tree'), details=document.getElementById('details'), filter=document.getElementById('filter');\nconst text=(tag,value,cls='')=>{{const e=document.createElement(tag);e.textContent=value??'';if(cls)e.className=cls;return e;}};\nconst allAttempts=c=>c.attempts||[];\nconst casePassed=c=>{{const last={{}};for(const a of allAttempts(c))last[a.engine]=a.passed;const runs=Object.values(last);return runs.length>0&&runs.every(p=>p);}};\nfunction renderTree(){{tree.replaceChildren();const q=filter.value.toLowerCase();for(const c of data.cases){{if(q&&!(`${{c.name}} ${{allAttempts(c).map(a=>a.engine).join(' ')}}`.toLowerCase().includes(q)))continue;const b=document.createElement('button');const ok=casePassed(c);b.append(text('span',c.selected?(ok?'PASS ':'FAIL '):'SKIP ','',c.selected?(ok?'pass':'fail'):'muted'),text('span',c.name));b.onclick=()=>renderDetails(c);tree.append(b);}}}}\nfunction renderDetails(c){{details.replaceChildren();details.append(text('h2',c.name));for(const a of allAttempts(c)){{const s=document.createElement('section');s.append(text('h3',`${{a.passed?'PASS':'FAIL'}} · ${{a.engine}} · attempt ${{a.attempt}}`,a.passed?'pass':'fail'));s.append(text('p',`Duration ${{a.durationMs}} ms · source ${{a.source.path}}:${{a.source.line}}:${{a.source.column}}`,'muted'));if(a.error)s.append(text('p',`Error: ${{a.error}}`,'fail'));const timeline=document.createElement('div');timeline.append(text('h4','Timeline'));for(const x of a.actions||[])timeline.append(text('span',`${{x.sequence}} ${{x.kind}} ${{x.fact}}`,'chip'));for(const x of a.trace||[])timeline.append(text('span',x,'chip'));s.append(timeline);const dom=document.createElement('div');dom.append(text('h4','DOM snapshots'));for(const x of a.snapshots||[])dom.append(text('p',`${{x.kind}}: ${{x.hash}} · ${{x.bytes}} bytes${{x.path?' · '+x.path:''}}`));s.append(dom);const source=document.createElement('div');source.append(text('h4','Source'));source.append(text('p',`${{a.source.path}}:${{a.source.line}}:${{a.source.column}}`));s.append(source);const logs=document.createElement('div');logs.append(text('h4','Logs / console'));for(const x of (a.events||[]).filter(x=>x.kind==='console'))logs.append(text('p',`${{x.requestMethod||'console'}} · ${{x.urlHash||''}}`));s.append(logs);const network=document.createElement('div');network.append(text('h4','Network'));for(const x of (a.events||[]).filter(x=>x.kind==='network'))network.append(text('p',`${{x.requestMethod||''}} · ${{x.urlHash||''}} · ${{x.statusCode}} · blocked=${{x.isBlocked}}`));s.append(network);const attachments=document.createElement('div');attachments.append(text('h4','Attachments'));for(const x of a.artifacts||[])attachments.append(text('p',`${{x.name}} · ${{x.path}} · ${{x.mime}} · ${{x.bytes}} bytes`));s.append(attachments);details.append(s);}}}}\nsummary.textContent=`${{data.summary}} · exit ${{data.exitCode}}`;filter.addEventListener('input',renderTree);renderTree();if(data.watch)setInterval(()=>location.reload(),1000);\n</script></body></html>"
 
 #Test("browser profiles keep exact version pins") {
     current: profile("bidi-2025.5") ?? panic("current profile rejected")
@@ -2397,6 +2482,47 @@ C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElemen
     assert(html.contains("\"sourceRoot\": \"\\u003cx\\u003e\\u0026\""))
     assert(html.starts_with("<!doctype html>"))
     assert(html.ends_with("</script></body></html>"))
+}
+
+#Test("a cross-browser case passes only when each engine's last attempt passed") {
+    source: BrowserTestSource{path: "home_test.jet", line: 7, column: 5}
+    tried: fn(engine: String, attempt: Int, error: String) -> BrowserTestAttempt {
+        BrowserTestAttempt{test: "home", engine: engine, attempt: attempt, passed: error == "", expected_failure: false, duration_ms: 0, source: source, actions: [BrowserTestAction]{}, snapshots: [BrowserTestSnapshot]{}, events: [BrowserTestEventFact]{}, artifacts: [BrowserTestArtifact]{}, trace: [String]{}, error: error}
+    }
+    retried: BrowserTestCase{name: "home", selected: true, attempts: [BrowserTestAttempt]{tried("chromium", 0, "boom"), tried("chromium", 1, ""), tried("firefox", 0, "")}}
+    passing: report_add_case(BrowserTestReport{source_root: ".", reporter: "text", ui: false, watch: false, cases: [BrowserTestCase]{}}, retried)
+    assert_eq(passing.exit_code(), 0)
+    assert_eq(report_summary(passing), "1 passed, 0 failed, 0 skipped")
+    assert_eq(passing.failures().len(), 0)
+    // A later engine's pass doesn't hide an earlier engine's failure.
+    split: BrowserTestCase{name: "home", selected: true, attempts: [BrowserTestAttempt]{tried("chromium", 0, "x"), tried("firefox", 0, "y"), tried("firefox", 1, "")}}
+    failing: report_add_case(passing, BrowserTestCase{name: "about", selected: true, attempts: [BrowserTestAttempt]{}})
+    failing_split: report_add_case(failing, split)
+    assert_eq(failing_split.exit_code(), 1)
+    assert_eq(report_summary(failing_split), "1 passed, 2 failed, 0 skipped")
+    assert_eq(failing_split.failures(), [String]{"`about` ran no attempt", "home_test.jet:7:5: `home` failed on chromium after 1 attempt: x"})
+}
+
+#Test("run_case runs each engine in order, retries a failed attempt, and skips a test the filter leaves out") {
+    root: files.temp_dir("jet-browser-run-") ?? panic("a temporary project root: {err}")
+    config := config_from_snapshot(root.path, [{name: [U8], value: [U8]}]{}) ?? panic("the default config: {err}")
+    // Engines no lock can pin fail before any browser starts.
+    config.engines = [String]{"lynx", "mosaic"}
+    config.retries = 1
+    case: run_case(config, "home", fn(page: BrowserPage) BrowserError! { Ok() })
+    order: loop attempt in case.attempts -> "{attempt.engine}#{attempt.attempt}:{attempt.passed}"
+    assert_eq(order.join(" "), "lynx#0:false lynx#1:false mosaic#0:false mosaic#1:false")
+    assert_eq(case.attempts[3].error, "browser engine is not supported")
+    assert(case.attempts[0].source.path.ends_with("Browser.jet"))
+    assert(case.attempts[0].source.line > 0)
+    failures: report_add_case(report_new(config), case).failures()
+    assert_eq(failures.len(), 2)
+    assert(failures[1].ends_with(": `home` failed on mosaic after 2 attempts: browser engine is not supported"))
+    config.filter = "other"
+    skipped: run_case(config, "home", fn(page: BrowserPage) BrowserError! { Ok() })
+    assert(!skipped.selected)
+    assert_eq(skipped.attempts.len(), 0)
+    files.remove_all(root.path).drop("the temporary root is empty")
 }
 
 source_position: fn(value: Int) -> Int Never! {

@@ -3,6 +3,7 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
+    CORE_BUILTINS_MODULE,
     CallArg,
     Diagnostic,
     EffectRowEntry,
@@ -14,6 +15,7 @@ use jet_foundation.[
     TFailureCarrier,
     TagMarker,
     Type,
+    core_call,
     expr_span,
 ]
 
@@ -485,27 +487,30 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
 }
 
+// A child's methods (`child.wait()` and the rest) are the host leaves
+// `jet_builtins.process_child_<method>`: the leaf's signature row types the
+// call, its Core call facts name the effects, and its row names the runtime
+// export every tier runs. A method with no leaf is not one of them.
 sema_process_child_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    result: if method == {
-        "id" -> if args.len() == 0 -> Val(Type.Int) else -> None
-        "wait" -> if args.len() == 0 -> Val(sema_process_io_result(sema_process_named("ProcessReceipt"))) else -> None
-        "exited" -> if args.len() == 0 -> Val(sema_process_io_result(Type.Bool)) else -> None
-        "kill" | "terminate" | "interrupt" -> if args.len() == 0 -> Val(sema_process_io_result(Type.Named{name: "Unit"})) else -> None
-        else -> None
-    }
-    known: method == "id" || method == "wait" || method == "exited" || method == "kill" || method == "terminate" || method == "interrupt"
-    if !known -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if args.len() != 0 {
-        sema_process_wrong_arity(method, 0, args.len(), span, diagnostics)
+    unhandled: SemaMethodSpecialCheck{handled: false, value: None}
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    record: core_call(CORE_BUILTINS_MODULE, "process_child_{method}") ?? return unhandled
+    signature: sema_call_core_typed_signature(record, record.signature.arity, [AccessConvention]{AccessConvention.Read}, [Type]{}) ?? return unhandled
+    if args.len() + 1 != signature.parameters.len() {
+        sema_process_wrong_arity(method, signature.parameters.len() - 1, args.len(), span, diagnostics)
         sema_process_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
+        return rejected
     }
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
+        return rejected
     }
-    result_ty: result ?? Type.Named{name: "Unit"}
-    effect_name: if method == "id" -> "" else -> "Exec"
-    sema_process_finish(receiver_value, THandleOp.ProcessChildMethod{method: method}, [TExpr]{}, result_ty, effect_name, "ProcessChild.{method}", span, expected, environment, program, scopes, context, diagnostics)
+    result: sema_expr_core_row_type(signature.return_type ?? Type.Named{name: "Unit"}, environment, program)
+    fallibility: sema_expression_failure_carrier(result)
+    if !sema_call_core_record_effects_as(record, "ProcessChild.{method}", span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
+        return rejected
+    }
+    value: sema_call_core_tree(record, [TExpr]{receiver_value}, span, [Type]{}, [Bool]{false}, result, fallibility, None, environment, program, diagnostics) ?? return rejected
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
 }
 
 sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
