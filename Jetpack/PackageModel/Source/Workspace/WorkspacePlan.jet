@@ -124,15 +124,26 @@ WorkspaceDeclarationProbe: struct {
 // Each distinct source that names `workspace` is lexed once per discovery
 // session, keyed by its text; repeated scans must use the same cache. Each
 // directory's workspace presence is resolved once per session too, keyed by
-// its canonical root, however many upward walks cross it.
+// its canonical root, however many upward walks cross it, and so is whether
+// it holds Jet source (pkg_authority_has_candidate), keyed by its path.
 WorkspaceDeclarationCache: struct {
     priv probes: [String:WorkspaceDeclarationProbe]
     priv presence: [String:Bool]
+    priv candidates: [String:Bool]{[String:Bool]{}}
     // Lexes actually performed by this session, excluding memo hits.
     lexes: Int{0}
 
     new: fn() -> WorkspaceDeclarationCache Never! {
         WorkspaceDeclarationCache{probes: [String:WorkspaceDeclarationProbe]{}, presence: [String:Bool]{}}
+    }
+
+    // Whether the directory `root` directly holds Jet source, listed once
+    // per session. A failure is never remembered.
+    has_candidate: fn(&self, root: String) -[FS, Env]> Bool AuthorityError! {
+        if self.candidates.get(root) == .Val(held) -> return Ok(held)
+        held: pkg_authority_has_candidate(root)
+        self.candidates[root.copy()] = held
+        Ok(held)
     }
 }
 

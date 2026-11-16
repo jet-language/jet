@@ -115,7 +115,7 @@ pkg_find_package_roots_checked: fn(cache: &WorkspaceDeclarationCache, start: Str
     inline_root := String?{None}
     inline_error := ManifestError?{None}
     loop {
-        authority: if AuthorityResolver.open_for_authority_walk(dir) == {
+        authority: if AuthorityResolver.open_for_authority_walk(cache, dir) == {
             .Ok(found) -> found
             .Err(error) -> {
                 return Err(pkg_entry_authority_error(error))

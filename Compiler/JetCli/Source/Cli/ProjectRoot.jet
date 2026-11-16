@@ -47,7 +47,7 @@ jet_cli_receipt_project_root: fn(cache: &WorkspaceDeclarationCache, start: Strin
 jet_cli_find_workspace_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
     dir := AuthorityResolver.authority_walk_root(start) ?? return Err(ManifestError{diagnostic: err.workspace_diagnostic()})
     loop {
-        if AuthorityResolver.open_for_authority_walk(dir) == {
+        if AuthorityResolver.open_for_authority_walk(cache, dir) == {
             .Ok(found) -> {
                 if found == .Val(resolver) {
                     if pkg_workspace_present(cache, resolver) == {
