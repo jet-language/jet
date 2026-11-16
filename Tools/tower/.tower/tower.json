@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108349,
+    "rev": 108350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74634,6 +74634,15 @@
           "verifiedBy": null,
           "evidence": "dev 6cea1699f9: git grep -n jet_jit_stdin_lines -- ':!Docs' ':!Tools/tower' -> no match (materializer and host registration removed)",
           "at": "2026-11-13T02:23:52.587Z"
+        },
+        {
+          "n": 29,
+          "text": "The cases suite never fails a C case on a racing musl sysroot build. Each run, one random C case fails: p197 fiber_liveness/a_foreign_call_that_blocks_its_carrier, p199 meta_suite J33 FFI.jet, p200 authority/ffi_library_grant_covers_its_own_library_only. Each case's engine builds musl itself, under run_all at cpu_count inside the 14G cases scope, and a clang dies with empty stderr ('Building musl ... failed: '). Fix: build the Hangar musl sysroot once per suite, shared and locked. Also, Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet stops dropping the build receipt's signal and exit code. Proof: three full cases runs with no musl failure; a forced clang kill shows its signal in the error.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T03:01:47.488Z"
         }
       ],
       "refs": [],
@@ -74644,9 +74653,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T14:11:07.271Z",
-      "updated": "2026-11-16T00:56:26.787Z",
+      "updated": "2026-11-16T03:01:47.488Z",
       "updatedBy": "Main",
-      "criteriaLastN": 28
+      "criteriaLastN": 29
     },
     {
       "id": "c0ff0n0i",
@@ -220981,6 +220990,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T03:01:47.488Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0heplig",
+      "note": "#29 The cases suite never fails a C case on a racing musl sysroo"
+    },
     {
       "at": "2026-11-16T02:53:38.050Z",
       "by": "Main",
