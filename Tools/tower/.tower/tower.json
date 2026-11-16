@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 107925,
+    "rev": 107950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -105392,12 +105392,12 @@
         },
         {
           "n": 11,
-          "text": "(was #4022 c19)",
+          "text": "Markers are PascalCase only: `#Allow(lint)` and `#Wire` are the only spellings, `#allow` and `#wire` (5 .jet files on dev 452b6443f3) are migrated, and a test checks every marker row against the marker NameCase rule. Proof: `git grep -l -E '#(allow|wire)\\b' -- '*.jet'` prints nothing and `jet test tests/guards --filter closed_lists` passes. (was #4022 c19)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:40:36.682Z"
+          "at": "2026-11-16T01:13:53.271Z"
         }
       ],
       "refs": [],
@@ -105412,7 +105412,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:44.799Z",
-      "updated": "2026-11-16T00:40:36.682Z",
+      "updated": "2026-11-16T01:13:53.271Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -105683,48 +105683,48 @@
         },
         {
           "n": 17,
-          "text": "(was #5073 c18)",
+          "text": "The Core arity rows agree with their runtime routes: core.plugin.load (CORE_CALLS 2 arguments, jet_plugin_load 3) and core.crypto.vault.current (1 against jet_vault_current_impl's 2) disagreed on dev 6a06b917cb, and the IR Lint core.arity check keeps them agreeing. Proof: `jet test Compiler/JetIR --filter LintPlanted` passes with LP_CORE_ARITY empty. (was #5073 c18)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:26.554Z"
+          "at": "2026-11-16T01:13:54.250Z"
         },
         {
           "n": 18,
-          "text": "(was #6151 c2)",
+          "text": "Every Core member that has a CORE_CALLS row is declared in Core source, and the compiler's twin of Core's API is deleted in one cutover: Compiler/Prelude/Core.jet's member rows and Registry/CoreCalls.jet, CoreCallRows.jet, CoreCallExtensions.jet, CoreSignatures.jet, CorePlatformSignatures.jet, CoreHostSignatures.jet and CoreValueSignatures.jet (census F4, F19). Proof: `git ls-files Compiler/JetFoundation/Source/Registry | grep -E 'Core(Calls|CallRows|CallExtensions|[A-Za-z]*Signatures)\\.jet'` prints nothing and `jet test tests/guards --filter core_declarations` passes. (was #6151 c2)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:49.631Z"
+          "at": "2026-11-16T01:13:55.269Z"
         },
         {
           "n": 19,
-          "text": "(was #6151 c12)",
+          "text": "A user call and a Core call to the same jet.runtime host leaf lower to the same IR shape. Proof: `jet test Compiler --profile cases --filter host_leaf_user_and_core_lower_alike` (an IR dump comparison). (was #6151 c12)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:51.974Z"
+          "at": "2026-11-16T01:13:56.333Z"
         },
         {
           "n": 20,
-          "text": "(was #6151 c39)",
+          "text": "A user package writes a build helper with the same API core.build uses. Proof: `jet test Compiler --profile golden --filter Metaprogramming/BuildTime/UserBuildHelper` passes. (was #6151 c39)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:56.303Z"
+          "at": "2026-11-16T01:13:57.330Z"
         },
         {
           "n": 21,
-          "text": "(was #6151 c52)",
+          "text": "D-CORE-LOWER1=A, entry half: the entry package's own unreached bodies follow dead_code=remove. Every entry root (jobs, C exports, CLI commands, callbacks and other roots) is kept, and an unreached entry function is not lowered. It is met when the ffi and export case lines pass (they were red from 4 selfhost_terminators jet_lexer cases broken by ScriptAPI-7 and a musl race in cffi concurrent-bridges). Proof: `jet test Compiler --profile cases --filter core_lower_entry_roots` (a case per root kind). (was #6151 c52)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:59.728Z"
+          "at": "2026-11-16T01:13:58.353Z"
         }
       ],
       "refs": [],
@@ -105738,8 +105738,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-16T00:52:06.196Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-16T01:13:58.353Z",
+      "updatedBy": "Main",
       "criteriaLastN": 21
     },
     {
@@ -105823,48 +105823,48 @@
         },
         {
           "n": 7,
-          "text": "(was #6151 c11)",
+          "text": "IR lowers Core calls through their host-leaf declarations: JetIR's RouteHandle.jet, RouteBuiltin.jet and RouteBrowser.jet hold no Core member names, and the runtime RouteAFont, RouteAGame, RouteBrowser, RouteTerm and RouteWeb tables are deleted or keyed by declared symbols (census F04). Proof: those tables leave tests/guards/closed_lists/baseline.tsv and `jet test tests/guards --filter closed_lists` passes. (was #6151 c11)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:50.880Z"
+          "at": "2026-11-16T01:13:59.356Z"
         },
         {
           "n": 8,
-          "text": "(was #6151 c14)",
+          "text": "Format selectors, decode, precise math and `loop line in handle.lines()` bind through public traits: JetIR's CoreReach.jet (lines 35-138 at 25f9dee58f) names no Core file path or helper (census F05). Trait-bound format and decode is on Main's ballot list (2026-11-15). Proof: `git ls-files Compiler/JetIR/Source/CoreReach.jet` prints nothing, or `git grep -n -E 'Core/|__decode_|__stdout_next_line' Compiler/JetIR/Source/CoreReach.jet` prints nothing. (was #6151 c14)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:52.995Z"
+          "at": "2026-11-16T01:14:00.341Z"
         },
         {
           "n": 9,
-          "text": "(was #6151 c15)",
+          "text": "A user type implements each of those traits and works with the language form: a format selector, decode, precise math and a line loop. It depends on the same ballot (Main's ballot list, 2026-11-15). Proof: `jet test Compiler --profile golden --filter Types/Traits/LanguageFormTraits` passes on o0, o1 and o2. (was #6151 c15)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:54.059Z"
+          "at": "2026-11-16T01:14:01.353Z"
         },
         {
           "n": 10,
-          "text": "(was #6151 c38)",
+          "text": "core.build runs on the public compiler library: Driver/BuildAdapter.jet (lines 36-81) dispatches no Build or BuildPlan member-name strings, and JetBuildSession is deleted or becomes a public library package (census F16). Proof: BuildAdapter.jet's member-name list leaves tests/guards/closed_lists/baseline.tsv and `jet test tests/guards --filter closed_lists` passes. (was #6151 c38)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:55.186Z"
+          "at": "2026-11-16T01:14:02.412Z"
         },
         {
           "n": 11,
-          "text": "(was #6151 c48)",
+          "text": "Each Core call carries the full effect set its Core declaration writes: the call row holds a set of effects, built from the parsed Core signature, and the JS effect lists are deleted. Today Core/Jobs/Jobs.jet:126 declares `fn queue() -[DB, Env, FS, Time]>` but CoreCallRows.jet:1278 keeps only Effect.DB (census F1, Docs/audits/2026-11-05-single-source-census.md). Proof: `jet test Compiler --profile cases --filter core_call_effect_set` shows all four effects for jobs.queue. (was #6151 c48)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:58.774Z"
+          "at": "2026-11-16T01:14:03.389Z"
         }
       ],
       "refs": [],
@@ -105878,7 +105878,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-16T00:41:58.774Z",
+      "updated": "2026-11-16T01:14:03.389Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -106053,12 +106053,12 @@
         },
         {
           "n": 5,
-          "text": "(was #4022 c3)",
+          "text": "D-EFFECT-ROOT-WORDS1=A keeps the short effect roots, and the one effect list in Docs/spec documents what each root covers. Proof: `jet test tests/guards --filter effect_list_documents_every_root`. (was #4022 c3)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:40:33.888Z"
+          "at": "2026-11-16T01:14:04.437Z"
         }
       ],
       "refs": [],
@@ -106073,7 +106073,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:10.153Z",
-      "updated": "2026-11-16T00:40:33.888Z",
+      "updated": "2026-11-16T01:14:04.437Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -106231,66 +106231,66 @@
         },
         {
           "n": 8,
-          "text": "(was #3590 c35)",
+          "text": "#3637 Provider: provider context, adapters, core and package providers. Proof: the claims of #3637 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (was #3590 c35)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:25.059Z"
+          "at": "2026-11-16T01:14:05.560Z"
         },
         {
           "n": 9,
-          "text": "(was #3590 c36)",
+          "text": "#3638 Provider: provider federation graph, package graph and plan facts. Proof: the claims of #3638 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (was #3590 c36)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:26.402Z"
+          "at": "2026-11-16T01:14:06.738Z"
         },
         {
           "n": 10,
-          "text": "(was #3590 c37)",
+          "text": "#3639 Provider: registries: fetch, native, CRAN. Proof: the claims of #3639 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (was #3590 c37)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:27.954Z"
+          "at": "2026-11-16T01:14:07.844Z"
         },
         {
           "n": 11,
-          "text": "(was #3590 c38)",
+          "text": "#3640 Provider: registries: LuaRocks and script registry. Proof: the claims of #3640 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (was #3590 c38)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:29.214Z"
+          "at": "2026-11-16T01:14:09.009Z"
         },
         {
           "n": 12,
-          "text": "(was #3590 c39)",
+          "text": "#3641 Provider: remote and Nix providers. Proof: the claims of #3641 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (was #3590 c39)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:30.539Z"
+          "at": "2026-11-16T01:14:10.104Z"
         },
         {
           "n": 13,
-          "text": "(was #3590 c40)",
+          "text": "#3642 Provider: C/C++ toolchain provider. Proof: the claims of #3642 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (was #3590 c40)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:31.830Z"
+          "at": "2026-11-16T01:14:11.106Z"
         },
         {
           "n": 14,
-          "text": "(was #3590 c41)",
+          "text": "#3643 Provider: bridge, foreign and remote build facts. Proof: the claims of #3643 pass as Provider rows of `jet test Compiler --profile packages` (4af5a352ef), with no known-failing ledger row left under #3590. (was #3590 c41)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:33.182Z"
+          "at": "2026-11-16T01:14:12.072Z"
         }
       ],
       "refs": [],
@@ -106305,7 +106305,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:12.098Z",
-      "updated": "2026-11-16T00:39:33.182Z",
+      "updated": "2026-11-16T01:14:12.072Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -106402,48 +106402,48 @@
         },
         {
           "n": 9,
-          "text": "(was #3329 c9)",
+          "text": "syntax-decisions.md, core-library.md and the syntax registry state one yielding-loop and collection-head rule: D-COMPREHEND1=A on top of D-COMPREHENSION1, D-LOOPEVAL1 and D-ARROW-CONTROL1, with no contradiction left. Proof: `jet test tests/guards --filter syntax_registry` passes and `git grep -n 'D-COMPREHEND1' -- Docs/spec` shows the rule in both docs. (was #3329 c9)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:12.956Z"
+          "at": "2026-11-16T01:14:13.022Z"
         },
         {
           "n": 10,
-          "text": "(was #3329 c22)",
+          "text": "A typed collection head takes a loop and builds that collection through FromIterator: `Set<String>{loop …}` and `[String: Int]{loop … -> k: v}`; a bare loop literal stays a list (D-COMPREHEND1=A). Proof: `jet test Compiler --profile golden --filter Collections/TypedLoopHeads` passes on o0, o1 and o2. (was #3329 c22)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:19.581Z"
+          "at": "2026-11-16T01:14:14.021Z"
         },
         {
           "n": 11,
-          "text": "(was #3329 c23)",
+          "text": "Items and a loop never mix in one collection literal: the mix is a registered error with what/why/fix (D-COMPREHEND1=A). Proof: `jet test Compiler --profile ui --filter collection_literal_mixes_items_and_loop`. (was #3329 c23)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:21.604Z"
+          "at": "2026-11-16T01:14:14.958Z"
         },
         {
           "n": 12,
-          "text": "(was #4022 c5)",
+          "text": "An executable token-to-meaning table gives each sigil one meaning, following D-SIGIL-ALGEBRA1=B, D-MOVE-SIGIL1=A and D-BIT-SIGILS1=A, and a guard checks the lexer against it. Proof: `jet test tests/guards --filter sigil_meaning_table`. (was #4022 c5)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:40:34.831Z"
+          "at": "2026-11-16T01:14:15.911Z"
         },
         {
           "n": 13,
-          "text": "(was #4022 c8)",
+          "text": "D-SIGIL-ALGEBRA1=B: infix `^` and `^=` for power are not Jet syntax and get no teaching diagnostic (owner order), and `x.pow(n)` generates the same code the operator did. Integer bit operations use `&`, `|`, `~` and `&~` (D-BIT-SIGILS1=A, 2026-10-31). Proof: `jet test Compiler --profile ui --filter caret_is_not_power` and `jet test Compiler --profile golden --filter pow_`. (was #4022 c8)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:40:35.754Z"
+          "at": "2026-11-16T01:14:16.942Z"
         }
       ],
       "refs": [],
@@ -106457,7 +106457,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.039Z",
-      "updated": "2026-11-16T00:40:35.754Z",
+      "updated": "2026-11-16T01:14:16.943Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -106518,12 +106518,12 @@
         },
         {
           "n": 5,
-          "text": "(was #3720 c50)",
+          "text": "A marker application counts as a use of its import, so it raises no false unused-import error, while a genuinely unused import is still reported as the registered tidy error (listed by jet check, never stopping jet run). An unknown or qualified marker gives one E0927 per site whose Why and Fix match D-META-USER1 and name the declaring import. A parse error in an imported file renders with that file's path, line and text. Proof: UI snapshots for all three under `jet test Compiler --profile ui --filter marker_import`. (was #3720 c50)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:40:27.470Z"
+          "at": "2026-11-16T01:14:17.972Z"
         },
         {
           "n": 6,
@@ -106546,7 +106546,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.937Z",
-      "updated": "2026-11-16T00:40:28.616Z",
+      "updated": "2026-11-16T01:14:17.972Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -224498,6 +224498,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T01:14:17.972Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0gbe4aj",
+      "note": "#5: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3720 c50)"
+    },
+    {
+      "at": "2026-11-16T01:14:16.943Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c01gyy9b",
+      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4022 c8)"
+    },
+    {
+      "at": "2026-11-16T01:14:15.911Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c01gyy9b",
+      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4022 c5)"
+    },
+    {
+      "at": "2026-11-16T01:14:14.958Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c01gyy9b",
+      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c23)"
+    },
+    {
+      "at": "2026-11-16T01:14:14.021Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c01gyy9b",
+      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c22)"
+    },
+    {
+      "at": "2026-11-16T01:14:13.023Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c01gyy9b",
+      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3329 c9)"
+    },
+    {
+      "at": "2026-11-16T01:14:12.072Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ho9o8j",
+      "note": "#14: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3590 c41)"
+    },
+    {
+      "at": "2026-11-16T01:14:11.106Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ho9o8j",
+      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3590 c40)"
+    },
+    {
+      "at": "2026-11-16T01:14:10.104Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ho9o8j",
+      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3590 c39)"
+    },
+    {
+      "at": "2026-11-16T01:14:09.009Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ho9o8j",
+      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3590 c38)"
+    },
+    {
+      "at": "2026-11-16T01:14:07.844Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ho9o8j",
+      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3590 c37)"
+    },
+    {
+      "at": "2026-11-16T01:14:06.738Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ho9o8j",
+      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3590 c36)"
+    },
+    {
+      "at": "2026-11-16T01:14:05.560Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ho9o8j",
+      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3590 c35)"
+    },
+    {
+      "at": "2026-11-16T01:14:04.437Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lidgow",
+      "note": "#5: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4022 c3)"
+    },
+    {
+      "at": "2026-11-16T01:14:03.389Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sdz4q0",
+      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6151 c48)"
+    },
+    {
+      "at": "2026-11-16T01:14:02.412Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sdz4q0",
+      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6151 c38)"
+    },
+    {
+      "at": "2026-11-16T01:14:01.353Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sdz4q0",
+      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6151 c15)"
+    },
+    {
+      "at": "2026-11-16T01:14:00.341Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sdz4q0",
+      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6151 c14)"
+    },
+    {
+      "at": "2026-11-16T01:13:59.356Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sdz4q0",
+      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6151 c11)"
+    },
+    {
+      "at": "2026-11-16T01:13:58.353Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#21: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6151 c52)"
+    },
+    {
+      "at": "2026-11-16T01:13:57.331Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#20: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6151 c39)"
+    },
+    {
+      "at": "2026-11-16T01:13:56.333Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#19: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6151 c12)"
+    },
+    {
+      "at": "2026-11-16T01:13:55.269Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#18: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6151 c2)"
+    },
+    {
+      "at": "2026-11-16T01:13:54.251Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#17: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5073 c18)"
+    },
+    {
+      "at": "2026-11-16T01:13:53.271Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0255wk0",
+      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4022 c19)"
+    },
     {
       "at": "2026-11-16T01:13:51.869Z",
       "by": "Main",
