@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108431,
+    "rev": 108432,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -221218,6 +221218,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T05:56:19.286Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0bucgf0",
+      "note": "Cycle p207 landed: assembled-unit imports, root loop waits (proof failing), lander regenerates diagnostics"
+    },
+    {
       "at": "2026-11-16T05:55:14.267Z",
       "by": "Main",
       "action": "card.update",
@@ -226082,6 +226089,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0bucgf0",
+      "title": "Cycle p207 landed: assembled-unit imports, root loop waits (proof failing), lander regenerates diagnostics",
+      "body": "# Cycle p207 landed (dev 0e93e25032)\n\n**Landed (4):**\n- MemKernel-6-2 **assembled-unit-imports**: the shared CoreImports file is gone; each assembled Jetpack file now imports what it uses.\n- MemKernel-6-2 **unit-tidy-sites** and **tidy-cleanup-2**.\n- PrecompiledCore-4 **root-loop-waits-on-run-value**: a root `#loop` over a `#run` module value now waits for that value instead of erroring. Its proof case still fails, though: the value is never computed, so the case reports E0956 \"the build could not compute ASSETS\". PrecompiledCore-4 is fixing that first, and #6847 c9 stays open until the case passes.\n\n**Suites against p206:**\n- ui: 2843 pass, 20 fail.\n- golden: 4965 pass, 4 fail.\n- cases: 4776 pass, 131 fail.\n- core: 2419 of 2421 pass.\n\nTwo new failures. `Examples/Interop/FFI/LibraryGrant.jet` (O0) is a load flake: it passes on O0, O1 and O2 when run alone. The other is the root-loop case above. No new exit-101 failures.\n\n**Compile speed:** rcc 0.49–0.51 s at 316 MB, InspectBuild 8.59 s. Both are flat against p206.\n\n**Lander change:** a conflict only in the diagnostic generators' outputs no longer bounces a SUB. The stack keeps one side, then reruns DiagnosticRows and DiagnosticCensus `--write` on the stacked sources and lands their output as one more commit. This unblocked p208's ten-SUB stack.\n\n**p208 census:**\n- **Refused:** Speed-3-2's schedule SUB (#6825 c2), and its c4 that sits on it. In Core, `App.__every` moves `run` into a lambda that can run more than once (E0121). Both went back to Speed-3-2.\n- **Rerunning:** the other nine SUBs.\n\n**Board:**\n- #6820 and #6552 are closed (every criterion was met).\n- New criteria from D-PRIM-ANY1 review 5:\n  - #6839 c39: an internal compiler error when a trait's owner implements it for a type from another file (an I2 violation).\n  - #6839 c40: a union with a trait member.\n  - #6839 c41: `Val(s)` copies a read value with no mark, a hidden clone.\n  - #6845 c18: a type-key collision panics instead of giving a diagnostic.\n- #6839 c35 now also covers the nested-module arm.\n\n**D-PRIM-ANY1:** review 5 failed on five ballot gaps; its recall audit passed. The recommendation is still C. AnyBallot is revising for round 5, and a sixth reviewer follows.\n",
+      "by": "Main",
+      "created": "2026-11-16T05:56:19.286Z",
+      "sections": []
+    },
     {
       "id": "briefing0p9p91m",
       "title": "Cycle p205 landed (dev 16c1bda2d9): 5 SUBs, core suite all green, 3 criteria met; p206 running",
