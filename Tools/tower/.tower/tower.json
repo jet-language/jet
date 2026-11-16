@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108418,
+    "rev": 108422,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51155,6 +51155,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T05:19:59.046Z"
+        },
+        {
+          "n": 13,
+          "text": "Using a priv struct from a file module outside that module gets E0605 (private), not E0119 'There's no type called geo.Secret' (p205, O0/O1/O2 alike; D-PRIM-ANY1 round 4), probe o8d in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes. Pairs with c11 (inline modules). Proof: a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:37:45.164Z"
         }
       ],
       "refs": [],
@@ -51164,12 +51173,12 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-07T11:23:08.090Z",
-      "updated": "2026-11-16T05:19:59.046Z",
+      "updated": "2026-11-16T05:37:45.164Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 12
+      "criteriaLastN": 13
     },
     {
       "id": "c038vt4s",
@@ -103335,6 +103344,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T05:20:05.143Z"
+        },
+        {
+          "n": 36,
+          "text": "I1 type safety: a union of two types with the same short name from different modules (geo2.Point | map2.Point, file modules) keeps both members. Today sema merges them into one member, so a map2.Point{name: \"harbor\"} prints as Point { x: 35184415600640, y: 2 } (another type's bytes) and the .Point(p) arm binds the wrong type; type tables still tell them apart (p205, O0/O1/O2 alike; D-PRIM-ANY1 round 4), probes o8f and o8b, control o8g in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes. Member identity is the type's full identity, never its short name. Proof: a cases row building and matching each member of such a union on O0/O1/O2, plus a sweep of every place union members are keyed by name.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:37:38.904Z"
+        },
+        {
+          "n": 37,
+          "text": "A type alias of an inline-module type resolves to its target everywhere, as it already does for file modules (o7, o8i): a call through the alias type-checks (today it says 'wants geo.Point, but this is geo.Point', o5c); a type-table arm through the alias matches (today it silently takes else, o5); and a type-table arm geo.Point -> works (today E0608, o5b) (p205, O0/O1/O2 alike; D-PRIM-ANY1 round 4), probes in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes. Proof: a cases row per form on each tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:37:41.122Z"
+        },
+        {
+          "n": 38,
+          "text": "A type alias names its target as a union member arm: an arm written through an alias matches the aliased member. Today it is E0305 with file and with inline modules (p205, O0/O1/O2 alike; D-PRIM-ANY1 round 4), probes o1 and o8e in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes. Proof: a cases row.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:37:43.337Z"
         }
       ],
       "refs": [],
@@ -103345,9 +103381,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T05:20:05.143Z",
+      "updated": "2026-11-16T05:37:43.337Z",
       "updatedBy": "Main",
-      "criteriaLastN": 35
+      "criteriaLastN": 38
     },
     {
       "id": "c0c3gh6u",
@@ -221188,6 +221224,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T05:37:45.164Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06m6abh",
+      "note": "#13 Using a priv struct from a file module outside that module g"
+    },
+    {
+      "at": "2026-11-16T05:37:43.337Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#38 A type alias names its target as a union member arm: an arm "
+    },
+    {
+      "at": "2026-11-16T05:37:41.122Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#37 A type alias of an inline-module type resolves to its target"
+    },
+    {
+      "at": "2026-11-16T05:37:38.904Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#36 I1 type safety: a union of two types with the same short nam"
+    },
     {
       "at": "2026-11-16T05:34:11.067Z",
       "by": "Main",
