@@ -4,6 +4,13 @@ The before-and-after receipt for the precompiled Core interface step, measured o
 
 Findings: wall and peak improved on every program; the one WORSE row (built-in summarize run user+sys, +3%) has a better wall and an improved twin arm, so it reads as noise. The load gate is not met: a loaded body costs x12 to x20 a body checked from text, which is open speed work.
 
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| W1 summarize run user+sys +3% | no-action | its wall improved (x0.97) and the named-tree arm of the same program improved, so the row is run-to-run noise, not a regression |
+| L1 loaded body costs x12 to x20 a body checked from text | card | #6759 criterion 24: the load path reaches a tenth of a text check |
+<!-- /audit-dispositions -->
+
 
 Before: identity `jet@a0.0.45#971cc5a059ed680bb74df04aaaa286a87e8eea0f00d39f0455abc0b68931f185`, `jet --version`: `jet a0.0.45-dev`.
 

@@ -24,7 +24,7 @@ TxnErr: enum {
 }
 
 transfer: fn(from: &Ledger, to: &Ledger, amount: Int) -> Int TxnErr! {
-    #Transact(tx) {
+    #Transact {
         from.balance -= amount
         to.balance += amount
         if from.balance < 0 -> return Err(TxnErr.Overdraft)
@@ -36,7 +36,7 @@ run: fn() {
     alice := Ledger{balance: 100, name: "Alice"}
     bob := Ledger{balance: 0, name: "Bob"}
     print("=== successful transfer ===")
-    r: transfer(alice, bob, 40) ?? -1
+    _: transfer(alice, bob, 40) ?? -1
     print(alice.balance)
     print(bob.balance)
     print("=== overdraft: balances restored by Rollback ===")

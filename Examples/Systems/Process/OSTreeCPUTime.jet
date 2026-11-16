@@ -37,15 +37,15 @@ run: fn() {
         .Ok(spent) -> if os.cpu_time(child.id()) == {
             // The grandchild's loop runs for far more than 50 ms of CPU.
             .Ok(alone) -> spent.in(.Nanoseconds) - alone.in(.Nanoseconds) >= 50000000
-            .Err(error) -> spent.in(.Nanoseconds) >= 50000000
+            .Err(_) -> spent.in(.Nanoseconds) >= 50000000
         }
         .Err(error) -> kind(error) == "Unsupported"
     }
     print("the shell said it was done: {said.len() > 0}")
     print("the tree's CPU time counts the finished grandchild, or is unreadable here: {counted}")
-    print("tree_cpu_time(-1): {if os.tree_cpu_time(-1) == { .Ok(spent) -> "accepted", .Err(error) -> kind(error) }}")
+    print("tree_cpu_time(-1): {if os.tree_cpu_time(-1) == { .Ok(_) -> "accepted", .Err(error) -> kind(error) }}")
     // No Linux pid is above 4194304, so nothing is read.
-    print("tree_cpu_time(4194305): {if os.tree_cpu_time(4194305) == { .Ok(spent) -> "accepted", .Err(error) -> kind(error) }}")
+    print("tree_cpu_time(4194305): {if os.tree_cpu_time(4194305) == { .Ok(_) -> "accepted", .Err(error) -> kind(error) }}")
     child.stdin.close()
     _ := child.wait()
 }

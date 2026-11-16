@@ -129,7 +129,7 @@ IR_COMPILER_OWNED_CORE_RECORDS: #run { [IRCompilerOwnedRecord]{
     {name: "UIShortcutBinding", fields: [String]{"shortcut", "action", "node"}},
     {name: "UIAccessibility", fields: [String]{"name", "description", "states"}},
     {name: "RealtimeReceipt", fields: [String]{"requested_rate_hz", "requested_frames", "completed_callbacks", "completed_frames", "missed", "max_lateness_ns", "start_identity", "end_identity"}},
-    {name: "TypeInfo", fields: [String]{"name", "path", "module", "identity", "kind", "layout", "fields", "methods", "type_params", "markers", "expanded_markers", "traits", "constants", "generic_bindings", "numeric", "states", "transitions", "facts", "dimensions", "span", "base", "location", "documentation"}},
+    {name: "TypeInfo", fields: [String]{"name", "path", "module", "identity", "kind", "layout", "fields", "methods", "type_params", "markers", "expanded_markers", "traits", "constants", "generic_bindings", "numeric", "states", "transitions", "facts", "dimensions", "span", "base", "location", "documentation", "cases"}},
     {name: "LayoutInfo", fields: [String]{"kind", "target", "guarantee", "source", "size", "alignment", "stride", "requested_alignment", "effective_alignment", "fields"}},
     {name: "LayoutField", fields: [String]{"name", "type", "target", "guarantee", "source", "offset", "size"}},
     {name: "MarkerInfo", fields: [String]{"name", "args"}},
@@ -169,6 +169,7 @@ IR_COMPILER_OWNED_CORE_RECORDS: #run { [IRCompilerOwnedRecord]{
     {name: "EffectInfo", fields: [String]{"values", "declared", "inferred"}},
     {name: "MethodInfo", fields: [String]{"name", "module", "identity", "signature", "markers", "dimensions", "facts", "arithmetic", "is_pub", "span", "location", "documentation"}},
     {name: "FieldInfo", fields: [String]{"name", "type", "index", "fields", "markers", "dimensions", "facts", "is_pub", "span", "default", "offset", "location", "documentation"}},
+    {name: "CaseInfo", fields: [String]{"name", "path", "wire_name", "payload", "discriminant", "markers", "span"}},
     // `meta.add_struct`'s field, which a build writes as a record literal.
     {name: "CompilerField", fields: [String]{"name", "type"}},
     {name: "DefaultInfo", fields: [String]{"source"}},
@@ -445,6 +446,8 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "UnitScaleProvenanceKind", variants: [String]{"Rational", "SymbolicPi", "Conventional", "Measured"}},
     // A reflected compile-time value; its payloads are the Core enum rows.
     {name: "PreparedValue", variants: [String]{"Int", "Float", "Bool", "Char", "String", "Enum", "List", "Struct", "Unit"}},
+    // A reflected enum case's payload; its payloads are the Core enum rows.
+    {name: "CasePayload", variants: [String]{"Unit", "Single", "Named"}},
 } }
 
 // The payload of one compiler-owned enum variant.
@@ -520,8 +523,9 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         return ir_compiler_owned_single(Type.Named{name: "PluginFault"})
     }
     // The canonical twelve DataEvent payloads are the generated Core payload
-    // rows (data_event_payload), as are a reflected PreparedValue's.
-    if name == "DataEvent" || name == "PreparedValue" {
+    // rows (data_event_payload), as are a reflected PreparedValue's and a
+    // reflected case's CasePayload.
+    if name == "DataEvent" || name == "PreparedValue" || name == "CasePayload" {
         payload: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
         if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])
         return IRCompilerOwnedPayload.Unit

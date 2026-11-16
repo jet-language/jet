@@ -170,6 +170,34 @@ ir_render_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slo
     }
 }
 
+// The text a reflected trait value at `slot` names its type by: the payload
+// key its box holds maps to the declared type of that key among those the
+// names at `args[names]` list (sema_call_reflection_names: a count, then each
+// type's checked key, type name and path), so its path is the identity of the
+// TypeId `T.reflect()` reads for it. `part` picks the type name (0) or the
+// path (1); a key of no listed type keeps the checked text of the trait
+// value's own type.
+ir_trait_reflect_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, args: [Int], names: Int, part: Int) -> Int Never! {
+    count: ir_reflect_count(p, b, args[names + 2])
+    builder: ir_text_builder(m, b)
+    key: ir_load_word(m, b, slot, 0)
+    loop index in 0..<count {
+        entry: names + 3 + index * 3
+        payload_key: ir_trait_key(m, p, Type.Named{name: ir_reflect_literal(p, b, args[entry])})
+        expected: ir_word_const(m, b, payload_key)
+        selected: ir_bool_op(m, b, IROp.Eq, key, expected)
+        ir_open_if(b.f, selected, b.line)
+        text: ir_reflect_literal(p, b, args[entry + 1 + part])
+        ir_push_static(m, b, builder, text)
+        ir_else(b.f, b.line)
+    }
+    fallback: ir_reflect_literal(p, b, args[names + part])
+    ir_push_static(m, b, builder, fallback)
+    loop _ in 0..<count -> ir_end(b.f, b.line)
+    string_row: ir_string_row(m)
+    ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+}
+
 // A concrete receiver type's identity, the same however the checked type
 // spells the name: a boxed value's type is module-qualified, an
 // implementation's owner type is the name its body wrote.

@@ -6248,26 +6248,32 @@ ir_route_store_err_message: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: 
     ir_emit(b.f, IROp.Store, -1, base, offset, error, b.line)
 }
 
-// `reflect.of(value, type_name, path, level)`: sema hands the checked names
-// as text after the value, then the value's field tree, one level as a field
-// count followed by each field's name, type name, path and its own level.
-// The Value record carries the value's Display text and one Value per stored
-// field, and a struct field's Value carries its own fields the same way.
+// `reflect.of(value, names, level)`: sema hands the checked names as text
+// after the value (sema_call_reflection_names: the type name, the path and the
+// declared types an erased trait value may hold), then the value's field tree,
+// one level as a field count followed by each field's name, its names and its
+// own level. The Value record carries the value's Display text and one Value
+// per stored field, and a struct field's Value carries its own fields the
+// same way.
 ir_reflect_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
-    if args.len() < 4 -> return ir_fail_slot(b, span, "reflect.of without its checked names")
+    if args.len() < 5 -> return ir_fail_slot(b, span, "reflect.of without its checked names")
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     value_ty: ir_ty(p, b, args[0])
     value: ir_expr(m, p, b, args[0])
     if ir_failed(b) -> return -1
     display: ir_render(m, p, b, value_ty, value, IRRender.Display, span)
     if ir_failed(b) || display < 0 -> return -1
-    level: ir_reflect_fields(m, p, b, value_ty, value, args, 3, span)
+    after_names: ir_reflect_names_end(p, b, args, 1)
+    if after_names < 0 {
+        return ir_fail_slot(b, span, "reflect.of names of {ir_type_name(value_ty)}")
+    }
+    level: ir_reflect_fields(m, p, b, value_ty, value, args, after_names, span)
     if ir_failed(b) || level.fields < 0 -> return -1
     if level.next != args.len() {
         return ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}")
     }
-    type_text: ir_expr(m, p, b, args[1])
-    path_text: ir_expr(m, p, b, args[2])
+    type_text: ir_reflect_name(m, p, b, value_ty, value, args, 1, 0)
+    path_text: ir_reflect_name(m, p, b, value_ty, value, args, 1, 1)
     if ir_failed(b) -> return -1
     result: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{type_text, path_text, display, level.fields}, result_row)
     ir_reflect_hold(m, b, result, value_ty, value)
@@ -6276,6 +6282,28 @@ ir_reflect_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [In
     ir_release(m, b, path_text)
     ir_release(m, b, value)
     result
+}
+
+// The index after the names that start at `args[names]` (the type name, the
+// path, then a count of declared types and each one's checked key, type name
+// and path), or -1 when they run past `args`.
+ir_reflect_names_end: fn(p: IRProgram, b: IRBuilder, args: [Int], names: Int) -> Int Never! {
+    if names + 2 >= args.len() -> return -1
+    count: ir_reflect_count(p, b, args[names + 2])
+    end: names + 3 + count * 3
+    if count < 0 || end > args.len() -> return -1
+    end
+}
+
+// One of the names at `args[names]` (`part` 0: the type name, 1: the path)
+// as text for `value` of `value_ty`: an erased trait value names the declared
+// type its box holds (ir_trait_reflect_text), any other value the checked
+// text.
+ir_reflect_name: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, args: [Int], names: Int, part: Int) -> Int Never! {
+    if ir_untag(value_ty) == .TraitObject(_) && value >= 0 && ir_reflect_count(p, b, args[names + 2]) > 0 {
+        return ir_trait_reflect_text(m, p, b, value, args, names, part)
+    }
+    ir_expr(m, p, b, args[names + part])
 }
 
 // One level of the reflect.of field tree, read from `args` at `at`: the new
@@ -6293,7 +6321,8 @@ ir_reflect_fields: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type,
     fields: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [Int]{capacity}, pointer_row)
     next := at + 1
     loop _ in 0..<count {
-        if next + 2 >= args.len() {
+        after_names: if next < args.len() -> ir_reflect_names_end(p, b, args, next + 1) else -> -1
+        if after_names < 0 {
             return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), next: next)
         }
         name: ir_reflect_literal(p, b, args[next])
@@ -6306,10 +6335,10 @@ ir_reflect_fields: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type,
         shown: ir_render(m, p, b, field_ty, read, IRRender.Display, span)
         if ir_failed(b) || shown < 0 -> return (fields: -1, next: next)
         field_name: ir_expr(m, p, b, args[next])
-        field_type_name: ir_expr(m, p, b, args[next + 1])
-        field_path: ir_expr(m, p, b, args[next + 2])
+        field_type_name: ir_reflect_name(m, p, b, field_ty, read, args, next + 1, 0)
+        field_path: ir_reflect_name(m, p, b, field_ty, read, args, next + 1, 1)
         if ir_failed(b) -> return (fields: -1, next: next)
-        nested: ir_reflect_fields(m, p, b, field_ty, read, args, next + 3, span)
+        nested: ir_reflect_fields(m, p, b, field_ty, read, args, after_names, span)
         if ir_failed(b) || nested.fields < 0 -> return (fields: -1, next: nested.next)
         next = nested.next
         field_value: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{field_type_name, field_path, shown, nested.fields}, pointer_row)

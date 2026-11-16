@@ -25,7 +25,7 @@ run: fn() {
     print("asked for: {describe(os.Scheduling.RoundRobin{priority: 100})}")
     #Unsafe("posix set_scheduling: the out-of-range priority never reaches the kernel") {
         refused: if os.set_scheduling(.RoundRobin{priority: 100}) == {
-            .Ok(ok) -> "accepted"
+            .Ok(_) -> "accepted"
             .Err(error) -> (if error == {
                 .InvalidInput(_) -> "InvalidInput"
                 .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "another error"
@@ -37,11 +37,11 @@ run: fn() {
     // move that applied and read back, and a refusal, print the same line.
     #Unsafe("posix set_scheduling: this program moves itself to batch time sharing and back") {
         batch: if os.set_scheduling(.Batch) == {
-            .Ok(ok) -> (if os.scheduling() == {
+            .Ok(_) -> (if os.scheduling() == {
                 .Ok(now) -> describe(now) == "batch"
-                .Err(error) -> false
+                .Err(_) -> false
             })
-            .Err(error) -> true
+            .Err(_) -> true
         }
         print("batch applied and read back, or refused: {batch}")
         os.set_scheduling(.Normal).drop("a refused move leaves the policy as it was")

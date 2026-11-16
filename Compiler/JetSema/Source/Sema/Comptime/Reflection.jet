@@ -213,8 +213,10 @@ sema_comptime_reflection_located: fn(value: TComptimeValue, segments: [SemaSourc
         }
         .List(values) -> TComptimeValue.List{values: loop item in values -> sema_comptime_reflection_located(item, segments, module_path, source)}
         .Present(inner) -> TComptimeValue.Present{value: sema_comptime_reflection_located(inner, segments, module_path, source)}
+        // A case payload's records (CasePayload's FieldInfo rows) are located as a field's are.
+        .Enum(owner, variant, args) -> TComptimeValue.Enum{type_name: owner, variant: variant, args: loop arg in args -> TComptimeEnumArg{name: arg.name, value: sema_comptime_reflection_located(arg.value, segments, module_path, source)}}
         // copy: a scalar leaf of the producer's value; the caller keeps the original
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit -> value.copy()
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Failed(_) | .Unit -> value.copy()
     }
 }
 
@@ -229,8 +231,9 @@ sema_comptime_reflection_in_file: fn(value: TComptimeValue, file: String) -> TCo
         }
         .List(values) -> TComptimeValue.List{values: loop item in values -> sema_comptime_reflection_in_file(item, file)}
         .Present(inner) -> TComptimeValue.Present{value: sema_comptime_reflection_in_file(inner, file)}
+        .Enum(owner, variant, args) -> TComptimeValue.Enum{type_name: owner, variant: variant, args: loop arg in args -> TComptimeEnumArg{name: arg.name, value: sema_comptime_reflection_in_file(arg.value, file)}}
         // copy: a scalar leaf of the producer's value; the caller keeps the original
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit -> value.copy()
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Failed(_) | .Unit -> value.copy()
     }
 }
 
@@ -2383,6 +2386,35 @@ sema_comptime_reflection_enum_variant_fields: fn(registration: SemaRegistrationG
     }
 }
 
+// A leaf case of `definition` as its CaseInfo, in declaration order: its leaf
+// name, its dotted path through any groups, the wire name the checker gives
+// it under the enum's rename style, its payload, its written number, its
+// markers and where it is written.
+sema_comptime_reflection_enum_case_info: fn(registration: SemaRegistrationGraph, caller: Int, definition: EnumDef, module_path: String, style: String?, variant: Variant, registry: SemaScopeMembersMarkerRegistry) -> TComptimeValue Never! {
+    payload: if variant.payload == {
+        .Unit -> TComptimeValue.Enum{type_name: "CasePayload", variant: "Unit", args: [TComptimeEnumArg]{}}
+        .Single(ty, _) -> TComptimeValue.Enum{type_name: "CasePayload", variant: "Single", args: [TComptimeEnumArg]{TComptimeEnumArg{name: None, value: sema_comptime_reflection_type_id(registration, caller, ty)}}}
+        .Named(_) -> {
+            fields: sema_comptime_reflection_enum_variant_fields(registration, caller, definition, variant, registry)
+            TComptimeValue.Enum{type_name: "CasePayload", variant: "Named", args: [TComptimeEnumArg]{TComptimeEnumArg{name: None, value: TComptimeValue.List{values: fields}}}}
+        }
+    }
+    // A grouped case's name is its last path segment.
+    leaf: if variant.name.cut_last(".") == .Val(parts) -> parts.after else -> variant.name
+    sema_comptime_reflection_struct(
+        "CaseInfo",
+        [SemaComptimeReflectionField]{
+            {name: "name", value: TComptimeValue.String{value: leaf}},
+            {name: "path", value: TComptimeValue.String{value: "{module_path}.{definition.name}.{variant.name}"}},
+            {name: "wire_name", value: TComptimeValue.String{value: sema_checked_variant_wire_name(variant, style)}},
+            {name: "payload", value: payload},
+            {name: "discriminant", value: sema_comptime_reflection_layout_optional(variant.discriminant)},
+            {name: "markers", value: TComptimeValue.List{values: sema_comptime_reflection_member_markers(variant.serde_markers, registry)}},
+            {name: "span", value: sema_comptime_reflection_span(variant.name_span, "")},
+        },
+    )
+}
+
 // A variant's payload type as a TypeId: `Unit` for none, the payload type for
 // one, and the written record `{name: Type, ...}` for named fields, each
 // field type qualified in `identity` as a TypeId's is.
@@ -2523,6 +2555,7 @@ sema_comptime_reflection_builtin_type_info: fn(graph: SemaRegistrationGraph, nam
         "builtin",
         layout,
         Span{start: 0, end: 0},
+        none,
         none,
         none,
         none,
@@ -2745,6 +2778,7 @@ sema_comptime_reflection_type_info_fields: fn(
     layout: TComptimeValue,
     span: Span,
     fields: [TComptimeValue],
+    cases: [TComptimeValue],
     methods: [TComptimeValue],
     type_params: [TComptimeValue],
     markers: SemaComptimeReflectionMarkerViews,
@@ -2768,6 +2802,7 @@ sema_comptime_reflection_type_info_fields: fn(
             {name: "layout", value: layout},
             {name: "span", value: sema_comptime_reflection_span(span, "")},
             {name: "fields", value: TComptimeValue.List{values: fields}},
+            {name: "cases", value: TComptimeValue.List{values: cases}},
             {name: "methods", value: TComptimeValue.List{values: methods}},
             {name: "type_params", value: TComptimeValue.List{values: type_params}},
             {name: "markers", value: TComptimeValue.List{values: markers.markers}},
@@ -2856,6 +2891,7 @@ sema_comptime_reflection_struct_type_info: fn(
         sema_comptime_reflection_struct_layout(registration, caller, definition, engine, layout_facts),
         definition.name_span,
         reflection_fields,
+        [TComptimeValue]{},
         method_values,
         type_params,
         marker_views,
@@ -2888,9 +2924,12 @@ sema_comptime_reflection_enum_type_info: fn(
     bindings: [SemaInferenceBinding],
 ) -> TComptimeValue {
     variant_values := [TComptimeValue]{}
+    cases := [TComptimeValue]{}
     dimensions := [TComptimeValue]{}
     facts := [TComptimeValue]{}
+    style: sema_checked_rename_case(definition.serde_markers)
     loop (index, variant) in definition.variants {
+        cases.push(sema_comptime_reflection_enum_case_info(registration, caller, definition, registered_module.module_path, style, variant, registry))
         variant_values.push(sema_comptime_reflection_enum_variant_info(registration, caller, definition, variant, index, registry))
         if variant.payload == {
             .Unit -> {}
@@ -2925,6 +2964,7 @@ sema_comptime_reflection_enum_type_info: fn(
         sema_comptime_reflection_enum_layout(registration, caller, definition, engine, module_text(registration.module_table, registered_module.module_identity)),
         definition.name_span,
         variant_values,
+        cases,
         methods,
         type_params,
         marker_views,
@@ -2963,6 +3003,7 @@ sema_comptime_reflection_distinct_type_info: fn(
         "distinct",
         sema_comptime_reflection_distinct_layout(engine),
         definition.name_span,
+        [TComptimeValue]{},
         [TComptimeValue]{},
         [TComptimeValue]{},
         [TComptimeValue]{},

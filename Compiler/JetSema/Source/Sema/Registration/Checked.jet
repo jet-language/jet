@@ -130,6 +130,13 @@ sema_checked_module_key: fn(module_name: String, name: String) -> String Never! 
     if module_name == "" -> name else -> "{module_name}::{name}"
 }
 
+// The checked key (TTypeDef.key) of `nominal`, declared in `module_row`: its
+// module-qualified name, or a compiler-owned enum's bare canonical name.
+sema_checked_nominal_key: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal) -> String Never! {
+    if sema_registration_is_compiler_owned_enum(nominal) -> return nominal.symbol.name
+    sema_checked_module_key(module_text(graph.module_table, module_row.module_identity), nominal.symbol.name)
+}
+
 // The member types of a standard core.units family every module sees. They
 // register no nominal (one canonical owner across modules), so each module
 // carries them as checked Float distincts for lowering.
@@ -3108,7 +3115,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
     type_kind: kind ?? return None
     TTypeDef{
         module_identity: module_row.module_identity,
-        key: if sema_registration_is_compiler_owned_enum(nominal) -> name else -> sema_checked_module_key(module_text(graph.module_table, module_row.module_identity), name),
+        key: sema_checked_nominal_key(graph, module_row, nominal),
         name: name,
         span: sema_checked_item_span(definition),
         public: nominal.symbol.visibility >= 2,

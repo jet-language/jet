@@ -219,7 +219,7 @@ store_build_last_run_directory: fn(root: String, create: Bool) -[FS, Env]> files
 store_build_write_last_run: fn(root: String, program: String, key: String) ArtifactStoreError! -[FS, Env, Time.Wait]> {
     bytes: store_build_last_run_encode(program, key)
     held: store_build_last_run_directory(root, true)
-    lock: held.lock()
+    _lock: held.lock()
     name: ArtifactDigest.hash(program.bytes()).to_hex()
     temp: ".{name}.{process.current_pid()}"
     writer := held.create(temp, if_exists: .Refuse, mode: Val(0o600))

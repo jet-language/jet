@@ -114,13 +114,13 @@ PublicationRegistryTransport: enum {
     remote: fn(self, url: String) -> String Never! {
         if self == {
             .Local -> url.copy()
-            .Network(scheme, host, port, explicit_port, address) -> publication_registry_remote(url, scheme, port, explicit_port, publication_registry_ip(address))
+            .Network(scheme, _, port, explicit_port, address) -> publication_registry_remote(url, scheme, port, explicit_port, publication_registry_ip(address))
         }
     }
 
     command: fn(self) -[Env, Exec]> ProcessSpec Never! {
         spec := foundation_hardened_git_command()
-        if self == .Network(scheme, host, port, explicit_port, address) {
+        if self == .Network(scheme, host, port, _, address) {
             if scheme == "http" || scheme == "https" {
                 loop value in publication_registry_http_config(host, port, publication_registry_ip(address)) {
                     spec = spec.arg("-c").arg(value)

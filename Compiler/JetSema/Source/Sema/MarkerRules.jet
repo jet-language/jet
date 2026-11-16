@@ -15,7 +15,6 @@ use jet_foundation.[
     STATE_ARROW_LABEL,
     Span,
     Stmt,
-    Symbol,
     SymbolKind,
     TAppliedRule,
     TAppliedRuleArgKind,
@@ -1291,7 +1290,6 @@ sema_marker_rules_declared_signature: fn(rule: SemaScopeMembersMarkerRule) -> (s
     variadic_expected_type := Type?{None}
     loop parameter in rule.params {
         if parameter.name.starts_with("$") -> next
-        ty := parameter.ty ?? Type.Named{name: "Value"}
         source_type := sema_marker_rules_type_name_for_parameter(parameter) ?? "Value"
         kind := sema_marker_rules_parameter_kind(parameter)
         default_source := if parameter.value != None -> Val("…") else -> None
