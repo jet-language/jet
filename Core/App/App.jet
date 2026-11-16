@@ -512,18 +512,19 @@ state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Load
 
 // Runs `binding`'s source as this task's running binding, so the reads it
 // makes join the binding's read set, and as the caller that made the
-// binding, whoever reads it now.
+// binding, whoever reads it now. The screen addresses the run asked
+// `presence` of become the ones its caller is present at (live_presence_settle).
 live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> T E! {
     me: tasks.current_task()
     live_run_begin(me, binding.id)
     acting_begin(me, binding.acting.copy())
     value: binding.run() ?? {
         acting_end(me)
-        live_run_end(me)
+        live_presence_settle(binding.id, binding.acting, live_run_end(me))
         return Err(err)
     }
     acting_end(me)
-    live_run_end(me)
+    live_presence_settle(binding.id, binding.acting, live_run_end(me))
     Ok(value)
 }
 
@@ -586,11 +587,11 @@ __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
 
 // `invalidate(source, args...)`: exactly that argument list re-runs.
 __live_invalidate: fn(source: String, args: [String]) Never! {
-    live_invalidate(source, Val(live_key(args)), None)
+    live_invalidate(source, Val(live_key(args)), None, 0)
 }
 
 // `invalidate(source)`: every binding of `source` re-runs.
-__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None, None) }
+__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None, None, 0) }
 
 // One argument's part of a binding's identity, and one argument of a queued
 // job's call: the argument encoded, or `_`, which no JSON reads, when it
@@ -649,7 +650,7 @@ priv(package) live_reads: module {
     // all of it, and every one whose read set holds one of the narrowed reads
     // `held` (`narrowed`): those whose condition holds for a changed row.
     invalidate: fn(source: String, held: [String]) Never! {
-        live_invalidate(source, None, Val(held))
+        live_invalidate(source, None, Val(held), 0)
     }
 }
 
@@ -673,11 +674,13 @@ live_read_record: fn(source: String, entry: String) {
     }
 }
 
-// The bindings whose sources are running now, each with its task; a source
-// that reads another binding stacks that binding on its own.
+// The bindings whose sources are running now, each with its task and the
+// screen addresses its run asked `presence` of so far; a source that reads
+// another binding stacks that binding on its own.
 LiveRun: struct {
     task: TaskID
     id: Int
+    asked: [String]
 }
 
 LiveRunning: struct {
@@ -688,19 +691,110 @@ LIVE_RUNNING: Shared{LiveRunning{runs: [LiveRun]{}}}
 
 live_run_begin: fn(task: TaskID, id: Int) {
     running := LIVE_RUNNING.guard_edit()
-    running.value.runs.push(LiveRun{task: task, id: id})
+    running.value.runs.push(LiveRun{task: task, id: id, asked: [String]{}})
 }
 
-live_run_end: fn(task: TaskID) {
+// Ends `task`'s innermost run and gives the addresses it asked `presence` of.
+live_run_end: fn(task: TaskID) -> [String] {
     running := LIVE_RUNNING.guard_edit()
     at := running.value.runs.len()
     loop at > 0 {
         at -= 1
         if task == running.value.runs[at].task {
+            asked: running.value.runs[at].asked.copy()
             _: running.value.runs.remove(at, .Slot)
-            return
+            return asked
         }
     }
+    [String]{}
+}
+
+// Adds `address` to what the run of `task`'s innermost binding asked
+// `presence` of; false when `task` runs no binding.
+live_presence_ask: fn(task: TaskID, address: String) -> Bool {
+    running := LIVE_RUNNING.guard_edit()
+    at := running.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if task == running.value.runs[at].task {
+            if !running.value.runs[at].asked.contains(address) {
+                running.value.runs[at].asked.push(address.copy())
+            }
+            return true
+        }
+    }
+    false
+}
+
+// One account present at a screen address: the latest run of the live
+// binding `binding`, acting for `account`, asked `presence` of `address`.
+AppPresent: struct {
+    binding: Int
+    account: String
+    address: String
+}
+
+APP_PRESENT: Shared{[AppPresent]{}}
+
+// The read-set source of who is present at a screen address: a binding
+// that asked `presence` of the address reads it, so a change of who is
+// present there re-runs the binding.
+LIVE_PRESENCE_SOURCE: "app.presence:"
+
+// Makes `asked`, the addresses the run of binding `id` that just ended asked
+// `presence` of, the ones its account (`acting`) is present at, and re-runs
+// every other binding that reads one whose accounts changed. A run that
+// asked none, such as one a row policy refused before it asked, leaves its
+// account present nowhere through this binding.
+live_presence_settle: fn(id: Int, acting: Acting?, asked: [String]) {
+    account: if acting == .Val(.Account(who)) -> who.raw() else -> ""
+    changed: live_presence_keep(id, account, asked)
+    loop address in changed -> live_invalidate("{LIVE_PRESENCE_SOURCE}{address}", None, None, id)
+}
+
+// Makes `asked` the addresses `account` is present at through binding `id`
+// (none when `account` is ""), and gives each address whose accounts that
+// changes.
+live_presence_keep: fn(id: Int, account: String, asked: [String]) -> [String] {
+    changed := [String]{}
+    had := [String]{}
+    held := APP_PRESENT.guard_edit()
+    kept := [AppPresent]{}
+    loop entry in held.value {
+        mine: entry.binding == id
+        if mine && (account == "" || entry.account != account || !asked.contains(entry.address)) {
+            changed.push(entry.address.copy())
+            next
+        }
+        if mine -> had.push(entry.address.copy())
+        kept.push(entry.copy())
+    }
+    loop address in asked {
+        if account == "" || had.contains(address) -> next
+        kept.push(AppPresent{binding: id, account: account.copy(), address: address.copy()})
+        changed.push(address.copy())
+    }
+    held.value = kept
+    changed
+}
+
+// The accounts present at `address`, sorted, each once: those of the
+// registered bindings whose latest run asked `presence` of it, and
+// `asking`, the account of the run asking now (none when "").
+live_present: fn(address: String, asking: String) -> [auth.AccountID] {
+    names := [String]{}
+    if asking != "" -> names.push(asking.copy())
+    registry: live_decode(live_cell_load())
+    held: APP_PRESENT.guard_read()
+    loop entry in held.value {
+        if entry.address != address || names.contains(entry.account) -> next
+        if registry == .Val(bindings) && live_index(bindings, entry.binding) == None -> next
+        names.push(entry.account.copy())
+    }
+    names.sort()
+    out := [auth.AccountID]{}
+    loop name in names -> out.push(auth.AccountID.from_string(name))
+    out
 }
 
 // The binding `task` is running now, the innermost when it runs several.
@@ -1358,7 +1452,8 @@ priv C_PUSH_NOTES_KEPT: 32
 // state it opens. `new` starts it, and the `.screen` calls of the one package
 // that builds it add the screens. Every target runs this one graph, so its
 // screens are every target's route set. The compiler lowers `.screen`,
-// `app.url_of` and `app.notify` to the graph's `__` members below.
+// `app.url_of`, `app.presence` and `app.notify` to the graph's `__` members
+// below.
 App: struct {
     title: String
 
@@ -1410,6 +1505,25 @@ App: struct {
         text: live_json.to_string<A>(value) ?? return ""
         tree: live_json.parse(text) ?? return text
         live_json.at<String>(tree, "") ?? text
+    }
+
+    // Who has the screen state at `address` open, as the compiler lowers
+    // `presence(view)` (`address` is `__url_of`'s): each account whose live
+    // binding's latest run asked this, sorted. A run that a row policy
+    // refuses before it asks, as a method that reads the state's row first
+    // is refused, leaves its account out, so only accounts whose last read
+    // of the screen's data passed are counted. Asked in a binding's run, the
+    // run's own account is present, and the binding re-runs when the
+    // accounts present change, as a live query does; asked elsewhere, it only
+    // reads them.
+    __presence: fn(address: String) -> [auth.AccountID] Never! {
+        asking := ""
+        if maybe_caller() == .Val(account) && live_presence_ask(tasks.current_task(), address) {
+            asking = account.raw()
+            source: "{LIVE_PRESENCE_SOURCE}{address}"
+            live_read_record(source, source)
+        }
+        live_present(address, asking)
     }
 
     // A push to each device the account `to` registered, as the compiler
@@ -1493,6 +1607,57 @@ priv RouteTestBoard: struct {
     assert_eq(App.__address_arg<Int>(42), "42")
     assert_eq(App.__address_arg<Bool>(true), "true")
     assert_eq(App.__address_arg<String>("say \"hi\""), "say \"hi\"")
+}
+
+// The accounts the presence test's source refuses, as a row policy would.
+priv PRESENCE_TEST_REFUSED: Shared{[String]{}}
+
+// `account`'s binding of the presence test's source: refused, or who has
+// the task at `/tasks/7` open.
+priv presence_test_bind: fn(account: String) -> Live<String, AppError> {
+    as_caller(auth.AccountID.from_string(account), fn() {
+        __live_bind<String, AppError>("app.test.presence", [String]{account.copy()}, fn() {
+            who: maybe_caller() ?? return Err(AppError.Invalid)
+            if PRESENCE_TEST_REFUSED.guard_read().value.contains(who.raw()) {
+                return Err(AppError.Unsupported)
+            }
+            names := [String]{}
+            loop present in App.__presence("/tasks/7") -> names.push(present.raw())
+            Ok(names.join(","))
+        })
+    })
+}
+
+priv presence_test_read: fn(binding: Live<String, AppError>) -> String {
+    if state(binding) == {
+        .Loaded(names) -> names
+        .Failed(_) -> "refused"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+priv presence_test_refuse: fn(account: String) {
+    refused := PRESENCE_TEST_REFUSED.guard_edit()
+    refused.value.push(account.copy())
+}
+
+#Test("presence counts each account whose binding's latest run asked, and re-runs the other bindings when that changes") {
+    ann: presence_test_bind("ann")
+    assert_eq(presence_test_read(ann), "ann")
+    presence_test_refuse("eve")
+    eve: presence_test_bind("eve")
+    assert_eq(presence_test_read(eve), "refused")
+    assert_eq(presence_test_read(ann), "ann")
+    ben: presence_test_bind("ben")
+    assert_eq(presence_test_read(ben), "ann,ben")
+    assert_eq(presence_test_read(ann), "ann,ben")
+    presence_test_refuse("ben")
+    __live_invalidate("app.test.presence", [String]{"ben"})
+    assert_eq(presence_test_read(ben), "refused")
+    assert_eq(presence_test_read(ann), "ann")
+    asked := [String]{}
+    loop present in App.__presence("/tasks/7") -> asked.push(present.raw())
+    assert_eq(asked.join(","), "ann")
 }
 
 // The key of the run this task is in: its delivery's ID for a job or a
@@ -2613,8 +2778,9 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
 // (`watch`) receive it; one that starts watching later first receives the
 // topic's latest. A whole-source invalidation also marks every binding that
 // read `source`: of those that read it narrowed (`live_reads`), only the ones
-// whose narrowed read is in `reached`, when it is given.
-live_invalidate: fn(source: String, key: String?, reached: [String]?) {
+// whose narrowed read is in `reached`, when it is given. The binding `skip`
+// (none when 0) is never marked: its own run made the change.
+live_invalidate: fn(source: String, key: String?, reached: [String]?, skip: Int) {
     loop {
         seen: live_cell_load()
         registry := live_decode(seen) ?? return
@@ -2622,6 +2788,7 @@ live_invalidate: fn(source: String, key: String?, reached: [String]?) {
         hits := [Int]{}
         events := [String]{}
         loop index in 0..<registry.records.len() {
+            if registry.records[index].id == skip -> next
             // An exact-key invalidation names one binding of `source`; a
             // whole-source one also reaches every binding that read it.
             if registry.records[index].source == source {

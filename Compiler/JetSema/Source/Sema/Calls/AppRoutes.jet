@@ -6,13 +6,14 @@
 // `:name` segment of `path` is the field `name`, each `#App.Query` field goes
 // after `?`, and every other field must be a path segment (E2820 otherwise).
 // The call lowers to `App.__screen<V>`, which adds the screen to the
-// process's route set. `app.url_of(view)` and a push's
+// process's route set. `app.url_of(view)`, `app.presence(view)` and a push's
 // `app.notify(to:, title:, body:, open: view)` lower to `App.__url_of<V>`,
 // the address of the screen whose state is the value's type, each field
-// read through `App.__address_arg`. Every target runs the program's one
-// graph, so its screens are every target's route set: in a program that
-// registers screens, a state that none of them opens is E2821 where an
-// address is taken of it (sema_app_route_diagnostics).
+// read through `App.__address_arg`; `presence` passes the address to
+// `App.__presence`, the accounts that have that state open. Every target
+// runs the program's one graph, so its screens are every target's route
+// set: in a program that registers screens, a state that none of them opens
+// is E2821 where an address is taken of it (sema_app_route_diagnostics).
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -34,7 +35,7 @@ use jet_foundation.[
 ]
 
 // The app module's graph type, its query marker, and the graph's members
-// that `.screen`, `url_of` and `notify` lower to.
+// that `.screen`, `url_of`, `presence` and `notify` lower to.
 SEMA_APP_GRAPH: "App"
 
 SEMA_APP_QUERY_MARKER: "Query"
@@ -46,6 +47,8 @@ SEMA_APP_URL_OF: "__url_of"
 SEMA_APP_ADDRESS_ARG: "__address_arg"
 
 SEMA_APP_NOTIFY: "__notify"
+
+SEMA_APP_PRESENCE: "__presence"
 
 // A screen's state: the key the route set knows it by (its nominal's
 // identity), its name, its stored fields in order with their types, the
@@ -195,11 +198,12 @@ sema_call_app_screen: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
-// `alias.url_of(view)` and `alias.notify(to:, title:, body:, open: view)`,
-// where `alias` names `app`. Each argument is evaluated once, in the order
-// written, into a hidden local; the state's address is
-// `alias.App.__url_of<V>(key, fields, texts)`, which `url_of` gives and
-// `notify` passes to `alias.App.__notify(to, title, body, address)`.
+// `alias.url_of(view)`, `alias.presence(view)` and
+// `alias.notify(to:, title:, body:, open: view)`, where `alias` names `app`.
+// Each argument is evaluated once, in the order written, into a hidden
+// local; the state's address is `alias.App.__url_of<V>(key, fields, texts)`,
+// which `url_of` gives, `presence` passes to `alias.App.__presence(address)`
+// and `notify` to `alias.App.__notify(to, title, body, address)`.
 sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     rejected: SemaDirectSpecialCheck{handled: true, value: None}
     graph: program.registration_graph ?? return rejected
@@ -209,7 +213,7 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
     }
     // The parameters in order, the state last.
     params: if member == "notify" -> [String]{"to", "title", "body", "open"} else -> [String]{"view"}
-    shape: if member == "notify" -> "`notify(to:, title:, body:, open:)` pushes to each device of `to` a notice that opens the state `open`" else -> "`url_of(view)` gives the address of the screen whose state is `view`"
+    shape: sema_app_address_shape(member)
     if args.len() != params.len() {
         diagnostics.push(sema_call_arity_diagnostic(member, params.len(), args.len(), false, span))
         return rejected
@@ -269,7 +273,11 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
         texts.push(sema_app_graph_call(alias, SEMA_APP_ADDRESS_ARG, [Type]{}, [CallArg]{sema_live_arg(read, view_span)}, view_span))
     }
     address: sema_app_graph_call(alias, SEMA_APP_URL_OF, [Type]{ty}, [CallArg]{sema_live_arg(sema_app_text(found.key, view_span), view_span), sema_live_arg(Expr.ListLit{elements: names, span: view_span, id: AST_NODE_GENERATED}, view_span), sema_live_arg(Expr.ListLit{elements: texts, span: view_span, id: AST_NODE_GENERATED}, view_span)}, view_span)
-    lowered: if member == "notify" -> sema_app_notify_call(alias, locals, address, span) else -> address
+    lowered: if member == {
+        "notify" -> sema_app_notify_call(alias, locals, address, span)
+        "presence" -> sema_app_graph_call(alias, SEMA_APP_PRESENCE, [Type]{}, [CallArg]{sema_live_arg(address, span)}, span)
+        else -> address
+    }
     checked: sema_check_expression(lowered, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
         sema_single_use_leave_scope(scopes, state, diagnostics)
         return rejected
@@ -279,6 +287,15 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
     sema_single_use_leave_scope(scopes, state, diagnostics)
     lowered_value: sema_tree_node(result_type, TExprKind.InlineBlock{body: body}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, environment, program, diagnostics)}
+}
+
+// What the address call `member` does, for its argument diagnostics.
+sema_app_address_shape: fn(member: String) -> String Never! {
+    if member == {
+        "notify" -> "`notify(to:, title:, body:, open:)` pushes to each device of `to` a notice that opens the state `open`"
+        "presence" -> "`presence(view)` gives the accounts that have the state `view` open and whose last read of its data passed its policies"
+        else -> "`url_of(view)` gives the address of the screen whose state is `view`"
+    }
 }
 
 // The first of `count` parameters no slot of `slots` passes, or -1.

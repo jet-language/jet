@@ -5512,6 +5512,7 @@ tasks never read or change the process registry. The module source is
 | `new(title: String) -> App` | graph | Start the app graph titled `title`, with no screens. |
 | `graph.screen(path, view, signed_in: Bool = false) -> App` | graph | Add the screen `view` shows at `path` to the graph, and give back the graph. See below. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
+| `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
 
 A source must be a named function, not a closure: its module path and name
@@ -5783,6 +5784,21 @@ a program that registers screens, so is a state that no screen opens. A
 program that registers no screen, such as a library checked on its own, is
 not checked against a graph. Running `url_of` before the process has built
 its graph stops the program.
+
+`app.presence(state)` gives the accounts that have the screen state `state`
+open now, each once, sorted. An account has it open while one of its live
+bindings is registered whose latest run asked `presence` of that state, such
+as the binding of a signed-in method that reads the state's row first
+(`_: self.tasks.get(id) ?? return Err(NotFound)`) and then asks. A row
+policy that refuses that read makes the method return before it asks, so an
+account whose last read of the screen's data did not pass its policies is
+not counted, and an account that loses access drops out at its binding's
+next run. A run that asks counts its own account, and each change of the
+accounts present re-runs every other binding that asked, as a write
+re-runs a live query, so a viewer list stays current. Asked outside a live
+binding's run, `presence` only reads the accounts present. A connection
+that closes does not end presence: the account stays present while its
+binding is registered. The state is checked as for `url_of` (E2821).
 
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:

@@ -1,0 +1,162 @@
+// Who has a task open, as Crewboard's task screen shows it. Each viewer's
+// live binding reads the task through the tasks table's row policy first and
+// asks `app.presence` only when that read passed, so an account the policy
+// refuses is never counted. A member who loses access drops out at the next
+// read of its binding, and the other viewers' bindings re-run without it.
+use {
+    app
+    auth: core.auth
+    core.reactive.loadable.[Loadable]
+    db: core.db
+}
+
+#[Codable, Comparable]
+MemberKey: struct {
+    project: Int
+    account: auth.AccountID
+}
+
+#Codable
+Member: struct {
+    project: Int
+    account: auth.AccountID
+}
+
+#Codable
+Task: struct {
+    id: Int
+    project: Int
+    title: String
+}
+
+// The task screen's state: its address is `/tasks/:id`.
+TaskView: struct {
+    id: Int
+}
+
+#Error
+ViewError: enum {
+    NotFound
+    Unreadable
+}
+
+task_screen: fn(view: TaskView) -> Int Never! { view.id }
+
+members_in: fn(store: db.Store) -> db.Table<MemberKey, Member> {
+    store.table("members", key: fn(row: Member) { MemberKey{project: row.project, account: row.account} })
+}
+
+tasks_in: fn(store: db.Store) -> db.Table<Int, Task> {
+    store.table("tasks", key: fn(row: Task) { row.id })
+}
+
+account_of: fn(who: db.Who) -> auth.AccountID? {
+    if who == {
+        .Account(account) -> Val(account)
+        .System -> None
+        .Anonymous -> None
+    }
+}
+
+// Members of a task's project read it; no one else does.
+task_policy: fn(row: Task, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    account: account_of(who) ?? return Ok(false)
+    if members_in(store).get(MemberKey{project: row.project, account: account}) == {
+        .Val(_) -> Ok(true)
+        .None -> Ok(false)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+// The store the tables open from. A lambda owns what it captures, so each
+// call opens the tables rather than capturing them.
+Stores: struct {
+    store: db.Store?
+}
+
+STORE: Shared{Stores{store: None}}
+
+keep: fn(store: db.Store) {
+    stores := STORE.guard_edit()
+    stores.value.store = Val(store.copy())
+}
+
+opened: fn() -> db.Store {
+    stores := STORE.guard_edit()
+    store: stores.value.store ?? panic("the store is open")
+    store.copy()
+}
+
+tasks: fn() -> db.Table<Int, Task> { tasks_in(opened()).guard(task_policy) }
+
+members: fn() -> db.Table<MemberKey, Member> { members_in(opened()) }
+
+// The accounts that have task `id` open, for a caller whose read of the task
+// passed its policy: the method reads the row first, so a refused caller
+// returns before it asks.
+viewers: fn(id: Int) -[DB.Read]> String ViewError! {
+    if tasks().get(id) == {
+        .Val(_) -> {}
+        .None -> return Err(ViewError.NotFound)
+        .Err(_) -> return Err(ViewError.Unreadable)
+    }
+    names := [String]{}
+    loop account in app.presence(TaskView{id: id}) -> names.push("{account}")
+    Ok("[{names.join(", ")}]")
+}
+
+shown: fn(state: Loadable<String, ViewError>) -> String {
+    if state == {
+        .Loaded(value) -> value
+        .Failed(reason) -> if reason == {
+            .NotFound -> "refused: not found"
+            .Unreadable -> "refused: unreadable"
+        }
+        .Idle | .Loading -> "pending"
+    }
+}
+
+// The binding `account`'s task screen makes of task 1's viewers.
+bind: fn(account: String) -> app.Live<String, ViewError> {
+    app.as_caller(auth.AccountID.from_string(account), fn() { app.live(viewers, 1) })
+}
+
+wrote: fn(result: Member db.DBError!) -> String {
+    if result == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+left: fn(key: MemberKey) -[DB.Read, DB.Write]> String {
+    if members().delete(key) == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+run: fn() {
+    _: app.new("Crew").screen("/tasks/:id", task_screen, signed_in: true)
+    keep(db.open_memory())
+    print("ann joins: {wrote(members().add(Member{project: 1, account: auth.AccountID.from_string("ann")}))}")
+    print("ben joins: {wrote(members().add(Member{project: 1, account: auth.AccountID.from_string("ben")}))}")
+    _: tasks_in(opened()).add(Task{id: 1, project: 1, title: "ship the beta"}) ?? panic("the task is added")
+
+    ann: bind("ann")
+    print("ann opens task 1 and sees {shown(app.state(ann))}")
+    eve: bind("eve")
+    print("eve, no member, opens task 1: {shown(app.state(eve))}")
+    print("ann sees {shown(app.state(ann))}")
+    ben: bind("ben")
+    print("ben opens task 1 and sees {shown(app.state(ben))}")
+    print("ann sees {shown(app.state(ann))}")
+
+    print("ben leaves the project: {left(MemberKey{project: 1, account: auth.AccountID.from_string("ben")})}")
+    print("ben's next read: {shown(app.state(ben))}")
+    print("ann sees {shown(app.state(ann))}")
+    present := [String]{}
+    loop account in app.as_system(fn() { app.presence(TaskView{id: 1}) }) {
+        present.push("{account}")
+    }
+    print("present at /tasks/1: [{present.join(", ")}]")
+}
