@@ -2317,6 +2317,22 @@ App: struct {
         opener.value.run(self.copy(), fields)
     }
 
+    // `.head(head)` as the compiler lowers it: `head` gives the page
+    // metadata of the screen whose state is `V`, and `state` names `V` as
+    // `__screen`'s does. `decode` makes a `V` from its address's field
+    // texts, as `__current`'s does. The last head given for `V` holds; a
+    // page asks it for the address it shows (`heads.of`).
+    __head: fn<V>(self, state: String, decode: &&fn(App, [String:String]) -> V? Never!, head: &&fn(V) -> Head Never!) -> App Never! {
+        held := APP_HEADS.guard_edit()
+        held.value[state.copy()] = Shared{AppHead{
+            run: fn(graph: App, fields: [String:String]) {
+                shown: decode(graph, fields) ?? return Head?{None}
+                Val(head(shown))
+            },
+        }}
+        self.copy()
+    }
+
     // The address of the screen whose state is `V`, as the compiler lowers
     // `url_of(view)` and a push's `open:`. `names` are `V`'s fields, in
     // order, and `values` their address text (`__address_arg`). Each `:name`
@@ -2429,11 +2445,13 @@ Query: struct {
     }
 }
 
-// Starts the app graph, titled `title`: a graph with no services, screens or
-// queue yet.
+// Starts the app graph, titled `title`: a graph with no services, screens,
+// heads or queue yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
     held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None}
+    heads := APP_HEADS.guard_edit()
+    heads.value = [String:Shared<AppHead>]{}
     App{title: title}
 }
 
@@ -2476,6 +2494,19 @@ CachePolicy: enum {
 
 // The cache policy of each reply type, by the name `__cache` was given.
 priv APP_CACHE: Shared{[String:CachePolicy]{}}
+
+// A page's metadata on the web output, as `.head(fn)` gives it for a
+// screen's state: the page's title, the description and share image a search
+// result or a shared link shows, whether the page names its own address as
+// its canonical one, and whether search engines may index it. A screen only
+// a signed-in caller opens is never indexed, whatever its head says.
+Head: struct {
+    title: String
+    description: String?{None}
+    image: String?{None}
+    canonical: Bool{true}
+    index: Bool{true}
+}
 
 // A reply a store keeps for a `.Public` policy, as it finds it: the encoded
 // reply and the milliseconds since it was kept, by the store's clock.
@@ -2630,6 +2661,45 @@ priv app_screen_public: fn(state: String) -> Bool Never! {
     !screen.signed_in
 }
 
+// The head `.head(fn)` gave a screen's state: `run` gives the head of the
+// state whose address has the field texts it is given, None when the texts
+// make no such state.
+priv AppHead: struct {
+    run: fn(App, [String:String]) -[]> Head? Never!
+}
+
+// The head of each screen's state, by the state's name.
+priv APP_HEADS: Shared{[String:Shared<AppHead>]{}}
+
+// What core.web's screen pages put in their `<head>`: the metadata the
+// graph gave a state, and whether search engines may index its page.
+priv(package) heads: module {
+    // The head `.head(fn)` gives the state named `state` of `graph` at the
+    // address whose field texts are `fields`, by field name; None when no
+    // head was given for it or the texts make no such state.
+    of: fn(graph: App, state: String, fields: [String:String]) -> Head? Never! {
+        given: app_head(state) ?? return None
+        held: given.guard_read()
+        held.value.run(graph, fields)
+    }
+
+    // Whether search engines may index the page of the state named
+    // `state`, whose head is `head`: never when only a signed-in caller
+    // opens its screen, else as its head says, and yes with no head.
+    indexed: fn(state: String, head: Head?) -> Bool Never! {
+        if !app_screen_public(state) -> return false
+        if head == .Val(given) -> return given.index
+        true
+    }
+}
+
+// The head given for the state named `state`, copied out so it runs with no
+// lock held.
+priv app_head: fn(state: String) -> Shared<AppHead>? Never! {
+    held: APP_HEADS.guard_read()
+    held.value.get(state)
+}
+
 // The states of a sitemap test's public guide screen and signed-in inbox.
 priv SitemapTestGuide: struct {
     slug: String
@@ -2665,6 +2735,53 @@ priv SitemapTestInbox: struct {
     paths: sitemap.signed_in_paths()
     assert(paths.contains("/inbox/*$"))
     assert(!paths.contains("/guides/*$"))
+}
+
+// The states of the head test's public guide screen and signed-in inbox.
+priv HeadTestGuide: struct {
+    slug: String
+}
+
+priv HeadTestInbox: struct {
+    box: String
+}
+
+// The guide and the inbox at an address, as the compiler lowers their
+// decoding from its field texts.
+priv head_test_guide: fn(_: App, fields: [String:String]) -> HeadTestGuide? Never! {
+    slug: fields.get("slug") ?? return None
+    Val(HeadTestGuide{slug: slug})
+}
+
+priv head_test_inbox: fn(_: App, fields: [String:String]) -> HeadTestInbox? Never! {
+    box: fields.get("box") ?? return None
+    Val(HeadTestInbox{box: box})
+}
+
+#Test("a screen's head is the last `.head` given for its state, and only a public screen whose head allows it is indexed") {
+    graph: new("Crew").__screen<HeadTestGuide>("/help/:slug", "app.HeadTestGuide", [String]{}, false, fn(_: App, _: [String:String]) { String?{None} }).__screen<HeadTestInbox>("/mail/:box", "app.HeadTestInbox", [String]{}, true, fn(_: App, _: [String:String]) { String?{None} })
+    faq_fields: [String:String]{"slug": "faq"}
+    assert(heads.of(graph, "app.HeadTestGuide", faq_fields) == None)
+    assert(heads.indexed("app.HeadTestGuide", None))
+    _: graph.__head<HeadTestGuide>("app.HeadTestGuide", head_test_guide, fn(guide: HeadTestGuide) { Head{title: "old {guide.slug}"} })
+    _: graph.__head<HeadTestGuide>("app.HeadTestGuide", head_test_guide, fn(guide: HeadTestGuide) { Head{title: "Help: {guide.slug}", description: Val("Answers about {guide.slug}"), index: guide.slug != "draft"} })
+    _: graph.__head<HeadTestInbox>("app.HeadTestInbox", head_test_inbox, fn(inbox: HeadTestInbox) { Head{title: "Mail: {inbox.box}"} })
+    faq: heads.of(graph, "app.HeadTestGuide", faq_fields) ?? panic("the guide has a head")
+    assert_eq(faq.title, "Help: faq")
+    assert_eq(faq.description, Val("Answers about faq"))
+    assert_eq(faq.image, String?{None})
+    assert(faq.canonical)
+    assert(heads.indexed("app.HeadTestGuide", Val(faq)))
+    draft: heads.of(graph, "app.HeadTestGuide", [String:String]{"slug": "draft"}) ?? panic("the draft has a head")
+    assert(!heads.indexed("app.HeadTestGuide", Val(draft)))
+    // Texts that make no guide give no head.
+    assert(heads.of(graph, "app.HeadTestGuide", [String:String]{"box": "mine"}) == None)
+    // A signed-in screen is never indexed, whatever its head says.
+    mine: heads.of(graph, "app.HeadTestInbox", [String:String]{"box": "mine"}) ?? panic("the inbox has a head")
+    assert_eq(mine.title, "Mail: mine")
+    assert(mine.index)
+    assert(!heads.indexed("app.HeadTestInbox", Val(mine)))
+    assert(!heads.indexed("app.HeadTestNowhere", None))
 }
 
 #Test("a reply type's cache policy is the last `.cache` set for it") {

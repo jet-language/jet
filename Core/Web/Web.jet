@@ -996,7 +996,9 @@ priv app_screen_routes: fn(app: App) Never! {
 // field's query value. A screen only a signed-in caller opens is 401 to any
 // other caller. A request that carries a session acts for its account, and
 // no one keeps its page: `Cache-Control: private, no-store`. An address
-// whose texts make no state of the screen is the app's not-found page.
+// whose texts make no state of the screen is the app's not-found page. The
+// page's `<head>` holds the metadata the graph's head of the state gives
+// there (`app_screen_head`).
 priv app_screen_response: fn(app: App, screen: calls.AppScreen, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     fields := [String:String]{}
     loop segment in screen.path.split("/") {
@@ -1013,14 +1015,36 @@ priv app_screen_response: fn(app: App, screen: calls.AppScreen, request: HTTPReq
     }
     account: app_session_account(request)
     if screen.signed_in && account == None {
-        refused: app_html(401, WebPage{title: "Sign in", body: "<p>This page needs a signed-in caller.</p>"}, "")
+        refused: app_document(401, app_head_tags("Sign in", None, "", None, false), "<p>This page needs a signed-in caller.</p>")
         return refused.__with_header("cache-control", "private, no-store")
     }
     page: if account == .Val(signed) -> app_screen_page_as(signed, screen, fields) else -> app_screen_page(screen, fields)
     body: page ?? return app_not_found_response(app, request)
-    answered: app_html(200, WebPage{title: calls.App.__graph().title, body: body}, "")
+    answered: app_document(200, app_screen_head(app, screen, fields, request), body)
     if account == None -> return answered
     answered.__with_header("cache-control", "private, no-store")
+}
+
+// The `<head>` of `screen`'s page at the address whose field texts are
+// `fields`: the graph's title, or the head the graph gives the state there
+// (`calls.heads.of`), with the page's canonical address (only the screen's
+// own fields, so unrelated query parameters drop) and its share image as
+// absolute URLs at the origin the request reached; noindex unless the
+// screen is public and its head lets search engines index it.
+priv app_screen_head: fn(app: App, screen: calls.AppScreen, fields: [String:String], request: HTTPRequest) -[FS.Read]> String Never! {
+    graph: calls.App.__graph()
+    head: calls.heads.of(graph, screen.state, fields)
+    origin: app_crawl_origin(request)
+    names := [String]{}
+    values := [String]{}
+    loop name in fields.keys() {
+        names.push(name.copy())  // copy: the address keeps the field's name
+        values.push(fields.get(name) ?? "")
+    }
+    url: "{origin}{calls.App.__url_of<String>(screen.state, names, values)}"
+    picture: if head == .Val(given) -> given.image.copy() else -> String?{None}  // copy: the head keeps its image for its tags
+    image: if picture == .Val(path) -> Val(app_head_image(app, origin, path)) else -> String?{None}
+    app_head_tags(graph.title, head, url, image, calls.heads.indexed(screen.state, head))
 }
 
 // The page `screen` shows at the address whose field texts are `fields`,
@@ -1188,6 +1212,35 @@ priv screen_test_inbox_open: fn(graph: calls.App, fields: [String:String]) -> St
     mine: http_server.__dispatch(app_table(own), web_http.server_request("GET", "/boards/b1?tab=x", web_http.body_text(""), web_http.headers()))
     assert((mine.text() ?? "unreadable").contains("<title>own</title>"))
     assert_eq(http_server.mux_routes(app_table(own)).len(), 2)
+}
+
+// The board at an address, as the compiler lowers its decoding from the
+// address's field texts for `.head`.
+priv screen_test_board_made: fn(graph: calls.App, fields: [String:String]) -> ScreenTestBoard? Never! {
+    graph.__address_state<ScreenTestBoard>([String]{"board", "tab"}, [String?]{graph.__address_json<String>(fields, "board"), graph.__address_json<String>(fields, "tab")})
+}
+
+// The board's head: its board and tab, with the board's share image.
+priv screen_test_board_head: fn(board: ScreenTestBoard) -> calls.Head Never! {
+    calls.Head{title: "Board {board.board}", description: Val("The {board.tab} tab"), image: Val("/brand/{board.board}.png")}
+}
+
+#Test("a screen's page carries the head the graph gives its state there, with its address at the request's origin and without unrelated query parameters") {
+    graph: calls.new("Crew").__screen<ScreenTestBoard>("/boards/:board", "web.ScreenTestBoard", [String]{"tab"}, false, screen_test_board_open)
+    _: graph.__head<ScreenTestBoard>("web.ScreenTestBoard", screen_test_board_made, screen_test_board_head)
+    served: app()
+    app_screen_routes(served)
+    fields: web_http.headers_set(web_http.headers(), "host", "crew.example")
+    shown: http_server.__dispatch(app_table(served), web_http.server_request("GET", "/boards/b1?tab=open&from=mail", web_http.body_text(""), fields))
+    assert_eq(shown.status, 200)
+    page: shown.text() ?? "unreadable"
+    assert(page.contains("<title>Board b1</title><meta name=\"description\" content=\"The open tab\"><link rel=\"canonical\" href=\"http://crew.example/boards/b1?tab=open\">"))
+    assert(page.contains("<meta property=\"og:image\" content=\"http://crew.example/brand/b1.png\">"))
+    assert(!page.contains("noindex"))
+    // A rebuilt graph forgets the head.
+    _: calls.new("Crew").__screen<ScreenTestBoard>("/boards/:board", "web.ScreenTestBoard", [String]{"tab"}, false, screen_test_board_open)
+    plain: http_server.__dispatch(app_table(served), web_http.server_request("GET", "/boards/b1?tab=open", web_http.body_text(""), fields))
+    assert((plain.text() ?? "unreadable").contains("<head><meta charset=\"utf-8\"><title>Crew</title></head>"))
 }
 
 // The body of a device's registration: its push service (`apns`, `fcm` or
@@ -1576,10 +1629,76 @@ priv app_boundary: fn(status: Int, boundary: AppHandler?, title: String, message
 }
 
 priv app_html: fn(status: Int, rendered: WebPage, route_data: String) -> HTTPResponse Never! {
-    document: "<!doctype html><html><head><meta charset=\"utf-8\"><title>{rendered.title}</title></head><body>{rendered.body}{route_data}</body></html>"
+    app_document(status, "<meta charset=\"utf-8\"><title>{rendered.title}</title>", "{rendered.body}{route_data}")
+}
+
+// An HTML page of the markup `head` in its `<head>` and `body` in its
+// `<body>`.
+priv app_document: fn(status: Int, head: String, body: String) -> HTTPResponse Never! {
+    document: "<!doctype html><html><head>{head}</head><body>{body}</body></html>"
     fields: core.http.headers_set(core.http.headers(), "content-type", "text/html; charset=utf-8")
     payload: core.http.body_text(document)
     http_server.response_body(status, payload, fields)
+}
+
+// The `<head>` markup of a screen's page: its title, `title` or the title
+// of `head`, the head `.head(fn)` gave its state (`calls.heads.of`); a
+// `noindex` robots rule unless search engines may index it (`indexed`); and
+// from the head its description, `url` as its canonical address, and the
+// Open Graph and Twitter card tags a shared link shows. `image` is the
+// head's share image as an absolute URL (app_head_image).
+priv app_head_tags: fn(title: String, head: calls.Head?, url: String, image: String?, indexed: Bool) -> String Never! {
+    tags := [String]{"<meta charset=\"utf-8\">"}
+    shown: if head == .Val(given) -> given.title.copy() else -> title.copy()
+    tags.push("<title>{app_html_attr(shown)}</title>")
+    if !indexed -> tags.push("<meta name=\"robots\" content=\"noindex\">")
+    given: head ?? return tags.join("")
+    if given.description == .Val(text) -> tags.push(app_meta("name", "description", text))
+    if given.canonical -> tags.push("<link rel=\"canonical\" href=\"{app_html_attr(url)}\">")
+    tags.push(app_meta("property", "og:type", "website"))
+    tags.push(app_meta("property", "og:title", given.title))
+    if given.description == .Val(text) -> tags.push(app_meta("property", "og:description", text))
+    if given.canonical -> tags.push(app_meta("property", "og:url", url))
+    if image == .Val(link) -> tags.push(app_meta("property", "og:image", link))
+    card: if image == None -> "summary" else -> "summary_large_image"
+    tags.push(app_meta("name", "twitter:card", card))
+    tags.push(app_meta("name", "twitter:title", given.title))
+    if given.description == .Val(text) -> tags.push(app_meta("name", "twitter:description", text))
+    if image == .Val(link) -> tags.push(app_meta("name", "twitter:image", link))
+    tags.join("")
+}
+
+// A `<meta>` tag whose attribute `key` is `name` and whose content is
+// `content`, escaped.
+priv app_meta: fn(key: String, name: String, content: String) -> String Never! {
+    "<meta {key}=\"{name}\" content=\"{app_html_attr(content)}\">"
+}
+
+// A head's share image `image` as the absolute URL a shared link loads from
+// `origin`: a URL as written; a path from the site's root at `origin`; any
+// other path an asset under `/assets/`, by its hashed name when the app's
+// first assets root holds it (app_asset_links).
+priv app_head_image: fn(app: App, origin: String, image: String) -[FS.Read]> String Never! {
+    if image.starts_with("https://") || image.starts_with("http://") -> return image.copy()
+    if image.starts_with("/") -> return "{origin}{image}"
+    guard: app.__state.guard_read()
+    if guard.value.assets.len() == 0 -> return "{origin}/assets/{image}"
+    hashed: http_server.static_hashed(guard.value.assets[0], image) ?? return "{origin}/assets/{image}"
+    "{origin}/assets/{hashed}"
+}
+
+#Test("a screen's head puts its title, description, canonical address and share tags in the page, and noindex when it may not be indexed") {
+    head: calls.Head{title: "Help: \"faq\" & more", description: Val("Answers <fast>"), image: Val("brand/board.png")}
+    shown: app_head_tags("Crew", Val(head), "https://crew.example/help/faq", Val(app_head_image(app(), "https://crew.example", "brand/board.png")), true)
+    assert_eq(shown, "<meta charset=\"utf-8\"><title>Help: &quot;faq&quot; &amp; more</title><meta name=\"description\" content=\"Answers &lt;fast&gt;\"><link rel=\"canonical\" href=\"https://crew.example/help/faq\"><meta property=\"og:type\" content=\"website\"><meta property=\"og:title\" content=\"Help: &quot;faq&quot; &amp; more\"><meta property=\"og:description\" content=\"Answers &lt;fast&gt;\"><meta property=\"og:url\" content=\"https://crew.example/help/faq\"><meta property=\"og:image\" content=\"https://crew.example/assets/brand/board.png\"><meta name=\"twitter:card\" content=\"summary_large_image\"><meta name=\"twitter:title\" content=\"Help: &quot;faq&quot; &amp; more\"><meta name=\"twitter:description\" content=\"Answers &lt;fast&gt;\"><meta name=\"twitter:image\" content=\"https://crew.example/assets/brand/board.png\">")
+    // A head with no description, image or canonical address, on a page
+    // search engines may not index.
+    plain: app_head_tags("Crew", Val(calls.Head{title: "Mail", canonical: false}), "https://crew.example/mail/mine", None, false)
+    assert_eq(plain, "<meta charset=\"utf-8\"><title>Mail</title><meta name=\"robots\" content=\"noindex\"><meta property=\"og:type\" content=\"website\"><meta property=\"og:title\" content=\"Mail\"><meta name=\"twitter:card\" content=\"summary\"><meta name=\"twitter:title\" content=\"Mail\">")
+    // No head: the app's title alone.
+    assert_eq(app_head_tags("Crew", None, "https://crew.example/", None, true), "<meta charset=\"utf-8\"><title>Crew</title>")
+    assert_eq(app_head_image(app(), "https://crew.example", "https://cdn.example/a.png"), "https://cdn.example/a.png")
+    assert_eq(app_head_image(app(), "https://crew.example", "/brand/a.png"), "https://crew.example/brand/a.png")
 }
 
 // The route identity and navigation status a served page publishes; the

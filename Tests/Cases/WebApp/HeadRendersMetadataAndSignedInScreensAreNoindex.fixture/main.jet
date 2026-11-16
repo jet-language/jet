@@ -1,0 +1,75 @@
+// A public guide screen and a signed-in inbox screen, each with a head. The
+// server HTML of a guide carries its title, description, canonical address,
+// and Open Graph and Twitter card tags, its share image an absolute URL; a
+// guide whose head says `index: false` is noindex. The inbox is noindex
+// whether its page is refused for want of a session or served to `ann`,
+// though its head says nothing of indexing.
+use {
+    app
+    auth: core.auth
+    http: core.http
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+GuideView: struct {
+    slug: String
+}
+
+InboxView: struct {
+    box: String
+}
+
+guide: fn(view: GuideView) -> String Never! { "Guide {view.slug}" }
+
+inbox: fn(view: InboxView) -> String Never! { "Box {view.box}" }
+
+guide_head: fn(view: GuideView) -> app.Head Never! {
+    app.Head{
+        title: "Crew help: {view.slug}",
+        description: Val("Answers about \"{view.slug}\" & more"),
+        image: Val("/brand/board.png"),
+        index: view.slug != "draft",
+    }
+}
+
+inbox_head: fn(view: InboxView) -> app.Head Never! {
+    app.Head{title: "Crew mail: {view.box}", canonical: false}
+}
+
+// GET `path` with the header `name: value` ("" sends none), and print its
+// status and the page's `<head>`, with the address the server listens at
+// written HOST.
+fetch: fn(addr: String, path: String, name: String, value: String) HTTPError! {
+    fields := http.headers()
+    if name != "" -> fields = http.headers_set(fields, name, value)
+    answer: http.send_request(http.request_with(.Get, "http://{addr}{path}", fields, http.body_text("")))
+    page: answer.text()
+    start: page.find("<head>")
+    end: page.find("</head>")
+    head: if start >= 0 && end > start -> page.slice(start + 6, end) else -> "no head"
+    print("{path}: {answer.status}")
+    print(head.replace(addr, "HOST"))
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    auth.register_user("ann", "ann's password hash") ?? panic("ann registers")
+    session: auth.password_login("ann", "ann's password hash", time.now_utc().to_unix_ms(), 3600000) ?? panic("ann signs in")
+    _: app.new("Crew")
+        .screen("/guides/:slug", guide)
+        .head(guide_head)
+        .screen("/inbox/:box", inbox, signed_in: true)
+        .head(inbox_head)
+    served: web.app()
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<4 { served.serve_once(listener) }
+    }
+    fetch(addr, "/guides/faq?from=mail", "", "")
+    fetch(addr, "/guides/draft", "", "")
+    fetch(addr, "/inbox/mine", "", "")
+    fetch(addr, "/inbox/mine", "authorization", "Bearer {auth.session_id(session)}")
+    serving.join()
+}

@@ -5542,6 +5542,7 @@ tasks never read or change the process registry. The module source is
 | `graph.screen(path, view, signed_in: Bool = false) -> App` | graph | Add the screen `view` shows at `path` to the graph, and give back the graph. See below. |
 | `graph.cache<V>(policy: CachePolicy) -> App` | graph | Answer every `#App.Public` endpoint reply of type `V` under `policy`, and give back the graph. See below. |
 | `graph.sitemap(list) -> App` | graph | List the address of each public screen state `list` gives in the served `/sitemap.xml`, and give back the graph. See below. |
+| `graph.head(head) -> App` | graph | Put the metadata `head` gives a screen's state in the `<head>` of that screen's server HTML, and give back the graph. See below. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -5916,6 +5917,26 @@ screen (`Disallow: /inbox/*$`, each `:name` segment a `*`, ending at the
 path), and is told the sitemap's address. A program route at either path
 answers it instead. A `list` that takes parameters, or gives no list of
 screen states, is E2810.
+
+`graph.head(head)` gives a screen's pages their metadata. `head` is a named
+function that takes one screen state and gives an `app.Head`, as
+`fn(view: GuideView) -> app.Head`; the last head given for a state holds,
+until `app.new` starts a graph with no heads.
+`Head` is `{title: String, description: String?, image: String?, canonical:
+Bool{true}, index: Bool{true}}`. A served web app's page of the state's
+screen asks it for the state at the page's address and puts in its
+`<head>`: `<title>` (the graph's title with no head), the `description`
+meta tag, a canonical link to the state's `url_of` address at the origin
+the request reached (unless `canonical` is false), and the Open Graph
+(`og:type`, `og:title`, `og:description`, `og:url`, `og:image`) and Twitter
+card (`summary`, or `summary_large_image` with an image) tags, each value
+attribute-escaped. `image` is a URL, a path from the site's root, or a path
+under the app's `/assets/`, by its hashed name when an assets root holds it;
+each becomes an absolute URL. A page is
+`<meta name="robots" content="noindex">` when its head says `index: false`,
+and a signed-in screen's page always is, whatever its head says, as is its
+401 page. A `head` that takes other than one state, a state that is no
+struct declared outside Core, or one that doesn't derive `Decode`, is E2810.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or
