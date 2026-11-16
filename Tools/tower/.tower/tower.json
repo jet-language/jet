@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108525,
+    "rev": 108531,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27512,11 +27512,11 @@
         {
           "n": 25,
           "text": "A grouped enum case with a named payload is constructible, and E0764's fix compiles. Today (p210, dev 7f902dd915) building Signal.Paint.Stroke { … } is E0764, and the literal its fix suggests is then E0119 'There's no type called Signal.Paint.Stroke' (found by GoalsA-1-4's p210 fix SUB). Either the literal builds the case on O0, O1 and O2, or E0764's fix names a spelling that compiles. Proof: a golden building and matching a grouped named-payload case on every tier, and the E0764 UI snapshot whose fix text compiles.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T08:06:07.863Z"
+          "evidence": "p211 gate (dev d6d482c5f7; bf85cc4c42, 04af41eb40): jet test Compiler --profile golden --filter GroupedNamedPayloadBraceLiteral -> n=3 bad=0 (O0, O1, O2: builds and matches a grouped named-payload case); jet test Compiler --profile ui --filter enum_grouped_named_payload_needs_dot_brace -> n=1 bad=0 (the E0764 snapshot whose fix spelling the golden compiles).",
+          "at": "2026-11-16T09:23:36.765Z"
         }
       ],
       "refs": [
@@ -27545,7 +27545,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T09:12:03.257Z",
+      "updated": "2026-11-16T09:23:36.765Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -99990,11 +99990,11 @@
         {
           "n": 4,
           "text": "auth.AccountID is the one account identity type, as ratified (D-DB-TABLE1: Member.account: auth.AccountID; app.caller() returns it). Today it doesn't exist and accounts are Strings: Core/App/App.jet:619 Who.Account(String), :640 as_caller(account: String, ...), :651 maybe_caller() -> String?, :660 caller() -> String, Core/Db/Db.jet:954-955 db.Who.Account(String). One cutover: add the type, move every API listed here to it, migrate every caller in every tree, and leave no String spelling. Proof: a cases row where a #Table struct with an auth.AccountID column round-trips through the store and app.caller() returns it, on O0/O1/O2; git grep shows no Account(String).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T06:59:58.038Z"
+          "evidence": "p211 gate (dev d6d482c5f7; 6e63e77b08, 7438c88cf5 + the p211 fixes): jet test Compiler --profile cases --filter web_app/account_id_round_trips_and_is_the_caller -> n=1 bad=0; the case's steps run -O0, -O1 and -O2. git grep -c 'Account(String)' d6d482c5f7 -> 0 files. Row policy cases (db/row_policy_judges_each_operation, db/row_policy_no_bypass, web_app/crewboard_row_policies, web_app/caller_dependent_live_query_is_not_shared) and golden CoreDB/TypedTable pass on the same gate.",
+          "at": "2026-11-16T09:23:20.472Z"
         }
       ],
       "refs": [],
@@ -100005,7 +100005,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:41.131Z",
-      "updated": "2026-11-16T09:17:56.351Z",
+      "updated": "2026-11-16T09:23:20.472Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101900,29 +101900,29 @@
         {
           "n": 6,
           "text": "A job whose worker disconnects before acknowledging it is delivered again, and a duplicate delivery runs under the job's declared idempotency key, so its effect happens once. Proof: `jet test Compiler --profile cases --filter web_app/job_redelivered_once`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:49:21.473Z"
+          "evidence": "p211 gate (dev d6d482c5f7): jet test Compiler --profile cases --filter web_app/job_redelivered_once -> n=1 bad=0 (proof row sp3-6825n6, proofsp211).",
+          "at": "2026-11-16T09:23:21.642Z"
         },
         {
           "n": 7,
           "text": "After a server restart, queued jobs (stored in the database) still run, while local schedule state is rebuilt, never replayed; a retried job's outcome follows its declared retry policy. Proof: `jet test Compiler --profile cases --filter web_app/jobs_survive_restart`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:49:22.478Z"
+          "evidence": "p211 gate (dev d6d482c5f7): jet test Compiler --profile cases --filter web_app/jobs_survive_restart -> n=1 bad=0 (proof row sp3-6825n7, proofsp211).",
+          "at": "2026-11-16T09:23:22.729Z"
         },
         {
           "n": 8,
           "text": "Shutdown waits a bounded time for running jobs and leaves an unfinished job unacknowledged, so it runs again on the next start. Proof: `jet test Compiler --profile cases --filter web_app/shutdown_never_acks_unfinished_jobs`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:49:23.664Z"
+          "evidence": "p211 gate (dev d6d482c5f7): jet test Compiler --profile cases --filter web_app/shutdown_never_acks_unfinished_jobs -> n=1 bad=0 (proof row sp3-6825n8, proofsp211).",
+          "at": "2026-11-16T09:23:23.982Z"
         },
         {
           "n": 9,
@@ -101951,7 +101951,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-16T09:17:57.337Z",
+      "updated": "2026-11-16T09:23:23.982Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -105712,11 +105712,11 @@
         {
           "n": 4,
           "text": "`jet test` on a package whose impl of an open Core trait breaks one of the trait's laws fails and names the law. Proof: `jet test Compiler --profile cases --filter law_kit_names_broken_law`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:11.055Z"
+          "evidence": "p211 gate (dev d6d482c5f7, MemKernel-6-law-kit-fix): jet test Compiler --profile cases --filter law_kit_names_broken_law -> n=1 bad=0.",
+          "at": "2026-11-16T09:23:37.930Z"
         }
       ],
       "refs": [],
@@ -105730,8 +105730,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:11.055Z",
-      "updated": "2026-11-15T02:25:11.055Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T09:23:37.930Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0ho9o8j",
@@ -221227,6 +221227,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T09:23:37.930Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00fktgk",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T09:23:36.765Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-16T09:23:23.982Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0se7lpr",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-16T09:23:22.729Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0se7lpr",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-16T09:23:21.642Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0se7lpr",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-16T09:23:20.472Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0f4o904",
+      "note": "#4"
+    },
     {
       "at": "2026-11-16T09:17:57.337Z",
       "by": "Main",
