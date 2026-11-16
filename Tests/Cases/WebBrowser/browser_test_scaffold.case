@@ -8,10 +8,10 @@ env: NO_COLOR=1
 step: jet test --browser-scaffold=demo
 cwd: {work}
 exit: 0
-stderr: ~ "created demo/"
-stderr: ~ "  home_test.jet"
-stderr: ~ "  browser-tests.conf"
-stderr: ~ "next: cd demo && jetpack browser lock chromium"
+stderr: ~ "created demo/" # the project folder
+stderr: ~ "  home_test.jet" # the first test it holds
+stderr: ~ "  browser-tests.conf" # the browser configuration it holds
+stderr: ~ "next: cd demo && jetpack browser lock chromium" # how to pin the browser next
 file: demo/browser-tests.conf ~ "browsers = chromium" # the configured browser
 file: demo/browser-tests.conf ~ "server = reuse" # a running `jet dev` is reused
 file: demo/browser-tests.conf ~ "webServer = jet dev run.jet" # else the run starts one
@@ -23,15 +23,15 @@ exit: 0
 step: jet test --browser-scaffold=demo
 cwd: {work}
 exit: 1
-stderr: ~ "`demo` already exists"
+stderr: ~ "`demo` already exists" # an existing folder is never overwritten
 step: jet test --browser-scaffold
 cwd: {work}
 exit: 2
-stderr: ~ "`--browser-scaffold` needs a value"
+stderr: ~ "`--browser-scaffold` needs a value" # the project needs a name
 step: jet test --browser-scaffold=other home_test.jet
 cwd: {work}
 exit: 2
-stderr: ~ "so it takes no target or filter, not `home_test.jet`"
+stderr: ~ "so it takes no target or filter, not `home_test.jet`" # a scaffold run tests nothing
 file: other absent # a refused scaffold writes nothing
 when probe chromium --version
 when probe chromedriver --version
@@ -45,7 +45,7 @@ env: JET_PROJECT_ROOT={work}/demo
 env: JET_APP_PORT={free-port:app}
 env: JET_TEST_WEB_SERVER_URL=http://127.0.0.1:{free-port:app}/
 exit: 0
-stdout: ~ "the home page greets the visitor: pass"
-stdout: ~ "1 passed, 0 failed, 0 skipped"
+stdout: ~ "the home page greets the visitor: pass" # the scaffolded test passes in chromium
+stdout: ~ "1 passed, 0 failed, 0 skipped" # the run's summary
 end when
 end when

@@ -185,21 +185,30 @@ ProcessResourceLimit: enum {
 // The file steps of an upload endpoint (core.app's uploads). core.web asks
 // for a step by handing core.app's `FileJob` to the lambda the compiler
 // writes where the endpoint's service is mounted, and that lambda runs it, so
-// only a program that mounts the service reaches its files and stores. A
-// step stages the request's body, ends the request, answers a blob's GET by
-// its id, or removes what a server that stopped left staged, as a server
-// starts.
+// only a program that mounts the service reaches its files and stores. The
+// server streams an admitted request's body to a staged file as it reads it:
+// `Open` stages an empty file, each `Write` appends the next bytes to the
+// staged file it names, and `Abandon` removes one whose request ended before
+// its body did. `Claim` hands a staged file to the request this task
+// answers. The other steps end that request, answer a blob's GET by its id,
+// or remove what a server that stopped left staged, as a server starts.
 FileStep: enum {
-    Stage([U8])
+    Open
+    Write(name: String, piece: [U8])
+    Abandon(String)
+    Claim(String)
     Finish
     Serve(String)
     Clean
 }
 
-// What a file step gave: its status, 200 when it did what it was asked, and,
-// for a blob's GET, the blob's bytes and their content type.
+// What a file step gave: its status, 200 when it did what it was asked;
+// for a blob's GET, the blob's bytes and their content type; the name of
+// the file `Open` staged; and the size of the file `Claim` handed over.
 FileDone: struct {
     status: Int
     body: [U8]
     media: String
+    staged: String{""}
+    bytes: Int{0}
 }

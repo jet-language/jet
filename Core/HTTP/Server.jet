@@ -265,14 +265,33 @@ HTTPAdmit: struct {
     max_body: Int
 }
 
+// What an admitted route's spool (`__route_add_admitted`) does with a body
+// as the server reads it: `open` makes a place for one body and names it
+// (None when it can't), `write` adds the next bytes of the body to the
+// place named (false when it can't), and `abandon` drops the place of a
+// body the request ended before.
+HTTPSpool: struct {
+    open: fn() -[Net, FS.Read]> String? Never!
+    write: fn(String, [U8]) -[Net, FS.Read]> Bool Never!
+    abandon: fn(String) -[Net, FS.Read]> Never!
+}
+
 priv HTTPAdmitCell: struct {
     check: fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!
+    spool: HTTPSpool
 }
 
 priv HTTPAdmitRow: struct {
     method: String
     pattern: String
     cell: Shared<HTTPAdmitCell>
+}
+
+// An admitted request (`mux_admit`): what its route's check decided, and
+// the route's cell when it has one.
+priv HTTPAdmitted: struct {
+    admit: HTTPAdmit
+    cell: Shared<HTTPAdmitCell>?
 }
 
 /// One route table: routes and middleware layers. A `web.app()` owns one and
@@ -316,12 +335,15 @@ priv route_add_custom: fn(mux: HTTPMux, method: String, pattern: String, handler
 
 // A route whose request `admit` checks by its head, before the server reads
 // the body (`mux_admit`): a refused request gets the check's response and its
-// body is never read, and an admitted one's body may hold the check's
-// `max_body` bytes in place of the server's own limit.
-__route_add_admitted: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, admit: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!, at: SourceLocation) Never! {
+// body is never read. An admitted one's body may hold the check's `max_body`
+// bytes in place of the server's own limit, and the server hands it to
+// `spool` piece by piece as it reads it, never holding it whole: the request
+// the handler gets has an empty body, and `__spooled` names the place the
+// spool opened for it.
+__route_add_admitted: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, admit: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!, spool: &&HTTPSpool, at: SourceLocation) Never! {
     route_add(mux, method, pattern, handler, "", at)
     guard := mux.__state.guard_edit()
-    guard.value.admits.push(HTTPAdmitRow{method: method, pattern: pattern, cell: Shared{HTTPAdmitCell{check: admit.move()}}})
+    guard.value.admits.push(HTTPAdmitRow{method: method, pattern: pattern, cell: Shared{HTTPAdmitCell{check: admit.move(), spool: spool.move()}}})
 }
 
 // A middleware layer: the first registered layer is the outermost.
@@ -1634,6 +1656,13 @@ priv HTTPChunked: struct {
     trailers: Headers
 }
 
+// Where a body goes as the server reads it: the spool of its admitted
+// route's cell, under the name the spool opened for it.
+priv HTTPSpoolTo: struct {
+    cell: Shared<HTTPAdmitCell>
+    name: String
+}
+
 // One accepted connection: exactly one of tcp/tls. A server bound with
 // `tls: server.tls(cert, key)` serves the TCP stream after the TLS handshake
 // (Docs/Spec/syntax-decisions.md:5083).
@@ -1690,6 +1719,8 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
         .Ok(received) -> {
             own: server_answer(server, mux, received, refusing)
             if own == .Val(answer) {
+                // The handler that would claim a spooled body never runs.
+                if received.__spooled == .Val(name) -> spool_abandon(mux, received, name)
                 bytes: response_wire(received.method, answer) ?? error_wire(503)
                 answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
             } else {
@@ -1892,15 +1923,17 @@ priv read_request: fn(stream: HTTPConn, wire: &HTTPWire, mux: HTTPMux) -[Net, FS
         length = value
     }
     limit := C_MAX_BODY_BYTES
+    spool_cell := Shared<HTTPAdmitCell>?{None}
     if mux_admits(mux) {
         asked := http.server_request(method, target, http.body_empty(), fields.copy())
         asked.__peer = stream.peer.copy()
         asked.__received = core.time.now_utc().to_timestamp()
         admitted: mux_admit(mux, asked)
-        if admitted.refused == .Val(refusal) {
+        if admitted.admit.refused == .Val(refusal) {
             return Err(.Refuse(response_wire(method, refusal) ?? error_wire(500)))
         }
-        limit = admitted.max_body
+        limit = admitted.admit.max_body
+        spool_cell = admitted.cell
     }
     if length > limit -> return Err(.Reply(413))
     if http.headers_get(fields, "content-encoding") != None -> return Err(.Reply(415))
@@ -1919,10 +1952,27 @@ priv read_request: fn(stream: HTTPConn, wire: &HTTPWire, mux: HTTPMux) -[Net, FS
             return Err(.Drop)
         }
     }
+    if spool_cell == .Val(cell) {
+        name: spool_open(cell) ?? return Err(.Reply(500))
+        to: HTTPSpoolTo{cell: cell.copy(), name: name.copy()}
+        // A body the request ended before is the spool's to drop.
+        if spool_read(stream, wire, split, length, chunked, declared, limit, to) == {
+            .Ok(trailers) -> {
+                request := http.server_request(method, target, http.body_empty(), fields)
+                request.__trailers = trailers
+                request.__spooled = Val(name)
+                return Ok(request)
+            }
+            .Err(fault) -> {
+                spool_drop(cell, name)
+                return Err(fault)
+            }
+        }
+    }
     content := [U8]{}
     trailers := Headers?{None}
     if chunked {
-        decoded: read_chunked(stream, wire, split, declared, limit) ?? return Err(err)
+        decoded: read_chunked(stream, wire, split, declared, limit, None) ?? return Err(err)
         content = decoded.body
         trailers = Val(decoded.trailers)
     } else if length > 0 {
@@ -1939,6 +1989,18 @@ priv read_request: fn(stream: HTTPConn, wire: &HTTPWire, mux: HTTPMux) -[Net, FS
     Ok(request)
 }
 
+// A spooled body (`spool_pass`) after the head that ends at `start`: its
+// `length` bytes, or its chunks when `chunked`; the trailers of a chunked
+// one.
+priv spool_read: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, length: Int, chunked: Bool, declared: [String], limit: Int, to: HTTPSpoolTo) -[Net, FS.Read, Time.Wait]> Headers? HTTPFault! {
+    if chunked {
+        decoded: read_chunked(stream, wire, start, declared, limit, Val(to)) ?? return Err(err)
+        return Ok(Val(decoded.trailers))
+    }
+    _: spool_pass(stream, wire, start, length, to) ?? return Err(err)
+    Ok(None)
+}
+
 // Whether a route of `mux` admits requests by their head.
 priv mux_admits: fn(mux: HTTPMux) -> Bool Never! {
     guard: mux.__state.guard_read()
@@ -1946,17 +2008,20 @@ priv mux_admits: fn(mux: HTTPMux) -> Bool Never! {
 }
 
 // The check of the admitted route that takes `head`, run as a task of its
-// own, as a handler is, so a panic in it is a 500. A request that no
-// admitted route takes is admitted under the server's own limit.
-priv mux_admit: fn(mux: HTTPMux, head: HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never! {
+// own, as a handler is, so a panic in it is a 500, with the route's cell. A
+// request that no admitted route takes is admitted under the server's own
+// limit.
+priv mux_admit: fn(mux: HTTPMux, head: HTTPRequest) -[Net, FS.Read]> HTTPAdmitted Never! {
     pick: mux_pick(mux, head)
-    open: HTTPAdmit{refused: None, max_body: C_MAX_BODY_BYTES}
+    open: HTTPAdmitted{admit: HTTPAdmit{refused: None, max_body: C_MAX_BODY_BYTES}, cell: None}
     if pick.answer != .None -> return open
     route: pick.routes[pick.index]
     cell: mux_admit_cell(mux, route.method, route.pattern) ?? return open
     picked: pick.request.copy()
-    checking: task { mux_admit_run(cell, picked) }
-    checking.join() ?? HTTPAdmit{refused: Val(status_page(500)), max_body: 0}
+    checked: cell.copy()
+    checking: task { mux_admit_run(checked, picked) }
+    decided: checking.join() ?? HTTPAdmit{refused: Val(status_page(500)), max_body: 0}
+    HTTPAdmitted{admit: decided, cell: Val(cell)}
 }
 
 priv mux_admit_cell: fn(mux: HTTPMux, method: String, pattern: String) -> Shared<HTTPAdmitCell>? Never! {
@@ -1985,21 +2050,29 @@ priv chunk_size: fn(line: [U8]) -> Int? Never! {
     Val(size)
 }
 
-priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [String], limit: Int) -[Net, Time.Wait]> HTTPChunked HTTPFault! {
+// A chunked body after the head that ends at `start`, refused 413 once its
+// chunks would pass `limit`, before the chunk that would is read. Without
+// `spool` the body is held; with it each chunk goes to the spool as it
+// arrives (`spool_pass`) and the body given is empty.
+priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [String], limit: Int, spool: HTTPSpoolTo?) -[Net, FS.Read, Time.Wait]> HTTPChunked HTTPFault! {
     at := start
     body := [U8]{}
+    total := 0
     loop {
         line_end: wire_line(stream, wire, at) ?? return Err(err)
         size: chunk_size(wire.buffer.slice(at, line_end)) ?? return Err(.Reply(400))
         at = line_end + 2
         if size == 0 -> break
-        if body.len() + size > limit -> return Err(.Reply(413))
-        wire_need(stream, wire, at + size + 2) ?? return Err(err)
-        loop b in wire.buffer.slice(at, at + size) -> body.push(b)
-        if wire.buffer[at + size] != (U8{13}) || wire.buffer[at + size + 1] != (U8{10}) {
-            return Err(.Reply(400))
+        if total + size > limit -> return Err(.Reply(413))
+        total += size
+        if spool == .Val(to) -> at = spool_pass(stream, wire, at, size, to) ?? return Err(err) else {
+            wire_need(stream, wire, at + size) ?? return Err(err)
+            loop b in wire.buffer.slice(at, at + size) -> body.push(b)
+            at += size
         }
-        at = at + size + 2
+        wire_need(stream, wire, at + 2) ?? return Err(err)
+        if wire.buffer[at] != (U8{13}) || wire.buffer[at + 1] != (U8{10}) -> return Err(.Reply(400))
+        at += 2
     }
     trailers := http.headers()
     loop {
@@ -2012,6 +2085,55 @@ priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [
         at = line_end + 2
     }
     Ok(HTTPChunked{body: body, trailers: trailers})
+}
+
+// Hands the `count` body bytes that start at `at` in the wire's buffer to
+// the spool as they arrive, so the buffer never holds more than one read of
+// them, then keeps only what follows them in the buffer. Gives where that
+// starts: 0. A spool that can't take a piece is a 500.
+priv spool_pass: fn(stream: HTTPConn, wire: &HTTPWire, at: Int, count: Int, to: HTTPSpoolTo) -[Net, FS.Read, Time.Wait]> Int HTTPFault! {
+    from := at
+    left := count
+    loop left > 0 {
+        if from >= wire.buffer.len() {
+            wire.buffer.clear()
+            from = 0
+            more: wire_fill(stream, wire) ?? return Err(err)
+            if !more -> return Err(.Reply(400))
+        }
+        end: if wire.buffer.len() - from < left -> wire.buffer.len() else -> from + left
+        if !spool_write(to.cell, to.name, wire.buffer.slice(from, end)) -> return Err(.Reply(500))
+        left -= end - from
+        from = end
+    }
+    wire.buffer = wire.buffer.slice(from, wire.buffer.len())
+    Ok(0)
+}
+
+priv spool_open: fn(cell: Shared<HTTPAdmitCell>) -[Net, FS.Read]> String? Never! {
+    guard: cell.guard_read()
+    guard.value.spool.open()
+}
+
+priv spool_write: fn(cell: Shared<HTTPAdmitCell>, name: String, piece: [U8]) -[Net, FS.Read]> Bool Never! {
+    guard: cell.guard_read()
+    guard.value.spool.write(name.copy(), piece)
+}
+
+priv spool_drop: fn(cell: Shared<HTTPAdmitCell>, name: String) -[Net, FS.Read]> Never! {
+    guard: cell.guard_read()
+    guard.value.spool.abandon(name.copy())
+}
+
+// Abandons the spooled body `name` of `request` with its route's spool.
+priv spool_abandon: fn(mux: HTTPMux, request: HTTPRequest, name: String) -[Net, FS.Read]> Never! {
+    pick: mux_pick(mux, request)
+    if pick.answer != .None {
+        return
+    }
+    route: pick.routes[pick.index]
+    cell: mux_admit_cell(mux, route.method, route.pattern) ?? return
+    spool_drop(cell, name)
 }
 
 priv error_wire: fn(status: Int) -[Time]> [U8] Never! {

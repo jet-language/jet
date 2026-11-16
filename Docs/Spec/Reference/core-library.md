@@ -6057,11 +6057,14 @@ reads the body: 401 to an `#App.SignedIn` endpoint's call without a session,
 `max_upload` (1000000 bytes by default), 422 to arguments that don't decode,
 and 403 when the check fails. The check runs as the caller, so a check that
 reads a row runs its policy, and a caller it refuses never sends the body.
-Only then is the body read, at most `max_upload` bytes, and staged in a file
-under `.jet/uploads` before the method's transaction begins: a transaction
-that runs again reads the staged file again. The method gets
-`app.Upload{name, bytes}`, where `name` is the name the client sent, kept
-only as metadata.
+Only then is the body read, and the server streams it, as it reads it, to a
+file staged under `.jet/uploads`; it never holds the whole body. A chunked
+body gets 413 as soon as its next chunk would pass `max_upload`, before that
+chunk is read, and what was staged is dropped, as it is for a body the
+client stops sending. The file is staged before the method's transaction
+begins: a transaction that runs again reads the staged file again. The
+method gets `app.Upload{name, bytes}`, where `name` is the name the client
+sent, kept only as metadata.
 
 `blobs.keep(file, allow:)` stores the staged file under a 32-hex-digit
 `BlobID` it makes, never under the client's name, so `../../escape.png`

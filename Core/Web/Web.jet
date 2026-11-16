@@ -18,7 +18,7 @@ use {
     codec: core.image
     crypto: core.crypto
     web_http: core.http
-    core.http.server.[HTTPAdmit, HTTPCorsPolicy, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS]
+    core.http.server.[HTTPAdmit, HTTPCorsPolicy, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS, HTTPSpool]
     http_server: core.http.server
     live_json: core.encoding.json
     core.encoding.[Dyn]
@@ -2508,7 +2508,8 @@ priv APP_MAX_UPLOAD: 1000000
 priv app_upload_routes: fn(table: HTTPMux, path: String, held: Shared<AppUploadEndpoint>, at: SourceLocation) Never! {
     admits: held.copy()
     answers: held.copy()
-    http_server.__route_add_admitted(table, "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_upload_response(answers, request)) }), fn(request: HTTPRequest) { app_upload_admit(admits, request) }, at)
+    spools: app_upload_spool(held.copy())
+    http_server.__route_add_admitted(table, "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_upload_response(answers, request)) }), fn(request: HTTPRequest) { app_upload_admit(admits, request) }, spools, at)
     blob: "{calls.BLOB_PATH}/:id"
     loop route in http_server.mux_routes(table) {
         if route.method == "GET" && route.pattern == blob {
@@ -2607,16 +2608,31 @@ priv app_upload_response: fn(held: Shared<AppUploadEndpoint>, request: HTTPReque
     answered.__with_header("cache-control", "private, no-store")
 }
 
-// One call of an upload endpoint. The body is staged
-// (jet_builtins.FileStep.Stage) before the call's transaction begins, so
-// each run of the transaction, a retry's too, keeps the same staged file.
-// The method gets the body as the `Upload` at its argument `at`, named by
-// the query's `name` ("upload" when it has none), among the query's `args`.
-// When the request ends (jet_builtins.FileStep.Finish), the staged file is
-// removed, and so is each blob that a run kept and then rolled back. A call
-// that failed once `keep` refused the file's media is answered 415 with its
-// error.
+// One call of an upload endpoint. The server streamed the body to a staged
+// file as it read it (`app_upload_spool`), before the call's transaction
+// begins, so each run of the transaction, a retry's too, keeps the same
+// staged file; the call claims it (jet_builtins.FileStep.Claim). The method
+// gets it as the `Upload` at its argument `at`, named by the query's `name`
+// ("upload" when it has none), among the query's `args`. When the request
+// ends (jet_builtins.FileStep.Finish), the staged file is removed, and so is
+// each blob that a run kept and then rolled back. A call that failed once
+// `keep` refused the file's media is answered 415 with its error.
 priv app_upload_call: fn(endpoint: AppUploadEndpoint, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    staged: request.__spooled ?? return app_json(500, app_error_json("the upload was not staged"))
+    claimed: endpoint.upload.files(calls.FileJob{step: .Claim(staged)}) ?? return app_json(500, app_error_json("the upload can't be staged"))
+    if claimed.status != 200 -> return app_json(500, app_error_json("the upload can't be staged"))
+    last: Shared{""}
+    answered: app_upload_run(endpoint, request, claimed.bytes, last.copy())
+    finished: endpoint.upload.files(calls.FileJob{step: .Finish}) ?? return answered
+    reply: last.guard_read()
+    if finished.status == 415 && app_reply_failed(reply.value) -> return app_json(415, reply.value)
+    answered
+}
+
+// Runs the method of an upload endpoint on the query's `args` and the
+// claimed upload of `bytes` bytes, in a transaction; `last` keeps the reply
+// of its last run.
+priv app_upload_run: fn(endpoint: AppUploadEndpoint, request: HTTPRequest, bytes: Int, last: Shared<String>) -[Net, FS.Read]> HTTPResponse Never! {
     args: app_upload_query(request, "args", "[]") ?? return app_json(422, app_invalid_json(err))
     name: app_upload_query(request, "name", "upload") ?? return app_json(422, app_invalid_json(err))
     given: live_json.parse(args) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
@@ -2628,30 +2644,47 @@ priv app_upload_call: fn(endpoint: AppUploadEndpoint, request: HTTPRequest) -[Ne
     if at > items.len() {
         return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call has {items.len()} arguments besides its upload, short of {at}"}}))
     }
-    body: request.body.bytes(app_upload_max(endpoint.upload)) ?? return app_json(400, app_error_json("the upload can't be read: {err}"))
-    file: live_json.parse("{{\"name\":{app_json_string(name)},\"bytes\":{body.len()}}}") ?? return app_json(500, app_error_json("the upload can't be described: {err}"))
+    file: live_json.parse("{{\"name\":{app_json_string(name)},\"bytes\":{bytes}}}") ?? return app_json(500, app_error_json("the upload can't be described: {err}"))
     spliced := [Dyn]{}
     loop index in 0..<items.len() {
         if index == at -> spliced.push(file.copy())
         spliced.push(items[index].copy())
     }
     if at == items.len() -> spliced.push(file.copy())
-    staged: endpoint.upload.files(calls.FileJob{step: .Stage(body)}) ?? return app_json(500, app_error_json("the upload can't be staged"))
-    if staged.status != 200 -> return app_json(500, app_error_json("the upload can't be staged"))
     tree: Dyn.Array(spliced)
-    last: Shared{""}
     ran: last.copy()
-    answered: app_transacted(None, None, fn() {
+    app_transacted(None, None, fn() {
         reply: endpoint.remote.answer(RemoteArgs{tree: tree.copy()}) ?? return {response: app_json(422, app_invalid_json(err)), commit: false}
         if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
         kept := ran.guard_edit()
         kept.value = reply.copy()
         {response: app_json(200, reply), commit: !app_reply_failed(reply)}
     })
-    finished: endpoint.upload.files(calls.FileJob{step: .Finish}) ?? return answered
-    reply: last.guard_read()
-    if finished.status == 415 && app_reply_failed(reply.value) -> return app_json(415, reply.value)
-    answered
+}
+
+// The spool of an upload endpoint (`__route_add_admitted`): the server
+// streams an admitted body to a file staged for it as it reads it
+// (jet_builtins.FileStep.Open, Write and Abandon).
+priv app_upload_spool: fn(held: Shared<AppUploadEndpoint>) -> HTTPSpool Never! {
+    opens: held.copy()
+    writes: held.copy()
+    drops: held.copy()
+    HTTPSpool{
+        open: fn() { app_upload_step(opens, calls.FileJob{step: .Open}) },
+        write: fn(name: String, piece: [U8]) { app_upload_step(writes, calls.FileJob{step: .Write{name: name, piece: piece}}) != None },
+        abandon: fn(name: String) {
+            _: app_upload_step(drops, calls.FileJob{step: .Abandon(name)})
+        },
+    }
+}
+
+// One step of an upload endpoint's staging: the staged file's name when it
+// went through (only `Open` gives one), else None.
+priv app_upload_step: fn(held: Shared<AppUploadEndpoint>, job: calls.FileJob) -[Net, FS.Read]> String? Never! {
+    entry: held.guard_read()
+    done: entry.value.upload.files(job) ?? return None
+    if done.status != 200 -> return None
+    Val(done.staged)
 }
 
 // GET `{BLOB_PATH}/:id`: the blob to a caller that the read policy of a row

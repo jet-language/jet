@@ -1,0 +1,15 @@
+# An upload streams to storage, and a body over the api's `max_upload` is
+# answered 413 before it is read. The app graph allows 64 bytes a call. A
+# sender announcing 100 bytes who sends none of them is answered 413 at once,
+# and so is a chunked sender whose next chunk would pass 64 bytes: a server
+# that read the chunk would wait for it. Nothing stays staged for either. A
+# 40-byte note sent in two halves is a 20-byte staged file before its second
+# half is sent, so the server writes the body to disk as it reads it rather
+# than holding it whole. The call keeps all 40 bytes, and the staged file is
+# gone once the request ends.
+fixture: UploadOverTheLimitIs413BeforeItIsRead.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "announces 100 bytes: HTTP/1.1 413 Payload Too Large {\"error\":\"an upload to `/api/add?args=%5B%5D&name=big.txt` is at most 64 bytes\"}\nstaged: []\na chunk passes 64 bytes: HTTP/1.1 413 Payload Too Large\nstaged: []\nstaged after the first half: [20]\nthe note: HTTP/1.1 200 OK {\"ok\":\"note.txt, 40 bytes\"}\nstaged after: []\n"
