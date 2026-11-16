@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 106599,
+    "rev": 106600,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -218994,6 +218994,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T00:17:43.146Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing081fg18",
+      "note": "Deadline 06:00 check-in, cycle p195 landed: 39.2% (-1.9, includes a c6 scoring correction)"
+    },
+    {
       "at": "2026-11-15T23:44:17.606Z",
       "by": "Main",
       "action": "briefing.post",
@@ -223722,6 +223729,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing081fg18",
+      "title": "Deadline 06:00 check-in, cycle p195 landed: 39.2% (-1.9, includes a c6 scoring correction)",
+      "body": "**Deadline 06:00 (precompiled Core + speed plan steps 1-5): 39.2% (-1.9 since the p194b check-in at 41.1%)**\n\n**Correction first.** Since 17:05 I had scored #5479 c6 (average parallelism >= 24 of 32) at 0.37, using p187's census-build reading of 8.3x. c6's own meter is the c1 throughput cell, and on p193c and p194b it reads release 3.7-4.3x, O0 3.0-3.3x, check 5.0-5.4x. That is below the criterion's starting \"about 5\", so c6 is re-scored at 0.1 (-3.2 points). Its gains so far are threading roots that have landed but don't show yet. The ledger now names the meter for every row.\n\nCycle p195 landed 10 SUBs (tip c1c2f3f4f5):\n- GoalsA-1-4 flat AST steps S4.2, S4.3 and S4.4: AST tables, with the semantic index, canvas and CLI readers moved onto views (#5479 c7 0.05 to 0.15, +1.4). The memory drop comes with S4.swap (-0.45 GB) and with S5, typed-body columns (the sealed bodies are 1.13 GiB of InspectBuild's 3.1 GB, measured by a heap census at the end of sema.bodies).\n- Speed-3-2: the E2815 caller scan runs on threads and its gate reads nodes in place. InspectBuild check wall fell from 14.2 s to 9.8 s. Also the core-check state aside and the indexed thread receipt.\n- PrecompiledCore-4: a 16 MiB large-free cache bound (wall-checked against an allocation-churn program: 8 MiB cost 8% CPU, 16 MiB nothing measurable) and the regenerated hot-text list. Its effect on the scaling run (target 200 MB; 216 MB on p194b) is measured in the p195 receipts running now.\n- GoalsB-5-2 c1-ahead: local values that need no landing are computed in the precheck batch. It broke 3 comptime_diff cases, which went straight back, so #6759 c1 stays at 0.7.\n\nSuite against p194b: 3 fixed, 5 new. Three are c1-ahead's (GoalsB-5-2); two are the known C-toolchain first-use race. The p194b rechecks pass (HTTP keepalive, process session); the TLS dudect rows flip between runs, a timing-noise test.\n\nRunning now: receipts on p195, then p196 with 10+ SUBs. These include MemKernel-6's first two fused-pipeline slices (#5479 c8: comptime binds without an object; the object written once from per-thread parts) and Speed-3-2's table CRC-32 plus threaded link CRC (release native.link 3.1-3.6 s to about 0.5 s; 4 MiB gzip 185 to 58 ms). Also the Core interface units on threads (runtime step -1.0 s), the comptime c1/c14/c20 steps, and the process-limit sampling fix.\n\nBoard: 432 open cards (0), 2,505 open criteria (0).\n",
+      "by": "Main",
+      "created": "2026-11-16T00:17:43.146Z",
+      "sections": []
+    },
     {
       "id": "briefing0w2cubn",
       "title": "Deadline 06:00 check-in, cycle p194b landed: 41.1% (+5.2)",
