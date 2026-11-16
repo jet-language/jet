@@ -276,8 +276,7 @@ link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectMod
         }
     }
     if has_rw -> link_pad_to(out, file_end - program_base, 0)
-    // The tail, as link_bind_sections writes it without debug sections or
-    // the image's symbols.
+    // The tail, as link_bind_sections writes it without debug sections.
     headers := link_bind_image_headers(c, view)
     extents := [[Int]]{}
     loop _ in 0..<LINK_CLASSES -> extents.push([Int]{0, 0})
@@ -303,7 +302,7 @@ link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectMod
         if header < 0 -> next
         link_image_symbol(globals, symbol_names, 1, def_name, if section == 1 -> 0x12 else -> 0x11, header, link_direct_startup_address(startup, def_name, startup_at, bss_at), 0)
     }
-    link_bind_symbols(c, out, origin, view, headers, locals, globals, symbol_names, false, elf)
+    link_bind_symbols(out, origin, headers, locals, globals, symbol_names, elf)
     exe.tail = out
     exe.patch_at.push(0)
     exe.patch_bytes.push(elf)
