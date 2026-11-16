@@ -61,7 +61,8 @@ JetCLILSPChecker: struct {
 
 // The automatic choices the checked modules record, by module and line, as
 // `jet inspect choices` finds them. Inlining is the optimizer's choice, which
-// a check does not make.
+// a check does not make, and live reads name their filter by the run's
+// declaration table, which a checked module does not carry.
 jet_cli_lsp_choices: fn(modules: [JetDriverDocModule]) -> [LSPChoice] Never! {
     out := [LSPChoice]{}
     loop module_ref in modules {
@@ -72,7 +73,6 @@ jet_cli_lsp_choices: fn(modules: [JetDriverDocModule]) -> [LSPChoice] Never! {
         jet_cli_exposure_choices(module_ref.functions, rows)
         jet_cli_rights_choices(module_ref.functions, rows)
         jet_cli_context_choices(module_ref.functions, rows)
-        jet_cli_live_read_choices(module_ref.functions, rows)
         loop row in rows {
             out.push(LSPChoice{module_path: module_ref.path.copy(), line: row.line, kind: row.kind.copy(), choice: row.choice.copy()})
         }
