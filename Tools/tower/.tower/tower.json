@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110354,
+    "rev": 110368,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79477,6 +79477,15 @@
           "evidence": "Moved to #6945 c8, the card that owns this work (board cleanup).",
           "at": "2026-11-16T00:59:10.454Z",
           "closure": "duplicate"
+        },
+        {
+          "n": 154,
+          "text": "`jet build --lib` builds a library output instead of reporting E2104, so MetaSuite family J35 (dynamic-library exports and generated library targets) passes its witness under Tests/Cases/LibraryOutputs and the MetaSuite check reports no owed J35 row (moved from #6845 c11). Proof: `jet test Compiler --profile cases --filter LibraryOutputs` and `--filter MetaSuite` list no owed J35 row.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T20:37:03.013Z"
         }
       ],
       "refs": [],
@@ -79487,9 +79496,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-16T00:59:10.454Z",
+      "updated": "2026-11-16T20:37:03.013Z",
       "updatedBy": "Main",
-      "criteriaLastN": 153
+      "criteriaLastN": 154
     },
     {
       "id": "c081c9o8",
@@ -97865,12 +97874,12 @@
         },
         {
           "n": 7,
-          "text": "The rows that failed only under full-suite load in cycles p220-p225 pass under that load, fixed at their root (a timing or resource assumption in the test or runtime), not by retry: Tests/Cases/HTTPServerLifecycle/plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries (tcp_shutdown write 'finish request write' panic in p225; passes 3/3 alone on the p225 batch compiler), the DeadlineContext o1 golden, the TLS dudect case and the FiberLiveness C toolchain unpack race. Proof: three consecutive full collect-all suite runs on batch compilers list none of them.",
+          "text": "The rows that failed only under full-suite load in cycles p220-p225 pass under that load, fixed at their root (a timing or resource assumption in the test or runtime), not by retry: Tests/Cases/HTTPServerLifecycle/plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries (tcp_shutdown write 'finish request write' panic in p225; passes 3/3 alone on the p225 batch compiler), the DeadlineContext o1 golden, the TLS dudect case, the FiberLiveness C toolchain unpack race and Tests/Cases/WebScaffold/jet_new_native_scaffold_builds_for_explicit_web_target (poll deadline exceeded in p226; passes 2/2 alone). Proof: three consecutive full collect-all suite runs on batch compilers list none of them.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T20:28:40.426Z"
+          "at": "2026-11-16T20:49:51.343Z"
         }
       ],
       "refs": [],
@@ -97881,7 +97890,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-16T20:28:40.426Z",
+      "updated": "2026-11-16T20:49:51.343Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -100229,7 +100238,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c1 waits on kit.file_button (#6447 kit / #6821); c2-c5 met on p226."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -100243,38 +100258,38 @@
         {
           "n": 2,
           "text": "Storage names each stored file itself and returns a blob ID. The client's file name is kept only as metadata and never becomes part of a path, so a name such as ../../etc/passwd stores safely. The server checks the media type from the bytes against the declared list, and a body declared image/png that holds HTML gets 415. Proof: `jet test Compiler --profile cases --filter WebApp/upload_storage_names_files_and_checks_content`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T20:05:20.735Z"
+          "evidence": "p226 batch compiler (dev 713d2cd072; uploads 33b4f0a1d8 + 46177eada7): jet test Compiler --profile cases --filter WebApp/upload_storage_names_files_and_checks_content PASS (sp-uploads WebApp/upload_ 3/3).",
+          "at": "2026-11-16T20:50:05.264Z"
         },
         {
           "n": 3,
           "text": "Before it reads the body, attach runs the method that #App.UploadCheck(method:) names, as the caller and after the session check; that method applies the project's row policy (D-DBPOLICY1, #3709), so a signed-in caller who is not a member gets 403 and the body is never read. Proof: `jet test Compiler --profile cases --filter WebApp/upload_by_a_non_member_is_403_before_it_is_read`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:35.821Z"
+          "evidence": "p226 batch compiler (dev 713d2cd072; uploads 33b4f0a1d8 + 46177eada7): jet test Compiler --profile cases --filter WebApp/upload_by_a_non_member_is_403_before_it_is_read PASS (in WebApp/upload_ 3/3).",
+          "at": "2026-11-16T20:50:06.275Z"
         },
         {
           "n": 4,
           "text": "A download of a stored blob runs the read policy of the row that holds its BlobID and is served with Content-Disposition: attachment and X-Content-Type-Options: nosniff. Proof: `jet test Compiler --profile cases --filter WebApp/blob_download_runs_row_policy`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:36.796Z"
+          "evidence": "p226 batch compiler (dev 713d2cd072; uploads 33b4f0a1d8 + 46177eada7): jet test Compiler --profile cases --filter WebApp/blob_download_runs_row_policy PASS 1/1.",
+          "at": "2026-11-16T20:50:07.356Z"
         },
         {
           "n": 5,
           "text": "An upload is spooled after its check passes and before the transaction starts; a retried transaction reads the staged body; a blob kept in a transaction that rolls back is deleted. A staged file lives no longer than its request, and one left by a crash is deleted when the server next starts. Proof: `jet test Compiler --profile cases --filter WebApp/upload_spools_before_the_transaction_and_rolls_back`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:37.897Z"
+          "evidence": "p226 batch compiler (dev 713d2cd072; uploads 33b4f0a1d8 + 46177eada7): jet test Compiler --profile cases --filter WebApp/upload_spools_before_the_transaction_and_rolls_back PASS (in WebApp/upload_ 3/3).",
+          "at": "2026-11-16T20:50:08.434Z"
         }
       ],
       "refs": [],
@@ -100285,7 +100300,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:59.169Z",
-      "updated": "2026-11-16T20:05:20.735Z",
+      "updated": "2026-11-16T20:50:11.187Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -101824,6 +101839,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "c2 waits on #6821 c1 (kit.Form<T>; no kit module in Core yet): its proof shows the FieldError beside its field in kit.form. Found by Speed-3-3, 2026-11-16."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "c2 needs kit.form, which does not exist; the kit package is #6821, unbuilt. c2 waits on #6821."
         },
         {
@@ -101874,7 +101894,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:37.165Z",
-      "updated": "2026-11-16T13:06:12.687Z",
+      "updated": "2026-11-16T20:46:59.319Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -103766,12 +103786,12 @@
         },
         {
           "n": 11,
-          "text": "One executable manifest covers the 40 Jai metaprogramming peer families and every reflection registry row, each with a passing witness on its tiers; a missing or inconclusive row fails the check, and historical Jai behavior is marked apart from observed Jai behavior. Proof: `jet test Compiler --profile cases --filter MetaSuite`",
+          "text": "One executable manifest covers the 40 Jai metaprogramming peer families and every reflection registry row, each with a passing witness on its tiers; a missing, inconclusive or untracked row fails the check, and historical Jai behavior is marked apart from observed Jai behavior. A row whose witness is a known-failing row owned by another card's open criterion is reported as owed, never as passed (today J34 native C callbacks, owned by #6947 c4, and J35 library exports, owned by #6418 c154). Proof: `jet test Compiler --profile cases --filter MetaSuite`",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:06:36.648Z"
+          "at": "2026-11-16T20:37:17.418Z"
         },
         {
           "n": 12,
@@ -103849,7 +103869,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-16T13:06:36.648Z",
+      "updated": "2026-11-16T20:37:17.418Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -106089,11 +106109,11 @@
         {
           "n": 2,
           "text": "A route loader's pending, error and not-found boundaries render, and an aborted navigation cancels its preload, on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Web/RouteLoaderBoundaries`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:52:15.741Z"
+          "evidence": "p226 batch compiler (dev 713d2cd072), commit 5e327e8133: jet test Compiler --profile golden --filter Web/RouteLoaderBoundaries PASS 6/6 (Native o0/o1/o2 and Web); navigation lives on web.app()'s one route table.",
+          "at": "2026-11-16T20:50:09.460Z"
         },
         {
           "n": 3,
@@ -106134,7 +106154,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:52:15.741Z",
-      "updated": "2026-11-16T20:28:54.389Z",
+      "updated": "2026-11-16T20:50:09.461Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -106681,11 +106701,11 @@
         {
           "n": 13,
           "text": "Test-host network abilities (sync review gap G64): the app test host can disconnect a client from the server and restore it mid-test, deterministically, so offline, catch-up and replay cases run without real network faults. Proof: a case that disconnects, writes on both sides, restores, and checks the merged state. (was #3709 c28)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:14:25.617Z"
+          "evidence": "p226 batch compiler (dev 713d2cd072), commits b9fbc7793e and 2fe268264c: jet test Compiler --profile cases --filter disconnected_client_merges_after_reconnect PASS 1/1 (the app test host disconnects a client mid-test, both sides write, the client reconnects and the merged state is checked).",
+          "at": "2026-11-16T20:45:56.597Z"
         },
         {
           "n": 14,
@@ -106709,7 +106729,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-16T19:12:17.817Z",
+      "updated": "2026-11-16T20:45:56.597Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -116559,6 +116579,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:16:26.292Z"
+        },
+        {
+          "n": 4,
+          "text": "MetaSuite family J34 (native callbacks and C calling convention) passes its witness Examples/Interop/FFI/Callbacks/run.jet on every applicable tier, so the MetaSuite check reports no owed J34 row (moved from #6845 c11). Proof: `jet test Compiler --profile cases --filter MetaSuite` lists no owed row for J34.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T20:36:59.633Z"
         }
       ],
       "refs": [],
@@ -116573,8 +116602,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:32.582Z",
-      "updated": "2026-11-16T13:16:26.292Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-16T20:36:59.633Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     },
     {
       "id": "c0zvan7c",
@@ -221000,6 +221030,104 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T20:50:22.777Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing02ftgpr",
+      "note": "p226 landed; #6813 c2-c5, #6864 c2 met; p227 (brace records) running"
+    },
+    {
+      "at": "2026-11-16T20:50:11.187Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pg5tj9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T20:50:09.461Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0drmvwg",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-16T20:50:08.434Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pg5tj9",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-16T20:50:07.356Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pg5tj9",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T20:50:06.275Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pg5tj9",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T20:50:05.264Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pg5tj9",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-16T20:49:51.343Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0gy2j07",
+      "note": "#7: Add the p226 load-only failure of the native scaffold case.; was: The rows that failed only under full-suite load in cycles p220-p225 pass under that load, fixed at their root (a timing or resource assumption in the test or runtime), not by retry: Tests/Cases/HTTPSe"
+    },
+    {
+      "at": "2026-11-16T20:46:59.319Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0exjsbx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T20:45:56.598Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00cqn1l",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-16T20:37:17.418Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0apk7x9",
+      "note": "#11: Correct the owning criterion number on #6418 (c154).; was: One executable manifest covers the 40 Jai metaprogramming peer families and every reflection registry row, each with a passing witness on its tiers; a missing, inconclusive or untracked row fails the "
+    },
+    {
+      "at": "2026-11-16T20:37:03.013Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#154 `jet build --lib` builds a library output instead of reporti"
+    },
+    {
+      "at": "2026-11-16T20:36:59.633Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kkogun",
+      "note": "#4 MetaSuite family J34 (native callbacks and C calling convent"
+    },
+    {
+      "at": "2026-11-16T20:36:56.323Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0apk7x9",
+      "note": "#11: Split the blocked half to the cards that own the missing work: J34's witness waits on the callback trampoline (#6947) and cffi E0003 (#6945 c2), J35's on `jet build --lib` (E2104, #6418). DeclTypes-6-1 checked on the p224 seed that every other family passes.; was: One executable manifest covers the 40 Jai metaprogramming peer families and every reflection registry row, each with a passing witness on its tiers; a missing or inconclusive row fails the check, and "
+    },
+    {
       "at": "2026-11-16T20:33:28.729Z",
       "by": "Main",
       "action": "card.update",
@@ -225892,6 +226020,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing02ftgpr",
+      "title": "p226 landed; #6813 c2-c5, #6864 c2 met; p227 (brace records) running",
+      "body": "p226 landed on dev 713d2cd072: IfHole #6857 c8 (one program entry form, E0621), Speed uploads fix (app.blobs/blob_url owned by the app module, App.jet formatted), Speed #6864 c2 (loader boundaries and navigation on web.app()'s one route table), DeclTypes #6852 c6 (E0149 from the declared CheckedText fact, sink registry deleted).\n\nSuite: 153 failures, 4 new, 6 fixed; golden 5020/5020 and core 2607/2607 clean; fmt corpus clean.\nNew: program_entry_mixed_nested_module finds no mix on the built compiler (back to IfHole); the two CheckedTextCrossings cases now get the more precise E0149 (back to DeclTypes); the native scaffold case timed out under load and passes 2/2 alone (#6772 c7).\n\nMet: #6813 c2-c5 (uploads; c1 waits on the kit's file button), #6864 c2, and earlier today #6868 c13. Closed: #6849. #6845 c11 split (J34 to #6947 c4, J35 to #6418 c154); its owed-rows check is in p227.\nHeld: #6857 c8 and #6852 c6 until their regressions are fixed.\n\np227 running: IfHole's brace-record stage 2 (#6857 c3+c4: paren tuples are not Jet, about 6000 sites swept), DeclTypes' dispatch guard, cffi byte spans and #6845 c11, Speed #6864 c4 (E2823/E2824 capability boundary) and #6867 c7.\n",
+      "by": "Main",
+      "created": "2026-11-16T20:50:22.777Z",
+      "sections": []
+    },
     {
       "id": "briefing0skf57i",
       "title": "p225 landed (1 new = load flake); 3 criteria met; p226 running",
