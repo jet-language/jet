@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6986,
-    "rev": 110400,
+    "nextNum": 6989,
+    "rev": 110425,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49052,6 +49052,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: moved from G6 to G5 when G5 fits better. It does: names in every script with look-alike names reported as tidy errors is developer experience (errors and what the editor shows), not declarations as types. #4723 (visibility and re-exports) stays in G6: it is declaration semantics, and G5 is no better fit."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -49193,10 +49198,10 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.274Z",
-      "updated": "2026-11-16T12:55:17.513Z",
+      "updated": "2026-11-16T21:53:04.281Z",
       "updatedBy": "Main",
       "goals": [
-        "G6"
+        "G5"
       ],
       "criteriaLastN": 16
     },
@@ -50996,6 +51001,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16 allowed a move to G5 if G5 fits better. Kept in G6: public-by-default visibility and declaration re-exports are declaration semantics; G5 (CLI, errors, editor) is no better fit."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
           "text": "Cleaned: c5 split into #4723 c7, #4723 c8, #4723 c9; c6 restated to the open part (the alias constructor and cycle errors have landed; #6176 allows non-generic aliases)."
@@ -51115,7 +51125,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-07T11:23:08.090Z",
-      "updated": "2026-11-16T12:55:34.777Z",
+      "updated": "2026-11-16T21:53:10.753Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -98614,7 +98624,7 @@
     {
       "id": "c0mq8xwu",
       "num": 6802,
-      "title": "Files: native open and save pickers, folder access that persists, and the browser's file pickers, as one typed API",
+      "title": "Files: native open and save pickers on Linux, folder access that persists, and the browser's file pickers, as one typed API",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G4).",
       "kind": "feature",
       "track": "sidequest",
@@ -98628,7 +98638,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6985 (G13)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -98641,21 +98657,21 @@
         },
         {
           "n": 2,
-          "text": "native.save_file writes where the person chose: through the system save dialog on desktops, the document picker on phones, and showSaveFilePicker or a download in the browser. Proof: `jet test Compiler --profile cases --filter NativeApp/save_file_writes_where_the_person_chose`.",
+          "text": "native.save_file writes where the person chose: through the portal save dialog on the Linux desktop, and showSaveFilePicker or a download in the browser. Proof: `jet test Compiler --profile cases --filter NativeApp/save_file_writes_where_the_person_chose` on Linux and the web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:04:57.593Z"
+          "at": "2026-11-16T21:52:58.841Z"
         },
         {
           "n": 3,
-          "text": "Access to a chosen folder survives a restart. This uses security-scoped bookmarks on macOS and iOS, persisted URI permissions on Android, and in the browser a stored FileSystemDirectoryHandle that asks for permission again. Proof: `jet test Compiler --profile cases --filter NativeApp/folder_access_survives_a_restart`.",
+          "text": "Access to a chosen folder survives a restart: on Linux through its path, or its document portal ID inside a sandbox; in the browser through a stored FileSystemDirectoryHandle that asks for permission again. Proof: `jet test Compiler --profile cases --filter NativeApp/folder_access_survives_a_restart` on Linux and the web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:04:58.531Z"
+          "at": "2026-11-16T21:53:01.053Z"
         }
       ],
       "refs": [],
@@ -98666,14 +98682,14 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:43.767Z",
-      "updated": "2026-11-16T21:52:55.432Z",
+      "updated": "2026-11-16T21:53:06.437Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
       "id": "c097myt8",
       "num": 6803,
-      "title": "Camera, sensors and location as typed streams behind declared device permissions",
+      "title": "Camera, sensors and location as typed streams behind declared device permissions, on Linux and the web",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G5).",
       "kind": "feature",
       "track": "sidequest",
@@ -98687,25 +98703,31 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6986 (G13)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place. In the browser they map to a capture input or getUserMedia, and to the Geolocation API. Proof: `jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant`.",
+          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place: on Linux through the camera portal (PipeWire) and GeoClue, in the browser through a capture input or getUserMedia and the Geolocation API. Proof: `jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant` on Linux and the web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:04:59.845Z"
+          "at": "2026-11-16T21:53:18.009Z"
         },
         {
           "n": 2,
-          "text": "native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered. Proof: `jet test Compiler --profile cases --filter NativeApp/sensor_streams_stop_with_their_scope`.",
+          "text": "native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered, on Linux and the web. Proof: `jet test Compiler --profile cases --filter NativeApp/sensor_streams_stop_with_their_scope`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:00.778Z"
+          "at": "2026-11-16T21:53:20.463Z"
         }
       ],
       "refs": [],
@@ -98716,14 +98738,14 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:45.126Z",
-      "updated": "2026-11-16T13:05:00.778Z",
+      "updated": "2026-11-16T21:53:25.215Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
     {
       "id": "c0unyp7q",
       "num": 6804,
-      "title": "Deep links and app links: custom schemes, iOS universal links and Android App Links land on screen state (D-ROUTE-ONE1)",
+      "title": "Deep links: custom schemes and web links land on screen state on Linux and the web (D-ROUTE-ONE1)",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G6).",
       "kind": "feature",
       "track": "sidequest",
@@ -98737,34 +98759,31 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6987 (G13)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "https://crew.example.com/tasks/<id>, an iOS universal link, an Android App Link and crewboard://tasks/<id> all land on TaskView{id} through the one route table (task IDs are UUIDv7). An unmatched path opens the not-found state. Proof: `jet test Compiler --profile cases --filter NativeApp/every_link_form_lands_on_the_route_state`.",
+          "text": "https://crew.example.com/tasks/<id> and crewboard://tasks/<id> (registered by the Linux desktop entry as the scheme handler) land on TaskView{id} through the one route table (task IDs are UUIDv7). An unmatched path opens the not-found state. Proof: `jet test Compiler --profile cases --filter NativeApp/every_link_form_lands_on_the_route_state` on Linux and the web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:01.698Z"
-        },
-        {
-          "n": 2,
-          "text": "The server output serves /.well-known/apple-app-site-association and /.well-known/assetlinks.json, written from the phone output's id and signing identity. Proof: `jet test Compiler --profile cases --filter WebApp/app_link_files_are_written_from_the_phone_output`.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:02.631Z"
+          "at": "2026-11-16T21:53:36.430Z"
         },
         {
           "n": 3,
-          "text": "Desktop single instance: a second launch with crewboard://tasks/42 hands its URL to the running app, which focuses its window and opens the state, and the second process exits. The reference designs are Electron requestSingleInstanceLock and Tauri's single-instance plugin. Proof: `jet test Compiler --profile cases --filter NativeApp/second_launch_hands_its_link_to_the_running_app`.",
+          "text": "Linux desktop single instance: a second launch with crewboard://tasks/42 hands its URL to the running app, which focuses its window and opens the state, and the second process exits. The reference designs are Electron requestSingleInstanceLock and Tauri's single-instance plugin. Proof: `jet test Compiler --profile cases --filter NativeApp/second_launch_hands_its_link_to_the_running_app` on Linux.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:03.598Z"
+          "at": "2026-11-16T21:53:38.656Z"
         }
       ],
       "refs": [],
@@ -98775,7 +98794,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:46.424Z",
-      "updated": "2026-11-16T13:05:03.598Z",
+      "updated": "2026-11-16T21:53:45.479Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98800,21 +98819,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "native.share opens the system share sheet on phones, macOS and Windows, and the Web Share API in a browser that has it. Elsewhere it copies the link and says so. Proof: `jet test Compiler --profile cases --filter NativeApp/share_uses_the_system_sheet_or_copies`.",
+          "text": "native.share uses the Web Share API in a browser that has it. On Linux and in other browsers it copies the link and says so. Proof: `jet test Compiler --profile cases --filter NativeApp/share_uses_the_web_share_api_or_copies` on Linux and the web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:04.537Z"
+          "at": "2026-11-16T21:53:56.522Z"
         },
         {
           "n": 2,
-          "text": "native.copy_text and native.paste_text work on every target. On the web, paste runs only inside a user gesture, and a refused read gives None. Proof: `jet test Compiler --profile cases --filter NativeApp/clipboard_round_trips_on_every_target`.",
+          "text": "native.copy_text and native.paste_text work on Linux (Wayland and X11) and the web. On the web, paste runs only inside a user gesture, and a refused read gives None. Proof: `jet test Compiler --profile cases --filter NativeApp/clipboard_round_trips_on_every_target` on Linux and the web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:05.492Z"
+          "at": "2026-11-16T21:53:58.802Z"
         },
         {
           "n": 3,
@@ -98834,7 +98853,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:47.698Z",
-      "updated": "2026-11-16T13:05:06.419Z",
+      "updated": "2026-11-16T21:53:58.802Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -119373,6 +119392,174 @@
       "needsAcceptance": false,
       "created": "2026-11-16T21:52:46.455Z",
       "updated": "2026-11-16T21:52:53.186Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
+    },
+    {
+      "id": "c03vcitf",
+      "num": 6986,
+      "title": "Camera, sensors and location on macOS, Windows and phones",
+      "body": "Platform half of #6803 (owner order 2026-11-16): #6803 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Camera, sensors and location as typed streams behind declared device permissions.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo and native.location a Place on macOS, Windows, iOS and Android. Proof: `jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant` on those hosts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:53:13.078Z"
+        },
+        {
+          "n": 2,
+          "text": "native.location_updates and the motion sensors stop with their scope, with no listener left registered, on macOS, Windows, iOS and Android. Proof: `jet test Compiler --profile cases --filter NativeApp/sensor_streams_stop_with_their_scope` on those hosts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:53:15.423Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G13"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-16T21:53:08.697Z",
+      "updated": "2026-11-16T21:53:15.423Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c0p5qaad",
+      "num": 6987,
+      "title": "Deep links on macOS, Windows and phones: iOS universal links, Android App Links and single instance",
+      "body": "Platform half of #6804 (owner order 2026-11-16): #6804 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Deep links and app links: custom schemes, iOS universal links and Android App Links land on screen state (D-ROUTE-ONE1).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An iOS universal link, an Android App Link and crewboard://tasks/<id> on macOS and Windows land on TaskView{id} through the one route table. Proof: `jet test Compiler --profile cases --filter NativeApp/every_link_form_lands_on_the_route_state` on those hosts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:53:29.627Z"
+        },
+        {
+          "n": 2,
+          "text": "The server output serves /.well-known/apple-app-site-association and /.well-known/assetlinks.json, written from the phone output's id and signing identity. Proof: `jet test Compiler --profile cases --filter WebApp/app_link_files_are_written_from_the_phone_output`. (Moved from the Linux card.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:53:31.816Z"
+        },
+        {
+          "n": 3,
+          "text": "A second launch on macOS or Windows hands its link to the running app, which focuses its window and opens the state. Proof: `jet test Compiler --profile cases --filter NativeApp/second_launch_hands_its_link_to_the_running_app` on those hosts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:53:33.914Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G13"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-16T21:53:27.399Z",
+      "updated": "2026-11-16T21:53:33.915Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
+    },
+    {
+      "id": "c02q0uvv",
+      "num": 6988,
+      "title": "System share sheet, clipboard and drag and drop on macOS, Windows and phones",
+      "body": "Platform half of #6805 (owner order 2026-11-16): #6805 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: System share sheet on phones and desktop and the Web Share API; clipboard and drag and drop reach app screens from core.ui.host.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "native.share opens the system share sheet on phones, macOS and Windows. Proof: `jet test Compiler --profile cases --filter NativeApp/share_uses_the_system_sheet_or_copies` on those hosts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:53:49.984Z"
+        },
+        {
+          "n": 2,
+          "text": "native.copy_text and native.paste_text round-trip on macOS, Windows, iOS and Android. Proof: `jet test Compiler --profile cases --filter NativeApp/clipboard_round_trips_on_every_target` on those hosts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:53:51.970Z"
+        },
+        {
+          "n": 3,
+          "text": "ui.drop_zone<T> refuses other types and offers a move without dragging on macOS, Windows, iOS and Android. Proof: `jet test Compiler --profile cases --filter NativeApp/drop_zone_refuses_other_types_and_offers_a_move_without_dragging` on those hosts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:53:54.247Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G13"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-16T21:53:47.810Z",
+      "updated": "2026-11-16T21:53:54.247Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     }
@@ -218535,6 +218722,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T21:53:58.802Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fqrrpk",
+      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6988.; was: native.copy_text and native.paste_text work on every target. On the web, paste runs only inside a user gesture, and a refused read gives None. Proof: `jet test Compiler --profile cases --filter Native"
+    },
+    {
+      "at": "2026-11-16T21:53:56.522Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fqrrpk",
+      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6988.; was: native.share opens the system share sheet on phones, macOS and Windows, and the Web Share API in a browser that has it. Elsewhere it copies the link and says so. Proof: `jet test Compiler --profile ca"
+    },
+    {
+      "at": "2026-11-16T21:53:54.247Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02q0uvv",
+      "note": "#3 ui.drop_zone<T> refuses other types and offers a move withou"
+    },
+    {
+      "at": "2026-11-16T21:53:51.970Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02q0uvv",
+      "note": "#2 native.copy_text and native.paste_text round-trip on macOS, "
+    },
+    {
+      "at": "2026-11-16T21:53:49.984Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02q0uvv",
+      "note": "#1 native.share opens the system share sheet on phones, macOS a"
+    },
+    {
+      "at": "2026-11-16T21:53:47.810Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c02q0uvv",
+      "note": "System share sheet, clipboard and drag and drop on macOS, Windows and phones"
+    },
+    {
+      "at": "2026-11-16T21:53:45.480Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0unyp7q",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-11-16T21:53:40.964Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0unyp7q",
+      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. Moved whole to #6987: it covers no Linux or web behavior.; was [open]: The server output serves /.well-known/apple-app-site-association and /.well-known/assetlinks.json, written from the phone output's id and signing identity. Proof: `jet test Compiler --profile cases --"
+    },
+    {
+      "at": "2026-11-16T21:53:38.656Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0unyp7q",
+      "note": "#3: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6987.; was: Desktop single instance: a second launch with crewboard://tasks/42 hands its URL to the running app, which focuses its window and opens the state, and the second process exits. The reference designs a"
+    },
+    {
+      "at": "2026-11-16T21:53:36.430Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0unyp7q",
+      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6987.; was: https://crew.example.com/tasks/<id>, an iOS universal link, an Android App Link and crewboard://tasks/<id> all land on TaskView{id} through the one route table (task IDs are UUIDv7). An unmatched path"
+    },
+    {
+      "at": "2026-11-16T21:53:33.915Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0p5qaad",
+      "note": "#3 A second launch on macOS or Windows hands its link to the ru"
+    },
+    {
+      "at": "2026-11-16T21:53:31.816Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0p5qaad",
+      "note": "#2 The server output serves /.well-known/apple-app-site-associa"
+    },
+    {
+      "at": "2026-11-16T21:53:29.628Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0p5qaad",
+      "note": "#1 An iOS universal link, an Android App Link and crewboard://t"
+    },
+    {
+      "at": "2026-11-16T21:53:27.399Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0p5qaad",
+      "note": "Deep links on macOS, Windows and phones: iOS universal links, Android App Links and single instance"
+    },
+    {
+      "at": "2026-11-16T21:53:25.215Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c097myt8",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-11-16T21:53:20.463Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c097myt8",
+      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6986.; was: native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered. Proof: `jet test Compiler --profile cases --filter NativeApp/sensor_"
+    },
+    {
+      "at": "2026-11-16T21:53:18.009Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c097myt8",
+      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6986.; was: After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place. In the browser they map to a capture input or getUserMedia, and to the Ge"
+    },
+    {
+      "at": "2026-11-16T21:53:15.423Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03vcitf",
+      "note": "#2 native.location_updates and the motion sensors stop with the"
+    },
+    {
+      "at": "2026-11-16T21:53:13.078Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03vcitf",
+      "note": "#1 After native.ask grants access, native.take_photo gives a Pi"
+    },
+    {
+      "at": "2026-11-16T21:53:10.753Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06m6abh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T21:53:08.697Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c03vcitf",
+      "note": "Camera, sensors and location on macOS, Windows and phones"
+    },
+    {
+      "at": "2026-11-16T21:53:06.438Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mq8xwu",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-11-16T21:53:04.282Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0441rvj",
+      "note": "logEntry,goals"
+    },
+    {
+      "at": "2026-11-16T21:53:01.053Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0mq8xwu",
+      "note": "#3: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6985.; was: Access to a chosen folder survives a restart. This uses security-scoped bookmarks on macOS and iOS, persisted URI permissions on Android, and in the browser a stored FileSystemDirectoryHandle that ask"
+    },
+    {
+      "at": "2026-11-16T21:52:58.841Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0mq8xwu",
+      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6985.; was: native.save_file writes where the person chose: through the system save dialog on desktops, the document picker on phones, and showSaveFilePicker or a download in the browser. Proof: `jet test Compile"
+    },
     {
       "at": "2026-11-16T21:52:55.432Z",
       "by": "Main",
