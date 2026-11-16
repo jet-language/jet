@@ -1126,10 +1126,10 @@ jet_driver_foreign_canonical_assembly: fn(load: JetDriverLoadResult, surface: Je
         carrier: jet_driver_inline_package(raw)
         source: jet_driver_mask_inline_package(raw, carrier)
         if canonical.len() > 0 && !canonical.ends_with("\n") -> canonical = "{canonical}\n"
-        base: canonical.len()
+        base: canonical.count_bytes()
         canonical = "{canonical}{source}"
         overlay_bases.push(base)
-        overlay_ends.push(base + source.len())
+        overlay_ends.push(base + source.count_bytes())
         overlay_starts.push(if carrier.found -> carrier.end else -> 0)
         overlay_sources.push(source)
     }
@@ -1138,7 +1138,7 @@ jet_driver_foreign_canonical_assembly: fn(load: JetDriverLoadResult, surface: Je
     adapter_sources := [String]{}
     loop adapter in adapters {
         if canonical.len() > 0 && !canonical.ends_with("\n") -> canonical = "{canonical}\n"
-        base: canonical.len()
+        base: canonical.count_bytes()
         source: jet_driver_foreign_adapter_source(adapter)
         canonical = "{canonical}{source}"
         adapter_bases.push(base)
@@ -1165,7 +1165,7 @@ jet_driver_foreign_canonical_assembly: fn(load: JetDriverLoadResult, surface: Je
     if cache_source.len() > 0 {
         cache_segments: jet_driver_source_segments(cache_path, cache_source)
         if cache_segments.len() > 0 {
-            source_segments.push(SemaSourceSegment{generated: Span{start: 0, end: cache_source.len()}, source_file: cache_path, source_start: 0, origin: SemaSourceOrigin.Snapshot, line_starts: cache_segments[0].line_starts})
+            source_segments.push(SemaSourceSegment{generated: Span{start: 0, end: cache_source.count_bytes()}, source_file: cache_path, source_start: 0, origin: SemaSourceOrigin.Snapshot, line_starts: cache_segments[0].line_starts})
         }
     }
     // A Core overlay (no authority root) is the loader's retained Core text.
@@ -1178,7 +1178,7 @@ jet_driver_foreign_canonical_assembly: fn(load: JetDriverLoadResult, surface: Je
     }
     loop adapter_index in 0..<adapter_sources.len() {
         adapter_path: jet_driver_foreign_adapter_path(surface, adapter_index)
-        source_segments.push(SemaSourceSegment{generated: Span{start: adapter_bases[adapter_index], end: adapter_bases[adapter_index] + adapter_sources[adapter_index].len()}, source_file: adapter_path, source_start: 0, origin: SemaSourceOrigin.CompilerGenerated, line_starts: jet_driver_foreign_fragment_line_starts(adapter_sources[adapter_index])})
+        source_segments.push(SemaSourceSegment{generated: Span{start: adapter_bases[adapter_index], end: adapter_bases[adapter_index] + adapter_sources[adapter_index].count_bytes()}, source_file: adapter_path, source_start: 0, origin: SemaSourceOrigin.CompilerGenerated, line_starts: jet_driver_foreign_fragment_line_starts(adapter_sources[adapter_index])})
     }
     aggregate_path: jet_driver_foreign_aggregate_path(surface)
     generated_source_files := [SourceFile]{
