@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110331,
+    "rev": 110337,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36,7 +36,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-11-16T08:55:05.414Z"
+    "completionCursor": "2026-11-16T19:29:21.088Z"
   },
   "epochs": [
     {
@@ -27565,11 +27565,11 @@
         {
           "n": 27,
           "text": "A program type that shares a Core type's name never hides the Core type's methods: with a program `Task: struct` in scope, `working: task { … }` is still Core's task handle and `working.detach()` / `working.join()` resolve on it, on O0/O1/O2. Sema resolves a Core value's type by its owner, never by the bare name. Proof: `jet test Compiler --profile cases --filter program_type_named_like_core_keeps_core_methods`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T17:53:10.050Z"
+          "evidence": "p223 batch compiler (dev a8b53c68d8): jet test Compiler --profile cases --filter program_type_named_like_core_keeps_core_methods PASS 1/1 (DeclTypes r2 88dc8f59b9 + r4 2e95600ee5); suite p223 0 new failures",
+          "at": "2026-11-16T19:34:02.702Z"
         }
       ],
       "refs": [
@@ -27598,7 +27598,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T18:40:29.942Z",
+      "updated": "2026-11-16T19:34:02.702Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -104827,11 +104827,11 @@
         {
           "n": 3,
           "text": "A Core call's effects and credential-sink class come from its declaration: sema_taint_core_effect and sema_taint_credential_sink (Sema/Taint.jet:240-300 at 25f9dee58f, also read by Cli/ProveReplay.jet) are deleted. Proof: `git grep -n -E 'sema_taint_core_effect|sema_taint_credential_sink' Compiler` prints nothing and `jet test Compiler --profile ui --filter Taint` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:50.260Z"
+          "evidence": "p223 batch compiler (dev a8b53c68d8): git grep -n -E 'sema_taint_core_effect|sema_taint_credential_sink' Compiler prints nothing; jet test Compiler --profile ui --filter Taint PASS 46/46 (e45ca214e6)",
+          "at": "2026-11-16T19:34:04.438Z"
         },
         {
           "n": 4,
@@ -104917,7 +104917,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-16T18:26:01.260Z",
+      "updated": "2026-11-16T19:34:04.438Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -106037,16 +106037,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c2 design (Main): route loader boundaries go on web.app()'s one route table (D-ROUTE-ONE1=A: only page rows join client navigation), on the screen routes c1 defines; a loader/settle/show API on core.web.router would be a second route mechanism (I8). Speed-3-3's router-level SUB was returned for that reason."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A screen's route is its state struct (typed `:field` path parameters and `#App.Query` search parameters), its view is the loader, and url_of, go and current are its navigation; a link or navigation to an unknown route or with a wrong parameter type is a compile error with a registered diagnostic and a UI snapshot. Proof: `jet test Compiler --profile ui --filter web_route_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T19:06:06.761Z"
+          "evidence": "p223 batch compiler (dev a8b53c68d8): jet test Compiler --profile ui --filter web_route_ PASS 4/4 (2ee79b3cf2)",
+          "at": "2026-11-16T19:34:06.150Z"
         },
         {
           "n": 2,
@@ -106096,7 +106102,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:52:15.741Z",
-      "updated": "2026-11-16T19:06:06.761Z",
+      "updated": "2026-11-16T19:34:06.150Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -220962,6 +220968,48 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T19:34:29.174Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing07qh4fr",
+      "note": "p223 landed clean (0 new); #3147 closed; p224 running"
+    },
+    {
+      "at": "2026-11-16T19:34:06.150Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0drmvwg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-16T19:34:04.438Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T19:34:02.702Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-16T19:33:49.919Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0drmvwg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T19:29:21.089Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-16T19:29:21.088Z"
+    },
+    {
       "at": "2026-11-16T19:12:42.872Z",
       "by": "Main",
       "action": "briefing.post",
@@ -225693,6 +225741,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing07qh4fr",
+      "title": "p223 landed clean (0 new); #3147 closed; p224 running",
+      "body": "p223 landed on dev a8b53c68d8 (master 24171b6ba5): DeclTypes #3147 c27 r4 and #6852 c3, Speed #6864 c1 typed route errors, GoalsA's brace-record meaning check. The first census held Speed uploads r3, whose Core/Web file hook made the compiler's dev web loop reach DB.Read (E0749); r4 fixes it at the root and is in p224.\n\nSuite: 151 failures, 0 new, 2 fixed; golden 5014/5014 and core 2604/2604 clean.\n\nClosed: #3147 (17/17). Met: #3147 c27, #6852 c3, #6864 c1. Earlier today: #3838, #6811, #6816, #6814 and #6825 closed.\n\nDecisions: #6852 c11 uses the declaration as the only source of a source-owned Core call's effects; #6864 c2's loader boundaries go on web.app()'s one route table (D-ROUTE-ONE1=A), not on core.web.router.\n\np224 is running: IfHole bit-sigils-b (#6857 c13, AST meaning check 686 same / 3 intended / 0 unexplained; Main merged one Taint.jet import conflict), Speed uploads r4 (#6813 c2-c5) with a Main bit-sigil fix for its one bit_and call, DeclTypes #6852 c11, GoalsA's StreamBench fmt and gauntlet entry paths, and a Main harness path fix.\n",
+      "by": "Main",
+      "created": "2026-11-16T19:34:29.174Z",
+      "sections": []
+    },
     {
       "id": "briefing03vwici",
       "title": "p222 landed; #6814 and #6825 closed; p223 running",
