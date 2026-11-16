@@ -75,7 +75,12 @@ what a run does works the same while building: Shared cells, tasks and
 SHA-256, and allocation in a fixed backing
 ([`native_o0_shared_tasks_select`](../../../tests/cases/comptime/native_o0_shared_tasks_select.case)).
 A foreign (`#FFI`) function is not linked into compile-time code, so a call
-of one while building stops the build (E3010).
+of one while building stops the build (E3010). The closures Core keeps for
+later run the same way: scope guards, transaction commit and rollback hooks,
+reactive derived values and effects, and UI click handlers and render
+bodies. The typed-text heads (`HTML`, `Sh`, `URL`, `Path`, `DateTime`,
+`SQL`) escape their holes while building as they do at run time
+([`native_o0_closure_kinds`](../../../tests/cases/comptime/native_o0_closure_kinds.case)).
 
 A compile-time value must be data: the build keeps it and hands it to later
 compile-time code and to the program. A runtime handle such as a
