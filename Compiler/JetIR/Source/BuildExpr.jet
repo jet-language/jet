@@ -3162,21 +3162,19 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         }
         return ir_route(m, p, b, data_symbol, operands, mask, ty, span)
     }
-    // A precise method whose core.math source helper the program holds calls
-    // it; only a precise type that is still a runtime handle crosses a route.
+    // A precise method calls its core.math source helper when the program
+    // holds it, else its runtime route (ir_precise_values).
     if operation == .PreciseMethod(type_name, method) {
-        if ir_precise_helper_row(p, type_name, method) != None {
-            slots := [Int]{}
-            subject: ir_expr(m, p, b, receiver)
+        slots := [Int]{}
+        subject: ir_expr(m, p, b, receiver)
+        if ir_failed(b) -> return -1
+        slots.push(subject)
+        loop arg in args {
+            slot: ir_expr(m, p, b, arg)
             if ir_failed(b) -> return -1
-            slots.push(subject)
-            loop arg in args {
-                slot: ir_expr(m, p, b, arg)
-                if ir_failed(b) -> return -1
-                slots.push(slot)
-            }
-            return ir_precise_values(m, p, b, ty, type_name, method, slots, span)
+            slots.push(slot)
         }
+        return ir_precise_values(m, p, b, ty, type_name, method, slots, span)
     }
     carrier: ir_failure_carrier_for_type(ty)
     route: ir_general_handle_route(operation, ir_ty(p, b, receiver), args.len(), carrier) ?? return ir_fail_slot(b, span, "handle method {ir_handle_op_name(operation)} without a closed route")
