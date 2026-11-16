@@ -15,6 +15,11 @@ extern bool jet_rt_handle_eq_process_resource_limit(const Enum *, const Enum *);
 extern Text *jet_rt_handle_show_process_resource_limit(const Enum *);
 extern Text *jet_rt_handle_display_process_resource_limit(const Enum *);
 extern Text *jet_rt_handle_debug_process_resource_limit(const Enum *);
+extern Enum *jet_rt_record_new_process_resource_limit_wall_time(void);
+extern Enum *jet_rt_record_new_process_resource_limit_cpu_time(void);
+extern Enum *jet_rt_record_new_process_resource_limit_memory(void);
+extern Enum *jet_rt_record_new_process_resource_limit_open_files(void);
+extern Enum *jet_rt_record_new_process_resource_limit_output(void);
 extern Enum *jet_rt_handle_clone_process_stream_mode(const Enum *);
 extern void jet_rt_handle_drop_process_stream_mode(Enum *);
 extern bool jet_rt_handle_eq_process_stream_mode(const Enum *, const Enum *);
@@ -35,9 +40,25 @@ static void text(Text *owned, const char *expected) {
 int main(void) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     static const char *human[] = {"wall time", "CPU time", "memory", "open file handles", "output"};
-    static const char *debug[] = {"WallTime", "CpuTime", "Memory", "OpenFiles", "Output"};
+    static const char *debug[] = {"WallTime", "CPUTime", "Memory", "OpenFiles", "Output"};
+    static Enum *(*const made[])(void) = {
+        jet_rt_record_new_process_resource_limit_wall_time,
+        jet_rt_record_new_process_resource_limit_cpu_time,
+        jet_rt_record_new_process_resource_limit_memory,
+        jet_rt_record_new_process_resource_limit_open_files,
+        jet_rt_record_new_process_resource_limit_output,
+    };
     jet_rt_alloc_init();
-    // Borrow native value fixtures; clone is the sole producer in this family.
+    // Each variant's constructor builds a fresh limit holding its position.
+    for (int64_t tag = 0; tag < 5; ++tag) {
+        Enum *built = made[tag]();
+        assert(built->tag == tag);
+        text(jet_rt_handle_debug_process_resource_limit(built), debug[tag]);
+        watched = built; frees = 0;
+        jet_rt_handle_drop_process_resource_limit(built);
+        assert(frees == 1); watched = NULL;
+    }
+    // Borrow native value fixtures for clone, equality and render.
     for (int64_t tag = 0; tag < 5; ++tag) {
         Enum value = {tag};
         Enum *clone = jet_rt_handle_clone_process_resource_limit(&value);

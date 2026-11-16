@@ -195,7 +195,7 @@ int main(int argc,char **argv) {
         for(size_t i=0;i<count;++i) assert(watched[i].freed==1);
         count=0;
     }
-    const char *const limits[]={"WallTime","CpuTime","Memory","OpenFiles","Output"};
+    const char *const limits[]={"WallTime","CPUTime","Memory","OpenFiles","Output"};
     const char *const limit_show[]={"wall time","CPU time","memory","open file handles","output"};
     for(int64_t i=0;i<5;++i) {
         Error *e=jet_rt_record_new_io_error_resource_limit(i); error_watch(e,true);

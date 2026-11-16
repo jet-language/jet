@@ -304,9 +304,9 @@ sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSen
 }
 
 // A compiler-owned Core enum family or record without a module export or a
-// nominal row (`IOError`, `IOContext`, `ProcessResourceLimit`) is declared by
-// its generated payload/field rows, so it crosses exactly when its parts do
-// (the copy facts walk the same rows: `sema_copy_core_row_facts`).
+// nominal row (`IOError`, `IOContext`) is declared by its generated
+// payload/field rows, so it crosses exactly when its parts do (the copy facts
+// walk the same rows: `sema_copy_core_row_facts`).
 sema_ownership_crossing_core_row_parts: fn(name: String) -> [TypeTupleField]? Never! {
     if core_enum_payload_variants(name) == .Val(variants) {
         parts := [TypeTupleField]{}

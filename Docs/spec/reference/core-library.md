@@ -2985,6 +2985,12 @@ The macOS backend refuses memory and open-file limits, Windows refuses
 open-file limits, and unsupported targets refuse the corresponding native
 CPU, memory, or open-file requests.
 
+A child or pipeline that runs out of a limit fails with
+`IOError.ResourceLimit(limit)`, and its receipt's `limit_hit` names the same
+limit. `limit` is a `ProcessResourceLimit`, declared in
+`Core/Builtins/Builtins.jet`: `.WallTime`, `.CPUTime`, `.Memory`,
+`.OpenFiles` or `.Output`.
+
 `.cpu_affinity(cpus: [Int])` runs the child only on the listed CPUs: the
 child sets its own affinity before it executes the program, so no
 instruction of the program runs elsewhere, and its descendants inherit the
