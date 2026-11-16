@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108408,
+    "rev": 108409,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -221130,6 +221130,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T05:14:28.091Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0p9p91m",
+      "note": "Cycle p205 landed (dev 16c1bda2d9): 5 SUBs, core suite all green, 3 criteria met; p206 running"
+    },
+    {
       "at": "2026-11-16T05:14:00.582Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -225833,6 +225840,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0p9p91m",
+      "title": "Cycle p205 landed (dev 16c1bda2d9): 5 SUBs, core suite all green, 3 criteria met; p206 running",
+      "body": "## Cycle p205 landed: dev 16c1bda2d9\n\n**Landed (5):**\n- the core-interface receipt's disposition table (Main);\n- an erased trait value reports its concrete type (GoalsA-1-4, #6845 c14);\n- the enum case catalog (GoalsA-1-4, #3147);\n- one `jet inspect choices` JSON line per inlined call (PrecompiledCore-4, #6979);\n- the tidy cleanup outside #6858 c2, with two lint false positives fixed (MemKernel-6-2).\n\n**Suites on the p205 batch compiler:**\n- golden: 4971 pass, 0 fail;\n- core: all 2421 pass, the first clean core run this stretch;\n- ui: 2841 pass, 17 fail (unchanged);\n- cases: 4771 pass, 133 fail (one fewer).\n\n1 new failure and 4 fixed:\n- The new one is the Firefox notebook case. It and its Chromium twin swap between failing and skipping depending on which browser the host has. Both fail on the unbuilt `jet notebook` (#6418), so both are now marked known-failing.\n- The fixed four include the TLS O0/O2 timing rows and the inspect-choices case.\n\n**Speed:** a cold `jet run` of a small program takes 0.50 s at 313 MB. The InspectBuild check takes 8.42 s, down from 9.42 s.\n\n**Criteria met:**\n- #6501 c15: the B-step receipt, every row improved.\n- #6845 c14: builtin types are Type values, and an erased trait value has the same TypeId.\n- #3147 c4: case descriptors (EnumCases golden, O0/O1/O2).\n\n**Found:**\n- The disposition golden judges card references against a frozen board snapshot, rev 92504, that dev still tracks. Any audit citing a newer card reads as naming a missing card. The golden is updated in p206; the root is filed as #6311 c56.\n- The nested tidy census (every package root) found 357 hits in 183 files. MemKernel-6-2 has filed fixes for all of them, so the #6858 c2 stack is complete and gets its own cycle, p207.\n\n**The Any ballot (D-PRIM-ANY1):**\n- Review 3 failed. Round 3 now recommends option C, a checked type arm over a trait value, with no Any type. A fourth fresh review is running.\n- Filed from the probes: #6845 c15 (a method-less trait value prints empty), #6839 c32 (Core traits are refused as value types, against spec.md:938) and #6839 c33 (`Any` gets a bare E0119).\n\n**Next:** p206 is running with nine SUBs:\n- #6979 c1-c4 (inline census, refusals, Core `abs`), with a full suite and self-build;\n- #6847 c4 and c9;\n- #3147 c2 and c5;\n- #6825 c1, c3 and c5 (G9 jobs);\n- the golden and known-failing fixes.\n",
+      "by": "Main",
+      "created": "2026-11-16T05:14:28.091Z",
+      "sections": []
+    },
     {
       "id": "briefing0qtrnd9",
       "title": "p204 landed: G9 transactions, webhook dedupe and trait-value printing met",
