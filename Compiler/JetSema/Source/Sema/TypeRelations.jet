@@ -2665,6 +2665,50 @@ sema_type_core_leaf_name: fn(graph: SemaRegistrationGraph, name: String, caller:
     Val(leaf)
 }
 
+// A Core row's type (a builtin Core record's field, a fixed Core call's
+// parameter or result) spells Core's nominals by their bare names. Such a name
+// is Core's even in a program that declares a type of the same name: where
+// the caller (row `caller`) resolves it to its own nominal, the name resolves
+// in the first loaded Core module exporting it instead
+// (sema_type_core_row_owner). Every other spelling is kept, so a Core body,
+// and a program that declares no such name, read the row as before.
+sema_type_core_row_form: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int) -> Type Never! {
+    if ty == {
+        .Named(name) -> if sema_type_core_row_owner(graph, name, caller) == .Val(owner) -> sema_type_graph_resolve_named(graph, name, owner) else -> ty
+        .Apply(name, args) -> {
+            owner: sema_type_core_row_owner(graph, name, caller)
+            Type.Apply{
+                name: if owner == .Val(core) -> sema_type_graph_resolve_apply_name(graph, name, core) else -> name,
+                args: loop arg in args -> sema_type_core_row_form(graph, arg, caller),
+            }
+        }
+        .List(inner) -> Type.List{element: sema_type_core_row_form(graph, inner, caller)}
+        .Shared(inner) -> Type.Shared{inner: sema_type_core_row_form(graph, inner, caller)}
+        .Option(inner) -> Type.Option{inner: sema_type_core_row_form(graph, inner, caller)}
+        .Result(ok, err) -> Type.Result{ok: sema_type_core_row_form(graph, ok, caller), err: sema_type_core_row_form(graph, err, caller)}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Tagged(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ty
+    }
+}
+
+// The registration row of the Core module a bare Core row name `name`
+// resolves in, when the caller (row `caller`, a program module) declares or
+// imports a non-Core nominal of that name: the first loaded Core module that
+// exports it. None when the caller's own resolution already names Core's type.
+sema_type_core_row_owner: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> Int? {
+    if caller < 0 || module_is_core(graph.modules[caller].module_identity) -> return None
+    if name.contains("::") || name.contains(".") -> return None
+    resolved: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return None
+    nominal: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
+    if module_is_core(graph.modules[nominal.module_index].module_identity) || graph.modules[nominal.module_index].nominals[nominal.row].compiler_owned {
+        return None
+    }
+    loop module_name in core_type_modules(name) {
+        owner: sema_registration_module_index_text(graph, "{MODULE_CORE_PREFIX}{module_name}") ?? next
+        return Val(owner)
+    }
+    None
+}
+
 sema_type_assignable_in_graph: fn(graph: SemaRegistrationGraph, required: Type, offered: Type, caller_module_identity: ModuleID) -> Bool? {
     sema_type_assignable_in_graph_with_generics(graph, required, offered, caller_module_identity, [TGenericParam]{})
 }

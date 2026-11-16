@@ -727,7 +727,13 @@ sema_copy_core_row_facts: fn(
     complete := true
     holds := false
     loop part in parts {
-        nested: sema_copy_type_facts(part, graph, table, caller, generic_params, walk)
+        // A row names Core's types bare; they stay Core's beside a program
+        // type of the same name (sema_type_core_row_form).
+        core_part: if graph == {
+            .Val(registered) -> sema_type_core_row_form(registered, part, caller)
+            .None -> part
+        }
+        nested: sema_copy_type_facts(core_part, graph, table, caller, generic_params, walk)
         cloneable = cloneable && nested.cloneable
         heap = heap || nested.heap
         clock = clock || nested.observable_clock

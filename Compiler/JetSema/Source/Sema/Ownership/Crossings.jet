@@ -294,7 +294,9 @@ sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSen
     walk.active.push(key.copy())
     found := SemaSendabilityProblem?{None}
     loop part in parts {
-        problem: sema_ownership_crossing_type_inner(part.ty, crossing, true, strict_callable, cell_only, environment, program, context, walk) ?? next
+        // A row names Core's types bare; they stay Core's beside a program
+        // type of the same name (sema_type_core_row_form).
+        problem: sema_ownership_crossing_type_inner(sema_expr_core_row_type(part.ty, environment, program), crossing, true, strict_callable, cell_only, environment, program, context, walk) ?? next
         found = Val(sema_ownership_crossing_prepend(name, part.name, problem))
         break
     }

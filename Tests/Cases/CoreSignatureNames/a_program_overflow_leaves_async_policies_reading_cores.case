@@ -1,0 +1,31 @@
+# A program declares `Overflow` with a payload, the name of core.event's queue
+# overflow policy. The AsyncPolicy record row's bare `overflow: Overflow` is
+# still Core's: the literal's `.DropNewest` and the field read check against
+# core.event's enum, the queue takes the policy on every tier, and the
+# program's own enum keeps its payload.
+fixture: AProgramOverflowLeavesAsyncPoliciesReadingCores.fixture
+env: NO_COLOR=1
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "drops newest\ngot 7\naccepted=true\nspill own 3\ncalm\n"
+step: jet run -O1 run.jet
+exit: 0
+stdout: = "drops newest\ngot 7\naccepted=true\nspill own 3\ncalm\n"
+step: jet run -O2 run.jet
+exit: 0
+stdout: = "drops newest\ngot 7\naccepted=true\nspill own 3\ncalm\n"
+step: jet build -O0 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "drops newest\ngot 7\naccepted=true\nspill own 3\ncalm\n"
+step: jet build -O1 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "drops newest\ngot 7\naccepted=true\nspill own 3\ncalm\n"
+step: jet build -O2 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "drops newest\ngot 7\naccepted=true\nspill own 3\ncalm\n"
