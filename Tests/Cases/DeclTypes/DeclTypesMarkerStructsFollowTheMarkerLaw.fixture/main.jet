@@ -1,0 +1,21 @@
+// A marker is a struct that implements `Marker`: `sites` and `repeatable`
+// are constants of that impl, and `expand` is the template the compiler
+// expands with the marked type bound to `target`.
+Described: struct {
+    impl Marker {
+        sites: [.Type]
+        repeatable: false
+
+        expand: fn(self, target: Target) {
+            describe: fn(self) -> String { "a {target.reflect().name}" }
+        }
+    }
+}
+
+#Described
+Point: struct {
+    x: Int
+    y: Int
+}
+
+run: fn() { print(Point{x: 1, y: 2}.describe()) }
