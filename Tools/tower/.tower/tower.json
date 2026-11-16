@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108378,
+    "rev": 108383,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95303,46 +95303,6 @@
       "criteriaLastN": 1
     },
     {
-      "id": "c01gm989",
-      "num": 6715,
-      "title": "jet test --profile packages --filter does not narrow the package rows",
-      "body": "In integ b7d, `jet test Compiler --profile packages --filter \"store cleanup quarantines projection with proven missing output\"` built and ran all 3235 package rows (~40 min) and reported unrelated FAILs. The filter should select the matching rows (and the packages that hold them) before anything builds, just as it does for the cases profile. Batch test lines rely on it.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "jet test Compiler --profile packages --filter X builds only the packages holding rows that match X and reports only those rows; a test pins it",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev ea02311525 (narrowing), proved on ab2d2ab82b with seed-b14 by Lander: cases test_profile_code_suites_report_rows PASS (the pinning test); --profile packages --filter TargetMachine rc 0; --profile packages --filter Compiler/JetBackend/Tests reports 'suite packages: 1 row, 1 passed, 0 failed', only the matching row. Outs $JET_SCRATCH_ROOT/lanes/Lander/sweep-6715c1.out, sweep-6715c1b.out",
-          "at": "2026-11-13T04:03:23.754Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T09:50:46.810Z",
-      "updated": "2026-11-13T04:03:25.353Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-13T04:03:25.353Z"
-    },
-    {
       "id": "c0cyzxlq",
       "num": 6716,
       "title": "Dev stays buildable by the admitted seed: compiler-side uses of new Core and runtime API land one seed later",
@@ -96918,6 +96878,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p203 core suite: a second TLS O2 dudect row failed (TLS 1.2 server RSA premaster timing), beside the RSAES-OAEP row that has failed under load since p188. Same flake class as c7: the suite runs these rows under full machine load."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
           "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c6 reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
@@ -97012,7 +96977,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:49:47.742Z",
-      "updated": "2026-11-16T03:04:52.356Z",
+      "updated": "2026-11-16T04:08:41.381Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -98092,11 +98057,11 @@
         {
           "n": 20,
           "text": "Core and Prelude ship precompiled inside the jet binary: checked interfaces and machine code produced when jet is built, part of the toolchain identity and immutable (no runtime cache, nothing to invalidate). `jet run` reads, scans and re-checks no Core or Prelude source: strace -c of `jet run hello.jet` shows no statx/openat/getdents64 on the toolchain tree, and the cold user time for hello is spent on the user code. One meaning on o0/o1/o2 (I9). Proof: the `strace -c` receipt of `jet run hello.jet` (Tools/perf/core-strace/run.jet, out of tree and in the checkout) logged on this card, and `jet test Compiler --profile golden` on O0, O1 and O2. (was #6328 c22)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T02:13:13.434Z"
+          "evidence": "p202/p203 batch compilers. strace half (p202, dev 7fbaac6e87, Tools/perf/core-strace/run.jet): jet run hello.jet out of tree has 507 file calls, 0 on Core/ or Compiler/Prelude/, PASS; in the checkout, jet run Examples/Basics/Hello.jet has 830 file calls, 0 on the tree, PASS. Golden half (p203 suite, dev 686e086a2c, jet test Compiler --profile golden on O0/O1/O2): PASS 4968, FAIL 0, KNOWN-FAILING 55, SKIP-HOST 3. Core and Prelude come precompiled inside the binary; I9 holds on o0/o1/o2.",
+          "at": "2026-11-16T04:08:38.808Z"
         },
         {
           "n": 21,
@@ -98136,7 +98101,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-16T03:49:55.987Z",
+      "updated": "2026-11-16T04:08:38.808Z",
       "updatedBy": "Main",
       "criteriaLastN": 23
     },
@@ -104170,11 +104135,11 @@
         {
           "n": 7,
           "text": "TypeInfo.identity is a TypeId (D-META-REFLECT2=A), not a String, and every reader moves to it in one cutover. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:40.963Z"
+          "evidence": "p203 batch compiler (dev 686e086a2c; the cutover landed as 93276d86a7): jet test Compiler --profile golden --filter Metaprogramming/Reflection gives n=79, bad=0 (O0/O1/O2). TypeValues.jet matches its .out, and git grep finds no identity: String left on TypeInfo (the remaining identity: String fields belong to ProgramFact and RunFact).",
+          "at": "2026-11-16T04:08:40.146Z"
         },
         {
           "n": 8,
@@ -104232,12 +104197,12 @@
         },
         {
           "n": 14,
-          "text": "Builtin types are Type values: counts[Int] = 1 works as user types do (today E0107 'Nothing named Int'; found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g3b_type_keyed_builtin). Also, ValueInfo.type of an erased trait or Any value equals T.reflect()'s TypeId, through one key→TypeId mapping, and the key is stable across builds that add a module. Proof: a cases row for each.",
+          "text": "Builtin types are Type values: counts[Int] = 1 works as user types do (today E0107 'Nothing named Int'; found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201, probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g3b_type_keyed_builtin). ValueInfo.type of an erased trait value equals T.reflect()'s TypeId through one key→TypeId mapping, and the key is stable across builds that add a module; an Any value, if D-PRIM-ANY1 adds one, uses the same mapping. Proof: cases reflect/builtin_types_are_type_values and erased_trait_value_reflects_its_type.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T03:24:39.696Z"
+          "at": "2026-11-16T04:05:04.230Z"
         }
       ],
       "refs": [],
@@ -104252,7 +104217,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-16T03:24:39.696Z",
+      "updated": "2026-11-16T04:08:40.146Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -221098,6 +221063,41 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T04:09:07.276Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0i5xk1w",
+      "note": "p203 landed: golden clean on all tiers, precompiled Core c20 met"
+    },
+    {
+      "at": "2026-11-16T04:08:41.381Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0miof6j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T04:08:40.146Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-16T04:08:38.808Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ssy5wy",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-16T04:05:04.230Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0apk7x9",
+      "note": "#14: Any does not exist and the ballot may keep it out; the erased-value half covers every trait value; was: Builtin types are Type values: counts[Int] = 1 works as user types do (today E0107 'Nothing named Int'; found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes"
+    },
+    {
       "at": "2026-11-16T04:01:36.942Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -225591,6 +225591,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0i5xk1w",
+      "title": "p203 landed: golden clean on all tiers, precompiled Core c20 met",
+      "body": "## p203 landed (dev 686e086a2c, 4 commits)\n\n**What landed:**\n- the single type interner (part 1 of #6978, now a G11 card);\n- trait values print (#6845 c13);\n- builtin types as Type values (#6845 c14, first half);\n- the AppTypedArgs golden fix.\n\n**Suite against p202:** 1 new failure, 3 fixed.\n- **golden:** 4968 pass, **0 fail**. AppTypedArgs passes for the first time on o0/o1/o2.\n- **ui:** 2839 / 17.\n- **cases:** 4768 / 134.\n- **core:** 2404 / 2. Both are TLS O2 dudect timing rows under load (#6748), not new code.\n- **The new failure** is `traits/trait_value_prints`, c13's own proof: sema still refuses trait-value printing on three paths (list print, bare interpolation, :Debug). It went straight back to GoalsA-1-4 as its top priority.\n\n**Criteria met:**\n- **#6759 c20, Core and Prelude ship precompiled:** strace shows 0 Core or Prelude file calls in and out of the checkout, and golden is clean on O0/O1/O2.\n- **#6759 c1:** one comptime child per compilation.\n- **#6845 c7:** TypeInfo.identity is a TypeId, Reflection golden 79/79.\n\nPrecompiled Core now waits only on #6501 c15's per-step receipt, which runs next on the batch compiler.\n\n**In flight:**\n- the tidy-error census for #6858 (the L0101/L0103/L0301/L0304 hits that must be cleaned up in the same stack as the tier);\n- **p204:** the #6445 c5 write-method transactions, the #6820 c3 webhook dedupe and the erased trait-value type (#6845 c14 second half);\n- **the TitleCase path cutover (#6733)** right after p204. Tools/tower is kept until a step that moves the board with your server restart (#6733 c4);\n- **the Any ballot:** the second fresh review failed the \"keep the rejection\" redesign too, with 11 gaps. The redesign is in round 2, and its defects are filed as #6727 c9 and #6839 c29 (2.5 silently takes a type table's else arm).\n",
+      "by": "Main",
+      "created": "2026-11-16T04:09:07.276Z",
+      "sections": []
+    },
     {
       "id": "briefing045fkvf",
       "title": "p202 landed: taint-walk revert, Core interface step, c1 met",
