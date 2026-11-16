@@ -87,11 +87,11 @@ sema_live_rejected: fn() -> SemaDirectSpecialCheck Never! {
 }
 
 // Whether `module_name.member` is one of the live-binding calls, `enqueue`
-// (sema_call_enqueue), `endpoints` (sema_call_app_endpoints), or `url_of`,
-// `presence` or `notify`, which take a screen state's address
-// (sema_call_app_address).
+// (sema_call_enqueue), `endpoints` (sema_call_app_endpoints), `url_of`,
+// `presence`, `notify` or `go`, which take a screen state's address
+// (sema_call_app_address), or `current` (sema_call_app_current).
 sema_live_member: fn(module_name: String, member: String) -> Bool Never! {
-    module_name == "app" && (member == "live" || member == "subscribe" || member == "push" || member == "invalidate" || member == "enqueue" || member == "endpoints" || member == "url_of" || member == "presence" || member == "notify")
+    module_name == "app" && (member == "live" || member == "subscribe" || member == "push" || member == "invalidate" || member == "enqueue" || member == "endpoints" || member == "url_of" || member == "presence" || member == "notify" || member == "go" || member == "current")
 }
 
 // A live-binding call through a Core module alias (`use app`).
@@ -113,7 +113,8 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
     if member == {
         "enqueue" -> return sema_call_enqueue(alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "endpoints" -> return sema_call_app_endpoints(alias, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        "url_of" | "presence" | "notify" -> return sema_call_app_address(member, alias, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "url_of" | "presence" | "notify" | "go" -> return sema_call_app_address(member, alias, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "current" -> return sema_call_app_current(alias, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         else -> {}
     }
     callee: "{alias}.{member}"

@@ -496,8 +496,9 @@ sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [Call
 // `__http_route…` and `__http_middleware`, a router's `__route`); the checked
 // arguments carry their conventions. A parameter the registration leaves out
 // takes its declared default, which is `#caller` (the `at: SourceLocation` of
-// the method): the place of this call, as at any call. An App method returns
-// the App, so registrations chain; a router's registers Net.
+// the method): the place of this call, as at any call. An App method (the
+// server's or the app graph's) returns the App, so registrations chain; a
+// router's registers Net.
 sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: &&[TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner: sema_call_http_nominal_leaf(receiver_value.ty)
     if program.registration_graph == .Val(graph) {
@@ -515,7 +516,7 @@ sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: 
             location: sema_check_expression(sema_site_location_expr("", environment, program, scopes, span), Val(sema_call_resolved_type(declared_ty, environment, program)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             filled.push(sema_call_http_static_tree_arg(location, sema_call_http_core_synthetic_arg(declared, span)))
         }
-        app: sema_app_is_route_table(receiver_value.ty, environment, program)
+        app: sema_app_is_route_table(receiver_value.ty, environment, program) || sema_app_is_graph(receiver_value.ty, environment, program)
         result_type: if app -> receiver_value.ty.copy() else -> Type.Named{name: "Unit"}
         built := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver_value, method: candidate.method.move(), type_args: [Type]{}, args: filled.move()}, span)
         if !app {

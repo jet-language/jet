@@ -5789,18 +5789,45 @@ calls one, each runs as the system (`db.Who.System`), which no row policy
 limits, and `jet inspect choices` lists it as a `rights` row under its
 marker.
 
-The app graph is the program's screens. `app.new(title)` starts it, and
-`graph.screen("/projects/:project/board", board)` adds one. `board` is a named
-function. Its one parameter that is no `app.Remote<S>` is the screen's state:
-a struct declared outside Core with no type parameters, whose fields each
-derive `Encode`. The state is the screen's address. Each `:name` segment of
-the path is the field `name`. A field marked `#App.Query` (`#App.Query q:
-String`) goes after `?`. Every other field must be a path segment. A path that
-is not a string literal starting with `/`, a field in neither place, a
-segment that names no field or names a query field, and a state that two
-screens register are E2820 (`jet.InvalidScreen`). `signed_in: true` marks a
-screen only a signed-in caller opens. Every target runs the one graph, so its
-screens are every target's route set.
+The app graph is the program's one client-safe description: its services,
+its screens and how it works offline. `app.new(title)` starts it, and each
+call below gives the graph back, so the calls chain. Every target runs the
+one graph, so it is every target's route set and every client's Remotes;
+there is no other place to register them.
+
+`graph.api<Board>("/api", max_upload: 1000000)` declares the service
+`Board`, a struct, which the graph's clients reach at `/api`; `max_upload:`
+(default 1000000) is the most bytes one call's body holds. Without a
+service struct, or with other arguments, it is E0104. `graph.mount(board)`
+answers the calls of `board`'s service in this process: the Remote the graph
+gives for `Board` then runs each call in this process, as one call of its
+own with the request key the Remote gave it, as a served endpoint does. A
+Remote of a service the graph doesn't mount posts each call to the
+`.api` path. The graph mounts the service alone: a prefix, and a method
+that `#App.Webhook`, `#App.Every` or an HTTP route marker marks, is E2805
+(`jet.InvalidRoute`), as those answer only the server's `web.App`. A method
+`#App.Job` marks is a job of the graph, as on a served App. The graph's
+rate limits apply only to served endpoints. `graph.offline(.Queue)` records
+that the clients keep their writes while offline (`app.Offline`: `.Off`,
+the default, or `.Queue`).
+
+`graph.screen("/projects/:project/board", board, signed_in: false)` adds a
+screen. `board` is a named function. Each of its parameters that is an
+`app.Remote<S>` is given the graph's Remote of `S`, which the graph must
+declare with `.api<S>` (opening the screen otherwise stops the program).
+Its one other parameter is the screen's state: a struct declared outside
+Core with no type parameters, whose fields each derive `Encode` and
+`Decode`. The view can't fail, and its result derives `Encode`: it is what
+the screen shows. The state is the screen's address. Each `:name` segment
+of the path is the field `name`. A field marked `#App.Query` (`#App.Query
+q: String`) goes after `?`. Every other field must be a path segment. A
+path that is not a string literal starting with `/`, a field in neither
+place, a segment that names no field or names a query field, a view of
+another shape, and a state that two screens register are E2820
+(`jet.InvalidScreen`). `signed_in: true` marks a screen only a signed-in
+caller opens. A renderer walks the graph's screens in the order they were
+added, each with its path, state, query fields, `signed_in` and an opener
+that makes the state from an address's field texts and runs the view.
 
 `app.url_of(state)` gives the address of the screen whose state is `state`'s
 type. Each path field's value is percent-encoded into its segment, and each
@@ -5808,12 +5835,17 @@ query field with a non-empty value follows `?` as `name=value`, in field
 order. A string field gives its own text, and any other field its JSON. A
 push opens a state the same way: `app.notify(to:, title:, body:, open:
 state)` sends the notice to each device `to` registered, with
-`url_of(state)` as the address a tap opens. A value that is no struct
-declared outside Core is E2821 (`jet.StateWithoutScreen`) in any program. In
-a program that registers screens, so is a state that no screen opens. A
-program that registers no screen, such as a library checked on its own, is
-not checked against a graph. Running `url_of` before the process has built
-its graph stops the program.
+`url_of(state)` as the address a tap opens. `app.go(state)` opens the
+screen of `state` at that address: it runs the screen's view with the state
+the address makes, and the screen is then the current one.
+`app.current<BoardView>()` gives the current screen's state, made back from
+its address, when it is a `BoardView`, and None otherwise or before a
+screen opens. A value that is no struct declared outside Core is E2821
+(`jet.StateWithoutScreen`) in any program. In a program that registers
+screens, so is a state that no screen opens. A program that registers no
+screen, such as a library checked on its own, is not checked against a
+graph. Running `url_of` or `go` before the process has built its graph
+stops the program.
 
 `app.presence(state)` gives the accounts that have the screen state `state`
 open now, each once, sorted. An account has it open while one of its live
