@@ -12,7 +12,7 @@
 // the one body of each.
 use {
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
-    jet_foundation.[AccessConvention, Diagnostic, Func, RUNTIME_INTERFACE_ROWS, RuntimeInterfaceRow, Span, Type, access_sigil, type_marked_name, type_name]
+    jet_foundation.[AccessConvention, Diagnostic, Func, RUNTIME_INTERFACE_ROWS, RuntimeInterfaceRow, Span, Type, access_sigil, compiler_take_rows, type_marked_name, type_name]
 }
 
 JET_DRIVER_RUNTIME_INTERFACE_ROOT: "jet.runtime"
@@ -134,38 +134,41 @@ jet_driver_runtime_interface_file: fn(rows: [RuntimeInterfaceRow]) -> String Nev
     lines.join("\n")
 }
 
-// The source of the interface module `module_name` from the embedded rows:
-// one `#Import(c)` declaration per member, in row order. None when no row
-// names it.
-jet_driver_runtime_interface_source: fn(module_name: String) -> String? Never! {
-    lines := [String]{"// `{module_name}`: generated from {JET_DRIVER_RUNTIME_INTERFACE_PATH}."}
-    loop row in RUNTIME_INTERFACE_ROWS {
-        if row.module_name == module_name {
-            lines.push("#Import(c) {row.declaration} = \"{row.symbol}\"")
-        }
-    }
-    if lines.len() == 1 -> return None
-    lines.push("")
-    Val(lines.join("\n"))
-}
-
 // The embedded interface modules as Core source rows, which the loader
-// schedules when a program names `jet.runtime.<m>` (jet_driver_core_unit).
-// Every member is an owned member: no Core call row names it, so each call
-// binds to its `#Import(c)` declaration.
+// schedules when a program names `jet.runtime.<m>` (jet_driver_core_unit):
+// per module, in the order the rows first name it, one `#Import(c)`
+// declaration per member, in row order. Every member is an owned member: no
+// Core call row names it, so each call binds to its `#Import(c)` declaration.
+// One pass over the rows: a module's rows usually run together, so only a
+// row naming another module than the row before looks its module up.
 jet_driver_runtime_interface_sources: fn() -> [JetDriverCoreSource] Never! {
     names := [String]{}
+    lines := [[String]]{}
+    members := [[String]]{}
+    index := -1
     loop row in RUNTIME_INTERFACE_ROWS {
-        if !names.contains(row.module_name) -> names.push(row.module_name.copy())
+        if index < 0 || names[index] != row.module_name {
+            index = -1
+            loop (at, name) in names {
+                if name == row.module_name {
+                    index = at
+                    break
+                }
+            }
+            if index < 0 {
+                index = names.len()
+                names.push(row.module_name.copy())
+                lines.push([String]{"// `{row.module_name}`: generated from {JET_DRIVER_RUNTIME_INTERFACE_PATH}."})
+                members.push([String]{})
+            }
+        }
+        lines[index].push("#Import(c) {row.declaration} = \"{row.symbol}\"")
+        members[index].push(row.member.copy())
     }
     sources := [JetDriverCoreSource]{}
-    loop module_name in names {
-        text: jet_driver_runtime_interface_source(module_name) ?? next
-        members := [String]{}
-        loop row in RUNTIME_INTERFACE_ROWS {
-            if row.module_name == module_name -> members.push(row.member.copy())
-        }
-        sources.push(JetDriverCoreSource{module_name: module_name, alias: "__{module_name.replace(".", "_")}", path: "{module_name.replace(".", "/")}.jet", owner: "", owned_members: members, runtime: false, text: jet_driver_core_text(text)})
+    loop (at, module_name) in names {
+        lines[at].push("")
+        sources.push(JetDriverCoreSource{module_name: module_name, alias: "__{module_name.replace(".", "_")}", path: "{module_name.replace(".", "/")}.jet", owner: "", owned_members: compiler_take_rows<String>(members[at]), runtime: false, text: jet_driver_core_text(lines[at].join("\n"))})
     }
     sources
 }
