@@ -697,7 +697,6 @@ jet_cli_output_entry_file: fn(root: String, output: JetCLIOutputFact) -[FS]> Jet
 // leftover `main.jet`, else the selected runnable output.
 jet_cli_resolve_run_entry: fn(root: String, manifest: JetCLIManifest?, notices: &[String]) -[FS]> JetCLIStockEntry Never! {
     origin: if manifest == .Val(facts) -> facts.origin else -> ""
-    name: if manifest == .Val(facts) -> facts.name else -> ""
     loop relative in JET_CLI_STOCK_ENTRIES {
         path: jet_cli_checked_file(root, relative) ?? next
         return JetCLIStockEntry.Found{entry: JetCLIEntry{path: path, callable: Val("run")}}

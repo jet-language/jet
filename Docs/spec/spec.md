@@ -3813,9 +3813,11 @@ defaults and per-profile, service, provider, and `require` decisions. An absent
 Lock-backed provenance reports integrity, transparency, publisher, and
 build-attestation facts; present evidence is labeled `verified` or `recorded`,
 and integrity failures remain **E1204**. Lints warn by default, while
-`package.jet` policy can deny named lints and produce **E1293**. Host policy
+`package.jet` policy can deny named lints and produce **E1293**; a tidy error
+(an unused import or local, an unreachable arm) never stops `jet run`,
+`jet dev` or `jet test`, and fails `jet check` and `jet build`. Host policy
 can narrow but not widen that rule
-(I1, I8, D-BOUND-PROV1, D-LINTPOLICY1=A, D-JPK-POLICYSURFACE1).
+(I1, I8, D-BOUND-PROV1, D-LINTPOLICY1=A, D-NO-WARNINGS1=A, D-JPK-POLICYSURFACE1).
 
 Once a package is realized, realize-class operations can reuse it with
 `--offline`. Network-class operations reject `--offline`; a missing local

@@ -370,7 +370,7 @@ constant_literal: fn(source: DiagnosticSource, name: String, fallback: String) -
 
 render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     context: "{source.name}: struct"
-    known: [String]{"code", "severity", "lint_name", "stage", "moment", "status", "meaning", "detail", "structured_fix", "no_fix", "fix_next", "fix_safety", "safety_class", "safety_reason", "expert_path"}
+    known: [String]{"code", "severity", "tier", "lint_name", "stage", "moment", "status", "meaning", "detail", "structured_fix", "no_fix", "fix_next", "fix_safety", "safety_class", "safety_reason", "expert_path"}
     loop constant in source.constants {
         if !known.contains(constant.name) {
             return Err(rows_fail("{context}: unknown constant `{constant.name}`"))
@@ -404,6 +404,14 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         severity == "Lint" && has_lint && LINT_NAME.match(lint) == None -> return Err(rows_fail("{context}: lint name `{lint}` is not snake_case"))
         severity != "Lint" && severity != "Error" -> return Err(rows_fail("{context}: a compiler diagnostic is `.Error` or `.Lint`, not `.{severity}`"))
         severity == "Error" && has_lint -> return Err(rows_fail("{context}: only a `.Lint` diagnostic has a `lint_name`"))
+    }
+    // A tidy error is a lint about untidy code that still runs, so it keeps
+    // its `.Lint` severity and its lint name; a `.Report` finding is a
+    // package lint's, never a compiler row's.
+    tier: constant_case(entry(source.constants, "tier") ?? ".Error", "{context}.tier") ?? return Err(err)
+    if {
+        tier != "Error" && tier != "Tidy" -> return Err(rows_fail("{context}: a compiler diagnostic's tier is `.Error` or `.Tidy`, not `.{tier}`"))
+        tier == "Tidy" && severity != "Lint" -> return Err(rows_fail("{context}: only a `.Lint` diagnostic is on the `.Tidy` tier"))
     }
     severity_int: if severity == "Lint" -> 2 else -> 1
     lint_text: if has_lint -> "Val(\"{lint}\")" else -> "None"
@@ -506,6 +514,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         "        lint_name: {lint_text},",
         "        stage: \"{stages}\",",
         "        severity: {severity_int},",
+        "        tier: DiagnosticTier.{tier},",
         "        moment: DiagnosticMoment.{moment},",
         "        status: DiagnosticRegistryStatus.{status},",
         "        meaning: \"{meaning}\",",
@@ -1683,6 +1692,16 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     assert(diagnostic_rows_error(row.replace("    path: String\n\n", "")).contains("reads no field"))
     assert(diagnostic_rows_error("{row}{row}").contains("used twice"))
     assert(diagnostic_rows_error(row.replace("site", "si\\qte")).contains("backslash escape"))
+}
+
+#Test("a row's tier is `.Error`, or `.Tidy` for a lint") {
+    row: MINIMAL_ROW
+    code: MINIMAL_CODE
+    assert((render_rows(row) ?? panic("the minimal row did not render: {err.message}")).text.contains("tier: DiagnosticTier.Error,"))
+    tidy: row.replace(code, "{code}        severity: .Lint\n        tier: .Tidy\n        lint_name: \"bad_path\"\n")
+    assert((render_rows(tidy) ?? panic("the tidy row did not render: {err.message}")).text.contains("tier: DiagnosticTier.Tidy,"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        tier: .Tidy\n")).contains("only a `.Lint` diagnostic is on the `.Tidy` tier"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        tier: .Report\n")).contains("tier is `.Error` or `.Tidy`"))
 }
 
 #Test("a placeholder Why or a decision ID in a row's text is refused, naming every code") {
