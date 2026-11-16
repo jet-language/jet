@@ -693,9 +693,16 @@ sema_failure_declared_conversion_name: fn(source_leaf: String, target_leaf: Stri
     "errconv_{sema_failure_conversion_name_part(source_leaf)}_to_{sema_failure_conversion_name_part(target_leaf)}"
 }
 
+// A failure domain by its declared names: a named type by its leaf, a union
+// (`NetError | TaskFailure`) by each member's.
 sema_failure_conversion_leaf: fn(ty: Type) -> String Never! {
     normalized: sema_expr_unwrap_tag(ty)
     if normalized == .Named(name) -> return sema_error_conversion_leaf(name)
+    if normalized == .Union(members) {
+        names := [String]{}
+        loop member in members -> names.push(sema_failure_conversion_leaf(member))
+        return names.join(" | ")
+    }
     type_name(normalized)
 }
 
