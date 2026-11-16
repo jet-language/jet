@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108389,
+    "rev": 108394,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81357,11 +81357,11 @@
         {
           "n": 5,
           "text": "Each method that writes runs in one serializable transaction, retried on a serialization failure up to a cap; two concurrent move_task calls on one version give one Ok and one Conflict. Proof: `jet test Compiler --profile cases --filter web_app/write_method_is_one_serializable_transaction`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T17:08:46.406Z"
+          "evidence": "p204 batch compiler (dev 686cdaaee7): jet test Compiler --profile cases --filter web_app/write_method_is_one_serializable_transaction gives n=1, bad=0 (commits e19632601d and 79075a3365).",
+          "at": "2026-11-16T04:40:14.492Z"
         },
         {
           "n": 6,
@@ -81489,7 +81489,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-16T03:23:46.013Z",
+      "updated": "2026-11-16T04:40:14.492Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -96894,6 +96894,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p204 core suite: TLS.jet [O0] dudect failed under suite load (p203 had the two O2 rows). The same flake class as c7."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "p203 core suite: a second TLS O2 dudect row failed (TLS 1.2 server RSA premaster timing), beside the RSAES-OAEP row that has failed under load since p188. Same flake class as c7: the suite runs these rows under full machine load."
         },
         {
@@ -96991,7 +96996,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:49:47.742Z",
-      "updated": "2026-11-16T04:08:41.381Z",
+      "updated": "2026-11-16T04:40:17.783Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -101529,11 +101534,11 @@
         {
           "n": 3,
           "text": "With .GitHub (and .Stripe) the framework drops a delivery whose X-GitHub-Delivery (Stripe event id) it has run, recording the ID in the webhook's transaction and keeping it 30 days. Proof: `jet test Compiler --profile cases --filter web_app/webhook_redelivery_runs_once`. The store that keeps delivery IDs follows open decision D-DB-TABLE1.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:38:28.812Z"
+          "evidence": "p204 batch compiler (dev 686cdaaee7): jet test Compiler --profile cases --filter web_app/webhook_redelivery_runs_once gives n=1, bad=0 (commit c4a55570dc).",
+          "at": "2026-11-16T04:40:15.616Z"
         },
         {
           "n": 4,
@@ -101553,8 +101558,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:31.447Z",
-      "updated": "2026-11-15T11:39:19.351Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T04:40:15.616Z",
+      "updatedBy": "Main",
       "criteriaLastN": 4
     },
     {
@@ -104186,11 +104191,11 @@
         {
           "n": 13,
           "text": "A trait value prints and debug-prints as its concrete value: print and interpolation dispatch on the box's type key to the concrete type's own print, for every trait, with one print arm per type the program converts. On gate-p199, print(\"{shape}\") of a Shape is E0915 and print(shapes[0]) is E0112 while the concrete struct prints (Any audit, probes p1 and p4; Docs/audits/any-type-info-pointer-2026-11-15.md, claim 3). Proof: jet test Compiler --profile cases --filter traits/trait_value_prints, which prints a [Shape] list's values on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T02:22:25.069Z"
+          "evidence": "p204 batch compiler (dev 686cdaaee7): jet test Compiler --profile cases --filter traits/trait_value_prints gives n=1, bad=0 (commits d5c6efe2c1 and the fix 3c615e25d9; the case runs on O0, O1 and O2).",
+          "at": "2026-11-16T04:40:16.785Z"
         },
         {
           "n": 14,
@@ -104214,7 +104219,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-16T04:08:40.146Z",
+      "updated": "2026-11-16T04:40:16.785Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -119944,7 +119949,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p204 landed c1's first SUB (686cdaaee7), but its proof case inspect_choices_shows_each_inlined_call_and_why fails on the p204 batch compiler: 'JSON value differs: expected 7, got 4' on jet inspect choices -O2 --json. Sent back to PrecompiledCore-4 as its top priority."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -119991,7 +120002,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T01:44:26.232Z",
-      "updated": "2026-11-16T01:44:39.714Z",
+      "updated": "2026-11-16T04:40:18.835Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     }
@@ -221059,6 +221070,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T04:40:18.836Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hjzhes",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T04:40:17.783Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0miof6j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T04:40:16.785Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0apk7x9",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-16T04:40:15.616Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0voqhky",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T04:40:14.492Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0y7zq8s",
+      "note": "#5"
+    },
     {
       "at": "2026-11-16T04:23:04.439Z",
       "by": "Main",
