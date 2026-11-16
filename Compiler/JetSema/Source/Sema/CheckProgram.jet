@@ -10167,6 +10167,13 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: false}
         }
         expression: checked ?? return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: false}
+        // A module value is data the build keeps: a runtime handle has none.
+        if source.kind == SemaComptimeItemKind.Constant && !source.runtime_check {
+            if sema_comptime_value_runtime_handle(expression.ty, environment, program) == .Val(handle) {
+                diagnostics.push(sema_comptime_runtime_handle_diagnostic(source.name, handle, source.span))
+                return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: true}
+            }
+        }
         checked_expected := source.expected_type
         if checked_expected != None {
             required: checked_expected ?? expression.ty

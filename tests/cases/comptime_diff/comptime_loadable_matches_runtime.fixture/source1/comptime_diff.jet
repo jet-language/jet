@@ -3,11 +3,11 @@ use {
     loadable: core.reactive.loadable
 }
 
-COMPTIME_VALUE: #run loadable.loading()
+COMPTIME_VALUE: #run loadable.loading<Int, String>()
 
 run: fn() {
-    r: loadable.loading()
-    comptime_diff_frame("{COMPTIME_VALUE.is_loading()}", "{r.is_loading()}")
+    r: loadable.loading<Int, String>()
+    comptime_diff_frame("{loadable.is_loading(COMPTIME_VALUE)}", "{loadable.is_loading(r)}")
 }
 
 comptime_diff_frame: fn(expected_text: String, actual_text: String) {

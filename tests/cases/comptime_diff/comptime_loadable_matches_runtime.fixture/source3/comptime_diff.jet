@@ -3,11 +3,11 @@ use {
     loadable: core.reactive.loadable
 }
 
-COMPTIME_VALUE: #run loadable.failed("offline")
+COMPTIME_VALUE: #run loadable.failed<Int, String>("offline")
 
 run: fn() {
-    r: loadable.failed("offline")
-    comptime_diff_frame("{COMPTIME_VALUE.is_failed()}", "{r.is_failed()}")
+    r: loadable.failed<Int, String>("offline")
+    comptime_diff_frame("{loadable.is_failed(COMPTIME_VALUE)}", "{loadable.is_failed(r)}")
 }
 
 comptime_diff_frame: fn(expected_text: String, actual_text: String) {

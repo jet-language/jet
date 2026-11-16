@@ -15297,6 +15297,32 @@ InlineAlwaysReadsTrace: struct {
     }
 }
 
+ComptimeValueIsRuntimeHandle: struct {
+    name: String
+    type: String
+
+    impl Diagnostic {
+        code: "E1018"
+        safety_class: .Soundness
+        safety_reason: "A runtime handle's state lives only in the run that made it, so a build that kept one would hand later code a handle to nothing."
+        expert_path: "none: a compile-time value is data"
+        stage: [.Comptime]
+        meaning: "A compile-time value whose type is a runtime handle, such as a reader's cursor, which has no data to keep"
+
+        what: fn(self) -> String {
+            "`{self.name}` is computed while building, but its value is a `{self.type}`, a runtime handle with no data form"
+        }
+
+        why: fn(self) -> String {
+            "A compile-time value must be data, which the build keeps and hands to later compile-time code and to the program. A runtime handle such as a `{self.type}` lives only in the run that made it."
+        }
+
+        fix: fn(self) -> String {
+            "Use the `{self.type}` inside one `#run`, such as a function it calls, and keep only the data that work returns."
+        }
+    }
+}
+
 FlagArgumentCount: struct {
     impl Diagnostic {
         code: "E1301"

@@ -1,0 +1,8 @@
+// Two `#run` sites can't share one reader: each reads the value the one
+// before it kept, and a reader has no value to keep.
+run: fn() {
+    ct: #run Reader.over([U8]{7, 9, 11})
+    ct_a: #run { ct.read_u8() ?? panic("ct a") }
+    ct_b: #run { ct.read_u8() ?? panic("ct b") }
+    print("{ct_a}|{ct_b}")
+}

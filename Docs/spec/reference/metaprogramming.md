@@ -69,6 +69,16 @@ program calls at run time
 The program makes each function value where it reads the module value, so
 such a value is never placed in static data.
 
+A compile-time value must be data: the build keeps it and hands it to later
+compile-time code and to the program. A runtime handle such as a
+[reader](../vocabulary.md#reader) or a [stream](../vocabulary.md#stream) lives
+only in the run that made it, so a `#run` value whose type holds one is E1018
+at its name
+([`comptime_dependency_handle_value.jet`](../../../tests/ui/comptime_dependency_handle_value.jet)).
+Work that needs the handle uses it inside one `#run`, such as a function it
+calls, and keeps the data that work returns
+([`sequential_comptime_reads_advance_one_reader`](../../../tests/cases/comptime_diff/sequential_comptime_reads_advance_one_reader.case)).
+
 `@if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See

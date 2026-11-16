@@ -149,6 +149,41 @@ sema_comptime_local_value_unstorable: fn(ty: Type) -> Bool Never! {
     }
 }
 
+// The runtime handle a compile-time value of type `ty` would hold, by its
+// name: a stream or cursor handle (sema_stream_handle_owner) whose state
+// lives only in the run that made it, alone or in a list, option, map,
+// result or tuple. A `Path` is its text, which is data, and a program type
+// that shadows a handle's name is its own declaration.
+sema_comptime_value_runtime_handle: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? Never! {
+    if ty == {
+        .List(element) -> return sema_comptime_value_runtime_handle(element, environment, program)
+        .Option(inner) -> return sema_comptime_value_runtime_handle(inner, environment, program)
+        .Map(_, _, value) -> return sema_comptime_value_runtime_handle(value, environment, program)
+        .Result(ok, err) -> {
+            if sema_comptime_value_runtime_handle(ok, environment, program) == .Val(handle) {
+                return Val(handle)
+            }
+            return sema_comptime_value_runtime_handle(err, environment, program)
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_comptime_value_runtime_handle(field.ty, environment, program) == .Val(handle) {
+                    return Val(handle)
+                }
+            }
+            return None
+        }
+        .Named(_) | .Apply(_, _) -> {
+            owner: sema_stream_handle_owner(ty) ?? return None
+            if owner == "Path" || !sema_stream_handle_is_canonical(ty, owner, environment, program) {
+                return None
+            }
+            return Val(owner)
+        }
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
+    }
+}
+
 // The key of the value computed ahead for the local whose initializer
 // spans `source_span` and whose name spans `site_span`, in the function
 // `function_key` of module `module_identity`. It is apart from the site's

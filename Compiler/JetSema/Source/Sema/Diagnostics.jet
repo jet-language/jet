@@ -450,6 +450,16 @@ sema_comptime_reads_runtime_value: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0640", span, row.what.replace("{{name}}", name), row.why.replace("{{name}}", name), row.fix.replace("{{name}}", name))
 }
 
+// E1018: a compile-time value named `name` holds the runtime handle `handle`
+// (sema_comptime_value_runtime_handle).
+sema_comptime_runtime_handle_diagnostic: fn(name: String, handle: String, span: Span) -> Diagnostic {
+    row: diagnostic_registry_row("E1018") ?? panic("E1018 has no registry row")
+    what: row.what.replace("{{name}}", name).replace("{{type}}", handle)
+    why: row.why.replace("{{type}}", handle)
+    fix: row.fix.replace("{{type}}", handle)
+    sema_error("E1018", span, what, why, fix)
+}
+
 sema_type_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) {
         return nested_fn
