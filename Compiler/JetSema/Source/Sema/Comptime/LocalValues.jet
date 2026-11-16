@@ -161,6 +161,18 @@ sema_comptime_local_value_ahead_destination: fn(function_key: String, source_spa
     "{function_key}{SEMA_COMPTIME_LOCAL_VALUE_AHEAD}{site_span.start}:{site_span.end}::{source_span.start}:{source_span.end}"
 }
 
+// The source that computes ahead the value of local value site `site`,
+// which the check of a function a comptime closure reached staged: the
+// site's own check, under the key of a value computed ahead, so the
+// landing of the body that holds the site builds no program for it.
+sema_comptime_local_value_ahead_site: fn(site: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {
+    source := sema_comptime_body_item_source(site)
+    source.key = sema_comptime_local_value_ahead_key(site.module_identity, site.function_key, site.span, site.site_span)
+    source.destination_key = sema_comptime_local_value_ahead_destination(site.function_key, site.span, site.site_span)
+    source.ahead = true
+    source
+}
+
 // What every destination key of a value computed ahead holds.
 SEMA_COMPTIME_LOCAL_VALUE_AHEAD: "::local-value-ahead::"
 

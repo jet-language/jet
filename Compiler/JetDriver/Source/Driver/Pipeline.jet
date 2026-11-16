@@ -76,6 +76,7 @@ use {
         sema_comptime_environment_publish_body_values,
         sema_comptime_fold_in,
         sema_comptime_local_value_failure,
+        sema_comptime_local_value_ahead_site,
         sema_comptime_local_value_unstorable,
         sema_comptime_shared_payload,
         sema_comptime_graph_apply_sites,
@@ -3540,6 +3541,20 @@ jet_driver_comptime_run: fn(
                         if call.checked_text == .Val(evaluation) {
                             jet_driver_comptime_checked_text_source_add(next_pending, known_sources, evaluation)
                         }
+                    }
+                    // The local values the closure's function checks staged
+                    // are computed ahead in this run, so the landing of
+                    // their bodies builds no program for them. A site added
+                    // is progress: the batch waits into the next pass, which
+                    // adds the site to it.
+                    loop site in checked_functions[function_index].comptime_body_sources {
+                        if !site.local_value || site.local_binding -> next
+                        ahead: sema_comptime_local_value_ahead_site(site)
+                        ahead_key: "{ahead.module_identity.id}\n{ahead.key}"
+                        if known_sources.get(ahead_key) != None -> next
+                        known_sources[ahead_key] = true
+                        next_pending.push(ahead)
+                        made_progress = true
                     }
                 }
                 scanned_functions = checked_functions.len()

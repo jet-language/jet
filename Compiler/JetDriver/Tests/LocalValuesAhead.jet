@@ -70,6 +70,11 @@ AHEAD_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nrepeat: fn(word: S
 // a program that computes only `pick`.
 AHEAD_MIXED_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nrun: fn() {{\n    four: square(2)\n    pick: if square(1) > 0 -> square(3) else -> square(4)\n    print(\"{{four}} {{pick}}\")\n}}\n"
 
+// `NINETY`'s closure checks `scaled`, whose `pick` is not read ahead from
+// the text: the closure's check stages it, and the build that computes
+// `NINETY` computes it too.
+AHEAD_CLOSURE_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nscaled: fn() -> Int {{\n    pick: if square(1) > 0 -> square(3) else -> square(4)\n    pick * 10\n}}\n\nNINETY: #run scaled()\n\nrun: fn() {{\n    print(\"{{NINETY}} {{scaled()}}\")\n}}\n"
+
 // The request that compiles `source`, its trace going to `path`.
 ahead_request: fn(path: String, source: String) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
@@ -135,6 +140,15 @@ ahead_compile: fn(path: String, source: String, verify: Bool) -> String {
         trace: ahead_compile(path, AHEAD_MIXED_SOURCE, verify)
         assert(trace.contains("< comptime.land.splice items=2"), "recheck_verify {verify}: `four` and `pick` did not land together:\n{trace}")
         assert(ahead_programs_built(trace) == 2, "recheck_verify {verify}: `pick` did not land in a build of its own:\n{trace}")
+    }
+    ahead_files.remove(path) ?? panic("cannot remove the trace: {err}")
+}
+
+#Test("a_local_value_a_closure_stages_is_computed_in_its_build") {
+    path: ahead_files.join(ahead_sys.temp_dir(), "jet-local-values-closure-{ahead_process.current_pid()}.trace")
+    loop verify in ([Bool]{false, true}) {
+        trace: ahead_compile(path, AHEAD_CLOSURE_SOURCE, verify)
+        assert(ahead_programs_built(trace) == 1, "recheck_verify {verify}: `pick` landed in a build of its own:\n{trace}")
     }
     ahead_files.remove(path) ?? panic("cannot remove the trace: {err}")
 }
