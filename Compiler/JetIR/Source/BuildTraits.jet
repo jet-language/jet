@@ -4,7 +4,7 @@
 // unknown key stops at jet_rt_unreachable. A copy is one more owner of the
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
-use jet_foundation.[Span, SymbolID, BodyCallArg, NodeKind, TComptimeField, TComptimeValue, TMethodRef, TTryConvert, TTypeDef, Type, name_rows_set, name_rows_value, sha256_bytes, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, BodyCallArg, FnBody, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, module_none, name_rows_set, name_rows_value, sha256_bytes, symbol_table, type_carrier_identity]
 
 // The payload key of concrete type `ty`: the key the program gave its
 // identity (IRProgram.trait_keys), or, for a type no implementation is
@@ -83,7 +83,9 @@ ir_trait_row: fn(m: IRModule, row: Int) -> Bool Never! { m.types[row].clone == i
 // The concrete types a value of trait `bound` may hold, each once: the
 // owners of the trait's non-generic implementations, as ir_trait_methods
 // files them (a TraitMethod of the trait, or a Method its implementation
-// slot names the trait for). A dynamic call selects among the same owners.
+// slot names the trait for), then the owners of its implementations that
+// declare no method (an empty trait's). A dynamic call selects among the
+// same owners.
 ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
     short: ir_short_name(bound)
     seen := [String:Bool]{}
@@ -114,7 +116,27 @@ ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
         seen[identity] = true
         owners.push(concrete)
     }
+    loop declared in p.empty_impls {
+        if declared.trait_short != short || ir_owner_generic(p, declared.owner) -> next
+        identity: ir_trait_identity(p, declared.owner)
+        if seen.get(identity) != None -> next
+        seen[identity] = true
+        owners.push(declared.owner.copy())
+    }
     owners
+}
+
+// Whether `owner` spells a parameter of its generic type declaration
+// (`impl<T> Box<T>`), as ir_owner_binders reads an owner pattern.
+ir_owner_generic: fn(p: IRProgram, owner: Type) -> Bool Never! {
+    if ir_untag(owner) == .Apply(name, args) {
+        row: ir_type_def(p, name) ?? return false
+        loop arg in args {
+            parameter: ir_type_parameter_name(arg) ?? next
+            if ir_declares(p.types[row].generic_params, parameter) -> return true
+        }
+    }
+    false
 }
 
 // The drop of the trait value box at `at` (trait value row `row`): a null
@@ -147,8 +169,10 @@ ir_trait_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) ->
     name_rows_set(m.function_rows, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
-    bounds: if ir_untag(m.types[row].ty) == .TraitObject(names) -> names.copy() else -> [String]{}
-    owners: if bounds.len() == 1 -> ir_trait_implementers(p, bounds[0]) else -> [Type]{}
+    owners := [Type]{}
+    if ir_untag(m.types[row].ty) == .TraitObject(bounds) {
+        if bounds.len() == 1 -> owners = ir_trait_implementers(p, bounds[0])
+    }
     key: ir_load_word(m, a, at, 0)
     loop concrete in owners {
         payload_row := -1
@@ -576,4 +600,19 @@ ir_trait_unreachable: fn(m: &IRModule, b: &IRBuilder) Never! {
         // implementers hold.
         assert_eq(ir_trait_key_free(table, "main::Circle", 7), ir_trait_key_hash("main::Circle", 1))
     }
+}
+
+// `impl <owner>.Bare {}`: an implementation that declares no method.
+ir_test_empty_impl: fn(owner: Type) -> TImplDef Never! {
+    TImplDef{module_identity: module_none(), key: "", span: Span{start: 0, end: 0}, self_type: owner, trait_name: Val("main::Bare"), trait_ref: None, associated_types: [TAssociatedTypeValue]{}, constants: [TTraitConstantValue]{}, methods: [String]{}, delegation_field: None, compiler_generated: false, serde: None, operator_rhs: None, operator_marker: None, target_os: None}
+}
+
+#Test("an implementation that declares no method makes its owner an implementer of its trait, once") {
+    impls := [TImplDef]{ir_test_empty_impl(Type.Int), ir_test_empty_impl(Type.String), ir_test_empty_impl(Type.Int)}
+    p := ir_program_declared([TTypeDef]{}, impls, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    owners: ir_trait_implementers(p, "main::Bare")
+    assert(owners.len() == 2)
+    assert(owners[0] == Type.Int)
+    assert(owners[1] == Type.String)
+    assert(ir_trait_implementers(p, "main::Shown").len() == 0)
 }
