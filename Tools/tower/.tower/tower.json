@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 109025,
+    "rev": 109050,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74659,30 +74659,30 @@
         },
         {
           "n": 9,
-          "text": "D-UB-BOUNDARY1=A: expert code skips a check only inside a written `#Unchecked(<check>)` block (bounds first); today `#Unchecked(bounds)` is E0927 on compiler 0ccdff27ea. The block removes the check only in its scope. Proof: `jet test Compiler --profile golden --filter memory/unchecked_bounds_scope` on O0, O1 and O2. (The flag removal and the every-tier index stop are UBFLAG and UBINDEX.)",
+          "text": "D-UB-BOUNDARY1=A: expert code skips a check only inside a written `#Unchecked(<check>)` block (bounds first); today `#Unchecked(bounds)` is E0927 on compiler 0ccdff27ea. The block removes the check only in its scope. Proof: `jet test Compiler --profile golden --filter Memory/UncheckedBoundsScope` on O0, O1 and O2. (The flag removal and the every-tier index stop are UBFLAG and UBINDEX.)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:43:43.322Z"
+          "at": "2026-11-16T12:59:40.174Z"
         },
         {
           "n": 10,
-          "text": "D-UB-BOUNDARY1=A: the global `--bounds` build flag is removed (`jet build --bounds=off` is an unknown-flag error), with every caller migrated in the same cutover. Proof: `jet test Compiler --profile cases --filter cli_build/bounds_flag_removed` and git grep finds no `--bounds=` in Compiler, Tools or Examples.",
+          "text": "D-UB-BOUNDARY1=A: the global `--bounds` build flag is removed (`jet build --bounds=off` is an unknown-flag error), with every caller migrated in the same cutover. Proof: `jet test Compiler --profile cases --filter CLIBuild/bounds_flag_removed` and git grep finds no `--bounds=` in Compiler, Tools or Examples.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:43:25.875Z"
+          "at": "2026-11-16T12:59:41.101Z"
         },
         {
           "n": 11,
-          "text": "No build setting lets safe code read or write outside a list: every out-of-range index outside `#Unchecked` is stopped with its registered run-time error or refused at compile time, on O0, O1, O2 and --release (the MemDesign bounds probes; from #5014 c8). Proof: `jet test Compiler --profile cases --filter memory/out_of_range_index_stopped_every_tier`.",
+          "text": "No build setting lets safe code read or write outside a list: every out-of-range index outside `#Unchecked` is stopped with its registered run-time error or refused at compile time, on O0, O1, O2 and --release (the MemDesign bounds probes; from #5014 c8). Proof: `jet test Compiler --profile cases --filter Memory/out_of_range_index_stopped_every_tier`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:43:26.761Z"
+          "at": "2026-11-16T12:59:42.041Z"
         }
       ],
       "refs": [],
@@ -74693,7 +74693,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:47.559Z",
-      "updated": "2026-11-16T12:59:38.922Z",
+      "updated": "2026-11-16T12:59:42.041Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -74936,12 +74936,12 @@
         },
         {
           "n": 3,
-          "text": "After ratification the state machine surface is implemented with examples and golden output on o0, o1 and o2. Proof: `jet test Compiler --profile golden --filter state_machine` on O0, O1 and O2.",
+          "text": "After ratification the state machine surface is implemented with examples and golden output on o0, o1 and o2. Proof: `jet test Compiler --profile golden --filter StateMachine` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:44:41.361Z"
+          "at": "2026-11-16T12:59:43.018Z"
         },
         {
           "n": 4,
@@ -74980,8 +74980,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-15T11:36:42.828Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T12:59:43.018Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -76569,12 +76569,12 @@
         },
         {
           "n": 4,
-          "text": "Each of the 20 undocumented worker functions found by the API audit is promoted to a typed, documented primitive or moved into a priv module, as D-API-COMPOSE1=A rules (base64, log and regex first). Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` reports no undocumented public function in those modules.",
+          "text": "Each of the 20 undocumented worker functions found by the API audit is promoted to a typed, documented primitive or moved into a priv module, as D-API-COMPOSE1=A rules (base64, log and regex first). Proof: `jet Tools/Agent/CoreSurfaceLedger.jet --check` reports no undocumented public function in those modules.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:37:35.484Z"
+          "at": "2026-11-16T12:59:43.990Z"
         },
         {
           "n": 5,
@@ -76587,48 +76587,48 @@
         },
         {
           "n": 6,
-          "text": "The build API takes label-only `b.action` arguments, typed effects and probe kinds, and defaulted deps (D-API-COMPOSE1=A). Proof: `jet test Compiler --profile cases --filter build/action_labelled_options`.",
+          "text": "The build API takes label-only `b.action` arguments, typed effects and probe kinds, and defaulted deps (D-API-COMPOSE1=A). Proof: `jet test Compiler --profile cases --filter Build/action_labelled_options`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:37:37.674Z"
+          "at": "2026-11-16T12:59:45.019Z"
         },
         {
           "n": 7,
-          "text": "Label-only parameters after a variadic, written after `*`, work (D-CALL-VARTAIL1=A), and the variadic APIs the audit named use them. Proof: `jet test Compiler --profile cases --filter calls/label_only_after_variadic` and `jet test Compiler --profile ui --filter variadic_tail_label_missing`.",
+          "text": "Label-only parameters after a variadic, written after `*`, work (D-CALL-VARTAIL1=A), and the variadic APIs the audit named use them. Proof: `jet test Compiler --profile cases --filter Calls/label_only_after_variadic` and `jet test Compiler --profile ui --filter variadic_tail_label_missing`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:37:38.810Z"
+          "at": "2026-11-16T12:59:46.011Z"
         },
         {
           "n": 8,
-          "text": "The `api` lint group and Docs/spec/contributing/api-review.md exist, the lints ratchet Core and Jetpack, and Law 9 in stdlib-api-laws.md is replaced by D-API-COMPOSE1=A's pillar 9 (lints are errors under D-NO-WARNINGS1=A). Proof: `git ls-files Docs/spec/contributing/api-review.md` lists it and `jet test tests/guards --filter api_` passes.",
+          "text": "The `api` lint group and Docs/Spec/Contributing/api-review.md exist, the lints ratchet Core and Jetpack, and Law 9 in stdlib-api-laws.md is replaced by D-API-COMPOSE1=A's pillar 9 (lints are errors under D-NO-WARNINGS1=A). Proof: `git ls-files Docs/Spec/Contributing/api-review.md` lists it and `jet test Tests/Guards --filter api_` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:37:39.755Z"
+          "at": "2026-11-16T12:59:46.979Z"
         },
         {
           "n": 9,
-          "text": "A research note under Docs/research compares the two ways build outputs are declared (API audit section 3) and recommends one. Proof: the note exists (`git ls-files Docs/research | grep build-outputs`).",
+          "text": "A research note under Docs/Research compares the two ways build outputs are declared (API audit section 3) and recommends one. Proof: the note exists (`git ls-files Docs/Research | grep build-outputs`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:37:40.678Z"
+          "at": "2026-11-16T12:59:47.972Z"
         },
         {
           "n": 11,
-          "text": "A survey under Docs/research covers the most-used libraries by real usage evidence across Python, JS/TS, Rust, Go, Java/Kotlin, C#, Swift, Ruby and PHP. Proof: the research note exists and cites its usage sources.",
+          "text": "A survey under Docs/Research covers the most-used libraries by real usage evidence across Python, JS/TS, Rust, Go, Java/Kotlin, C#, Swift, Ruby and PHP. Proof: the research note exists and cites its usage sources.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:14:13.011Z"
+          "at": "2026-11-16T12:59:48.930Z"
         },
         {
           "n": 12,
@@ -76648,8 +76648,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:54.632Z",
-      "updated": "2026-11-15T03:37:53.171Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:59:48.930Z",
+      "updatedBy": "Main",
       "criteriaLastN": 12
     },
     {
@@ -77224,12 +77224,12 @@
         },
         {
           "n": 9,
-          "text": "Tensor shape, layout, scalar type and tag survive JSON, `compute.serialize` and CBOR, and the separate ad-hoc tensor serializer in Core/Compute is removed. Proof: `jet test Compiler --profile golden --filter serde/tensor_codec`. (was #3236 c16)",
+          "text": "Tensor shape, layout, scalar type and tag survive JSON, `compute.serialize` and CBOR, and the separate ad-hoc tensor serializer in Core/Compute is removed. Proof: `jet test Compiler --profile golden --filter Serde/TensorCodec`. (was #3236 c16)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:55.635Z"
+          "at": "2026-11-16T12:59:49.870Z"
         },
         {
           "n": 10,
@@ -77249,7 +77249,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T22:49:32.837Z",
-      "updated": "2026-11-16T01:11:56.738Z",
+      "updated": "2026-11-16T12:59:49.870Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -80109,12 +80109,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Examples/features/ui/surface.jet and the gui battery build with `use font`. Their goldens are unchanged. Proof: `jet test Compiler --profile golden --filter ui/surface` on O0, O1 and O2 with `use font`, goldens unchanged.",
+          "text": "Examples/features/ui/surface.jet and the gui battery build with `use font`. Their goldens are unchanged. Proof: `jet test Compiler --profile golden --filter UI/Surface` on O0, O1 and O2 with `use font`, goldens unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:46:39.946Z"
+          "at": "2026-11-16T12:59:50.836Z"
         },
         {
           "n": 2,
@@ -80134,8 +80134,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T05:09:37.133Z",
-      "updated": "2026-11-15T05:46:41.006Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T12:59:50.836Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c06wbg4r",
@@ -80849,12 +80849,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A generator pull that stays on the consumer thread costs under 50 ns per value (a direct switch or a compiled state machine, no scheduler park and wake), measured same-run on the iterloop kit case and a 10M-yield microbench, with every generator golden unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter generator` and the committed microbench receipt.",
+          "text": "A generator pull that stays on the consumer thread costs under 50 ns per value (a direct switch or a compiled state machine, no scheduler park and wake), measured same-run on the iterloop kit case and a 10M-yield microbench, with every generator golden unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter Generator` and the committed microbench receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:31:51.947Z"
+          "at": "2026-11-16T12:59:51.786Z"
         }
       ],
       "refs": [],
@@ -80865,8 +80865,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T11:41:45.304Z",
-      "updated": "2026-11-15T05:31:51.947Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T12:59:51.787Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c05p5u7s",
@@ -80935,12 +80935,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The cat cell is faster than Rust same-run (Jet/Rust < 1.00) by wall time and task-clock, strace shows reads of at least 64 KiB per syscall on a pipe, and every stdin and stdout golden and interactive REPL case is unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter runtime/stdin_buffered_reads` and the committed same-run cat receipt.",
+          "text": "The cat cell is faster than Rust same-run (Jet/Rust < 1.00) by wall time and task-clock, strace shows reads of at least 64 KiB per syscall on a pipe, and every stdin and stdout golden and interactive REPL case is unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter Runtime/stdin_buffered_reads` and the committed same-run cat receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:31:52.879Z"
+          "at": "2026-11-16T12:59:52.790Z"
         }
       ],
       "refs": [],
@@ -80951,8 +80951,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:01:34.913Z",
-      "updated": "2026-11-15T05:31:52.879Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T12:59:52.790Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0y7zq8s",
@@ -81035,12 +81035,12 @@
         },
         {
           "n": 2,
-          "text": "D-WEB-RUNTIME-API1=A is built (ratified 2026-11-13). core.web.browser becomes core.browser, members unchanged. core.web.on and core.web.value become core.browser.host.on and .value, and core.web.storage.local/.session become core.browser.storage.local/.session (get, set, remove, clear). Live<T, E> and app.live, subscribe, push, invalidate, state and live_stats move into Core's app module with their signatures, and the jet.runtime.web bindings stay priv under app. web.openapi(site) returns String OpenAPIError! (no E2805 stop). The compiler rules key on four markers the battery declares (#Form, #RouteTable, #ColumnOf, #WebApp), not on module names. Every caller moves in the same cutover. Proof: `jet test Compiler --profile golden --filter browser` on O0, O1 and O2 and `git grep -n \"core.web\" -- Core Compiler Examples` prints nothing.",
+          "text": "D-WEB-RUNTIME-API1=A is built (ratified 2026-11-13). core.web.browser becomes core.browser, members unchanged. core.web.on and core.web.value become core.browser.host.on and .value, and core.web.storage.local/.session become core.browser.storage.local/.session (get, set, remove, clear). Live<T, E> and app.live, subscribe, push, invalidate, state and live_stats move into Core's app module with their signatures, and the jet.runtime.web bindings stay priv under app. web.openapi(site) returns String OpenAPIError! (no E2805 stop). The compiler rules key on four markers the battery declares (#Form, #RouteTable, #ColumnOf, #WebApp), not on module names. Every caller moves in the same cutover. Proof: `jet test Compiler --profile golden --filter Browser` on O0, O1 and O2 and `git grep -n \"core.web\" -- Core Compiler Examples` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:46:43.287Z"
+          "at": "2026-11-16T12:59:53.771Z"
         },
         {
           "n": 3,
@@ -81053,12 +81053,12 @@
         },
         {
           "n": 4,
-          "text": "app.caller() is accepted only on paths that start at an #App.SignedIn endpoint or a test's app.as_caller; a path from #App.Public, a webhook, a job or a schedule is a compile error naming the path; app.maybe_caller() is the Public form. Proof: `jet test Compiler --profile cases --filter web_app/caller_needs_a_signed_in_path`.",
+          "text": "app.caller() is accepted only on paths that start at an #App.SignedIn endpoint or a test's app.as_caller; a path from #App.Public, a webhook, a job or a schedule is a compile error naming the path; app.maybe_caller() is the Public form. Proof: `jet test Compiler --profile cases --filter WebApp/caller_needs_a_signed_in_path`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:45.423Z"
+          "at": "2026-11-16T12:59:54.758Z"
         },
         {
           "n": 5,
@@ -81071,30 +81071,30 @@
         },
         {
           "n": 6,
-          "text": "Only the package that builds the shared graph calls .screen: a .screen call in an entry package (one an output names) is a compile error; push open:, mail link: and app links resolve through the one route set. Proof: `jet test Compiler --profile cases --filter web_app/entry_package_cannot_add_a_screen`.",
+          "text": "Only the package that builds the shared graph calls .screen: a .screen call in an entry package (one an output names) is a compile error; push open:, mail link: and app links resolve through the one route set. Proof: `jet test Compiler --profile cases --filter WebApp/entry_package_cannot_add_a_screen`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:47.355Z"
+          "at": "2026-11-16T12:59:55.820Z"
         },
         {
           "n": 7,
-          "text": "A handler of kit.button, icon_button, swipe_action, file_button, native.item, ui.drop_zone, the tray and menu bar builders, native.background's run, native.lifecycle's on_resume and native.drop_files's on_drop has type fn() app.Notice!: its error type must convert to app.Notice. The frame shows the notice at the handler's destination (beside the control, a disabled menu item, the resumed window, or the drop target), announces it, and rolls back a refused predicted write. A failed native.background run joins the app's notice list, kept until dismissed, and is logged. Proof: `jet test Compiler --profile cases --filter web_app/handler_error_becomes_a_notice_by_the_control`.",
+          "text": "A handler of kit.button, icon_button, swipe_action, file_button, native.item, ui.drop_zone, the tray and menu bar builders, native.background's run, native.lifecycle's on_resume and native.drop_files's on_drop has type fn() app.Notice!: its error type must convert to app.Notice. The frame shows the notice at the handler's destination (beside the control, a disabled menu item, the resumed window, or the drop target), announces it, and rolls back a refused predicted write. A failed native.background run joins the app's notice list, kept until dismissed, and is logged. Proof: `jet test Compiler --profile cases --filter WebApp/handler_error_becomes_a_notice_by_the_control`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:43:09.146Z"
+          "at": "2026-11-16T12:59:56.810Z"
         },
         {
           "n": 8,
-          "text": "app.live's closure must be one call of an app.Remote endpoint with codable arguments, so the subscription is keyed by the method and its arguments; anything else is a compile error with a registered diagnostic. Proof: `jet test Compiler --profile cases --filter web_app/live_takes_one_remote_call`.",
+          "text": "app.live's closure must be one call of an app.Remote endpoint with codable arguments, so the subscription is keyed by the method and its arguments; anything else is a compile error with a registered diagnostic. Proof: `jet test Compiler --profile cases --filter WebApp/live_takes_one_remote_call`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:17:43.299Z"
+          "at": "2026-11-16T12:59:57.761Z"
         },
         {
           "n": 9,
@@ -81107,30 +81107,30 @@
         },
         {
           "n": 10,
-          "text": "The web store is one generic impl over its state type in the `web` package, not per-type copies. Proof: `jet test Compiler --profile cases --filter web_app/store_generic_impl`.",
+          "text": "The web store is one generic impl over its state type in the `web` package, not per-type copies. Proof: `jet test Compiler --profile cases --filter WebApp/store_generic_impl`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:31.581Z"
+          "at": "2026-11-16T12:59:58.748Z"
         },
         {
           "n": 11,
-          "text": "Exactly one module exports live, subscribe, invalidate and sync (the `app` package of D-WEBAPP-SHAPE1=A) and one exports the auth surface (the `auth` package); every caller migrates and Core/Web/Query.jet's live, subscribe and invalidate are gone. Proof: `git grep -n -E '^(live|subscribe|invalidate): fn' -- Core` prints nothing and `jet test Compiler --profile cases --filter web_app/` passes. (was #3709 c8)",
+          "text": "Exactly one module exports live, subscribe, invalidate and sync (the `app` package of D-WEBAPP-SHAPE1=A) and one exports the auth surface (the `auth` package); every caller migrates and Core/Web/Query.jet's live, subscribe and invalidate are gone. Proof: `git grep -n -E '^(live|subscribe|invalidate): fn' -- Core` prints nothing and `jet test Compiler --profile cases --filter WebApp/` passes. (was #3709 c8)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:57.764Z"
+          "at": "2026-11-16T12:59:59.751Z"
         },
         {
           "n": 12,
-          "text": "A dated parity audit in Docs/audits lists every element of the reference frameworks named in the body, the best framework for each element, Jet's current state cited by code path and executable example, the gap, and each known downside of the best implementation with the Jet design that removes it. Proof: `git ls-files \"Docs/audits/*web-framework-parity*\"` names the dated audit. (was #6552 c1)",
+          "text": "A dated parity audit in Docs/Audits lists every element of the reference frameworks named in the body, the best framework for each element, Jet's current state cited by code path and executable example, the gap, and each known downside of the best implementation with the Jet design that removes it. Proof: `git ls-files \"Docs/Audits/*web-framework-parity*\"` names the dated audit. (was #6552 c1)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:58.804Z"
+          "at": "2026-11-16T13:00:00.743Z"
         },
         {
           "n": 13,
@@ -81152,12 +81152,12 @@
         },
         {
           "n": 15,
-          "text": "Every claim that the Jet framework or any of its elements is better than an existing framework is backed by a passing adversarial review in Docs/audits, and every downside that review finds is engineered away and re-reviewed before the element is presented to the owner or built (AGENTS.md, Adversarial design review). Proof: each better-than claim in the audit names its passing adversarial review under Docs/audits. (was #6552 c6)",
+          "text": "Every claim that the Jet framework or any of its elements is better than an existing framework is backed by a passing adversarial review in Docs/Audits, and every downside that review finds is engineered away and re-reviewed before the element is presented to the owner or built (AGENTS.md, Adversarial design review). Proof: each better-than claim in the audit names its passing adversarial review under Docs/audits. (was #6552 c6)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:12:01.954Z"
+          "at": "2026-11-16T13:00:01.783Z"
         },
         {
           "n": 16,
@@ -81170,21 +81170,21 @@
         },
         {
           "n": 17,
-          "text": "One app package serves web, desktop and phones (D-ONEAPP-MODEL1=A): one example app builds for web and Linux desktop from the same source, and both goldens pass. Proof: `jet test Compiler --profile cases --filter web_app/one_source_web_and_linux`. (was #6552 c35)",
+          "text": "One app package serves web, desktop and phones (D-ONEAPP-MODEL1=A): one example app builds for web and Linux desktop from the same source, and both goldens pass. Proof: `jet test Compiler --profile cases --filter WebApp/one_source_web_and_linux`. (was #6552 c35)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:12:03.937Z"
+          "at": "2026-11-16T13:00:02.814Z"
         },
         {
           "n": 18,
-          "text": "A screen calls a marked server method like a plain function (D-SERVER-FN1=A, in the D-WEBAPP-SHAPE1=A form of app.Remote<S> and #App.SignedIn): the call crosses to the server with typed arguments and comes back with a typed error. Proof: `jet test Compiler --profile cases --filter web_app/remote_call_typed_errors`. (was #6552 c36)",
+          "text": "A screen calls a marked server method like a plain function (D-SERVER-FN1=A, in the D-WEBAPP-SHAPE1=A form of app.Remote<S> and #App.SignedIn): the call crosses to the server with typed arguments and comes back with a typed error. Proof: `jet test Compiler --profile cases --filter WebApp/remote_call_typed_errors`. (was #6552 c36)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:12:04.954Z"
+          "at": "2026-11-16T13:00:03.772Z"
         }
       ],
       "refs": [],
@@ -81195,7 +81195,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-16T04:40:14.492Z",
+      "updated": "2026-11-16T13:00:03.772Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -219983,6 +219983,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:00:03.772Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#18: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A screen calls a marked server method like a plain function (D-SERVER-FN1=A, in the D-WEBAPP-SHAPE1=A form of app.Remote<S> and #App.SignedIn): the call crosses to the server with typed arguments and "
+    },
+    {
+      "at": "2026-11-16T13:00:02.814Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#17: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: One app package serves web, desktop and phones (D-ONEAPP-MODEL1=A): one example app builds for web and Linux desktop from the same source, and both goldens pass. Proof: `jet test Compiler --profile ca"
+    },
+    {
+      "at": "2026-11-16T13:00:01.783Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#15: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every claim that the Jet framework or any of its elements is better than an existing framework is backed by a passing adversarial review in Docs/audits, and every downside that review finds is enginee"
+    },
+    {
+      "at": "2026-11-16T13:00:00.743Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#12: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A dated parity audit in Docs/audits lists every element of the reference frameworks named in the body, the best framework for each element, Jet's current state cited by code path and executable exampl"
+    },
+    {
+      "at": "2026-11-16T12:59:59.751Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Exactly one module exports live, subscribe, invalidate and sync (the `app` package of D-WEBAPP-SHAPE1=A) and one exports the auth surface (the `auth` package); every caller migrates and Core/Web/Query"
+    },
+    {
+      "at": "2026-11-16T12:59:58.748Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The web store is one generic impl over its state type in the `web` package, not per-type copies. Proof: `jet test Compiler --profile cases --filter web_app/store_generic_impl`."
+    },
+    {
+      "at": "2026-11-16T12:59:57.761Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#8: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: app.live's closure must be one call of an app.Remote endpoint with codable arguments, so the subscription is keyed by the method and its arguments; anything else is a compile error with a registered d"
+    },
+    {
+      "at": "2026-11-16T12:59:56.810Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A handler of kit.button, icon_button, swipe_action, file_button, native.item, ui.drop_zone, the tray and menu bar builders, native.background's run, native.lifecycle's on_resume and native.drop_files'"
+    },
+    {
+      "at": "2026-11-16T12:59:55.820Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Only the package that builds the shared graph calls .screen: a .screen call in an entry package (one an output names) is a compile error; push open:, mail link: and app links resolve through the one r"
+    },
+    {
+      "at": "2026-11-16T12:59:54.758Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: app.caller() is accepted only on paths that start at an #App.SignedIn endpoint or a test's app.as_caller; a path from #App.Public, a webhook, a job or a schedule is a compile error naming the path; ap"
+    },
+    {
+      "at": "2026-11-16T12:59:53.771Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-WEB-RUNTIME-API1=A is built (ratified 2026-11-13). core.web.browser becomes core.browser, members unchanged. core.web.on and core.web.value become core.browser.host.on and .value, and core.web.stora"
+    },
+    {
+      "at": "2026-11-16T12:59:52.790Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05p5u7s",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The cat cell is faster than Rust same-run (Jet/Rust < 1.00) by wall time and task-clock, strace shows reads of at least 64 KiB per syscall on a pipe, and every stdin and stdout golden and interactive "
+    },
+    {
+      "at": "2026-11-16T12:59:51.787Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00w7rum",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A generator pull that stays on the consumer thread costs under 50 ns per value (a direct switch or a compiled state machine, no scheduler park and wake), measured same-run on the iterloop kit case and"
+    },
+    {
+      "at": "2026-11-16T12:59:50.836Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0byuovb",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Examples/features/ui/surface.jet and the gui battery build with `use font`. Their goldens are unchanged. Proof: `jet test Compiler --profile golden --filter ui/surface` on O0, O1 and O2 with `use font"
+    },
+    {
+      "at": "2026-11-16T12:59:49.870Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06lvend",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Tensor shape, layout, scalar type and tag survive JSON, `compute.serialize` and CBOR, and the separate ad-hoc tensor serializer in Core/Compute is removed. Proof: `jet test Compiler --profile golden -"
+    },
+    {
+      "at": "2026-11-16T12:59:48.930Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A survey under Docs/research covers the most-used libraries by real usage evidence across Python, JS/TS, Rust, Go, Java/Kotlin, C#, Swift, Ruby and PHP. Proof: the research note exists and cites its u"
+    },
+    {
+      "at": "2026-11-16T12:59:47.972Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A research note under Docs/research compares the two ways build outputs are declared (API audit section 3) and recommends one. Proof: the note exists (`git ls-files Docs/research | grep build-outputs`"
+    },
+    {
+      "at": "2026-11-16T12:59:46.979Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#8: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The `api` lint group and Docs/spec/contributing/api-review.md exist, the lints ratchet Core and Jetpack, and Law 9 in stdlib-api-laws.md is replaced by D-API-COMPOSE1=A's pillar 9 (lints are errors un"
+    },
+    {
+      "at": "2026-11-16T12:59:46.011Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Label-only parameters after a variadic, written after `*`, work (D-CALL-VARTAIL1=A), and the variadic APIs the audit named use them. Proof: `jet test Compiler --profile cases --filter calls/label_only"
+    },
+    {
+      "at": "2026-11-16T12:59:45.019Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The build API takes label-only `b.action` arguments, typed effects and probe kinds, and defaulted deps (D-API-COMPOSE1=A). Proof: `jet test Compiler --profile cases --filter build/action_labelled_opti"
+    },
+    {
+      "at": "2026-11-16T12:59:43.990Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Each of the 20 undocumented worker functions found by the API audit is promoted to a typed, documented primitive or moved into a priv module, as D-API-COMPOSE1=A rules (base64, log and regex first). P"
+    },
+    {
+      "at": "2026-11-16T12:59:43.018Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06he0ee",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: After ratification the state machine surface is implemented with examples and golden output on o0, o1 and o2. Proof: `jet test Compiler --profile golden --filter state_machine` on O0, O1 and O2."
+    },
+    {
+      "at": "2026-11-16T12:59:42.041Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: No build setting lets safe code read or write outside a list: every out-of-range index outside `#Unchecked` is stopped with its registered run-time error or refused at compile time, on O0, O1, O2 and "
+    },
+    {
+      "at": "2026-11-16T12:59:41.101Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-UB-BOUNDARY1=A: the global `--bounds` build flag is removed (`jet build --bounds=off` is an unknown-flag error), with every caller migrated in the same cutover. Proof: `jet test Compiler --profile c"
+    },
+    {
+      "at": "2026-11-16T12:59:40.174Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-UB-BOUNDARY1=A: expert code skips a check only inside a written `#Unchecked(<check>)` block (bounds first); today `#Unchecked(bounds)` is E0927 on compiler 0ccdff27ea. The block removes the check on"
+    },
     {
       "at": "2026-11-16T12:59:38.922Z",
       "by": "Main",
