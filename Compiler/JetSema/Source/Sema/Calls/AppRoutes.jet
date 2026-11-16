@@ -50,6 +50,7 @@ use jet_foundation.[
     compiler_threads_failure_text,
     compiler_threads_partition,
     diagnostic_registry_row,
+    expr_span,
     module_is_core,
     type_name,
 ]
@@ -283,7 +284,9 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     }
     candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, SEMA_APP_SCREEN, [Type]{}, [Type]{}, span, environment, program, diagnostics)
     registered: candidates.pop() ?? panic("App.{SEMA_APP_SCREEN} is not registered")
-    result_type: sema_call_resolved_type(sema_call_signature_return(registered.signature) ?? panic("App.{SEMA_APP_SCREEN} has no result"), environment, program)
+    // `__screen` can't fail (`App Never!`): the call is the graph, as a
+    // declared method's call of it is.
+    result_type: sema_call_resolved_type(sema_owned_infallible(sema_call_signature_return(registered.signature) ?? panic("App.{SEMA_APP_SCREEN} has no result")), environment, program)
     built: sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver_value, method: registered.method, type_args: [Type]{viewed}, args: registration}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
 }
@@ -606,8 +609,8 @@ sema_call_app_graph_method: fn(receiver: Expr, receiver_value: TExpr, method: St
 
 // `alias.url_of(view)`, `alias.presence(view)`, `alias.go(view)` and
 // `alias.notify(to:, title:, body:, open: view)`, where `alias` names `app`.
-// Each argument is evaluated once, in the order written, into a hidden
-// local; the state's address is `alias.App.__url_of<V>(key, fields, texts)`,
+// Each argument but a bare name is evaluated once, in the order written,
+// into a hidden local; the state's address is `alias.App.__url_of<V>(key, fields, texts)`,
 // which `url_of` gives, `presence` passes to `alias.App.__presence(address)`
 // and `notify` to `alias.App.__notify(to, title, body, address)`, and `go`
 // opens it: `alias.App.__go<V>(key, fields, texts)`.
@@ -649,15 +652,31 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
     view_span := span
     loop index in 0..<args.len() {
         slot: slots[index]
+        value: args[index].expr.copy()  // copy: the caller's argument list keeps its expression
+        // A bare name is read where the address is made, with no local of
+        // its own: a local would take a read parameter this function doesn't
+        // own (E0120), and a name reads the same value each time.
+        if value == .Ident(name, name_span, _) {
+            if slot == state_slot {
+                read: sema_check_expression(Expr.Ident{name: "{name}", span: name_span, id: AST_NODE_GENERATED}, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+                    sema_single_use_leave_scope(scopes, state, diagnostics)
+                    return rejected
+                }
+                view = Val(read.ty.move())
+                view_span = name_span
+            }
+            locals[slot] = Val(value)
+            next
+        }
         local: "__jet_app_{span.start}_{params[slot]}"
-        binding: ast_binding(local, args[index].span, false, args[index].expr.copy(), None)  // copy: the caller's argument list keeps its expression
+        binding: ast_binding(local, args[index].span, false, value, None)
         statement: sema_stmt_check_binding(binding, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
             sema_single_use_leave_scope(scopes, state, diagnostics)
             return rejected
         }
         if slot == state_slot {
             if statement == .Let(_, _, init, _, _, _) -> view = Val(init.ty.copy())  // copy: the statement keeps its value's type
-            view_span = args[index].span
+            view_span = expr_span(args[index].expr)
         }
         body.push(statement)
         locals[slot] = Val(Expr.Ident{name: local, span: args[index].span, id: AST_NODE_GENERATED})

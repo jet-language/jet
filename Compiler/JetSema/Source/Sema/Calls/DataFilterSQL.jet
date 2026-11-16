@@ -83,11 +83,14 @@ sema_data_filter_body: fn(predicate: Expr, parameter: String, row: Type, environ
 }
 
 // The fields of `row` a condition can compare; none when `row` is not a
-// derived `#Codable` struct without a migration block.
+// derived `#Codable` struct without a migration block. A compile-time check
+// (a local value's closure checked ahead) has no checked types, so the row's
+// declaration is checked here, and its body keeps the condition the
+// program check writes.
 sema_data_filter_fields: fn(row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaDataFilterField] Never! {
     out := [SemaDataFilterField]{}
     if row == .Named(name) {
-        definition: sema_serde_type_definition(environment, program, name) ?? return out
+        definition: sema_comparability_definition(environment, program, environment.module_identity, name) ?? return out
         if !sema_data_filter_derived(definition) || sema_data_filter_migrated(program, definition.name) {
             return out
         }

@@ -123,6 +123,7 @@ jet_cli_dap_eval: fn(tables: ASTTables, expr: ExprNode, locals: [NativeLocal]) -
                     }
                     Err(jet_cli_dap_eval_error("`-` needs an Int or a Float"))
                 }
+                .Complement -> if jet_cli_dap_as_int(value) == .Val(number) -> Ok(jet_cli_dap_of_int(-number - 1)) else -> Err(jet_cli_dap_eval_error("`~` needs an Int"))
             }
         }
         .Binary(op, left, right, _, _) -> {

@@ -104,12 +104,14 @@ parser_expression_form_loop_step: fn(state: &JetParserState, depth: Int) -> Stmt
     if parser_expression_form_loop_body_start(state) || parser_expression_form_loop_guard_comma(state) {
         return None
     }
+    state.reading_loop_step = true
     step_expr: parser_parse_expression_no_struct_lit(state, depth + 1)
+    state.reading_loop_step = false
     if parser_is_assignment_operator(parser_current_kind(state)) {
         operator: parser_bump(state)
         value: parser_parse_expression(state, 1, depth + 1)
         target: parser_expression_lvalue(state, step_expr.expr, step_expr.span, operator)
-        return Val(Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr})
+        return Val(Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator.kind), op_span: operator.span, value: parser_assignment_value(state, operator, value)})
     }
     Val(Stmt.Expr{expr: step_expr.expr})
 }
@@ -299,13 +301,15 @@ parser_expression_form_parse_counted_loop: fn(state: &JetParserState, start: Spa
     if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
         parser_bump(state)
         if !parser_expression_form_loop_body_start(state) {
+            state.reading_loop_step = true
             step_expr: parser_parse_expression_no_struct_lit(state, depth + 1)
+            state.reading_loop_step = false
             step = if {
                 parser_is_assignment_operator(parser_current_kind(state)) -> {
                     operator: parser_bump(state)
                     value: parser_parse_expression(state, 1, depth + 1)
                     target: parser_expression_lvalue(state, step_expr.expr, step_expr.span, operator)
-                    Val(Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr})
+                    Val(Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator.kind), op_span: operator.span, value: parser_assignment_value(state, operator, value)})
                 }
                 else -> Val(Stmt.Expr{expr: step_expr.expr})
             }

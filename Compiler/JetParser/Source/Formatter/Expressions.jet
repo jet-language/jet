@@ -1556,7 +1556,8 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             if prec > JFMT_PREC_UNARY -> jfmt_write(f, "(")
             if op == {
                 .Neg -> { jfmt_write(f, "-") }
-                .Not -> jfmt_write(f, "!")
+                .Not -> { jfmt_write(f, "!") }
+                .Complement -> jfmt_write(f, "~")
             }
             jfmt_fmt_expr(f, inner, JFMT_PREC_UNARY)
             if prec > JFMT_PREC_UNARY -> jfmt_write(f, ")")
@@ -1580,8 +1581,14 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
                     if jfmt_is_and_operand(right) -> right_prec = jfmt_prec_add_rhs(JFMT_PREC_AND)
                 }
                 jfmt_fmt_expr(f, left, left_prec)
-                jfmt_write(f, " {spelled} ")
-                jfmt_fmt_expr(f, right, right_prec)
+                // `a & ~b` clears bits and prints as `a &~ b`.
+                if op == BinOp.BitAnd && right == .Unary(.Complement, cleared, _, _) {
+                    jfmt_write(f, " &~ ")
+                    jfmt_fmt_expr(f, cleared, right_prec)
+                } else {
+                    jfmt_write(f, " {spelled} ")
+                    jfmt_fmt_expr(f, right, right_prec)
+                }
             }
             if prec > op_prec -> jfmt_write(f, ")")
         }
@@ -1607,10 +1614,10 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write(f, "*")
             jfmt_fmt_expr(f, inner, JFMT_PREC_UNARY)
         }
-        // Prefix `x.copy()`.
+        // A copy sema builds, spelled as the receiver's copy method.
         .Copy(inner, _, _) -> {
-            jfmt_write(f, "~")
-            jfmt_fmt_expr(f, inner, JFMT_PREC_UNARY)
+            jfmt_fmt_expr(f, inner, JFMT_PREC_POSTFIX)
+            jfmt_write(f, ".copy()")
         }
         .Place(inner, access, span, id) -> {
             // Parsed places are write windows (`&values[2..3]`), plain reads,

@@ -1725,7 +1725,7 @@ sema_taint_total_operator: fn(state: SemaTaintFlowState, op: BinOp, right: Expr)
 // Whether a call of `method` with `count` arguments cannot stop and does not
 // branch: a list's or a string's length query, or a built-in method whose
 // registry row (BUILTIN_METHOD_ROWS) of that name and arity lowers to `&`,
-// `|`, `^` or a bit not, or to a wrapping `+`, `-` or `*`.
+// `|`, `~` or a complement, or to a wrapping `+`, `-` or `*`.
 sema_taint_total_method: fn(method: String, count: Int) -> Bool Never! {
     if count == 0 && (method == "len" || method == "is_empty") -> return true
     loop row in BUILTIN_METHOD_ROWS {
@@ -1755,7 +1755,7 @@ sema_taint_total_expr: fn(state: SemaTaintFlowState, value: Expr) -> Bool Never!
         .Paren(inner, _, _) -> return sema_taint_total_expr(state, inner)
         .Field(base, _, _, _) -> return sema_taint_total_expr(state, base)
         .Tainted(inner, _, _, _) -> return sema_taint_total_expr(state, inner)
-        .Unary(op, operand, _, _) -> return op == .Not && sema_taint_total_expr(state, operand)
+        .Unary(op, operand, _, _) -> return (op == .Not || op == .Complement) && sema_taint_total_expr(state, operand)
         .Binary(op, left, right, _, _) -> return sema_taint_total_operator(state, op, right) && sema_taint_total_expr(state, left) && sema_taint_total_expr(state, right)
         .CompareChain(operands, _, _, _, _) -> {
             loop operand in operands {

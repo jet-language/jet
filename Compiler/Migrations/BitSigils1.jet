@@ -1,0 +1,585 @@
+// Toolchain a0.0.45: integer bits are sigils, so every `bit_and`, `bit_or`,
+// `bit_xor` and `bit_not` call becomes one. `a.bit_and(b)` is `a & b`,
+// `a.bit_or(b)` is `a | b`, `a.bit_xor(b)` is `a ~ b`, `a.bit_not()` is `~a`
+// and `a.bit_and(b.bit_not())` is `a &~ b`. A statement that assigns a call
+// back to its own receiver (`x = x.bit_and(m)`) becomes an update (`x &= m`,
+// `x |= m`, `x ~= m`, `x &~= m`). The plan reads the lexer's tokens: a call's
+// receiver is the chain of names, literals, calls, indexes, typed literals,
+// fields and `?` steps before its `.`, and the tokens beside the call decide
+// whether the sigil form needs parentheses, which it does after a prefix
+// operator, before a postfix step, and beside an operator that binds at least
+// as tightly. A source that parsed cleanly must still parse after the
+// rewrite, or it is left alone. Jet quoted in a string (a raw string whole, a
+// plain string by its code spans or whole), an interpolation hole, a Markdown
+// ```jet fence and the code spans of prose or of any other text are read the
+// same way.
+use {
+    jet_lexer.[Token, TokenTables, lex_generated, lexer_without_comments, STRING_PART_INTERPOLATION, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BANG, TOKEN_CARET, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_DOT_DOT_DOT, TOKEN_EQ, TOKEN_GT, TOKEN_IDENT, TOKEN_KW_ELSE, TOKEN_KW_FN, TOKEN_KW_IF, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_MINUS, TOKEN_NULL, TOKEN_PIPE, TOKEN_PIPE_GT, TOKEN_QUESTION, TOKEN_QUESTION_DOT, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STAR, TOKEN_STRING, TOKEN_TILDE, TOKEN_UNIFIED_ARROW]
+    jet_parser.[parser_expression_precedence]
+}
+
+// How tightly a prefix operator binds: above every binary one.
+BIT_SIGILS_PREFIX: 100
+
+// One `bit_*` call: the indexes, in its token stream, of the receiver's first
+// token, the `.` and the closing `)`, and the bytes the call covers. An
+// update starts at its target, which ends at `target_end`; any other call has
+// `target_end` -1.
+BitSigilsSite: struct {
+    stream: Int
+    first: Int
+    dot: Int
+    close: Int
+    // `&`, `|` or `~` between two values; empty for the prefix complement.
+    op: String
+    start: Int
+    end: Int
+    target_end: Int
+}
+
+// A string literal's contents, from `start` to `end`, which hold bit calls:
+// a raw string's (`raw`) or a plain one's. `place` names the literal.
+BitSigilsQuoted: struct {
+    start: Int
+    end: Int
+    raw: Bool
+    place: String
+}
+
+// The calls and quoted strings found in one text, and the token streams the
+// calls index: the text's own and each interpolation hole's.
+BitSigilsScan: struct {
+    bytes: [U8]
+    streams: [[Token]]
+    sites: [BitSigilsSite]
+    quoted: [BitSigilsQuoted]
+    rewritten: Int
+    skipped: [String]
+}
+
+// Rewrites the bit calls of one file: a Jet source (`source`, or a `.jet` or
+// `.template` path), a Markdown file's ```jet fences and prose code spans, or
+// the code spans of any other text.
+bit_sigils1_file: fn(path: String, text: String, source: Bool) -> MigrationOutcome {
+    if source || path.ends_with(".jet") || path.ends_with(".template") {
+        return bit_sigils1_source(path, text)
+    }
+    if path.ends_with(".md") -> return bit_sigils1_markdown(path, text)
+    bit_sigils1_spans(path, text)
+}
+
+// A Jet source, rewritten unless it parsed cleanly and the result does not.
+bit_sigils1_source: fn(path: String, text: String) -> MigrationOutcome {
+    outcome := bit_sigils1_jet(path, text)
+    if outcome.rewritten == 0 || lambda_shape1_errors(text) > 0 -> return outcome
+    after_errors: lambda_shape1_errors(outcome.text)
+    if after_errors > 0 {
+        outcome.skipped.push("{path}: the rewrite does not parse ({after_errors} errors), file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: outcome.skipped.move()}
+    }
+    outcome
+}
+
+// Rewrites the bit calls of one Jet text, a whole source or a snippet.
+bit_sigils1_jet: fn(path: String, text: String) -> MigrationOutcome {
+    if !text.contains(".bit_") {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    bytes: text.bytes()
+    lexed: lex_generated(bytes)
+    scan := BitSigilsScan{bytes: bytes, streams: [[Token]]{}, sites: [BitSigilsSite]{}, quoted: [BitSigilsQuoted]{}, rewritten: 0, skipped: [String]{}}
+    bit_sigils1_collect(path, scan, lexed.tables, lexed.tokens)
+    if scan.rewritten == 0 {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: scan.skipped.move()}
+    }
+    rewritten: bit_sigils1_render(scan, 0, scan.bytes.len())
+    MigrationOutcome{text: rewritten, rewritten: scan.rewritten, skipped: scan.skipped.move()}
+}
+
+// The sigil each bit method becomes; empty for the prefix complement.
+bit_sigils1_method: fn(name: String) -> String? {
+    if name == {
+        "bit_and" -> Val("&")
+        "bit_or" -> Val("|")
+        "bit_xor" -> Val("~")
+        "bit_not" -> Val("")
+        else -> None
+    }
+}
+
+// How tightly a sigil binds, as the parser reads it.
+bit_sigils1_binding: fn(op: String) -> Int {
+    if op == {
+        "&" -> parser_expression_precedence(TOKEN_AMP)
+        "|" -> parser_expression_precedence(TOKEN_PIPE)
+        "~" -> parser_expression_precedence(TOKEN_TILDE)
+        else -> BIT_SIGILS_PREFIX
+    }
+}
+
+// Finds the calls of one token stream, then those of its interpolation holes.
+bit_sigils1_collect: fn(path: String, scan: &BitSigilsScan, tables: TokenTables, raw: [Token]) {
+    tokens: lexer_without_comments(raw)
+    stream: scan.streams.len()
+    holes := [Int]{}
+    loop index in 0..<tokens.len() {
+        token: tokens[index]
+        if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
+            if {
+                token.literal >= 0 && tables.literals[token.literal].string_parts.any(fn(part) { part.kind == STRING_PART_INTERPOLATION }) -> {
+                    holes.push(token.literal)
+                }
+                else -> bit_sigils1_quoted(path, scan, token)
+            }
+            next
+        }
+        if token.kind != TOKEN_IDENT || index < 2 || index + 1 >= tokens.len() -> next
+        if tokens[index - 1].kind != TOKEN_DOT || tokens[index + 1].kind != TOKEN_LPAREN -> next
+        name: lambda_shape1_text(scan.bytes, token.span.start, token.span.end)
+        op: bit_sigils1_method(name) ?? next
+        close: lambda_shape1_match(tokens, index + 1)
+        first: bit_sigils1_receiver(tokens, index - 1)
+        reason: if {
+            close < 0 -> "an unclosed `{name}` call"
+            (op == "") != (close == index + 2) -> "`{name}` with other arguments"
+            op != "" && !bit_sigils1_one_argument(tokens, index + 2, close) -> "`{name}` with more than one argument or a labeled one"
+            first < 0 -> "the receiver of `{name}` is not a chain of names, literals, calls, indexes and fields"
+            else -> ""
+        }
+        if reason != "" {
+            scan.skipped.push("{path}:{lambda_shape1_line(scan.bytes, token.span.start)}: {reason}")
+            next
+        }
+        target: if op == "" -> -1 else -> bit_sigils1_update_target(scan.bytes, tokens, first, index - 1, close)
+        site := BitSigilsSite{stream: stream, first: first, dot: index - 1, close: close, op: op, start: tokens[first].span.start, end: tokens[close].span.end, target_end: -1}
+        if target >= 0 {
+            site.start = tokens[target].span.start
+            site.target_end = tokens[first - 2].span.end
+        }
+        scan.sites.push(site)
+        scan.rewritten += 1
+    }
+    scan.streams.push(tokens)
+    loop literal in holes {
+        loop part in tables.literals[literal].string_parts {
+            if part.kind == STRING_PART_INTERPOLATION {
+                bit_sigils1_collect(path, scan, tables, part.tokens)
+            }
+        }
+    }
+}
+
+// Whether the tokens from `from` to the `)` at `close` are one unlabeled
+// argument, a trailing comma allowed.
+bit_sigils1_one_argument: fn(tokens: [Token], from: Int, close: Int) -> Bool {
+    last: bit_sigils1_argument_last(tokens, close)
+    if last < from -> return false
+    if from < last && tokens[from].kind == TOKEN_IDENT && tokens[from + 1].kind == TOKEN_COLON {
+        return false
+    }
+    depth := 0
+    loop index in from..<(last + 1) {
+        kind: tokens[index].kind
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> depth -= 1
+        if depth == 0 && kind == TOKEN_COMMA -> return false
+    }
+    true
+}
+
+// The argument's last token before the `)` at `close`, past a trailing comma.
+bit_sigils1_argument_last: fn(tokens: [Token], close: Int) -> Int {
+    if tokens[close - 1].kind == TOKEN_COMMA -> return close - 2
+    close - 1
+}
+
+// The index of the first token of the receiver whose `.` is at `dot`, or -1:
+// the chain of names, literals, calls, indexes, typed literals, fields and
+// `?` steps that ends right before the `.`.
+bit_sigils1_receiver: fn(tokens: [Token], dot: Int) -> Int {
+    at := dot - 1
+    loop at >= 0 {
+        kind: tokens[at].kind
+        start := at
+        if {
+            kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> {
+                open: bit_sigils1_opener(tokens, at)
+                if open < 0 -> return -1
+                start = open
+                // A call, an index or a typed literal goes on with the value
+                // or type written right before it; a generic call's
+                // `<…>` is not read, nor is a block.
+                adjacent: open > 0 && tokens[open - 1].span.end == tokens[open].span.start
+                if adjacent && bit_sigils1_value_end(tokens[open - 1].kind) {
+                    at = open - 1
+                    next
+                }
+                if kind == TOKEN_RBRACE || (adjacent && tokens[open - 1].kind == TOKEN_GT) {
+                    return -1
+                }
+            }
+            kind == TOKEN_QUESTION -> {
+                at -= 1
+                next
+            }
+            !bit_sigils1_value_end(kind) -> return -1
+        }
+        if start >= 2 && tokens[start - 1].kind == TOKEN_DOT {
+            at = start - 2
+            next
+        }
+        return start
+    }
+    -1
+}
+
+// The index of the opener matching the closer at `close`, or -1.
+bit_sigils1_opener: fn(tokens: [Token], close: Int) -> Int {
+    closer: tokens[close].kind
+    opener: if {
+        closer == TOKEN_RPAREN -> TOKEN_LPAREN
+        closer == TOKEN_RBRACKET -> TOKEN_LBRACKET
+        else -> TOKEN_LBRACE
+    }
+    depth := 0
+    index := close
+    loop index >= 0 {
+        kind: tokens[index].kind
+        if kind == closer -> depth += 1
+        if kind == opener {
+            depth -= 1
+            if depth == 0 -> return index
+        }
+        index -= 1
+    }
+    -1
+}
+
+// Whether a token of `kind` ends a value, so an operator after it is binary:
+// a name, a literal, `true`, `false`, `self`, `null`, a closer or `?`.
+bit_sigils1_value_end: fn(kind: Int) -> Bool {
+    kind == TOKEN_IDENT || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_QUESTION || (kind >= TOKEN_RAW_STRING && kind <= TOKEN_NULL)
+}
+
+// The first token of the target when the call from `first` to `close` is a
+// whole statement `target = target.bit_*(m)`; -1 otherwise.
+bit_sigils1_update_target: fn(bytes: [U8], tokens: [Token], first: Int, dot: Int, close: Int) -> Int {
+    if first < 2 || tokens[first - 1].kind != TOKEN_EQ -> return -1
+    if close + 1 < tokens.len() && tokens[close + 1].kind != TOKEN_SEMI && tokens[close + 1].kind != TOKEN_RBRACE {
+        return -1
+    }
+    target := first - 2
+    loop target > 0 && !bit_sigils1_statement_start(tokens[target - 1].kind) -> target -= 1
+    written: lambda_shape1_text(bytes, tokens[target].span.start, tokens[first - 2].span.end)
+    if written != lambda_shape1_text(bytes, tokens[first].span.start, tokens[dot - 1].span.end) {
+        return -1
+    }
+    target
+}
+
+bit_sigils1_statement_start: fn(kind: Int) -> Bool {
+    kind == TOKEN_SEMI || kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_KW_ELSE
+}
+
+// A string literal's Jet, recorded when it holds bit calls and rewritten
+// when its place is rendered.
+bit_sigils1_quoted: fn(path: String, scan: &BitSigilsScan, token: Token) {
+    raw: lambda_shape1_text(scan.bytes, token.span.start, token.span.end)
+    if !raw.contains(".bit_") {
+        return
+    }
+    raw_string: token.kind == TOKEN_RAW_STRING
+    quote: if raw_string -> lambda_shape1_fence(raw, 96) else -> lambda_shape1_fence(raw, 34)
+    if quote == 0 || raw.len() < quote * 2 {
+        return
+    }
+    from: token.span.start + quote
+    to: token.span.end - quote
+    place: "{path}:{lambda_shape1_line(scan.bytes, token.span.start)}"
+    outcome: bit_sigils1_string(place, lambda_shape1_text(scan.bytes, from, to), raw_string) ?? {
+        scan.skipped.push("{place}: a string with an escape the plan does not read")
+        return
+    }
+    scan.skipped.extend(outcome.skipped.move())
+    if outcome.rewritten == 0 {
+        return
+    }
+    scan.quoted.push(BitSigilsQuoted{start: from, end: to, raw: raw_string, place: place})
+    scan.rewritten += outcome.rewritten
+}
+
+// A string literal's contents rewritten: a raw string's whole, and a plain
+// string's code spans when it has any and its contents whole otherwise, read
+// through its escapes and written back quoted. None when a plain string
+// holds an escape the plan does not read.
+bit_sigils1_string: fn(place: String, contents: String, raw_string: Bool) -> MigrationOutcome? {
+    if raw_string -> return Val(bit_sigils1_jet(place, contents))
+    inner: lambda_shape1_unquote(contents) ?? return None
+    if lambda_shape1_quote(inner) != contents -> return None
+    outcome: if inner.contains("`") -> bit_sigils1_spans(place, inner) else -> bit_sigils1_jet(place, inner)
+    if outcome.rewritten == 0 -> return Val(outcome)
+    Val(MigrationOutcome{text: lambda_shape1_quote(outcome.text), rewritten: outcome.rewritten, skipped: outcome.skipped.move()})
+}
+
+// The bytes from `lo` to `hi` with each outermost call and quoted string in
+// them rewritten.
+bit_sigils1_render: fn(scan: BitSigilsScan, lo: Int, hi: Int) -> String {
+    out := [String]{}
+    cursor := lo
+    loop {
+        site := -1
+        quoted := -1
+        start := hi
+        end := hi
+        loop index in 0..<scan.sites.len() {
+            candidate: scan.sites[index]
+            if candidate.start < cursor || candidate.end > hi -> next
+            if candidate.start < start || (candidate.start == start && candidate.end > end) {
+                site = index
+                start = candidate.start
+                end = candidate.end
+            }
+        }
+        loop index in 0..<scan.quoted.len() {
+            candidate: scan.quoted[index]
+            if candidate.start < cursor || candidate.end > hi -> next
+            if candidate.start < start {
+                site = -1
+                quoted = index
+                start = candidate.start
+                end = candidate.end
+            }
+        }
+        out.push(lambda_shape1_text(scan.bytes, cursor, start))
+        if {
+            site >= 0 -> out.push(bit_sigils1_site(scan, site, bit_sigils1_wrapped(scan, site)))
+            quoted >= 0 -> {
+                literal: scan.quoted[quoted]
+                contents: lambda_shape1_text(scan.bytes, literal.start, literal.end)
+                outcome: bit_sigils1_string(literal.place, contents, literal.raw) ?? panic("{literal.place}: a string read once no longer reads")
+                out.push(outcome.text.move())
+            }
+            else -> break
+        }
+        cursor = end
+    }
+    out.join("")
+}
+
+bit_sigils1_token: fn(scan: BitSigilsScan, stream: Int, index: Int) -> Token {
+    scan.streams[stream][index]
+}
+
+// One call in its sigil form, in parentheses when `wrap`.
+bit_sigils1_site: fn(scan: BitSigilsScan, index: Int, wrap: Bool) -> String {
+    site: scan.sites[index]
+    receiver_start: bit_sigils1_token(scan, site.stream, site.first).span.start
+    receiver_end: bit_sigils1_token(scan, site.stream, site.dot - 1).span.end
+    binding: bit_sigils1_binding(site.op)
+    if site.op == "" {
+        complement: "~{bit_sigils1_operand(scan, receiver_start, receiver_end, BIT_SIGILS_PREFIX, false)}"
+        return if wrap -> "({complement})" else -> complement
+    }
+    argument_start: bit_sigils1_token(scan, site.stream, site.dot + 3).span.start
+    last := site.close - 1
+    if bit_sigils1_token(scan, site.stream, last).kind == TOKEN_COMMA -> last -= 1
+    argument_end: bit_sigils1_token(scan, site.stream, last).span.end
+    update: site.target_end >= 0
+    left: if update -> bit_sigils1_render(scan, site.start, site.target_end) else -> bit_sigils1_operand(scan, receiver_start, receiver_end, binding, false)
+    cleared: if site.op == "&" -> bit_sigils1_exact(scan, argument_start, argument_end, true) else -> -1
+    body: if {
+        cleared >= 0 -> {
+            inner: scan.sites[cleared]
+            operand_start: bit_sigils1_token(scan, inner.stream, inner.first).span.start
+            operand_end: bit_sigils1_token(scan, inner.stream, inner.dot - 1).span.end
+            operand: bit_sigils1_operand(scan, operand_start, operand_end, BIT_SIGILS_PREFIX, false)
+            if update -> "{left} &~= {operand}" else -> "{left} &~ {operand}"
+        }
+        update -> "{left} {site.op}= {bit_sigils1_operand(scan, argument_start, argument_end, 0, true)}"
+        else -> "{left} {site.op} {bit_sigils1_operand(scan, argument_start, argument_end, binding, true)}"
+    }
+    if wrap -> "({body})" else -> body
+}
+
+// The call, not an update, that covers exactly `lo` to `hi`, a complement
+// only when `complement`; -1 when none does.
+bit_sigils1_exact: fn(scan: BitSigilsScan, lo: Int, hi: Int, complement: Bool) -> Int {
+    loop index in 0..<scan.sites.len() {
+        site: scan.sites[index]
+        if site.start == lo && site.end == hi && site.target_end < 0 && (!complement || site.op == "") {
+            return index
+        }
+    }
+    -1
+}
+
+// The value from `lo` to `hi` written beside an operator that binds at
+// `binding`, on its right when `right`, in parentheses when it binds more
+// loosely (or as loosely, on the right). A receiver that is no call is a
+// chain, which binds tighter than any operator.
+bit_sigils1_operand: fn(scan: BitSigilsScan, lo: Int, hi: Int, binding: Int, right: Bool) -> String {
+    exact: bit_sigils1_exact(scan, lo, hi, false)
+    if exact >= 0 {
+        inner: bit_sigils1_binding(scan.sites[exact].op)
+        return bit_sigils1_site(scan, exact, inner < binding || (right && inner == binding))
+    }
+    text: bit_sigils1_render(scan, lo, hi)
+    if right && bit_sigils1_loosest(text) <= binding -> return "({text})"
+    text
+}
+
+// Whether the tokens around a call need its sigil form in parentheses: a
+// postfix step after it, a prefix operator before it, or an operator beside
+// it that binds at least as tightly (more tightly, after it).
+bit_sigils1_wrapped: fn(scan: BitSigilsScan, index: Int) -> Bool {
+    site: scan.sites[index]
+    if site.target_end >= 0 -> return false
+    binding: bit_sigils1_binding(site.op)
+    if site.close + 1 < scan.streams[site.stream].len() {
+        close: bit_sigils1_token(scan, site.stream, site.close)
+        after: bit_sigils1_token(scan, site.stream, site.close + 1)
+        if after.kind == TOKEN_DOT || after.kind == TOKEN_QUESTION_DOT || after.kind == TOKEN_QUESTION {
+            return true
+        }
+        if (after.kind == TOKEN_LPAREN || after.kind == TOKEN_LBRACKET) && after.span.start == close.span.end {
+            return true
+        }
+        if parser_expression_precedence(after.kind) > binding -> return true
+    }
+    if site.first == 0 -> return false
+    before: bit_sigils1_token(scan, site.stream, site.first - 1)
+    if site.first >= 2 && bit_sigils1_value_end(bit_sigils1_token(scan, site.stream, site.first - 2).kind) && parser_expression_precedence(before.kind) > 0 {
+        return parser_expression_precedence(before.kind) >= binding
+    }
+    binding != BIT_SIGILS_PREFIX && bit_sigils1_prefix(before.kind)
+}
+
+bit_sigils1_prefix: fn(kind: Int) -> Bool {
+    kind == TOKEN_MINUS || kind == TOKEN_BANG || kind == TOKEN_TILDE || kind == TOKEN_AMP || kind == TOKEN_CARET || kind == TOKEN_STAR || kind == TOKEN_AND_AND || kind == TOKEN_DOT_DOT_DOT
+}
+
+// The loosest binding among the binary operators outside any brackets in
+// `text`; 0 when it holds a statement, an assignment or a keyword form,
+// which always needs parentheses beside an operator.
+bit_sigils1_loosest: fn(text: String) -> Int {
+    lexed: lex_generated(text.bytes())
+    if lexed.diagnostics.len() > 0 -> return 0
+    tokens: lexer_without_comments(lexed.tokens)
+    loosest := BIT_SIGILS_PREFIX
+    depth := 0
+    loop index in 0..<tokens.len() {
+        token: tokens[index]
+        kind: token.kind
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> depth -= 1
+        if depth == 0 {
+            if kind == TOKEN_KW_IF || kind == TOKEN_KW_FN || kind == TOKEN_KW_ELSE || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_EQ || kind == TOKEN_COLON_EQ || kind == TOKEN_PIPE_GT || (kind == TOKEN_SEMI && token.span.end > token.span.start) {
+                return 0
+            }
+            binding: parser_expression_precedence(kind)
+            if binding > 0 && index > 0 && bit_sigils1_value_end(tokens[index - 1].kind) && binding < loosest {
+                loosest = binding
+            }
+        }
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+    }
+    loosest
+}
+
+// The code spans of a text, each rewritten as Jet: the bytes between two
+// single backticks on one line.
+bit_sigils1_spans: fn(path: String, text: String) -> MigrationOutcome {
+    if !text.contains(".bit_") {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    bytes: text.bytes()
+    out := [String]{}
+    skipped := [String]{}
+    rewritten := 0
+    cursor := 0
+    index := 0
+    loop index < bytes.len() {
+        if bytes[index] != 96 {
+            index += 1
+            next
+        }
+        run := index
+        loop run < bytes.len() && bytes[run] == 96 -> run += 1
+        if run - index != 1 {
+            index = run
+            next
+        }
+        close := index + 1
+        loop close < bytes.len() && bytes[close] != 96 && bytes[close] != 10 -> close += 1
+        if close >= bytes.len() || bytes[close] != 96 {
+            index = close
+            next
+        }
+        span: bit_sigils1_jet("{path}:{lambda_shape1_line(bytes, index)}", lambda_shape1_text(bytes, index + 1, close))
+        skipped.extend(span.skipped.move())
+        if span.rewritten > 0 {
+            out.push(lambda_shape1_text(bytes, cursor, index + 1))
+            out.push(span.text.move())
+            cursor = close
+            rewritten += span.rewritten
+        }
+        index = close + 1
+    }
+    if rewritten == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    out.push(lambda_shape1_text(bytes, cursor, bytes.len()))
+    MigrationOutcome{text: out.join(""), rewritten: rewritten, skipped: skipped}
+}
+
+// A Markdown file: each ```jet fence is rewritten as one Jet text, and so is
+// each code span of its prose. Other fences stay as written.
+bit_sigils1_markdown: fn(path: String, text: String) -> MigrationOutcome {
+    if !text.contains(".bit_") {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    bytes: text.bytes()
+    out := [String]{}
+    skipped := [String]{}
+    rewritten := 0
+    cursor := 0
+    start := 0
+    line := 1
+    // The first byte of the open ```jet fence's body; -1 outside a fence and
+    // -2 inside any other fence.
+    fence := -1
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && bytes[end] != 10 -> end += 1
+        trimmed: lambda_shape1_text(bytes, start, end).trim()
+        if {
+            fence != -1 && trimmed == "```" -> {
+                if fence >= 0 && start > fence {
+                    block: bit_sigils1_jet("{path}:{line}", lambda_shape1_text(bytes, fence, start - 1))
+                    skipped.extend(block.skipped.move())
+                    if block.rewritten > 0 {
+                        out.push(lambda_shape1_text(bytes, cursor, fence))
+                        out.push(block.text.move())
+                        cursor = start - 1
+                        rewritten += block.rewritten
+                    }
+                }
+                fence = -1
+            }
+            fence != -1 -> {}
+            trimmed.starts_with("```") -> fence = if trimmed == "```jet" -> end + 1 else -> -2
+            else -> {
+                spans: bit_sigils1_spans("{path}:{line}", lambda_shape1_text(bytes, start, end))
+                skipped.extend(spans.skipped.move())
+                if spans.rewritten > 0 {
+                    out.push(lambda_shape1_text(bytes, cursor, start))
+                    out.push(spans.text.move())
+                    cursor = end
+                    rewritten += spans.rewritten
+                }
+            }
+        }
+        start = end + 1
+        line += 1
+    }
+    if rewritten == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    out.push(lambda_shape1_text(bytes, cursor, bytes.len()))
+    MigrationOutcome{text: out.join(""), rewritten: rewritten, skipped: skipped}
+}

@@ -906,6 +906,15 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                     last_code = push_code(facts, K_AMP_EQ, start, start + 2, false)
                     i += 2
                 }
+                // `&~` clears bits: `a &~ b` is `a & ~b`.
+                next1 == 126 && next2 == 61 -> {
+                    last_code = push_code(facts, K_AMP_TILDE_EQ, start, start + 3, false)
+                    i += 3
+                }
+                next1 == 126 -> {
+                    last_code = push_code(facts, K_AMP_TILDE, start, start + 2, false)
+                    i += 2
+                }
                 else -> {
                     last_code = push_code(facts, K_AMP, start, start + 1, false)
                     i += 1
@@ -960,6 +969,10 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                 }
                 next1 == 124 -> {
                     last_code = push_code(facts, K_TILDE_PIPE, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 -> {
+                    last_code = push_code(facts, K_TILDE_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {

@@ -345,11 +345,13 @@ effect-body = block | "->" non-if-stmt ;
 ```
 
 The expression parser uses precedence climbing. From weakest to strongest,
-the relevant operators are `||`, `&&`, comparisons, shifts, `+` and `-`,
-`*`, `/`, `/%`, `%`, `%%`, unary `-` and Boolean `!`, then calls,
-field/index access, identifiers, literals, and parenthesized expressions.
-Bit arithmetic uses `bit_and`, `bit_or`, `bit_xor`, and `bit_not`; power
-uses `pow` (D-SIGIL-ALGEBRA1=B). Method nesting states the grouping explicitly.
+the relevant operators are `||`, `&&`, comparisons, `|`, `~`, `&` and `&~`,
+shifts, `+` and `-`, `*`, `/`, `/%`, `%`, `%%`, unary `-`, Boolean `!` and
+the complement `~`, then calls, field/index access, identifiers, literals, and
+parenthesized expressions. Integer bits are the infix `&`, `|`, `~`
+(exclusive-or) and `&~` (and-not), the prefix complement `~`, and the updates
+`&=`, `|=`, `~=` and `&~=` (D-BIT-SIGILS1=A). `^` is not an operator; power
+uses `pow` (D-SIGIL-ALGEBRA1=B).
 
 ## Values, expressions, and calls
 

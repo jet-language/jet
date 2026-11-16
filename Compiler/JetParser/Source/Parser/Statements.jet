@@ -33,6 +33,7 @@ use {
         TupleField,
         Type,
         TypedLitBody,
+        UnOp,
         ast_binding,
         AST_EMPTY_CALL_ARG_FLAGS,
         expr_span,
@@ -42,6 +43,7 @@ use {
     jet_lexer.[
         TOKEN_AMP,
         TOKEN_AMP_EQ,
+        TOKEN_AMP_TILDE_EQ,
         TOKEN_AND_AND,
         TOKEN_AT,
         TOKEN_BANG,
@@ -101,6 +103,8 @@ use {
         TOKEN_STAR,
         TOKEN_STAR_EQ,
         TOKEN_STRING,
+        TOKEN_TILDE,
+        TOKEN_TILDE_EQ,
         TOKEN_TRUE,
         TOKEN_UNIFIED_ARROW,
         TOKEN_UNIT_NUMBER,
@@ -1929,24 +1933,12 @@ parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
         return Stmt.Val{binding: binding}
     }
     operator: parser_current_kind(state)
-    // `&=` and `|=` were retired with infix bit arithmetic (S17): an update
-    // assigns the named method's result back. The right side is consumed with
-    // the operator, so the line reports once.
-    retired_method: parser_retired_bit_update_method(operator)
-    if retired_method != "" {
-        op_token: parser_bump(state)
-        parser_parse_expression(state, 1, 0)
-        parser_finish_statement(state)
-        spelling: parser_retired_bit_update_spelling(operator)
-        parser_add_error_code(state, "E0398", op_token.span, "`{spelling}` is retired; assign the `{retired_method}` result back", "marks express ownership and outcomes; arithmetic uses named methods", "write `x = x.{retired_method}(m)` in place of `x {spelling} m`")
-        return Stmt.Expr{expr: left.expr}
-    }
     if parser_is_assignment_operator(operator) {
         op_token: parser_bump(state)
         right: parser_parse_expression(state, 1, 0)
         parser_finish_statement(state)
         target: parser_expression_lvalue(state, left.expr, left.span, op_token)
-        return Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator), op_span: op_token.span, value: right.expr}
+        return Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator), op_span: op_token.span, value: parser_assignment_value(state, op_token, right)}
     }
     if named && !parser_named_line_does_work(state, left.expr) {
         parser_add_error(state, expr_span(left.expr), "this line computes a value but doesn't do anything with it", "only calls, bindings, assignments, and `return` are allowed here", "use the value, e.g. `x: ...` or `print(...)`")
@@ -2018,7 +2010,7 @@ parser_starts_expression: fn(kind: Int) -> Bool Never! {
     if kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET || kind == TOKEN_HASH || kind == TOKEN_DOLLAR || kind == TOKEN_DOT || kind == TOKEN_LT_GT {
         return true
     }
-    kind == TOKEN_MINUS || kind == TOKEN_BANG || kind == TOKEN_STAR || kind == TOKEN_AMP || kind == TOKEN_CARET
+    kind == TOKEN_MINUS || kind == TOKEN_BANG || kind == TOKEN_TILDE || kind == TOKEN_STAR || kind == TOKEN_AMP || kind == TOKEN_CARET
 }
 
 // A line that starts with a name or `self` works when it calls, names a
@@ -2077,24 +2069,15 @@ parser_refutable_test_binding: fn(expr: Expr) -> Binding? {
 }
 
 parser_is_assignment_operator: fn(kind: Int) -> Bool Never! {
-    kind == TOKEN_EQ || kind == TOKEN_PLUS_EQ || kind == TOKEN_MINUS_EQ || kind == TOKEN_STAR_EQ || kind == TOKEN_SLASH_EQ || kind == TOKEN_SLASH_PERCENT_EQ || kind == TOKEN_PERCENT_EQ || kind == TOKEN_PERCENT_PERCENT_EQ || kind == TOKEN_SHL_EQ || kind == TOKEN_SHR_EQ
+    kind == TOKEN_EQ || kind == TOKEN_PLUS_EQ || kind == TOKEN_MINUS_EQ || kind == TOKEN_STAR_EQ || kind == TOKEN_SLASH_EQ || kind == TOKEN_SLASH_PERCENT_EQ || kind == TOKEN_PERCENT_EQ || kind == TOKEN_PERCENT_PERCENT_EQ || kind == TOKEN_SHL_EQ || kind == TOKEN_SHR_EQ || kind == TOKEN_AMP_EQ || kind == TOKEN_PIPE_EQ || kind == TOKEN_TILDE_EQ || kind == TOKEN_AMP_TILDE_EQ
 }
 
-// The method a retired compound update names, or "" for any other token.
-parser_retired_bit_update_method: fn(kind: Int) -> String Never! {
-    if kind == {
-        TOKEN_AMP_EQ -> "bit_and"
-        TOKEN_PIPE_EQ -> "bit_or"
-        else -> ""
-    }
-}
-
-parser_retired_bit_update_spelling: fn(kind: Int) -> String Never! {
-    if kind == {
-        TOKEN_AMP_EQ -> "&="
-        TOKEN_PIPE_EQ -> "|="
-        else -> ""
-    }
+// The value an update assigns through its operator: `x &~= m` is `x &= ~m`,
+// so its value is complemented.
+parser_assignment_value: fn(state: &JetParserState, operator: Token, value: ParsedExpr) -> Expr {
+    if operator.kind != TOKEN_AMP_TILDE_EQ -> return value.expr
+    span: Span{start: operator.span.start + 1, end: value.span.end}
+    Expr.Unary{op: UnOp.Complement, operand: value.expr, span: span, id: parser_node_id(state)}
 }
 
 parser_assignment_binop: fn(kind: Int) -> BinOp? {
@@ -2109,6 +2092,10 @@ parser_assignment_binop: fn(kind: Int) -> BinOp? {
         TOKEN_PERCENT_PERCENT_EQ -> Val(BinOp.Rem)
         TOKEN_SHL_EQ -> Val(BinOp.Shl)
         TOKEN_SHR_EQ -> Val(BinOp.Shr)
+        TOKEN_AMP_EQ -> Val(BinOp.BitAnd)
+        TOKEN_AMP_TILDE_EQ -> Val(BinOp.BitAnd)
+        TOKEN_PIPE_EQ -> Val(BinOp.BitOr)
+        TOKEN_TILDE_EQ -> Val(BinOp.BitXor)
         else -> None
     }
 }

@@ -4592,14 +4592,16 @@ body_codec_get_placeaccess: fn(bytes: [U8], input: &BodyCodecIn) -> PlaceAccess 
 body_codec_put_unop: fn(out: &BodyCodecOut, value: UnOp) Never! {
     if value == {
         .Neg -> { body_codec_put_tag(out, 0) }
-        .Not -> body_codec_put_tag(out, 1)
+        .Not -> { body_codec_put_tag(out, 1) }
+        .Complement -> body_codec_put_tag(out, 2)
     }
 }
 
 body_codec_get_unop: fn(bytes: [U8], input: &BodyCodecIn) -> UnOp Never! {
-    position: body_codec_get_tag(bytes, input, 2, 0)
+    position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
         1 -> UnOp.Not
+        2 -> UnOp.Complement
         else -> UnOp.Neg
     }
 }

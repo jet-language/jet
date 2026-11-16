@@ -1,16 +1,18 @@
 // Superseded arrow, exit and capture spellings never come back in tracked Jet
 // source, generated Jet artifacts or the Docs: the old callable and control
 // arrow `=>`, a `:>` that closes no `<:` fence, the old effect arrows
-// `=[E]=>`, `=[E]>` and `:[E]>` (the current one is `-[E]>`), the endpoint-pair
-// protocol line `client -> server: Msg`, the old loop exits `?break`,
-// `?return`, `?next`, `?continue`, `break.name`, `break @name` and
-// `next @name`, and the `take(...)` closure-capture prefix. Tokens come from the
-// Jet lexer, so comments and string text never count. A dated before/after
-// example, a line that names the spelling as retired, a negative UI fixture's
-// subject line and a `retired_*` fixture keep their spelling.
+// `=[E]=>`, `=[E]>` and `:[E]>` (the current one is `-[E]>`), a failure
+// contract written before the effect arrow (`T E! -[IO]>`, `(A | B)! -[IO]>`;
+// the row comes first, `-[IO]> T E!`), the endpoint-pair protocol line
+// `client -> server: Msg`, the old loop exits `?break`, `?return`, `?next`,
+// `?continue`, `break.name`, `break @name` and `next @name`, and the
+// `take(...)` closure-capture prefix. Tokens come from the Jet lexer, so
+// comments and string text never count. A dated before/after example, a line
+// that names the spelling as retired, a negative UI fixture's subject line and
+// a `retired_*` fixture keep their spelling.
 use {
     arrow_surface_files: core.files
-    jet_lexer.[lex, lexer_without_comments, Token, TokenTables, token_decoded, STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_BREAK, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_QUESTION, TOKEN_GT, TOKEN_FENCE_CLOSE, TOKEN_DOT, TOKEN_LPAREN, TOKEN_LBRACKET, TOKEN_UNIFIED_ARROW, TOKEN_EQ, TOKEN_FENCE_OPEN, TOKEN_COLON, TOKEN_KW_MOVE]
+    jet_lexer.[lex, lexer_without_comments, Token, TokenTables, token_decoded, STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_BREAK, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_QUESTION, TOKEN_GT, TOKEN_FENCE_CLOSE, TOKEN_DOT, TOKEN_LPAREN, TOKEN_LBRACKET, TOKEN_UNIFIED_ARROW, TOKEN_EQ, TOKEN_FENCE_OPEN, TOKEN_COLON, TOKEN_KW_MOVE, TOKEN_MINUS, TOKEN_BANG]
     guards.[guards_enter_root]
 }
 
@@ -120,6 +122,11 @@ arrow_surface_scan: fn(bytes: [U8], tables: TokenTables, raw: [Token], hits: &[A
             open: arrow_surface_row_opener(tokens, index)
             if open > 0 && arrow_surface_touch(tokens[open - 1], tokens[open]) && (tokens[open - 1].kind == TOKEN_EQ || tokens[open - 1].kind == TOKEN_COLON) {
                 hits.push(ArrowSurfaceHit{offset: tokens[open - 1].span.start, spelling: "effect arrow not spelled `-[E]>`"})
+            }
+            // A contract's `!` that ends right before the `-[` opener puts the
+            // failure contract ahead of the effect row.
+            if open > 2 && tokens[open - 1].kind == TOKEN_MINUS && arrow_surface_touch(tokens[open - 1], tokens[open]) && tokens[open - 2].kind == TOKEN_BANG && arrow_surface_touch(tokens[open - 3], tokens[open - 2]) {
+                hits.push(ArrowSurfaceHit{offset: tokens[open - 2].span.start, spelling: "failure contract before the effect arrow"})
             }
         }
         if token.kind == TOKEN_QUESTION && following && arrow_surface_touch(token, tokens[index + 1]) {
@@ -415,13 +422,13 @@ arrow_surface_ui_subject_lines: fn(path: String) -> [Int] {
             }
         }
     }
-    assert(failures.is_empty(), "superseded spellings (write `->`, `-[E]>`, `break(name)`, `next(name)`, `client: Msg(...)`, or a plain capture):\n{failures.join("\n")}")
+    assert(failures.is_empty(), "superseded spellings (write `->`, `-[E]>`, `-[E]> T F!`, `break(name)`, `next(name)`, `client: Msg(...)`, or a plain capture):\n{failures.join("\n")}")
 }
 
 #Test("arrow surface scan reads tokens, not text") {
-    flagged: [String]{"f: fn() => Int {{ 1 }}", "f: fn() :> Int {{ 1 }}", "f: fn() =[IO]=> Int {{ 1 }}", "f: fn() :[IO]> Int {{ 1 }}", "f: fn() =[IO]> Int {{ 1 }}", "f: fn() {{ loop {{ ?break }} }}", "f: fn() {{ loop {{ ?return }} }}", "f: fn() {{ loop {{ ?next }} }}", "f: fn() {{ loop {{ break.outer }} }}", "f: fn() {{ loop {{ break @outer }} }}", "f: fn() {{ loop {{ next @outer }} }}", "g: take(a) (x) -> x", "g: take(a) -> a", "p: protocol {{\n    client -> server: Ping\n}}"}
+    flagged: [String]{"f: fn() => Int {{ 1 }}", "f: fn() :> Int {{ 1 }}", "f: fn() =[IO]=> Int {{ 1 }}", "f: fn() :[IO]> Int {{ 1 }}", "f: fn() =[IO]> Int {{ 1 }}", "f: fn() Int ParseError! -[IO]> {{ 1 }}", "f: fn() (ParseError | IOError)! -[IO]> {{ 1 }}", "f: fn() [FieldError]! -[IO]> {{ 1 }}", "h: fn(Int) Int E!-[IO]>", "f: fn() {{ loop {{ ?break }} }}", "f: fn() {{ loop {{ ?return }} }}", "f: fn() {{ loop {{ ?next }} }}", "f: fn() {{ loop {{ break.outer }} }}", "f: fn() {{ loop {{ break @outer }} }}", "f: fn() {{ loop {{ next @outer }} }}", "g: take(a) (x) -> x", "g: take(a) -> a", "p: protocol {{\n    client -> server: Ping\n}}"}
     loop source in flagged -> assert(arrow_surface_source_hits(source).len() == 1, source)
-    lawful: [String]{"f: fn() -[IO]> Int {{ 1 }}", "f: fn() -> Int {{ 1 }}", "// f: fn() => Int\nx: 1", "s: \"a => b, :[IO]>\"", "f: fn() {{ loop {{ break(outer) }} }}", "f: fn() {{ loop {{ next(outer) }} }}", "n: next.x", "t: take(9.99)", "r: fn() {{ loop x in xs.take(2) -> print(x) }}", "v: <:a:> + 1", "c: a <=> b", "w: a >= b", "l: x = [1]", "p: protocol {{\n    client: Ping()\n}}"}
+    lawful: [String]{"f: fn() -[IO]> Int {{ 1 }}", "f: fn() -> Int {{ 1 }}", "f: fn() -[IO]> Int ParseError! {{ 1 }}", "f: fn() -[IO]> (ParseError | IOError)! {{ 1 }}", "f: fn() -[IO]> [FieldError]! {{ 1 }}", "// f: fn() Int E! -[IO]>\nx: 1", "// f: fn() => Int\nx: 1", "s: \"a => b, :[IO]>\"", "f: fn() {{ loop {{ break(outer) }} }}", "f: fn() {{ loop {{ next(outer) }} }}", "n: next.x", "t: take(9.99)", "r: fn() {{ loop x in xs.take(2) -> print(x) }}", "v: <:a:> + 1", "c: a <=> b", "w: a >= b", "l: x = [1]", "p: protocol {{\n    client: Ping()\n}}"}
     loop source in lawful -> assert(arrow_surface_source_hits(source).is_empty(), source)
     assert_eq(arrow_surface_source_hits("s: \"{{f(fn() => 1)}}\"").len(), 1)
 }

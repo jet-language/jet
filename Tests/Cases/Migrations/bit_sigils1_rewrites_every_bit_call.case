@@ -1,0 +1,25 @@
+# The registered bit-sigils1 plan (toolchain a0.0.45) rewrites every
+# `bit_and`, `bit_or`, `bit_xor` and `bit_not` call in an old-spelling
+# source, a Markdown file and the code spans of a text: each sigil, the
+# `&~` and `~` forms, chains in either order, an argument that binds more
+# loosely, a postfix step after the call, a prefix operator and arithmetic
+# beside it, receivers that are paren groups, typed literals, calls,
+# indexes and a call on the next line, interpolation holes, the updates
+# `|=`, `&~=` and `~=` on a name and on a field (and an assignment to
+# another name, which stays an assignment), a raw string, a plain string's
+# code span, a Jet fence and prose code spans. Other fences, text outside
+# code spans, a call with two arguments and a generic call's receiver stay
+# as written. A second run finds nothing left to rewrite.
+fixture: BitSigils1RewritesEveryBitCall/Input
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- bit-sigils1 --write before.jet guide.md notes.txt
+exit: 0
+stdout: = "EDIT before.jet 42\nEDIT guide.md 5\nSKIP notes.txt:3:1: `bit_and` with more than one argument or a labeled one\nSKIP notes.txt:3:1: the receiver of `bit_or` is not a chain of names, literals, calls, indexes and fields\nEDIT notes.txt 2\nTOTAL 49 sites in 3 files\n"
+file: before.jet = BitSigils1RewritesEveryBitCall/before.out
+file: guide.md = BitSigils1RewritesEveryBitCall/guide.out
+file: notes.txt = BitSigils1RewritesEveryBitCall/notes.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- bit-sigils1 --write before.jet guide.md notes.txt
+exit: 0
+stdout: = "SKIP notes.txt:3:1: `bit_and` with more than one argument or a labeled one\nSKIP notes.txt:3:1: the receiver of `bit_or` is not a chain of names, literals, calls, indexes and fields\nTOTAL 0 sites in 0 files\n"
+file: before.jet = BitSigils1RewritesEveryBitCall/before.out
+file: guide.md = BitSigils1RewritesEveryBitCall/guide.out
+file: notes.txt = BitSigils1RewritesEveryBitCall/notes.out

@@ -46,7 +46,7 @@
 //   live query re-runs for every write to it.
 use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
-    jet_foundation.[CompilerThreads, FnBody, body_node, build_options_stock, module_is_core]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, SymbolTable, body_node, build_options_stock, decl_table_key, module_is_core]
     jet_ir.[IROptInlined]
 }
 
@@ -251,14 +251,24 @@ jet_cli_context_key_name: fn(key: String) -> String Never! {
 
 // The live read choices of the program's own `functions`, at the function's
 // line: each filter, with the SQL condition its table reads by, or why it
-// reads the whole table.
-jet_cli_live_read_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+// reads the whole table. A filter is a call of Core's source
+// `__query_filter`, whose declaration `decls` names by its function key.
+jet_cli_live_read_choices: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, out: &[JetCLIChoice]) Never! {
+    filters := [String]{}
+    loop function in functions {
+        if function.name == "__query_filter" && module_is_core(function.module_identity) {
+            filters.push("{function.key}")
+        }
+    }
+    if filters.len() == 0 {
+        return
+    }
     loop function in functions {
         if function.synthetic || module_is_core(function.module_identity) -> next
         loop node in function.tree.nodes {
-            if node.kind == .CoreCall(record, args, _, _, _, _) && (record.source_target ?? "") == "core.data.__query_filter" && args.len() == 4 {
+            if node.kind == .Call(callee, _, args) && args.len() == 4 && filters.contains(decl_table_key(decls, symbols, callee)) {
                 condition := ""
-                if body_node(function.tree, args[1]).kind == .StrLit(parts) {
+                if body_node(function.tree, args[1].value).kind == .StrLit(parts) {
                     loop part in parts {
                         if part == .Literal(text) -> condition = "{condition}{text}"
                     }
@@ -342,7 +352,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             jet_cli_exposure_choices(inputs.functions, choices)
             jet_cli_rights_choices(inputs.functions, choices)
             jet_cli_context_choices(inputs.functions, choices)
-            jet_cli_live_read_choices(inputs.functions, choices)
+            jet_cli_live_read_choices(inputs.functions, inputs.decls, inputs.symbols, choices)
             if inputs.entry_key != None {
                 threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
                 build := build_options_stock("build")

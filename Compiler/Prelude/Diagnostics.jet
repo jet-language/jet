@@ -23668,27 +23668,27 @@ RetiredForeignPowerOperator: struct {
     }
 }
 
-BitArithmeticNeedsMethod: struct {
+BitLogicMixup: struct {
     impl Diagnostic {
         code: "E0398"
         safety_class: .Soundness
-        safety_reason: "`!` is defined only on Bool and `&=` and `|=` are no operators, so the code has no operation to run."
-        expert_path: "none: `bit_not()` flips integer bits and an update assigns the method result back"
+        safety_reason: "`!` is defined only on Bool, `~` only on integers, and a `~=` update gives no Bool, so the code has no operation that means what it says."
+        expert_path: "none: `~value` flips integer bits, `!flag` negates a Bool and `!=` compares"
         stage: [.Parse, .Sema]
-        meaning: "Bit arithmetic written with a retired sign: `!` on a non-Bool value, or a `&=` or `|=` update"
+        meaning: "A bit sign written for a logic one or the reverse: `!` on an integer, `~` on a Bool, or a `~=` update where a condition compares"
         detail: true
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
 
-        what: fn(self) -> String { "Bit arithmetic uses named methods, not signs." }
+        what: fn(self) -> String { "Bit signs and logic signs are different operators." }
 
         why: fn(self) -> String {
-            "`!` negates a Bool and `&` and `|` mark ownership; integer bits use named methods."
+            "`!` negates a Bool and `!=` compares, while `~` flips integer bits and `~=` updates by exclusive-or."
         }
 
         fix: fn(self) -> String {
-            "Write `value.bit_not()` to flip integer bits; for an update, assign the method result back: `x = x.bit_and(m)` or `x = x.bit_or(m)`."
+            "Write `~value` to flip integer bits, `!flag` to negate a Bool, and `!=` to test that two values differ."
         }
     }
 }

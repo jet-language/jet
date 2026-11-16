@@ -549,7 +549,9 @@ sema_type_equatable: fn(environment: SemaScopeEnvironment, program: SemaProgramT
             }
             // Compiler fact enums compare by variant; codegen folds the test.
             if sema_fact_enum_menu(ty, environment, program) != None -> return true
-            if sema_comparability_bare_core_enum(environment, program, name) == .Val(equatable) -> return equatable
+            if sema_comparability_bare_core_enum(environment, program, name) == .Val(equatable) {
+                return equatable
+            }
             sema_comparability_implements(environment, program, ty, "Equatable")
         }
         .Apply(name, args) -> {

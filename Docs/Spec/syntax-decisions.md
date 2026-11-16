@@ -315,10 +315,11 @@ D-DOTCTOR3 whole-value reading, so `evens: [Int]: xs.map(f)` becomes
 **S4 — Type annotations**: `name: Type` after the name on signatures and fields.
 Never on a local binding. Never `Type name`.
 
-**S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `<<=` `>>=`.
-Arithmetic four on Int/Float; the rest Int-only. `&=`, `|=` and `~|=` are
-retired with infix bit arithmetic (D-SIGIL-ALGEBRA1=B): an update assigns the
-`bit_and`, `bit_or` or `bit_xor` result back. `^=` is not Jet syntax: a power
+**S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `<<=` `>>=`, and the
+integer bit updates `&=` `|=` `~=` `&~=` (D-BIT-SIGILS1=A).
+Arithmetic four on Int/Float; the rest Int-only. `x &~= m` clears the bits of
+`m`. `~=` is an update, never a comparison: inside a condition it is E0398
+naming `!=`. `^=` is not Jet syntax: a power
 update is `x = x.pow(n)`. `String += piece`
 appends text (a String or a borrowed text view); ordinary text construction
 still uses interpolation, not binary `+`. The append preserves explicitly
@@ -820,12 +821,13 @@ D-ONELINE-BODY1=B's typed `f: fn() T -> expr`; the earlier general-pipe
 proposal (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 
 **D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow** *(ratified
-2026-07-15, card #552; amended by D-SIGIL-ALGEBRA1=B and D-PIPE1=A)*: single `|` belongs
+2026-07-15, card #552; amended by D-SIGIL-ALGEBRA1=B, D-PIPE1=A and D-BIT-SIGILS1=A)*: single `|` belongs
 to alternative-list grammar, including structural or-patterns and choice arms.
 Jet assigns no general flow meaning to a bar; the one flow form is the D-PIPE1
 pipe below. Reusable flows otherwise use ordinary calls,
 named intermediate values, and ordinary named composition helpers. `||` keeps
-its Boolean meaning; integer OR is `value.bit_or(other)`. Its warning against
+its Boolean meaning; integer OR is the value-position infix `a | b`
+(D-BIT-SIGILS1=A). Its warning against
 tap, error, async and mutation pipe variants stands.
 
 **D-PIPE1=A — `|>` steps and the `<>` value** *(ratified 2026-11-05, card
@@ -1340,10 +1342,10 @@ in-place form is `/%=`. A zero divisor traps
 with the divided-by-zero message on every tier. The registry spellings are
 `OP_SLASH_PERCENT` and `OP_SLASH_PERCENT_EQ` in `Data/Syntax/MathLayout.jet`.
 
-**D-SIGIL-ALGEBRA1=B — Words for bit arithmetic and power** *(ratified
-2026-10-04, card #4141)*: every integer type has `bit_and(other)`,
-`bit_or(other)`, `bit_xor(other)` and `bit_not()`. Power is `value.pow(exponent)`
-on Int and Float. These methods lower through the existing numeric operations
+**D-SIGIL-ALGEBRA1=B — Words for power** *(ratified
+2026-10-04, card #4141; its bit-method half is amended by D-BIT-SIGILS1=A)*:
+power is `value.pow(exponent)`
+on Int and Float. It lowers through the existing numeric operations
 and shared Prelude, with the same integer-width, exactness, overflow-policy
 and D-EXPNEG1 negative-exponent rules. Shifts remain `<<` and `>>`. Prefix
 `&` and `^` retain their ownership meanings; copying is `.copy()` (D-COPY-WORD1),
@@ -1351,13 +1353,31 @@ and `!` negates Bool only.
 A written negative Int exponent (including a parenthesized negative numeral)
 selects Fraction; positive literals and negative zero remain Int. An exponent
 whose sign is dynamic remains Int and uses the shared runtime negative-power stop.
-Retired infix bit arithmetic and its compounds produce E0398 naming the
-method, with a precedence-preserving structured repair. Infix `^` and `^=`
+Infix `^` and `^=`
 for power are not Jet syntax and get only the generic parse error, with no
-teaching diagnostic (owner order, card #6857). Updates explicitly assign the
-method result back. `core.math.xor` and `core.math.pow` are removed.
-Generated Jet observers use these methods too: a wire writer extracts
-its hexadecimal byte nibbles with `.bit_and(15)`, not retired infix arithmetic.
+teaching diagnostic (owner order, card #6857). `core.math.xor` and
+`core.math.pow` are removed. The ruling first gave integers the bit methods
+`bit_and`, `bit_or`, `bit_xor` and `bit_not`; D-BIT-SIGILS1=A replaces them
+with sigils.
+
+**D-BIT-SIGILS1=A — Sigils for integer bits** *(ratified 2026-11-16, card
+#6857; amends D-SIGIL-ALGEBRA1=B and D-SIGIL-FREED2)*: every integer type has
+the value-position infix operators `a & b` (and), `a | b` (or), `a ~ b`
+(exclusive-or) and `a &~ b` (and-not), the prefix complement `~a`, and the
+updates `&=`, `|=`, `~=` and `&~=`. Precedence follows C and stays above the
+comparisons: shifts, then `&` and `&~`, then `~`, then `|`, then `==` and the
+other comparisons, so `a & b == c` compares the masked value. One tilde serves
+both exclusive-or and complement, because complement is exclusive-or with all
+ones; exact `Int` complement is `-x - 1`, and a fixed width keeps its width.
+`a &~ b` is `a & ~b` and `x &~= m` is `x &= ~m`; fmt prints both short forms.
+`^` stays free, so neither a C exclusive-or habit nor a power habit runs
+silently. Bool logic keeps `!`, `&&`, `||` and `!=`; the mixups are E0398:
+`~` on a Bool names `!`, `!` on an integer names `~`, and `~=` in a condition
+names `!=`, each with an edit. The `bit-sigils1` migration plan
+(`jet run Compiler/Migrations/Migrate.jet -- bit-sigils1 --write PATH...`)
+rewrites `bit_and`, `bit_or`, `bit_xor` and `bit_not` calls into the sigils,
+adding parentheses only where precedence needs them.
+Example: `Tests/Run/BitwiseNot/BitSigilsFollowTheirPrecedence.jet`.
 
 **D-CHAINCMP1 — Chained comparisons**: `0 <= sev < 10` desugars to
 `0 <= sev && sev < 10`, middle operand evaluated once. Same-direction chains
@@ -3423,8 +3443,8 @@ each mark against the resolved receiver
 convention of user methods, trait dispatch, and builtin receivers: a missing,
 extra (E0225) or wrong mark is an error with a machine-applicable
 fix. A line that starts with `&name` or `^name` begins a new statement.
-Arithmetic uses named bit methods and `pow` (D-SIGIL-ALGEBRA1=B).
-`~` copy grouping and `&place` window lifetimes are
+Integer bits use the sigils of D-BIT-SIGILS1=A and power uses `pow`
+(D-SIGIL-ALGEBRA1=B). `&place` window lifetimes are
 unchanged; calls through a stored write window mark the window name. Lookup,
 evaluation order, one place evaluation, two-phase builtin borrowing, and move
 checks are unchanged. Rationale: one value-side mark position for receivers,
@@ -3485,8 +3505,8 @@ takes the input for good: `c: &&T`, `seal: fn(&&self)`,
 `gzclose: fn(file: &&GzFile) -> Int = "gzclose"`, `task &&job { … }`. The
 take mark appears only in a parameter type, before `self`, and after `task`,
 so it never meets logical `&&`, which sits between two values. `^` has no
-grammar meaning left (no xor and no power; the bitwise method is
-`bit_xor`) and stays an ordinary error until a ballot gives it a job
+grammar meaning left (no xor and no power; exclusive-or is `a ~ b` under
+D-BIT-SIGILS1=A) and stays an ordinary error until a ballot gives it a job
 (D-SIGIL-FREED2).
 
 **D-DECL-COLON1=A — every declaration is `name: value`** *(ratified
@@ -9212,6 +9232,15 @@ D-GENMOD-VALUE1 and D-META-CODE1, reverses the intervening same-day ruling
 that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
+
+**2026-11-16 — bit sigils for integers (D-BIT-SIGILS1=A)** *(card #6857)*:
+`&`, `|`, `~`, `&~`, prefix `~` and the updates `&=`, `|=`, `~=`, `&~=` are
+integer bit operators with C precedence above the comparisons. E0398 now
+teaches the Bool and bit mixups (`~` on Bool, `!` on an integer, `~=` in a
+condition) instead of rewriting infix bits into methods, and
+the `bit-sigils1` migration plan (Compiler/Migrations) moves `bit_*` calls to
+the sigils.
+Example: `Tests/Run/BitwiseNot/BitSigilsFollowTheirPrecedence.jet`.
 
 **2026-11-16 — infix power is not taught** *(card #6857; owner order under
 D-SIGIL-ALGEBRA1=B)*: `a ^ b` and `a ^= b` no longer get E0398 with a `pow`
