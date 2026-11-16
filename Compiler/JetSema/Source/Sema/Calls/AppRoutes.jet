@@ -366,7 +366,18 @@ sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg]
         return rejected
     }
     declared: handler.function.declaration.return_type ?? Type.Named{name: "Unit"}
-    returned: sema_type_resolve_declared(graph, declared, handler.function.symbol.module_identity)
+    resolved: sema_type_resolve_declared(graph, declared, handler.function.symbol.module_identity)
+    // A function that can't fail (`Never!`) gives its success type.
+    returned: if {
+        resolved == .Result(ok, err) -> {
+            if err != (Type.Named{name: "Never"}) {
+                diagnostics.push(sema_error("E2810", args[0].span, "App `sitemap` requires a function that can't fail, and `{handler.name}` can fail", "a crawler reads the sitemap whenever it likes, and no caller is there to handle a failure", shape))
+                return rejected
+            }
+            ok
+        }
+        else -> resolved
+    }
     listed: sema_app_list_element(returned) ?? {
         diagnostics.push(sema_error("E2810", args[0].span, "App `sitemap` requires a function that gives a list of screen states, and `{handler.name}` gives `{type_name(returned)}`", "the sitemap lists the address of each state the function gives", shape))
         return rejected
