@@ -660,6 +660,12 @@ SemaRegistrationModuleInput: struct {
     // the Core bodies no program calls, its casing is the Core library's check
     // (`jet check Core`), which leaves this true.
     check_casing: Bool{true}
+    // The derive templates' expansions this module's registration takes or
+    // keeps (Derives.jet SemaDeriveMemo, CoreBodies.jet
+    // sema_core_derives_attach): the Core library's check keeps a Core
+    // module's, which SemaRegistrationModule.derive_captures records, and a
+    // compile bound to that Core takes them from the record.
+    derive_memo: SemaDeriveMemo{SemaDeriveMemo{}}
 }
 
 SemaForeignImportBinding: struct {
@@ -751,6 +757,11 @@ SemaRegistrationModule: struct {
     namespace_import_split: Int{-1}
     namespace_full: Bool{false}
     namespace_bindings: [SemaRegistrationRowRef]{[SemaRegistrationRowRef]{}}
+    // The record of the derive templates' expansions the Core library's
+    // check kept for this Core module (Derives.jet sema_derive_memo_capture),
+    // at most one, which its bodies file holds (CoreBodies.jet
+    // sema_core_derive_bodies).
+    derive_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}}
 }
 
 SemaRegistrationImportBindingRef: struct {
@@ -3279,8 +3290,12 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     sema_error_conversion_items(module_row.program.items, module_row.program.rule_facts, module_row.namespace_refs, diagnostics)
     // Selected built-in capabilities expand from the Prelude
     // derive templates into compiler-generated trait blocks before any
-    // declaration, impl, or known-time value is registered.
-    sema_derive_expand_builtin_items(module_row.program.items, diagnostics)
+    // declaration, impl, or known-time value is registered. The Core
+    // library's check keeps a Core module's template expansions; a compile
+    // bound to that Core takes them in place of expanding.
+    derive_memo := owned.derive_memo.move()
+    sema_derive_expand_builtin_items_with(module_row.program.items, diagnostics, derive_memo)
+    sema_derive_memo_capture(derive_memo.move(), module_row.derive_captures)
     // Explicit and structurally selected codecs
     // enter as ordinary generated `impl T.Encode`/`impl T.Decode` items.
     sema_serde_expand_builtin_items(module_row.program.items, codecs)
@@ -5205,8 +5220,11 @@ sema_registration_compiler_builtin_row: fn(graph: SemaRegistrationGraph, name: S
 // `counting` sets the graph's `counting` (#4319 lookup counters). The inputs
 // are consumed: each program moves into its module row. The unit scans and
 // the module rows are prepared on up to `threads` compiler threads, with the
-// same rows and diagnostics for any thread count.
-sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: &&ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads) -> SemaRegistrationGraph {
+// same rows and diagnostics for any thread count. The Core library's check
+// (`capture_derives`) records each Core module's derive expansion; a
+// compile whose host lends that check's bodies file (`derive_hooks`) takes
+// the records in place of expanding (CoreBodies.jet sema_core_derives_attach).
+sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: &&ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads, derive_hooks: SemaHostHookAccess?{None}, capture_derives: Bool{false}) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // Rust CheckInner `retain_error_prelude_module` runs first: the original
@@ -5218,6 +5236,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     prepared_inputs := inputs.move()
     table := module_table.move()
     sema_registration_retain_original_error_module(prepared_inputs, table, diagnostics)
+    sema_core_derives_attach(prepared_inputs, table, derive_hooks, capture_derives)
     units_names: sema_units_catalog_names(SEMA_UNITS_CATALOG)
     units_mentions: sema_units_scan_mentions(prepared_inputs, canonical_effect_module_identity, units_names, threads)
     // An input that mentions no catalog unit takes no family.

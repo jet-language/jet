@@ -1,0 +1,212 @@
+// A Core module's derive templates' expansions, as the Core library's check
+// records them in its bodies file (Registration/Derives.jet SemaDeriveMemo,
+// CoreBodies.jet sema_core_derive_bodies), read back as the expansions
+// registration makes from the module's items. A module whose items a load
+// cut, or whose types differ from those the record was made from, takes
+// what the record holds of its types and expands the rest.
+use {
+    jet_sema.[
+        SEMA_CORE_DERIVE_KEY,
+        SemaBuildFacts,
+        SemaCoreBodies,
+        SemaCoreBody,
+        SemaDeriveCapture,
+        SemaDeriveMemo,
+        SemaForeignProviderInput,
+        SemaHostHookAccess,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationGraph,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_core_bodies_bytes,
+        sema_core_bodies_position,
+        sema_core_bodies_problem,
+        sema_core_bodies_read,
+        sema_core_derive_bodies,
+        sema_core_derive_read,
+        sema_derive_expand_builtin_items,
+        sema_derive_expand_builtin_items_with,
+        sema_derive_memo_capture,
+        sema_has_error_since,
+        sema_host_hook_access,
+        sema_registration_prepare_graph,
+    ]
+    jet_parser.[parse_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_foundation.[
+        Diagnostic,
+        Item,
+        Span,
+        body_codec_out,
+        compiler_threads_single,
+        effect_vocabulary_module,
+        jet_target_machine_hosted,
+        module_intern,
+        module_table,
+    ]
+}
+
+// Types whose derives registration expands: an enum with payloads, a struct
+// with `point_fields`, and a payload-free enum, then `extra`.
+derive_record_source: fn(point_fields: String, extra: String) -> String {
+    lines: [String]{
+        "Shape: enum {{",
+        "    Circle(radius: Float)",
+        "    Rect(width: Int, height: Int)",
+        "    Empty",
+        "}}",
+        "",
+        "Point: struct {{",
+        point_fields,
+        "}}",
+        "",
+        "Level: enum {{",
+        "    Low",
+        "    High",
+        "}}",
+        "",
+    }
+    "{lines.join("\n")}{extra}"
+}
+
+// The fields of `Point` in derive_record_source.
+DERIVE_RECORD_POINT: "    x: Int\n    y: Int"
+
+// Two more types derive_record_source can add.
+DERIVE_RECORD_EXTRA: "Size: struct {{\n    width: Int\n}}\n\nMode: enum {{\n    On\n    Off\n}}\n"
+
+// The items of `source` as parsed.
+derive_record_items: fn(source: String) -> [Item] {
+    parsed: parse_source(source.bytes())
+    if sema_has_error_since(parsed.diagnostics, 0) {
+        panic("DeriveRecord: the source does not parse: {parsed.diagnostics:Debug}")
+    }
+    parsed.program.items.move()
+}
+
+// The bodies file of `bodies`, read back whole.
+derive_record_file: fn(bodies: &&[SemaCoreBody]) -> SemaCoreBodies {
+    bytes: sema_core_bodies_bytes(bodies.move(), "derive-record")
+    if sema_core_bodies_problem(bytes) == .Val(problem) {
+        panic("DeriveRecord: the bodies file does not read back: {problem}")
+    }
+    sema_core_bodies_read(bytes) ?? panic("DeriveRecord: the bodies file has no header")
+}
+
+// The memo of the expansions of `source`'s derives, recorded as the Core
+// library's check records a Core module's, written to a bodies file and
+// read back as a compile handed that file reads it.
+derive_record_memo: fn(source: String) -> SemaDeriveMemo {
+    items := derive_record_items(source)
+    diagnostics := [Diagnostic]{}
+    out := body_codec_out()
+    out.indexed = true
+    memo := SemaDeriveMemo{capture: Val(out.move())}
+    sema_derive_expand_builtin_items_with(items, diagnostics, memo)
+    captures := [SemaDeriveCapture]{}
+    sema_derive_memo_capture(memo.move(), captures)
+    capture: captures.pop() ?? panic("DeriveRecord: the expansion made no record: {diagnostics:Debug}")
+    if !"{items:Debug}".contains("Equatable") || !"{items:Debug}".contains("Comparable") {
+        panic("DeriveRecord: the fixture's types derived neither Equatable nor Comparable")
+    }
+    key: "{SEMA_CORE_DERIVE_KEY}fixture"
+    file: derive_record_file([SemaCoreBody]{SemaCoreBody{key: key, bytes: capture.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: [String]{}, strings: capture.strings.move()}})
+    position: sema_core_bodies_position(Val(file), key) ?? panic("DeriveRecord: the bodies file has no record keyed `{key}`")
+    read := 0
+    record: sema_core_derive_read(Val(file), None, module_table(), position, read) ?? panic("DeriveRecord: the record does not read")
+    if read == 0 -> panic("DeriveRecord: reading the record counted no bytes")
+    record
+}
+
+// How many expansions the items of `source` take from `memo`, whose
+// expansion must give the items expanding without it gives.
+derive_record_apply: fn(source: String, memo: &SemaDeriveMemo) -> Int {
+    diagnostics := [Diagnostic]{}
+    items := derive_record_items(source)
+    sema_derive_expand_builtin_items_with(items, diagnostics, memo)
+    expected := derive_record_items(source)
+    sema_derive_expand_builtin_items(expected, diagnostics)
+    if diagnostics.len() > 0 -> panic("DeriveRecord: the expansion reported {diagnostics:Debug}")
+    if "{items:Debug}" != "{expected:Debug}" {
+        panic("DeriveRecord: the items the record gives differ from those the expansion gives")
+    }
+    memo.taken
+}
+
+#Test("a derive record read back from a bodies file gives the items the expansion gives") {
+    source: derive_record_source(DERIVE_RECORD_POINT, "")
+    memo := derive_record_memo(source)
+    count: memo.keys.len()
+    assert(count >= 3)
+    assert_eq(derive_record_apply(source, memo), count)
+}
+
+#Test("a module whose items a load cut takes the expansions of the types it keeps") {
+    memo := derive_record_memo(derive_record_source(DERIVE_RECORD_POINT, DERIVE_RECORD_EXTRA))
+    kept: derive_record_source(DERIVE_RECORD_POINT, "")
+    count: derive_record_memo(kept).keys.len()
+    assert(count < memo.keys.len())
+    assert_eq(derive_record_apply(kept, memo), count)
+}
+
+#Test("a type that differs from the one a derive record was made from expands its own") {
+    memo := derive_record_memo(derive_record_source(DERIVE_RECORD_POINT, ""))
+    taken: derive_record_apply(derive_record_source("    x: Int\n    y: Int\n    z: Int", ""), memo)
+    assert(taken > 0)
+    assert(taken < memo.keys.len())
+}
+
+// The registration graph of derive_record_source as Core module
+// `<corelib>/derive-record`, beside the canonical effect module: recording
+// each module's derive expansions with `capture`, and taking those of the
+// bodies file `hooks` lends.
+derive_record_graph: fn(hooks: SemaHostHookAccess?, capture: Bool{false}) -> SemaRegistrationGraph {
+    source: derive_record_source(DERIVE_RECORD_POINT, DERIVE_RECORD_EXTRA)
+    parsed: parse_source(source.bytes())
+    if sema_has_error_since(parsed.diagnostics, 0) {
+        panic("DeriveRecord: the source does not parse: {parsed.diagnostics:Debug}")
+    }
+    table := module_table()
+    main_id: module_intern(table, "<corelib>/derive-record")
+    canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("DeriveRecord: the canonical effect module declares no effects")
+    canonical_id: canonical.module_identity
+    facts: SemaBuildFacts{package_name: "derive-record", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    input: SemaRegistrationModuleInput{package_identity: "core", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+    sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "core", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single(), derive_hooks: hooks, capture_derives: capture)
+}
+
+#Test("a Core module registered with its recorded derive expansions registers as one that expands them") {
+    captured := derive_record_graph(None, capture: true)
+    bodies := [SemaCoreBody]{}
+    sema_core_derive_bodies(captured, bodies)
+    assert(bodies.len() > 0)
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(derive_record_file(bodies.move()))}}
+    loaded: derive_record_graph(sema_host_hook_access(hooks), capture: false)
+    assert(hooks.guard_read().value.core_bodies_read > 0)
+    expanded: derive_record_graph(None, capture: false)
+    assert_eq(loaded.modules.len(), expanded.modules.len())
+    failures := [String]{}
+    loop (position, row) in expanded.modules {
+        taken: loaded.modules[position]
+        if "{taken.program.items:Debug}" != "{row.program.items:Debug}" {
+            failures.push("{row.module_name}: the items differ")
+        }
+        if "{taken.symbols:Debug}" != "{row.symbols:Debug}" {
+            failures.push("{row.module_name}: the symbols differ")
+        }
+        if "{taken.impls:Debug}" != "{row.impls:Debug}" {
+            failures.push("{row.module_name}: the impls differ")
+        }
+        if "{taken.nominals:Debug}" != "{row.nominals:Debug}" {
+            failures.push("{row.module_name}: the nominals differ")
+        }
+    }
+    if "{loaded.diagnostics:Debug}" != "{expanded.diagnostics:Debug}" {
+        failures.push("the diagnostics differ")
+    }
+    assert_eq(failures, [String]{})
+}

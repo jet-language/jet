@@ -47,6 +47,14 @@
 // else the function is checked from text. Its Core functions' checks stay
 // on the module pass's thread, where the host hooks are, so no compiler
 // thread checks a body the pass then loads (sema_core_bodies_held).
+//
+// The file also holds, per Core module, the derive templates' expansions
+// the check's registration made (Registration/Derives.jet SemaDeriveMemo),
+// one record per module keyed SEMA_CORE_DERIVE_KEY and the module's text,
+// laid out as a function's record is: no symbol or declaration keys, its
+// module identities and strings, then its bytes (sema_core_derive_bodies).
+// A compile handed the file takes a module's expansions from its record in
+// place of expanding (sema_core_derives_attach).
 use jet_foundation.[
     BodyCodecIn,
     BodyCodecOut,
@@ -74,7 +82,11 @@ use jet_foundation.[
     symbol_table_key,
 ]
 
-SEMA_CORE_BODIES_HEADER: "jet core bodies 5"
+SEMA_CORE_BODIES_HEADER: "jet core bodies 6"
+
+// The start of the key of a Core module's derive record, which the
+// module's text ends. No function's key starts with it.
+SEMA_CORE_DERIVE_KEY: "#derive "
 
 // The width of an offset in a bodies file's table, in little-endian bytes.
 SEMA_CORE_BODIES_OFFSET_BYTES: 8
@@ -874,4 +886,85 @@ sema_core_body_builtin_key: fn(graph: SemaRegistrationGraph, key: String) -> Str
     row: graph.compiler_builtin_rows.get(name) ?? return None
     holder: module_text(graph.module_table, graph.modules[row.module_index].module_identity)
     Val(key.replace(SEMA_CORE_BODIES_BUILTIN_MODULE, holder))
+}
+
+// A module whose derive expansions the Core library's check records and a
+// compile handed its bodies file takes: a Core module or one of the
+// canonical effect package (the Prelude's), as for sema_core_body_module.
+sema_core_derive_module: fn(input: SemaRegistrationModuleInput) -> Bool Never! {
+    input.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || module_is_core(input.module_identity)
+}
+
+// Where each Core module of `inputs` takes its derive templates'
+// expansions from (SemaRegistrationModuleInput.derive_memo). The Core
+// library's check (`capture`) keeps each one's; a compile whose host lends
+// the bodies file (SemaRegistrationHostHooks.core_bodies) takes those of
+// the record it holds for the module, whose bytes join core_bodies_read.
+// An expansion reads nothing but the compiler's template and the type it
+// expands over, so a record serves a compile in any context.
+sema_core_derives_attach: fn(inputs: &[SemaRegistrationModuleInput], table: ModuleTable, hooks: SemaHostHookAccess?, capture: Bool) {
+    loop index in 0..<inputs.len() {
+        if !sema_core_derive_module(inputs[index]) -> next
+        if capture {
+            out := body_codec_out()
+            out.indexed = true
+            inputs[index].derive_memo.capture = Val(out.move())
+            next
+        }
+        if sema_host_hook_callbacks(hooks) == .Val(shared) {
+            permit: shared.guard_edit()
+            key: "{SEMA_CORE_DERIVE_KEY}{module_text(table, inputs[index].module_identity)}"
+            position: sema_core_bodies_position(permit.value.core_bodies, key) ?? next
+            memo := sema_core_derive_read(permit.value.core_bodies, permit.value.core_bodies_records, table, position, permit.value.core_bodies_read) ?? next
+            inputs[index].derive_memo = memo.move()
+        }
+    }
+}
+
+// The derive record at `position` of `bodies`, read through `records` when
+// the host hands that read, else from the lent bytes; its bytes join
+// `read`. None when a module it names is not in `table`.
+sema_core_derive_read: fn(bodies: SemaCoreBodies?, records: SemaCoreBodiesRecords?, table: ModuleTable, position: Int, read: &Int) -> SemaDeriveMemo? {
+    if bodies == .Val(file) {
+        at: sema_core_bodies_offset(file.bytes, file.head, position)
+        end: if position + 1 < file.head.count -> sema_core_bodies_offset(file.bytes, file.head, position + 1) else -> file.bytes.len()
+        read += end - at
+        record := if records == .Val(source) -> source.read(at, end - at) ?? panic("internal compiler error: record {position} of the Core bodies file does not read from the host's file") else -> file.bytes.slice(at, end)
+        return sema_core_derive_decode(record, table, position)
+    }
+    None
+}
+
+// The memo of the derive record `bytes`, record `position` of its bodies
+// file; None when a module it names is not in `table`. The Core library's
+// build read the file back whole (sema_core_bodies_problem), so a record
+// that does not read is jet's own defect.
+sema_core_derive_decode: fn(bytes: &&[U8], table: ModuleTable, position: Int) -> SemaDeriveMemo? {
+    record := bytes.move()
+    input := sema_core_bodies_record(record, 0)
+    symbol_keys: sema_core_bodies_keys(record, input)
+    decl_keys: sema_core_bodies_keys(record, input)
+    module_keys: sema_core_bodies_keys(record, input)
+    strings := sema_core_bodies_keys(record, input)
+    size: body_codec_get_count(record, input, 1)
+    if input.failed || symbol_keys.len() > 0 || decl_keys.len() > 0 || input.at + size != record.len() {
+        panic("internal compiler error: the derive record {position} of the Core bodies file does not read")
+    }
+    modules := [ModuleID]{}
+    loop module_key in module_keys { modules.push(module_find(table, module_key) ?? return None) }
+    at: input.at
+    Val(sema_derive_memo_read(record, at, modules, strings) ?? panic("internal compiler error: the derive record {position} of the Core bodies file does not read"))
+}
+
+// Puts into `bodies` the record of the derive templates' expansions each
+// Core module of `graph` kept (SemaRegistrationModule.derive_captures),
+// moved out of its row, keyed SEMA_CORE_DERIVE_KEY and the module's text.
+sema_core_derive_bodies: fn(graph: &SemaRegistrationGraph, bodies: &[SemaCoreBody]) {
+    loop index in 0..<graph.modules.len() {
+        key: "{SEMA_CORE_DERIVE_KEY}{module_text(graph.module_table, graph.modules[index].module_identity)}"
+        loop capture in compiler_take_rows<SemaDeriveCapture>(graph.modules[index].derive_captures) {
+            modules: loop id in capture.modules -> "{module_text(graph.module_table, id)}"
+            bodies.push(SemaCoreBody{key: key, bytes: capture.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: modules, strings: capture.strings.move()})
+        }
+    }
 }

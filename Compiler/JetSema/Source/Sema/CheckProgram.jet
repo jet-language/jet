@@ -12531,6 +12531,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
     // The Core library encodes the captures (sema_core_bodies_bytes) beside
     // its IR build, not here on the finalization's thread.
+    if final_graph.core_seal -> sema_core_derive_bodies(final_graph, core_bodies)
     captures: if final_graph.core_seal -> SemaCoreCaptures{bodies: core_bodies.move(), context: sema_core_bodies_context(final_graph)} else -> SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}
     result := SemaGraphResult{
         package_identity: final_graph.package_identity,
