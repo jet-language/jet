@@ -307,24 +307,48 @@ remote: fn<S>(service: &&S) -> Remote<S> Never! { Remote<S>{service: Val(service
 // `{address}/{method}`.
 remote_at: fn<S>(address: String) -> Remote<S> Never! { Remote<S>{service: None, address: address} }
 
+// The times a remote call is sent, in all, while its reply is lost: each
+// send carries the call's one request key, so a server that ran the call
+// answers a repeat with the reply it kept, and the call runs once.
+priv REMOTE_SENDS: 3
+
+// The wait before a remote call is sent again, in milliseconds, times the
+// sends so far.
+priv REMOTE_RESEND_MS: 200
+
 // One remote call: POST the JSON array of `args` to `{address}/{method}`;
 // the reply's body on 200, else the failure its status names. The call
 // carries a W3C `traceparent` that starts its trace, and that trace's id as
-// its `x-request-id`, so the server's span of the call has both.
+// its `x-request-id`, so the server's span of the call has both. It also
+// carries a request key, its `idempotency-key`, and is sent again under the
+// same key when no reply comes, up to `REMOTE_SENDS` times.
 priv remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
     seed: "{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}"
     trace: make_trace_id("trace:{seed}", 16)
-    sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_body("[{args.join(",")}]")
-    response: sent.send() ?? return Err(.Unreachable("{address}/{method}: {err}"))
-    text: response.body.text(REMOTE_MAX_REPLY) ?? return Err(.Unreachable("{address}/{method}: {err}"))
-    if {
-        response.status == 200 -> Ok(text)
-        response.status == 401 -> Err(.SignedOut)
-        response.status == 422 -> Err(.Invalid(remote_invalid(text)))
-        response.status == 426 -> Err(.UpdateRequired)
-        response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
-        else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
+    key: make_trace_id("key:{seed}", 16)
+    body: "[{args.join(",")}]"
+    lost := ""
+    loop sends in 0..<REMOTE_SENDS {
+        if sends > 0 -> tasks.sleep(REMOTE_RESEND_MS * sends)
+        sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_header("idempotency-key", key).__with_body(body)
+        response: sent.send() ?? {
+            lost = "{err}"
+            next
+        }
+        text: response.body.text(REMOTE_MAX_REPLY) ?? {
+            lost = "{err}"
+            next
+        }
+        return if {
+            response.status == 200 -> Ok(text)
+            response.status == 401 -> Err(.SignedOut)
+            response.status == 422 -> Err(.Invalid(remote_invalid(text)))
+            response.status == 426 -> Err(.UpdateRequired)
+            response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
+            else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
+        }
     }
+    Err(.Unreachable("{address}/{method}: {lost}"))
 }
 
 // A W3C trace-context id of `n` bytes (16 for a trace, 8 for a span) as
@@ -767,7 +791,13 @@ priv(package) callers: module {
 // it; a store that has run the delivery already marks the call repeated, and
 // the framework rolls it back and drops the delivery. A schedule's call
 // carries its due run (`schedule`), which core.db records the same way, so
-// a run another server has done is dropped as well. A job the call queues
+// a run another server has done is dropped as well. A remote call that
+// carries a request key (`ask`) gives its reply (`answer`), which `end`
+// keeps under the key in the first store the call joined: in that store's
+// transaction when the call commits, and on its own after the call rolls
+// back. A store that keeps a reply under the key of a call that joins it
+// gives the call that reply and marks it repeated, so the framework rolls
+// the call back and answers with the kept reply. A job the call queues
 // (`enqueue`) waits for it: `end` keeps the job in the outbox of the first
 // store the call joined, in that store's transaction, under a key of its
 // own, and once the call commits, runs it on a task of its own (`job_run`);
@@ -786,7 +816,8 @@ CallJoin: struct {
 // time (Unix milliseconds): the server that runs its job takes it again
 // each tick while the job runs (`hold`), and once that time has passed, a
 // serving server takes the row (`take`) and runs the job again, as when the
-// server that ran it stopped.
+// server that ran it stopped. It also keeps the replies of calls that
+// carried a request key (`answered`).
 CallOutbox: struct {
     // Names the store among the open ones: the database file's path, or
     // one of its own for an in-memory database.
@@ -812,6 +843,10 @@ CallOutbox: struct {
     // Takes the rows of keys `keys` until `until`; false when the store
     // couldn't.
     hold: fn([String], Int) -[]> Bool Never!
+    // Keeps the reply of request `request`, in the transaction of call
+    // `call`, or on its own for call 0 (after the call rolled back); false
+    // when the store couldn't.
+    answered: fn(Int, CallRequest, String) -[]> Bool Never!
 }
 
 // A row a server took from a store's outbox: its job's key, name and
@@ -857,6 +892,17 @@ CallTick: struct {
     due: Int
 }
 
+// The request key of a remote call: the account the call acts for ("" for
+// none), the key the client gave the call, the same each time it sends the
+// call again, and the second (since the Unix epoch) the server received it.
+// The account scopes the key, so one account's key never answers another's.
+#Equatable
+CallRequest: struct {
+    account: String
+    key: String
+    at: Int
+}
+
 CallRun: struct {
     task: TaskID
     id: Int
@@ -864,6 +910,8 @@ CallRun: struct {
     refused: Bool
     delivery: CallDelivery?
     tick: CallTick?
+    request: CallRequest?
+    reply: String?
     repeated: Bool
     jobs: [CallJob]
 }
@@ -890,7 +938,7 @@ priv(package) transactions: module {
             if run.task == me -> return None
         }
         runs.value.made += 1
-        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, tick: None, repeated: false, jobs: [CallJob]{}})
+        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, tick: None, request: None, reply: None, repeated: false, jobs: [CallJob]{}})
         Val(runs.value.made)
     }
 
@@ -980,8 +1028,49 @@ priv(package) transactions: module {
         None
     }
 
+    // Gives call `call` the request key it carries.
+    ask: fn(call: Int, request: CallRequest) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call {
+                runs.value.runs[index].request = Val(request.copy())
+            }
+        }
+    }
+
+    // The request key call `call` carries; None for a call that carries none.
+    request: fn(call: Int) -> CallRequest? Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.request.copy()
+        }
+        None
+    }
+
+    // Gives call `call` its reply: the one a store kept under its request
+    // key already, which a store gives as the call joins it, or else the one
+    // its run gave, which `end` keeps under that key. The first reply the
+    // call is given stands.
+    answer: fn(call: Int, reply: String) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call && runs.value.runs[index].reply == None {
+                runs.value.runs[index].reply = Val(reply.copy())
+            }
+        }
+    }
+
+    // Call `call`'s reply (`answer`); None before it has one.
+    reply: fn(call: Int) -> String? Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.reply.copy()
+        }
+        None
+    }
+
     // Marks call `call` repeated: a store it uses has run its delivery or
-    // its schedule's run.
+    // its schedule's run, or keeps a reply under its request key.
     repeat: fn(call: Int) Never! {
         runs := CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
@@ -990,7 +1079,7 @@ priv(package) transactions: module {
     }
 
     // Whether a store has run call `call`'s delivery or schedule's run
-    // already.
+    // already, or keeps a reply under its request key.
     repeated: fn(call: Int) -> Bool Never! {
         runs: CALLS.guard_read()
         loop run in runs.value.runs {
@@ -1001,16 +1090,20 @@ priv(package) transactions: module {
 
     // Ends call `call`: commits each joined transaction, in the order the
     // call joined them, when `commit` holds and no store refused the call or
-    // had run its delivery, and otherwise rolls each back. False when the
-    // call has to run again: a store refused it, the first store couldn't
-    // keep its jobs, or the first commit failed (and was rolled back). A
-    // call that writes two stores commits each on its own; once one has
-    // committed, a later failed commit can't undo it, so the call stands, and
-    // its jobs run. A call that joined no store runs its jobs as it ends.
+    // had run its delivery, and otherwise rolls each back. A call that
+    // carries a request key keeps its reply (`calls_answered`) in the first
+    // store's transaction before the commits, or on its own once a run that
+    // failed has rolled back. False when the call has to run again: a store
+    // refused it, the first store couldn't keep its jobs or its reply, or the
+    // first commit failed (and was rolled back). A call that writes two
+    // stores commits each on its own; once one has committed, a later failed
+    // commit can't undo it, so the call stands, and its jobs run. A call
+    // that joined no store runs its jobs as it ends, and keeps no reply.
     end: fn(call: Int, commit: Bool) -> Bool Never! {
         ended := calls_take(call) ?? return true
         if ended.refused || ended.repeated || !commit {
             loop joined in ended.joins -> _: joined.end(false)
+            if !ended.refused && !ended.repeated -> _: calls_answered(ended, 0)
             return !ended.refused
         }
         keys := [String]{}
@@ -1023,6 +1116,10 @@ priv(package) transactions: module {
                 }
                 keys.push(key)
             }
+        }
+        if !calls_answered(ended, call) {
+            loop joined in ended.joins -> _: joined.end(false)
+            return false
         }
         loop (index, joined) in ended.joins {
             if joined.end(true) || index > 0 -> next
@@ -1052,6 +1149,17 @@ priv calls_take: fn(call: Int) -> CallRun? Never! {
         if runs.value.runs[index].id == call -> return runs.value.runs.remove(index, .Slot)
     }
     None
+}
+
+// Keeps `run`'s reply under its request key in the first store it joined,
+// in call `call`'s transaction there, or on its own for call 0; true when
+// the run carries no key, has no reply or joined no store.
+priv calls_answered: fn(run: &CallRun, call: Int) -> Bool Never! {
+    if run.joins.len() == 0 -> return true
+    if run.request == .Val(request) {
+        if run.reply == .Val(reply) -> return run.joins[0].outbox.answered(call, request, reply)
+    }
+    true
 }
 
 // A device an account registered for pushes: its push service (`apns`,
@@ -2033,6 +2141,7 @@ priv outbox_unused: fn() -> CallOutbox Never! {
         failed: fn(_: String, _: Int, _: String, _: Int) { false },
         take: fn(_: [String], _: Int, _: Int) { None },
         hold: fn(_: [String], _: Int) { false },
+        answered: fn(_: Int, _: CallRequest, _: String) { false },
     }
 }
 
@@ -2078,6 +2187,71 @@ priv outbox_unused: fn() -> CallOutbox Never! {
     assert_eq(log.value.join(", "), "commit a, commit b, roll back c, roll back d, commit e, roll back f, roll back g")
 }
 
+#Test("a call that carries a request key keeps its reply in its first store before the commits, or on its own after a rollback, and a repeated or refused call keeps none") {
+    seen: Shared{[String]{}}
+    outbox: fn(name: String) -> CallOutbox {
+        CallOutbox{
+            store: "app.Test request outbox",
+            now: fn() { 0 },
+            keep: fn(_: String, _: String, _: Int) { "" },
+            done: fn(_: String) { 0 },
+            failed: fn(_: String, _: Int, _: String, _: Int) { false },
+            take: fn(_: [String], _: Int, _: Int) { None },
+            hold: fn(_: [String], _: Int) { false },
+            answered: fn(call: Int, request: CallRequest, reply: String) {
+                at: if call == 0 -> "on its own" else -> "in its call"
+                log := seen.guard_edit()
+                log.value.push("{name} keeps {request.account}/{request.key} {reply} {at}")
+                true
+            },
+        }
+    }
+    ends: fn(name: String) -> fn(Bool) -[]> Bool Never! {
+        fn(commit: Bool) {
+            log := seen.guard_edit()
+            log.value.push(if commit -> "commit {name}" else -> "roll back {name}")
+            true
+        }
+    }
+    asked: fn(key: String) -> CallRequest { CallRequest{account: "ann", key: key, at: 1} }
+    committed: transactions.begin() ?? panic("no call is open")
+    assert_eq(transactions.request(committed), CallRequest?{None})
+    transactions.ask(committed, asked("k1"))
+    assert_eq(transactions.request(committed), Val(asked("k1")))
+    transactions.join(committed, ends("a"), outbox("a"))
+    transactions.join(committed, ends("b"), outbox("b"))
+    assert_eq(transactions.reply(committed), String?{None})
+    transactions.answer(committed, "ok 1")
+    // The first reply stands: a store's kept reply comes before the run's.
+    transactions.answer(committed, "ok 2")
+    assert_eq(transactions.reply(committed), Val("ok 1"))
+    assert(transactions.end(committed, true))
+    failed: transactions.begin() ?? panic("no call is open")
+    transactions.ask(failed, asked("k2"))
+    transactions.join(failed, ends("c"), outbox("c"))
+    transactions.answer(failed, "err no")
+    assert(transactions.end(failed, false))
+    repeated: transactions.begin() ?? panic("no call is open")
+    transactions.ask(repeated, asked("k3"))
+    transactions.join(repeated, ends("d"), outbox("d"))
+    transactions.answer(repeated, "kept")
+    transactions.repeat(repeated)
+    assert(transactions.end(repeated, true))
+    refused: transactions.begin() ?? panic("no call is open")
+    transactions.ask(refused, asked("k4"))
+    transactions.join(refused, ends("e"), outbox("e"))
+    transactions.answer(refused, "ok 4")
+    transactions.refuse(refused)
+    assert(!transactions.end(refused, true))
+    // A call whose arguments didn't decode ran nothing, so it has no reply.
+    undecoded: transactions.begin() ?? panic("no call is open")
+    transactions.ask(undecoded, asked("k5"))
+    transactions.join(undecoded, ends("f"), outbox("f"))
+    assert(transactions.end(undecoded, false))
+    log: seen.guard_read()
+    assert_eq(log.value.join(", "), "a keeps ann/k1 ok 1 in its call, commit a, commit b, roll back c, c keeps ann/k2 err no on its own, roll back d, roll back e, roll back f")
+}
+
 // The entries `seen` holds so far.
 priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
     log: seen.guard_read()
@@ -2107,6 +2281,7 @@ priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
             },
             take: fn(_: [String], _: Int, _: Int) { Val([CallQueued]{}) },
             hold: fn(_: [String], _: Int) { true },
+            answered: fn(_: Int, _: CallRequest, _: String) { false },
         }
     }
     tries: Shared{0}

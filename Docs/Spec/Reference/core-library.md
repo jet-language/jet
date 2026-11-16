@@ -5663,6 +5663,21 @@ dropped. A run that fails rolls its record back with the rest, so a delivery
 that failed runs when it comes again. A delivery without an ID, and a webhook
 that uses no store, have nothing to record and run every time.
 
+A Remote call sends a request key, its `Idempotency-Key` header, and sends
+the call again under the same key when no reply comes, up to three times in
+all, waiting 200 ms and then 400 ms. The server reads the key with the
+account the call acts for (none for a call with no caller). When the call
+first uses a store, the store looks the key up in its `__jet_requests`
+table, which keeps each reply for 24 hours from the second the server
+received the call. A key it holds a reply for makes the call roll back, and
+the call is answered 200 with that reply and `Idempotent-Replayed: true`.
+The reply of a call that commits is kept in the transaction of the first
+store it used, with its writes. The reply of a run that fails is kept on its
+own after the rollback, so the call sent again gets the same failure. A call
+that uses no store, and one whose arguments do not decode (422), keep
+nothing and run each time. What a run does before its first store statement
+runs again on a repeat. A key longer than 255 bytes is answered 400.
+
 A method marked `#App.Job` is work a call queues to run after it commits,
 such as a notice to send. `app.enqueue(fn() { self.notify(task, to) })`, in a
 method of the same service, queues one call of the job method `notify`. The

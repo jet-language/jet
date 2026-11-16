@@ -1,0 +1,138 @@
+// A board whose `add` counts each run of it that commits, in its store. Its
+// client calls it through a relay that drops the server's first reply, as
+// a network that loses a reply does. The client sends the call again under
+// the same request key, and the server answers with the reply it kept for
+// that key, so `add` commits once and the client gets the first run's reply.
+use {
+    app
+    db: core.db
+    net: core.net
+    web: core.web
+}
+
+#Codable
+Count: struct {
+    id: Int
+    runs: Int
+}
+
+#Error
+BoardError: enum {
+    Failed(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+counts_in: fn(store: db.Store) -> db.Table<Int, Count> {
+    store.table("counts", key: fn(count: Count) { count.id })
+}
+
+Board: struct {
+    store: db.Store
+
+    // Counts a run, and gives `title` with the runs so far.
+    #App.Public add: fn(self, title: String) -> String BoardError! {
+        counts: counts_in(self.store)
+        runs := 0
+        if counts.get(1) == {
+            .Val(found) -> runs = found.runs
+            .None -> {}
+            .Err(failure) -> return Err(BoardError.Failed(failure.message()))
+        }
+        _: counts.put(Count{id: 1, runs: runs + 1}) ?? return Err(BoardError.Failed(err.message()))
+        Ok("{title} {runs + 1}")
+    }
+}
+
+// The runs of `add` that committed.
+runs: fn(store: db.Store) -> Int {
+    if counts_in(store).get(1) == {
+        .Val(found) -> found.runs
+        .None -> 0
+        .Err(_) -> -1
+    }
+}
+
+// What a call of `add` gave, as text.
+shown: fn(added: String BoardError!) -> String {
+    text: added ?? {
+        if err == .Unreachable(why) -> return "unreachable: {why}"
+        return "failed"
+    }
+    text
+}
+
+// Whether `text` holds one whole HTTP message: its head, which an empty
+// line ends, and the body bytes its `content-length` names.
+message_whole: fn(text: String) -> Bool {
+    parts: text.split("\r\n\r\n").to_list()
+    if parts.len() < 2 -> return false
+    head: parts[0]
+    length := 0
+    loop line in head.split("\r\n").to_list() {
+        pair: line.split(":").to_list()
+        if pair.len() == 2 && pair[0].trim().to_lower() == "content-length" {
+            length = pair[1].trim().to_int() ?? 0
+        }
+    }
+    text.len() - head.len() - 4 >= length
+}
+
+// Reads one HTTP message from `stream`, whole.
+read_message: fn(stream: &net.TCPStream) -> String {
+    text := ""
+    loop !message_whole(text) {
+        chunk: stream.read_bytes(65536, deadline: 5s) ?? panic("read")
+        if chunk.len() == 0 -> panic("the connection closed before its message ended")
+        text = "{text}{String.from_bytes(chunk) ?? panic("UTF-8")}"
+    }
+    text
+}
+
+// Relays one connection that `listener` takes to `server`: the client's
+// request to the server, and the server's reply back to the client, unless
+// `drop` holds. Then the client's connection closes with no reply.
+relay: fn(listener: net.TCPListener, server: String, drop: Bool) {
+    client := net.tcp_accept(listener) ?? panic("accept")
+    request: read_message(client)
+    upstream := net.tcp_connect(server) ?? panic("connect")
+    net.tcp_write_text(upstream, request) ?? panic("forward the request")
+    reply: read_message(upstream)
+    net.tcp_close(upstream) ?? panic("close the server's connection")
+    if !drop -> net.tcp_write_text(client, reply) ?? panic("relay the reply")
+    net.tcp_close(client) ?? panic("close the client's connection")
+}
+
+// Calls `add` through `board`.
+adds: fn(board: app.Remote<Board>) { print("add: {shown(board.add("first"))}") }
+
+run: fn() {
+    store: db.open_memory()
+    served: web.app().mount("/api", Board{store: store.copy()})
+    server := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    server_addr: server.local_addr()
+    relayed := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    relay_addr: relayed.local_addr()
+    // The first send's connection and the second's. A client that sent no
+    // second time leaves them waiting.
+    serving: task {
+        loop _ in 0..<2 { served.serve_once(server) ?? panic("serve") }
+    }
+    serving.detach()
+    relaying: task {
+        relay(relayed, server_addr, true)
+        relay(relayed, server_addr, false)
+    }
+    relaying.detach()
+    // The server answers each send once its call has ended.
+    adds(app.remote_at<Board>("http://{relay_addr}/api"))
+    print("runs: {runs(store)}")
+}

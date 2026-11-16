@@ -1398,16 +1398,30 @@ priv app_limited: fn(wait_ns: Int) -> HTTPResponse Never! {
 // A call of an endpoint method: 200 with its reply, or 422 with the field
 // errors (`app_invalid_json`) when the body is no JSON array of arguments
 // the method takes. The call is one transaction (`app_transacted`): a reply
-// that `__reply_err` made rolls it back.
+// that `__reply_err` made rolls it back. A call that carries an
+// `Idempotency-Key` header carries it as its request key, with the account
+// it acts for: the call's reply is kept under the key for 24 hours, and the
+// call sent again under the key is answered with the kept reply.
 priv app_remote_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     if app_remote_limited(endpoint.limit, request) == .Val(wait_ns) -> return app_limited(wait_ns)
+    key: request.header("idempotency-key") ?? ""
+    if key.len() > APP_REQUEST_KEY_MAX {
+        return app_json(400, app_error_json("an `Idempotency-Key` is at most {APP_REQUEST_KEY_MAX} bytes"))
+    }
+    account := ""
+    if calls.maybe_caller() == .Val(who) -> account = who.raw()
+    asked: if key == "" -> calls.CallRequest?{None} else -> Val(calls.CallRequest{account: account, key: key, at: request.__received})
     text: request.text() ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
     tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
-    app_transacted(None, fn() {
+    app_transacted(None, asked, fn() {
         reply: endpoint.answer(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
+        if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
         (response: app_json(200, reply), commit: !app_reply_failed(reply))
     })
 }
+
+// The longest request key a call carries, in bytes.
+priv APP_REQUEST_KEY_MAX: 255
 
 // Whether `reply` is a failed run's: `__reply_err` leads it.
 priv app_reply_failed: fn(reply: String) -> Bool Never! { reply.starts_with("{{\"err\":") }
@@ -1420,14 +1434,23 @@ priv app_reply_failed: fn(reply: String) -> Bool Never! { reply.starts_with("{{\
 // `Retry-After`. A call made on a task that runs one already is part of it.
 // A webhook's call runs `delivery` (None for any other call): a store that
 // has run it already makes the call roll back, and the delivery is answered
-// 200 `{"repeated":<ID>}`, so its sender stops delivering it.
-priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]> (response: HTTPResponse, commit: Bool) Never!) -[Net, FS.Read]> HTTPResponse Never! {
+// 200 `{"repeated":<ID>}`, so its sender stops delivering it. A remote
+// call carries `request` (None for a call that carries no request key): a
+// store that keeps a reply under its key makes the call roll back, and the
+// call is answered 200 with that reply, marked `Idempotent-Replayed: true`.
+priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallRequest?, run: fn() -[Net, FS.Read]> (response: HTTPResponse, commit: Bool) Never!) -[Net, FS.Read]> HTTPResponse Never! {
     loop _ in 0..<calls.transactions.attempts() {
         call: calls.transactions.begin() ?? return run().response
         if delivery == .Val(given) -> calls.transactions.deliver(call, given)
+        if request == .Val(asked) -> calls.transactions.ask(call, asked)
         outcome: run()
         if calls.transactions.repeated(call) {
+            kept: calls.transactions.reply(call)
             _: calls.transactions.end(call, false)
+            if request != None && kept == .Val(reply) {
+                replayed: app_json(200, reply)
+                return replayed.__with_header("idempotent-replayed", "true")
+            }
             id: if delivery == .Val(given) -> given.id.copy() else -> ""
             return app_json(200, "{{\"repeated\":{app_json_string(id)}}}")
         }
@@ -1442,7 +1465,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]
     first: runs.copy()
     second: runs.copy()
     // Refused by its store until its third run.
-    flaky: app_transacted(None, fn() {
+    flaky: app_transacted(None, None, fn() {
         count := first.guard_edit()
         count.value += 1
         if count.value < 3 {
@@ -1452,7 +1475,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]
     })
     assert_eq(flaky.status, 200)
     assert_eq(flaky.text(), "{{\"ok\":3}}")
-    refused: app_transacted(None, fn() {
+    refused: app_transacted(None, None, fn() {
         count := second.guard_edit()
         count.value += 1
         calls.transactions.refuse(calls.transactions.current() ?? panic("the call is open"))
@@ -1467,7 +1490,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]
 
 #Test("a delivery a store has run already is answered 200 as repeated, and its call rolls back") {
     delivery: calls.CallDelivery{id: "d-1", at: 1}
-    repeated: app_transacted(Val(delivery.copy()), fn() {
+    repeated: app_transacted(Val(delivery.copy()), None, fn() {
         call: calls.transactions.current() ?? panic("the call is open")
         assert_eq(calls.transactions.delivery(call), Val(delivery))
         calls.transactions.repeat(call)
@@ -1481,6 +1504,23 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]
     assert_eq(app_webhook_delivery(Signature.GitHub, None, stripe), "")
     assert_eq(app_webhook_delivery(Signature.Stripe, None, stripe), "evt_1")
     assert_eq(app_webhook_delivery(Signature.Stripe, None, numbered), "")
+    assert_eq(calls.transactions.current(), Int?{None})
+}
+
+#Test("a call whose request key a store kept a reply under is answered 200 with that reply, marked replayed, and its call rolls back") {
+    asked: calls.CallRequest{account: "ann", key: "k-1", at: 1}
+    replayed: app_transacted(None, Val(asked.copy()), fn() {
+        call: calls.transactions.current() ?? panic("the call is open")
+        assert_eq(calls.transactions.request(call), Val(asked))
+        // As core.db does when the call joins a store that kept the reply.
+        calls.transactions.answer(call, "{{\"ok\":7}}")
+        calls.transactions.repeat(call)
+        calls.transactions.answer(call, "{{\"err\":\"dropped\"}}")
+        (response: app_json(200, "{{\"err\":\"dropped\"}}"), commit: false)
+    })
+    assert_eq(replayed.status, 200)
+    assert_eq(replayed.text(), "{{\"ok\":7}}")
+    assert_eq(replayed.header("idempotent-replayed"), Val("true"))
     assert_eq(calls.transactions.current(), Int?{None})
 }
 
@@ -1520,7 +1560,7 @@ priv app_webhook_response: fn(hook: AppWebhook, request: HTTPRequest) -[Net, FS.
     delivery: if id == "" -> calls.CallDelivery?{None} else -> Val(calls.CallDelivery{id: id, at: request.__received})
     values.push(text)
     arguments: live_json.parse("[{values.join(",")}]") ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
-    app_transacted(delivery, fn() {
+    app_transacted(delivery, None, fn() {
         reply: hook.answer(RemoteArgs{tree: arguments.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
         if app_reply_failed(reply) -> return (response: app_json(500, reply), commit: false)
         (response: app_json(200, reply), commit: true)

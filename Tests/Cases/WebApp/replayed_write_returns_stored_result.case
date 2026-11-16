@@ -1,0 +1,14 @@
+# A remote call carries a request key, its `idempotency-key`, and the server
+# keeps the call's reply under the account and the key for 24 hours. The
+# fixture's relay drops the server's first reply, so the client sends the
+# call again under the same key; the server answers with the kept reply
+# and runs nothing again, so `add` commits once and the client gets the
+# first run's reply.
+fixture: ReplayedWriteReturnsStoredResult.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "add: first 1\nruns: 1\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "add: first 1\nruns: 1\n"

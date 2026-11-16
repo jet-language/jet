@@ -1366,9 +1366,9 @@ priv db_waited: fn() -> DBError Never! {
 // later statement of the attempt fails at once; the framework then runs the
 // call again. A webhook's call records its delivery's ID, and a schedule's
 // call its due run, in the transaction it begins (`db_ran`); when the store
-// has run that delivery or that run already, the call is repeated, every
-// later statement of it fails at once, and the framework rolls it back and
-// drops it.
+// has run that delivery or that run already, or keeps a reply under the
+// call's request key, the call is repeated, every later statement of it
+// fails at once, and the framework rolls it back and drops it.
 priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
     if driver_closed(held.driver) -> return Err(db_closed())
     if call == 0 -> return Ok()
@@ -1397,15 +1397,17 @@ priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
 }
 
 priv db_repeated: fn() -> DBError Never! {
-    db_error("the call's delivery or scheduled run has run already, so it is dropped")
+    db_error("the call's delivery, scheduled run or request has run already, so it is dropped")
 }
 
 // Whether the store has run call `call` already, as the webhook delivery
-// (`db_delivered`) or the schedule's run (`db_scheduled`) it is; when not,
-// records it in the call's transaction. False for any other call.
+// (`db_delivered`), the schedule's run (`db_scheduled`) or the request
+// (`db_requested`) it is; when not, records a delivery or a run in the
+// call's transaction. False for any other call.
 priv db_ran: fn(driver: &DBDriver, call: Int) -> Bool DBError! {
     if app.transactions.delivery(call) == .Val(delivery) -> return db_delivered(driver, delivery)
     if app.transactions.tick(call) == .Val(tick) -> return db_scheduled(driver, tick)
+    if app.transactions.request(call) == .Val(request) -> return db_requested(driver, call, request)
     Ok(false)
 }
 
@@ -1452,6 +1454,48 @@ priv db_delivered: fn(driver: &DBDriver, delivery: app.CallDelivery) -> Bool DBE
     Ok(false)
 }
 
+// A store keeps the reply of each request it has run this long, in
+// seconds: 24 hours.
+priv DB_REQUEST_KEPT: 86400
+
+// The table of the replies of requests a store has run, one row per
+// account and request key.
+priv DB_REQUESTS_TABLE: "CREATE TABLE IF NOT EXISTS __jet_requests (account TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL, reply TEXT NOT NULL, PRIMARY KEY (account, key))"
+
+// Whether the store keeps a reply under `request`'s account and key from
+// the 24 hours before it came; when it does, gives call `call` that reply.
+// Forgets the replies kept longer.
+priv db_requested: fn(driver: &DBDriver, call: Int, request: app.CallRequest) -> Bool DBError! {
+    _: __driver_execute(driver, DB_REQUESTS_TABLE, [DBValue]{}) ?? return Err(err)
+    _: __driver_execute(driver, "CREATE INDEX IF NOT EXISTS __jet_requests_at ON __jet_requests (at)", [DBValue]{}) ?? return Err(err)
+    _: __driver_execute(driver, "DELETE FROM __jet_requests WHERE at < ?", [DBValue]{.Int(request.at - DB_REQUEST_KEPT)}) ?? return Err(err)
+    if __driver_query_one(driver, "SELECT reply FROM __jet_requests WHERE account = ? AND key = ?", [DBValue]{.Text(request.account.copy()), .Text(request.key.copy())}) == {
+        .Ok(found) -> {
+            if found == .Val(row) {
+                if row.get("reply") == .Val(.Text(reply)) {
+                    app.transactions.answer(call, reply)
+                    return Ok(true)
+                }
+            }
+        }
+        .Err(failure) -> return Err(failure)
+    }
+    Ok(false)
+}
+
+// Keeps `reply` as the reply of `request`: in the transaction of call
+// `call`, or, for call 0, on its own once no call's transaction is open on
+// the connection. False when the store couldn't. A request whose reply the
+// store keeps already keeps that one.
+priv db_request_keep: fn(state: Shared<DBState>, call: Int, request: app.CallRequest, reply: String) -> Bool Never! {
+    guard := state.guard_edit()
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return false
+    if driver_closed(guard.value.driver) -> return false
+    _: __driver_execute(guard.value.driver, DB_REQUESTS_TABLE, [DBValue]{}) ?? return false
+    values: [DBValue]{.Text(request.account.copy()), .Text(request.key.copy()), .Int(request.at), .Text(reply.copy())}
+    __driver_execute(guard.value.driver, "INSERT OR IGNORE INTO __jet_requests (account, key, at, reply) VALUES (?, ?, ?, ?)", values) == .Ok(_)
+}
+
 // Ends a call's transaction on `state`: commits it, or rolls it back when
 // `commit` is false; false when that failed.
 priv db_end: fn(state: Shared<DBState>, commit: Bool) -> Bool Never! {
@@ -1473,6 +1517,7 @@ priv db_outbox: fn(state: Shared<DBState>, store: String) -> app.CallOutbox Neve
         failed: fn(key: String, runs: Int, error: String, until: Int) { db_job_failed(state, key, runs, error, until) },
         take: fn(names: [String], now: Int, until: Int) { db_job_take(state, names, now, until) },
         hold: fn(keys: [String], until: Int) { db_job_hold(state, keys, until) },
+        answered: fn(call: Int, request: app.CallRequest, reply: String) { db_request_keep(state, call, request, reply) },
     }
 }
 
@@ -1706,6 +1751,49 @@ priv call_deliver: fn(counts: Table<Int, CallCount>, id: String, at: Int, count:
     assert(!call_deliver(counts, "d-2", came + DB_DELIVERY_KEPT + 1, 6, true))
     assert_eq(call_count(counts), 6)
     assert(!call_deliver(counts, "d-1", came + DB_DELIVERY_KEPT + 1, 7, true))
+    assert_eq(call_count(counts), 7)
+}
+
+// One call of request `key` of `account`, which came at second `at`, that
+// writes `count` to `counts` and replies "reply {count}", committing when
+// `commit` holds; the reply the call ends with: its own, or one the store
+// kept under the key.
+priv call_request: fn(counts: Table<Int, CallCount>, account: String, key: String, at: Int, count: Int, commit: Bool) -> String {
+    call: app.transactions.begin() ?? panic("no call is open")
+    app.transactions.ask(call, app.CallRequest{account: account, key: key, at: at})
+    if counts.put(CallCount{id: 1, count: count}) == {
+        .Ok(_) -> {}
+        .Err(failure) -> assert(app.transactions.repeated(call), failure.message())
+    }
+    app.transactions.answer(call, "reply {count}")
+    reply: app.transactions.reply(call) ?? panic("the call has a reply")
+    assert(app.transactions.end(call, commit))
+    reply
+}
+
+#Test("a request's call keeps its reply under its account and key, and the store answers the request sent again with that reply for 24 hours") {
+    store: open_memory()
+    counts: call_counts(store)
+    _: counts.put(CallCount{id: 1, count: 0}) ?? panic("the first row")
+    came: 1000000000
+    // A run that commits keeps its reply with its writes.
+    assert_eq(call_request(counts, "ann", "k-1", came, 1, true), "reply 1")
+    assert_eq(call_count(counts), 1)
+    // Sent again under the key, it gets the kept reply and writes nothing.
+    assert_eq(call_request(counts, "ann", "k-1", came + 1, 2, true), "reply 1")
+    assert_eq(call_count(counts), 1)
+    // Another account's key is its own.
+    assert_eq(call_request(counts, "ben", "k-1", came, 3, true), "reply 3")
+    assert_eq(call_count(counts), 3)
+    // A run that fails rolls back its writes and keeps its reply on its own.
+    assert_eq(call_request(counts, "ann", "k-2", came, 4, false), "reply 4")
+    assert_eq(call_count(counts), 3)
+    assert_eq(call_request(counts, "ann", "k-2", came, 5, true), "reply 4")
+    assert_eq(call_count(counts), 3)
+    // Kept for 24 hours, and forgotten a second later.
+    assert_eq(call_request(counts, "ann", "k-1", came + DB_REQUEST_KEPT, 6, true), "reply 1")
+    assert_eq(call_count(counts), 3)
+    assert_eq(call_request(counts, "ann", "k-1", came + DB_REQUEST_KEPT + 1, 7, true), "reply 7")
     assert_eq(call_count(counts), 7)
 }
 
