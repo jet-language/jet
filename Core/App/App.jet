@@ -3586,7 +3586,7 @@ priv blob_text: fn(head: [U8], cut: Bool) -> Bool Never! {
     end := head.len()
     if cut {
         back := 0
-        loop back < 3 && back < end && blob_byte(head, end - 1 - back).bit_and(192) == 128 {
+        loop back < 3 && back < end && (blob_byte(head, end - 1 - back) & 192) == 128 {
             back += 1
         }
         if back < end && blob_byte(head, end - 1 - back) >= 192 -> end = end - 1 - back
