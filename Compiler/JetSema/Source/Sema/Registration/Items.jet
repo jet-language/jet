@@ -96,8 +96,6 @@ use {
         compiler_threads_failure_text,
         compiler_threads_heaviest_first,
         compiler_transfer_rows,
-        core_enum_payload_variants,
-        core_enum_variant_payload,
         core_module_export,
         core_module_has_member,
         core_module_has_type,
@@ -2334,34 +2332,21 @@ sema_registration_compiler_owned_codec_trait: fn(module_id: ModuleID, module_ide
 }
 
 // Compiler-owned enum rows keep their bare canonical identity across modules.
-// Runtime enums (`Ordering`, `RemoveBy`, `TaskFailure`) and artifact-declared
+// Runtime enums (`Ordering`, `RemoveBy`, `TaskPauseMode`) and artifact-declared
 // reflection enums share this checked nominal path; runtime ownership is
 // decided independently by the emitter's native carrier registry.
 sema_registration_is_compiler_owned_enum: fn(nominal: SemaRegistrationNominal) -> Bool Never! {
     nominal.compiler_owned && nominal.generated_provenance == (Val(sema_registration_compiler_owned_enum_provenance()))
 }
 
-// Canonical unit menus come from the runtime or reflection sema oracle;
-// TaskFailure payloads come from the Core enum rows.
+// Canonical unit menus come from the runtime or reflection sema oracle.
 sema_registration_compiler_owned_enum_variants: fn(name: String) -> [Variant]? {
     span: Span{start: 0, end: 0}
-    names := sema_compiler_enum_variants(name) ?? sema_fact_enum_variants(name) ?? [String]{}
-    unit_menu: names.len() > 0
-    if !unit_menu {
-        if name != "TaskFailure" -> return None
-        names = core_enum_payload_variants(name) ?? return None
-    }
+    names: sema_compiler_enum_variants(name) ?? sema_fact_enum_variants(name) ?? return None
+    if names.len() == 0 -> return None
     variants := [Variant]{}
     loop variant_name in names {
-        payload := VariantPayload.Unit
-        if !unit_menu {
-            payload_types: core_enum_variant_payload(name, variant_name) ?? return None
-            if payload_types.len() > 1 -> return None
-            if payload_types.len() == 1 {
-                payload = VariantPayload.Single{ty: payload_types[0], span: span}
-            }
-        }
-        variants.push(Variant{name: variant_name, name_span: span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+        variants.push(Variant{name: variant_name, name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
     }
     Val(variants)
 }
@@ -5200,7 +5185,7 @@ sema_registration_inject_compiler_builtins: fn(graph: &SemaRegistrationGraph) {
     loop (row, nominal) in graph.modules[owner.module_index].nominals {
         graph.compiler_builtin_rows[nominal.symbol.name] = SemaRegistrationRowRef{module_index: owner.module_index, row: row}
     }
-    compiler_enums: [String]{"Ordering", "RemoveBy", "TaskFailure", "TaskPauseMode", "UnitScaleProvenanceKind"}
+    compiler_enums: [String]{"Ordering", "RemoveBy", "TaskPauseMode", "UnitScaleProvenanceKind"}
     loop name in compiler_enums {
         variants: sema_registration_compiler_owned_enum_variants(name) ?? panic("compiler-owned enum has no variant menu")
         module_index: sema_registration_compiler_builtin_module(graph, name) ?? next

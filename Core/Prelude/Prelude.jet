@@ -131,6 +131,19 @@ SendError: struct<T> {
     value: T
 }
 
+// How a task's join fails: the task was cancelled, ran past its deadline, or
+// stopped on a failure it did not handle, with that failure's text. It lives
+// in the prelude because every program can reach it without naming it: a
+// join (`h.join()`, `task.all`, a group) fails with it, and the runtime's
+// scheduler builds it by its position. A `!` contract may name it, but it is
+// not in the standard error family: no conversion takes it to `Err`.
+#Error
+TaskFailure: enum {
+    Cancelled
+    DeadlineBlown
+    Panicked(String)
+}
+
 // The phase of the compiled copy an expression runs in: `#phase` is
 // `.Preparation` in preparation and compile-time code and in a function's
 // compile-time copy, `.Build` in the copy a package's `fn build` runs, and

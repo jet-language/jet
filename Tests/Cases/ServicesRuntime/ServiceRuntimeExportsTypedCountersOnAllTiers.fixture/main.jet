@@ -21,9 +21,9 @@ status_label: fn(status: TaskStatus) -> String {
 outcome_label: fn(outcome: TaskOutcome) -> String {
     if outcome == {
         .Finished -> "finished"
-        .Panicked(_) -> "panicked"
-        .Cancelled -> "cancelled"
-        .DeadlineBlown -> "deadline-blown"
+        .Failed(.Panicked(_)) -> "panicked"
+        .Failed(.Cancelled) -> "cancelled"
+        .Failed(.DeadlineBlown) -> "deadline-blown"
     }
 }
 
@@ -38,7 +38,7 @@ status_is_paused: fn(status: TaskStatus) -> Bool {
 outcome_is_finished: fn(outcome: TaskOutcome) -> Bool {
     if outcome == {
         .Finished -> { return true }
-        .Panicked(_) | .Cancelled | .DeadlineBlown -> {}
+        .Failed(_) -> {}
     }
     return false
 }
@@ -87,7 +87,7 @@ run: fn() {
     print("hist:{tree.workflow_history(run_id) ?? panic("hist")}")
     scheduled: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity")
     print("activity:{status_label(scheduled)}")
-    retried: tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
+    retried: tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Failed(.Panicked("timeout"))) ?? panic("retry")
     if !status_is_paused(retried) -> panic("typed retry status")
     print("retry:{status_label(retried)}")
     completed: tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")

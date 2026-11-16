@@ -3702,8 +3702,8 @@ positional branches is one parse error (E1117), with no successful lowering.
 
 **D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
 2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:
-`join()` returns `T !TaskFailure`. `TaskFailure` is a normal enum with
-`.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
+`join()` returns `T !TaskFailure`. `TaskFailure` is a normal enum the prelude
+declares, with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
 same rail: positional form returns its ordered list and named form its
 anonymous tuple/record. A joined child panic becomes `.Panicked(reason)`;
 it does not kill the process. The reason uses the canonical task identity and
@@ -3712,7 +3712,9 @@ wrong-variant getters and
 numeric stops follow this same task-publication boundary. `trace()`,
 `exception()`, `TaskOutcome`, and
 `TaskStatus` are deleted from the task-handle surface. D-SERVICE1 retains
-`TaskOutcome` and `TaskStatus` as typed service-workflow facts; that domain API
+`TaskOutcome` and `TaskStatus` as typed service-workflow facts; a
+`TaskOutcome` is `.Finished` or `.Failed(TaskFailure)`, so a workflow's failure
+is the same value a join gives. That domain API
 is not `TaskHandle.outcome()` or `TaskHandle.status()` and does not restore
 `trace()` or `exception()`. It amends D-COROUTINE1 and retires
 D-CONC-OUTCOME1=A; conversion uses D-FAIL-CONV1.

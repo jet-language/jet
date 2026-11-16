@@ -381,7 +381,7 @@ IRCompilerOwnedEnum: struct {
     variants: [String]
 }
 
-// Compiler-owned runtime enums (`IOError`, `Key`, `TaskFailure`, ...)
+// Compiler-owned runtime enums (`IOError`, `Key`, `DataEvent`, ...)
 // are checked values with no Jet declaration. Each joins every program as one
 // row under its bare canonical key, so an enum literal, a variant pattern and
 // the backends name the same IR type as the Rust runtime does.
@@ -395,8 +395,6 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "DispatchFailure", variants: [String]{"Handler", "Panic"}},
     {name: "Ordering", variants: [String]{"Less", "Equal", "Greater"}},
     {name: "RemoveBy", variants: [String]{"Val", "Slot"}},
-    {name: "TaskFailure", variants: [String]{"Cancelled", "DeadlineBlown", "Panicked"}},
-    {name: "TaskOutcome", variants: [String]{"Finished", "Panicked", "Cancelled", "DeadlineBlown"}},
     {name: "TaskStatus", variants: [String]{"Running", "Paused", "CancelRequested"}},
     {name: "TaskPauseMode", variants: [String]{"WaitPoints", "CheckLoops"}},
     {name: "DeliveryState", variants: [String]{"Pending", "Accepted", "Delivering", "Delivered", "DeadLettered", "Cancelled"}},
@@ -455,10 +453,6 @@ ir_compiler_owned_named: fn(fields: [TypeTupleField]) -> IRCompilerOwnedPayload 
 // NetError and NetDNSError carry their checked variant payloads.
 ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerOwnedPayload Never! {
     bytes: Type.List{element: Type.IntN{signed: false, bits: 8}}
-    if name == "TaskFailure" || name == "TaskOutcome" {
-        if variant == "Panicked" -> return ir_compiler_owned_single(Type.String)
-        return IRCompilerOwnedPayload.Unit
-    }
     if name == "HookDecision" || name == "HookOutcome" {
         carries_value: if name == "HookDecision" -> "Transform" else -> "Continue"
         if variant == carries_value -> return ir_compiler_owned_single(Type.Named{name: "T"})

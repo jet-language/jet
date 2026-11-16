@@ -6840,8 +6840,10 @@ therefore adds no identity-open failures.
 All ten error cases carry a String; their service display is the message alone.
 Receipts retain every original field, including authority and signature, and
 their service display preserves the existing field order and labels.
-`TaskOutcome` retains Finished, Panicked(String), Cancelled and DeadlineBlown:
-display uses the raw panic reason, while Debug quotes and escapes that String.
+`TaskOutcome` is `Finished` or `Failed(TaskFailure)`, the prelude's one task
+failure enum. Its display is `Finished` or the failure's text (`Cancelled`,
+`DeadlineBlown`, or `Panicked(reason)` with the raw reason), while Debug quotes
+and escapes that reason.
 `core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
 original positional order. `Delivery` shows exactly `Delivery(` + its ID + `)`.
 `Delivery.show()` and `DeliveryReceipt.show()` return that same display text.

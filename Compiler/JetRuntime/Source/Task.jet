@@ -74,10 +74,10 @@ task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
     jet_rt_string_eq(sync_load(wrapping(left + TASK_FAILURE_REASON)), sync_load(wrapping(right + TASK_FAILURE_REASON)))
 }
 
-// Panicked is raw in show/display but Rust str Debug quoted in debug. Extend
-// the existing carrier in place. Normalize service outcome ordinals to
-// TaskFailure's terminal variants.
-task_terminal_render: fn(result: I64, kind: I64, reason: I64, debug: Bool) {
+// Panicked is raw in show/display but Rust str Debug quoted in debug.
+task_failure_render: fn(failure: I64, debug: Bool) -> I64 {
+    kind: sync_load(wrapping(failure + TASK_FAILURE_TAG))
+    result: jet_rt_string_builder_new()
     if kind == TASK_FAILURE_CANCELLED {
         rt_text_push_word(result, I64{7308335478031147331}, I64{8})
         rt_text_push_word(result, I64{100}, I64{1})
@@ -85,6 +85,7 @@ task_terminal_render: fn(result: I64, kind: I64, reason: I64, debug: Bool) {
         rt_text_push_word(result, I64{7308895159530382660}, I64{8})
         rt_text_push_word(result, I64{474450193474}, I64{5})
     } else {
+        reason: sync_load(wrapping(failure + TASK_FAILURE_REASON))
         rt_text_push_word(result, I64{7234306451155345744}, I64{8})
         rt_text_push_word(result, I64{40}, I64{1})
         if debug -> rt_text_push_rust_debug_str(result, reason) else {
@@ -92,13 +93,6 @@ task_terminal_render: fn(result: I64, kind: I64, reason: I64, debug: Bool) {
         }
         rt_text_push_word(result, I64{41}, I64{1})
     }
-}
-
-task_failure_render: fn(failure: I64, debug: Bool) -> I64 {
-    kind: sync_load(wrapping(failure + TASK_FAILURE_TAG))
-    reason: if kind == TASK_FAILURE_PANICKED -> sync_load(wrapping(failure + TASK_FAILURE_REASON)) else -> I64{0}
-    result: jet_rt_string_builder_new()
-    task_terminal_render(result, kind, reason, debug)
     result
 }
 
@@ -112,90 +106,6 @@ task_failure_render: fn(failure: I64, debug: Bool) -> I64 {
 
 #Export(c) jet_rt_handle_debug_jet_task_failure: fn(failure: I64) -> I64 {
     task_failure_render(failure, true)
-}
-
-// Service TaskOutcome is a distinct registry-owned carrier, not TaskFailure.
-// The Rust originals fix these four ordinals.
-task_outcome_new: fn(kind: I64, owned_reason: I64) -> I64 {
-    outcome: jet_rt_alloc(TASK_OUTCOME_BYTES, I64{8})
-    sync_store(wrapping(outcome + TASK_OUTCOME_TAG), kind)
-    sync_store(wrapping(outcome + TASK_OUTCOME_REASON), owned_reason)
-    outcome
-}
-
-#Export(c) jet_rt_record_tag_jet_task_outcome: fn(outcome: I64) -> I64 {
-    sync_load(wrapping(outcome + TASK_OUTCOME_TAG))
-}
-
-#Export(c) jet_rt_record_get_jet_task_outcome_panicked: fn(outcome: I64) -> I64 {
-    if sync_load(wrapping(outcome + TASK_OUTCOME_TAG)) != TASK_OUTCOME_PANICKED {
-        rt_record_variant_panic()
-        return I64{0}
-    }
-    jet_rt_string_clone(sync_load(wrapping(outcome + TASK_OUTCOME_REASON)))
-}
-
-#Export(c) jet_rt_record_new_jet_task_outcome_finished: fn() -> I64 {
-    task_outcome_new(TASK_OUTCOME_FINISHED, I64{0})
-}
-
-#Export(c) jet_rt_record_new_jet_task_outcome_panicked: fn(reason: I64) -> I64 {
-    task_outcome_new(TASK_OUTCOME_PANICKED, jet_rt_string_clone(reason))
-}
-
-#Export(c) jet_rt_record_new_jet_task_outcome_cancelled: fn() -> I64 {
-    task_outcome_new(TASK_OUTCOME_CANCELLED, I64{0})
-}
-
-#Export(c) jet_rt_record_new_jet_task_outcome_deadline_blown: fn() -> I64 {
-    task_outcome_new(TASK_OUTCOME_DEADLINE, I64{0})
-}
-
-#Export(c) jet_rt_handle_clone_jet_task_outcome: fn(outcome: I64) -> I64 {
-    kind: sync_load(wrapping(outcome + TASK_OUTCOME_TAG))
-    reason: if kind == TASK_OUTCOME_PANICKED -> jet_rt_string_clone(sync_load(wrapping(outcome + TASK_OUTCOME_REASON))) else -> I64{0}
-    task_outcome_new(kind, reason)
-}
-
-#Export(c) jet_rt_handle_drop_jet_task_outcome: fn(outcome: I64) {
-    if (outcome == I64{0}) {
-        return
-    }
-    if sync_load(wrapping(outcome + TASK_OUTCOME_TAG)) == TASK_OUTCOME_PANICKED {
-        jet_rt_string_drop(sync_load(wrapping(outcome + TASK_OUTCOME_REASON)))
-    }
-    jet_rt_free(outcome, TASK_OUTCOME_BYTES, I64{8})
-}
-
-#Export(c) jet_rt_handle_eq_jet_task_outcome: fn(left: I64, right: I64) -> Bool {
-    kind: sync_load(wrapping(left + TASK_OUTCOME_TAG))
-    if kind != sync_load(wrapping(right + TASK_OUTCOME_TAG)) -> return false
-    if kind != TASK_OUTCOME_PANICKED -> return true
-    jet_rt_string_eq(sync_load(wrapping(left + TASK_OUTCOME_REASON)), sync_load(wrapping(right + TASK_OUTCOME_REASON)))
-}
-
-// Byte contract: Core/Service/Service.jet:91-125 at 497daa7a0 (read-only).
-task_outcome_render: fn(outcome: I64, debug: Bool) -> I64 {
-    kind: sync_load(wrapping(outcome + TASK_OUTCOME_TAG))
-    result: jet_rt_string_builder_new()
-    if kind == TASK_OUTCOME_FINISHED -> rt_text_push_word(result, I64{7234303221339941190}, I64{8}) else {
-        terminal: if kind == TASK_OUTCOME_CANCELLED -> TASK_FAILURE_CANCELLED else if kind == TASK_OUTCOME_DEADLINE -> TASK_FAILURE_DEADLINE else -> TASK_FAILURE_PANICKED
-        reason: if kind == TASK_OUTCOME_PANICKED -> sync_load(wrapping(outcome + TASK_OUTCOME_REASON)) else -> I64{0}
-        task_terminal_render(result, terminal, reason, debug)
-    }
-    result
-}
-
-#Export(c) jet_rt_handle_show_jet_task_outcome: fn(outcome: I64) -> I64 {
-    task_outcome_render(outcome, false)
-}
-
-#Export(c) jet_rt_handle_display_jet_task_outcome: fn(outcome: I64) -> I64 {
-    task_outcome_render(outcome, false)
-}
-
-#Export(c) jet_rt_handle_debug_jet_task_outcome: fn(outcome: I64) -> I64 {
-    task_outcome_render(outcome, true)
 }
 
 task_retain: fn(child: I64) { _ := sync_add(child, I64{1}) }
