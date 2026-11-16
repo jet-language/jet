@@ -232,7 +232,7 @@ store_scan_doctor_objects: fn(verification: &StoreVerification, hangar: String, 
 
 // Rust `collect_doctor_cas_keys`: `<sha256>-<permission bits, 8 hex digits>`
 // of every non-empty regular file in an object; unreadable files are skipped.
-store_collect_doctor_cas_keys: fn(object: String, keys: &[String]) Never! -[FS, Env]> {
+store_collect_doctor_cas_keys: fn(object: String, keys: &[String]) -[FS, Env]> Never! {
     members: store_files_under(object)
     loop file in members {
         metadata: files.stat(file) ?? next
@@ -254,7 +254,7 @@ store_doctor_hex8: fn(value: Int) -> String Never! {
 
 // Rust `scan_doctor_staging`: abandoned ingest and admission stages, and
 // partial objects under `objects/`.
-store_scan_doctor_staging: fn(hangar: String, report: &HangarDoctorReport) StoreError! -[FS, Env]> {
+store_scan_doctor_staging: fn(hangar: String, report: &HangarDoctorReport) -[FS, Env]> StoreError! {
     store_scan_doctor_stage_dir(hangar, STORE_STAGE_DIR, false, report)
     store_scan_doctor_stage_dir(hangar, "stage", true, report)
     objects: files.join(hangar, STORE_OBJECTS_DIR)
@@ -271,7 +271,7 @@ store_scan_doctor_staging: fn(hangar: String, report: &HangarDoctorReport) Store
 
 // Rust `scan_doctor_stage_dir`. In the admission stage directory a native
 // `nix-cache-` stage of a live process is not stale (Unix only).
-store_scan_doctor_stage_dir: fn(hangar: String, relative: String, admission_only: Bool, report: &HangarDoctorReport) StoreError! -[FS, Env]> {
+store_scan_doctor_stage_dir: fn(hangar: String, relative: String, admission_only: Bool, report: &HangarDoctorReport) -[FS, Env]> StoreError! {
     stage: files.join(hangar, relative)
     found: store_node_stat(stage)
     metadata: found ?? return
@@ -293,7 +293,7 @@ store_scan_doctor_stage_dir: fn(hangar: String, relative: String, admission_only
 // `.locks` namespace and the `.jetpack.lock` owner file belong to
 // RuntimePolicy and are never removed: removing either can split active
 // shared-CAS lock holders across lock-file inodes.
-store_scan_doctor_cas: fn(hangar: String, referenced: [String], report: &HangarDoctorReport) StoreError! -[FS]> {
+store_scan_doctor_cas: fn(hangar: String, referenced: [String], report: &HangarDoctorReport) -[FS]> StoreError! {
     cas: files.join(hangar, STORE_CAS_DIR)
     found: store_node_stat(cas)
     pool: found ?? return
@@ -387,7 +387,7 @@ store_doctor_remove_repair: fn(path: String) -[FS]> DoctorRepair Never! {
 
 // Rust `remove_doctor_node`: remove a repair path without following links; an
 // absent path is already repaired.
-store_remove_doctor_node: fn(path: String) StoreError! -[FS]> {
+store_remove_doctor_node: fn(path: String) -[FS]> StoreError! {
     found: store_node_stat(path)
     metadata: found ?? return
     if metadata.is_symlink {

@@ -148,14 +148,14 @@ pkg_binder_canonicalize: fn(path: String, context: String) -[FS, Env]> String Fo
     }
 }
 
-pkg_binder_create_dir_all: fn(path: String, context: String) ForeignBindError! -[FS]> {
+pkg_binder_create_dir_all: fn(path: String, context: String) -[FS]> ForeignBindError! {
     if binder_core_files.create_dir_all(path) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
-pkg_binder_write: fn(path: String, text: String, context: String) ForeignBindError! -[FS]> {
+pkg_binder_write: fn(path: String, text: String, context: String) -[FS]> ForeignBindError! {
     if binder_core_files.write(path, text) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
@@ -169,7 +169,7 @@ pkg_binder_read_bytes: fn(path: String, context: String) -[FS]> [U8] ForeignBind
     }
 }
 
-pkg_binder_copy: fn(from: String, to: String, context: String) ForeignBindError! -[FS]> {
+pkg_binder_copy: fn(from: String, to: String, context: String) -[FS]> ForeignBindError! {
     if binder_core_files.copy2(from, to) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))

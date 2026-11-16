@@ -139,14 +139,14 @@ provider_validate_library_name: fn(name: String) ProviderError! {
     }
 }
 
-provider_require_directory: fn(path: String, label: String) ProviderError! -[FS]> {
+provider_require_directory: fn(path: String, label: String) -[FS]> ProviderError! {
     info: files.stat(path) ?? return Err(ProviderError.ForeignProjection("{label} {path} is unavailable: {err}"))
     if info.is_symlink || !info.is_dir {
         return Err(ProviderError.ForeignProjection("{label} {path} is not a real directory"))
     }
 }
 
-provider_require_regular_file: fn(path: String, label: String) ProviderError! -[FS]> {
+provider_require_regular_file: fn(path: String, label: String) -[FS]> ProviderError! {
     info: files.stat(path) ?? return Err(ProviderError.ForeignProjection("{label} {path} is unavailable: {err}"))
     if info.is_symlink || !info.is_file {
         return Err(ProviderError.ForeignProjection("{label} {path} is not a regular file"))
@@ -155,7 +155,7 @@ provider_require_regular_file: fn(path: String, label: String) ProviderError! -[
 
 // The binding's `// jet-ffi-descriptor=` line must equal the current
 // descriptor stamp.
-provider_require_descriptor_stamp: fn(path: String, expected: String) ProviderError! -[FS]> {
+provider_require_descriptor_stamp: fn(path: String, expected: String) -[FS]> ProviderError! {
     source: files.read(path) ?? return Err(ProviderError.ForeignProjection("could not read generated foreign binding {path}: {err}"))
     actual := String?{None}
     loop line in source.split("\n") {
@@ -168,7 +168,7 @@ provider_require_descriptor_stamp: fn(path: String, expected: String) ProviderEr
     }
 }
 
-provider_copy_verified_file: fn(source: String, destination: String) ProviderError! -[FS, Env]> {
+provider_copy_verified_file: fn(source: String, destination: String) -[FS, Env]> ProviderError! {
     bytes: files.read_bytes(source) ?? return Err(ProviderError.ForeignProjection("could not read verified binding {source}: {err}"))
     if bytes.len() == 0 {
         return Err(ProviderError.ForeignProjection("verified binding {source} is empty"))
@@ -178,7 +178,7 @@ provider_copy_verified_file: fn(source: String, destination: String) ProviderErr
 
 // Publish `bytes` through an exclusively created temporary sibling, synced
 // and renamed over a destination that is absent or a regular file.
-provider_write_verified_file: fn(destination: String, bytes: [U8]) ProviderError! -[FS, Env]> {
+provider_write_verified_file: fn(destination: String, bytes: [U8]) -[FS, Env]> ProviderError! {
     parent: files.dirname(destination)
     if parent != "" {
         files.create_dir_all(parent) ?? return Err(ProviderError.ForeignProjection("could not create binding directory {parent}: {err}"))
@@ -214,7 +214,7 @@ provider_write_verified_file: fn(destination: String, bytes: [U8]) ProviderError
     }
 }
 
-provider_write_synced: fn(writer: &&FileWriter, bytes: [U8]) IOError! -[FS]> {
+provider_write_synced: fn(writer: &&FileWriter, bytes: [U8]) -[FS]> IOError! {
     held := writer
     held.write_bytes(bytes)
     held.fsync()

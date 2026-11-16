@@ -1331,7 +1331,7 @@ exact: fn(ran: Ran, stdout: String, stderr: String) Problem! {
 }
 
 // One front-end command of the production CLI, with its log and record.
-front: fn(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Setting]) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+front: fn(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Setting]) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     files.create_dir_all(files.dirname(prefix)) ?? return Err(problem("`{prefix}` cannot be prepared: {err}"))
     binary: lane.jet.copy()
     ran: execute(lane, binary, args, cwd, extra, 0, front_timeout_ms()) ?? return Err(err)
@@ -1345,7 +1345,7 @@ front: fn(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Sett
 // Lower `file` as a native library through `jet doc`, the runtime-library
 // seam (`jet check` lowers no #Export(c) body): the front-end hook writes its
 // object, exports, ABI, thread and issue files beside `prefix`.
-library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     if !files.exists(lifecycle) {
         return Err(problem("native library lifecycle list `{lifecycle}` is missing"))
     }
@@ -1367,11 +1367,11 @@ library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String) Proble
 
 // The runtime imports jet_rt_fault_report, which Jet's linker writes into each
 // image; this platform link assembles it from the shared report source.
-link: fn(lane: &Lane, source: String, object: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+link: fn(lane: &Lane, source: String, object: String, binary: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     link_with(lane, STRICT_CFLAGS, source, object, binary)
 }
 
-link_with: fn(lane: &Lane, cflags: [String], source: String, object: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+link_with: fn(lane: &Lane, cflags: [String], source: String, object: String, binary: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     report_object: fault_report(lane) ?? return Err(err)
     args := cflags.copy()
     args.extend([String]{source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary})
@@ -1394,7 +1394,7 @@ fault_report: fn(lane: &Lane) -[Env, Exec, FS, IO, Time, Time.Wait]> String Prob
 
 // The real GNU-as inputs of the runtime-pack fixtures, assembled into the
 // lane: runtime.o, archive.o, consumer.o, missing.o and runtime.a.
-pack_roots_inputs: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+pack_roots_inputs: fn(lane: &Lane) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     cwd: lane.out.copy()
     loop name in PACK_ROOTS_INPUTS {
         object: if name == "object" -> "runtime.o" else -> "{name}.o"
@@ -1409,7 +1409,7 @@ pack_roots_inputs: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait
 // each call's C witness is linked against the runtime object and handed over,
 // and a runner without one links its fixture against the same link inputs.
 // Every call must print exactly its line and nothing on stderr.
-runner_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+runner_verdict: fn(lane: &Lane, found: Spec) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     out: lane.out.copy()
     script: "{lane.repo}/{found.runner}"
     loop call in found.calls {
@@ -1436,7 +1436,7 @@ read_json: fn(path: String) -[FS]> Dyn Problem! {
     parsed
 }
 
-copy_tree: fn(from: String, to: String) Problem! -[FS]> {
+copy_tree: fn(from: String, to: String) -[FS]> Problem! {
     files.create_dir_all(to) ?? return Err(problem("`{to}` cannot be created: {err}"))
     listed: files.list_dir(from) ?? return Err(problem("`{from}` cannot be listed: {err}"))
     loop entry in listed {
@@ -1494,7 +1494,7 @@ run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtim
 
 // The transport body: the native build or library, the C driver, and the
 // exact verdict its kind admits.
-drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+drive: fn(lane: &Lane, found: Spec) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     out: lane.out.copy()
     repo: lane.repo.copy()
     staged: lane.jet.copy()
@@ -1597,7 +1597,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
 // The scheduler host walks its tasks silently at 1, 2 and 8 workers, then
 // stops on a root panic that the process edge reports exactly as the
 // committed literals compose it: no runtime manufactures the golden.
-scheduler_verdict: fn(lane: &Lane, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+scheduler_verdict: fn(lane: &Lane, binary: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     out: lane.out.copy()
     repo: lane.repo.copy()
     loop threads in ([String]{"1", "2", "8"}) {
@@ -1620,7 +1620,7 @@ scheduler_verdict: fn(lane: &Lane, binary: String) Problem! -[Env, Exec, FS, IO,
 // file (0600) in an owner-only directory (0700). The logical-environment and
 // link-native hosts link against the same object and run: each prints exactly
 // the lines its C source `puts`. Every failure is reported.
-world_sentry_verdict: fn(lane: &Lane, binary: String, object: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+world_sentry_verdict: fn(lane: &Lane, binary: String, object: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     out: lane.out.copy()
     repo: lane.repo.copy()
     failures := [String]{}
@@ -1676,7 +1676,7 @@ world_sentry_verdict: fn(lane: &Lane, binary: String, object: String) Problem! -
 // silently on stderr, printing each witness's line; a select on closed or
 // empty channels with no ready arm is a scheduler stop, which spec S36
 // delivers as E3001 with exit 70: no output, and a report naming the panic.
-channel_verdict: fn(lane: &Lane, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+channel_verdict: fn(lane: &Lane, binary: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     out: lane.out.copy()
     failures := [String]{}
     if execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) == {
@@ -1712,7 +1712,7 @@ channel_verdict: fn(lane: &Lane, binary: String) Problem! -[Env, Exec, FS, IO, T
 
 // The Shared publication host prints its World and Process race lines; the
 // Shared weak host, linked against the same object, its three lines.
-publication_verdict: fn(lane: &Lane, binary: String, object: String, expected: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+publication_verdict: fn(lane: &Lane, binary: String, object: String, expected: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     out: lane.out.copy()
     failures := step_failures("publication", execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS), expected, "")
     host: "{out}/native/{PUBLICATION_LINKED}"
@@ -1763,7 +1763,7 @@ step_failures: fn(step: String, result: Ran Problem!, stdout: String, stderr: St
 // A crypto row runs its own KAT witness against the one composed object:
 // exact stdout from the committed literal, empty stderr, the World entropy
 // stops, and for AgeV1 every frozen open and seal vector.
-crypto_verdict: fn(lane: &Lane, name: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+crypto_verdict: fn(lane: &Lane, name: String, binary: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     failures := [String]{}
     if name == "AgeV1" -> failures.extend(age_failures(lane, binary) ?? return Err(err)) else {
         expected: witness_stdout(lane.repo, name) ?? return Err(err)
@@ -1872,7 +1872,7 @@ puts_lines: fn(path: String) -[FS]> String Problem! {
     out
 }
 
-c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+c_verdict: fn(lane: &Lane, found: Spec) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     out: lane.out.copy()
     repo: lane.repo.copy()
     // The runtime unit with this fixture's test fragment, as the package's
@@ -2289,7 +2289,7 @@ exit_problem: fn(what: String, ran: ProcessReceipt, timeout_ms: Int) -> String N
 }
 
 // Execute one manifest entry; `result` gathers the command, logs and report.
-run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime?, adapter: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime?, adapter: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     mode: text_field(entry, "mode")
     count: int_field(entry, "testCount") ?? 0
     path: text_field(entry, "path")

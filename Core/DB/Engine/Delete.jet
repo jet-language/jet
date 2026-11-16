@@ -171,7 +171,7 @@ autoincrement_end: fn(p: &cg.Parse, a: &ast.AST) Never! {
 // data cursor is on, from the indices at cursors i_idx_cur+i; only those
 // with a nonzero a_reg_idx[i] when a_reg_idx is given, and never the
 // PRIMARY KEY index of a WITHOUT ROWID table or cursor i_idx_no_seek.
-generate_row_index_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, a_reg_idx: [Int]?, i_idx_no_seek: Int) Never! -[DB]> {
+generate_row_index_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, a_reg_idx: [Int]?, i_idx_no_seek: Int) -[DB]> Never! {
     pk: if ex.has_rowid(p.db, t) -> -1 else -> cat.primary_key_index(p.db, t)
     r1 := -1
     prior := -1
@@ -201,7 +201,7 @@ generate_row_index_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int
 // count the change. C's onconf only matters to triggers, which this build
 // has none of; with no triggers or foreign keys there are no OLD.*
 // registers to fill.
-generate_row_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, i_pk: Int, n_pk: Int, count: Bool, e_mode: Int, i_idx_no_seek: Int) Never! -[DB]> {
+generate_row_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, i_pk: Int, n_pk: Int, count: Bool, e_mode: Int, i_idx_no_seek: Int) -[DB]> Never! {
     i_label: cg.v_make_label(p)
     op_seek: if ex.has_rowid(p.db, t) -> opc.OP_NOT_EXISTS else -> opc.OP_NOT_FOUND
     if e_mode == we.ONEPASS_OFF -> _: cg.op4_int(p, op_seek, i_data_cur, i_label, i_pk, n_pk)
@@ -225,14 +225,14 @@ generate_row_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_id
 // single-item SrcList; where_expr is -1 when there is no WHERE. Without
 // SQLITE_ENABLE_UPDATE_DELETE_LIMIT the grammar takes no ORDER BY or
 // LIMIT on DELETE. The statement owns src and where_expr and deletes them.
-delete_from: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) Never! -[DB]> {
+delete_from: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) -[DB]> Never! {
     if cg.n_err(a) == 0 -> delete_body(p, a, src, where_expr)
     ast.src_list_delete(a, src)
     ast.expr_delete(a, where_expr)
 }
 
 // The body of sqlite3DeleteFrom up to its delete_from_cleanup label.
-delete_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) Never! -[DB]> {
+delete_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) -[DB]> Never! {
     t: src_list_lookup(p, a, src)
     if t < 0 {
         return

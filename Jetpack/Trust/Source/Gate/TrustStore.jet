@@ -170,7 +170,7 @@ trust_store_lines: fn(store: String) -[FS]> [String] Never! {
 
 // Append one line, creating the parent directory; write failures are
 // ignored as in the reference.
-trust_store_append: fn(store: String, line: String) Never! -[FS]> {
+trust_store_append: fn(store: String, line: String) -[FS]> Never! {
     files.create_dir_all(files.dirname(store)).drop("trust-store directory creation remains best-effort")
     existing := files.read(store) ?? ""
     if existing != "" && !existing.ends_with("\n") -> existing = "{existing}\n"

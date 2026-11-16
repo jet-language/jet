@@ -1748,7 +1748,7 @@ jet_cli_prove_stop_text: fn(item: JetCLIProveTestItem) -[FS]> String Never! {
 // `.jet/proofs/<kind>/<name>/<artifact-id[0..16]>.jetproof` below the
 // authority root, published without replacement under the directory's lock,
 // then indexed as a protected proof record.
-jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed: [JetDriverRecordLink]) JetCLIProveRefusal! -[FS, Env, Time]> {
+jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed: [JetDriverRecordLink]) -[FS, Env, Time]> JetCLIProveRefusal! {
     report_id: prove_crypto.sha256("{report}\n".bytes()).hex()
     links := consumed.copy()
     links.sort_by(fn(left: JetDriverRecordLink, right: JetDriverRecordLink) { if left.kind == right.kind -> left.artifact_id <=> right.artifact_id else -> left.kind <=> right.kind })
@@ -1805,7 +1805,7 @@ jet_cli_prove_artifact_parts: fn(identity: JetCLIProveIdentity) -> [String] Neve
 // Each artifact folder that exists is a real folder, not a link or a file
 // (E3614). `jet_cli_prove_run` asks once the target resolves, before any
 // test runs; the write asks again in case the path changed since.
-jet_cli_prove_artifact_folders_safe: fn(root: String, parts: [String]) JetCLIProveRefusal! -[FS]> {
+jet_cli_prove_artifact_folders_safe: fn(root: String, parts: [String]) -[FS]> JetCLIProveRefusal! {
     walked := root.copy()
     shown := ""
     loop part in parts {

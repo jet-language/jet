@@ -909,7 +909,7 @@ Ctx: struct {
     reused_failures: [SuiteRow]{[SuiteRow]{}}
 }
 
-row: fn(ctx: &Ctx, check: String, status: String, detail: String) Never! -[FS, IO, Time]> {
+row: fn(ctx: &Ctx, check: String, status: String, detail: String) -[FS, IO, Time]> Never! {
     ctx.rows.push(GateRow{check: check.copy(), status: status.copy(), detail: detail.copy()})
     say("release", ctx.log, "{check}: {status} {detail}")
 }
@@ -1006,7 +1006,7 @@ release_preflight: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> String? 
 
 // The candidate column's preflight, once the chain built s2: a failing row
 // keeps every suite from launching, so neither column is compared.
-candidate_preflight: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+candidate_preflight: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     if !ctx.built {
         return
     }
@@ -1039,7 +1039,7 @@ gate_preflight: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Nev
     Val(refused.copy())
 }
 
-chain_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+chain_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     out: files.join(ctx.work, "chain")
     log: files.join(ctx.work, "logs/chain.log")
     result: run_logged([String]{ctx.release.jet.copy(), files.join(ctx.root, "Tools/Agent/Chain.jet"), ctx.tree.copy(), "full", "--out", out}, ctx.work, [Var]{set_var("CHAIN_SEED", ctx.release.dir), set_var("JET_COMPILER_IDENTITY", ctx.release.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.root)}, log, 4 * 3600)
@@ -1105,7 +1105,7 @@ tree_differences: fn(root: String, other: String) -[FS]> (differ: [String], file
     (differ: differ, files: left.len())
 }
 
-pack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+pack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     log: files.join(ctx.work, "logs/pack.log")
     built: files.join(ctx.tree, "Compiler/JetCLI/.jet/build")
     remove_tree(built)
@@ -1133,20 +1133,20 @@ pack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
 // Builds this host's C toolchain pack with Tools/Agent/cc-pack.nix (Nix runs
 // only on the release machine) and checks it against the hash jet embeds;
 // assemble ships it beside jet.
-cc_pack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+cc_pack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     pinned_asset_stage(ctx, "cc-pack", "Tools/Agent/cc-pack.nix", CC_PACK_SOURCE, CC_PACK_TABLE, host_target())
 }
 
 // Builds the sandbox's pinned bubblewrap for this host's architecture with
 // Tools/Agent/bwrap.nix and checks it against the hash jet embeds; assemble
 // ships it beside jet, where jet looks before fetching it from the release.
-bwrap_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+bwrap_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     pinned_asset_stage(ctx, "bwrap", "Tools/Agent/bwrap.nix", BWRAP_SOURCE, BWRAP_TABLE, sys.arch())
 }
 
 // One pinned-asset check: the row of `table` in `source` whose platform or
 // arch is `key`, built by `nix` and held to the row's SHA-256 and size.
-pinned_asset_stage: fn(ctx: &Ctx, check: String, nix: String, source: String, table: String, key: String) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+pinned_asset_stage: fn(ctx: &Ctx, check: String, nix: String, source: String, table: String, key: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     expected := PinnedAsset?{None}
     loop found in pinned_assets(read_text(files.join(ctx.tree, source)) ?? "", table) {
         if (found.platform == key || found.arch == key) && expected == None {
@@ -1192,7 +1192,7 @@ first_existing: fn(dirs: [String], name: String) -[FS]> String Never! {
     ""
 }
 
-clear_scratch: fn(worker: String) Never! -[Env, Exec, FS, Time.Wait]> {
+clear_scratch: fn(worker: String) -[Env, Exec, FS, Time.Wait]> Never! {
     loop dir in bootstrap_scratch(worker) -> remove_tree(dir)
 }
 
@@ -1249,7 +1249,7 @@ shown_keys: fn(keys: [String], count: Int) -> String Never! {
 // (evidence/jetpack-candidate.keys), else a census of the release on its own
 // tree. The candidate must add no row; a census that finishes for the
 // release must finish for the candidate.
-jetpack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+jetpack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     recorded: files.join(ctx.baseline.dir, "evidence/jetpack-candidate.keys")
     cache: files.join(files.join(ctx.work_root, "cache"), "jetpack-{cache_key([String]{ctx.baseline.jet_sha, ctx.baseline.commit})}.keys")
     before := Census{finished: false, keys: [String]{}, detail: ""}
@@ -1310,7 +1310,7 @@ jetpack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     row(ctx, "jetpack", "PASS", "no new census rows ({after.keys.len()} rows, {fixed.len()} fixed; release {before.detail}; candidate {after.detail})")
 }
 
-hosted_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+hosted_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     worker: "release-hosted-{sys.pid()}"
     clear_scratch(worker)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JETPACK_WORKER", worker), set_var("JET", ctx.candidate.jet), norust_var()})
@@ -1948,7 +1948,7 @@ release_rows: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time
 // (evidence/rows-candidate.json, what a later --reuse takes) when they are
 // complete and unfiltered, then the release column release_rows picks from
 // them, then judge_suites.
-judge_columns: fn(ctx: &Ctx, candidate: SuiteRun) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+judge_columns: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     if candidate.error == "" && ctx.options.filter == "" {
         files.write(files.join(ctx.work, "evidence/rows-candidate.json"), row_file_text(RowFile{commit: ctx.sha.copy(), source: ctx.source.copy(), compiler: ctx.candidate.identity.copy(), rows: candidate.rows.copy()})) ?? ()
     }
@@ -1961,7 +1961,7 @@ judge_columns: fn(ctx: &Ctx, candidate: SuiteRun) Never! -[Env, Exec, FS, IO, Ti
 // those a changed file reaches and its untracked failures (the failures a
 // reuse exists to verify), which run again on the candidate. The release
 // column follows as in a full run (judge_columns).
-reused_suites: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+reused_suites: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     plan: reuse_plan(ctx)
     if plan.error != "" {
         loop suite in kit_suites(ctx.native) {
@@ -2012,7 +2012,7 @@ reused_suites: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
 // run: a row that passes by itself has not failed outright, but it is flaky,
 // listed with both outcomes, and fails the gate unless a disposition names
 // the card that owns it (flaky_row).
-judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [SuiteRun]) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [SuiteRun]) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     firsts := [Compared]{}
     judged := [[SuiteRow]]{}
     seen := [String:Bool]{}
@@ -2080,7 +2080,7 @@ judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [Suit
 // and the kit's cases entry, then runs every entry with s2. Every entry must
 // pass (registries_verdict), as in Tools/Agent/VerifyFull.jet. A --filter run
 // narrows the kit suites and runs none of it.
-registries_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+registries_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     check: "suite:{REGISTRY_SUITE}"
     if ctx.options.filter != "" {
         why: "not run: --filter {ctx.options.filter} narrows the kit suites, and a filtered run is never a release"
@@ -2145,7 +2145,7 @@ SPEED_RUNS: 3
 
 SPEED_CELL_MODES: "check,O0,release"
 
-speed_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+speed_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     if ctx.options.filter != "" {
         row(ctx, "speed", "NOTE", "not measured: --filter {ctx.options.filter} narrows the gate, and a filtered run is never a release")
         return
@@ -2264,7 +2264,7 @@ unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [
 }
 
 // A WARN row naming every disposition that tracks no row.
-disposition_note: fn(ctx: &Ctx) Never! -[FS, IO, Time]> {
+disposition_note: fn(ctx: &Ctx) -[FS, IO, Time]> Never! {
     unused: unused_dispositions(ctx.dispositions, ctx.suites)
     if unused.len() > 0 {
         row(ctx, "dispositions", "WARN", "{unused.len()} disposition(s) match no lost row, no row failing alike on both columns and no flaky row: {unused.join(" | ")}")
@@ -2590,7 +2590,7 @@ publish_release: fn(ctx: Ctx, dest: String) -[Env, Exec, FS, IO, Time, Time.Wait
     state
 }
 
-print_commands: fn(ctx: Ctx, dest: String, plan: MergePlan) Never! -[IO]> {
+print_commands: fn(ctx: Ctx, dest: String, plan: MergePlan) -[IO]> Never! {
     lines := [String]{}
     if ctx.options.filter != "" {
         lines.extend([String]{"FILTERED RUN (--filter {ctx.options.filter}): {ctx.next} is not a release and was neither tagged nor published. Do not run these commands; jet-use refuses it.", ""})

@@ -64,7 +64,7 @@ JetCLIDap: struct {
     rules: [Int:JetCLIDapRule]
     launched: Bool
 
-    handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) Never! -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> {
+    handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> Never! {
         request := input.move()
         if request.command == {
             "initialize" -> {
@@ -294,7 +294,7 @@ JetCLIDap: struct {
     }
 
     // An `output` event of `category`, after the program's output so far.
-    say: fn(&self, session: &NativeSession, category: String, text: String) Never! -[FS, IO, Time.Wait]> {
+    say: fn(&self, session: &NativeSession, category: String, text: String) -[FS, IO, Time.Wait]> Never! {
         output: session.take_output()
         if output != "" {
             self.event("output", "{{\"category\":\"stdout\",\"output\":{foundation_json_quote(output)}}}")
@@ -304,7 +304,7 @@ JetCLIDap: struct {
 
     // Where `settled` left the program: its new output, then `stopped` (for
     // `reason` unless a breakpoint stopped it), or its end.
-    report: fn(&self, session: &NativeSession, settled: JetCLIDapStop, reason: String) Never! -[FS, IO, Time.Wait]> {
+    report: fn(&self, session: &NativeSession, settled: JetCLIDapStop, reason: String) -[FS, IO, Time.Wait]> Never! {
         output: session.take_output()
         if output != "" {
             self.event("output", "{{\"category\":\"stdout\",\"output\":{foundation_json_quote(output)}}}")
@@ -329,29 +329,29 @@ JetCLIDap: struct {
     }
 
     // A run the native debugger could not finish ends the session.
-    stopped_by: fn(&self, failure: NativeDebugError) Never! -[IO, Time.Wait]> {
+    stopped_by: fn(&self, failure: NativeDebugError) -[IO, Time.Wait]> Never! {
         self.event("output", "{{\"category\":\"stderr\",\"output\":{foundation_json_quote("{failure.detail}\n")}}}")
         self.event("terminated", "{{}}")
     }
 
-    respond: fn(&self, request: JetCLIDapRequest, body: String) Never! -[IO, Time.Wait]> {
+    respond: fn(&self, request: JetCLIDapRequest, body: String) -[IO, Time.Wait]> Never! {
         self.seq += 1
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":true,\"command\":{foundation_json_quote(request.command)},\"body\":{body}}}")
     }
 
-    fail: fn(&self, request: JetCLIDapRequest, message: String) Never! -[IO, Time.Wait]> {
+    fail: fn(&self, request: JetCLIDapRequest, message: String) -[IO, Time.Wait]> Never! {
         self.seq += 1
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":false,\"command\":{foundation_json_quote(request.command)},\"message\":{foundation_json_quote(message)}}}")
     }
 
-    event: fn(&self, name: String, body: String) Never! -[IO, Time.Wait]> {
+    event: fn(&self, name: String, body: String) -[IO, Time.Wait]> Never! {
         self.seq += 1
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"event\",\"event\":\"{name}\",\"body\":{body}}}")
     }
 }
 
 // Answer requests until stdin ends or the editor disconnects.
-jet_cli_debug_dap: fn(session: &NativeSession, entry: String) Never! -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> {
+jet_cli_debug_dap: fn(session: &NativeSession, entry: String) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> Never! {
     dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, rules: [Int:JetCLIDapRule]{}, launched: false}
     loop true {
         text: jet_cli_dap_read() ?? break
@@ -395,7 +395,7 @@ jet_cli_dap_read: fn() -[IO, Time.Wait]> String? Never! {
     Val(String.from_bytes(body) ?? return None)
 }
 
-jet_cli_dap_send: fn(json: String) Never! -[IO, Time.Wait]> {
+jet_cli_dap_send: fn(json: String) -[IO, Time.Wait]> Never! {
     jet_cli_debug_write("Content-Length: {json.bytes().len()}\r\n\r\n{json}")
 }
 

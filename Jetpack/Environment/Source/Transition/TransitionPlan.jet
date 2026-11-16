@@ -130,7 +130,7 @@ TransitionPlan: struct {
         Ok(TransitionResult{summary: self.summary()})
     }
 
-    apply_changes: fn(self) EnvironmentError! -[FS, Env]> {
+    apply_changes: fn(self) -[FS, Env]> EnvironmentError! {
         loop change in self.changes {
             path: env_transition_safe_path(self.root, change.relative)
             desired: if self.reverse -> change.before else -> change.after

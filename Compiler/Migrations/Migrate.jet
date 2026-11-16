@@ -23,13 +23,17 @@ migration_plans: fn() -> [MigrationPlan] {
     [MigrationPlan]{
         MigrationPlan{name: "lambda-shape1", toolchain: "a0.0.45"},
         MigrationPlan{name: "codable-options1", toolchain: "a0.0.45"},
+        MigrationPlan{name: "sig-arrow1", toolchain: "a0.0.45"},
     }
 }
 
 migration_rewrite: fn(plan: String, path: String, text: String, source: Bool) -> MigrationOutcome {
-    if plan == "lambda-shape1" -> return lambda_shape1_file(path, text, source)
-    if plan == "codable-options1" -> return codable_options1_file(path, text)
-    panic("no migration plan named {plan}")
+    if plan == {
+        "lambda-shape1" -> lambda_shape1_file(path, text, source)
+        "codable-options1" -> codable_options1_file(path, text)
+        "sig-arrow1" -> sig_arrow1_file(path, text, source)
+        else -> panic("no migration plan named {plan}")
+    }
 }
 
 migration_listing: fn(path: String, into: &[String]) {

@@ -234,7 +234,7 @@ normalize_angle: fn(angle: Float) -> Float Never! {
 }
 
 /// Install `value` as the deterministic stream seed.
-seed: fn(value: Int) Never! -[Rand]> { core.math.random.seed(value) }
+seed: fn(value: Int) -[Rand]> Never! { core.math.random.seed(value) }
 
 /// Construct a deterministic, caller-owned RNG capability.
 rng: fn(seed_value: Int) -> RNG Never! {
@@ -335,7 +335,7 @@ weighted_pick: fn<T>(items: [T], weights: [Float]) -[Rand]> T? Never! {
 }
 
 /// Fisher–Yates. Mutates `items` in place.
-shuffle: fn(items: &[Int]) Never! -[Rand]> {
+shuffle: fn(items: &[Int]) -[Rand]> Never! {
     n: items.len()
     if n < 2 {
         return

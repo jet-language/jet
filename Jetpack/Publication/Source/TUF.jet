@@ -419,7 +419,7 @@ publication_tuf_log_text: fn(records: [PublicationLogRecord]) -> String Never! {
     out.join("")
 }
 
-publication_tuf_write_log: fn(repo: String, records: [PublicationLogRecord]) IOError! -[FS, Env, Time]> {
+publication_tuf_write_log: fn(repo: String, records: [PublicationLogRecord]) -[FS, Env, Time]> IOError! {
     publication_tuf_atomic_write(repo, publication_tuf_transparency_log_path(repo), publication_tuf_log_text(records).bytes())
 }
 
@@ -462,7 +462,7 @@ publication_tuf_parse_checkpoint: fn(text: String) -> PublicationCheckpoint IOEr
     Ok(PublicationCheckpoint{sequence: sequence, root: publication_tuf_required_field(fields, "root"), public_key: publication_tuf_decode_text(publication_tuf_required_field(fields, "public_key")), signature: publication_tuf_required_field(fields, "signature")})
 }
 
-publication_tuf_verify_checkpoint: fn(repo: String, root_key: String, checkpoint: PublicationCheckpoint) IOError! -[FS, Env]> {
+publication_tuf_verify_checkpoint: fn(repo: String, root_key: String, checkpoint: PublicationCheckpoint) -[FS, Env]> IOError! {
     records: publication_tuf_read_log(repo)
     expected_root := publication_tuf_empty_log_root()
     expected_sequence := 0
@@ -487,7 +487,7 @@ publication_tuf_log_contains_entry: fn(records: [PublicationLogRecord], expected
     false
 }
 
-publication_tuf_accept_checkpoint: fn(registry_name: String, repo: String, checkpoint: PublicationCheckpoint) IOError! -[FS, Env, Time]> {
+publication_tuf_accept_checkpoint: fn(registry_name: String, repo: String, checkpoint: PublicationCheckpoint) -[FS, Env, Time]> IOError! {
     // Mandatory JP-PUB-REG-TRUST-CACHE path, never a repository-supplied pin.
     path: publication_registry_checkpoint_path(registry_name)
     lock_path: path.copy()
@@ -495,7 +495,7 @@ publication_tuf_accept_checkpoint: fn(registry_name: String, repo: String, check
     publication_tuf_with_checkpoint_lock(lock_path, fn() { publication_tuf_accept_checkpoint_locked(path, repo, checkpoint) })
 }
 
-publication_tuf_accept_checkpoint_locked: fn(path: String, repo: String, checkpoint: PublicationCheckpoint) IOError! -[FS, Env, Time]> {
+publication_tuf_accept_checkpoint_locked: fn(path: String, repo: String, checkpoint: PublicationCheckpoint) -[FS, Env, Time]> IOError! {
     if files.stat(path) == .Ok(metadata) {
         if metadata.is_symlink || !metadata.is_file {
             return Err(publication_tuf_invalid("accepted registry checkpoint is not a regular file"))
@@ -538,7 +538,7 @@ publication_tuf_check_accepted_checkpoint: fn(sequence: Int, root: String, check
 
 // Rust with_checkpoint_lock: 100 exclusive-create attempts, stale >300s,
 // 20ms backoff, fsync before action, close and cleanup after every action result.
-publication_tuf_with_checkpoint_lock: fn(state: String, action: fn() -[FS, Env, Time]> IOError!) IOError! -[FS, Env, Time]> {
+publication_tuf_with_checkpoint_lock: fn(state: String, action: fn() -[FS, Env, Time]> IOError!) -[FS, Env, Time]> IOError! {
     parent: files.dirname(state)
     if parent == "" {
         return Err(publication_tuf_invalid("accepted registry checkpoint has no parent"))
@@ -667,7 +667,7 @@ publication_tuf_snapshot_file: fn(repo: String, path: String) -[FS, Env]> Public
     Ok(PublicationMetadataFileSnapshot{path: path, bytes: Val(bytes)})
 }
 
-publication_tuf_restore_snapshots: fn(repo: String, snapshots: [PublicationMetadataFileSnapshot]) IOError! -[FS, Env, Time]> {
+publication_tuf_restore_snapshots: fn(repo: String, snapshots: [PublicationMetadataFileSnapshot]) -[FS, Env, Time]> IOError! {
     first_error := IOError?{None}
     loop snapshot in snapshots {
         if publication_tuf_restore_snapshot(repo, snapshot) == .Err(error) {
@@ -677,7 +677,7 @@ publication_tuf_restore_snapshots: fn(repo: String, snapshots: [PublicationMetad
     if first_error == Val(error) -> return Err(error)
 }
 
-publication_tuf_restore_snapshot: fn(repo: String, snapshot: PublicationMetadataFileSnapshot) IOError! -[FS, Env, Time]> {
+publication_tuf_restore_snapshot: fn(repo: String, snapshot: PublicationMetadataFileSnapshot) -[FS, Env, Time]> IOError! {
     if snapshot.bytes == {
         Val(bytes) -> { publication_tuf_atomic_write(repo, snapshot.path, bytes) }
         None -> {
@@ -697,7 +697,7 @@ publication_tuf_restore_snapshot: fn(repo: String, snapshot: PublicationMetadata
     }
 }
 
-publication_tuf_atomic_write: fn(root: String, path: String, bytes: [U8]) IOError! -[FS, Env, Time]> {
+publication_tuf_atomic_write: fn(root: String, path: String, bytes: [U8]) -[FS, Env, Time]> IOError! {
     if files.stat(path) == .Ok(metadata) {
         if metadata.is_symlink || !metadata.is_file {
             return Err(publication_tuf_invalid("registry metadata destination is not a regular file"))

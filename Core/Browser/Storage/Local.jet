@@ -23,7 +23,7 @@ get: fn(key: String) -[Browser]> String? Never! {
     guard.value.entries.get(key)
 }
 
-set: fn(key: String, value: String) Never! -[Browser]> {
+set: fn(key: String, value: String) -[Browser]> Never! {
     if storage.world_set("core.browser.storage.local", key, value) {
         return
     }
@@ -32,7 +32,7 @@ set: fn(key: String, value: String) Never! -[Browser]> {
     _: guard.value.entries.add(key.copy(), value.copy())
 }
 
-remove: fn(key: String) Never! -[Browser]> {
+remove: fn(key: String) -[Browser]> Never! {
     if storage.world_remove("core.browser.storage.local", key) {
         return
     }
@@ -41,7 +41,7 @@ remove: fn(key: String) Never! -[Browser]> {
     _: guard.value.entries.remove(key)
 }
 
-clear: fn() Never! -[Browser]> {
+clear: fn() -[Browser]> Never! {
     if storage.world_clear("core.browser.storage.local") {
         return
     }
@@ -55,7 +55,7 @@ get_or: fn(key: String, fallback: String) -> String Never! { get(key) ?? fallbac
 has: fn(key: String) -> Bool Never! { get(key) != None }
 
 // An explicit Browser-only caller bounds the inferred effects of both helpers.
-test_helper_effects: fn() Never! -[Browser]> {
+test_helper_effects: fn() -[Browser]> Never! {
     key: "Core.browser.storage.local.helper.effects"
     remove(key)
     assert_eq(get_or(key, "fallback"), "fallback")

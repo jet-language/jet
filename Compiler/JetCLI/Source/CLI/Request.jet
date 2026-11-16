@@ -2797,12 +2797,12 @@ JetCLITraceSink: struct {
     state: Shared<JetCLITraceState>
 
     impl CompilerTraceSink {
-        begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS, Time]> {
+        begin: fn(self, name: String, detail: String, index: Int, total: Int) -[FS, Time]> Never! {
             args: if index >= 0 -> ",\"args\":{{\"index\":{index},\"total\":{total}}}" else -> ""
             jet_cli_trace_open(self, name, detail, args, jet_cli_trace_place(index, total), index >= 0)
         }
 
-        begin_item: fn(self, name: String, file: String, item: String) Never! -[FS, Time]> {
+        begin_item: fn(self, name: String, file: String, item: String) -[FS, Time]> Never! {
             args: ",\"args\":{{\"file\":{foundation_json_quote(file)},\"item\":{foundation_json_quote(item)}}}"
             jet_cli_trace_open(self, name, item, args, " ({file})", true)
         }
@@ -2810,7 +2810,7 @@ JetCLITraceSink: struct {
         // Closes the innermost open span of kind `name` in this task, and any
         // deeper span an early return left open; no open span of that kind in
         // this task writes nothing.
-        end: fn(self, name: String, items: Int) Never! -[FS, Time]> {
+        end: fn(self, name: String, items: Int) -[FS, Time]> Never! {
             cpu_ns: cli_tasks.cpu_ns()
             ts: jet_cli_trace_micros(self.start_us)
             id: cli_tasks.current_task()
@@ -2846,7 +2846,7 @@ JetCLITraceSink: struct {
             jet_cli_trace_write(self.target, permit.value, line, settle: top)
         }
 
-        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
+        progress: fn(self, name: String, done: Int, total: Int) -[FS, Time]> Never! {
             if name.starts_with("counters.") {
                 self.counter(name, done)
                 return
@@ -2887,7 +2887,7 @@ JetCLITraceSink: struct {
     // A `counters.<phase>.<name>` progress kind: one #4319 scaling counter
     // value, written unthrottled as the `<phase>.<name>` counter event and,
     // with `--phase-counters`, as a `JET_PHASE_COUNTERS` stderr line.
-    counter: fn(self, kind: String, value: Int) Never! -[FS, Time]> {
+    counter: fn(self, kind: String, value: Int) -[FS, Time]> Never! {
         parts := kind.split(".").to_list()
         if parts.len() < 3 {
             return
@@ -3101,7 +3101,7 @@ jet_cli_trace_progress_due: fn(state: Shared<JetCLITraceState>, name: String, la
 // event carries `args` (`,"args":{...}` or ""), its readable line `place`.
 // An `item` span (one comptime item, or one indexed unit of a phase) reads
 // only its task's CPU clock, so a phase of many items stays cheap to trace.
-jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args: String, place: String, item: Bool) Never! -[FS, Time]> {
+jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args: String, place: String, item: Bool) -[FS, Time]> Never! {
     ts: jet_cli_trace_micros(sink.start_us)
     id: cli_tasks.current_task()
     label: if detail == "" -> name else -> detail
@@ -3380,7 +3380,7 @@ jet_cli_trace_drain: fn(target: String, state: &JetCLITraceState) Never! {
 // `trace.bytes` counter (every event's bytes before it) and `trace.flushes`
 // (the blocks written, this last one included), then every waiting event.
 // An event after it is written at once.
-jet_cli_trace_finish: fn(sink: JetCLITraceSink) Never! -[FS, Time]> {
+jet_cli_trace_finish: fn(sink: JetCLITraceSink) -[FS, Time]> Never! {
     totals: jet_cli_trace_totals(sink.state)
     sink.counter("counters.trace.bytes", totals.bytes)
     sink.counter("counters.trace.flushes", totals.flushes + 1)

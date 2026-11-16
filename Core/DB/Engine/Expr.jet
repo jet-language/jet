@@ -297,7 +297,7 @@ expr_vector_register: fn(p: &cg.Parse, a: &ast.AST, v: Int, i_field: Int, reg_se
 
 // codeVectorCompare: the comparison `e` of two vectors, its result (1, 0 or
 // NULL) into register dest.
-code_vector_compare: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, op: Int, p5: Int) Never! -[DB]> {
+code_vector_compare: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, op: Int, p5: Int) -[DB]> Never! {
     l: a.exprs[e].left
     r: a.exprs[e].right
     n_left: ast.vector_size(a, l)
@@ -404,7 +404,7 @@ ConstOrGroupByWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
@@ -654,7 +654,7 @@ vector_error_msg: fn(a: &ast.AST, e: Int) Never! {
 
 // sqlite3CodeRhsOfIN: an ephemeral index on cursor i_tab holding the right
 // side of IN `e`, coded once as a subroutine when it does not vary.
-code_rhs_of_in: fn(p: &cg.Parse, a: &ast.AST, e: Int, i_tab: Int) Never! -[DB]> {
+code_rhs_of_in: fn(p: &cg.Parse, a: &ast.AST, e: Int, i_tab: Int) -[DB]> Never! {
     addr_once := 0
     if !ast.has(a, e, ast.EP_VAR_SELECT) && p.f.i_self_tab == 0 {
         if ast.has(a, e, ast.EP_SUBRTN) {
@@ -810,7 +810,7 @@ expr_check_in: fn(p: cg.Parse, a: &ast.AST, e: Int) -> Bool Never! {
 // sqlite3ExprCodeIN: jump to dest_if_false when the left side of IN `e` is
 // not on its right, to dest_if_null when NULLs leave it unknown, and fall
 // through when it is.
-expr_code_in: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest_if_false: Int, dest_if_null: Int) Never! -[DB]> {
+expr_code_in: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest_if_false: Int, dest_if_null: Int) -[DB]> Never! {
     ok_const_factor: p.f.ok_const_factor
     l: a.exprs[e].left
     if expr_check_in(p, a, e) {
@@ -966,7 +966,7 @@ code_integer: fn(p: &cg.Parse, a: &ast.AST, e: Int, neg: Bool, i_mem: Int) Never
 
 // sqlite3ExprCodeLoadIndexColumn: column i_idx_col of index ix, for the
 // table row under cursor i_tab_cur, into reg_out.
-expr_code_load_index_column: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_tab_cur: Int, i_idx_col: Int, reg_out: Int) Never! -[DB]> {
+expr_code_load_index_column: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_tab_cur: Int, i_idx_col: Int, reg_out: Int) -[DB]> Never! {
     i_tab_col: p.db.indexes[ix].ai_column[i_idx_col]
     if i_tab_col == conn.XN_EXPR {
         p.f.i_self_tab = i_tab_cur + 1
@@ -980,7 +980,7 @@ expr_code_load_index_column: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_tab_cur: I
 
 // sqlite3ExprCodeGeneratedColumn: generated column i_col of table t into
 // reg_out.
-expr_code_generated_column: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_col: Int, reg_out: Int) Never! -[DB]> {
+expr_code_generated_column: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_col: Int, reg_out: Int) -[DB]> Never! {
     n_err: cg.n_err(a)
     i_addr: if p.f.i_self_tab > 0 -> cg.op3(p, opc.OP_IF_NULL_ROW, p.f.i_self_tab - 1, 0, reg_out) else -> 0
     ce: cat.column_expr(p.db, a, t, i_col)
@@ -995,7 +995,7 @@ expr_code_generated_column: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_col: Int, re
 
 // sqlite3ExprCodeGetColumnOfTable: column i_col (the rowid when negative)
 // of table t under cursor i_tab_cur into reg_out.
-expr_code_get_column_of_table: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_tab_cur: Int, i_col: Int, reg_out: Int) Never! -[DB]> {
+expr_code_get_column_of_table: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_tab_cur: Int, i_col: Int, reg_out: Int) -[DB]> Never! {
     if i_col < 0 || i_col == p.db.tables[t].ipkey {
         _: cg.op2(p, opc.OP_ROWID, i_tab_cur, reg_out)
         return
@@ -1697,7 +1697,7 @@ expr_code_temp: fn(p: &cg.Parse, a: &ast.AST, e0: Int) -[DB]> (reg: Int, free: I
 }
 
 // sqlite3ExprCode: code `e` into register target.
-expr_code: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) Never! -[DB]> {
+expr_code: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Never! {
     if !p.f.has_vdbe {
         return
     }
@@ -1711,14 +1711,14 @@ expr_code: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) Never! -[DB]> {
 }
 
 // sqlite3ExprCodeCopy: expr_code over a copy of `e0`, which stays as it is.
-expr_code_copy: fn(p: &cg.Parse, a: &ast.AST, e0: Int, target: Int) Never! -[DB]> {
+expr_code_copy: fn(p: &cg.Parse, a: &ast.AST, e0: Int, target: Int) -[DB]> Never! {
     e: ast.expr_dup(a, e0, 0)
     if !p.db.malloc_failed -> expr_code(p, a, e, target)
 }
 
 // sqlite3ExprCodeFactorable: expr_code_copy, factored out of the loop
 // when `e` is constant.
-expr_code_factorable: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) Never! -[DB]> {
+expr_code_factorable: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Never! {
     if p.f.ok_const_factor && ast.expr_is_constant_not_join(a, e) {
         _: expr_code_run_just_once(p, a, e, target)
     } else { expr_code_copy(p, a, e, target) }
@@ -1767,7 +1767,7 @@ expr_code_expr_list: fn(p: &cg.Parse, a: &ast.AST, list: Int, target: Int, src_r
 // exprCodeBetween: x BETWEEN y AND z as x>=y AND x<=z, x coded once.
 // `jump` 0 stores the result in register dest; 1 jumps to dest when true
 // (sqlite3ExprIfTrue), 2 when false (sqlite3ExprIfFalse).
-expr_code_between: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump: Int, jump_if_null: Int) Never! -[DB]> {
+expr_code_between: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump: Int, jump_if_null: Int) -[DB]> Never! {
     del: ast.expr_dup(a, a.exprs[e].left, 0)
     if p.db.malloc_failed {
         return
@@ -1800,7 +1800,7 @@ expr_code_between: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump: Int, j
 
 // sqlite3ExprIfTrue: jump to dest when `e` is true, and when it is NULL
 // with jump_if_null cg.JUMPIFNULL; fall through otherwise.
-expr_if_true: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: Int) Never! -[DB]> {
+expr_if_true: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: Int) -[DB]> Never! {
     if !p.f.has_vdbe || e < 0 {
         return
     }
@@ -1867,7 +1867,7 @@ expr_if_true: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: In
 
 // sqlite3ExprIfFalse: jump to dest when `e` is false, and when it is NULL
 // with jump_if_null cg.JUMPIFNULL; fall through otherwise.
-expr_if_false: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: Int) Never! -[DB]> {
+expr_if_false: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: Int) -[DB]> Never! {
     if !p.f.has_vdbe || e < 0 {
         return
     }
@@ -1937,7 +1937,7 @@ expr_if_false: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: I
 }
 
 // sqlite3ExprIfFalseDup: expr_if_false over a copy of `e0`.
-expr_if_false_dup: fn(p: &cg.Parse, a: &ast.AST, e0: Int, dest: Int, jump_if_null: Int) Never! -[DB]> {
+expr_if_false_dup: fn(p: &cg.Parse, a: &ast.AST, e0: Int, dest: Int, jump_if_null: Int) -[DB]> Never! {
     e: ast.expr_dup(a, e0, 0)
     if !p.db.malloc_failed -> expr_if_false(p, a, e, dest, jump_if_null)
 }
@@ -2093,14 +2093,14 @@ ImpliesNotNullRowWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
 
 // bothImplyNotNullRow.
-both_imply_not_null_row: fn(p: &cg.Parse, a: &ast.AST, e1: Int, e2: Int) Never! -[DB]> {
+both_imply_not_null_row: fn(p: &cg.Parse, a: &ast.AST, e1: Int, e2: Int) -[DB]> Never! {
     t: cg.walk_top(p)
     if p.walks[t].e_code != 0 {
         return
@@ -2208,14 +2208,14 @@ AggInfoPersistWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
 
 // sqlite3AggInfoPersistWalkerInit and sqlite3WalkSelect over SELECT `s`.
-agg_info_persist_select: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+agg_info_persist_select: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
     w := AggInfoPersistWalker{unused: 0}
     cg.walk_push(p, w, 0)
     _: cg.pwalk_select(p, a, s)
@@ -2369,7 +2369,7 @@ AnalyzeAggWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { true }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
             cg.walker_depth_decrease(p)
         }
 
@@ -2379,7 +2379,7 @@ AnalyzeAggWalker: struct {
 
 // sqlite3ExprAnalyzeAggregates: add the aggregate functions and columns of
 // `e` to the AggInfo of NameContext nc.
-expr_analyze_aggregates: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) Never! -[DB]> {
+expr_analyze_aggregates: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Never! {
     w := AnalyzeAggWalker{unused: 0}
     cg.walk_push(p, w, nc)
     _: cg.pwalk_expr(p, a, e)
@@ -2387,7 +2387,7 @@ expr_analyze_aggregates: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) Never! -
 }
 
 // sqlite3ExprAnalyzeAggList.
-expr_analyze_agg_list: fn(p: &cg.Parse, a: &ast.AST, nc: Int, list: Int) Never! -[DB]> {
+expr_analyze_agg_list: fn(p: &cg.Parse, a: &ast.AST, nc: Int, list: Int) -[DB]> Never! {
     loop i in 0..<ast.list_len(a, list) {
         ie: ast.list_expr(a, list, i)
         expr_analyze_aggregates(p, a, nc, ie)

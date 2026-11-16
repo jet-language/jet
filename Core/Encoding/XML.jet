@@ -305,7 +305,7 @@ XMLWriter: struct<W: Writer> {
         Err(error)
     }
 
-    write: fn(&self, event: Dyn) EncodingError! -[IO]> {
+    write: fn(&self, event: Dyn) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         if self.finished {
             return self.fail(writer_error(.State, self.total, "write called after finish"))
@@ -340,12 +340,12 @@ XMLWriter: struct<W: Writer> {
         self.total = next_total
     }
 
-    flush: fn(&self) EncodingError! -[IO]> {
+    flush: fn(&self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         self.output.flush() ?? return self.fail(io_error(self.total, stream.io_cause(err)))
     }
 
-    finish: fn(&self) EncodingError! -[IO]> {
+    finish: fn(&self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         if self.finished {
             return

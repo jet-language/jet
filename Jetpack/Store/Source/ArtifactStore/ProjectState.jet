@@ -41,7 +41,7 @@ store_project_state_dir: fn(workspace_root: String) -> String Never! {
 }
 
 // Replace a workspace state file without disk syncs, creating its parents.
-store_project_write_atomic: fn(path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Rand]> {
+store_project_write_atomic: fn(path: String, bytes: [U8]) -[FS, Env, Rand]> ArtifactStoreError! {
     files.create_dir_all(files.dirname(path))
     store_artifact_replace_unsynced(path, bytes)
 }
@@ -137,7 +137,7 @@ StampTable: struct {
     }
 
     // Persist the table when a lookup added or refreshed an entry.
-    save: fn(self, workspace_root: String) ArtifactStoreError! -[FS, Env, Rand]> {
+    save: fn(self, workspace_root: String) -[FS, Env, Rand]> ArtifactStoreError! {
         if !self.changed {
             return
         }

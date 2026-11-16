@@ -22,7 +22,7 @@ ProviderAdapter: enum {
 
     // Validate that the current provider authority still matches a recorded
     // cache binding.
-    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env, Net, Time.Wait]> {
+    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> ProviderError! {
         if self == {
             .Nix -> { NixProvider{}.validate_cache_authority(spec, table, ctx) }
             .Cran -> { CranProvider{}.validate_cache_authority(spec, table, ctx) }
@@ -120,7 +120,7 @@ provider_for_ref: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, 
 }
 
 // Check the provider authority recorded for a project cache binding.
-provider_validate_cache_authority: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env, Exec, Net, Time.Wait, Rand]> {
+provider_validate_cache_authority: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> ProviderError! {
     if ctx.project_dir == None {
         return
     }

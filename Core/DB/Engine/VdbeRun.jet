@@ -224,7 +224,7 @@ TestHost: struct {
             base.OK
         }
 
-        vtab_close: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: Int) Never! -[DB]> {}
+        vtab_close: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: Int) -[DB]> Never! {}
 
         vtab_take_errmsg: fn(&self, _db: conn.Conn, _vt: Int) -[]> [U8]? { None }
 
@@ -268,24 +268,24 @@ TestHost: struct {
             base.ERROR
         }
 
-        func_call: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _method: Int) Never! -[DB]> {}
+        func_call: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _method: Int) -[DB]> Never! {}
 
         commit_hook: fn(&self, _db: &conn.Conn) -[DB]> Int Never! { 0 }
 
-        rollback_hook: fn(&self, _db: &conn.Conn) Never! -[DB]> {}
+        rollback_hook: fn(&self, _db: &conn.Conn) -[DB]> Never! {}
 
         has_update_hook: fn(&self, _db: conn.Conn) -[]> Bool Never! { false }
 
-        update_hook: fn(&self, _db: &conn.Conn, _op: Int, _db_name: [U8], _table: [U8], _rowid: Int) Never! -[DB]> {}
+        update_hook: fn(&self, _db: &conn.Conn, _op: Int, _db_name: [U8], _table: [U8], _rowid: Int) -[DB]> Never! {}
 
         progress: fn(&self, _db: &conn.Conn) -[DB]> Bool Never! {
             self.progress_calls += 1
             self.progress_calls == self.interrupt_at
         }
 
-        trace: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _event: Int, _text: [U8]) Never! -[DB]> {}
+        trace: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _event: Int, _text: [U8]) -[DB]> Never! {}
 
-        profile: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _elapsed_ns: Int) Never! -[DB]> {}
+        profile: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _elapsed_ns: Int) -[DB]> Never! {}
 
         wal_hook: fn(&self, _db: &conn.Conn, _db_name: [U8], _n_frame: Int) -[DB]> Int Never! {
             base.OK

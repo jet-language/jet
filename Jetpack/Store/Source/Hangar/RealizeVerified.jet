@@ -118,7 +118,7 @@ IntegrityFailure: struct {
     fix: fn(self) -> String Never! { self.fix_text }
 }
 
-store_report_integrity: fn(theme: Theme, failure: IntegrityFailure) Never! -[IO, Time.Wait]> {
+store_report_integrity: fn(theme: Theme, failure: IntegrityFailure) -[IO, Time.Wait]> Never! {
     theme.error_coded("E2604", failure.what(), failure.why(), failure.fix())
 }
 
@@ -503,7 +503,7 @@ store_realize_request_facts: fn(verification: &StoreVerification, request: Reali
     }
 }
 
-store_progress_phase: fn(ctx: ProviderCtx, phase: String) Never! -[IO, Env, Time.Wait]> {
+store_progress_phase: fn(ctx: ProviderCtx, phase: String) -[IO, Env, Time.Wait]> Never! {
     if ctx.progress == {
         .Val(progress) -> { progress.phase(phase) }
         .None -> {}

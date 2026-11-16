@@ -1052,7 +1052,7 @@ live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> T
 // the handler holds `binding` because it read it for its own caller under
 // that caller's policy. Once the last connection watching `binding` closes,
 // its caller is present nowhere through it (__live_left_settle).
-watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) Never! -[Net]> {
+watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) -[Net]> Never! {
     ws.__live_watch(socket, "live:{binding.id}")
 }
 
@@ -2084,7 +2084,7 @@ priv(package) push: module {
 
     // Sets up the push services `settings` names, in place of the ones set
     // up before.
-    configure: fn(settings: push_wire.PushSettings) push_wire.PushError! -[FS.Read, Net]> {
+    configure: fn(settings: push_wire.PushSettings) -[FS.Read, Net]> push_wire.PushError! {
         push_wire.push_configure(settings)
     }
 
@@ -2407,7 +2407,7 @@ App: struct {
     // `jet.push.failed`) and kept with its service, account and reason
     // (`push.outcomes`): the published signature declares only Net, so no
     // log record can carry them.
-    __notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) Never! -[Net]> {
+    __notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) -[Net]> Never! {
         account: to.raw()
         devices: push.devices(account)
         if devices.len() == 0 {

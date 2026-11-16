@@ -313,7 +313,7 @@ pkcs7_parse_der: fn(buf: [U8]) -> PKCS7 PKCS7Error! {
 // digest verifies with `cert`'s key. `given` is the data, or its digest
 // when `is_hash`. Without MBEDTLS_PKCS7_ALLOW_WEAK_SIGNATURES the digest and
 // the certificate's signature key type must pass the default profile.
-pkcs7_data_or_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, given: [U8], is_hash: Bool) PKCS7Error! -[Time]> {
+pkcs7_data_or_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, given: [U8], is_hash: Bool) -[Time]> PKCS7Error! {
     signers: msg.signed_data.signers
     if signers.len() == 0 -> return Err(.InvalidCert(None))
     if x509.x509_time_is_past(cert.valid_to) || x509.x509_time_is_future(cert.valid_from) {
@@ -344,14 +344,14 @@ pkcs7_data_or_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, given: [U8], i
 /// Checks that a signer of `msg` signed `data` with `cert`'s key
 /// (mbedtls_pkcs7_signed_data_verify): the certificate must be valid now,
 /// and the digest and key type allowed by the default profile.
-pkcs7_signed_data_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, data: [U8]) PKCS7Error! -[Time]> {
+pkcs7_signed_data_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, data: [U8]) -[Time]> PKCS7Error! {
     pkcs7_data_or_hash_verify(msg, cert, data, false)
 }
 
 /// Checks that a signer of `msg` signed the digest `hash` with `cert`'s key
 /// (mbedtls_pkcs7_signed_hash_verify); `hash` must have the length of the
 /// message's digest algorithm.
-pkcs7_signed_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, hash: [U8]) PKCS7Error! -[Time]> {
+pkcs7_signed_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, hash: [U8]) -[Time]> PKCS7Error! {
     pkcs7_data_or_hash_verify(msg, cert, hash, true)
 }
 

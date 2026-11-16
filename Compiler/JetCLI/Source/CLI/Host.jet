@@ -1700,7 +1700,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
 // `ir.build` and early Drops on the thread that claims it (`ir.opt` again),
 // so no thread waits for a whole pass to end. Each finding is an ICE row and
 // traps its function: `--opt-verify`'s first, then IR Lint's.
-jet_cli_native_o0: fn(program: &IRModule, options: IROptOptions, threads: CompilerThreads, census: &[JetDriverIceRow], trace_sink: CompilerTraceSink?) Never! -[FS, Time]> {
+jet_cli_native_o0: fn(program: &IRModule, options: IROptOptions, threads: CompilerThreads, census: &[JetDriverIceRow], trace_sink: CompilerTraceSink?) -[FS, Time]> Never! {
     count: program.functions.len()
     if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O0", -1, -1)
     report := ir_opt_module_start(program, options, threads)

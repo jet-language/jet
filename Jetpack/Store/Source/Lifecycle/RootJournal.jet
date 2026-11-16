@@ -126,7 +126,7 @@ store_lifecycle_remove_root: fn(verification: &StoreVerification, roots: HangarR
 
 // Apply and persist `entry` unless it is already durable; a durable retry
 // only gives compaction its chance.
-store_lifecycle_apply_or_compact: fn(roots: HangarRoots, state: &[String:LifecycleRoot], entry: LifecycleJournalEntry, control: LifecycleWriteControl) StoreError! -[FS, Env]> {
+store_lifecycle_apply_or_compact: fn(roots: HangarRoots, state: &[String:LifecycleRoot], entry: LifecycleJournalEntry, control: LifecycleWriteControl) -[FS, Env]> StoreError! {
     if store_lifecycle_entry_already_applied(state, entry) {
         store_lifecycle_compact_if_needed(roots, state)
         return
@@ -136,7 +136,7 @@ store_lifecycle_apply_or_compact: fn(roots: HangarRoots, state: &[String:Lifecyc
 }
 
 // Apply and persist `entry` unless it is already durable.
-store_lifecycle_apply_if_new: fn(roots: HangarRoots, state: &[String:LifecycleRoot], entry: LifecycleJournalEntry) StoreError! -[FS, Env]> {
+store_lifecycle_apply_if_new: fn(roots: HangarRoots, state: &[String:LifecycleRoot], entry: LifecycleJournalEntry) -[FS, Env]> StoreError! {
     if store_lifecycle_entry_already_applied(state, entry) {
         return
     }
@@ -327,11 +327,11 @@ store_lifecycle_recover: fn(verification: &StoreVerification, roots: HangarRoots
     Ok(recovered)
 }
 
-store_lifecycle_prepare_unlocked: fn(roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp, known: [String]) StoreError! -[FS, Env]> {
+store_lifecycle_prepare_unlocked: fn(roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp, known: [String]) -[FS, Env]> StoreError! {
     store_lifecycle_prepare_unlocked_controlled(roots, identity, targets, at, known, LifecycleWriteControl.none())
 }
 
-store_lifecycle_prepare_unlocked_controlled: fn(roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp, known: [String], control: LifecycleWriteControl) StoreError! -[FS, Env]> {
+store_lifecycle_prepare_unlocked_controlled: fn(roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp, known: [String], control: LifecycleWriteControl) -[FS, Env]> StoreError! {
     proposed: store_lifecycle_checked_targets(targets, known)
     state := store_lifecycle_load_state(roots, known)
     protected := proposed
@@ -621,7 +621,7 @@ store_lifecycle_validate_entry_targets: fn(entry: LifecycleJournalEntry, known: 
 
 // Rust `persist_entry`: publish one transaction durably, then compact when
 // the history is long.
-store_lifecycle_persist_entry: fn(roots: HangarRoots, entry: LifecycleJournalEntry, state: [String:LifecycleRoot], control: LifecycleWriteControl) StoreError! -[FS, Env]> {
+store_lifecycle_persist_entry: fn(roots: HangarRoots, entry: LifecycleJournalEntry, state: [String:LifecycleRoot], control: LifecycleWriteControl) -[FS, Env]> StoreError! {
     store_lifecycle_validate_state_bounds(state)
     store_lifecycle_validate_snapshot_wire(state)
     journal: store_lifecycle_ensure_journal_dir(roots)
@@ -823,7 +823,7 @@ store_lifecycle_read_member_bounded: fn(journal: PinnedLifecycleDirectory, name:
 
 // Rust `compact_if_needed`: after more than 128 live transactions, publish a
 // snapshot through the newest sequence and delete the folded members.
-store_lifecycle_compact_if_needed: fn(roots: HangarRoots, state: [String:LifecycleRoot]) StoreError! -[FS, Env]> {
+store_lifecycle_compact_if_needed: fn(roots: HangarRoots, state: [String:LifecycleRoot]) -[FS, Env]> StoreError! {
     journal: store_lifecycle_ensure_journal_dir(roots)
     scan: store_lifecycle_scan_journal(journal)
     through: scan.through()

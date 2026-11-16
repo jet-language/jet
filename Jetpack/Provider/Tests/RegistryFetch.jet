@@ -182,7 +182,7 @@ provider_registry_test_tar: fn(members: [[U8]]) -> [U8] Never! {
 
 // Validation refuses `archive` with a reason containing `expected`, and
 // extraction refuses it too without writing outside the unpack root.
-provider_registry_test_refuses: fn(archive: [U8], expected: String) Never! -[FS]> {
+provider_registry_test_refuses: fn(archive: [U8], expected: String) -[FS]> Never! {
     dir: files.tmpdir("jet-registry-tar-") ?? panic("claim a scratch directory")
     path: files.join(dir, "source.tar")
     files.write_bytes(path, archive) ?? panic("write the archive")

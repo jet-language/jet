@@ -358,7 +358,7 @@ JSONPull: struct<R: Reader> {
         Ok(Val(byte))
     }
 
-    skip_ws: fn(&self) EncodingError! -[IO, Time.Wait]> {
+    skip_ws: fn(&self) -[IO, Time.Wait]> EncodingError! {
         loop {
             if self.buffered == self.buffer.len() {
                 next_byte: self.fill()
@@ -374,7 +374,7 @@ JSONPull: struct<R: Reader> {
         }
     }
 
-    expect: fn(&self, want: U8, context: String) EncodingError! -[IO, Time.Wait]> {
+    expect: fn(&self, want: U8, context: String) -[IO, Time.Wait]> EncodingError! {
         byte: self.consume()
         if byte == .Val(got) {
             if got == want {
@@ -496,7 +496,7 @@ JSONPull: struct<R: Reader> {
         self.column += count
     }
 
-    read_string_bytes: fn(&self, bytes: &[U8]) EncodingError! -[IO, Time.Wait]> {
+    read_string_bytes: fn(&self, bytes: &[U8]) -[IO, Time.Wait]> EncodingError! {
         loop {
             self.take_plain(bytes)
             byte: self.consume()
@@ -630,7 +630,7 @@ JSONPull: struct<R: Reader> {
         Ok(DataEvent.Float(value))
     }
 
-    number_bytes: fn(&self, bytes: &[U8], first: U8) EncodingError! -[IO, Time.Wait]> {
+    number_bytes: fn(&self, bytes: &[U8], first: U8) -[IO, Time.Wait]> EncodingError! {
         self.append(bytes, first, "number")
         loop {
             byte: self.fill()
@@ -1302,7 +1302,7 @@ JSONPush: struct<W: Writer> {
         }
     }
 
-    write_bytes: fn(&self, bytes: View<U8>) EncodingError! -[IO]> {
+    write_bytes: fn(&self, bytes: View<U8>) -[IO]> EncodingError! {
         self.ensure_total(bytes.len())
         self.out.clear()
         loop byte in bytes -> self.out.push(byte)
@@ -1310,24 +1310,24 @@ JSONPush: struct<W: Writer> {
         self.total += bytes.len()
     }
 
-    write_byte: fn(&self, value: U8) EncodingError! -[IO]> {
+    write_byte: fn(&self, value: U8) -[IO]> EncodingError! {
         buffer: [U8#1]{value}
         window: buffer[0..<1]
         self.write_bytes(window)
     }
 
-    write_literal: fn(&self, bytes: [U8#5], count: Int) EncodingError! -[IO]> {
+    write_literal: fn(&self, bytes: [U8#5], count: Int) -[IO]> EncodingError! {
         window: bytes[0..<count]
         self.write_bytes(window)
     }
 
-    canonical_byte: fn(&self, value: U8) EncodingError! -[IO]> {
+    canonical_byte: fn(&self, value: U8) -[IO]> EncodingError! {
         buffer: [U8#1]{value}
         window: buffer[0..<1]
         self.canonical_emit(window)
     }
 
-    write_text: fn(&self, text: String) EncodingError! -[IO]> {
+    write_text: fn(&self, text: String) -[IO]> EncodingError! {
         self.ensure_total(text.count_bytes())
         self.out.clear()
         loop i in 0..<text.count_bytes() -> self.out.push(byte_at(text, i))
@@ -1359,7 +1359,7 @@ JSONPush: struct<W: Writer> {
         out.push(U8{34})
     }
 
-    write_quoted: fn(&self, text: String) EncodingError! -[IO]> {
+    write_quoted: fn(&self, text: String) -[IO]> EncodingError! {
         _: self.quoted_len(text)
         self.write_byte(U8{34})
         i := 0
@@ -1387,7 +1387,7 @@ JSONPush: struct<W: Writer> {
         }
     }
 
-    before_value: fn(&self) EncodingError! -[IO]> {
+    before_value: fn(&self) -[IO]> EncodingError! {
         if self.frames.len() == 0 {
             if self.root_written {
                 return Err(self.state_error("JSON writer accepts exactly one root"))
@@ -1406,7 +1406,7 @@ JSONPush: struct<W: Writer> {
         }
     }
 
-    write: fn(&self, event: &&DataEvent) EncodingError! -[IO]> {
+    write: fn(&self, event: &&DataEvent) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         if self.canonical {
             self.write_canonical(event) ?? {
@@ -1423,7 +1423,7 @@ JSONPush: struct<W: Writer> {
         }
     }
 
-    write_normal: fn(&self, event: &&DataEvent) EncodingError! -[IO]> {
+    write_normal: fn(&self, event: &&DataEvent) -[IO]> EncodingError! {
         if self.finished -> return Err(self.state_error("write called after finish"))
         if event == {
             .Key(key) -> {
@@ -1540,7 +1540,7 @@ JSONPush: struct<W: Writer> {
         None
     }
 
-    canonical_emit: fn(&self, bytes: View<U8>) EncodingError! -[IO]> {
+    canonical_emit: fn(&self, bytes: View<U8>) -[IO]> EncodingError! {
         if self.canonical_sink() == .Val(at) {
             needed: self.canonical_frames[at].value.len() + bytes.len()
             if needed > self.limits.max_item_bytes {
@@ -1566,7 +1566,7 @@ JSONPush: struct<W: Writer> {
         Ok(out)
     }
 
-    canonical_before_value: fn(&self) EncodingError! -[IO]> {
+    canonical_before_value: fn(&self) -[IO]> EncodingError! {
         if self.canonical_frames.len() == 0 {
             if self.root_written {
                 return Err(self.state_error("JSON writer accepts exactly one root"))
@@ -1659,7 +1659,7 @@ JSONPush: struct<W: Writer> {
         Ok(out)
     }
 
-    write_canonical: fn(&self, event: &&DataEvent) EncodingError! -[IO]> {
+    write_canonical: fn(&self, event: &&DataEvent) -[IO]> EncodingError! {
         if self.finished -> return Err(self.state_error("write called after finish"))
         if event == {
             .Key(key) -> {
@@ -1751,7 +1751,7 @@ JSONPush: struct<W: Writer> {
         }
     }
 
-    flush: fn(&self) EncodingError! -[IO]> {
+    flush: fn(&self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         self.output.flush() ?? {
             error: io_error(self.total, 1, self.total + 1, io_cause(err))
@@ -1761,7 +1761,7 @@ JSONPush: struct<W: Writer> {
         }
     }
 
-    finish: fn(&self) EncodingError! -[IO]> {
+    finish: fn(&self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished {
             return
@@ -2058,7 +2058,7 @@ jsonl_reader: fn<R: Reader>(input: &&R, limits: EncodingLimits, typed_numbers: B
     Ok(JSONLinesPull<R>{parser: parser, record_index: 0, terminal: None})
 }
 
-write_tree: fn<W: Writer>(writer: &JSONPush<W>, value: Dyn) EncodingError! -[IO]> {
+write_tree: fn<W: Writer>(writer: &JSONPush<W>, value: Dyn) -[IO]> EncodingError! {
     if value == {
         .Null -> { writer.write(DataEvent.Null) }
         .Bool(v) -> { writer.write(DataEvent.Bool(v)) }
@@ -2206,7 +2206,7 @@ JSONLinesPush: struct<W: Writer> {
     record_index: Int
     pending_lf: Bool
 
-    close_line: fn(&self) EncodingError! -[IO]> {
+    close_line: fn(&self) -[IO]> EncodingError! {
         if !self.pending_lf {
             return
         }
@@ -2215,7 +2215,7 @@ JSONLinesPush: struct<W: Writer> {
         self.pending_lf = false
     }
 
-    write: fn(&self, value: &&Dyn) EncodingError! -[IO]> {
+    write: fn(&self, value: &&Dyn) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return self.fail(self.writer.state_error("write called after finish"))
         self.close_line() ?? return Err(err)
@@ -2249,13 +2249,13 @@ JSONLinesPush: struct<W: Writer> {
         return Err(first)
     }
 
-    flush: fn(&self) EncodingError! -[IO]> {
+    flush: fn(&self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         self.close_line() ?? return Err(err)
         self.writer.flush() ?? return self.fail(err)
     }
 
-    finish: fn(&self) EncodingError! -[IO]> {
+    finish: fn(&self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished {
             return

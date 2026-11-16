@@ -320,7 +320,7 @@ pkg_cobol_runtime_dir_from_flags: fn(flags: [String]) -> String? Never! {
 }
 
 // A failed link probe is an ABI mismatch, not a tool rejection.
-pkg_cobol_prove_link: fn(argv: [String]) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_cobol_prove_link: fn(argv: [String]) -[Exec, Time.Wait]> ForeignBindError! {
     if pkg_cobol_run(argv, "cc") == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -476,7 +476,7 @@ pkg_cobol_render_bridge: fn(program: String, layout: CobolRecordLayout, packed: 
     "{lines.join("\n")}\n"
 }
 
-pkg_cobol_run: fn(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_cobol_run: fn(argv: [String], tool: String) -[Exec, Time.Wait]> ForeignBindError! {
     pkg_cobol_checked_output(argv, tool)
 }
 

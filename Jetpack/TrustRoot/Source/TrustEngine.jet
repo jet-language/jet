@@ -105,7 +105,7 @@ TrustEngine: struct {
     // A new root must satisfy both the current and its own root threshold,
     // expire later than now, and strictly advance the version. A pinned
     // engine moves its on-disk pin in the same step.
-    update_root: fn(&self, signed_root: SignedMetadata<TUFRootMetadata>, clock: TrustedClock) TrustRootError! -[FS, Time]> {
+    update_root: fn(&self, signed_root: SignedMetadata<TUFRootMetadata>, clock: TrustedClock) -[FS, Time]> TrustRootError! {
         canonical: trust_canonical_root(signed_root.signed)
         trust_enforce_size(MetadataRole.Root, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
@@ -142,7 +142,7 @@ TrustEngine: struct {
 
     // Threshold-minus-one recovery drill: a rotation signed by fewer than
     // the current root threshold must fail with `ThresholdUnmet`.
-    recovery_drill_threshold_minus_one: fn(self, new_root: TUFRootMetadata, signers: [TrustKey], clock: TrustedClock) TrustRootError! -[FS, Time]> {
+    recovery_drill_threshold_minus_one: fn(self, new_root: TUFRootMetadata, signers: [TrustKey], clock: TrustedClock) -[FS, Time]> TrustRootError! {
         role: self.root.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold{detail: "current root missing root role"})
         if signers.len() >= role.threshold {
             return Err(TrustRootError.RotationRejected{detail: "drill requires fewer than threshold signers"})
@@ -162,7 +162,7 @@ TrustEngine: struct {
 
     clone_for_drill: fn(self) -> TrustEngine Never! { self.copy() }
 
-    verify_targets: fn(&self, signed: SignedMetadata<TargetsMetadata>, delegated_path: String?, clock: TrustedClock) TrustRootError! -[Time]> {
+    verify_targets: fn(&self, signed: SignedMetadata<TargetsMetadata>, delegated_path: String?, clock: TrustedClock) -[Time]> TrustRootError! {
         canonical: trust_canonical_targets(signed.signed)
         trust_enforce_size(MetadataRole.Targets, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
@@ -178,7 +178,7 @@ TrustEngine: struct {
         self.versions[(MetadataRole.Targets).label()] = signed.signed.version
     }
 
-    verify_snapshot: fn(&self, signed: SignedMetadata<SnapshotMetadata>, targets_canonical: String, targets_version: Int, clock: TrustedClock) TrustRootError! -[Time]> {
+    verify_snapshot: fn(&self, signed: SignedMetadata<SnapshotMetadata>, targets_canonical: String, targets_version: Int, clock: TrustedClock) -[Time]> TrustRootError! {
         canonical: trust_canonical_snapshot(signed.signed)
         trust_enforce_size(MetadataRole.Snapshot, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
@@ -206,7 +206,7 @@ TrustEngine: struct {
         self.versions[(MetadataRole.Snapshot).label()] = signed.signed.version
     }
 
-    verify_timestamp: fn(&self, signed: SignedMetadata<TimestampMetadata>, snapshot_canonical: String, snapshot_version: Int, clock: TrustedClock) TrustRootError! -[Time]> {
+    verify_timestamp: fn(&self, signed: SignedMetadata<TimestampMetadata>, snapshot_canonical: String, snapshot_version: Int, clock: TrustedClock) -[Time]> TrustRootError! {
         canonical: trust_canonical_timestamp(signed.signed)
         trust_enforce_size(MetadataRole.Timestamp, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
@@ -326,14 +326,14 @@ trust_enforce_size: fn(role: MetadataRole, size: Int, policy: TrustRootPolicy) T
     }
 }
 
-trust_check_expiry: fn(role: MetadataRole, expires_unix: Int, clock: TrustedClock) TrustRootError! -[Time]> {
+trust_check_expiry: fn(role: MetadataRole, expires_unix: Int, clock: TrustedClock) -[Time]> TrustRootError! {
     now: clock.now_unix()
     if now >= expires_unix {
         return Err(TrustRootError.Expired{role: role, expires_unix: expires_unix, now_unix: now})
     }
 }
 
-trust_check_clock: fn(policy: TrustRootPolicy, clock: TrustedClock) TrustRootError! -[Time]> {
+trust_check_clock: fn(policy: TrustRootPolicy, clock: TrustedClock) -[Time]> TrustRootError! {
     trusted: policy.trusted_unix ?? return
     now: clock.now_unix()
     skew: if now > trusted -> now - trusted else -> trusted - now

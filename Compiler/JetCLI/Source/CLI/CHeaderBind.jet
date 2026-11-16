@@ -81,7 +81,7 @@ jet_cli_c_bind_fix: fn(lib: String) -> String Never! {
 // `<stem>.provenance` and `<stem>.hash`. The old hash goes first and the new
 // one last, so a write cut short leaves a cache the next compile rebinds,
 // never one it trusts. A bind without metadata removes a stale `.metadata`.
-jet_cli_c_bind_publish: fn(held: JetCLIRootedDirectory, stem: String, bound: CBindFiles, provenance: String) JetCLIReadError! -[FS, Env, Time]> {
+jet_cli_c_bind_publish: fn(held: JetCLIRootedDirectory, stem: String, bound: CBindFiles, provenance: String) -[FS, Env, Time]> JetCLIReadError! {
     _: held.remove("{stem}.hash")
     held.replace("{stem}.jet", bound.cache.bytes(), None)
     if bound.metadata == {

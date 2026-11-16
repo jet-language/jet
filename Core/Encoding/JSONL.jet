@@ -32,11 +32,11 @@ use {
 JSONLWriter: struct<W: Writer> {
     output: stream.JSONLinesPush<W>
 
-    write: fn(&self, value: &&Dyn) EncodingError! -[IO]> { self.output.write(value) }
+    write: fn(&self, value: &&Dyn) -[IO]> EncodingError! { self.output.write(value) }
 
-    flush: fn(&self) EncodingError! -[IO]> { self.output.flush() }
+    flush: fn(&self) -[IO]> EncodingError! { self.output.flush() }
 
-    finish: fn(&self) EncodingError! -[IO]> { self.output.finish() }
+    finish: fn(&self) -[IO]> EncodingError! { self.output.finish() }
 }
 
 writer: fn<W: Writer>(target: &&W, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONLWriter<W> EncodingError! {

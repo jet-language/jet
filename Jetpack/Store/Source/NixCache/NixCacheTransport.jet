@@ -349,19 +349,19 @@ store_nix_content_length: fn(response: HTTPResponse) -> Int? Never! {
     }
 }
 
-store_nix_progress_phase: fn(progress: ProgressHandle?, phase: String) Never! -[IO, Env, Time.Wait]> {
+store_nix_progress_phase: fn(progress: ProgressHandle?, phase: String) -[IO, Env, Time.Wait]> Never! {
     if progress == .Val(handle) -> handle.phase(phase)
 }
 
-store_nix_progress_objects: fn(progress: ProgressHandle?, done: Int, total: Int) Never! -[IO, Env, Time.Wait]> {
+store_nix_progress_objects: fn(progress: ProgressHandle?, done: Int, total: Int) -[IO, Env, Time.Wait]> Never! {
     if progress == .Val(handle) -> handle.object_progress(done, total)
 }
 
-store_nix_progress_discovered: fn(progress: ProgressHandle?, bytes: Int) Never! -[IO, Env, Time.Wait]> {
+store_nix_progress_discovered: fn(progress: ProgressHandle?, bytes: Int) -[IO, Env, Time.Wait]> Never! {
     if progress == .Val(handle) -> handle.discovered_bytes(bytes)
 }
 
-store_nix_progress_transferred: fn(progress: ProgressHandle?, bytes: Int) Never! -[IO, Env, Time.Wait]> {
+store_nix_progress_transferred: fn(progress: ProgressHandle?, bytes: Int) -[IO, Env, Time.Wait]> Never! {
     if progress == .Val(handle) -> handle.transferred_bytes(bytes)
 }
 

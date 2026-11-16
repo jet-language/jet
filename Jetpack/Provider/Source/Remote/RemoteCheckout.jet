@@ -163,7 +163,7 @@ provider_sparse_member_fetch_in: fn(remote: RemoteSource, want_package: String, 
 }
 
 // Publish a checkout by path (the entry used by tests).
-provider_publish_remote_checkout: fn(tmp: String, cache: String) ProviderReason! -[FS, Env, Rand]> {
+provider_publish_remote_checkout: fn(tmp: String, cache: String) -[FS, Env, Rand]> ProviderReason! {
     source: HeldDirectoryEntry.open(tmp) ?? return Err(ProviderReason{message: "{err}"})
     cache_parent: HeldCacheParent.open_or_create(cache) ?? return Err(ProviderReason{message: "{err}"})
     provider_publish_remote_checkout_held(source, cache_parent)
@@ -171,7 +171,7 @@ provider_publish_remote_checkout: fn(tmp: String, cache: String) ProviderReason!
 
 // Validate the checkout tree (no links, no multiply-linked files) and move
 // it into the cache; when the rename fails, copy it through held handles.
-provider_publish_remote_checkout_held: fn(source: HeldDirectoryEntry, cache: HeldCacheParent) ProviderReason! -[FS, Rand]> {
+provider_publish_remote_checkout_held: fn(source: HeldDirectoryEntry, cache: HeldCacheParent) -[FS, Rand]> ProviderReason! {
     cache.validate_existing() ?? return Err(ProviderReason{message: "{err}"})
     provider_tree_fingerprint_held(source.directory)
     if source.rename_into(cache) == {
@@ -323,7 +323,7 @@ HeldCacheParent: struct {
     }
 
     // An existing non-directory cache entry must be a singly linked file.
-    validate_existing: fn(self) IOError! -[FS]> {
+    validate_existing: fn(self) -[FS]> IOError! {
         if self.directory.open_directory(self.name) == {
             .Ok(_) -> {}
             .Err(error) -> {
@@ -395,13 +395,13 @@ HeldDirectoryEntry: struct {
     }
 
     // Move this directory to the cache name under the cache's held parent.
-    rename_into: fn(self, destination: HeldCacheParent) IOError! -[FS]> {
+    rename_into: fn(self, destination: HeldCacheParent) -[FS]> IOError! {
         self.parent.rename(self.name, destination.name, into: Val(destination.directory))
     }
 
     // Remove this directory tree relative to its held parent (Rust
     // `HeldTempDirectory` drop); best effort.
-    remove: fn(self) Never! -[FS]> {
+    remove: fn(self) -[FS]> Never! {
         foundation_remove_held_tree(self.parent, self.name).drop("a temporary checkout is swept by later cleanup")
     }
 }
@@ -464,7 +464,7 @@ provider_tree_fingerprint_held: fn(root: Directory) -[FS]> String ProviderReason
     Ok(pkg_sha256_hex(input))
 }
 
-provider_collect_fingerprint_files: fn(directory: Directory, relative: String, out: &[(relative: String, bytes: [U8], mode: Int)]) IOError! -[FS]> {
+provider_collect_fingerprint_files: fn(directory: Directory, relative: String, out: &[(relative: String, bytes: [U8], mode: Int)]) -[FS]> IOError! {
     entries: directory.list()
     loop entry in entries {
         child_relative: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
@@ -495,14 +495,14 @@ provider_collect_fingerprint_files: fn(directory: Directory, relative: String, o
 // Recursively copy a tree, preserving file modes (so `bin/` executables stay
 // executable). Every source and destination operation is relative to a held
 // directory.
-provider_copy_tree: fn(src: String, dst: String) ProviderReason! -[FS, Rand]> {
+provider_copy_tree: fn(src: String, dst: String) -[FS, Rand]> ProviderReason! {
     source: HeldDirectoryEntry.open(src) ?? return Err(ProviderReason{message: "{err}"})
     destination_parent: HeldCacheParent.open_or_create(dst) ?? return Err(ProviderReason{message: "{err}"})
     destination: destination_parent.open_or_create_directory() ?? return Err(ProviderReason{message: "{err}"})
     provider_copy_tree_held(source.directory, destination)
 }
 
-provider_copy_tree_held: fn(source: Directory, destination: Directory) ProviderReason! -[FS, Rand]> {
+provider_copy_tree_held: fn(source: Directory, destination: Directory) -[FS, Rand]> ProviderReason! {
     entries: source.list() ?? return Err(ProviderReason{message: "{err}"})
     loop entry in entries {
         source_path: files.join(source.path, entry.name)
@@ -525,7 +525,7 @@ provider_copy_tree_held: fn(source: Directory, destination: Directory) ProviderR
 // Copy one regular file through an exclusively created temporary sibling,
 // then rename it over the destination. The source must stay the same file
 // object while it is copied; neither side may be multiply linked.
-provider_copy_held_file: fn(source: Directory, source_name: String, destination: Directory, destination_name: String) IOError! -[FS, Rand]> {
+provider_copy_held_file: fn(source: Directory, source_name: String, destination: Directory, destination_name: String) -[FS, Rand]> IOError! {
     reader := source.open(source_name)
     before: reader.stat()
     provider_reject_multiply_linked(before)
@@ -566,7 +566,7 @@ provider_create_temp_file_name: fn(destination: Directory, mode: Int) -[FS, Rand
     Err(provider_io_error_exists(destination.path, "could not allocate an exclusive temporary file"))
 }
 
-provider_fill_temp_file: fn(reader: &FileReader, before: Stat, destination: Directory, temporary: String, writer: &FileWriter, mode: Int, destination_name: String) IOError! -[FS]> {
+provider_fill_temp_file: fn(reader: &FileReader, before: Stat, destination: Directory, temporary: String, writer: &FileWriter, mode: Int, destination_name: String) -[FS]> IOError! {
     loop {
         chunk: reader.read_bytes(PROVIDER_READ_CHUNK_BYTES)
         if chunk.len() == 0 -> break
@@ -583,7 +583,7 @@ provider_fill_temp_file: fn(reader: &FileReader, before: Stat, destination: Dire
 }
 
 // Create a private child directory; one that already exists is accepted.
-provider_create_private_child: fn(parent: Directory, name: String) IOError! -[FS]> {
+provider_create_private_child: fn(parent: Directory, name: String) -[FS]> IOError! {
     if parent.create_directory(name, mode: Val(PROVIDER_HELD_PRIVATE_MODE)) == {
         .Ok(_) -> {}
         .Err(error) -> {

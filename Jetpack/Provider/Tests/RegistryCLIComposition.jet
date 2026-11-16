@@ -29,7 +29,7 @@ publication_tuf_test_manifest: fn(name: String, version: String) -> String Never
     "name: \"{name}\"\nversion: \"{version}\"\njet: \">=a0.0.43\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n"
 }
 
-publication_tuf_test_project: fn(root: String, name: String, version: String) Never! -[FS, Exec, Time]> {
+publication_tuf_test_project: fn(root: String, name: String, version: String) -[FS, Exec, Time]> Never! {
     files.create_dir_all(root) ?? panic("create project")
     files.write(files.join(root, "package.jet"), publication_tuf_test_manifest(name, version)) ?? panic("manifest")
     files.write(files.join(root, "run.jet"), "#Test(\"smoke\") {{ assert(1 == 1) }}\nrun: fn() {{ print(\"hi\") }}\n") ?? panic("entry")

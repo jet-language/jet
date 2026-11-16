@@ -43,7 +43,7 @@ cli_declared_images: fn(plan: EnvPlan) -> String Never! {
     "declared images: {names.join(", ")}."
 }
 
-cli_render_env_diagnostic: fn(src: String, error: EnvModelEvalError) Never! -[IO, Time.Wait]> {
+cli_render_env_diagnostic: fn(src: String, error: EnvModelEvalError) -[IO, Time.Wait]> Never! {
     terminal_write_output(diagnostic_render_all(ENV_FILE, src, [Diagnostic]{error.diagnostic}, false))
 }
 
@@ -286,7 +286,7 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
 
 // An environment image writes its projection artifacts; any other image
 // writes only the projection report.
-cli_write_image_projection: fn(from_environment: Bool, out_dir: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
+cli_write_image_projection: fn(from_environment: Bool, out_dir: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) -[FS, Env]> ImageError! {
     if from_environment {
         return image_write_projection_artifacts(out_dir, manifest_digest, plan, report)
     }
@@ -409,7 +409,7 @@ cli_image_extra_file: fn(theme: Theme, name: String, dir: String, plan: EnvPlan,
     Val(LayerFile{path: layer_path, data: data, mode: 420})
 }
 
-cli_reject_image_file: fn(theme: Theme, name: String, from_environment: Bool, relative: String, error: String, projection: &ProjectionReport, out_dir: String, environment_fix: String, package_fix: String) Never! -[IO, FS, Env, Time.Wait, Rand]> {
+cli_reject_image_file: fn(theme: Theme, name: String, from_environment: Bool, relative: String, error: String, projection: &ProjectionReport, out_dir: String, environment_fix: String, package_fix: String) -[IO, FS, Env, Time.Wait, Rand]> Never! {
     projection.rejected.push("file:{relative}")
     cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
     if from_environment {
@@ -727,7 +727,7 @@ cli_normalized_project_path_matches: fn(candidate: String, normalized: String) -
     }
 }
 
-cli_write_rejected_projection: fn(out_dir: String, projection: ProjectionReport) CLIError! -[FS, Env, Rand]> {
+cli_write_rejected_projection: fn(out_dir: String, projection: ProjectionReport) -[FS, Env, Rand]> CLIError! {
     files.create_dir_all(out_dir) ?? return Err(CLIError.IO(err))
     if image_write_projection_report(out_dir, "", projection) == .Err(error) {
         return Err(CLIError.Other(error.message()))
@@ -736,7 +736,7 @@ cli_write_rejected_projection: fn(out_dir: String, projection: ProjectionReport)
 
 // The Hangar entry's output must be its verified content-addressed object,
 // with a real bin projection inside it.
-cli_verify_realized_hangar_package: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) CLIError! -[FS, Env, Time]> {
+cli_verify_realized_hangar_package: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> CLIError! {
     store_verify_hangar_object(verification, roots, entry) ?? return Err(CLIError.Other("{err}"))
     if entry.envelope.output_hash == "" {
         return Err(CLIError.Other("the Hangar entry has no canonical output digest"))

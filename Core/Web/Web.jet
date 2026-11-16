@@ -576,11 +576,11 @@ App: struct {
     // Serve on 127.0.0.1 until the process stops, on the port __app_port
     // chooses: `JET_APP_PORT`, else `port`, else 8080. One ready line names
     // the address once the socket listens.
-    serve: fn(self, port: Int?{None}) Never! -[Env, IO, Net, FS.Read, Time]> {
+    serve: fn(self, port: Int?{None}) -[Env, IO, Net, FS.Read, Time]> Never! {
         app_serve(self, __app_port(port))
     }
 
-    serve_on: fn(self, port: Int) Never! -[Env, IO, Net, FS.Read, Time]> {
+    serve_on: fn(self, port: Int) -[Env, IO, Net, FS.Read, Time]> Never! {
         app_serve(self, __app_port(Val(port)))
     }
 
@@ -598,7 +598,7 @@ App: struct {
     }
 
     // Answer the one connection `listener` accepts next.
-    serve_once: fn(self, listener: TCPListener) HTTPError! -[Net, FS.Read, Time]> {
+    serve_once: fn(self, listener: TCPListener) -[Net, FS.Read, Time]> HTTPError! {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
@@ -646,7 +646,7 @@ app: fn() -> App Never! {
 // `build` makes from it as `App.serve(port)` does. Settings that do not decode,
 // or a `build` that fails, stop the program before any socket binds
 // (app_settings, app_build_failure).
-serve: fn<Settings: Decode>(*, prefix: String, build: fn(Settings) -> App, port: Int?{None}) Never! -[Env, IO, Net, FS, Exec, Time]> {
+serve: fn<Settings: Decode>(*, prefix: String, build: fn(Settings) -> App, port: Int?{None}) -[Env, IO, Net, FS, Exec, Time]> Never! {
     settings: app_settings<Settings>(prefix)
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, app_build_failure("{err}"))
     app_serve(app, __app_port(port))
@@ -739,7 +739,7 @@ __app_dev: fn() -> Bool Never! {
 // program's own answers it. Stderr names the port and what chose it
 // (__app_port) before the ready line. The spans still queued for export when
 // serving stops are sent before it returns.
-priv app_serve: fn(app: App, chosen: AppPort) Never! -[Env, IO, Net, FS.Read, Time]> {
+priv app_serve: fn(app: App, chosen: AppPort) -[Env, IO, Net, FS.Read, Time]> Never! {
     dev: __app_dev()
     if dev {
         guard := app.__state.guard_edit()
@@ -2623,7 +2623,7 @@ priv app_trace_take: fn(export: AppTraceExport) -> [TraceSpan] Never! {
 }
 
 // The export task: every schedule delay, the queue goes out.
-priv app_trace_export_loop: fn(export: AppTraceExport) Never! -[Net, Time.Wait]> {
+priv app_trace_export_loop: fn(export: AppTraceExport) -[Net, Time.Wait]> Never! {
     loop {
         core.tasks.sleep(export.settings.delay_ms)
         app_trace_flush(export)
@@ -2633,7 +2633,7 @@ priv app_trace_export_loop: fn(export: AppTraceExport) Never! -[Net, Time.Wait]>
 // Sends the queued spans, one batch a request. A batch the collector does
 // not take with a 2xx is dropped and counted, so a collector that is down
 // never holds more than the queue's bound.
-priv app_trace_flush: fn(export: AppTraceExport) Never! -[Net, Time.Wait]> {
+priv app_trace_flush: fn(export: AppTraceExport) -[Net, Time.Wait]> Never! {
     loop {
         batch: app_trace_take(export)
         size: batch.len()

@@ -189,7 +189,7 @@ pkg_php_bind: fn(path: String, source: String, lib: String, cache: String) -[FS,
 }
 
 // `php -n -l`: any failing status is reported as a parse error.
-pkg_php_lint: fn(php: String, script: String) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_php_lint: fn(php: String, script: String) -[Exec, Time.Wait]> ForeignBindError! {
     if pkg_worker_run_tool([String]{php, "-n", "-l", script}, "php", ForeignLanguage.Php, true) == {
         .Ok(_) -> {}
         .Err(error) -> {

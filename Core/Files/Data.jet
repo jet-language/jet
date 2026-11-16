@@ -24,7 +24,7 @@ use {
 
 /// Read a local file loader's file as its payload; `core.data.snapshot` then
 /// parses and commits it. A failed read is recorded in the loader status.
-read: fn<T>(loader: &DataLoader<T>) DataError! -[FS.Read]> {
+read: fn<T>(loader: &DataLoader<T>) -[FS.Read]> DataError! {
     core.data.__read_file<T>(loader, fn(path) { Ok(files.read_bytes(path) ?? return Err("{err}")) })
 }
 
@@ -201,7 +201,7 @@ status: fn() -[FS, Env]> [DataStatus] Never! {
     rows
 }
 
-require_bridge: fn(provider: String) DataError! -[FS, Env]> {
+require_bridge: fn(provider: String) -[FS, Env]> DataError! {
     step: bridge_provider(provider) ?? return Err(core.data.data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
     facts: bridge_status(step)
     if facts.path == "available" -> return Ok()

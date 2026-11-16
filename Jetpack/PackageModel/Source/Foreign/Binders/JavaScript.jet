@@ -45,7 +45,7 @@ pkg_javascript_bind: fn(declaration_path: String, declarations: String, runtime_
 }
 
 // `node --check` parses the runtime module without running it.
-pkg_javascript_check_node: fn(path: String) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_javascript_check_node: fn(path: String) -[Exec, Time.Wait]> ForeignBindError! {
     if process.cmd([String]{PKG_JS_RUNTIME, "--check", path}).stdout(.Capture).stderr(.Capture).run() == {
         .Ok(receipt) -> {
             if receipt.success {

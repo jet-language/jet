@@ -12,7 +12,7 @@ publication_artifact_path: fn(repo: String, name: String, version: String) -> St
     Ok(files.join(files.join(files.join(repo, "artifacts"), name), version))
 }
 
-publication_ensure_real_directory: fn(path: String, label: String) IOError! -[FS, Env]> {
+publication_ensure_real_directory: fn(path: String, label: String) -[FS, Env]> IOError! {
     info: files.stat(path)
     if info.is_symlink || !info.is_dir {
         return Err(publication_read_error(.InvalidInput, path, "{label} is not a real directory"))
@@ -84,7 +84,7 @@ publication_snapshot_verified_artifact: fn(repo: String, entry: PublicationIndex
 // and the artifact is staged in a private sibling, re-hashed and renamed into
 // place. An existing artifact must hold the same bytes. A failure removes the
 // stage and any OCI referrer state this publish created.
-publication_ensure_real_directory_if_present: fn(path: String, label: String) IOError! -[FS, Env]> {
+publication_ensure_real_directory_if_present: fn(path: String, label: String) -[FS, Env]> IOError! {
     if files.stat(path) == {
         .Ok(_) -> { publication_ensure_real_directory(path, label) }
         .Err(error) -> {
@@ -170,7 +170,7 @@ publication_publish_snapshot: fn(repo: String, held: FoundationDirectoryAuthorit
     Ok(destination)
 }
 
-publication_publish_stage: fn(repo: String, source: String, name: String, version: String, actual: String, stage: FoundationDirectoryAuthority, snapshot: FoundationDirectoryAuthority) IOError! -[FS, Env, Time]> {
+publication_publish_stage: fn(repo: String, source: String, name: String, version: String, actual: String, stage: FoundationDirectoryAuthority, snapshot: FoundationDirectoryAuthority) -[FS, Env, Time]> IOError! {
     publication_stage_oci_sbom(repo, source, name, version, actual)
     stage.copy_tree_from(snapshot)
     if stage.tree_hash() != actual {

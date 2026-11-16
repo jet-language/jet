@@ -1788,7 +1788,7 @@ priv client_dial_exchange: fn(wire: &BuildWire, method: String, url: ClientURL, 
 // Connects the wire to `url`, through `proxy` when there is one, with TLS
 // configured by `tls` for an https URL. Each dial failure leaves its stage
 // and portable name on the wire for a capture to record.
-priv client_dial: fn(wire: &BuildWire, url: ClientURL, phases: ClientPhases, proxy: ClientURL?, tls: build_tls.ClientConfig) HTTPError! -[Net, Time.Wait]> {
+priv client_dial: fn(wire: &BuildWire, url: ClientURL, phases: ClientPhases, proxy: ClientURL?, tls: build_tls.ClientConfig) -[Net, Time.Wait]> HTTPError! {
     destination: proxy ?? url
     connect_end: client_until(phases.connect_ns, phases.end_ns)
     if connect_end <= rt.clock_mono_ns() {
@@ -2026,7 +2026,7 @@ priv client_take_u64: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // A TLS stream owns its socket until closed: close it so the peer sees
 // close_notify; the reply is already decided either way.
-priv client_close: fn(wire: &BuildWire) Never! -[Net, Time.Wait]> {
+priv client_close: fn(wire: &BuildWire) -[Net, Time.Wait]> Never! {
     if wire.tls == .Val(stream) {
         if stream.close() == {
             .Ok(_) -> {}
@@ -2036,7 +2036,7 @@ priv client_close: fn(wire: &BuildWire) Never! -[Net, Time.Wait]> {
 }
 
 // `CONNECT host:port` through an http proxy; any failure is Proxy.
-priv client_tunnel: fn(wire: &BuildWire, url: ClientURL) HTTPError! -[Net, Time.Wait]> {
+priv client_tunnel: fn(wire: &BuildWire, url: ClientURL) -[Net, Time.Wait]> HTTPError! {
     authority: "{url.host}:{url.port}"
     _: build_send(wire, "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: keep-alive\r\n\r\n".bytes()) ?? return Err(.Proxy{stage: "transport"})
     head: client_head(wire) ?? return Err(.Proxy{stage: "transport"})

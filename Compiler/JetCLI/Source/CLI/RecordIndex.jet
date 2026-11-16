@@ -248,7 +248,7 @@ jet_cli_record_index_decode: fn(raw: [U8], budget: U64) -> JetCLIRecordIndex Jet
     Ok(decoded)
 }
 
-jet_cli_record_index_remove_disposable: fn(project_root: String, path: String) JetCLIReadError! -[FS]> {
+jet_cli_record_index_remove_disposable: fn(project_root: String, path: String) -[FS]> JetCLIReadError! {
     parts := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
@@ -264,7 +264,7 @@ jet_cli_record_index_remove_disposable: fn(project_root: String, path: String) J
     _: held.remove(name) ?? return Err(err)
 }
 
-jet_cli_record_index_store_held: fn(index: JetCLIRecordIndex, held: JetCLIRootedDirectory, project_root: String, previous: [JetCLIRecordIndexEntry]) JetCLIReadError! -[FS, Env, Time.Wait]> {
+jet_cli_record_index_store_held: fn(index: JetCLIRecordIndex, held: JetCLIRootedDirectory, project_root: String, previous: [JetCLIRecordIndexEntry]) -[FS, Env, Time.Wait]> JetCLIReadError! {
     bytes: jet_cli_record_index_to_bytes(index)
     held.replace("index.jsonl", bytes, Val(0o600)) ?? return Err(err)
     loop entry in previous {
@@ -293,7 +293,7 @@ jet_cli_record_index_fresh_sequence: fn(index: JetCLIRecordIndex, entry: &&JetCL
     Ok(updated)
 }
 
-jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entry: &&JetCLIRecordIndexEntry, supersede: Bool{false}) JetCLIReadError! -[FS, Env, Time]> {
+jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entry: &&JetCLIRecordIndexEntry, supersede: Bool{false}) -[FS, Env, Time]> JetCLIReadError! {
     held: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
@@ -313,7 +313,7 @@ jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_ro
     index = candidate.move()
 }
 
-jet_cli_record_index_upsert_many_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entries: &&[JetCLIRecordIndexEntry]) JetCLIReadError! -[FS, Env, Time]> {
+jet_cli_record_index_upsert_many_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entries: &&[JetCLIRecordIndexEntry]) -[FS, Env, Time]> JetCLIReadError! {
     held: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)

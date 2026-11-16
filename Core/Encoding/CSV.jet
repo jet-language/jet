@@ -809,7 +809,7 @@ CSVWriter: struct<W: Writer> {
     }
 
     // Writes `buffer` to the sink, if it holds any bytes, and empties it.
-    drain: fn(&self) EncodingError! -[IO]> {
+    drain: fn(&self) -[IO]> EncodingError! {
         if self.buffer.len() == 0 {
             return
         }
@@ -820,7 +820,7 @@ CSVWriter: struct<W: Writer> {
         self.buffer.clear()
     }
 
-    close_record: fn(&self) EncodingError! -[IO]> {
+    close_record: fn(&self) -[IO]> EncodingError! {
         if !self.pending_crlf {
             return
         }
@@ -836,7 +836,7 @@ CSVWriter: struct<W: Writer> {
         self.pending_crlf = false
     }
 
-    write_inner: fn(&self, row: [String]) EncodingError! -[IO]> {
+    write_inner: fn(&self, row: [String]) -[IO]> EncodingError! {
         if self.finished -> return Err(self.error(.State, 0, "write called after finish"))
         self.close_record() ?? return Err(err)
         decoded := 0
@@ -890,7 +890,7 @@ CSVWriter: struct<W: Writer> {
         self.record_index += 1
     }
 
-    write: fn(&self, row: &&[String]) EncodingError! -[IO]> {
+    write: fn(&self, row: &&[String]) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         self.write_inner(row) ?? {
             self.terminal = Val(err)
@@ -899,7 +899,7 @@ CSVWriter: struct<W: Writer> {
     }
 
     // A held CRLF is written first, so a flushed file ends on a whole record.
-    flush: fn(&self) EncodingError! -[IO]> {
+    flush: fn(&self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         self.close_record() ?? {
             self.terminal = Val(err)
@@ -912,7 +912,7 @@ CSVWriter: struct<W: Writer> {
         }
     }
 
-    finish: fn(&self) EncodingError! -[IO]> {
+    finish: fn(&self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished {
             return

@@ -127,7 +127,7 @@ pkg_project_gate_declarations: fn(cache: &WorkspaceDeclarationCache, root: Strin
     Ok(declarations)
 }
 
-pkg_check_project_gate: fn(root: String, key: PolicyKey, site: String) PackageGateError! -[FS, Env]> {
+pkg_check_project_gate: fn(root: String, key: PolicyKey, site: String) -[FS, Env]> PackageGateError! {
     cache := WorkspaceDeclarationCache.new()
     declarations: pkg_project_gate_declarations(cache, root)
     if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) {
@@ -146,7 +146,7 @@ pkg_invocation_gate_key: fn(argument: String) -> PolicyKey? Never! {
     None
 }
 
-pkg_check_invocation_flags: fn(root: String, args: [String]) PackageGateError! -[FS, Env]> {
+pkg_check_invocation_flags: fn(root: String, args: [String]) -[FS, Env]> PackageGateError! {
     gated := false
     loop argument in args {
         if pkg_invocation_gate_key(argument) != None -> gated = true
@@ -179,7 +179,7 @@ pkg_is_forced_override: fn(package: PackageOverride) -> Bool Never! {
 }
 
 // Refuse before process locking.
-pkg_check_workspace_overlay_gates: fn(cache: &WorkspaceDeclarationCache, root: String, policy: OverlayPolicy) PackageGateError! -[FS, Env]> {
+pkg_check_workspace_overlay_gates: fn(cache: &WorkspaceDeclarationCache, root: String, policy: OverlayPolicy) -[FS, Env]> PackageGateError! {
     gated := false
     loop overlay in policy.overlays {
         loop package in overlay.packages {

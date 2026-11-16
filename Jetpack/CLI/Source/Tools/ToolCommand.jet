@@ -175,7 +175,7 @@ cli_tool_profile_switch: fn(verification: &StoreVerification, theme: Theme, pars
     EXIT_OK
 }
 
-cli_tool_activate_under_lock: fn(verification: &StoreVerification, generation: Int) CLIError! -[FS, Env, Exec, Time, Rand]> {
+cli_tool_activate_under_lock: fn(verification: &StoreVerification, generation: Int) -[FS, Env, Exec, Time, Rand]> CLIError! {
     _lock: cli_tool_profile_lock()
     cli_recover_tool_profile_state(verification)
     cli_activate_tool_generation_locked(verification, generation)
@@ -392,7 +392,7 @@ cli_tool_install: fn(verification: &StoreVerification, cache: &WorkspaceDeclarat
     EXIT_OK
 }
 
-cli_report_tool_install_error: fn(theme: Theme, error: CLIError) Never! -[IO, Time.Wait]> {
+cli_report_tool_install_error: fn(theme: Theme, error: CLIError) -[IO, Time.Wait]> Never! {
     if error == {
         .ManagedTool(message) -> {
             theme.error_coded("E1340", message, "the tool is managed by jetpack and its projected bytes are read-only", "run `jetpack update tools -y` to move the declarative pin to the installed tool")
@@ -464,7 +464,7 @@ cli_reject_unavailable_provider: fn(theme: Theme, raw: String) -[IO, Time.Wait]>
     Val(EXIT_USAGE)
 }
 
-cli_report_collide: fn(theme: Theme, bin: String, job: String, path: String, raw: String) Never! -[IO, Time.Wait]> {
+cli_report_collide: fn(theme: Theme, bin: String, job: String, path: String, raw: String) -[IO, Time.Wait]> Never! {
     name: files.basename(path)
     rel: if name == "" -> path else -> "./{name}"
     theme.error_coded(
@@ -495,7 +495,7 @@ cli_find_job_collision: fn(dir: String, bin: String) -[FS]> ToolJobCollision? Ne
     None
 }
 
-cli_collect_jet_files: fn(dir: String, out: &[String], depth: Int) Never! -[FS]> {
+cli_collect_jet_files: fn(dir: String, out: &[String], depth: Int) -[FS]> Never! {
     if depth > 4 {
         return
     }
@@ -654,7 +654,7 @@ cli_check_user_tools_drift: fn(verification: &StoreVerification, theme: Theme, p
 }
 
 // Pin each drifted tool to the identity actually installed.
-cli_move_tool_pins: fn(drifts: [ToolDrift]) CLIError! -[FS, Env, Time]> {
+cli_move_tool_pins: fn(drifts: [ToolDrift]) -[FS, Env, Time]> CLIError! {
     _lock: cli_tool_profile_lock()
     manifest := cli_read_tool_manifest()
     loop drift in drifts {
@@ -670,7 +670,7 @@ cli_move_tool_pins: fn(drifts: [ToolDrift]) CLIError! -[FS, Env, Time]> {
 }
 
 // Point each drifted tool's realization input back at its pin.
-cli_restore_tool_pins: fn(drifts: [ToolDrift]) CLIError! -[FS, Env, Time]> {
+cli_restore_tool_pins: fn(drifts: [ToolDrift]) -[FS, Env, Time]> CLIError! {
     _lock: cli_tool_profile_lock()
     manifest := cli_read_tool_manifest()
     loop drift in drifts {
@@ -683,7 +683,7 @@ cli_restore_tool_pins: fn(drifts: [ToolDrift]) CLIError! -[FS, Env, Time]> {
     cli_write_tool_manifest(manifest)
 }
 
-cli_render_tool_update_plan: fn(theme: Theme, updates: [ToolSourceUpdate]) Never! -[IO, Time.Wait]> {
+cli_render_tool_update_plan: fn(theme: Theme, updates: [ToolSourceUpdate]) -[IO, Time.Wait]> Never! {
     name_w := 8
     loop update in updates {
         if update.name.len() > name_w -> name_w = update.name.len()

@@ -120,7 +120,7 @@ HTTPMux :: struct {
 
 impl HTTPMux {
     // `mux.get(pattern, handler)` and its sibling verbs land here.
-    __route :: fn(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) Never! -[Net]> {
+    __route :: fn(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -[Net]> Never! {
         parsed :: __route_parse(pattern)
         if parsed.problem != "" -> panic("E2805: invalid HTTP route `{pattern}`: {parsed.problem}")
         shape :: __route_shape(parsed.segments)
@@ -132,7 +132,7 @@ impl HTTPMux {
     }
 
     // `mux.middleware(layer)`: the first registered layer is the outermost.
-    __middleware :: fn(self, middleware: ^fn(HTTPHandler) -[Net]> HTTPHandler) Never! -[Net]> {
+    __middleware :: fn(self, middleware: ^fn(HTTPHandler) -[Net]> HTTPHandler) -[Net]> Never! {
         guard := self.__state.guard_edit()
         &guard.value.layers.push(Shared{__HTTPLayerCell{wrap: ^middleware}})
     }
@@ -244,13 +244,13 @@ mux :: fn() -[Net]> HTTPMux Never! {
     HTTPMux{__state: Shared{__HTTPMuxState{routes: [__HTTPRoute]{}, layers: [Shared<__HTTPLayerCell>]{}, request_seq: 0}}}
 }
 
-serve_once :: fn(addr: String, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
+serve_once :: fn(addr: String, mux: HTTPMux) -[Net, FS.Read, Time]> HTTPError! {
     listener :: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
     serve_once_listener(listener, mux) ?? return Err(err)
     Ok()
 }
 
-serve_once_listener :: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
+serve_once_listener :: fn(listener: TCPListener, mux: HTTPMux) -[Net, FS.Read, Time]> HTTPError! {
     stream :: listener.accept(deadline: Duration{ns: C_ACCEPT_ONCE_NS}) ?? {
         if __accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})
@@ -259,7 +259,7 @@ serve_once_listener :: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net,
     Ok()
 }
 
-__serve_entry :: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) HTTPError! -[Net, FS.Read, Time]> {
+__serve_entry :: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net, FS.Read, Time]> HTTPError! {
     server :: __bind_entry(addr, mux, tls, deadline) ?? return Err(err)
     _ :: server.serve() ?? return Err(err)
     Ok()
@@ -285,7 +285,7 @@ __http_serve_entry :: fn(mux: HTTPMux, deadline: Duration) -[Net]> HTTPServer Ne
     __bind_entry("127.0.0.1:8080", mux, None, Val(deadline)) ?? panic("HTTP server bind failed: {err}")
 }
 
-__static_files_entry :: fn(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! -[Net, FS.Read]> {
+__static_files_entry :: fn(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) -[Net, FS.Read]> Never! {
     mount :: __HTTPStaticMount{root: root, index: index ?? true, dotfiles: dotfiles ?? false, follow_links: follow_links ?? false}
     base :: __trim_trailing_slashes(prefix)
     mux.__route("GET", "{base}/*jet_static_path", (request: HTTPRequest) -> Ok(__static_serve(mount, request)))
@@ -324,7 +324,7 @@ static_file_range :: fn(request: HTTPRequest, path: String, content_type: String
     Ok(partial)
 }
 
-static_files :: fn(mux: HTTPMux, prefix: String, root: String) Never! -[Net, FS.Read]> {
+static_files :: fn(mux: HTTPMux, prefix: String, root: String) -[Net, FS.Read]> Never! {
     __static_files_entry(mux, prefix, root, None, None, None)
 }
 
@@ -356,7 +356,7 @@ cors_policy :: fn(origins: [String] | HTTPCorsOrigins, methods: [String]{[String
     }
 }
 
-cors :: fn(mux: HTTPMux, policy: HTTPCorsPolicy) Never! -[Net, FS.Read]> {
+cors :: fn(mux: HTTPMux, policy: HTTPCorsPolicy) -[Net, FS.Read]> Never! {
     mux.__middleware((next: HTTPHandler) -> __cors_handler(policy, next))
 }
 
@@ -382,7 +382,7 @@ access_log_path :: fn(path: String) -> String Never! {
     String.from_bytes(raw.slice(0, end)) ?? panic("query separator is not a UTF-8 boundary")
 }
 
-request_id :: fn(mux: HTTPMux) Never! -[Net, FS.Read]> {
+request_id :: fn(mux: HTTPMux) -[Net, FS.Read]> Never! {
     mux.__middleware((next: HTTPHandler) -> __request_id_handler(next))
 }
 
@@ -865,7 +865,7 @@ __wire_fill :: fn(stream: TCPStream, &wire: __HTTPWire) -[Net]> Bool __HTTPFault
 }
 
 // Fill until `need` bytes are buffered; a short stream is a bad request.
-__wire_need :: fn(stream: TCPStream, &wire: __HTTPWire, need: Int) __HTTPFault! -[Net]> {
+__wire_need :: fn(stream: TCPStream, &wire: __HTTPWire, need: Int) -[Net]> __HTTPFault! {
     loop wire.buffer.len() < need {
         more :: __wire_fill(stream, &wire) ?? return Err(err)
         if !more -> return Err(.Reply(400))

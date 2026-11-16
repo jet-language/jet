@@ -72,7 +72,7 @@ impl Condition {
     notify_all: fn(self) Never! { core.tasks.__condition_notify_all(self) }
 }
 
-yield_now: fn() Never! -[Time.Wait]> { host_yield() }
+yield_now: fn() -[Time.Wait]> Never! { host_yield() }
 
 /// The running task's identity. Two reads by one task are equal and differ
 /// from every other running task's; a finished task's identity can be reused.
@@ -161,7 +161,7 @@ Semaphore: struct {
     }
 
     // After `limit`, marks `expired` and wakes every waiter.
-    priv expire: fn(self, expired: Shared<Bool>, limit: time.Duration) Never! -[Time.Wait]> {
+    priv expire: fn(self, expired: Shared<Bool>, limit: time.Duration) -[Time.Wait]> Never! {
         timeout(limit)
         guard := self.count.guard_edit()
         flag := expired.guard_edit()
@@ -262,9 +262,9 @@ is_ready: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_ready() }
 
 delay_ms: fn<T>(rx: Receiver<T>) -> Int Never! { rx.delay_ms() }
 
-timeout: fn(delay: time.Duration) Never! -[Time.Wait]> { _: recv(core.tasks.after(delay, 0)) }
+timeout: fn(delay: time.Duration) -[Time.Wait]> Never! { _: recv(core.tasks.after(delay, 0)) }
 
-sleep: fn(ms: Int) Never! -[Time.Wait]> {
+sleep: fn(ms: Int) -[Time.Wait]> Never! {
     delay := ms
     if delay < 0 -> delay = 0
     host_sleep_ms(delay)
@@ -342,7 +342,7 @@ notify: fn(state: TaskState) -> TaskState Never! {
 
 start: fn<T>(rx: Receiver<T>) -> Receiver<T> Never! { rx.copy() }
 
-run: fn() Never! -[Time.Wait]> { yield_now() }
+run: fn() -[Time.Wait]> Never! { yield_now() }
 
 is_closed: fn(state: TaskState) -> Bool Never! { state.closed }
 

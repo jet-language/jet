@@ -135,7 +135,7 @@ pkg_cffi_provenance_value: fn(provenance: ForeignProvenance, name: String) -> St
     Ok(value)
 }
 
-pkg_cffi_verify_artifact: fn(path: String, digest: String) ForeignBridgeError! -[FS]> {
+pkg_cffi_verify_artifact: fn(path: String, digest: String) -[FS]> ForeignBridgeError! {
     actual: pkg_bridge_sha_file(path)
     if actual != digest {
         return Err(pkg_bridge_error("loaded artifact `{path}` changed (expected {digest}, found {actual})"))
@@ -225,7 +225,7 @@ pkg_cffi_read_boundary_facts: fn(cache: String, expected_language: ForeignLangua
 }
 
 // One `<path>:sha256-<digest>` loaded-artifact identity.
-pkg_cffi_verify_loaded_artifact: fn(provenance_path: String, item: String, artifact_digests: [String]) ForeignBridgeError! -[FS]> {
+pkg_cffi_verify_loaded_artifact: fn(provenance_path: String, item: String, artifact_digests: [String]) -[FS]> ForeignBridgeError! {
     parts: item.cut_last(":sha256-") ?? return Err(pkg_bridge_error("foreign loaded artifact identity is malformed"))
     pkg_cffi_verify_artifact(pkg_cffi_resolve_provenance_artifact(provenance_path, parts.before), parts.after)
     if artifact_digests.len() > 0 && !artifact_digests.contains(parts.after) {

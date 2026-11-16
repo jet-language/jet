@@ -502,7 +502,7 @@ provider_native_output_path: fn(store_dir: String, facts: NativeReleaseFacts) ->
 }
 
 // The fixture artifact, else the remote asset, staged at `destination`.
-provider_native_fetch_artifact: fn(facts: NativeReleaseFacts, destination: String) RegistryError! -[FS, Env, Net, Time.Wait]> {
+provider_native_fetch_artifact: fn(facts: NativeReleaseFacts, destination: String) -[FS, Env, Net, Time.Wait]> RegistryError! {
     if facts.fixture_artifact == {
         .Val(source) -> return provider_native_copy_bounded_file(source, destination)
         .None -> {}
@@ -512,7 +512,7 @@ provider_native_fetch_artifact: fn(facts: NativeReleaseFacts, destination: Strin
 }
 
 // A catalog recipe's `file://` artifact is copied; any other URL is fetched.
-provider_native_fetch_declared_artifact: fn(url: String, destination: String) RegistryError! -[FS, Env, Net, Time.Wait]> {
+provider_native_fetch_declared_artifact: fn(url: String, destination: String) -[FS, Env, Net, Time.Wait]> RegistryError! {
     if url.starts_with("file://") {
         return provider_native_copy_bounded_file(url.removeprefix("file://"), destination)
     }
@@ -545,7 +545,7 @@ provider_native_content_length: fn(response: HTTPResponse, url: String) -> Int? 
     Ok(Val(length))
 }
 
-provider_native_fetch_remote_artifact: fn(url: String, destination: String, label: String) RegistryError! -[FS, Env, Net, Time.Wait]> {
+provider_native_fetch_remote_artifact: fn(url: String, destination: String, label: String) -[FS, Env, Net, Time.Wait]> RegistryError! {
     provider_ensure_network_allowed(label)
     response: provider_native_get(url, label)
     if provider_native_content_length(response, url) == {
@@ -570,7 +570,7 @@ provider_native_fetch_remote_artifact: fn(url: String, destination: String, labe
     provider_native_validate_artifact_file(destination, label)
 }
 
-provider_native_validate_artifact_file: fn(destination: String, label: String) RegistryError! -[FS]> {
+provider_native_validate_artifact_file: fn(destination: String, label: String) -[FS]> RegistryError! {
     stat: files.stat(destination) ?? return Err(RegistryError.Reason("could not stat {label}: {err}"))
     if stat.is_symlink || !stat.is_file || stat.size == 0 {
         return Err(RegistryError.Reason("{label} is not a non-empty regular file"))
@@ -582,7 +582,7 @@ provider_native_validate_artifact_file: fn(destination: String, label: String) R
 
 // Copy a local artifact into a staging file that must not exist yet. Its
 // failures always read as native release failures, as in Rust.
-provider_native_copy_bounded_file: fn(source: String, destination: String) RegistryError! -[FS]> {
+provider_native_copy_bounded_file: fn(source: String, destination: String) -[FS]> RegistryError! {
     stat: files.stat(source) ?? return Err(RegistryError.Provider(provider_native_error("could not stat fixture artifact: {err}")))
     if stat.is_symlink || !stat.is_file || stat.size == 0 {
         return Err(RegistryError.Provider(provider_native_error("fixture artifact is not a non-empty regular file")))
@@ -652,13 +652,13 @@ provider_native_read_bounded_file: fn(path: String, limit: Int) -[FS]> [U8] Regi
 }
 
 // Add the 0755 bits to the staged artifact.
-provider_native_make_executable: fn(path: String) RegistryError! -[FS]> {
+provider_native_make_executable: fn(path: String) -[FS]> RegistryError! {
     stat: files.stat(path) ?? return Err(RegistryError.Reason("could not stat executable: {err}"))
     files.set_mode(path, (stat.mode).bit_or(0o755)) ?? return Err(RegistryError.Reason("could not mark executable: {err}"))
 }
 
 // Best-effort removal of an abandoned staging tree or file.
-provider_native_remove_staging: fn(path: String) Never! -[FS]> {
+provider_native_remove_staging: fn(path: String) -[FS]> Never! {
     stat: files.stat(path) ?? return
     if stat.is_dir && !stat.is_symlink -> provider_remove_tree_quiet(path) else {
         files.remove(path).drop("an abandoned staging file is swept by later cleanup")

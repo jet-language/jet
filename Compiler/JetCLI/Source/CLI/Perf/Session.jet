@@ -355,7 +355,7 @@ JetCLIPerfSessionObserved: struct {
 
 // One poll of the process tree under `root` at `at` ns into the session
 // (`poll_observe_snapshot`).
-jet_cli_perf_session_observe: fn(observed: &JetCLIPerfSessionObserved, root: Int, at: U64) Never! -[FS.Read, Env, Time]> {
+jet_cli_perf_session_observe: fn(observed: &JetCLIPerfSessionObserved, root: Int, at: U64) -[FS.Read, Env, Time]> Never! {
     if jet_cli_perf_live_read(root) == .Ok(live) {
         jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: at, live: live})
     }

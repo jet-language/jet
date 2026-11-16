@@ -429,7 +429,7 @@ priv PushFCMGrant: struct {
 /// Sets up the services `settings` names, reading each one's key, in place
 /// of the services set up before. Fails, keeping those, when a key can't be
 /// read or is not the kind its service takes.
-push_configure: fn(settings: PushSettings) PushError! -[FS.Read, Net]> {
+push_configure: fn(settings: PushSettings) -[FS.Read, Net]> PushError! {
     rng := push_rng() ?? return Err(err)
     senders := PushSenders{apns: None, apns_key: [U8]{}, apns_token: "", apns_until: 0, fcm: None, fcm_key: "", fcm_token: "", fcm_until: 0, web: None, web_key: None}
     if settings.apns == .Val(apns) {

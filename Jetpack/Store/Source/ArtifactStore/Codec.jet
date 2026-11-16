@@ -203,17 +203,17 @@ store_artifact_same_file: fn(left: files.Stat, right: files.Stat) -> Bool Never!
 // Replace `path` atomically: a new temporary sibling, written and synced,
 // renamed over the target, then the directory synced. The temporary file is
 // removed when any step fails.
-store_artifact_atomic_write: fn(path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Rand]> {
+store_artifact_atomic_write: fn(path: String, bytes: [U8]) -[FS, Env, Rand]> ArtifactStoreError! {
     store_artifact_replace_file(path, bytes, true)
 }
 
 // `store_artifact_atomic_write` without the disk syncs: readers still see the
 // old file or the whole new one, but a crash may lose the new one.
-store_artifact_replace_unsynced: fn(path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Rand]> {
+store_artifact_replace_unsynced: fn(path: String, bytes: [U8]) -[FS, Env, Rand]> ArtifactStoreError! {
     store_artifact_replace_file(path, bytes, false)
 }
 
-store_artifact_replace_file: fn(path: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS, Env, Rand]> {
+store_artifact_replace_file: fn(path: String, bytes: [U8], durable: Bool) -[FS, Env, Rand]> ArtifactStoreError! {
     parent: files.dirname(path)
     file_name: files.basename(path)
     if path == "" || path == "/" {
@@ -232,7 +232,7 @@ store_artifact_replace_file: fn(path: String, bytes: [U8], durable: Bool) Artifa
 }
 
 // #3593: exclusive create Refuse and FileWriter.write_all/fsync are provider gates.
-store_artifact_replace_with: fn(temporary: String, path: String, parent: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS]> {
+store_artifact_replace_with: fn(temporary: String, path: String, parent: String, bytes: [U8], durable: Bool) -[FS]> ArtifactStoreError! {
     writer := files.create(temporary, if_exists: .Refuse)
     writer.write_bytes(bytes)
     if durable -> writer.fsync()
@@ -241,7 +241,7 @@ store_artifact_replace_with: fn(temporary: String, path: String, parent: String,
     if durable -> store_artifact_sync_dir(parent)
 }
 
-store_artifact_set_executable: fn(path: String, executable: Bool) ArtifactStoreError! -[FS]> {
+store_artifact_set_executable: fn(path: String, executable: Bool) -[FS]> ArtifactStoreError! {
     info: files.stat(path)
     mode: info.mode
     updated_mode: if executable -> (mode).bit_or(0o111) else -> mode - ((mode).bit_and(0o111))
@@ -250,7 +250,7 @@ store_artifact_set_executable: fn(path: String, executable: Bool) ArtifactStoreE
 
 // Create `path`, refusing an existing one. Lock and lease files mean
 // something only while their owner runs, so their bytes are not synced.
-store_artifact_create_new: fn(path: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
+store_artifact_create_new: fn(path: String, bytes: [U8]) -[FS]> ArtifactStoreError! {
     writer := files.create(path, if_exists: .Refuse)
     writer.write_bytes(bytes)
     close(writer)
@@ -258,7 +258,7 @@ store_artifact_create_new: fn(path: String, bytes: [U8]) ArtifactStoreError! -[F
 
 // Append records to a regular file (the journal), synced with its directory
 // when `durable`.
-store_artifact_append: fn(path: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS]> {
+store_artifact_append: fn(path: String, bytes: [U8], durable: Bool) -[FS]> ArtifactStoreError! {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_file {
@@ -279,7 +279,7 @@ store_artifact_append: fn(path: String, bytes: [U8], durable: Bool) ArtifactStor
 // only when `durable`: the layout directories and the parents of cache
 // entries are recreated by any later run, and on a busy disk each sync waits
 // for a journal commit (8 of them took 22.5 s opening one cold store).
-store_artifact_ensure_dir: fn(path: String, durable: Bool) ArtifactStoreError! -[FS]> {
+store_artifact_ensure_dir: fn(path: String, durable: Bool) -[FS]> ArtifactStoreError! {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink {
@@ -310,7 +310,7 @@ store_artifact_ensure_dir: fn(path: String, durable: Bool) ArtifactStoreError! -
 
 // Make earlier renames and creations inside `path` durable. A platform that
 // cannot sync a directory reports InvalidInput, which is not a failure.
-store_artifact_sync_dir: fn(path: String) ArtifactStoreError! -[FS]> {
+store_artifact_sync_dir: fn(path: String) -[FS]> ArtifactStoreError! {
     if files.fsync(path) == {
         .Ok(_) -> {}
         .Err(error) -> {

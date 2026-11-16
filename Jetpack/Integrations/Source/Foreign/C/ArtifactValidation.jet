@@ -25,7 +25,7 @@ use {
 }
 
 // Validate the artifacts behind one directly linked library.
-pkg_cffi_validate_link_inputs: fn(lib: String, project_root: String, target: String, flags: LinkFlags, overlay_overrides: [COverlayOverride], entry: String?) CFFIError! -[FS, Env, Exec, Time.Wait]> {
+pkg_cffi_validate_link_inputs: fn(lib: String, project_root: String, target: String, flags: LinkFlags, overlay_overrides: [COverlayOverride], entry: String?) -[FS, Env, Exec, Time.Wait]> CFFIError! {
     bindings_root: files.join(project_root, SOURCE_ROOT_DIR)
     cpp_prefix: (ForeignLanguage.Cpp).bridge_prefix()
     if lib.starts_with(cpp_prefix) {
@@ -51,7 +51,7 @@ pkg_cffi_validate_link_inputs: fn(lib: String, project_root: String, target: Str
     pkg_cffi_validate_c_binding(lib, project_root, overlay_overrides, entry)
 }
 
-pkg_cffi_validate_com_binding: fn(lib: String, directory: String, archive: String) CFFIError! -[FS, Env, Exec, Time.Wait]> {
+pkg_cffi_validate_com_binding: fn(lib: String, directory: String, archive: String) -[FS, Env, Exec, Time.Wait]> CFFIError! {
     generated_source: files.join(directory, "{lib}.jet")
     provenance: files.join(directory, "{lib}.provenance")
     pkg_com_validate_provenance(provenance, generated_source, archive, lib) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance, "jet_com_{lib}", "the COM binding is invalid ({err.message()})")))
@@ -59,7 +59,7 @@ pkg_cffi_validate_com_binding: fn(lib: String, directory: String, archive: Strin
 
 // A generated archive must hash to the digest its binding provenance
 // recorded, and so must every recorded source and local archive input.
-pkg_cffi_validate_generated_artifact: fn(provenance_path: String, archive: String, lib: String) CFFIError! -[FS]> {
+pkg_cffi_validate_generated_artifact: fn(provenance_path: String, archive: String, lib: String) -[FS]> CFFIError! {
     if !files.is_file(provenance_path) {
         return
     }
@@ -77,7 +77,7 @@ pkg_cffi_validate_generated_artifact: fn(provenance_path: String, archive: Strin
 CFFI_PROVENANCE_SOURCE_ROLES: [String]{"source", "runtime", "declaration", "worker", "link"}
 
 // Every recorded source role still hashes to its recorded digest.
-pkg_cffi_validate_provenance_source_inputs: fn(provenance: ForeignProvenance, provenance_path: String, lib: String) CFFIError! -[FS]> {
+pkg_cffi_validate_provenance_source_inputs: fn(provenance: ForeignProvenance, provenance_path: String, lib: String) -[FS]> CFFIError! {
     loop role in CFFI_PROVENANCE_SOURCE_ROLES {
         digest_key: "{role}-sha256"
         if provenance.fields.get(role) == None {
@@ -103,7 +103,7 @@ pkg_cffi_validate_provenance_source_inputs: fn(provenance: ForeignProvenance, pr
 
 // Every recorded local archive still hashes to its recorded digest; an
 // unreadable archive compares as `missing`.
-pkg_cffi_validate_provenance_archive_inputs: fn(provenance: ForeignProvenance, provenance_path: String, lib: String) CFFIError! -[FS]> {
+pkg_cffi_validate_provenance_archive_inputs: fn(provenance: ForeignProvenance, provenance_path: String, lib: String) -[FS]> CFFIError! {
     paths: provenance.fields.get("linked-archive") ?? [String]{}
     digests: provenance.fields.get("linked-archive-sha256") ?? [String]{}
     if paths.len() != digests.len() {
@@ -124,7 +124,7 @@ pkg_cffi_validate_provenance_archive_inputs: fn(provenance: ForeignProvenance, p
 // A C binding's cache must match the identity and cache digest its
 // provenance recorded, and a declared local archive must export every
 // symbol the cache binds (after overlay replacements).
-pkg_cffi_validate_c_binding: fn(lib: String, project_root: String, overlay_overrides: [COverlayOverride], entry: String?) CFFIError! -[FS, Env, Exec, Time.Wait]> {
+pkg_cffi_validate_c_binding: fn(lib: String, project_root: String, overlay_overrides: [COverlayOverride], entry: String?) -[FS, Env, Exec, Time.Wait]> CFFIError! {
     cache: pkg_cffi_binding_cache_file(project_root, ForeignLanguage.C, lib)
     if !files.is_file(cache) {
         return
@@ -170,7 +170,7 @@ pkg_cffi_validate_c_binding: fn(lib: String, project_root: String, overlay_overr
     return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "the local archive `{input.path}` is missing bound export symbol(s): {missing.join(", ")}; the binding is stale")))
 }
 
-pkg_cffi_validate_c_binding_provenance: fn(lib: String, project_root: String, cache: String, provenance_path: String, entry: String?) CFFIError! -[FS, Env, Exec, Time.Wait]> {
+pkg_cffi_validate_c_binding_provenance: fn(lib: String, project_root: String, cache: String, provenance_path: String, entry: String?) -[FS, Env, Exec, Time.Wait]> CFFIError! {
     provenance: pkg_bridge_read_provenance(provenance_path) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the C binding provenance is invalid ({err.message})")))
     header: provenance.value("source") ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the C binding provenance has no source header")))
     expected: pkg_cffi_c_binding_identity_with_entry(project_root, lib, header, cache, entry) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(provenance_path, lib, "the C binding inputs could not be read ({err.message})")))
@@ -202,7 +202,7 @@ pkg_cffi_binding_symbols: fn(source: String) -> [String] Never! {
 
 // A generated C++ archive may only need symbols the local archives of its
 // declared libraries export (C++ runtime and standard-library symbols aside).
-pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive: String, target: String, flags: LinkFlags) CFFIError! -[FS, Env, Exec, Time.Wait]> {
+pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive: String, target: String, flags: LinkFlags) -[FS, Env, Exec, Time.Wait]> CFFIError! {
     generated_name: "{(ForeignLanguage.Cpp).bridge_prefix()}{actual}"
     libraries := [String]{}
     loop name in flags.link_names {

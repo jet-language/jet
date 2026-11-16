@@ -91,7 +91,7 @@ store_perf: fn() -[FS]> String Err! {
 // Samples the process for the session's seconds with call graph `graph`,
 // writes the symbolized samples to perf.script and analyzes them; a failing
 // step ends the program with its status, as `set -e` does.
-record: fn(session: Session, graph: String) Err! -[Env, Exec, FS, IO]> {
+record: fn(session: Session, graph: String) -[Env, Exec, FS, IO]> Err! {
     out: session.out
     term.eprint("Sampling PID {session.pid} for {session.seconds}s ({graph}); output: {out}")
     data: files.join(out, "perf.data")

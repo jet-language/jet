@@ -30,7 +30,7 @@ trust_semantic_lock_load: fn(project: String) -[FS]> SemanticLockFile? {
 // Rust `atomic_commit`: revalidate, then splice the semantic sections into
 // `.jet/lock` atomically under the project lock. A missing or unstamped
 // machine half gains a build stamp first.
-trust_semantic_lock_atomic_commit: fn(project: String, lock: SemanticLockFile) TrustError! -[FS, Env, Exec, Time, Time.Wait]> {
+trust_semantic_lock_atomic_commit: fn(project: String, lock: SemanticLockFile) -[FS, Env, Exec, Time, Time.Wait]> TrustError! {
     trust_revalidate_semantic_lock(lock)
     path: trust_semantic_lock_live_path(project)
     _guard: env_runtime_project_lock(project, SEMANTIC_LOCK_SCOPE)

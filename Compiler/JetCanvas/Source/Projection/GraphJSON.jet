@@ -526,7 +526,7 @@ ledger_function_visibility: fn(ledger: NameLedger, module_index: Int, name: Stri
 }
 
 // Declarations are public by default, so the signature carries no visibility
-// marker.
+// marker. The effect row follows the parameters and precedes the result.
 function_signature_text: fn(tables: ASTTables, src: String, f: Func) -> String Never! {
     params: loop p in f.params -> {
         text := "{p.name}: {type_name(p.ty)}"
@@ -535,16 +535,16 @@ function_signature_text: fn(tables: ASTTables, src: String, f: Func) -> String N
         }
         text
     }
-    out := "{f.name}: fn({params.join(", ")}) {func_return_name(f)}"
-    if {
-        f.effect_via == .Val(via) -> { out = "{out} -[via {via.name}]>" }
+    row: if {
+        f.effect_via == .Val(via) -> " -[via {via.name}]>"
         f.declared_effects == .Val(entries) -> {
             names: loop entry in entries -> entry.name
-            out = "{out} -[{names.join(", ")}]>"
+            " -[{names.join(", ")}]>"
         }
-        f.is_pure -> { out = "{out} -[]>" }
+        f.is_pure -> " -[]>"
+        else -> ""
     }
-    out
+    "{f.name}: fn({params.join(", ")}){row} {func_return_name(f)}"
 }
 
 doc_comment_before: fn(src: String, name_start: Int) -> String Never! {

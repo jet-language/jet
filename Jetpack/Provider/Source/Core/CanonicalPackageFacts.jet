@@ -59,7 +59,7 @@ provider_load_canonical_facts: fn(dir: String, marker: String) -[FS, Env]> Packa
     }
 }
 
-provider_collect_canonical_packages: fn(repo: String, members: [MemberRef], requested: String, out: &[CanonicalPackage]) ProviderReason! -[FS, Env]> {
+provider_collect_canonical_packages: fn(repo: String, members: [MemberRef], requested: String, out: &[CanonicalPackage]) -[FS, Env]> ProviderReason! {
     seen := [String]{}
     loop member in members {
         relative: if member == {
@@ -89,7 +89,7 @@ provider_collect_canonical_packages: fn(repo: String, members: [MemberRef], requ
     }
 }
 
-provider_collect_one_canonical_package: fn(path: String, requested: String, seen: &[String], out: &[CanonicalPackage]) ProviderReason! -[FS, Env]> {
+provider_collect_one_canonical_package: fn(path: String, requested: String, seen: &[String], out: &[CanonicalPackage]) -[FS, Env]> ProviderReason! {
     if seen.contains(path) {
         return
     }
@@ -173,7 +173,7 @@ provider_push_be: fn(out: &[U8], value: Int, width: Int) Never! {
     }
 }
 
-provider_collect_core_files: fn(root: String, relative: String, out: &[(relative: String, path: String)]) ProviderReason! -[FS]> {
+provider_collect_core_files: fn(root: String, relative: String, out: &[(relative: String, path: String)]) -[FS]> ProviderReason! {
     current: if relative == "" -> root else -> files.join(root, relative)
     entries: files.list_dir(current) ?? return Err(ProviderReason{message: "{err}"})
     loop entry in entries {
@@ -327,7 +327,7 @@ provider_is_contained_relative: fn(path: String) -> Bool Never! {
 
 // The core source root and every node beneath it are real directories or
 // regular files.
-provider_validate_core_source_tree: fn(root: String) ProviderReason! -[FS]> {
+provider_validate_core_source_tree: fn(root: String) -[FS]> ProviderReason! {
     info: files.stat(root) ?? return Err(ProviderReason{message: "{err}"})
     if info.is_symlink || !info.is_dir {
         return Err(ProviderReason{message: "core source root is not a real directory: {root}"})

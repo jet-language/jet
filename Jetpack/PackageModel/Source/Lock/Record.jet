@@ -114,7 +114,7 @@ pkg_lock_load_or_empty: fn(project_root: String) -[FS]> LockFile {
 // Publish one complete canonical serialization without exposing a partially
 // written file. The size check runs before any temporary exists, so a
 // rejected lock never replaces the last good lock or leaves scratch bytes.
-pkg_lock_write_atomically: fn(project_root: String, contents: [U8]) LockError! -[FS, Env, Time]> {
+pkg_lock_write_atomically: fn(project_root: String, contents: [U8]) -[FS, Env, Time]> LockError! {
     path: pkg_lock_file_path(project_root)
     if contents.len() > PKG_MAX_LOCK_BYTES {
         return Err(LockError.Invalid("internal error: refusing to write project lock `{path}`: serialized lock is {contents.len()} bytes, over the 1 MiB limit"))
@@ -193,7 +193,7 @@ pkg_lock_envelope_output_is: fn(package: LockedPackage, output_hash: String) -> 
 // complete closure record, creating the lock when the project has none. This
 // entry is the trust root a later offline replay matches before reusing the
 // Hangar copy. Upserts by package name.
-pkg_lock_record_nix_realization: fn(project_root: String, name: String, version: String, reference_input: String, output: String, nix_closure: NixClosureRecord, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+pkg_lock_record_nix_realization: fn(project_root: String, name: String, version: String, reference_input: String, output: String, nix_closure: NixClosureRecord, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
     nix_closure.validate()
     envelope.validate_nix_catalog()
     if nix_closure.output != output || envelope.output_hash != output {
@@ -249,7 +249,7 @@ pkg_lock_reference_source_name: fn(reference: String) -> String Never! {
 // Hangar projection that supplied the generated binding. Upserting by
 // foreign dependency name keeps a provider change visible and preserves the
 // receipt only when the identity and envelope are unchanged.
-pkg_lock_record_foreign_realization: fn(project_root: String, name: String, version: String, language: ForeignLanguage, reference: String, output: String, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+pkg_lock_record_foreign_realization: fn(project_root: String, name: String, version: String, language: ForeignLanguage, reference: String, output: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
     lock := pkg_lock_load_for_update(project_root)
     lock.version = PKG_LOCK_VERSION
     source: LockSource.Foreign{language: language, reference: reference, output: output}
@@ -271,7 +271,7 @@ pkg_lock_record_foreign_realization: fn(project_root: String, name: String, vers
 // only fills these records; it is never copied into a second lock schema. A
 // later bridge build replaces the earlier bridge records and leaves
 // user/provider records untouched.
-pkg_lock_record_rust_bridge: fn(project_root: String, bridge_identity: String, packages: [LockedPackage]) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+pkg_lock_record_rust_bridge: fn(project_root: String, bridge_identity: String, packages: [LockedPackage]) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
     if bridge_identity.trim() == "" {
         return Err(LockError.Invalid("Rust bridge lock identity is empty"))
     }
@@ -462,7 +462,7 @@ pkg_lock_registry_realization: fn(project_root: String, registry: String, refere
 // toolchain, keyed by channel. Unlike `pkg_lock_record_envelope` this creates
 // a minimal lock, since `jet update jet` / `jet init` may run before any
 // dependency lock exists.
-pkg_lock_record_toolchain: fn(project_root: String, toolchain: LockedToolchain) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+pkg_lock_record_toolchain: fn(project_root: String, toolchain: LockedToolchain) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
     toolchain.validate_completeness()
     loaded: pkg_lock_load_strict(project_root)
     lock := loaded ?? LockFile.empty()
@@ -508,7 +508,7 @@ pkg_lock_locked_source_channel: fn(project_root: String, name: String) -[FS]> Lo
 
 // Upsert a named source channel lock, keyed by source
 // name so moving a channel replaces the prior exact identity.
-pkg_lock_record_source_channel: fn(project_root: String, input: LockedSourceChannel) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+pkg_lock_record_source_channel: fn(project_root: String, input: LockedSourceChannel) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
     source := input
     source.exact = pkg_canonical_locked_ref(source.exact)
     source.validate_completeness()

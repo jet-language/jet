@@ -895,7 +895,7 @@ has_close: fn(events: [UIEvent]) -> Bool {
 // callback and presentation feedback. Three buffers and one frame in
 // flight leave one free; if none is, this waits for a release rather
 // than drop the frame.
-present: fn(c: &Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net, Time]> {
+present: fn(c: &Connection, pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError! {
     if c.failure == .Val(failure) -> return Err(failure)
     frame_bytes: c.width * c.height * 4
     if pixels.len() != frame_bytes {
@@ -1987,7 +1987,7 @@ read_text: fn(reader: sys.Fd) -[Env, Time]> String UIError! {
 // text type, set as the selection at the latest input's serial (the
 // compositor takes a copy only from the client with the keyboard focus).
 // The source answers pastes until another client copies.
-set_clipboard_text: fn(c: &Connection, text: String) UIError! -[Net, Time]> {
+set_clipboard_text: fn(c: &Connection, text: String) -[Net, Time]> UIError! {
     if c.failure == .Val(failure) -> return Err(failure)
     if c.data_device == 0 {
         return Err(UIError.Unsupported("the compositor offers no wl_data_device_manager"))
@@ -2120,7 +2120,7 @@ enable_text_input: fn(c: &Connection) {
 // pixels, and none means it has no text field, which turns the input
 // method off and ends the composition. A compositor without
 // zwp_text_input_v3 leaves typing to the keyboard alone.
-set_text_input: fn(c: &Connection, area: UIRect?) UIError! -[Net, Time]> {
+set_text_input: fn(c: &Connection, area: UIRect?) -[Net, Time]> UIError! {
     if c.failure == .Val(failure) -> return Err(failure)
     logical := [Int]{}
     if area == .Val(rect) {
@@ -2189,7 +2189,7 @@ set_app_id: fn(c: &Connection, app_id: String) { request(c, c.toplevel, 3, text_
 // pool kept until the next icon replaces it; an icon with neither
 // unsets the window's. A compositor without the protocol keeps the icon
 // of the app_id's desktop entry.
-set_icon: fn(c: &Connection, icon: UIIcon) UIError! -[Env]> {
+set_icon: fn(c: &Connection, icon: UIIcon) -[Env]> UIError! {
     if c.icon_manager == 0 -> return Ok()
     toplevel: c.toplevel
     manager: c.icon_manager
@@ -2707,7 +2707,7 @@ shm_span: fn(n: Int, what: String) -> Int(0..1073741824) UIError! {
     Ok(Int(0..1073741824).from_int(n) ?? return Err(UIError.Protocol("{what} failed: byte {n} lies outside shared memory")))
 }
 
-shm_write: fn(memory: &sys.SharedMemory, at: Int, bytes: [U8], what: String) UIError! -[Env]> {
+shm_write: fn(memory: &sys.SharedMemory, at: Int, bytes: [U8], what: String) -[Env]> UIError! {
     memory.write(shm_span(at, what), bytes) ?? return Err(UIError.Protocol("{what} failed: {err}"))
     Ok()
 }
@@ -2716,7 +2716,7 @@ shm_read: fn(memory: sys.SharedMemory, at: Int, count: Int, what: String) -[Env]
     Ok(memory.read(shm_span(at, what), shm_span(count, what)) ?? return Err(UIError.Protocol("{what} failed: {err}")))
 }
 
-shm_fill: fn(memory: &sys.SharedMemory, at: Int, count: Int, value: Int, what: String) UIError! -[Env]> {
+shm_fill: fn(memory: &sys.SharedMemory, at: Int, count: Int, value: Int, what: String) -[Env]> UIError! {
     pixels: Int(0..268435456).from_int(count) ?? return Err(UIError.Protocol("{what} failed: {count} pixels do not fit shared memory"))
     word: Int(0..4294967295).from_int(value) ?? return Err(UIError.Protocol("{what} failed: {value} is not a 32-bit pixel"))
     memory.fill_u32(shm_span(at, what), pixels, word) ?? return Err(UIError.Protocol("{what} failed: {err}"))
@@ -2725,7 +2725,7 @@ shm_fill: fn(memory: &sys.SharedMemory, at: Int, count: Int, value: Int, what: S
 
 // The rectangle (`x`, `y`) `width` by `height` of the RGBA `pixels`, rows
 // `stride` bytes, into the image at byte `offset` of `memory` as `format`.
-shm_pixels: fn(memory: &sys.SharedMemory, offset: Int, pixels: [U8], stride: Int, x: Int, y: Int, width: Int, height: Int, format: sys.PixelFormat) UIError! -[Env]> {
+shm_pixels: fn(memory: &sys.SharedMemory, offset: Int, pixels: [U8], stride: Int, x: Int, y: Int, width: Int, height: Int, format: sys.PixelFormat) -[Env]> UIError! {
     what: "writing the frame"
     outside: UIError.Protocol("{what} failed: the {width}x{height} rectangle at {x},{y} of a {stride}-byte row lies outside a window")
     row: Int(4..65536).from_int(stride) ?? return Err(outside)

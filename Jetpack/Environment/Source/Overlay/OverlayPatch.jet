@@ -303,7 +303,7 @@ env_overlay_has_control: fn(raw: String) -> Bool Never! {
 // Commit changed files in path order; on failure restore the ones already
 // written and report both the commit and any rollback failure. `after_commit`
 // borrows the committed path; the stage retains all of its descriptor owners.
-env_overlay_commit_staged: fn(source: OverlayAuthority, stage: &OverlayStage, after_commit: fn(String) -[FS]> Never!) OverlayError! -[FS, Env, Rand]> {
+env_overlay_commit_staged: fn(source: OverlayAuthority, stage: &OverlayStage, after_commit: fn(String) -[FS]> Never!) -[FS, Env, Rand]> OverlayError! {
     root: source.resolver.checked_directory(".") ?? return Err(OverlayError.IO("could not validate source authority: {err.message()}"))
     root_handle: source.resolver.directory_handle(root)
     committed := [String]{}
@@ -332,7 +332,7 @@ env_overlay_commit_staged: fn(source: OverlayAuthority, stage: &OverlayStage, af
 
 // The target still is the file that was read: same parent entry, same
 // identity, and the input handle unchanged since staging.
-env_overlay_validate_target: fn(entry: OverlayStagedFile, root_handle: Directory, parent: Directory) IOError! -[FS]> {
+env_overlay_validate_target: fn(entry: OverlayStagedFile, root_handle: Directory, parent: Directory) -[FS]> IOError! {
     root: root_handle.stat()
     if !root.is_dir -> return Err(env_overlay_io("source root authority is no longer a directory"))
     current: if parent.open(entry.name) == {
@@ -358,7 +358,7 @@ env_overlay_validate_target: fn(entry: OverlayStagedFile, root_handle: Directory
 
 // Write `bytes` to a fresh exclusive temporary beside the target, make it
 // durable, and rename it over the target inside the held parent.
-env_overlay_write_atomically: fn(entry: OverlayStagedFile, root_handle: Directory, parent: Directory, bytes: [U8], verify_target: Bool) IOError! -[FS, Env, Rand]> {
+env_overlay_write_atomically: fn(entry: OverlayStagedFile, root_handle: Directory, parent: Directory, bytes: [U8], verify_target: Bool) -[FS, Env, Rand]> IOError! {
     if verify_target -> env_overlay_validate_target(entry, root_handle, parent) else {
         root: root_handle.stat()
         if !root.is_dir {
@@ -401,7 +401,7 @@ env_overlay_write_atomically: fn(entry: OverlayStagedFile, root_handle: Director
 // The file is durable before publication. The directory sync after the
 // rename is best effort, so a reporting failure cannot claim a failed commit
 // after the destination already changed.
-env_overlay_publish: fn(entry: OverlayStagedFile, parent: Directory, file: &FileWriter, temporary: String, bytes: [U8]) IOError! -[FS]> {
+env_overlay_publish: fn(entry: OverlayStagedFile, parent: Directory, file: &FileWriter, temporary: String, bytes: [U8]) -[FS]> IOError! {
     file.write_bytes(bytes)
     file.set_mode(entry.mode)
     file.fsync()

@@ -20,13 +20,13 @@ CBORReader: struct<R: Reader> {
 CBORWriter: struct<W: Writer> {
     output: codec.CBORPush<W>
 
-    write: fn(&self, event: &&DataEvent) EncodingError! -[IO, Time.Wait]> {
+    write: fn(&self, event: &&DataEvent) -[IO, Time.Wait]> EncodingError! {
         self.output.write(event)
     }
 
-    flush: fn(&self) EncodingError! -[IO, Time.Wait]> { self.output.flush() }
+    flush: fn(&self) -[IO, Time.Wait]> EncodingError! { self.output.flush() }
 
-    finish: fn(&self) EncodingError! -[IO, Time.Wait]> { self.output.finish() }
+    finish: fn(&self) -[IO, Time.Wait]> EncodingError! { self.output.finish() }
 }
 
 // A bounded CBOR event stream over any byte source: a FileReader, a socket,

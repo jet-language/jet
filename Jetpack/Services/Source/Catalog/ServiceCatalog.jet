@@ -333,7 +333,7 @@ ServicePresetKind: enum {
     }
 
     // First-start state setup inside `data_dir`, run through `env`'s PATH.
-    prepare: fn(self, port: Int, data_dir: String, env: &ShellEnv) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+    prepare: fn(self, port: Int, data_dir: String, env: &ShellEnv) -[FS, Env, Exec, Time.Wait]> ServicesError! {
         if self == {
             .Postgres -> {
                 services_prepare_database(port, data_dir, env, "initdb", [String]{"--no-locale", "--encoding=UTF8", "--pgdata", data_dir})
@@ -508,13 +508,13 @@ services_catalog_marker: fn(data_dir: String) -> String Never! {
     files.join(data_dir, ".jet-preset-initialized")
 }
 
-services_prepare_config: fn(path: String, contents: String, label: String) ServicesError! -[FS, Env]> {
+services_prepare_config: fn(path: String, contents: String, label: String) -[FS, Env]> ServicesError! {
     if services_write_atomic(path, contents.bytes()) == .Err(error) {
         return Err(ServicesError.new("couldn't write {label} preset config: {error}"))
     }
 }
 
-services_prepare_nginx: fn(port: Int, data_dir: String) ServicesError! -[FS, Env]> {
+services_prepare_nginx: fn(port: Int, data_dir: String) -[FS, Env]> ServicesError! {
     prefix: services_nginx_prefix(port, data_dir)
     config_dir: files.join(prefix, "conf")
     if files.create_dir_all(config_dir) == .Err(error) {
@@ -526,7 +526,7 @@ services_prepare_nginx: fn(port: Int, data_dir: String) ServicesError! -[FS, Env
 
 // Initialize a database directory once; an existing initialized directory
 // only gains the marker.
-services_prepare_database: fn(port: Int, data_dir: String, env: &ShellEnv, tool: String, args: [String]) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+services_prepare_database: fn(port: Int, data_dir: String, env: &ShellEnv, tool: String, args: [String]) -[FS, Env, Exec, Time.Wait]> ServicesError! {
     marker: services_catalog_marker(data_dir)
     if files.is_file(marker) {
         return
@@ -538,7 +538,7 @@ services_prepare_database: fn(port: Int, data_dir: String, env: &ShellEnv, tool:
     }
 }
 
-services_run_catalog_tool: fn(env: &ShellEnv, tool: String, args: [String], data_dir: String) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+services_run_catalog_tool: fn(env: &ShellEnv, tool: String, args: [String], data_dir: String) -[FS, Env, Exec, Time.Wait]> ServicesError! {
     argv := [String]{tool}
     loop arg in args -> argv.push(arg.copy())
     spec := process.cmd(argv).cwd(data_dir).stdout(.Capture).stderr(.Capture)

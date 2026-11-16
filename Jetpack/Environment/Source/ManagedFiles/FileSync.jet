@@ -343,7 +343,7 @@ ManagedApplyJournal: struct {
     new_objects: [String]
 }
 
-env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: &FileSyncReport, journal: &ManagedApplyJournal) EnvironmentError! -[FS, Env]> {
+env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: &FileSyncReport, journal: &ManagedApplyJournal) -[FS, Env]> EnvironmentError! {
     loop index in 0..<plan.planned.len() {
         file: plan.planned[index]
         if file.action == {
@@ -427,7 +427,7 @@ env_files_open_existing_object: fn(path: String) -[FS]> FileReader? EnvironmentE
     }
 }
 
-env_files_install_file: fn(file: PlannedFile, object: String) EnvironmentError! -[FS, Env]> {
+env_files_install_file: fn(file: PlannedFile, object: String) -[FS, Env]> EnvironmentError! {
     dirname: files.dirname(file.destination)
     parent: if dirname == "" -> "." else -> dirname
     files.create_dir_all(parent) ?? return Err(env_files_error("couldn't create parent for `{file.declaration.destination}`: {err}"))
@@ -463,7 +463,7 @@ env_files_install_file: fn(file: PlannedFile, object: String) EnvironmentError! 
     }
 }
 
-env_files_remove_destination: fn(path: String) IOError! -[FS]> {
+env_files_remove_destination: fn(path: String) -[FS]> IOError! {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_dir -> return files.remove_dir(path)
@@ -554,7 +554,7 @@ env_files_parse_u32: fn(text: String) -> Int? Never! {
     Val(value)
 }
 
-env_files_write_state_atomic: fn(path: String, state: ManagedFileState) EnvironmentError! -[FS, Env]> {
+env_files_write_state_atomic: fn(path: String, state: ManagedFileState) -[FS, Env]> EnvironmentError! {
     parent: files.dirname(path)
     files.create_dir_all(parent) ?? return Err(env_files_error("couldn't create managed file state directory: {err}"))
     temp: files.join(parent, ".state-{sys.pid()}.tmp")
@@ -582,7 +582,7 @@ env_files_write_state_atomic: fn(path: String, state: ManagedFileState) Environm
 }
 
 // Stage `bytes` in a new file, sync it, and rename it over `path`.
-env_files_publish: fn(temp: String, path: String, bytes: [U8]) IOError! -[FS]> {
+env_files_publish: fn(temp: String, path: String, bytes: [U8]) -[FS]> IOError! {
     output := files.create(temp, if_exists: .Refuse)
     output.write_bytes(bytes)
     output.fsync()

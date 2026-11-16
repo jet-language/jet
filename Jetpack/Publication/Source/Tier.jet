@@ -98,15 +98,15 @@ publication_blocked_reasons: fn(status: PublicationGateStatus) -> [String] Never
     reasons
 }
 
-publication_require_core_review: fn(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
+publication_require_core_review: fn(repo: String, package: String, version: String) -[FS]> PublicationDiagnosticError! {
     publication_require_review(repo, package, version, false)
 }
 
-publication_require_takeover_review: fn(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
+publication_require_takeover_review: fn(repo: String, package: String, version: String) -[FS]> PublicationDiagnosticError! {
     publication_require_review(repo, package, version, true)
 }
 
-publication_require_review: fn(repo: String, package: String, version: String, takeover: Bool) PublicationDiagnosticError! -[FS]> {
+publication_require_review: fn(repo: String, package: String, version: String, takeover: Bool) -[FS]> PublicationDiagnosticError! {
     path: files.join(files.join(files.join(repo, "reviews"), package), "{version}.review")
     text: files.read(path) ?? return Err(publication_review_error(package, version, path, takeover))
     package_field := String?{None}

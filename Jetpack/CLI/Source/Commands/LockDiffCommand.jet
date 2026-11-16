@@ -83,7 +83,7 @@ cli_cmd_lock: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time
     EXIT_OK
 }
 
-cli_render_lock_diff: fn(theme: Theme, diff: LockDiff, sizes: DiffSizes) Never! -[IO, FS, Time.Wait]> {
+cli_render_lock_diff: fn(theme: Theme, diff: LockDiff, sizes: DiffSizes) -[IO, FS, Time.Wait]> Never! {
     theme.status("Lock changes")
     loop line in cli_render_lock_diff_lines(diff, sizes) -> theme.detail(line)
 }

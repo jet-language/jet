@@ -205,7 +205,7 @@ store_receipt_pointer_path: fn(workspace_root: String, closure: String) -> Strin
 impl ArtifactStore {
     // Publish the typed record for `closure` and point the closure at it. The
     // record blob is immutable; only the per-closure pointer moves.
-    publish_receipt: fn(self, workspace_root: String, record: ReceiptRecord) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+    publish_receipt: fn(self, workspace_root: String, record: ReceiptRecord) -[FS, Env, Exec, Time, Rand]> ArtifactStoreError! {
         payload: record.to_bytes() ?? return Err(ArtifactStoreError.Config("receipt is not recordable: {err.message}"))
         object: self.publish_blob(payload)
         store_project_write_atomic(store_receipt_pointer_path(workspace_root, record.closure), object.text().bytes())

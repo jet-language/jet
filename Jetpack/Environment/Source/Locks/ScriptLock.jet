@@ -46,7 +46,7 @@ ScriptLockFile: struct {
 // a `.jet/` folder, since a bare script may not have one yet.
 env_script_lock_sidecar_path: fn(script_path: String) -> String Never! { "{script_path}.lock" }
 
-env_script_lock_write: fn(script_path: String, lock: ScriptLockFile) IOError! -[FS]> {
+env_script_lock_write: fn(script_path: String, lock: ScriptLockFile) -[FS]> IOError! {
     files.write(env_script_lock_sidecar_path(script_path), env_script_lock_render(lock))
 }
 

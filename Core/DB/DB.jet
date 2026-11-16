@@ -327,7 +327,7 @@ SQL: struct {
         Hole: DBValue
 
         // Every SQL text is accepted; its holes are what keeps a query safe.
-        check: fn(_text: String) Never! -[]> { return Ok() }
+        check: fn(_text: String) -[]> Never! { return Ok() }
 
         // A DBValue binds as-is; Int, Float, Bool and byte lists bind as their own
         // variant; anything else binds its display text.
@@ -982,9 +982,9 @@ DBScope: struct {
     priv state: Shared<DBState>
     priv number: Int
 
-    commit: fn(&&self) DBError! -[DB]> { db_commit(self.state) }
+    commit: fn(&&self) -[DB]> DBError! { db_commit(self.state) }
 
-    rollback: fn(&&self) DBError! -[DB]> { db_rollback(self.state) }
+    rollback: fn(&&self) -[DB]> DBError! { db_rollback(self.state) }
 
     impl Close {
         close: fn(&&self) {
@@ -1116,7 +1116,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     }
 
     // Removes the row whose key is `key`, if there is one.
-    delete: fn(self, key: K) DBError! -[DB.Read, DB.Write]> {
+    delete: fn(self, key: K) -[DB.Read, DB.Write]> DBError! {
         cells: table_cells(self.name, key.encode()) ?? return Err(err)
         if self.policy == .Val(_) {
             if table_stored<K, T>(self, cells) == {
@@ -3034,7 +3034,7 @@ priv PoolWaiter: struct {
 DBLease: struct {
     state: Shared<LeaseState>
 
-    close: fn(self) DBError! -[DB]> {
+    close: fn(self) -[DB]> DBError! {
         guard := self.state.guard_edit()
         if guard.value.drivers.len() == 0 -> return Ok()
         driver: guard.value.drivers.remove(0, .Slot) ?? return Ok()

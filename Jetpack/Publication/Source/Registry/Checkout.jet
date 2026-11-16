@@ -53,7 +53,7 @@ publication_attach_checkout_cleanup: fn(primary: PublicationDiagnosticError, che
 }
 
 // Removes the checkout's owned scratch directory; any other path is refused.
-publication_cleanup_publish_checkout: fn(checkout: PublicationPublishCheckout) IOError! -[FS]> {
+publication_cleanup_publish_checkout: fn(checkout: PublicationPublishCheckout) -[FS]> IOError! {
     if !files.basename(checkout.root).starts_with(PUBLICATION_CHECKOUT_PREFIX) || files.join(checkout.root, "checkout") != checkout.path {
         return Err(publication_read_error(.InvalidInput, checkout.root, "refusing to remove a directory that is not a publication checkout"))
     }
@@ -126,11 +126,11 @@ publication_staged_path_allowed: fn(allowed: [String], staged: String) -> Bool N
 // them. "Nothing to commit" is idempotent success; any other git failure is
 // E1235. A rejected push accepts only a byte-identical concurrent winner,
 // else rebuilds once from a fresh remote checkout.
-publication_push_index: fn(registry: PublicationRegistryConfig, repo: String, message: String, paths: [String], expected: PublicationIndexEntry?) PublicationDiagnosticError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
+publication_push_index: fn(registry: PublicationRegistryConfig, repo: String, message: String, paths: [String], expected: PublicationIndexEntry?) -[FS, Env, Exec, Net, Time, Time.Wait]> PublicationDiagnosticError! {
     publication_push_index_inner(registry, repo, message, paths, expected, true)
 }
 
-publication_push_index_inner: fn(registry: PublicationRegistryConfig, repo: String, message: String, paths: [String], expected: PublicationIndexEntry?, recover_race: Bool) PublicationDiagnosticError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
+publication_push_index_inner: fn(registry: PublicationRegistryConfig, repo: String, message: String, paths: [String], expected: PublicationIndexEntry?, recover_race: Bool) -[FS, Env, Exec, Net, Time, Time.Wait]> PublicationDiagnosticError! {
     transport: publication_validate_registry_transport(registry)
     // A scratch clone may carry no user identity; set one so `commit` works.
     publication_checkout_git(registry, transport, repo, [String]{"config", "user.email", "jet-publish@localhost"}).drop("a failed identity write surfaces as the commit failure")
@@ -228,7 +228,7 @@ publication_verify_remote_winner_in: fn(registry: PublicationRegistryConfig, rep
     Ok(false)
 }
 
-publication_rebuild_publication_after_race: fn(registry: PublicationRegistryConfig, stale_repo: String, message: String, expected: PublicationIndexEntry?) PublicationDiagnosticError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
+publication_rebuild_publication_after_race: fn(registry: PublicationRegistryConfig, stale_repo: String, message: String, expected: PublicationIndexEntry?) -[FS, Env, Exec, Net, Time, Time.Wait]> PublicationDiagnosticError! {
     entry: expected ?? return Err(publication_registry_cache_error(registry, "concurrent publication cannot be rebuilt without an immutable entry"))
     checkout: publication_prepare_publish_checkout(registry)
     failure := PublicationDiagnosticError?{None}
@@ -238,7 +238,7 @@ publication_rebuild_publication_after_race: fn(registry: PublicationRegistryConf
     if publication_finish_publish_checkout(checkout, failure) == .Val(error) -> return Err(error)
 }
 
-publication_rebuild_publication_in: fn(registry: PublicationRegistryConfig, repo: String, stale_repo: String, message: String, expected: PublicationIndexEntry) PublicationDiagnosticError! -[FS, Env, Exec, Net, Time, Time.Wait]> {
+publication_rebuild_publication_in: fn(registry: PublicationRegistryConfig, repo: String, stale_repo: String, message: String, expected: PublicationIndexEntry) -[FS, Env, Exec, Net, Time, Time.Wait]> PublicationDiagnosticError! {
     index: publication_index_entry_path(repo, expected.name) ?? return Err(publication_registry_cache_error(registry, "{err}"))
     paths := [String]{index}
     if expected.yanked {

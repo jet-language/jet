@@ -93,7 +93,7 @@ mem_journal_open: fn(f: &SQLFile) Never! {
 }
 
 // sqlite3OsClose; closing a closed handle does nothing.
-file_close: fn(f: &SQLFile) Never! -[DB]> {
+file_close: fn(f: &SQLFile) -[DB]> Never! {
     if f.mem {
         f.mem = false
         f.data = [U8]{}
@@ -230,7 +230,7 @@ file_device_characteristics: fn(f: &SQLFile) -> Int Never! {
 
 // sqlite3OsFileControl(SQLITE_FCNTL_SIZE_HINT); a hint, so its errors are
 // dropped (sqlite3OsFileControlHint).
-file_size_hint: fn(f: &SQLFile, size: Int) Never! -[DB]> {
+file_size_hint: fn(f: &SQLFile, size: Int) -[DB]> Never! {
     if f.mem || !os.os_is_open(f.os) {
         return
     }
@@ -285,7 +285,7 @@ file_shm_lock: fn(f: &SQLFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! 
 }
 
 // sqlite3OsShmUnmap.
-file_shm_unmap: fn(f: &SQLFile, delete: Bool) Never! -[DB]> {
+file_shm_unmap: fn(f: &SQLFile, delete: Bool) -[DB]> Never! {
     if f.mem {
         return
     }

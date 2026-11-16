@@ -645,7 +645,7 @@ fail_runner: fn(result: &Dyn, reason: String) {
 // its compile and run stages, recording each into `result`. A runner that
 // cannot go on records why and stops; a host error is the caller's to
 // charge to `progress.stage`.
-run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: &Dyn, progress: &RunnerProgress) Err! -[FS, Exec]> {
+run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: &Dyn, progress: &RunnerProgress) -[FS, Exec]> Err! {
     runner_dir: files.join(pass.axis_dir, Regex{"[^A-Za-z0-9_.-]"}.replace(text_or_empty(runner, "id"), "_"))
     files.create_dir_all(runner_dir)
     staged: host.stage_files(runner_dir, dyn_at(runner, "files"))

@@ -203,7 +203,7 @@ env_discovery_load: fn(project_dir: String) -[FS]> PackageIndex? ProviderReason!
 }
 
 // Replace the project index under the project lock.
-env_discovery_write: fn(project_dir: String, index: PackageIndex) ProviderReason! -[FS, Env, Time]> {
+env_discovery_write: fn(project_dir: String, index: PackageIndex) -[FS, Env, Time]> ProviderReason! {
     path: env_discovery_index_path(project_dir)
     _project_lock: env_runtime_project_lock(project_dir, "discovery-index") ?? return Err(ProviderReason{message: "{err}"})
     files.create_dir_all(files.dirname(path)) ?? return Err(ProviderReason{message: "{err}"})
@@ -214,7 +214,7 @@ env_discovery_write: fn(project_dir: String, index: PackageIndex) ProviderReason
 
 // Declared refs, versioned from an offline fixture or a hangar record when
 // one exists.
-env_discovery_merge_refs: fn(index: &PackageIndex, refs: [RefSpec], fixtures: String?, store_entries: [StoreEntry]) Never! -[FS]> {
+env_discovery_merge_refs: fn(index: &PackageIndex, refs: [RefSpec], fixtures: String?, store_entries: [StoreEntry]) -[FS]> Never! {
     loop spec in refs {
         found: if env_discovery_fixture_version(fixtures, spec) == {
             .Val(pair) -> Val(pair)

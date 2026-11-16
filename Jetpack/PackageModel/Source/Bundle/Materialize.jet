@@ -33,7 +33,7 @@ BundleSigningRun: struct {
     identities: [String]
 }
 
-pkg_bundle_native_free: fn(path: String) BundleMaterializeError! -[FS]> {
+pkg_bundle_native_free: fn(path: String) -[FS]> BundleMaterializeError! {
     if files.stat(path) == {
         .Ok(_) -> { Err(BundleMaterializeError{reason: "package output `{path}` already exists"}) }
         .Err(error) -> {
@@ -120,7 +120,7 @@ pkg_bundle_native_version: fn(run: NativeSandboxOutput) -> String BundleMaterial
     Err(BundleMaterializeError{reason: "package materializer tool returned no version text"})
 }
 
-pkg_bundle_native_hooks: fn(plan: &BundlePlan, phase: SigningPhase, source: String, output: String, run: &BundleSigningRun) BundleMaterializeError! -[FS, Env, Exec, Time, Time.Wait]> {
+pkg_bundle_native_hooks: fn(plan: &BundlePlan, phase: SigningPhase, source: String, output: String, run: &BundleSigningRun) -[FS, Env, Exec, Time, Time.Wait]> BundleMaterializeError! {
     loop hook in plan.signing_hooks {
         if hook.phase != phase -> next
         loop expected in hook.inputs {
@@ -188,7 +188,7 @@ pkg_bundle_native_relative: fn(plan: BundlePlan, file: BundleFile, strip: Bool) 
     Ok(parts.join("/"))
 }
 
-pkg_bundle_native_tree: fn(plan: &BundlePlan, stage: String, strip: Bool) BundleMaterializeError! -[FS, Env]> {
+pkg_bundle_native_tree: fn(plan: &BundlePlan, stage: String, strip: Bool) -[FS, Env]> BundleMaterializeError! {
     seen := [String]{}
     loop file in plan.files {
         relative: pkg_bundle_native_relative(plan, file, strip)

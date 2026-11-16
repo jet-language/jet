@@ -171,7 +171,7 @@ pkg_lock_e3512: fn(what: String, why: String, fix: String) -> Diagnostic Never! 
 
 // `--locked` requires every generated input to already be in
 // the unified lock with the same hash.
-pkg_lock_verify_locked_generated_inputs: fn(project_root: String, generated: [ComptimeInput]) LockError! -[FS]> {
+pkg_lock_verify_locked_generated_inputs: fn(project_root: String, generated: [ComptimeInput]) -[FS]> LockError! {
     loaded: pkg_lock_load(project_root)
     if loaded == None {
         if generated.len() == 0 {
@@ -191,7 +191,7 @@ pkg_lock_verify_locked_generated_inputs: fn(project_root: String, generated: [Co
 // and the files a build read through `embed_file`, `embed_bytes` or `find`.
 // Rows are upserted by path, so a rebuild replaces drift instead of
 // appending.
-pkg_lock_record_generated_inputs: fn(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
+pkg_lock_record_generated_inputs: fn(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp) -[FS, Env, Time]> LockError! {
     lock_was_present: files.exists(pkg_lock_file_path(project_root))
     pkg_lock_record_generated_inputs_with_lock_state(project_root, generated, locked, stamp, lock_was_present)
 }
@@ -201,7 +201,7 @@ pkg_lock_record_generated_inputs: fn(project_root: String, generated: [ComptimeI
 // publish any lock update, so a first build bootstraps dependencies once.
 // `locked` checks the `.jet/generated/` rows alone; the rows of the files a
 // compile read are the compile's own.
-pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp, lock_was_present: Bool) LockError! -[FS, Env, Time]> {
+pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp, lock_was_present: Bool) -[FS, Env, Time]> LockError! {
     lock := pkg_lock_load_or_empty(project_root)
     if locked {
         managed := [ComptimeInput]{}
@@ -291,7 +291,7 @@ pkg_lock_locked_build_contribution_set: fn(package: String, contributions: [Fact
 }
 
 // Locked builds replay the exact computed writer set.
-pkg_lock_verify_locked_build_contributions: fn(project_root: String, package: String, contributions: [FactContribution]) LockError! -[FS]> {
+pkg_lock_verify_locked_build_contributions: fn(project_root: String, package: String, contributions: [FactContribution]) -[FS]> LockError! {
     actual: pkg_lock_locked_build_contribution_set(package, contributions)
     loaded: pkg_lock_load(project_root)
     if loaded == None {
@@ -313,7 +313,7 @@ pkg_lock_verify_locked_build_contributions: fn(project_root: String, package: St
 
 // Replace one package's computed writer records in the
 // unified lock after the selected runtime bundle passed the front end.
-pkg_lock_record_build_contributions: fn(project_root: String, package: String, contributions: [FactContribution], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
+pkg_lock_record_build_contributions: fn(project_root: String, package: String, contributions: [FactContribution], locked: Bool, stamp: BuildStamp) -[FS, Env, Time]> LockError! {
     if locked {
         return pkg_lock_verify_locked_build_contributions(project_root, package, contributions)
     }

@@ -49,7 +49,7 @@ start :: fn() -[Time]> Stopwatch Never! {
 }
 
 // D-AUTH-AMBIENT2: waiting is the `Time.Wait` leaf, so sleeping needs no clock grant.
-sleep :: fn(duration: Duration) Never! -[Time.Wait]> {
+sleep :: fn(duration: Duration) -[Time.Wait]> Never! {
     // Even a zero or negative delay is a deadline/cancellation wait boundary.
     // The shared scheduler clamps the delay and owns pre/post wait checks.
     core.time.__sleep_ns(duration.ns)
@@ -1473,7 +1473,7 @@ civil_monotonic_ns :: fn() -[Time]> Int Never! {
     civil_i64(core.time.__host_monotonic_ns())
 }
 instant :: fn() -[Time]> Instant Never! { Instant{start_ns: civil_monotonic_ns()} }
-sleep_until :: fn(deadline: Instant) Never! -[Time]> {
+sleep_until :: fn(deadline: Instant) -[Time]> Never! {
     remaining :: saturating_sub_ns(deadline.start_ns, civil_monotonic_ns())
     sleep(duration_ns(remaining))
 }

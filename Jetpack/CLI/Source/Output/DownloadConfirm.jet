@@ -28,7 +28,7 @@ impl Theme {
         "{label}: {plan.new} new, {plan.cached} cached, {plan.repaired} repaired · {download} · on disk {disk}{estimate}"
     }
 
-    download_plan_table: fn(self, plan: DownloadPlan) Never! -[IO, Time.Wait]> {
+    download_plan_table: fn(self, plan: DownloadPlan) -[IO, Time.Wait]> Never! {
         self.detail("package                                  state     download   on disk")
         loop item in plan.items {
             state: if item.state == {

@@ -455,7 +455,7 @@ build_work_output_size: fn(base: String, path: String, limit: Int) -[FS]> Int Bu
 // renamed from its held directory into the held destination directory over
 // the final name. A file another name also links, or one the rename can't
 // move (another file system), is read and restored instead.
-build_move_output: fn(work: String, from: String, base: String, path: String) BuildIOError! -[FS, Rand]> {
+build_move_output: fn(work: String, from: String, base: String, path: String) -[FS, Rand]> BuildIOError! {
     source_parts: build_relative_components(work, from, "cache path escapes root")
     if source_parts.len() == 0 {
         return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
@@ -507,7 +507,7 @@ build_output_parent: fn(base: String, parts: [String]) -[FS]> files.Directory Bu
 // following links, write a fresh `.jet-restore-<nonce>` exclusively (0600,
 // or 0755 when `executable`), fsync it, then rename it over the final name
 // inside the held directory.
-build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, executable: Bool) BuildIOError! -[FS, Rand]> {
+build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, executable: Bool) -[FS, Rand]> BuildIOError! {
     parts: build_relative_components(base, path, "build output escapes root")
     if parts.len() == 0 {
         return Err(BuildIOError.new(.InvalidInput, "build output has no file name"))
@@ -540,7 +540,7 @@ build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, execut
 
 // Rust `ensure_real_directory`: create a directory tree without ever
 // following an existing link; `..` is refused.
-build_ensure_real_directory: fn(path: String) BuildIOError! -[FS]> {
+build_ensure_real_directory: fn(path: String) -[FS]> BuildIOError! {
     current := if path.starts_with("/") -> "/" else -> ""
     loop part in path.split("/") {
         if part == "" || part == "." -> next
@@ -555,7 +555,7 @@ build_ensure_real_directory: fn(path: String) BuildIOError! -[FS]> {
 // One component of a no-follow directory walk: an existing link or
 // non-directory is refused; a missing name is created, and a concurrent
 // creator must have made a real directory.
-build_ensure_real_directory_step: fn(current: String, symlink: String, not_directory: String, not_real: String) BuildIOError! -[FS]> {
+build_ensure_real_directory_step: fn(current: String, symlink: String, not_directory: String, not_real: String) -[FS]> BuildIOError! {
     if files.stat(current) == {
         .Ok(info) -> {
             if info.is_symlink -> return Err(BuildIOError.new(.PermissionDenied, symlink))
@@ -580,7 +580,7 @@ build_ensure_real_directory_step: fn(current: String, symlink: String, not_direc
 // Rust `prepare_output_destination`: every parent of `output` below `root`
 // is a real directory (created when missing); a final link is removed so the
 // restore never writes through it.
-build_prepare_output_destination: fn(root: String, output: String) BuildIOError! -[FS]> {
+build_prepare_output_destination: fn(root: String, output: String) -[FS]> BuildIOError! {
     parent: files.dirname(output)
     parts: build_relative_components(root, if parent == "" -> root else -> parent, "build output parent escapes project root")
     current := root
@@ -678,7 +678,7 @@ build_parse_u64: fn(text: String) -> Int? Never! {
 }
 
 // Rust `write_action_record`.
-build_write_action_record: fn(store: BuildArtifactStoreHandle, key: String, record: ActionResultRecord) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
+build_write_action_record: fn(store: BuildArtifactStoreHandle, key: String, record: ActionResultRecord) -[FS, Env, Exec, Time, Rand]> BuildIOError! {
     text := "{record.key}\noutcome={build_encode_outcome(record.outcome)}\n"
     if record.failure_report == .Val(report) {
         wire: build_report_to_json(report)

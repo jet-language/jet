@@ -292,7 +292,7 @@ wal_shm_result: fn(w: &Wal, rc: Int) -> Int Never! {
 
 // Read n bytes of region 0 at `offset` into buf[at..]: the shared header
 // (walIndexHdr) and checkpoint information (walCkptInfo).
-wi_read: fn(w: &Wal, db: &file.SQLFile, offset: Int, buf: &[U8], at: Int, n: Int) Never! -[DB]> {
+wi_read: fn(w: &Wal, db: &file.SQLFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> Never! {
     if wal_local(w) {
         if w.wi.len() == 0 || w.wi[0].len() == 0 {
             loop i in 0..<n -> buf[at + i] = U8{0}
@@ -309,7 +309,7 @@ wi_read: fn(w: &Wal, db: &file.SQLFile, offset: Int, buf: &[U8], at: Int, n: Int
 }
 
 // Write data[at..<at+n] to region 0 at `offset`.
-wi_write: fn(w: &Wal, db: &file.SQLFile, offset: Int, data: [U8], at: Int, n: Int) Never! -[DB]> {
+wi_write: fn(w: &Wal, db: &file.SQLFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Never! {
     if wal_local(w) {
         if w.wi.len() == 0 || w.wi[0].len() == 0 {
             return
@@ -327,7 +327,7 @@ wi_get4: fn(w: &Wal, db: &file.SQLFile, offset: Int) -[DB]> Int Never! {
     le_get4(b, 0)
 }
 
-wi_set4: fn(w: &Wal, db: &file.SQLFile, offset: Int, v: Int) Never! -[DB]> {
+wi_set4: fn(w: &Wal, db: &file.SQLFile, offset: Int, v: Int) -[DB]> Never! {
     b := wal_zeros(4)
     le_put4(b, 0, v.bit_and(os.U32_MASK))
     wi_write(w, db, offset, b, 0, 4)
@@ -373,7 +373,7 @@ wi_zero: fn(w: &Wal, i: Int, lo: Int, hi: Int) Never! {
 
 // Write the changed ranges of the region copies to the shared memory,
 // never the header bytes of region 0, which are written in place.
-wal_flush: fn(w: &Wal, db: &file.SQLFile) Never! -[DB]> {
+wal_flush: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
     local: wal_local(w)
     loop i in 0..<w.wi.len() {
         lo := w.wi_lo[i]
@@ -497,7 +497,7 @@ wal_checksum: fn(native: Bool, a: [U8], at: Int, n: Int, s1_in: Int, s2_in: Int)
 
 // walIndexWriteHdr: publish w.hdr as the shared header, after the region
 // bytes the writer changed.
-wal_index_write_hdr: fn(w: &Wal, db: &file.SQLFile) Never! -[DB]> {
+wal_index_write_hdr: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
     wal_flush(w, db)
     w.hdr[HDR_ISINIT] = U8{1}
     hdr_set(w, HDR_VERSION, WALINDEX_MAX_VERSION)
@@ -554,7 +554,7 @@ wal_lock_shared: fn(w: &Wal, db: &file.SQLFile, idx: Int) -[DB]> Int Never! {
     file.file_shm_lock(db, idx, 1, os.SHM_LOCK.bit_or(os.SHM_SHARED))
 }
 
-wal_unlock_shared: fn(w: &Wal, db: &file.SQLFile, idx: Int) Never! -[DB]> {
+wal_unlock_shared: fn(w: &Wal, db: &file.SQLFile, idx: Int) -[DB]> Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE {
         return
     }
@@ -566,7 +566,7 @@ wal_lock_exclusive: fn(w: &Wal, db: &file.SQLFile, idx: Int, n: Int) -[DB]> Int 
     file.file_shm_lock(db, idx, n, os.SHM_LOCK.bit_or(os.SHM_EXCLUSIVE))
 }
 
-wal_unlock_exclusive: fn(w: &Wal, db: &file.SQLFile, idx: Int, n: Int) Never! -[DB]> {
+wal_unlock_exclusive: fn(w: &Wal, db: &file.SQLFile, idx: Int, n: Int) -[DB]> Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE {
         return
     }
@@ -628,7 +628,7 @@ wal_frame_pgno: fn(w: Wal, frame: Int) -> Int Never! {
 
 // walCleanupHash: remove the entries for frames past mxFrame from the last
 // hash table.
-wal_cleanup_hash: fn(w: &Wal, db: &file.SQLFile) Never! -[DB]> {
+wal_cleanup_hash: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
     mx: wal_mx_frame(w)
     if mx == 0 {
         return
@@ -770,7 +770,7 @@ wal_index_recover: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
 }
 
 // walIndexClose.
-wal_index_close: fn(w: &Wal, db: &file.SQLFile, delete: Bool) Never! -[DB]> {
+wal_index_close: fn(w: &Wal, db: &file.SQLFile, delete: Bool) -[DB]> Never! {
     wal_free_pages(w)
     if w.exclusive_mode != WAL_HEAPMEMORY_MODE -> file.file_shm_unmap(db, delete)
 }
@@ -855,7 +855,7 @@ wal_pagesize: fn(w: Wal) -> Int Never! {
 }
 
 // walRestartHdr: start the log over with salt1 as the second salt.
-wal_restart_hdr: fn(w: &Wal, db: &file.SQLFile, salt1: [U8]) Never! -[DB]> {
+wal_restart_hdr: fn(w: &Wal, db: &file.SQLFile, salt1: [U8]) -[DB]> Never! {
     w.n_ckpt += 1
     hdr_set(w, HDR_MXFRAME, 0)
     // C reads aSalt[0] big-endian and stores the sum as a native word.
@@ -962,7 +962,7 @@ wal_checkpoint_run: fn(w: &Wal, db: &file.SQLFile, mode: Int, busy: &BusyHandler
 }
 
 // walLimitSize: truncate the log to at most n_max bytes.
-wal_limit_size: fn(w: &Wal, n_max: Int) Never! -[DB]> {
+wal_limit_size: fn(w: &Wal, n_max: Int) -[DB]> Never! {
     sz := 0
     rx: file.file_size(w.fd, sz)
     if rx == base.OK && sz > n_max -> _: file.file_truncate(w.fd, n_max)
@@ -1216,7 +1216,7 @@ wal_begin_read_transaction: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]
 }
 
 // sqlite3WalEndReadTransaction.
-wal_end_read_transaction: fn(w: &Wal, db: &file.SQLFile) Never! -[DB]> {
+wal_end_read_transaction: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
     _: wal_end_write_transaction(w, db)
     if w.read_lock >= 0 {
         slot: read_lock(w.read_lock)

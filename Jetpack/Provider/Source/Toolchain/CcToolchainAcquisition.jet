@@ -214,7 +214,7 @@ provider_cc_manifest_bundle_root: fn(fixtures: String?, manifest: CcBundleManife
     Ok(root)
 }
 
-provider_cc_verify_manifest_payload: fn(root: String, manifest: CcBundleManifest) CcToolchainError! -[FS, Env]> {
+provider_cc_verify_manifest_payload: fn(root: String, manifest: CcBundleManifest) -[FS, Env]> CcToolchainError! {
     provider_cc_verify_file(root, manifest.compiler, manifest.compiler_sha256, "compiler")
     provider_cc_verify_file(root, manifest.cxx, manifest.cxx_sha256, "C++ compiler")
     provider_cc_verify_file(root, manifest.linker, manifest.linker_sha256, "linker")
@@ -229,7 +229,7 @@ CcCopyBudget: struct {
 
 // Copy a bundle tree in name order, refusing symlinks and special files and
 // preserving permission bits, within the node and byte limits.
-provider_cc_copy_tree: fn(source: String, destination: String) CcToolchainError! -[FS]> {
+provider_cc_copy_tree: fn(source: String, destination: String) -[FS]> CcToolchainError! {
     _: provider_cc_copy_tree_node(source, destination, CcCopyBudget{nodes: 0, bytes: 0})
 }
 
@@ -286,7 +286,7 @@ provider_cc_copy_tree_node: fn(source: String, destination: String, spent: CcCop
 }
 
 // Create the Hangar directory and insist it is a real directory.
-provider_cc_ensure_real_directory: fn(path: String) CcToolchainError! -[FS]> {
+provider_cc_ensure_real_directory: fn(path: String) -[FS]> CcToolchainError! {
     files.create_dir_all(path) ?? {
         return Err(CcToolchainError.Invalid("create Hangar directory: {err}"))
     }

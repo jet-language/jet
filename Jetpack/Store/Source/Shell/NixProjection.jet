@@ -184,7 +184,7 @@ env_shell_logical_executable_path: fn(projections: [String:String], binary: Stri
     None
 }
 
-env_shell_check_rootless_namespace: fn(unshare: String, shell: String) EnvironmentError! -[Exec, Time.Wait]> {
+env_shell_check_rootless_namespace: fn(unshare: String, shell: String) -[Exec, Time.Wait]> EnvironmentError! {
     argv := [String]{unshare}
     loop flag in ENV_SHELL_NAMESPACE_FLAGS -> argv.push(flag)
     probe: [String]{shell, "-c", ":"}
@@ -226,7 +226,7 @@ env_shell_first_file: fn(candidates: [String]) -[FS]> String? Never! {
     None
 }
 
-env_shell_report_nix_projection_error: fn(theme: Theme, program: String, error: EnvironmentError) Never! -[IO, Time.Wait]> {
+env_shell_report_nix_projection_error: fn(theme: Theme, program: String, error: EnvironmentError) -[IO, Time.Wait]> Never! {
     if error == {
         .Unsupported(reason) -> {
             theme.error_coded("E1351", "Nix closure execution is unavailable on this host.", "Jetpack could not create the isolated /nix/store projection: {reason}.", "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.")

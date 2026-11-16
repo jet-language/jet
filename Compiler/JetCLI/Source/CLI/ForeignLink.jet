@@ -31,7 +31,7 @@ JetCLIForeignInputs: struct {
     platform: Bool{false}
 }
 
-jet_cli_foreign_add: fn(inputs: &JetCLIForeignInputs, path: String) JetCLIForeignLinkError! -[FS]> {
+jet_cli_foreign_add: fn(inputs: &JetCLIForeignInputs, path: String) -[FS]> JetCLIForeignLinkError! {
     if inputs.paths.contains(path) -> return Ok()
     bytes: cli_files.read_bytes(path) ?? return Err(jet_cli_foreign_link_error("couldn't read C link input `{path}`: {err}"))
     inputs.paths.push(path.copy())
@@ -303,7 +303,7 @@ jet_cli_native_c_argv: fn(tools: JetCLINativeCTools) -> [String] Never! {
 // NIX_CFLAGS_COMPILE(_BEFORE) and the NIX_HARDENING_ENABLE features to every
 // compile, so two environments with the same tool bytes can emit different
 // objects and must not share a store entry.
-jet_cli_native_c_identity: fn(identity: &[U8], schema: String, tools: JetCLINativeCTools, flags: [String]) JetCLIForeignLinkError! -[FS, Env]> {
+jet_cli_native_c_identity: fn(identity: &[U8], schema: String, tools: JetCLINativeCTools, flags: [String]) -[FS, Env]> JetCLIForeignLinkError! {
     jet_cli_foreign_hash_field(identity, "schema", schema.bytes())
     jet_cli_foreign_hash_field(identity, "target", tools.target.bytes())
     loop (index, tool) in ([String]{tools.compiler, tools.archiver}) {
@@ -337,7 +337,7 @@ jet_cli_native_c_cached: fn(archive: String) -[FS]> Bool Never! {
 
 // Archive `objects` deterministically and publish it with its digest
 // sidecar; the staged build directory is removed afterwards.
-jet_cli_native_c_publish: fn(tools: JetCLINativeCTools, lib: String, temporary: String, objects: [String], archive: String) JetCLIForeignLinkError! -[FS, Env, Exec, Time.Wait]> {
+jet_cli_native_c_publish: fn(tools: JetCLINativeCTools, lib: String, temporary: String, objects: [String], archive: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignLinkError! {
     staged: "{temporary}/lib{lib}.a"
     argv := [String]{tools.archiver, "rcsD", staged}
     loop object in objects -> argv.push(object.copy())

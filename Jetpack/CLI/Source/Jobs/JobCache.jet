@@ -127,7 +127,7 @@ cli_task_environment_hash_with_vars: fn(refs: [RefSpec], table: SourceTable, sec
 // A strict cached job declares at least one input, keeps inputs and outputs
 // out of secret-bearing or Jet state, and never overlaps an input with an
 // output.
-cli_validate_cached_job_metadata: fn(project_dir: String, metadata: JobMetadata) CLIError! -[FS, Env]> {
+cli_validate_cached_job_metadata: fn(project_dir: String, metadata: JobMetadata) -[FS, Env]> CLIError! {
     if metadata.cache == JobCachePolicy.Uncached {
         return
     }
@@ -188,7 +188,7 @@ cli_reject_cache_sensitive_path: fn(relative: String, field: String) CLIError! {
     }
 }
 
-cli_reject_cache_sensitive_resolved_path: fn(project_dir: String, path: String, declared: String, field: String) CLIError! -[FS, Env]> {
+cli_reject_cache_sensitive_resolved_path: fn(project_dir: String, path: String, declared: String, field: String) -[FS, Env]> CLIError! {
     root: files.canonicalize(project_dir) ?? return Err(CLIError.Other("couldn't resolve cached job project root: {err}"))
     if !cli_path_starts_with(path, root) {
         return Err(CLIError.Other("cached job {field} `{declared}` escapes the project"))
@@ -199,7 +199,7 @@ cli_reject_cache_sensitive_resolved_path: fn(project_dir: String, path: String, 
     }
 }
 
-cli_reject_cache_sensitive_descendants: fn(root: String, relative: String, field: String) CLIError! -[FS]> {
+cli_reject_cache_sensitive_descendants: fn(root: String, relative: String, field: String) -[FS]> CLIError! {
     if !files.is_dir(root) {
         return
     }
@@ -229,7 +229,7 @@ cli_task_project_scope_fingerprint: fn(project_dir: String, metadata: JobMetadat
     Ok(cli_sha256_hex(identity.bytes()))
 }
 
-cli_collect_job_scope_files: fn(root: String, directory: String, metadata: JobMetadata, found: &[(path: String, digest: String)]) CLIError! -[FS]> {
+cli_collect_job_scope_files: fn(root: String, directory: String, metadata: JobMetadata, found: &[(path: String, digest: String)]) -[FS]> CLIError! {
     entries: files.list_dir(directory) ?? return Err(CLIError.Other("couldn't read job cache scope `{directory}`: {err}"))
     loop item in entries {
         relative: item.path.removeprefix(root).removeprefix("/")
@@ -315,7 +315,7 @@ cli_task_cache_hit: fn(project_dir: String, roots: HangarRoots, metadata: JobMet
 
 // Record a finished strict job: write a temporary, then rename it over the
 // record.
-cli_write_job_cache: fn(project_dir: String, roots: HangarRoots, metadata: JobMetadata, key: String) CLIError! -[FS, Env]> {
+cli_write_job_cache: fn(project_dir: String, roots: HangarRoots, metadata: JobMetadata, key: String) -[FS, Env]> CLIError! {
     path: cli_job_cache_path(project_dir, roots, metadata, key)
     parent: files.dirname(path)
     if parent == "" -> return Err(CLIError.Other("job cache has no parent directory"))

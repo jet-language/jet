@@ -58,11 +58,11 @@ ServicesVerb: enum {
 // one typed secret map against the selected environment and encrypted store.
 // Values stay inside the secrets store and are dropped immediately;
 // composition is installed as a names/template plan, never as a vault row.
-cli_validate_declared_secrets: fn(theme: Theme, project_dir: String, specs: [SecretSpec], active_environment: String?) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+cli_validate_declared_secrets: fn(theme: Theme, project_dir: String, specs: [SecretSpec], active_environment: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> CLIError! {
     cli_validate_declared_secrets_with_reuse(theme, project_dir, specs, active_environment, false)
 }
 
-cli_validate_declared_secrets_with_reuse: fn(theme: Theme, project_dir: String, specs: [SecretSpec], active_environment: String?, reuse_verified_store: Bool) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+cli_validate_declared_secrets_with_reuse: fn(theme: Theme, project_dir: String, specs: [SecretSpec], active_environment: String?, reuse_verified_store: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> CLIError! {
     environment: active_environment ?? "dynamic"
     trust_secrets_write_runtime_plan(project_dir, specs) ?? {
         theme.error("couldn't install the secret read plan", err.message(), "fix the project `.jet` directory and try activation again.")
@@ -103,7 +103,7 @@ cli_validate_declared_secrets_with_reuse: fn(theme: Theme, project_dir: String, 
 
 // A max-age rotation policy: overdue is E1333, an error for a required
 // declaration and a warning for an optional one.
-cli_check_secret_rotation: fn(theme: Theme, project_dir: String, spec: SecretSpec, environment: String, seconds: Int) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
+cli_check_secret_rotation: fn(theme: Theme, project_dir: String, spec: SecretSpec, environment: String, seconds: Int) -[IO, FS, Env, Time, Time.Wait]> CLIError! {
     age: if trust_secrets_store_age(project_dir) == {
         .Val(found) -> found
         .None -> {
@@ -160,7 +160,7 @@ cli_secret_activation_missing: fn(project_dir: String, spec: SecretSpec, specs: 
 
 // The per-service start hook: refuse an unknown field (E1262), then run the
 // declared `before_start` jobs.
-cli_service_before_start: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, svc: DevServicePlan) ServicesError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+cli_service_before_start: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, svc: DevServicePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ServicesError! {
     if services_unknown_field(svc) == .Val(field) {
         theme.error_coded("E1262", "service `{svc.name}` has a field Jet doesn't recognize: `{field}`", SERVICES_UNKNOWN_FIELD_WHY, SERVICES_UNKNOWN_FIELD_FIX)
         return Err(ServicesError{message: "service `{svc.name}` has an unsupported field"})
@@ -170,7 +170,7 @@ cli_service_before_start: fn(verification: &StoreVerification, cache: &Workspace
     }
 }
 
-cli_report_service_start_error: fn(theme: Theme, title: String, error: String) Never! -[IO, Time.Wait]> {
+cli_report_service_start_error: fn(theme: Theme, title: String, error: String) -[IO, Time.Wait]> Never! {
     if error.contains("did not become healthy") || error.contains("restart limit exhausted") || error.contains("restart did not produce a running process") {
         name := "unknown"
         if cli_strip_prefix(error, "service `") == .Val(rest) {
@@ -207,22 +207,22 @@ LifecycleHookMode: struct {
 // Run typed lifecycle actions through the same composed environment used by
 // commands and services. The normal short form names a checked `#Job fn`;
 // only an explicit record command uses the expert trust-gated hook escape.
-cli_run_lifecycle_hooks: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+cli_run_lifecycle_hooks: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> CLIError! {
     cli_run_lifecycle_hooks_with_mode(verification, cache, theme, parsed, roots, project_dir, entry, env, hooks, phase, LifecycleHookMode{clean: false, strict: false, silent: false})
 }
 
 // Shell activation: job stdout must not corrupt the generated export script.
-cli_run_lifecycle_hooks_silent: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+cli_run_lifecycle_hooks_silent: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> CLIError! {
     cli_run_lifecycle_hooks_with_mode(verification, cache, theme, parsed, roots, project_dir, entry, env, hooks, phase, LifecycleHookMode{clean: false, strict: false, silent: true})
 }
 
 // `jet env test`: only the declared environment is visible, so a check cannot
 // pass because a host variable or host-installed executable leaked in.
-cli_run_lifecycle_hooks_clean: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+cli_run_lifecycle_hooks_clean: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> CLIError! {
     cli_run_lifecycle_hooks_with_mode(verification, cache, theme, parsed, roots, project_dir, entry, env, hooks, phase, LifecycleHookMode{clean: true, strict: true, silent: true})
 }
 
-cli_run_lifecycle_hooks_with_mode: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String, mode: LifecycleHookMode) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+cli_run_lifecycle_hooks_with_mode: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String, mode: LifecycleHookMode) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> CLIError! {
     loop hook in hooks {
         if hook.action == {
             .Task(job) -> {
@@ -241,7 +241,7 @@ cli_run_lifecycle_hooks_with_mode: fn(verification: &StoreVerification, cache: &
 }
 
 // One explicit, trust-gated lifecycle command in a checked project cwd.
-cli_run_lifecycle_command: fn(theme: Theme, project_dir: String, env: &ShellEnv, hook: HookSpec, command: String, phase: String, mode: LifecycleHookMode) CLIError! -[IO, FS, Env, Exec, Time.Wait]> {
+cli_run_lifecycle_command: fn(theme: Theme, project_dir: String, env: &ShellEnv, hook: HookSpec, command: String, phase: String, mode: LifecycleHookMode) -[IO, FS, Env, Exec, Time.Wait]> CLIError! {
     if !hook.trusted {
         if !mode.strict {
             theme.detail("skipping untrusted lifecycle {phase} hook `{hook.name}`")

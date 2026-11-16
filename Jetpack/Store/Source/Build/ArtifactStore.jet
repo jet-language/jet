@@ -36,7 +36,7 @@ BuildArtifactStoreHandle: struct {
         Ok(found)
     }
 
-    put_record: fn(self, key: String, bytes: [U8]) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
+    put_record: fn(self, key: String, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> BuildIOError! {
         self.store.publish_action_entry(self.store.action(key), bytes, durable: false) ?? return Err(build_store_io_error(err))
     }
 

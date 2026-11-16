@@ -44,7 +44,7 @@ pkg_python_bind: fn(source_path: String, source: String, lib: String, cache: Str
 }
 
 // Compile the module with Python's own compiler without running it.
-pkg_python_check: fn(path: String) ForeignBindError! -[Exec, Time.Wait]> {
+pkg_python_check: fn(path: String) -[Exec, Time.Wait]> ForeignBindError! {
     if process.cmd([String]{PKG_PYTHON_RUNTIME, "-c", PKG_PYTHON_COMPILE_CHECK, path}).stdout(.Capture).stderr(.Capture).run() == {
         .Ok(receipt) -> {
             if receipt.success {

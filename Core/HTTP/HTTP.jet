@@ -746,7 +746,7 @@ HTTPRouter: struct {
     // registers in the router's route table, so duplicates, matching and
     // `web.openapi` are the table's; the handler keeps its `Net`-only type.
     // `at` is the registering call's place, handed on to the table.
-    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
+    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -[Net]> Never! {
         state: self.__state
         index: router_handler_count(self.__state)
         routes.route_add(self.__mux, method, pattern, routes.__handler(fn(request: HTTPRequest) { router_call(state, index, request) }), contract, at)
@@ -867,7 +867,7 @@ __MethodTokenError: struct {
 // registers. Any RFC 9110 token is a method, kept in its exact case; only a
 // token that is exactly a standard method is refused, since that method has
 // its own verb.
-__method_token_check: fn(token: String) __MethodTokenError! -[]> {
+__method_token_check: fn(token: String) -[]> __MethodTokenError! {
     if !valid_method(token) {
         return Err(__MethodTokenError{reason: "`{token}` is not an HTTP method token: a method is one or more letters, digits or characters of !#$%&'*+-.^_`|~"})
     }

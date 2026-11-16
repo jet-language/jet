@@ -25,7 +25,7 @@ pkg_facts_test_dir: fn(label: String) -[FS]> String Never! {
     files.tmpdir("jet-package-{label}") ?? panic("scratch directory")
 }
 
-pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[FS]> {
+pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Never! {
     path: files.join(dir, relative)
     files.create_dir_all(pkg_path_parent(path)) ?? panic("parent directory")
     files.write(path, text) ?? panic("write fixture")
@@ -315,7 +315,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
 }
 
 // One rejected nested-entry fixture: the run entry has no unique source.
-pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, extra: [ManifestEntry]) Never! -[FS, Env, IO]> {
+pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, extra: [ManifestEntry]) -[FS, Env, IO]> Never! {
     dir: pkg_facts_test_dir(label)
     pkg_facts_test_write(dir, "entry.jet", entry_source)
     loop fixture in extra -> pkg_facts_test_write(dir, fixture.key, fixture.value)

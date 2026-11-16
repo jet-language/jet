@@ -145,7 +145,7 @@ TLSStream: struct {
         read_into_locked(guard.value, buffer, limit, end_ns)
     }
 
-    write_bytes: fn(self, bytes: [U8], /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
+    write_bytes: fn(self, bytes: [U8], /, *, deadline: Duration) -[Net, Time.Wait]> IOError! {
         end_ns: deadline_end(deadline, "tls write all") ?? return Err(net_to_io(err))
         state: __state(self) ?? return Err(io_error(.Write, "TLS stream is closed"))
         guard := state.guard_edit()
@@ -179,7 +179,7 @@ TLSStream: struct {
     // Sends close_notify, shuts down the socket's write side and closes the
     // stream, freeing the engine and wiping its buffers. Closing a closed
     // stream succeeds.
-    close: fn(self) IOError! -[Net, Time.Wait]> {
+    close: fn(self) -[Net, Time.Wait]> IOError! {
         state: __state(self) ?? return Err(io_error(.Close, "TLS stream is closed"))
         guard := state.guard_edit()
         if guard.value.closed -> return Ok()
@@ -190,7 +190,7 @@ TLSStream: struct {
     }
 
     // Sends close_notify and shuts down the write side; reads stay open.
-    close_write: fn(self, /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
+    close_write: fn(self, /, *, deadline: Duration) -[Net, Time.Wait]> IOError! {
         end_ns: deadline_end(deadline, "tls close write") ?? return Err(net_to_io(err))
         state: __state(self) ?? return Err(io_error(.Close, "TLS stream is closed"))
         guard := state.guard_edit()
@@ -413,15 +413,15 @@ write_some: fn(stream: &TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! 
     Ok(bytes.len())
 }
 
-write_bytes: fn(stream: &TLSStream, bytes: [U8]) IOError! -[Net, Time.Wait]> {
+write_bytes: fn(stream: &TLSStream, bytes: [U8]) -[Net, Time.Wait]> IOError! {
     stream.write_bytes(bytes, deadline: forever())
 }
 
-write: fn(stream: &TLSStream, text: String) IOError! -[Net, Time.Wait]> {
+write: fn(stream: &TLSStream, text: String) -[Net, Time.Wait]> IOError! {
     write_bytes(stream, text.bytes())
 }
 
-close: fn(stream: TLSStream) IOError! -[Net, Time.Wait]> { stream.close() }
+close: fn(stream: TLSStream) -[Net, Time.Wait]> IOError! { stream.close() }
 
 sni: fn(stream: &TLSStream) -[Net]> String Never! {
     peer: stream.peer_identity()
@@ -1255,7 +1255,7 @@ priv engine_read_status: fn(tls: &TLSState, limit: Int, end_ns: Int, operation: 
 
 // A failed handshake frees the engine and wipes the buffers before its error
 // goes back, as close does.
-priv run_handshake: fn(tls: &TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
+priv run_handshake: fn(tls: &TLSState, server_name: String, end_ns: Int) -[Net, Time.Wait]> NetError! {
     if handshake_steps(tls, server_name, end_ns) == .Err(error) {
         release(tls)
         return Err(error)
@@ -1263,7 +1263,7 @@ priv run_handshake: fn(tls: &TLSState, server_name: String, end_ns: Int) NetErro
     Ok()
 }
 
-priv handshake_steps: fn(tls: &TLSState, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
+priv handshake_steps: fn(tls: &TLSState, server_name: String, end_ns: Int) -[Net, Time.Wait]> NetError! {
     loop {
         status := 0
         if ssltls.ssl_handshake(tls.ssl, tls.rng) == .Err(e) -> status = engine_status(e)
@@ -1758,7 +1758,7 @@ priv fill_pending: fn(tls: &TLSState, operation: IOOperation, end_ns: Int, reada
     }
 }
 
-priv write_all: fn(tls: &TLSState, bytes: [U8], end_ns: Int) IOError! -[Net, Time.Wait]> {
+priv write_all: fn(tls: &TLSState, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> IOError! {
     if tls.closed || tls.write_closed -> return Err(io_error(.Write, "TLS stream is closed"))
     offset := 0
     loop offset < bytes.len() {
@@ -1793,7 +1793,7 @@ priv write_chunk: fn(tls: &TLSState, chunk: [U8], end_ns: Int) -[Net, Time.Wait]
     }
 }
 
-priv send_close_notify: fn(tls: &TLSState, end_ns: Int, operation: String) IOError! -[Net, Time.Wait]> {
+priv send_close_notify: fn(tls: &TLSState, end_ns: Int, operation: String) -[Net, Time.Wait]> IOError! {
     if tls.write_closed -> return Ok()
     loop {
         status := 0

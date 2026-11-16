@@ -620,7 +620,7 @@ priv peer_leave: fn(state: &HTTPServerState, peer: String) Never! {
 // One admitted connection's task: the TLS handshake and its request, then its
 // count given back, all shielded from cancellation so a signal lets the
 // request finish and the count reach the drain.
-priv serve_admitted: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
+priv serve_admitted: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Never! {
     #Shield {
         answered: serve_taken(state, handoff, tls, mux, deadline, false)
         guard := state.guard_edit()
@@ -632,7 +632,7 @@ priv serve_admitted: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStre
 
 // A connection taken once accepting work stopped: within the limits, its own
 // task answers it 503 (or the readiness probe); past them, it is refused now.
-priv take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) Never! -[Net, FS.Read, Time]> {
+priv take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) -[Net, FS.Read, Time]> Never! {
     peer: peer_host(stream)
     if admit_refusing(server.__state, peer) {
         state: server.__state
@@ -647,7 +647,7 @@ priv take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) Never! -[N
 
 // A connection taken while draining: its request is answered 503, or by the
 // readiness probe, and its count given back.
-priv serve_refusing: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
+priv serve_refusing: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Never! {
     #Shield {
         _: serve_taken(state, handoff, tls, mux, deadline, true)
         guard := state.guard_edit()
@@ -665,7 +665,7 @@ priv serve_taken: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]
 }
 
 // A connection over the limits: a plain one is told 503, then closed.
-priv refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) Never! -[Net, Time]> {
+priv refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) -[Net, Time]> Never! {
     plain := true
     if tls == .Val(_) -> plain = false
     if plain {
@@ -751,7 +751,7 @@ __on_upgraded: fn(mux: HTTPMux, ended: &&fn() -[Time]> Never!) Never! {
 
 // Runs what `__on_upgraded` left on `mux`, in the order it was left, after
 // the table's guard is let go.
-priv mux_upgraded: fn(mux: HTTPMux) Never! -[Time]> {
+priv mux_upgraded: fn(mux: HTTPMux) -[Time]> Never! {
     loop cell in mux_upgraded_cells(mux) {
         held: cell.guard_read()
         held.value.ended()
@@ -800,7 +800,7 @@ priv mux_stops_taken: fn(mux: HTTPMux) -> [fn(Int) -[Time]> Never!] Never! {
 }
 
 // Answer one connection the listener accepts (`app.serve_once(listener)`).
-priv server_serve_once: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
+priv server_serve_once: fn(listener: TCPListener, mux: HTTPMux) -[Net, FS.Read, Time]> HTTPError! {
     _: mux_serving(mux)
     stream: listener.accept(deadline: Duration{ns: C_ACCEPT_ONCE_NS}) ?? {
         if accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
@@ -1752,7 +1752,7 @@ priv wire_fill: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> Bool HT
 }
 
 // Fill until `need` bytes are buffered; a short stream is a bad request.
-priv wire_need: fn(stream: HTTPConn, wire: &HTTPWire, need: Int) HTTPFault! -[Net, Time.Wait]> {
+priv wire_need: fn(stream: HTTPConn, wire: &HTTPWire, need: Int) -[Net, Time.Wait]> HTTPFault! {
     loop wire.buffer.len() < need {
         more: wire_fill(stream, wire) ?? return Err(err)
         if !more -> return Err(.Reply(400))

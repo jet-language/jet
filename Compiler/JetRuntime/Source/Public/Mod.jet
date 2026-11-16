@@ -32,10 +32,10 @@ mod: module {
     #Import(c) priv context_digest: fn(id: Int) -> Bool = "jet_mod_context_digest_raw"
 
     // Stages the payload to a file.
-    #Import(c) priv stage_context: fn(id: Int) Err! -[FS]> = "jet_mod_stage_context_raw"
+    #Import(c) priv stage_context: fn(id: Int) -[FS]> Err! = "jet_mod_stage_context_raw"
 
     // Maps the staged payload.
-    #Import(c) priv open_context: fn(id: Int) Err! -[Exec]> = "jet_mod_open_context_raw"
+    #Import(c) priv open_context: fn(id: Int) -[Exec]> Err! = "jet_mod_open_context_raw"
 
     // The header's export `index`.
     #Import(c) priv export_info: fn(id: Int, index: Int) -> (name: String, symbol: String, text: Bool) = "jet_mod_export_info_raw"
@@ -44,10 +44,10 @@ mod: module {
     #Import(c) priv exports_count: fn(id: Int) -> Int = "jet_mod_exports_count_raw"
 
     // Resolves the mapped payload's export `index`.
-    #Import(c) priv resolve_export: fn(id: Int, index: Int) Err! -[Exec]> = "jet_mod_resolve_export_raw"
+    #Import(c) priv resolve_export: fn(id: Int, index: Int) -[Exec]> Err! = "jet_mod_resolve_export_raw"
 
     // Resolves the mapped payload's symbol `symbol`.
-    #Import(c) priv resolve_symbol: fn(id: Int, symbol: String) Err! -[Exec]> = "jet_mod_resolve_symbol_raw"
+    #Import(c) priv resolve_symbol: fn(id: Int, symbol: String) -[Exec]> Err! = "jet_mod_resolve_symbol_raw"
 
     // The loaded module; the context keeps no staged path.
     #Import(c) priv finish_context: fn(id: Int) -> Mod = "jet_mod_finish_context_raw"

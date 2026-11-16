@@ -4,7 +4,7 @@
 // confirmation, and report channel freshness read-only.
 use files: core.files
 
-cli_render_channel_update_row: fn(theme: Theme, scope: String, name: String, name_w: Int, before: String, after: String, package_count: Int, download_bytes: Int?) Never! -[IO, Time.Wait]> {
+cli_render_channel_update_row: fn(theme: Theme, scope: String, name: String, name_w: Int, before: String, after: String, package_count: Int, download_bytes: Int?) -[IO, Time.Wait]> Never! {
     shown_after: "{after}   {cli_package_noun(package_count)}, {cli_download_size(download_bytes)}"
     label: "{terminal_pad_end(scope, 5)} {terminal_pad_end(name, name_w)}"
     theme.plan_row(PlanMark.Change, label, label.len(), before, shown_after)
@@ -211,7 +211,7 @@ cli_plan_project_update: fn(cache: &WorkspaceDeclarationCache, theme: Theme, par
     Ok(Val(ProjectUpdatePlan{project_dir: project_dir, updates: updates}))
 }
 
-cli_render_project_update_plan: fn(theme: Theme, plan: ProjectUpdatePlan) Never! -[IO, Time.Wait]> {
+cli_render_project_update_plan: fn(theme: Theme, plan: ProjectUpdatePlan) -[IO, Time.Wait]> Never! {
     name_w := 8
     loop update in plan.updates {
         if update.source.name.len() > name_w -> name_w = update.source.name.len()

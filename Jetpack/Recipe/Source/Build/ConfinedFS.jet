@@ -103,7 +103,7 @@ PinnedRecipeDirectory: struct {
         Ok(true)
     }
 
-    rename_name: fn(self, old: String, new: String) RecipeError! -[FS]> {
+    rename_name: fn(self, old: String, new: String) -[FS]> RecipeError! {
         recipe_validate_component(old)
         recipe_validate_component(new)
         self.directory.rename(old, new)
@@ -125,14 +125,14 @@ PinnedRecipeDirectory: struct {
 
     // Remove a member and, for a directory, everything below it, without
     // following any link. A missing member is already removed.
-    remove_name: fn(self, name: String) RecipeError! -[FS]> {
+    remove_name: fn(self, name: String) -[FS]> RecipeError! {
         recipe_validate_component(name)
         recipe_remove_member(self.directory, name)
     }
 
     // Exclusively create `temporary`, write and flush `bytes`, then publish
     // it as `final`. A concurrent identical winner is accepted.
-    publish_new_file: fn(self, temporary: String, final: String, bytes: [U8]) RecipeError! -[FS]> {
+    publish_new_file: fn(self, temporary: String, final: String, bytes: [U8]) -[FS]> RecipeError! {
         recipe_validate_component(temporary)
         recipe_validate_component(final)
         out := self.directory.create(temporary, if_exists: .Refuse)
@@ -151,11 +151,11 @@ PinnedRecipeDirectory: struct {
     }
 
     // Make earlier member creations, renames and removals durable.
-    sync: fn(self) RecipeError! -[FS]> { self.directory.fsync() }
+    sync: fn(self) -[FS]> RecipeError! { self.directory.fsync() }
 }
 
 // Remove `name` under `parent` without following links (Rust `remove_at`).
-recipe_remove_member: fn(parent: Directory, name: String) RecipeError! -[FS]> {
+recipe_remove_member: fn(parent: Directory, name: String) -[FS]> RecipeError! {
     info: if parent.entry_stat(name) == {
         .Ok(info) -> info
         .Err(error) -> {
@@ -274,7 +274,7 @@ recipe_has_parent_component: fn(relative: String) -> Bool Never! {
 }
 
 // Rust `ensure_recipe_directory`: hold and create a directory path.
-recipe_ensure_directory: fn(path: String) RecipeError! -[FS, Env]> {
+recipe_ensure_directory: fn(path: String) -[FS, Env]> RecipeError! {
     PinnedRecipeDirectory.open_or_create(path)
 }
 
@@ -295,7 +295,7 @@ recipe_output_name: fn(output_root: String) -> String RecipeError! {
 
 // Publish a staged output directory over `output_root` through the held
 // parent, as a diagnostic on failure.
-recipe_commit_staged_output: fn(parent: PinnedRecipeDirectory, staged_name: String, output_root: String) RecipeDiagnostic! -[FS, Env, Rand]> {
+recipe_commit_staged_output: fn(parent: PinnedRecipeDirectory, staged_name: String, output_root: String) -[FS, Env, Rand]> RecipeDiagnostic! {
     if recipe_commit_staged_output_io(parent, staged_name, output_root) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -307,7 +307,7 @@ recipe_commit_staged_output: fn(parent: PinnedRecipeDirectory, staged_name: Stri
 // Replace the output root with the staged tree: an atomic exchange where the
 // platform has one, otherwise move the previous output to an exclusive backup
 // name, publish, and remove the backup.
-recipe_commit_staged_output_io: fn(parent: PinnedRecipeDirectory, staged_name: String, output_root: String) RecipeError! -[FS, Env, Rand]> {
+recipe_commit_staged_output_io: fn(parent: PinnedRecipeDirectory, staged_name: String, output_root: String) -[FS, Env, Rand]> RecipeError! {
     output_parent: files.dirname(output_root)
     expected_parent: recipe_absolute_path(if output_parent == "" -> "." else -> output_parent)
     if expected_parent != parent.path() {
@@ -353,7 +353,7 @@ recipe_commit_staged_output_io: fn(parent: PinnedRecipeDirectory, staged_name: S
 
 // Copy a directory tree without following links; special files are refused
 // and a source that changes during the copy is an error.
-recipe_copy_tree: fn(src: String, dst: String) RecipeError! -[FS, Env]> {
+recipe_copy_tree: fn(src: String, dst: String) -[FS, Env]> RecipeError! {
     source_info: files.stat(src)
     if source_info.is_symlink {
         return Err(RecipeError.PermissionDenied("recipe tree root is a symlink or reparse point `{src}`"))
@@ -400,7 +400,7 @@ recipe_sorted_names: fn(path: String) -[FS]> [String] RecipeError! {
 // Copy one regular file whose identity was observed as `expected`, refusing
 // links at either end and a source that changes during the copy. The copy
 // keeps the source permission bits.
-recipe_copy_regular_file_nofollow: fn(src: String, dst: String, expected: Stat) RecipeError! -[FS, Env]> {
+recipe_copy_regular_file_nofollow: fn(src: String, dst: String, expected: Stat) -[FS, Env]> RecipeError! {
     source := files.open(src, links: .Refuse)
     opened: source.stat()
     if !opened.is_file || opened.id != expected.id {
@@ -489,7 +489,7 @@ recipe_confined_source: fn(source_root: String, source: String, directory: Bool)
 // Every component from the source root down is a real directory (the last
 // may be any non-link), never a symlink. A `.` component names the directory
 // it is in, so `.` alone is the source root itself.
-recipe_validate_source_components: fn(source_root: String, relative: String) RecipeError! -[FS]> {
+recipe_validate_source_components: fn(source_root: String, relative: String) -[FS]> RecipeError! {
     root_info: files.stat(source_root)
     if root_info.is_symlink {
         return Err(RecipeError.PermissionDenied("recipe source root must not be a symlink or reparse point"))

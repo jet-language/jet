@@ -8,7 +8,7 @@ impl NixDerivationStore {
     // Read `drv_path` and, exactly where `hashDerivationModulo` will need
     // them, its input derivations, into this store. Fixed, floating and
     // impure derivations read no inputs, as in the reference.
-    load_from_filesystem: fn(&self, drv_path: String) NixError! -[FS]> {
+    load_from_filesystem: fn(&self, drv_path: String) -[FS]> NixError! {
         if self.derivations.get(drv_path) != None {
             return
         }
@@ -18,7 +18,7 @@ impl NixDerivationStore {
         self.load_inputs_from_filesystem(drv)
     }
 
-    load_inputs_from_filesystem: fn(&self, drv: NixDerivation) NixError! -[FS]> {
+    load_inputs_from_filesystem: fn(&self, drv: NixDerivation) -[FS]> NixError! {
         if drv.is_fixed() {
             return
         }
@@ -101,7 +101,7 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
     Ok(report)
 }
 
-nix_verify_corpus_outputs: fn(store: &NixDerivationStore, store_dir: String, path: String, drv: NixDerivation) NixError! -[FS]> {
+nix_verify_corpus_outputs: fn(store: &NixDerivationStore, store_dir: String, path: String, drv: NixDerivation) -[FS]> NixError! {
     store.load_inputs_from_filesystem(drv)
     store.verify_output_paths(store_dir, path, drv)
 }

@@ -157,7 +157,7 @@ publication_validate_existing_index_clone: fn(registry: PublicationRegistryConfi
 
 // Foundation retains the ancestor chain for every mutation and delegates to
 // its ONE descriptor-relative remover (moved from Provider); no path rollback.
-publication_registry_clone_cleanup: fn(parent: FoundationDirectoryAuthority, name: String) IOError! -[FS]> {
+publication_registry_clone_cleanup: fn(parent: FoundationDirectoryAuthority, name: String) -[FS]> IOError! {
     parent.remove_tree(name)
 }
 
@@ -177,7 +177,7 @@ publication_registry_clone_failure: fn(registry: PublicationRegistryConfig, pare
     }
 }
 
-publication_clone_registry_to: fn<N: PublicationRegistryNet>(registry: PublicationRegistryConfig, parent: FoundationDirectoryAuthority, path: String, transport: PublicationRegistryTransport, network: N) PublicationDiagnosticError! -[FS, Env, Exec, Time.Wait]> {
+publication_clone_registry_to: fn<N: PublicationRegistryNet>(registry: PublicationRegistryConfig, parent: FoundationDirectoryAuthority, path: String, transport: PublicationRegistryTransport, network: N) -[FS, Env, Exec, Time.Wait]> PublicationDiagnosticError! {
     command: publication_registry_git_command(transport) ?? return Err(publication_registry_clone_failure(registry, parent, path, "{err}"))
     output: command.args_extend(publication_registry_clone_arguments(registry.url, network.fetch_remote(registry.url, transport), path)).run() ?? return Err(publication_registry_clone_failure(registry, parent, path, "{err}"))
     if !output.success {

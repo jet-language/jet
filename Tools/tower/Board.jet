@@ -1208,7 +1208,7 @@ finding: fn(rule: String, ref: String, msg: String) -> Dyn Never! {
 
 // The text spec files under `dir` as lint.mjs walks them: entries in
 // localeCompare order, dot names skipped, symlinked directories not entered.
-spec_files: fn(dir: String, out: &[String]) Failure! -[FS]> {
+spec_files: fn(dir: String, out: &[String]) -[FS]> Failure! {
     listed := files.list_dir(dir) ?? return Err(fail("E_IO", "cannot list {dir}: {err}"))
     listed.sort_by(fn(left: DirEntry, right: DirEntry) { unicode.collate(left.name, right.name) })
     loop entry in listed {

@@ -137,7 +137,7 @@ recipe_update_resolve: fn(options: ToolchainUpdateOptions, now: Int) -[FS, Env, 
 }
 
 // Release policy plus, when state exists, the monotonic transition rule.
-recipe_update_validate_manifest_policy: fn(manifest: ToolchainChannelManifest, options: ToolchainUpdateOptions, now: Int) RecipeError! -[FS, Env]> {
+recipe_update_validate_manifest_policy: fn(manifest: ToolchainChannelManifest, options: ToolchainUpdateOptions, now: Int) -[FS, Env]> RecipeError! {
     recipe_update_validate_release_policy(manifest.version, manifest.min_version, manifest.published_at, manifest.expires_at, options.running_version, now)
     state: recipe_update_read_state(options.state_path)
     if state != None {
@@ -177,7 +177,7 @@ recipe_update_install_verified: fn(current_exe: String, bytes: [U8], plan: Toolc
 }
 
 // Refuse to reuse any leftover staging, rollback or helper path.
-recipe_update_reject_existing: fn(path: String, label: String) RecipeError! -[FS]> {
+recipe_update_reject_existing: fn(path: String, label: String) -[FS]> RecipeError! {
     if files.stat(path) == {
         .Ok(_) -> { Err(RecipeError.Update("a previous {label} is still present")) }
         .Err(error) -> {
@@ -190,7 +190,7 @@ recipe_update_reject_existing: fn(path: String, label: String) RecipeError! -[FS
 }
 
 // Exclusively create the staged executable with the current file's mode.
-recipe_update_stage_executable: fn(staged: String, bytes: [U8], mode: Int) RecipeError! -[FS, Env]> {
+recipe_update_stage_executable: fn(staged: String, bytes: [U8], mode: Int) -[FS, Env]> RecipeError! {
     recipe_update_reject_existing(staged, "self-update staging file")
     recipe_update_validate_no_symlink_ancestors(staged, "self-update staging file")
     out := files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
@@ -230,7 +230,7 @@ recipe_update_install_unix: fn(current_exe: String, parent: String, mode: Int, b
     }
 }
 
-recipe_update_activate_unix: fn(current_exe: String, parent: String, staged: String, rollback: String, plan: ToolchainUpdatePlan, state_path: String, state_before: ToolchainUpdateState?, running_version: String) RecipeError! -[FS, Env, Exec, Time, Time.Wait]> {
+recipe_update_activate_unix: fn(current_exe: String, parent: String, staged: String, rollback: String, plan: ToolchainUpdatePlan, state_path: String, state_before: ToolchainUpdateState?, running_version: String) -[FS, Env, Exec, Time, Time.Wait]> RecipeError! {
     recipe_update_validate_release_policy(plan.version, plan.min_version, plan.published_at, plan.expires_at, running_version, recipe_update_now_seconds())
     recipe_update_health_check(staged)
     files.hard_link(current_exe, rollback) ?? return Err(RecipeError.Update("preserve current Jet executable for rollback: {err}"))
@@ -274,7 +274,7 @@ recipe_update_rollback_unix: fn(current_exe: String, rollback: String, parent: S
     }
 }
 
-recipe_update_restore_previous: fn(current_exe: String, rollback: String, parent: String, state_path: String, state_before: ToolchainUpdateState?) RecipeError! -[FS, Env]> {
+recipe_update_restore_previous: fn(current_exe: String, rollback: String, parent: String, state_path: String, state_before: ToolchainUpdateState?) -[FS, Env]> RecipeError! {
     info: files.stat(current_exe) ?? return Err(RecipeError.Update("inspect activated Jet executable during rollback: {err}"))
     if info.is_symlink || !info.is_file {
         return Err(RecipeError.Update("activated Jet executable became unsafe during rollback"))
@@ -286,7 +286,7 @@ recipe_update_restore_previous: fn(current_exe: String, rollback: String, parent
 }
 
 // Put back the previous state, or remove a state that did not exist before.
-recipe_update_restore_state: fn(path: String, previous: ToolchainUpdateState?) RecipeError! -[FS, Env]> {
+recipe_update_restore_state: fn(path: String, previous: ToolchainUpdateState?) -[FS, Env]> RecipeError! {
     if previous == {
         .Val(state) -> { recipe_update_write_state(path, state) }
         .None -> {
@@ -312,7 +312,7 @@ recipe_update_restore_state: fn(path: String, previous: ToolchainUpdateState?) R
 
 // `<exe> --version` must exit successfully; the helper marker is removed so
 // the checked binary cannot re-enter the Windows helper.
-recipe_update_health_check: fn(path: String) RecipeError! -[Exec, Time.Wait]> {
+recipe_update_health_check: fn(path: String) -[Exec, Time.Wait]> RecipeError! {
     receipt: process.cmd([String]{path, "--version"}).env_remove(TOOLCHAIN_WINDOWS_HELPER_ENV).stdout(.Capture).stderr(.Capture).run() ?? return Err(RecipeError.Update("health-check staged Jet executable: {err}"))
     if !receipt.success {
         return Err(RecipeError.Update("health-check staged Jet executable exited with exit status: {receipt.code}"))
@@ -400,7 +400,7 @@ recipe_update_install_windows_deferred: fn(current_exe: String, parent: String, 
     }
 }
 
-recipe_update_stage_windows_file: fn(staged: String, bytes: [U8]) RecipeError! -[FS]> {
+recipe_update_stage_windows_file: fn(staged: String, bytes: [U8]) -[FS]> RecipeError! {
     recipe_update_reject_existing(staged, "self-update staging file")
     out := files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
     if recipe_update_write_all_synced(out, bytes) == {
@@ -413,7 +413,7 @@ recipe_update_stage_windows_file: fn(staged: String, bytes: [U8]) RecipeError! -
 }
 
 // Copy a regular file to a new path and flush it.
-recipe_update_copy_regular_file: fn(source: String, destination: String, label: String) RecipeError! -[FS, Env]> {
+recipe_update_copy_regular_file: fn(source: String, destination: String, label: String) -[FS, Env]> RecipeError! {
     recipe_update_validate_no_symlink_ancestors(source, label)
     recipe_update_validate_no_symlink_ancestors(destination, label)
     info: files.stat(source) ?? return Err(RecipeError.Update("inspect {label}: {err}"))
@@ -428,7 +428,7 @@ recipe_update_copy_regular_file: fn(source: String, destination: String, label: 
 // The deferred Windows helper: re-verify the staged image against the plan
 // the parent passed, wait for the old executable to be released, replace it,
 // health-check, commit the state, and roll back on failure.
-recipe_update_windows_helper_run: fn() RecipeError! -[FS, Env, Exec, Time, Time.Wait]> {
+recipe_update_windows_helper_run: fn() -[FS, Env, Exec, Time, Time.Wait]> RecipeError! {
     current: recipe_update_helper_path(ENV_JET_TOOLCHAIN_UPDATE_CURRENT)
     staged: recipe_update_helper_path(ENV_JET_TOOLCHAIN_UPDATE_STAGED)
     rollback: recipe_update_helper_path(ENV_JET_TOOLCHAIN_UPDATE_ROLLBACK)
@@ -510,13 +510,13 @@ recipe_update_windows_helper_run: fn() RecipeError! -[FS, Env, Exec, Time, Time.
     // Core cannot schedule a delete at reboot: the helper copy stays behind.
 }
 
-recipe_update_windows_commit: fn(current: String, state_path: String, state: ToolchainUpdateState) RecipeError! -[FS, Env, Exec, Time.Wait]> {
+recipe_update_windows_commit: fn(current: String, state_path: String, state: ToolchainUpdateState) -[FS, Env, Exec, Time.Wait]> RecipeError! {
     recipe_update_helper_regular(current, "Windows self-update activated executable")
     recipe_update_health_check(current)
     recipe_update_write_state(state_path, state)
 }
 
-recipe_update_windows_rollback: fn(current: String, rollback: String, state_path: String, previous_state: ToolchainUpdateState?) RecipeError! -[FS, Env]> {
+recipe_update_windows_rollback: fn(current: String, rollback: String, state_path: String, previous_state: ToolchainUpdateState?) -[FS, Env]> RecipeError! {
     files.remove(current) ?? return Err(RecipeError.Update("remove failed Windows Jet executable: {err}"))
     files.rename(rollback, current, if_exists: .Replace) ?? return Err(RecipeError.Update("restore previous Windows Jet executable: {err}"))
     recipe_update_restore_state(state_path, previous_state)

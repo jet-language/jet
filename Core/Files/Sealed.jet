@@ -75,7 +75,7 @@ JetcBytes: struct {
 
 /// Seal `source` to `recipients` as a JETC v2 container at `destination`.
 /// The destination must not exist; a failed seal leaves no output.
-seal: fn(recipients: [X25519PublicKey], source: Path, destination: Path) FileCryptoError! -[FS, Rand]> {
+seal: fn(recipients: [X25519PublicKey], source: Path, destination: Path) -[FS, Rand]> FileCryptoError! {
     canonical: jetc.canonical(recipients)
     parent: jetc_parent(destination.to_string())
     // The portable oracle deliberately has no race-safe source snapshot.
@@ -115,7 +115,7 @@ seal: fn(recipients: [X25519PublicKey], source: Path, destination: Path) FileCry
 /// Open the JETC v2 container `source` with `identity` into `destination`.
 /// The destination must not exist; output is published only once every
 /// record has authenticated.
-open: fn(identity: X25519SecretKey, source: Path, destination: Path) FileCryptoError! -[FS]> {
+open: fn(identity: X25519SecretKey, source: Path, destination: Path) -[FS]> FileCryptoError! {
     input: jetc_source(source.to_string(), .OpenFailed)
     metadata: jetc_stat(input, .OpenFailed)
     fixed: jetc_read_exact(input, 20, "open-input-read", .OpenFailed)
@@ -409,7 +409,7 @@ jetc_seal_stage: fn(
     expected: [U8],
     metadata: JetcStat,
     verify: Bool,
-) FileCryptoError! -[FS, Rand]> {
+) -[FS, Rand]> FileCryptoError! {
     // Ratified snapshot/cancellation ordering: no RNG1 on observed cancel.
     jetc_cancel_checkpoint()
     file_id: jetc_random(16)

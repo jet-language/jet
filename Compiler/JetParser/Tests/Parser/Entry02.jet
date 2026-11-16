@@ -426,19 +426,34 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 }
 
 #Test("unit_fallible_signatures_use_the_error_prefix") {
-    p: entry02_program("save: fn(path: String) IOError! {{}}\nsync: fn() Err! {{}}\nbounded: fn() IOError! -[FS]> {{}}\nload: fn() -> Config IOError! {{}}\n")
+    p: entry02_program("save: fn(path: String) IOError! {{}}\nsync: fn() Err! {{}}\nbounded: fn() -[FS]> IOError! {{}}\nload: fn() -> Config IOError! {{}}\n")
     assert(entry02_unit_result(entry02_func(p, "save").return_type, "IOError"))
     assert(entry02_unit_result(entry02_func(p, "sync").return_type, "Err"))
     assert(entry02_unit_result(entry02_func(p, "bounded").return_type, "IOError"))
     assert(entry02_func(p, "load").return_type == (Val(Type.Result{ok: Type.Named{name: "Config"}, err: Type.Named{name: "IOError"}})))
 }
 
-// The contract may also follow the effect arrow; both orders are one signature.
-#Test("unit_fallible_contract_may_follow_the_effect_arrow") {
-    p: entry02_program("before: fn() IOError! -[FS]> {{}}\nafter: fn() -[FS]> IOError! {{}}\n")
-    assert(entry02_unit_result(entry02_func(p, "before").return_type, "IOError"))
+// The unit-fallible contract follows the effect arrow; the error-first order
+// is not a signature and gets the generic parse error.
+#Test("unit_fallible_contract_follows_the_effect_arrow") {
+    p: entry02_program("after: fn() -[FS]> IOError! {{}}\n")
     assert(entry02_unit_result(entry02_func(p, "after").return_type, "IOError"))
-    assert(entry02_format("after: fn() -[FS]> IOError! {{}}\n").contains("after: fn() IOError! -[FS]>"))
+    assert(entry02_format("after: fn() -[FS]> IOError! {{}}\n").contains("after: fn() -[FS]> IOError!"))
+    before: entry02_diag(entry02_errors("before: fn() (IOError | ParseError)! -[FS]> {{}}\n"), "E0003")
+    assert_eq(before.what, "Expected `{{` to open the function body, found `-`")
+}
+
+#Test("error_first_trait_slots_fn_types_and_lambdas_get_the_generic_parse_error") {
+    sources: [String]{
+        "Sink: trait {{\n    save: fn(self) (IOError | ParseError)! -[FS]>\n}}\n",
+        "Hooks: struct {{\n    on_save: fn(Int) (IOError | ParseError)! -[FS]>\n}}\n",
+        "run: fn() {{\n    save: fn(n: Int) (IOError | ParseError)! -[FS]> {{ print(n) }}\n}}\n",
+    }
+    expected: [String]{"the end of the method signature", "the end of the function type", "`{{` to open the lambda body"}
+    loop index in 0..<sources.len() {
+        whats: loop diagnostic in entry02_errors(sources[index]) -> "{diagnostic.code} {diagnostic.what}"
+        assert_eq(whats, [String]{"E0003 Expected {expected[index]}, found `-`"})
+    }
 }
 
 #Test("suffix_contract_reaches_nested_general_type_positions") {
@@ -504,10 +519,10 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 }
 
 #Test("unit_fallible_signatures_format_without_arrow") {
-    once: entry02_format("save: fn(path: String) IOError! {{}}\nsync: fn() Err! {{}}\nbounded: fn() IOError! -[FS]> {{}}\n")
+    once: entry02_format("save: fn(path: String) IOError! {{}}\nsync: fn() Err! {{}}\nbounded: fn() -[FS]> IOError! {{}}\n")
     assert(once.contains("save: fn(path: String) IOError!"))
     assert(once.contains("sync: fn() Err!"))
-    assert(once.contains("bounded: fn() IOError! -[FS]>"))
+    assert(once.contains("bounded: fn() -[FS]> IOError!"))
     assert(once == entry02_format(once))
 }
 

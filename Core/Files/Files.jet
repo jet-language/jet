@@ -61,7 +61,7 @@ impl Path.CheckedText {
     Error: PathLiteralError
     Hole: String
 
-    check: fn(text: String) PathLiteralError! -[]> {
+    check: fn(text: String) -[]> PathLiteralError! {
         if text.bytes().contains(U8{0}) {
             return Err(PathLiteralError{reason: "a Path cannot contain a NUL character"})
         }
@@ -273,7 +273,7 @@ MappedFile: struct {
     /// Tell the system how the mapped bytes will be read (posix_madvise over
     /// the whole map). Advice only plans paging: the map holds the same file
     /// contents whatever it says, and an empty map accepts any.
-    advise: fn(self, advice: Advice) IOError! -[FS.Read]> {
+    advise: fn(self, advice: Advice) -[FS.Read]> IOError! {
         core.files.__map_advise(self, map_advice_code(advice))
     }
 
@@ -360,7 +360,7 @@ FileReader: struct {
     /// Tell the system how the file will be read (posix_fadvise over the
     /// whole file). Advice only plans caching: reads return the same bytes
     /// whatever it says, and a pipe or a system without advice accepts any.
-    advise: fn(self, advice: Advice) IOError! -[FS.Read]> {
+    advise: fn(self, advice: Advice) -[FS.Read]> IOError! {
         core.files.__reader_advise(self, advice_code(advice))
     }
 
@@ -392,25 +392,25 @@ FileWriter: struct {
 
     /// Set the open file's permission bits (0o0..0o7777) without naming its
     /// path again. Windows keeps only the read-only flag.
-    set_mode: fn(self, mode: Int) IOError! -[FS.Write]> { core.files.__writer_set_mode(self, mode) }
+    set_mode: fn(self, mode: Int) -[FS.Write]> IOError! { core.files.__writer_set_mode(self, mode) }
 
     /// Reserve disk space for the first `size` bytes (posix_fallocate), so
     /// later writes there cannot fail for lack of space. A shorter file grows
     /// to `size`, the new bytes zero; a longer one keeps its length.
     /// `IOError.Unsupported` reports a file system that cannot reserve.
-    allocate: fn(self, size: Int) IOError! -[FS.Write]> { core.files.__writer_allocate(self, size) }
+    allocate: fn(self, size: Int) -[FS.Write]> IOError! { core.files.__writer_allocate(self, size) }
 
     /// `write_bytes` hands over every byte; the bytes are buffered until
     /// `flush`, `fsync` or close. `write` and `write_line` are the Prelude
     /// `Writer`'s defaults: the text's bytes through `write_bytes`.
     impl Writer {
-        write_bytes: fn(&self, bytes: [U8]) IOError! -[Time.Wait]> {
+        write_bytes: fn(&self, bytes: [U8]) -[Time.Wait]> IOError! {
             rt.writer_write_all(self, bytes)
         }
 
         // Every `flush` call on a FileWriter reaches this method, so it calls
         // the runtime's flush, never the handle's by name.
-        flush: fn(&self) IOError! -[Time.Wait]> { rt.writer_flush(self) }
+        flush: fn(&self) -[Time.Wait]> IOError! { rt.writer_flush(self) }
     }
 }
 
@@ -566,7 +566,7 @@ Directory: struct {
 
     /// Rename `from` to `to`, both inside this directory unless `into` names
     /// the directory that receives `to`. `if_exists` follows `files.rename`.
-    rename: fn(self, from: String, to: String, into: Directory?{None}, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
+    rename: fn(self, from: String, to: String, into: Directory?{None}, if_exists: RenameIfExists{.Replace}) -[FS.Write]> IOError! {
         held_name(self.path, from, true)
         target := self.handle
         target_path := self.path
@@ -582,26 +582,26 @@ Directory: struct {
     }
 
     /// Remove the non-directory entry `name`; a link is removed, not followed.
-    remove: fn(self, name: String) IOError! -[FS.Write]> {
+    remove: fn(self, name: String) -[FS.Write]> IOError! {
         held_name(self.path, name, true)
         core.files.__remove_at(self.handle, name, false)
     }
 
     /// Remove the non-directory entry whose name is exactly the bytes `name`;
     /// `open_raw` says which names are refused.
-    remove_raw: fn(self, name: [U8]) IOError! -[FS.Write]> {
+    remove_raw: fn(self, name: [U8]) -[FS.Write]> IOError! {
         raw_held_name(self.path, name, true)
         core.files.__remove_at_raw(self.handle, name)
     }
 
     /// Remove the empty directory `name`.
-    remove_directory: fn(self, name: String) IOError! -[FS.Write]> {
+    remove_directory: fn(self, name: String) -[FS.Write]> IOError! {
         held_name(self.path, name, true)
         core.files.__remove_at(self.handle, name, true)
     }
 
     /// Flush the held directory so earlier renames inside it are durable.
-    fsync: fn(self) IOError! -[FS.Write]> { core.files.__fsync_directory(self.handle) }
+    fsync: fn(self) -[FS.Write]> IOError! { core.files.__fsync_directory(self.handle) }
 
     /// Acquire an exclusive, nonblocking flock on this directory's identity.
     /// An independent descriptor owns the lock until the returned owner closes,
@@ -929,7 +929,7 @@ extended_attribute: fn(path: String, name: String) -[FS.Read]> [U8]? IOError! {
 
 /// Write one extended-attribute value on `path` itself.
 /// Windows and file systems without attributes report `IOError.Unsupported`.
-set_extended_attribute: fn(path: String, name: String, value: [U8]) IOError! -[FS.Write]> {
+set_extended_attribute: fn(path: String, name: String, value: [U8]) -[FS.Write]> IOError! {
     core.files.__xattr_set(path, name, value)
 }
 
@@ -985,7 +985,7 @@ file_fault: fn(operation_path: String, operation: IOOperation, path: String) IOE
 // FS.Read fault (the same checkpoint `stat` takes) answers `false` too.
 read_probe_fault: fn() -> Bool Never! { rt.fault_should_fail("FS.Read") }
 
-file_writer_refusal: fn(path: String) IOError! -[FS.Write]> {
+file_writer_refusal: fn(path: String) -[FS.Write]> IOError! {
     if core.files.__writer_refusal(path) == {
         .None -> {}
         .Val(error) -> return Err(error)
@@ -1019,27 +1019,27 @@ map: fn(path: String | Path) -[FS.Read]> MappedFile IOError! {
     core.files.__map_raw(text)
 }
 
-write: fn(path: String | Path, text: String) IOError! -[FS.Write]> {
+write: fn(path: String | Path, text: String) -[FS.Write]> IOError! {
     target: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__write_bytes_os(target, text.bytes())
 }
 
-write_bytes: fn(path: String | Path, bytes: [U8]) IOError! -[FS.Write]> {
+write_bytes: fn(path: String | Path, bytes: [U8]) -[FS.Write]> IOError! {
     target: path_text(path)
     file_writer_refusal(target)
     file_fault("FS.Write", .Write, target)
     core.files.__write_bytes_os(target, bytes)
 }
 
-append_all: fn(path: String | Path, text: String) IOError! -[FS.Write]> {
+append_all: fn(path: String | Path, text: String) -[FS.Write]> IOError! {
     target: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__append_bytes_os(target, text.bytes())
 }
 
 // `Path.write_atomic(bytes)` calls this with its receiver (one atomic writer).
-write_atomic: fn(path: String | Path, bytes: [U8]) IOError! -[FS.Write]> {
+write_atomic: fn(path: String | Path, bytes: [U8]) -[FS.Write]> IOError! {
     destination: path_text(path)
     file_writer_refusal(destination)
     file_fault("FS.Write", .Write, destination)
@@ -1105,14 +1105,14 @@ read_at: fn(path: String | Path, offset: Int, count: Int) -[FS.Read]> [U8] IOErr
     core.files.__read_at_os(source, if offset < 0 -> 0 else -> offset, if count < 0 -> 0 else -> count)
 }
 
-write_at: fn(path: String | Path, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
+write_at: fn(path: String | Path, offset: Int, bytes: [U8]) -[FS.Write]> IOError! {
     target: path_text(path)
     file_writer_refusal(target)
     file_fault("FS.Write", .Write, target)
     core.files.__write_at_os(target, if offset < 0 -> 0 else -> offset, bytes)
 }
 
-fsync: fn(path: String | Path) IOError! -[FS.Write]> {
+fsync: fn(path: String | Path) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Flush, text)
     core.files.__fsync_raw(text)
@@ -1121,7 +1121,7 @@ fsync: fn(path: String | Path) IOError! -[FS.Write]> {
 /// Flush every dirty file and directory on the filesystem holding `path` in
 /// one `syncfs`. Write a whole tree, sync once, then publish it with a rename
 /// instead of syncing file by file.
-sync_filesystem: fn(path: String | Path) IOError! -[FS.Write]> {
+sync_filesystem: fn(path: String | Path) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Flush, text)
     core.files.__syncfs_raw(text)
@@ -1219,7 +1219,7 @@ stat: fn(path: String | Path, links: LinkPolicy?{None}) -[FS.Read]> Stat IOError
 /// The same description as `stat`; neither follows a final link.
 lstat: fn(path: String | Path) -[FS.Read]> Stat IOError! { stat(path) }
 
-set_mode: fn(path: String | Path, mode: Int) IOError! -[FS.Write]> {
+set_mode: fn(path: String | Path, mode: Int) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     if rt.os_family() == "unix" {
@@ -1232,7 +1232,7 @@ set_mode: fn(path: String | Path, mode: Int) IOError! -[FS.Write]> {
     core.files.__set_mode_raw(text, mode)
 }
 
-chown: fn(path: String | Path, owner: Int, group: Int) IOError! -[FS.Write]> {
+chown: fn(path: String | Path, owner: Int, group: Int) -[FS.Write]> IOError! {
     text: path_text(path)
     if rt.os_family() != "unix" {
         return Err(files8_other(.Write, None, "chown is unavailable on this platform"))
@@ -1544,32 +1544,32 @@ dirname_impl: fn(path: String) -> String Never! {
 dirname: fn(path: String) -> String Never! { dirname_impl(path) }
 
 /// Create `path` and any missing parents; an existing directory is success.
-create_dir_all: fn(path: String | Path) IOError! -[FS.Write]> {
+create_dir_all: fn(path: String | Path) -[FS.Write]> IOError! {
     target: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__create_dirs_os(target)
 }
 
-remove: fn(path: String | Path) IOError! -[FS.Write]> {
+remove: fn(path: String | Path) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     core.files.__remove_raw(text)
 }
 
-remove_dir: fn(path: String | Path) IOError! -[FS.Write]> {
+remove_dir: fn(path: String | Path) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     core.files.__remove_dir_raw(text)
 }
 
-remove_all: fn(path: String | Path) IOError! -[FS]> {
+remove_all: fn(path: String | Path) -[FS]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     directory: core.files.__metadata_directory(text) ?? false
     core.files.__remove_all_raw(text, directory)
 }
 
-copy: fn(from: String | Path, to: String | Path) IOError! -[FS]> {
+copy: fn(from: String | Path, to: String | Path) -[FS]> IOError! {
     source: path_text(from)
     target: path_text(to)
     files8_preflight("FS.Read", .Read, source)
@@ -1577,14 +1577,14 @@ copy: fn(from: String | Path, to: String | Path) IOError! -[FS]> {
     core.files.__copy_raw(source, target)
 }
 
-copy_file_impl: fn(from: String, to: String) IOError! -[FS]> {
+copy_file_impl: fn(from: String, to: String) -[FS]> IOError! {
     bytes: read_bytes(from)
     parent: dirname_impl(to)
     if parent.bytes().len() > 0 -> create_dir_all(parent)
     write_bytes(to.copy(), bytes)
 }
 
-copy_dir: fn(from: String | Path, to: String | Path) IOError! -[FS]> {
+copy_dir: fn(from: String | Path, to: String | Path) -[FS]> IOError! {
     source: path_text(from)
     destination: path_text(to)
     files8_preflight("FS.Read", .Read, source)
@@ -1594,7 +1594,7 @@ copy_dir: fn(from: String | Path, to: String | Path) IOError! -[FS]> {
     entries_copy_tree(context, 0, source)
 }
 
-entries_copy_tree: fn(context: Int, directory: Int, resource: String) IOError! -[FS]> {
+entries_copy_tree: fn(context: Int, directory: Int, resource: String) -[FS]> IOError! {
     created: rt.entries_mkdir(context, directory)
     if created.status_reason != None {
         return Err(walk_error(.Write, created.status, created.status_code, created.status_reason, resource))
@@ -1628,7 +1628,7 @@ entries_copy_tree: fn(context: Int, directory: Int, resource: String) IOError! -
 /// replaces an existing target, `.Refuse` reports `IOError.AlreadyExists`,
 /// and `.Swap` exchanges the two names in one step (both must exist).
 /// Follow with `fsync(dirname(to))` to make the rename durable.
-rename: fn(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
+rename: fn(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Replace}) -[FS.Write]> IOError! {
     core.files.__rename_at(-1, path_text(from), -1, path_text(to), rename_code(if_exists))
 }
 
@@ -1638,7 +1638,7 @@ rename: fn(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Re
 /// `canonicalize` results instead. `replace: true` first removes a link or
 /// file already at `link`, so a link to a directory is replaced, not
 /// followed, as `ln -sfn` does; a real directory there is an error.
-symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) IOError! -[FS.Write]> {
+symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) -[FS.Write]> IOError! {
     source: path_text(original)
     target: path_text(link)
     files8_preflight("FS.Write", .Write, target)
@@ -1665,33 +1665,33 @@ symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) 
 BestEffort: struct {
     failures: [IOError]
 
-    copy_file: fn(&self, from: String | Path, to: String | Path) Never! -[FS]> {
+    copy_file: fn(&self, from: String | Path, to: String | Path) -[FS]> Never! {
         if core.files.copy(from, to) == .Err(failure) -> self.failures.push(failure)
     }
 
-    copy_dir: fn(&self, from: String | Path, to: String | Path) Never! -[FS]> {
+    copy_dir: fn(&self, from: String | Path, to: String | Path) -[FS]> Never! {
         if core.files.copy_dir(from, to) == .Err(failure) -> self.failures.push(failure)
     }
 
     /// `rm -f`: a path that is already gone is no failure.
-    remove: fn(&self, path: String | Path) Never! -[FS.Write]> {
+    remove: fn(&self, path: String | Path) -[FS.Write]> Never! {
         if core.files.remove(path) == .Err(failure) && !(failure == .NotFound(_)) {
             self.failures.push(failure)
         }
     }
 
     /// `rm -rf`: a path that is already gone is no failure.
-    remove_all: fn(&self, path: String | Path) Never! -[FS]> {
+    remove_all: fn(&self, path: String | Path) -[FS]> Never! {
         if core.files.remove_all(path) == .Err(failure) && !(failure == .NotFound(_)) {
             self.failures.push(failure)
         }
     }
 
-    create_dir_all: fn(&self, path: String | Path) Never! -[FS.Write]> {
+    create_dir_all: fn(&self, path: String | Path) -[FS.Write]> Never! {
         if core.files.create_dir_all(path) == .Err(failure) -> self.failures.push(failure)
     }
 
-    symlink: fn(&self, original: String | Path, link: String | Path, replace: Bool{false}) Never! -[FS.Write]> {
+    symlink: fn(&self, original: String | Path, link: String | Path, replace: Bool{false}) -[FS.Write]> Never! {
         if core.files.symlink(original, link, replace: replace) == .Err(failure) {
             self.failures.push(failure)
         }
@@ -1720,7 +1720,7 @@ BestEffort: struct {
 /// A new, empty best-effort record: `done := files.best_effort()`.
 best_effort: fn() -> BestEffort Never! { {failures: [IOError]{}} }
 
-hard_link: fn(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+hard_link: fn(original: String | Path, link: String | Path) -[FS.Write]> IOError! {
     source: path_text(original)
     target: path_text(link)
     files8_preflight("FS.Write", .Write, target)
@@ -1936,7 +1936,7 @@ walk_error: fn(operation: IOOperation, kind: Int, code: Int?, cause: String?, re
 
 // The directory and every ancestor must be a real directory, not a symlink.
 // The ancestor slots this pushes are released before it returns.
-walk_validate: fn(context: Int, directory: Int, root: String) IOError! -[FS]> {
+walk_validate: fn(context: Int, directory: Int, root: String) -[FS]> IOError! {
     source: rt.walk_validation_path(context, directory)
     failure := IOError?{None}
     loop ancestor in rt.walk_ancestors(context, source) {
@@ -2110,7 +2110,7 @@ priv WalkCursor: struct {
     }
 }
 
-priv walk_open: fn(cursor: &WalkCursor) IOError! -[FS]> {
+priv walk_open: fn(cursor: &WalkCursor) -[FS]> IOError! {
     files8_preflight("FS.Read", .Read, cursor.root)
     cursor.context = rt.walk_context(cursor.root, cursor.ignore ?? "", cursor.ignore != None)
     walk_validate(cursor.context, 0, cursor.root)
@@ -2174,7 +2174,7 @@ entries_glob_root: fn(pattern: String, separator: U8) -> String Never! {
     if last <= 0 -> "." else -> slice(bytes, 0, last)
 }
 
-entries_glob_tree: fn(context: Int, directory: Int, resource: String, output: &[String]) IOError! -[FS]> {
+entries_glob_tree: fn(context: Int, directory: Int, resource: String, output: &[String]) -[FS]> IOError! {
     opened: rt.entries_read_dir(context, directory)
     if opened.status_reason != None {
         return Err(walk_error(.Read, opened.status, opened.status_code, opened.status_reason, resource))
@@ -2474,7 +2474,7 @@ expanduser: fn(path: String) -[FS, Env]> String IOError! {
     Ok(path.copy())
 }
 
-touch: fn(path: String) IOError! -[FS]> {
+touch: fn(path: String) -[FS]> IOError! {
     if exists_impl(path) {
         core.files.fsync(path)
         return Ok()
@@ -2484,39 +2484,39 @@ touch: fn(path: String) IOError! -[FS]> {
     write_bytes(path, [U8]{})
 }
 
-relocate: fn(from: String, to: String) IOError! -[FS]> { rename(from, to) }
+relocate: fn(from: String, to: String) -[FS]> IOError! { rename(from, to) }
 
 /// Python-compatible spelling for an atomic replacement rename.
-replace: fn(from: String, to: String) IOError! -[FS]> { relocate(from, to) }
+replace: fn(from: String, to: String) -[FS]> IOError! { relocate(from, to) }
 
 /// Return `path` relative to `start`, using the same normalized path rules.
 relativeto: fn(path: String, start: String) -> String Never! { relative(path, start) }
 
 /// Python-compatible spelling for `set_mode`.
-chmod: fn(path: String, mode: Int) IOError! -[FS]> { core.files.set_mode(path, mode) }
+chmod: fn(path: String, mode: Int) -[FS]> IOError! { core.files.set_mode(path, mode) }
 
 /// Copy the bytes of `from` to `to`, creating missing parent directories.
 /// Unlike Python's `shutil.copy2`, permission bits and timestamps are not
 /// copied: the new file takes the default mode.
-copy2: fn(from: String, to: String) IOError! -[FS]> { copy_file_impl(from, to) }
+copy2: fn(from: String, to: String) -[FS]> IOError! { copy_file_impl(from, to) }
 
 /// Python-compatible spelling for a single-file copy.
-copyfile: fn(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
+copyfile: fn(from: String, to: String) -[FS]> IOError! { copy2(from, to) }
 
 /// Python-compatible spelling of `create_dir_all`: missing parents are always
 /// created, so `parents` does not change the result.
-mkdir: fn(path: String, parents: Bool) IOError! -[FS]> { create_dir_all(path) }
+mkdir: fn(path: String, parents: Bool) -[FS]> IOError! { create_dir_all(path) }
 
-rmdir: fn(path: String) IOError! -[FS]> { core.files.remove_dir(path) }
+rmdir: fn(path: String) -[FS]> IOError! { core.files.remove_dir(path) }
 
-unlink: fn(path: String) IOError! -[FS]> { core.files.remove(path) }
+unlink: fn(path: String) -[FS]> IOError! { core.files.remove(path) }
 
 joinpath: fn(a: String, b: String) -> String Never! { join(a, b) }
 
 /// Python `os` spellings backed by the same checked filesystem surface.
 getcwd: fn() -[FS, Env]> String IOError! { cwd() }
 
-chdir: fn(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
+chdir: fn(path: String) -[FS, Env]> IOError! { sys.set_current_dir(path) }
 
 scandir: fn(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
 
@@ -2529,7 +2529,7 @@ read_lines: fn(path: String) -[FS]> [String] IOError! {
     Ok(split_lines(text))
 }
 
-write_lines: fn(path: String, lines: [String]) IOError! -[FS]> {
+write_lines: fn(path: String, lines: [String]) -[FS]> IOError! {
     s := ""
     loop line in lines -> s = "{s}{line}\n"
     write(path, s)
@@ -2697,11 +2697,11 @@ expandvars: fn(path: String) -[Env]> String IOError! {
     Ok(out)
 }
 
-move: fn(from: String, to: String) IOError! -[FS]> { rename(from, to) }
+move: fn(from: String, to: String) -[FS]> IOError! { rename(from, to) }
 
-rmtree: fn(path: String) IOError! -[FS]> { core.files.remove_all(path) }
+rmtree: fn(path: String) -[FS]> IOError! { core.files.remove_all(path) }
 
-makedirs: fn(path: String) IOError! -[FS]> { create_dir_all(path) }
+makedirs: fn(path: String) -[FS]> IOError! { create_dir_all(path) }
 
 listdir: fn(path: String) -[FS]> [String] IOError! {
     entries: core.files.list_dir(path)
@@ -2727,7 +2727,7 @@ is_mount: fn(path: String) -[FS]> Bool Never! {
     false
 }
 
-ensure_parent: fn(path: String) IOError! -[FS]> { create_dir_all(dirname_impl(path)) }
+ensure_parent: fn(path: String) -[FS]> IOError! { create_dir_all(dirname_impl(path)) }
 
 slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
@@ -2745,7 +2745,7 @@ walkdir: fn(root: String, ignore: String?) -[FS]> Walk {
     Walk{root: root, ignore: ignore, files_only: false, skip: [String]{}}
 }
 
-truncate: fn(path: String, size: Int) IOError! -[FS]> {
+truncate: fn(path: String, size: Int) -[FS]> IOError! {
     if size < 0 -> return Err(io_err("truncate", path, "negative size"))
     bytes: read_bytes(path.copy())
     if size < bytes.len() -> write_bytes(path.copy(), slice_bytes(bytes, 0, size)) else {
@@ -2755,18 +2755,18 @@ truncate: fn(path: String, size: Int) IOError! -[FS]> {
     }
 }
 
-createdirectory: fn(path: String) IOError! -[FS]> { create_dir_all(path) }
+createdirectory: fn(path: String) -[FS]> IOError! { create_dir_all(path) }
 
 filesize: fn(path: String) -[FS]> Int IOError! {
     info: stat(path)
     Ok(info.size)
 }
 
-delete: fn(path: String) IOError! -[FS]> { core.files.remove(path) }
+delete: fn(path: String) -[FS]> IOError! { core.files.remove(path) }
 
-cp: fn(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
+cp: fn(from: String, to: String) -[FS]> IOError! { copy2(from, to) }
 
-rm: fn(path: String) IOError! -[FS]> { core.files.remove(path) }
+rm: fn(path: String) -[FS]> IOError! { core.files.remove(path) }
 
 realpath: fn(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
 
@@ -2778,7 +2778,7 @@ tmpdir: fn(prefix: String) -[FS]> String IOError! { mkdtemp(prefix) }
 
 topath: fn(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
 
-cd: fn(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
+cd: fn(path: String) -[FS, Env]> IOError! { sys.set_current_dir(path) }
 
 #Test("whole-file policy preserves UTF-8 error text and negative range clamping") {
     root: mktemp("whole-file-source-policy")

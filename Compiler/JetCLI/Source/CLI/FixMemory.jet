@@ -34,7 +34,7 @@ jet_cli_memory_repair_path: fn(root: String, source: String) -[FS]> String? Neve
     None
 }
 
-jet_cli_memory_write_atomic: fn(path: String, source: String) JetCLIReadError! -[FS, Env, Time.Wait]> {
+jet_cli_memory_write_atomic: fn(path: String, source: String) -[FS, Env, Time.Wait]> JetCLIReadError! {
     parent: jet_cli_parent(path) ?? return Err(jet_cli_read_error("source has no parent directory"))
     name: jet_cli_file_name(path)
     canonical: cli_files.realpath(parent) ?? return Err(jet_cli_read_error("cannot inspect source directory: {jet_cli_io_error_text(err)}"))

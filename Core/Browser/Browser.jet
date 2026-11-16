@@ -260,7 +260,7 @@ Browser: struct {
     }
 
     // A BiDi event; CDP events go through `protocol("cdp").subscribe`.
-    subscribe: fn(self, event: String) BrowserError! -[Net, Time]> {
+    subscribe: fn(self, event: String) -[Net, Time]> BrowserError! {
         if event.starts_with("goog:cdp") -> return Err(BrowserError{kind: "unsupported protocol"})
         browser_command(self, "session.subscribe", obj([(key: "events", value: Dyn.Array([Dyn]{Dyn.Text(event.copy())}))]))
         Ok()
@@ -300,19 +300,19 @@ Browser: struct {
         Ok(BrowserIntercept{__browser: self, __scope: new_scope(id)})
     }
 
-    continue_request: fn(self, request_id: String) BrowserError! -[Net, Time]> {
+    continue_request: fn(self, request_id: String) -[Net, Time]> BrowserError! {
         if request_id.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         browser_command(self, "network.continueRequest", obj([(key: "request", value: Dyn.Text(request_id.copy()))]))
         Ok()
     }
 
-    fail_request: fn(self, request_id: String) BrowserError! -[Net, Time]> {
+    fail_request: fn(self, request_id: String) -[Net, Time]> BrowserError! {
         if request_id.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         browser_command(self, "network.failRequest", obj([(key: "request", value: Dyn.Text(request_id.copy())), (key: "errorReason", value: Dyn.Text("Failed"))]))
         Ok()
     }
 
-    fulfill_request: fn(self, request_id: String, status: Int, body: String) BrowserError! -[Net, Time]> {
+    fulfill_request: fn(self, request_id: String, status: Int, body: String) -[Net, Time]> BrowserError! {
         if request_id.len() == 0 || status < 100 || status > 599 {
             return Err(BrowserError{kind: "protocol"})
         }
@@ -331,7 +331,7 @@ Browser: struct {
     }
 
     // Allow downloads into an absolute destination folder.
-    allow_downloads: fn(self, folder: String) BrowserError! -[Net, Time]> {
+    allow_downloads: fn(self, folder: String) -[Net, Time]> BrowserError! {
         if folder.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         behavior: obj([(key: "type", value: Dyn.Text("allowed")), (key: "destinationFolder", value: Dyn.Text(folder.copy()))])
         browser_command(self, "browser.setDownloadBehavior", obj([(key: "downloadBehavior", value: behavior)]))
@@ -360,7 +360,7 @@ Browser: struct {
         BrowserReceipt{entries: guard.value.trace.copy(), isolated: true, cleaned: guard.value.closed}
     }
 
-    close: fn(self) BrowserError! -[Net, Time]> {
+    close: fn(self) -[Net, Time]> BrowserError! {
         if browser_closed(self) -> return Ok()
         if browser_session_started(self) -> browser_command(self, "session.end", empty_object())
         browser_mark_closed(self)
@@ -382,7 +382,7 @@ BrowserContext: struct {
     // The hashed user-context id; the raw id never leaves the session.
     user_hash: fn(self) -> String Never! { fact_hash(scope_id(self.__scope)) }
 
-    close: fn(self) BrowserError! -[Net, Time]> {
+    close: fn(self) -[Net, Time]> BrowserError! {
         if scope_closed(self.__scope) -> return Ok()
         if !browser_closed(self.__browser) {
             browser_command(self.__browser, "browser.removeUserContext", obj([(key: "userContext", value: Dyn.Text(scope_id(self.__scope)))]))
@@ -397,7 +397,7 @@ BrowserPage: struct {
     __context: Shared<BrowserScope>
     __scope: Shared<BrowserScope>
 
-    goto: fn(self, url: String) BrowserError! -[Env, Net, Time]> {
+    goto: fn(self, url: String) -[Env, Net, Time]> BrowserError! {
         page_live(self)
         target: navigation_url(url)
         browser_command(
@@ -414,7 +414,7 @@ BrowserPage: struct {
         Ok()
     }
 
-    close: fn(self) BrowserError! -[Net, Time]> {
+    close: fn(self) -[Net, Time]> BrowserError! {
         if scope_closed(self.__scope) -> return Ok()
         if !scope_closed(self.__context) && !browser_closed(self.__browser) {
             browser_command(self.__browser, "browsingContext.close", obj([(key: "context", value: Dyn.Text(scope_id(self.__scope)))]))
@@ -468,7 +468,7 @@ BrowserPage: struct {
         decode_data(result)
     }
 
-    set_cookie: fn(self, name: String, value: String, domain: String) BrowserError! -[Net, Time]> {
+    set_cookie: fn(self, name: String, value: String, domain: String) -[Net, Time]> BrowserError! {
         page_live(self)
         if name.len() == 0 || domain.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         cookie: obj([(key: "name", value: Dyn.Text(name.copy())), (key: "value", value: string_value(value)), (key: "domain", value: Dyn.Text(domain.copy()))])
@@ -490,7 +490,7 @@ BrowserPage: struct {
         Err(BrowserError{kind: "protocol"})
     }
 
-    clear_cookies: fn(self) BrowserError! -[Net, Time]> {
+    clear_cookies: fn(self) -[Net, Time]> BrowserError! {
         page_live(self)
         browser_command(self.__browser, "storage.deleteCookies", obj([(key: "partition", value: page_partition(self))]))
         Ok()
@@ -503,14 +503,14 @@ BrowserPage: struct {
         remote_string(result)
     }
 
-    storage_set: fn(self, kind: String, key: String, value: String) BrowserError! -[Net, Time]> {
+    storage_set: fn(self, kind: String, key: String, value: String) -[Net, Time]> BrowserError! {
         store: storage_name(kind) ?? return Err(BrowserError{kind: "protocol"})
         if key.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         page_storage_call(self, "function(key, value) {{ {store}.setItem(key, value); }}", [Dyn]{string_value(key), string_value(value)})
         Ok()
     }
 
-    storage_clear: fn(self, kind: String) BrowserError! -[Net, Time]> {
+    storage_clear: fn(self, kind: String) -[Net, Time]> BrowserError! {
         store: storage_name(kind) ?? return Err(BrowserError{kind: "protocol"})
         page_storage_call(self, "function() {{ {store}.clear(); }}", [Dyn]{})
         Ok()
@@ -564,7 +564,7 @@ BrowserFrame: struct {
     __page: Shared<BrowserScope>
     __scope: Shared<BrowserScope>
 
-    close: fn(self) BrowserError! -[Net, Time]> {
+    close: fn(self) -[Net, Time]> BrowserError! {
         if scope_closed(self.__scope) -> return Ok()
         if scope_closed(self.__page) || scope_closed(self.__context) || browser_closed(self.__browser) {
             scope_close(self.__scope)
@@ -588,7 +588,7 @@ BrowserLocator: struct {
     __name: String
     __value: String
 
-    wait: fn(self, timeout: BrowserTimeout) BrowserError! -[Net, Time, Time.Wait]> {
+    wait: fn(self, timeout: BrowserTimeout) -[Net, Time, Time.Wait]> BrowserError! {
         started: time.instant()
         loop {
             remaining: remaining_ms(started, timeout.milliseconds)
@@ -597,7 +597,7 @@ BrowserLocator: struct {
         }
     }
 
-    wait_gone: fn(self, timeout: BrowserTimeout) BrowserError! -[Net, Time, Time.Wait]> {
+    wait_gone: fn(self, timeout: BrowserTimeout) -[Net, Time, Time.Wait]> BrowserError! {
         started: time.instant()
         loop {
             remaining: remaining_ms(started, timeout.milliseconds)
@@ -612,18 +612,18 @@ BrowserLocator: struct {
         Ok(found)
     }
 
-    click: fn(self) BrowserError! -[Net, Time]> {
+    click: fn(self) -[Net, Time]> BrowserError! {
         shared_id: self.resolve()
         locator_pointer(self, shared_id, true)
     }
 
-    hover: fn(self) BrowserError! -[Net, Time]> {
+    hover: fn(self) -[Net, Time]> BrowserError! {
         shared_id: self.resolve()
         locator_pointer(self, shared_id, false)
     }
 
     // Clear, then assign through the DOM value path; no page data enters the trace.
-    fill: fn(self, value: String) BrowserError! -[Net, Time]> {
+    fill: fn(self, value: String) -[Net, Time]> BrowserError! {
         shared_id: self.resolve()
         target: obj([(key: "context", value: Dyn.Text(scope_id(self.__page)))])
         node: obj([(key: "type", value: Dyn.Text("node")), (key: "sharedId", value: Dyn.Text(shared_id))])
@@ -642,7 +642,7 @@ BrowserLocator: struct {
         Ok()
     }
 
-    press: fn(self, key: String) BrowserError! -[Net, Time]> {
+    press: fn(self, key: String) -[Net, Time]> BrowserError! {
         shared_id: self.resolve()
         locator_pointer(self, shared_id, true)
         down: obj([(key: "type", value: Dyn.Text("keyDown")), (key: "value", value: Dyn.Text(key.copy()))])
@@ -652,7 +652,7 @@ BrowserLocator: struct {
         Ok()
     }
 
-    set_files: fn(self, path: String) BrowserError! -[Net, Time]> {
+    set_files: fn(self, path: String) -[Net, Time]> BrowserError! {
         if path.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         shared_id: self.resolve()
         element: obj([(key: "sharedId", value: Dyn.Text(shared_id))])
@@ -675,7 +675,7 @@ BrowserIntercept: struct {
     __browser: Browser
     __scope: Shared<BrowserScope>
 
-    remove: fn(self) BrowserError! -[Net, Time]> {
+    remove: fn(self) -[Net, Time]> BrowserError! {
         if scope_closed(self.__scope) -> return Ok()
         browser_command(self.__browser, "network.removeIntercept", obj([(key: "intercept", value: Dyn.Text(scope_id(self.__scope)))]))
         scope_close(self.__scope)
@@ -719,7 +719,7 @@ BrowserProtocol: struct {
         Ok(json.dumps(result) ?? return Err(BrowserError{kind: "protocol"}))
     }
 
-    subscribe: fn(self, event: String) BrowserError! -[Net, Time]> {
+    subscribe: fn(self, event: String) -[Net, Time]> BrowserError! {
         if self.__kind == "bidi" {
             self.__browser.subscribe(event)
             return Ok()
@@ -792,7 +792,7 @@ BrowserLocked: struct {
 
     protocol: fn(self) -> String Never! { self.protocol }
 
-    verify: fn(self) BrowserError! -[FS]> {
+    verify: fn(self) -[FS]> BrowserError! {
         if !files.is_file(self.binary) -> return Err(BrowserError{kind: "missing binary"})
         size: files.getsize(self.binary) ?? return Err(BrowserError{kind: "missing binary"})
         if size != self.size -> return Err(BrowserError{kind: "size mismatch"})
@@ -945,7 +945,7 @@ BrowserTestServer: struct {
         guard.value.logs
     }
 
-    stop: fn(self) Never! -[Exec, Time.Wait]> {
+    stop: fn(self) -[Exec, Time.Wait]> Never! {
         guard := self.__state.guard_edit()
         if guard.value.child == .Val(child) {
             // A child that already exited cannot be signalled; wait still reaps it.
@@ -1002,7 +1002,7 @@ locked: fn(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
 }
 
 // A pinned driver must still be the locked file; no driver pins nothing.
-priv verify_driver: fn(entry: BrowserLocked) BrowserError! -[FS]> {
+priv verify_driver: fn(entry: BrowserLocked) -[FS]> BrowserError! {
     if entry.driver == "" -> return Ok()
     if !files.is_file(entry.driver) -> return Err(BrowserError{kind: "missing driver"})
     size: files.getsize(entry.driver) ?? return Err(BrowserError{kind: "missing driver"})
@@ -1372,13 +1372,13 @@ remaining_ms: fn(started: Instant, timeout_ms: Int) -[Time]> Int BrowserError! {
     Ok(remaining)
 }
 
-browser_ws_timeout: fn(browser: Browser, timeout_ms: Int) BrowserError! -[Net]> {
+browser_ws_timeout: fn(browser: Browser, timeout_ms: Int) -[Net]> BrowserError! {
     state: browser.__state.guard_read()
     core.browser.__ws_set_timeout(state.value.conn, timeout_ms) ?? return Err(browser_ws_error(err))
     Ok()
 }
 
-browser_ws_send: fn(browser: Browser, text: String) BrowserError! -[Net]> {
+browser_ws_send: fn(browser: Browser, text: String) -[Net]> BrowserError! {
     state: browser.__state.guard_read()
     state.value.conn.send_text(text) ?? return Err(browser_ws_error(err))
     Ok()
@@ -1855,7 +1855,7 @@ locator_query: fn(locator: BrowserLocator, timeout_ms: Int) -[Net, Time]> String
     Err(BrowserError{kind: "protocol"})
 }
 
-locator_pointer: fn(locator: BrowserLocator, shared_id: String, down_up: Bool) BrowserError! -[Net, Time]> {
+locator_pointer: fn(locator: BrowserLocator, shared_id: String, down_up: Bool) -[Net, Time]> BrowserError! {
     element: obj([(key: "sharedId", value: Dyn.Text(shared_id.copy()))])
     origin: obj([(key: "type", value: Dyn.Text("element")), (key: "element", value: element)])
     actions := [Dyn]{obj([(key: "type", value: Dyn.Text("pointerMove")), (key: "x", value: Dyn.Int(0)), (key: "y", value: Dyn.Int(0)), (key: "origin", value: origin)])}
@@ -2120,7 +2120,7 @@ report_html: fn(report: BrowserTestReport) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-write_report: fn(report: BrowserTestReport, path: String) BrowserError! -[FS]> {
+write_report: fn(report: BrowserTestReport, path: String) -[FS]> BrowserError! {
     // The configured format is written first; the HTML viewer companion
     // follows for `ui` runs and HTML reports.
     rendered: if report.reporter == {
@@ -2135,7 +2135,7 @@ write_report: fn(report: BrowserTestReport, path: String) BrowserError! -[FS]> {
     Ok()
 }
 
-write_report_text: fn(path: String, rendered: String) BrowserError! -[FS]> {
+write_report_text: fn(path: String, rendered: String) -[FS]> BrowserError! {
     if rendered.bytes().len() > C_MAX_REPORT_BYTES -> return Err(BrowserError{kind: "protocol"})
     parent: files.dirname(path)
     if parent.len() > 0 {
@@ -2167,7 +2167,7 @@ server_start: fn(config: BrowserTestConfig) -[Exec, Net, Time, Time.Wait]> Brows
     Ok(server)
 }
 
-server_wait_ready: fn(url: String, timeout_ms: Int) BrowserError! -[Net, Time, Time.Wait]> {
+server_wait_ready: fn(url: String, timeout_ms: Int) -[Net, Time, Time.Wait]> BrowserError! {
     target: server_host_port(url) ?? return Err(BrowserError{kind: "transport"})
     started: time.instant()
     loop {
@@ -2209,7 +2209,7 @@ watch_changed: fn(path: String, last_modified_ms: Int) -[FS, Net]> Bool BrowserE
     Ok(modified > last_modified_ms)
 }
 
-server_stop: fn(server: BrowserTestServer) Never! -[Exec, Time.Wait]> { server.stop() }
+server_stop: fn(server: BrowserTestServer) -[Exec, Time.Wait]> Never! { server.stop() }
 
 server_url: fn(server: BrowserTestServer) -> String Never! { server.url() }
 

@@ -353,7 +353,7 @@ send: fn(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int NetError! {
 
 tcp_read: fn(stream: &TCPStream) -[Net, Time.Wait]> String NetError! { stream.read(8192) }
 
-tcp_write: fn(stream: &TCPStream, text: String) NetError! -[Net, Time.Wait]> {
+tcp_write: fn(stream: &TCPStream, text: String) -[Net, Time.Wait]> NetError! {
     return stream.write(text)
 }
 
@@ -367,23 +367,23 @@ tcp_read_text: fn(stream: &TCPStream, n: Int) -[Net, Time.Wait]> String NetError
     stream.read(n)
 }
 
-tcp_write_bytes: fn(stream: &TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+tcp_write_bytes: fn(stream: &TCPStream, bytes: [U8]) -[Net, Time.Wait]> NetError! {
     return stream.write_bytes(bytes)
 }
 
-tcp_write_all_bytes: fn(stream: &TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+tcp_write_all_bytes: fn(stream: &TCPStream, bytes: [U8]) -[Net, Time.Wait]> NetError! {
     return stream.write_bytes(bytes)
 }
 
-tcp_write_text: fn(stream: &TCPStream, text: String) NetError! -[Net, Time.Wait]> {
+tcp_write_text: fn(stream: &TCPStream, text: String) -[Net, Time.Wait]> NetError! {
     return stream.write(text)
 }
 
-tcp_shutdown: fn(stream: &TCPStream, how: NetShutdown) NetError! -[Net]> {
+tcp_shutdown: fn(stream: &TCPStream, how: NetShutdown) -[Net]> NetError! {
     return stream.shutdown(how)
 }
 
-tcp_close: fn(stream: &TCPStream) NetError! -[Net]> { return stream.close() }
+tcp_close: fn(stream: &TCPStream) -[Net]> NetError! { return stream.close() }
 
 tcp_ready: fn(stream: &TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
     if !valid_timeout(deadline_ms) {
@@ -414,7 +414,7 @@ listener_local_socket_addr: fn(listener: TCPListener) -[Net]> SocketAddr NetErro
 }
 
 // One plain-text HTTP/1.1 reply, then the write half closes.
-tcp_reply: fn(stream: &&TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
+tcp_reply: fn(stream: &&TCPStream, status: String, body: String) -[Net, Time.Wait]> NetError! {
     if !valid_status(status) {
         return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
     }
@@ -425,13 +425,13 @@ tcp_reply: fn(stream: &&TCPStream, status: String, body: String) NetError! -[Net
 
 nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! { core.net.__nodelay(stream) }
 
-set_nodelay: fn(stream: &TCPStream, on: Bool) NetError! -[Net]> {
+set_nodelay: fn(stream: &TCPStream, on: Bool) -[Net]> NetError! {
     core.net.__set_nodelay(stream, on)
 }
 
 ttl: fn(stream: TCPStream) -[Net]> Int NetError! { core.net.__ttl(stream) }
 
-set_ttl: fn(stream: &TCPStream, hops: Int) NetError! -[Net]> {
+set_ttl: fn(stream: &TCPStream, hops: Int) -[Net]> NetError! {
     if hops < 0 || hops > 4294967295 -> return Err(net_err("set_ttl", "", "ttl must fit u32"))
     core.net.__set_ttl(stream, hops)
 }
@@ -513,7 +513,7 @@ unix_read: fn(stream: &UnixStream) -[Net, Time.Wait]> String NetError! {
     core.net.__unix_read(stream)
 }
 
-unix_write: fn(stream: &UnixStream, text: String) NetError! -[Net, Time.Wait]> {
+unix_write: fn(stream: &UnixStream, text: String) -[Net, Time.Wait]> NetError! {
     core.net.unix_write(stream, text)
 }
 
@@ -522,7 +522,7 @@ unix_read_bytes: fn(stream: &UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetErro
     core.net.unix_read_bytes(stream, n)
 }
 
-unix_write_all_bytes: fn(stream: &UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+unix_write_all_bytes: fn(stream: &UnixStream, bytes: [U8]) -[Net, Time.Wait]> NetError! {
     core.net.__unix_write_all_bytes(stream, bytes)
 }
 
@@ -537,7 +537,7 @@ UnixMessage: struct {
 // Sends every byte with `fds` attached (SCM_RIGHTS) to the first byte the
 // peer reads; the peer receives its own copies, so `fds` stay open here.
 // Descriptors need at least one byte to ride with; at most 253 per send.
-unix_send: fn(stream: &UnixStream, bytes: [U8], fds: [sys.Fd]) NetError! -[Net, Time.Wait]> {
+unix_send: fn(stream: &UnixStream, bytes: [U8], fds: [sys.Fd]) -[Net, Time.Wait]> NetError! {
     if bytes.len() == 0 -> return Err(net_err("unix_send", "", "a send needs at least one byte"))
     if fds.len() > 253 {
         return Err(net_err("unix_send", "", "a send carries at most 253 descriptors"))
@@ -577,11 +577,11 @@ unix_wait: fn(stream: &UnixStream, timeout_ns: Int) -[Net, Time.Wait]> Bool NetE
     Ok(ready != 0)
 }
 
-unix_shutdown: fn(stream: &UnixStream, how: NetShutdown) NetError! -[Net]> {
+unix_shutdown: fn(stream: &UnixStream, how: NetShutdown) -[Net]> NetError! {
     core.net.__unix_shutdown(stream, how)
 }
 
-unix_close: fn(stream: &UnixStream) NetError! -[Net]> { core.net.__unix_close(stream) }
+unix_close: fn(stream: &UnixStream) -[Net]> NetError! { core.net.__unix_close(stream) }
 
 // A lookup waits at most C_DNS_WAIT_MS, or less when the `#Deadline` in force
 // ends sooner.

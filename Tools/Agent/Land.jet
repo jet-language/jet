@@ -564,7 +564,7 @@ land: fn(dir: String, pairs: [Pair]) -[Exec, Env, FS, IO, Time.Wait]> Int Never!
 }
 
 // Undo the applied patches, newest first.
-revert: fn(dir: String, applied: [String]) Never! -[Exec, IO, Time.Wait]> {
+revert: fn(dir: String, applied: [String]) -[Exec, IO, Time.Wait]> Never! {
     loop step in 0..<applied.len() {
         patch: applied[applied.len() - 1 - step]
         undone: git(dir, [String]{"apply", "-R", patch})
@@ -957,7 +957,7 @@ compile_env: fn(identity: String, tree: String, report: String) -> [Setting] Nev
 }
 
 // COMMIT of the checkout `repo` (only `paths` when there are any) unpacked into `dir`.
-export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) LandError! -[Exec, FS, Time.Wait]> {
+export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) -[Exec, FS, Time.Wait]> LandError! {
     files.create_dir_all(dir) ?? return Err(LandError{message: "`{dir}` cannot be created: {err}"})
     archive: "{dir}.tar"
     argv := [String]{"archive", "--format=tar", "-o", archive, commit}
@@ -982,7 +982,7 @@ export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) Land
 // objects are borrowed from `repo`, so a check that lists tracked files
 // (`git ls-files`) sees exactly what it sees in a checkout. No object is
 // copied and nothing is checked out.
-git_view: fn(repo: String, commit: String, dir: String) LandError! -[Exec, FS, Time.Wait]> {
+git_view: fn(repo: String, commit: String, dir: String) -[Exec, FS, Time.Wait]> LandError! {
     common: git(repo, [String]{"rev-parse", "--path-format=absolute", "--git-common-dir"})
     if common.code != 0 {
         return Err(LandError{message: "git rev-parse --git-common-dir failed: {first_line(common)}"})

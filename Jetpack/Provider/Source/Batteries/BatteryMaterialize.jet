@@ -79,7 +79,7 @@ env_battery_append_bytes: fn(target: &[U8], bytes: [U8]) Never! {
 }
 
 // `path` is a real directory, created when missing.
-env_battery_ensure_real_directory: fn(path: String) ProviderReason! -[FS]> {
+env_battery_ensure_real_directory: fn(path: String) -[FS]> ProviderReason! {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_dir {
@@ -100,7 +100,7 @@ env_battery_ensure_real_directory: fn(path: String) ProviderReason! -[FS]> {
     }
 }
 
-env_battery_write_package_tree: fn(root: String, package: BatteryPackage) ProviderReason! -[FS, Env]> {
+env_battery_write_package_tree: fn(root: String, package: BatteryPackage) -[FS, Env]> ProviderReason! {
     loop file in package.files {
         relative: env_battery_safe_relative_path(file.path)
         destination: files.join(root, relative)
@@ -118,7 +118,7 @@ env_battery_write_package_tree: fn(root: String, package: BatteryPackage) Provid
 
 // The cache tree holds exactly the bundled files with their bytes and modes,
 // and nothing else.
-env_battery_verify_package_tree: fn(root: String, package: BatteryPackage) ProviderReason! -[FS, Env]> {
+env_battery_verify_package_tree: fn(root: String, package: BatteryPackage) -[FS, Env]> ProviderReason! {
     seen := [String]{}
     env_battery_verify_directory(root, "", package, seen)
     if seen.len() != package.files.len() {
@@ -126,7 +126,7 @@ env_battery_verify_package_tree: fn(root: String, package: BatteryPackage) Provi
     }
 }
 
-env_battery_verify_directory: fn(directory: String, relative: String, package: BatteryPackage, seen: &[String]) ProviderReason! -[FS, Env]> {
+env_battery_verify_directory: fn(directory: String, relative: String, package: BatteryPackage, seen: &[String]) -[FS, Env]> ProviderReason! {
     entries: files.list_dir(directory) ?? return Err(ProviderReason{message: "could not read embedded battery cache {directory}: {err}"})
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err(ProviderReason{message: "could not inspect embedded battery cache entry {entry.path}: {err}"})

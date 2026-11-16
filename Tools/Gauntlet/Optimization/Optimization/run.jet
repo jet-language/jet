@@ -117,7 +117,7 @@ run: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> {
     optimization(locate(), process.args()) ?? process.fail(1, "optimization: {err.message}")
 }
 
-optimization: fn(paths: Paths, argv: [String]) Err! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+optimization: fn(paths: Paths, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Err! {
     options: parse_options(argv, paths)
     context: load_context(paths, options.manifest)
     record: if options.mode == {
@@ -729,7 +729,7 @@ report: fn(context: Context, raw: Dyn) -> Dyn Err! {
 
 // `record` as two-space JSON: written to `output` (and its path printed),
 // else printed.
-emit: fn(record: Dyn, output: String?) Err! -[FS, IO]> {
+emit: fn(record: Dyn, output: String?) -[FS, IO]> Err! {
     serialized: "{json.stringify(record, 2)}\n"
     if output == .Val(path) {
         files.write(path, serialized) ?? return Err("{err}")

@@ -373,7 +373,7 @@ compiler_data_empty: fn(counts: CompilerDataCounts) -> Bool {
 }
 
 // Every `.jet` file under `path` with a nonzero count.
-compiler_data_scan: fn(path: String, found: &[String:CompilerDataCounts]) CompilerDataError! -[FS]> {
+compiler_data_scan: fn(path: String, found: &[String:CompilerDataCounts]) -[FS]> CompilerDataError! {
     kind: files.stat(path) ?? return Err(CompilerDataError{message: "cannot stat {path}: {err}"})
     if kind.is_symlink -> return Ok()
     if kind.is_dir {

@@ -509,7 +509,7 @@ jet_cli_codemod_has_identity: fn(identities: [cli_files.FileID], id: cli_files.F
     false
 }
 
-jet_cli_codemod_validate_destinations: fn(project: String, paths: [String], any_path: Bool) JetCLIReadError! -[FS, Env]> {
+jet_cli_codemod_validate_destinations: fn(project: String, paths: [String], any_path: Bool) -[FS, Env]> JetCLIReadError! {
     canonical_project: jet_cli_codemod_open_project(project)
     names := [String]{}
     identities := [cli_files.FileID]{}
@@ -527,7 +527,7 @@ jet_cli_codemod_validate_destinations: fn(project: String, paths: [String], any_
     }
 }
 
-jet_cli_codemod_validate_replay_aliases: fn(project: String, log: String, paths: [String], any_path: Bool) JetCLIReadError! -[FS, Env]> {
+jet_cli_codemod_validate_replay_aliases: fn(project: String, log: String, paths: [String], any_path: Bool) -[FS, Env]> JetCLIReadError! {
     canonical_project: jet_cli_codemod_open_project(project)
     identities := [cli_files.FileID]{}
     log_id: jet_cli_codemod_path_identity(log) ?? return Err(jet_cli_codemod_error("could not inspect replay log: {err.message}"))
@@ -1161,7 +1161,7 @@ jet_cli_codemod_read_fingerprint: fn(path: String, inputs: &[String:String]) -[F
 }
 
 // Rust verify_inputs.
-jet_cli_codemod_verify_inputs: fn(inputs: [String:String]) JetCLIReadError! -[FS]> {
+jet_cli_codemod_verify_inputs: fn(inputs: [String:String]) -[FS]> JetCLIReadError! {
     paths := inputs.keys().to_list()
     paths.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
     drift := [String]{}
@@ -1365,7 +1365,7 @@ jet_cli_codemod_insert_unit: fn(units: &[JetCLICodemodUnit], path: String, fixtu
 }
 
 // Rust walk_jet: sorted, no links, every `.jet` file a unit.
-jet_cli_codemod_walk: fn(directory: String, fixture: Bool, units: &[JetCLICodemodUnit]) JetCLIReadError! -[FS, Env]> {
+jet_cli_codemod_walk: fn(directory: String, fixture: Bool, units: &[JetCLICodemodUnit]) -[FS, Env]> JetCLIReadError! {
     listed: cli_files.list_dir(directory) ?? return Err(jet_cli_codemod_error("could not read root `{directory}`: {jet_cli_io_error_text(err)}"))
     paths := loop entry in listed -> jet_cli_rooted_join(directory, entry.name)
     paths.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
@@ -1696,7 +1696,7 @@ jet_cli_codemod_print_diff: fn(run: &JetCLICodemodRun, before: [U8], after: [U8]
 }
 
 // Rust print_batch.
-jet_cli_codemod_print_batch: fn(batch: JetCLICodemodBatch, plan: JetCLICodemodPlan, run: &JetCLICodemodRun) JetCLIReadError! -[FS, Env]> {
+jet_cli_codemod_print_batch: fn(batch: JetCLICodemodBatch, plan: JetCLICodemodPlan, run: &JetCLICodemodRun) -[FS, Env]> JetCLIReadError! {
     changed := 0
     loop index in 0..<plan.files.paths.len() {
         if plan.files.before[index] != plan.files.staged[index] -> changed += 1
@@ -1914,7 +1914,7 @@ jet_cli_codemod_read_replay_log: fn(project: String, path: String) -[FS, Env]> S
     Ok(String.from_bytes(bytes) ?? return Err(jet_cli_codemod_error("replay log is not UTF-8")))
 }
 
-jet_cli_codemod_lock_and_recover: fn(project_path: String) JetCLIReadError! -[FS, Env, Time]> {
+jet_cli_codemod_lock_and_recover: fn(project_path: String) -[FS, Env, Time]> JetCLIReadError! {
     project: JetCLIRootedDirectory.open(project_path, [String]{}, false)
     journal: project.descendant([String]{".jet", "codemods"}, true)
     lock: journal.transaction_lock()
@@ -1941,7 +1941,7 @@ jet_cli_codemod_undo: fn(path: String, run: &JetCLICodemodRun) -[FS, Env, Exec, 
 }
 
 // Rust undo_v2: the codemod-side checks, then the held source undo.
-jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: String, run: &JetCLICodemodRun) JetCLIReadError! -[FS, Env, Exec, Time]> {
+jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: String, run: &JetCLICodemodRun) -[FS, Env, Exec, Time]> JetCLIReadError! {
     object := jet_cli_codemod_object(value, "expected JSON object")
     if jet_cli_codemod_take_number(object, "schema") != 2 {
         return Err(jet_cli_codemod_error("unsupported codemod log schema"))
@@ -1983,7 +1983,7 @@ jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: Str
 
 // Rust undo_v1: a legacy log restores `before_bytes` or replays its inverse
 // edits over the checkpointed bytes.
-jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path: String, run: &JetCLICodemodRun) JetCLIReadError! -[FS, Env, Exec, Time]> {
+jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path: String, run: &JetCLICodemodRun) -[FS, Env, Exec, Time]> JetCLIReadError! {
     object := jet_cli_codemod_object(value, "expected JSON object")
     name: jet_cli_codemod_take_string_opt(object, "name") ?? "UndoCodemod"
     files: jet_cli_codemod_take_array(object, "files")

@@ -101,7 +101,7 @@ PlanSandbox: struct {
 
     // Every declared input is read and digest-checked, even ones the
     // callback did not open.
-    verify_declared_inputs: fn(&self) StagedPlanActionError! -[FS, Env]> {
+    verify_declared_inputs: fn(&self) -[FS, Env]> StagedPlanActionError! {
         paths := self.declared_inputs.keys().to_list()
         paths.sort()
         loop path in paths -> self.read_input(path)
@@ -437,7 +437,7 @@ StagedPlanWriteFailure: struct {
     error: RecipeError
 }
 
-recipe_write_staged_plan_files: fn(staging: String, fragment_bytes: [U8], lock_text: String, plan_fingerprint: String) StagedPlanWriteFailure! -[FS]> {
+recipe_write_staged_plan_files: fn(staging: String, fragment_bytes: [U8], lock_text: String, plan_fingerprint: String) -[FS]> StagedPlanWriteFailure! {
     if files.write_bytes(files.join(staging, "fragment.plan"), fragment_bytes) == {
         .Err(error) -> {
             return Err(StagedPlanWriteFailure{what: "could not write staged-plan fragment", error: RecipeError.IO(error)})

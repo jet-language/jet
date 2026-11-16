@@ -98,7 +98,7 @@ cli_is_lower_hex: fn(text: String) -> Bool Never! {
 // sources never enter this loop. NixOS/nixpkgs channel declarations are the
 // one implicit moving-source form because the provider requires their exact
 // lock before realization.
-cli_apply_locked_channels: fn(theme: Theme, project_dir: String, table: &SourceTable, flags: CLIFlags) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+cli_apply_locked_channels: fn(theme: Theme, project_dir: String, table: &SourceTable, flags: CLIFlags) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> CLIError! {
     _lock_diff: CLILockDiffGuard.new(theme, project_dir)
     loop source in cli_channel_sources(table) {
         if source.policy == ChannelPolicy.Automatic && !flags.offline {
@@ -136,7 +136,7 @@ cli_apply_locked_channels: fn(theme: Theme, project_dir: String, table: &SourceT
     }
 }
 
-cli_report_unlocked_channel: fn(theme: Theme, name: String, channel: String) Never! -[IO, Time.Wait]> {
+cli_report_unlocked_channel: fn(theme: Theme, name: String, channel: String) -[IO, Time.Wait]> Never! {
     theme.error_coded(
         "E1271",
         "source `{name}` tracks `{channel}` but is not locked",

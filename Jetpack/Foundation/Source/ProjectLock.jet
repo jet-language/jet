@@ -45,7 +45,7 @@ RuntimeLock: struct {
     marker_parent: FoundationDirectoryAuthority
     marker_name: String
 
-    revalidate: fn(self) IOError! -[FS]> {
+    revalidate: fn(self) -[FS]> IOError! {
         self.authority.revalidate()
         env_lock_validate_marker(self.marker_parent, self.marker, self.marker_name, self.path)
     }
@@ -181,7 +181,7 @@ env_lock_owner_path: fn(authority: FoundationDirectoryAuthority) -> String Never
 
 // The owner file is a regular file: a directory, symlink or other node at its
 // name is refused before and after the lock attempt, never followed.
-env_lock_check_owner_kind: fn(authority: FoundationDirectoryAuthority) IOError! -[FS]> {
+env_lock_check_owner_kind: fn(authority: FoundationDirectoryAuthority) -[FS]> IOError! {
     info: authority.entry_stat(RUNTIME_LOCK_OWNER_FILE) ?? {
         if err == .NotFound(_) {
             return
@@ -200,14 +200,14 @@ env_lock_hold: fn(opened: &&RuntimeLockScope, owner: &&FileLock) -> RuntimeLock 
     RuntimeLock{path: opened.path, owner_path: owner_path, owner: owner.move(), marker: opened.marker.move(), authority: opened.authority.move(), marker_parent: opened.marker_parent.move(), marker_name: opened.name}
 }
 
-env_lock_check_marker_kind: fn(parent: FoundationDirectoryAuthority, name: String, path: String) IOError! -[FS]> {
+env_lock_check_marker_kind: fn(parent: FoundationDirectoryAuthority, name: String, path: String) -[FS]> IOError! {
     info: parent.entry_stat(name)
     if !info.is_file || info.is_symlink {
         return Err(env_lock_io_error(path, "jetpack lock ownership path `{path}` changed"))
     }
 }
 
-env_lock_validate_marker: fn(parent: FoundationDirectoryAuthority, marker: FileReader, name: String, path: String) IOError! -[FS]> {
+env_lock_validate_marker: fn(parent: FoundationDirectoryAuthority, marker: FileReader, name: String, path: String) -[FS]> IOError! {
     parent.revalidate()
     at_path: parent.entry_stat(name)
     held: marker.stat()

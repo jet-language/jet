@@ -269,7 +269,7 @@ SemaGateVisitor: struct {
     ledger: GateLedger
     context: Shared<SemaGateContext>
 
-    visit: fn(&self, expression: ExprNode) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
+    visit: fn(&self, expression: ExprNode) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never! {
         permit: self.context.guard_read()
         sema_gate_expression_value(self.source, ast_expr(self.tables, expression), self.ledger, permit.value)
     }

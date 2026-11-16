@@ -5,7 +5,7 @@ use files: core.files
 
 NixProvider: struct {
     // A readable project lock is the Nix cache authority.
-    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS]> {
+    validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS]> ProviderError! {
         project: ctx.project_dir ?? return
         if !files.is_dir(project) {
             return

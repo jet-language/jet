@@ -140,7 +140,7 @@ env_transition_relative_inside: fn(root: String, path: String) -[FS]> String Env
     Ok(normalized)
 }
 
-env_transition_ensure_new_file: fn(root: String, relative: String) EnvironmentError! -[FS]> {
+env_transition_ensure_new_file: fn(root: String, relative: String) -[FS]> EnvironmentError! {
     path: env_transition_safe_path(root, relative)
     if files.stat(path) == .Ok(_) {
         return Err(env_transition_error("transition destination {relative} already exists"))
@@ -158,7 +158,7 @@ env_transition_ensure_new_file: fn(root: String, relative: String) EnvironmentEr
     }
 }
 
-env_transition_remove_regular: fn(root: String, path: String) EnvironmentError! -[FS, Env]> {
+env_transition_remove_regular: fn(root: String, path: String) -[FS, Env]> EnvironmentError! {
     relative: env_transition_relative_inside(root, path)
     env_transition_safe_path(root, relative)
     if files.stat(path) == {
@@ -180,7 +180,7 @@ env_transition_remove_regular: fn(root: String, path: String) EnvironmentError! 
 }
 
 // Move `path` to `state`: exact bytes, or absent.
-env_transition_apply_state: fn(root: String, path: String, state: [U8]?) EnvironmentError! -[FS, Env]> {
+env_transition_apply_state: fn(root: String, path: String, state: [U8]?) -[FS, Env]> EnvironmentError! {
     env_transition_relative_inside(root, path)
     if state == {
         .Val(bytes) -> {
@@ -192,7 +192,7 @@ env_transition_apply_state: fn(root: String, path: String, state: [U8]?) Environ
     }
 }
 
-env_transition_create_real_dirs: fn(root: String, directory: String) EnvironmentError! -[FS, Env]> {
+env_transition_create_real_dirs: fn(root: String, directory: String) -[FS, Env]> EnvironmentError! {
     relative: env_shell_strip_path_prefix(directory, root) ?? return Err(env_transition_error("transition directory escapes the Package root"))
     cursor := root
     loop component in env_transition_components(relative) {
@@ -220,7 +220,7 @@ env_transition_create_real_dirs: fn(root: String, directory: String) Environment
 
 // Stage in a new temporary beside `path`, sync, rename, and sync the parent
 // directory so the rename is durable.
-env_transition_write_atomic: fn(path: String, bytes: [U8]) EnvironmentError! -[FS, Env]> {
+env_transition_write_atomic: fn(path: String, bytes: [U8]) -[FS, Env]> EnvironmentError! {
     parent: files.dirname(path)
     if parent == "" -> return Err(env_transition_error("{path} has no parent"))
     name: files.basename(path)
@@ -243,14 +243,14 @@ env_transition_write_atomic: fn(path: String, bytes: [U8]) EnvironmentError! -[F
     env_transition_sync_directory(parent) ?? return Err(env_transition_error("couldn't sync {path}: {err}"))
 }
 
-env_transition_stage: fn(temp: String, bytes: [U8]) IOError! -[FS]> {
+env_transition_stage: fn(temp: String, bytes: [U8]) -[FS]> IOError! {
     output := files.create(temp, if_exists: .Refuse)
     output.write_bytes(bytes)
     output.fsync()
 }
 
 // A directory sync makes a create, remove, or rename inside it durable.
-env_transition_sync_directory: fn(path: String) IOError! -[FS, Env]> {
+env_transition_sync_directory: fn(path: String) -[FS, Env]> IOError! {
     if !sys.is_unix() {
         return
     }

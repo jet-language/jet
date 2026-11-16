@@ -52,7 +52,7 @@ EXPLAIN_COL_NAMES: [String]{"addr", "opcode", "p1", "p2", "p3", "p4", "p5", "com
 
 // invokeProfileCallback (checkProfileCallback): report the run that began
 // at Vdbe.start_time to the profile callbacks.
-check_profile: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) Never! -[DB]> {
+check_profile: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
     if v.start_time <= 0 {
         return
     }
@@ -118,7 +118,7 @@ wal_callbacks: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Int Never! {
 
 // sqlite3WalDefaultHook: checkpoint a log that reached Conn.wal_arg
 // frames, its result ignored.
-wal_default_hook: fn(db: &conn.Conn, name: [U8], n_frame: Int) Never! -[DB]> {
+wal_default_hook: fn(db: &conn.Conn, name: [U8], n_frame: Int) -[DB]> Never! {
     if n_frame < db.wal_arg {
         return
     }

@@ -98,35 +98,35 @@ provider_registry_read_text: fn(path: String, context: String) -[FS]> String Reg
     }
 }
 
-provider_registry_write_text: fn(path: String, text: String, context: String) RegistryError! -[FS]> {
+provider_registry_write_text: fn(path: String, text: String, context: String) -[FS]> RegistryError! {
     if files.write(path, text) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(RegistryError.Reason("{context}: {error}"))
     }
 }
 
-provider_registry_create_dir_all: fn(path: String, context: String) RegistryError! -[FS]> {
+provider_registry_create_dir_all: fn(path: String, context: String) -[FS]> RegistryError! {
     if files.create_dir_all(path) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(RegistryError.Reason("{context}: {error}"))
     }
 }
 
-provider_registry_copy: fn(from: String, to: String, context: String) RegistryError! -[FS]> {
+provider_registry_copy: fn(from: String, to: String, context: String) -[FS]> RegistryError! {
     if files.copy2(from, to) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(RegistryError.Reason("{context}: {error}"))
     }
 }
 
-provider_registry_set_mode: fn(path: String, mode: Int, context: String) RegistryError! -[FS]> {
+provider_registry_set_mode: fn(path: String, mode: Int, context: String) -[FS]> RegistryError! {
     if files.set_mode(path, mode) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(RegistryError.Reason("{context}: {error}"))
     }
 }
 
-provider_registry_seal: fn(path: String, context: String) RegistryError! -[FS, Env]> {
+provider_registry_seal: fn(path: String, context: String) -[FS, Env]> RegistryError! {
     if store_seal_local_output(path) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(RegistryError.Reason("{context}: {error.message()}"))
@@ -200,7 +200,7 @@ provider_registry_which: fn(tool: String) -[FS, Env]> String? Never! { files.whi
 // Run one provisioned tool and require success (Rust `status()` +
 // `success()`): `could not {action}: {error}` when it cannot start,
 // `failure` when it exits unsuccessfully.
-provider_registry_run: fn(spec: ProcessSpec, action: String, failure: String) RegistryError! -[Exec, Time.Wait]> {
+provider_registry_run: fn(spec: ProcessSpec, action: String, failure: String) -[Exec, Time.Wait]> RegistryError! {
     receipt: spec.run() ?? return Err(RegistryError.Reason("could not {action}: {err}"))
     if !receipt.success -> return Err(RegistryError.Reason(failure))
 }
@@ -403,7 +403,7 @@ provider_registry_fresh_output: fn(store: String, name: String, version: String,
 }
 
 // Write an executable POSIX wrapper (mode 0755).
-provider_registry_write_wrapper: fn(path: String, text: String, label: String) RegistryError! -[FS]> {
+provider_registry_write_wrapper: fn(path: String, text: String, label: String) -[FS]> RegistryError! {
     provider_registry_write_text(path, text, "could not write {label}")
     provider_registry_set_mode(path, 0o755, "could not make {label} executable")
 }
@@ -487,7 +487,7 @@ RegistryAuthority: struct {
     // Fetch `url` into `destination`. The body lands in scratch first, so a
     // refused hop, failed status, or oversized body never creates the
     // destination.
-    to_path: fn(self, url: String, destination: String, scratch: String) RegistryError! -[Net, Time.Wait, FS]> {
+    to_path: fn(self, url: String, destination: String, scratch: String) -[Net, Time.Wait, FS]> RegistryError! {
         self.check_url(url)
         response: self.get_checked(url)
         status: response.status()
@@ -652,7 +652,7 @@ provider_registry_normalize_authority: fn(value: String) -> String RegistryError
 
 // ── Download and archive budgets ──
 
-provider_registry_ensure_download_budget: fn(path: String) RegistryError! -[FS]> {
+provider_registry_ensure_download_budget: fn(path: String) -[FS]> RegistryError! {
     stat: if files.stat(path) == {
         .Ok(found) -> found
         .Err(error) -> {
@@ -667,7 +667,7 @@ provider_registry_ensure_download_budget: fn(path: String) RegistryError! -[FS]>
 // A source archive admitted for extraction: within the download budget,
 // raw headers within the entry, payload, and total budgets, and a listing of
 // only safe relative regular files and directories.
-provider_registry_validate_tar_archive: fn(path: String, gzipped: Bool) RegistryError! -[FS]> {
+provider_registry_validate_tar_archive: fn(path: String, gzipped: Bool) -[FS]> RegistryError! {
     stream: provider_registry_tar_stream(path, gzipped)
     provider_registry_preflight_tar(stream, gzipped)
     listing: provider_registry_tar_entries(stream)
@@ -1056,7 +1056,7 @@ provider_registry_tar_listing: fn(path: String, gzipped: Bool) -[FS]> [RegistryT
 // Extract a validated archive of regular files and directories under
 // `destination` (Rust `tar -x[z]f … -C destination` as an unprivileged user:
 // no owners, permission bits under the process umask).
-provider_registry_extract_tar: fn(path: String, gzipped: Bool, destination: String) RegistryError! -[FS]> {
+provider_registry_extract_tar: fn(path: String, gzipped: Bool, destination: String) -[FS]> RegistryError! {
     stream: provider_registry_tar_stream(path, gzipped)
     members: provider_registry_tar_members(stream)
     if members.len() > PROVIDER_MAX_ARCHIVE_ENTRIES {

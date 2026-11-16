@@ -171,7 +171,7 @@ pkg_fetch_git_snapshot: fn(transport: PackageFetchGitTransport, url: String, rev
     }
 }
 
-pkg_fetch_git_populate: fn(transport: PackageFetchGitTransport, stage: FoundationDirectoryAuthority, revision: String) PackageFetchError! -[FS, Env, Exec, Time.Wait]> {
+pkg_fetch_git_populate: fn(transport: PackageFetchGitTransport, stage: FoundationDirectoryAuthority, revision: String) -[FS, Env, Exec, Time.Wait]> PackageFetchError! {
     clone: stage.process_directory(pkg_fetch_git_command(transport), 198, true) ?? return Err(pkg_fetch_git_bad("couldn't retain Git cache authority: {err}"))
     // A local clone would hardlink the source's objects, and Jet refuses a
     // local Git source whose files are multiply linked.

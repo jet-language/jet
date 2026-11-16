@@ -266,7 +266,7 @@ entry: fn(path: String, label: String) -[FS]> Entry StageError! {
     }
 }
 
-reject_symlink_ancestors: fn(target: String, label: String) StageError! -[FS]> {
+reject_symlink_ancestors: fn(target: String, label: String) -[FS]> StageError! {
     steps: prefixes(target)
     loop (index, cursor) in steps {
         info: entry(cursor, label) ?? return Err(err)
@@ -324,7 +324,7 @@ read_bounded: fn(file: String, size: Int, label: String, limit: Int) -[FS]> [U8]
 }
 
 // Make `dir` and its missing ancestors, each a real directory.
-directory: fn(dir: String, label: String) StageError! -[FS]> {
+directory: fn(dir: String, label: String) -[FS]> StageError! {
     loop cursor in prefixes(dir) {
         info := entry(cursor, label) ?? return Err(err)
         if info == .Missing {
@@ -340,7 +340,7 @@ directory: fn(dir: String, label: String) StageError! -[FS]> {
 // Publish `bytes` at `file` once: an existing file must already hold them.
 // A new file is written beside it, synced, renamed into place, and its
 // directory synced.
-immutable: fn(file: String, bytes: [U8]) StageError! -[Env, FS]> {
+immutable: fn(file: String, bytes: [U8]) -[Env, FS]> StageError! {
     reject_symlink_ancestors(file, "publication") ?? return Err(err)
     existing: entry(file, "publication") ?? return Err(err)
     if existing == .Present(found) {
@@ -370,7 +370,7 @@ immutable: fn(file: String, bytes: [U8]) StageError! -[Env, FS]> {
     Ok()
 }
 
-publish: fn(writer: &files.FileWriter, partial: String, file: String, parent: String, bytes: [U8]) IOError! -[FS]> {
+publish: fn(writer: &files.FileWriter, partial: String, file: String, parent: String, bytes: [U8]) -[FS]> IOError! {
     writer.write_bytes(bytes) ?? return Err(err)
     writer.fsync() ?? return Err(err)
     files.rename(partial, file) ?? return Err(err)

@@ -79,7 +79,7 @@ PinnedLifecycleDirectory: struct {
     // Rename the member `old_name`, which must still be the file behind
     // `source`, to `new_name`. Without `replace` an existing destination fails
     // with AlreadyExists and both names are left as they were.
-    rename_open: fn(self, source: FileWriter, old_name: String, new_name: String, replace: Bool) StoreError! -[FS]> {
+    rename_open: fn(self, source: FileWriter, old_name: String, new_name: String, replace: Bool) -[FS]> StoreError! {
         store_pinned_valid_name(old_name)
         store_pinned_valid_name(new_name)
         opened: source.stat()
@@ -93,17 +93,17 @@ PinnedLifecycleDirectory: struct {
     // file just opened. Lifecycle mutations are cooperative under the Hangar
     // lock; an external writer that ignores that ownership law is corruption,
     // not a supported concurrent mutator.
-    remove_file: fn(self, name: String) StoreError! -[FS]> {
+    remove_file: fn(self, name: String) -[FS]> StoreError! {
         file: self.open_read(name)
         self.validate_open_name(file.stat(), name)
         self.directory.remove(name)
     }
 
     // Make earlier member creations, renames and removals durable.
-    sync: fn(self) StoreError! -[FS]> { self.directory.fsync() }
+    sync: fn(self) -[FS]> StoreError! { self.directory.fsync() }
 
     // The member `name` is still a regular file with the identity of `opened`.
-    validate_open_name: fn(self, opened: Stat, name: String) StoreError! -[FS]> {
+    validate_open_name: fn(self, opened: Stat, name: String) -[FS]> StoreError! {
         current: self.directory.entry_stat(name)
         if !current.is_file || current.id != opened.id {
             return Err(StoreError.Other("pinned directory member was replaced"))

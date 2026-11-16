@@ -3,7 +3,7 @@ use files: core.files
 // Native generation writes require canonical RootProjection/StoreRealize
 // (#4262); no copier or realized package substitute lives here. Compiler
 // protocol JSON integration is #4262.
-jetos_write_etc_tree: fn(dir: String, system: SystemPlan) IOError! -[FS]> {
+jetos_write_etc_tree: fn(dir: String, system: SystemPlan) -[FS]> IOError! {
     etc: files.join(dir, "etc")
     files.create_dir_all(etc)
     host: jetos_option_value(system, [String]{"network.hostName", "network.hostname"}) ?? system.name
@@ -27,7 +27,7 @@ jetos_write_etc_tree: fn(dir: String, system: SystemPlan) IOError! -[FS]> {
     jetos_write_jetos_identity_assets(dir)
 }
 
-jetos_write_identity_files: fn(dir: String, etc: String, system: SystemPlan) IOError! -[FS]> {
+jetos_write_identity_files: fn(dir: String, etc: String, system: SystemPlan) -[FS]> IOError! {
     users: jetos_collect_names(system, "users")
     groups: jetos_collect_names(system, "groups")
     passwd := [String]{"root:x:0:0:root:/root:/bin/sh\n", "messagebus:x:81:81:D-Bus system message bus:/run/dbus:/usr/sbin/nologin\n", "gdm:x:120:120:GDM display manager:/var/lib/gdm:/usr/sbin/nologin\n"}
@@ -75,7 +75,7 @@ jetos_write_identity_files: fn(dir: String, etc: String, system: SystemPlan) IOE
     files.write(files.join(sysusers_dir, "jetos.conf"), sysusers.join(""))
 }
 
-jetos_write_pam_files: fn(etc: String) IOError! -[FS]> {
+jetos_write_pam_files: fn(etc: String) -[FS]> IOError! {
     pam: files.join(etc, "pam.d")
     files.create_dir_all(pam)
     login: "auth sufficient pam_unix.so nullok\naccount sufficient pam_unix.so\npassword sufficient pam_unix.so nullok\nsession required pam_unix.so\nsession optional pam_systemd.so\n"
@@ -210,7 +210,7 @@ jetos_missing_kernel_source_files: fn(entry: JetOSRealizedPackage) -[FS, Env, Ra
 // and set_permissions with their actual IO failures. Core files.copy2 cannot
 // provide this contract; its byte-only auto-parent behavior must not be
 // substituted while the canonical provider is #3593.
-jetos_write_boot_facts: fn(dir: String, system: SystemPlan, realized: [JetOSRealizedPackage]) IOError! -[FS, Env, Rand]> {
+jetos_write_boot_facts: fn(dir: String, system: SystemPlan, realized: [JetOSRealizedPackage]) -[FS, Env, Rand]> IOError! {
     boot: jetos_boot_profile(system)
     boot_dir: files.join(dir, "boot")
     files.create_dir_all(boot_dir)
@@ -220,7 +220,7 @@ jetos_write_boot_facts: fn(dir: String, system: SystemPlan, realized: [JetOSReal
 
 // The selected held package is read in place from `realized` for kernel,
 // initrd, and modules, rather than copying a lease out of the list.
-jetos_write_boot_payload: fn(boot_dir: String, system: SystemPlan, boot: JetOSBootProfile, realized: [JetOSRealizedPackage], kernel: Int?) IOError! -[FS, Env, Rand]> {
+jetos_write_boot_payload: fn(boot_dir: String, system: SystemPlan, boot: JetOSBootProfile, realized: [JetOSRealizedPackage], kernel: Int?) -[FS, Env, Rand]> IOError! {
     kernel_path: if kernel == {
         .Val(at) -> jetos_boot_artifact(realized[at], [String]{"boot/vmlinuz-cachyos", "bzImage", "vmlinuz"}) ?? boot.kernel
         .None -> boot.kernel
@@ -257,7 +257,7 @@ jetos_write_boot_payload: fn(boot_dir: String, system: SystemPlan, boot: JetOSBo
 
 // Best-effort removal of the destination, a native copy that never creates
 // parents, then the source's permission bits with the write bits set.
-jetos_copy_file_replace: fn(source: String, destination: String) IOError! -[FS]> {
+jetos_copy_file_replace: fn(source: String, destination: String) -[FS]> IOError! {
     if files.remove(destination) == {
         .Ok(_) -> {}
         .Err(_) -> {}

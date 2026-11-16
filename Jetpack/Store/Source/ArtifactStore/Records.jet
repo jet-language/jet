@@ -90,7 +90,7 @@ impl ArtifactStore {
     // Publish one record. For a blob kind `key` must be the SHA-256 hex of
     // `bytes`. An action key that already holds different bytes is a
     // `Conflict`: the same inputs recomputed to a different record.
-    put_record: fn(self, kind: ArtifactRecordKind, key: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+    put_record: fn(self, kind: ArtifactRecordKind, key: String, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ArtifactStoreError! {
         if record_open_schema(bytes, kind.schema()).problem == .Val(problem) {
             return Err(ArtifactStoreError.Config("{kind.schema()} record is not publishable: {problem}"))
         }
@@ -127,7 +127,7 @@ impl ArtifactStore {
     }
 
     // Record one use of each action record `keys` names, in one journal write.
-    touch_records: fn(self, kind: ArtifactRecordKind, keys: [String]) Never! -[FS, Env, Time, Rand]> {
+    touch_records: fn(self, kind: ArtifactRecordKind, keys: [String]) -[FS, Env, Time, Rand]> Never! {
         if !kind.is_action() {
             return
         }
@@ -138,7 +138,7 @@ impl ArtifactStore {
 
     // Publish many action records of one kind in one store transaction.
     // Bytes that do not decode as the kind's schema are skipped.
-    put_records: fn(self, kind: ArtifactRecordKind, records: [ArtifactRecordPublication]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+    put_records: fn(self, kind: ArtifactRecordKind, records: [ArtifactRecordPublication]) -[FS, Env, Exec, Time, Rand]> ArtifactStoreError! {
         if !kind.is_action() {
             return Err(ArtifactStoreError.Config("{kind.schema()} records are content addressed; publish them one by one"))
         }

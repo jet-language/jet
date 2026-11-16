@@ -144,7 +144,7 @@ provider_cc_path_within: fn(path: String, base: String) -> Bool Never! {
 
 // Every descriptor field, digest, envelope, and payload byte is re-proved
 // before a Hangar descriptor is used.
-provider_cc_validate_descriptor: fn(descriptor: CcToolchainDescriptor, entry: StoreEntry, hangar_root: String) CcToolchainError! -[FS, Env]> {
+provider_cc_validate_descriptor: fn(descriptor: CcToolchainDescriptor, entry: StoreEntry, hangar_root: String) -[FS, Env]> CcToolchainError! {
     host: provider_cc_toolchain_host_target_triple()
     if descriptor.host != host {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` targets host `{descriptor.host}`, but this machine is `{host}`"))
@@ -190,7 +190,7 @@ provider_cc_validate_descriptor: fn(descriptor: CcToolchainDescriptor, entry: St
 
 // A fixture bundle is one directory: every role root is the descriptor root
 // and its single mount carries the bundle digest.
-provider_cc_validate_fixture_roots: fn(descriptor: CcToolchainDescriptor, entry_id: String) CcToolchainError! -[FS, Env]> {
+provider_cc_validate_fixture_roots: fn(descriptor: CcToolchainDescriptor, entry_id: String) -[FS, Env]> CcToolchainError! {
     root: descriptor.root
     if descriptor.compiler_root != root || descriptor.cxx_root != root || descriptor.linker_root != root || descriptor.sysroot_root != root {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has inconsistent fixture roots"))
@@ -207,7 +207,7 @@ provider_cc_validate_fixture_roots: fn(descriptor: CcToolchainDescriptor, entry_
 // A pack-layout toolchain mounts its pack object (compiler, C++ driver,
 // linker and their resources) as the compiler role and its own sysroot as the
 // sysroot role; the entry must reference the pack so it stays alive.
-provider_cc_validate_pack_roots: fn(descriptor: CcToolchainDescriptor, entry_id: String, hangar_root: String) CcToolchainError! -[FS, Env]> {
+provider_cc_validate_pack_roots: fn(descriptor: CcToolchainDescriptor, entry_id: String, hangar_root: String) -[FS, Env]> CcToolchainError! {
     if descriptor.mounts.len() != 2 || descriptor.cxx_root != descriptor.compiler_root || descriptor.linker_root != descriptor.compiler_root {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has inconsistent pack roots"))
     }
@@ -265,7 +265,7 @@ provider_cc_checked_entry_root: fn(hangar_root: String, entry: StoreEntry) -[FS,
 
 // A non-empty regular file under `root` (no symlink on the way) whose
 // SHA-256 is `expected`.
-provider_cc_verify_file: fn(root: String, relative: String, expected: String, label: String) CcToolchainError! -[FS]> {
+provider_cc_verify_file: fn(root: String, relative: String, expected: String, label: String) -[FS]> CcToolchainError! {
     path: provider_cc_checked_relative_path(root, relative, label)
     metadata: files.stat(path) ?? {
         return Err(CcToolchainError.Invalid("C toolchain {label} is unavailable: {err}"))
@@ -282,7 +282,7 @@ provider_cc_verify_file: fn(root: String, relative: String, expected: String, la
 }
 
 // A real directory under `root` whose Hangar tree digest is `expected`.
-provider_cc_verify_tree: fn(root: String, relative: String, expected: String, label: String) CcToolchainError! -[FS, Env]> {
+provider_cc_verify_tree: fn(root: String, relative: String, expected: String, label: String) -[FS, Env]> CcToolchainError! {
     path: provider_cc_checked_relative_path(root, relative, label)
     metadata: files.stat(path) ?? {
         return Err(CcToolchainError.Invalid("C toolchain {label} is unavailable: {err}"))

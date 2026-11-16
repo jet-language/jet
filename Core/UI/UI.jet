@@ -954,7 +954,7 @@ Window: struct {
     // name and no images unsets it, and so does a display server without
     // xdg_toplevel_icon_v1: both show the icon of the app_id's desktop
     // entry instead.
-    set_icon: fn(self, icon: UIIcon) UIError! -[Env]> {
+    set_icon: fn(self, icon: UIIcon) -[Env]> UIError! {
         if has_nul(icon.name) -> return Err(UIError.Invalid("an icon name has no NUL byte"))
         loop image in icon.images {
             if image.side < 1 || image.side > ICON_SIDE_MAX {
@@ -988,7 +988,7 @@ Window: struct {
     // paste until another copy replaces it. Copy in answer to input: the
     // display server takes a copy only from the window with the keyboard
     // focus.
-    set_clipboard_text: fn(self, text: String) UIError! -[Net, Time]> {
+    set_clipboard_text: fn(self, text: String) -[Net, Time]> UIError! {
         guard := self.state.guard_edit()
         if guard.value.link == .Val(link) {
             connection := link.guard_edit()
@@ -1004,7 +1004,7 @@ Window: struct {
     // which ends any composition. Compositions arrive as `.Compose` and
     // their committed text as `.Text`. Without an input method, typing
     // arrives from the keyboard alone; a headless window has none.
-    set_text_input: fn(self, area: UIRect?) UIError! -[Net, Time]> {
+    set_text_input: fn(self, area: UIRect?) -[Net, Time]> UIError! {
         guard: self.state.guard_read()
         if guard.value.link == .Val(link) {
             connection := link.guard_edit()
@@ -1322,13 +1322,13 @@ Frame: struct {
     events: fn(self) -> [UIEvent] { self.pending.copy() }
 
     // Shows `pixels`: `height` rows of `width` RGBA pixels, 4 bytes each.
-    present: fn(self, pixels: [U8]) UIError! -[Env, Net, Time]> {
+    present: fn(self, pixels: [U8]) -[Env, Net, Time]> UIError! {
         self.present_damage(pixels, [UIRect]{UIRect{x: 0, y: 0, width: self.width, height: self.height}})
     }
 
     // Shows `pixels` where only the `damage` rectangles changed since the
     // previous frame; only they are copied to the display.
-    present_damage: fn(self, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net, Time]> {
+    present_damage: fn(self, pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError! {
         if pixels.len() != self.width * self.height * 4 {
             return Err(UIError.Size("frame {self.index} needs {self.width * self.height * 4} bytes for {self.width}x{self.height} RGBA, got {pixels.len()}"))
         }

@@ -1,0 +1,14 @@
+// A signature's effect row comes right after its parameters, and a unit
+// result's error contract after the row. The error-first order is not Jet:
+// it gets the generic parse error, with nothing that teaches it.
+#Error
+SaveError: enum { Full }
+#Error
+LoadError: enum { Gone }
+
+save: fn(n: Int) (SaveError | LoadError)! -[IO]> {
+    if n < 0 -> return Err(SaveError.Full)
+    print("saved {n}")
+}
+
+run: fn() { save(1) ?? print("failed") }

@@ -6,11 +6,11 @@ Rejected: struct {
     message: fn(self) -> String Never! { "rejected {self.n}" }
 }
 
-check: fn(n: Int) Rejected! -[IO]> {
+check: fn(n: Int) -[IO]> Rejected! {
     if n < 0 -> return Err(Rejected{n: n})
     print("ok {n}")
 }
 
-accept_total: fn(handler: fn(Int) -[IO]> Never!, n: Int) Never! -[IO]> { handler(n) }
+accept_total: fn(handler: fn(Int) -[IO]> Never!, n: Int) -[IO]> Never! { handler(n) }
 
 run: fn() { accept_total(check, 2) }

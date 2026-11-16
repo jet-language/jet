@@ -53,7 +53,7 @@ evidence_report_read: fn(path: String) -[FS.Read]> EvidenceReport EvidenceCodecE
 }
 
 // EvidenceReport::write.
-evidence_report_write: fn(report: EvidenceReport, path: String) EvidenceCodecError! -[FS.Write]> {
+evidence_report_write: fn(report: EvidenceReport, path: String) -[FS.Write]> EvidenceCodecError! {
     bytes: evidence_report_encode(report)
     if evidence_files.write_bytes(path, bytes) == {
         .Ok(_) -> return
@@ -84,7 +84,7 @@ evidence_stable_token: fn(parts: [String]) -> String Never! {
     derivation_hash_hex(state)
 }
 
-evidence_write_record_from_codes: fn(path: String, kind: Int, state: Int, name: String, message: String, file: String, line: U32, context: EvidenceCaptureContext) EvidenceCodecError! -[FS, Env]> {
+evidence_write_record_from_codes: fn(path: String, kind: Int, state: Int, name: String, message: String, file: String, line: U32, context: EvidenceCaptureContext) -[FS, Env]> EvidenceCodecError! {
     record := evidence_record_from_test_environment(kind, state, name, message, file, line)
     if record.outcome == EvidenceOutcome.Passed || record.outcome == EvidenceOutcome.Failed {
         if evidence_record_set_expectation(record, context.expectation) == .Err(error) {
@@ -103,7 +103,7 @@ evidence_write_record_from_codes: fn(path: String, kind: Int, state: Int, name: 
     evidence_write_record_with_derivation(path, record, derivation)
 }
 
-evidence_write_record_with_derivation: fn(path: String, record: EvidenceRecord, derivation: DerivationRecord) EvidenceCodecError! -[FS, Env]> {
+evidence_write_record_with_derivation: fn(path: String, record: EvidenceRecord, derivation: DerivationRecord) -[FS, Env]> EvidenceCodecError! {
     frame := [U8]{}
     evidence_encode_record_with_derivation(record, derivation, frame)
     evidence_append_frame(path, frame)
@@ -114,7 +114,7 @@ evidence_write_record_with_derivation: fn(path: String, record: EvidenceRecord, 
 // schema. Rust serializes the appends of one process with a mutex; the
 // exclusive OS lock on the report also serializes concurrent test processes
 // sharing it.
-evidence_append_frame: fn(path: String, frame: [U8]) EvidenceCodecError! -[FS, Env]> {
+evidence_append_frame: fn(path: String, frame: [U8]) -[FS, Env]> EvidenceCodecError! {
     if frame.len() > EVIDENCE_MAX_REPORT_BYTES {
         return Err(evidence_codec_error("evidence record exceeds the 16 MiB limit"))
     }
@@ -137,7 +137,7 @@ evidence_append_frame: fn(path: String, frame: [U8]) EvidenceCodecError! -[FS, E
     result
 }
 
-evidence_append_locked: fn(path: String, writer: &evidence_files.FileWriter, frame: [U8]) EvidenceCodecError! -[FS]> {
+evidence_append_locked: fn(path: String, writer: &evidence_files.FileWriter, frame: [U8]) -[FS]> EvidenceCodecError! {
     info: writer.stat() ?? return Err(evidence_codec_error("{err}"))
     if info.size == 0 {
         header := EVIDENCE_REPORT_MAGIC.bytes()

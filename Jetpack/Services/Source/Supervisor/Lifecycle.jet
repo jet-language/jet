@@ -38,7 +38,7 @@ services_state_lock: fn(project_dir: String) -[FS, Env, Time]> RuntimeLock Servi
 
 // Start `plan` if it is not already running. `env` composes the PATH the
 // project's realized packages live on, so a preset binary resolves.
-services_up_one: fn(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
+services_up_one: fn(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> ServicesError! {
     if sys.get(SERVICES_SUPERVISOR_ENV) != None {
         started: services_start_one(host, project_dir, env, plan)
         found: started ?? return
@@ -66,7 +66,7 @@ services_reap_child: fn(child: &&ProcessChild) -[Exec, Time.Wait]> {
 // until it publishes the service's state or its failure, or exits without
 // either. The wait has no clock: a live supervisor is still publishing, and
 // only its own exit ends the wait without its evidence.
-services_spawn_service_supervisor: fn(project_dir: String, env: &ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+services_spawn_service_supervisor: fn(project_dir: String, env: &ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Time.Wait]> ServicesError! {
     // The parent already loaded, realized, and trust-gated this exact plan;
     // the detached child must not prompt or replay a trust decision.
     spec := process.cmd([String]{sys.executable(), "services", "up", plan.name, "--trust", "--no-color"}).cwd(project_dir).detached()
@@ -507,7 +507,7 @@ services_stopping_requested: fn(project_dir: String, plan: DevServicePlan) -[FS]
     files.is_file(files.join(services_service_dir(project_dir, plan.name), ".stopping"))
 }
 
-services_stop_started_process: fn(started: &StartedService, shutdown: ShutdownPolicy?) ServicesError! -[FS, Env, Exec, Time, Time.Wait]> {
+services_stop_started_process: fn(started: &StartedService, shutdown: ShutdownPolicy?) -[FS, Env, Exec, Time, Time.Wait]> ServicesError! {
     services_stop_process_with_authority(started.state, shutdown, Val(started.authority))
 }
 
@@ -515,7 +515,7 @@ services_stop_started_process: fn(started: &StartedService, shutdown: ShutdownPo
 // ready phase lands after that generation's running lifecycle, never under it.
 // A generation that already ended (a dependency failure stopped it, or it
 // exited) keeps its terminal evidence.
-services_mark_lifecycle_ready: fn(project_dir: String, plan: DevServicePlan) ServicesError! -[FS, Env, Time]> {
+services_mark_lifecycle_ready: fn(project_dir: String, plan: DevServicePlan) -[FS, Env, Time]> ServicesError! {
     _guard: services_state_lock(project_dir)
     dir: services_service_dir(project_dir, plan.name)
     found: services_read_lifecycle(dir)
@@ -658,7 +658,7 @@ services_watch_stamps: fn(project_dir: String, paths: [String]) -[FS]> [String] 
     Ok(entries)
 }
 
-services_collect_watch_stamps: fn(project_dir: String, path: String, limit: Int, depth: Int, entries: &[String]) ServicesError! -[FS]> {
+services_collect_watch_stamps: fn(project_dir: String, path: String, limit: Int, depth: Int, entries: &[String]) -[FS]> ServicesError! {
     if depth > SERVICES_MAX_WATCH_DEPTH {
         return Err(ServicesError.new("watched tree exceeds the bounded depth of {SERVICES_MAX_WATCH_DEPTH}"))
     }
@@ -733,7 +733,7 @@ services_watch_changed_debounced: fn(project_dir: String, paths: [String], stamp
 
 // Stop `plan` if a verified service process is on record: TERM, a bounded
 // grace wait, then KILL. A PID-only legacy record is dropped, never signalled.
-services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Rand, Time, Time.Wait]> {
+services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan) -[FS, Env, Exec, Rand, Time, Time.Wait]> ServicesError! {
     services_validate_service_name(plan.name)
     guard := env_acquire_lock(pkg_managed_dir(project_dir), SERVICES_STATE_LOCK_SCOPE) ?? return Err(ServicesError.new("couldn't lock service state: {err}"))
     dir: services_service_dir(project_dir, plan.name)
@@ -834,7 +834,7 @@ services_down_authority: fn(host: ServiceHost, lifecycle: LifecycleFacts?) -> Se
 
 // Stop a generation's authority from its supervisor: through the live child
 // when the leader still matches, then through the persisted authority facts.
-services_stop_supervisor_authority: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan, started: &StartedService) ServicesError! -[FS, Env, Exec, Rand, Time, Time.Wait]> {
+services_stop_supervisor_authority: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan, started: &StartedService) -[FS, Env, Exec, Rand, Time, Time.Wait]> ServicesError! {
     // The live attempt: whether it ran, and its failure if any.
     live_attempted := false
     live_error := ServicesError?{None}

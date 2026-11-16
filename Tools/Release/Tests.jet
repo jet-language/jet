@@ -81,12 +81,12 @@ repo_root: fn() -[FS, Env]> String Never! {
     files.absolute(".") ?? panic("the checkout root did not resolve: {err}")
 }
 
-put: fn(path: String, text: String) Never! -[FS]> {
+put: fn(path: String, text: String) -[FS]> Never! {
     files.create_dir_all(files.dirname(path)) ?? panic("create {files.dirname(path)}: {err}")
     files.write(path, text) ?? panic("write {path}: {err}")
 }
 
-put_json: fn(path: String, tree: Dyn) Never! -[FS]> {
+put_json: fn(path: String, tree: Dyn) -[FS]> Never! {
     put(path, "{json.canonical(tree) ?? panic("json: {err}")}\n")
 }
 
@@ -144,11 +144,11 @@ runner: fn(scratch: String, name: String, dir: String, shard: Int, count: Int, s
     evidence
 }
 
-write_sums: fn(dir: String) Never! -[FS]> {
+write_sums: fn(dir: String) -[FS]> Never! {
     put(files.join(dir, "SHA256SUMS"), sums_text(shipped_artifacts(dir)))
 }
 
-write_build: fn(dir: String, s2: String, s3: String) Never! -[FS]> {
+write_build: fn(dir: String, s2: String, s3: String) -[FS]> Never! {
     put_json(
         files.join(dir, "BUILD.json"),
         object(
@@ -161,7 +161,7 @@ write_build: fn(dir: String, s2: String, s3: String) Never! -[FS]> {
 }
 
 // A `build` release directory of `jet`, as the build step leaves it.
-make_build: fn(dir: String, jet: String) Never! -[FS]> {
+make_build: fn(dir: String, jet: String) -[FS]> Never! {
     put(files.join(dir, "jet"), jet)
     files.set_mode(files.join(dir, "jet"), 493) ?? panic("chmod jet: {err}")
     sha: jet_sha(dir)
@@ -224,7 +224,7 @@ has_problem: fn(problems: [Problem], class: String, part: String) -> Bool Never!
 
 // `outcome` has `verdict`, names a `class` problem containing `part`, and
 // its audit entry is on disk with the same verdict and problem.
-expect: fn(outcome: Outcome, verdict: String, class: String, part: String) Never! -[FS]> {
+expect: fn(outcome: Outcome, verdict: String, class: String, part: String) -[FS]> Never! {
     if outcome.verdict != verdict || !has_problem(outcome.problems, class, part) {
         panic("want {verdict} with [{class}] `{part}`, got {outcome.verdict}:\n{problem_lines(outcome.problems)}")
     }
@@ -237,7 +237,7 @@ expect: fn(outcome: Outcome, verdict: String, class: String, part: String) Never
     assert(has_problem(kept, class, part))
 }
 
-expect_clean: fn(outcome: Outcome, verdict: String) Never! -[FS]> {
+expect_clean: fn(outcome: Outcome, verdict: String) -[FS]> Never! {
     if outcome.verdict != verdict || outcome.problems.len() > 0 {
         panic("want a clean {verdict}, got {outcome.verdict}:\n{problem_lines(outcome.problems)}")
     }
