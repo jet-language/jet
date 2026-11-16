@@ -1,0 +1,8 @@
+Error [jet.HoleHeaderInPipeStep]: A table in a pipe step has no hole: `<>` here is the step's value
+  --> Tests/UI/dispatch_hole_in_pipe_step.jet:5:22
+    |
+  5 |     return raw |> if width(<>) % 3 == 0 {
+    |                      ^^^^^^^^^^^^^^^^^^
+ Why: Inside a `|>` step `<>` always names the value the step receives, so a table header there has no place for each arm's value
+ Fix: End the pipe one line earlier in a named value and start the table with that name, as `n: raw |> Int.parse(<>) ?? 0` and then `if n % <> == 0 {`
+More: jet-lang.dev/e/E0444

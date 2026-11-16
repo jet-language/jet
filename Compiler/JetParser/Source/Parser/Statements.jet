@@ -750,6 +750,7 @@ parser_parse_if_statement: fn(state: &JetParserState) -> Stmt {
     }
     parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     cond_start: parser_current(state).span.start
+    reads_before: parser_pipe_step_read_count(state)
     condition: parser_parse_expression_no_struct_lit(state, 1)
     cond_span: Span{start: cond_start, end: parser_prev_token_end(state)}
     // A bare `=` in a condition is an assignment, not `==`.
@@ -761,7 +762,7 @@ parser_parse_if_statement: fn(state: &JetParserState) -> Stmt {
     }
     if parser_current_kind(state) == TOKEN_LBRACE && parser_dispatch_hole_count(condition.expr) > 0 {
         parser_bump(state)
-        return parser_parse_if_hole_table(state, condition.expr, start.span)
+        return parser_parse_if_hole_table(state, condition.expr, cond_span, start.span)
     }
     braced: parser_current_kind(state) == TOKEN_LBRACE
     if braced {
@@ -771,7 +772,10 @@ parser_parse_if_statement: fn(state: &JetParserState) -> Stmt {
         open_position: state.position
         parser_bump(state)
         if parser_if_body_is_arms(state) {
-            parser_add_error_code(state, "E0992", start.span, "a multi-arm `if` needs a comparison between the subject and `{{`", "`if subject == {{ … }}` (or `<`, `>`, `!=`, `<=`, `>=`) marks value dispatch explicitly, so a plain `if cond {{ … }}` body is always statements", "write `if subject == {{ value -> body }}`")
+            if {
+                parser_pipe_step_read_count(state) > reads_before -> parser_dispatch_hole_in_pipe_step(state, cond_span)
+                else -> parser_add_error_code(state, "E0992", start.span, "a multi-arm `if` needs a comparison between the subject and `{{`", "`if subject == {{ … }}` (or `<`, `>`, `!=`, `<=`, `>=`) marks value dispatch explicitly, so a plain `if cond {{ … }}` body is always statements", "write `if subject == {{ value -> body }}`")
+            }
             return parser_parse_if_arms(state, condition.expr, start.span, BinOp.Eq)
         }
         state.position = open_position
@@ -911,16 +915,17 @@ parser_parse_if_guard_arms: fn(state: &JetParserState, start: Span) -> Stmt {
     Stmt.Switch{subject: Expr.Bool{value: true, span: start, id: parser_node_id(state)}, arms: arms, else_body: else_body, span: start}
 }
 
-// `if H[_] { candidate -> body }`. A comparison header over a subject is the
-// comparison table; any other header is a guard table, its arms read against
-// the hole marker so that each arm atom becomes the header filled with it.
-parser_parse_if_hole_table: fn(state: &JetParserState, header: &&Expr, start: Span) -> Stmt {
-    parser_dispatch_hole_check_header(state, header)
+// `if H[<>] { candidate -> body }`. A header that only compares with its
+// hole is refused (E0441) and read as the comparison table it stands for;
+// any other header is a guard table, its arms read against the hole marker
+// so that each arm atom becomes the header filled with it.
+parser_parse_if_hole_table: fn(state: &JetParserState, header: &&Expr, cond: Span, start: Span) -> Stmt {
+    parser_dispatch_hole_check_header(state, header, cond)
     compared: parser_dispatch_hole_comparison(header)
     if compared == .Val(table) -> return parser_parse_if_arms(state, table.subject, start, table.op)
     saved_else_arms: state.else_arms.len()
     marker: parser_dispatch_hole_marker(header)
-    state.dispatch_hole_headers.push(header)
+    state.dispatch_hole_headers.push(parser_dispatch_hole_header(state, header, cond))
     parsed: parser_parse_if_arms(state, marker, start, BinOp.Eq)
     _ := state.dispatch_hole_headers.pop()
     loop state.else_arms.len() > saved_else_arms -> _ := state.else_arms.pop()

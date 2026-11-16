@@ -1,0 +1,11 @@
+// E0444: inside a pipe step `<>` is the step's value, so a table there has no hole.
+width: fn(text: String) -> Int { text.len() }
+
+label: fn(raw: String) -> String {
+    return raw |> if width(<>) % 3 == 0 {
+        true -> "three"
+        else -> "other"
+    }
+}
+
+run: fn() { print(label("abc")) }

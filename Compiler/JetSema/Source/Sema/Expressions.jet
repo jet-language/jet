@@ -3125,6 +3125,7 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
                     unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
                     foreign_capability: sema_expr_call_foreign_capability(program, callee),
                     replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
+                    hole_header: sema_expr_in_hole_header(scopes, span),
                 },
             ),
         },
@@ -3153,6 +3154,13 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
     callee_key: sema_symbol_key(program, context, symbol)
     context.comptime_requests.push(SemaComptimeRequest{callee_key: callee_key, module_identity: target.module_identity, args: args, span: span, checked_text: None})
     true
+}
+
+// The call at `span` is written in the header of the hole table being
+// checked, which runs once per arm tried (E0442).
+sema_expr_in_hole_header: fn(scopes: SemaScopeTable, span: Span) -> Bool Never! {
+    header: scopes.hole_header ?? return false
+    span.start >= header.start && span.end <= header.end
 }
 
 // An extern callee (`#FFI(<lang>)` body or foreign row) carries its one foreign
@@ -7108,10 +7116,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
             diagnostics.push(sema_type_used_as_value(type_name(ty), span))
             None
         }
-        .Paren(value, span, _) -> {
-            checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-            return Val(TExpr{ty: checked.ty, kind: checked.kind, span: span})
-        }
+        .Paren(value, span, _) -> sema_expr_check_paren(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Unary(op, operand, span, _) -> sema_expr_check_unary(op, operand, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
         .Binary(op, left, right, span, _) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Call(call, _) -> {
@@ -7196,7 +7201,14 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
 }
 
 sema_expr_check_paren: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    // The parser gives each arm of a hole table its header twice wrapped in
+    // parentheses that span the written header; a call written there runs
+    // once per arm (E0442).
+    outer: scopes.hole_header
+    if value == .Paren(_, inner_span, _) && inner_span == span -> scopes.hole_header = Val(span)
+    result: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    scopes.hole_header = outer
+    checked: result ?? return None
     Val(TExpr{ty: checked.ty, kind: checked.kind, span: span})
 }
 

@@ -1,4 +1,4 @@
-// A hole table `if H[_] { candidate -> body }` parses to the table written
+// A hole table `if H[<>] { candidate -> body }` parses to the table written
 // out by hand: each arm tests the header with its candidate in the hole.
 use jet_parser.[jet_format_source, jfmt_structure, parse_source]
 
@@ -26,90 +26,127 @@ hole_error_codes: fn(source: String) -> String {
     codes
 }
 
-#Test("a header with two holes is refused") {
-    assert_eq(hole_error_codes("run: fn(n: Int) {{\n    if n % _ == _ {{\n        3 -> print(\"three\")\n        else -> print(\"other\")\n    }}\n}}\n"), "E0946")
-    assert_eq(hole_error_codes("pick: fn(n: Int) -> Int {{\n    return if both(_, _) {{\n        true -> 1\n        else -> 2\n    }}\n}}\n"), "E0946")
+// The text the first error's edit writes, or "none".
+hole_first_edit: fn(source: String) -> String {
+    parsed: parse_source(source.bytes())
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == 1 {
+            edit: diagnostic.edit ?? return "none"
+            return edit.new_text
+        }
+    }
+    "none"
 }
 
-#Test("a range or payload pattern arm needs a subject == _ header") {
-    assert_eq(hole_error_codes("run: fn(n: Int) {{\n    if n % _ == 0 {{\n        2..4 -> print(\"small\")\n        else -> print(\"other\")\n    }}\n}}\n"), "E0948")
-    assert_eq(hole_error_codes("pick: fn(n: Int) -> Int {{\n    return if find(_) > n {{\n        .Val(x) -> x\n        else -> 0\n    }}\n}}\n"), "E0948")
-    assert_eq(hole_error_codes("pick: fn(n: Int) -> Int {{\n    return if n == _ {{\n        2..4 -> 1\n        else -> 0\n    }}\n}}\n"), "")
+#Test("a header with two holes is refused") {
+    assert_eq(hole_error_codes("run: fn(n: Int) {{\n    if n % <> == <> {{\n        3 -> print(\"three\")\n        else -> print(\"other\")\n    }}\n}}\n"), "E0946")
+    assert_eq(hole_error_codes("pick: fn(n: Int) -> Int {{\n    return if both(<>, <>) {{\n        true -> 1\n        else -> 2\n    }}\n}}\n"), "E0946")
+}
+
+#Test("a range or payload pattern arm needs a plain table") {
+    assert_eq(hole_error_codes("run: fn(n: Int) {{\n    if n % <> == 0 {{\n        2..4 -> print(\"small\")\n        else -> print(\"other\")\n    }}\n}}\n"), "E0948")
+    assert_eq(hole_error_codes("pick: fn(n: Int) -> Int {{\n    return if find(<>) > n {{\n        .Val(x) -> x\n        else -> 0\n    }}\n}}\n"), "E0948")
+    assert_eq(hole_error_codes("pick: fn(n: Int) -> Int {{\n    return if n == {{\n        2..4 -> 1\n        else -> 0\n    }}\n}}\n"), "")
+}
+
+#Test("a header that only compares with the hole is the plain table") {
+    assert_eq(hole_error_codes("area: fn(shape: Shape) -> Int {{\n    return if shape == <> {{\n        .Circle(r) -> 3 * r * r\n        .Square(side) -> side * side\n    }}\n}}\n"), "E0441")
+    assert_eq(hole_first_edit("area: fn(shape: Shape) -> Int {{\n    return if shape == <> {{\n        .Circle(r) -> 3 * r * r\n        .Square(side) -> side * side\n    }}\n}}\n"), "shape ==")
+    assert_eq(hole_first_edit("grade: fn(score: Int) {{\n    if <> == score {{\n        100 -> print(\"perfect\")\n        else -> print(\"score\")\n    }}\n}}\n"), "score ==")
+    assert_eq(hole_first_edit("grade: fn(score: Int) {{\n    if (<> <= score + 1) {{\n        90 -> print(\"high\")\n        else -> print(\"low\")\n    }}\n}}\n"), "score + 1 >=")
+    assert_eq(hole_first_edit("grade: fn(score: Int) {{\n    if (score % 7) < <> {{\n        3 -> print(\"high\")\n        else -> print(\"low\")\n    }}\n}}\n"), "(score % 7) <")
+}
+
+#Test("the old `_` hole is refused with an edit writing `<>`") {
+    assert_eq(hole_error_codes("run: fn(n: Int) {{\n    if n % _ == 0 {{\n        3 -> print(\"three\")\n        else -> print(\"other\")\n    }}\n}}\n"), "E0443")
+    assert_eq(hole_first_edit("run: fn(n: Int) {{\n    if n % _ == 0 {{\n        3 -> print(\"three\")\n        else -> print(\"other\")\n    }}\n}}\n"), "<>")
+    assert_eq(hole_error_codes("run: fn(n: Int) {{\n    if n == _ {{\n        3 -> print(\"three\")\n        else -> print(\"other\")\n    }}\n}}\n"), "E0443")
+}
+
+#Test("a table header in a pipe step has no hole") {
+    assert_eq(hole_error_codes("label: fn(raw: String) -> String {{\n    return raw |> if width(<>) % 3 == 0 {{\n        true -> \"three\"\n        else -> \"other\"\n    }}\n}}\n"), "E0444")
+}
+
+#Test("a value hole table needs an else") {
+    assert_eq(hole_error_codes("label: fn(n: Int) -> String {{\n    return if n % <> == 0 {{\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n    }}\n}}\n"), "E0003")
 }
 
 #Test("None fills the hole as a value") {
     hole_same_as(
-        "pick: fn(key: String) -> Int {{\n    return if lookup(_) == key {{\n        None -> 0\n        else -> 1\n    }}\n}}\n",
+        "pick: fn(key: String) -> Int {{\n    return if lookup(<>) == key {{\n        None -> 0\n        else -> 1\n    }}\n}}\n",
         "pick: fn(key: String) -> Int {{\n    return if {{\n        lookup(None) == key -> 0\n        else -> 1\n    }}\n}}\n",
     )
 }
 
 #Test("a hole table at the end of a body is its value") {
     hole_same_as(
-        "parity: fn(text: String) -> String ReadError! {{\n    if width(text) % _ == 0 {{\n        2 -> \"even\"\n        else -> \"odd\"\n    }}\n}}\n",
+        "parity: fn(text: String) -> String ReadError! {{\n    if width(text) % <> == 0 {{\n        2 -> \"even\"\n        else -> \"odd\"\n    }}\n}}\n",
         "parity: fn(text: String) -> String ReadError! {{\n    if {{\n        width(text) % 2 == 0 -> \"even\"\n        else -> \"odd\"\n    }}\n}}\n",
     )
     hole_same_as(
-        "pick: fn(r: Int?) -> Int {{\n    if r == .Val(_) {{\n        return 1\n    }}\n    if r == _ {{\n        .Val(n) -> n\n        None -> 0\n    }}\n}}\n",
-        "pick: fn(r: Int?) -> Int {{\n    if r == .Val(_) {{\n        return 1\n    }}\n    if r == {{\n        .Val(n) -> n\n        None -> 0\n    }}\n}}\n",
+        "pick: fn(r: Int?) -> Int {{\n    if r == .Val(_) {{\n        return 1\n    }}\n    if width(r) % <> == 0 {{\n        2 -> 2\n        else -> 0\n    }}\n}}\n",
+        "pick: fn(r: Int?) -> Int {{\n    if r == .Val(_) {{\n        return 1\n    }}\n    if {{\n        width(r) % 2 == 0 -> 2\n        else -> 0\n    }}\n}}\n",
     )
 }
 
 #Test("a statement hole table is the guard table of filled headers") {
     hole_same_as(
-        "pick: fn(n: Int) {{\n    if n % _ == 0 {{\n        15 -> print(\"FizzBuzz\")\n        3 -> print(\"Fizz\")\n        else -> print(\"{{n}}\")\n    }}\n}}\n",
+        "pick: fn(n: Int) {{\n    if n % <> == 0 {{\n        15 -> print(\"FizzBuzz\")\n        3 -> print(\"Fizz\")\n        else -> print(\"{{n}}\")\n    }}\n}}\n",
         "pick: fn(n: Int) {{\n    if {{\n        n % 15 == 0 -> print(\"FizzBuzz\")\n        n % 3 == 0 -> print(\"Fizz\")\n        else -> print(\"{{n}}\")\n    }}\n}}\n",
     )
 }
 
 #Test("a value hole table is the value guard table of filled headers") {
     hole_same_as(
-        "label: fn(n: Int) -> String {{\n    return if n % _ == 0 {{\n        15 -> \"FizzBuzz\"\n        5 -> \"Buzz\"\n        else -> \"{{n}}\"\n    }}\n}}\n",
+        "label: fn(n: Int) -> String {{\n    return if n % <> == 0 {{\n        15 -> \"FizzBuzz\"\n        5 -> \"Buzz\"\n        else -> \"{{n}}\"\n    }}\n}}\n",
         "label: fn(n: Int) -> String {{\n    return if {{\n        n % 15 == 0 -> \"FizzBuzz\"\n        n % 5 == 0 -> \"Buzz\"\n        else -> \"{{n}}\"\n    }}\n}}\n",
     )
 }
 
 #Test("guards after a candidate keep ordinary precedence") {
     hole_same_as(
-        "gate: fn(n: Int, ready: Bool, emergency: Bool) {{\n    if probe(_) == n {{\n        2 && ready || emergency -> print(\"open\")\n    }}\n}}\n",
+        "gate: fn(n: Int, ready: Bool, emergency: Bool) {{\n    if probe(<>) == n {{\n        2 && ready || emergency -> print(\"open\")\n    }}\n}}\n",
         "gate: fn(n: Int, ready: Bool, emergency: Bool) {{\n    if {{\n        (probe(2) == n && ready) || emergency -> print(\"open\")\n    }}\n}}\n",
     )
 }
 
 #Test("a candidate group tries each candidate in turn") {
     hole_same_as(
-        "pick: fn(n: Int) {{\n    if probe(_) == n {{\n        (2 | 3) -> print(\"two or three\")\n        else -> print(\"other\")\n    }}\n}}\n",
+        "pick: fn(n: Int) {{\n    if probe(<>) == n {{\n        (2 | 3) -> print(\"two or three\")\n        else -> print(\"other\")\n    }}\n}}\n",
         "pick: fn(n: Int) {{\n    if {{\n        probe(2) == n || probe(3) == n -> print(\"two or three\")\n        else -> print(\"other\")\n    }}\n}}\n",
     )
 }
 
 #Test("a parenthesized Bool candidate fills the hole whole") {
     hole_same_as(
-        "sign: fn(n: Int) -> String {{\n    return if both(_, n > 0) {{\n        (n % 2 == 0) -> \"even\"\n        else -> \"other\"\n    }}\n}}\n",
+        "sign: fn(n: Int) -> String {{\n    return if both(<>, n > 0) {{\n        (n % 2 == 0) -> \"even\"\n        else -> \"other\"\n    }}\n}}\n",
         "sign: fn(n: Int) -> String {{\n    return if {{\n        both(n % 2 == 0, n > 0) -> \"even\"\n        else -> \"other\"\n    }}\n}}\n",
+    )
+}
+
+#Test("parentheses make a Boolean candidate whole") {
+    hole_same_as(
+        "pick: fn(ready: Bool, backup: Bool) -> String {{\n    return if refuses(<>) {{\n        (ready && backup) -> \"both\"\n        ready && backup -> \"ready, then backup\"\n        else -> \"other\"\n    }}\n}}\n",
+        "pick: fn(ready: Bool, backup: Bool) -> String {{\n    return if {{\n        refuses(ready && backup) -> \"both\"\n        refuses(ready) && backup -> \"ready, then backup\"\n        else -> \"other\"\n    }}\n}}\n",
+    )
+}
+
+#Test("a candidate group may follow a Boolean operator") {
+    hole_same_as(
+        "pick: fn(n: Int, ready: Bool, emergency: Bool) -> String {{\n    return if n % <> == 0 {{\n        7 || (5 | 3) -> \"seven, five or three\"\n        2 && (11 | 13) -> \"even and eleven or thirteen\"\n        4 && (ready || emergency) -> \"four, open\"\n        else -> \"other\"\n    }}\n}}\n",
+        "pick: fn(n: Int, ready: Bool, emergency: Bool) -> String {{\n    return if {{\n        n % 7 == 0 || (n % 5 == 0 || n % 3 == 0) -> \"seven, five or three\"\n        n % 2 == 0 && (n % 11 == 0 || n % 13 == 0) -> \"even and eleven or thirteen\"\n        n % 4 == 0 && (ready || emergency) -> \"four, open\"\n        else -> \"other\"\n    }}\n}}\n",
     )
 }
 
 #Test("a case candidate fills the hole as a value") {
     hole_same_as(
-        "first: fn(limit: Int) -> String {{\n    return if wait(_) > limit {{\n        .Green -> \"green\"\n        else -> \"none\"\n    }}\n}}\n",
+        "first: fn(limit: Int) -> String {{\n    return if wait(<>) > limit {{\n        .Green -> \"green\"\n        else -> \"none\"\n    }}\n}}\n",
         "first: fn(limit: Int) -> String {{\n    return if {{\n        wait(.Green) > limit -> \"green\"\n        else -> \"none\"\n    }}\n}}\n",
     )
 }
 
-#Test("subject == _ is the comparison table over the subject") {
-    hole_same_as(
-        "area: fn(shape: Shape) -> Int {{\n    return if shape == _ {{\n        .Circle(r) -> 3 * r * r\n        .Square(side) -> side * side\n    }}\n}}\n",
-        "area: fn(shape: Shape) -> Int {{\n    return if shape == {{\n        .Circle(r) -> 3 * r * r\n        .Square(side) -> side * side\n    }}\n}}\n",
-    )
-    hole_same_as(
-        "grade: fn(score: Int) {{\n    if _ == score {{\n        100 -> print(\"perfect\")\n        else -> print(\"score\")\n    }}\n}}\n",
-        "grade: fn(score: Int) {{\n    if score == {{\n        100 -> print(\"perfect\")\n        else -> print(\"score\")\n    }}\n}}\n",
-    )
-}
-
 #Test("the formatter keeps a hole table as written") {
-    source: "pick: fn(n: Int) -> String {{\n    if trace(_) == n {{\n        1 -> print(\"one\")\n        (2 | 3) -> print(\"two or three\")\n    }}\n    return if n % _ == 0 {{\n        15 -> \"FizzBuzz\"\n        else -> \"{{n}}\"\n    }}\n}}\n"
+    source: "pick: fn(n: Int) -> String {{\n    if trace(<>) == n {{\n        1 -> print(\"one\")\n        (2 | 3) -> print(\"two or three\")\n    }}\n    return if n % <> == 0 {{\n        15 -> \"FizzBuzz\"\n        else -> \"{{n}}\"\n    }}\n}}\n"
     formatted: jet_format_source(source, false)
     assert(formatted.ok)
     assert_eq(formatted.text, source)

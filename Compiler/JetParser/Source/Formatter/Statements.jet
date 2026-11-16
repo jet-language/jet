@@ -37,7 +37,6 @@ use {
         TOKEN_EQ_EQ,
         TOKEN_GE,
         TOKEN_GT,
-        TOKEN_IDENT,
         TOKEN_KW_ELSE,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -45,6 +44,7 @@ use {
         TOKEN_LINE_COMMENT,
         TOKEN_LPAREN,
         TOKEN_LT,
+        TOKEN_LT_GT,
         TOKEN_NOT_EQ,
         TOKEN_RAW_STRING,
         TOKEN_RBRACKET,
@@ -1391,17 +1391,17 @@ jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [
     jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, false)
 }
 
-// A hole table (`if n % _ == 0 { 15 -> … }`) keeps its source as written,
+// A hole table (`if n % <> == 0 { 15 -> … }`) keeps its source as written,
 // since its arms hold the header filled with each candidate. The end of the
 // table's closing `}` for the `if` at `start`; -1 when the header has no
-// hole. A `_` in a case's payload (`r == .Val(_)`) is a wildcard, not a hole.
+// hole.
 jfmt_hole_table_end: fn(f: JetFmt, start: Int) -> Int Never! {
     index := jfmt_first_token_at(f, start) + 1
-    case_groups := [Bool]{}
+    groups := 0
     hole := false
     loop index < f.source_toks.len() {
         token: f.source_toks[index]
-        if case_groups.len() == 0 {
+        if groups == 0 {
             if token.kind == TOKEN_LBRACE {
                 if !hole || index >= f.brace_closes.len() || f.brace_closes[index] < 0 -> return -1
                 return f.source_toks[f.brace_closes[index]].span.end
@@ -1410,16 +1410,9 @@ jfmt_hole_table_end: fn(f: JetFmt, start: Int) -> Int Never! {
                 return -1
             }
         }
-        if token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET {
-            opener: f.source_toks[index - 1]
-            case_groups.push(opener.kind == TOKEN_IDENT && parser_pascal_name(jfmt_src_text(f, opener.span.start, opener.span.end)))
-        }
-        if (token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && case_groups.len() > 0 {
-            _ := case_groups.pop()
-        }
-        if token.kind == TOKEN_IDENT && jfmt_src_text(f, token.span.start, token.span.end) == "_" {
-            if case_groups.len() == 0 || !case_groups[case_groups.len() - 1] -> hole = true
-        }
+        if token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET -> groups += 1
+        if (token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && groups > 0 -> groups -= 1
+        if token.kind == TOKEN_LT_GT -> hole = true
         index += 1
     }
     -1

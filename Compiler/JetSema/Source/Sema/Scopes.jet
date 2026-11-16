@@ -234,6 +234,9 @@ SemaCallSiteDetail: struct {
     // this call to a local, a parameter or nothing, so a `jet fix` rename
     // wouldn't call the replacement.
     replacement_hidden: Bool{false}
+    // The call is in a hole table's header, which runs once per arm tried:
+    // the effect phase reports it when the callee has an effect (E0442).
+    hole_header: Bool{false}
     shared_lifetime: SharedLifetime?{None}
     shared_member: String{""}
     shared_source: String{""}
@@ -256,7 +259,7 @@ sema_call_site_detail_of: fn(detail: SemaCallSiteDetail) -> SemaCallSiteDetail? 
     if detail.foreign_effect_root != None || detail.foreign_opaque || detail.unsafe_foreign_name != None || detail.audited_operation || detail.foreign_capability != None || detail.lifecycle != None {
         return Val(detail)
     }
-    if detail.replacement_hidden || detail.shared_lifetime != None || detail.shared_member != "" || detail.shared_source != "" || detail.intrinsic_api != None || detail.runtime_export != None || detail.operator != None {
+    if detail.replacement_hidden || detail.shared_lifetime != None || detail.shared_member != "" || detail.shared_source != "" || detail.intrinsic_api != None || detail.runtime_export != None || detail.operator != None || detail.hole_header {
         return Val(detail)
     }
     None
@@ -1066,6 +1069,10 @@ SemaScopeTable: struct {
     // The innermost `#Context` block: 0 outside one, 1 inside one without an
     // `allocator:` field, 2 when an enclosing block names an allocator.
     context_allocation: Int{0}
+    // The written header of the hole table being checked: the parser
+    // checks it once per arm, so a call there that has an effect runs once
+    // per arm (E0442).
+    hole_header: Span?{None}
     // Derived from the immutable graph installed by seed_unit_policy.
     // Function rollback leaves this memo intact; snapshots may rebuild it.
     // A new graph/module setup reseeds it, including each staging version.

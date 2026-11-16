@@ -1,0 +1,72 @@
+// A hole table's header runs once for each arm it tries, in arm order, with
+// that arm's candidate where `<>` stands, and never for an arm after the
+// first match. A header can't call a function with an effect (E0442), so the
+// tries show through traced candidates: a candidate runs where the hole
+// stands, at most once for its arm's try, and not at all when the header
+// stops before the hole.
+traced: fn(n: Int) -> Int {
+    print("  candidate {n}")
+    n
+}
+
+first_divisor: fn(n: Int) -> String {
+    return if n % <> == 0 {
+        traced(2) -> "two"
+        traced(3) -> "three"
+        traced(5) -> "five"
+        else -> "none"
+    }
+}
+
+// The reference form: the header written out once per arm.
+first_divisor_by_hand: fn(n: Int) -> String {
+    return if {
+        n % traced(2) == 0 -> "two"
+        n % traced(3) == 0 -> "three"
+        n % traced(5) == 0 -> "five"
+        else -> "none"
+    }
+}
+
+// `&&` in the header stops before the hole when its left side is false, so
+// no candidate runs at all.
+gated: fn(open: Bool, n: Int) -> String {
+    return if open && n % <> == 0 {
+        traced(2) -> "two"
+        traced(3) -> "three"
+        else -> "closed or none"
+    }
+}
+
+// A failure raised while the header runs leaves the table, as any call's
+// failure would: it is not a miss that moves on to the next arm or `else`.
+#Error
+ReadError: enum {
+    Empty
+}
+
+width: fn(text: String) -> Int ReadError! {
+    if text == "" -> return Err(ReadError.Empty)
+    text.count_bytes()
+}
+
+parity: fn(text: String) -> String ReadError! {
+    if width(text) % <> == 0 {
+        traced(2) -> "even"
+        else -> "odd"
+    }
+}
+
+run: fn() {
+    loop n in [4, 9, 25, 7] {
+        print(first_divisor(n))
+        print(first_divisor_by_hand(n))
+    }
+    print(gated(false, 4))
+    print(gated(true, 9))
+    print(parity("abcd") ?? "failed")
+    if parity("") == {
+        .Ok(word) -> { print(word) }
+        .Err(_) -> print("the header's failure reached the caller")
+    }
+}

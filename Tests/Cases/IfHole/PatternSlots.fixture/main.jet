@@ -1,0 +1,43 @@
+// A plain `subject == {` table matches each arm against its subject, so it
+// keeps range arms, payload wildcards and bindings, and a table over an enum
+// that lists every case needs no `else`.
+Shape: enum {
+    Circle(Int)
+    Rect(w: Int, h: Int)
+    Dot
+}
+
+describe: fn(shape: Shape) -> String {
+    return if shape == {
+        .Circle(r) -> "circle {r}"
+        .Rect(w, _) -> "rect {w} wide"
+        .Dot -> "dot"
+    }
+}
+
+size: fn(n: Int) -> String {
+    return if n == {
+        0 -> "zero"
+        1..9 -> "small"
+        10..99 -> "medium"
+        else -> "large"
+    }
+}
+
+// A plain table over a call reads its subject once.
+next_shape: fn() -> Shape {
+    print("  read")
+    Shape.Dot
+}
+
+run: fn() {
+    print(describe(Shape.Circle(3)))
+    print(describe(Shape.Rect{w: 4, h: 2}))
+    print(describe(Shape.Dot))
+    loop n in [0, 7, 42, 500] { print(size(n)) }
+    if next_shape() == {
+        .Circle(_) -> print("circle")
+        .Rect(_, _) -> print("rect")
+        .Dot -> print("dot")
+    }
+}

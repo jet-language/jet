@@ -1612,38 +1612,35 @@ DispatchHoleCount: struct {
     impl Diagnostic {
         code: "E0946"
         safety_class: .Soundness
-        safety_reason: "Each candidate fills one hole, so a second `_` in the header would have no value."
+        safety_reason: "Each candidate fills one hole, so a second `<>` in the header would have no value."
         expert_path: "none: a hole table header holds one hole"
         stage: [.Parse]
-        meaning: "A hole table header with more than one `_`"
+        meaning: "A hole table header with more than one `<>`"
         detail: true
 
-        what: fn(self) -> String { "An `if` table header holds one `_` hole, and this one has 2" }
+        what: fn(self) -> String { "An `if` table header holds one `<>` hole, and this one has 2" }
 
         why: fn(self) -> String {
-            "Each arm's candidate takes the place of the one `_`, so a second `_` would stand for nothing."
+            "Each arm's candidate takes the place of the one `<>`, so a second `<>` would stand for nothing."
         }
 
-        fix: fn(self) -> String { "Keep one `_` and write the other value out in the header." }
+        fix: fn(self) -> String { "Keep one `<>` and write the other value out in the header." }
     }
 }
 
-DispatchHoleOutsideTable: struct {
+RetiredDispatchHoleOutsideTable: struct {
     impl Diagnostic {
         code: "E0947"
-        safety_class: .Soundness
-        safety_reason: "`_` has a value only as an arm's candidate, so anywhere else it would read a value that does not exist."
-        expert_path: "none: `_` is a value only in a hole table header"
-        meaning: "A `_` read as a value outside the header of an `if` table"
-        detail: true
+        status: .Retired
+        no_fix: None
 
-        what: fn(self) -> String { "`_` stands for an arm's candidate only in the header of an `if` table" }
+        what: fn(self) -> String { "*Retired* (was: `_` read as a value outside an `if` table header)" }
 
         why: fn(self) -> String {
-            "In `if header {{ candidate -> body }}` each candidate takes the place of the header's `_`; nowhere else does `_` have a value."
+            "Jet no longer reports this code; its row stays so an older reference to it still explains"
         }
 
-        fix: fn(self) -> String { "Write the value here, or move the test into an `if` header followed by `{{` and its arms." }
+        fix: fn(self) -> String { "Follow the guidance for E0947" }
     }
 }
 
@@ -1651,19 +1648,19 @@ DispatchHoleCandidatePattern: struct {
     impl Diagnostic {
         code: "E0948"
         safety_class: .Soundness
-        safety_reason: "A pattern or range is not a value, so it can't fill the hole of a header that uses its candidate as a value."
-        expert_path: "none: patterns and ranges match against the subject of `subject == _`"
+        safety_reason: "A pattern or range is not a value, so it can't fill the `<>` of a hole table."
+        expert_path: "none: patterns and ranges match against the subject of a plain `if subject == {{` table"
         stage: [.Parse]
-        meaning: "A pattern or range arm in a hole table whose header is not `subject == _`"
+        meaning: "A pattern or range arm in a hole table"
         detail: true
 
-        what: fn(self) -> String { "A pattern or range arm needs a `subject == _` header" }
+        what: fn(self) -> String { "A pattern or range arm needs a plain `if subject == {{` table" }
 
         why: fn(self) -> String {
-            "Only `subject == _` matches each arm against the subject; any other header puts the candidate in the hole as a value, and a pattern or range is not a value."
+            "A hole table puts each arm's candidate in its `<>` as a value, and a pattern or range is not a value; only a plain table matches each arm against its subject."
         }
 
-        fix: fn(self) -> String { "Write the header as `subject == _`, or write this arm's candidate as a value." }
+        fix: fn(self) -> String { "Write the table as `if subject == {{`, or write this arm's candidate as a value." }
     }
 }
 
@@ -23674,18 +23671,18 @@ PipeValueOutsideStep: struct {
     impl Diagnostic {
         code: "E0437"
         safety_class: .Soundness
-        safety_reason: "Outside a pipe step there is no value for `<>` to name."
-        expert_path: "none: `<>` belongs inside a `|>` step"
-        stage: [.Parse]
-        meaning: "`<>` is written outside a pipe step"
+        safety_reason: "Outside a pipe step or an `if` table header there is no value for `<>` to name."
+        expert_path: "none: `<>` belongs inside a `|>` step or an `if` table header"
+        stage: [.Sema]
+        meaning: "`<>` is written outside a pipe step or an `if` table header"
         detail: true
         no_fix: .Behavior
         fix_next: "Move `<>` into a `|>` step, or write the value itself."
 
-        what: fn(self) -> String { "`<>` is outside a pipe step" }
+        what: fn(self) -> String { "`<>` is outside a pipe step or an `if` table header" }
 
         why: fn(self) -> String {
-            "`<>` is the value a `|> step` receives from the line above; outside a step there is no such value"
+            "`<>` is the value a `|> step` receives from the line above, or the place each arm's candidate takes in an `if` table header; here it is neither"
         }
 
         fix: fn(self) -> String {
@@ -23763,6 +23760,101 @@ EmptyTypeArgumentList: struct {
 
         fix: fn(self) -> String {
             "Write the type arguments, such as `{self.name}<Int>`, or drop the `<>`"
+        }
+    }
+}
+
+HoleHeaderOnlyCompares: struct {
+    plain: String
+
+    impl Diagnostic {
+        code: "E0441"
+        safety_class: .Opinion
+        safety_reason: "The header compares each candidate with one subject, so it runs as the plain table would, and Jet keeps one spelling: the plain table, which also keeps pattern and range arms."
+        stage: [.Parse]
+        meaning: "An `if` table header that only compares with its `<>`"
+        detail: true
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+
+        what: fn(self) -> String { "This header only compares with `<>`, so it is the plain table `if {self.plain} {{`" }
+
+        why: fn(self) -> String {
+            "A plain `subject OP {{` table compares each arm with its subject itself, and it keeps pattern and range arms and their coverage"
+        }
+
+        fix: fn(self) -> String { "Write `if {self.plain} {{` without the `<>`" }
+    }
+}
+
+HoleHeaderEffect: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E0442"
+        safety_class: .Opinion
+        safety_reason: "The header runs once for each arm tried, so the program is defined, and Jet refuses an effect there because it would repeat once per arm without the code saying so."
+        stage: [.Sema]
+        meaning: "An `if` table header with `<>` calls a function that has an effect"
+        detail: true
+        no_fix: .Behavior
+        fix_next: "Name the value on the line above the table, then read the name in the header."
+
+        what: fn(self) -> String { "This `if` table header calls `{self.name}`, which has an effect" }
+
+        why: fn(self) -> String {
+            "A hole table runs its header once for each arm it tries, so the effect of `{self.name}` would run again for every arm"
+        }
+
+        fix: fn(self) -> String {
+            "Name the value first: `value: {self.name}(…)` on the line above, then read `value` in the header"
+        }
+    }
+}
+
+UnderscoreHole: struct {
+    impl Diagnostic {
+        code: "E0443"
+        safety_class: .Opinion
+        safety_reason: "The old `_` hole has one reading, and Jet keeps one spelling so that `_` always means a value thrown away."
+        stage: [.Parse]
+        meaning: "An `if` table hole written `_` instead of `<>`"
+        detail: true
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+
+        what: fn(self) -> String { "An `if` table's hole is written `<>`, not `_`" }
+
+        why: fn(self) -> String {
+            "`_` is a value thrown away, so it can't stand for the candidate each arm puts in the header"
+        }
+
+        fix: fn(self) -> String { "Write `<>` in place of `_`" }
+    }
+}
+
+HoleHeaderInPipeStep: struct {
+    impl Diagnostic {
+        code: "E0444"
+        safety_class: .Soundness
+        safety_reason: "Inside a pipe step `<>` is the step's value, so the table header has no hole for its arms to fill."
+        expert_path: "none: a hole table starts outside a pipe step"
+        stage: [.Parse]
+        meaning: "An `if` table with arms inside a `|>` step, where `<>` is the step's value"
+        detail: true
+        no_fix: .Behavior
+        fix_next: "End the pipe in a named value, then start the table with that name."
+
+        what: fn(self) -> String { "A table in a pipe step has no hole: `<>` here is the step's value" }
+
+        why: fn(self) -> String {
+            "Inside a `|>` step `<>` always names the value the step receives, so a table header there has no place for each arm's value"
+        }
+
+        fix: fn(self) -> String {
+            "End the pipe one line earlier in a named value and start the table with that name, as `n: raw |> Int.parse(<>) ?? 0` and then `if n % <> == 0 {{`"
         }
     }
 }

@@ -2,7 +2,7 @@
 // answer: each arm fills the header with its own candidate, and the header
 // runs again for each candidate tried.
 label: fn(n: Int) -> String {
-    if n % _ == 0 {
+    if n % <> == 0 {
         15 -> "FizzBuzz"
         3 -> "Fizz"
         5 -> "Buzz"
@@ -11,7 +11,7 @@ label: fn(n: Int) -> String {
 }
 
 label_bound: fn(n: Int) -> String {
-    word: if n % _ == 0 {
+    word: if n % <> == 0 {
         15 -> "FizzBuzz"
         3 -> "Fizz"
         5 -> "Buzz"
@@ -22,7 +22,7 @@ label_bound: fn(n: Int) -> String {
 
 label_statements: fn(n: Int) -> String {
     word := "{n}"
-    if n % _ == 0 {
+    if n % <> == 0 {
         15 -> word = "FizzBuzz"
         3 -> word = "Fizz"
         5 -> word = "Buzz"
@@ -37,25 +37,30 @@ Light: enum {
 }
 
 wait_secs: fn(light: Light) -> Int {
-    seconds: if light == {
+    if light == {
         .Red -> 30
         .Amber -> 5
         .Green -> 0
     }
-    print("  wait {seconds}")
-    seconds
+}
+
+// A candidate runs where the hole stands, once for each arm tried, so a
+// traced candidate shows the tries in arm order and none after the match.
+shown: fn(light: Light, name: String) -> Light {
+    print("  try {name}")
+    light
 }
 
 first_longer: fn(limit: Int) -> String {
-    if wait_secs(_) > limit {
-        .Green -> "green"
-        .Amber -> "amber"
-        .Red -> "red"
+    if wait_secs(<>) > limit {
+        shown(.Green, "green") -> "green"
+        shown(.Amber, "amber") -> "amber"
+        shown(.Red, "red") -> "red"
         else -> "none"
     }
 }
 
-// A plain table over a call still reads its subject once.
+// A plain table over a call reads its subject once.
 next_light: fn() -> Light {
     print("  read")
     Light.Amber

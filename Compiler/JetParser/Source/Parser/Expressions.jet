@@ -332,7 +332,9 @@ parser_pipe_step_writes: fn(state: JetParserState, start: Int, name: String) -> 
     false
 }
 
-// `<>`: the value the innermost open pipe step receives.
+// `<>`: the value the innermost open pipe step receives. Outside a step it
+// stays a `<>` name: an `if` table header reads it as its hole, and sema
+// refuses one anywhere else (E0437).
 parser_parse_pipe_value: fn(state: &JetParserState, token: Token) -> ParsedExpr {
     parser_bump(state)
     next: parser_current(state)
@@ -343,8 +345,7 @@ parser_parse_pipe_value: fn(state: &JetParserState, token: Token) -> ParsedExpr 
     }
     count: state.pipe_step_names.len()
     if count == 0 {
-        parser_add_error_code(state, "E0437", token.span, "`<>` is outside a pipe step", "`<>` is the value a `|> step` receives from the line above; outside a step there is no such value", "Move it into a step such as `value |> f(<>)`, or write the value itself")
-        return ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(state)}, span: token.span}
+        return ParsedExpr{expr: Expr.Ident{name: "<>", span: token.span, id: parser_node_id(state)}, span: token.span}
     }
     state.pipe_step_reads[count - 1] = state.pipe_step_reads[count - 1] + 1
     ParsedExpr{expr: Expr.Ident{name: state.pipe_step_names[count - 1], span: token.span, id: parser_node_id(state)}, span: token.span}

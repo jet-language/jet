@@ -84,7 +84,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `?` | optional type mark after its type (`T?`) |
 | `??` | fallback |
 | `\|>` | pipe step: the expression after it runs on the value from the line above, which it reads as `<>`; each step is a hidden one-step binding |
-| `<>` | the value of the nearest enclosing `\|>` step; legal only inside a step, which must read it at least once |
+| `<>` | the value of the nearest enclosing `\|>` step, legal only inside a step, which must read it at least once; in an `if` table header, the hole each arm's candidate fills |
 | `x.move()` | an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `&&T` or `&&self` |
 | `&&T / &&self` | take mark in a signature, and `task &&name` for a task capture; `&T` / `&self` is the write mark; calls stay unmarked |
 | `fn(&T) / fn(&&T)` | a function type marks a written input `&` and a taken one `&&`, as a declaration does (`action: fn(&Mobj)`); a function or lambda fits it only when its marks match (E0227), and a stored one is called plainly (`st.action(m)`) |
@@ -100,7 +100,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `[first, ..rest]` | list pattern with a read-only zero-copy rest window; exact without the rest marker |
 | `[key: pattern, key?: optional, ..]` | map pattern; required and optional keys, exact unless it ends with rest |
 | `if T == { Int -> … else -> … }` | type table: a generic function branches on its type parameter; each arm reads `T` as its type, `else` is required, each instance keeps one arm; `if T == Int { … }` is the one-arm test; `.Int -> …` names a union member without binding it |
-| `if n % _ == 0 { 3 -> … else -> … }` | hole table: the one `_` in an `if` header is filled by each arm's candidate in turn; the header runs once per candidate tried, `(a \| b)` tries a group, and `subject == _` keeps pattern and range arms |
+| `if n % <> == 0 { 3 -> … else -> … }` | hole table: the one `<>` in an `if` header is filled by each arm's candidate in turn; the header runs once per arm tried and calls nothing with an effect, `(a \| b)` tries a group, a table used as a value ends in `else`, and pattern and range arms belong in a plain `if subject == {` table |
 | `T: trait { name: Type } / name: Type{default} / impl X.T { name: value } / T.name` | trait constant: a compile-time literal, enum case or list each implementation supplies (or takes the default), read from the type |
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes |
 | `;` | retired explicit statement terminator |
@@ -834,7 +834,8 @@ which the step writes as `<>`:
 `|>` is one token, left-associative and the loosest form; a step runs to the
 next `|>`, so a step's own `?? return` leaves the function. `<>` is one
 longest-match lexer token beside `<:` and `:>` (`<`, `<=`, `<=>`, `<<` and `>>`
-never form it) and a primary expression legal only inside a step (E0437). Every
+never form it) and a primary expression legal only inside a step or an `if`
+table header (E0437; D-IFHOLE2=A). Every
 step reads `<>` at least once (E0438) and may read it more often; the value is
 computed once. E0438's fix writes `<>` where it fits (D-PIPE-FIRST1=A, ratified
 2026-11-10): a bare function name becomes `name(<>)`, a call one argument
@@ -1058,17 +1059,31 @@ D-ARMHEAD-PAREN1=A. Pattern heads remain `==`-only. Statement and expression
 position share one table spelling; expression tables unify arm values or yield
 `()`.
 
-**D-IFHOLE1=A — header holes** *(ratified 2026-09-11, card #3067)*: an `if`
-header that holds one statically typed `_` hole, followed by `{`, is a hole
-table: `if n % _ == 0 { 15 -> "FizzBuzz" else -> "{n}" }`. Each non-else arm
-head is a candidate that fills the hole. The header is evaluated per attempted
-candidate, a candidate runs at most once, and skipped candidates have no
-effect. Guards keep ordinary `&&`/`||` after a candidate, `(a | b)` groups
-alternatives, and a Bool candidate is parenthesized. `subject == _` keeps
-pattern, range and binding arms and exhaustiveness. A second hole is E0946,
-`_` outside a hole table header is E0947, and a pattern or range arm under any
-other header is E0948. Holeless `if subject == {` tables stay until the
-owner settles the conflicting distributed-header removal against D-IF3.
+**D-IFHOLE1=A — header holes** *(ratified 2026-09-11, card #3067; amended by
+D-IFHOLE2=A)*: an `if` header that holds one statically typed hole, followed
+by `{`, is a hole table: `if n % <> == 0 { 15 -> "FizzBuzz" else -> "{n}" }`.
+Each non-else arm head is a candidate that fills the hole. The header is
+evaluated per attempted candidate, a candidate runs at most once, and skipped
+candidates have no effect. Guards keep ordinary `&&`/`||` after a candidate,
+`(a | b)` groups alternatives, and a Bool candidate is parenthesized. A second
+hole is E0946.
+
+**D-IFHOLE2=A — the `<>` hole beside plain tables** *(ratified 2026-11-15,
+card #3067)*: amends D-IFHOLE1. Not every table holds a hole: D-IF3, D-IFDIST1
+and S68 keep the plain `if subject == {` table, which reads its subject once
+and keeps pattern, range and binding arms and exhaustiveness. The hole is
+spelled `<>`, as in a pipe step; `<>` outside a step or a table header is
+E0437, which E0947 retires into, and a `_` where the hole goes is E0443, whose
+fix writes `<>`. A header whose whole test, ignoring parentheses, is
+`subject OP <>` or `<> OP subject` is E0441, whose fix deletes the `<>` (and
+flips the operator when `<>` stood on the left). A pattern or range arm in a
+hole table is E0948, whose fix is `if subject == {`. A call with an effect in
+a hole header is E0442, whose fix names the value on the line above; a pure
+call stays. A hole table used as a value requires `else` (E0003), since its
+arms are tests, not cases of one type; one used as a statement may leave
+`else` out. Inside a pipe step `<>` is always the step's value, so a table
+header there that needs a hole is E0444, whose fix ends the pipe one line
+early in a named value.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
 #680; amended by D-ARROW-CONTROL1, D-ARROW-UNIFY1, and D-ONELINE-BODY1=B)*: `if cond -> statement` is the one-line

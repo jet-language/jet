@@ -1,0 +1,31 @@
+# A plain `subject == {` table keeps range arms, payload wildcards and
+# bindings, and one over an enum that lists every case needs no `else`, on
+# O0, O1 and O2; it reads its subject once. A hole table refuses a range arm
+# (E0948, whose fix is the plain table), and a hole table used as a value
+# needs a final `else` (E0003).
+fixture: PatternSlots.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "circle 3\nrect 4 wide\ndot\nzero\nsmall\nmedium\nlarge\n  read\ndot\n"
+stderr: empty
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "circle 3\nrect 4 wide\ndot\nzero\nsmall\nmedium\nlarge\n  read\ndot\n"
+stderr: empty
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "circle 3\nrect 4 wide\ndot\nzero\nsmall\nmedium\nlarge\n  read\ndot\n"
+stderr: empty
+step range_arm: jet check range_arm.jet
+exit: 1
+stderr: ~ "A pattern or range arm needs a plain `if subject == {` table" # the E0948 headline
+stderr: ~ "Fix: Write the table as `if subject == {`" # its fix names the plain table
+stderr: ~ "E0948" # the hole-table pattern code
+stderr: !~ "subject == _" # no fix names the old hole
+step no_else: jet check no_else.jet
+exit: 1
+stderr: ~ "A hole table used as a value needs a final `else` arm" # the value form's headline
+stderr: ~ "E0003" # the parse code
