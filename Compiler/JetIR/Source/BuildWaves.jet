@@ -8,7 +8,7 @@
 // content and numbers every row by first use in a walk from the jobs taken in
 // key order, so the module is the same whichever thread built a job and in
 // whatever order the jobs were built.
-use jet_foundation.[CompilerThreads, FnBody, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, symbol_table]
+use jet_foundation.[CompilerThreads, CompilerTraceSink, FnBody, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, symbol_table]
 
 // Building one checked function's body costs about this on one thread, so the
 // build admits threads by x64 selection admission (ir_x64_admit) with each
@@ -109,20 +109,24 @@ IRBuildClaim: struct {
 // they reach on up to `threads` threads; with `entry`, roots[0] is the
 // program entry (ir_entry_function), built after the first drain.
 ir_build_waves: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, threads: CompilerThreads) -> IRBuildResult Never! {
-    kept := ir_build_waves_kept(program, roots, entry, threads)
+    kept := ir_build_waves_kept(program, roots, entry, threads, None)
     kept.result.move()
 }
 
 // ir_build_waves, handing the checked program back with the build.
-ir_build_waves_kept: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, threads: CompilerThreads) -> IRBuildKept Never! {
+ir_build_waves_kept: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> IRBuildKept Never! {
     count: ir_x64_admit(threads, program.functions.len(), program.functions.len(), IR_BUILD_NS_PER_FUNCTION)
-    ir_build_waves_parted(program, roots, entry, count)
+    ir_build_waves_parted(program, roots, entry, count, trace_sink)
 }
 
 // ir_build_waves_kept on `count` parts. A part that fails ends the build,
 // which panics naming the function the part was building; one part runs on
-// the calling thread, where the failing job's own panic ends it.
-ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, count: Int) -> IRBuildKept Never! {
+// the calling thread, where the failing job's own panic ends it. With
+// `trace_sink` each step is a span: `ir.build.parts` (the jobs on every
+// part), `ir.build.entry` (the entry and what it reaches), `ir.build.glues`,
+// `ir.build.order` (the jobs ranked and the parts gathered), ir_merge's
+// steps and `ir.build.recursion`.
+ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, count: Int, trace_sink: CompilerTraceSink?) -> IRBuildKept Never! {
     p := program.move()
     slots := [Shared<IRWaveWorker>]{}
     own := [[Int]]{}
@@ -142,11 +146,14 @@ ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Boo
     ir_build_queue_add(queue, roots)
     rooted: ir_build_queue_count(queue)
     inputs: Shared{IRWaveInputs{programs: [IRProgram]{p.move()}}}
+    if trace_sink == .Val(sink) -> sink.begin("ir.build.parts", "", -1, count)
     ended := ir_build_parts(inputs, slots, queue, bell, 0) ?? panic("the IR build threads failed")
     if ended.stop != "" -> panic(ir_build_stop_text(ir_build_queue_jobs(queue), ended))
+    if trace_sink == .Val(sink) -> sink.end("ir.build.parts", ended.built)
     entry_root := IRMergeRoot{part: -1, local: -1}
     entry_failures := [IRBuildFailure]{}
     if entry {
+        if trace_sink == .Val(sink) -> sink.begin("ir.build.entry", "", -1, -1)
         part := 0
         local := -1
         loop part < slots.len() {
@@ -162,8 +169,12 @@ ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Boo
         ir_build_queue_add(queue, reached)
         ended = ir_build_parts(inputs, slots, queue, bell, 0) ?? panic("the IR build threads failed")
         if ended.stop != "" -> panic(ir_build_stop_text(ir_build_queue_jobs(queue), ended))
+        if trace_sink == .Val(sink) -> sink.end("ir.build.entry", ended.built)
     }
-    _ := ir_waves_glues(inputs, slots, 0) ?? panic("the IR build threads failed")
+    if trace_sink == .Val(sink) -> sink.begin("ir.build.glues", "", -1, -1)
+    glues: ir_waves_glues(inputs, slots, 0) ?? panic("the IR build threads failed")
+    if trace_sink == .Val(sink) -> sink.end("ir.build.glues", glues)
+    if trace_sink == .Val(sink) -> sink.begin("ir.build.order", "", -1, -1)
     jobs := ir_build_queue_jobs(queue)
     failed := [[IRBuildFailure]]{}
     loop _ in 0..<jobs.len() -> failed.push([IRBuildFailure]{})
@@ -204,8 +215,11 @@ ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Boo
         parts.extend(ir_waves_take_modules(slot))
         preps.extend(ir_waves_take_preps(slot))
     }
-    merged := ir_merge(parts, preps, roots_merged, entry_index)
+    if trace_sink == .Val(sink) -> sink.end("ir.build.order", jobs.len())
+    merged := ir_merge(parts, preps, roots_merged, entry_index, trace_sink)
+    if trace_sink == .Val(sink) -> sink.begin("ir.build.recursion", "", -1, -1)
     ir_recursion_checks(merged)
+    if trace_sink == .Val(sink) -> sink.end("ir.build.recursion", merged.functions.len())
     IRBuildKept{result: IRBuildResult{program: merged.move(), failures: failures}, program: ir_waves_take_program(inputs)}
 }
 
@@ -452,7 +466,7 @@ ir_wave_glues: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>) -> I
 ir_build_stop_test_run: fn(count: Int) -> String Never! {
     p := ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
     roots := [IRWaveJob]{IRWaveJob{key: "test:stop.jet::gone", row: 0, args: [Type]{Type.Int}, lambda: -1, part: -1, local: -1}}
-    kept := ir_build_waves_parted(p.move(), roots.move(), false, count)
+    kept := ir_build_waves_parted(p.move(), roots.move(), false, count, None)
     "the build ended with {kept.result.failures.len()} failures"
 }
 

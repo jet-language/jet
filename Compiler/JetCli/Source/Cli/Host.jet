@@ -609,7 +609,7 @@ jet_cli_eval_result: fn(file: String, source: String, color: Bool, json: Bool, r
     loop function in checked.functions {
         if function.key == entry_key -> span = function.source_span
     }
-    built := ir_build_program(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), entry_key, ir_checks_stock(), result.compiler_threads)
+    built := ir_build_program(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), entry_key, ir_checks_stock(), result.compiler_threads, None)
     if built.failures.len() > 0 {
         census := [JetDriverIceRow]{}
         loop failure in built.failures {
@@ -1586,7 +1586,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
         }
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    built := if harness == .Val(plan) -> ir_build_tests(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), plan, checks) else -> ir_build_program(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", checks, result.compiler_threads)
+    built := if harness == .Val(plan) -> ir_build_tests(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), plan, checks) else -> ir_build_program(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", checks, result.compiler_threads, trace_sink)
     function_count: built.program.functions.len()
     if trace_sink == .Val(sink) -> sink.end("ir.build", function_count)
     loop failure in built.failures {

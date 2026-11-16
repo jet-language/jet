@@ -2,7 +2,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 use {
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -1543,8 +1543,12 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // foreign functions; `checks` the runtime checks the program's functions
 // keep (ir_bounds_mode). Under `dead_code: keep` (checks.keep) every
 // non-generic function of checks.modules is a root too, so the image carries
-// the package's unreached functions.
-ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
+// the package's unreached functions. With `trace_sink` the build's steps are
+// spans inside the host's `ir.build`: `ir.build.program` (the checked
+// program's tables), the steps of ir_build_waves_parted, and
+// `ir.build.core_cells`.
+ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> IRBuildResult Never! {
+    if trace_sink == .Val(sink) -> sink.begin("ir.build.program", "", -1, -1)
     p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.checks = checks
     p.sentries = ir_checks_sentries(checks)
@@ -1552,6 +1556,7 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     if !ir_core_image_fits(p) -> p.checks.core = None
     ir_foreign_index(p, foreign, decls)
     row: ir_function_row(p, entry_key) ?? {
+        if trace_sink == .Val(sink) -> sink.end("ir.build.program", -1)
         failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
         return IRBuildResult{program: ir_module_for(p), failures: failures}
     }
@@ -1569,13 +1574,16 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
             kept_keys.push(function.key.copy())
         }
     }
-    waves: ir_build_waves_kept(p, roots, true, threads)
+    if trace_sink == .Val(sink) -> sink.end("ir.build.program", p.functions.len())
+    waves: ir_build_waves_kept(p, roots, true, threads, trace_sink)
     built := waves.result.move()
     loop key in kept_keys {
         at: name_rows_get_text(built.program.function_rows, key) ?? next
         built.program.kept.push(at)
     }
+    if trace_sink == .Val(sink) -> sink.begin("ir.build.core_cells", "", -1, -1)
     if waves.program.checks.core == .Val(image) -> ir_core_cells_bind(built.program, image)
+    if trace_sink == .Val(sink) -> sink.end("ir.build.core_cells", -1)
     built
 }
 
@@ -1598,7 +1606,7 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
         empty := ir_module_for(p)
         return IRBuildKept{result: IRBuildResult{program: empty.move(), failures: failures}, program: p.move()}
     }
-    ir_build_waves_kept(p, roots, false, threads)
+    ir_build_waves_kept(p, roots, false, threads, None)
 }
 
 // The function the executable starts: `entry` itself when it takes nothing,
