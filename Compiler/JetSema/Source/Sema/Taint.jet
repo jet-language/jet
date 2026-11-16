@@ -9,7 +9,6 @@ use jet_foundation.[
     BinOp,
     BindPattern,
     BUILTIN_METHOD_ROWS,
-    CORE_BUILTINS_MODULE,
     Call,
     CallArg,
     Diagnostic,
@@ -21,7 +20,6 @@ use jet_foundation.[
     ModuleID,
     NameTable,
     NamedSpan,
-    SinkClass,
     Span,
     Stmt,
     SwitchArm,
@@ -83,6 +81,11 @@ SemaTaintCallableFact: struct {
     return_type: Type?
     scrub_tag: String?
     ffi_origin: Bool
+    // The declared effect row (`FS.Read`, `Net`), in written order; an
+    // extern function's effect root.
+    effects: [String]
+    // Whether it renders an encodable value as output (sema_taint_serializes).
+    serializes: Bool{false}
     span: Span
 }
 
@@ -421,82 +424,54 @@ sema_taint_success_type: fn(ty: Type?) -> Type? Never! {
     ty.copy()
 }
 
-// The effect of the Core call `module.method` (Rust `Effects::core_effect`):
-// its registered row's effect, else the module's resolver default, so a call
-// the module does not declare still reaches its effect destination.
-sema_taint_core_effect: fn(module_name: String, method: String) -> String? Never! {
-    if core_call(module_name, method) == .Val(record) -> return record.effect_kind
-    if module_name == "core.service" && method == "state_store" -> return Val("FS")
-    if module_name == "core.net" && method == "gethostname" -> return Val("Env")
-    if (module_name == "core.sys" && method == "success") || (module_name == "core.process" && method == "status_ok") {
-        return None
+// Whether a call of a declaration with `effects` (and `serializes`) writes
+// to a log, terminal, or serialized output, where a credential would leak:
+// its declared row names a `Log` or `IO` effect, or it renders an encodable
+// value as text or bytes.
+sema_taint_leaks_credential: fn(effects: [String], serializes: Bool) -> Bool Never! {
+    if serializes -> return true
+    loop effect in effects {
+        root: sema_effect_root(effect)
+        if root == "Log" || root == "IO" -> return true
     }
-    if module_name == "core.time" && (method == "zone" || method == "host_zone" || method == "parse_zoned") {
-        return Val("FS")
-    }
-    if module_name == "core.time" && ["clock", "time", "parse_time", "period", "period_days", "period_months", "period_years", "utc", "zoned", "zoned_local"].contains(method) {
-        return None
-    }
-    if module_name == "core.math.random" && method == "rng" -> return None
-    if module_name == "core.math" && method == "random" -> return Val("Rand")
-    if module_name == "core.term" && method == "style_force" -> return None
-    if module_name == "core.net" && ["ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4", "is_ipv6", "__ip_from_bytes", "__ip_bytes", "__ip_is_v4", "__socket_from_parts", "__socket_ip", "__socket_port", "__socket_scope", "__udp_packet_addr", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string", "ready_readable", "ready_writable", "error_operation", "error_address", "error_name", "error_message", "error_os_code", "dns_srv_target", "dns_srv_port", "dns_srv_priority", "dns_srv_weight", "udp_packet_data", "udp_packet_addr", "udp_packet_bytes", "udp_packet_original_len", "udp_packet_truncated"].contains(method) {
-        return None
-    }
-    if module_name == "core.watcher" {
-        return if method == {
-            "files" -> Val("FS")
-            "process_pid" -> Val("Exec")
-            "port" -> Val("Net")
-            else -> None
-        }
-    }
-    if module_name == "core.browser" {
-        return if method == {
-            "profile" | "timeout" -> None
-            "locked" -> Val("FS")
-            "config_from_env" -> Val("Env")
-            else -> Val("Net")
-        }
-    }
-    if module_name == "core.compute" && method != "device_cpu" -> return Val("GPU")
-    if module_name == CORE_BUILTINS_MODULE {
-        if method.starts_with("jetc_") || method.starts_with("lock_") -> return Val("FS")
-        if method == "resolve_ordered" -> return Val("Net")
-    }
-    if module_name == "core.auth" && ["register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume", "oauth_begin", "oauth_finish"].contains(method) {
-        return Val("DB")
-    }
-    if module_name == "core.crypto.vault" && ["get", "current", "versions", "load", "status", "prepare_generate", "prepare_store", "prepare_rotate", "prepare_retire", "prepare_revoke", "authorize_write", "commit_generate", "commit_store", "commit_rotate", "commit_retire", "commit_revoke", "export_to_recipients", "export_to_passphrase", "prepare_import_wrapped", "authorize_wrapped_import", "commit_import_wrapped", "prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519"].contains(method) {
-        return Val("Secret")
-    }
-    if module_name == {
-        "core.files" -> Val("FS")
-        "core.net" | "core.net.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
-        "core.time" -> Val("Time")
-        "core.math.random" | "core.crypto.random" -> Val("Rand")
-        "core.sys" -> Val("Env")
-        "core.process" | "core.plugin" | "core.mod" -> Val("Exec")
-        "core.term" -> Val("IO")
-        "core.db" -> Val("DB")
-        "core.log" -> Val("Log")
-        "core.ui" | "core.web" | "core.browser.host" | "core.browser.storage.local" | "core.browser.storage.session" -> Val("Browser")
-        else -> None
-    }
+    false
 }
 
-// A Core call that writes to a log, terminal, or serialized output, where a
-// credential would leak (Rust `Syntax::credential_sink`).
-sema_taint_credential_sink: fn(module_name: String, method: String) -> Bool Never! {
-    if core_call(module_name, method) == .Val(record) {
-        if record.sink_class == .Val(sink_class) -> return sink_class == SinkClass.Credential
+// Whether `function` renders an encodable value as output text or bytes: a
+// `to_string`/`to_bytes` form whose first parameter is an `Encode`-bounded
+// type parameter or a `Dyn` tree (or a list of them).
+sema_taint_serializes: fn(function: Func) -> Bool Never! {
+    if !["to_string", "to_string_pretty", "to_bytes", "to_bytes_canonical"].contains(function.name) || function.params.len() == 0 {
+        return false
     }
-    if module_name == "core.log" -> return true
-    if module_name == "core.term" -> return method == "print" || method == "eprint"
-    if ["core.encoding.json", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.cbor", "core.encoding.xml"].contains(module_name) {
-        return ["to_string", "to_string_pretty", "to_bytes", "to_bytes_canonical"].contains(method)
+    if function.params[0].ty == .List(item) -> return sema_taint_encodable(function, item)
+    sema_taint_encodable(function, function.params[0].ty)
+}
+
+// Whether `ty`, a parameter type of `function`, is a `Dyn` tree or a type
+// parameter `function` bounds by `Encode`.
+sema_taint_encodable: fn(function: Func, ty: Type) -> Bool Never! {
+    if ty == .Named(name) {
+        if name == "Dyn" -> return true
+        loop type_param in function.type_params {
+            if type_param.name == name -> return type_param.bounds.contains("Encode")
+        }
     }
-    module_name == "core.encoding.jsonl" && method == "to_string"
+    false
+}
+
+// The effects of a Core member the Core dispatcher routes with no source
+// declaration: its call record's root and leaf, as
+// sema_call_core_record_effects bounds them.
+sema_taint_record_effects: fn(module_name: String, method: String) -> [String] Never! {
+    effects := [String]{}
+    record: core_call(module_name, method) ?? return effects
+    leaf: record.effect_leaf ?? ""
+    if record.effect_kind == .Val(root) {
+        if leaf == "" || !sema_effect_covers(root, leaf) -> effects.push(root)
+    }
+    if leaf != "" -> effects.push(leaf)
+    effects
 }
 
 // A Prelude value tag (Prelude/Markers.jet, read ahead of time into
@@ -772,7 +747,11 @@ sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleI
     }
     ffi_origin := function.inline_foreign != None
     if ffi_origin -> sema_taint_add(return_tags, SEMA_TAINT_ORIGIN_FFI)
-    catalog.callables.push(SemaTaintCallableFact{module_identity: module_identity, owner: owner, name: function.name, parameter_tags: params, return_tags: return_tags, return_type: success, scrub_tag: function.scrub_tag, ffi_origin: ffi_origin, span: function.name_span})
+    effects := [String]{}
+    if function.declared_effects == .Val(row) {
+        loop entry in row -> effects.push(entry.name)
+    }
+    catalog.callables.push(SemaTaintCallableFact{module_identity: module_identity, owner: owner, name: function.name, parameter_tags: params, return_tags: return_tags, return_type: success, scrub_tag: function.scrub_tag, ffi_origin: ffi_origin, effects: effects, serializes: sema_taint_serializes(function), span: function.name_span})
     sema_taint_index_callable(catalog, module_identity, owner, function.name)
 }
 
@@ -785,7 +764,9 @@ sema_taint_add_extern_callable: fn(catalog: &SemaTaintCatalog, module_identity: 
     returns := [String]{SEMA_TAINT_ORIGIN_FFI}
     if success == .Val(ty) -> returns = sema_taint_type_tags(ty)
     sema_taint_add(returns, SEMA_TAINT_ORIGIN_FFI)
-    catalog.callables.push(SemaTaintCallableFact{module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: success, scrub_tag: None, ffi_origin: true, span: function.name_span})
+    effects := [String]{}
+    if function.effect_root == .Val(root) -> effects.push(sema_effect_root(root))
+    catalog.callables.push(SemaTaintCallableFact{module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: success, scrub_tag: None, ffi_origin: true, effects: effects, span: function.name_span})
     sema_taint_index_callable(catalog, module_identity, "", function.name)
 }
 
@@ -1148,25 +1129,47 @@ sema_taint_core_module_for_receiver: fn(state: SemaTaintFlowState, receiver: Exp
     ""
 }
 
+// Where `receiver.method(...)` sends its arguments: a Core call adds the
+// effects its declaration writes (its call record's, for a member the Core
+// dispatcher routes with no source declaration), and a call whose
+// declaration leaks a credential (sema_taint_leaks_credential) adds `Log`.
 sema_taint_method_destinations: fn(state: SemaTaintFlowState, receiver: Expr, method: String) -> [String] Never! {
     destinations := [String]{}
     if receiver == {
         .Ident(alias, _, _) -> {
-            module_row := sema_taint_core_alias(state, alias)
-            if {
-                module_row == "" -> { destinations.push("{alias}.{method}") }
-                else -> {
-                    destinations.push("{module_row}.{method}")
-                    if sema_taint_core_effect(module_row, method) == .Val(effect_name) {
-                        destinations.push(effect_name)
-                    }
-                    if sema_taint_credential_sink(module_row, method) -> destinations.push("Log")
-                }
+            module_row: sema_taint_core_alias(state, alias)
+            destinations.push(if module_row == "" -> "{alias}.{method}" else -> "{module_row}.{method}")
+            found: sema_taint_method_callable(state, receiver, method)
+            serializes: if found == .Val(fact) -> fact.serializes else -> false
+            // The found declaration's effects move here: this is its last use.
+            effects: if found == {
+                .Val(fact) -> fact.effects
+                .None -> if module_row == "" -> [String]{} else -> sema_taint_record_effects(module_row, method)
             }
+            leaks: sema_taint_leaks_credential(effects, serializes)
+            if module_row != "" -> destinations.extend(effects)
+            if leaks -> destinations.push("Log")
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     destinations
+}
+
+// Where a bare call `name(...)` sends its arguments: its name, plus `Log`
+// when the function it reaches leaks a credential
+// (sema_taint_leaks_credential). The ambient `print` and `eprint` reach no
+// function of the walked module; they check as core.term's, whose
+// declarations write `IO`, so they send to `Log` alone.
+sema_taint_call_destinations: fn(state: SemaTaintFlowState, name: String) -> [String] Never! {
+    if sema_taint_bare_callable(state, name) == .Val(callable) {
+        destinations := [String]{name}
+        if sema_taint_leaks_credential(callable.effects, callable.serializes) {
+            destinations.push("Log")
+        }
+        return destinations
+    }
+    if name == "print" || name == "eprint" -> return [String]{"Log"}
+    [String]{name}
 }
 
 sema_taint_is_typed_decode: fn(state: SemaTaintFlowState, receiver: Expr, method: String) -> Bool Never! {
@@ -2662,8 +2665,8 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             sema_taint_check_method_crossing(graph, state, receiver, method, args)
         }
         .Call(call, _) -> {
-            credential_sink := call.name == "print" || call.name == "eprint"
-            destinations := if credential_sink -> [String]{"Log"} else -> [String]{call.name}
+            destinations := sema_taint_call_destinations(state, call.name)
+            credential_sink := sema_taint_has(destinations, "Log")
             loop argument in call.args {
                 tags := sema_taint_tags_of(state, argument.expr)
                 denied := sema_taint_denied_tag(graph, state, tags, destinations)

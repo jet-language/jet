@@ -1083,6 +1083,13 @@ struct is E0732, and using a tag where dispatch or method attachment is
 expected is E0731. Tag names are PascalCase. Prelude declares `Input`, `PII`,
 `Secret`, and `Credential` as tag structs (D-QUAL2, D-TAG-MARKER1, D-CASING1).
 
+A `Credential` value passed to a call is E0722 when the callee's declaration
+says the call writes it out: its effect row names `Log` or `IO`, or it is a
+`to_string`/`to_bytes` form over an `Encode`-bounded or `Dyn` value. Core
+functions and a program's own get the same rule from their declarations. The
+destinations a Core call offers `#FX(!…)` denials and `from` sources are the
+effects its declaration writes.
+
 A tag's `impl Marker` block may also write `timing: .Free | .Fixed` and
 `protects: .Secrecy | .Integrity` (core.compiler.lang `TagTiming`,
 `TagProtects`). Left out, they are

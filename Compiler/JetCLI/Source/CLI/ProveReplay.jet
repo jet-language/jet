@@ -16,7 +16,7 @@ use {
     prove_crypto: core.crypto
     replay_base64: core.encoding.base64
     replay_random: core.crypto.random
-    jet_driver.[JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverRecordLink, jet_driver_run_receipt_frame]
+    jet_driver.[JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCoreSource, JetDriverRecordLink, jet_driver_run_receipt_frame]
     jet_foundation.[
         ASTTables,
         BuildSettingOverride,
@@ -40,12 +40,13 @@ use {
         ast_stmt,
         canonical_json_bytes,
         canonical_json_value,
+        core_call,
         foundation_byte_text,
         import_alias,
         import_walk_bindings,
     ]
     jet_parser.[parse_source]
-    jet_sema.[sema_taint_core_effect]
+    jet_sema.[sema_effect_root]
     jet_pkg_model.[JET_VERSION]
 }
 
@@ -278,6 +279,11 @@ JetCLIReplaySite: struct {
     operation: String
     authority: String?
     owner: String
+    // A Core call the walk found, whose authority comes from its declaration
+    // once the walk ends (jet_cli_replay_resolve); `boundary` keeps it an
+    // opaque boundary when nothing declares it.
+    pending: Bool{false}
+    boundary: Bool{false}
 }
 
 // One failed artifact check: E3620 (an unsupported reader vocabulary), E3628
@@ -2634,7 +2640,73 @@ jet_cli_replay_sites: fn(members: [JetCLIProveMember]) -> [JetCLIReplaySite] {
         jet_cli_replay_items(parsed.program.tables, parsed.program.items, aliases, locals, sites)
         jet_cli_replay_block(parsed.program.tables, parsed.program.script_body, aliases, locals, sites)
     }
+    input: if members.len() == 0 -> "." else -> members[0].absolute
+    jet_cli_replay_resolve(sites, input)
     sites
+}
+
+// The Core declarations the replay authority reads, each module's files
+// parsed once (`parsed` holds their indexes in `sources`): the root of the
+// first effect each declared function writes by `module.member`, empty for a
+// function that declares none.
+JetCLIReplayCore: struct {
+    sources: [JetDriverCoreSource]
+    parsed: [Int]
+    roots: [String:String]
+}
+
+// Gives each pending Core call site its authority: the root of the first
+// effect its Core declaration writes or, for a member the Core dispatcher
+// routes with no source declaration, its call record's effect. A call with
+// neither reaches no authority and leaves the list; a dotted call through no
+// import alias then stays a boundary. Sites keep their walk order.
+jet_cli_replay_resolve: fn(sites: &[JetCLIReplaySite], input: String) {
+    sources: if jet_cli_core_sources(input) == {
+        .Loaded(loaded) -> loaded
+        .Missing(_, _) -> [JetDriverCoreSource]{}
+    }
+    core := JetCLIReplayCore{sources: sources, parsed: [Int]{}, roots: [String:String]{}}
+    walked := [JetCLIReplaySite]{}
+    loop sites.len() > 0 -> walked.push(sites.pop() ?? break)
+    loop walked.len() > 0 {
+        site := walked.pop() ?? break
+        if !site.pending {
+            sites.push(site)
+            next
+        }
+        dot: site.operation.rfind(".")
+        member: site.operation.slice(dot + 1, site.operation.len())
+        site.authority = jet_cli_replay_core_authority(core, site.owner, member)
+        if {
+            site.authority != None -> sites.push(site)
+            site.boundary -> jet_cli_replay_boundary(site.operation, sites)
+        }
+    }
+}
+
+jet_cli_replay_core_authority: fn(core: &JetCLIReplayCore, module_name: String, member: String) -> String? {
+    loop (index, source) in core.sources {
+        if source.module_name != module_name || core.parsed.contains(index) -> next
+        core.parsed.push(index)
+        parsed: parse_source(source.source().bytes())
+        loop item in parsed.program.items {
+            if item == .Func(function) {
+                root := ""
+                if function.declared_effects == .Val(row) {
+                    if row.len() > 0 -> root = sema_effect_root(row[0].name)
+                }
+                core.roots["{module_name}.{function.name}"] = root
+            }
+        }
+    }
+    if core.roots.get("{module_name}.{member}") == .Val(root) {
+        if root == "" -> return None
+        return Val(sema_effect_root(root))
+    }
+    record: core_call(module_name, member) ?? return None
+    if record.effect_kind == .Val(root) -> return Val(root)
+    leaf: record.effect_leaf ?? return None
+    Val(sema_effect_root(leaf))
 }
 
 // Local name -> the Core module or member it imports.
@@ -3114,23 +3186,12 @@ jet_cli_replay_call: fn(name: String, aliases: [String:String], locals: [String]
         if member_dot < 0 {
             return
         }
-        target_bytes: target.bytes()
-        home: foundation_byte_text(target_bytes, 0, member_dot)
-        authority: sema_taint_core_effect(home, foundation_byte_text(target_bytes, member_dot + 1, target_bytes.len())) ?? return
-        sites.push(JetCLIReplaySite{operation: target, authority: Val(authority), owner: home})
+        sites.push(JetCLIReplaySite{operation: target, authority: None, owner: foundation_byte_text(target.bytes(), 0, member_dot), pending: true})
         return
     }
-    bytes: name.bytes()
-    head: foundation_byte_text(bytes, 0, dot)
-    member: foundation_byte_text(bytes, dot + 1, bytes.len())
+    head: foundation_byte_text(name.bytes(), 0, dot)
     owner: jet_cli_replay_module(head, aliases)
-    resolved: owner ?? head
-    authority: sema_taint_core_effect(resolved, member)
-    if authority == .Val(found) {
-        sites.push(JetCLIReplaySite{operation: name, authority: Val(found), owner: resolved})
-        return
-    }
-    if owner == None -> jet_cli_replay_boundary(name, sites)
+    sites.push(JetCLIReplaySite{operation: name, authority: None, owner: owner ?? head, pending: true, boundary: owner == None})
 }
 
 // `receiver.method(…)`: a Core member through an import alias, else a
@@ -3142,8 +3203,7 @@ jet_cli_replay_method: fn(tables: ASTTables, receiver: ExprNode, method: String,
         jet_cli_replay_boundary("method call {method}", sites)
         return
     }
-    authority: sema_taint_core_effect(owner, method) ?? return
-    sites.push(JetCLIReplaySite{operation: "{owner}.{method}", authority: Val(authority), owner: owner})
+    sites.push(JetCLIReplaySite{operation: "{owner}.{method}", authority: None, owner: owner, pending: true})
 }
 
 // `a.b.c` with `a` an import alias: the aliased module with `.b.c` appended.
