@@ -102309,6 +102309,50 @@
       "completedAt": "2026-11-13T05:42:27.938Z",
       "questions": [],
       "retiredAt": "2026-11-16T05:53:55.123Z"
+    },
+    {
+      "id": "c09qdr1z",
+      "num": 6667,
+      "title": "Codemod refuses editable roots outside Examples/ or tests/ui/ (agent_workloads corpus root examples)",
+      "body": "Compiler Codemod.jet:395 accepts editable roots only beneath Examples/ or tests/ui/, so a user project's own examples/ root is refused with E2105 'Editable root examples must be beneath Examples/ or tests/ui/'. Case agent_workloads/equivalent_adapters_complete_declared_tasks runs repository_semantic_edit.jet over a corpus whose root is examples and panics. A codemod over a user repository must accept that repository's roots; the checkout-specific roots look like repo tooling leaking into the product.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet codemod (and the repository_semantic_edit workload) accepts any editable root inside the target repository, not only Examples/ and tests/ui/: an unknown root falls back to the manifest root or the entry directory (Codemod.jet jet_cli_codemod_managed_project). Proof: a tests/cases row runs jet codemod on a package rooted outside Examples/ and tests/ui (for example a temp package with its own jet.toml), shows the edit applied and checked, and tests/known-failing.tsv names no #6667 row. The agent_workloads/equivalent_adapters_complete_declared_tasks case is tracked by #6386 (`jet self lsp` E2104).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 056cb675c4 (G5DevX-6667c1): jet test Compiler --profile cases --filter codemod/codemod_rename_applies_in_a_package_outside_examples_and_tests_ui PASS 1 on seed-b14. A temp package with its own package.jet, outside Examples/ and tests/ui: the dry run leaves it unchanged, apply --yes renames the definition and the call, the log lands in proj/.jet/codemods, and jet check plus jet run (prints ok) are rc 0. tests/known-failing.tsv names no #6667 row.",
+          "at": "2026-11-13T06:05:40.522Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T09:39:22.111Z",
+      "updated": "2026-11-13T06:05:42.066Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-13T06:05:42.066Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T06:06:23.681Z"
     }
   ]
 }
