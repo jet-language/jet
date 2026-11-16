@@ -14,9 +14,12 @@
 // tree, with Core from the compiler's own records.
 // Names that no longer name a function are skipped by the build (`--trace`
 // counter ir.object.hot_missing). A closure's name keeps while edits move
-// its source (JetIR ir_closure_key), so rows go stale only as functions are
-// renamed or removed, and the list misses only functions added since it was
-// traced; `--image` says when a regenerated list is due.
+// its source (JetIR ir_closure_key), and a missing name whose symbol ends in
+// a key hash hands its place to the functions of the same stem the list does
+// not name when there are no more of them than such names (JetIR
+// ir_x64_hot_order), so rows go stale mostly as functions are renamed or
+// removed and helpers' hashes change, and the list misses functions added
+// since it was traced; `--image` says when a regenerated list is due.
 //
 //   node Tools/perf/hot-text.mjs --jet <jet> [--out Compiler/JetCli/hot-text.list] [--twins <checkout>]
 //   node Tools/perf/hot-text.mjs --image <jet>
