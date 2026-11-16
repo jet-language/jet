@@ -761,6 +761,22 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     assert(elapsed.ns < 600000000)
 }
 
+// Where a spawned child's standard stream goes: a pipe the program reads or
+// writes as it runs, the parent's own stream, a pipe collected into the
+// receipt, or (for stderr) the child's stdout.
+ProcessStreamMode: enum {
+    Stream
+    Inherit
+    Capture
+    Stdout
+}
+
+// The line discipline of a spawned child's pseudo-terminal.
+TerminalMode: enum {
+    Raw
+    Cooked
+}
+
 // Temporary native-carrier layout. This is not a second public builder API:
 // the canonical ProcessSpec stays opaque and its existing methods stay intact.
 ProcessFields: struct {
