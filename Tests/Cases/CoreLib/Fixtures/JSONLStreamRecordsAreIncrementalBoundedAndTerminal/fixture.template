@@ -53,7 +53,7 @@ run: fn() {
 
     malformed_input: files.open("{work}/malformed.jsonl") ?? panic("open malformed")
     malformed_reader := jsonl.reader(malformed_input) ?? panic("reader malformed")
-    first_malformed: malformed_reader.next() ?? panic("first malformed record")
+    _first_malformed: malformed_reader.next() ?? panic("first malformed record")
     if malformed_reader.next() == {
         .Val(_) | .None -> { print("malformed-missed") }
         .Err(first) -> {

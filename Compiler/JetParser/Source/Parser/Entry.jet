@@ -159,15 +159,19 @@ parse_config_with_source: fn(lexed: &&Lexed, source: [U8]) -> ParseResult {
 }
 
 // A parsed file with every `impl Name.Effect` block written outside its type
-// joined to the type (parser_attach_effect_impls), once the whole file is
-// read: a chunked parse sees the type and the block in different chunks.
+// joined to the type (parser_attach_effect_impls), and every
+// `impl Trait.Derive` block given its trait's visibility
+// (parser_join_derive_visibility), once the whole file is read: a chunked
+// parse sees the type or trait and the block in different chunks.
 parser_join_effect_impls: fn(input: &&ParseResult) -> ParseResult {
     result := input.move()
-    if !parser_effect_impls_outside(result.program.items) -> return result
-    diagnostics := result.diagnostics.move()
-    items: parser_attach_effect_impls(result.program.items, diagnostics)
-    result.program.items = items
-    result.diagnostics = diagnostics.move()
+    derives: parser_derives_written(result.program.items)
+    effects: parser_effect_impls_outside(result.program.items)
+    if !derives && !effects -> return result
+    items := result.program.items.move()
+    if derives -> parser_join_derive_visibility(items)
+    if effects -> parser_attach_effect_impls(items, result.diagnostics)
+    result.program.items = items.move()
     result
 }
 

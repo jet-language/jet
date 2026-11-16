@@ -1751,6 +1751,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         }
     }
     context.arithmetic_policy = sema_function_arithmetic_policy(func.markers)
+    context.runtime_policy = sema_function_runtime_policy(func.markers)
     context.compiler_generated = func.compiler_generated && !sema_test_synthetic_function(func) && !sema_policy_wrapper_function(func) && !sema_computed_field_getter_function(func)
     context.return_view_declared = func.declared_return_view_provenance != None
     if !complete {
@@ -9142,6 +9143,8 @@ sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, boun
 // stand in for every run's. So is a call of a `#Memo` function: its result
 // store and the hit and miss counts `name.cache()` reads belong to the
 // running program, and a call computed while building would never reach them.
+// A call of a `#Runtime(.Only)` function is refused whatever `runtime_runs`:
+// the mark keeps it to the running program.
 sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact], runtime_runs: Bool) -> String? Never! {
     loop fact in call_facts {
         detail: sema_call_site_detail(fact)
@@ -9173,6 +9176,9 @@ sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: 
                 }
                 if runtime_runs && sema_comptime_callable_memoized(graph, row) {
                     return Val("it calls {name}, a `#Memo` function whose result store the running program keeps")
+                }
+                if sema_callable_runtime_only(graph, row) {
+                    return Val("it calls {name}, which `#Runtime(.Only)` keeps to the running program")
                 }
             }
         }
@@ -9222,6 +9228,18 @@ sema_comptime_callable_memoized: fn(graph: SemaRegistrationGraph, row: SemaRegis
         .Foreign(_, _) -> SemaMemoConfig{bound: None, unbounded: false}
     }
     memo.bound != None || memo.unbounded
+}
+
+// Whether callable `row` is marked `#Runtime(.Only)`: it runs only in the
+// running program, never while building. Read from its declaration in place.
+sema_callable_runtime_only: fn(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow) -> Bool Never! {
+    policy: if row == {
+        .Function(module_index, index) -> sema_function_runtime_policy(graph.modules[module_index].functions[index].declaration.markers)
+        .NominalMethod(module_index, owner, index) -> sema_function_runtime_policy(graph.modules[module_index].nominals[owner].methods[index].declaration.markers)
+        .ImplMethod(module_index, owner, index) -> sema_function_runtime_policy(graph.modules[module_index].impls[owner].methods[index].declaration.markers)
+        .Foreign(_, _) -> None
+    }
+    sema_runtime_policy_only(policy)
 }
 
 // Why checked closure body `function` keeps a value from being computed while

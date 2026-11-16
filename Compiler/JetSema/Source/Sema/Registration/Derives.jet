@@ -2333,31 +2333,35 @@ sema_derive_owner_type: fn(name: String, type_params: [TypeParam]) -> Type {
 // Expand one provider for one target. The provider signature was parsed from
 // `Prelude/Derives.jet`, so its type spans point into that file; the only
 // authored location a derived member has is the target's name, and every
-// signature span lands there. The template spells the target `#{name}`,
-// which becomes the owner type with its parameters. A failed expansion
-// reports its diagnostic and generates nothing. The template's expansion
-// is taken from or kept in `memo` (sema_derive_memo_expand).
+// signature span lands there. The template writes the trait's impl
+// (`impl #{name}.Equatable { … }`) and spells the target `#{name}`, which
+// becomes the owner type with its parameters; the impl's methods are the
+// derived members. A failed expansion reports its diagnostic and generates
+// nothing. The template's expansion is taken from or kept in `memo`
+// (sema_derive_memo_expand).
 sema_derive_expand_builtin_provider: fn(providers: [MarkerDecl], trait_name: String, target_name: String, target_span: Span, owner_type: Type, type_info: CtValue, memo: &SemaDeriveMemo, diagnostics: &[Diagnostic]) -> TraitImplBlock? {
     provider: sema_derive_provider(providers, trait_name) ?? return None
     expanded: sema_derive_memo_expand(memo, trait_name, provider.body ?? [DeriveBodyItem]{}, type_info, diagnostics) ?? return None
     methods := [Func]{}
     loop item in expanded {
-        if item == .Func(function) {
-            method := function
-            params := [Param]{}
-            loop param in function.params {
-                updated := param
-                updated.ty = sema_derive_replace_provider_type(param.ty, target_name, owner_type)
-                updated.ty_span = target_span
-                params.push(updated)
+        if item == .Impl(definition) && (definition.trait_name ?? "") == trait_name {
+            loop function in definition.methods {
+                method := function
+                params := [Param]{}
+                loop param in function.params {
+                    updated := param
+                    updated.ty = sema_derive_replace_provider_type(param.ty, target_name, owner_type)
+                    updated.ty_span = target_span
+                    params.push(updated)
+                }
+                method.params = params
+                if function.return_type == .Val(return_type) {
+                    method.return_type = Val(sema_derive_replace_provider_type(return_type, target_name, owner_type))
+                    method.return_type_span = Val(target_span)
+                }
+                method.compiler_generated = true
+                methods.push(method)
             }
-            method.params = params
-            if function.return_type == .Val(return_type) {
-                method.return_type = Val(sema_derive_replace_provider_type(return_type, target_name, owner_type))
-                method.return_type_span = Val(target_span)
-            }
-            method.compiler_generated = true
-            methods.push(method)
         }
     }
     if methods.len() == 0 -> return None

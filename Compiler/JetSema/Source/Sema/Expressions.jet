@@ -115,6 +115,10 @@ use {
         PlaceAccess,
         TTryConvert,
         ast_empty_lambda_meta,
+        ASTTables,
+        ExprNode,
+        ast_visit_call_args,
+        ast_visit_expr,
         core_module_has_type,
         diagnostic_with_edit,
         TextEdit,
@@ -3125,6 +3129,7 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
                     unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
                     foreign_capability: sema_expr_call_foreign_capability(program, callee),
                     replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
+                    hole_header: sema_expr_hole_header_site(scopes, span),
                 },
             ),
         },
@@ -3137,7 +3142,17 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
     // Every early return here is the same `true`, and the target lookup is
     // pure, so the cheap tests go first and only a `#run` target builds
     // its row (whose declaration copy is the callee's whole body).
-    if scopes.comptime_execution_depth > 0 -> return true
+    if scopes.comptime_execution_depth > 0 {
+        // Compile-time code never runs a `#Runtime(.Only)` function: the
+        // mark keeps it to the running program.
+        graph: program.registration_graph ?? return true
+        row: sema_registration_callable_row_of(graph, symbol) ?? return true
+        if sema_callable_runtime_only(graph, row) {
+            diagnostics.push(sema_runtime_only_build_time_diagnostic("Compile-time code calls `{sema_effect_comptime_callee_name(symbol_table_key(graph.symbols, symbol))}`", span))
+            return false
+        }
+        return true
+    }
     if !sema_expr_comptime_target_declared(environment, program, scopes, symbol) -> return true
     target: sema_expr_comptime_target(environment, program, scopes, symbol) ?? return true
     // A `#run fn` runs while building: run-time code never calls it, or it
@@ -3153,6 +3168,19 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
     callee_key: sema_symbol_key(program, context, symbol)
     context.comptime_requests.push(SemaComptimeRequest{callee_key: callee_key, module_identity: target.module_identity, args: args, span: span, checked_text: None})
     true
+}
+
+// The call at `span` is written in the header of the hole table being
+// checked, which runs once per arm tried (E0442): its fix until the call's
+// check names the value (sema_expr_check_hole_header_call).
+sema_expr_hole_header_site: fn(scopes: SemaScopeTable, span: Span) -> SemaHoleHeaderFix? Never! {
+    if !sema_expr_in_hole_header(scopes, span) -> return None
+    Val(SemaHoleHeaderFix{fix: "name the value on the line above the table, then read the name in the header", edits: [TextEdit]{}, reported: false})
+}
+
+sema_expr_in_hole_header: fn(scopes: SemaScopeTable, span: Span) -> Bool Never! {
+    header: scopes.hole_header ?? return false
+    span.start >= header.start && span.end <= header.end
 }
 
 // An extern callee (`#FFI(<lang>)` body or foreign row) carries its one foreign
@@ -7064,8 +7092,8 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
         .Paren(value, span, _) -> sema_expr_check_paren(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Unary(op, operand, span, _) -> sema_expr_check_unary(op, operand, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
         .Binary(op, left, right, span, _) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .Call(call, _) -> sema_expr_check_call_expr(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> sema_expr_check_method_call_expr(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Call(call, _) -> if scopes.hole_header != None -> sema_expr_hole_header_call(expr, sema_expr_check_call_expr(call, expected, environment, program, scopes, state, tail_store, context, diagnostics), environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_call_expr(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> if scopes.hole_header != None -> sema_expr_hole_header_call(expr, sema_expr_check_method_call_expr(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics), environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_method_call_expr(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .ListLit(elements, span, _) -> sema_expr_check_list_literal(elements, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Range(start, end, exclusive, span, _) -> sema_expression_range(start, end, exclusive, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Index(base, index, span, kind, _) -> sema_expression_index(base, index, kind, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -7108,10 +7136,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
             diagnostics.push(sema_type_used_as_value(type_name(ty), span))
             None
         }
-        .Paren(value, span, _) -> {
-            checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-            return Val(TExpr{ty: checked.ty, kind: checked.kind, span: span})
-        }
+        .Paren(value, span, _) -> sema_expr_check_paren(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Unary(op, operand, span, _) -> sema_expr_check_unary(op, operand, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
         .Binary(op, left, right, span, _) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Call(call, _) -> {
@@ -7196,7 +7221,14 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
 }
 
 sema_expr_check_paren: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    // The parser gives each arm of a hole table its header twice wrapped in
+    // parentheses that span the written header; a call written there runs
+    // once per arm (E0442).
+    outer: scopes.hole_header
+    if value == .Paren(_, inner_span, _) && inner_span == span -> scopes.hole_header = Val(span)
+    result: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    scopes.hole_header = outer
+    checked: result ?? return None
     Val(TExpr{ty: checked.ty, kind: checked.kind, span: span})
 }
 
@@ -7819,7 +7851,9 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     if sema_expr_is_bare_member_chain(expr) {
         bare_member: sema_expr_check_bare_member_chain(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if bare_member.handled {
-            if bare_member.value == None -> sema_expr_mark_failed_call_reads(expr, scopes, state)
+            if bare_member.value == None {
+                sema_expr_mark_failed_call_reads(environment.tables, expr, scopes, state)
+            }
             return sema_check_expression_recorded(expr, bare_member.value, context)
         }
     }
@@ -7851,7 +7885,7 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     // The checked value moves out and back: binding it while `checked` was
     // still returned copied the whole checked tree at every level.
     value := checked ?? {
-        sema_expr_mark_failed_call_reads(expr, scopes, state)
+        sema_expr_mark_failed_call_reads(environment.tables, expr, scopes, state)
         return None
     }
     if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
@@ -7860,22 +7894,37 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     Val(value.move())
 }
 
-// A call that fails to check (an unresolved callee or member) still reads
-// the names in its arguments, so they are no unused bindings whose `_name`
-// rename `jet fix` would apply to a binding the call uses.
-sema_expr_mark_failed_call_reads: fn(expr: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) {
+// A call that fails to check (an unresolved callee or member, a refused
+// `app.live` or `app.enqueue` closure) still reads the names in its
+// arguments, lambda bodies included, so they are no unused bindings whose
+// `_name` rename `jet fix` would apply to a binding the call uses.
+sema_expr_mark_failed_call_reads: fn(tables: ASTTables, expr: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) {
     names := [String]{}
     if expr == {
-        .Call(call, _) -> {
-            loop argument in call.args {
-                sema_function_memory_collect_expr_idents(argument.expr, names)
-            }
-        }
+        .Call(call, _) -> ast_visit_call_args(tables, call.args, fn(expression: ExprNode) { sema_call_note_ident(tables, names, expression) })
         .MethodCall(_, _, _, _, _, args, _) | .OptMethodCall(_, _, _, _, args, _, _) | .CallValue(_, args, _, _) -> {
-            loop argument in args -> sema_function_memory_collect_expr_idents(argument.expr, names)
+            ast_visit_call_args(tables, args, fn(expression: ExprNode) { sema_call_note_ident(tables, names, expression) })
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return
     }
+    sema_expr_mark_named_reads(names, scopes, state)
+}
+
+// A `.skip` reason is recorded, never run, yet its interpolations spell reads
+// of the names they show, so those are no unused bindings either.
+sema_expr_mark_text_reads: fn(tables: ASTTables, text: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) {
+    names := [String]{}
+    if text == .Str(parts, _, _) {
+        loop part in parts {
+            if part == .Interp(value, _) {
+                ast_visit_expr(tables, value, fn(expression: ExprNode) { sema_call_note_ident(tables, names, expression) })
+            }
+        }
+    }
+    sema_expr_mark_named_reads(names, scopes, state)
+}
+
+sema_expr_mark_named_reads: fn(names: [String], scopes: SemaScopeTable, state: &SemaOwnershipState) {
     loop name in names {
         index: sema_scope_resolve_index(scopes, name) ?? next
         state.used_ids[scopes.bindings[index].symbol.id.id] = true

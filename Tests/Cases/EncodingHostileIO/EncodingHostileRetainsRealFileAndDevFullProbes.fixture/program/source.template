@@ -29,11 +29,11 @@ run: fn() {
     full_output: files.create("/dev/full") ?? panic("full")
     full_writer := cbor.writer(full_output) ?? panic("writer")
     if full_writer.write(encoding.DataEvent.Null) == {
-        .Err(io_error) -> print(writer_io(full_writer))
-        .Ok(wrote) -> {
+        .Err(_) -> print(writer_io(full_writer))
+        .Ok(_) -> {
             if full_writer.flush() == {
-                .Err(io_error) -> print(writer_io(full_writer))
-                .Ok(done) -> print(false)
+                .Err(_) -> print(writer_io(full_writer))
+                .Ok(_) -> print(false)
             }
         }
     }

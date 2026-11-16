@@ -14,6 +14,7 @@ use jet_foundation.[
     diagnostic_explanation,
     diagnostic_explanation_render,
     diagnostic_from_registry,
+    diagnostic_is_tidy,
     diagnostic_render_all,
     diagnostic_without_fix,
     diagnostic_theme_dim,
@@ -219,28 +220,56 @@ jet_driver_report_problems: fn(file: String, source: String, diagnostics: [Diagn
     jet_driver_problem_report(file, source, shown, "{count} problem{jet_driver_plural(count)} found", color)
 }
 
-// `jet check` human output for presented diagnostics: errors fail with the
-// problem count; warnings alone end in one `ok:` verdict; a clean check says
+// What fails `jet check` and `jet build`: the errors, or with none the tidy
+// errors (diagnostic_is_tidy). Empty when the check passes. Like a warning, a
+// tidy error is only reported once the errors are fixed, and a run, a dev
+// session or a test never stops for one.
+jet_driver_check_failures: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
+    has_error := false
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> has_error = true
+    }
+    failures := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        failing: if has_error -> diagnostic.severity == DIAGNOSTIC_ERROR else -> diagnostic_is_tidy(diagnostic)
+        if failing -> failures.push(diagnostic.copy())
+    }
+    failures
+}
+
+// What a check shows: every diagnostic but the accessibility lints.
+jet_driver_check_shown: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
+    shown := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if !jet_driver_is_a11y_lint(diagnostic.code) -> shown.push(diagnostic.copy())
+    }
+    shown
+}
+
+// What a failed `jet check` reports: its errors, or with none every lint but
+// the accessibility lints, the tidy errors among them. Empty when it passes.
+jet_driver_check_reported: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
+    failures: jet_driver_check_failures(diagnostics)
+    if failures.len() == 0 || failures[0].severity == DIAGNOSTIC_ERROR -> return failures
+    jet_driver_check_shown(diagnostics)
+}
+
+// `jet check` human output for presented diagnostics, the accessibility lints
+// left out: errors fail with the problem count; with none, a tidy error fails
+// with every lint; warnings alone end in one `ok:` verdict; a clean check says
 // so unless `--quiet`. `file` is the entry as the user named it and `source`
 // its bytes, used for any diagnostic that carries no origin of its own.
 jet_driver_check_outcome: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, quiet: Bool) -> JetDriverVerbOutput Never! {
-    errors := [Diagnostic]{}
-    lints := [Diagnostic]{}
-    loop diagnostic in diagnostics {
-        if {
-            diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic.copy())
-            jet_driver_is_a11y_lint(diagnostic.code) -> {}
-            else -> lints.push(diagnostic.copy())
-        }
+    failed: jet_driver_check_reported(diagnostics)
+    if failed.len() > 0 {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, failed, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if errors.len() > 0 {
-        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    }
-    count: lints.len()
+    shown: jet_driver_check_shown(diagnostics)
+    count: shown.len()
     stderr := ""
     if {
         count > 0 -> {
-            stderr = jet_driver_problem_report(file, source, lints, "ok: `{file}` has no errors ({count} warning{jet_driver_plural(count)})", color)
+            stderr = jet_driver_problem_report(file, source, shown, "ok: `{file}` has no errors ({count} warning{jet_driver_plural(count)})", color)
         }
         quiet -> {}
         else -> stderr = "ok: `{file}` has no problems\n"

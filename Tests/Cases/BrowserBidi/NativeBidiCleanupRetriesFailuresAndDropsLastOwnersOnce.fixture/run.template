@@ -16,7 +16,7 @@ run: fn() {
         retry_locator.click() ?? next
         print("unexpected click")
     }
-    loop attempt in [1, 2] {
+    loop _ in [1, 2] {
         retry_context.close() ?? next
     }
 
@@ -26,6 +26,6 @@ run: fn() {
     local_page.close() ?? panic("local page close")
 
     drop_context: session.context() ?? panic("drop context")
-    drop_page: drop_context.page() ?? panic("drop page")
+    _drop_page: drop_context.page() ?? panic("drop page")
     session.close() ?? return
 }

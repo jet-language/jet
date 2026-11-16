@@ -1,0 +1,94 @@
+// Guards joined to a hole table's candidates keep the ordinary `&&` and `||`
+// precedence and stop early as they do anywhere else. Each table sits beside
+// its reference form, the subjectless table it stands for, and `run` prints
+// both, so every table must give its reference form's answer and traces.
+note: fn(name: String, value: Bool) -> Bool {
+    print("  {name}")
+    value
+}
+
+// `&&` binds tighter than `||`: the arm reads
+// `(n % 2 == 0 && note("ready", ready)) || note("emergency", emergency)`,
+// and a guard after a failed test never runs.
+gate: fn(n: Int, ready: Bool, emergency: Bool) -> String {
+    return if n % <> == 0 {
+        2 && note("ready", ready) || note("emergency", emergency) -> "open"
+        else -> "shut"
+    }
+}
+
+gate_by_hand: fn(n: Int, ready: Bool, emergency: Bool) -> String {
+    return if {
+        (n % 2 == 0 && note("ready", ready)) || note("emergency", emergency) -> "open"
+        else -> "shut"
+    }
+}
+
+// A parenthesized guard is one Bool operand.
+launch: fn(n: Int, ready: Bool, backup: Bool) -> String {
+    return if n % <> == 0 {
+        2 && (ready && backup) -> "both"
+        3 && (ready || backup) -> "either"
+        else -> "neither"
+    }
+}
+
+launch_by_hand: fn(n: Int, ready: Bool, backup: Bool) -> String {
+    return if {
+        n % 2 == 0 && (ready && backup) -> "both"
+        n % 3 == 0 && (ready || backup) -> "either"
+        else -> "neither"
+    }
+}
+
+// After `||`, a parenthesized `|` group is more candidates: `7 || (5 | 3)`
+// tries 7, then 5, then 3.
+divides: fn(n: Int) -> String {
+    return if n % <> == 0 {
+        7 || (5 | 3) -> "seven, five or three"
+        2 -> "two"
+        else -> "none"
+    }
+}
+
+divides_by_hand: fn(n: Int) -> String {
+    return if {
+        n % 7 == 0 || n % 5 == 0 || n % 3 == 0 -> "seven, five or three"
+        n % 2 == 0 -> "two"
+        else -> "none"
+    }
+}
+
+// A Bool candidate is written in parentheses, and a guard after it is an
+// ordinary operand.
+both: fn(a: Bool, b: Bool) -> Bool { a && b }
+
+sized: fn(n: Int) -> String {
+    return if both(<>, n > 0) {
+        (n > 100) -> "large"
+        (n > 10) && (n % 2 == 0) -> "even medium"
+        else -> "other"
+    }
+}
+
+sized_by_hand: fn(n: Int) -> String {
+    return if {
+        both(n > 100, n > 0) -> "large"
+        both(n > 10, n > 0) && (n % 2 == 0) -> "even medium"
+        else -> "other"
+    }
+}
+
+run: fn() {
+    print(gate(4, true, false))
+    print(gate_by_hand(4, true, false))
+    print(gate(3, true, false))
+    print(gate_by_hand(3, true, false))
+    print(gate(4, false, true))
+    print(gate_by_hand(4, false, true))
+    print("{launch(4, true, true)} {launch_by_hand(4, true, true)}")
+    print("{launch(6, true, false)} {launch_by_hand(6, true, false)}")
+    print("{launch(5, true, true)} {launch_by_hand(5, true, true)}")
+    loop n in [14, 10, 9, 4, 11] { print("{divides(n)} / {divides_by_hand(n)}") }
+    loop n in [200, 12, 13, -500] { print("{sized(n)} / {sized_by_hand(n)}") }
+}

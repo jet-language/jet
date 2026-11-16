@@ -6,6 +6,13 @@
 // otherwise). A generic leaf is not an enum row.
 CORE_ENUM_CASE_ROWS: #run core_enum_case_rows(CORE_DECLARATIONS)
 
+// Each CORE_ENUM_CASE_ROWS row's case payloads, at the same index: one
+// payload slot list per case (empty for a unit case) when its Core.rows list
+// carries payloads (`Key:plain(Char(Char)|Enter|…|F(Int)|…)`, read with
+// core_sig_row_type), else no entries. A program that names the enum without
+// loading its module (a bare `Key`) checks and lays out its cases from these.
+CORE_ENUM_CASE_PAYLOADS: #run core_enum_case_payloads(CORE_DECLARATIONS)
+
 // Source-owned Core nominals (`source_module … types { … }`) in Core.rows order.
 CORE_SOURCE_OWNED_TYPES: #run core_source_owned_types(CORE_DECLARATIONS)
 
@@ -42,6 +49,26 @@ core_enum_case_rows: fn(declared: CoreDeclarations) -> [CoreModuleTypeExport] {
             }
             seen[leaf.name] = variants
             rows.push(CoreModuleTypeExport{name: leaf.name.copy(), kind: CoreLeafKind.Enum{variants: leaf.variants.copy()}})
+        }
+    }
+    rows
+}
+
+core_enum_case_payloads: fn(declared: CoreDeclarations) -> [[[Type]]] Never! {
+    rows := [[[Type]]]{}
+    loop entry in declared.modules {
+        loop leaf in entry.types {
+            if leaf.generic_arity > 0 || leaf.variants.len() == 0 -> next
+            carried: loop payload in leaf.payloads {
+                if payload != "" {
+                    break true
+                }
+            } ?? false
+            if !carried {
+                rows.push([[Type]]{})
+                next
+            }
+            rows.push(loop payload in leaf.payloads -> if payload == "" -> [Type]{} else -> [Type]{core_sig_row_type(payload, 0)})
         }
     }
     rows

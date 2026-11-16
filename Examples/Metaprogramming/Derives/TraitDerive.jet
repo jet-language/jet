@@ -1,0 +1,33 @@
+// A trait's derive: `impl Describe.Derive` holds the template that `#Describe`
+// expands for each marked type, and the template writes that type's
+// `Describe` impl. A derive has no `self`: the request carries no data, so
+// `target` is all the template reads.
+Describe: trait {
+    describe: fn(self) -> String
+}
+
+impl Describe.Derive {
+    expand: fn(target: Target) {
+        name: target.name
+        impl #{name}.Describe {
+            describe: fn(self) -> String { target.reflect().name }
+        }
+    }
+}
+
+#Describe
+Point: struct {
+    x: Int
+    y: Int
+}
+
+#Describe
+Color: enum {
+    Red
+    Green
+}
+
+run: fn() {
+    print(Point{x: 3, y: 4}.describe())
+    print(Color.Green.describe())
+}

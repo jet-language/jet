@@ -1,0 +1,19 @@
+# Closing a live connection ends that account's presence. Ann and Ben each
+# open task 1 over a WebSocket whose handler binds, reads and watches that
+# account's live query of who has `/tasks/1` open. Once Ben's client closes
+# and Ben's handler returns, the hub's leave signal drops Ben from
+# app.presence: Ann's connection receives a live event, Ann's next read shows
+# [ann], and app.presence as the system shows [ann]. Same output on o0/o1/o2.
+fixture: PresenceEndsWhenTheConnectionCloses.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = presence_ends_when_the_connection_closes.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

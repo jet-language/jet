@@ -1,0 +1,32 @@
+square: fn(n: Int) -> Int { n * n }
+
+// No local here is computed while compiling, but the explicit `#run` is.
+#Runtime(.NoEager) lazy: fn() {
+    lazy_local: square(7)
+    print(lazy_local)
+    lazy_explicit: #run square(8)
+    print(lazy_explicit)
+}
+
+// Unmarked code keeps automatic evaluation.
+eager: fn() {
+    eager_local: square(9)
+    print(eager_local)
+}
+
+// The mark covers its block only; the local after it is computed while
+// compiling again.
+block: fn() {
+    #Runtime(.NoEager) {
+        block_local: square(10)
+        print(block_local)
+    }
+    after_block: square(11)
+    print(after_block)
+}
+
+run: fn() {
+    lazy()
+    eager()
+    block()
+}

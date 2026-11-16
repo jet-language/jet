@@ -12,6 +12,9 @@ use {
         BodyNode,
         Call,
         CallArg,
+        BUILTIN_METHOD_ROWS,
+        CORE_ERROR_TYPES,
+        CORE_RECORD_LITERAL_ROWS,
         DIAGNOSTIC_ERROR,
         Diagnostic,
         DiagnosticFixApplicability,
@@ -55,6 +58,8 @@ use {
         type_union_member_tag,
         foundation_named_type,
         foundation_byte_text,
+        ir_host_value_name,
+        ir_runtime_handle_row,
         ModuleID,
         module_is_core,
         owned_trait_conversion,
@@ -65,89 +70,75 @@ use {
     ]
 }
 
-// The standard library's own error family, exactly the
-// `impl <member> -> Err` declarations of the embedded Prelude/Errors.jet (the
-// Rust reference's `is_core_error_family_type`). Adds the
-// payload-free `CryptoError` and `FileCryptoError`, and `AllocError`, whose
-// conversion allocates nothing. `TaskFailure` and component types stay
-// outside on purpose. The typed decode's `[FieldError]` list is the one
-// member that is not a named type, and the refused send's `SendError<T>` the
-// one generic member (sema_core_error_family_source).
-JET_CORE_ERROR_FAMILY: #run { [String]{
-    "AllocError",
-    "AppError",
-    "ArchiveError",
-    "Base32Error",
-    "Base64Error",
-    "BuildError",
-    "BrowserError",
-    "CBORError",
-    "ComputeError",
-    "CryptoError",
-    "DBError",
-    "DataError",
-    "EncodingError",
-    "EnvError",
-    "FileCryptoError",
-    "HTTPError",
-    "HexError",
-    "IOError",
-    "MIMEError",
-    "ModError",
-    "NetError",
-    "PerfError",
-    "PluginError",
-    "RangeError",
-    "RegexError",
-    "SendError",
-    "TextError",
-    "TimeError",
-    "UIHostError",
-    "URLError",
-    "UTF8Error",
-    "UUIDError",
-    "WsError",
-    "XMLError",
-} }
+// The standard library's own error family: the members of the
+// `impl <member> -> Err` declarations of Prelude/Errors.jet
+// (SEMA_PRELUDE_ERROR_SOURCE), read at build (the Rust reference's
+// `is_core_error_family_type`). That file says why each member belongs and
+// why `TaskFailure` and component types stay outside. The typed decode's
+// `[FieldError]` list is the one member that is not a named type, and the
+// refused send's `SendError<T>` the one generic member
+// (sema_core_error_family_source).
+JET_CORE_ERROR_FAMILY: #run sema_core_error_family_names(SEMA_PRELUDE_ERROR_SOURCE)
 
-// Every Core type that may be named as the error side
-// of an explicit `!` contract (the Rust reference's `is_core_error_type`).
-JET_CORE_ERROR_TYPES: #run { [String]{
-    "AllocError",
-    "AuthError",
+sema_core_error_family_names: fn(source: String) -> [String] Never! {
+    names := [String]{}
+    loop line in source.split("\n") {
+        declared: line.trim()
+        if declared.starts_with("impl ") && declared.ends_with(" -> Err {{") {
+            names.push(declared.removeprefix("impl ").removesuffix(" -> Err {{"))
+        }
+    }
+    names
+}
+
+// The error types the compiler owns, which no Core source declares: the
+// build and comptime host values BuildError, CompilerError and
+// CompilerPackageError (ir_host_value_name); the runtime handles Closed,
+// FieldError, IOError, RangeError, TextError and UTF8Error
+// (IR_RUNTIME_HANDLES); the `Expired` record (CORE_RECORD_LITERAL_ROWS); and
+// the ParseError that the builtin `parse`, `to_int` and `to_float` return
+// (BUILTIN_METHOD_ROWS). A Core error type is in Core.rows's `error_types`
+// (CORE_ERROR_TYPES) instead.
+SEMA_COMPILER_ERROR_TYPES: [String]{
     "BuildError",
-    "BrowserError",
-    "CBORError",
     "Closed",
     "CompilerError",
     "CompilerPackageError",
-    "ComputeError",
-    "CryptoError",
-    "DBError",
-    "DataError",
-    "EncodingCause",
-    "EncodingError",
-    "EnvError",
-    "EventConfigError",
     "Expired",
-    "FileCryptoError",
-    "HTTPError",
+    "FieldError",
     "IOError",
-    "UIHostError",
-    "KeyWrapError",
-    "NetError",
-    "RangeError",
-    "ServiceError",
     "ParseError",
-    "PluginError",
-    "TaskFailure",
+    "RangeError",
     "TextError",
     "UTF8Error",
-    "VaultError",
-    "WsError",
-    "XMLError",
-    "FieldError",
-} }
+}
+
+SEMA_COMPILER_ERROR_TYPES_CHECKED: #run sema_compiler_error_types_checked(SEMA_COMPILER_ERROR_TYPES)
+
+// The number of names in `owned` (SEMA_COMPILER_ERROR_TYPES), once each is a
+// host value, a runtime handle, a record or a builtin method's error and none
+// is a Core error type; else the build stops naming the first stray.
+sema_compiler_error_types_checked: fn(owned: [String]) -> Int {
+    loop name in owned {
+        if CORE_ERROR_TYPES.contains(name) {
+            panic("SEMA_COMPILER_ERROR_TYPES names {name}, which Core.rows error_types already lists")
+        }
+        if !ir_host_value_name(name) && ir_runtime_handle_row(name) == None && !sema_compiler_error_record_or_result(name) {
+            panic("SEMA_COMPILER_ERROR_TYPES names {name}, which no host value, runtime handle, record or builtin method error is")
+        }
+    }
+    owned.len()
+}
+
+sema_compiler_error_record_or_result: fn(name: String) -> Bool {
+    loop row in CORE_RECORD_LITERAL_ROWS {
+        if row.owner == name -> return true
+    }
+    loop row in BUILTIN_METHOD_ROWS {
+        if row.result == .Result(_, .Named(err_name)) && err_name == name -> return true
+    }
+    false
+}
 
 // A canonical owner identity (`<corelib>/core.crypto.uuid::UUIDError`)
 // reduces to its `::` leaf; a qualified spelling to its `.` leaf.
@@ -503,10 +494,7 @@ sema_gone_failure_blank_end: fn(raw: [U8], from: Int) -> Int Never! {
 
 sema_core_error_type: fn(name: String) -> Bool Never! {
     leaf: sema_error_conversion_leaf(name)
-    loop member in JET_CORE_ERROR_TYPES {
-        if member == leaf -> return true
-    }
-    false
+    CORE_ERROR_TYPES.contains(leaf) || SEMA_COMPILER_ERROR_TYPES.contains(leaf)
 }
 
 SemaErrorConversionEdge: struct {

@@ -16,6 +16,7 @@ use {
         ForKind,
         LValue,
         MARKER_OVERFLOW,
+        MARKER_RUNTIME,
         Marker,
         NameRange,
         NamedSpan,
@@ -37,7 +38,6 @@ use {
         TOKEN_EQ_EQ,
         TOKEN_GE,
         TOKEN_GT,
-        TOKEN_IDENT,
         TOKEN_KW_ELSE,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -45,6 +45,7 @@ use {
         TOKEN_LINE_COMMENT,
         TOKEN_LPAREN,
         TOKEN_LT,
+        TOKEN_LT_GT,
         TOKEN_NOT_EQ,
         TOKEN_RAW_STRING,
         TOKEN_RBRACKET,
@@ -182,6 +183,7 @@ jfmt_policy_key_name: fn(key: PolicyKey) -> String Never! {
         .Arithmetic -> "arithmetic"
         .Writes -> "writes"
         .Failures -> "failures"
+        .Runtime -> "runtime"
     }
 }
 
@@ -203,6 +205,8 @@ jfmt_policy_value_display: fn(value: PolicyValue) -> String Never! {
         .Off -> ".Off"
         .Explicit -> ".Explicit"
         .Arithmetic(mode) -> ".{overflow_mode_name(mode)}"
+        .NoEager -> ".NoEager"
+        .Only -> ".Only"
     }
 }
 
@@ -212,7 +216,7 @@ jfmt_fmt_policy_entry: fn(f: &JetFmt, declaration: PolicyDeclaration) {
     jfmt_write(f, jfmt_policy_key_name(declaration.key))
     if declaration.value == {
         .Limit(limit) -> jfmt_write(f, "({limit})")
-        .On | .Off | .Explicit | .Arithmetic(_) -> {
+        .On | .Off | .Explicit | .Arithmetic(_) | .NoEager | .Only -> {
             jfmt_write(f, ": ")
             jfmt_write(f, jfmt_policy_value_display(declaration.value))
         }
@@ -235,7 +239,7 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
                 if target != span -> next
                 tracked: if declaration.value == {
                     .Track | .Skip -> true
-                    .Enabled | .Limit(_) | .Forbid | .Default | .GateOnly | .Obligations | .Relaxed | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> false
+                    .Enabled | .Limit(_) | .Forbid | .Default | .GateOnly | .Obligations | .Relaxed | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) | .NoEager | .Only -> false
                 }
                 if !tracked -> next
                 args.push(JetFmtMarkerArgument.Expr{label: Val("obligations"), value: Expr.Ident{name: jfmt_policy_value_display(declaration.value), span: span, id: AST_NODE_GENERATED}})
@@ -254,9 +258,13 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
         .Shield(_, _) -> Val(JetFmtBlockMarker{name: "Shield", negated: false, args: [JetFmtMarkerArgument]{}})
         .Region(name, _, _, _) -> Val(JetFmtBlockMarker{name: "Region", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Ident{value: name}}})
         .Policy(declarations, _, _) -> {
-            // `#Overflow(.Wrapping) { … }` keeps its spelling.
+            // `#Overflow(.Wrapping) { … }` and `#Runtime(.NoEager) { … }`
+            // keep their spelling.
             if declarations.len() == 1 && declarations[0].source == MARKER_OVERFLOW && declarations[0].value == .Arithmetic(mode) {
                 return Val(JetFmtBlockMarker{name: MARKER_OVERFLOW, negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Ident{value: ".{overflow_mode_name(mode)}"}}})
+            }
+            if declarations.len() == 1 && declarations[0].source == MARKER_RUNTIME {
+                return Val(JetFmtBlockMarker{name: MARKER_RUNTIME, negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Ident{value: jfmt_policy_value_display(declarations[0].value)}}})
             }
             Val(JetFmtBlockMarker{name: "Policy", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Policy{declarations: declarations}}})
         }
@@ -1391,17 +1399,17 @@ jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [
     jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, false)
 }
 
-// A hole table (`if n % _ == 0 { 15 -> … }`) keeps its source as written,
+// A hole table (`if n % <> == 0 { 15 -> … }`) keeps its source as written,
 // since its arms hold the header filled with each candidate. The end of the
 // table's closing `}` for the `if` at `start`; -1 when the header has no
-// hole. A `_` in a case's payload (`r == .Val(_)`) is a wildcard, not a hole.
+// hole.
 jfmt_hole_table_end: fn(f: JetFmt, start: Int) -> Int Never! {
     index := jfmt_first_token_at(f, start) + 1
-    case_groups := [Bool]{}
+    groups := 0
     hole := false
     loop index < f.source_toks.len() {
         token: f.source_toks[index]
-        if case_groups.len() == 0 {
+        if groups == 0 {
             if token.kind == TOKEN_LBRACE {
                 if !hole || index >= f.brace_closes.len() || f.brace_closes[index] < 0 -> return -1
                 return f.source_toks[f.brace_closes[index]].span.end
@@ -1410,16 +1418,9 @@ jfmt_hole_table_end: fn(f: JetFmt, start: Int) -> Int Never! {
                 return -1
             }
         }
-        if token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET {
-            opener: f.source_toks[index - 1]
-            case_groups.push(opener.kind == TOKEN_IDENT && parser_pascal_name(jfmt_src_text(f, opener.span.start, opener.span.end)))
-        }
-        if (token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && case_groups.len() > 0 {
-            _ := case_groups.pop()
-        }
-        if token.kind == TOKEN_IDENT && jfmt_src_text(f, token.span.start, token.span.end) == "_" {
-            if case_groups.len() == 0 || !case_groups[case_groups.len() - 1] -> hole = true
-        }
+        if token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET -> groups += 1
+        if (token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && groups > 0 -> groups -= 1
+        if token.kind == TOKEN_LT_GT -> hole = true
         index += 1
     }
     -1

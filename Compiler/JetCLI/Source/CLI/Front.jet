@@ -2234,6 +2234,10 @@ jet_cli_test_option_error: fn(what: String, color: Bool) -> JetCLIPlan Never! {
 // and `test: fn`'s; the result cache and the flags the command model
 // (JET_CLI_FORMS) marks unported are not ported yet.
 jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env, Exec]> JetCLIPlan Never! {
+    // Test programs stop on purpose (aborts, fault reports, CPU limits), and a
+    // core file of each one is only noise on the developer's machine. Every
+    // program the run starts inherits this limit.
+    cli_sys.set_core_file_limit(Val(0), Val(0)) ?? ()
     if jet_cli_option_flags_refusal(jet_cli_test_build_argv(jet_argv, ""), color) == .Val(refusal) {
         return refusal
     }

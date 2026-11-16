@@ -6479,6 +6479,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     loop module_row in inputs {
         sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, calls.symbols, solved, diagnostics)
+        sema_effect_check_hole_headers(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, calls.symbols, solved, diagnostics)
     }
     // All source reads are finished: stamp the solved rows in place, the
     // frame bound of each function a stack denial reaches, and each uncalled
@@ -6945,6 +6946,36 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
         discarded.push(sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span))
     }
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, discarded)
+}
+
+// A call written in a hole table's header whose callee acts outside the
+// program: the header runs once per arm tried, so the action would repeat
+// once per arm (E0442). The parser checks the header once per arm, so one
+// written call reports once, with the fix its check found
+// (sema_expr_hole_header_fix); a call already refused for a change it makes
+// is not refused again.
+sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: NameRows, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
+    reported := [Diagnostic]{}
+    seen := [Span]{}
+    loop fact in call_facts {
+        detail: fact.detail ?? next
+        fix: detail.hole_header ?? next
+        if fix.reported || seen.contains(fact.span) -> next
+        if fact.callee == .Val(callee) {
+            callee_key: sema_effect_run_key(symbols, callee) ?? next
+            node_index: sema_effect_node_index(node_by_key, callee_key) ?? next
+            if sema_effect_deep_check_over(solved[node_index]).len() == 0 -> next
+            seen.push(fact.span)
+            reported.push(sema_expr_hole_header_diagnostic(nodes[node_index].name, "has an effect", fix, fact.span))
+            next
+        }
+        bound: fact.facts.effect_bound ?? next
+        names: loop entry in bound -> entry.name
+        if sema_effect_deep_check_over(names).len() == 0 -> next
+        seen.push(fact.span)
+        reported.push(sema_expr_hole_header_diagnostic(detail.intrinsic_api ?? "this call", "has an effect", fix, fact.span))
+    }
+    sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, reported)
 }
 
 // The walkers over a checked flat body: the one a child visit continues

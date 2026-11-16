@@ -70,7 +70,7 @@ deadline_receiver: fn(rx: Receiver<Int>) -> Int {
 deadline_vs_send: fn(rounds: Int) -> (received: Int, expired: Int) {
     received := 0
     expired := 0
-    loop i in 0..<rounds {
+    loop _ in 0..<rounds {
         { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
         waiter: task deadline_receiver(rx)
         time.sleep(1ms)
@@ -99,7 +99,7 @@ idler: fn(nap: Duration) -> Int {
 parked_cpu: fn(nap: Duration) -[Env, Time.Wait]> (spent: Duration, woke: Int) {
     before: sys.usage() ?? panic("usage")
     idle := [Task<Int>]{}
-    loop i in 0..<1000 -> idle.push(task idler(nap))
+    loop _ in 0..<1000 -> idle.push(task idler(nap))
     woke := 0
     loop handle in idle -> woke += handle.join() ?? 0
     after: sys.usage() ?? panic("usage")
@@ -108,7 +108,7 @@ parked_cpu: fn(nap: Duration) -[Env, Time.Wait]> (spent: Duration, woke: Int) {
 
 run: fn() {
     races := [Task<Int>]{}
-    loop r in 0..<RACERS -> races.push(task racer())
+    loop _ in 0..<RACERS -> races.push(task racer())
     accounted := 0
     loop race in races -> accounted += race.join() ?? 0
     print("rounds accounted {accounted} of {RACERS * 2000}")

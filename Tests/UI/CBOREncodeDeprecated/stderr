@@ -1,8 +1,8 @@
-Error [jet.DispatchHoleOutsideTable]: `_` stands for an arm's candidate only in the header of an `if` table
+Error [jet.UnknownName]: `_` is not a name, so it has no value to read
   --> Tests/UI/CBOREncodeDeprecated/run.jet:8:5
     |
   8 |     _ = cbor.encode(tree)
     |     ^
- Why: In `if header { candidate -> body }` each candidate takes the place of the header's `_`; nowhere else does `_` have a value
- Fix: Write the value here, or move the test into an `if` header followed by `{` and its arms
-More: jet-lang.dev/e/E0947
+ Why: `_` throws a value away where a binding would go; it never names one
+ Fix: To throw a value away write `_: value`; to read it, bind it to a name and read that name
+More: jet-lang.dev/e/E0107

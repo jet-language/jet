@@ -13,250 +13,178 @@ use jet_foundation.[
     SymbolKind,
     Type,
     core_identity_is,
+    core_module_export,
+    ir_runtime_handle_row,
 ]
 
-SemaNetworkHandleSpec: struct {
+// The Core handles whose method calls sema types from
+// SEMA_NETWORK_HANDLE_METHODS. Each is a runtime handle (IR_RUNTIME_HANDLES)
+// whose methods no Core source declares, so no declaration answers the call.
+SEMA_NETWORK_HANDLE_OWNERS: [String]{"TCPListener", "TCPStream", "UDPSocket", "UnixListener", "UnixStream", "WsConn", "WsMessage"}
+
+// One parameter of a handle method: `deadline:` is passed by label only, and
+// `&buffer` is a written place the read appends to in place.
+SemaNetworkHandleParam: struct {
+    name: String
+    ty: Type
+    label_only: Bool
+    write: Bool
+}
+
+// One form of a handle method: its owner and the owner's Core module, the
+// operation the call lowers to, its result, the parameters, whose count is
+// the form's arity, and the effect the call records ("" for none).
+SemaNetworkHandleMethod: struct {
+    owner: String
+    module: String
+    method: String
     operation: THandleOp
-    result_type: Type
-    params: [SemaCallParam]
-    receiver_convention: AccessConvention
-    callback_non_escaping: Bool
-    effect_name: String?
+    result: Type
+    params: [SemaNetworkHandleParam]
+    effect: String
 }
 
-sema_network_handle_parameter: fn(name: String, label: String, ty: Type, zone: ParamZone) -> SemaCallParam Never! {
-    SemaCallParam{
-        label: label,
-        name: name,
-        zone: zone,
-        default: None,
-        default_ref: None,
-        convention: AccessConvention.Read,
-        ty: Val(ty),
-        variadic: false,
-    }
-}
+SEMA_NETWORK_HANDLE_DEADLINE: SemaNetworkHandleParam{name: "deadline", ty: Type.Named{name: "Duration"}, label_only: true, write: false}
 
-sema_network_handle_argument: fn(name: String, ty: Type) -> SemaCallParam Never! {
-    sema_network_handle_parameter(name, name, ty, ParamZone.Either)
-}
+SEMA_NETWORK_HANDLE_MAX_BYTES: SemaNetworkHandleParam{name: "max_bytes", ty: Type.Int, label_only: false, write: false}
 
-sema_network_handle_deadline: fn() -> SemaCallParam Never! {
-    sema_network_handle_parameter("deadline", "deadline", Type.Named{name: "Duration"}, ParamZone.LabelOnly)
-}
+SEMA_NETWORK_HANDLE_LIMIT: SemaNetworkHandleParam{name: "limit", ty: Type.Int, label_only: false, write: false}
 
-sema_network_handle_spec: fn(operation: THandleOp, result_type: Type, params: [SemaCallParam], receiver_convention: AccessConvention) -> SemaNetworkHandleSpec Never! {
-    SemaNetworkHandleSpec{
-        operation: operation,
-        result_type: result_type,
-        params: params,
-        receiver_convention: receiver_convention,
-        callback_non_escaping: false,
-        effect_name: Val("Net"),
-    }
-}
+SEMA_NETWORK_HANDLE_TEXT: SemaNetworkHandleParam{name: "text", ty: Type.String, label_only: false, write: false}
 
-sema_network_handle_result: fn(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
-
-sema_network_handle_net_result: fn(ok: Type) -> Type Never! {
-    sema_network_handle_result(ok, Type.Named{name: "NetError"})
-}
-
-sema_network_handle_u8_list: fn() -> Type Never! {
-    Type.List{element: Type.IntN{signed: false, bits: 8}}
-}
+SEMA_NETWORK_HANDLE_BYTES: SemaNetworkHandleParam{name: "bytes", ty: Type.List{element: Type.IntN{signed: false, bits: 8}}, label_only: false, write: false}
 
 // `read_into`'s `&buffer: [U8]`: the read appends to the caller's List in
-// place (#5976).
-sema_network_handle_buffer: fn() -> SemaCallParam Never! {
-    param := sema_network_handle_argument("buffer", sema_network_handle_u8_list())
-    param.convention = AccessConvention.Write
-    param
+// place.
+SEMA_NETWORK_HANDLE_BUFFER: SemaNetworkHandleParam{name: "buffer", ty: Type.List{element: Type.IntN{signed: false, bits: 8}}, label_only: false, write: true}
+
+SEMA_NETWORK_HANDLE_INTEREST: SemaNetworkHandleParam{name: "interest", ty: Type.Named{name: "NetReadyInterest"}, label_only: false, write: false}
+
+// Every method form of SEMA_NETWORK_HANDLE_OWNERS, an owner's forms of one
+// method in rising arity.
+SEMA_NETWORK_HANDLE_METHODS: [SemaNetworkHandleMethod]{
+    {owner: "TCPListener", module: "core.net", method: "accept", operation: THandleOp.TCPListenerAccept, result: Type.Result{ok: Type.Named{name: "TCPStream"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPListener", module: "core.net", method: "accept", operation: THandleOp.TCPListenerAcceptDeadline, result: Type.Result{ok: Type.Named{name: "TCPStream"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPListener", module: "core.net", method: "local_addr", operation: THandleOp.TCPListenerLocalAddr, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read", operation: THandleOp.TCPStreamRead, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read", operation: THandleOp.TCPStreamReadText, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read", operation: THandleOp.TCPStreamReadTextDeadline, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read_bytes", operation: THandleOp.TCPStreamReadBytes{into: false}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read_bytes", operation: THandleOp.TCPStreamReadBytesDeadline{into: false}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read_into", operation: THandleOp.TCPStreamReadBytes{into: true}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BUFFER, SEMA_NETWORK_HANDLE_LIMIT}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read_into", operation: THandleOp.TCPStreamReadBytesDeadline{into: true}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BUFFER, SEMA_NETWORK_HANDLE_LIMIT, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write", operation: THandleOp.TCPStreamWriteText, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_TEXT}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write", operation: THandleOp.TCPStreamWriteTextDeadline, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_TEXT, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write_some", operation: THandleOp.TCPStreamWriteBytes, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write_some", operation: THandleOp.TCPStreamWriteBytesDeadline, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write_bytes", operation: THandleOp.TCPStreamWriteAllBytes, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write_bytes", operation: THandleOp.TCPStreamWriteAllBytesDeadline, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "shutdown", operation: THandleOp.TCPStreamShutdown, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{{name: "how", ty: Type.Named{name: "NetShutdown"}, label_only: false, write: false}}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "ready", operation: THandleOp.TCPStreamReady, result: Type.Result{ok: Type.Named{name: "NetReady"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_INTEREST, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "peer_addr", operation: THandleOp.TCPStreamPeerAddr, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "local_addr", operation: THandleOp.TCPStreamLocalAddr, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "close", operation: THandleOp.TCPStreamClose, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "UDPSocket", module: "core.net", method: "ready", operation: THandleOp.UDPSocketReady, result: Type.Result{ok: Type.Named{name: "NetReady"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_INTEREST, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UDPSocket", module: "core.net", method: "close", operation: THandleOp.UDPSocketClose, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "UDPSocket", module: "core.net", method: "receive", operation: THandleOp.UDPSocketReceiveDeadline, result: Type.Result{ok: Type.Named{name: "UDPPacket"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UDPSocket", module: "core.net", method: "send_to", operation: THandleOp.UDPSocketSendToDeadline, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, {name: "address", ty: Type.Named{name: "SocketAddr"}, label_only: false, write: false}, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixListener", module: "core.net", method: "accept", operation: THandleOp.UnixListenerAcceptDeadline, result: Type.Result{ok: Type.Named{name: "UnixStream"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "read_bytes", operation: THandleOp.UnixStreamReadDeadline{into: false}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "read_into", operation: THandleOp.UnixStreamReadDeadline{into: true}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BUFFER, SEMA_NETWORK_HANDLE_LIMIT, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "write_bytes", operation: THandleOp.UnixStreamWriteAllDeadline, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "ready", operation: THandleOp.UnixStreamReady, result: Type.Result{ok: Type.Named{name: "NetReady"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_INTEREST, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "close", operation: THandleOp.UnixStreamClose, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "set_timeout", operation: THandleOp.UnixStreamSetTimeout, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{{name: "timeout", ty: Type.Named{name: "Duration"}, label_only: false, write: false}}, effect: "Net"},
+    {owner: "WsConn", module: "core.net.ws", method: "send_text", operation: THandleOp.HTTPServerMethod{kind: "WsConn", method: "send_text"}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_TEXT}, effect: "Net"},
+    {owner: "WsConn", module: "core.net.ws", method: "send_bytes", operation: THandleOp.HTTPServerMethod{kind: "WsConn", method: "send_bytes"}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES}, effect: "Net"},
+    {owner: "WsConn", module: "core.net.ws", method: "recv", operation: THandleOp.HTTPServerMethod{kind: "WsConn", method: "recv"}, result: Type.Result{ok: Type.Named{name: "WsMessage"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "WsConn", module: "core.net.ws", method: "close", operation: THandleOp.HTTPServerMethod{kind: "WsConn", method: "close"}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{{name: "code", ty: Type.Int, label_only: false, write: false}, {name: "reason", ty: Type.String, label_only: false, write: false}}, effect: "Net"},
+    {owner: "WsMessage", module: "core.net.ws", method: "is_text", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "is_text"}, result: Type.Bool, params: [SemaNetworkHandleParam]{}, effect: ""},
+    {owner: "WsMessage", module: "core.net.ws", method: "is_binary", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "is_binary"}, result: Type.Bool, params: [SemaNetworkHandleParam]{}, effect: ""},
+    {owner: "WsMessage", module: "core.net.ws", method: "is_close", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "is_close"}, result: Type.Bool, params: [SemaNetworkHandleParam]{}, effect: ""},
+    {owner: "WsMessage", module: "core.net.ws", method: "text", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "text"}, result: Type.Result{ok: Type.String, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{}, effect: ""},
+    {owner: "WsMessage", module: "core.net.ws", method: "bytes", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "bytes"}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{}, effect: ""},
 }
 
-// Rust `net_method_return` infers a handle method's arguments without an
-// access convention: the readiness interest and the shutdown direction are
-// read, never taken from the caller.
-sema_network_handle_ready_params: fn() -> [SemaCallParam] Never! {
-    [SemaCallParam]{
-        sema_network_handle_argument("interest", Type.Named{name: "NetReadyInterest"}),
-        sema_network_handle_deadline(),
+SEMA_NETWORK_HANDLE_METHODS_CHECKED: #run sema_network_handle_methods_checked(SEMA_NETWORK_HANDLE_OWNERS, SEMA_NETWORK_HANDLE_METHODS)
+
+// The number of forms in `methods` (SEMA_NETWORK_HANDLE_METHODS), once every
+// owner is a runtime handle with one Core module and at least one form, every
+// form's owner is one of `owners` and no two forms share an owner, a method
+// and an arity; else the build stops naming the first stray.
+sema_network_handle_methods_checked: fn(owners: [String], methods: [SemaNetworkHandleMethod]) -> Int {
+    loop owner in owners {
+        if ir_runtime_handle_row(owner) == None {
+            panic("SEMA_NETWORK_HANDLE_OWNERS names {owner}, which is no runtime handle (IR_RUNTIME_HANDLES)")
+        }
+        home: sema_network_handle_owner_module(owner)
+        if home == "" {
+            panic("SEMA_NETWORK_HANDLE_OWNERS names {owner}, which no SEMA_NETWORK_HANDLE_METHODS row has")
+        }
+        if core_module_export(home) == None {
+            panic("SEMA_NETWORK_HANDLE_METHODS puts {owner} in {home}, which is no Core module")
+        }
     }
+    loop index in 0..<methods.len() {
+        owner: methods[index].owner
+        method: methods[index].method
+        if !owners.contains(owner) {
+            panic("SEMA_NETWORK_HANDLE_METHODS has {owner}.{method}, whose owner SEMA_NETWORK_HANDLE_OWNERS does not name")
+        }
+        if methods[index].module != sema_network_handle_owner_module(owner) {
+            panic("SEMA_NETWORK_HANDLE_METHODS puts {owner} in two modules")
+        }
+        loop earlier in 0..<index {
+            if methods[earlier].owner == owner && methods[earlier].method == method && methods[earlier].params.len() == methods[index].params.len() {
+                panic("SEMA_NETWORK_HANDLE_METHODS has {owner}.{method} with {methods[index].params.len()} arguments twice")
+            }
+        }
+    }
+    methods.len()
 }
 
-sema_network_handle_spec_for: fn(owner: String, method: String, argc: Int) -> SemaNetworkHandleSpec? {
-    unit := Type.Named{name: "Unit"}
-    string := Type.String
-    bytes := sema_network_handle_u8_list()
-    duration := Type.Named{name: "Duration"}
-    int := Type.Int
-    if owner == "TCPListener" {
-        if method == "accept" && argc == 0 {
-            return Val(sema_network_handle_spec(THandleOp.TCPListenerAccept, sema_network_handle_net_result(Type.Named{name: "TCPStream"}), [SemaCallParam]{}, AccessConvention.Read))
-        }
-        if method == "accept" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.TCPListenerAcceptDeadline, sema_network_handle_net_result(Type.Named{name: "TCPStream"}), [SemaCallParam]{sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "local_addr" && argc == 0 {
-            return Val(sema_network_handle_spec(THandleOp.TCPListenerLocalAddr, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
-        }
-    }
-    if owner == "TCPStream" {
-        if method == "read" && argc == 0 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamRead, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
-        }
-        if method == "read" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamReadText, sema_network_handle_net_result(string), [SemaCallParam]{sema_network_handle_argument("max_bytes", int)}, AccessConvention.Read))
-        }
-        if method == "read" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamReadTextDeadline, sema_network_handle_net_result(string), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "read_bytes" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytes{into: false}, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int)}, AccessConvention.Read))
-        }
-        if method == "read_bytes" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytesDeadline{into: false}, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "read_into" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytes{into: true}, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_buffer(), sema_network_handle_argument("limit", int)}, AccessConvention.Read))
-        }
-        if method == "read_into" && argc == 3 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytesDeadline{into: true}, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_buffer(), sema_network_handle_argument("limit", int), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "write" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteText, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("text", string)}, AccessConvention.Read))
-        }
-        if method == "write" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteTextDeadline, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("text", string), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "write_some" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteBytes, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_argument("bytes", bytes)}, AccessConvention.Read))
-        }
-        if method == "write_some" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteBytesDeadline, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "write_bytes" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteAllBytes, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("bytes", bytes)}, AccessConvention.Read))
-        }
-        if method == "write_bytes" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteAllBytesDeadline, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "shutdown" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamShutdown, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("how", Type.Named{name: "NetShutdown"})}, AccessConvention.Read))
-        }
-        if method == "ready" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamReady, sema_network_handle_net_result(Type.Named{name: "NetReady"}), sema_network_handle_ready_params(), AccessConvention.Read))
-        }
-        if method == "peer_addr" && argc == 0 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamPeerAddr, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
-        }
-        if method == "local_addr" && argc == 0 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamLocalAddr, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
-        }
-        if method == "close" && argc == 0 {
-            return Val(sema_network_handle_spec(THandleOp.TCPStreamClose, sema_network_handle_net_result(unit), [SemaCallParam]{}, AccessConvention.Read))
-        }
-    }
-    if owner == "UDPSocket" {
-        if method == "ready" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.UDPSocketReady, sema_network_handle_net_result(Type.Named{name: "NetReady"}), sema_network_handle_ready_params(), AccessConvention.Read))
-        }
-        if method == "close" && argc == 0 {
-            return Val(sema_network_handle_spec(THandleOp.UDPSocketClose, sema_network_handle_net_result(unit), [SemaCallParam]{}, AccessConvention.Read))
-        }
-        if method == "receive" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.UDPSocketReceiveDeadline, sema_network_handle_net_result(Type.Named{name: "UDPPacket"}), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "send_to" && argc == 3 {
-            return Val(sema_network_handle_spec(THandleOp.UDPSocketSendToDeadline, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_argument("address", Type.Named{name: "SocketAddr"}), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-    }
-    if owner == "UnixListener" {
-        if method == "accept" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.UnixListenerAcceptDeadline, sema_network_handle_net_result(Type.Named{name: "UnixStream"}), [SemaCallParam]{sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-    }
-    if owner == "UnixStream" {
-        if method == "read_bytes" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.UnixStreamReadDeadline{into: false}, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "read_into" && argc == 3 {
-            return Val(sema_network_handle_spec(THandleOp.UnixStreamReadDeadline{into: true}, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_buffer(), sema_network_handle_argument("limit", int), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "write_bytes" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.UnixStreamWriteAllDeadline, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_deadline()}, AccessConvention.Read))
-        }
-        if method == "ready" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.UnixStreamReady, sema_network_handle_net_result(Type.Named{name: "NetReady"}), sema_network_handle_ready_params(), AccessConvention.Read))
-        }
-        if method == "close" && argc == 0 {
-            return Val(sema_network_handle_spec(THandleOp.UnixStreamClose, sema_network_handle_net_result(unit), [SemaCallParam]{}, AccessConvention.Read))
-        }
-        if method == "set_timeout" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.UnixStreamSetTimeout, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("timeout", duration)}, AccessConvention.Read))
-        }
-    }
-    if owner == "WsConn" {
-        ws_error := Type.Named{name: "WsError"}
-        if method == "send_text" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.HTTPServerMethod{kind: "WsConn", method: method}, sema_network_handle_result(unit, ws_error), [SemaCallParam]{sema_network_handle_argument("text", string)}, AccessConvention.Read))
-        }
-        if method == "send_bytes" && argc == 1 {
-            return Val(sema_network_handle_spec(THandleOp.HTTPServerMethod{kind: "WsConn", method: method}, sema_network_handle_result(unit, ws_error), [SemaCallParam]{sema_network_handle_argument("bytes", bytes)}, AccessConvention.Read))
-        }
-        if method == "recv" && argc == 0 {
-            return Val(sema_network_handle_spec(THandleOp.HTTPServerMethod{kind: "WsConn", method: method}, sema_network_handle_result(Type.Named{name: "WsMessage"}, ws_error), [SemaCallParam]{}, AccessConvention.Read))
-        }
-        if method == "close" && argc == 2 {
-            return Val(sema_network_handle_spec(THandleOp.HTTPServerMethod{kind: "WsConn", method: method}, sema_network_handle_result(unit, ws_error), [SemaCallParam]{sema_network_handle_argument("code", int), sema_network_handle_argument("reason", string)}, AccessConvention.Read))
-        }
-    }
-    if owner == "WsMessage" {
-        if (method == "is_text" || method == "is_binary" || method == "is_close") && argc == 0 {
-            spec := sema_network_handle_spec(THandleOp.HTTPServerMethod{kind: "WsMessage", method: method}, Type.Bool, [SemaCallParam]{}, AccessConvention.Read)
-            spec.effect_name = Val("")
-            return Val(spec)
-        }
-        if method == "text" && argc == 0 {
-            spec := sema_network_handle_spec(THandleOp.HTTPServerMethod{kind: "WsMessage", method: method}, sema_network_handle_result(string, Type.Named{name: "WsError"}), [SemaCallParam]{}, AccessConvention.Read)
-            spec.effect_name = Val("")
-            return Val(spec)
-        }
-        if method == "bytes" && argc == 0 {
-            spec := sema_network_handle_spec(THandleOp.HTTPServerMethod{kind: "WsMessage", method: method}, sema_network_handle_result(bytes, Type.Named{name: "WsError"}), [SemaCallParam]{}, AccessConvention.Read)
-            spec.effect_name = Val("")
-            return Val(spec)
+// The SEMA_NETWORK_HANDLE_METHODS row of `owner.method` called with `argc`
+// arguments.
+sema_network_handle_method_row: fn(owner: String, method: String, argc: Int) -> Int? Never! {
+    loop index in 0..<SEMA_NETWORK_HANDLE_METHODS.len() {
+        if SEMA_NETWORK_HANDLE_METHODS[index].owner == owner && SEMA_NETWORK_HANDLE_METHODS[index].method == method && SEMA_NETWORK_HANDLE_METHODS[index].params.len() == argc {
+            return Val(index)
         }
     }
     None
 }
 
+// The checked parameters of a handle method form.
+sema_network_handle_params: fn(params: [SemaNetworkHandleParam]) -> [SemaCallParam] Never! {
+    checked := [SemaCallParam]{}
+    loop param in params {
+        checked.push(
+            SemaCallParam{
+                label: param.name,
+                name: param.name,
+                zone: if param.label_only -> ParamZone.LabelOnly else -> ParamZone.Either,
+                default: None,
+                default_ref: None,
+                convention: if param.write -> AccessConvention.Write else -> AccessConvention.Read,
+                ty: Val(param.ty),
+                variadic: false,
+            },
+        )
+    }
+    checked
+}
+
 sema_network_handle_known_method: fn(owner: String, method: String) -> Bool Never! {
-    if owner == "TCPListener" -> return method == "accept" || method == "local_addr"
-    if owner == "TCPStream" {
-        return method == "read" || method == "read_bytes" || method == "read_into" || method == "write" || method == "write_some" || method == "write_bytes" || method == "shutdown" || method == "ready" || method == "peer_addr" || method == "local_addr" || method == "close"
-    }
-    if owner == "UDPSocket" {
-        return method == "ready" || method == "close" || method == "receive" || method == "send_to"
-    }
-    if owner == "UnixListener" -> return method == "accept"
-    if owner == "UnixStream" {
-        return method == "read_bytes" || method == "read_into" || method == "write_bytes" || method == "ready" || method == "close" || method == "set_timeout"
-    }
-    if owner == "WsConn" {
-        return method == "send_text" || method == "send_bytes" || method == "recv" || method == "close"
-    }
-    if owner == "WsMessage" {
-        return method == "is_text" || method == "is_binary" || method == "is_close" || method == "text" || method == "bytes"
+    loop row in SEMA_NETWORK_HANDLE_METHODS {
+        if row.owner == owner && row.method == method -> return true
     }
     false
 }
 
 sema_network_handle_owner_module: fn(owner: String) -> String Never! {
-    if owner == "TCPListener" || owner == "TCPStream" || owner == "UDPSocket" || owner == "UnixListener" || owner == "UnixStream" {
-        return "core.net"
+    loop row in SEMA_NETWORK_HANDLE_METHODS {
+        if row.owner == owner -> return row.module
     }
-    if owner == "WsConn" || owner == "WsMessage" -> return "core.net.ws"
     ""
 }
 
@@ -269,21 +197,20 @@ sema_network_handle_nominal_owner: fn(ty: Type) -> String? {
     }
 }
 
-// Rust `core_net_handle_dispatch_name`: the canonical `core.net` TCP handle
-// identities and their bare spellings project onto the method table.
+// Rust `core_net_handle_dispatch_name`: an owner's canonical Core identity
+// and its bare spelling project onto the method table.
 sema_network_handle_dispatch_name: fn(name: String) -> String? Never! {
-    if name == "TCPStream" || core_identity_is(name, "core.net", "TCPStream") {
-        return Val("TCPStream")
-    }
-    if name == "TCPListener" || core_identity_is(name, "core.net", "TCPListener") {
-        return Val("TCPListener")
+    loop owner in SEMA_NETWORK_HANDLE_OWNERS {
+        if name == owner || core_identity_is(name, sema_network_handle_owner_module(owner), owner) {
+            return Val(owner)
+        }
     }
     None
 }
 
 // Rust `net_method_return` claims a receiver by its type name alone: the
 // handle owners are Core leaf types with no source declaration, so the bare
-// spelling (or the canonical `core.net` TCP identity) is the Core handle. A
+// spelling (or the owner's canonical Core identity) is the Core handle. A
 // bare name the module itself resolves names the Core owner only when that
 // declaration belongs to the owner's Core module.
 sema_network_handle_is_canonical: fn(receiver_type: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -309,39 +236,16 @@ sema_network_handle_infer_args: fn(args: [CallArg], environment: SemaScopeEnviro
     }
 }
 
+// The arities of `owner.method`'s forms: "1", "1 or 2", "0, 1, or 2".
 sema_network_handle_expected_arity: fn(owner: String, method: String) -> String Never! {
-    if owner == "TCPListener" {
-        if method == "accept" -> return "0 or 1"
-        return "0"
+    arities := [String]{}
+    loop row in SEMA_NETWORK_HANDLE_METHODS {
+        if row.owner == owner && row.method == method -> arities.push("{row.params.len()}")
     }
-    if owner == "TCPStream" {
-        if method == "read" -> return "0, 1, or 2"
-        if method == "read_into" -> return "2 or 3"
-        if method == "read_bytes" || method == "write" || method == "write_some" || method == "write_bytes" {
-            return "1 or 2"
-        }
-        if method == "shutdown" -> return "1"
-        if method == "ready" -> return "2"
-        return "0"
-    }
-    if owner == "UDPSocket" {
-        if method == "ready" || method == "receive" -> return "2"
-        if method == "send_to" -> return "3"
-        return "0"
-    }
-    if owner == "UnixListener" -> return "1"
-    if owner == "UnixStream" {
-        if method == "read_into" -> return "3"
-        if method == "read_bytes" || method == "write_bytes" || method == "ready" -> return "2"
-        if method == "set_timeout" -> return "1"
-        return "0"
-    }
-    if owner == "WsConn" {
-        if method == "send_text" || method == "send_bytes" -> return "1"
-        if method == "close" -> return "2"
-        return "0"
-    }
-    "0"
+    if arities.len() < 2 -> return arities.join("")
+    last: arities.pop() ?? ""
+    if arities.len() == 1 -> return "{arities[0]} or {last}"
+    "{arities.join(", ")}, or {last}"
 }
 
 sema_network_handle_arity_diagnostic: fn(owner: String, method: String, argc: Int, span: Span, diagnostics: &[Diagnostic]) {
@@ -349,17 +253,14 @@ sema_network_handle_arity_diagnostic: fn(owner: String, method: String, argc: In
     diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects {expected} arguments, got {argc}", "the core networking handle has a fixed checked signature", "pass the arguments and deadline labels for this method's documented form"))
 }
 
-sema_network_handle_effect_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String?, diagnostics: &[Diagnostic]) -> Bool Never! {
-    effect_row := [EffectRowEntry]?{None}
-    if effect_name == .Val(name) {
-        entries := [EffectRowEntry]{}
-        if name != "" -> entries.push(EffectRowEntry{name: name, span: span})
-        effect_row = Val(entries)
-    }
+// The call's effect row names `effect_name`, or nothing when it is "".
+sema_network_handle_effect_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+    entries := [EffectRowEntry]{}
+    if effect_name != "" -> entries.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
         return_type: result_type,
         failure_carrier: sema_call_failure_carrier(Val(result_type)),
-        effect_bound: effect_row,
+        effect_bound: Val(entries),
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},
     }
@@ -401,7 +302,7 @@ sema_network_handle_checked_args: fn(method: String, params: [SemaCallParam], ar
     Val(values)
 }
 
-sema_network_handle_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String?, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+sema_network_handle_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_network_handle_effect_fact(environment, program, scopes, context, api, span, result_type, effect_name, diagnostics) {
@@ -419,18 +320,17 @@ sema_call_try_network_handle_method: fn(receiver: Expr, receiver_value: TExpr, m
     if !sema_network_handle_is_canonical(receiver_value.ty, owner, environment, program) || !sema_network_handle_known_method(owner, method) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    spec := sema_network_handle_spec_for(owner, method, args.len())
-    if spec == None {
+    row: sema_network_handle_method_row(owner, method, args.len()) ?? {
         sema_network_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         sema_network_handle_arity_diagnostic(owner, method, args.len(), span, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    signature := spec ?? SemaNetworkHandleSpec{operation: THandleOp.TCPStreamRead, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: None}
-    checked_args: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), signature.receiver_convention, signature.callback_non_escaping, span, environment, program, scopes, state, tail_store, context, diagnostics)
+    params: sema_network_handle_params(SEMA_NETWORK_HANDLE_METHODS[row].params)
+    checked_args: sema_network_handle_checked_args(method, params, args, Val(receiver), AccessConvention.Read, false, span, environment, program, scopes, state, tail_store, context, diagnostics)
     // Rust `net_method_return` types the network handle methods without
     // recording a receiver convention, so a written mark (`stream.write(…)`)
     // has nothing to be compared with.
     sema_receiver_mark_forget(state, receiver)
     typed_args := checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, program, scopes, context, diagnostics)
+    sema_network_handle_finish(receiver_value, SEMA_NETWORK_HANDLE_METHODS[row].operation, typed_args, SEMA_NETWORK_HANDLE_METHODS[row].result, SEMA_NETWORK_HANDLE_METHODS[row].effect, "{owner}.{method}", span, expected, environment, program, scopes, context, diagnostics)
 }

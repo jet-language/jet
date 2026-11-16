@@ -122,7 +122,6 @@ use {
         TOKEN_KW_PRIV,
         TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
-        TOKEN_KW_TAG,
         TOKEN_KW_TRAIT,
         TOKEN_KW_USE,
         TOKEN_LBRACE,
@@ -333,6 +332,9 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
         token.kind == TOKEN_KW_TRAIT -> {
             value: parser_parse_trait(state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Trait{value: value}), handled: true}
+        }
+        parser_derive_impl_ahead(state) -> {
+            return ParsedItemOrImport{item: Val(Item.MarkerDecl{value: parser_parse_derive_impl(state, modifiers)}), handled: true}
         }
         token.kind == TOKEN_KW_IMPL -> return ParsedItemOrImport{item: Val(parser_parse_impl(state, modifiers)), handled: true}
         token.kind == TOKEN_KW_MODULE -> return ParsedItemOrImport{item: Val(parser_parse_module(state, modifiers)), handled: true}
@@ -2209,7 +2211,7 @@ parser_apply_struct_markers: fn(state: &JetParserState, value: &StructDef, marke
 // names a field too (a marker's `use` argument, `Deprecated{use: …}`).
 parser_field_name: fn(state: &JetParserState, context: String) -> Token {
     token: parser_current(state)
-    if token.kind != TOKEN_IDENT && token.kind != TOKEN_KW_TAG && parser_kind_at(state, 1) == TOKEN_COLON && parser_is_keyword_token(state, token) {
+    if token.kind != TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && parser_is_keyword_token(state, token) {
         parser_bump(state)
         spelling: parser_text(state, token)
         return parser_spelled_token(state, TOKEN_IDENT, token.span, spelling)

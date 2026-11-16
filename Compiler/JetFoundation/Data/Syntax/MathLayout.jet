@@ -773,14 +773,6 @@ FOREIGN_CLASS: "class"
 /// S28/S62; retires `~~` (S83).
 KW_TRAIT: "trait"
 
-/// Retired declaration word: a value tag is a field-less struct whose
-/// `impl Marker` block names `sites: [.TypeUse]`, and its `#FX(!…)` row lists
-/// its denials. The word stays a token so `tag` still reads as a name or label.
-KW_TAG: "tag"
-
-/// S55 (ratified M9): opt-in built-in derive line in a type body.
-KW_DERIVE: "derive"
-
 /// The compiler requests, which must run while building: `#run { … }`, a
 /// value `NAME: #run build_table()` (an unbraced `#run` takes one postfix
 /// operand; anything larger keeps its braces), a `#run fn` hook and a
@@ -843,8 +835,10 @@ OP_OPTIONAL_CHAIN: "?."
 /// loosest form, and each step may carry its own `??` route.
 OP_PIPE_STEP: "|>"
 
-/// Inside a `|>` step, the value that step receives. Legal only in a step;
-/// the nearest enclosing step wins, through lambdas and string holes.
+/// Inside a `|>` step, the value that step receives; the nearest enclosing
+/// step wins, through lambdas and string holes. In the header of an `if`
+/// table, outside any step, the one hole each arm's candidate fills in turn:
+/// `if n % <> == 0 { 3 -> … else -> … }`. Anywhere else it is E0437.
 OP_PIPE_VALUE: "<>"
 
 /// S71 (ratified 2026-06-15): the retired word fallback; the fallback is

@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A screen&#39;s state is its address: each of its fields is a `:field` segment of the path or, marked `#App.Query`, goes after `?`, and every target opens the screen from that address, so the state has one screen and each field a place in the address.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write the path as a string literal starting with `/`, give the view one parameter besides its `app.Remote&lt;S&gt;` ones, a struct whose fields each derive `Encode`, name each field that isn&#39;t `#App.Query` once as a `:field` segment, and register each state at one screen.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write the path as a string literal starting with `/`, give the view one parameter besides its `app.Remote&lt;S&gt;` ones, a struct whose fields each derive `Encode` and `Decode`, make the view unable to fail and give a value that derives `Encode`, name each field that isn&#39;t `#App.Query` once as a `:field` segment, and register each state at one screen.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2820</code>: <code>Tests/UI/app_screen_field_not_in_address.stderr</code>.</p>
 <pre class="diag">Error [jet.InvalidScreen]: `.screen(&quot;/tasks/:id&quot;, …)` registers no screen: the field `tab` of `TaskView` is neither a `:tab` segment of the path nor marked `#App.Query`.
@@ -43,7 +43,7 @@
  10 | graph: fn() -&gt; app.App Never! { app.new(&quot;Crew&quot;).screen(&quot;/tasks/:id&quot;, task_screen) }
     |                                                        ^^^^^^^^^^^^
  Why: A screen&#39;s state is its address: each of its fields is a `:field` segment of the path or, marked `#App.Query`, goes after `?`, and every target opens the screen from that address, so the state has one screen and each field a place in the address.
- Fix: Write the path as a string literal starting with `/`, give the view one parameter besides its `app.Remote&lt;S&gt;` ones, a struct whose fields each derive `Encode`, name each field that isn&#39;t `#App.Query` once as a `:field` segment, and register each state at one screen.
+ Fix: Write the path as a string literal starting with `/`, give the view one parameter besides its `app.Remote&lt;S&gt;` ones, a struct whose fields each derive `Encode` and `Decode`, make the view unable to fail and give a value that derives `Encode`, name each field that isn&#39;t `#App.Query` once as a `:field` segment, and register each state at one screen.
 More: jet-lang.dev/e/E2820
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -59,7 +59,6 @@ use {
         TOKEN_AND_AND,
         TOKEN_BANG,
         TOKEN_BREAK,
-        TOKEN_CARET,
         TOKEN_CHAR,
         TOKEN_COLON,
         TOKEN_COMMA,
@@ -83,7 +82,6 @@ use {
         TOKEN_KW_IN,
         TOKEN_KW_IT,
         TOKEN_KW_LOOP,
-        TOKEN_KW_TAG,
         TOKEN_KW_USE,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -332,7 +330,9 @@ parser_pipe_step_writes: fn(state: JetParserState, start: Int, name: String) -> 
     false
 }
 
-// `<>`: the value the innermost open pipe step receives.
+// `<>`: the value the innermost open pipe step receives. Outside a step it
+// stays a `<>` name: an `if` table header reads it as its hole, and sema
+// refuses one anywhere else (E0437).
 parser_parse_pipe_value: fn(state: &JetParserState, token: Token) -> ParsedExpr {
     parser_bump(state)
     next: parser_current(state)
@@ -343,8 +343,7 @@ parser_parse_pipe_value: fn(state: &JetParserState, token: Token) -> ParsedExpr 
     }
     count: state.pipe_step_names.len()
     if count == 0 {
-        parser_add_error_code(state, "E0437", token.span, "`<>` is outside a pipe step", "`<>` is the value a `|> step` receives from the line above; outside a step there is no such value", "Move it into a step such as `value |> f(<>)`, or write the value itself")
-        return ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(state)}, span: token.span}
+        return ParsedExpr{expr: Expr.Ident{name: "<>", span: token.span, id: parser_node_id(state)}, span: token.span}
     }
     state.pipe_step_reads[count - 1] = state.pipe_step_reads[count - 1] + 1
     ParsedExpr{expr: Expr.Ident{name: state.pipe_step_names[count - 1], span: token.span, id: parser_node_id(state)}, span: token.span}
@@ -385,13 +384,6 @@ parser_parse_operators: fn(state: &JetParserState, minimum: Int, depth: Int, all
             parser_add_error(state, stray.span, "something unexpected appeared after this value, found `<>`", "after a value, an expression continues only with an operator: `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, `&&`, `||`, `??` or `|>`", "write the operator you mean, such as `!=` for not equal")
             _ := parser_parse_operators(state, minimum, depth + 1, allow_struct_lit, stop_before_comparison)
             break
-        }
-        // Infix power was retired: `^` marks ownership, so after a value on
-        // the same line it is the old power sign. It binds tighter than any
-        // operator, so its operand is one prefix expression.
-        if operator == TOKEN_CARET {
-            parser_report_infix_power(state, left, depth, allow_struct_lit)
-            next
         }
         precedence := parser_expression_precedence(operator)
         if precedence == 0 || precedence < minimum -> break
@@ -506,22 +498,6 @@ parser_parse_operators: fn(state: &JetParserState, minimum: Int, depth: Int, all
 // The ordinary "expected a value" report, at the `&` that starts `span`.
 parser_report_marked_value: fn(state: &JetParserState, span: Span) {
     parser_add_error(state, Span{start: span.start, end: span.start + 1}, "expected a value, found `&`", "a value can be a name, literal, collection, call, or parenthesized expression", "write an expression such as `x`, `42`, or `\"hello\"`")
-}
-
-// `base ^ exponent`: E0398 with the `.pow` rewrite as its edit. The caller
-// keeps `base` as the value, so the line reports once.
-parser_report_infix_power: fn(state: &JetParserState, base: ParsedExpr, depth: Int, allow_struct_lit: Bool) {
-    caret: parser_bump(state)
-    prefix: parser_parse_prefix(state, depth + 1, allow_struct_lit, false)
-    exponent: parser_parse_postfix(state, prefix, depth + 1, allow_struct_lit, false)
-    base_text: parser_source_text(state, base.span)
-    receiver: if base.expr == .Ident(_, _, _) || base.expr == .Int(_, _, _, _, _) || base.expr == .Float(_, _, _, _, _) || base.expr == .Call(_, _) || base.expr == .MethodCall(_, _, _, _, _, _, _) || base.expr == .Field(_, _, _, _) || base.expr == .Index(_, _, _, _, _) -> base_text else -> "({base_text})"
-    rewrite: "{receiver}.pow({parser_source_text(state, exponent.span)})"
-    diagnostic: diagnostic_from_registry("E0398", Val(caret.span), "Infix `^` is retired; write `{rewrite}`", "`^` marks ownership; a power is the named method `pow`", "Write `{rewrite}`")
-    if parser_aborting(state) {
-        return
-    }
-    state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: parser_cover(base.span, exponent.span), new_text: rewrite}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.BehaviorPreserving))
 }
 
 // E0082 (amended 2026-09-28): an unparenthesized `&&`
@@ -671,8 +647,7 @@ parser_header_typed_literal_ahead: fn(state: &JetParserState) -> Bool Never! {
 parser_literal_fields_ahead: fn(state: &JetParserState) -> Bool Never! {
     first := parser_kind_at(state, 1)
     if first == TOKEN_RBRACE -> return true
-    // `tag` names a field like any other word (`Label{tag: "ok"}`).
-    if first != TOKEN_IDENT && first != TOKEN_KW_TAG -> return false
+    if first != TOKEN_IDENT -> return false
     second := parser_kind_at(state, 2)
     second == TOKEN_COLON || second == TOKEN_COMMA || second == TOKEN_SEMI || second == TOKEN_RBRACE
 }
@@ -812,10 +787,37 @@ parser_parse_typed_literal_body: fn(state: &JetParserState, head: Type?, start: 
         else -> TypedLitBody.Value{value: first.expr.move()}
     }
     state.head_text_at = saved_head
+    if parser_typed_literal_mixed_loop(body) == .Val(loop_span) {
+        parser_add_error_code(state, "E0445", loop_span, "this collection literal mixes items with a loop", "A typed head holds either its items or one loop that builds them, so a reader sees at once what makes the collection", "Build the items and the loop's collection apart, then join them, such as `[0].concat(loop x in xs -> x)`")
+    }
     parser_literal_close_terminators(state)
     close := parser_expect(state, TOKEN_RBRACE, "`}}` to close a typed literal")
     span := parser_cover(start, close.span)
     ParsedExpr{expr: Expr.TypedLit{head: head, body: body.move(), span: span, id: parser_node_id(state)}, span: span}
+}
+
+// The span of a collecting loop written beside other items or entries in a
+// typed literal's body, which a head never takes. A lone loop builds the
+// head's collection; a loop as a map key is the loop's own `key: value` item.
+parser_typed_literal_mixed_loop: fn(body: TypedLitBody) -> Span? Never! {
+    if body == {
+        .Elements(elements) -> {
+            if elements.len() < 2 -> return None
+            loop element in elements {
+                if parser_expression_is_collecting_loop(element) -> return Val(expr_span(element))
+            }
+        }
+        .Entries(entries) -> {
+            if entries.len() < 2 -> return None
+            loop entry in entries {
+                if parser_expression_is_collecting_loop(entry.key) {
+                    return Val(expr_span(entry.key))
+                }
+            }
+        }
+        .Fields(_) | .Value(_) | .ByteText(_) | .Empty -> {}
+    }
+    None
 }
 
 // The `{value}` default after a parameter, field or constant type. The body
@@ -1101,12 +1103,6 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     if kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_KW_IT {
         parser_bump(state)
         return ParsedExpr{expr: Expr.Ident{name: if kind == TOKEN_IDENT -> word else -> parser_value(state, token), span: token.span, id: parser_node_id(state)}, span: token.span}
-    }
-    // The `tag` keyword also spells an ordinary name (a field, a variant
-    // field, a parameter), so a value reads it back as that name.
-    if kind == TOKEN_KW_TAG {
-        parser_bump(state)
-        return ParsedExpr{expr: Expr.Ident{name: "tag", span: token.span, id: parser_node_id(state)}, span: token.span}
     }
     if kind == TOKEN_TRUE || kind == TOKEN_FALSE {
         parser_bump(state)
@@ -2307,12 +2303,11 @@ parser_parse_call_args: fn(state: &JetParserState, depth: Int, allow_marker_labe
             if spread -> parser_bump(state)
             label := CallLabel?{None}
             label_kind := parser_current_kind(state)
-            has_label := label_kind == TOKEN_IDENT || label_kind == TOKEN_KW_TAG || (allow_marker_labels && label_kind == TOKEN_KW_USE)
+            has_label := label_kind == TOKEN_IDENT || (allow_marker_labels && label_kind == TOKEN_KW_USE)
             if has_label && parser_kind_at(state, 1) == TOKEN_COLON {
                 label_token: parser_bump(state)
                 parser_bump(state)
                 label_name := parser_value(state, label_token)
-                if label_token.kind == TOKEN_KW_TAG -> label_name = "tag"
                 if label_token.kind == TOKEN_KW_USE -> label_name = "use"
                 label = Val(CallLabel{name: label_name, span: label_token.span})
             }

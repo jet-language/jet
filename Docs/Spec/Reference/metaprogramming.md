@@ -28,8 +28,8 @@ become part of a program. The boundary is visible in source:
   preparation or compile-time bindings.
 - `@if` selects a compile-time branch.
 - `@loop` repeats a typed body over a compile-time collection.
-- `derive` and marker bodies use ordinary items and statements rather than a
-  string macro language.
+- Derive (`impl Trait.Derive`) and marker templates use ordinary items and
+  statements rather than a string macro language.
 
 The feature examples exercise these forms directly. For example, the block in
 [`prep_block.jet`](../../../Examples/Metaprogramming/Comptime/PrepBlock.jet)
@@ -104,6 +104,41 @@ A call from run-time code is E1019 at the call. The fix computes the value
 with `value: #run T.f(…)`
 ([`comptime_no_silent_fallback_run_fn_call.jet`](../../../Tests/UI/comptime_no_silent_fallback_run_fn_call.jet),
 [`comptime_no_silent_fallback_run_fn_call`](../../../Tests/Cases/ComptimeNoSilentFallback/comptime_no_silent_fallback_run_fn_call.case)).
+
+A local whose value only calls pure code is computed while compiling when
+it can be, and the program reads the computed value; this automatic
+evaluation never changes what the program prints. `#Runtime(mode)` on a
+function, a method or a block sets how much of its code may run while
+building:
+
+- `#Runtime(.NoEager)` turns automatic evaluation off, so its locals are
+  computed when the program runs. An explicit `#run` still runs while
+  building.
+- `#Runtime(.Only)` keeps the code to the running program. Automatic
+  evaluation is off, and compile-time code may not run it: a `#run`, a
+  `#run { … }` block or a computed `#if` inside it, a call of a function it
+  marks from compile-time code, and a `#Runtime(.Only)` block that
+  compile-time code reaches are each E1022. A local elsewhere that calls a
+  marked function is computed when the program runs.
+
+A `.NoEager` block inside `.Only` code stays `.Only`. Neither mode is an
+optimizer setting: the optimizer still inlines and folds the lowered code
+at `-O1` and above
+([`comptime_policy_no_eager_keeps_explicit_run`](../../../Tests/Cases/ComptimeDiff/comptime_policy_no_eager_keeps_explicit_run.case),
+[`comptime_policy_only_refuses_compile_time_code`](../../../Tests/Cases/ComptimeDiff/comptime_policy_only_refuses_compile_time_code.case),
+[`comptime_policy_keeps_optimizer_folding`](../../../Tests/Cases/ComptimeDiff/comptime_policy_keeps_optimizer_folding.case)).
+
+An immutable `name: value` local, in a function body or any block in it,
+falls back to run time quietly, with no report, when it can't be
+computed while building: it reads a run-time input such as a parameter, it
+calls code that reaches the outside world, it holds a value no build can
+keep (a function, a shared cell), computing it stops or runs out of the
+evaluator's steps, or `#Runtime` keeps it to run time. Hover on the local
+and `jet inspect semindex` give the reason it fell back, or the value it
+holds when it was computed
+([`comptime_fallback_reason_shows_in_inspect`](../../../Tests/Cases/Semindex/comptime_fallback_reason_shows_in_inspect.case),
+[`comptime_fallback_reason_shows_in_hover`](../../../Tests/Cases/LSP/comptime_fallback_reason_shows_in_hover.case),
+[`comptime_fallback_reason_names_the_runtime_mark`](../../../Tests/Cases/Semindex/comptime_fallback_reason_names_the_runtime_mark.case)).
 
 A compile-time value that can't be computed is reported once, at the value
 that owns the problem, and the values and code that read it report nothing
@@ -378,11 +413,13 @@ in the [Jetpack reference](jetpack-epoch5.md). Build-side inspection is
 read-only unless a ratified generation operation is used; a build entry cannot
 silently rewrite an existing declaration.
 
-The source registry reserves typed item-template generation. A marker's
-`expand` template and `b.generate(name) { ... }` carry ordinary Jet item and
-statement grammar, and neither form accepts a source string or re-lexes
-generated text. The old `derive T.Trait { ... }` provider declaration is not
-Jet syntax; a provider is a marker.
+The source registry reserves typed item-template generation. A marker's or a
+trait derive's `expand` template and `b.generate(name) { ... }` carry ordinary
+Jet item and statement grammar, and none of them accepts a source string or
+re-lexes generated text. The old `derive T.Trait { ... }` provider declaration
+is not Jet syntax; a trait's provider is its
+`impl Trait.Derive { expand: fn(target: Target) { ... } }` block, and any other
+provider is a marker.
 This is the `D-META-CODE1` / `D-META-BODY1` rule in the [syntax decisions](../syntax-decisions.md).
 
 A `#{name}` paste in a `b.generate` body that names a local of the build entry splices
@@ -868,6 +905,28 @@ range, dimension, state, effect, sendability, movedness, attribution, origin,
 view provenance, and maturity facts; consumers must use the registered fact
 record rather than infer a fact from a string. `fact_reads.jet` and
 `reflect-value.jet` are executable examples of those member names.
+
+A compiler fact plane is a field-less struct implementing the Prelude trait
+`Fact`, written in `Compiler/Prelude/Facts.jet`; no `fact` word exists. The
+plane's laws are the trait's constants: `holds` says what it attaches to
+(`FactTarget.Value`, `.Scope` or `.Build`, one form for all three), `safe`
+is the one direction it may move unaided (`FactDirection`), and `gates` lists
+the escapes that move it the other way as `Gate` values: one case per escape
+word, such as `.Approx` or `.PolicyAllow`, and `.Marker(Unsafe)` for an
+escape written as a marker. `name` gives a dotted registry name,
+`identity` marks a fact that is part of a type's identity, and `proved_by`
+names the read-only prover that publishes it. The compiler's fact registry is
+read from that file while the compiler builds.
+
+```jet
+Taint: struct {
+    impl Fact {
+        holds: .Value
+        safe: .Gain
+        gates: [.Marker(Scrub)]
+    }
+}
+```
 
 ## The metadata contract
 

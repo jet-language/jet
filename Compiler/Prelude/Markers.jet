@@ -48,6 +48,18 @@ Overflow: struct {
     }
 }
 
+// `#Runtime(.NoEager)`: the run-time policy of one function, method or block
+// body. `.NoEager` computes no local value of it while compiling; `.Only`
+// also refuses every compile-time run of it. It is lexical, so it has no
+// module or package site.
+Runtime: struct {
+    mode: RuntimeMode
+
+    impl Marker {
+        sites: [.Function, .Method, .Block]
+    }
+}
+
 Unsafe: struct {
     reason: String
     obligations: ObligationMode{.None}

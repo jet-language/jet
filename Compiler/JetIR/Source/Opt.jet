@@ -305,7 +305,9 @@ ir_opt_dump_names: fn(options: IROptOptions) -> [String] Never! {
     names
 }
 
-// Each function of `m` that `names` lists, as IR text after `stage`.
+// Each function of `m` that `names` lists, as IR text after `stage`. The
+// dump is read by people, so a function key prints as its dotted Jet path
+// (`main.jet.square`, not the IR's `main.jet::square`).
 ir_opt_dump: fn(m: IRModule, names: [String], stage: String, report: &IROptReport) Never! {
     if names.len() == 0 {
         return
@@ -313,7 +315,7 @@ ir_opt_dump: fn(m: IRModule, names: [String], stage: String, report: &IROptRepor
     loop f in m.functions {
         loop name in names {
             if f.name == name {
-                report.dumps.push("{stage} {ir_function_text(m, f)}")
+                report.dumps.push("{stage} {ir_function_text(m, f).replace("::", ".")}")
                 break
             }
         }

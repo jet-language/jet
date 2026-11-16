@@ -1,0 +1,49 @@
+# Markers, effects, facts, derives and tags are declared as ordinary types, and
+# the old declaration words are gone. No Jet source in the repository declares
+# with `marker`, `effect`, `fact`, `derive` or `tag` (test folders hold the
+# probes that prove those lines refused). The words are no longer reserved:
+# each is an ordinary name, and a line that opens with one fails to parse like
+# any unknown word, with no teaching diagnostic.
+fixture: DeclTypesNoOldWords.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step scan: jet run scan.jet -- {root}
+exit: 0
+stdout: ~ "Core: scanned" # the Core library sources were read
+stdout: ~ "Compiler: scanned" # the compiler and its Prelude sources were read
+stdout: ~ "Examples: scanned" # the examples were read
+stdout: ~ "old declaration lines: 0" # nothing declares with a retired word
+step names: jet run names/main.jet
+exit: 0
+stdout: ~ "ok 5" # `tag`, `effect`, `marker` and `fact` name fields, labels and locals
+stdout: ~ "derive true" # `derive` names a field
+step reserved: jet inspect reserved --json
+exit: 0
+stdout: !~ "\"tag\"" # `tag` is not reserved
+stdout: !~ "\"effect\"" # `effect` is not reserved
+stdout: !~ "\"derive\"" # `derive` is not reserved
+step marker: jet check words/marker.jet
+exit: 1
+stderr: ~ "`marker` is not a Jet word" # the declaration word is gone
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: !~ "impl Marker" # no teaching diagnostic names the new form
+step effect: jet check words/effect.jet
+exit: 1
+stderr: ~ "`effect` is not a Jet word" # the declaration word is gone
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: !~ "impl Effect" # no teaching diagnostic names the new form
+step fact: jet check words/fact.jet
+exit: 1
+stderr: ~ "`fact` is not a Jet word" # the declaration word is gone
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: !~ "impl Fact" # no teaching diagnostic names the new form
+step derive: jet check words/derive.jet
+exit: 1
+stderr: ~ "`derive` is not a Jet word" # the declaration word is gone
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: !~ "Derive" # no teaching diagnostic names the new form
+step tag: jet check words/tag.jet
+exit: 1
+stderr: ~ "`tag` is not a Jet word" # the declaration word is gone
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: !~ "impl Marker" # no teaching diagnostic names the new form

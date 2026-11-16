@@ -219,6 +219,34 @@ run: fn() {}
     assert(diagnostics[0].what.contains("`fact` is not a Jet word"), diagnostics[0].what)
 }
 
+#Test("the_old_declaration_words_are_ordinary_names") {
+    lines: [String]{"tag Secret", "effect Net", "marker Traced {{\n}}", "derive Point.Describe {{}}"}
+    words: [String]{"tag", "effect", "marker", "derive"}
+    loop (index, line) in lines {
+        diagnostics: parser_test_errors("{line}\nrun: fn() {{}}\n")
+        assert_eq(diagnostics.len(), 1)
+        assert_eq(diagnostics[0].code, "E0003")
+        assert_eq(diagnostics[0].what, "`{words[index]}` is not a Jet word")
+    }
+    named: parser_test_result(
+        `Label: struct {
+    tag: String
+    effect: Int
+    derive: Bool
+}
+describe: fn(tag: String, effect: Int, derive: Bool) -> String {
+    marker: Label{tag: tag, effect: effect, derive: derive}
+    fact := marker.effect
+    "{marker.tag} {fact}"
+}
+run: fn() {
+    print(describe(tag: "ok", effect: 1, derive: true))
+}
+`,
+    )
+    assert(named.diagnostics.is_empty(), "a retired declaration word still parses as a name")
+}
+
 #Test("an_unknown_top_word_lists_the_declaration_forms") {
     diagnostics: parser_test_errors(
         `
@@ -848,4 +876,76 @@ impl Audit.Effect {
     assert(computed.what.contains("`name` in `Bucket{{…}}` needs a literal value"))
     empty: parser_test_diagnostic(parser_test_errors(`put: fn() -[Bucket{}]> {}`), "E0119")
     assert(empty.what.contains("`Bucket{{}}` gives no value"))
+}
+
+#Test("a_trait_derive_is_a_type_marker_whose_template_writes_the_impl") {
+    source: `Describe: trait {
+    describe: fn(self) -> String
+}
+
+impl Describe.Derive {
+    expand: fn(target: Target) {
+        name: target.name
+        impl #{name}.Describe {
+            describe: fn(self) -> String { target.name }
+        }
+    }
+}
+`
+    program: parser_test_program(source)
+    program.items[1] == .MarkerDecl(declaration) ?? panic("the derive is a marker declaration")
+    assert(declaration.is_derive)
+    assert_eq(declaration.name, "Describe")
+    assert(declaration.is_pub, "the derive is as visible as its trait")
+    assert_eq(declaration.params.len(), 1)
+    assert_eq(declaration.params[0].name, "$sites")
+    template: declaration.body ?? panic("the derive keeps its template")
+    assert_eq(template.len(), 2)
+    assert_eq(parser_test_stable(source), source)
+    hidden: parser_test_program(
+        `impl Describe.Derive {
+    expand: fn(target: Target) {}
+}
+`,
+    )
+    hidden.items[0] == .MarkerDecl(elsewhere) ?? panic("a derive of a trait declared elsewhere")
+    assert(!elsewhere.is_pub, "a derive of a trait declared elsewhere stays in its module")
+}
+
+#Test("a_trait_derive_keeps_the_derive_contract") {
+    selfed: parser_test_diagnostic(
+        parser_test_errors(
+            `impl Describe.Derive {
+    expand: fn(self, target: Target) {}
+}
+`,
+        ),
+        "E0907",
+    )
+    assert(selfed.what.contains("doesn't match the `Derive` contract"))
+    method: parser_test_diagnostic(
+        parser_test_errors(
+            `impl Describe.Derive {
+    describe: fn(self) -> String { "" }
+}
+`,
+        ),
+        "E0907",
+    )
+    assert(method.what.contains("`describe` is not a method of `Derive`"))
+    empty: parser_test_diagnostic(parser_test_errors(`impl Describe.Derive {}`), "E0907")
+    assert(empty.what.contains("has no `expand: fn(target: Target)`"))
+    hidden: parser_test_diagnostic(
+        parser_test_errors(
+            `priv impl Describe.Derive {
+    expand: fn(target: Target) {}
+}
+`,
+        ),
+        "E0003",
+    )
+    assert(hidden.what.contains("is written with markers or `priv`"))
+    word: parser_test_errors(`derive Point.Describe {}`)
+    assert_eq(word[0].code, "E0003")
+    assert(!word[0].what.contains("Derive"), word[0].what)
 }

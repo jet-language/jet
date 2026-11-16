@@ -12,7 +12,7 @@ Run a lesson from the repository root, for example `jet run Examples/Tooling/<Le
 - [InternalProjectParts](InternalProjectParts.jet) — This declaration is omitted from automatic project discovery until another source writes `use project._bench`.
 - [OutputCallable](OutputCallable.jet) — A Package executable can name ordinary checked code.
 - [SolvePuzzle](SolvePuzzle.jet)
-- [StructureLiveness](StructureLiveness.jet) — The four liveness verdicts are warnings, not runtime work.
+- [StructureLiveness](StructureLiveness.jet) — The four liveness verdicts are findings, not runtime work.
 - [StructurePlane](StructurePlane/) — `jet inspect structure Examples/Tooling/StructurePlane/run.jet` exposes the registered structure rows without changing this program.
 
 ## Build

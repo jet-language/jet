@@ -86,7 +86,7 @@ run: fn() {
     depth_limits.max_depth = 1
     nested_input: files.open("{work}/nested.cbor") ?? panic("nested open")
     nested_reader := cbor.reader(nested_input, depth_limits) ?? panic("nested reader")
-    root_event: nested_reader.next() ?? panic("root array")
+    _root_event: nested_reader.next() ?? panic("root array")
     if nested_reader.next() == {
         .Ok(_) -> print(false)
         .Err(depth_error) -> print(depth_error.reason == "max_depth 1 exceeded")

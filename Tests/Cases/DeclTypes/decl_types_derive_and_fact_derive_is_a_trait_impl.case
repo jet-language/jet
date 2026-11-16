@@ -1,0 +1,24 @@
+# A trait's derive is `impl Trait.Derive { expand: fn(target: Target) }`, with
+# no `derive` or `derives` word. `#Describe` on a type expands the template,
+# which writes that type's `Describe` impl; the Prelude's `#Equatable` is a
+# block of the same shape. The template has no `self`, since a derive request
+# carries no data. The old `derive T.Trait { … }` declaration fails to parse
+# like any unknown word, with no teaching diagnostic.
+fixture: DeclTypesDeriveAndFactDeriveIsATraitImpl.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: ~ "derived Point" # the user derive wrote the trait impl
+stdout: ~ "equal true" # the Prelude derive wrote `Equatable`
+stderr: empty
+step self: jet check self/main.jet
+exit: 1
+stderr: ~ "`expand: fn` doesn't match the `Derive` contract" # a derive template has no self
+stderr: ~ "write `expand: fn(target: Target) { … }`" # naming the one shape
+stderr: ~ "jet-lang.dev/e/E0907" # the trait-method code
+step word: jet check word/main.jet
+exit: 1
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: !~ "impl Describe.Derive" # no teaching diagnostic names the new form
+stderr: !~ "E2714" # the retired derive spelling code stays retired

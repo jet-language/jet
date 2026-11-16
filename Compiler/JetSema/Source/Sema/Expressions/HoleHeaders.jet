@@ -1,0 +1,217 @@
+// E0442, a call written in a hole table's header. The header runs once for
+// each arm tried, so a call there that changes the value it is called on or
+// a value it is given would change it again for every arm, and one with an
+// effect would repeat the effect (sema_effect_check_hole_headers). The fix
+// names the call's value on the line above the table and reads the name in
+// the header: the called method's name, or `value` for another call, with a
+// number added when a binding already has it. The fix is applied only when
+// the table starts its statement, where the header's first run came before
+// anything else the statement does; elsewhere naming the value first could
+// move it before another effect, so the fix is only shown. A call that holds
+// the `<>` gets a new value for each arm, so no name can hold it: its fix
+// shows the arms as plain tests.
+use {
+    jet_foundation.[
+        AccessConvention,
+        Diagnostic,
+        Expr,
+        Span,
+        TextEdit,
+        ast_program,
+        diagnostic_with_edit,
+        expr_source_start,
+        expr_span,
+    ]
+    jet_lexer.[Token]
+    jet_parser.[jfmt_fmt_expr, jfmt_new, jfmt_out_text]
+}
+
+// A call `expr` checked (as `checked`) while a hole table's header is: the
+// call's facts take its fix, and a call that changes a value is refused here,
+// once for the header however many arms check it.
+sema_expr_hole_header_call: fn(expr: Expr, checked: TExpr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    value: checked ?? return None
+    span: expr_span(expr)
+    if !sema_expr_in_hole_header(scopes, span) -> return Val(value)
+    change: sema_expr_hole_call_change(expr, value, state)
+    fix := sema_expr_hole_header_fix(expr, environment, program, scopes)
+    fix.reported = change != ""
+    // The call's facts are spanned at its name, as `span` is.
+    loop index in 0..<context.call_facts.len() {
+        if context.call_facts[index].span != span -> next
+        detail := sema_call_site_detail(context.call_facts[index])
+        if detail.hole_header == None -> next
+        // copy: every arm's fact of the call keeps the fix.
+        detail.hole_header = Val(fix.copy())
+        context.call_facts[index].detail = sema_call_site_detail_of(detail)
+    }
+    if change == "" || sema_expr_hole_header_reported(diagnostics, span) -> return Val(value)
+    diagnostics.push(sema_expr_hole_header_diagnostic(sema_expr_hole_call_name(expr), change, fix, span))
+    Val(value)
+}
+
+// E0442 for the call `name` at `span`, which `action` (has an effect,
+// changes a value), with its fix and the edits that apply it.
+sema_expr_hole_header_diagnostic: fn(name: String, action: String, fix: SemaHoleHeaderFix, span: Span) -> Diagnostic {
+    diagnostic := sema_error("E0442", span, "this `if` table header calls `{name}`, which {action}", "a hole table runs its header once for each arm it tries, so `{name}` would run again for every arm", fix.fix)
+    if fix.edits.len() == 0 -> return diagnostic
+    diagnostic = diagnostic_with_edit(diagnostic, fix.edits[0])
+    loop index in 1..<fix.edits.len() -> diagnostic.fix_edits.push(fix.edits[index].copy())
+    diagnostic
+}
+
+sema_expr_hole_header_reported: fn(diagnostics: [Diagnostic], span: Span) -> Bool Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0442" && diagnostic.span == (Val(span)) -> return true
+    }
+    false
+}
+
+sema_expr_hole_call_name: fn(expr: Expr) -> String Never! {
+    if expr == .MethodCall(_, method, _, _, _, _, _) {
+        return method
+    }
+    if expr == .Call(call, _) {
+        return call.name
+    }
+    ""
+}
+
+// What the checked call changes, as E0442 says it, or "" when it changes
+// nothing: a `&self` method writes the value it is called on, and a `&`
+// parameter the value it is given.
+sema_expr_hole_call_change: fn(expr: Expr, value: TExpr, state: SemaOwnershipState) -> String Never! {
+    if expr == .MethodCall(receiver, _, _, _, _, _, _) {
+        if sema_ownership_walk_receiver_access(state, receiver) == AccessConvention.Write -> return "changes the value it is called on"
+    }
+    if sema_expr_hole_call_writes_argument(value) -> return "changes a value it is given"
+    ""
+}
+
+sema_expr_hole_call_writes_argument: fn(value: TExpr) -> Bool Never! {
+    if value.kind == .Call(_, _, args) {
+        return sema_expr_hole_args_write(args)
+    }
+    if value.kind == .IndirectCall(_, _, args, _) {
+        return sema_expr_hole_args_write(args)
+    }
+    if value.kind == .MethodCall(_, _, _, args) {
+        return sema_expr_hole_args_write(args)
+    }
+    // A call behind its generated argument pins is the block's value.
+    if value.kind == .InlineBlock(body) {
+        if body.len() > 0 && body[body.len() - 1] == .ExprStmt(tail, _) {
+            return sema_expr_hole_call_writes_argument(tail)
+        }
+    }
+    false
+}
+
+sema_expr_hole_args_write: fn(args: [TCallArg]) -> Bool Never! {
+    loop arg in args {
+        if arg.mut_borrow -> return true
+    }
+    false
+}
+
+// The fix for the call `expr` in the header being checked.
+sema_expr_hole_header_fix: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaHoleHeaderFix {
+    shown := SemaHoleHeaderFix{fix: "name the value on the line above the table, then read the name in the header", edits: [TextEdit]{}, reported: false}
+    header: scopes.hole_header ?? return shown
+    graph: program.registration_graph ?? return shown
+    caller: sema_scope_caller_index(environment, graph) ?? return shown
+    raw: graph.modules[caller].source.bytes()
+    start: expr_source_start(expr)
+    end: sema_expr_call_source_end(raw, expr_span(expr).end) ?? return shown
+    call: sema_stmt_source_text(raw, Span{start: start, end: end}) ?? return shown
+    if call.contains("<>") {
+        written: sema_stmt_source_text(raw, header) ?? return shown
+        formatter := jfmt_new(ast_program(), "", [Token]{}, false)
+        jfmt_fmt_expr(formatter, expr, 0)
+        test: written.replace(call, jfmt_out_text(formatter))
+        shown.fix = "this call holds the `<>`, so its value can't be named first: write the arms as plain tests, as `if {{ {test} -> … }}`"
+        return shown
+    }
+    name: sema_expr_hole_value_name(expr, scopes)
+    shown.fix = "name the value first: `{name}: {call}` on the line above, then read `{name}` in the header"
+    indent_span: sema_expr_hole_table_indent(raw, header.start) ?? return shown
+    indent: if indent_span.start == indent_span.end -> "" else -> sema_stmt_source_text(raw, indent_span) ?? return shown
+    shown.edits = [TextEdit]{
+        TextEdit{span: Span{start: indent_span.start, end: indent_span.start}, new_text: "{indent}{name}: {call}\n"},
+        TextEdit{span: Span{start: start, end: end}, new_text: name},
+    }
+    shown
+}
+
+// The called method's name, or `value` for another call, with a number
+// added while a binding in scope has it.
+sema_expr_hole_value_name: fn(expr: Expr, scopes: SemaScopeTable) -> String {
+    base := "value"
+    if expr == .MethodCall(_, method, _, _, _, _, _) -> base = method
+    name := base
+    number := 2
+    loop sema_scope_resolve_index(scopes, name) != None {
+        name = "{base}{number}"
+        number += 1
+    }
+    name
+}
+
+// The end of the call whose name ends at `at`: past its type arguments and
+// the `)` that closes its arguments, skipping quoted text. None when no
+// argument list follows the name.
+sema_expr_call_source_end: fn(raw: [U8], at: Int) -> Int? Never! {
+    position := at
+    if position < raw.len() && raw[position] == (U8{60}) {
+        angles := 0
+        loop position < raw.len() {
+            if raw[position] == (U8{60}) -> angles += 1
+            if raw[position] == (U8{62}) -> angles -= 1
+            position += 1
+            if angles == 0 -> break
+        }
+    }
+    if position >= raw.len() || raw[position] != (U8{40}) -> return None
+    depth := 0
+    quoted := false
+    loop position < raw.len() {
+        byte: raw[position]
+        position += 1
+        if quoted {
+            if {
+                byte == (U8{92}) -> position += 1
+                byte == (U8{34}) -> quoted = false
+                else -> {}
+            }
+            next
+        }
+        if {
+            byte == (U8{34}) -> quoted = true
+            byte == (U8{40}) -> depth += 1
+            byte == (U8{41}) -> {
+                depth -= 1
+                if depth == 0 -> return Val(position)
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
+// The blanks before the `if` of the table whose header starts at
+// `header_start`, when that `if` starts its line, and so its statement: a
+// line above the table can then name a value. None otherwise.
+sema_expr_hole_table_indent: fn(raw: [U8], header_start: Int) -> Span? Never! {
+    position := header_start
+    loop position > 0 && sema_expr_hole_blank(raw[position - 1]) -> position -= 1
+    if position < 2 || raw[position - 2] != (U8{105}) || raw[position - 1] != (U8{102}) -> return None
+    keyword: position - 2
+    line_start := keyword
+    loop line_start > 0 && sema_expr_hole_blank(raw[line_start - 1]) -> line_start -= 1
+    if line_start > 0 && raw[line_start - 1] != (U8{10}) -> return None
+    Val(Span{start: line_start, end: keyword})
+}
+
+sema_expr_hole_blank: fn(byte: U8) -> Bool Never! {
+    byte == (U8{32}) || byte == (U8{9})
+}

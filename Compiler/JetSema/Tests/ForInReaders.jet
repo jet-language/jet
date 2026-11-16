@@ -1,0 +1,30 @@
+// A loop over a Core reader walks its `next(&self) -> Item? E!`: the item is
+// the `Item` that signature declares, so a reader needs no compiler list.
+use {
+    jet_foundation.[Type]
+    jet_sema.[sema_stmt_for_in_reader_item]
+}
+
+reader_step: fn(params: [Type], ret: Type?) -> Type {
+    Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+}
+
+#Test("a reader step's item is the `Item` of its `Item? E!` return") {
+    event: Type.Named{name: "DataEvent"}
+    failure: Type.Named{name: "EncodingError"}
+    step: reader_step([Type]{Type.Named{name: "JSONReader"}}, Val(Type.Result{ok: Type.Option{inner: event}, err: failure}))
+    assert_eq(sema_stmt_for_in_reader_item(step), Val(Type.Named{name: "DataEvent"}))
+}
+
+#Test("a step that is not `fn(&self) -> Item? E!` reads no item") {
+    receiver: Type.Named{name: "CSVParser"}
+    failure: Type.Named{name: "EncodingError"}
+    infallible: reader_step([Type]{receiver}, Val(Type.Option{inner: Type.String}))
+    assert(sema_stmt_for_in_reader_item(infallible) == None, "an infallible `next` is no reader step")
+    certain: reader_step([Type]{receiver}, Val(Type.Result{ok: Type.String, err: failure}))
+    assert(sema_stmt_for_in_reader_item(certain) == None, "a `next` with no end is no reader step")
+    argued: reader_step([Type]{receiver, Type.Int}, Val(Type.Result{ok: Type.Option{inner: Type.String}, err: failure}))
+    assert(sema_stmt_for_in_reader_item(argued) == None, "a `next` with an argument is no reader step")
+    assert(sema_stmt_for_in_reader_item(reader_step([Type]{receiver}, None)) == None, "a `next` with no return is no reader step")
+    assert(sema_stmt_for_in_reader_item(Type.String) == None, "a non-function is no reader step")
+}

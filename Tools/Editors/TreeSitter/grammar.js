@@ -15,13 +15,13 @@
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "in", "loop", "next", "return", "task", "task.all", "task.any", "task.group", "task.race", "yield"];
-const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Unsafe", "add", "as", "change", "client", "derive", "distinct", "enum", "extern", "fact", "fn", "impl", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "trait", "use", "validate", "via", "wrap"];
+const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Unsafe", "add", "as", "change", "client", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "trait", "use", "validate", "via", "wrap"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["#build", "#caller", "#code", "#here", "#if", "#loop", "#package", "#phase", "#program", "#run", "@SOURCE", "@TYPES", "it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "Decimal", "Derived", "Duration", "Dyn", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arg", "As", "Bindgen", "CLI", "Close", "Codable", "Commutative", "Comparable", "Context", "ContextKey", "Credential", "Deadline", "Debug", "Deprecated", "DevPanel", "Doc", "Equatable", "Error", "FFI", "FX", "HTML", "Impure", "Inline", "Input", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "MaxDepth", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "On", "Overflow", "PII", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "Reactive", "Receipt", "Redact", "Region", "Rename", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Secret", "Shared", "Shield", "SingleUse", "Specified", "State", "Static", "Target", "Test", "Through", "Todo", "Track", "Transact", "Undo", "UnitFamily", "Unsafe", "Waive"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arg", "As", "Bindgen", "CLI", "Close", "Codable", "Commutative", "Comparable", "Context", "ContextKey", "Credential", "Deadline", "Debug", "Deprecated", "DevPanel", "Doc", "Equatable", "Error", "FFI", "FX", "HTML", "Impure", "Inline", "Input", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "MaxDepth", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "On", "Overflow", "PII", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "Reactive", "Receipt", "Redact", "Region", "Rename", "Replayable", "Root", "Runtime", "SQL", "Scalar", "Scrub", "Secret", "Shared", "Shield", "SingleUse", "Specified", "State", "Static", "Target", "Test", "Through", "Todo", "Track", "Transact", "Undo", "UnitFamily", "Unsafe", "Waive"];
 const JET_HIGHLIGHT_TAKE_MARK = ["&&"];
 const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", ":", ":=", ":>", "<:"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "<>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "|", "|>", "||"];
@@ -44,7 +44,7 @@ const JET_MARKER_INBODY_SEPARATOR = ":";
 // - the other reserved/statement words (`defer`, `next`, `task`, `as`, ...)
 //   are the named `keyword` token, never anonymous, so the registry's
 //   anonymous-literal guard keeps holding;
-// - contextual declaration words (`state`, `protocol`, `fact`, ...) stay
+// - contextual declaration words (`state`, `protocol`, ...) stay
 //   identifiers and are colored only in declaration shape (`decl_head`:
 //   a word directly followed by a type name).
 
@@ -58,8 +58,8 @@ const PREC = {
 
 // Anonymous lowercase keywords that may still name a member after `.`.
 const MEMBER_KEYWORDS = [
-  "break", "else", "if", "in", "loop", "return", "derive", "enum", "extern",
-  "fn", "impl", "module", "pub", "struct", "tag", "trait", "use", "self",
+  "break", "else", "if", "in", "loop", "return", "enum", "extern",
+  "fn", "impl", "module", "pub", "struct", "trait", "use", "self",
 ];
 
 const OPERATORS = [
@@ -111,7 +111,6 @@ module.exports = grammar({
         $.enum_def,
         $.trait_def,
         $.impl_block,
-        $.tag_def,
         $.module_def,
         $.decl_head,
         $.binding,
@@ -233,7 +232,6 @@ module.exports = grammar({
     struct_def: ($) => declaration($, "struct"),
     enum_def: ($) => declaration($, "enum"),
     trait_def: ($) => declaration($, "trait"),
-    tag_def: ($) => declaration($, "tag"),
 
     // `impl Type.Trait { … }`, `impl Trait for Type { … }`.
     impl_block: ($) =>
@@ -300,7 +298,7 @@ module.exports = grammar({
     // `field: Type`, `key: value`, `LIMIT: 10`, named arguments and manifest keys.
     label: ($) => prec(PREC.label, seq(field("name", choice($._label_name, $.type_identifier)), ":")),
 
-    // Reserved words still name record fields and arguments (`tag: "x"`).
+    // Reserved words still name record fields and arguments (`copy: "x"`).
     _label_name: ($) =>
       prec(PREC.label, choice(
         $.identifier,
@@ -397,7 +395,7 @@ module.exports = grammar({
           1,
           choice(
             "priv", "null", "const", "copy", "move", "mutate", "it",
-            "as", "distinct", "uninit", "freeze", "effect", "rust", "via",
+            "as", "distinct", "uninit", "freeze", "rust", "via",
           ),
         ),
       ),
@@ -405,10 +403,9 @@ module.exports = grammar({
     _keyword_word: ($) =>
       choice(
         "if", "else", "in", "loop", "break", "return",
-        "derive", "extern", "pub", "use",
-        // `module.id`, `tag.name`: a declaration word used as a value.
+        "extern", "pub", "use",
+        // `module.id`: a declaration word used as a value.
         prec(-1, alias("module", $.identifier)),
-        prec(-1, alias("tag", $.identifier)),
       ),
 
     self: (_) => "self",

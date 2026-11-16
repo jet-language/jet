@@ -1,0 +1,26 @@
+square: fn(value: Int) -> Int { value * value }
+
+#Runtime(.NoEager) lazy: fn() -> Int {
+    kept: square(6)
+    kept
+}
+
+#Runtime(.Only) runtime_only: fn() -> Int {
+    held: square(7)
+    held
+}
+
+blocks: fn() -> Int {
+    #Runtime(.NoEager) {
+        inner: square(8)
+        print(inner)
+    }
+    after: square(9)
+    after
+}
+
+run: fn() {
+    print(lazy())
+    print(runtime_only())
+    print(blocks())
+}

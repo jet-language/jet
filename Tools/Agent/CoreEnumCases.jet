@@ -1,18 +1,22 @@
 #!/usr/bin/env jet
 // Write the case lists of the Core enum leaves in Compiler/Prelude/Core.rows
 // from the enums the Core sources declare. A `module` line lists each type
-// its module exports (`types { … }`); an enum leaf is `Name:plain(A|B)`, its
-// cases in declaration order. The compiler reads those lists
-// (Registry/CoreEnumRows.jet CORE_ENUM_CASE_ROWS) for the cases of a Core enum
-// whose module a program has not loaded, so no program loads a Core module
-// for them. When a source of the line's module (its `source_module` rows and
-// the parts Compiler/Prelude/CoreSourceParts.tsv attaches to it) declares
-// `Name: enum { … }`, this tool writes the list from that declaration. The
-// cases are the upper-case names at the body's top level before its first
-// method, read the way the compiler build reads them
-// (Compiler/JetFoundation/Source/CoreDeclarations/Sources.jet). A list whose
-// enum no Core source declares is the compiler-owned residue
-// (Registry/CoreEnumPayloadRows.jet) and is left as it is written.
+// its module exports (`types { … }`); an enum leaf is `Name:plain(A|B(T))`,
+// its cases in declaration order. The compiler reads those lists
+// (Registry/CoreEnumRows.jet CORE_ENUM_CASE_ROWS, and the payload rows of
+// Registry/CoreEnumPayloadRows.jet CORE_ENUM_PAYLOAD_ROWS) for the cases of a
+// Core enum whose module a program has not loaded, so no program loads a Core
+// module for them. When a source of the line's module (its `source_module`
+// rows and the parts Compiler/Prelude/CoreSourceParts.tsv attaches to it)
+// declares `Name: enum { … }`, this tool writes the list from that
+// declaration. The cases are the upper-case names at the body's top level
+// before its first method, read the way the compiler build reads them
+// (Compiler/JetFoundation/Source/CoreDeclarations/Sources.jet). A case carries
+// its payload, `B(T)`, when every payload the enum declares is one unlabeled
+// slot whose type is a name, a list or an option of them (the Core.rows
+// grammar core_decl_payload_text reads); otherwise the list names the cases
+// alone. A list whose enum no Core source declares is the compiler-owned
+// residue (Registry/CoreEnumPayloadRows.jet) and is left as it is written.
 // Usage (from the repository root): jet Tools/Agent/CoreEnumCases.jet
 // [--check|--write]; --check fails when a list differs from its declaration,
 // and --write rewrites the lists.
@@ -115,8 +119,8 @@ declaration_start: fn(bytes: [U8], at: Int) -> Bool Never! {
     start == 0 || code_at(bytes, start - 1) == 10
 }
 
-// The cases `text` declares for the enum `name` (`name: enum { … }` at a line
-// start), or None when it declares no such enum.
+// The list entries of the enum `name` that `text` declares (`name: enum { … }`
+// at a line start), or None when it declares no such enum.
 declared_cases: fn(text: String, name: String) -> [String]? {
     bytes: text.bytes()
     needle: "{name}:"
@@ -135,8 +139,9 @@ declared_cases: fn(text: String, name: String) -> [String]? {
     }
 }
 
-// The cases of the enum body that opens at byte `open`: the upper-case names
-// at its top level, comments dropped, until its first `fn` or `impl`.
+// The list entries of the enum body that opens at byte `open`: the
+// upper-case names at its top level, comments dropped, until its first `fn`
+// or `impl`, each with its payload when the list can carry every payload.
 body_cases: fn(bytes: [U8], open: Int) -> [String] Never! {
     end := open
     depth := 1
@@ -148,6 +153,8 @@ body_cases: fn(bytes: [U8], open: Int) -> [String] Never! {
     }
     body_end: end - 1
     cases := [String]{}
+    payloads := [String]{}
+    carried := true
     nesting := 0
     index := open
     loop index < body_end {
@@ -174,10 +181,48 @@ body_cases: fn(bytes: [U8], open: Int) -> [String] Never! {
         loop word_end < body_end && word_byte(code_at(bytes, word_end)) -> word_end += 1
         word: byte_text(bytes, index, word_end)
         if word == "fn" || word == "impl" -> break
-        if upper_byte(code) -> cases.push(word)
+        if upper_byte(code) {
+            after: skip_space(bytes, word_end)
+            opener: if after < body_end -> code_at(bytes, after) else -> 0
+            payload: if opener == 40 -> payload_slot(bytes, after, body_end) else -> ""
+            if opener == 123 || (opener == 40 && !carried_payload(payload)) -> carried = false
+            cases.push(word)
+            payloads.push(payload)
+        }
         index = word_end
     }
-    cases
+    if !carried -> return cases
+    loop (at, case_name) in cases -> if payloads[at] == "" -> case_name else -> "{case_name}({payloads[at]})"
+}
+
+// The text inside the parentheses that open at byte `open`, white space
+// dropped.
+payload_slot: fn(bytes: [U8], open: Int, body_end: Int) -> String Never! {
+    depth := 0
+    close := open
+    loop close < body_end {
+        code: code_at(bytes, close)
+        if code == 40 || code == 91 || code == 123 -> depth += 1
+        if code == 41 || code == 93 || code == 125 -> depth -= 1
+        if depth == 0 -> break
+        close += 1
+    }
+    kept := [U8]{}
+    loop byte in bytes.slice(open + 1, close) {
+        if !space_byte(Int{byte}) -> kept.push(byte)
+    }
+    String.from_bytes(kept) ?? ""
+}
+
+// Whether a Core.rows list can carry `payload`: one unlabeled slot whose type
+// is a name, a list or an option of them (`String`, `[U8]`, `Int?`).
+carried_payload: fn(payload: String) -> Bool Never! {
+    if payload == "" -> return false
+    loop byte in payload.bytes() {
+        code: Int{byte}
+        if !(word_byte(code) || code == 91 || code == 93 || code == 63) -> return false
+    }
+    true
 }
 
 // The cases the sources of `module_name` declare for `name`, and the path of
@@ -279,6 +324,13 @@ run: fn() { print(core_enum_cases_main(process.args()) ?? process.fail(1, err.me
     assert_eq((declared_cases(text, "Mode") ?? [String]{}).join("|"), "Fast|Slow|Named")
     assert(declared_cases(text, "Other") == None)
     assert(declared_cases(text, "Absent") == None)
+}
+
+#Test("a list carries the payloads only when it can carry every payload of the enum") {
+    text: "Event: enum {{\n    Null\n    Bytes( [U8] )\n    Text(String)\n    Last(Int?) // the final one\n}}\nMixed: enum {{\n    Plain(String)\n    Labeled(limit: Int)\n}}\nPair: enum {{\n    Two(Int, Int)\n}}\n"
+    assert_eq((declared_cases(text, "Event") ?? [String]{}).join("|"), "Null|Bytes([U8])|Text(String)|Last(Int?)")
+    assert_eq((declared_cases(text, "Mixed") ?? [String]{}).join("|"), "Plain|Labeled")
+    assert_eq((declared_cases(text, "Pair") ?? [String]{}).join("|"), "Two")
 }
 
 #Test("a module line's lists follow the declarations of the module's sources") {

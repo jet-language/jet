@@ -39,7 +39,6 @@ use {
         TOKEN_KW_MODULE,
         TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
-        TOKEN_KW_TAG,
         TOKEN_IDENT,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -115,9 +114,14 @@ JetParserState: struct {
     // The block depth of a braceless arm body in an arm table (-1 = none);
     // its statement may end before the `,` that separates compact arms.
     table_arm_block_depth: Int{-1}
-    // The headers of the hole tables (`if n % _ == 0 { … }`) whose arms are
-    // being read, innermost last; an arm atom fills the innermost one.
+    // The headers of the hole tables (`if n % <> == 0 { … }`) whose arms are
+    // being read, innermost last, each grouped over its written span; an arm
+    // atom fills the innermost one.
     dispatch_hole_headers: [Expr]{[Expr]{}}
+    // Where the last value hole table read starts (-1 = none). A callable
+    // body's final `if` whose value reading is one keeps that reading, so a
+    // missing `else` is reported as such (parser_parse_tail_if).
+    hole_value_table: Int{-1}
     // Rust `block_depth`: braced statement lists entered so far. Value
     // blocks read their lines at the enclosing depth, as in Rust.
     block_depth: Int{0}
@@ -651,12 +655,6 @@ parser_expect: fn(state: &JetParserState, kind: Int, context: String) -> Token {
 
 parser_expect_name: fn(state: &JetParserState, context: String) -> Token {
     if parser_current_kind(state) == TOKEN_IDENT -> return parser_bump(state)
-    // Rust `expect_ident`: the `tag` keyword also spells an ordinary name
-    // (a field, a variant field, a parameter).
-    if parser_current_kind(state) == TOKEN_KW_TAG {
-        keyword: parser_bump(state)
-        return parser_spelled_token(state, TOKEN_IDENT, keyword.span, "tag")
-    }
     token: parser_current(state)
     // Rust `expect_ident`: `in` is the source-loop keyword, never a name.
     if token.kind == TOKEN_KW_IN {

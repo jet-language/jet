@@ -598,19 +598,27 @@ When the subject of `if subject == { … }` is not a plain name — a call or a
 field access, for example — the arms refer to it as `it`, as in
 `it == .Ok(n)`.
 
-A header that holds one `_` hole makes a hole table:
-`if n % _ == 0 { 15 -> "FizzBuzz", 3 -> "Fizz", else -> "{n}" }`. Each arm
+A header that holds one `<>` hole makes a hole table:
+`if n % <> == 0 { 15 -> "FizzBuzz", 3 -> "Fizz", else -> "{n}" }`. Each arm
 head is a candidate that fills the hole, so an arm reads as the header with
-its candidate in place of `_`, tried in order. The header is evaluated again
-for each candidate tried, and a candidate that is never reached never runs.
-A group `(2 | 3)` tries its candidates in turn. After a candidate, `&&` and
-`||` are ordinary operators (`2 && ready || emergency` reads
-`(H[2] && ready) || emergency`), and a Bool candidate is written in
-parentheses. A payload-free case (`.Green`) or `None` fills the hole as a
-value. `subject == _` (or `subject OP _`) is the comparison table over
-`subject`, so its arms keep patterns, ranges, bindings and coverage. Any
-other header refuses a pattern or range arm (E0948). A header holds exactly one
-`_` (E0946), and `_` has a value nowhere else (E0947) (D-IFHOLE1=A).
+its candidate in place of `<>`, tried in order. The header is evaluated again
+for each arm tried and never for an arm after the first match, and a candidate
+that is never reached never runs. A group `(2 | 3)` tries its candidates in
+turn. After a candidate, `&&` and `||` are ordinary operators
+(`2 && ready || emergency` reads `(H[2] && ready) || emergency`), and a Bool
+candidate is written in parentheses. A payload-free case (`.Green`) or `None`
+fills the hole as a value. Since the header runs once per arm, it may not call
+a function with an effect or one that changes a value it is given or is called
+on (E0442); name the value on the line above and read the name, which the fix
+does when the table starts its statement. A call that holds the `<>` can't be
+named first, so its arms become plain tests. A pattern or range arm belongs in
+a plain `if subject == {` table (E0948), and a header whose whole test is
+`subject OP <>` is that plain table written with a needless hole (E0441). A
+hole table used as a value needs a
+final `else` (E0003), because its arms are tests rather than cases of one
+type. A header holds exactly one `<>` (E0946); `_` is no hole (E0443), and
+inside a `|>` step `<>` is the step's value, so a header there holds no hole
+(E0444) (D-IFHOLE1=A, D-IFHOLE2=A).
 
 `#Through` after a match arm's body runs the next arm's body (or the `else`
 body) after it (D-JAI-SMALL1=A): `.Error -> page() #Through` then
@@ -680,8 +688,11 @@ map keeps its key-value pair.
 A source loop may use `-> expression` or a braced value body. Each accepted
 iteration yields one non-unit value. The eager result is a `List` in iteration
 order; a guard or `next` omits an item. Multiple source clauses produce one flat
-list. An explicitly nested collecting loop preserves nesting. Maps and sets use
-explicit terminals; lazy work uses iterator adapters. In statement position,
+list. An explicitly nested collecting loop preserves nesting. A bare loop stays
+a `List` whatever type is expected; a typed set or map head holding one loop in
+place of its items builds that collection, a map loop yielding `key: value`
+with a later key replacing an earlier one, and items beside the loop are E0445
+(D-COMPREHEND1). Lazy work uses iterator adapters. In statement position,
 a finite source, infinite, condition-only, or mutable-state loop may use
 `-> statement`; its value is discarded. A discarded non-unit value earns the
 registered lint. Bind a collecting loop with `:`, or use a write handle for an
@@ -998,12 +1009,19 @@ container, generated, and hand-written implementations. A built-in derive adds
 typed Jet items beside the marked type and sends them through the same sema, IR builder,
 and codegen path as hand-written members. JSON therefore compares the same
 encoded bytes and decoded values for generated and hand-written codecs. A
-package provider is a marker whose `expand` template holds the generated
-members; the built-in `Equatable` and `Comparable` providers are Prelude markers
-of the same shape. A marker from another module is written through its import
-alias (`#Labels.RemoteLabel`), so no separate orphan rule applies and E2711 is
-retired. The old `derive T.X { … }` declaration is not Jet syntax (D-SERDE2,
-D-SERDE16, D-META-CODE1, D-META-BODY1, D-MARKER-LAW1).
+trait's derive is an `impl Trait.Derive { expand: fn(target: Target) { … } }`
+block: `#Trait` on a struct or enum requests it, and its template writes that
+type's `Trait` impl. The template has no `self`, since a derive request
+carries no data, and the block holds nothing else; the derive is as visible
+as its trait, and `priv` or a marker before `impl` is refused (E0003). A
+second `expand`, another member, or a template written with `self` is E0907.
+The built-in `Equatable` and `Comparable` derives are Prelude blocks of the
+same shape. A provider with no trait is a marker whose `expand` template holds
+the generated members. A marker from another module is written through its
+import alias (`#Labels.RemoteLabel`), so no separate orphan rule applies and
+E2711 is retired. No `derive` or `derives` declaration word remains, and the
+old `derive T.X { … }` declaration is not Jet syntax (D-SERDE2, D-SERDE16,
+D-META-CODE1, D-META-BODY1, D-MARKER-LAW1, D-DECL-TYPES1).
 
 A struct's `validate { … }` block declares checks in the exact form
 `check(condition, at: field, "message")`. `field` names a sibling field. Every
@@ -1673,8 +1691,9 @@ needs a declared conversion (E2402). A catch-all `.Err(e)` arm over a union
 that holds `Err` binds `e` the same way, as an `Err`; over a union without
 `Err`, `e` is the union. An arm `.Err(.T(…))` for a type `T` that is not
 a member of the union can never match, since nothing that fails with `T`
-reaches the value any more. It is the lint L0304, the table is checked
-without it, and its edit deletes the arm. A name that is no type stays E0305.
+reaches the value any more. It is the tidy error L0304, which fails
+`jet check` and `jet build` but never `jet run`; the table is checked without
+it, and its edit deletes the arm. A name that is no type stays E0305.
 
 A conversion from a generic error type names the type bare, as an impl of a
 generic type does (`impl Err.From(Unsent)`), and applies to every instantiation:
@@ -3877,9 +3896,11 @@ defaults and per-profile, service, provider, and `require` decisions. An absent
 Lock-backed provenance reports integrity, transparency, publisher, and
 build-attestation facts; present evidence is labeled `verified` or `recorded`,
 and integrity failures remain **E1204**. Lints warn by default, while
-`package.jet` policy can deny named lints and produce **E1293**. Host policy
+`package.jet` policy can deny named lints and produce **E1293**; a tidy error
+(an unused import or local, an unreachable arm) never stops `jet run`,
+`jet dev` or `jet test`, and fails `jet check` and `jet build`. Host policy
 can narrow but not widen that rule
-(I1, I8, D-BOUND-PROV1, D-LINTPOLICY1=A, D-JPK-POLICYSURFACE1).
+(I1, I8, D-BOUND-PROV1, D-LINTPOLICY1=A, D-NO-WARNINGS1=A, D-JPK-POLICYSURFACE1).
 
 Once a package is realized, realize-class operations can reuse it with
 `--offline`. Network-class operations reject `--offline`; a missing local

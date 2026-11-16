@@ -206,8 +206,10 @@ priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: S
 // `#App.SignedIn` or `#App.Public` marks: a call of any other method of `S`
 // is E2812, and the service itself stays out of reach. A call through a
 // Remote that `remote` made runs the method directly on that service; one
-// through a Remote that `remote_at` made posts it to the server. Either way
-// the call is one transaction on each store it uses, as a served call is
+// through a Remote that `remote_at` made posts it to the server, and one
+// through the app graph's Remote of a service the graph mounts (`App.__remote`)
+// is answered in this process as a server answers it (`graph_post`). Either
+// way the call is one transaction on each store it uses, as a served call is
 // (`transactions`), and the call's error type takes a `CallError`: a method
 // that fails with `E` needs `impl CallError -> E`, and one that can't fail
 // answers `R CallError!`. A Remote made for a named client fails each call
@@ -217,12 +219,14 @@ Remote: struct<S> {
     priv service: S?
     priv address: String
     priv client: String
+    // Whether the app graph mounts `S`, so `address` names `S` in it.
+    priv local: Bool
 
     // A call of the endpoint method `method` of `S`, which can fail with
     // `E`. The compiler lowers each such call here: `direct` runs it on the
     // service the Remote holds; otherwise `args`, the encoded arguments, go to
     // the server, and `fail` gives a `CallError` as the method's own error.
-    __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time.Wait]> R E! {
+    __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time]> R E! {
         if links_cut(self.client) -> return fail(links_unreachable(self.client, method))
         if self.service == .Val(service) {
             loop _ in 0..<transactions.attempts() {
@@ -238,7 +242,7 @@ Remote: struct<S> {
             }
             return fail(.Unreachable("the database stayed busy"))
         }
-        reply: remote_post(self.address, method, args) ?? return fail(err)
+        reply: remote_post(self.address, self.local, method, args) ?? return fail(err)
         tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
         if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
         value: live_json.at<R>(tree, "/ok") ?? return fail(.Unreachable("the server's reply to `{method}` has no value"))
@@ -246,7 +250,7 @@ Remote: struct<S> {
     }
 
     // A call of the endpoint method `method` of `S`, which can't fail.
-    __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time.Wait]> R CallError! {
+    __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time]> R CallError! {
         if links_cut(self.client) -> return Err(links_unreachable(self.client, method))
         if self.service == .Val(service) {
             loop _ in 0..<transactions.attempts() {
@@ -256,7 +260,7 @@ Remote: struct<S> {
             }
             return Err(.Unreachable("the database stayed busy"))
         }
-        reply: remote_post(self.address, method, args)
+        reply: remote_post(self.address, self.local, method, args)
         tree: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
         value: live_json.at<R>(tree, "/ok") ?? return Err(.Unreachable("the server's reply to `{method}` has no value"))
         Ok(value)
@@ -336,14 +340,14 @@ REMOTE_MAX_REPLY: 16777216
 // marked method on `service` directly. `client` names the client that holds
 // it, which a test can cut off (`disconnect`); "" names none.
 remote: fn<S>(service: &&S, client: String{""}) -> Remote<S> Never! {
-    Remote<S>{service: Val(service), address: "", client: client}
+    Remote<S>{service: Val(service), address: "", client: client, local: false}
 }
 
 // The Remote of a service a server mounts at `address`, its mount prefix
 // (`http://127.0.0.1:8080/api`): each call posts its JSON arguments to
 // `{address}/{method}`. `client` is as for `remote`.
 remote_at: fn<S>(address: String, client: String{""}) -> Remote<S> Never! {
-    Remote<S>{service: None, address: address, client: client}
+    Remote<S>{service: None, address: address, client: client, local: false}
 }
 
 // The test host's link between each client and the servers. `disconnect`
@@ -450,12 +454,15 @@ priv REMOTE_RESEND_MS: 200
 // carries a W3C `traceparent` that starts its trace, and that trace's id as
 // its `x-request-id`, so the server's span of the call has both. It also
 // carries a request key, its `idempotency-key`, and is sent again under the
-// same key when no reply comes, up to `REMOTE_SENDS` times.
-priv remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
+// same key when no reply comes, up to `REMOTE_SENDS` times. A `local` call
+// is the app graph's, answered in this process under the same key
+// (`graph_post`).
+priv remote_post: fn(address: String, local: Bool, method: String, args: [String]) -[Net, Time]> String CallError! {
     seed: "{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}"
     trace: make_trace_id("trace:{seed}", 16)
     key: make_trace_id("key:{seed}", 16)
     body: "[{args.join(",")}]"
+    if local -> return graph_post("{address}/{method}", key, body)
     lost := ""
     loop sends in 0..<REMOTE_SENDS {
         if sends > 0 -> tasks.sleep(REMOTE_RESEND_MS * sends)
@@ -639,7 +646,8 @@ live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> T
 // after them, and the binding's first current result after the hold sends the
 // event again. A connection receives only the bindings its handler watches;
 // the handler holds `binding` because it read it for its own caller under
-// that caller's policy.
+// that caller's policy. Once the last connection watching `binding` closes,
+// its caller is present nowhere through it (__live_left_settle).
 watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) Never! -[Net]> {
     ws.__live_watch(socket, "live:{binding.id}")
 }
@@ -883,8 +891,10 @@ live_presence_keep: fn(id: Int, account: String, asked: [String]) -> [String] {
 
 // The accounts present at `address`, sorted, each once: those of the
 // registered bindings whose latest run asked `presence` of it, and
-// `asking`, the account of the run asking now (none when "").
+// `asking`, the account of the run asking now (none when ""). A binding
+// whose last watching connection closed is not among them (__live_left_settle).
 live_present: fn(address: String, asking: String) -> [auth.AccountID] {
+    __live_left_settle()
     names := [String]{}
     if asking != "" -> names.push(asking.copy())
     registry: live_decode(live_cell_load())
@@ -898,6 +908,27 @@ live_present: fn(address: String, asking: String) -> [auth.AccountID] {
     out := [auth.AccountID]{}
     loop name in names -> out.push(auth.AccountID.from_string(name))
     out
+}
+
+// The leave signal of the WebSocket live hub: each binding whose last
+// watching connection (`watch`) closed since the last call is present
+// nowhere (live_left). A server runs this once each upgraded connection's
+// handler returns, and every presence read runs it first, so a closed
+// session is never counted.
+__live_left_settle: fn() Never! { live_left(rt_web.live_left()) }
+
+// Ends the presence of each binding `topics` names, one hub topic
+// (`live:<id>`, `watch`'s) per line, and re-runs every binding that reads an
+// address it was present at. That binding re-runs too: a connection that
+// watches it again first receives its event, so the client reads it, and
+// the run asks again, counting its account.
+priv live_left: fn(topics: String) Never! {
+    loop topic in topics.split("\n") {
+        if !topic.starts_with("live:") -> next
+        id: Int.parse(topic.slice(5, topic.len())) ?? next
+        changed: live_presence_keep(id, "", [String]{})
+        loop address in changed -> live_invalidate("{LIVE_PRESENCE_SOURCE}{address}", None, None, 0)
+    }
 }
 
 // The binding `task` is running now, the innermost when it runs several.
@@ -1673,22 +1704,28 @@ priv PUSH_NOTES: Shared{PushNotes{skipped: 0, failed: 0, last: [String]{}}}
 
 priv C_PUSH_NOTES_KEPT: 32
 
-// The app graph: the screens every target shows, each at the address of the
-// state it opens. `new` starts it, and the `.screen` calls of the one package
-// that builds it add the screens. Every target runs this one graph, so its
-// screens are every target's route set. The compiler lowers `.screen`,
-// `.cache`, `.sitemap`, `app.url_of`, `app.presence` and `app.notify` to the
-// graph's `__` members below.
+// The app graph: the services its clients call, the screens every target
+// shows, each at the address of the state it opens, and whether a device
+// queues the writes it can't send. `new` starts it, `.api<S>(path)` declares
+// the service `S` the clients reach at `path`, `.mount(service)` answers
+// `S`'s calls in this process, `.screen` adds a screen and `.offline` sets
+// the queue. Every target runs this one graph, so its screens are every
+// target's route set, and each `app.Remote<S>` a screen's view takes is the
+// graph's Remote of `S`. The graph is the process's: each copy of an App,
+// and the members that take none, read and change that one graph. The
+// compiler lowers `.api`, `.mount`, `.screen`, `.cache`, `.sitemap`,
+// `app.go`, `app.current`, `app.url_of`, `app.presence` and `app.notify` to
+// the graph's `__` members below.
 App: struct {
     title: String
 
-    // `.screen(path, view, signed_in:)` as the compiler lowers it, once it
-    // has checked `view`'s state `V` against `path`: `state` names `V`, and
-    // `query` lists its `#App.Query` fields. The screen joins the process's
-    // route set, where `__url_of` finds its address.
-    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool) -> App Never! {
-        held := APP_ROUTES.guard_edit()
-        held.value[state.copy()] = AppScreen{path: path, state: state, query: query, signed_in: signed_in}
+    // `.api<S>(path, max_upload:)` as the compiler lowers it: `service`
+    // names `S`. A client posts each call of an endpoint method of `S` to
+    // `{path}/{method}`, a body of at most `max_upload` bytes; a graph that
+    // mounts `S` answers its calls in this process (`__remote`).
+    __api: fn<S>(self, path: String, service: String, max_upload: Int) -> App Never! {
+        held := APP_GRAPH.guard_edit()
+        held.value.apis[service] = AppAPI{path: path, max_upload: max_upload}
         self.copy()
     }
 
@@ -1727,6 +1764,147 @@ App: struct {
         self.copy()
     }
 
+    // Whether a device queues the writes it can't send (`.Queue`) or fails
+    // them at once (`.Off`, the start).
+    offline: fn(self, mode: Offline) -> App Never! {
+        held := APP_GRAPH.guard_edit()
+        held.value.offline = mode
+        self.copy()
+    }
+
+    // `.screen(path, view, signed_in:)` as the compiler lowers it, once it
+    // has checked `view`'s state `V` against `path`: `state` names `V`,
+    // `query` lists its `#App.Query` fields, and `open` opens the screen at
+    // an address: from the text of each of `V`'s fields there, by name, it
+    // makes the state, runs `view` with it and the graph's Remotes, and gives
+    // the text of what the view shows (`__view_text`); None when the texts
+    // don't make a `V`. The screen joins the graph's route set, in the order
+    // the graph adds it, where `__url_of` finds its address, `__go` opens it,
+    // and a renderer walks it (`screens`).
+    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: &&fn(App, [String:String]) -> String? Never!) -> App Never! {
+        held := APP_GRAPH.guard_edit()
+        held.value.screens.push(AppScreen{path: path, state: state, query: query, signed_in: signed_in, open: Shared{AppOpen{run: open.move()}}})
+        self.copy()
+    }
+
+    // An `#App.Public` method of a mounted service, as the compiler lowers
+    // `.mount(service)`: `path` is `{service}/{method}`, where the graph's
+    // Remote of the service posts the call (`graph_post`), and `answer` runs
+    // the call from its decoded arguments. A call in this process comes from
+    // no network address, so the endpoint's limit of `limit` calls per
+    // `window_ns` from one address, which a server keeps, doesn't apply.
+    __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -> String [FieldError]!, limit: Int, window_ns: Int) -> App Never! {
+        held := APP_GRAPH.guard_edit()
+        held.value.endpoints[path] = AppEndpoint{answer: Val(Shared{AppAnswer{run: answer.move()}})}
+        self.copy()
+    }
+
+    // An `#App.SignedIn` method of a mounted service: its call answers
+    // `SignedOut`, as a server's does, until the graph signs a caller in.
+    __remote_signed_in: fn(self, path: String, limit: Int, window_ns: Int) -> App Never! {
+        held := APP_GRAPH.guard_edit()
+        held.value.endpoints[path] = AppEndpoint{answer: None}
+        self.copy()
+    }
+
+    // An `#App.Job` method of a mounted service, declared to this process's
+    // jobs (`jobs.know`), so a server serving here runs the job's kept rows.
+    __job: fn(self, name: String, retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
+        jobs.know(name, retries, run.move())
+        self.copy()
+    }
+
+    // The graph's Remote of the service `S` (`.api<S>`, which `service`
+    // names), as the compiler passes it to each `app.Remote<S>` parameter of
+    // a screen's view: when the graph mounts `S`, each call runs in this
+    // process (`graph_post`); otherwise it posts to `{path}/{method}`. The
+    // compiler passes only a service a `.api` of the graph declares.
+    __remote: fn<S>(self, service: String) -> Remote<S> Never! {
+        held: APP_GRAPH.guard_read()
+        api: held.value.apis.get(service) ?? panic("the app graph declares no `.api` of `{service}`: add `.api<{service}>(path)` to the graph")
+        loop path in held.value.endpoints.keys() {
+            if path.starts_with("{service}/") {
+                return Remote<S>{service: None, address: service, client: "", local: true}
+            }
+        }
+        Remote<S>{service: None, address: api.path.copy(), client: "", local: false}
+    }
+
+    // The JSON of the field `name` of a state, of type `T`, from its text in
+    // an address (`fields`, by field name): a value whose JSON is a string
+    // is its own text, any other its JSON (`__address_arg`). None when the
+    // address has no such field or its text is no `T`.
+    __address_json: fn<T: [Encode, Decode]>(self, fields: [String:String], name: String) -> String? Never! {
+        text: fields.get(name) ?? return None
+        quoted: live_json.to_string<String>(text) ?? return None
+        if live_json.decode<T>(quoted) == .Ok(value) {
+            return Val(live_json.to_string<T>(value) ?? return None)
+        }
+        value: live_json.decode<T>(text) ?? return None
+        Val(live_json.to_string<T>(value) ?? return None)
+    }
+
+    // The state `V` whose fields `names` have the JSON `values`
+    // (`__address_json`), in order; None when a value is missing or the
+    // values make no `V`.
+    __address_state: fn<V: Decode>(self, names: [String], values: [String?]) -> V? Never! {
+        parts := [String]{}
+        loop index in 0..<names.len() {
+            value: values[index] ?? return None
+            name: live_json.to_string<String>(names[index]) ?? return None
+            parts.push("{name}:{value}")
+        }
+        Val(live_json.decode<V>("{{{parts.join(",")}}}") ?? return None)
+    }
+
+    // Runs `run` with `state`, and gives its text; None for no state.
+    __opened: fn<V>(self, state: V?, run: fn(V) -> String Never!) -> String? Never! {
+        if state == .Val(made) -> return Val(run(made))
+        None
+    }
+
+    // The text of what a screen's view shows: a string's own text, and any
+    // other value's JSON.
+    __view_text: fn<N: Encode>(self, shown: N) -> String Never! { App.__address_arg<N>(shown) }
+
+    // `app.go(view)` as the compiler lowers it: opens the screen whose state
+    // is `V`, which `state` names, at the address of the fields `names` with
+    // the texts `values` (`__address_arg`): the screen becomes the current
+    // one (`__current`), and its view runs. The compiler refuses a state that
+    // no screen of the program's graph opens, so a state with no screen here
+    // is one whose graph this process has not built.
+    __go: fn<V>(state: String, names: [String], values: [String]) Never! {
+        fields := [String:String]{}
+        loop index in 0..<names.len() -> fields[names[index].copy()] = values[index].copy()
+        screen: app_screen(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before opening a screen")
+        graph: app_graph_open(state, fields.copy())
+        _: graph.__open(screen, fields)
+    }
+
+    // `app.current<V>()` as the compiler lowers it: the state of the current
+    // screen (`__go`) when it is a `V`, which `state` names, made from its
+    // address's field texts by `decode`; None otherwise.
+    __current: fn<V>(state: String, decode: fn(App, [String:String]) -> V? Never!) -> V? Never! {
+        now: app_graph_current() ?? return None
+        if now.state != state -> return None
+        decode(App{title: app_graph_title()}, now.fields)
+    }
+
+    // The screens of the graph, in the order it adds them: what a renderer
+    // walks to answer each address.
+    __screens: fn(self) -> [AppScreen] Never! {
+        held: APP_GRAPH.guard_read()
+        held.value.screens.copy()
+    }
+
+    // Opens `screen` at the address whose field texts are `fields`, by field
+    // name, as a renderer does: the text of what its view shows, or None
+    // when the texts make no state of the screen.
+    __open: fn(self, screen: AppScreen, fields: [String:String]) -> String? Never! {
+        opener: screen.open.guard_read()
+        opener.value.run(self.copy(), fields)
+    }
+
     // The address of the screen whose state is `V`, as the compiler lowers
     // `url_of(view)` and a push's `open:`. `names` are `V`'s fields, in
     // order, and `values` their address text (`__address_arg`). Each `:name`
@@ -1736,8 +1914,7 @@ App: struct {
     // program's graph opens, so a state with no screen here is one whose
     // graph this process has not built.
     __url_of: fn<V>(state: String, names: [String], values: [String]) -> String Never! {
-        held: APP_ROUTES.guard_read()
-        screen: held.value.get(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before taking an address")
+        screen: app_screen(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before taking an address")
         parts := [String]{}
         loop segment in screen.path.split("/") {
             if !segment.starts_with(":") {
@@ -1840,20 +2017,38 @@ Query: struct {
     }
 }
 
-// Starts the app graph, titled `title`.
-new: fn(title: String) -> App Never! { App{title: title} }
+// Starts the app graph, titled `title`: a graph with no services, screens or
+// queue yet.
+new: fn(title: String) -> App Never! {
+    held := APP_GRAPH.guard_edit()
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None}
+    App{title: title}
+}
+
+// Whether a device queues the writes it can't send, to send them once it
+// reaches the server again (`.Queue`), or fails them (`.Off`).
+#Equatable
+Offline: enum {
+    Off
+    Queue
+}
 
 // One screen of the route set: the path its state's fields fill, the state's
-// name, its `#App.Query` fields, and whether only a signed-in caller opens it.
-priv AppScreen: struct {
+// name, its `#App.Query` fields, whether only a signed-in caller opens it,
+// and how it opens at an address (`App.__screen`).
+AppScreen: struct {
     path: String
     state: String
     query: [String]
     signed_in: Bool
+    open: Shared<AppOpen>
 }
 
-// The route set: the screen of each state, by the state's name.
-priv APP_ROUTES: Shared{[String:AppScreen]{}}
+// How a screen opens at an address: from its fields' texts, the text of
+// what its view shows, or None when they make no state.
+AppOpen: struct {
+    run: fn(App, [String:String]) -> String? Never!
+}
 
 // How the replies of one type may be kept, as `.cache<V>(policy)` sets it.
 // `.Private` is kept by no one: `Cache-Control: private, no-store`, as
@@ -1994,10 +2189,9 @@ priv(package) sitemap: module {
     // robots.txt rule matches it: each `:name` segment is `*`, and `$` ends
     // the path, so a public page under it stays open to crawlers.
     signed_in_paths: fn() -> [String] Never! {
-        held: APP_ROUTES.guard_read()
+        held: APP_GRAPH.guard_read()
         paths := [String]{}
-        loop state in held.value.keys() {
-            screen: held.value.get(state) ?? next
+        loop screen in held.value.screens {
             if !screen.signed_in -> next
             segments := [String]{}
             loop segment in screen.path.split("/") {
@@ -2020,8 +2214,7 @@ priv app_sitemaps: fn() -> [Shared<AppSitemap>] Never! {
 // Whether a screen opens the state named `state` for a caller who is not
 // signed in.
 priv app_screen_public: fn(state: String) -> Bool Never! {
-    held: APP_ROUTES.guard_read()
-    screen: held.value.get(state) ?? return false
+    screen: app_screen(state) ?? return false
     !screen.signed_in
 }
 
@@ -2035,7 +2228,7 @@ priv SitemapTestInbox: struct {
 }
 
 #Test("a sitemap lists each state its list gives whose screen opens without signing in, and robots leave each signed-in screen") {
-    graph: new("Crew").__screen<SitemapTestGuide>("/guides/:slug", "app.SitemapTestGuide", [String]{}, false).__screen<SitemapTestInbox>("/inbox/:box", "app.SitemapTestInbox", [String]{}, true)
+    graph: new("Crew").__screen<SitemapTestGuide>("/guides/:slug", "app.SitemapTestGuide", [String]{}, false, fn(_: App, _: [String:String]) { String?{None} }).__screen<SitemapTestInbox>("/inbox/:box", "app.SitemapTestInbox", [String]{}, true, fn(_: App, _: [String:String]) { String?{None} })
     _: graph.__sitemap<SitemapTestGuide>(
         "app.SitemapTestGuide",
         [String]{"slug"},
@@ -2155,15 +2348,164 @@ priv resume_test_view: fn() -> String Never! {
     assert_eq(resume.seed("<p>49</p>"), 0)
 }
 
-// A board's state, for the route-set test: its project is a path segment and
-// its filter the query.
+// A service a graph declares (`.api<S>`): where its clients post its calls,
+// and the most bytes one call's body holds.
+priv AppAPI: struct {
+    path: String
+    max_upload: Int
+}
+
+// An endpoint method of a service the graph mounts: how it answers a call
+// from its decoded arguments, or None for a method only a signed-in caller
+// calls.
+priv AppEndpoint: struct {
+    answer: Shared<AppAnswer>?
+}
+
+priv AppAnswer: struct {
+    run: fn(RemoteArgs) -> String [FieldError]!
+}
+
+// The screen open now (`App.__go`): its state's name and its address's
+// field texts, by field name.
+priv AppCurrent: struct {
+    state: String
+    fields: [String:String]
+}
+
+// The process's app graph: its title, its services by the name of each
+// (`.api`), the endpoints of the services it mounts by `{service}/{method}`,
+// its screens in the order it adds them, its offline mode and the screen
+// open now.
+priv AppGraph: struct {
+    title: String
+    apis: [String:AppAPI]
+    endpoints: [String:AppEndpoint]
+    screens: [AppScreen]
+    offline: Offline
+    current: AppCurrent?
+}
+
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None}}
+
+// Makes the screen of `state`, at the address of the field texts `fields`,
+// the current one, and gives the graph.
+priv app_graph_open: fn(state: String, fields: [String:String]) -> App Never! {
+    held := APP_GRAPH.guard_edit()
+    held.value.current = Val(AppCurrent{state: state, fields: fields})
+    App{title: held.value.title.copy()}
+}
+
+// The screen open now (`App.__go`); None before one opens.
+priv app_graph_current: fn() -> AppCurrent? Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.current.copy()
+}
+
+priv app_graph_title: fn() -> String Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.title.copy()
+}
+
+// The screen of the graph whose state `state` names.
+priv app_screen: fn(state: String) -> AppScreen? Never! {
+    held: APP_GRAPH.guard_read()
+    loop screen in held.value.screens {
+        if screen.state == state -> return Val(screen.copy())
+    }
+    None
+}
+
+// One remote call of the endpoint at `path` of a service the app graph
+// mounts (`App.__remote_public`), answered in this process as a server
+// answers it (Web's `app_remote_response`): `body` is the JSON array of its
+// arguments, and the call carries the request key `key` with the account it
+// acts for, so it is one transaction on each store it uses, and a store that
+// keeps a reply under the key answers with that reply. A run that fails
+// rolls back, and a busy store's refusal runs it again, up to
+// `transactions.attempts()` times.
+priv graph_post: fn(path: String, key: String, body: String) -[Time]> String CallError! {
+    endpoint: graph_endpoint(path) ?? return Err(.Unreachable("no service the app graph mounts answers `{path}`"))
+    answer: endpoint.answer ?? return Err(.SignedOut)
+    tree: live_json.parse(body) ?? return Err(.Invalid([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
+    account := ""
+    if maybe_caller() == .Val(who) -> account = who.raw()
+    asked: CallRequest{account: account, key: key, at: time.now_utc().to_timestamp()}
+    held: answer.guard_read()
+    loop _ in 0..<transactions.attempts() {
+        call: transactions.begin() ?? return graph_answered(graph_run(held.value.run, tree))
+        transactions.ask(call, asked.copy())
+        failed := CallError?{None}
+        given: graph_run(held.value.run, tree) ?? {
+            failed = Val(CallError.Invalid(err))
+            ""
+        }
+        if failed == None -> transactions.answer(call, given)
+        if transactions.repeated(call) {
+            kept: transactions.reply(call)
+            _: transactions.end(call, false)
+            return Ok(kept ?? return Err(.Unreachable("the reply kept for `{path}` is lost")))
+        }
+        if transactions.end(call, failed == None && !given.starts_with("{{\"err\":")) {
+            if failed == .Val(failure) -> return Err(failure)
+            return Ok(given)
+        }
+    }
+    Err(.Unreachable("the database stayed busy"))
+}
+
+// Runs a mounted method's call, `run`, with the arguments `tree`.
+priv graph_run: fn(run: fn(RemoteArgs) -> String [FieldError]!, tree: Dyn) -> String [FieldError]! {
+    run(RemoteArgs{tree: tree.copy()})
+}
+
+// The endpoint at `path` of a service the graph mounts.
+priv graph_endpoint: fn(path: String) -> AppEndpoint? Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.endpoints.get(path).copy()
+}
+
+// A mounted method's reply as a remote call's: its field errors are the
+// call's `Invalid`.
+priv graph_answered: fn(replied: String [FieldError]!) -> String CallError! {
+    if replied == {
+        .Ok(given) -> Ok(given)
+        .Err(fields) -> Err(.Invalid(fields))
+    }
+}
+
+// A board's state, for the graph test: its project is a path segment and its
+// filter the query.
 priv RouteTestBoard: struct {
     project: String
     q: String
 }
 
-#Test("a screen's state is its address: path fields fill their segments, and query fields with a value join the query") {
-    graph: new("Crew").__screen<RouteTestBoard>("/projects/:project/board", "app.RouteTestBoard", [String]{"q"}, true)
+// The service the graph test's board calls.
+priv RouteTestService: struct {}
+
+// The graph test's board view, as the compiler lowers `.screen`'s `open`:
+// it makes the state from the address's texts, and greets its project
+// through the graph's Remote of the service.
+priv route_test_open: fn(graph: App, fields: [String:String]) -> String? Never! {
+    made: graph.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{graph.__address_json<String>(fields, "project"), graph.__address_json<String>(fields, "q")})
+    graph.__opened<RouteTestBoard>(made, fn(state: RouteTestBoard) {
+        greeting: remote_post("app.RouteTestService", true, "greet", [String]{live_json.to_string<String>(state.project) ?? "null"}) ?? "{err}"
+        graph.__view_text<String>("{greeting}: {state.q}")
+    })
+}
+
+#Test("the app graph opens each screen at its state's address, with the graph's Remotes") {
+    graph: new("Crew").__api<RouteTestService>("/api", "app.RouteTestService", 1000000).__remote_public(
+        "app.RouteTestService/greet",
+        fn(args: RemoteArgs) {
+            name: args.__take<String>(0) ?? return Err(err)
+            Ok(args.__reply_value<String>("hello {name}"))
+        },
+        0,
+        0,
+    )
+        .__screen<RouteTestBoard>("/projects/:project/board", "app.RouteTestBoard", [String]{"q"}, true, route_test_open).offline(.Queue)
     assert_eq(graph.title, "Crew")
     names: [String]{"project", "q"}
     assert_eq(App.__url_of<RouteTestBoard>("app.RouteTestBoard", names, [String]{App.__address_arg<String>("p 1/2"), App.__address_arg<String>("")}), "/projects/p%201%2F2/board")
@@ -2171,6 +2513,27 @@ priv RouteTestBoard: struct {
     assert_eq(App.__address_arg<Int>(42), "42")
     assert_eq(App.__address_arg<Bool>(true), "true")
     assert_eq(App.__address_arg<String>("say \"hi\""), "say \"hi\"")
+    // A field's address text makes its value back: a string's own text, any
+    // other value's JSON.
+    texts: [String:String]{"id": "42", "name": "42", "done": "true"}
+    assert_eq(graph.__address_json<Int>(texts, "id"), Val("42"))
+    assert_eq(graph.__address_json<String>(texts, "name"), Val("\"42\""))
+    assert_eq(graph.__address_json<Bool>(texts, "done"), Val("true"))
+    assert_eq(graph.__address_json<Int>(texts, "absent"), String?{None})
+    assert_eq(graph.__address_json<Int>([String:String]{"id": "four"}, "id"), String?{None})
+    // The registry a renderer walks.
+    screens: graph.__screens()
+    assert_eq(screens.len(), 1)
+    assert_eq(screens[0].path, "/projects/:project/board")
+    assert_eq(screens[0].signed_in, true)
+    assert_eq(graph.__open(screens[0], [String:String]{"project": "p1", "q": "mine"}), Val("{{\"ok\":\"hello p1\"}}: mine"))
+    assert_eq(graph.__open(screens[0], [String:String]{"q": "mine"}), String?{None})
+    // `go` makes a screen the current one.
+    assert_eq(App.__current<RouteTestBoard>("app.RouteTestBoard", fn(at: App, fields: [String:String]) { at.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{at.__address_json<String>(fields, "project"), at.__address_json<String>(fields, "q")}) }) == None, true)
+    App.__go<RouteTestBoard>("app.RouteTestBoard", names, [String]{"p2", ""})
+    now: App.__current<RouteTestBoard>("app.RouteTestBoard", fn(at: App, fields: [String:String]) { at.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{at.__address_json<String>(fields, "project"), at.__address_json<String>(fields, "q")}) }) ?? panic("the board is open")
+    assert_eq(now.project, "p2")
+    assert_eq(App.__current<RouteTestService>("app.RouteTestService", fn(_at: App, _fields: [String:String]) { RouteTestService?{None} }) == None, true)
 }
 
 // The accounts the presence test's source refuses, as a row policy would.
@@ -2222,6 +2585,36 @@ priv presence_test_refuse: fn(account: String) {
     asked := [String]{}
     loop present in App.__presence("/tasks/7") -> asked.push(present.raw())
     assert_eq(asked.join(","), "ann")
+}
+
+// `account`'s binding of who has the task at `/tasks/8` open.
+priv presence_left_test_bind: fn(account: String) -> Live<String, AppError> {
+    as_caller(auth.AccountID.from_string(account), fn() {
+        __live_bind<String, AppError>("app.test.presence_left", [String]{account.copy()}, fn() {
+            names := [String]{}
+            loop present in App.__presence("/tasks/8") -> names.push(present.raw())
+            Ok(names.join(","))
+        })
+    })
+}
+
+#Test("a binding whose last watching connection closed is present nowhere, and every binding that read its presence re-runs") {
+    ann: presence_left_test_bind("ann")
+    ben: presence_left_test_bind("ben")
+    assert_eq(presence_test_read(ann), "ann")
+    assert_eq(presence_test_read(ben), "ann,ben")
+    assert_eq(presence_test_read(ann), "ann,ben")
+    // The hub's leave signal: ben's only connection closed. A line that
+    // names no binding is passed over.
+    live_left("chat\nlive:{ben.id}\nlive:none")
+    asked := [String]{}
+    loop present in App.__presence("/tasks/8") -> asked.push(present.raw())
+    assert_eq(asked.join(","), "ann")
+    assert_eq(presence_test_read(ann), "ann")
+    // Ben's binding re-runs on its next read, as a reconnected client reads
+    // it, and counts ben again.
+    assert_eq(presence_test_read(ben), "ann,ben")
+    assert_eq(presence_test_read(ann), "ann,ben")
 }
 
 // The key of the run this task is in: its delivery's ID for a job or a

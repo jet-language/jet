@@ -38,7 +38,6 @@ use {
         TOKEN_IDENT,
         TOKEN_INT,
         TOKEN_KW_FN,
-        TOKEN_KW_TAG,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
         TOKEN_LPAREN,
@@ -459,11 +458,9 @@ parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
     }
     fields := [TypeTupleField]{}
     loop {
-        // A member name is an identifier or the `tag` keyword, which also
-        // spells an ordinary name (parser_expect_name).
         kind: parser_current_kind(state)
         if {
-            (kind == TOKEN_IDENT || kind == TOKEN_KW_TAG) && parser_kind_at(state, 1) == TOKEN_COLON -> {
+            kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON -> {
                 name: parser_expect_name(state, "for a tuple member name")
                 parser_bump(state)
                 ty: parser_parse_type(state, depth + 1)

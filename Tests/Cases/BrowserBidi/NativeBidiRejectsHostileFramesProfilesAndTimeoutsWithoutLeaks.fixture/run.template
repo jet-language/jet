@@ -10,12 +10,12 @@ connect_outcome: fn(endpoint: String) -> String {
 }
 
 profile_outcome: fn() -> String {
-    profile: browser.profile("rolling") ?? return "caught"
+    _profile: browser.profile("rolling") ?? return "caught"
     return "unexpected-success"
 }
 
 timeout_outcome: fn() -> String {
-    timeout: browser.timeout(0) ?? return "caught"
+    _timeout: browser.timeout(0) ?? return "caught"
     return "unexpected-success"
 }
 
@@ -23,7 +23,7 @@ cdp_outcome: fn(endpoint: String) -> String {
     profile: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout: browser.timeout(250) ?? return "unexpected-timeout"
     session: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
-    cdp: session.protocol("cdp") ?? return "caught"
+    _cdp: session.protocol("cdp") ?? return "caught"
     return "unexpected-success"
 }
 

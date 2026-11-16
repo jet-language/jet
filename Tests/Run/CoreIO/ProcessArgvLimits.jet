@@ -84,7 +84,7 @@ run: fn() -[Exec, IO, Time.Wait]> {
     child: process.cmd(["seq", "1", "1000000"]).stdout(.Stream).timeout(10s).spawn() ?? panic("spawn failed")
     pid: child.id()
     seen := 0
-    loop line in child.stdout.lines() {
+    loop _ in child.stdout.lines() {
         seen += 1
         if seen == 3 -> break
     }

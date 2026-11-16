@@ -6,8 +6,8 @@
 fixture: FallbackErrIsNeverAnUnusedLocal.fixture
 env: NO_COLOR=1
 step: jet check main.jet
-exit: 0
-stderr: ~ "Local binding `err` is never read" # a real unused err still warns
+exit: 1 # the unused err is a tidy error
+stderr: ~ "Local binding `err` is never read" # a real unused err is still reported
 stderr: ~ "main.jet:22:5" # the user binding at line 21 is the only report
 stderr: !~ "main.jet:9:" # no report for the fallback err on line 8
 stderr: !~ "main.jet:13:" # no report for the fallback err on line 12

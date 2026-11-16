@@ -84,7 +84,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `?` | optional type mark after its type (`T?`) |
 | `??` | fallback |
 | `\|>` | pipe step: the expression after it runs on the value from the line above, which it reads as `<>`; each step is a hidden one-step binding |
-| `<>` | the value of the nearest enclosing `\|>` step; legal only inside a step, which must read it at least once |
+| `<>` | the value of the nearest enclosing `\|>` step, legal only inside a step, which must read it at least once; in an `if` table header, the hole each arm's candidate fills |
 | `x.move()` | an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `&&T` or `&&self` |
 | `&&T / &&self` | take mark in a signature, and `task &&name` for a task capture; `&T` / `&self` is the write mark; calls stay unmarked |
 | `fn(&T) / fn(&&T)` | a function type marks a written input `&` and a taken one `&&`, as a declaration does (`action: fn(&Mobj)`); a function or lambda fits it only when its marks match (E0227), and a stored one is called plainly (`st.action(m)`) |
@@ -92,6 +92,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `T{expr}` | field default |
 | `Name{"…"}` | checked text head |
 | `{ … }` | typed anonymous value |
+| `loop x in xs -> item / Head{loop x in xs -> item}` | yielding loop: in value position a finite loop yields one item per accepted pass, in loop order; a bare one builds a List and ignores the expected type; a typed set or map head holding one loop in place of its items builds that collection, a map loop yielding `key: value` where a later key replaces an earlier one; items beside a loop in one head are a build error |
 | <code>`</code> | raw ordinary String fence |
 | `"""` | multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted) |
 | `\u{H}` | Unicode scalar escape in quoted text and character literals, beside `\n`, `\r`, `\t`, `\"` and `\\`: one to six hexadecimal digits up to 10FFFF, never a surrogate (D800-DFFF); byte literals have none and write `\xNN` |
@@ -100,7 +101,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `[first, ..rest]` | list pattern with a read-only zero-copy rest window; exact without the rest marker |
 | `[key: pattern, key?: optional, ..]` | map pattern; required and optional keys, exact unless it ends with rest |
 | `if T == { Int -> … else -> … }` | type table: a generic function branches on its type parameter; each arm reads `T` as its type, `else` is required, each instance keeps one arm; `if T == Int { … }` is the one-arm test; `.Int -> …` names a union member without binding it |
-| `if n % _ == 0 { 3 -> … else -> … }` | hole table: the one `_` in an `if` header is filled by each arm's candidate in turn; the header runs once per candidate tried, `(a \| b)` tries a group, and `subject == _` keeps pattern and range arms |
+| `if n % <> == 0 { 3 -> … else -> … }` | hole table: the one `<>` in an `if` header is filled by each arm's candidate in turn; the header runs once per arm tried and calls nothing with an effect, `(a \| b)` tries a group, a table used as a value ends in `else`, and pattern and range arms belong in a plain `if subject == {` table |
 | `T: trait { name: Type } / name: Type{default} / impl X.T { name: value } / T.name` | trait constant: a compile-time literal, enum case or list each implementation supplies (or takes the default), read from the type |
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes |
 | `;` | retired explicit statement terminator |
@@ -316,9 +317,9 @@ Never on a local binding. Never `Type name`.
 
 **S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `<<=` `>>=`.
 Arithmetic four on Int/Float; the rest Int-only. `&=`, `|=` and `~|=` are
-retired with infix bit arithmetic, and `^=` with infix power
-(D-SIGIL-ALGEBRA1=B): an update assigns the `bit_and`, `bit_or`, `bit_xor` or
-`pow` result back. `String += piece`
+retired with infix bit arithmetic (D-SIGIL-ALGEBRA1=B): an update assigns the
+`bit_and`, `bit_or` or `bit_xor` result back. `^=` is not Jet syntax: a power
+update is `x = x.pow(n)`. `String += piece`
 appends text (a String or a borrowed text view); ordinary text construction
 still uses interpolation, not binary `+`. The append preserves explicitly
 copied values. The place must be mutable or reached through an `&` parameter.
@@ -834,7 +835,8 @@ which the step writes as `<>`:
 `|>` is one token, left-associative and the loosest form; a step runs to the
 next `|>`, so a step's own `?? return` leaves the function. `<>` is one
 longest-match lexer token beside `<:` and `:>` (`<`, `<=`, `<=>`, `<<` and `>>`
-never form it) and a primary expression legal only inside a step (E0437). Every
+never form it) and a primary expression legal only inside a step or an `if`
+table header (E0437; D-IFHOLE2=A). Every
 step reads `<>` at least once (E0438) and may read it more often; the value is
 computed once. E0438's fix writes `<>` where it fits (D-PIPE-FIRST1=A, ratified
 2026-11-10): a bare function name becomes `name(<>)`, a call one argument
@@ -867,7 +869,7 @@ An `else if` link can use either body shape; expression arm bodies are separate.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
 D-LOOPEVAL1=A, D-COMPREHENSION1=A, D-LOOP-COMMA1=A, amended by
-D-LOOP-IN1=A, ratified 2026-07-30, card #1336)*:
+D-LOOP-IN1=A and D-COMPREHEND1=A, ratified 2026-07-30, card #1336)*:
 
 ```jet
 loop { … }                        // infinite
@@ -913,9 +915,24 @@ names: loop users if .active -> .name   // bindingless subject, D-LOOP-SUBJECT1
 ```
 
 Multiple source clauses nest left to right and yield one flat List. An inner
-collecting loop preserves nesting. `next` omits the current item. Maps, Sets,
-and lazy iteration use ordinary Map construction, `Set.from(...)`, and the
-existing iterator adapters.
+collecting loop preserves nesting. `next` omits the current item. Lazy
+iteration uses the existing iterator adapters.
+
+**D-COMPREHEND1=A — Typed heads take a loop** *(ratified 2026-11-10)*: a bare
+yielding loop stays a List and ignores the expected type. A typed set or map
+head may hold one loop in place of its items, and builds that collection from
+the loop's items in loop order. A map loop yields the head's own `key: value`
+form, and a later key replaces an earlier one. A typed list head holds its
+loop's List. Items beside a loop in one head are refused with E0445; build the
+two apart and join them. A struct literal never starts with `loop`, so the two
+can't be confused. The other collection types build from the loop's List
+through their constructors (`Tally.from(loop …)`).
+
+```jet
+unique: Set<String>{loop w in words -> w}
+sizes: [String:Int]{loop w in words if w != "" -> w: w.len()}
+evens: loop x in xs if x % 2 == 0 -> x   // a List
+```
 
 Every statement-position loop header may use `-> statement`; the statement's
 value is discarded. A finite loop in value position keeps the collection arrow.
@@ -1058,17 +1075,35 @@ D-ARMHEAD-PAREN1=A. Pattern heads remain `==`-only. Statement and expression
 position share one table spelling; expression tables unify arm values or yield
 `()`.
 
-**D-IFHOLE1=A — header holes** *(ratified 2026-09-11, card #3067)*: an `if`
-header that holds one statically typed `_` hole, followed by `{`, is a hole
-table: `if n % _ == 0 { 15 -> "FizzBuzz" else -> "{n}" }`. Each non-else arm
-head is a candidate that fills the hole. The header is evaluated per attempted
-candidate, a candidate runs at most once, and skipped candidates have no
-effect. Guards keep ordinary `&&`/`||` after a candidate, `(a | b)` groups
-alternatives, and a Bool candidate is parenthesized. `subject == _` keeps
-pattern, range and binding arms and exhaustiveness. A second hole is E0946,
-`_` outside a hole table header is E0947, and a pattern or range arm under any
-other header is E0948. Holeless `if subject == {` tables stay until the
-owner settles the conflicting distributed-header removal against D-IF3.
+**D-IFHOLE1=A — header holes** *(ratified 2026-09-11, card #3067; amended by
+D-IFHOLE2=A)*: an `if` header that holds one statically typed hole, followed
+by `{`, is a hole table: `if n % <> == 0 { 15 -> "FizzBuzz" else -> "{n}" }`.
+Each non-else arm head is a candidate that fills the hole. The header is
+evaluated per attempted candidate, a candidate runs at most once, and skipped
+candidates have no effect. Guards keep ordinary `&&`/`||` after a candidate,
+`(a | b)` groups alternatives, and a Bool candidate is parenthesized. A second
+hole is E0946.
+
+**D-IFHOLE2=A — the `<>` hole beside plain tables** *(ratified 2026-11-15,
+card #3067)*: amends D-IFHOLE1. Not every table holds a hole: D-IF3, D-IFDIST1
+and S68 keep the plain `if subject == {` table, which reads its subject once
+and keeps pattern, range and binding arms and exhaustiveness. The hole is
+spelled `<>`, as in a pipe step; `<>` outside a step or a table header is
+E0437, which E0947 retires into, and a `_` where the hole goes is E0443, whose
+fix writes `<>`. A header whose whole test, ignoring parentheses, is
+`subject OP <>` or `<> OP subject` is E0441, whose fix deletes the `<>` (and
+flips the operator when `<>` stood on the left). A pattern or range arm in a
+hole table is E0948, whose fix is `if subject == {`. A call in a hole header
+that has an effect, or that changes a value it is given (`&`) or is called on
+(`&self`), is E0442, whose fix names the value on the line above, as the
+method's name or `value`, and reads the name in the header; it is applied when
+the table starts its statement and shown otherwise, and a call that holds the
+`<>` gets plain tests instead. A pure call stays. A hole table used as a value
+requires `else` (E0003), wherever it stands, since its
+arms are tests, not cases of one type; one used as a statement may leave
+`else` out. Inside a pipe step `<>` is always the step's value, so a table
+header there that needs a hole is E0444, whose fix ends the pipe one line
+early in a named value.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
 #680; amended by D-ARROW-CONTROL1, D-ARROW-UNIFY1, and D-ONELINE-BODY1=B)*: `if cond -> statement` is the one-line
@@ -1316,8 +1351,10 @@ and `!` negates Bool only.
 A written negative Int exponent (including a parenthesized negative numeral)
 selects Fraction; positive literals and negative zero remain Int. An exponent
 whose sign is dynamic remains Int and uses the shared runtime negative-power stop.
-Retired infix arithmetic and compounds produce E0398 naming the method, with
-a precedence-preserving structured repair. Updates explicitly assign the
+Retired infix bit arithmetic and its compounds produce E0398 naming the
+method, with a precedence-preserving structured repair. Infix `^` and `^=`
+for power are not Jet syntax and get only the generic parse error, with no
+teaching diagnostic (owner order, card #6857). Updates explicitly assign the
 method result back. `core.math.xor` and `core.math.pow` are removed.
 Generated Jet observers use these methods too: a wire writer extracts
 its hexadecimal byte nibbles with `.bit_and(15)`, not retired infix arithmetic.
@@ -9175,6 +9212,12 @@ D-GENMOD-VALUE1 and D-META-CODE1, reverses the intervening same-day ruling
 that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
+
+**2026-11-16 — infix power is not taught** *(card #6857; owner order under
+D-SIGIL-ALGEBRA1=B)*: `a ^ b` and `a ^= b` no longer get E0398 with a `pow`
+repair. They meet the generic parse error any stray token gets, and power is
+only `value.pow(exponent)`, which compiles to the code the operator did.
+Example: `Tests/UI/caret_is_not_power.jet`.
 
 **2026-11-13 — the `jet debug` prompt is `(Jet)`** *(card #6734; owner ruling
 2026-11-09)*: every readout a user sees starts with a capital, so the

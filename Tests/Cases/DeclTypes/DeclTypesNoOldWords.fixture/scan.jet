@@ -1,0 +1,67 @@
+// Scans the repository's Jet sources for a declaration written with a retired
+// word: `marker Name`, `effect Name`, `fact Name(…)`, `derive T.Trait`,
+// `tag Name` (each optionally `pub`), or a `Name: effect` line. Test folders
+// are skipped, since their probes spell the old forms to prove them refused.
+// Usage: jet run scan.jet -- <repository root>
+use {
+    files: core.files
+    process: core.process
+}
+
+OLD_WORDS: [String]{"marker", "effect", "fact", "derive", "derives", "tag"}
+
+ROOTS: [String]{"Core", "Compiler", "Jetpack", "Examples", "Tools", "Docs"}
+
+SKIPPED: [String]{"Tests", "node_modules", "target"}
+
+// Whether `word` opens with a type name or a marker, as a declared name does.
+names_a_type: fn(word: String) -> Bool {
+    bytes: word.bytes()
+    if bytes.len() == 0 -> return false
+    first: Int{bytes[0]}
+    (first >= 65 && first <= 90) || first == 35
+}
+
+// Whether one source line declares something with a retired word.
+old_declaration: fn(line: String) -> Bool {
+    words := [String]{}
+    loop word in line.trim().split(" ") {
+        if word != "" -> words.push(word)
+    }
+    at: if words.len() > 0 && words[0] == "pub" -> 1 else -> 0
+    if words.len() >= at + 2 && OLD_WORDS.contains(words[at]) && names_a_type(words[at + 1]) {
+        return true
+    }
+    words.len() == 2 && words[0].ends_with(":") && names_a_type(words[0]) && OLD_WORDS.contains(words[1])
+}
+
+scan: fn(path: String, hits: &[String], count: &Int) -[FS.Read]> {
+    loop entry in files.list_dir(path) ?? panic("cannot list {path}: {err}") {
+        if entry.name.starts_with(".") || SKIPPED.contains(entry.name) -> next
+        child: "{path}/{entry.name}"
+        if entry.is_dir {
+            scan(child, hits, count)
+            next
+        }
+        if !entry.name.ends_with(".jet") -> next
+        count += 1
+        text: files.read(child) ?? panic("cannot read {child}: {err}")
+        loop (index, line) in text.lines() {
+            if old_declaration(line) -> hits.push("{child}:{index + 1}: {line.trim()}")
+        }
+    }
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() == 0 -> panic("usage: jet run scan.jet -- <repository root>")
+    root: args[args.len() - 1]
+    hits := [String]{}
+    loop name in ROOTS {
+        count := 0
+        scan("{root}/{name}", hits, count)
+        print("{name}: {if count > 0 -> "scanned" else -> "empty"}")
+    }
+    loop hit in hits -> print(hit)
+    print("old declaration lines: {hits.len()}")
+}

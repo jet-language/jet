@@ -380,9 +380,9 @@ core_decl_source_text: fn(sources: [CoreDeclarationFile], path: String) -> Strin
 }
 
 // The Core type names a compiler registry owns: the runtime handles, the
-// record field and literal owners, the enum payload rows and the Syntax
-// registry's TYPE_ constants by name, and a Core module's statics as
-// `<module>.<owner>`.
+// record field and literal owners, the compiler-owned enum payload rows and
+// the Syntax registry's TYPE_ constants by name, and a Core module's statics
+// as `<module>.<owner>`.
 core_decl_registry_types: fn() -> [String:Bool] CoreDeclarationError! {
     names := [String:Bool]{}
     loop row in IR_RUNTIME_HANDLES -> names[row.jet_name] = true
@@ -401,21 +401,27 @@ core_decl_registry_types: fn() -> [String:Bool] CoreDeclarationError! {
     Ok(names)
 }
 
-// Every type leaf of `listing`, a module with source rows, that none of its
-// sources (its rows and parts) declares and that is no `from(core.x)`
-// re-export and no name a compiler registry owns (`owned`).
-core_decl_undeclared_leaves: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile], listing: CoreDeclarationModule, owned: [String:Bool]) -> [String] Never! {
-    problems := [String]{}
+// The source paths of `listing`: its `source_module` rows, then the parts
+// attached to it; empty for a module with no source rows.
+core_decl_module_paths: fn(declared: CoreDeclarations, listing: CoreDeclarationModule) -> [String] Never! {
     paths := [String]{}
     loop row in declared.source_rows {
         if row.module_name == listing.name && !paths.contains(row.path) {
             paths.push(row.path.copy())
         }
     }
-    if paths.len() == 0 -> return problems
+    if paths.len() == 0 -> return paths
     loop part in declared.parts {
         if part.owner == listing.name && !paths.contains(part.path) -> paths.push(part.path.copy())
     }
+    paths
+}
+
+// Every type leaf of `listing`, a module with source rows, that none of its
+// sources (`paths`) declares and that is no `from(core.x)` re-export and no
+// name a compiler registry owns (`owned`).
+core_decl_undeclared_leaves: fn(sources: [CoreDeclarationFile], listing: CoreDeclarationModule, paths: [String], owned: [String:Bool]) -> [String] Never! {
+    problems := [String]{}
     declares := [String:Bool]{}
     loop path in paths {
         text: core_decl_source_text(sources, path) ?? next
@@ -433,6 +439,48 @@ core_decl_undeclared_leaves: fn(declared: CoreDeclarations, sources: [CoreDeclar
     problems
 }
 
+// Whether the attributes that open `line` name `Error`: `#Error`,
+// `#Error("…")` or a group such as `#[Equatable, Error]`.
+core_decl_marks_error: fn(line: String) -> Bool Never! {
+    if line.starts_with("#[") {
+        loop name in line.removeprefix("#[").partition("]").head.split(",") {
+            if name.trim() == MARKER_ERROR -> return true
+        }
+        return false
+    }
+    attribute: "#{MARKER_ERROR}"
+    loop word in line.split(" ") {
+        if word == attribute || word.starts_with("{attribute}(") -> return true
+    }
+    false
+}
+
+// The names `listing` exports, as a member or a defining type leaf, that one
+// of its sources (`paths`) declares with the `#Error` attribute, on the
+// declaration's line or on the attribute lines just above it.
+core_decl_error_leaves: fn(sources: [CoreDeclarationFile], listing: CoreDeclarationModule, paths: [String]) -> [String] Never! {
+    marked := [String]{}
+    loop path in paths {
+        text: core_decl_source_text(sources, path) ?? next
+        pending := false
+        loop line in core_decl_source_lines(text) {
+            attributed: line.starts_with("#")
+            if attributed && core_decl_marks_error(line) -> pending = true
+            name: core_decl_type_name(line)
+            named: name != ""
+            if named && pending -> marked.push(name)
+            if !attributed || named -> pending = false
+        }
+    }
+    leaves := loop member in listing.members if marked.contains(member) -> member
+    loop leaf in listing.types {
+        if leaf.from_module == "" && marked.contains(leaf.name) && !leaves.contains(leaf.name) {
+            leaves.push(leaf.name)
+        }
+    }
+    leaves
+}
+
 // Every problem with the sources `declared` names, in check order.
 core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile]) -> [String] Never! {
     problems := [String]{}
@@ -442,9 +490,23 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
         }
     }
     owned: core_decl_registry_types() ?? return [String]{"{CORE_DECLARATIONS_CORE_PATH}: {err.message}"}
+    marked := [String]{}
     loop listing in declared.modules {
-        loop problem in core_decl_undeclared_leaves(declared, sources, listing, owned) {
+        paths: core_decl_module_paths(declared, listing)
+        if paths.len() == 0 -> next
+        loop problem in core_decl_undeclared_leaves(sources, listing, paths, owned) {
             problems.push(problem)
+        }
+        loop name in core_decl_error_leaves(sources, listing, paths) {
+            if !declared.error_types.contains(name) {
+                problems.push("{CORE_DECLARATIONS_CORE_PATH}:{listing.line}: Core type leaf {name} of {listing.name} is declared #Error by its sources ({paths.join(", ")}) but error_types does not list it; add it to error_types")
+            }
+            marked.push(name)
+        }
+    }
+    loop name in declared.error_types {
+        if !marked.contains(name) {
+            problems.push("{CORE_DECLARATIONS_CORE_PATH}: error_types lists {name}, which is no Core type leaf a source of its module declares #Error; drop it or mark its declaration #Error")
         }
     }
     targets := [String:String]{}

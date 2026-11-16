@@ -314,7 +314,7 @@ Compiler/JetFoundation/Source/CLISchema/Schema.jet	1
 Compiler/JetFoundation/Source/CanonicalPass.jet	1
 Compiler/JetFoundation/Source/Collections.jet	7
 Compiler/JetFoundation/Source/CoreDeclarations/Calls.jet	12
-Compiler/JetFoundation/Source/CoreDeclarations/Declarations.jet	50
+Compiler/JetFoundation/Source/CoreDeclarations/Declarations.jet	48
 Compiler/JetFoundation/Source/CoreDeclarations/Sources.jet	13
 Compiler/JetFoundation/Source/CoreDeclarations/Text.jet	1
 Compiler/JetFoundation/Source/Derivations.jet	1
@@ -376,7 +376,7 @@ Compiler/JetFoundation/Tests/Names/Projection.jet	2
 Compiler/JetFoundation/Tests/Outcome/ErrorReport.jet	2
 Compiler/JetFoundation/Tests/Performance/BudgetReport.jet	6
 Compiler/JetFoundation/Tests/Policy/MarkerNames.jet	3
-Compiler/JetFoundation/Tests/Registry/RegistryCoverage.jet	3
+Compiler/JetFoundation/Tests/Registry/RegistryCoverage.jet	2
 Compiler/JetFoundation/Tests/Registry/RuntimeInterfacePurity.jet	2
 Compiler/JetFoundation/Tests/Registry/ToolFacts.jet	1
 Compiler/JetFoundation/Tests/Target/Frame.jet	6
@@ -466,17 +466,17 @@ Compiler/JetParser/Source/Formatter/Formatter.jet	23
 Compiler/JetParser/Source/Formatter/Items.jet	28
 Compiler/JetParser/Source/Formatter/Statements.jet	8
 Compiler/JetParser/Source/Parser/DeclarationMarkers.jet	6
-# Raised from none: a file with an `impl Name.Effect` block outside its type rebuilds its item list, and each item it keeps is copied out of the list it still reads (DeclTypes-6-1-effect-word).
-Compiler/JetParser/Source/Parser/Declarations/Effects.jet	4
 Compiler/JetParser/Source/Parser/Declarations/Foreign.jet	1
 Compiler/JetParser/Source/Parser/Declarations/InBodyMarkers.jet	7
 Compiler/JetParser/Source/Parser/Declarations/Markers.jet	3
 Compiler/JetParser/Source/Parser/Declarations/Modules.jet	10
-Compiler/JetParser/Source/Parser/Declarations/Policies.jet	1
+# Raised by one: a `#Runtime` block's declaration has two owners, its Policy statement and the block list the program collects, as an `#Overflow` block's already does.
+Compiler/JetParser/Source/Parser/Declarations/Policies.jet	2
 Compiler/JetParser/Source/Parser/Declarations/StateMarkers.jet	12
 Compiler/JetParser/Source/Parser/Declarations/States.jet	1
 Compiler/JetParser/Source/Parser/Declarations/Types.jet	1
 Compiler/JetParser/Source/Parser/Entry.jet	11
+Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet	2
 Compiler/JetParser/Source/Parser/Expressions.jet	10
 Compiler/JetParser/Source/Parser/FencedNames.jet	6
 Compiler/JetParser/Source/Parser/ImplPlacement.jet	1
@@ -515,7 +515,7 @@ Compiler/JetSema/Source/Sema/CallablePolicies.jet	5
 Compiler/JetSema/Source/Sema/Calls/AppJobs.jet	3
 # Raised by two: `.cache<V>` lowers with the reply type's identity and the caller's written policy, each copied out of a borrowed table.
 # Raised by four: `.sitemap(list)` lowers with the caller's written function, and a typed address lambda whose graph and state parameter types and field names are copied out of the borrowed receiver and state rows.
-Compiler/JetSema/Source/Sema/Calls/AppRoutes.jet	22
+Compiler/JetSema/Source/Sema/Calls/AppRoutes.jet	31
 Compiler/JetSema/Source/Sema/Calls/Binder.jet	4
 Compiler/JetSema/Source/Sema/Calls/Build.jet	62
 Compiler/JetSema/Source/Sema/Calls/Checking.jet	11
@@ -535,7 +535,7 @@ Compiler/JetSema/Source/Sema/Calls/Geometry.jet	14
 Compiler/JetSema/Source/Sema/Calls/Hardware.jet	11
 Compiler/JetSema/Source/Sema/Calls/Histories.jet	9
 Compiler/JetSema/Source/Sema/Calls/HTTP.jet	3
-Compiler/JetSema/Source/Sema/Calls/HTTPMount.jet	2
+Compiler/JetSema/Source/Sema/Calls/HTTPMount.jet	3
 Compiler/JetSema/Source/Sema/Calls/HTTPRouting.jet	7
 Compiler/JetSema/Source/Sema/Calls/Live.jet	19
 Compiler/JetSema/Source/Sema/Calls/Memory.jet	7
@@ -584,10 +584,12 @@ Compiler/JetSema/Source/Sema/Expressions/Constructors.jet	21
 Compiler/JetSema/Source/Sema/Expressions/Control.jet	64
 Compiler/JetSema/Source/Sema/Expressions/Defaults.jet	2
 Compiler/JetSema/Source/Sema/Expressions/FactReads.jet	6
+Compiler/JetSema/Source/Sema/Expressions/HoleHeaders.jet	2
 Compiler/JetSema/Source/Sema/Expressions/Lambdas.jet	42
 Compiler/JetSema/Source/Sema/Expressions/LayoutValues.jet	3
 Compiler/JetSema/Source/Sema/Expressions/Literals.jet	9
-Compiler/JetSema/Source/Sema/Expressions/LoopValues.jet	15
+# Raised by seven: a set or map head around a collecting loop lowers to an owned value loop built from the borrowed parse tree, which the caller keeps for its other literal forms; each yield site takes its own head and entry value.
+Compiler/JetSema/Source/Sema/Expressions/LoopValues.jet	22
 Compiler/JetSema/Source/Sema/Expressions/NumberNames.jet	9
 Compiler/JetSema/Source/Sema/Expressions/Pipes.jet	12
 Compiler/JetSema/Source/Sema/Expressions/Places.jet	17
@@ -674,6 +676,7 @@ Compiler/JetSema/Tests/CoreFailureRecordFixtures.jet	10
 Compiler/JetSema/Tests/EffectDiagnosticOrigins.jet	2
 Compiler/JetSema/Tests/EffectTypeRowFixtures.jet	2
 Compiler/JetSema/Tests/FrozenFixtures.fixture/FrozenFixtures.jet	1
+Compiler/JetSema/Tests/HoleHeaderFixtures.jet	5
 Compiler/JetSema/Tests/OperatorBadArgumentFixtures.jet	1
 Compiler/JetSema/Tests/OperatorRhsFixtures.jet	1
 Compiler/JetSema/Tests/OutputFixtures.jet	17

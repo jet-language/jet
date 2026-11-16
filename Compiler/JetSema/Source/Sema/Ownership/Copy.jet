@@ -1313,6 +1313,29 @@ sema_copy_holds_single_use_in: fn(ty: Type, environment: SemaScopeEnvironment, p
     sema_copy_holds_single_use(ty, graph, sema_type_module_row(graph, environment.module_identity), seen)
 }
 
+// Whether a value of `ty` acts when it goes: a resource or a value holding
+// one (a Close duty at any depth, a handle that never clones), a cell or
+// shared guard, a child process (its tree ends with its last handle), a
+// temporary directory (removed when its owner drops) or a task handle (its
+// join duty speaks for it). A binding of one is used by being held, so it
+// is no unused binding (L0101).
+sema_copy_acts_when_dropped: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
+    if sema_single_use_is_task(ty) -> return true
+    if ty == {
+        .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .String | .Fn(_, _, _, _, _, _) -> return false
+        .Named(name) | .Apply(name, _) -> {
+            if name == "SharedGuard" || name == "ProcessChild" || name == "TempDir" || name.ends_with("::TempDir") {
+                return true
+            }
+        }
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
+    walk := sema_copy_walk()
+    facts: sema_copy_type_facts(ty, program.registration_graph, program.copy_facts, caller, generic_params, walk)
+    facts.resource || facts.holds_resource || facts.dynamic_loan
+}
+
 // A refused copy's diagnostic. A value that is or holds a `#SingleUse` value
 // is refused for its duty, whatever else it holds.
 sema_copy_refusal: fn(facts: SemaCopyFacts, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {

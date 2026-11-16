@@ -1259,8 +1259,11 @@ ir_lint_typing: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, 
 // result; an Aggregate result's slot receives the caller's storage).
 ir_lint_call: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, pass: String, out: &[IRLintFinding]) Never! {
     callee: f.a[at]
+    // The finding names the call site in source: no program can reach it
+    // (sema refuses every mark the inliner can't keep), so it is a compiler
+    // bug the report must point at.
     if callee < context.marked.len() && context.marked[callee] {
-        out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_MARKED, "a call of #Inline(Always) function {callee} {context.function_names[callee]} left after the marked calls were inlined"))
+        out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_MARKED, "a call of #Inline(Always) function {callee} {context.function_names[callee]} at {ir_lint_source_at(m, f, at)} left after the marked calls were inlined"))
     }
     first: context.param_start[callee]
     arity: context.param_start[callee + 1] - first
@@ -1292,6 +1295,20 @@ ir_lint_call: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, pa
     if result != f.slot_type[dst] && !ir_lint_same(m, result, f.slot_type[dst]) {
         out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_RESULT, "s{dst} of {ir_lint_row_text(m, f.slot_type[dst])} for result {ir_lint_row_text(m, result)} of function {callee} {context.function_names[callee]}"))
     }
+}
+
+// Where instruction `at` of `f` came from in source, `file:line`: the file
+// of the function whose body holds it, the callee of its innermost inline
+// site (IRFunction.inline_sites) or `f` itself.
+ir_lint_source_at: fn(m: IRModule, f: IRFunction, at: Int) -> String Never! {
+    line: f.code_line[at]
+    source: ir_code_line_source(line)
+    site: ir_code_line_site(line)
+    if site > 0 {
+        callee: f.inline_sites[IR_INLINE_SITE_WORDS * (site - 1)]
+        if callee >= 0 && callee < m.functions.len() -> return "{m.functions[callee].source_file}:{source}"
+    }
+    "{f.source_file}:{source}"
 }
 
 // A CallIndirect through a code word whose row is IR_CODE_TYPE over a

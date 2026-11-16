@@ -527,6 +527,13 @@ sema_http_mount_arg: fn(expression: Expr, span: Span) -> CallArg Never! {
 // (`sema_app_mount_endpoint`), under the static `prefix` when there is one;
 // the call is the App, so it chains.
 sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    // The app graph mounts a service at its key: `.api<S>` names where its
+    // clients reach it, so its `.mount` takes the service alone.
+    on_graph: sema_app_is_graph(receiver_value.ty, environment, program)
+    if on_graph && args.len() != 1 {
+        diagnostics.push(sema_error("E2805", args[0].span, "the app graph's `.mount` takes no prefix", "the graph answers a mounted service's calls at the path its `.api<S>` declares", "remove the prefix: `.mount(service)`"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     if args.len() != 1 && args.len() != 2 {
         diagnostics.push(sema_call_arity_diagnostic("mount", 2, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -581,6 +588,11 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
             if program.registration_graph == .Val(graph) {
                 nominal_row: sema_type_resolve_nominal_row(graph, value_ty, environment.module_identity) ?? panic("mount has no nominal row")
                 method_module: graph.modules[nominal_row.module_index].module_identity
+                // The graph's endpoints are keyed by the service's identity,
+                // the key its Remotes find them by.
+                if on_graph {
+                    prefix = graph.modules[nominal_row.module_index].nominals[nominal_row.row].identity_key.copy()
+                }
                 loop method in definition.methods {
                     // An endpoint method answers POST `{prefix}/{name}`, once
                     // whatever markers it carries.
@@ -597,6 +609,10 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                         if !sema_app_marker_is(marker, SEMA_APP_WEBHOOK_MARKER, graph, method_module) {
                             next
                         }
+                        if on_graph {
+                            diagnostics.push(sema_app_graph_mount_refused(method.name, "a webhook", marker.span))
+                            break
+                        }
                         hook: sema_app_mount_webhook(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, definition.methods, method, method_module, marker, prefix, span, environment, program, scopes, state, tail_store, context, diagnostics)
                         if hook == .Val(value) {
                             body.push(TStmt.ExprStmt{value: value, span: span})
@@ -607,6 +623,10 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     loop marker in method.markers {
                         if !sema_app_marker_is(marker, SEMA_APP_EVERY_MARKER, graph, method_module) {
                             next
+                        }
+                        if on_graph {
+                            diagnostics.push(sema_app_graph_mount_refused(method.name, "a schedule", marker.span))
+                            break
                         }
                         schedule: sema_app_mount_schedule(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, method, method_module, marker, span, environment, program, scopes, state, tail_store, context, diagnostics)
                         if schedule == .Val(value) {
@@ -625,6 +645,10 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     }
                     loop marker in method.markers {
                         verb: sema_http_route_marker_verb(marker, graph, method_module) ?? next
+                        if on_graph {
+                            diagnostics.push(sema_app_graph_mount_refused(method.name, "an HTTP route", marker.span))
+                            next
+                        }
                         if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
                             diagnostics.push(sema_error("E2805", marker.span, "HTTP route method `{method.name}` needs read-only self and a concrete signature", "mounted handlers retain shared state and are called on request workers", "write `{method.name}: fn(self, ...)` without method type parameters; use Shared<T> for mutable shared state"))
                             next
@@ -686,6 +710,12 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     sema_single_use_leave_scope(scopes, state, diagnostics)
     value: sema_tree_node(receiver_value.ty, TExprKind.InlineBlock{body: body}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// E2805 for the method `method` of a service the app graph mounts that is
+// `what`, a server-side registration the graph runs on no target.
+sema_app_graph_mount_refused: fn(method: String, what: String, span: Span) -> Diagnostic Never! {
+    sema_error("E2805", span, "the app graph can't mount `{method}`, which is {what}", "the app graph runs on every target and answers only the calls of its clients' Remotes; {what} answers the server alone", "mount the service on the server's `web.App` as well, which serves its webhooks, schedules and routes")
 }
 
 // The endpoint method `method` of the mounted value `value_name` answers

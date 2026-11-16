@@ -40,7 +40,7 @@ census: fn(prefix: String) -[FS]> Int {
 run: fn() {
     sys.set_memory_limit(CAP, CAP) ?? panic("set_memory_limit")
     handles := [Task<Int>]{}
-    loop i in 0..<TASKS -> handles.push(task nap())
+    loop _ in 0..<TASKS -> handles.push(task nap())
     total := 0
     loop handle in handles -> total += handle.join() ?? 0
     peak: census("VmPeak:")

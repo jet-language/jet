@@ -442,6 +442,25 @@ ArithmeticPolicyFact: struct {
     operation: ArithmeticOperation?
 }
 
+// The arithmetic modes are a checked view of `Gate` in
+// Core/Prelude/Prelude.jet: each mode is the escape its word (`checked`,
+// `wrapping`, `saturating`) writes. While the compiler builds,
+// ARITHMETIC_MODE_COUNT checks that each case is a Gate case, and a stray
+// stops the build naming it.
+ARITHMETIC_MODE_COUNT: #run arithmetic_mode_count(embed_file("Expressions.jet"), embed_file("toolchain:Core/Prelude/Prelude.jet"))
+
+// The number of ArithmeticMode cases in `text` (this file), once each is a
+// case of `Gate` in `prelude`; else the build stops naming the strays.
+arithmetic_mode_count: fn(text: String, prelude: String) -> Int {
+    modes: effect_vocabulary_enum_cases(text, "ArithmeticMode") ?? panic("Expressions.jet declares no `ArithmeticMode: enum {{ … }}`")
+    gates: effect_vocabulary_enum_cases(prelude, "Gate") ?? panic("Core/Prelude/Prelude.jet declares no `Gate: enum {{ … }}`")
+    strays: effect_vocabulary_strays(modes, gates)
+    if strays.len() > 0 {
+        panic("Expressions.jet: ArithmeticMode names escapes that `Gate` in Core/Prelude/Prelude.jet does not declare: {strays.join(", ")}")
+    }
+    modes.len()
+}
+
 ArithmeticMode: enum {
     Checked
     Wrapping

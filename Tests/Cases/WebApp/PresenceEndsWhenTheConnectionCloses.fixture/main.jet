@@ -1,0 +1,123 @@
+// Who has a task open, as Crewboard's task screen shows it over the live
+// hub. Ann and Ben each open task 1 on a WebSocket: the server binds that
+// account's live query of the task's viewers, reads it and watches it. Ben's
+// join re-runs Ann's binding. Once Ben's connection closes, Ben is present
+// nowhere: the server hears the hub's leave signal as Ben's handler returns,
+// Ann's connection receives a live event, and Ann's next read shows [ann].
+use {
+    app
+    auth: core.auth
+    core.reactive.loadable.[Loadable]
+    ws: core.net.ws
+    server: core.http.server
+    web: core.web
+    time: core.time
+}
+
+// The task screen's state: its address is `/tasks/:id`.
+TaskView: struct {
+    id: Int
+}
+
+#Error
+ViewError: enum {
+    NotFound
+}
+
+task_screen: fn(view: TaskView) -> Int Never! { view.id }
+
+// The accounts that have task `id` open, the caller among them. A live query
+// may only read, so it declares the read it is allowed.
+viewers: fn(id: Int) -[DB.Read]> String ViewError! {
+    if id != 1 -> return Err(ViewError.NotFound)
+    names := [String]{}
+    loop account in app.presence(TaskView{id: id}) -> names.push("{account}")
+    Ok("[{names.join(", ")}]")
+}
+
+shown: fn(state: Loadable<String, ViewError>) -> String {
+    if state == {
+        .Loaded(value) -> value
+        .Failed(_) -> "refused: not found"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+// The binding `account`'s task screen makes of task 1's viewers.
+bind: fn(account: String) -> app.Live<String, ViewError> Never! {
+    app.as_caller(auth.AccountID.from_string(account), fn() { app.live(viewers, 1) })
+}
+
+// The server side of `account`'s task screen: it binds and reads that
+// account's viewers, watches the binding, says what it sees and "ready",
+// then answers each text with what it sees now, until the client closes.
+open_task: fn(req: HTTPRequest, account: String) -> HTTPResponse HTTPError! {
+    sock: ws.upgrade(req) ?? panic("upgrade")
+    mine: bind(account)
+    seen: shown(app.state(mine))
+    app.watch(sock, mine)
+    sock.send_text("sees {seen}") ?? panic("sees")
+    sock.send_text("ready") ?? panic("ready")
+    loop {
+        message: sock.recv() ?? break
+        if message.is_close() -> break
+        if message.is_text() -> sock.send_text("sees {shown(app.state(mine))}") ?? break
+    }
+    Ok(server.response(500, "unused"))
+}
+
+// The next text the client receives.
+next_text: fn(client: WsConn) -> String {
+    loop {
+        message: client.recv() ?? panic("client recv")
+        if message.is_text() -> return message.text() ?? panic("text")
+    }
+}
+
+// Every text the client receives up to one that starts with `until`, in
+// order.
+texts_until: fn(client: WsConn, until: String) -> String {
+    out := [String]{}
+    loop {
+        text: next_text(client)
+        done: text.starts_with(until)
+        out.push(text)
+        if done -> return out.join(" ")
+    }
+}
+
+run: fn() {
+    _: app.new("Crew").screen("/tasks/:id", task_screen, signed_in: true)
+    mux: web.app()
+    mux.get("/tasks/1/ann", fn(req: HTTPRequest) { open_task(req, "ann") })
+    mux.get("/tasks/1/ben", fn(req: HTTPRequest) { open_task(req, "ben") })
+    listening: mux.bind("127.0.0.1:0") ?? panic("bind")
+    addr: listening.local_addr() ?? panic("address")
+    serving: task { listening.serve() ?? panic("serve") }
+    time.sleep(20ms)
+
+    ann_client: ws.connect("ws://{addr}/tasks/1/ann") ?? panic("connect ann")
+    print("ann opens task 1: {texts_until(ann_client, "ready")}")
+    ben_client: ws.connect("ws://{addr}/tasks/1/ben") ?? panic("connect ben")
+    print("ben opens task 1: {texts_until(ben_client, "ready")}")
+    ann_client.send_text("read") ?? panic("ann read")
+    print("ann received: {texts_until(ann_client, "sees")}")
+
+    ben_client.close(1000, "") ?? panic("close ben")
+    print("ben closed task 1")
+    // Only the leave signal of Ben's closed connection re-runs Ann's binding,
+    // so this event follows Ben's handler's return.
+    print("ann received: {next_text(ann_client)}")
+    ann_client.send_text("read") ?? panic("ann read")
+    print("ann received: {texts_until(ann_client, "sees")}")
+    present := [String]{}
+    loop account in app.as_system(fn() { app.presence(TaskView{id: 1}) }) {
+        present.push("{account}")
+    }
+    print("present at /tasks/1: [{present.join(", ")}]")
+
+    ann_client.close(1000, "") ?? panic("close ann")
+    grace: 100ms
+    listening.shutdown(grace) ?? panic("shutdown")
+    _: serving.join() ?? panic("server join")
+}

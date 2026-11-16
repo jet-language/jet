@@ -18,10 +18,6 @@
   name: (_) @name
   "trait" @context) @item
 
-(tag_def
-  name: (_) @name
-  "tag" @context) @item
-
 (impl_block
   "impl" @context
   type: (_) @name) @item

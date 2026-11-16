@@ -34,6 +34,7 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     SymbolTable,
+    TextEdit,
     symbol_find,
     symbol_is_local,
     symbol_key_text,
@@ -234,6 +235,10 @@ SemaCallSiteDetail: struct {
     // this call to a local, a parameter or nothing, so a `jet fix` rename
     // wouldn't call the replacement.
     replacement_hidden: Bool{false}
+    // The call is in a hole table's header, which runs once per arm tried:
+    // the effect phase reports it when the callee has an effect (E0442),
+    // with this fix, unless the call was already reported for a change.
+    hole_header: SemaHoleHeaderFix?{None}
     shared_lifetime: SharedLifetime?{None}
     shared_member: String{""}
     shared_source: String{""}
@@ -256,7 +261,7 @@ sema_call_site_detail_of: fn(detail: SemaCallSiteDetail) -> SemaCallSiteDetail? 
     if detail.foreign_effect_root != None || detail.foreign_opaque || detail.unsafe_foreign_name != None || detail.audited_operation || detail.foreign_capability != None || detail.lifecycle != None {
         return Val(detail)
     }
-    if detail.replacement_hidden || detail.shared_lifetime != None || detail.shared_member != "" || detail.shared_source != "" || detail.intrinsic_api != None || detail.runtime_export != None || detail.operator != None {
+    if detail.replacement_hidden || detail.shared_lifetime != None || detail.shared_member != "" || detail.shared_source != "" || detail.intrinsic_api != None || detail.runtime_export != None || detail.operator != None || detail.hole_header != None {
         return Val(detail)
     }
     None
@@ -277,6 +282,17 @@ SemaOperatorSite: struct {
     receiver: Span
     argument: Span
     bare: Bool
+}
+
+// The fix of an E0442 report on a call in a hole table's header
+// (sema_expr_hole_header_fix): `edits` name the call's value on the line
+// above the table and read the name in the header, and are empty when the
+// fix is only shown. `reported` when the call was refused for a change it
+// makes, so its effect is not refused again.
+SemaHoleHeaderFix: struct {
+    fix: String
+    edits: [TextEdit]
+    reported: Bool
 }
 
 // A raw `extern rust` callee's name and the capability sigil (`&` or `&&`)
@@ -969,6 +985,10 @@ SemaCheckContext: struct {
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Overflow(mode)` marker. Closures checked inside the body keep it.
     arithmetic_policy: ArithmeticPolicyFact?{None}
+    // The active run-time policy (`#Runtime(.NoEager)` or `#Runtime(.Only)`)
+    // of the function and block being checked: `PolicyValue.NoEager` or
+    // `PolicyValue.Only`. Closures checked inside the body keep it.
+    runtime_policy: PolicyValue?{None}
     // The overflow word (`wrapping`, `saturating` or `checked`) written
     // directly around the typed-literal conversion being checked. The
     // conversion takes it on entry, so it never reaches a nested expression.
@@ -1066,6 +1086,10 @@ SemaScopeTable: struct {
     // The innermost `#Context` block: 0 outside one, 1 inside one without an
     // `allocator:` field, 2 when an enclosing block names an allocator.
     context_allocation: Int{0}
+    // The written header of the hole table being checked: the parser
+    // checks it once per arm, so a call there that has an effect runs once
+    // per arm (E0442).
+    hole_header: Span?{None}
     // Derived from the immutable graph installed by seed_unit_policy.
     // Function rollback leaves this memo intact; snapshots may rebuild it.
     // A new graph/module setup reseeds it, including each staging version.
@@ -1602,6 +1626,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         subject_shorthand_depth: source.subject_shorthand_depth,
         host_hooks: source.host_hooks,
         arithmetic_policy: source.arithmetic_policy,
+        runtime_policy: source.runtime_policy,
         compiler_generated: source.compiler_generated,
         fork_copy_rebuilding: source.fork_copy_rebuilding.copy(),
         return_view_declared: source.return_view_declared,
@@ -1763,6 +1788,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             implicit_loop_subject_depth: context.implicit_loop_subject_depth,
             subject_shorthand_depth: context.subject_shorthand_depth,
             arithmetic_policy: context.arithmetic_policy,
+            runtime_policy: context.runtime_policy,
             compiler_generated: context.compiler_generated,
             return_view_declared: context.return_view_declared,
         },
@@ -1882,6 +1908,7 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: &&SemaCheckCon
     context.implicit_loop_subject_depth = saved.implicit_loop_subject_depth
     context.subject_shorthand_depth = saved.subject_shorthand_depth
     context.arithmetic_policy = saved.arithmetic_policy.move()
+    context.runtime_policy = saved.runtime_policy
     context.compiler_generated = saved.compiler_generated
     context.return_view_declared = saved.return_view_declared
 }

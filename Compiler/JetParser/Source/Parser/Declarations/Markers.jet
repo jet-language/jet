@@ -9,6 +9,7 @@ use {
         CallLabel,
         DeriveBodyItem,
         EffectRowEntry,
+        EnumLitArg,
         Expr,
         FactDecl,
         Func,
@@ -35,6 +36,7 @@ use {
         TOKEN_BANG,
         TOKEN_COLON,
         TOKEN_COMMA,
+        TOKEN_DOT,
         TOKEN_EOF,
         TOKEN_GT,
         TOKEN_HASH,
@@ -49,7 +51,6 @@ use {
         TOKEN_KW_PRIV,
         TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
-        TOKEN_KW_TAG,
         TOKEN_KW_USE,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -172,11 +173,16 @@ parser_parse_marker_setting: fn(state: &JetParserState, declaration: &MarkerDecl
 }
 
 // `expand: fn(self, target: Target) { … }`: the marker's template, which the
-// compiler expands with the marked item bound to `target`. A row written
-// before the body, `-[Meta.Generate]>` or `-[]>`, narrows the template's.
+// compiler expands with the marked item bound to `target`. A derive's
+// template is `expand: fn(target: Target) { … }`: a derive request carries
+// no data, so it has no `self`. A row written before the body,
+// `-[Meta.Generate]>` or `-[]>`, narrows the template's.
 parser_parse_marker_expand: fn(state: &JetParserState, declaration: &MarkerDecl) -> Span {
+    block: if declaration.is_derive -> "`impl {declaration.name}.Derive`" else -> "`impl Marker`"
+    contract: if declaration.is_derive -> "Derive" else -> "Marker"
+    written: if declaration.is_derive -> "expand: fn(target: Target)" else -> "expand: fn(self, target: Target)"
     start: parser_bump(state)
-    name: parser_expect_name(state, "after `fn` in `impl Marker`")
+    name: parser_expect_name(state, "after `fn` in {block}")
     method: parser_value(state, name)
     params: parser_parse_param_list(state)
     row := [EffectRowEntry]?{None}
@@ -187,10 +193,21 @@ parser_parse_marker_expand: fn(state: &JetParserState, declaration: &MarkerDecl)
         row_span = Val(parser_cover(row_start, parser_lookahead(state, -1).span))
     }
     signature: parser_cover(start.span, parser_lookahead(state, -1).span)
-    shaped: method == "expand" && params.len() == 2 && params[0].name == "self" && params[0].convention == AccessConvention.Read && params[1].name == "target" && params[1].convention == AccessConvention.Read && params[1].ty == Type.Named{name: "Target"} && parser_current_kind(state) == TOKEN_LBRACE
+    receivers: if declaration.is_derive -> 0 else -> 1
+    shaped := method == "expand" && params.len() == receivers + 1 && parser_current_kind(state) == TOKEN_LBRACE
+    if shaped {
+        target: params[params.len() - 1]
+        typed: target.ty == Type.Named{name: "Target"}
+        if receivers == 1 && (params[0].name != "self" || params[0].convention != AccessConvention.Read) {
+            shaped = false
+        }
+        if target.name != "target" || target.convention != AccessConvention.Read || !typed {
+            shaped = false
+        }
+    }
     if !shaped {
-        what: if method == "expand" -> "`expand: fn` doesn't match the `Marker` contract" else -> "`{method}` is not a method of `Marker`"
-        parser_add_error_code(state, "E0907", signature, what, "`impl Marker` has one method, the template the compiler expands with the marked item bound to `target`", "write `expand: fn(self, target: Target) {{ … }}`")
+        what: if method == "expand" -> "`expand: fn` doesn't match the `{contract}` contract" else -> "`{method}` is not a method of `{contract}`"
+        parser_add_error_code(state, "E0907", signature, what, "{block} has one method, the template the compiler expands with the marked item bound to `target`", "write `{written} {{ … }}`")
         loop parser_current_kind(state) != TOKEN_LBRACE && parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
             parser_bump(state)
         }
@@ -200,13 +217,95 @@ parser_parse_marker_expand: fn(state: &JetParserState, declaration: &MarkerDecl)
     span: parser_cover(start.span, parser_lookahead(state, -1).span)
     if !shaped -> return span
     if declaration.body != None {
-        parser_add_error_code(state, "E0105", name.span, "`expand: fn` is defined twice in `impl Marker`", "a marker has one template", "remove one of the definitions")
+        parser_add_error_code(state, "E0105", name.span, "`expand: fn` is defined twice in {block}", "{block} holds one template", "remove one of the definitions")
         return span
     }
     declaration.body = Val(body)
     declaration.row = row
     declaration.row_span = row_span
     span
+}
+
+// Whether `impl Name.Derive {` starts here.
+parser_derive_impl_ahead: fn(state: &JetParserState) -> Bool Never! {
+    parser_current_kind(state) == TOKEN_KW_IMPL && parser_kind_at(state, 1) == TOKEN_IDENT && parser_kind_at(state, 2) == TOKEN_DOT && parser_value_at(state, 3) == "Derive" && parser_kind_at(state, 4) == TOKEN_LBRACE
+}
+
+// `impl Trait.Derive { expand: fn(target: Target) { … } }`: the derive of
+// the trait `Trait`, which `#Trait` on a struct or enum requests. It is a
+// marker on types (`sites: [.Type]`) whose template writes the trait's impl
+// for the marked type (`name: target.name` then `impl #{name}.Trait { … }`).
+// The block holds that one method and nothing else; the derive is as visible
+// as its trait (parser_join_derive_visibility).
+parser_parse_derive_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> MarkerDecl {
+    start: parser_bump(state)
+    name_token: parser_bump(state)
+    parser_bump(state)
+    parser_bump(state)
+    name: parser_value(state, name_token)
+    if !modifiers.is_pub || modifiers.markers.len() > 0 {
+        parser_add_error(state, parser_cover(modifiers.start_span, start.span), "`impl {name}.Derive` is written with markers or `priv`", "a derive is as visible as the trait `{name}`, and its template is all it declares", "remove what is written before `impl`")
+    }
+    parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl {name}.Derive` body")
+    sites: Expr.EnumLit{type_name: "", variant: "Type", variant_span: Val(name_token.span), args: [EnumLitArg]{}, leading_dot: true, span: name_token.span, id: parser_node_id(state)}
+    setting: MarkerDeclParam{name: "$sites", name_span: name_token.span, ty: None, value: Val(Expr.ListLit{elements: [Expr]{sites}, span: name_token.span, id: parser_node_id(state)}), variadic: false}
+    declaration := MarkerDecl{name: name, name_span: name_token.span, params: [MarkerDeclParam]{setting}, body: None, is_derive: true, span: start.span}
+    loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
+        parser_skip_semicolons(state)
+        if parser_current_kind(state) == TOKEN_RBRACE -> break
+        token: parser_current(state)
+        if token.kind == TOKEN_KW_FN {
+            _ := parser_parse_marker_expand(state, declaration)
+            next
+        }
+        found: parser_describe_token(state, token)
+        parser_add_error(state, token.span, "expected `expand: fn(target: Target)`, found {found}", "`impl {name}.Derive` holds one method, the template the compiler expands for each type marked `#{name}`", "write `expand: fn(target: Target) {{ … }}`")
+        break
+    }
+    close: parser_expect(state, TOKEN_RBRACE, "`}}` to close the `impl {name}.Derive` body")
+    if declaration.body == None && !parser_aborting(state) {
+        parser_add_error_code(state, "E0907", parser_cover(start.span, close.span), "`impl {name}.Derive` has no `expand: fn(target: Target)`", "a derive is its template: the compiler expands it for each type marked `#{name}`", "write `expand: fn(target: Target) {{ … }}` whose template writes the type's `{name}` impl")
+    }
+    declaration.span = parser_cover(start.span, close.span)
+    declaration
+}
+
+// Whether `items`, or an inline module body among them, hold an
+// `impl Trait.Derive` block.
+parser_derives_written: fn(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == .MarkerDecl(declaration) && declaration.is_derive -> return true
+        if item == .CodeModule(definition) && definition.body == .Val(inner) && parser_derives_written(inner) {
+            return true
+        }
+    }
+    false
+}
+
+// A derive is as visible as its trait: each `impl Trait.Derive` block takes
+// the visibility of the trait the same items declare. A derive of a trait
+// declared elsewhere stays private to its module.
+parser_join_derive_visibility: fn(items: &[Item]) Never! {
+    loop index in 0..<items.len() {
+        if items[index] == .MarkerDecl(declaration) && declaration.is_derive {
+            updated := declaration
+            loop other in items {
+                if other == .Trait(definition) && definition.name == declaration.name {
+                    updated.is_pub = definition.is_pub
+                    updated.is_package_pub = definition.is_package_pub
+                }
+            }
+            items[index] = Item.MarkerDecl{value: updated}
+            next
+        }
+        if items[index] == .CodeModule(definition) && definition.body == .Val(inner) {
+            body := inner
+            parser_join_derive_visibility(body)
+            updated := definition
+            updated.body = Val(body)
+            items[index] = Item.CodeModule{value: updated}
+        }
+    }
 }
 
 // At the struct's close the fields become the marker's parameters, ahead of
@@ -456,11 +555,10 @@ parser_parse_marker_args: fn(state: &JetParserState, marker_name: String) -> Par
         loop {
             label := CallLabel?{None}
             label_kind: parser_current_kind(state)
-            if (label_kind == TOKEN_IDENT || label_kind == TOKEN_KW_TAG || label_kind == TOKEN_KW_USE) && parser_kind_at(state, 1) == TOKEN_COLON {
+            if (label_kind == TOKEN_IDENT || label_kind == TOKEN_KW_USE) && parser_kind_at(state, 1) == TOKEN_COLON {
                 label_token: parser_bump(state)
                 parser_bump(state)
                 label_name := parser_value(state, label_token)
-                if label_token.kind == TOKEN_KW_TAG -> label_name = "tag"
                 if label_token.kind == TOKEN_KW_USE -> label_name = "use"
                 label = Val(CallLabel{name: label_name, span: label_token.span})
             }

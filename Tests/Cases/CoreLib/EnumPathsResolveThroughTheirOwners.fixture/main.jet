@@ -1,0 +1,29 @@
+use {
+    event: core.event
+    net: core.net
+}
+
+pick: fn(flag: Bool) -> HookDecision<Int, String> {
+    if flag -> return HookDecision.Transform(2)
+    HookDecision.Cancel
+}
+
+show: fn(decision: HookDecision<Int, String>) {
+    if decision == {
+        .Transform(value) -> { print("transform {value}") }
+        .Cancel -> print("cancel")
+        else -> print("other")
+    }
+}
+
+wrap_dns: fn(error: NetDNSError) -> NetError Never! { NetError.DNS(error) }
+
+run: fn() {
+    span: 1500ms
+    print(span.in(DurationUnit.Milliseconds))
+    print(span.in(DurationUnit.Seconds))
+    show(pick(true))
+    show(pick(false))
+    print(net.error_message(wrap_dns(NetDNSError.NotFound("example.test"))))
+    print(net.error_message(wrap_dns(NetDNSError.Failure("resolver unavailable"))))
+}

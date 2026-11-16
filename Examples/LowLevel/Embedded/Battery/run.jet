@@ -53,7 +53,7 @@ run: fn() {
     // RX and TX are independent instances of the same fixed-capacity ring.
     rx := embedded.uart_ring()
     tx := embedded.uart_ring()
-    loop byte in 0..<9 -> _received: embedded.uart_enqueue(rx, U8{65})
+    loop _ in 0..<9 -> _received: embedded.uart_enqueue(rx, U8{65})
     first_rx: embedded.uart_dequeue(rx) ?? U8{0}
     _sent: embedded.uart_enqueue(tx, U8{84})
     first_tx: embedded.uart_dequeue(tx) ?? U8{0}

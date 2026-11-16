@@ -1,0 +1,15 @@
+# A local that could be computed while compiling but sits under `#Runtime`
+# (on its function or its block) is computed at run time, and
+# `jet inspect semindex` names the mark as the reason. A local after the
+# marked block is computed while compiling again.
+fixture: ComptimeFallbackReasonNamesTheRuntimeMark.fixture
+step: jet inspect semindex marked.jet --json
+exit: 0
+json: stdout doc $.semindex.definitions[?leaf_name="kept"][0].detail.stage = {"when":"run","reason":"`#Runtime(.NoEager)` keeps it to run time"}
+json: stdout doc $.semindex.definitions[?leaf_name="held"][0].detail.stage = {"when":"run","reason":"`#Runtime(.Only)` keeps it to run time"}
+json: stdout doc $.semindex.definitions[?leaf_name="inner"][0].detail.stage = {"when":"run","reason":"`#Runtime(.NoEager)` keeps it to run time"}
+json: stdout doc $.semindex.definitions[?leaf_name="after"][0].detail.stage = {"when":"build","value":"81"}
+step: jet run marked.jet
+exit: 0
+stdout: = "36\n49\n64\n81\n"
+stderr: empty

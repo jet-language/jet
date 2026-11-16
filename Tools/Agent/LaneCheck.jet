@@ -328,7 +328,7 @@ prelude_generator: fn(name: String, jet: String) -> [String] Never! {
         "CoreSurfaceInventory.rows" -> [String]{jet, "Tools/Agent/CoreSurfaceLedger.jet", "--check"}
         "Diagnostics.jet" -> [String]{jet, "Tools/Agent/DiagnosticRows.jet", "--check"}
         "Traits.jet" | "Core/prelude.jet" -> [String]{jet, "Tools/Agent/OwnedTraitRows.jet", "--check"}
-        "Markers.jet" | "Derives.jet" | "Errors.jet" | "Units.jet" -> [String]{jet, "Toolchain/PreludeSources.jet", "--check"}
+        "Markers.jet" | "Derives.jet" | "Errors.jet" | "Units.jet" | "Facts.jet" -> [String]{jet, "Toolchain/PreludeSources.jet", "--check"}
         else -> [String]{}
     }
 }
@@ -1262,7 +1262,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/Agent/DiagnosticRows.jet")
     assert_eq(prelude_generator("Core/prelude.jet", "/j")[1], "Tools/Agent/OwnedTraitRows.jet")
     assert_eq(prelude_generator("Units.jet", "/j")[1], "Toolchain/PreludeSources.jet")
-    assert_eq(prelude_generator("Facts.jet", "/j").len(), 0)
+    assert_eq(prelude_generator("Facts.jet", "/j")[1], "Toolchain/PreludeSources.jet")
 }
 
 #Test("a Core source checks as its module, its part's owner, or its runtime unit") {

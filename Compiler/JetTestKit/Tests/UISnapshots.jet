@@ -384,6 +384,21 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     files.remove_all(root) ?? panic("remove UI bless scratch: {err}")
 }
 
+// A tidy lint fails `jet check` and renders as an error; a fixture whose check
+// fails on lints alone still compiled, and one with a real error did not.
+#Test("a UI lint fixture may fail its check on tidy lints alone") {
+    root: kit_ui_test_scratch("tidy")
+    entry: KitEntry{path: "Tests/UILint/lint.jet", expected: "Tests/UILint/lint.warn", project: "Tests/UILint", suite: "ui", mode: "lint"}
+    call: kit_ui_invocation("", entry.path, true)
+    ctx: kit_ui_test_context(root, "scratch")
+    tidy: "Error [jet.UnusedImport]: unused\nMore: jet-lang.dev/e/L0103\n"
+    kit_exec_write(files.join(root, entry.expected), tidy)
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, tidy), tidy, ctx).status, "PASS")
+    broken: "{tidy}\nError [jet.TypeMismatch]: broken\nMore: jet-lang.dev/e/E0001\n"
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, broken), broken, ctx).status, "FAIL")
+    files.remove_all(root) ?? panic("remove UI tidy scratch: {err}")
+}
+
 #Test("UI coverage independently derives source codes report openers and allowances") {
     row: KitUIRegistryRow{code: "E0109", name: "jet.OperatorTypeMismatch", active: true}
     kept := [String]{}

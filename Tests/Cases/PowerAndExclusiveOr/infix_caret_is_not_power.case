@@ -1,0 +1,11 @@
+# Infix `^` is not Jet syntax: it gets the generic parse error and no lesson about `pow`.
+fixture: InfixCaretIsNotPower.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: caret_retired
+exit: 1
+stderr: ~ "E0003" # the generic parse error
+stderr: !~ "pow" # no teaching toward the method
+stderr: !~ "E0398" # not the bit-method lesson either

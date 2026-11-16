@@ -1,0 +1,35 @@
+// A typed set or map head may hold one loop in place of its items, and the
+// collection is built from that loop's items in loop order. A map loop yields
+// `key: value`, and a later key replaces an earlier one. A typed list head
+// holds its loop's List, and a bare loop stays a List.
+run: fn() {
+    words: ["apple", "bob", "apple", "cat", "bob", "apple"]
+
+    unique: Set<String>{loop w in words -> w}
+    print(unique.len())
+    print(unique.has("cat"))
+    print(unique.has("dog"))
+
+    long: Set<String>{loop w in words if w.len() > 3 -> w}
+    print(long.len())
+
+    lengths: Set<Int>{loop w in words -> w.len()}
+    print(lengths.len())
+
+    last_seen: [String:Int]{loop i in 0..<words.len() -> words[i]: i}
+    print(last_seen.len())
+    print(last_seen["apple"])
+    print(last_seen["bob"])
+    print(last_seen["cat"])
+
+    sizes: [String:Int]{loop w in words if w != "bob" -> w: w.len() * 10}
+    print(sizes.len())
+    print(sizes["apple"])
+    print(sizes["cat"])
+
+    doubled: [Int]{loop x in 1..3 -> x * 2}
+    print(doubled)
+
+    bare: loop w in words -> w.len()
+    print(bare)
+}

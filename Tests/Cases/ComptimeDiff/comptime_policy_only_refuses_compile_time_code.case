@@ -1,0 +1,29 @@
+# `#Runtime(.Only)` keeps code to the running program: compile-time code may
+# not run it. A `#run` that calls a marked function is E1022 at the call, and
+# so is a call further down, in a function a `#run` value calls. A `#run`
+# inside marked code is E1022 too, and a `.NoEager` block inside it does not
+# widen the mark. A local over a marked function, and a local inside one, is
+# computed when the program runs, with no report; a local beside them over
+# unmarked code is still computed while compiling.
+fixture: ComptimePolicyOnlyRefusesCompileTimeCode.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check call.jet
+exit: nonzero
+stderr: ~ "Error [jet.RuntimeOnlyAtBuildTime]: Compile-time code calls `stamp()` while building, but `#Runtime(.Only)` keeps it to the running program\n  --> call.jet:4:17\n" # the `#run` calls the marked function
+step: jet check through.jet
+exit: nonzero
+stderr: ~ "Error [jet.RuntimeOnlyAtBuildTime]: Compile-time code calls `stamp()` while building, but `#Runtime(.Only)` keeps it to the running program\n  --> through.jet:3:23\n" # the call inside the function the `#run` value calls
+step: jet check inside.jet
+exit: nonzero
+stderr: ~ "Error [jet.RuntimeOnlyAtBuildTime]: This `#run` runs its code while building, but `#Runtime(.Only)` keeps it to the running program\n  --> inside.jet:2:" # the `#run` inside the marked function
+step: jet check nested.jet
+exit: nonzero
+stderr: ~ "Error [jet.RuntimeOnlyAtBuildTime]: This `#run` runs its code while building, but `#Runtime(.Only)` keeps it to the running program\n  --> nested.jet:4:" # the `.NoEager` block stays `.Only`
+step: jet run --trace runs.jet
+exit: 0
+stdout: = "8\n16\n"
+stderr: !~ "RuntimeOnlyAtBuildTime" # a local that reaches marked code falls back with no report
+stderr: !~ "comptime.eval stamped " # the local over the marked function runs with the program
+stderr: !~ "comptime.eval inner " # and so does the marked function's own local
+stderr: ~ "comptime.eval plain " # the unmarked local beside them is still computed while compiling

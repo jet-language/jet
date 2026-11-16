@@ -1,0 +1,28 @@
+// The standard library's error family is read from the `impl <member> -> Err`
+// declarations of Prelude/Errors.jet at build (JET_CORE_ERROR_FAMILY), so a
+// member the Prelude adds or drops changes the family with no second list.
+// A bare error domain whose module is not loaded is a Core error type when
+// Core.rows `error_types` lists it, or one of the compiler's own error types.
+use jet_sema.[sema_core_error_family_member, sema_core_error_family_names, sema_core_error_type]
+
+#Test("the family names are the members of the `-> Err` declarations") {
+    source: "// impl Commented -> Err {{\nimpl NetError -> Err {{\n    message: fn(self) -> String {{ \"\" }}\n}}\nimpl Other -> Elsewhere {{\n}}\n    impl SendError -> Err {{\n}}\n"
+    assert_eq(sema_core_error_family_names(source), [String]{"NetError", "SendError"})
+}
+
+#Test("the Prelude's members are in the family and its component types are not") {
+    assert(sema_core_error_family_member("NetError"))
+    assert(sema_core_error_family_member("<corelib>/core.crypto.uuid::UUIDError"))
+    assert(sema_core_error_family_member("SendError"))
+    assert(sema_core_error_family_member("AllocError"))
+    assert(!sema_core_error_family_member("TaskFailure"))
+    assert(!sema_core_error_family_member("EncodingCause"))
+    assert(!sema_core_error_family_member("NetDNSError"))
+}
+
+#Test("a Core type its source marks `#Error` and a compiler-owned error are error domains") {
+    errors: [String]{"NetError", "ColorError", "TaskFailure", "SendError", "<corelib>/core.crypto.uuid::UUIDError", "core.net.WsError", "IOError", "ParseError", "BuildError", "Expired"}
+    loop name in errors { assert(sema_core_error_type(name), "{name} is not an error domain") }
+    others: [String]{"Color", "NetErrorDetail", "TaskStatus", "MarkerArgValue", "UIPreviewContext"}
+    loop name in others { assert(!sema_core_error_type(name), "{name} is an error domain") }
+}

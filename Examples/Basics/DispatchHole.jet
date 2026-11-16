@@ -1,7 +1,9 @@
-// A `_` in an `if` header is its hole. Each arm head is a candidate that
+// A `<>` in an `if` header is its hole. Each arm head is a candidate that
 // fills the hole, so the test is written once and every arm reads as a value.
+// Each table here sits beside the plain code it stands for, its reference
+// form, and `run` prints both.
 label: fn(n: Int) -> String {
-    return if n % _ == 0 {
+    return if n % <> == 0 {
         15 -> "FizzBuzz"
         3 -> "Fizz"
         5 -> "Buzz"
@@ -9,26 +11,52 @@ label: fn(n: Int) -> String {
     }
 }
 
-// The header runs again for each candidate tried. A candidate that is never
-// reached never runs, and a group `(2 | 3)` stops at its first match.
+label_by_hand: fn(n: Int) -> String {
+    return if {
+        n % 15 == 0 -> "FizzBuzz"
+        n % 3 == 0 -> "Fizz"
+        n % 5 == 0 -> "Buzz"
+        else -> "{n}"
+    }
+}
+
+// The header runs once for each arm tried, in arm order, with that arm's
+// candidate in the hole. A candidate runs where the hole stands, so a traced
+// candidate shows each try: an arm after the first match never runs, and a
+// group `(2 | 3)` stops at its first match.
 trace: fn(n: Int) -> Int {
     print("  try {n}")
     n
 }
 
 pick: fn(n: Int) {
-    if trace(_) == n {
-        1 -> print("one")
-        (2 | 3) -> print("two or three")
+    if n % <> == 0 {
+        trace(4) -> print("four")
+        (trace(2) | trace(3)) -> print("two or three")
+        else -> print("other")
+    }
+}
+
+pick_by_hand: fn(n: Int) {
+    if {
+        n % trace(4) == 0 -> print("four")
+        n % trace(2) == 0 || n % trace(3) == 0 -> print("two or three")
         else -> print("other")
     }
 }
 
 // After a candidate, `&&` and `||` are ordinary operators:
-// `2 && ready || emergency` reads `(trace(2) == n && ready) || emergency`.
+// `2 && ready || emergency` reads `(n % 2 == 0 && ready) || emergency`.
 gate: fn(n: Int, ready: Bool, emergency: Bool) -> String {
-    return if trace(_) == n {
+    return if n % <> == 0 {
         2 && ready || emergency -> "open"
+        else -> "shut"
+    }
+}
+
+gate_by_hand: fn(n: Int, ready: Bool, emergency: Bool) -> String {
+    return if {
+        (n % 2 == 0 && ready) || emergency -> "open"
         else -> "shut"
     }
 }
@@ -37,9 +65,17 @@ gate: fn(n: Int, ready: Bool, emergency: Bool) -> String {
 both: fn(a: Bool, b: Bool) -> Bool { a && b }
 
 sign: fn(n: Int) -> String {
-    return if both(_, n > 0) {
+    return if both(<>, n > 0) {
         (n % 2 == 0) -> "positive and even"
         (n < 10) -> "positive, odd and small"
+        else -> "something else"
+    }
+}
+
+sign_by_hand: fn(n: Int) -> String {
+    return if {
+        both(n % 2 == 0, n > 0) -> "positive and even"
+        both(n < 10, n > 0) -> "positive, odd and small"
         else -> "something else"
     }
 }
@@ -60,7 +96,7 @@ wait_secs: fn(light: Light) -> Int {
 }
 
 first_longer: fn(limit: Int) -> String {
-    return if wait_secs(_) > limit {
+    return if wait_secs(<>) > limit {
         .Green -> "green"
         .Amber -> "amber"
         .Red -> "red"
@@ -68,18 +104,34 @@ first_longer: fn(limit: Int) -> String {
     }
 }
 
-// `subject == _` compares the subject with each arm: pattern arms bind
-// payloads and cover every case, so the table needs no `else`.
+first_longer_by_hand: fn(limit: Int) -> String {
+    return if {
+        wait_secs(Light.Green) > limit -> "green"
+        wait_secs(Light.Amber) > limit -> "amber"
+        wait_secs(Light.Red) > limit -> "red"
+        else -> "none"
+    }
+}
+
+// A pattern slot belongs to the plain `subject == {` table, which matches
+// each arm against its subject: pattern arms bind payloads and cover every
+// case, so the table needs no `else`.
 Shape: enum {
     Circle(Int)
     Square(Int)
 }
 
 area: fn(shape: Shape) -> Int {
-    return if shape == _ {
+    return if shape == {
         .Circle(r) -> 3 * r * r
         .Square(side) -> side * side
     }
+}
+
+area_by_hand: fn(shape: Shape) -> Int {
+    if shape == .Circle(r) -> return 3 * r * r
+    if shape == .Square(side) -> return side * side
+    0
 }
 
 // An error raised while the header runs leaves the table and the function,
@@ -95,67 +147,82 @@ width: fn(text: String) -> Int ReadError! {
 }
 
 parity: fn(text: String) -> String ReadError! {
-    if width(text) % _ == 0 {
+    if width(text) % <> == 0 {
         2 -> "even"
         else -> "odd"
     }
 }
 
+parity_by_hand: fn(text: String) -> String ReadError! {
+    if {
+        width(text) % 2 == 0 -> "even"
+        else -> "odd"
+    }
+}
+
 run: fn() {
-    print(label(9))
-    print(label(10))
-    print(label(15))
-    print(label(7))
-    pick(1)
-    pick(3)
-    pick(9)
-    print(gate(2, true, false))
-    print(gate(2, false, false))
-    print(gate(5, false, true))
-    print(sign(4))
-    print(sign(3))
-    print(sign(-2))
-    print(first_longer(10))
-    print(first_longer(2))
-    print(first_longer(60))
-    print(area(Shape.Circle(2)))
-    print(area(Shape.Square(3)))
+    loop n in [9, 10, 15, 7] { print("{label(n)} {label_by_hand(n)}") }
+    loop n in [8, 6, 7] {
+        pick(n)
+        pick_by_hand(n)
+    }
+    print("{gate(4, true, false)} {gate_by_hand(4, true, false)}")
+    print("{gate(4, false, false)} {gate_by_hand(4, false, false)}")
+    print("{gate(5, false, true)} {gate_by_hand(5, false, true)}")
+    loop n in [4, 3, -2] { print("{sign(n)} / {sign_by_hand(n)}") }
+    loop limit in [10, 2, 60] { print("{first_longer(limit)} {first_longer_by_hand(limit)}") }
+    print("{area(Shape.Circle(2))} {area_by_hand(Shape.Circle(2))}")
+    print("{area(Shape.Square(3))} {area_by_hand(Shape.Square(3))}")
     print(parity("ab") ?? "failed")
+    print(parity_by_hand("ab") ?? "failed")
     print(parity("abc") ?? "failed")
+    print(parity_by_hand("abc") ?? "failed")
     if parity("") == {
         .Ok(word) -> { print(word) }
         .Err(_) -> print("the header's error reached the caller")
     }
+    if parity_by_hand("") == {
+        .Ok(word) -> { print(word) }
+        .Err(_) -> print("the reference form's error reached the caller")
+    }
 }
 // --- expected output --------------------------------------------------
-// Fizz
-// Buzz
-// FizzBuzz
-// 7
-//   try 1
-// one
-//   try 1
+// Fizz Fizz
+// Buzz Buzz
+// FizzBuzz FizzBuzz
+// 7 7
+//   try 4
+// four
+//   try 4
+// four
+//   try 4
 //   try 2
-//   try 3
 // two or three
-//   try 1
+//   try 4
+//   try 2
+// two or three
+//   try 4
 //   try 2
 //   try 3
 // other
+//   try 4
 //   try 2
-// open
-//   try 2
-// shut
-//   try 2
-// open
-// positive and even
-// positive, odd and small
-// something else
-// red
-// amber
-// none
-// 12
-// 9
+//   try 3
+// other
+// open open
+// shut shut
+// open open
+// positive and even / positive and even
+// positive, odd and small / positive, odd and small
+// something else / something else
+// red red
+// amber amber
+// none none
+// 12 12
+// 9 9
+// even
 // even
 // odd
+// odd
 // the header's error reached the caller
+// the reference form's error reached the caller

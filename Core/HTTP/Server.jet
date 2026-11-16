@@ -237,6 +237,12 @@ priv HTTPLayerCell: struct {
     wrap: fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler
 }
 
+// What a server runs each time the handler of a request it upgraded
+// returns (`__on_upgraded`).
+priv HTTPUpgradedCell: struct {
+    ended: fn() -[Time]> Never!
+}
+
 priv HTTPMuxState: struct {
     routes: [HTTPRoute]
     layers: [Shared<HTTPLayerCell>]
@@ -245,6 +251,7 @@ priv HTTPMuxState: struct {
     // and what that server runs once it stops serving (`__on_stop`).
     starts: [fn() -[Time]> Never!]
     stops: [fn(Int) -[Time]> Never!]
+    upgraded: [Shared<HTTPUpgradedCell>]
 }
 
 /// One route table: routes and middleware layers. A `web.app()` owns one and
@@ -713,7 +720,7 @@ priv accept_transient_code: fn(os_code: Int?) -> Bool Never! {
 // An empty route table: a `web.app()`'s, and the one an `http.router()`
 // routes with.
 priv mux_new: fn() -> HTTPMux Never! {
-    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0, starts: [fn() -[Time]> Never!]{}, stops: [fn(Int) -[Time]> Never!]{}}}}
+    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0, starts: [fn() -[Time]> Never!]{}, stops: [fn(Int) -[Time]> Never!]{}, upgraded: [Shared<HTTPUpgradedCell>]{}}}}
 }
 
 // Has the first server that serves `mux`, by `serve` or `serve_once`, run
@@ -731,6 +738,29 @@ __on_serve: fn(mux: HTTPMux, start: &&fn() -[Time]> Never!) Never! {
 __on_stop: fn(mux: HTTPMux, stop: &&fn(Int) -[Time]> Never!) Never! {
     guard := mux.__state.guard_edit()
     guard.value.stops.push(stop.move())
+}
+
+// Has every server that serves `mux` run `ended` each time the handler of a
+// request it upgraded to a WebSocket returns, so after the connection that
+// handler held is closed: a web app's live hub so learns which bindings no
+// open connection watches any more.
+__on_upgraded: fn(mux: HTTPMux, ended: &&fn() -[Time]> Never!) Never! {
+    guard := mux.__state.guard_edit()
+    guard.value.upgraded.push(Shared{HTTPUpgradedCell{ended: ended.move()}})
+}
+
+// Runs what `__on_upgraded` left on `mux`, in the order it was left, after
+// the table's guard is let go.
+priv mux_upgraded: fn(mux: HTTPMux) Never! -[Time]> {
+    loop cell in mux_upgraded_cells(mux) {
+        held: cell.guard_read()
+        held.value.ended()
+    }
+}
+
+priv mux_upgraded_cells: fn(mux: HTTPMux) -> [Shared<HTTPUpgradedCell>] Never! {
+    guard: mux.__state.guard_read()
+    guard.value.upgraded.copy()
 }
 
 // Runs, and drops, what `__on_serve` left on `mux`, in the order it was
@@ -1610,7 +1640,8 @@ priv accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duratio
 
 // Whether the connection's request was answered by the mux. A request the
 // handler upgraded to a WebSocket gets no HTTP response, and its socket is
-// left to the upgraded connection rather than closed here. When the drain of
+// left to the upgraded connection rather than closed here; once that
+// handler returns, what `__on_upgraded` left on `mux` runs. When the drain of
 // `server` ran out while the handler ran, the connection was reported
 // cancelled, so its response is not sent and the socket just closes. The
 // server answers the readiness probe, and a `refusing` connection, itself
@@ -1640,7 +1671,10 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
                 handling: task { dispatch_shielded(mux, routed) }
                 reply: handling.join() ?? status_page(500)
                 upgraded = http.cell_upgraded(cell)
-                if upgraded -> answered = true else if !drain_ended(server) {
+                if upgraded {
+                    answered = true
+                    mux_upgraded(mux)
+                } else if !drain_ended(server) {
                     bytes: response_wire(request.method, reply) ?? error_wire(500)
                     answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
                 }

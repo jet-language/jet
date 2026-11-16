@@ -1,14 +1,30 @@
 // Loop-expression state transitions shared by statement dispatch and inline-loop lowering.
 use jet_foundation.[
+    AST_EMPTY_CALL_ARG_FLAGS,
+    AST_NODE_GENERATED,
+    AccessConvention,
+    CallArg,
     Diagnostic,
     Expr,
+    IndexKind,
+    LValue,
+    Lambda,
+    LambdaBody,
+    LambdaParam,
+    NamedSpan,
     Span,
+    Stmt,
+    SwitchArm,
     TBuiltinOp,
     TLetTy,
     TLetWrapper,
     TLocal,
     Type,
+    TypedLitBody,
+    ast_binding,
+    ast_empty_lambda_meta,
     checked_generated_local,
+    expr_span,
     type_identity_equal,
     type_name,
 ]
@@ -589,4 +605,185 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
 
 sema_loop_value_widen_result_breaks: fn(body: &[TStmt], root_label: String?, result_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     sema_loop_value_widen_result_breaks_in(body, root_label, result_type, true, environment, program, diagnostics)
+}
+
+// A set or map head written around one collecting loop builds that collection
+// from the loop's items, in loop order: `Set<String>{loop w in words -> w}`.
+// A map loop's item is the head's own `key: value` form. The parser reads it
+// as one entry keyed by the loop (`[String: Int]{loop w in words -> w: w.len()}`),
+// and each item sets its key, so a later key replaces an earlier one. A list
+// head needs none of this, because its loop's List is already the value. The
+// head is checked as the value loop it means:
+// `loop { head := <empty head>; <the loop, adding each item to head>; break head }`.
+// Copies: the parts come from the read parameter `body`, and the generated
+// tree owns its own.
+sema_loop_value_typed_head: fn(result_head: Type, body: TypedLitBody, span: Span) -> Expr? Never! {
+    loop_body := [Stmt]?{None}
+    entry_value := Expr?{None}
+    empty := Expr?{None}
+    if result_head == {
+        .Map(_, _, _) -> {
+            if body == .Entries(entries) && entries.len() == 1 {
+                loop_body = sema_loop_value_collecting_body(entries[0].key)
+                if loop_body != None {
+                    entry_value = Val(entries[0].value.copy())
+                    empty = Val(Expr.TypedLit{head: Val(result_head.copy()), body: TypedLitBody.Empty, span: span, id: AST_NODE_GENERATED})
+                }
+            }
+        }
+        .Apply(name, args) -> {
+            if name == "Set" && args.len() == 1 && body == .Value(value) {
+                loop_body = sema_loop_value_collecting_body(value)
+                if loop_body != None {
+                    empty = Val(Expr.MethodCall{receiver: Expr.Ident{name: "Set", span: span, id: AST_NODE_GENERATED}, method: "new", method_span: span, owner_type_args: args.copy(), type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED})
+                }
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    filled := loop_body ?? return None
+    head_name: "__jet_head_{span.start}"
+    head: Expr.Ident{name: head_name, span: span, id: AST_NODE_GENERATED}
+    sema_loop_value_head_items(filled, head, entry_value)
+    statements := [Stmt]{Stmt.Val{binding: ast_binding(head_name, span, true, empty ?? return None, Val(span))}}
+    loop statement in filled -> statements.push(statement)
+    statements.push(Stmt.BreakValue{value: head, span: span})
+    meta := ast_empty_lambda_meta()
+    meta.result_loop = true
+    value_loop: Stmt.Loop{body: statements, span: span, arrow_body: false, label: None}
+    lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Block{body: [Stmt]{value_loop}}, span: span, meta: meta}
+    Val(Expr.CallValue{callee: Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED}, args: [CallArg]{}, span: span, id: AST_NODE_GENERATED})
+}
+
+// The statements of a parsed collecting loop (`loop … -> item`), which the
+// parser builds as a call of a no-parameter lambda.
+sema_loop_value_collecting_body: fn(value: Expr) -> [Stmt]? Never! {
+    if value == .CallValue(callee, _, _, _) {
+        if callee == .Lambda(lambda, _) {
+            if lambda.meta.collecting_loop && lambda.params.len() == 0 && lambda.body == .Block(statements) {
+                return Val(statements.copy())
+            }
+        }
+    }
+    None
+}
+
+// Each item a collecting loop yields becomes an addition to `head`:
+// `head.add(item)` for a set, `head[item] = value` for a map, where `value` is
+// the entry's value. Every nested block is walked, loops included, because a
+// `yield` there still feeds this loop. Nested loop values are expressions and
+// keep their own items.
+sema_loop_value_head_items: fn(statements: &[Stmt], head: Expr, entry_value: Expr?) Never! {
+    loop index in 0..<statements.len() {
+        // An owned copy, so its nested bodies can move into the rebuilt statement.
+        statement := statements[index]
+        if statement == {
+            .Yield(item, _) -> {
+                item_span: expr_span(item)
+                statements[index] = if entry_value == {
+                    .Val(value) -> Stmt.Assign{target: LValue.Index{base: head.copy(), index: item, span: item_span, kind: IndexKind.Unknown}, op: None, op_span: item_span, value: value.copy()}
+                    .None -> {
+                        argument: CallArg{convention: AccessConvention.Read, expr: item, span: item_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
+                        Stmt.Expr{expr: Expr.MethodCall{receiver: head.copy(), method: "add", method_span: item_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}}
+                    }
+                }
+            }
+            .While(cond, body, span, arrow_body, label) -> {
+                statements[index] = Stmt.While{cond: cond, body: sema_loop_value_head_items_in(body, head, entry_value), span: span, arrow_body: arrow_body, label: label}
+            }
+            .For(var, var_span, var2, kind, body, span, arrow_body, label, auto_vectorization) -> {
+                statements[index] = Stmt.For{var: var, var_span: var_span, var2: var2, kind: kind, body: sema_loop_value_head_items_in(body, head, entry_value), span: span, arrow_body: arrow_body, label: label, auto_vectorization: auto_vectorization}
+            }
+            .Loop(body, span, arrow_body, label) -> {
+                statements[index] = Stmt.Loop{body: sema_loop_value_head_items_in(body, head, entry_value), span: span, arrow_body: arrow_body, label: label}
+            }
+            .CountedLoop(init, cond, step, body, span, arrow_body, label) -> {
+                statements[index] = Stmt.CountedLoop{init: init, cond: cond, step: step, body: sema_loop_value_head_items_in(body, head, entry_value), span: span, arrow_body: arrow_body, label: label}
+            }
+            .Switch(subject, arms, else_body, span) -> {
+                statements[index] = Stmt.Switch{subject: subject, arms: sema_loop_value_head_items_arms(arms, head, entry_value), else_body: sema_loop_value_head_items_else(else_body, head, entry_value), span: span}
+            }
+            .ComptimeSwitch(subject, arms, else_body, span) -> {
+                statements[index] = Stmt.ComptimeSwitch{subject: subject, arms: sema_loop_value_head_items_arms(arms, head, entry_value), else_body: sema_loop_value_head_items_else(else_body, head, entry_value), span: span}
+            }
+            .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> {
+                statements[index] = Stmt.ComptimeIf{cond: cond, cond_span: cond_span, then_body: sema_loop_value_head_items_in(then_body, head, entry_value), else_body: sema_loop_value_head_items_else(else_body, head, entry_value), span: span, selected_then: selected_then}
+            }
+            .Unsafe(audit, audit_expr, body, span) -> {
+                statements[index] = Stmt.Unsafe{audit: audit, audit_expr: audit_expr, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Impure(reason, reason_expr, body, span) -> {
+                statements[index] = Stmt.Impure{reason: reason, reason_expr: reason_expr, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Reactive(body, span) -> {
+                statements[index] = Stmt.Reactive{body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Shield(body, span) -> {
+                statements[index] = Stmt.Shield{body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Defer(body, span) -> {
+                statements[index] = Stmt.Defer{body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Switched(marker, body, span) -> {
+                statements[index] = Stmt.Switched{marker: marker, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Region(name, name_span, body, span) -> {
+                statements[index] = Stmt.Region{name: name, name_span: name_span, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Policy(declarations, body, span) -> {
+                statements[index] = Stmt.Policy{declarations: declarations, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .TaskGroup(name, name_span, args, body, span) -> {
+                statements[index] = Stmt.TaskGroup{name: name, name_span: name_span, args: args, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Layout(name, name_span, body, span) -> {
+                statements[index] = Stmt.Layout{name: name, name_span: name_span, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .AuthorityScope(caps, caps_span, binding, body, span) -> {
+                statements[index] = Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .ComptimeBlock(body, is_template_loop, span) -> {
+                statements[index] = Stmt.ComptimeBlock{body: sema_loop_value_head_items_in(body, head, entry_value), is_template_loop: is_template_loop, span: span}
+            }
+            .ContextBlock(fields, body, span) -> {
+                statements[index] = Stmt.ContextBlock{fields: fields, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Live(body, span) -> {
+                statements[index] = Stmt.Live{body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .AssumeDet(reason, reason_expr, body, span) -> {
+                statements[index] = Stmt.AssumeDet{reason: reason, reason_expr: reason_expr, body: sema_loop_value_head_items_in(body, head, entry_value), span: span}
+            }
+            .Transact(name, name_span, body, implicit, span) -> {
+                statements[index] = Stmt.Transact{name: name, name_span: name_span, body: sema_loop_value_head_items_in(body, head, entry_value), implicit: implicit, span: span}
+            }
+            .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> {
+                statements[index] = Stmt.ScopeMember{name: name, name_span: name_span, args: args, args_span: args_span, body: sema_loop_value_head_items_in(body, head, entry_value), dsl: dsl, dot_span: dot_span, span: span}
+            }
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .DeferClose(_, _) -> {}
+        }
+    }
+}
+
+sema_loop_value_head_items_in: fn(body: &&[Stmt], head: Expr, entry_value: Expr?) -> [Stmt] Never! {
+    updated := body
+    sema_loop_value_head_items(updated, head, entry_value)
+    updated
+}
+
+sema_loop_value_head_items_arms: fn(arms: &&[SwitchArm], head: Expr, entry_value: Expr?) -> [SwitchArm] Never! {
+    updated := arms
+    loop arm_index in 0..<updated.len() {
+        arm := updated[arm_index]
+        arm.body = sema_loop_value_head_items_in(arm.body.move(), head, entry_value)
+        updated[arm_index] = arm
+    }
+    updated
+}
+
+sema_loop_value_head_items_else: fn(else_body: &&[Stmt]?, head: Expr, entry_value: Expr?) -> [Stmt]? Never! {
+    if else_body == {
+        .Val(body) -> Val(sema_loop_value_head_items_in(body, head, entry_value))
+        .None -> None
+    }
 }

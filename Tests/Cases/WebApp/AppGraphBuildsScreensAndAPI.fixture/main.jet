@@ -1,0 +1,43 @@
+// One app graph gives the route set, the screens and the Remotes.
+// `.api<Board>` declares the service, `.mount` answers its calls in this
+// process, and `.screen` registers the board, whose view takes the graph's
+// Remote of `Board` beside its state. `app.go` opens the board at its
+// address, and `app.current` makes the state back from that address.
+use app
+
+Board: struct {
+    owner: String
+
+    #App.Public title: fn(self, project: String) -> String Never! { "{self.owner}'s {project}" }
+}
+
+BoardView: struct {
+    project: String
+    #App.Query tab: String
+}
+
+// The board's view: its title comes from the service, through the Remote.
+board: fn(remote: app.Remote<Board>, view: BoardView) -> String Never! {
+    title: remote.title(view.project) ?? "unreachable"
+    shown: "{title} ({view.tab})"
+    print("board: {shown}")
+    shown
+}
+
+graph: fn() -> app.App Never! {
+    app.new("Crew").api<Board>("/api").mount(Board{owner: "Ada"}).screen("/projects/:project/board", board).offline(.Queue)
+}
+
+// The project and tab of the current board, or `none`.
+current_board: fn() -> String Never! {
+    if app.current<BoardView>() == .Val(now) -> return "{now.project} {now.tab}"
+    "none"
+}
+
+run: fn() {
+    _: graph()
+    print(app.url_of(BoardView{project: "p 1", tab: "open"}))
+    print("before: {current_board()}")
+    app.go(BoardView{project: "p 1", tab: "open"})
+    print("current: {current_board()}")
+}

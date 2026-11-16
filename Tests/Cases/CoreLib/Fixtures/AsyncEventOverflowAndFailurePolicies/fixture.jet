@@ -1,6 +1,6 @@
 use {
     event: core.event
-    tasks: core.tasks
+    _tasks: core.tasks
 }
 
 panic_log_handler: fn(n: Int) { panic("log boom") }
@@ -17,13 +17,13 @@ run: fn() {
         released_newest: newest_release_rx.receive() ?? panic("release")
     })
     newest_first: newest.emit_async(1)
-    newest_started_first: newest_started_rx.receive() ?? panic("started")
+    _newest_started_first: newest_started_rx.receive() ?? panic("started")
     newest_second: newest.emit_async(2)
     newest_third: newest.emit_async(3)
     newest_report: newest_third.join() ?? panic("newest third join")
     print("newest={!newest_report.accepted() && newest_report.state() == .DroppedNewest}")
     newest_release_tx.send(1)
-    newest_started_second: newest_started_rx.receive() ?? panic("second")
+    _newest_started_second: newest_started_rx.receive() ?? panic("second")
     newest_release_tx.send(2)
     _: newest_first.join() ?? panic("newest first join")
     _: newest_second.join() ?? panic("newest second join")
@@ -37,13 +37,13 @@ run: fn() {
         released_oldest: oldest_release_rx.receive() ?? panic("release")
     })
     oldest_first: oldest.emit_async(1)
-    oldest_started_first: oldest_started_rx.receive() ?? panic("started")
+    _oldest_started_first: oldest_started_rx.receive() ?? panic("started")
     oldest_evicted: oldest.emit_async(2)
     oldest_third: oldest.emit_async(3)
     oldest_report: oldest_evicted.join() ?? panic("oldest evicted join")
     print("oldest={oldest_report.accepted() && oldest_report.state() == .DroppedOldest}")
     oldest_release_tx.send(1)
-    oldest_started_third: oldest_started_rx.receive() ?? panic("third")
+    _oldest_started_third: oldest_started_rx.receive() ?? panic("third")
     oldest_release_tx.send(3)
     _: oldest_first.join() ?? panic("oldest first join")
     _: oldest_third.join() ?? panic("oldest third join")
@@ -60,7 +60,7 @@ run: fn() {
     })
     once_event.once(once_scope, fn(n: Int) {})
     once_first: once_event.emit_async(1)
-    once_started: once_started_rx.receive() ?? panic("started")
+    _once_started: once_started_rx.receive() ?? panic("started")
     once_second: once_event.emit_async(2)
     once_release_tx.send(1)
     once_first_report: once_first.join() ?? panic("once first join")
