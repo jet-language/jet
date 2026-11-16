@@ -9,6 +9,9 @@
 # each program value here comes from a different typing path (a literal, a
 # signature, a generic alias, an import, an alias to the import) and a path
 # that left one bare would send its method to the handle's and fail the run.
+# The channel's endpoints are destructured, and a destructure binds each
+# member's checked type as it is: resolving `Sender<Int>` again in the
+# caller's scope would rebind the bare handle to the program's `Sender`.
 # Before, the program's types answered for the handles: `send` expected no
 # arguments, `receive` gave a String, `join` gave the program's String and
 # each handle still owed its join (L1101).

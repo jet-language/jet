@@ -5999,6 +5999,22 @@ sema_stmt_check_else_complement: fn(names: [BindName], body: [Stmt], span: Span,
     SemaStatementResult{value: statements, complete: complete && checked.complete}
 }
 
+// The alias expansion of the type a destructure takes apart, when its head is
+// an alias; None keeps the value's checked type as it is. A checked type
+// already spells its names as checked (a program nominal by its module path,
+// a builtin handle such as `Sender<Int>` or `Task<T>` bare): resolving the
+// whole type again in the caller's scope would rebind a bare handle to a
+// program type that shares its name.
+sema_stmt_destructure_alias: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    if program.registration_graph == .Val(graph) {
+        row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return None
+        if graph.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.TypeAlias {
+            return Val(sema_expr_expected_type(ty, environment, program))
+        }
+    }
+    None
+}
+
 sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if pattern == {
         .Refutable(inner, fallback, names, span) -> return sema_stmt_check_refutable_binding(binding, inner, fallback, names, span, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -6009,7 +6025,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
         sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, state, context, diagnostics)
         return None
     }
-    ty := sema_expr_expected_type(init.ty, environment, program)
+    ty: sema_stmt_destructure_alias(init.ty, environment, program) ?? init.ty
     names := sema_stmt_destructure_names(pattern)
     fields := [TypeTupleField]{}
     span := binding.name_span
