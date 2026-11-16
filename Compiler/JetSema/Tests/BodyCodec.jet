@@ -18,8 +18,6 @@ use {
         SemaComptimeRequest,
         SemaCopyEvent,
         SemaCoreBody,
-        SemaCoreBodiesAheadPart,
-        SemaCoreBodyAhead,
         SemaCoreBodyRecord,
         SemaCoreCaptures,
         SemaComptimeDeclarationStage,
@@ -42,7 +40,7 @@ use {
         body_codec_put_semaparallelbody,
         sema_core_body_ahead_take,
         sema_core_body_decode,
-        sema_core_bodies_ahead_parts,
+        sema_core_bodies_ahead_load,
         sema_core_bodies_bytes,
         sema_core_bodies_keys,
         sema_core_bodies_key_at,
@@ -62,6 +60,7 @@ use {
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[
         BodyCodecIn,
+        CompilerThreads,
         DeclID,
         DeclRow,
         Diagnostic,
@@ -707,11 +706,12 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     }
 }
 
-// A Core demand wave's packets read ahead (CoreBodies.jet
-// sema_core_bodies_ahead) are decoded by compiler threads, each with a
-// reader of its own, and the wave's loads take them: each packet is the one
-// a load reads with the one reader every load shares, and a take counts it
-// as that load would.
+// A module pass's packets read ahead (CoreBodies.jet
+// sema_core_bodies_ahead_load) are decoded by compiler threads as one
+// thread reads them, each with a reader of its own, and the pass's loads
+// take them: each packet is the one a load reads with the one reader every
+// load shares, whether its record was sliced from the lent file or read
+// through the host, and a take counts it as that load would.
 #Test("Core function checks read ahead on compiler threads are the checks a load reads") {
     failures := [String]{}
     captured := body_codec_check(failures, "core", body_codec_hooks(), true) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
@@ -723,11 +723,6 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     if count < 6 -> panic("BodyCodec: only {count} function checks were captured")
     shared := BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
     loads := [String]{}
-    parts := [SemaCoreBodiesAheadPart]{}
-    loop _ in 0..<3 {
-        parts.push(SemaCoreBodiesAheadPart{records: [SemaCoreBodyRecord]{}, packets: [SemaParallelBody?]{}})
-    }
-    part_index := 0
     total := 0
     loop position in 0..<count {
         at: sema_core_bodies_offset(bodies.bytes, bodies.head, position)
@@ -738,57 +733,74 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
             total += end - at
             loads.push("{packet:Debug}")
         } else { loads.push("") }
-        parts[part_index].records.push(SemaCoreBodyRecord{owner: SymbolID{id: U32{position}}, position: position, bytes: bodies.bytes[at..<end]})
-        part_index = if part_index == 2 -> 0 else -> part_index + 1
     }
-    done := sema_core_bodies_ahead_parts(graph, parts)
-    hooks := SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
+    // The lent file of the read-ahead through the host: the head, with every
+    // record's bytes blanked, so a record sliced from it would not load.
+    first: sema_core_bodies_offset(bodies.bytes, bodies.head, 0)
+    blank := bodies.bytes.slice(0, first)
+    loop _ in first..<bodies.bytes.len() -> blank.push(U8{0})
+    lent := SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
+    lent.core_bodies = Val(bodies.move())
+    body_codec_ahead(failures, graph, lent, loads, total, "from the lent file")
+    file: lent.core_bodies.move() ?? panic("BodyCodec: the read-ahead lost its lent file")
+    host := SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
+    host.core_bodies = Val(sema_core_bodies_read(blank.move()) ?? panic("BodyCodec: the blanked bodies file does not read back"))
+    host.core_bodies_records = Val(BodyCodecRecords{bytes: file.bytes.move()})
+    body_codec_ahead(failures, graph, host, loads, total, "through the host")
+    if failures.len() > 0 {
+        panic("BodyCodec collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
+}
+
+// Reads ahead every record of the bodies file lent in `hooks` on four
+// compiler threads (sema_core_bodies_ahead_load), one reading and those its
+// bytes admit decoding: sliced from the lent file, or read through the host
+// (BodyCodecRecords) when `hooks` has one. Then takes each as a module
+// pass's load would: each packet is `loads[position]`, the one a load reads
+// ("" where none loads), and the takes count `total` bytes read.
+body_codec_ahead: fn(failures: &[String], graph: SemaRegistrationGraph, hooks: &SemaRegistrationHostHooks, loads: [String], total: Int, mode: String) {
+    found := [SemaCoreBodyRecord]{}
+    if hooks.core_bodies == .Val(bodies) {
+        loop position in 0..<bodies.head.count {
+            at: sema_core_bodies_offset(bodies.bytes, bodies.head, position)
+            end: if position + 1 < bodies.head.count -> sema_core_bodies_offset(bodies.bytes, bodies.head, position + 1) else -> bodies.bytes.len()
+            found.push(SemaCoreBodyRecord{owner: SymbolID{id: U32{position}}, position: position, at: at, size: end - at})
+        }
+    }
+    count: found.len()
+    sema_core_bodies_ahead_load(graph, hooks, found.move(), CompilerThreads{cap: None, cores: 4, memory_available: None})
     ahead := 0
-    loop done.len() > 0 {
-        part := done.pop() ?? break
-        if part.packets.len() != part.records.len() {
-            failures.push("a part decoded {part.packets.len()} of {part.records.len()} records")
-        }
-        loop part.records.len() > 0 && part.packets.len() > 0 {
-            record := part.records.pop() ?? break
-            popped := part.packets.pop() ?? break
-            if record.bytes.len() != 0 -> failures.push("record {record.position} kept its bytes")
-            packet := popped.move() ?? {
-                if loads[record.position] != "" {
-                    failures.push("record {record.position} loads but was not read ahead")
-                }
-                next
-            }
-            if loads[record.position] == "" {
-                failures.push("record {record.position} was read ahead but does not load")
-            }
-            ahead += 1
-            hooks.core_bodies_ahead[record.owner.id] = Val(SemaCoreBodyAhead{packet: packet.move(), position: record.position, size: record.size})
-        }
-    }
-    if ahead < 6 -> failures.push("only {ahead} of {count} records were read ahead")
     loop position in 0..<count {
-        if loads[position] == "" -> next
+        read_ahead: hooks.core_bodies_ahead.has_key(U32{position})
+        if loads[position] == "" {
+            if read_ahead {
+                failures.push("{mode}: record {position} was read ahead but does not load")
+            }
+            next
+        }
+        if !read_ahead {
+            failures.push("{mode}: record {position} loads but was not read ahead")
+            next
+        }
+        ahead += 1
         taken := sema_core_body_ahead_take(hooks, SymbolID{id: U32{position}}) ?? {
-            failures.push("record {position} was not taken")
+            failures.push("{mode}: record {position} was not taken")
             next
         }
         if "{taken:Debug}" != loads[position] {
-            failures.push("record {position}: the packet read ahead differs from the one a load reads")
+            failures.push("{mode}: record {position}: the packet read ahead differs from the one a load reads")
         }
         if !hooks.core_bodies_loaded[position] {
-            failures.push("record {position} was taken but not marked loaded")
+            failures.push("{mode}: record {position} was taken but not marked loaded")
         }
     }
+    if ahead < 6 -> failures.push("{mode}: only {ahead} of {count} records were read ahead")
     left := 0
     loop (_, row) in hooks.core_bodies_ahead {
         if row != None -> left += 1
     }
-    if left != 0 -> failures.push("{left} packets read ahead were not taken")
+    if left != 0 -> failures.push("{mode}: {left} packets read ahead were not taken")
     if hooks.core_bodies_read != total {
-        failures.push("the takes counted {hooks.core_bodies_read} bytes read, not {total}")
-    }
-    if failures.len() > 0 {
-        panic("BodyCodec collected {failures.len()} failures:\n{failures.join("\n")}")
+        failures.push("{mode}: the takes counted {hooks.core_bodies_read} bytes read, not {total}")
     }
 }
