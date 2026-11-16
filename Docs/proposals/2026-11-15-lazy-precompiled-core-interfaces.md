@@ -1149,8 +1149,17 @@ On built-in Core, against the jet before:
   - **binary size:** within 3.4's limits. Generic instances shipped as
     checked bodies count toward B's limit. No instance ships as machine
     code in this note.
-- **The measuring script** of 1.0 is checked in by A0 under
-  `Tools/perf/core-interface/`, with the program set and the arms.
+- **The measuring script** is `Tools/perf/core-interface/run.jet`. It runs
+  hello, `abs.jet`, `fread.jet`, Summarize and RunColdContext under
+  `jet check` and `jet run`, in the built-in arm and, when they are named,
+  the matching-tree and edited-tree arms. Each step's receipt goes on its
+  card. Two parts of the plan are not in it:
+  - e2404, lint and e3401 are not in its program set;
+  - it reports no cgroup peak. Own peak, user and sys are per run.
+
+  The per-body load against check comes from the `core.timed` counters of
+  a per-function trace. They time the bodies of a demand wave, so the load
+  is not a separate `core.interface.bodies` span.
 
 ### 6.3 Who owns hello's "user time on the user code" (G17)
 
