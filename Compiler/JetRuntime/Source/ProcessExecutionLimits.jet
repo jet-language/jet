@@ -105,20 +105,44 @@ process_execution_live_limit: fn(child: I64, scratch: I64) -> I64 {
     process_spec_live_limit(fd_word(process_execution_native(child), I64{8}), fd_word(child, I64{24}), scratch)
 }
 
-// For one live pid under `spec` (borrowed).
+// A spawned child runs on this process's address space until its execve
+// switches it to its own image, and the spawn's CLOEXEC error pipe can read
+// end-of-file before that switch. Until then the child's /proc VmSize and
+// descriptor table are this process's, not its own. kcmp(this process, pid,
+// KCMP_VM) is 0 while both share one address space; a kernel without kcmp
+// answers an error and counts as switched.
+process_spec_left_image: fn(pid: I64) -> Bool {
+    host_call5(I64{312}, jet_std_os_pid(), pid, I64{1}, I64{0}, I64{0}) != I64{0}
+}
+
+process_spec_memory_reached: fn(pid: I64, threshold: I64, scratch: I64) -> Bool {
+    used: process_execution_memory_used(pid, scratch)
+    used >= I64{0} && used >= threshold
+}
+
+process_spec_files_reached: fn(pid: I64, limit: I64, scratch: I64) -> Bool {
+    used: process_execution_files_used(pid, scratch)
+    used >= I64{0} && used >= limit
+}
+
+// For one live pid under `spec` (borrowed). A sample at a limit counts only
+// once the child has left this process's image, and is then taken again,
+// since the first one may predate the switch.
 process_spec_live_limit: fn(pid: I64, spec: I64, scratch: I64) -> I64 {
     memory: fd_word(spec, PROCESS_SPEC_MEMORY_LIMIT)
     if (memory != I64{0}) {
         limit: fd_word(memory, I64{0})
         threshold: if (limit <= I64{1048576}) -> { I64{0} } else -> { limit - I64{1048576} }
-        used: process_execution_memory_used(pid, scratch)
-        if (used >= I64{0} && used >= threshold) { return PROCESS_RESOURCE_MEMORY }
+        if (process_spec_memory_reached(pid, threshold, scratch) && process_spec_left_image(pid) && process_spec_memory_reached(pid, threshold, scratch)) {
+            return PROCESS_RESOURCE_MEMORY
+        }
     }
     files: fd_word(spec, PROCESS_SPEC_OPEN_FILE_LIMIT)
     if (files != I64{0}) {
-        used: process_execution_files_used(pid, scratch)
         limit: fd_word(files, I64{0})
-        if (used >= I64{0} && used >= limit) { return PROCESS_RESOURCE_OPEN_FILES }
+        if (process_spec_files_reached(pid, limit, scratch) && process_spec_left_image(pid) && process_spec_files_reached(pid, limit, scratch)) {
+            return PROCESS_RESOURCE_OPEN_FILES
+        }
     }
     I64{-1}
 }
