@@ -1,6 +1,6 @@
 # `jet inspect choices` lists each call site the optimizer inlined as
 # `jet build` optimizes the program, at the call's line, with why it was
-# taken. Optimized, the small `bump` is spliced into `run` at line 7. With
+# taken. Optimized, the small `bump` is spliced into `run` at line 4. With
 # `--inline=off`, or at O0, no unmarked callee is inlined and the kind says
 # none. An `#Inline(Always)` callee is inlined at every call on every tier
 # and under every `inline` value, and the row says so. `#Inline(Always)`
@@ -41,7 +41,7 @@ json: stdout doc $.action = "inspect.choices"
 json: stdout doc $.kinds[1] = "inlining"
 json: stdout doc $.choices[0].kind = "inlining"
 json: stdout doc $.choices[0].function = "run"
-json: stdout doc $.choices[0].line = 7
+json: stdout doc $.choices[0].line = 4
 step locked: jet check locked.jet
 exit: nonzero
 stderr: ~ "`count` calls itself, so `#Inline(Always)` cannot expand it" # the broken lock names the recursion
