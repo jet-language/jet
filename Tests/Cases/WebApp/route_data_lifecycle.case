@@ -1,0 +1,27 @@
+# A screen's route data is the live bindings its view reads, each keyed by
+# its source and arguments: opening task 8 after task 7 runs task 8's title
+# query and shares the count both read, and opening the same address again
+# runs nothing. A write outside the read set leaves the data current; a write
+# that meets it makes it stale and the next open refetches it. Once the last
+# screen that read a binding leaves, the registry drops it, so the board
+# holds only the count and returning to task 8 fetches its title again. The
+# same lines print at O0, O1 and O2 and under node on web.
+fixture: RouteDataLifecycle.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = route_data_lifecycle.stdout.expected
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0
+when tool node
+step: jet build --target web main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: == o0
+end when
