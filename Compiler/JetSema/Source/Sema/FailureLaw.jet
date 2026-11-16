@@ -1305,8 +1305,9 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
                 diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it.", "Move `Never` to a function return type, or use `()`/another value type."))
             }
             sema_check_private_module_type(name, span, environment, program, diagnostics)
-            // Compiler-owned IO enum/record rows have no public annotation origin.
-            // Reuse the Core-only literal origin gate; user declarations stay E0119.
+            // The IOError context's `IOOperation` enum and `IOContext` record
+            // have no public annotation origin. Reuse the Core-only literal
+            // origin gate; user declarations stay E0119.
             unresolved := (name == "IOOperation" || name == "IOContext") && !module_is_core(environment.module_identity)
             // Owner-only impl metadata cannot manufacture a qualified export.
             owner_annotation: loop suffix in JET_CORE_OWNER_ANNOTATION_SUFFIXES {
