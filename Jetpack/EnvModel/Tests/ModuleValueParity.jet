@@ -10,6 +10,7 @@ use {
         PromptPathMode,
         ReloadPolicy,
         SecretGenerator,
+        SecretRotationPolicy,
         envmodel_evaluate_env,
         envmodel_evaluate_source,
         envmodel_find_jet_binary,
@@ -372,6 +373,30 @@ dev: module {
     files.remove_all(dir) ?? return
 }
 
+// A call and a method call are computed whole: the syntax tree spans each by
+// its name, but the value is the name with its receiver and arguments.
+ENV_FIELD_CALLS: `
+BASE: 8000
+
+port_of: fn(base: Int) -> Int { base + 2 }
+
+dev: module {
+    env.dev: Env{
+        port: port_of(BASE),
+        size: "dev-{port}".len(),
+    }
+}
+`
+
+#Test("env_field_calls_are_computed_whole") {
+    dir: envmodel_test_oci_base_dir("env-field-calls")
+    modules: envmodel_evaluate_source(ENV_FIELD_CALLS, dir) ?? panic("the revision evaluates")
+    files.remove_all(dir) ?? panic("remove the environment")
+    entry: modules[0].entries[0].entry
+    assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text{value: "8002"}))
+    assert_eq(envmodel_test_setting_value(entry, "size"), Val(FactValue.Text{value: "8"}))
+}
+
 #Test("env_field_cycle_names_the_fields_at_the_field") {
     source: "dev: module {{\n    env.dev: Env{{\n        port: label.len(),\n        label: \"x{{port}}\",\n    }}\n}}\n"
     dir: envmodel_test_oci_base_dir("env-field-cycle")
@@ -435,6 +460,55 @@ dev: module {
     sources: [String]{lifecycle, secret}
     loop source in sources {
         dir: envmodel_test_oci_base_dir("env-lifecycle-secret-error")
+        error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+        files.remove_all(dir) ?? panic("remove the environment")
+        head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
+        assert(head.contains("--> main.jet:4:"), head)
+        assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
+    }
+}
+
+// `max_age(…)` and `random(…)` are the schema's functions: the compiler
+// computes the age in seconds from the duration as written, saturating at
+// Int's largest, and the generator's length.
+ENV_SECRET_POLICY_CALLS: `
+DAYS: 45
+
+dev: module {
+    env.dev: Env{
+        secrets: {
+            DAILY: { required: false, rotation: max_age(90d), generate: random(length: DAYS - 13) },
+            HOURLY: { required: false, rotation: max_age(2hours) },
+            MINUTELY: { required: false, rotation: max_age(30m) },
+            SECONDLY: { required: false, rotation: max_age(45sec) },
+            FOREVER: { required: false, rotation: max_age(9223372036854775807d) },
+        },
+    }
+}
+`
+
+#Test("secret_policy_calls_are_the_schemas") {
+    dir: envmodel_test_oci_base_dir("env-secret-policy-calls")
+    plan: envmodel_evaluate_env(ENV_SECRET_POLICY_CALLS, dir) ?? panic("the revision plans: {err.diagnostic.what}")
+    files.remove_all(dir) ?? panic("remove the environment")
+    ages := [String:SecretRotationPolicy]{}
+    loop secret in plan.secrets {
+        ages[secret.name] = secret.rotation
+        if secret.name == "DAILY" -> assert_eq(secret.generate, SecretGenerator.Random{length: 32})
+    }
+    assert_eq(ages.get("DAILY"), Val(SecretRotationPolicy.MaxAge{seconds: 7776000}))
+    assert_eq(ages.get("HOURLY"), Val(SecretRotationPolicy.MaxAge{seconds: 7200}))
+    assert_eq(ages.get("MINUTELY"), Val(SecretRotationPolicy.MaxAge{seconds: 1800}))
+    assert_eq(ages.get("SECONDLY"), Val(SecretRotationPolicy.MaxAge{seconds: 45}))
+    assert_eq(ages.get("FOREVER"), Val(SecretRotationPolicy.MaxAge{seconds: 9223372036854775807}))
+}
+
+#Test("secret_policy_call_errors_are_at_their_line") {
+    age: "dev: module {{\n    env.dev: Env{{\n        secrets: {{\n            API_KEY: {{ required: false, rotation: max_age(90, 1) }},\n        }},\n    }}\n}}\n"
+    length: "dev: module {{\n    env.dev: Env{{\n        secrets: {{\n            API_KEY: {{ required: false, generate: random(size: 32) }},\n        }},\n    }}\n}}\n"
+    sources: [String]{age, length}
+    loop source in sources {
+        dir: envmodel_test_oci_base_dir("env-secret-policy-error")
         error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
         files.remove_all(dir) ?? panic("remove the environment")
         head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))

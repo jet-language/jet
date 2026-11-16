@@ -521,7 +521,11 @@ at the field in the source. A headless record takes the type its field gives
 it: `prompt: { label: "dev" }` is a `Prompt`, and each entry of
 `presets: ["dev": { … }]` is a `Preset`. The names a field holds
 (`presets: { dev: … }`, `.Rust`, `packages.app`, the jobs in
-`on_enter: [prepare]`, a `secrets:` map with its `compose(…)`, `max_age(…)`
-and `random(…)` declarations) stay environment syntax; only the values inside
-them go to the compiler, so `git_hooks_path: "{HOOKS}/githooks"` or
-`random(length: LENGTH * 2)` reads the module's values.
+`on_enter: [prepare]`, a `secrets:` map and its `compose(…)` templates) stay
+environment syntax; only the values inside them go to the compiler, so
+`git_hooks_path: "{HOOKS}/githooks"` reads the module's values. A secret's
+`max_age(…)` and `random(…)` are schema functions the compiler calls:
+`random(length: LENGTH * 2)` is a `SecretRandom`, and `max_age(90d)` (a count
+with a `d`/`day`/`days`, `h`/`hour`/`hours`, `m`/`min`/`minute`/`minutes` or
+`s`/`sec`/`second`/`seconds` suffix) is a `SecretMaxAge` of that many
+seconds, saturating at the largest `Int`.

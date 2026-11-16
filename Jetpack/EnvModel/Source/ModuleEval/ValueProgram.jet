@@ -3,11 +3,12 @@
 // `ENVMODEL_VALUE_<n>: <expression>`, appended to the module-values program
 // after the source (module_values_program). The expression is copied from
 // the source. A read of a sibling field is respelled to that field's
-// generated name, and a `$NAME` read to the literal it holds. A headless
-// record whose type its field gives (`prompt: { label: "x" }`) is passed
-// through that type's `envmodel_expect_*` function from the schema. Every
-// piece of the generated text keeps the source span it stands for, so a
-// diagnostic the compiler gives inside it is placed back in the source.
+// generated name, a `$NAME` read to the literal it holds, and an EnvModel
+// literal the schema reads in another form (`max_age(90d)`) to that form. A
+// headless record whose type its field gives (`prompt: { label: "x" }`) is
+// passed through that type's `envmodel_expect_*` function from the schema.
+// Every piece of the generated text keeps the source span it stands for, so
+// a diagnostic the compiler gives inside it is placed back in the source.
 //
 // EnvModel's own syntax stays EnvModel's: a record of bare names
 // (`presets: { dev: { … } }`) or a headless enum case (`.Rust`) is walked
@@ -25,10 +26,12 @@ use {
         comptime_walk_identifiers,
         diagnostic_from_registry,
         expr_span,
+        expr_source_start,
         jet_config_eval_diagnostic,
         jet_config_literal,
         jet_config_plain_literal,
     ]
+    jet_lexer.[TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, Token, lex_config, lexer_without_comments]
     jet_pkg_model.[pkg_bytes_text]
 }
 
@@ -44,6 +47,8 @@ EnvValueSegment: struct {
 // The generated declarations for one source, and what each one computes.
 EnvValueProgram: struct {
     source: [U8]
+    // The source's tokens, which place the end of a call's arguments.
+    tokens: [Token]
     environment: [String:CtValue]
     prefix: String
     parts: [String]
@@ -56,6 +61,8 @@ EnvValueProgram: struct {
     labels: [String:String]
     // A value known without the compiler, by its expression's start.
     known: [Int:CtValue]
+    // Source text the program spells differently, by its span.
+    respelled: [(span: Span, text: String)]
     // Whether some generated value needs the compiler.
     needed: Bool
     // The span the first generated value stands for.
@@ -71,6 +78,7 @@ envmodel_value_program: fn(source: String, environment: [String:CtValue]) -> Env
     }
     EnvValueProgram{
         source: source.bytes(),
+        tokens: lexer_without_comments(lex_config(source.bytes()).tokens),
         environment: environment,
         prefix: prefix,
         parts: [String]{},
@@ -80,6 +88,7 @@ envmodel_value_program: fn(source: String, environment: [String:CtValue]) -> Env
         leaves: [Int:String]{},
         labels: [String:String]{},
         known: [Int:CtValue]{},
+        respelled: [(span: Span, text: String)]{},
         needed: false,
         first: None,
     }
@@ -151,7 +160,8 @@ envmodel_value_structural: fn(expr: Expr) -> Bool Never! {
 envmodel_value_plan: fn(plan: &EnvValueProgram, expr: Expr, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
     current: envmodel_unparen(expr)
     if !envmodel_value_structural(current) {
-        envmodel_value_leaf(plan, current, "", "", expr_span(current), siblings, globals)
+        extent: envmodel_value_extent(plan, current)
+        envmodel_value_leaf(plan, current, "", "", extent, siblings, globals)
         return
     }
     if current == .StructLit(_, _, _, _, fields, _, _, _) {
@@ -182,7 +192,8 @@ envmodel_value_plan: fn(plan: &EnvValueProgram, expr: Expr, siblings: [String:St
 envmodel_value_plan_typed: fn(plan: &EnvValueProgram, expr: Expr, expect: String, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
     current: envmodel_unparen(expr)
     if !envmodel_value_structural(current) {
-        envmodel_value_leaf(plan, current, "", "", expr_span(current), siblings, globals)
+        extent: envmodel_value_extent(plan, current)
+        envmodel_value_leaf(plan, current, "", "", extent, siblings, globals)
         return
     }
     if current == .StructLit(_, _, _, _, fields, _, _, _) {
@@ -210,7 +221,8 @@ envmodel_value_plan_typed: fn(plan: &EnvValueProgram, expr: Expr, expect: String
 envmodel_value_plan_element: fn(plan: &EnvValueProgram, expr: Expr, expect: String, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
     current: envmodel_unparen(expr)
     if envmodel_value_headless_record(current) {
-        envmodel_value_leaf(plan, current, expect, "", expr_span(current), siblings, globals)
+        extent: envmodel_value_extent(plan, current)
+        envmodel_value_leaf(plan, current, expect, "", extent, siblings, globals)
         return
     }
     envmodel_value_plan(plan, current, siblings, globals)
@@ -228,11 +240,41 @@ envmodel_value_known: fn(plan: EnvValueProgram, expr: Expr, siblings: [String:St
     None
 }
 
+// The source text `expr` is written as. The syntax tree spans a call or a
+// method call by its name and a member path by its last name, so the text
+// runs from the receiver's start through the argument lists or indexes
+// right after the expression's own span.
+envmodel_value_extent: fn(plan: EnvValueProgram, expr: Expr) -> Span Never! {
+    start: expr_source_start(expr)
+    end := expr_span(expr).end
+    low := 0
+    high := plan.tokens.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if {
+            plan.tokens[middle].span.start < end -> low = middle + 1
+            else -> high = middle
+        }
+    }
+    depth := 0
+    loop index in low..<plan.tokens.len() {
+        kind: plan.tokens[index].kind
+        if depth == 0 && kind != TOKEN_LPAREN && kind != TOKEN_LBRACKET {
+            return Span{start: start, end: end}
+        }
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> depth -= 1
+        end = plan.tokens[index].span.end
+    }
+    Span{start: start, end: end}
+}
+
 // One generated value computing `expr`, passed through `expect` unless it is
 // empty. `name` is the generated name a sibling field reads ("" for a fresh
 // one), and `label_span` the span its declaration stands for.
 envmodel_value_leaf: fn(plan: &EnvValueProgram, expr: Expr, expect: String, name: String, label_span: Span, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
     span: expr_span(expr)
+    extent: envmodel_value_extent(plan, expr)
     known := CtValue?{None}
     if expect == "" -> known = envmodel_value_known(plan, expr, siblings, globals)
     if known == {
@@ -256,16 +298,21 @@ envmodel_value_leaf: fn(plan: &EnvValueProgram, expr: Expr, expect: String, name
         }
         sites.push((span: site.span, text: sibling))
     }
+    loop respelling in plan.respelled {
+        if respelling.span.start >= extent.start && respelling.span.end <= extent.end {
+            sites.push((span: respelling.span, text: respelling.text))
+        }
+    }
     sites.sort_by(fn(site) { site.span.start })
-    cursor := span.start
+    cursor := extent.start
     loop site in sites {
         envmodel_value_copy(plan, cursor, site.span.start)
         envmodel_value_append(plan, site.text, site.span)
         cursor = site.span.end
     }
-    envmodel_value_copy(plan, cursor, span.end)
+    envmodel_value_copy(plan, cursor, extent.end)
     tail: if expect == "" -> "\n" else -> ")\n"
-    envmodel_value_append(plan, tail, span)
+    envmodel_value_append(plan, tail, extent)
     plan.leaves[span.start] = generated
     plan.labels[generated] = pkg_bytes_text(plan.source, label_span.start, label_span.end)
     if plan.first == None -> plan.first = Val(label_span)

@@ -199,9 +199,10 @@ use {
 #Test("ambient io in an env field is the compilers refusal at the call") {
     src: "\ndev: module {{\n    env.dev: Env{{\n        prompt: read_file(\"/etc/hostname\"),\n    }}\n}}\n"
     error: envmodel_test_source_error(envmodel_evaluate_source(src, envmodel_test_base_dir()))
-    assert_eq(error.code, "E0107")
+    assert_eq(error.code, "E0643")
     rendered: envmodel_test_render("env.jet", src, error)
-    assert(rendered.contains("Nothing named `read_file` exists here"), rendered)
+    assert(rendered.contains("can't be computed while building"), rendered)
+    assert(!rendered.contains("ENVMODEL_VALUE"), rendered)
     assert(rendered.contains("--> env.jet:4:17"), rendered)
 }
 
