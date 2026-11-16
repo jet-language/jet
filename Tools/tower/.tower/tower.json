@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108436,
+    "rev": 108446,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27365,20 +27365,20 @@
         {
           "n": 6,
           "text": "D-ENUM-CASEMETA1 is exercised for unit/named/tuple payloads, copied captures, active case and refused shared/noncopyable graphs. Proof: `jet test Compiler --profile golden --filter reflect/enum_case_meta` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:45:58.776Z"
+          "evidence": "jet test Compiler --profile golden --filter reflect/enum_case_meta: n=9, 0 bad, on the p208 batch compiler (dev 54326edf75, census build), cycle p208 proof run by Main. Landed as GoalsA-1-4-g6-enum-case-meta-r2 ff642d1583 and -rows-r2 ffc7abb6ce.",
+          "at": "2026-11-16T06:16:45.956Z"
         },
         {
           "n": 8,
           "text": "Layout and ABI facts describe the selected compilation target. Compile-time metadata does not impose a runtime table or allocation on unrelated programs. Proof: `jet test Compiler --profile cases --filter reflect/enum_case_meta_zero_cost` shows no runtime table or allocation in a program that does not reflect.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:46:00.098Z"
+          "evidence": "jet test Compiler --profile cases --filter reflect/enum_case_meta_zero_cost: n=1, 0 bad, on the p208 batch compiler (dev 54326edf75, census build), cycle p208 proof run by Main. Landed as GoalsA-1-4-g6-enum-case-zero-cost-r2 523a73197f.",
+          "at": "2026-11-16T06:16:47.066Z"
         },
         {
           "n": 10,
@@ -27401,11 +27401,11 @@
         {
           "n": 12,
           "text": "`value.case()` exposes only the active case and its typed payload; a program that does not reflect emits no reflection table or allocation, checked in the generated IR. Proof: `jet test Compiler --profile cases --filter enum_case_no_unused_table`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:57.572Z"
+          "evidence": "jet test Compiler --profile cases --filter enum_case_no_unused_table: n=1, 0 bad, on the p208 batch compiler (dev 54326edf75, census build), cycle p208 proof run by Main. Landed as GoalsA-1-4-g6-enum-case-named-literals-r2 f37675ef99 and -zero-cost-r2 523a73197f.",
+          "at": "2026-11-16T06:16:48.241Z"
         },
         {
           "n": 14,
@@ -27506,7 +27506,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T05:14:00.582Z",
+      "updated": "2026-11-16T06:16:48.241Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -42537,6 +42537,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p208 landed the tidy error tier (MemKernel-6-tidy-errors-c2-r3 bc60c2fa1d, c24-l0304-tidy-r3 bac11a8e4a); the p208 suites lost 773 rows (553 ui snapshots print tidy findings beside the real error, 163 cases and 53 run rows meet unswept tidy sites in tests/ and Examples, 242 golden lines), and L0101 has two false positives (a read inside an already-refused expression; a binding kept alive for its drop). Main reverted both on dev. The r4 stack fixes both false positives, sweeps every tree the rule reaches to 0 hits, and keeps check output stable or regenerates every snapshot in the same SUB."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "Proof batch on p182 (dev 9003020128, Main 2026-11-15): c1-c4, c7, c10, c11, c15, c18 and c20-c26 re-proven. c5 met. c16 (failures_explicit_policy_function shows a second E0434 at line 14; fmt_inserts_failure_marks leaves rows: parse(path) without ?), c17 (review_flags_new_failure_point REFUSED: a partial assertion without a reason) and c19 (fix_pin_failures exits 1 with E2105) fail after 8ba6fd9fc3, 02087a6f98 and 85282c9d8a landed; all four went back to GoalsA-1-4 as one list."
@@ -42832,7 +42837,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-15T14:48:08.776Z",
+      "updated": "2026-11-16T06:17:15.378Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -102924,6 +102929,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "D-PRIM-ANY1 review 6 evidence for filed criteria: c41 scope: a from clause return (-> [Int]? from item) emits the same IR as the copy form at O0 (a 24-byte optional cell, a byte copy and a retain; probe y12_from_val_copy_audit.jet with .ir.out); c41's fix must not refuse Val(p) returned under a from clause, which is recover's body. c27: [Shown] | Int is accepted and leaks names (probe y10). Probes in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "c29 (2.5 takes a type table's else arm) shares its float-literal root with #6727 c9, whose text now includes f5 (a float literal as a ...Printable argument gives a wrong E0904). Fix them together."
         },
         {
@@ -103310,12 +103320,39 @@
         },
         {
           "n": 42,
-          "text": "I1 memory safety: a lent result through dynamic dispatch keeps its loan. With a trait method point: fn(self) -> Point? from self called on a [Shown] element, moving or mutating the list while the result lives is E0212, as the same loan on a struct method already is (probe w03d). Today it compiles with no E0212 and the result still reads 41, so it's unproven whether the value is copied or the loan dangles (p207, O0/O1/O2 alike; D-PRIM-ANY1 round 5, probes w03b, w03c and w03d in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes). Proof: a UI snapshot of the E0212 on the trait-dispatch form, a cases row of the legal use, and a sweep of every dyn-dispatch call site that carries a from-self return.",
+          "text": "A lent result through dynamic dispatch keeps its loan and is not silently copied. With a trait method point: fn(self) -> Point? from self called on a [Shown] element, moving or mutating the list while the result lives is E0212, as the same loan on a struct method already is (probe w03d). Today it compiles with no E0212, and the result is a hidden copy: it reads 41 after the stored Point was bumped to 141, the IR of Point.point allocates and copies, and jet audit reports no copy (p208, O0/O1/O2 alike; D-PRIM-ANY1 review 6, probes y01_trait_loan_then_mutate.jet (with its .ir.out), y01d and y02 in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes; earlier w03b/w03c in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes). Proof: a UI snapshot of the E0212 on the trait-dispatch form, a cases row of the legal use reading through the loan with no copy (jet audit shows none), and a sweep of every dyn-dispatch call site carrying a from-self return.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T06:06:23.301Z"
+          "at": "2026-11-16T06:26:26.394Z"
+        },
+        {
+          "n": 43,
+          "text": "A union's named case and a qualified member may not share a last name segment: Point(Int) | geo.Point is refused with E0363, as Point(Int) | Point already is (y09b). Today it is accepted, and a bare .Point(n) arm binds the named case, leaving the member with no bare spelling (p208, O0/O1/O2 alike; D-PRIM-ANY1 review 6, probes y09_union_named_case_vs_member_leaf.jet and y09d_named_case_bare_arm_binds.jet in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes). Proof: a UI snapshot of the E0363 and a sweep of every union in the tree that the rule refuses.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T06:26:28.839Z"
+        },
+        {
+          "n": 44,
+          "text": "Writing to an arm binding over a &Item parameter is refused with a report that blames the binding: the binding is read-only, and item itself is writable. Today it gets E0205 'Cannot edit through item — it has read access only', which names the wrong thing (p208, O0/O1/O2 alike; D-PRIM-ANY1 review 6, probe y08_write_subject_arm.jet in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes). Proof: a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T06:26:31.187Z"
+        },
+        {
+          "n": 45,
+          "text": "A from clause naming a && (owned) parameter is refused at the declaration with a registered diagnostic, since an owned argument is consumed and nothing outlives it to lend. Today the declaration is accepted, and the call is then refused with a misleading E0209 pointing at the result as a later use of item (p208, O0/O1/O2 alike; D-PRIM-ANY1 review 6, probe y07b_owned_subject_with_from.jet in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes). Proof: a UI snapshot at the declaration.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T06:26:33.844Z"
         }
       ],
       "refs": [],
@@ -103326,9 +103363,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T06:06:23.301Z",
+      "updated": "2026-11-16T06:26:35.962Z",
       "updatedBy": "Main",
-      "criteriaLastN": 42
+      "criteriaLastN": 45
     },
     {
       "id": "c0c3gh6u",
@@ -105965,6 +106002,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p208 landed the tidy error tier (MemKernel-6-tidy-errors-c2-r3 bc60c2fa1d, c24-l0304-tidy-r3 bac11a8e4a); the p208 suites lost 773 rows (553 ui snapshots print tidy findings beside the real error, 163 cases and 53 run rows meet unswept tidy sites in tests/ and Examples, 242 golden lines), and L0101 has two false positives (a read inside an already-refused expression; a binding kept alive for its drop). Main reverted both on dev. The r4 stack fixes both false positives, sweeps every tree the rule reaches to 0 hits, and keeps check output stable or regenerates every snapshot in the same SUB."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "p207 (dev 0e93e25032): MemKernel-6-2's assembled-unit-imports a3436a9533 (CoreImports.jet removed; each assembled Jetpack file imports what it uses), unit-tidy-sites 401a2b9016 and tidy-cleanup-2 8d40093b4c landed. The c2 tier (tidy-errors-c2-r3) and c24 (L0304 tidy) are stacked in p208; c2's closing proof is the nested tidy census on p208's compiler showing 0 hits. golden Tooling/StructureLiveness passes on O0/O1/O2; ui lint shows only its 3 known-failing rows."
         }
       ],
@@ -106035,7 +106077,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.937Z",
-      "updated": "2026-11-16T05:53:54.962Z",
+      "updated": "2026-11-16T06:17:14.260Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -221198,6 +221240,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T06:26:35.962Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oe96sn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T06:26:33.844Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#45 A from clause naming a && (owned) parameter is refused at th"
+    },
+    {
+      "at": "2026-11-16T06:26:31.187Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#44 Writing to an arm binding over a &Item parameter is refused "
+    },
+    {
+      "at": "2026-11-16T06:26:28.839Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#43 A union's named case and a qualified member may not share a "
+    },
+    {
+      "at": "2026-11-16T06:26:26.394Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#42: D-PRIM-ANY1 review 6 settled the open question with an IR dump: the result is a copy, not a dangling loan; was: I1 memory safety: a lent result through dynamic dispatch keeps its loan. With a trait method point: fn(self) -> Point? from self called on a [Shown] element, moving or mutating the list while the resu"
+    },
+    {
+      "at": "2026-11-16T06:17:15.378Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0flvd7x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T06:17:14.261Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gbe4aj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T06:16:48.241Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-16T06:16:47.067Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-16T06:16:45.956Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#6"
+    },
     {
       "at": "2026-11-16T06:06:23.301Z",
       "by": "Main",
