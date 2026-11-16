@@ -9,14 +9,15 @@ use {
     jet_cli.[JetCLITraceSink, JetCLITraceSpan, JetCLITraceState, JetCLITraceUsage, jet_cli_trace_moved, jet_cli_trace_opening_lanes, jet_cli_trace_splice]
 }
 
-// A file sink whose trace opened at clock 1000000 µs as process 500, holding
-// only its `[` header.
+// A file sink whose trace opened at wall clock 1000000 µs as process 500,
+// holding only its `[` header.
 splice_test_sink: fn(path: String) -> JetCLITraceSink {
     splice_files.write(path, "[\n") ?? panic("write the trace header: {err}")
     JetCLITraceSink{
         target: path,
         human: false,
-        start_us: 1000000,
+        start_us: 70,
+        start_unix_us: 1000000,
         pid: 500,
         functions: false,
         phase_counters: false,
@@ -36,9 +37,9 @@ splice_test_sink: fn(path: String) -> JetCLITraceSink {
 }
 
 // The trace a step's jet process writes: its header, process name and start
-// (at clock `clock` µs, or none), a lane name, and one phase.
+// (at wall clock `clock` µs, or none), a lane name, and one phase.
 splice_test_child: fn(name: String, clock: Int?) -> String Never! {
-    started: if clock == .Val(us) -> ",\"clock_us\":{us}" else -> ""
+    started: if clock == .Val(us) -> ",\"unix_us\":{us}" else -> ""
     lines: [String]{
         "[",
         "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":2,\"tid\":0,\"args\":{{\"name\":\"{name}\"}}}},",

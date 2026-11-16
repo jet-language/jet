@@ -690,11 +690,9 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
 // Core exports, or is `*`.
 check_core_library: fn(core: String, out: String) {
     core_text: files.read("{core}.exports") ?? fail("cannot read the Core exports: {err}")
-    core_rows: core_text.split("\n").to_list()
-    if !core_rows.any(fn(row) { row != "" }) -> fail("the Core export list is empty")
+    if !core_text.split("\n").any(fn(row) { row != "" }) -> fail("the Core export list is empty")
     core_threads: files.read("{core}.threads") ?? fail("cannot read the Core thread receipt: {err}")
-    core_thread_rows: core_threads.split("\n").to_list()
-    if core_threads.trim() != "*" && core_thread_rows.any(fn(name) { name != "" && !core_rows.any(fn(row) { row.starts_with("{name}\t") }) }) {
+    if core_threads_unexported(core_text, core_threads) {
         fail("Core thread receipt names a symbol the Core exports lack")
     }
     // A Core root the library left out (JetCli CoreLibrary.jet writes one
@@ -709,6 +707,19 @@ check_core_library: fn(core: String, out: String) {
         copy_into("{core}.skipped", kept)
         fail("the Core library left out {skipped.len()} root(s), listed in `{kept}`; the first: {skipped[0]}")
     }
+}
+
+// Whether the thread receipt `threads` names a symbol the export list
+// `exports` (one `symbol<TAB>...` row each) lacks; `*` names none. The
+// export symbols are read once into a set, so each name is one lookup.
+core_threads_unexported: fn(exports: String, threads: String) -> Bool {
+    if threads.trim() == "*" -> return false
+    symbols := [String:Bool]{}
+    loop row in exports.split("\n") {
+        cut: row.partition("\t")
+        if cut.sep != "" -> symbols[cut.head] = true
+    }
+    threads.split("\n").any(fn(name) { name != "" && symbols.get(name) == None })
 }
 
 // The sources sources.list lists, in order.
@@ -975,6 +986,16 @@ run: fn() {
     assert_eq(abi_symbols("[{{\"symbol\":\"b\"}},{{\"symbol\":\"a\"}}]"), [String]{"a", "b"})
     assert_eq(export_names("b\na\n"), [String]{"a", "b"})
     assert_eq(abi_symbols("{{}}"), [String]{})
+}
+
+#Test("a Core thread receipt names only exported symbols, or is `*`") {
+    exports: "core_a\tk1\tsig\ncore_b\tk2\tsig\n"
+    assert(!core_threads_unexported(exports, "core_b\ncore_a\n"))
+    assert(!core_threads_unexported(exports, "*\n"))
+    assert(!core_threads_unexported(exports, ""))
+    assert(core_threads_unexported(exports, "core_a\ncore_c\n"))
+    // A symbol is the whole first field, never a prefix of one.
+    assert(core_threads_unexported(exports, "core\n"))
 }
 
 #Test("unit names only type-shaped fragments, each once") {
