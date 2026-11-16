@@ -111,8 +111,9 @@ x64_executable_add_parts: fn(image: [U8], names: [String], payloads: [[U8]]) -> 
         link_phdr(table, note_at[k], 4, 4, distance + note_at[k], size, size, 8)
     }
     // The image, the table and each note are written once each, straight
-    // into the output.
+    // into the output, sized once.
     out := [U8]{}
+    out.try_reserve(end) ?? return Err("the image with its parts needs {end} bytes: {err}")
     out.extend(image[0..<image.len()])
     link_pad_to(out, at, 0)
     out.extend(table)
