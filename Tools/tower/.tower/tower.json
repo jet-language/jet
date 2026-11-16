@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108455,
+    "rev": 108463,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27300,6 +27300,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "n15 shape (Main): the built-in enum case lists come from one table generated from the Core/*.jet enum declarations (a Jet generator with --write and --check that the lane check runs, committed with its sources), not from loading the declaring Core modules into every program. Compile speed ranks first, and the generated table is neither handwritten nor a second source. Sema, menus and IR read it; core_enum_variants is removed; the sourceless leaves and payload families join it as they become real Core enums."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "n15 scope decided by Main (from the criterion's text: no handwritten case list in Compiler/; lists come from the Core declarations): GoalsA-1-4 removes the core_enum_variants/CORE_ENUM_ROWS catalog first (sema, menus and IR read the registered nominal; 174 Core.rows plain lists already match their source). Then it declares the 15 sourceless Core.rows leaves (BrowserError, ComputeError, DataLoaderKind, DispatchState, Dyn, EnvError, EventConfigError, FailurePolicy, HTTPOperation, HookPolicy, Overflow, PluginError, PluginLimit, TaskStatus, WebFormLifecycle) and the 14 CoreEnumPayloadRows families (IOError, IOOperation, TaskFailure, Key, DataEvent and the rest) as real Core enums, and finally deletes CoreEnumPayloadRows and every plain(A|B) list. n15 is met only after the last step."
         },
         {
@@ -27511,7 +27516,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T06:40:13.990Z",
+      "updated": "2026-11-16T07:11:34.280Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -42544,6 +42549,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p209: law-kit-r2 (8987b1961d, #6855 c4) stops jet test with panic 'the law `law` does not parse' at TraitLaws.jet:186: cases law_kit_names_broken_law and assert_eq_compares_through_authored_equatable fail. MemKernel-6-2 owns the fix: correct law source text, and a registered diagnostic instead of the panic."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "p208 landed the tidy error tier (MemKernel-6-tidy-errors-c2-r3 bc60c2fa1d, c24-l0304-tidy-r3 bac11a8e4a); the p208 suites lost 773 rows (553 ui snapshots print tidy findings beside the real error, 163 cases and 53 run rows meet unswept tidy sites in tests/ and Examples, 242 golden lines), and L0101 has two false positives (a read inside an already-refused expression; a binding kept alive for its drop). Main reverted both on dev. The r4 stack fixes both false positives, sweeps every tree the rule reaches to 0 hits, and keeps check output stable or regenerates every snapshot in the same SUB."
         },
         {
@@ -42842,7 +42852,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-16T06:17:15.378Z",
+      "updated": "2026-11-16T07:12:40.206Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -101966,6 +101976,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p209: c2 (9fb22f4c60) hangs every served mux. Server.jet mux_serving relied on list remove(0, .Slot) giving None on an empty list, but .Slot stops on an out-of-range index (E3010), so the serving task dies at its first serve and the client times out. That broke about 100 suite rows (HTTP examples, web_app, http_server_lifecycle, ws, tls, canvas). Speed-3-2 sends the fix first in p210, sweeping every .Slot ?? return|default caller (App.jet:995, Db.jet:2178). c1, c2, c3 and c4 proof rows fail on p209 for this root."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "c9 ruling (Main): a queue store adapter can't be written by user code today. The only adapter seam is core.app's priv(package) transactions module with CallOutbox (Core/App/App.jet:775, :836), joined only by core.db (Core/Db/Db.jet:1362). Refusing a service with #App.Job methods that holds no db.Store would contradict the ratified text in core-library.md:5664-5665 (a call that used no store runs the job at once without keeping it), so that reading is rejected. c9 has a subject only once a public adapter surface exists, and adding one is owner-gated public API. c9 is blocked on a ballot for it; Speed-3-2 moved to #6800 c1."
         },
         {
@@ -102014,11 +102029,11 @@
         {
           "n": 5,
           "text": "app.enqueue's body must be one call of an #App.Job method of the same service with codable arguments, evaluated and encoded at the call; anything else is a compile error with a registered diagnostic and a UI snapshot. Proof: `jet test Compiler --profile cases --filter web_app/enqueue_takes_one_job_call`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T18:17:37.554Z"
+          "evidence": "p209 gate (dev a1c3325a65): jet test Compiler --profile cases --filter web_app/enqueue_takes_one_job_call n=1 bad=0, ui web_app_enqueue_not_one_job_call n=1 bad=0 (E2817).",
+          "at": "2026-11-16T07:12:38.237Z"
         },
         {
           "n": 6,
@@ -102074,7 +102089,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-16T06:59:16.374Z",
+      "updated": "2026-11-16T07:12:39.216Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -102948,6 +102963,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "c27 evidence (D-PRIM-ANY1 review 7): probe z03 in $JET_SCRATCH_ROOT/lanes/AnyReview7/probes. On p209 E0641's suggested fix leaks the mangled name .M__fn_Int_____Int_. The cascade after E0363 is c48."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "D-PRIM-ANY1 review 6 evidence for filed criteria: c41 scope: a from clause return (-> [Int]? from item) emits the same IR as the copy form at O0 (a 24-byte optional cell, a byte copy and a retain; probe y12_from_val_copy_audit.jet with .ir.out); c41's fix must not refuse Val(p) returned under a from clause, which is recover's body. c27: [Shown] | Int is accepted and leaks names (probe y10). Probes in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes."
         },
         {
@@ -103286,11 +103306,11 @@
         {
           "n": 36,
           "text": "I1 type safety: a union of two types with the same short name from different modules (geo2.Point | map2.Point, file modules) keeps both members. Today sema merges them into one member, so a map2.Point{name: \"harbor\"} prints as Point { x: 35184415600640, y: 2 } (another type's bytes) and the .Point(p) arm binds the wrong type; type tables still tell them apart (p205, O0/O1/O2 alike; D-PRIM-ANY1 round 4), probes o8f and o8b, control o8g in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes. Member identity is the type's full identity, never its short name. Proof: a cases row building and matching each member of such a union on O0/O1/O2, plus a sweep of every place union members are keyed by name.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T05:37:38.904Z"
+          "evidence": "p209 gate (dev a1c3325a65 = GoalsA-1-4-u36-union-member-identity-r2): cases union_members_of_one_name_from_two_modules_stay_apart_on_every_tier n=1 bad=0 (O0/O1/O2), ui union_arm_names_two_members n=1 bad=0; the SUB swept every place union members are keyed by name. Probes o8b, o8f and vf/f are E0305 on p209 (AnyBallot round 7 rerun).",
+          "at": "2026-11-16T07:12:37.247Z"
         },
         {
           "n": 37,
@@ -103409,7 +103429,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T06:50:35.565Z",
+      "updated": "2026-11-16T07:12:37.247Z",
       "updatedBy": "Main",
       "criteriaLastN": 48
     },
@@ -104578,6 +104598,16 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p209: c10 (06c5d8b172) ICEs: comptime_record_of_function_values exits 101 (ir.build unlowered: named function main.jet::double outside the checked program). PrecompiledCore-4 owns the fix (SUB PrecompiledCore-4-g6-c10-fix); c10 stays open."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c16 plan (Main): (a) EnvModel sends every immutable module value, with the source's functions and types, to the compiler in one request with source offsets kept. The compiler types them (field defaults included), orders them, reports cycles at the value span and gives E3410 and E0643; EnvModel drops its own graph, I/O gate and literal walk for module values. (b) EnvModel's schema walk over env, image and system record fields (EnvFields.jet:214-267, ComputedFields.jet:131-181) is a second typing of Jet literals. Its schema (Env, Lang, Prompt, Preset, package and lifecycle names) becomes Jet types in Jetpack/EnvModel source that the compiler checks record fields against; user syntax stays identical (jetpack-epoch5.md:503-506: the environment model owns typed projections). c16 is met only after (b)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "Sweep of the open proofs on the p207 batch compiler (dev 0e93e25032), by Main. c5 met (FoldConstants o0/o1/o2 pass). n1: comptime_diff 161 pass, 0 fail, 3 known-failing (sequential_comptime_reads_advance_the_shared_reader, comptime_loadable_matches_runtime, loadable_incompatible_defaults_stop_before_rustc); open until those pass. n2, n3, n6, n7, n8, n13 and n14: their filters match no tests yet. n9: passes (comptime_loop_waits_on_named_constant); held for the run-value root loop follow-up queued for p209. n10: queued for p209. n11: waits on the generic-spelling ballot conflict. PrecompiledCore-4 order: n1, n7, n2, n3, n6, n8, n13, n14."
         },
         {
@@ -104744,7 +104774,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-16T06:52:19.337Z",
+      "updated": "2026-11-16T07:12:41.211Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -221295,6 +221325,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T07:12:41.211Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07ywjvi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T07:12:40.206Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0flvd7x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T07:12:39.216Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0se7lpr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T07:12:38.237Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0se7lpr",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-16T07:12:37.247Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-16T07:11:34.280Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T07:06:28.460Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07ywjvi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T07:01:52.149Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oe96sn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-16T06:59:58.038Z",
       "by": "Main",
