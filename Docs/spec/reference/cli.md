@@ -1642,10 +1642,11 @@ synchronized storage, for example `storage form: main.jet:3 in run: pending:
 Signal<Int> synchronized for task crossing`. `#Local` locks the one-thread
 form; a crossing then fails the build with E1102, which names the crossing.
 Inlining: for a program with a `run: fn`, each call site the optimizer inlined
-as `jet build` optimizes it (the profile's level and the build option flags,
-so `--inline=off` and `-O0` list none), at the call's line, with
-why it was taken: its size within the level's callee limit and the caller's
-remaining budget, its only call, or `marked #Inline(Always)`.
+as `jet build` optimizes it (the profile's level and the build option flags),
+at the call's line, with why it was taken: its size within the level's callee
+limit and the caller's remaining budget, its only call, or `marked
+#Inline(Always)`. A marked callee is listed under `--inline=off` and `-O0`
+too, which list no other.
 `#Inline(Always)` locks the callee inlined; a change that makes it recursive,
 address-taken, or too large fails the build (E0917-E0919).
 Collection: under `#Policy(gc)`, a binding whose returned heap graph needs

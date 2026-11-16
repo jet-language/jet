@@ -339,7 +339,7 @@ ir_opt_local_box_test_module: fn(escape: Bool, moved: Bool) -> IRModule Never! {
     loop level in 1..<3 {
         m := ir_opt_local_box_test_module(false, false)
         options := ir_opt_options(level)
-        options.inline = IROptInline.Off
+        options.inline = IROptInline.Marked
         options.verify = true
         report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
@@ -358,7 +358,7 @@ ir_opt_local_box_test_module: fn(escape: Bool, moved: Bool) -> IRModule Never! {
     loop level in 1..<3 {
         m := ir_opt_local_box_test_module(false, true)
         options := ir_opt_options(level)
-        options.inline = IROptInline.Off
+        options.inline = IROptInline.Marked
         options.verify = true
         report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
@@ -372,7 +372,7 @@ ir_opt_local_box_test_module: fn(escape: Bool, moved: Bool) -> IRModule Never! {
     loop round in 0..<2 {
         m := ir_opt_local_box_test_module(true, round == 1)
         options := ir_opt_options(1)
-        options.inline = IROptInline.Off
+        options.inline = IROptInline.Marked
         options.verify = true
         report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
@@ -454,7 +454,7 @@ ir_opt_local_box_join_test_module: fn(escape: Bool) -> IRModule Never! {
     loop level in 1..<3 {
         m := ir_opt_local_box_join_test_module(false)
         options := ir_opt_options(level)
-        options.inline = IROptInline.Off
+        options.inline = IROptInline.Marked
         options.verify = true
         report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
@@ -467,7 +467,7 @@ ir_opt_local_box_join_test_module: fn(escape: Bool) -> IRModule Never! {
 #Test("Boxes moved into a result whose box is stored keep their heap blocks") {
     m := ir_opt_local_box_join_test_module(true)
     options := ir_opt_options(1)
-    options.inline = IROptInline.Off
+    options.inline = IROptInline.Marked
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)

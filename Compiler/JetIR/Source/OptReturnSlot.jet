@@ -691,7 +691,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
         bytes: if step < 3 -> 16 else -> IR_FRAME_BOX_BYTES
         m := ir_opt_slot_test_module(false, bytes)
         options := ir_opt_options(level)
-        options.inline = IROptInline.Off
+        options.inline = IROptInline.Marked
         options.verify = true
         report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
@@ -713,7 +713,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
 #Test("A box above the frame box bytes stays on the heap") {
     m := ir_opt_slot_test_module(false, IR_FRAME_BOX_BYTES + 8)
     options := ir_opt_options(1)
-    options.inline = IROptInline.Off
+    options.inline = IROptInline.Marked
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
@@ -727,7 +727,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
         glued: step == 3
         m := ir_opt_slot_test_quad(if glued -> "test_quad_drop" else -> "")
         options := ir_opt_options(level)
-        options.inline = IROptInline.Off
+        options.inline = IROptInline.Marked
         options.verify = !glued
         report: ir_optimize_module(m, options, compiler_threads_single())
         if !glued -> assert_eq(report.lint.len(), 0)
@@ -740,7 +740,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
 #Test("A box a caller returns keeps the function that makes it allocating") {
     m := ir_opt_slot_test_module(true, 16)
     options := ir_opt_options(1)
-    options.inline = IROptInline.Off
+    options.inline = IROptInline.Marked
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)

@@ -2,7 +2,8 @@
 # compiles the entry: the build option flags apply over the profile, so the
 # report never contradicts the build. The default build runs the O2 passes.
 # Under the stock `inline: auto` the small `bump` is spliced at its calls;
-# `--inline=off` inlines nothing; `-O1`
+# `--inline=off` inlines only the nine calls of the `#Inline(Always)`
+# `mix`; `-O1`
 # runs the O1 passes, and `-O1` against `-O2`, in either order, is
 # refused as two disagreeing levels; a value outside the row is refused as
 # `jet build` refuses it. JET_OPT_DUMP names functions by a comma list and
@@ -18,7 +19,7 @@ step: jet inspect decisions --inline=off main.jet
 cwd: open
 exit: 0
 stdout: ~ "O2:" # the flag keeps the build's level
-stdout: ~ "inlined 0," # off inlines nothing
+stdout: ~ "inlined 9," # off inlines only the marked `mix`, at its nine calls
 step: jet inspect decisions -O1 main.jet
 cwd: open
 exit: 0
