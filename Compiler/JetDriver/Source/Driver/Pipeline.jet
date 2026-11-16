@@ -1094,6 +1094,22 @@ jet_driver_comptime_value_functions_note: fn(index: &JetDriverComptimeRunIndex, 
     if held.len() > 0 -> index.value_functions[key] = held
 }
 
+// The functions each landed constant's value names, by constant key: a kept
+// body that reads the constant reaches them (ir_reachable_core_rows).
+jet_driver_value_function_keys: fn(values: [SemaComptimeItemValue]) -> [String:[String]] Never! {
+    keys := [String:[String]]{}
+    loop value in values {
+        held := [String:Bool]{}
+        jet_driver_comptime_value_functions(value.value, held)
+        if held.len() > 0 {
+            functions := [String]{}
+            loop (key, _) in held -> functions.push(key)
+            keys[value.key] = functions
+        }
+    }
+    keys
+}
+
 // Adds each function `value` names to `held`. The items of a list and the
 // values of a map share one type, so one scalar among them makes them all
 // scalars, which name no function.
@@ -6364,7 +6380,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // #3980: lower only the Core source bodies the program reaches (Rust
     // reference lowering's `should_lower_imported_core_body`).
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
-    lowering_rows := ir_reachable_core_rows(checked_functions, decls, symbol_rows, lowering_candidates, prunable_modules, entry_roots, request.compiler_threads, request.trace_sink)
+    lowering_rows := ir_reachable_core_rows(checked_functions, decls, symbol_rows, lowering_candidates, prunable_modules, entry_roots, jet_driver_value_function_keys(comptime_values), request.compiler_threads, request.trace_sink)
     symbols := symbol_rows.pop() ?? panic("the run's symbol table left core reachability")
     sema_functions := [FnBody]{}
     unlowered_functions := [FnBody]{}
