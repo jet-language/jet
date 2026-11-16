@@ -5365,8 +5365,10 @@ impl fails the run with the law's name and the shrunk inputs. An impl whose
 type is not generatable, or whose operator compares with another type, lists
 each law as a skipped test named `Trait.law for Type, not checked: <reason>`.
 `#Waive(law, "reason")` written above an impl skips that one law for it,
-listed as `Trait.law for Type, waived: <reason>`; the reason is required.
-(D-CORE-LAWS1)
+listed as `Trait.law for Type, waived: <reason>`; the reason is required. A
+law the compiler cannot make into a test is an internal compiler error, never
+a skip: that law's test fails with the report, every other test still runs,
+and `jet test` exits 101. (D-CORE-LAWS1)
 
 For an explicit file, `jet test <file.jet>` builds one generated AOT harness for
 that file. Each claim runs behind a process-local unwind boundary, and the

@@ -3887,7 +3887,9 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
                 if checked_test.function == .Val(function) {
                     module_result.injected_function_keys.push(function.key)
                     module_result.functions.push(function)
-                    module_result.tests.push(checked_test_artifact_fact(environment.tables, environment.module_identity, module_text(graph.module_table, environment.module_identity), test, graph.modules[module_index].source))
+                    fact := checked_test_artifact_fact(environment.tables, environment.module_identity, module_text(graph.module_table, environment.module_identity), test, graph.modules[module_index].source)
+                    fact.compiler_fault = graph.law_faults.get(fact.key)
+                    module_result.tests.push(fact)
                 }
             }
         }
