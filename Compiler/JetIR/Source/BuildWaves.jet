@@ -218,7 +218,7 @@ ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Boo
     if trace_sink == .Val(sink) -> sink.end("ir.build.order", jobs.len())
     merged := ir_merge(parts, preps, roots_merged, entry_index, trace_sink)
     if trace_sink == .Val(sink) -> sink.begin("ir.build.recursion", "", -1, -1)
-    ir_recursion_checks(merged)
+    ir_recursion_checks(merged, count)
     if trace_sink == .Val(sink) -> sink.end("ir.build.recursion", merged.functions.len())
     IRBuildKept{result: IRBuildResult{program: merged.move(), failures: failures}, program: ir_waves_take_program(inputs)}
 }
