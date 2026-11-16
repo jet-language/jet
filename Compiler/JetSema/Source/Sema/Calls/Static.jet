@@ -1088,11 +1088,12 @@ sema_call_static_source_owner: fn(receiver: Expr, method: String, owner_type_arg
             args = target.owner_type_args
         }
         nominal: graph.modules[row.module_index].nominals[row.row]
-        // A user distinct type's base conversion (`pkg.ID.from_int(n)`) is no
-        // registered method; sema_call_try_distinct_conversion builds it. A
-        // Core owner keeps its built-in rows (sema_call_try_builtin_static_field).
-        user_distinct: nominal.kind == SemaRegistrationNominalKind.Distinct && !module_is_core(nominal.symbol.module_identity)
-        if !user_distinct && !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) {
+        // A distinct type's base conversion (`pkg.ID.from_int(n)`,
+        // `auth.AccountID.from_string(id)`) is no registered method;
+        // sema_call_try_distinct_conversion builds it, for a distinct declared
+        // in Core as for one declared in a package.
+        distinct: nominal.kind == SemaRegistrationNominalKind.Distinct
+        if !distinct && !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) {
             return None
         }
         return Val(SemaStaticOwner{symbol: sema_resolved_symbol(graph, resolved), owner_type_args: args})
