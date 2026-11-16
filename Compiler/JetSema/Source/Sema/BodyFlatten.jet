@@ -54,6 +54,7 @@ use jet_foundation.[
     Type,
     Variant,
     body_tree_new,
+    body_tree_sealed,
     type_table_intern,
 ]
 
@@ -89,6 +90,7 @@ body_flat_function: fn(value: TFunc, arena: BodyTree) -> FnBody Never! {
     body_tree_finish(tree)
     sema_body_fact_types(tree, params, value.ret, value.kind, value.failure_carrier)
     sema_loop_facts(tree, value.is_scalar)
+    tree = body_tree_sealed(tree)
     FnBody{
         name: value.name,
         module_name: value.module_name,

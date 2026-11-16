@@ -514,7 +514,8 @@ SymbolLocalKeys: struct {
     // Each row's `name_rows_hash`: a probe compares bytes only with a row of
     // the same hash, and a grow never hashes a key again.
     hashes: [Int]
-    // Open-addressing slots: 0 is empty, otherwise the row plus one.
+    // Open-addressing slots: 0 is empty, otherwise the row plus one. Sealed
+    // keys (symbol_local_keys_seal) have none, and mask 0.
     slots: [Int]
     mask: Int
 }
@@ -551,7 +552,17 @@ symbol_local_keys_spells: fn(keys: SymbolLocalKeys, row: Int, bytes: [U8]) -> Bo
 }
 
 // The row of `key`, whose `name_rows_hash` is `hash`, when `keys` holds it.
+// Sealed keys (symbol_local_keys_seal) have no slots, so their rows are
+// scanned.
 symbol_local_keys_row: fn(keys: SymbolLocalKeys, key: String, hash: Int) -> Int? Never! {
+    if keys.slots.len() == 0 {
+        loop row in 0..<keys.hashes.len() {
+            if keys.hashes[row] == hash && symbol_local_keys_spells(keys, row, key.bytes()) {
+                return Val(row)
+            }
+        }
+        return None
+    }
     slot := hash.bit_and(keys.mask)
     loop keys.slots[slot] != 0 {
         row: keys.slots[slot] - 1
@@ -574,8 +585,11 @@ symbol_local_keys_intern: fn(keys: &SymbolLocalKeys, key: String) -> SymbolID Ne
     keys.bytes.extend(key.bytes())
     keys.ends.push(keys.bytes.len())
     keys.hashes.push(hash)
-    if (row + 1) * 2 > keys.mask {
-        capacity: (keys.mask + 1) * 2
+    if keys.slots.len() == 0 || (row + 1) * 2 > keys.mask {
+        // The slots double as the keys grow; sealed keys rebuild theirs at
+        // the size growing to this many keys reached.
+        capacity := SYMBOL_LOCAL_INITIAL_SLOTS
+        loop capacity - 1 < (row + 1) * 2 -> capacity *= 2
         mask: capacity - 1
         slots := (loop _ in 0..<capacity -> 0)
         loop index in 0..<keys.hashes.len() {
@@ -591,6 +605,14 @@ symbol_local_keys_intern: fn(keys: &SymbolLocalKeys, key: String) -> SymbolID Ne
     loop keys.slots[slot] != 0 -> slot = (slot + 1).bit_and(keys.mask)
     keys.slots[slot] = row + 1
     symbol_local_id(row)
+}
+
+// Drops the slots of keys that stop growing (body_tree_sealed): a body holds
+// few keys, so a later find scans them, and a later intern rebuilds the
+// slots first.
+symbol_local_keys_seal: fn(keys: &SymbolLocalKeys) Never! {
+    keys.slots = [Int]{}
+    keys.mask = 0
 }
 
 // The id of `key` when `keys` holds it; never interns.
@@ -878,6 +900,21 @@ symbol_mint: fn(table: &SymbolTable, kind: SymbolKind, module_name: String, owne
     assert_eq(symbol_local_keys_text(keys, symbol_local_id(1)), "local:m:f:v0")
     assert_eq(symbol_local_keys_text(keys, symbol_local_id(40)), "local:m:f:v39")
     assert(symbol_local_keys_text_at(keys, symbol_local_id(41)) == None)
+}
+
+#Test("sealed symbol keys still find each key, and an intern rebuilds their slots") {
+    keys := symbol_local_keys()
+    loop index in 0..<40 -> _ := symbol_local_keys_intern(keys, "local:m:f:v{index}")
+    symbol_local_keys_seal(keys)
+    assert_eq(keys.slots.len(), 0)
+    assert_eq(Int{(symbol_local_keys_find(keys, "local:m:f:v39") ?? symbol_none()).id}, SYMBOL_LOCAL_BASE + 40)
+    assert(symbol_local_keys_find(keys, "local:m:f:v40") == None)
+    assert_eq(Int{symbol_local_keys_intern(keys, "local:m:f:v7").id}, SYMBOL_LOCAL_BASE + 8)
+    assert_eq(keys.slots.len(), 0)
+    assert_eq(Int{symbol_local_keys_intern(keys, "local:m:f:v40").id}, SYMBOL_LOCAL_BASE + 41)
+    assert_eq(keys.slots.len(), 128)
+    assert_eq(Int{(symbol_local_keys_find(keys, "local:m:f:v0") ?? symbol_none()).id}, SYMBOL_LOCAL_BASE + 1)
+    assert_eq(Int{(symbol_local_keys_find(keys, "local:m:f:v40") ?? symbol_none()).id}, SYMBOL_LOCAL_BASE + 41)
 }
 
 // The range of `id`: the last one whose base is at most `id`.

@@ -75,6 +75,11 @@ AHEAD_MIXED_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nrun: fn() {{
 // `NINETY` computes it too.
 AHEAD_CLOSURE_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nscaled: fn() -> Int {{\n    pick: if square(1) > 0 -> square(3) else -> square(4)\n    pick * 10\n}}\n\nNINETY: #run scaled()\n\nrun: fn() {{\n    print(\"{{NINETY}} {{scaled()}}\")\n}}\n"
 
+// `line`'s closure checks `late`, which holds a `#run` local that no pass of
+// the module's comptime run lands: `line` is not computed ahead, and the
+// landing computes it after `big`, so `late`'s body holds `big`.
+AHEAD_RUN_SITE_SOURCE: "fact: fn(n: Int) -> Int {{\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}}\n\nearly: fn() -> String {{\n    line: late()\n    line\n}}\n\nlate: fn() -> String {{\n    big: #run fact(5)\n    \"late {{big}}\"\n}}\n\nrun: fn() {{\n    print(early())\n}}\n"
+
 // The request that compiles `source`, its trace going to `path`.
 ahead_request: fn(path: String, source: String) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
@@ -106,6 +111,16 @@ ahead_programs_built: fn(trace: String) -> Int {
         }
     }
     built
+}
+
+// Whether the landing of `trace` checks comptime item `item`.
+ahead_landing_checks: fn(trace: String, item: String) -> Bool {
+    landing := false
+    loop line in trace.split("\n") {
+        if line.starts_with("> comptime.land.open") -> landing = true
+        if landing && line.starts_with("> comptime.check {item} (") -> return true
+    }
+    false
 }
 
 // Compiles `source` with `verify`, its trace going to `path`; returns the trace.
@@ -149,6 +164,15 @@ ahead_compile: fn(path: String, source: String, verify: Bool) -> String {
     loop verify in ([Bool]{false, true}) {
         trace: ahead_compile(path, AHEAD_CLOSURE_SOURCE, verify)
         assert(ahead_programs_built(trace) == 1, "recheck_verify {verify}: `pick` landed in a build of its own:\n{trace}")
+    }
+    ahead_files.remove(path) ?? panic("cannot remove the trace: {err}")
+}
+
+#Test("a_value_whose_closure_reaches_a_run_local_lands_after_it") {
+    path: ahead_files.join(ahead_sys.temp_dir(), "jet-local-values-run-site-{ahead_process.current_pid()}.trace")
+    loop verify in ([Bool]{false, true}) {
+        trace: ahead_compile(path, AHEAD_RUN_SITE_SOURCE, verify)
+        assert(ahead_landing_checks(trace, "line"), "recheck_verify {verify}: `line` was computed ahead of `big`:\n{trace}")
     }
     ahead_files.remove(path) ?? panic("cannot remove the trace: {err}")
 }

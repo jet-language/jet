@@ -213,7 +213,9 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // compiler's identity, which both compiles read, is settled before either
 // starts. The runtime's IR build follows its front end at once, so the front
 // end's compile state drops on a detached task meanwhile
-// (JetDriverCompileRequest.release_state_aside).
+// (JetDriverCompileRequest.release_state_aside). The Core interface
+// (jet_cli_core_interface_made) is made beside all of it and joined last:
+// neither machine code nor the pack reads it.
 jet_cli_runtime_library: fn(request: &&JetDriverCompileRequest, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     selected := request.move()
     selected.release_state_aside = true
@@ -244,9 +246,7 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
     interfacing: task jet_cli_core_interface_made(core_prefix, core_threads, trace_sink)
     runtime: jet_cli_runtime_ir(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
     core_ir: building.join() ?? return jet_driver_compile_escaped_failure("the Core library build stopped: {compiler_threads_failure_text(err)}")
-    interface_problem: interfacing.join() ?? return jet_driver_compile_escaped_failure("the Core interface stopped: {compiler_threads_failure_text(err)}")
-    if interface_problem != "" -> return jet_driver_compile_escaped_failure(interface_problem)
-    if runtime.move() == {
+    finished: if runtime.move() == {
         .Stopped(result) -> result
         .Built(result, library, interface_text, threads, receipt) -> {
             problems := [String]{}
@@ -272,6 +272,9 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
             jet_cli_runtime_packed(result, prefix, pack.move(), Val(core.bytes.move()), compiler_threads, trace_sink)
         }
     }
+    interface_problem: interfacing.join() ?? return jet_driver_compile_escaped_failure("the Core interface stopped: {compiler_threads_failure_text(err)}")
+    if interface_problem != "" -> return jet_driver_compile_escaped_failure(interface_problem)
+    finished
 }
 
 // The runtime `result` with its pack `pack` (jet_cli_runtime_pack_linked)

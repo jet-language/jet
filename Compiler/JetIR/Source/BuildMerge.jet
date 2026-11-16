@@ -26,7 +26,7 @@
 // steps through those short lists instead of every function's instructions;
 // a row's second use in a function finds its number already given, so the
 // numbering is the same.
-use jet_foundation.[compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, name_rows_set, name_rows_sorted, name_rows_value]
+use jet_foundation.[CompilerTraceSink, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, name_rows_set, name_rows_sorted, name_rows_value]
 
 // A function the walk starts from: function `local` of part `part`.
 IRMergeRoot: struct {
@@ -137,16 +137,23 @@ ir_merge_serial: fn(built: &&IRModule) -> IRModule Never! {
     prepared.push(ir_merge_prepare(m))
     parts := [IRModule]{}
     parts.push(m)
-    ir_merge(parts, prepared, roots, entry)
+    ir_merge(parts, prepared, roots, entry, None)
 }
 
 // Merges `built` (each part's preparation in `prepared`, ir_merge_prepare)
 // from the job functions `roots` (in job order); `entry` is the root of the
 // program entry (-1: none). The merged module's layout and build memos start
-// empty (they name part rows); its key maps name the merged rows.
-ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot], entry: Int) -> IRModule Never! {
+// empty (they name part rows); its key maps name the merged rows. With
+// `trace_sink` each step is a span: `ir.merge.group` (ir_merge_new),
+// `ir.merge.walk`, `ir.merge.functions` and `ir.merge.rows` (the reached
+// functions, then the other rows, taken out of the parts) and
+// `ir.merge.keys` (the key maps, while the parts drop).
+ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot], entry: Int, trace_sink: CompilerTraceSink?) -> IRModule Never! {
     parts := built.move()
+    if trace_sink == .Val(sink) -> sink.begin("ir.merge.group", "", -1, -1)
     g := ir_merge_new(parts, prepared, roots)
+    if trace_sink == .Val(sink) -> sink.end("ir.merge.group", g.function_keys.len())
+    if trace_sink == .Val(sink) -> sink.begin("ir.merge.walk", "", -1, -1)
     loop root in roots -> _: ir_merge_function(g, parts, root.part, root.local)
     cursor := 0
     loop cursor < g.function_part.len() {
@@ -155,6 +162,8 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
         ir_merge_scan(g, parts, part, local)
         cursor += 1
     }
+    if trace_sink == .Val(sink) -> sink.end("ir.merge.walk", cursor)
+    if trace_sink == .Val(sink) -> sink.begin("ir.merge.functions", "", -1, -1)
     g.use_starts = [[Int]]{}
     g.uses = [[Int]]{}
     out := ir_module_new()
@@ -163,6 +172,8 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
         out.user_values = parts[0].user_values
     }
     ir_merge_take_functions(parts, g, out.functions)
+    if trace_sink == .Val(sink) -> sink.end("ir.merge.functions", out.functions.len())
+    if trace_sink == .Val(sink) -> sink.begin("ir.merge.rows", "", -1, -1)
     if entry >= 0 -> out.entry = g.sides[roots[entry].part].function_new[roots[entry].local]
     loop (row, part) in g.type_part {
         local: g.type_local[row]
@@ -254,14 +265,17 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
             if out.host_literals.get(key) == None -> out.host_literals[key.copy()] = value.copy()
         }
     }
+    if trace_sink == .Val(sink) -> sink.end("ir.merge.rows", out.types.len())
     // The parts are read no more. Past IR_MERGE_MIN_ROWS_FOR_THREADS they drop
     // on threads of their own while this one fills the merged key maps; a
     // smaller merge fills them here and its parts drop as it returns. A
     // task's arguments stay shared with the thread that spawns it, which drops
     // them after the join, so each part reaches its thread through
     // `released`: the thread pops it off.
+    if trace_sink == .Val(sink) -> sink.begin("ir.merge.keys", "", -1, -1)
     if ir_merge_row_count(parts) < IR_MERGE_MIN_ROWS_FOR_THREADS {
         ir_merge_key_rows(out, g)
+        if trace_sink == .Val(sink) -> sink.end("ir.merge.keys", -1)
         return out
     }
     released: Shared{[IRModule]{}}
@@ -271,6 +285,7 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
         ir_merge_key_rows(out, g)
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
+    if trace_sink == .Val(sink) -> sink.end("ir.merge.keys", -1)
     out
 }
 
@@ -830,7 +845,7 @@ ir_merge_rewrite_part: fn(functions: &&[IRFunction], side: IRMergeSide, ids: &&[
     }
     preps := [IRMergePrep]{}
     loop m in parts -> preps.push(ir_merge_prepare(m))
-    merged: ir_merge(parts, preps, [IRMergeRoot]{IRMergeRoot{part: 0, local: 0}, IRMergeRoot{part: 1, local: 0}}, -1)
+    merged: ir_merge(parts, preps, [IRMergeRoot]{IRMergeRoot{part: 0, local: 0}, IRMergeRoot{part: 1, local: 0}}, -1, None)
     assert_eq(merged.data.len(), 3)
     shared: name_rows_value(merged.constant_rows, "storage:shared") ?? -1
     own0: name_rows_value(merged.constant_rows, "storage:own0") ?? -1

@@ -2,7 +2,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 use {
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -1543,8 +1543,12 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // foreign functions; `checks` the runtime checks the program's functions
 // keep (ir_bounds_mode). Under `dead_code: keep` (checks.keep) every
 // non-generic function of checks.modules is a root too, so the image carries
-// the package's unreached functions.
-ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
+// the package's unreached functions. With `trace_sink` the build's steps are
+// spans inside the host's `ir.build`: `ir.build.program` (the checked
+// program's tables), the steps of ir_build_waves_parted, and
+// `ir.build.core_cells`.
+ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> IRBuildResult Never! {
+    if trace_sink == .Val(sink) -> sink.begin("ir.build.program", "", -1, -1)
     p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.checks = checks
     p.sentries = ir_checks_sentries(checks)
@@ -1552,6 +1556,7 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     if !ir_core_image_fits(p) -> p.checks.core = None
     ir_foreign_index(p, foreign, decls)
     row: ir_function_row(p, entry_key) ?? {
+        if trace_sink == .Val(sink) -> sink.end("ir.build.program", -1)
         failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
         return IRBuildResult{program: ir_module_for(p), failures: failures}
     }
@@ -1569,13 +1574,16 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
             kept_keys.push(function.key.copy())
         }
     }
-    waves: ir_build_waves_kept(p, roots, true, threads)
+    if trace_sink == .Val(sink) -> sink.end("ir.build.program", p.functions.len())
+    waves: ir_build_waves_kept(p, roots, true, threads, trace_sink)
     built := waves.result.move()
     loop key in kept_keys {
         at: name_rows_get_text(built.program.function_rows, key) ?? next
         built.program.kept.push(at)
     }
+    if trace_sink == .Val(sink) -> sink.begin("ir.build.core_cells", "", -1, -1)
     if waves.program.checks.core == .Val(image) -> ir_core_cells_bind(built.program, image)
+    if trace_sink == .Val(sink) -> sink.end("ir.build.core_cells", -1)
     built
 }
 
@@ -1598,7 +1606,7 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
         empty := ir_module_for(p)
         return IRBuildKept{result: IRBuildResult{program: empty.move(), failures: failures}, program: p.move()}
     }
-    ir_build_waves_kept(p, roots, false, threads)
+    ir_build_waves_kept(p, roots, false, threads, None)
 }
 
 // The function the executable starts: `entry` itself when it takes nothing,
@@ -2946,46 +2954,180 @@ ir_entry_check: fn(m: &IRModule, b: &IRBuilder) Never! {
 // A call through a function value (CallIndirect) counts as a call of every
 // function whose address the module takes (FunctionAddress), through one
 // extra node after the functions. Every other body's entry check goes
-// before any pass reads the module, and every body's index is reset.
-ir_recursion_checks: fn(m: &IRModule) Never! {
+// before any pass reads the module, and every body's index is reset. Each
+// body's calls and, once the cycles are known, its removal read only its
+// own instructions, so the functions split into consecutive parts
+// (compiler_threads_partition by size), at most `workers` of at least
+// IR_OPT_MIN_INSTRUCTIONS_PER_THREAD instructions each.
+ir_recursion_checks: fn(m: &IRModule, workers: Int) Never! {
+    total := 0
+    loop f in m.functions -> total += 1 + f.op.len()
+    admitted := if workers < 1 -> 1 else -> workers
+    loop admitted > 1 && admitted * IR_OPT_MIN_INSTRUCTIONS_PER_THREAD > total -> admitted -= 1
+    ir_recursion_checks_parted(m, admitted)
+}
+
+// ir_recursion_checks on `workers` parts: the calls of each part on a thread
+// of its own, the cycles on this one over every part's calls in function
+// order, then the removals on the parts' threads again.
+ir_recursion_checks_parted: fn(m: &IRModule, workers: Int) Never! {
     count: m.functions.len()
     checked := false
+    weights := [Int]{}
     loop f in m.functions {
-        if f.entry_check >= 0 {
-            checked = true
-            break
-        }
+        if f.entry_check >= 0 -> checked = true
+        weights.push(1 + f.op.len())
     }
     if !checked {
         return
     }
+    bounds: compiler_threads_partition(weights, workers)
+    // Parts leave the list last-first: part `workers - 1` pops first.
+    parts := [IRRecursionPart]{}
+    part := workers - 1
+    loop part >= 0 {
+        rows := [IRFunction]{}
+        loop m.functions.len() > bounds[part] {
+            row: m.functions.pop() ?? panic("the recursion checks lost a function")
+            rows.push(row)
+        }
+        rows.reverse()
+        parts.push(IRRecursionPart{functions: rows.move(), start: bounds[part], calls: [Int]{}, ends: [Int]{}, taken: [Int]{}})
+        part -= 1
+    }
+    parts.reverse()
+    parts = ir_recursion_walks(count, [Bool]{}, parts.move())
     calls := OptCalls{start: [Int]{}, to: [Int]{}}
     taken := [Int]{}
-    loop f in m.functions {
-        calls.start.push(calls.to.len())
-        indirect := false
-        loop at in 0..<f.op.len() {
-            op: f.op[at]
-            callee: f.a[at]
-            if op == .CallIndirect -> indirect = true
-            if (op == .Call || op == .FunctionAddress) && callee >= 0 && callee < count {
-                if op == .Call -> calls.to.push(callee) else -> taken.push(callee)
-            }
+    loop at in 0..<parts.len() {
+        base: calls.to.len()
+        from := 0
+        loop end in parts[at].ends {
+            calls.start.push(base + from)
+            from = end
         }
-        if indirect -> calls.to.push(count)
+        compiler_transfer_rows<Int>(calls.to, parts[at].calls)
+        compiler_transfer_rows<Int>(taken, parts[at].taken)
     }
     calls.start.push(calls.to.len())
-    calls.to.extend(taken)
+    compiler_transfer_rows<Int>(calls.to, taken)
     calls.start.push(calls.to.len())
     order: ir_opt_bottom_up(calls)
-    loop id in 0..<count {
-        at: m.functions[id].entry_check
-        if at < 0 -> next
-        m.functions[id].entry_check = -1
-        if order.recursive[id] -> next
-        end: m.functions[id].c[at + 1]
-        loop k in at..<(end + 1) -> ir_opt_kill(m.functions[id], k)
-        ir_opt_compact(m.functions[id])
+    parts = ir_recursion_walks(count, order.recursive, parts.move())
+    loop at in 0..<parts.len() {
+        m.functions.extend(compiler_take_rows<IRFunction>(parts[at].functions))
+    }
+}
+
+// One thread's functions of ir_recursion_checks, in order, from function
+// `start`: per function the functions it calls (calls[ends[row - 1]..<
+// ends[row]], from 0 for the first; the module's function count stands for
+// a call through a function value), and the functions whose address any of
+// them takes.
+IRRecursionPart: struct {
+    functions: [IRFunction]
+    start: Int
+    calls: [Int]
+    ends: [Int]
+    taken: [Int]
+}
+
+// Walks `parts` (ir_recursion_part), in part order: the last part on its
+// own thread, the ones before it the same way, and the first on this one.
+ir_recursion_walks: fn(count: Int, recursive: [Bool], parts: &&[IRRecursionPart]) -> [IRRecursionPart] Never! {
+    rest := parts.move()
+    last: rest.pop() ?? return rest
+    if rest.len() == 0 {
+        rest.push(ir_recursion_part(count, recursive, last.move()))
+        return rest
+    }
+    done := [IRRecursionPart]{}
+    task.group ir_recursion_threads {
+        head: task ir_recursion_part(count, recursive, last.move())
+        done = ir_recursion_walks(count, recursive, rest.move())
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+    }
+    done
+}
+
+// One part's walk: its functions' calls while `recursive` is empty, else
+// the removal of their entry checks.
+ir_recursion_part: fn(count: Int, recursive: [Bool], part: &&IRRecursionPart) -> IRRecursionPart Never! {
+    walked := part.move()
+    start: walked.start
+    scanning: recursive.len() == 0
+    loop row in 0..<walked.functions.len() {
+        if scanning {
+            ir_recursion_calls(walked.functions[row], count, walked.calls, walked.taken)
+            walked.ends.push(walked.calls.len())
+            next
+        }
+        ir_recursion_entry(walked.functions[row], recursive, start + row)
+    }
+    walked
+}
+
+// Appends the functions `f` calls to `calls` (`count` once for its calls
+// through a function value) and those whose address it takes to `taken`.
+ir_recursion_calls: fn(f: IRFunction, count: Int, calls: &[Int], taken: &[Int]) Never! {
+    indirect := false
+    loop at in 0..<f.op.len() {
+        op: f.op[at]
+        callee: f.a[at]
+        if op == .CallIndirect -> indirect = true
+        if (op == .Call || op == .FunctionAddress) && callee >= 0 && callee < count {
+            if op == .Call -> calls.push(callee) else -> taken.push(callee)
+        }
+    }
+    if indirect -> calls.push(count)
+}
+
+// Resets the entry check index of `f`, function `id`, and removes its check
+// unless `recursive` marks it.
+ir_recursion_entry: fn(f: &IRFunction, recursive: [Bool], id: Int) Never! {
+    at: f.entry_check
+    if at < 0 {
+        return
+    }
+    f.entry_check = -1
+    if recursive[id] {
+        return
+    }
+    end: f.c[at + 1]
+    loop k in at..<(end + 1) -> ir_opt_kill(f, k)
+    ir_opt_compact(f)
+}
+
+// f0 calls itself; f1 calls f2, which calls through a function value and
+// takes f1's address, so the two are a cycle; f3 calls f0; f4 is the poll.
+// Each entry check is the poll's call, an If and its End.
+#Test("recursion checks keep the entry checks of recursive bodies only, on any number of parts") {
+    loop workers in 1..<5 {
+        m := ir_module_new()
+        loop id in 0..<5 {
+            f := ir_function_new("f{id}", "test:recursion.jet::f{id}", "f{id}", "recursion.jet", 1)
+            if id < 4 {
+                f.entry_check = ir_emit(f, IROp.Call, 0, 4, -1, 0, 1)
+                _: ir_emit(f, IROp.If, -1, 0, -1, 2, 1)
+                _: ir_emit(f, IROp.End, -1, 1, -1, -1, 1)
+            }
+            if id == {
+                0 | 3 -> { _: ir_emit(f, IROp.Call, -1, 0, -1, 0, 1) }
+                1 -> { _: ir_emit(f, IROp.Call, -1, 2, -1, 0, 1) }
+                2 -> {
+                    _: ir_emit(f, IROp.FunctionAddress, 1, 1, -1, -1, 1)
+                    _: ir_emit(f, IROp.CallIndirect, -1, 1, -1, 0, 1)
+                }
+                else -> {}
+            }
+            m.functions.push(f)
+        }
+        ir_recursion_checks_parted(m, workers)
+        sizes: loop f in m.functions -> f.op.len()
+        assert_eq(sizes, [Int]{4, 4, 5, 1, 0})
+        loop f in m.functions -> assert_eq(f.entry_check, -1)
+        assert_eq(m.functions[3].op[0], IROp.Call)
+        assert_eq(m.functions[3].a[0], 0)
     }
 }
 
