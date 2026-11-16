@@ -35,7 +35,6 @@ use {
         SemaLookupCounts,
         SemaRegistrationForeignHandleFacts,
         SemaRegistrationGraph,
-        SemaRegistrationImport,
         SemaRegistrationModuleInput,
         SemaRegistrationPackagePolicy,
         SemaProgramTables,
@@ -173,11 +172,9 @@ use {
         ModuleID,
         ModuleTable,
         module_count,
-        module_find,
         module_index,
         module_intern,
         module_is_core,
-        module_is_none,
         module_none,
         module_text,
         Item,
@@ -387,7 +384,7 @@ jet_driver_summarize_dependency_reports: fn(load: JetDriverLoadResult, diagnosti
     held := [Diagnostic]{}
     held_owners := [Int]{}
     failing := [Bool]{}
-    loop package in load.packages -> failing.push(false)
+    loop _ in load.packages -> failing.push(false)
     loop diagnostic in diagnostics {
         // Diagnostics name a source by its display path; package roots are canonical.
         source_path: diagnostic.source_path ?? ""

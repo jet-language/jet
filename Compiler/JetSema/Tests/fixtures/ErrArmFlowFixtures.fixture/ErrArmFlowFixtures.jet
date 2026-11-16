@@ -15,7 +15,7 @@ outer_ticket: fn(flag: Bool, ticket: &&Ticket) -> Int {
     result: if flag -> Err(ticket_message(ticket)) else -> ticket_payload(ticket)
     if result == {
         .Ok(payload) -> payload.value
-        .Err(error) -> 0
+        .Err(_) -> 0
     }
 }
 
@@ -29,7 +29,7 @@ local_ticket: fn(flag: Bool) -> Int {
     }
     if result == {
         .Ok(payload) -> payload.value
-        .Err(error) -> 0
+        .Err(_) -> 0
     }
 }
 
@@ -43,7 +43,7 @@ taking_variant_subject_once: fn() -> Int Never! {
     calls := 0
     ticket: Ticket{message: "once"}
     value: if counted_ticket_payload(ticket, calls) == {
-        .Err(error) -> 0
+        .Err(_) -> 0
         .Ok(payload) -> payload.value
     }
     if calls != 1 || value != 4 -> panic("taking variant subject ran more than once")
