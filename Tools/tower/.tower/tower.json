@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 107675,
+    "rev": 107700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2452,7 +2452,7 @@
       "title": "M04 · Deterministic game runtime",
       "goal": "core.game delivers a usable deterministic runtime: assets have stable identity and safe loading, ECS storage and queries schedule work, input and fixed-step time drive deterministic replay and rollback, editor and performance hooks are real, backend capabilities are explicit, and a playable vertical slice survives hostile cases. The capability is proven by the packaged slice and its production-path tests for missing assets, disconnects, frame spikes, replay divergence, device loss, and unsupported backends.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:02:47.413Z"
     },
     {
@@ -2583,7 +2583,7 @@
       "title": "M07 · Security closure",
       "goal": "Every security candidate has one evidence-backed disposition, confirmed findings have root fixes and hostile proof, and independent closeout produces one reconciled final report with no unresolved candidate.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:04:12.861Z"
     },
     {
@@ -4058,13 +4058,18 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": "e11-m04-deterministic-game-runtime",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nImplement D-GAME-ASSET1=A in Jet. Core/game owns scene-scoped asset identity, the typed image and sound handles, kind and path validation, and the atomic hot-reload transaction. The host keeps only file-read and decode leaves.\n\n## Current state\n- Core/game/game.jet:19-48 has only plain `Scene{name, max_frames, tick}`, `Replay{path}` and `Backend{name, running}`. The exports are `Backend`, `Replay`, `Scene` and `run` (Compiler/JetFoundation/Source/Registry/CoreCallRows.jet:1944).\n- Every asset semantic is Rust: GameState asset roots and handles (crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:10-20), `jet_game_assets_image` and `jet_game_assets_sound` (:402-441), and the reload transaction (:444-493).\n- Codegen routes game handles to host symbols (Compiler/JetCodegen/Source/Codegen/HandleMethods.jet:1095-1099). Sema is Compiler/JetSema/Source/Sema/Calls/Game.jet.\n- Examples/features/game/core_game_headless.jet:17-18 uses `scene.assets.image` and `scene.assets.sound`, and has a golden.\n- Ratified shape (Docs/spec/syntax-decisions.md:3695-3706): `player: scene.assets.image(\"assets/player.png\")?`, with handles tied to scene identity.\n\n## Changes\n1. Core/game/game.jet: a `SceneAssets` registry keyed by scene identity, with typed `GameImage` and `GameSound` handles {scene, path, kind, revision}; `image(path)` and `sound(path)`; and `reload`, which validates the import fact (kind, declared path, owning scene) and then publishes one deterministic handle and receipt. A missing file, wrong kind, stale scene, corrupt import fact or failed reload returns a typed error and leaves the last valid handle and its provenance unchanged.\n2. Game.rs keeps only the provider leaves (read bytes, decode header into an import fact, the dev-session watch relay). Delete `jet_game_assets_image`, `jet_game_assets_sound` and the reload policy. Route `scene.assets.*` to the Jet source in HandleMethods.jet and Sema Calls/Game.jet.\n3. Add the new types to CoreCallRows.jet:1944 and run `node Tools/agent/gen-core-tables.mjs --write`.\n4. New Examples/features/game/game_assets.jet with Examples/features/expected/game/game_assets.out. It covers success; each failure cell, printing the retained handle and receipt; and a handle used on a second scene. It must fail if `scene.assets` bypasses the Jet registry.\n\n## Proof\n- `jet test Compiler --profile golden game/game_assets` passes.\n- `jet test Compiler --profile golden game/core_game_headless` still passes.\n- `jet test Compiler --profile golden game/game_assets` passes on O0, O1 and O2.\n\n## Batch\nbatch-core-ui: Core/game plus Jet codegen and sema routing, proven by game goldens.\n\n## Dependencies\nNone open. #3690 is the umbrella direction, not a prerequisite.",
       "blockedBy": [],
       "workOrder": 1810,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #238 cN): #6887 (6)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -4210,7 +4215,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-11-16T00:47:07.527Z",
+      "updated": "2026-11-16T01:05:58.086Z",
       "criteria": [
         {
           "n": 2,
@@ -4343,7 +4348,8 @@
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 16
+      "criteriaLastN": 16,
+      "completedAt": "2026-11-16T01:05:58.086Z"
     },
     {
       "id": "c0nlrm12",
@@ -20493,12 +20499,17 @@
       "track": "epoch",
       "epoch": "e12",
       "milestoneId": "e12-m07-security-closure",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "**Goal**\nClose the epoch-12 security gate. The 134-candidate reconciliation is done (Docs/audits/security-closure-2026-09-02.md: 133 already-fixed, 1 duplicate), and the campaign cards #1377-#1385 are done.\n\n**Remaining**\n1. Map each of the four 2026-09-01 authority defects to a done card with file:line evidence, or fix it with a case (AUTHDEFS).\n2. Write the security-scan procedure as a Jet tool under Tools/ (the old scripts/agent/security-scan.mjs, deleted in 2efc938b3, is not restored).\n3. On a clean checkout at the integration HEAD, run the scan and its finalize step, publish Docs/audits/security-final-<date>/, and update the report's gate section and receipt.\n\nCrypto, sandbox, web and Jetpack items that were folded here went to #6925, #6697, #6865 and #6632.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #1387 cN): #5457 (2), #6930 (1)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -20800,14 +20811,15 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T15:42:30.347Z",
-      "updated": "2026-11-16T00:47:11.484Z",
+      "updated": "2026-11-16T01:06:02.911Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 21
+      "criteriaLastN": 21,
+      "completedAt": "2026-11-16T01:06:02.911Z"
     },
     {
       "id": "c0dxl32d",
@@ -23382,13 +23394,18 @@
       "track": "sidequest",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nRemove the general per-line costs from AOT text pipelines: literal `String` allocation on each use, owned split results that get cloned again, doubled map-key clones, cloned records in group_by/sort, and stack frames on infallible calls. Output bytes, diagnostics and tier behavior stay the same. This is one emitter and ownership path, not a fast path per corpus entry, and it adds no public API.\n\n## Current state\n- Measured AOT losses (gauntlet run 20260902-1649436-mtkr9fvl): logreport 4.0x Rust (109 ms vs 27 ms), 4.2x Python, 7.1x Zig, 6.3x Node, 2.8x Go; text-script 1.23x Rust; datasummary 11.7x Rust; taskfile-cli 1.13x Rust. These are the text.report-cli, text.script, numerics.script, numerics.notebook, cli.app and formats.json-app cells.\n- The Jet Rust printer turns every MIR String constant into an owned String: `Compiler/JetCodegen/Source/Emit/Types.jet:1344` (`.String(value) -> \"{quote}.to_string()\"`) and the const-key path at `:1389`.\n- Split routes through `jet_unicode_split_once` with owned arguments: `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet:522`. The Prelude already borrows its inputs: `crates/jet-codegen/src/Prelude/Core/UnicodeString.rs:131` takes `(&str, &str)` and returns owned `(String, String)`.\n- The shipped Rust printer already skips the stack frame for infallible functions in release. `crates/jet-codegen/src/Codegen/MIRRust.rs:12064-12099` wraps `jet_stack_enter` in `#[cfg(not(jet_release))]` unless the function is fallible, unsafe or policy-scoped. The Jet printer (`Compiler/JetCodegen/Source/Emit/Functions.jet:429`) emits only sentry and deadline scopes.\n- The split-literal borrow fix from 2026-09-21 (ebe828003) exists only in the archived MIRRust.rs.\n\n## Changes\n1. Jet lowering (`Compiler/JetCodegen/Source/Codegen/{Expressions,BuiltinMethods,Statements,Functions}.jet`): when the checked ownership and escape facts prove a value does not escape, pass literal arguments, split results, map keys and group_by/sort records as borrowed MIR operands (`MirAccess.Read` place or const). Values that escape stay owned.\n2. Jet printer (`Compiler/JetCodegen/Source/Emit/{Types,Operations,Values}.jet`):\n   - Print a borrowed String constant as a `&str` literal where the Prelude parameter is `&str`.\n   - Stop re-cloning split-result fields.\n   - Print map `get` with one borrowed key.\n   - Port the ebe828003 split-literal rule.\n3. Jet printer (`Emit/Functions.jet`): match the MIRRust.rs:12065 rule. The default profile gets no frame for `MirFailureCarrier.Infallible` functions without unsafe or policy scopes. Debug and hardened profiles keep the frame.\n4. Rust mirror, so the shipped binary proves the change: apply the same borrow rules in `MIRRust.rs`. Change Prelude signatures in `Prelude/CoreLib/Top/Text.rs` and `Prelude/Core/Collections.rs` only where the checked ABI already allows a borrow. Add no second text representation.\n5. Add a witness `line_parsing_witness_borrows_literals_and_split_results` in `tests/tir_collections_and_methods.rs`. It covers literal args, split_once, map lookup, group_by and sort. It asserts on the emitted Rust and calls `assert_tiers_agree`.\n\n## Proof\n- `Tools/agent/jet-env cargo test --test tir_collections_and_methods -- line_parsing_witness`: passes. The loop body has no `\" \".to_string()`, no `.clone()` of split fields, and no `get(&key.clone())`. O0, O1 and O2 output are identical.\n- `jet test Compiler --profile golden text/` and `JET_GOLDEN_FILTER=strings/ ...`: no golden changes.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: no new errors in the touched JetCodegen files compared with the pre-change receipt.\n- Measurement (batch-measure pass): run `node Tools/gauntlet/harness/run.mjs --entry X` for logreport, text-script, datasummary and taskfile-cli. Jet/peer must be < 1.00 for every peer, Rust included, on every metric, and Jet/ceiling <= 1.00 against the asm-parity reference. Record each loss separately.\n\n## Batch\nbatch-jetc-back: this is Jet lowering and printer work, with the MIRRust.rs mirror landing in the same build.\n\n## Dependencies\nNone blocking. The ownership facts are already checked by sema.\n",
       "checkSteps": null,
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #2865 cN): #6962 (4), #6953 (1)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -23637,15 +23654,15 @@
       "parentId": "c04ww22r",
       "needsAcceptance": false,
       "created": "2026-09-03T10:52:31.721Z",
-      "updated": "2026-11-16T00:47:26.352Z",
+      "updated": "2026-11-16T01:06:12.441Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
-      "claimedAt": "2026-11-11T12:44:48.026Z",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 13
+      "criteriaLastN": 13,
+      "completedAt": "2026-11-16T01:06:12.441Z"
     },
     {
       "id": "c0j1k587",
@@ -96785,20 +96802,22 @@
         {
           "n": 13,
           "text": "Breakpoints, stepping, frames, variables, async tasks, optimized code, errors and source locations keep their Jet-level meaning across the platform matrix through the production DAP wire. Proof: `jet test Compiler --profile cases --filter debug/dap_cli_` (known-failing on #6730 today).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:09:19.561Z"
+          "evidence": "Moved to #6919 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:04:49.673Z",
+          "closure": "duplicate"
         },
         {
           "n": 14,
           "text": "Stale binaries, optimized-away values, process exit, attach denial, signal or exception storms and disconnect each end cleanly with an honest state, including attach, pause, restart and raw-frame refusal over DAP (E2236). Proof: `jet test Compiler --profile cases --filter debug/dap_cli_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:09:20.494Z"
+          "evidence": "Moved to #6919 c9, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:04:52.642Z",
+          "closure": "duplicate"
         },
         {
           "n": 15,
@@ -96853,29 +96872,32 @@
         {
           "n": 20,
           "text": "A rejected unsupported continuation leaves the live session and paused state unchanged, and the next valid continuation keeps the same session ID; source-revision and tier mismatches are still refused. Proof: `jet test Compiler --profile cases --filter debug/canvas_debug_stop_requires_matching_source_revision_and_tier` and `--filter debug/canvas_debug_session_replays_one_source_bound_session`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:09:21.414Z"
+          "evidence": "Moved to #6909 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:04:55.814Z",
+          "closure": "duplicate"
         },
         {
           "n": 21,
           "text": "Breakpoints, frames and values refer to the accepted revision. Inspection never changes the guest or grants authority, and the script and library_loadable guest matrix runs with lldb present, without skip. Proof: `jet test Compiler --profile cases --filter debug/` with lldb on PATH.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:09:22.339Z"
+          "evidence": "Moved to #6918 c9, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:04:58.643Z",
+          "closure": "duplicate"
         },
         {
           "n": 23,
           "text": "`jet debug prog.jet --break file:line` stops there, prints locals with their types, and steps over and into, and `jet debug --dap` drives the same session from VS Code. Proof: `jet test Compiler --profile cases --filter debug/break_then_continue_stops_at_breakpoint` and `--filter debug/dap_cli_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:09:23.255Z"
+          "evidence": "Moved to #6919 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:01.132Z",
+          "closure": "duplicate"
         },
         {
           "n": 24,
@@ -96890,11 +96912,12 @@
         {
           "n": 25,
           "text": "Compiler/JetDebug checks clean as a package and its DAP tests run, which unblocks #6187 C1 (E2231-E2239 rows with runner-produced snapshots). Proof: `jet check Compiler/JetDebug` exits 0 with no problems, and `jet test Compiler/JetDebug` runs its DAP tests. On 2026-11-14 the check gave 0 errors with gate-p66 at 7700a065ff; the DAP tests have not run yet.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:09:24.184Z"
+          "evidence": "Moved to #6919 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:03.318Z",
+          "closure": "duplicate"
         },
         {
           "n": 26,
@@ -96919,29 +96942,32 @@
         {
           "n": 28,
           "text": "jet debug's DAP supports conditional breakpoints, logpoints and evaluate (Docs/audits/2026-11-14-debugging-profiling-review.md). Proof: `jet test Compiler --profile cases --filter debug/dap_conditional_breakpoints_logpoints_evaluate`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:09:25.106Z"
+          "evidence": "Moved to #6919 c12, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:05.725Z",
+          "closure": "duplicate"
         },
         {
           "n": 29,
           "text": "The time to the first stop and the time per step are measured against lldb on the same image (Docs/audits/2026-11-14-debugging-profiling-review.md). Proof: a committed measurement under Docs/audits naming the image hash, the commands and both timings.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:09:26.047Z"
+          "evidence": "Moved to #6841 c22, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:08.495Z",
+          "closure": "duplicate"
         },
         {
           "n": 30,
           "text": "The debugger event-observation behaviours the deleted Rust tests covered have Jet cases: only executed, redacted sync and hook facts; pressure drop, failure, close and single terminals; exact async registration and once-removal; a bounded runtime event sequence the debugger preserves exactly. Proof: `jet test Compiler --profile cases --filter event_observations/`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:58:32.394Z"
+          "evidence": "Moved to #6919 c13, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:10.940Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -96952,7 +96978,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:15:33.693Z",
-      "updated": "2026-11-16T01:04:45.513Z",
+      "updated": "2026-11-16T01:05:10.940Z",
       "updatedBy": "Main",
       "criteriaLastN": 30
     },
@@ -97465,38 +97491,42 @@
         {
           "n": 1,
           "text": "core.crypto and core.net.tls contain no file derived from mbedtls: every file is MIT, written from the cited specifications (RFC, FIPS, SP 800), and the public and private module boundaries are unchanged. Proof: `git grep -l -i mbedtls -- Core/Crypto Core/Net/Tls` prints nothing, and each file header cites its specification.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:46:59.833Z"
+          "evidence": "Moved to #6925 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:13.282Z",
+          "closure": "duplicate"
         },
         {
           "n": 2,
           "text": "The rewrite passes the same vectors (NIST CAVP plus the fetched Wycheproof), the interop matrix and the constant-time checks as #6694. Proof: `jet test Compiler --profile core --filter crypto` and `jet test Compiler --profile core --filter tls` with the CAVP, Wycheproof, interop and constant-time rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:47:00.847Z"
+          "evidence": "Moved to #6925 c9, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:15.960Z",
+          "closure": "duplicate"
         },
         {
           "n": 3,
           "text": "The full mbedtls surface that Core does not use is complete in Jet: every mbedtls test-suite vector, interop with OpenSSL and the old mbedtls build on every TLS 1.2 and 1.3 version, suite and curve, client certificates and the remaining X.509 and PSA features, with constant-time checks on every secret-dependent primitive. Proof: `jet test Compiler --profile core --filter crypto` with every mbedtls test-suite vector, and the interop receipt for every TLS version, suite and curve.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:47:01.915Z"
+          "evidence": "Moved to #6925 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:18.939Z",
+          "closure": "duplicate"
         },
         {
           "n": 4,
           "text": "password_hash_with_salt leaves the public core.crypto surface and all public compiler rows, and fixed-salt tests use expert.argon2id (D-CRYPTO-SALTROW1=A). Proof: `git grep -n password_hash_with_salt -- Core Compiler/Prelude Examples` prints nothing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:44:38.349Z"
+          "evidence": "Moved to #6925 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:22.344Z",
+          "closure": "duplicate"
         },
         {
           "n": 5,
@@ -97511,11 +97541,12 @@
         {
           "n": 6,
           "text": "No external dependency is added (I6), and the RSA rows New, generate_key, private_encrypt, private_decrypt, public_encrypt and public_decrypt stay refused as not built; building or deleting them is on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile ui --filter crypto_rsa_not_built`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:34:01.945Z"
+          "evidence": "Moved to #6925 c12, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:25.227Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -97526,8 +97557,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:49:47.742Z",
-      "updated": "2026-11-15T11:36:07.276Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T01:05:25.227Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -118096,20 +118127,22 @@
         {
           "n": 1,
           "text": "binparse at O2 has Jet/Rust, Jet/C, Jet/Zig and Jet/Go each below 1.00 on wall time and peak memory, with its Jet/ceiling ratio against the binparse asm-parity reference reported. Proof: `node Tools/gauntlet/harness/run.mjs --entry binparse` shows no in-group loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:19:39.346Z"
+          "evidence": "Moved to #6953 c33, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:28.023Z",
+          "closure": "duplicate"
         },
         {
           "n": 2,
           "text": "sieve and wordfreq at O2 pass every required in-group peer and metric, Rust and Zig included, and the O2 synthesis counts only after every required metric passes, never a primary-metric-only or historical weaker result. Proof: `node Tools/gauntlet/harness/run.mjs --entry sieve` and `--entry wordfreq` show no in-group loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:19:39.346Z"
+          "evidence": "Moved to #6953 c34, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:31.129Z",
+          "closure": "duplicate"
         },
         {
           "n": 3,
@@ -118124,20 +118157,22 @@
         {
           "n": 4,
           "text": "regex-logscan passes at O2 against its compiled peers and on run and dev against Python and JS. Proof: `node Tools/gauntlet/harness/run.mjs --entry regex-logscan` shows no in-group loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:19:39.346Z"
+          "evidence": "Moved to #6953 c35, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:34.203Z",
+          "closure": "duplicate"
         },
         {
           "n": 5,
           "text": "nbody at O2 has Jet/{C, Zig, Rust} < 1.00 in the default profile and jet-expert below c-expert and rust-expert, with byte-identical output, matched expert implementations, the same SIMD policy, and vectorized f64 lanes in the default profile with output identical to `#Scalar`. Proof: `node Tools/gauntlet/harness/run.mjs --entry nbody` shows no in-group loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:24:46.192Z"
+          "evidence": "Moved to #6973 c6, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:36.945Z",
+          "closure": "duplicate"
         },
         {
           "n": 6,
@@ -118162,38 +118197,42 @@
         {
           "n": 8,
           "text": "taskfile-cli carries no state between invocations. Proof: `node Tools/gauntlet/harness/run.mjs --entry taskfile-cli` passes with a fresh-state check between runs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:19:39.346Z"
+          "evidence": "Moved to #6533 c4, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:40.069Z",
+          "closure": "duplicate"
         },
         {
           "n": 9,
           "text": "The memory-safety-fuzz entry's Zig rail is measured. Proof: `node Tools/gauntlet/harness/run.mjs --entry memory-safety-fuzz` reports a Zig result.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:19:39.346Z"
+          "evidence": "Moved to #6953 c36, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:43.179Z",
+          "closure": "duplicate"
         },
         {
           "n": 10,
           "text": "The parallel-grep Jet entry builds and is measured. Proof: `node Tools/gauntlet/harness/run.mjs --entry parallel-grep` reports a Jet result.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:19:39.346Z"
+          "evidence": "Moved to #6953 c37, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:46.297Z",
+          "closure": "duplicate"
         },
         {
           "n": 11,
           "text": "Paired cells for a 30-state tokenizer and a bytecode VM compare plain Jet with C (switch and computed goto) and Zig (labeled switch), and the emitted dispatch is inspected before any syntax proposal. Proof: `node Tools/gauntlet/harness/run.mjs --entry dispatch-loops` plus the committed disassembly note.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:19:39.346Z"
+          "evidence": "Moved to #6957 c12, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:49.385Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -118207,8 +118246,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:39.346Z",
-      "updated": "2026-11-15T05:25:10.351Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T01:05:49.385Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0ipkmlg",
@@ -224303,6 +224342,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T01:06:12.441Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pr2dsz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:06:02.911Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02lvwje",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:05:58.089Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c9q0534j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:05:49.385Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02tlmeh",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-16T01:05:46.297Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02tlmeh",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-16T01:05:43.179Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02tlmeh",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-16T01:05:40.069Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02tlmeh",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-16T01:05:36.946Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02tlmeh",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-16T01:05:34.203Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02tlmeh",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T01:05:31.130Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02tlmeh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-16T01:05:28.023Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02tlmeh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-16T01:05:25.227Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0miof6j",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-16T01:05:22.344Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0miof6j",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T01:05:18.940Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0miof6j",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T01:05:15.961Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0miof6j",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-16T01:05:13.282Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0miof6j",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-16T01:05:10.940Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-16T01:05:08.495Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-16T01:05:05.725Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-16T01:05:03.318Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-16T01:05:01.132Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-16T01:04:58.643Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-16T01:04:55.814Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-16T01:04:52.642Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-16T01:04:49.673Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06vkd04",
+      "note": "#13"
+    },
     {
       "at": "2026-11-16T01:04:45.513Z",
       "by": "Main",
