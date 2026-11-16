@@ -2235,6 +2235,9 @@ jet_cli_test_option_error: fn(what: String, color: Bool) -> JetCLIPlan Never! {
 // starter (Host.jet jet_cli_new_extra_files): an app `jet dev` serves, the
 // browser test settings that reuse that server, and a first passing test.
 jet_cli_test_browser_scaffold: fn(jet_argv: [String], name: String, color: Bool, quiet: Bool) -[FS]> JetCLIPlan Never! {
+    if name == "" {
+        return jet_cli_fail("E2104", "`--browser-scaffold` needs a value", jet_cli_why("E2104"), "write `--browser-scaffold=<name>`, the new project's folder", color, JET_DRIVER_EXIT_USAGE)
+    }
     // A separate value belongs to its flag, as in jet_cli_test.
     index := 0
     loop index < jet_argv.len() {

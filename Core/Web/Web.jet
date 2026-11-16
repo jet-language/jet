@@ -18,7 +18,7 @@ use {
     codec: core.image
     crypto: core.crypto
     web_http: core.http
-    core.http.server.[HTTPAdmit, HTTPCorsPolicy, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS]
+    core.http.server.[HTTPAdmit, HTTPCorsPolicy, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS, HTTPSpool]
     http_server: core.http.server
     live_json: core.encoding.json
     core.encoding.[Dyn]
@@ -1364,11 +1364,18 @@ priv app_robots_response: fn(request: HTTPRequest) -> HTTPResponse Never! {
 // (`image_key`), so it answers with immutable caching as an image variant
 // does; the manifest is revalidated, so an edited icon gets new addresses.
 // An icon is made the first time it is asked for, by `install_icon_bytes`.
+// Every page also registers the app's service worker (`app_worker_script`),
+// which keeps the shell and the hashed assets so the installed app reloads
+// offline, and holds the writes of a queueing graph until the server is
+// back.
 
 // The address of the manifest, and the prefix of its icons' addresses.
 priv C_APP_MANIFEST: "/manifest.webmanifest"
 
 priv C_APP_ICONS: "/__jet/icons/"
+
+// The address of the app's service worker.
+priv C_APP_WORKER: "/sw.js"
 
 // One icon of the manifest: its size in pixels, the 0xRRGGBB color a
 // maskable icon fills its square with (None for one that is transparent
@@ -1379,11 +1386,11 @@ priv InstallIcon: struct {
     path: String
 }
 
-// Registers GET `/manifest.webmanifest` (app_manifest_response) and GET
-// `/__jet/icons/:icon` (app_icon_response) when the app graph is
-// installable, each unless the app routes that path itself or did this
-// before. An icon file that can't be read, or is no PNG or JPEG, stops the
-// app before it serves.
+// Registers GET `/manifest.webmanifest` (app_manifest_response), GET
+// `/__jet/icons/:icon` (app_icon_response) and GET `/sw.js`
+// (app_worker_response) when the app graph is installable, each unless the
+// app routes that path itself or did this before. An icon file that can't
+// be read, or is no PNG or JPEG, stops the app before it serves.
 priv app_install_routes: fn(app: App) -[Net, FS.Read]> Never! {
     install: calls.App.__graph().__install() ?? return
     data: core.files.read_bytes(install.icon) ?? panic("the app's icon `{install.icon}` can't be read: {err}")
@@ -1403,6 +1410,10 @@ priv app_install_routes: fn(app: App) -[Net, FS.Read]> Never! {
         served: app.copy()
         http_server.route_add(table, "GET", icons, http_server.__handler(fn(request: HTTPRequest) { Ok(app_icon_response(served, request)) }), "", #here)
     }
+    if !taken.contains(C_APP_WORKER) {
+        worked: app.copy()
+        http_server.route_add(table, "GET", C_APP_WORKER, http_server.__handler(fn(request: HTTPRequest) { Ok(app_worker_response(worked)) }), "", #here)
+    }
 }
 
 priv install_icon_problem: fn(problem: ImageError) -> String Never! {
@@ -1414,10 +1425,11 @@ priv install_icon_problem: fn(problem: ImageError) -> String Never! {
 }
 
 // The tags every page's `<head>` ends with when the app graph is
-// installable: the link to its manifest and its theme color.
+// installable: the link to its manifest, its theme color, and the script
+// that registers its service worker.
 priv app_install_tags: fn() -> String Never! {
     install: calls.App.__graph().__install() ?? return ""
-    "<link rel=\"manifest\" href=\"{C_APP_MANIFEST}\"><meta name=\"theme-color\" content=\"{install_color(install.color).to_hex()}\">"
+    "<link rel=\"manifest\" href=\"{C_APP_MANIFEST}\"><meta name=\"theme-color\" content=\"{install_color(install.color).to_hex()}\"><script>if (\"serviceWorker\" in navigator) navigator.serviceWorker.register(\"{C_APP_WORKER}\")</script>"
 }
 
 priv install_color: fn(color: Int) -> Color Never! {
@@ -1506,6 +1518,145 @@ priv app_manifest_response: fn(request: HTTPRequest) -[FS.Read]> HTTPResponse Ne
     http_server.response_body(200, core.http.body_text(document), fields)
 }
 
+priv app_worker_response: fn(app: App) -[FS.Read]> HTTPResponse Never! {
+    typed: core.http.headers_set(core.http.headers(), "content-type", "text/javascript; charset=utf-8")
+    fields: core.http.headers_set(typed, "cache-control", "no-cache")
+    http_server.response_body(200, core.http.body_text(app_worker_script(app)), fields)
+}
+
+// The service worker of an installable app graph. It keeps the shell (the
+// site's root, the manifest and the icons) and each file under the app's
+// first assets root by its hashed name in a cache named for what it holds,
+// so a changed file makes a new cache and the worker drops the old one. A
+// page comes from the network and, failing that, from the cache; a
+// navigation to an address the cache doesn't hold gets the cached root. A
+// hashed asset comes from the cache first. When the graph queues
+// (`.offline(.Queue)`), a POST under one of its services' paths that can't
+// reach the server is kept, in order, in the `jet-queue` cache and answered
+// 202 with the number of writes waiting. The worker sends the waiting
+// writes again, oldest first and each under its `idempotency-key`, before
+// the next write, on each navigation, and on GET `/__jet/queue`, which
+// answers the number still waiting.
+priv app_worker_script: fn(app: App) -[FS.Read]> String Never! {
+    shell := [String]{"/", C_APP_MANIFEST}
+    if calls.App.__graph().__install() == .Val(install) {
+        if core.files.read_bytes(install.icon) == .Ok(data) {
+            loop icon in install_icons(install, data) -> shell.push(icon.path)
+        }
+    }
+    assets := [String]{}
+    guard: app.__state.guard_read()
+    if guard.value.assets.len() > 0 {
+        root: guard.value.assets[0].copy()
+        loop relative in app_asset_files(root, "") {
+            if http_server.static_hashed(root, relative) == .Val(name) {
+                assets.push("/assets/{name}")
+            }
+        }
+    }
+    queued := [String]{}
+    loop path in calls.App.__graph().__queued_apis() {
+        queued.push(if path.ends_with("/") -> path.copy() else -> "{path}/")
+    }
+    lists: "const SHELL = {app_json_list(shell)};\nconst ASSETS = {app_json_list(assets)};\nconst QUEUED = {app_json_list(queued)};\n"
+    "const CACHE = \"jet-shell-{crypto.sha256(lists).hex().slice(0, 16)}\";\n{lists}{C_APP_WORKER_BODY}"
+}
+
+// The files under the folder `under` of `root` ("" for `root` itself) and
+// under the folders in it, by their paths from `root`, sorted.
+priv app_asset_files: fn(root: String, under: String) -[FS.Read]> [String] Never! {
+    found := [String]{}
+    at: if under == "" -> root.copy() else -> "{root}/{under}"
+    entries: core.files.list_dir(at) ?? return found
+    loop entry in entries {
+        relative: if under == "" -> entry.name.copy() else -> "{under}/{entry.name}"
+        if entry.is_dir {
+            loop inner in app_asset_files(root, relative) -> found.push(inner)
+        } else { found.push(relative) }
+    }
+    found.sort()
+    found
+}
+
+// The part of the app's service worker that is the same whatever the app
+// holds; app_worker_script writes CACHE, SHELL, ASSETS and QUEUED before it.
+priv C_APP_WORKER_BODY: """
+const HOLD = "jet-queue";
+self.addEventListener("install", (event) => {{
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL.concat(ASSETS))).then(() => self.skipWaiting()));
+}});
+self.addEventListener("activate", (event) => {{
+  event.waitUntil(caches.keys().then((names) => Promise.all(names.filter((name) => name.startsWith("jet-shell-") && name !== CACHE).map((name) => caches.delete(name)))).then(() => self.clients.claim()));
+}});
+const answer = (status, value) => new Response(JSON.stringify(value), {{status, headers: {{"content-type": "application/json"}}}});
+const waiting = async () => (await (await caches.open(HOLD)).keys()).length;
+const drain = async () => {{
+  const held = await caches.open(HOLD);
+  for (const kept of await held.keys()) {{
+    const entry = await (await held.match(kept)).json();
+    try {{
+      await fetch(entry.url, {{method: "POST", headers: entry.headers, body: entry.body}});
+    }} catch (_) {{
+      return;
+    }}
+    await held.delete(kept);
+  }}
+}};
+let sending = null;
+const send = () => sending || (sending = drain().finally(() => {{ sending = null; }}));
+const write = async (request) => {{
+  const body = await request.text();
+  const headers = Object.fromEntries(request.headers);
+  headers["idempotency-key"] = headers["idempotency-key"] || crypto.randomUUID();
+  await send();
+  if ((await waiting()) === 0) {{
+    try {{
+      return await fetch(request.url, {{method: "POST", headers, body}});
+    }} catch (_) {{}}
+  }}
+  const entry = new Response(JSON.stringify({{url: request.url, headers, body}}));
+  await (await caches.open(HOLD)).put(new Request("/__jet/queue/" + headers["idempotency-key"]), entry);
+  return answer(202, {{queued: await waiting()}});
+}};
+const page = async (request) => {{
+  const cache = await caches.open(CACHE);
+  try {{
+    const fresh = await fetch(request);
+    if (fresh.ok && !fresh.redirected && SHELL.includes(new URL(request.url).pathname)) await cache.put(request, fresh.clone());
+    return fresh;
+  }} catch (failure) {{
+    const kept = (await cache.match(request, {{ignoreVary: true}})) || (request.mode === "navigate" ? await cache.match("/", {{ignoreVary: true}}) : undefined);
+    if (kept) return kept;
+    throw failure;
+  }}
+}};
+const asset = async (request) => {{
+  const cache = await caches.open(CACHE);
+  const kept = await cache.match(request, {{ignoreVary: true}});
+  if (kept) return kept;
+  const fresh = await fetch(request);
+  if (fresh.ok) await cache.put(request, fresh.clone());
+  return fresh;
+}};
+self.addEventListener("fetch", (event) => {{
+  const request = event.request;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  if (request.method === "GET" && url.pathname === "/__jet/queue") {{
+    event.respondWith(send().then(waiting).then((queued) => answer(200, {{queued}})));
+    return;
+  }}
+  if (request.method === "POST" && QUEUED.some((path) => url.pathname.startsWith(path))) {{
+    event.respondWith(write(request));
+    return;
+  }}
+  if (request.method !== "GET") return;
+  if (request.mode === "navigate") event.waitUntil(send());
+  event.respondWith(ASSETS.includes(url.pathname) ? asset(request) : page(request));
+}});
+
+"""
+
 // The icon at `request`'s address, made from the icon file as it is now
 // and kept once made; else the app's not-found page.
 priv app_icon_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
@@ -1562,7 +1713,13 @@ priv app_icon_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTP
     assert_eq(Int{masked.pixels[center]}, 255)
     assert_eq(Int{masked.pixels[center + 2]}, 0)
     _: calls.new("Shop").installable(name: "Shop", icon: "brand/icon.png", color: 0x2a5bd7)
-    assert_eq(app_install_tags(), "<link rel=\"manifest\" href=\"/manifest.webmanifest\"><meta name=\"theme-color\" content=\"#2a5bd7\">")
+    assert_eq(app_install_tags(), "<link rel=\"manifest\" href=\"/manifest.webmanifest\"><meta name=\"theme-color\" content=\"#2a5bd7\"><script>if (\"serviceWorker\" in navigator) navigator.serviceWorker.register(\"/sw.js\")</script>")
+    // A graph that doesn't queue gives its worker no service paths to hold.
+    worker: app_worker_script(app())
+    assert(worker.starts_with("const CACHE = \"jet-shell-"))
+    assert(worker.contains("\nconst SHELL = [\"/\",\"/manifest.webmanifest\""))
+    assert(worker.contains("\nconst ASSETS = [];\nconst QUEUED = [];\nconst HOLD = \"jet-queue\";\n"))
+    assert_eq(app_worker_script(app()), worker)
     _: calls.new("Shop")
     assert_eq(app_install_tags(), "")
 }
@@ -2508,7 +2665,8 @@ priv APP_MAX_UPLOAD: 1000000
 priv app_upload_routes: fn(table: HTTPMux, path: String, held: Shared<AppUploadEndpoint>, at: SourceLocation) Never! {
     admits: held.copy()
     answers: held.copy()
-    http_server.__route_add_admitted(table, "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_upload_response(answers, request)) }), fn(request: HTTPRequest) { app_upload_admit(admits, request) }, at)
+    spools: app_upload_spool(held.copy())
+    http_server.__route_add_admitted(table, "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_upload_response(answers, request)) }), fn(request: HTTPRequest) { app_upload_admit(admits, request) }, spools, at)
     blob: "{calls.BLOB_PATH}/:id"
     loop route in http_server.mux_routes(table) {
         if route.method == "GET" && route.pattern == blob {
@@ -2607,16 +2765,31 @@ priv app_upload_response: fn(held: Shared<AppUploadEndpoint>, request: HTTPReque
     answered.__with_header("cache-control", "private, no-store")
 }
 
-// One call of an upload endpoint. The body is staged
-// (jet_builtins.FileStep.Stage) before the call's transaction begins, so
-// each run of the transaction, a retry's too, keeps the same staged file.
-// The method gets the body as the `Upload` at its argument `at`, named by
-// the query's `name` ("upload" when it has none), among the query's `args`.
-// When the request ends (jet_builtins.FileStep.Finish), the staged file is
-// removed, and so is each blob that a run kept and then rolled back. A call
-// that failed once `keep` refused the file's media is answered 415 with its
-// error.
+// One call of an upload endpoint. The server streamed the body to a staged
+// file as it read it (`app_upload_spool`), before the call's transaction
+// begins, so each run of the transaction, a retry's too, keeps the same
+// staged file; the call claims it (jet_builtins.FileStep.Claim). The method
+// gets it as the `Upload` at its argument `at`, named by the query's `name`
+// ("upload" when it has none), among the query's `args`. When the request
+// ends (jet_builtins.FileStep.Finish), the staged file is removed, and so is
+// each blob that a run kept and then rolled back. A call that failed once
+// `keep` refused the file's media is answered 415 with its error.
 priv app_upload_call: fn(endpoint: AppUploadEndpoint, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    staged: request.__spooled ?? return app_json(500, app_error_json("the upload was not staged"))
+    claimed: endpoint.upload.files(calls.FileJob{step: .Claim(staged)}) ?? return app_json(500, app_error_json("the upload can't be staged"))
+    if claimed.status != 200 -> return app_json(500, app_error_json("the upload can't be staged"))
+    last: Shared{""}
+    answered: app_upload_run(endpoint, request, claimed.bytes, last.copy())
+    finished: endpoint.upload.files(calls.FileJob{step: .Finish}) ?? return answered
+    reply: last.guard_read()
+    if finished.status == 415 && app_reply_failed(reply.value) -> return app_json(415, reply.value)
+    answered
+}
+
+// Runs the method of an upload endpoint on the query's `args` and the
+// claimed upload of `bytes` bytes, in a transaction; `last` keeps the reply
+// of its last run.
+priv app_upload_run: fn(endpoint: AppUploadEndpoint, request: HTTPRequest, bytes: Int, last: Shared<String>) -[Net, FS.Read]> HTTPResponse Never! {
     args: app_upload_query(request, "args", "[]") ?? return app_json(422, app_invalid_json(err))
     name: app_upload_query(request, "name", "upload") ?? return app_json(422, app_invalid_json(err))
     given: live_json.parse(args) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
@@ -2628,30 +2801,47 @@ priv app_upload_call: fn(endpoint: AppUploadEndpoint, request: HTTPRequest) -[Ne
     if at > items.len() {
         return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call has {items.len()} arguments besides its upload, short of {at}"}}))
     }
-    body: request.body.bytes(app_upload_max(endpoint.upload)) ?? return app_json(400, app_error_json("the upload can't be read: {err}"))
-    file: live_json.parse("{{\"name\":{app_json_string(name)},\"bytes\":{body.len()}}}") ?? return app_json(500, app_error_json("the upload can't be described: {err}"))
+    file: live_json.parse("{{\"name\":{app_json_string(name)},\"bytes\":{bytes}}}") ?? return app_json(500, app_error_json("the upload can't be described: {err}"))
     spliced := [Dyn]{}
     loop index in 0..<items.len() {
         if index == at -> spliced.push(file.copy())
         spliced.push(items[index].copy())
     }
     if at == items.len() -> spliced.push(file.copy())
-    staged: endpoint.upload.files(calls.FileJob{step: .Stage(body)}) ?? return app_json(500, app_error_json("the upload can't be staged"))
-    if staged.status != 200 -> return app_json(500, app_error_json("the upload can't be staged"))
     tree: Dyn.Array(spliced)
-    last: Shared{""}
     ran: last.copy()
-    answered: app_transacted(None, None, fn() {
+    app_transacted(None, None, fn() {
         reply: endpoint.remote.answer(RemoteArgs{tree: tree.copy()}) ?? return {response: app_json(422, app_invalid_json(err)), commit: false}
         if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
         kept := ran.guard_edit()
         kept.value = reply.copy()
         {response: app_json(200, reply), commit: !app_reply_failed(reply)}
     })
-    finished: endpoint.upload.files(calls.FileJob{step: .Finish}) ?? return answered
-    reply: last.guard_read()
-    if finished.status == 415 && app_reply_failed(reply.value) -> return app_json(415, reply.value)
-    answered
+}
+
+// The spool of an upload endpoint (`__route_add_admitted`): the server
+// streams an admitted body to a file staged for it as it reads it
+// (jet_builtins.FileStep.Open, Write and Abandon).
+priv app_upload_spool: fn(held: Shared<AppUploadEndpoint>) -> HTTPSpool Never! {
+    opens: held.copy()
+    writes: held.copy()
+    drops: held.copy()
+    HTTPSpool{
+        open: fn() { app_upload_step(opens, calls.FileJob{step: .Open}) },
+        write: fn(name: String, piece: [U8]) { app_upload_step(writes, calls.FileJob{step: .Write{name: name, piece: piece}}) != None },
+        abandon: fn(name: String) {
+            _: app_upload_step(drops, calls.FileJob{step: .Abandon(name)})
+        },
+    }
+}
+
+// One step of an upload endpoint's staging: the staged file's name when it
+// went through (only `Open` gives one), else None.
+priv app_upload_step: fn(held: Shared<AppUploadEndpoint>, job: calls.FileJob) -[Net, FS.Read]> String? Never! {
+    entry: held.guard_read()
+    done: entry.value.upload.files(job) ?? return None
+    if done.status != 200 -> return None
+    Val(done.staged)
 }
 
 // GET `{BLOB_PATH}/:id`: the blob to a caller that the read policy of a row

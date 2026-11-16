@@ -5992,11 +5992,30 @@ Each icon's address under `/__jet/icons/` holds a key of the icon file's
 bytes, its size and its fill, so it answers with
 `Cache-Control: public, max-age=31536000, immutable`, and an edited icon file
 gets new addresses. Every HTML page the app serves ends its `<head>` with
-`<link rel="manifest" href="/manifest.webmanifest">` and
-`<meta name="theme-color" content="#rrggbb">`. An empty name or icon path,
+`<link rel="manifest" href="/manifest.webmanifest">`,
+`<meta name="theme-color" content="#rrggbb">` and a script that registers
+the app's service worker. An empty name or icon path,
 or a color outside `0x000000..0xFFFFFF`, panics; an icon file that can't be
 read, or is no PNG or JPEG the image codec reads, stops the app before it
 serves. A program route at `/manifest.webmanifest` answers it instead.
+
+The service worker is GET `/sw.js` (`text/javascript`,
+`Cache-Control: no-cache`). It keeps the shell (`/`, the manifest and the
+icons) and every file under the app's first assets root, by its hashed
+name, in a cache named for what it holds; a changed file makes a new cache
+and the worker drops the old one. A page comes from the network and, when
+the server can't be reached, from the cache, and a navigation to an address
+the cache doesn't hold gets the cached `/`, so an installed app reloads
+offline into its shell. A hashed asset comes from the cache first. When the
+graph also queues (`graph.offline(.Queue)`), a POST under one of its
+services' paths that can't reach the server is kept, in order, in the
+browser's `jet-queue` cache under its `idempotency-key` (the worker makes
+one when the call has none) and answered 202 `{"queued":n}`, the number of
+writes waiting. The queue outlives reloads. The worker sends the waiting
+writes again, oldest first, before the next write, on each navigation, and
+on GET `/__jet/queue`, which answers `{"queued":n}` with the number still
+waiting; the server's idempotency keys make a write it already took count
+once. A program route at `/sw.js` answers it instead.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or
@@ -6057,11 +6076,14 @@ reads the body: 401 to an `#App.SignedIn` endpoint's call without a session,
 `max_upload` (1000000 bytes by default), 422 to arguments that don't decode,
 and 403 when the check fails. The check runs as the caller, so a check that
 reads a row runs its policy, and a caller it refuses never sends the body.
-Only then is the body read, at most `max_upload` bytes, and staged in a file
-under `.jet/uploads` before the method's transaction begins: a transaction
-that runs again reads the staged file again. The method gets
-`app.Upload{name, bytes}`, where `name` is the name the client sent, kept
-only as metadata.
+Only then is the body read, and the server streams it, as it reads it, to a
+file staged under `.jet/uploads`; it never holds the whole body. A chunked
+body gets 413 as soon as its next chunk would pass `max_upload`, before that
+chunk is read, and what was staged is dropped, as it is for a body the
+client stops sending. The file is staged before the method's transaction
+begins: a transaction that runs again reads the staged file again. The
+method gets `app.Upload{name, bytes}`, where `name` is the name the client
+sent, kept only as metadata.
 
 `blobs.keep(file, allow:)` stores the staged file under a 32-hex-digit
 `BlobID` it makes, never under the client's name, so `../../escape.png`

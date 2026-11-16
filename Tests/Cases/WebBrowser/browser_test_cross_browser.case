@@ -26,14 +26,14 @@ cwd: {work}/cross
 env: JET_PROJECT_ROOT={work}/cross
 env: JET_TEST_WEB_SERVER_URL=http://127.0.0.1:{free-port:app}/
 exit: 1
-stdout+stderr: ~ "browser cases run on every engine: FAIL"
+stdout+stderr: ~ "browser cases run on every engine: FAIL" # the test fails the run
 stdout+stderr: ~ "cross_test.jet:18:13: `banner` failed on chromium after 2 attempts: browser operation timed out" # the failing test's source position
-stdout+stderr: ~ "cross_test.jet:18:13: `banner` failed on firefox after 2 attempts: browser operation timed out"
+stdout+stderr: ~ "cross_test.jet:18:13: `banner` failed on firefox after 2 attempts: browser operation timed out" # one line per failing engine
 stdout+stderr: !~ "`greeting` failed" # the passing test reports nothing
 stdout+stderr: ~ "--> cross_test.jet:29" # Jet's diagnostic at the assertion
-file: cross/.jet/browser-tests/report.json ~ "\"summary\": \"1 passed, 1 failed, 0 skipped\""
-file: cross/.jet/browser-tests/report.json ~ "\"exitCode\": 1"
-file: cross/.jet/browser-tests/report.json ~ "\"engine\": \"firefox\",\n          \"attempt\": 1,\n          \"passed\": false"
+file: cross/.jet/browser-tests/report.json ~ "\"summary\": \"1 passed, 1 failed, 0 skipped\"" # the JSON report's summary
+file: cross/.jet/browser-tests/report.json ~ "\"exitCode\": 1" # the run's status
+file: cross/.jet/browser-tests/report.json ~ "\"engine\": \"firefox\",\n          \"attempt\": 1,\n          \"passed\": false" # each attempt on each engine
 step: jet test
 cwd: {work}/cross
 env: JET_PROJECT_ROOT={work}/cross
@@ -41,11 +41,11 @@ env: JET_TEST_WEB_SERVER_URL=http://127.0.0.1:{free-port:app}/
 env: JET_TEST_REPORTER=text
 env: JET_TEST_REPORT={work}/cross/report.txt
 exit: 1
-stdout+stderr: ~ "cross_test.jet:18:13: `banner` failed on chromium after 2 attempts: browser operation timed out"
-stdout+stderr: ~ "cross_test.jet:18:13: `banner` failed on firefox after 2 attempts: browser operation timed out"
-file: cross/report.txt ~ "Browser tests: 1 passed, 1 failed, 0 skipped"
-file: cross/report.txt ~ "FAIL banner [chromium] attempt=1"
-file: cross/report.txt ~ "FAIL banner [firefox] attempt=1"
+stdout+stderr: ~ "cross_test.jet:18:13: `banner` failed on chromium after 2 attempts: browser operation timed out" # the same failure on chromium
+stdout+stderr: ~ "cross_test.jet:18:13: `banner` failed on firefox after 2 attempts: browser operation timed out" # and on firefox
+file: cross/report.txt ~ "Browser tests: 1 passed, 1 failed, 0 skipped" # the text report's summary
+file: cross/report.txt ~ "FAIL banner [chromium] attempt=1" # a line per failed attempt
+file: cross/report.txt ~ "FAIL banner [firefox] attempt=1" # on each engine
 signal app: KILL
 wait: app
 exit: any # the server is killed

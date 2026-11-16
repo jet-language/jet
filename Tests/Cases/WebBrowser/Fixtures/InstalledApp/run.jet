@@ -1,0 +1,31 @@
+// An installable notes app whose device queues the writes it can't send.
+// `/` is its shell, styled by assets/app.css; `/notes` lists what the server
+// holds; POST `/api/add` adds a note. JET_APP_PORT overrides the port.
+use {
+    app
+    web: core.web
+}
+
+priv NOTES: Shared{[String]{}}
+
+Notes: struct {
+    // Adds the note `text`.
+    #App.Public add: fn(self, text: String) {
+        held := NOTES.guard_edit()
+        held.value.push(text.copy())
+    }
+}
+
+home: fn() -> WebPage {
+    web.page("Notes", "<link rel=\"stylesheet\" href=\"/assets/app.css\"><main><h1 id=\"shell\">Notes</h1></main>")
+}
+
+notes: fn() -> WebPage {
+    held: NOTES.guard_read()
+    web.page("Notes", "<p id=\"notes\">{held.value.join(", ")}</p>")
+}
+
+run: fn() {
+    _: app.new("Notes").api<Notes>("/api").installable(name: "Notes", icon: "brand/icon.png", color: 0x2a5bd7).offline(.Queue)
+    web.app().route("/", home).route("/notes", notes).mount("/api", Notes{}).assets("assets").serve(4173)
+}

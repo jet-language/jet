@@ -278,6 +278,10 @@ HTTPRequest: struct {
     // The second, since the Unix epoch, the server read the request at; 0 on
     // a client request.
     __received: Int{0}
+    // On a server, the name an admitted route's spool gave the place it
+    // streamed the request's body to (core.http.server `__route_add_admitted`);
+    // the request's own body is then empty. None on any other request.
+    __spooled: String?{None}
 
     method: fn(self) -> String Never! { self.method.copy() }
 

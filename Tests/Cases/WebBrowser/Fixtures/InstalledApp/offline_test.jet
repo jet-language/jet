@@ -1,0 +1,90 @@
+// The installed notes app on each configured browser. Its service worker
+// caches the shell and the hashed stylesheet the shell links. With the
+// server stopped, a reload still shows the styled shell. Two notes added
+// while offline are held in the worker's queue, which survives an offline
+// reload. Once the server is back, the worker sends them in order.
+use {
+    browser: core.browser
+    json: core.encoding.json
+}
+
+// Resolves once the worker controls the page.
+CONTROLLED: "navigator.serviceWorker.ready.then(() => navigator.serviceWorker.controller ? \"controlled\" : new Promise(done => navigator.serviceWorker.addEventListener(\"controllerchange\", () => done(\"controlled\"))))"
+
+// The paths the worker's caches hold, sorted, one space apart.
+CACHED: "caches.keys().then(names => Promise.all(names.map(name => caches.open(name).then(cache => cache.keys())))).then(lists => lists.flat().map(asked => new URL(asked.url).pathname).sort().join(\" \"))"
+
+LINKED: "document.querySelector(\"link[rel=stylesheet]\").getAttribute(\"href\")"
+
+COLOR: "getComputedStyle(document.querySelector(\"#shell\")).color"
+
+QUEUE: "fetch(\"/__jet/queue\").then(answer => answer.text())"
+
+// The status and body of the call that adds the note `text`.
+adding: fn(text: String) -> String {
+    "fetch(\"/api/add\", {{method: \"POST\", headers: {{\"content-type\": \"application/json\"}}, body: JSON.stringify([\"{text}\"])}}).then(answer => answer.text().then(body => answer.status + \" \" + body))"
+}
+
+#Test("the installed app reloads offline and holds its queue") {
+    config: browser.config() ?? panic("browser-tests.conf: {err}")
+    loop engine in config.engines() { assert_eq(visit(config, engine), "") }
+}
+
+// "" when `engine` shows the shell offline and holds then sends the queue,
+// else what went wrong.
+visit: fn(config: BrowserTestConfig, engine: String) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> String Never! {
+    server: browser.server_start(config) ?? return "the app is not serving {config.server_url()}: {err}"
+    defer server.stop()
+    url: server.url()
+    fixture: browser.begin_named(config, "the installed app reloads offline and holds its queue", engine, 0, "offline_test.jet", 28, 1) ?? return "{engine} did not start: {err}"
+    page: browser.fixture_page(fixture)
+    cdp: page.protocol("cdp") ?? return "{engine} has no CDP: {err}"
+    page.goto(url) ?? return "{engine} could not open {url}: {err}"
+    controlled: value(cdp, CONTROLLED) ?? return "the worker never controlled the page: {err}"
+    if controlled != "controlled" -> return "the worker gave `{controlled}`"
+    linked: value(cdp, LINKED) ?? return "the shell links no stylesheet: {err}"
+    if !linked.starts_with("/assets/app.") || linked == "/assets/app.css" {
+        return "the shell links `{linked}`, not the hashed stylesheet"
+    }
+    cached: value(cdp, CACHED) ?? return "the caches can't be read: {err}"
+    held: cached.split(" ").to_list()
+    loop path in ([String]{"/", "/manifest.webmanifest", linked}) {
+        if !held.contains(path) -> return "the worker's caches hold `{cached}`, not `{path}`"
+    }
+    server.stop()
+    page.goto(url) ?? return "offline, {url} did not reload: {err}"
+    shown: page.text() ?? return "offline, the page shows no text: {err}"
+    if !shown.contains("Notes") -> return "offline, the page shows `{shown}`, not the shell"
+    color: value(cdp, COLOR) ?? return "offline, the shell has no style: {err}"
+    if color != "rgb(42, 91, 215)" {
+        return "offline, the shell is `{color}`, not styled by the cached stylesheet"
+    }
+    first: value(cdp, adding("milk")) ?? return "offline, adding milk failed: {err}"
+    if first != "202 {{\"queued\":1}}" -> return "offline, adding milk gave `{first}`"
+    second: value(cdp, adding("eggs")) ?? return "offline, adding eggs failed: {err}"
+    if second != "202 {{\"queued\":2}}" -> return "offline, adding eggs gave `{second}`"
+    page.goto(url) ?? return "offline, the second reload failed: {err}"
+    kept: value(cdp, QUEUE) ?? return "offline, the queue can't be read: {err}"
+    if kept != "{{\"queued\":2}}" -> return "after an offline reload the queue is `{kept}`"
+    again: browser.server_start(config) ?? return "the app did not serve again: {err}"
+    defer again.stop()
+    sent: value(cdp, QUEUE) ?? return "online, the queue can't be read: {err}"
+    if sent != "{{\"queued\":0}}" -> return "online, the queue is `{sent}`"
+    page.goto("{url}notes") ?? return "online, {url}notes did not open: {err}"
+    listed: page.text() ?? return "online, the notes page shows no text: {err}"
+    again.stop()
+    if !listed.contains("milk, eggs") {
+        return "the server holds `{listed}`, not the queued notes in order"
+    }
+    ""
+}
+
+// The value the page's script `expression` gives, once it settles, as text:
+// the CDP answer's `result` is the session's reply, whose `result` is the
+// value.
+value: fn(cdp: BrowserProtocol, expression: String) -[Net, Time]> String BrowserError! {
+    asked: "{{\"expression\":{json.stringify(expression)},\"awaitPromise\":true,\"returnByValue\":true}}"
+    answer: cdp.send("Runtime.evaluate", asked) ?? return Err(err)
+    tree: json.parse(answer) ?? return Err(BrowserError{kind: "protocol"})
+    Ok(json.at<String>(tree, "/result/result/value") ?? return Err(BrowserError{kind: "protocol"}))
+}

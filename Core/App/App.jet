@@ -2370,6 +2370,18 @@ App: struct {
         held.value.install.copy()
     }
 
+    // The paths of the graph's services when it queues the writes it can't
+    // send (`.offline(.Queue)`), which a browser's service worker holds;
+    // none when it doesn't.
+    __queued_apis: fn(self) -> [String] Never! {
+        held: APP_GRAPH.guard_read()
+        paths := [String]{}
+        if held.value.offline != .Queue -> return paths
+        loop service in held.value.apis.keys() -> paths.push(held.value.apis[service].path.copy())
+        paths.sort()
+        paths
+    }
+
     // Opens `screen` at the address whose field texts are `fields`, by field
     // name, as a renderer does: the HTML of what its view shows, or None
     // when the texts make no state of the screen.
@@ -3317,9 +3329,12 @@ priv push_device_listed: fn(found: [PushDevice], device: PushDevice) -> Bool Nev
 // the query's `name`, and the method's other arguments as the JSON array of
 // the query's `args`. The server reads the request's head first, and refuses
 // it before it reads the body when the endpoint's check (`UploadCheck`)
-// fails or the body is over the size limit. It then stages the body in a file
-// under UPLOAD_STAGING before the call's transaction begins, so each run of
-// the transaction, a retry's too, keeps the same staged file (`Blobs.keep`).
+// fails or the body is over the size limit. It then streams the body, as it
+// reads it, to a file staged under UPLOAD_STAGING, never holding the whole
+// body; a chunked body is refused 413 before the chunk that would pass the
+// limit is read. All this happens before the call's transaction begins, so
+// each run of the transaction, a retry's too, keeps the same staged file
+// (`Blobs.keep`).
 // When the request ends, the staged file is removed, and so is each blob that
 // a run kept and then rolled back. The compiler writes the lambda that runs
 // each of these steps (`FileJob.run`) where the service is mounted, so the
@@ -3455,7 +3470,10 @@ priv FileJob: struct {
 // Runs one file step of an upload endpoint (`FileJob`).
 priv file_steps: fn(step: builtin.FileStep) -[FS, DB.Read]> builtin.FileDone Never! {
     if step == {
-        .Stage(body) -> uploads_stage(body)
+        .Open -> uploads_open()
+        .Write(name, piece) -> uploads_write(name, piece)
+        .Abandon(name) -> uploads_abandon(name)
+        .Claim(name) -> uploads_claim(name)
         .Finish -> uploads_finish()
         .Serve(id) -> blobs_serve(id)
         .Clean -> {
@@ -3469,15 +3487,68 @@ priv file_done: fn(status: Int) -> builtin.FileDone Never! {
     builtin.FileDone{status: status, body: [U8]{}, media: ""}
 }
 
-// Stages `body` for the request this task answers.
-priv uploads_stage: fn(body: [U8]) -[FS.Write]> builtin.FileDone Never! {
+// Stages an empty file for a request whose body the server is about to
+// read, and gives its name.
+priv uploads_open: fn() -[FS.Write]> builtin.FileDone Never! {
     files.create_dir_all(UPLOAD_STAGING) ?? return file_done(500)
-    path: "{UPLOAD_STAGING}/{blob_id()}"
-    files.write_bytes(path, body) ?? return file_done(500)
-    staged: StagedUpload{task: tasks.current_task(), path: path, bytes: body.len(), head: blob_head(body), kept: [KeptBlob]{}, refused: false}
+    name: blob_id()
+    path: "{UPLOAD_STAGING}/{name}"
+    files.write_bytes(path, [U8]{}) ?? return file_done(500)
+    staged: StagedUpload{task: tasks.current_task(), path: path, bytes: 0, head: [U8]{}, kept: [KeptBlob]{}, refused: false}
     held := BLOBS.guard_edit()
     held.value.staged.push(staged)
+    builtin.FileDone{status: 200, body: [U8]{}, media: "", staged: name}
+}
+
+// Appends `piece`, the next bytes of a body, to the staged file `name`, and
+// keeps the first BLOB_HEAD bytes, which tell what the file is.
+priv uploads_write: fn(name: String, piece: [U8]) -[FS.Write]> builtin.FileDone Never! {
+    if !blob_id_valid(name) -> return file_done(404)
+    path: "{UPLOAD_STAGING}/{name}"
+    writer := files.append(path) ?? return file_done(500)
+    writer.write_bytes(piece) ?? return file_done(500)
+    writer.flush() ?? return file_done(500)
+    held := BLOBS.guard_edit()
+    loop index in 0..<held.value.staged.len() {
+        if held.value.staged[index].path == path {
+            held.value.staged[index].bytes += piece.len()
+            loop byte in piece {
+                if held.value.staged[index].head.len() >= BLOB_HEAD -> break
+                held.value.staged[index].head.push(byte)
+            }
+            return file_done(200)
+        }
+    }
+    file_done(404)
+}
+
+// Removes the staged file `name`, whose request ended before its body did.
+priv uploads_abandon: fn(name: String) -[FS.Write]> builtin.FileDone Never! {
+    if !blob_id_valid(name) -> return file_done(404)
+    path: "{UPLOAD_STAGING}/{name}"
+    held := BLOBS.guard_edit()
+    loop index in 0..<held.value.staged.len() {
+        if held.value.staged[index].path == path {
+            _: held.value.staged.remove(index, .Slot)
+            break
+        }
+    }
+    files.remove(path).drop("a staged file that can't be removed waits for the next start")
     file_done(200)
+}
+
+// Hands the staged file `name` to the request this task answers, and gives
+// its size.
+priv uploads_claim: fn(name: String) -> builtin.FileDone Never! {
+    path: "{UPLOAD_STAGING}/{name}"
+    held := BLOBS.guard_edit()
+    loop index in 0..<held.value.staged.len() {
+        if held.value.staged[index].path == path {
+            held.value.staged[index].task = tasks.current_task()
+            return builtin.FileDone{status: 200, body: [U8]{}, media: "", bytes: held.value.staged[index].bytes}
+        }
+    }
+    file_done(404)
 }
 
 // Removes the files a stopped server left staged, once per process.

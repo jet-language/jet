@@ -1,0 +1,105 @@
+// An upload streams to storage, and a body over the api's `max_upload` is
+// answered 413 before it is read. The app graph allows the `Notes` service 64
+// bytes a call. A sender announcing 100 bytes, who sends none of them, is
+// answered 413 at once. So is a chunked sender, once a chunk would pass the
+// limit: the server answers before it reads that chunk, and drops what it
+// staged. A 40-byte note sent in two halves is on disk after the first half,
+// before the second is sent: the server never holds the body whole. The
+// call keeps all 40 bytes, and nothing stays staged once the request ends.
+use {
+    app
+    files: core.files
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+#Error
+NoteError: enum {
+    Closed
+}
+
+Notes: struct {
+    shelf: app.Blobs
+
+    // Keeps a text note.
+    #[App.Public, App.UploadCheck(method: "may_add")]
+    add: fn(self, file: app.Upload) -[FS.Write]> String app.BlobError! {
+        blob: self.shelf.keep(file, allow: [app.Media]{app.Media.Text}) ?? return Err(err)
+        Ok("{file.name}, {blob.bytes} bytes")
+    }
+
+    // add's check: the board is always open.
+    may_add: fn(self) NoteError! { Ok() }
+}
+
+CRLF: "\r\n"
+
+// A connection that has sent the head of a POST of the note `name`, with the
+// framing field `framing`.
+posting: fn(addr: String, name: String, framing: String) -> TCPStream NetError! {
+    stream := net.tcp_connect(addr) ?? return Err(err)
+    head: "POST /api/add?args=%5B%5D&name={name} HTTP/1.1{CRLF}Host: {addr}{CRLF}{framing}{CRLF}Connection: close{CRLF}{CRLF}"
+    stream.write_bytes(head.bytes()) ?? return Err(err)
+    Ok(stream)
+}
+
+// The answer's status line and body, read within five seconds.
+answer: fn(stream: &TCPStream) -> String {
+    got := [U8]{}
+    loop _ in 0..<20 {
+        more: stream.read_bytes(8192, deadline: time.duration_ms(5000)) ?? break
+        if more.len() == 0 -> break
+        loop b in more -> got.push(b)
+    }
+    text: String.from_bytes(got) ?? return "an answer that is not text"
+    parts: text.partition("{CRLF}{CRLF}")
+    "{parts.head.partition(CRLF).head} {parts.tail}".trim()
+}
+
+// The files staged now, as their sizes.
+staged: fn() -> [Int] {
+    sizes := [Int]{}
+    found: files.list_dir(".jet/uploads") ?? return sizes
+    loop entry in found {
+        stat: files.stat(entry.path) ?? next
+        sizes.push(stat.size)
+    }
+    sizes
+}
+
+// The staged sizes once one file holds `bytes` bytes, waiting up to five
+// seconds.
+staged_holding: fn(bytes: Int) -> [Int] {
+    loop _ in 0..<50 {
+        sizes: staged()
+        if sizes.contains(bytes) -> return sizes
+        time.sleep(time.duration_ms(100))
+    }
+    staged()
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    _: app.new("Notes").api<Notes>("/api", max_upload: 64)
+    served: web.app().mount("/api", Notes{shelf: app.blobs("notes")})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<3 { served.serve_once(listener) }
+    }
+    announced := posting(addr, "big.txt", "Content-Length: 100") ?? return Err(err)
+    print("announces 100 bytes: {answer(announced)}")
+    print("staged: {staged()}")
+    chunked := posting(addr, "chunks.txt", "Transfer-Encoding: chunked") ?? return Err(err)
+    chunked.write_bytes("20{CRLF}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{CRLF}40{CRLF}".bytes()) ?? return Err(err)
+    print("a chunk passes 64 bytes: {answer(chunked)}")
+    print("staged: {staged()}")
+    note: "a note of forty bytes sent in two parts\n"
+    sending := posting(addr, "note.txt", "Content-Length: {note.len()}") ?? return Err(err)
+    sending.write_bytes(note.bytes().slice(0, 20)) ?? return Err(err)
+    print("staged after the first half: {staged_holding(20)}")
+    sending.write_bytes(note.bytes().slice(20, note.len())) ?? return Err(err)
+    print("the note: {answer(sending)}")
+    serving.join()
+    print("staged after: {staged()}")
+}
