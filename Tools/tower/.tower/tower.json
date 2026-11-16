@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108550,
+    "rev": 108552,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -106486,6 +106486,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "Rulings (Main, 2026-11-16 06:00). The offline queue surface is the proposal's .offline(.Queue) on the client graph; no app.offline_queue(path) free function (a second spelling, I8). c4-c7's client half waits on the graph and its card (Speed-3-2 to name it). c5 waits on #6818: the queue sends no session until #6818's native session design exists. Marking an ID type (Core app.ID with a bare UUIDv7 codec, or a marker on a distinct String) is new public API: an owner ballot that Main files, with neither spelling built meanwhile. Built now without a ruling: c6's server half (app.new_id() UUIDv7; Table.add answers Exists only when the caller may read the taken row, otherwise Denied). Queued for p215: c2 request keys (Speed-3-request-keys) and the server-side signed-in caller (Speed-3-signed-in-caller, a dependency of c5-c7)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "State on dev 78f4541780 (Speed-3-2 survey): c9's grep matches Docs/research/2026-11-15-sync-partial-bootstrap-and-local-only.md, but the note is a fifth draft whose own status needs a fifth adversarial review before anything is built, and review 4, which it cites, is not in Docs/audits; c9 stays open. c1 and c3-c7 are blocked by no ballot but need unbuilt parts: the offline client queue (.offline(.Queue)); a signed-in caller over HTTP (#App.SignedIn endpoints answer 401 today); a browser runtime with IndexedDB and Web Locks; and the frame's notice list. c2 (request keys) is in progress (Speed-3-2)."
         }
       ],
@@ -106584,7 +106589,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:09.432Z",
-      "updated": "2026-11-16T10:03:57.566Z",
+      "updated": "2026-11-16T10:40:39.234Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -220172,6 +220177,20 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T10:41:03.568Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0qml9pv",
+      "note": "Cycle p214: 11 landings, 7 criteria met, 2 regressions sent back"
+    },
+    {
+      "at": "2026-11-16T10:40:39.234Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m0czk2",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-16T10:40:15.912Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -225162,6 +225181,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0qml9pv",
+      "title": "Cycle p214: 11 landings, 7 criteria met, 2 regressions sent back",
+      "body": "# Cycle p214: 11 landings, 7 criteria met, 2 regressions sent back\n\n**Landed on dev** (78f4541780 → aa8715dacd; master carries it):\n\n| Area | Commits | Card |\n|---|---|---|\n| Core enums in Core sources: PluginError/PluginLimit, IOOperation, ProcessResourceLimit, CasePayload reads | 3f, 3g, casepayload, 3h (0bcfa02ff8) | G6 #3147 n15 step 3 |\n| A method-less trait value prints and interpolates as its concrete value | 1e6bb8daf2 | G6 #6845 c15 |\n| reflect.of on a trait value gives the user's type name and path, a builtin implementer included | 26ac9d9275 | G6 #6845 c16 |\n| An inline-module struct prints with its declared name | 50d75d6587 | G6 #6845 c17 |\n| Markers are PascalCase only: no `#allow` / `#wire` | aa8715dacd | G6 #6849 c11 |\n| E0209 arrow snapshot; a `None` that needs context reports the ambiguity first | Speed-3-2 | G9 |\n| The Any adversarial review (D-PRIM-ANY1) | 7332cb8bd7 | G6 #3838 |\n\n**Met:** #6845 c15, c16, c17; #6849 c11; #3147 c11 and c15. GoalsA found that c11 and c15 already held on dev; Main reran both proofs on p214.\n\n**Suites against p213:** core 2,499/0; golden 1 failure, a CBind flake that passes alone; 3 new case failures, of which one is a flake that passes alone (the C-programs link case). Two are real:\n- `truthfulness/audit_reports_list_findings_without_a_disposition`: Main's own Any audit had no disposition table. The fix, a table naming each finding's card and an updated golden, is queued as Main-any-audit-dispositions.\n- `authority/plugin_failure_propagation_records_the_host_call_line_on_all_tiers`: SIGSEGV since 3h. Sent to GoalsA-1-4 as its top priority.\n\n**Decisions:**\n- #6867 (G9): the offline queue is the proposal's `.offline(.Queue)` on the client graph, with no free-function spelling. c5 waits on #6818. Marking an ID type goes to an owner ballot. c6's server half (`app.new_id()`, Table.add Exists or Denied) is being built.\n- Diagnostic codes: E1022 goes to PrecompiledCore-4 (#6847 c6) and E1023 to DeclTypes-6-1 (#6849 c10, renumbered from a collision).\n\n**TitleCase (#6733):** the cutover is regenerated on aa8715dacd, after the first validation's roots were fixed in the scripts (fixture contents and battery folders are exempt, the test-data rewrite rules are narrowed, the guard lists are in byte order). The full validation runs now, as the heavy job.\n\n**Next:** if the cutover validates clean, it lands and the queued SUBs are translated onto it. Then p215 lands 15 queued SUBs: PC4 drop slot, drop delivery, realtime closure and host target (#6847 c8); DeclTypes inline census (#6979 c1), marker hygiene (#6849 c9) and qualified markers (c10); Speed's route set, push-open, request keys (#6867 c2) and signed-in caller; GoalsA's outcome cases (#3147 c22–c24) and reflection-size cells (c16); and the audit fix.\n",
+      "by": "Main",
+      "created": "2026-11-16T10:41:03.567Z",
+      "sections": []
+    },
     {
       "id": "briefing0plzhyf",
       "title": "Cycle p213: 24 landings, 5 criteria met, 3 regressions sent back",
