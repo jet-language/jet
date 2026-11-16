@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 109250,
+    "rev": 109275,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93552,48 +93552,48 @@
         },
         {
           "n": 4,
-          "text": "There is one canonical Core sandbox API: Foundation NativeSandbox.jet (tooling: arbitrary source, output and read-only mounts) and Core ProcessSpec.under (cwd-derived repository grants) become one implementation with one policy and no observable differences. The API shape is the ballot D-SANDBOX-API1, on Main's ballot list (2026-11-15). Proof: git grep finds one sandbox policy implementation, and `jet test Compiler --profile cases --filter authority/sandbox_policy_single_home` passes.",
+          "text": "There is one canonical Core sandbox API: Foundation NativeSandbox.jet (tooling: arbitrary source, output and read-only mounts) and Core ProcessSpec.under (cwd-derived repository grants) become one implementation with one policy and no observable differences. The API shape is the ballot D-SANDBOX-API1, on Main's ballot list (2026-11-15). Proof: git grep finds one sandbox policy implementation, and `jet test Compiler --profile cases --filter Authority/sandbox_policy_single_home` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T11:34:00.508Z"
+          "at": "2026-11-16T13:03:21.253Z"
         },
         {
           "n": 5,
-          "text": "A process spec's `.under(grant)` narrows authority through the shared runtime (`jet_std_process_spec_under` is registered). Proof: `jet test Compiler --profile golden --filter under_fx_boundary`.",
+          "text": "A process spec's `.under(grant)` narrows authority through the shared runtime (`jet_std_process_spec_under` is registered). Proof: `jet test Compiler --profile golden --filter UnderFxBoundary`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:55.595Z"
+          "at": "2026-11-16T13:03:22.170Z"
         },
         {
           "n": 6,
-          "text": "Declared filesystem, process, network, environment, device and resource policy is enforced and recorded by the platform backend: a child runs under the native sandbox (Jetpack/Foundation/Source/NativeSandbox.jet, SandboxPolicy.jet) with a declared policy, each denied access fails, and the recorded policy matches. Proof: `jet test Compiler --profile cases --filter authority/native_sandbox_policy_enforced` on Linux.",
+          "text": "Declared filesystem, process, network, environment, device and resource policy is enforced and recorded by the platform backend: a child runs under the native sandbox (Jetpack/Foundation/Source/NativeSandbox.jet, SandboxPolicy.jet) with a declared policy, each denied access fails, and the recorded policy matches. Proof: `jet test Compiler --profile cases --filter Authority/native_sandbox_policy_enforced` on Linux.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:56.724Z"
+          "at": "2026-11-16T13:03:23.084Z"
         },
         {
           "n": 7,
-          "text": "A launch's plan, transaction, descendants, limits, outputs and receipt share one policy digest and record the authority actually enforced. Proof: `jet test Compiler --profile cases --filter agent_executor/policy_digest_shared` on Linux.",
+          "text": "A launch's plan, transaction, descendants, limits, outputs and receipt share one policy digest and record the authority actually enforced. Proof: `jet test Compiler --profile cases --filter AgentExecutor/policy_digest_shared` on Linux.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:57.616Z"
+          "at": "2026-11-16T13:03:23.987Z"
         },
         {
           "n": 8,
-          "text": "Unsupported enforcement, denied access, an escape attempt, limit exhaustion, cancellation and child-process abuse each fail closed, with no leaked handle, secret or process. Proof: `jet test Compiler --profile cases --filter agent_executor/fails_closed_`, one case per failure on Linux.",
+          "text": "Unsupported enforcement, denied access, an escape attempt, limit exhaustion, cancellation and child-process abuse each fail closed, with no leaked handle, secret or process. Proof: `jet test Compiler --profile cases --filter AgentExecutor/fails_closed_`, one case per failure on Linux.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:58.504Z"
+          "at": "2026-11-16T13:03:24.912Z"
         }
       ],
       "refs": [],
@@ -93604,7 +93604,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T18:43:54.516Z",
-      "updated": "2026-11-16T13:03:19.950Z",
+      "updated": "2026-11-16T13:03:24.912Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -93682,12 +93682,12 @@
         },
         {
           "n": 5,
-          "text": "Every binary64 core.math function is correctly rounded, matching MPFR bits on a committed corpus with the CORE-MATH hard cases, the musl libc-test vectors and special values, on O0, O1, O2 and web, with no host libm and no fused operations. Proof: `jet test Compiler --profile cases --filter math/f64_mpfr_corpus`.",
+          "text": "Every binary64 core.math function is correctly rounded, matching MPFR bits on a committed corpus with the CORE-MATH hard cases, the musl libc-test vectors and special values, on O0, O1, O2 and web, with no host libm and no fused operations. Proof: `jet test Compiler --profile cases --filter Math/f64_mpfr_corpus`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:46:31.490Z"
+          "at": "2026-11-16T13:03:25.905Z"
         },
         {
           "n": 8,
@@ -93709,12 +93709,12 @@
         },
         {
           "n": 10,
-          "text": "core.math's elementary functions accept F32 and return F32 at the same width: the Float-only source facade (Core/Math/Math.jet, e.g. `sin: fn(n: Float)`) gains the F32 forms the old sema accepted, with no widening. Proof: `jet test Compiler --profile cases --filter corelib/math_f32_same_width`.",
+          "text": "core.math's elementary functions accept F32 and return F32 at the same width: the Float-only source facade (Core/Math/Math.jet, e.g. `sin: fn(n: Float)`) gains the F32 forms the old sema accepted, with no widening. Proof: `jet test Compiler --profile cases --filter CoreLib/math_f32_same_width`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:21.446Z"
+          "at": "2026-11-16T13:03:26.982Z"
         },
         {
           "n": 11,
@@ -93748,8 +93748,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-15T05:46:55.312Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T13:03:26.982Z",
+      "updatedBy": "Main",
       "criteriaLastN": 12
     },
     {
@@ -93903,21 +93903,21 @@
         },
         {
           "n": 2,
-          "text": "Safe Jet: programs using ui need no #Unsafe and Core/Ui (the Wayland client included) contains none; AF_UNIX connect, fd passing over SCM_RIGHTS as owned typed fds, a bounds-checked shared-memory buffer unmapped on drop, and poll are safe typed Core APIs whose single vetted edge is in the runtime (owner 2026-11-08). Proof: `git grep -n '#Unsafe' -- Core/Ui` prints nothing and `jet test Compiler --profile golden --filter Ui/WaylandWindow`.",
+          "text": "Safe Jet: programs using ui need no #Unsafe and Core/UI (the Wayland client included) contains none; AF_UNIX connect, fd passing over SCM_RIGHTS as owned typed fds, a bounds-checked shared-memory buffer unmapped on drop, and poll are safe typed Core APIs whose single vetted edge is in the runtime (owner 2026-11-08). Proof: `git grep -n '#Unsafe' -- Core/UI` prints nothing and `jet test Compiler --profile golden --filter UI/WaylandWindow`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:48:06.845Z"
+          "at": "2026-11-16T13:03:28.061Z"
         },
         {
           "n": 3,
-          "text": "One implementation (owner 2026-11-08: \"keep one implementation and just have it adapt to underlying linux\"): one window, frame, buffer, input, XKB keymap, renderer and event-loop model, and each display server is a thin wire adapter chosen from the environment. Proof: `jet test Compiler --profile cases --filter ui/display_adapter_selection`.",
+          "text": "One implementation (owner 2026-11-08: \"keep one implementation and just have it adapt to underlying linux\"): one window, frame, buffer, input, XKB keymap, renderer and event-loop model, and each display server is a thin wire adapter chosen from the environment. Proof: `jet test Compiler --profile cases --filter UI/display_adapter_selection`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:48:07.718Z"
+          "at": "2026-11-16T13:03:29.186Z"
         },
         {
           "n": 4,
@@ -93948,12 +93948,12 @@
         },
         {
           "n": 7,
-          "text": "The same Jet app runs as a native window and as a web app with identical behaviour and pixels: layout, style, drawing, text shaping and rasterization, input and event model, and frame are each one Jet implementation, and each target only presents and marshals (owner 2026-11-08). Proof: `jet test Compiler --profile golden --filter Ui/NativeWebParity` compares native and web images pixel for pixel and replays one event script on both.",
+          "text": "The same Jet app runs as a native window and as a web app with identical behaviour and pixels: layout, style, drawing, text shaping and rasterization, input and event model, and frame are each one Jet implementation, and each target only presents and marshals (owner 2026-11-08). Proof: `jet test Compiler --profile golden --filter UI/NativeWebParity` compares native and web images pixel for pixel and replays one event script on both.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:48:09.578Z"
+          "at": "2026-11-16T13:03:30.135Z"
         },
         {
           "n": 8,
@@ -93966,66 +93966,66 @@
         },
         {
           "n": 9,
-          "text": "A dated adversarial review in Docs/audits compares Jet native windows with SDL3, GLFW, winit and GTK4 on one program (open a 2560x1440 window, draw a frame, answer keys, resize, close), each built and run on this host: time to first frame, key-to-present latency p50 and p99, idle CPU, peak RSS, binary size and source lines, and the features each has that Jet lacks; every claim ends holds, holds within limits, or fails, and each gap becomes a criterion on this card. Proof: `git ls-files Docs/audits | grep -i native-windows` names the review.",
+          "text": "A dated adversarial review in Docs/Audits compares Jet native windows with SDL3, GLFW, winit and GTK4 on one program (open a 2560x1440 window, draw a frame, answer keys, resize, close), each built and run on this host: time to first frame, key-to-present latency p50 and p99, idle CPU, peak RSS, binary size and source lines, and the features each has that Jet lacks; every claim ends holds, holds within limits, or fails, and each gap becomes a criterion on this card. Proof: `git ls-files Docs/Audits | grep -i native-windows` names the review.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:48:10.463Z"
+          "at": "2026-11-16T13:03:31.059Z"
         },
         {
           "n": 10,
-          "text": "Wayland is full-featured: multiple windows, resize, HiDPI scale, pointer, keyboard with layouts and repeat, text input, clipboard, cursor shapes, decorations and fullscreen. Proof: `jet test Compiler --profile cases --filter ui/wayland_` against the headless compositor fixture.",
+          "text": "Wayland is full-featured: multiple windows, resize, HiDPI scale, pointer, keyboard with layouts and repeat, text input, clipboard, cursor shapes, decorations and fullscreen. Proof: `jet test Compiler --profile cases --filter UI/wayland_` against the headless compositor fixture.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:48:00.382Z"
+          "at": "2026-11-16T13:03:32.035Z"
         },
         {
           "n": 11,
-          "text": "An X11 wire adapter runs the same window, input and frame implementation as Wayland, with the same golden output. Proof: `jet test Compiler --profile cases --filter ui/x11_` against an Xvfb fixture.",
+          "text": "An X11 wire adapter runs the same window, input and frame implementation as Wayland, with the same golden output. Proof: `jet test Compiler --profile cases --filter UI/x11_` against an Xvfb fixture.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:48:01.362Z"
+          "at": "2026-11-16T13:03:32.957Z"
         },
         {
           "n": 12,
-          "text": "The ui subsystem (D-GAME-PLATFORM1=A; the owner renamed ray to ui on 2026-11-08) uses one shared input, atlas decode, sprite draw and transcript model for keyboard and gamepad state, with deterministic headless rendering that matches on O0, O1, O2, compile time and web where applicable; the native window adapter reads the same facts. Proof: `jet test Compiler --profile golden --filter Ui/Headless` on every tier. (was #5035 c19)",
+          "text": "The ui subsystem (D-GAME-PLATFORM1=A; the owner renamed ray to ui on 2026-11-08) uses one shared input, atlas decode, sprite draw and transcript model for keyboard and gamepad state, with deterministic headless rendering that matches on O0, O1, O2, compile time and web where applicable; the native window adapter reads the same facts. Proof: `jet test Compiler --profile golden --filter UI/Headless` on every tier. (was #5035 c19)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:12:50.461Z"
+          "at": "2026-11-16T13:03:33.926Z"
         },
         {
           "n": 13,
-          "text": "A Doom-style program on the static Linux target opens a window, presents a 320x200 8-bit indexed framebuffer through a 256-entry palette at 35 Hz, reads keyboard input, and plays a PCM sound effect, as an example with golden output; the platform layer follows the ratified D-RAYLIB-DRIVER-LOAD1 (speak the display and sound protocols directly, stay static). Today Compiler/JetRuntime/Source/RouteAGame.jet:1-8 opens no window and input is inert (window_should_close is true at :25), Core/Game/Raylib.jet:768-775 play_sound only checks the path, and the only present path is __fill_rect runs (Raylib.jet:819-821). Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea). Proof: `jet test Compiler --profile golden --filter game/doom_style_window` on the static Linux target with the headless recorder. (was #5035 c21)",
+          "text": "A Doom-style program on the static Linux target opens a window, presents a 320x200 8-bit indexed framebuffer through a 256-entry palette at 35 Hz, reads keyboard input, and plays a PCM sound effect, as an example with golden output; the platform layer follows the ratified D-RAYLIB-DRIVER-LOAD1 (speak the display and sound protocols directly, stay static). Today Compiler/JetRuntime/Source/RouteAGame.jet:1-8 opens no window and input is inert (window_should_close is true at :25), Core/Game/Raylib.jet:768-775 play_sound only checks the path, and the only present path is __fill_rect runs (Raylib.jet:819-821). Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea). Proof: `jet test Compiler --profile golden --filter Game/DoomStyleWindow` on the static Linux target with the headless recorder. (was #5035 c21)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:12:51.636Z"
+          "at": "2026-11-16T13:03:34.868Z"
         },
         {
           "n": 14,
-          "text": "D-GAME-PLATFORM1=A is built: two independent subsystems shared by games and apps: ui (windows, frames, present(pixels, palette) and present(rgba), immediate-mode drawing, per-window events, gamepads) and audio (open(rate), queue(samples), queued(), a mixer with voices and buses); several windows and outputs per program; ui.headless and audio.headless record checksums; core.game composes them with no device code; Core/Game/Raylib.jet is deleted (owner 2026-11-08: no raylib naming anywhere). Proof: `git ls-files Core | grep -i raylib` prints nothing and `jet test Compiler --profile golden --filter Ui/` and `--filter Audio/` pass on O0, O1 and O2. (was #5035 c22)",
+          "text": "D-GAME-PLATFORM1=A is built: two independent subsystems shared by games and apps: ui (windows, frames, present(pixels, palette) and present(rgba), immediate-mode drawing, per-window events, gamepads) and audio (open(rate), queue(samples), queued(), a mixer with voices and buses); several windows and outputs per program; ui.headless and audio.headless record checksums; core.game composes them with no device code; Core/Game/Raylib.jet is deleted (owner 2026-11-08: no raylib naming anywhere). Proof: `git ls-files Core | grep -i raylib` prints nothing and `jet test Compiler --profile golden --filter UI/` and `--filter Audio/` pass on O0, O1 and O2. (was #5035 c22)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:12:52.706Z"
+          "at": "2026-11-16T13:03:35.914Z"
         },
         {
           "n": 15,
-          "text": "Backends expose typed capability interfaces with headless and native ui providers (D-GAME-BACKEND1=A; no raylib, owner 2026-11-08), and an unsupported capability fails at startup, not mid-frame. Proof: `jet test Compiler --profile cases --filter game/backend_capability_missing`. (was #5035 c24)",
+          "text": "Backends expose typed capability interfaces with headless and native ui providers (D-GAME-BACKEND1=A; no raylib, owner 2026-11-08), and an unsupported capability fails at startup, not mid-frame. Proof: `jet test Compiler --profile cases --filter Game/backend_capability_missing`. (was #5035 c24)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:12:53.706Z"
+          "at": "2026-11-16T13:03:36.855Z"
         }
       ],
       "refs": [],
@@ -94040,7 +94040,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-16T01:12:53.706Z",
+      "updated": "2026-11-16T13:03:36.855Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -94071,12 +94071,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every runtime syscall leaf carries a machine-checkable contract: precondition, postcondition, and frame (which bytes and fds it may touch, with no arithmetic overflow). Proof: `jet test tests/guards --filter runtime_leaf_contracts_complete`.",
+          "text": "Every runtime syscall leaf carries a machine-checkable contract: precondition, postcondition, and frame (which bytes and fds it may touch, with no arithmetic overflow). Proof: `jet test Tests/Guards --filter runtime_leaf_contracts_complete`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:45:14.526Z"
+          "at": "2026-11-16T13:03:37.806Z"
         },
         {
           "n": 2,
@@ -94098,21 +94098,21 @@
         },
         {
           "n": 4,
-          "text": "`--checked-alloc` keeps a shadow ledger of open fds and mappings and checks every leaf call against it (owned and open, in range, not after close), and the cases and golden suites pass in this mode. Proof: `jet test Compiler --profile cases --filter checked_alloc/fd_ledger_` and a committed receipt of the cases and golden suites under --checked-alloc.",
+          "text": "`--checked-alloc` keeps a shadow ledger of open fds and mappings and checks every leaf call against it (owned and open, in range, not after close), and the cases and golden suites pass in this mode. Proof: `jet test Compiler --profile cases --filter CheckedAlloc/fd_ledger_` and a committed receipt of the cases and golden suites under --checked-alloc.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:45:17.795Z"
+          "at": "2026-11-16T13:03:38.761Z"
         },
         {
           "n": 5,
-          "text": "Drift gates: the unsafe-site ratchet can only fall, every leaf has a contract and a proof record, and `jet audit foreign` stays clean. Proof: `jet test tests/guards --filter unsafe_site_ratchet` and `jet audit foreign` exits 0.",
+          "text": "Drift gates: the unsafe-site ratchet can only fall, every leaf has a contract and a proof record, and `jet audit foreign` stays clean. Proof: `jet test Tests/Guards --filter unsafe_site_ratchet` and `jet audit foreign` exits 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:45:18.802Z"
+          "at": "2026-11-16T13:03:39.740Z"
         },
         {
           "n": 6,
@@ -94143,12 +94143,12 @@
         },
         {
           "n": 9,
-          "text": "A dated adversarial review in Docs/audits tries to break the claim that the runtime OS edge is proven, and passes before any public text makes that claim (AGENTS.md). Proof: `git ls-files Docs/audits` lists the review, and git grep finds no public claim older than it.",
+          "text": "A dated adversarial review in Docs/Audits tries to break the claim that the runtime OS edge is proven, and passes before any public text makes that claim (AGENTS.md). Proof: `git ls-files Docs/Audits` lists the review, and git grep finds no public claim older than it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:44:57.409Z"
+          "at": "2026-11-16T13:03:40.710Z"
         }
       ],
       "refs": [],
@@ -94163,8 +94163,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T20:10:18.606Z",
-      "updated": "2026-11-15T04:45:21.693Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T13:03:40.710Z",
+      "updatedBy": "Main",
       "criteriaLastN": 9
     },
     {
@@ -94260,12 +94260,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A same-program comparison table, recorded with its commit and commands, covers Jet and each alternative on: presented-interval p50/p99 and missed frames at the display's refresh (idle and under a full-machine load), input-to-photon latency, CPU time per frame and wakeups per second, time to first presented frame, RSS and binary size. Proof: `git ls-files \"Docs/audits/*wayland-stack*\"` names the committed table.",
+          "text": "A same-program comparison table, recorded with its commit and commands, covers Jet and each alternative on: presented-interval p50/p99 and missed frames at the display's refresh (idle and under a full-machine load), input-to-photon latency, CPU time per frame and wakeups per second, time to first presented frame, RSS and binary size. Proof: `git ls-files \"Docs/Audits/*wayland-stack*\"` names the committed table.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:35:26.124Z"
+          "at": "2026-11-16T13:03:41.627Z"
         },
         {
           "n": 2,
@@ -94287,12 +94287,12 @@
         },
         {
           "n": 4,
-          "text": "The Jet xkb keymap matches libxkbcommon on the oracle and beats it on keymap compile time (compositor keymap fd to ready Keymap), per-key cost and memory, or each loss has its own card. Proof: `jet test Compiler --profile cases --filter xkb/oracle_matches_libxkbcommon` and the timing rows of the committed table.",
+          "text": "The Jet xkb keymap matches libxkbcommon on the oracle and beats it on keymap compile time (compositor keymap fd to ready Keymap), per-key cost and memory, or each loss has its own card. Proof: `jet test Compiler --profile cases --filter Xkb/oracle_matches_libxkbcommon` and the timing rows of the committed table.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:35:28.955Z"
+          "at": "2026-11-16T13:03:42.570Z"
         }
       ],
       "refs": [],
@@ -94303,8 +94303,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T21:10:33.514Z",
-      "updated": "2026-11-15T05:35:28.955Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T13:03:42.570Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0vwlomv",
@@ -94338,21 +94338,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A safe borrowed view of a mapped file never observes a byte change made by another process after the borrow, on every applicable tier. Proof: `jet test Compiler --profile cases --filter files/map_view_stable_against_external_write`.",
+          "text": "A safe borrowed view of a mapped file never observes a byte change made by another process after the borrow, on every applicable tier. Proof: `jet test Compiler --profile cases --filter Files/map_view_stable_against_external_write`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:46:07.588Z"
+          "at": "2026-11-16T13:03:43.536Z"
         },
         {
           "n": 2,
-          "text": "Another process truncates and rewrites a mapped file during safe access, and the program keeps reading the bytes it mapped (including past the new end) with no SIGBUS or other fault and no change visible through the map, on every applicable tier (D-MMAP-STABLE1=A). Proof: `jet test Compiler --profile cases --filter files/map_survives_external_truncate`.",
+          "text": "Another process truncates and rewrites a mapped file during safe access, and the program keeps reading the bytes it mapped (including past the new end) with no SIGBUS or other fault and no change visible through the map, on every applicable tier (D-MMAP-STABLE1=A). Proof: `jet test Compiler --profile cases --filter Files/map_survives_external_truncate`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:46:09.092Z"
+          "at": "2026-11-16T13:03:44.454Z"
         },
         {
           "n": 4,
@@ -94381,7 +94381,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T21:18:50.483Z",
-      "updated": "2026-11-15T16:38:46.785Z",
+      "updated": "2026-11-16T13:03:44.454Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -219983,6 +219983,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:03:44.454Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0vwlomv",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Another process truncates and rewrites a mapped file during safe access, and the program keeps reading the bytes it mapped (including past the new end) with no SIGBUS or other fault and no change visi"
+    },
+    {
+      "at": "2026-11-16T13:03:43.536Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0vwlomv",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A safe borrowed view of a mapped file never observes a byte change made by another process after the borrow, on every applicable tier. Proof: `jet test Compiler --profile cases --filter files/map_view"
+    },
+    {
+      "at": "2026-11-16T13:03:42.570Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ky4017",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The Jet xkb keymap matches libxkbcommon on the oracle and beats it on keymap compile time (compositor keymap fd to ready Keymap), per-key cost and memory, or each loss has its own card. Proof: `jet te"
+    },
+    {
+      "at": "2026-11-16T13:03:41.627Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ky4017",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A same-program comparison table, recorded with its commit and commands, covers Jet and each alternative on: presented-interval p50/p99 and missed frames at the display's refresh (idle and under a full"
+    },
+    {
+      "at": "2026-11-16T13:03:40.710Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0wz8yaf",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A dated adversarial review in Docs/audits tries to break the claim that the runtime OS edge is proven, and passes before any public text makes that claim (AGENTS.md). Proof: `git ls-files Docs/audits`"
+    },
+    {
+      "at": "2026-11-16T13:03:39.740Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0wz8yaf",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Drift gates: the unsafe-site ratchet can only fall, every leaf has a contract and a proof record, and `jet audit foreign` stays clean. Proof: `jet test tests/guards --filter unsafe_site_ratchet` and `"
+    },
+    {
+      "at": "2026-11-16T13:03:38.761Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0wz8yaf",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `--checked-alloc` keeps a shadow ledger of open fds and mappings and checks every leaf call against it (owned and open, in range, not after close), and the cases and golden suites pass in this mode. P"
+    },
+    {
+      "at": "2026-11-16T13:03:37.806Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0wz8yaf",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every runtime syscall leaf carries a machine-checkable contract: precondition, postcondition, and frame (which bytes and fds it may touch, with no arithmetic overflow). Proof: `jet test tests/guards -"
+    },
+    {
+      "at": "2026-11-16T13:03:36.855Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#15: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Backends expose typed capability interfaces with headless and native ui providers (D-GAME-BACKEND1=A; no raylib, owner 2026-11-08), and an unsupported capability fails at startup, not mid-frame. Proof"
+    },
+    {
+      "at": "2026-11-16T13:03:35.914Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#14: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-GAME-PLATFORM1=A is built: two independent subsystems shared by games and apps: ui (windows, frames, present(pixels, palette) and present(rgba), immediate-mode drawing, per-window events, gamepads) "
+    },
+    {
+      "at": "2026-11-16T13:03:34.868Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#13: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A Doom-style program on the static Linux target opens a window, presents a 320x200 8-bit indexed framebuffer through a 256-entry palette at 35 Hz, reads keyboard input, and plays a PCM sound effect, a"
+    },
+    {
+      "at": "2026-11-16T13:03:33.926Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#12: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The ui subsystem (D-GAME-PLATFORM1=A; the owner renamed ray to ui on 2026-11-08) uses one shared input, atlas decode, sprite draw and transcript model for keyboard and gamepad state, with deterministi"
+    },
+    {
+      "at": "2026-11-16T13:03:32.957Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: An X11 wire adapter runs the same window, input and frame implementation as Wayland, with the same golden output. Proof: `jet test Compiler --profile cases --filter ui/x11_` against an Xvfb fixture."
+    },
+    {
+      "at": "2026-11-16T13:03:32.035Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Wayland is full-featured: multiple windows, resize, HiDPI scale, pointer, keyboard with layouts and repeat, text input, clipboard, cursor shapes, decorations and fullscreen. Proof: `jet test Compiler "
+    },
+    {
+      "at": "2026-11-16T13:03:31.060Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A dated adversarial review in Docs/audits compares Jet native windows with SDL3, GLFW, winit and GTK4 on one program (open a 2560x1440 window, draw a frame, answer keys, resize, close), each built and"
+    },
+    {
+      "at": "2026-11-16T13:03:30.135Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The same Jet app runs as a native window and as a web app with identical behaviour and pixels: layout, style, drawing, text shaping and rasterization, input and event model, and frame are each one Jet"
+    },
+    {
+      "at": "2026-11-16T13:03:29.186Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: One implementation (owner 2026-11-08: \"keep one implementation and just have it adapt to underlying linux\"): one window, frame, buffer, input, XKB keymap, renderer and event-loop model, and each displ"
+    },
+    {
+      "at": "2026-11-16T13:03:28.061Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l39twq",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Safe Jet: programs using ui need no #Unsafe and Core/Ui (the Wayland client included) contains none; AF_UNIX connect, fd passing over SCM_RIGHTS as owned typed fds, a bounds-checked shared-memory buff"
+    },
+    {
+      "at": "2026-11-16T13:03:26.982Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c028lxdd",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: core.math's elementary functions accept F32 and return F32 at the same width: the Float-only source facade (Core/Math/Math.jet, e.g. `sin: fn(n: Float)`) gains the F32 forms the old sema accepted, wit"
+    },
+    {
+      "at": "2026-11-16T13:03:25.905Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c028lxdd",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every binary64 core.math function is correctly rounded, matching MPFR bits on a committed corpus with the CORE-MATH hard cases, the musl libc-test vectors and special values, on O0, O1, O2 and web, wi"
+    },
+    {
+      "at": "2026-11-16T13:03:24.912Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dlrfkp",
+      "note": "#8: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Unsupported enforcement, denied access, an escape attempt, limit exhaustion, cancellation and child-process abuse each fail closed, with no leaked handle, secret or process. Proof: `jet test Compiler "
+    },
+    {
+      "at": "2026-11-16T13:03:23.987Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dlrfkp",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A launch's plan, transaction, descendants, limits, outputs and receipt share one policy digest and record the authority actually enforced. Proof: `jet test Compiler --profile cases --filter agent_exec"
+    },
+    {
+      "at": "2026-11-16T13:03:23.084Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dlrfkp",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Declared filesystem, process, network, environment, device and resource policy is enforced and recorded by the platform backend: a child runs under the native sandbox (Jetpack/Foundation/Source/Native"
+    },
+    {
+      "at": "2026-11-16T13:03:22.170Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dlrfkp",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A process spec's `.under(grant)` narrows authority through the shared runtime (`jet_std_process_spec_under` is registered). Proof: `jet test Compiler --profile golden --filter under_fx_boundary`."
+    },
+    {
+      "at": "2026-11-16T13:03:21.253Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dlrfkp",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: There is one canonical Core sandbox API: Foundation NativeSandbox.jet (tooling: arbitrary source, output and read-only mounts) and Core ProcessSpec.under (cwd-derived repository grants) become one imp"
+    },
     {
       "at": "2026-11-16T13:03:19.950Z",
       "by": "Main",
