@@ -592,7 +592,10 @@ LiveRegistry: struct {
 // binding's stored result is held until the next second (live_current). Writes
 // between two reads cost one re-run, however many there were. While the
 // source runs, the tables it reads join the binding's read set (`live_reads`).
+// While a server renders a page, the view's reads are noted for the page's
+// resume state (`resume`).
 state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
+    resume_note(binding.id)
     now: rt.clock_mono_ns()
     seen: live_current(binding.id, now)
     if seen.value == .Val(text) {
@@ -906,6 +909,128 @@ live_running: fn(task: TaskID) -> Int? {
         if running.value.runs[at].task == task -> return Val(running.value.runs[at].id)
     }
     None
+}
+
+// A page's resume state. While a task renders a page (`resume.render`),
+// each binding its view reads (`state`) is noted, but not one a source
+// reads while it runs. The page then carries each noted binding's source
+// wire name, encoded arguments and stored result. A client that resumes the
+// page (`resume.seed`) stores those results as its own bindings' results,
+// so its first `state` of each gives the server's result and runs no source:
+// the client does not run the view's reads again to rebuild the page.
+priv(package) resume: module {
+    // The HTML `view` gives, rendered as this task's page, then the resume
+    // script of the reads it made: `<script type="application/json"
+    // id="jet-resume">` holding a JSON list of `{source, key, value}`, each
+    // `<` written `\u003c`. A read with no stored result, or one a write made
+    // stale since, is left out, so the client runs that one itself.
+    render: fn(view: fn() -> String Never!) -> String Never! {
+        me: tasks.current_task()
+        resume_begin(me)
+        body: view()
+        "{body}{resume_script(resume_end(me))}"
+    }
+
+    // Stores the results the resume script of the served page `page`
+    // carries as the bindings of this task's caller, and gives how many it
+    // stored.
+    seed: fn(page: String) -> Int Never! {
+        start: page.find(RESUME_OPEN)
+        if start < 0 -> return 0
+        rest: page.slice(start + RESUME_OPEN.len(), page.len())
+        end: rest.find("</script>")
+        if end < 0 -> return 0
+        reads: live_json.decode<[AppResumed]>(rest.slice(0, end)) ?? return 0
+        caller: acting_tag(acting_now(tasks.current_task()))
+        stored := 0
+        loop read in reads {
+            id: live_register(read.source, read.key, caller, 0)
+            if id == 0 -> next
+            live_store(id, read.value, -1, None)
+            stored += 1
+        }
+        stored
+    }
+}
+
+priv RESUME_OPEN: "<script type=\"application/json\" id=\"jet-resume\">"
+
+// One read a page carries: its binding's source wire name, encoded
+// argument list and stored result (`ok:` or `err:`, then its JSON).
+priv AppResumed: struct {
+    source: String
+    key: String
+    value: String
+}
+
+// The bindings a task rendering a page read, in first-read order.
+priv AppResumeReads: struct {
+    task: TaskID
+    ids: [Int]
+}
+
+priv APP_RESUME_READS: Shared{[AppResumeReads]{}}
+
+priv resume_begin: fn(task: TaskID) Never! {
+    held := APP_RESUME_READS.guard_edit()
+    held.value.push(AppResumeReads{task: task, ids: [Int]{}})
+}
+
+// Ends `task`'s innermost page and gives the bindings its view read.
+priv resume_end: fn(task: TaskID) -> [Int] Never! {
+    held := APP_RESUME_READS.guard_edit()
+    at := held.value.len()
+    loop at > 0 {
+        at -= 1
+        if task == held.value[at].task {
+            ids: held.value[at].ids.copy()
+            _: held.value.remove(at, .Slot)
+            return ids
+        }
+    }
+    [Int]{}
+}
+
+// Notes that this task's page read binding `id`, when this task renders a
+// page and runs no binding's source.
+priv resume_note: fn(id: Int) Never! {
+    if !resume_rendering() {
+        return
+    }
+    me: tasks.current_task()
+    if live_running(me) != None {
+        return
+    }
+    held := APP_RESUME_READS.guard_edit()
+    at := held.value.len()
+    loop at > 0 {
+        at -= 1
+        if held.value[at].task != me -> next
+        if !held.value[at].ids.contains(id) -> held.value[at].ids.push(id)
+        return
+    }
+}
+
+// Whether any task renders a page now, so a read outside one costs one
+// look at an empty list.
+priv resume_rendering: fn() -> Bool Never! {
+    held: APP_RESUME_READS.guard_read()
+    held.value.len() != 0
+}
+
+// The resume script of the bindings `ids`: each one's stored result, when
+// it has one and no write made it stale.
+priv resume_script: fn(ids: [Int]) -> String Never! {
+    reads := [AppResumed]{}
+    registry: live_decode(live_cell_load()) ?? return "{RESUME_OPEN}[]</script>"
+    loop id in ids {
+        index: live_index(registry, id) ?? next
+        record: registry.records[index]
+        if record.value == "" || record.dirty -> next
+        reads.push(AppResumed{source: record.source.copy(), key: record.key.copy(), value: record.value.copy()})
+    }
+    text: live_json.to_string<[AppResumed]>(reads) ?? "[]"
+    "{RESUME_OPEN}{text.replace("<", "\\u003c")}</script>"
 }
 
 // Whom a task acts for. `as_caller` runs a function for an account and
@@ -1972,6 +2097,62 @@ priv SitemapTestInbox: struct {
     assert(reply_cache.keep("/api/board [1]", "{{\"ok\":false}}", 1000))
     assert_eq((reply_cache.find("/api/board [1]") ?? panic("the reply was not kept")).reply, "{{\"ok\":false}}")
     assert(reply_cache.find("/api/board [2]") == None)
+}
+
+// How many times the resume test's source ran.
+priv ResumeTestRuns: struct {
+    runs: Int
+}
+
+priv RESUME_TEST_RUNS: Shared{ResumeTestRuns{runs: 0}}
+
+// The resume test's source: 7 squared, each run counted.
+priv resume_test_square: fn() -> Int AppError! {
+    held := RESUME_TEST_RUNS.guard_edit()
+    held.value.runs += 1
+    Ok(49)
+}
+
+priv resume_test_runs: fn() -> Int Never! {
+    held: RESUME_TEST_RUNS.guard_read()
+    held.value.runs
+}
+
+// The resume test's view: one read, drawn in each of its states.
+priv resume_test_view: fn() -> String Never! {
+    binding: __live_bind<Int, AppError>("app.resume_test_square", [String]{"7"}, fn() { resume_test_square() })
+    if state(binding) == {
+        .Loaded(value) -> "<p>{value}</p>"
+        .Failed(_) -> "<p>failed</p>"
+        .Idle | .Loading -> "<p>loading</p>"
+    }
+}
+
+#Test("a page carries the reads its view made, and a client that resumes the page reads them without running their source") {
+    page: resume.render(fn() { resume_test_view() })
+    assert_eq(resume_test_runs(), 1)
+    assert_eq(page, "<p>49</p><script type=\"application/json\" id=\"jet-resume\">[{{\"source\":\"app.resume_test_square\",\"key\":\"[7]\",\"value\":\"ok:49\"}}]</script>")
+    ann: auth.AccountID.from_string("ann")
+    assert_eq(as_caller(ann, fn() { resume.seed(page) }), 1)
+    assert_eq(as_caller(ann, fn() { resume_test_view() }), "<p>49</p>")
+    assert_eq(resume_test_runs(), 1)
+    // A client that resumed no page runs the read itself.
+    ben: auth.AccountID.from_string("ben")
+    assert_eq(as_caller(ben, fn() { resume_test_view() }), "<p>49</p>")
+    assert_eq(resume_test_runs(), 2)
+    // A read a write made stale before the page was sent is left out, so
+    // the client runs it itself.
+    stale: resume.render(fn() {
+        shown: resume_test_view()
+        __live_invalidate("app.resume_test_square", [String]{"7"})
+        shown
+    })
+    assert_eq(stale, "<p>49</p>{RESUME_OPEN}[]</script>")
+    assert_eq(resume_test_runs(), 2)
+    // A page whose view reads nothing carries an empty list, and a page
+    // without a resume script seeds nothing.
+    assert_eq(resume.render(fn() { "<p>still</p>" }), "<p>still</p>{RESUME_OPEN}[]</script>")
+    assert_eq(resume.seed("<p>49</p>"), 0)
 }
 
 // A board's state, for the route-set test: its project is a path segment and

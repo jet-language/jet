@@ -17,6 +17,7 @@ use {
     core.color.[Color]
     core.ui.host.[UIAccessibility, UIAccessibilityState, UITextRange]
     core.ui.host.ime.[UIIMEComposition]
+    markup: core.text.html
     draw: __core_ui_draw
     wayland: __core_ui_wayland
     internal.[checksum, has_nul, without_key, without_button, leaf, backend_state, measure_tree, layout_state, mount_state, paint_state, dispatch, focus_ring, focused_text, push_scalar, float_text]
@@ -1888,6 +1889,42 @@ priv internal: module {
     }
 }
 
+// The tree as HTML, as a server sends a screen: a box is a `<div>` of its
+// children, top to bottom; text is a `<p>`; a button is a `<button
+// type="button">`, its click slot, when it has one, in `data-jet-click`, so a
+// resumed page attaches the handler there instead of building the tree
+// again; a text input is an `<input>` holding its text; any other node is a
+// `<div>` of its label. An accessible name is the element's `aria-label`
+// and a color its `style` color. Text and attributes are escaped.
+priv(package) html: module {
+    node: fn(tree: UINode) -> String Never! {
+        label: markup.escape(tree.label)
+        named: html_name(tree)
+        painted: if tree.color == .Val(fill) -> " style=\"color:{fill.to_hex()}\"" else -> ""
+        if tree.kind == {
+            .Box -> {
+                parts := [String]{}
+                loop child in tree.children -> parts.push(node(child))
+                "<div{named}{painted}>{parts.join("")}</div>"
+            }
+            .Text -> "<p{named}{painted}>{label}</p>"
+            .Button -> {
+                click: if tree.click != 0 -> " data-jet-click=\"{tree.click}\"" else -> ""
+                "<button type=\"button\"{named}{painted}{click}>{label}</button>"
+            }
+            .TextInput -> "<input type=\"text\" value=\"{label}\"{named}{painted}>"
+            .Custom -> "<div{named}{painted}>{label}</div>"
+        }
+    }
+}
+
+// ` aria-label="…"` for a node with an accessible name, else "".
+priv html_name: fn(tree: UINode) -> String Never! {
+    access: tree.accessibility ?? return ""
+    name: access.name ?? return ""
+    " aria-label=\"{markup.escape(name)}\""
+}
+
 #Test("UI aria role constructors") {
     assert(aria_role_button() == UIAriaRole.Button)
     assert(aria_role_container() == UIAriaRole.Container)
@@ -2067,4 +2104,22 @@ priv internal: module {
     }
     assert_eq(covered, 164)
     assert_eq(joined, 1)
+}
+
+#Test("a tree renders to server HTML: a box's children in order, text escaped, a button's click slot and an accessible name") {
+    named: node_accessibility(button("Save"), UIAccessibility{name: Val("Save the <draft>"), description: None, states: [UIAccessibilityState]{}})
+    tree: box(
+        [UINode]{
+            text("Tom & Jerry's \"plan\""),
+            named,
+            __button_click("Go", None, None, 7),
+            text_input("a<b", .Native),
+            node_color("hot", 3.0, 1.0, Color{r: 255, g: 0, b: 0, a: 255}),
+            node("free", 4.0, 1.0),
+        },
+    )
+    assert_eq(
+        html.node(tree),
+        "<div><p>Tom &amp; Jerry&#x27;s &quot;plan&quot;</p><button type=\"button\" aria-label=\"Save the &lt;draft&gt;\">Save</button><button type=\"button\" data-jet-click=\"7\">Go</button><input type=\"text\" value=\"a&lt;b\"><div style=\"color:#ff0000\">hot</div><div>free</div></div>",
+    )
 }
