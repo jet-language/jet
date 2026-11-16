@@ -1436,6 +1436,24 @@ Other gaps:
   test.
 - **D-PRIM-ANY1:** options E, B and C as above, recommending C.
 
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| trait-to-trait conversion and a closure in a trait list are ICEs (`q2`, `q5`); generic trait values (`q6`) | card | #6727 |
+| a `Decimal` in a trait value (claim 14) | card | #6839 |
+| the `2.5f` suffix (claim 14) | card | #4730 |
+| union, arm, view and loan defects (`#6839` c27-c57) | card | #6839 |
+| `priv` struct privacy and inline-module imports (`n12b`, `n14`, `o8d`) | card | #4723 |
+| an empty trait prints blank, `reflect.of` on a trait value, mangled inline-module names, a key collision panics | card | #6845 |
+| one key-to-TypeId mapping stable across builds | card | #6845 |
+| type identity across a `.jetlib` boundary (claim 15) | card | #3102 |
+| INI over the data tree with `decode<T>` | card | #6883 |
+| member arms over `Any`, unions and trait values; the bare-arm rule; the extended member test | card | #6833 |
+| the choice among options E, B and C (D-PRIM-ANY1, recommending C) | card | #3838 |
+<!-- /audit-dispositions -->
+
 ## Unprobed edges
 
 A comptime value as an `Any`; a move-only resource in an `Any` or a trait
