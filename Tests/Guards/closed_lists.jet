@@ -10,7 +10,10 @@ use closed_list_files: core.files
 // exact copy of its one hand-written home, when the subset ledger names it as
 // a checked subset view of one vocabulary, or when the migration baseline
 // still lists it.
-// Function-local lists are state private to one function and are not findings.
+// Function-local lists are state private to one function and are not findings,
+// except in a route or dispatch file (CLOSED_LIST_ROUTE_PATHS,
+// CLOSED_LIST_DISPATCH_PATHS), where each function that holds or dispatches on
+// three or more Core names is one.
 CLOSED_LIST_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
 
 CLOSED_LIST_BASELINE_PATH: "Tests/Guards/closed_lists/baseline.tsv"
@@ -40,7 +43,7 @@ CLOSED_LIST_BLOCK_END: "// END GENERATED"
 // when its list moves to a declared home, then lower the ceiling to match. A
 // duplicate baseline row also records how many members its pair shares, and
 // that count only shrinks.
-CLOSED_LIST_BASELINE: 958
+CLOSED_LIST_BASELINE: 977
 
 CLOSED_LIST_DUPLICATE_BASELINE: 319
 
@@ -599,6 +602,149 @@ closed_list_findings: fn() -> [ClosedListFinding] {
     found
 }
 
+// The files that route Core calls by member name instead of through the
+// called member's declaration. Each top-level function in one is a closed list
+// of the Core names it holds, so it stays in the baseline until it routes by
+// declared symbol. A route file holds no Core name at all; a dispatch file
+// may name Core members in its text, but dispatches on none (match arms,
+// comparisons and prefix tests).
+CLOSED_LIST_ROUTE_PATHS: [String]{
+    "Compiler/JetIR/Source/RouteHandle.jet",
+    "Compiler/JetIR/Source/RouteBuiltin.jet",
+    "Compiler/JetRuntime/Source/RouteTerm.jet",
+}
+
+CLOSED_LIST_DISPATCH_PATHS: [String]{
+    "Compiler/JetDriver/Source/Driver/BuildAdapter.jet",
+}
+
+// Whether a string literal spells a Core name: a type, member or module
+// (`Signal`, `on_priority`, `Signal.get`, `core.event`, `Build.`). Messages,
+// templates and host symbols (`jet_list_clear`, `JetCache::clear`) are not
+// Core names.
+closed_list_member_shaped: fn(literal: String) -> Bool {
+    bytes: literal.bytes()
+    if bytes.len() == 0 || literal.starts_with("jet_") -> return false
+    first: Int{bytes[0]}
+    if first == 46 || (first >= 48 && first <= 57) -> return false
+    loop byte in bytes {
+        if !closed_list_ident_byte(byte) && (Int{byte}) != 46 -> return false
+    }
+    true
+}
+
+// The index of the last byte before `index` that is not whitespace, or -1.
+closed_list_back: fn(bytes: [U8], index: Int) -> Int {
+    cursor := index - 1
+    loop cursor >= 0 {
+        value: closed_list_at(bytes, cursor)
+        if value != 32 && value != 9 && value != 10 && value != 13 -> return cursor
+        cursor -= 1
+    }
+    -1
+}
+
+// Whether the string literal `token` is a dispatch key: a match-arm pattern
+// (`"get" ->`, `"on" | "once"`), a comparison operand (`member == "get"`) or
+// a prefix or suffix test or strip (`member.starts_with("Build.")`,
+// `member.removeprefix("Build.")`).
+closed_list_dispatch_key: fn(text: String, bytes: [U8], token: ClosedListToken) -> Bool {
+    before: closed_list_back(bytes, token.start)
+    value: closed_list_at(bytes, before)
+    if value == 124 -> return true
+    if value == 61 {
+        operator: closed_list_at(bytes, before - 1)
+        if operator == 61 || operator == 33 -> return true
+    }
+    if value == 40 {
+        word_start := before
+        loop word_start > 0 && closed_list_word_byte(closed_list_at(bytes, word_start - 1)) {
+            word_start -= 1
+        }
+        word: policy_slice_bytes(text, word_start, before)
+        if word == "starts_with" || word == "ends_with" || word == "removeprefix" || word == "removesuffix" {
+            return true
+        }
+    }
+    after: closed_list_code_token(bytes, token.end)
+    if closed_list_is_punct(bytes, after, 124) -> return true
+    closed_list_is_punct(bytes, after, 45) && closed_list_at(bytes, after.end) == 62
+}
+
+// The Core-name literals of the function whose signature starts at `from`,
+// pushed to `out` lower-cased: only its dispatch keys when `keys_only`.
+// Returns the index just past its body, or the start of the next top-level
+// line when it has none.
+closed_list_function_members: fn(text: String, bytes: [U8], from: Int, keys_only: Bool, out: &[String]) -> Int {
+    cursor := from
+    depth := 0
+    opened := false
+    loop {
+        token: closed_list_token(bytes, cursor)
+        if token.kind == CLOSED_LIST_TOKEN_END -> return cursor
+        if !opened && depth == 0 && token.kind == CLOSED_LIST_TOKEN_WORD && closed_list_at(bytes, token.start - 1) == 10 {
+            return token.start
+        }
+        cursor = token.end
+        if token.kind == CLOSED_LIST_TOKEN_STRING {
+            if opened && closed_list_at(bytes, token.start) == 34 && token.end - token.start >= 2 && (!keys_only || closed_list_dispatch_key(text, bytes, token)) {
+                literal: policy_slice_bytes(text, token.start + 1, token.end - 1)
+                if closed_list_member_shaped(literal) -> out.push(literal.to_lower())
+            }
+            next
+        }
+        if token.kind != CLOSED_LIST_TOKEN_PUNCT -> next
+        value: closed_list_at(bytes, token.start)
+        if value == 123 && depth == 0 -> opened = true
+        if value == 123 || value == 40 || value == 91 -> depth += 1
+        if (value == 125 || value == 41 || value == 93) && depth > 0 {
+            depth -= 1
+            if depth == 0 && opened -> return cursor
+        }
+    }
+}
+
+// Every top-level function of the route or dispatch file `path` (source
+// `text`) that holds three or more Core names, as a finding named by the
+// function.
+closed_list_dispatch_in: fn(path: String, text: String, keys_only: Bool, out: &[ClosedListFinding]) {
+    bytes: text.bytes()
+    depth := 0
+    cursor := 0
+    loop {
+        token: closed_list_token(bytes, cursor)
+        if token.kind == CLOSED_LIST_TOKEN_END -> break
+        cursor = token.end
+        if token.kind == CLOSED_LIST_TOKEN_PUNCT {
+            value: closed_list_at(bytes, token.start)
+            if value == 123 || value == 40 || value == 91 -> depth += 1
+            if (value == 125 || value == 41 || value == 93) && depth > 0 -> depth -= 1
+            next
+        }
+        if depth > 0 || token.kind != CLOSED_LIST_TOKEN_WORD -> next
+        colon: closed_list_code_token(bytes, token.end)
+        if !closed_list_is_punct(bytes, colon, 58) -> next
+        head: closed_list_code_token(bytes, colon.end)
+        if !closed_list_is_word(text, head, "fn") -> next
+        members := [String]{}
+        cursor = closed_list_function_members(text, bytes, head.end, keys_only, members)
+        closed_list_record(path, policy_slice_bytes(text, token.start, token.end), members, out)
+    }
+}
+
+closed_list_dispatch_findings: fn() -> [ClosedListFinding] {
+    found := [ClosedListFinding]{}
+    loop path in CLOSED_LIST_ROUTE_PATHS {
+        text: closed_list_files.read(path) ?? panic("read {path}")
+        closed_list_dispatch_in(path, text, false, found)
+    }
+    loop path in CLOSED_LIST_DISPATCH_PATHS {
+        text: closed_list_files.read(path) ?? panic("read {path}")
+        closed_list_dispatch_in(path, text, true, found)
+    }
+    found
+}
+
 // The rows of a ledger file: tab-separated fields; `#` lines are comments.
 closed_list_rows: fn(path: String) -> [[String]] {
     text: closed_list_files.read(path) ?? panic("read {path}")
@@ -907,7 +1053,11 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     loop view in closed_list_subset_problems(findings, subset_rows, texts, problems) {
         copies.push(view)
     }
-    closed_list_home_problems(findings, copies, problems)
+    // A dispatch function's names are held by the same ledgers; its member
+    // literals are route keys, not a vocabulary another list may duplicate.
+    held := findings.copy()
+    loop finding in closed_list_dispatch_findings() -> held.push(finding)
+    closed_list_home_problems(held, copies, problems)
     // CORE_LEVELS is a checked copy of the `optimize` build option's values
     // (the core-levels test holds it to them), so its pairs are that row's.
     copies.push(closed_list_key(CLOSED_LIST_CORE_LEVELS_PATH, "CORE_LEVELS"))
@@ -1035,6 +1185,31 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
     message: closed_list_new_list_problem(found[0])
     assert(message.contains("Core trait with one `impl` per member") && message.contains("--check") && message.contains(CLOSED_LIST_KERNEL_PATH))
     assert(closed_list_duplicate_problem(pairs[0]).contains("Core trait with one `impl` per member"))
+}
+
+#Test("a route or dispatch file's functions are closed lists of the Core names they hold") {
+    guards_enter_root()
+    found := [ClosedListFinding]{}
+    source: "route: fn(name: String, method: String) -> String? {{\n    if name == \"Signal\" && method == {{\n        \"get\" | \"set\" -> return Val(\"jet_std::JetSignal::{{method}}\")\n        else -> panic(\"no route for this member\")\n    }}\n    None\n}}\nkeyed: fn(symbol: SymbolID) -> Int {{ symbol.id }}\nwords: fn(detail: String) -> Bool {{ detail.contains(\"tls\") || detail.contains(\"alert\") || fail(\"E3414\", \"handshake\") }}\nbuild: fn(member: String) -> Bool {{ member == \"BuildPlan.graph\" || member.starts_with(\"Build.\") || member == \"Code.pasted\" }}\n"
+    closed_list_dispatch_in("r.jet", source, true, found)
+    // `words` tests text and passes call arguments; it dispatches on nothing.
+    assert_eq(found.len(), 2)
+    assert_eq(found[0].name, "route")
+    assert_eq(found[0].members.join(","), "signal,get,set")
+    assert_eq(found[1].name, "build")
+    assert_eq(found[1].members.join(","), "buildplan.graph,build.,code.pasted")
+    // A route file holds no Core name at all, dispatched on or not.
+    held := [ClosedListFinding]{}
+    closed_list_dispatch_in("r.jet", source, false, held)
+    assert_eq(held.len(), 3)
+    assert_eq(held[1].name, "words")
+    assert_eq(held[1].members.join(","), "tls,alert,e3414,handshake")
+    // Messages, host symbols and templates are not Core names.
+    assert(!closed_list_member_shaped("no route for this member"))
+    assert(!closed_list_member_shaped("jet_std::JetSignal::get"))
+    assert(!closed_list_member_shaped("jet_{{key}}_{{method}}"))
+    assert(!closed_list_member_shaped("jet_list_clear"))
+    assert(closed_list_member_shaped("core.event"))
 }
 
 // The syntax dictionary (`jet syntax`) keeps its rows' meanings, but each
