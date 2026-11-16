@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 109900,
+    "rev": 109925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -113731,21 +113731,21 @@
         },
         {
           "n": 4,
-          "text": "There is one Secret mechanism: core.crypto.Secret and every crypto key are built on the runtime Secret (Compiler/JetRuntime/Source/Secret.jet), which wipes spare capacity and is wiped on a crash. Proof: `jet test Compiler --profile cases --filter crypto/secret_wiped_on_close_and_crash`, and git grep finds a single Secret wipe implementation.",
+          "text": "There is one Secret mechanism: core.crypto.Secret and every crypto key are built on the runtime Secret (Compiler/JetRuntime/Source/Secret.jet), which wipes spare capacity and is wiped on a crash. Proof: `jet test Compiler --profile cases --filter Crypto/secret_wiped_on_close_and_crash`, and git grep finds a single Secret wipe implementation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:34:48.238Z"
+          "at": "2026-11-16T13:14:12.366Z"
         },
         {
           "n": 5,
-          "text": "A service authority signing key comes from a secret issuance and registry and can never be derived from the public token (Core/Service/Service.jet reads the authority proof from hex today), and the receipt does not carry the authority as a public String. The issuance design is the ballot D-SERVICE-AUTH-KEY1, on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile cases --filter service/authority_key_not_derivable_from_token`.",
+          "text": "A service authority signing key comes from a secret issuance and registry and can never be derived from the public token (Core/Service/Service.jet reads the authority proof from hex today), and the receipt does not carry the authority as a public String. The issuance design is the ballot D-SERVICE-AUTH-KEY1, on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile cases --filter Service/authority_key_not_derivable_from_token`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T11:34:24.860Z"
+          "at": "2026-11-16T13:14:13.301Z"
         },
         {
           "n": 6,
@@ -113758,12 +113758,12 @@
         },
         {
           "n": 7,
-          "text": "D-CRYPTOENV1=A: core.crypto offers misuse-resistant seal, open, sign and verify; the expert raw and exposure operations (a raw nonce or algorithm) require #Unsafe; and a secret value cannot be printed, compared, reflected or serialized in ordinary code (Docs/spec/syntax-decisions.md). Proof: `jet test Compiler --profile cases --filter crypto/d_cryptoenv1_contract`.",
+          "text": "D-CRYPTOENV1=A: core.crypto offers misuse-resistant seal, open, sign and verify; the expert raw and exposure operations (a raw nonce or algorithm) require #Unsafe; and a secret value cannot be printed, compared, reflected or serialized in ordinary code (Docs/Spec/syntax-decisions.md). Proof: `jet test Compiler --profile cases --filter Crypto/d_cryptoenv1_contract`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:54.709Z"
+          "at": "2026-11-16T13:14:14.305Z"
         },
         {
           "n": 8,
@@ -113776,21 +113776,21 @@
         },
         {
           "n": 9,
-          "text": "The rewrite passes the same vectors (NIST CAVP plus the fetched Wycheproof), the interop matrix and the constant-time checks as #6694. Proof: `jet test Compiler --profile core --filter crypto` and `jet test Compiler --profile core --filter tls` with the CAVP, Wycheproof, interop and constant-time rows. (was #6748 c2)",
+          "text": "The rewrite passes the same vectors (NIST CAVP plus the fetched Wycheproof), the interop matrix and the constant-time checks as #6694. Proof: `jet test Compiler --profile core --filter Crypto` and `jet test Compiler --profile core --filter tls` with the CAVP, Wycheproof, interop and constant-time rows. (was #6748 c2)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:17:59.547Z"
+          "at": "2026-11-16T13:14:15.239Z"
         },
         {
           "n": 10,
-          "text": "The full mbedtls surface that Core does not use is complete in Jet: every mbedtls test-suite vector, interop with OpenSSL and the old mbedtls build on every TLS 1.2 and 1.3 version, suite and curve, client certificates and the remaining X.509 and PSA features, with constant-time checks on every secret-dependent primitive. Proof: `jet test Compiler --profile core --filter crypto` with every mbedtls test-suite vector, and the interop receipt for every TLS version, suite and curve. (was #6748 c3)",
+          "text": "The full mbedtls surface that Core does not use is complete in Jet: every mbedtls test-suite vector, interop with OpenSSL and the old mbedtls build on every TLS 1.2 and 1.3 version, suite and curve, client certificates and the remaining X.509 and PSA features, with constant-time checks on every secret-dependent primitive. Proof: `jet test Compiler --profile core --filter Crypto` with every mbedtls test-suite vector, and the interop receipt for every TLS version, suite and curve. (was #6748 c3)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:00.563Z"
+          "at": "2026-11-16T13:14:16.548Z"
         },
         {
           "n": 11,
@@ -113822,7 +113822,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:34:48.239Z",
-      "updated": "2026-11-16T01:18:02.570Z",
+      "updated": "2026-11-16T13:14:16.548Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -113847,111 +113847,111 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Channel outcomes are distinct: capacity 0 (rendezvous) differs from capacity 1, and full, closed-send, dropped-receiver, cancel and receive-after-close each report their own outcome. A public API change needs a ballot. Proof: `jet test Compiler --profile golden --filter concurrency/channel_outcomes` on O0, O1 and O2.",
+          "text": "Channel outcomes are distinct: capacity 0 (rendezvous) differs from capacity 1, and full, closed-send, dropped-receiver, cancel and receive-after-close each report their own outcome. A public API change needs a ballot. Proof: `jet test Compiler --profile golden --filter Concurrency/ChannelOutcomes` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:18.286Z"
         },
         {
           "n": 2,
-          "text": "A non-blocking drain stops at Empty without closing the channel, later items stay readable, and closed, cancelled and failed states stay distinct. Proof: `jet test Compiler --profile golden --filter concurrency/channel_ready_items`.",
+          "text": "A non-blocking drain stops at Empty without closing the channel, later items stay readable, and closed, cancelled and failed states stay distinct. Proof: `jet test Compiler --profile golden --filter Concurrency/ChannelReadyItems`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:20.039Z"
         },
         {
           "n": 3,
-          "text": "A stream's not-ready state never becomes a normal end-of-stream, and consumer demand and producer wakeup can never lose an item or spin. Proof: `jet test Compiler --profile golden --filter stream_readiness` prints the same output on O0, O1 and O2.",
+          "text": "A stream's not-ready state never becomes a normal end-of-stream, and consumer demand and producer wakeup can never lose an item or spin. Proof: `jet test Compiler --profile golden --filter StreamReadiness` prints the same output on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:20.980Z"
         },
         {
           "n": 4,
-          "text": "Breaking out of, dropping or failing a pipeline cancels and cleans up through the existing task path. Proof: `jet test Compiler --profile golden --filter stream_cancel_on_break` on O0, O1 and O2.",
+          "text": "Breaking out of, dropping or failing a pipeline cancels and cleans up through the existing task path. Proof: `jet test Compiler --profile golden --filter StreamCancelOnBreak` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:22.123Z"
         },
         {
           "n": 5,
-          "text": "Sync and suspended stream callbacks keep their declared effects and output order on every tier, with no second StreamExt-style dialect. Proof: `jet test Compiler --profile golden --filter stream_failure_adapters` on O0, O1 and O2.",
+          "text": "Sync and suspended stream callbacks keep their declared effects and output order on every tier, with no second StreamExt-style dialect. Proof: `jet test Compiler --profile golden --filter StreamFailureAdapters` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:23.280Z"
         },
         {
           "n": 6,
-          "text": "Exact splitting, zip, reverse, positions and chunked folds are offered only when their bounds hold, encounter order stays separate from callback effect order, and cheap kernels stay serial (the speed pair is on #6085). Proof: `jet test Compiler --profile golden --filter concurrency/para_generic_sources` and `jet test Compiler --profile ui --filter para_indexed_after_filter`.",
+          "text": "Exact splitting, zip, reverse, positions and chunked folds are offered only when their bounds hold, encounter order stays separate from callback effect order, and cheap kernels stay serial (the speed pair is on #6085). Proof: `jet test Compiler --profile golden --filter Concurrency/ParaGenericSources` and `jet test Compiler --profile ui --filter para_indexed_after_filter`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:24.522Z"
         },
         {
           "n": 7,
-          "text": "A parallel stream map's limit bounds in-flight work and results, ordered and completion-order modes both exist, failure and cancellation cleanup is defined, and capture rules apply (the speed pair is on #6085). Proof: `jet test Compiler --profile golden --filter concurrency/para_map_stream`.",
+          "text": "A parallel stream map's limit bounds in-flight work and results, ordered and completion-order modes both exist, failure and cancellation cleanup is defined, and capture rules apply (the speed pair is on #6085). Proof: `jet test Compiler --profile golden --filter Concurrency/ParaMapStream`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:25.684Z"
         },
         {
           "n": 8,
-          "text": "Merging ready streams keeps per-source order, orders across sources by readiness, closes only the named sources on an owned end, drop or error, keeps keyed-source identity, and states its fairness and in-flight bound. Proof: `jet test Compiler --profile golden --filter streams/merge_ready`.",
+          "text": "Merging ready streams keeps per-source order, orders across sources by readiness, closes only the named sources on an owned end, drop or error, keeps keyed-source identity, and states its fairness and in-flight bound. Proof: `jet test Compiler --profile golden --filter Streams/MergeReady`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:27.190Z"
         },
         {
           "n": 9,
-          "text": "Timed batching keeps processing time, event time and readiness distinct and states its timeout, partial-batch and cancel rules. Proof: `jet test Compiler --profile golden --filter streams/timing_batches`.",
+          "text": "Timed batching keeps processing time, event time and readiness distinct and states its timeout, partial-batch and cancel rules. Proof: `jet test Compiler --profile golden --filter Streams/TimingBatches`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:28.733Z"
         },
         {
           "n": 10,
-          "text": "A worker-pool stream reports per-worker initialize, clone and drop counts, ordered versus any-completion results, and the effects still in flight after cancel, with no new pool, scheduler or tuning API. Proof: `jet test Compiler --profile cases --filter concurrency/worker_pool_counts` on O0, O1 and O2.",
+          "text": "A worker-pool stream reports per-worker initialize, clone and drop counts, ordered versus any-completion results, and the effects still in flight after cancel, with no new pool, scheduler or tuning API. Proof: `jet test Compiler --profile cases --filter Concurrency/worker_pool_counts` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:30.336Z"
         },
         {
           "n": 11,
-          "text": "D-CONC-BACKGROUND1=A: a nonblocking `Sender.try_send` returns ownership of the value when the queue is full, and a bounded worker, panic isolation and shutdown compose with it, with no Worker wrapper type. Proof: `jet test Compiler --profile cases --filter concurrency/try_send_background_queue`.",
+          "text": "D-CONC-BACKGROUND1=A: a nonblocking `Sender.try_send` returns ownership of the value when the queue is full, and a bounded worker, panic isolation and shutdown compose with it, with no Worker wrapper type. Proof: `jet test Compiler --profile cases --filter Concurrency/try_send_background_queue`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:58.858Z"
+          "at": "2026-11-16T13:14:33.555Z"
         },
         {
           "n": 12,
-          "text": "A task body's `Err(e)` of domain type E reaches the joiner as E, not as `TaskFailure.Panicked`, and Core declares the single `TaskFailure` enum that sema and the runtime both use. Proof: `jet test Compiler --profile golden --filter concurrency/task_domain_error` on O0, O1 and O2. (was #3239 c5)",
+          "text": "A task body's `Err(e)` of domain type E reaches the joiner as E, not as `TaskFailure.Panicked`, and Core declares the single `TaskFailure` enum that sema and the runtime both use. Proof: `jet test Compiler --profile golden --filter Concurrency/TaskDomainError` on O0, O1 and O2. (was #3239 c5)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:03.542Z"
+          "at": "2026-11-16T13:14:34.535Z"
         },
         {
           "n": 13,
@@ -113964,48 +113964,48 @@
         },
         {
           "n": 14,
-          "text": "A task group shows capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation through observed transitions, plus its join, shield and detach obligations. Proof: `jet test Compiler --profile golden --filter concurrency/conformance_capsule` on O0, O1 and O2. (was #3239 c10)",
+          "text": "A task group shows capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation through observed transitions, plus its join, shield and detach obligations. Proof: `jet test Compiler --profile golden --filter Concurrency/ConformanceCapsule` on O0, O1 and O2. (was #3239 c10)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:05.578Z"
+          "at": "2026-11-16T13:14:35.476Z"
         },
         {
           "n": 15,
-          "text": "Task affinity, blocking offload, admission and backpressure, caller buffers, allocation and cancellation association each map onto an existing owner, and each new control goes to its own owner ballot (cost claims are G11, #2858). Proof: `jet test Compiler --profile cases --filter concurrency/control_mapping_`, one case per mapping on O0, O1 and O2. (was #3239 c11)",
+          "text": "Task affinity, blocking offload, admission and backpressure, caller buffers, allocation and cancellation association each map onto an existing owner, and each new control goes to its own owner ballot (cost claims are G11, #2858). Proof: `jet test Compiler --profile cases --filter Concurrency/control_mapping_`, one case per mapping on O0, O1 and O2. (was #3239 c11)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:06.655Z"
+          "at": "2026-11-16T13:14:36.401Z"
         },
         {
           "n": 16,
-          "text": "core.tasks has no sentinel or silent rail: a send on a closed channel is an error (never -1), a lock always locks, nothing is dropped silently, and a negative or zero capacity never means unbounded (STREAMS owns what 0 and 1 mean). Proof: `jet test Compiler --profile cases --filter concurrency/no_sentinel_`, one case per rule on O0, O1 and O2. (was #3239 c61)",
+          "text": "core.tasks has no sentinel or silent rail: a send on a closed channel is an error (never -1), a lock always locks, nothing is dropped silently, and a negative or zero capacity never means unbounded (STREAMS owns what 0 and 1 mean). Proof: `jet test Compiler --profile cases --filter Concurrency/no_sentinel_`, one case per rule on O0, O1 and O2. (was #3239 c61)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:07.753Z"
+          "at": "2026-11-16T13:14:37.314Z"
         },
         {
           "n": 17,
-          "text": "A checked operation that fails inside a task (overflow, division by zero, list bounds) publishes `TaskFailure.Panicked` to the joiner instead of stopping the process. Proof: `jet test Compiler --profile cases --filter concurrency/checked_failure_in_task_`, one case per operation on O0, O1 and O2, each showing the joiner's report and the process continuing. (was #3239 c62)",
+          "text": "A checked operation that fails inside a task (overflow, division by zero, list bounds) publishes `TaskFailure.Panicked` to the joiner instead of stopping the process. Proof: `jet test Compiler --profile cases --filter Concurrency/checked_failure_in_task_`, one case per operation on O0, O1 and O2, each showing the joiner's report and the process continuing. (was #3239 c62)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:09.277Z"
+          "at": "2026-11-16T13:14:38.241Z"
         },
         {
           "n": 18,
-          "text": "Task-group expansion in concurrency services gives each generated function a unique JetIR identity, and the bounded workload reaches its exact expected output with no duplicate-function internal error. Proof: `jet test Compiler --profile cases --filter concurrency/task_group_expansion_unique_ids`. (was #3239 c79)",
+          "text": "Task-group expansion in concurrency services gives each generated function a unique JetIR identity, and the bounded workload reaches its exact expected output with no duplicate-function internal error. Proof: `jet test Compiler --profile cases --filter Concurrency/task_group_expansion_unique_ids`. (was #3239 c79)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:10.435Z"
+          "at": "2026-11-16T13:14:39.268Z"
         },
         {
           "n": 19,
@@ -114018,12 +114018,12 @@
         },
         {
           "n": 20,
-          "text": "Task control, run-time stop codes and run-time I/O work at O0 under `jet run`. Proof: `jet test Compiler --profile cases --filter task_control_tiers/` passes its O0 rows. (was #3239 c84)",
+          "text": "Task control, run-time stop codes and run-time I/O work at O0 under `jet run`. Proof: `jet test Compiler --profile cases --filter TaskControlTiers/` passes its O0 rows. (was #3239 c84)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:12.513Z"
+          "at": "2026-11-16T13:14:40.194Z"
         },
         {
           "n": 21,
@@ -114036,12 +114036,12 @@
         },
         {
           "n": 22,
-          "text": "Stream.key_by, window, watermark and the late-event disposition share one SendFn callback identity and the bare event side-output shape on O0, O1, O2 and web where applicable; a callback whose result is not sendable, or that escapes, is refused. Proof: `jet test Compiler --profile golden --filter collections/stream_windows`. (was #3317 c45)",
+          "text": "Stream.key_by, window, watermark and the late-event disposition share one SendFn callback identity and the bare event side-output shape on O0, O1, O2 and web where applicable; a callback whose result is not sendable, or that escapes, is refused. Proof: `jet test Compiler --profile golden --filter Collections/StreamWindows`. (was #3317 c45)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:14.496Z"
+          "at": "2026-11-16T13:14:41.130Z"
         }
       ],
       "refs": [],
@@ -114056,7 +114056,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:37:58.858Z",
-      "updated": "2026-11-16T01:18:14.496Z",
+      "updated": "2026-11-16T13:14:41.130Z",
       "updatedBy": "Main",
       "criteriaLastN": 22
     },
@@ -114099,12 +114099,12 @@
         },
         {
           "n": 3,
-          "text": "Root cancellation, signal handling, request deadlines, listener drain and ProcessStdin close run through shared Prelude semantics. Proof: `jet test Compiler --profile golden --filter concurrency/signal_deadline_` and `jet test Compiler --profile cases --filter cli_signals/` on O0, O1 and O2.",
+          "text": "Root cancellation, signal handling, request deadlines, listener drain and ProcessStdin close run through shared Prelude semantics. Proof: `jet test Compiler --profile golden --filter Concurrency/SignalDeadline` and `jet test Compiler --profile cases --filter CLISignals/` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:59.765Z"
+          "at": "2026-11-16T13:14:42.085Z"
         },
         {
           "n": 4,
@@ -114163,7 +114163,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:37:59.765Z",
-      "updated": "2026-11-16T01:18:15.561Z",
+      "updated": "2026-11-16T13:14:42.085Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -219957,6 +219957,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:14:42.085Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sbl400",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Root cancellation, signal handling, request deadlines, listener drain and ProcessStdin close run through shared Prelude semantics. Proof: `jet test Compiler --profile golden --filter concurrency/signa"
+    },
+    {
+      "at": "2026-11-16T13:14:41.130Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#22: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Stream.key_by, window, watermark and the late-event disposition share one SendFn callback identity and the bare event side-output shape on O0, O1, O2 and web where applicable; a callback whose result "
+    },
+    {
+      "at": "2026-11-16T13:14:40.194Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#20: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Task control, run-time stop codes and run-time I/O work at O0 under `jet run`. Proof: `jet test Compiler --profile cases --filter task_control_tiers/` passes its O0 rows. (was #3239 c84)"
+    },
+    {
+      "at": "2026-11-16T13:14:39.268Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#18: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Task-group expansion in concurrency services gives each generated function a unique JetIR identity, and the bounded workload reaches its exact expected output with no duplicate-function internal error"
+    },
+    {
+      "at": "2026-11-16T13:14:38.241Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#17: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A checked operation that fails inside a task (overflow, division by zero, list bounds) publishes `TaskFailure.Panicked` to the joiner instead of stopping the process. Proof: `jet test Compiler --profi"
+    },
+    {
+      "at": "2026-11-16T13:14:37.315Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#16: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: core.tasks has no sentinel or silent rail: a send on a closed channel is an error (never -1), a lock always locks, nothing is dropped silently, and a negative or zero capacity never means unbounded (S"
+    },
+    {
+      "at": "2026-11-16T13:14:36.402Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#15: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Task affinity, blocking offload, admission and backpressure, caller buffers, allocation and cancellation association each map onto an existing owner, and each new control goes to its own owner ballot "
+    },
+    {
+      "at": "2026-11-16T13:14:35.476Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#14: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A task group shows capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation through observed transitions, plus its join, shield and detach obligations. Proof: `"
+    },
+    {
+      "at": "2026-11-16T13:14:34.535Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#12: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A task body's `Err(e)` of domain type E reaches the joiner as E, not as `TaskFailure.Panicked`, and Core declares the single `TaskFailure` enum that sema and the runtime both use. Proof: `jet test Com"
+    },
+    {
+      "at": "2026-11-16T13:14:33.555Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-CONC-BACKGROUND1=A: a nonblocking `Sender.try_send` returns ownership of the value when the queue is full, and a bounded worker, panic isolation and shutdown compose with it, with no Worker wrapper "
+    },
+    {
+      "at": "2026-11-16T13:14:30.336Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A worker-pool stream reports per-worker initialize, clone and drop counts, ordered versus any-completion results, and the effects still in flight after cancel, with no new pool, scheduler or tuning AP"
+    },
+    {
+      "at": "2026-11-16T13:14:28.733Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Timed batching keeps processing time, event time and readiness distinct and states its timeout, partial-batch and cancel rules. Proof: `jet test Compiler --profile golden --filter streams/timing_batch"
+    },
+    {
+      "at": "2026-11-16T13:14:27.190Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#8: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Merging ready streams keeps per-source order, orders across sources by readiness, closes only the named sources on an owned end, drop or error, keeps keyed-source identity, and states its fairness and"
+    },
+    {
+      "at": "2026-11-16T13:14:25.684Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A parallel stream map's limit bounds in-flight work and results, ordered and completion-order modes both exist, failure and cancellation cleanup is defined, and capture rules apply (the speed pair is "
+    },
+    {
+      "at": "2026-11-16T13:14:24.522Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Exact splitting, zip, reverse, positions and chunked folds are offered only when their bounds hold, encounter order stays separate from callback effect order, and cheap kernels stay serial (the speed "
+    },
+    {
+      "at": "2026-11-16T13:14:23.280Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Sync and suspended stream callbacks keep their declared effects and output order on every tier, with no second StreamExt-style dialect. Proof: `jet test Compiler --profile golden --filter stream_failu"
+    },
+    {
+      "at": "2026-11-16T13:14:22.123Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Breaking out of, dropping or failing a pipeline cancels and cleans up through the existing task path. Proof: `jet test Compiler --profile golden --filter stream_cancel_on_break` on O0, O1 and O2."
+    },
+    {
+      "at": "2026-11-16T13:14:20.980Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A stream's not-ready state never becomes a normal end-of-stream, and consumer demand and producer wakeup can never lose an item or spin. Proof: `jet test Compiler --profile golden --filter stream_read"
+    },
+    {
+      "at": "2026-11-16T13:14:20.039Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A non-blocking drain stops at Empty without closing the channel, later items stay readable, and closed, cancelled and failed states stay distinct. Proof: `jet test Compiler --profile golden --filter c"
+    },
+    {
+      "at": "2026-11-16T13:14:18.286Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dbs1yh",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Channel outcomes are distinct: capacity 0 (rendezvous) differs from capacity 1, and full, closed-send, dropped-receiver, cancel and receive-after-close each report their own outcome. A public API chan"
+    },
+    {
+      "at": "2026-11-16T13:14:16.548Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sttk1s",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The full mbedtls surface that Core does not use is complete in Jet: every mbedtls test-suite vector, interop with OpenSSL and the old mbedtls build on every TLS 1.2 and 1.3 version, suite and curve, c"
+    },
+    {
+      "at": "2026-11-16T13:14:15.239Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sttk1s",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The rewrite passes the same vectors (NIST CAVP plus the fetched Wycheproof), the interop matrix and the constant-time checks as #6694. Proof: `jet test Compiler --profile core --filter crypto` and `je"
+    },
+    {
+      "at": "2026-11-16T13:14:14.305Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sttk1s",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-CRYPTOENV1=A: core.crypto offers misuse-resistant seal, open, sign and verify; the expert raw and exposure operations (a raw nonce or algorithm) require #Unsafe; and a secret value cannot be printed"
+    },
+    {
+      "at": "2026-11-16T13:14:13.301Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sttk1s",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A service authority signing key comes from a secret issuance and registry and can never be derived from the public token (Core/Service/Service.jet reads the authority proof from hex today), and the re"
+    },
+    {
+      "at": "2026-11-16T13:14:12.366Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sttk1s",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: There is one Secret mechanism: core.crypto.Secret and every crypto key are built on the runtime Secret (Compiler/JetRuntime/Source/Secret.jet), which wipes spare capacity and is wiped on a crash. Proo"
+    },
     {
       "at": "2026-11-16T13:14:11.024Z",
       "by": "Main",
