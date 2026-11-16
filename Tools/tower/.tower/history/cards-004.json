@@ -102256,6 +102256,59 @@
       "completedAt": "2026-11-13T04:09:21.603Z",
       "questions": [],
       "retiredAt": "2026-11-16T04:17:50.094Z"
+    },
+    {
+      "id": "c06pt752",
+      "num": 6768,
+      "title": "I1: Close never runs for a reassigned close local and its temporaries (resource_close/reassigned_close_local_frees_its_old_buffer_once)",
+      "body": "Reproduced by G11Speed-4 on 2026-11-12 on seed-b13 against origin/dev; not marked known-failing. tests resource_close/reassigned_close_local_frees_its_old_buffer_once fails with a snapshot mismatch on every tier (O0, O1, O2, checked-alloc, web). The golden's first 3 lines, 'close x sum 2100', 'close t sum 1500' and 'close n sum 600', are missing. In reduced(), with 't: sub(x, n); x = t', the Close of the old x, of t and of n never runs. A safe-Jet resource leak, so I1 applies. Repro: $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/devred/.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root is named, with the lowering or ownership step that drops the Close of a reassigned close local and of its temporaries. The fix is at that root, and tests resource_close/reassigned_close_local_frees_its_old_buffer_once passes on O0, O1, O2, checked-alloc and web (jet test Compiler --profile golden or the resource_close suite, 0 FAIL/KF).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 1380383b42 (sema: a compile-time closure holds the close of every value its code drops). Root: first: reduced() was folded at compile time as a local value, so its closes never ran at run time. Main ran on seed-b14, 2026-11-13: jet test Compiler --profile cases --filter resource_close/reassigned_close_local_frees_its_old_buffer_once PASS 1 FAIL 0, and --filter resource_close/a_close_local_rebound_in_a_loop_and_a_branch_closes_each_value_once PASS 1 FAIL 0.",
+          "at": "2026-11-13T05:42:22.325Z"
+        },
+        {
+          "n": 2,
+          "text": "A second program closes a reassigned local in a different shape (a loop that rebinds a Close value each iteration, plus a branch that rebinds it), and every Close runs exactly once on every tier (a case with expected output).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 1380383b42 (sema: a compile-time closure holds the close of every value its code drops). Root: first: reduced() was folded at compile time as a local value, so its closes never ran at run time. Main ran on seed-b14, 2026-11-13: jet test Compiler --profile cases --filter resource_close/reassigned_close_local_frees_its_old_buffer_once PASS 1 FAIL 0, and --filter resource_close/a_close_local_rebound_in_a_loop_and_a_branch_closes_each_value_once PASS 1 FAIL 0.",
+          "at": "2026-11-13T05:42:23.225Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T10:16:05.809Z",
+      "updated": "2026-11-13T05:42:27.938Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-13T05:42:27.938Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T05:53:55.123Z"
     }
   ]
 }
