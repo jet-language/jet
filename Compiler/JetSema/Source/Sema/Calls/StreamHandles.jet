@@ -12,7 +12,6 @@ use jet_foundation.[
     ParamZone,
     Span,
     SymbolKind,
-    TDeclarationOwnership,
     TMethodRef,
     Type,
     core_source_owns_type,
@@ -77,18 +76,9 @@ sema_stream_handle_is_canonical: fn(ty: Type, owner: String, environment: SemaSc
     actual: sema_stream_handle_owner(ty) ?? return false
     if actual != owner -> return false
     // The channel endpoints are compiler-owned builtins with no declaring
-    // module (Concurrency.jet `sema_call_concurrency_is_canonical_sender`):
-    // a user nominal of the same name shadows them.
-    if owner == "Sender" || owner == "Receiver" {
-        if program.registration_graph == .Val(graph) {
-            if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None {
-                return false
-            }
-            fact: sema_registration_core_builtin_owner(graph, owner) ?? return false
-            return fact.ownership == TDeclarationOwnership.Owned
-        }
-        return false
-    }
+    // module: a program's own `Sender` or `Receiver` is spelled by its
+    // owner, never bare (sema_type_is_builtin_handle).
+    if owner == "Sender" || owner == "Receiver" -> return sema_type_is_builtin_handle(ty, owner)
     if program.registration_graph == .Val(graph) {
         resolved: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
         if resolved == .Val(row) {

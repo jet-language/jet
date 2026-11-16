@@ -1,0 +1,28 @@
+# A program type that shares a builtin handle's name never hides the
+# handle's methods, and the handle never takes the program type's: beside a
+# program `Task<T>`, `Sender<T>` and `Receiver<T>` with a `join`, `detach`,
+# `send` and `receive` of their own, and an imported `jobs.Task`, the handles
+# `task { … }` and `channel<Int>()` make still detach, join, send and receive
+# as Core's, on every tier. Sema tells a handle by its spelling, never by a
+# lookup of the bare name in the caller's scope (sema_type_is_builtin_handle):
+# a program nominal is spelled `module::Leaf` however its value is typed, so
+# each program value here comes from a different typing path (a literal, a
+# signature, a generic alias, an import, an alias to the import) and a path
+# that left one bare would send its method to the handle's and fail the run.
+# Before, the program's types answered for the handles: `send` expected no
+# arguments, `receive` gave a String, `join` gave the program's String and
+# each handle still owed its join (L1101).
+fixture: ProgramTypeNamedLikeCoreKeepsCoreMethods.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = program_type_named_like_core_keeps_core_methods.out
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = program_type_named_like_core_keeps_core_methods.out
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = program_type_named_like_core_keeps_core_methods.out

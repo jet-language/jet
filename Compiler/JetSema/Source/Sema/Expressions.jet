@@ -3519,6 +3519,9 @@ sema_expr_builtin_impl_method_candidates: fn(graph: SemaRegistrationGraph, recei
 // changing the annotation's public spelling or inventing a Core alias table.
 sema_expr_receiver_nominal_identity: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type) -> String Never! {
     base_name: sema_expr_type_base_name(receiver_type) ?? return type_name(receiver_type)
+    // A builtin handle is its own identity, whatever program type shares its
+    // name (sema_type_is_builtin_handle).
+    if sema_type_is_builtin_handle(receiver_type, base_name) -> return base_name
     if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row_at(graph, receiver_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
             nominal: graph.modules[row.module_index].nominals[row.row]
@@ -3546,6 +3549,9 @@ sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program
     if program.registration_graph == .Val(graph) {
         // A resolved receiver carries its canonical identity (`module::URL`).
         base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
+        // A builtin handle declares no methods; a program type of its name is
+        // spelled by its owner (sema_type_is_builtin_handle).
+        if sema_type_is_builtin_handle(receiver_type, base_name) -> return false
         if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
             loop owner_index in owner_modules {
                 loop implementation_index in 0..<graph.modules[owner_index].impls.len() {
