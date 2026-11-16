@@ -381,13 +381,17 @@ IRCompilerOwnedEnum: struct {
     variants: [String]
 }
 
-// Compiler-owned runtime enums (`IOError`, `Key`, `DataEvent`, ...). Each
-// joins every program as one row under its bare canonical key, so an enum
-// literal, a variant pattern and the backends name the same IR type as the
-// Rust runtime does. A Core enum with only unit cases has no row here: its
-// CORE_ENUM_CASE_ROWS row (its Core.rows case list) stands in when no single
-// Core declaration of it is loaded. The Core-declared families still here
-// carry payloads that row can't hold.
+// Compiler-owned runtime enums (`IOError`, `Key`, `Dyn`, ...). Each joins
+// every program as one row under its bare canonical key, so an enum literal,
+// a variant pattern and the backends name the same IR type as the Rust
+// runtime does. A Core-declared enum needs no row here: its Core declaration
+// claims the bare name wherever its module is loaded, which is wherever a
+// value of it can arise. Where its module line lists its cases, that
+// CORE_ENUM_CASE_ROWS row stands in when no single declaration is loaded. The
+// Core-declared families still here carry payloads that row can't hold, and
+// either a program can hold their values without loading the declaring
+// module, or (DataEvent) this row lays them out as their runtime handle
+// carrier, where the Core declaration would lay them out inline.
 IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "HookOutcome", variants: [String]{"Continue", "Cancel", "Fail"}},
     {name: "HookDecision", variants: [String]{"Continue", "Transform", "Cancel", "Fail"}},
@@ -400,9 +404,6 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "DurationUnit", variants: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}},
     {name: "Dyn", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}},
     {name: "DataEvent", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"}},
-    {name: "NetDNSError", variants: [String]{"NotFound", "Failure"}},
-    {name: "NetError", variants: [String]{"InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"}},
-    {name: "WsError", variants: [String]{"InvalidURL", "InvalidHandshake", "Protocol", "Timeout", "Closed", "Cancelled", "UnsupportedTarget", "MessageTooLarge", "IO"}},
     // The closed reflection detail menus sema types fact reads with
     // (sema_fact_enum_variants): a read `EXACTNESS.kind` or
     // `OBLIGATION.param_contract[0].zone` is a runtime value of these rows.
@@ -433,13 +434,8 @@ ir_compiler_owned_single: fn(ty: Type) -> IRCompilerOwnedPayload Never! {
     IRCompilerOwnedPayload.Single{ty: ty}
 }
 
-ir_compiler_owned_named: fn(fields: [TypeTupleField]) -> IRCompilerOwnedPayload Never! {
-    IRCompilerOwnedPayload.Named{fields: fields}
-}
-
 // The payload of `name.variant` on a COMPILER_OWNED_ENUMS row, written over
 // the row's type parameters; a plain Core enum row's variants are all unit.
-// NetError and NetDNSError carry their checked variant payloads.
 ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerOwnedPayload Never! {
     bytes: Type.List{element: Type.IntN{signed: false, bits: 8}}
     if name == "HookDecision" || name == "HookOutcome" {
@@ -451,27 +447,6 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
     if name == "DispatchFailure" {
         if variant == "Handler" -> return ir_compiler_owned_single(Type.Named{name: "E"})
         return ir_compiler_owned_single(Type.String)
-    }
-    if name == "DataEvent" {
-        if variant == "Bool" -> return ir_compiler_owned_single(Type.Bool)
-        if variant == "Int" -> return ir_compiler_owned_single(Type.Int)
-        if variant == "Float" -> return ir_compiler_owned_single(Type.Float)
-        if variant == "Number" || variant == "Text" || variant == "Key" {
-            return ir_compiler_owned_single(Type.String)
-        }
-        if variant == "Bytes" {
-            return ir_compiler_owned_single(Type.List{element: Type.IntN{signed: false, bits: 8}})
-        }
-        return IRCompilerOwnedPayload.Unit
-    }
-    if name == "WsError" {
-        if variant == "MessageTooLarge" {
-            return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Int}})
-        }
-        if variant == "IO" {
-            return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "operation", ty: Type.String}})
-        }
-        return IRCompilerOwnedPayload.Unit
     }
     if name == "IOError" {
         if variant == "ResourceLimit" {
@@ -501,11 +476,6 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
             return ir_compiler_owned_single(Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}})
         }
         return IRCompilerOwnedPayload.Unit
-    }
-    if name == "NetDNSError" -> return ir_compiler_owned_single(Type.String)
-    if name == "NetError" {
-        if variant == "DNS" -> return ir_compiler_owned_single(Type.Named{name: "NetDNSError"})
-        return ir_compiler_owned_single(Type.Named{name: "NetErrorDetail"})
     }
     IRCompilerOwnedPayload.Unit
 }
