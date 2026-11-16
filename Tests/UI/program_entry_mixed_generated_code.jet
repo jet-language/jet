@@ -1,0 +1,14 @@
+// @programmable_build
+// @cli_build
+// A `run: fn` in a module `b.generate` makes is a `run` entry, so the entry
+// file's top-level statements are a second one.
+build: fn(b: Build) {
+    b.generate("tool") {
+        run: fn() { print("generated") }
+    }
+    app: b.add_executable("app", ["program_entry_mixed_generated_code.jet", ".jet/generated/program_entry_mixed_generated_code/tool.jet"], [])
+    b.default(app)
+}
+
+print("before")
+print("after")
