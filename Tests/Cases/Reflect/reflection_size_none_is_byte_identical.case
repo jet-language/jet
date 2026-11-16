@@ -1,0 +1,33 @@
+# The "size, none" reflection cell of the canonical manifest
+# (Tools/Gauntlet/measurement-manifest.json reflection_size_pairs). A program
+# that imports core.reflect and reflects nothing builds to the same bytes as
+# the same program without the import, at every level: an unused import adds
+# no record, table or route. The plain arm keeps a comment line where the
+# import was, since a build records each function's source line.
+fixture: ReflectionSizeNoneIsByteIdentical.fixture
+env: NO_COLOR=1
+step: jet build -O0 main.jet
+cwd: {work}/reflect
+exit: 0
+step: jet build -O0 main.jet
+cwd: {work}/plain
+exit: 0
+file: reflect/.jet/build/main == plain/.jet/build/main
+step: jet build -O1 main.jet
+cwd: {work}/reflect
+exit: 0
+step: jet build -O1 main.jet
+cwd: {work}/plain
+exit: 0
+file: reflect/.jet/build/main == plain/.jet/build/main
+step: jet build -O2 main.jet
+cwd: {work}/reflect
+exit: 0
+step: jet build -O2 main.jet
+cwd: {work}/plain
+exit: 0
+file: reflect/.jet/build/main == plain/.jet/build/main
+step: jet run -O0 main.jet
+cwd: {work}/reflect
+exit: 0
+stdout: = "rock 3, door shut\n"

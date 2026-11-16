@@ -1,0 +1,25 @@
+// The reflection arm of the "size, none" cell: it imports core.reflect and
+// reflects nothing. Its build must be byte-identical to the plain arm's, the
+// same program without the import.
+use reflect: core.reflect
+
+Rock: struct {
+    weight: Int
+}
+
+Door: enum {
+    Open
+    Shut
+}
+
+label: fn(door: Door) -> String {
+    if door == {
+        .Open -> "open"
+        .Shut -> "shut"
+    }
+}
+
+run: fn() {
+    rock: Rock{weight: 3}
+    print("rock {rock.weight}, door {label(Door.Shut)}")
+}

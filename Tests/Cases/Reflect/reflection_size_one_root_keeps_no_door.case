@@ -1,0 +1,29 @@
+# The "size, one root" reflection cell of the canonical manifest
+# (Tools/Gauntlet/measurement-manifest.json reflection_size_pairs). Both arms
+# reflect only `Rock`; the door arm also declares and uses `Door`. Each build
+# carries `Rock`'s record, and the door arm carries none for `Door`: reflection
+# retains what its one root reaches, not every declared type.
+fixture: ReflectionSizeOneRootKeepsNoDoor.fixture
+env: NO_COLOR=1
+step: jet build -O0 main.jet
+cwd: {work}/rock
+exit: 0
+file: rock/.jet/build/main ~ "main.Rock" # the reflected root's record
+step: jet build -O0 main.jet
+cwd: {work}/door
+exit: 0
+file: door/.jet/build/main ~ "main.Rock" # the same root's record
+file: door/.jet/build/main !~ "main.Door" # no record for the type it never reflects
+step: jet build -O2 main.jet
+cwd: {work}/door
+exit: 0
+file: door/.jet/build/main ~ "main.Rock" # the root's record survives optimization
+file: door/.jet/build/main !~ "main.Door" # and still no record for `Door`
+step: jet run -O0 main.jet
+cwd: {work}/door
+exit: 0
+stdout: = "main.Rock 1\ndoor shut\n"
+step: jet run -O0 main.jet
+cwd: {work}/rock
+exit: 0
+stdout: = "main.Rock 1\n"

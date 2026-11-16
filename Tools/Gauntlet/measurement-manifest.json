@@ -349,6 +349,31 @@
       }
     ]
   },
+  "reflection_size_pairs": {
+    "schema": "jet.perf.reflection-size-pairs.v1",
+    "version": 1,
+    "rule": "Reflection costs only what a program reflects. Each cell is a pair of programs built at -O0, -O1 and -O2. A program that imports core.reflect and reflects nothing builds to the same bytes as the same program without the import. A program that reflects one root carries that root's record and no record for a type it declares and uses but never reflects.",
+    "pairs": [
+      {
+        "id": "reflection_size_none",
+        "cell": "P5",
+        "reflect": "Tests/Cases/Reflect/ReflectionSizeNoneIsByteIdentical.fixture/reflect",
+        "plain": "Tests/Cases/Reflect/ReflectionSizeNoneIsByteIdentical.fixture/plain",
+        "levels": ["-O0", "-O1", "-O2"],
+        "pass": "byte-identical build",
+        "command": "jet test Compiler --profile cases --filter reflection_size_none_is_byte_identical"
+      },
+      {
+        "id": "reflection_size_one_root",
+        "cell": "P6",
+        "reflect": "Tests/Cases/Reflect/ReflectionSizeOneRootKeepsNoDoor.fixture/door",
+        "plain": "Tests/Cases/Reflect/ReflectionSizeOneRootKeepsNoDoor.fixture/rock",
+        "levels": ["-O0", "-O2"],
+        "pass": "the reflect arm's build holds the reflected root's record and none for the declared and used Door",
+        "command": "jet test Compiler --profile cases --filter reflection_size_one_root_keeps_no_door"
+      }
+    ]
+  },
   "axes": {
     "live_reload": {
       "status": "required",

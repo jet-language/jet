@@ -686,6 +686,18 @@ whole call with E0112 naming the field. A capture is an ordinary copy of the
 value, so a value that can't be copied (one holding a `#SingleUse` value,
 resource state or a borrowed loan) is refused with E0112 too.
 
+Reflection costs only what a program reflects. A program that imports
+`core.reflect` and reflects nothing builds to the same bytes as the same
+program without the import, and a program that reflects one root carries
+that root's record and none for a type it declares and uses but never
+reflects. The two paired size cells are `reflection_size_pairs` in the
+canonical manifest
+([`measurement-manifest.json`](../../../Tools/Gauntlet/measurement-manifest.json)),
+each checked by its case:
+[`reflection_size_none_is_byte_identical`](../../../Tests/Cases/Reflect/reflection_size_none_is_byte_identical.case)
+and
+[`reflection_size_one_root_keeps_no_door`](../../../Tests/Cases/Reflect/reflection_size_one_root_keeps_no_door.case).
+
 An enum value's `case()` returns the case it held when it was captured as a
 `Case`, an outcome value's its built-in case (below), and `None` for a value
 of any other type. `Case.name()` is the case's
