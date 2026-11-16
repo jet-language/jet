@@ -76,3 +76,40 @@ brace_layout_impl_shape: fn(program: Program) -> String {
 `,
     )
 }
+
+#Test("marker, fact and effect settings end at a comma") {
+    program: parser_test_program(
+        `Inline: struct {
+    mode: Int
+
+    impl Marker {
+        sites: [.Function, .Method],
+        repeatable: false,
+    }
+}
+Tracked: struct {
+    impl Fact {
+        holds: .Value,
+        safe: true,
+    }
+}
+Audit: struct {
+    impl Effect {
+        parent: Log,
+    }
+}
+run: fn() {}
+`,
+    )
+    shape := [String]{}
+    loop item in program.items {
+        if item == .Struct(value) {
+            if value.marker == .Val(declaration) -> shape.push("marker {declaration.params.len()}")
+            if value.effect_impl == .Val(declared) && declared.parent == .Val(parent) {
+                shape.push("parent {parent.name}")
+            }
+        }
+        if item == .FactDecl(fact) -> shape.push("fact {fact.params.len()}")
+    }
+    assert_eq(shape.join(", "), "marker 3, fact 2, parent Log")
+}

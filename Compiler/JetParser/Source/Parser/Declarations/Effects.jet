@@ -101,7 +101,7 @@ parser_parse_effect_setting: fn(state: &JetParserState) -> NamedSpan? {
     key: parser_value(state, key_token)
     if key != "parent" {
         _ := parser_parse_expression(state, 1, 0)
-        parser_finish_statement(state)
+        parser_finish_data_member(state)
         parser_add_report(state, parser_effect_setting_report(key_token.span, key))
         return None
     }
@@ -114,7 +114,7 @@ parser_parse_effect_setting: fn(state: &JetParserState) -> NamedSpan? {
         name = "{name}.{parser_value(state, segment)}"
         end = segment.span
     }
-    parser_finish_statement(state)
+    parser_finish_data_member(state)
     Val(NamedSpan{name: name, span: parser_cover(first.span, end)})
 }
 
