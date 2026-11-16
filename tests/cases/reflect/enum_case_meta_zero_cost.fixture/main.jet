@@ -1,0 +1,22 @@
+// The case catalog is compile-time metadata: its count folds while building,
+// so the program carries the number and no table of cases.
+Shape: enum {
+    Dot
+    Circle(Int)
+    Rect(width: Int, height: Int)
+}
+
+CASES: #run Shape.reflect().cases.len()
+
+area: fn(shape: Shape) -> Int {
+    if shape == {
+        .Dot -> 0
+        .Circle(radius) -> 3 * radius * radius
+        .Rect(width, height) -> width * height
+    }
+}
+
+run: fn() {
+    print(CASES)
+    print(area(Shape.Rect{width: 4, height: 5}))
+}
