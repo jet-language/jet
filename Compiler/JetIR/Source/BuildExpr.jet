@@ -3683,8 +3683,9 @@ ir_copy_word: fn(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Never!
 
 // An owner-qualified call: a user type's static method is a direct call of
 // its checked function (a generic owner's type arguments lead the method's
-// own); a Prelude owner's crosses its runtime route `<path>::<member>` with
-// the arguments' borrow mask.
+// own); a type parameter's bound's (`T.zero()`) calls the implementation the
+// instance's concrete owner has; a Prelude owner's crosses its runtime route
+// `<path>::<member>` with the arguments' borrow mask.
 ir_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     if owner == .Prelude(rooted, path, _) {
         if method.trait_owner != None {
@@ -3733,7 +3734,13 @@ ir_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: T
         result: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
         return ir_route(m, p, b, symbol, slots, borrowed, result, span)
     }
-    method_key: ir_body_symbol_key(p, b, method.symbol)
+    method_key := ir_body_symbol_key(p, b, method.symbol)
+    if method.trait_owner != None {
+        written: owner_type ?? return ir_fail_slot(b, span, "missing checked fact: trait static call of {method.name} without its owner type")
+        concrete: ir_fact(p, b, written, span)
+        if ir_failed(b) -> return -1
+        method_key = ir_method_key(m, p, concrete, method)
+    }
     row: ir_function_row(p, method_key) ?? return ir_fail_slot(b, span, "static call outside the checked program: {method.name}")
     function: p.functions[row]
     expected: function.generic_params.len()
@@ -3757,7 +3764,8 @@ ir_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: T
         }
         return ir_call(m, p, b, read.key, read.args, -1, [IRWriteBack]{}, args, span)
     }
-    ir_call(m, p, b, method_key, all, -1, [IRWriteBack]{}, args, span)
+    value: ir_call(m, p, b, method_key, all, -1, [IRWriteBack]{}, args, span)
+    ir_trait_propagate(m, p, b, method, value, ty, span)
 }
 
 // The arm of a valued `if`: its statements, then its value into `result`.

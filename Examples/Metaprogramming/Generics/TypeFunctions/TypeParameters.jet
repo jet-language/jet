@@ -1,0 +1,19 @@
+// A type parameter makes a declaration a recipe the build fills in once per
+// type it is used at: `Pair<T>` and `swap<T>` below are built for Int and
+// for String, and each instance is ordinary code for its type.
+
+Pair: struct<T> {
+    left: T
+    right: T
+}
+
+swap: fn<T>(pair: Pair<T>) -> Pair<T> { {left: pair.right.copy(), right: pair.left.copy()} }
+
+run: fn() {
+    numbers: Pair<Int>{left: 1, right: 2}
+    flipped: swap(numbers)
+    print("{flipped.left} {flipped.right}")
+    words: Pair<String>{left: "type", right: "parameter"}
+    turned: swap(words)
+    print("{turned.left} {turned.right}")
+}

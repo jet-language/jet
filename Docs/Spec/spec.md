@@ -949,7 +949,10 @@ A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
 dynamic dispatch with invisible boxing. A trait value prints, interpolates and
 debug-prints as the concrete value it holds, so `print(shapes)` shows each
 shape; it can be shown a way only when every type implementing the trait can.
-Generic bounds use `f: fn<T: Bound>(…)` and `Pair: struct<T> { … }`. Built-in
+Generic bounds use `f: fn<T: Bound>(…)` and `Pair: struct<T> { … }`. Inside
+such a function `T.name(…)` calls a static method a bound declares (one
+without `self`, such as `zero: fn() -> Self`): `Self` reads as `T`, and each
+instance calls the implementation its concrete type has. Built-in
 `Printable`, `Equatable`, `Debug`, `Comparable`, `Encode`, and `Decode` derive
 when every field qualifies. The
 package default can deny `auto_derive` through

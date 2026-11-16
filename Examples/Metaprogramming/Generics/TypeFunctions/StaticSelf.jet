@@ -1,0 +1,52 @@
+// A trait method without `self` makes a value of the implementing type:
+// `zero: fn() -> Self`. Through a bound, `T.zero()` calls the implementation
+// of whichever type the build fills T with.
+
+Measure: trait {
+    zero: fn() -> Self
+    from_int: fn(amount: Int) -> Self
+    plus: fn(self, other: Self) -> Self
+    show: fn(self) -> String
+}
+
+Meters: struct {
+    value: Int
+
+    impl Measure {
+        zero: fn() -> Meters { Meters{value: 0} }
+
+        from_int: fn(amount: Int) -> Meters { Meters{value: amount} }
+
+        plus: fn(self, other: Meters) -> Meters { Meters{value: self.value + other.value} }
+
+        show: fn(self) -> String { "{self.value} m" }
+    }
+}
+
+Seconds: struct {
+    ticks: Int
+
+    impl Measure {
+        zero: fn() -> Seconds { Seconds{ticks: 0} }
+
+        from_int: fn(amount: Int) -> Seconds { Seconds{ticks: amount} }
+
+        plus: fn(self, other: Seconds) -> Seconds { Seconds{ticks: self.ticks + other.ticks} }
+
+        show: fn(self) -> String { "{self.ticks} s" }
+    }
+}
+
+total: fn<T: Measure>(amounts: [Int]) -> T {
+    sum := T.zero()
+    loop amount in amounts -> sum = sum.plus(T.from_int(amount))
+    sum
+}
+
+run: fn() {
+    distance: total<Meters>([Int]{3, 4, 5})
+    print(distance.show())
+    time: total<Seconds>([Int]{60, 30})
+    print(time.show())
+    print(Meters.zero().show())
+}
