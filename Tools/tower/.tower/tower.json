@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 109350,
+    "rev": 109375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98299,54 +98299,6 @@
       "completedAt": "2026-11-14T01:33:07.345Z"
     },
     {
-      "id": "c0w8eeu5",
-      "num": 6788,
-      "title": "Copy ratchet red on dev: 9 compiler files over their copy ceiling since the lambda cutover",
-      "body": "Found by Main on 2026-11-13: tests/guards/copy_ratchet.jet on dev 78d3db56d8 (seed-b14) reports 9 compiler files over their copy ceilings: FixCommands.jet 5/3, DiagnosticRows.jet 18/16, Lexer Payload.jet 2/1, NamedMarkerGroups.jet 5/4, TestKit Exec.jet 14/13, Golden.jet 15/12, Ui.jet 19/17, Prelude Diagnostics.jet 14/12, and Compiler/test.jet 51/46. Two files are under their ceiling: Lexer Tests/Entry.jet 2/3 and Parser State.jet 3/4. The guard was 151/0 at bf740ddd38. The lambda-shape1 cutover (78d3db56d8) or the g5-fold6 landings brought the new copies.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c1 met by 3310bed0ba."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "tests/guards/copy_ratchet.jet passes on dev with the batch jet. Each new copy in the 9 files is removed at its root (move the last use, borrow or restructure), never by raising a ceiling, and the two files under their ceiling get the lowered ceiling. Proof: the guard file 0 failed, with the batch jet first on PATH.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 3310bed0ba (G5DevX2-6788), landed by Lander5 on 2026-11-13 on top of 8c82f027d2. seed-b14: tests/guards/copy_ratchet.jet 153 passed, 0 failed; jet check of JetTestKit, JetLexer, JetParser, JetFoundation, JetCli and Compiler/test.jet rc 0; jet check --prelude Compiler/Prelude/Diagnostics.jet rc 0; DiagnosticRows --check rc 0. No ceiling raised, 5 lowered.",
-          "at": "2026-11-13T13:05:09.677Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G6"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-13T12:24:23.122Z",
-      "updated": "2026-11-13T13:05:11.211Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-13T13:05:11.211Z"
-    },
-    {
       "id": "c0098utl",
       "num": 6789,
       "title": "Metaprogramming goldens CommentsAndDocs and MarkerSettings fail on dev at every level",
@@ -99467,21 +99419,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place. In the browser they map to a capture input or getUserMedia, and to the Geolocation API. Proof: `jet test Compiler --profile cases --filter native_app/camera_and_location_give_typed_values_after_a_grant`.",
+          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place. In the browser they map to a capture input or getUserMedia, and to the Geolocation API. Proof: `jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:23.712Z"
+          "at": "2026-11-16T13:04:59.845Z"
         },
         {
           "n": 2,
-          "text": "native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered. Proof: `jet test Compiler --profile cases --filter native_app/sensor_streams_stop_with_their_scope`.",
+          "text": "native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered. Proof: `jet test Compiler --profile cases --filter NativeApp/sensor_streams_stop_with_their_scope`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:24.737Z"
+          "at": "2026-11-16T13:05:00.778Z"
         }
       ],
       "refs": [],
@@ -99492,8 +99444,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:45.126Z",
-      "updated": "2026-11-15T11:38:53.674Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T13:05:00.778Z",
+      "updatedBy": "Main",
       "criteriaLastN": 2
     },
     {
@@ -99517,30 +99469,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "https://crew.example.com/tasks/<id>, an iOS universal link, an Android App Link and crewboard://tasks/<id> all land on TaskView{id} through the one route table (task IDs are UUIDv7). An unmatched path opens the not-found state. Proof: `jet test Compiler --profile cases --filter native_app/every_link_form_lands_on_the_route_state`.",
+          "text": "https://crew.example.com/tasks/<id>, an iOS universal link, an Android App Link and crewboard://tasks/<id> all land on TaskView{id} through the one route table (task IDs are UUIDv7). An unmatched path opens the not-found state. Proof: `jet test Compiler --profile cases --filter NativeApp/every_link_form_lands_on_the_route_state`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:09:01.782Z"
+          "at": "2026-11-16T13:05:01.698Z"
         },
         {
           "n": 2,
-          "text": "The server output serves /.well-known/apple-app-site-association and /.well-known/assetlinks.json, written from the phone output's id and signing identity. Proof: `jet test Compiler --profile cases --filter web_app/app_link_files_are_written_from_the_phone_output`.",
+          "text": "The server output serves /.well-known/apple-app-site-association and /.well-known/assetlinks.json, written from the phone output's id and signing identity. Proof: `jet test Compiler --profile cases --filter WebApp/app_link_files_are_written_from_the_phone_output`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:26.728Z"
+          "at": "2026-11-16T13:05:02.631Z"
         },
         {
           "n": 3,
-          "text": "Desktop single instance: a second launch with crewboard://tasks/42 hands its URL to the running app, which focuses its window and opens the state, and the second process exits. The reference designs are Electron requestSingleInstanceLock and Tauri's single-instance plugin. Proof: `jet test Compiler --profile cases --filter native_app/second_launch_hands_its_link_to_the_running_app`.",
+          "text": "Desktop single instance: a second launch with crewboard://tasks/42 hands its URL to the running app, which focuses its window and opens the state, and the second process exits. The reference designs are Electron requestSingleInstanceLock and Tauri's single-instance plugin. Proof: `jet test Compiler --profile cases --filter NativeApp/second_launch_hands_its_link_to_the_running_app`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:27.696Z"
+          "at": "2026-11-16T13:05:03.598Z"
         }
       ],
       "refs": [],
@@ -99551,8 +99503,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:46.424Z",
-      "updated": "2026-11-15T11:38:55.497Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T13:05:03.598Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -99576,30 +99528,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "native.share opens the system share sheet on phones, macOS and Windows, and the Web Share API in a browser that has it. Elsewhere it copies the link and says so. Proof: `jet test Compiler --profile cases --filter native_app/share_uses_the_system_sheet_or_copies`.",
+          "text": "native.share opens the system share sheet on phones, macOS and Windows, and the Web Share API in a browser that has it. Elsewhere it copies the link and says so. Proof: `jet test Compiler --profile cases --filter NativeApp/share_uses_the_system_sheet_or_copies`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:28.662Z"
+          "at": "2026-11-16T13:05:04.537Z"
         },
         {
           "n": 2,
-          "text": "native.copy_text and native.paste_text work on every target. On the web, paste runs only inside a user gesture, and a refused read gives None. Proof: `jet test Compiler --profile cases --filter native_app/clipboard_round_trips_on_every_target`.",
+          "text": "native.copy_text and native.paste_text work on every target. On the web, paste runs only inside a user gesture, and a refused read gives None. Proof: `jet test Compiler --profile cases --filter NativeApp/clipboard_round_trips_on_every_target`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:29.678Z"
+          "at": "2026-11-16T13:05:05.492Z"
         },
         {
           "n": 3,
-          "text": "ui.drop_zone<T> takes only a T. A file or text dropped on the drop zone in examples/drag.jet is refused. The same move is also reachable without dragging, by a single pointer or the keyboard (WCAG 2.2 SC 2.5.7). Proof: `jet test Compiler --profile cases --filter native_app/drop_zone_refuses_other_types_and_offers_a_move_without_dragging`.",
+          "text": "ui.drop_zone<T> takes only a T. A file or text dropped on the drop zone in examples/drag.jet is refused. The same move is also reachable without dragging, by a single pointer or the keyboard (WCAG 2.2 SC 2.5.7). Proof: `jet test Compiler --profile cases --filter NativeApp/drop_zone_refuses_other_types_and_offers_a_move_without_dragging`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:30.794Z"
+          "at": "2026-11-16T13:05:06.419Z"
         }
       ],
       "refs": [],
@@ -99610,8 +99562,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:47.698Z",
-      "updated": "2026-11-15T11:38:57.046Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T13:05:06.419Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -99635,21 +99587,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The build writes each purposes: line into Info.plist usage descriptions and AndroidManifest.xml uses-permission entries. A call that needs a permission with no purposes: line fails the build, naming the call and the missing key. Proof: `jet test Compiler --profile cases --filter native_app/permission_without_a_purpose_fails_the_build`.",
+          "text": "The build writes each purposes: line into Info.plist usage descriptions and AndroidManifest.xml uses-permission entries. A call that needs a permission with no purposes: line fails the build, naming the call and the missing key. Proof: `jet test Compiler --profile cases --filter NativeApp/permission_without_a_purpose_fails_the_build`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:31.969Z"
+          "at": "2026-11-16T13:05:07.378Z"
         },
         {
           "n": 2,
-          "text": "native.ask gives Granted, Denied or Restricted on every target, and prompts only at first use. native.open_settings opens the app's settings page. Proof: `jet test Compiler --profile cases --filter native_app/ask_gives_a_typed_grant_on_every_target`.",
+          "text": "native.ask gives Granted, Denied or Restricted on every target, and prompts only at first use. native.open_settings opens the app's settings page. Proof: `jet test Compiler --profile cases --filter NativeApp/ask_gives_a_typed_grant_on_every_target`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:33.122Z"
+          "at": "2026-11-16T13:05:08.313Z"
         }
       ],
       "refs": [],
@@ -99660,8 +99612,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:49.075Z",
-      "updated": "2026-11-15T11:38:58.709Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T13:05:08.313Z",
+      "updatedBy": "Main",
       "criteriaLastN": 2
     },
     {
@@ -99691,39 +99643,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "kit views export their role, name and state: through AccessKit on desktops (UIA, NSAccessibility, AT-SPI), through UIAccessibility on iOS and AccessibilityNodeInfo on Android (the web is a separate criterion). move_button in examples/access.jet is a button named \"Move <title> to <status>\" on every native target. Proof: `jet test Compiler --profile cases --filter native_app/access_tree_names_kit_views`.",
+          "text": "kit views export their role, name and state: through AccessKit on desktops (UIA, NSAccessibility, AT-SPI), through UIAccessibility on iOS and AccessibilityNodeInfo on Android (the web is a separate criterion). move_button in examples/access.jet is a button named \"Move <title> to <status>\" on every native target. Proof: `jet test Compiler --profile cases --filter NativeApp/access_tree_names_kit_views`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T11:38:22.203Z"
+          "at": "2026-11-16T13:05:09.291Z"
         },
         {
           "n": 2,
-          "text": "A kit.icon_button without label: and a ui.image without alt: fail jet check (section 6.5 rows b4 and b5). Proof: `jet test Compiler --profile cases --filter ui_style/missing_alt_and_label_are_compile_errors`.",
+          "text": "A kit.icon_button without label: and a ui.image without alt: fail jet check (section 6.5 rows b4 and b5). Proof: `jet test Compiler --profile cases --filter UIStyle/missing_alt_and_label_are_compile_errors`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:35.384Z"
+          "at": "2026-11-16T13:05:10.260Z"
         },
         {
           "n": 3,
-          "text": "ui.announce reaches screen readers as a polite announcement and does not move focus. Proof: `jet test Compiler --profile cases --filter native_app/announce_is_polite_and_keeps_focus`.",
+          "text": "ui.announce reaches screen readers as a polite announcement and does not move focus. Proof: `jet test Compiler --profile cases --filter NativeApp/announce_is_polite_and_keeps_focus`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:36.501Z"
+          "at": "2026-11-16T13:05:11.208Z"
         },
         {
           "n": 4,
-          "text": "On the web, kit views render as semantic HTML with ARIA: move_button in examples/access.jet is a button named \"Move <title> to <status>\". Proof: `jet test Compiler --profile cases --filter web_app/kit_views_render_semantic_html`.",
+          "text": "On the web, kit views render as semantic HTML with ARIA: move_button in examples/access.jet is a button named \"Move <title> to <status>\". Proof: `jet test Compiler --profile cases --filter WebApp/kit_views_render_semantic_html`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T11:37:56.114Z"
+          "at": "2026-11-16T13:05:12.558Z"
         }
       ],
       "refs": [],
@@ -99734,8 +99686,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:50.597Z",
-      "updated": "2026-11-15T11:39:36.584Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T13:05:12.558Z",
+      "updatedBy": "Main",
       "criteriaLastN": 4
     },
     {
@@ -99759,30 +99711,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "jet i18n --add=de writes one catalog entry per view literal in examples/words.jet. The German build shows the translations, and text passed through ui.verbatim is never looked up. Proof: `jet test Compiler --profile cases --filter ui_i18n/catalog_from_view_literals_and_verbatim_is_untranslated`.",
+          "text": "jet i18n --add=de writes one catalog entry per view literal in examples/words.jet. The German build shows the translations, and text passed through ui.verbatim is never looked up. Proof: `jet test Compiler --profile cases --filter UII18N/catalog_from_view_literals_and_verbatim_is_untranslated`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:37.439Z"
+          "at": "2026-11-16T13:05:13.498Z"
         },
         {
           "n": 2,
-          "text": "ui.text(..., one:, plural:) picks the CLDR plural category per locale (one, few, many, other), and ui.date and numbers follow the reader's locale. Proof: `jet test Compiler --profile cases --filter ui_i18n/plurals_dates_and_numbers_follow_the_locale`.",
+          "text": "ui.text(..., one:, plural:) picks the CLDR plural category per locale (one, few, many, other), and ui.date and numbers follow the reader's locale. Proof: `jet test Compiler --profile cases --filter UII18N/plurals_dates_and_numbers_follow_the_locale`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:38.383Z"
+          "at": "2026-11-16T13:05:14.443Z"
         },
         {
           "n": 3,
-          "text": "In a right-to-left locale, rows, leading and trailing edges and icons that show direction are mirrored, and text from data keeps its own direction. Proof: `jet test Compiler --profile cases --filter ui_i18n/right_to_left_mirrors_layout`.",
+          "text": "In a right-to-left locale, rows, leading and trailing edges and icons that show direction are mirrored, and text from data keeps its own direction. Proof: `jet test Compiler --profile cases --filter UII18N/right_to_left_mirrors_layout`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:39.337Z"
+          "at": "2026-11-16T13:05:15.396Z"
         }
       ],
       "refs": [],
@@ -99793,8 +99745,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:52.050Z",
-      "updated": "2026-11-15T11:39:02.052Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T13:05:15.396Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -99818,30 +99770,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "start, foreground, background, suspend and terminate reach the app on every target: through scenePhase-equivalent events on phones, window events on desktops and the Page Lifecycle API on the web. native.lifecycle(on_resume:) runs on resume. Proof: `jet test Compiler --profile cases --filter native_app/lifecycle_events_reach_the_app_on_every_target`.",
+          "text": "start, foreground, background, suspend and terminate reach the app on every target: through scenePhase-equivalent events on phones, window events on desktops and the Page Lifecycle API on the web. native.lifecycle(on_resume:) runs on resume. Proof: `jet test Compiler --profile cases --filter NativeApp/lifecycle_events_reach_the_app_on_every_target`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:40.667Z"
+          "at": "2026-11-16T13:05:16.373Z"
         },
         {
           "n": 2,
-          "text": "ui.saved state, such as the half-typed comment in comment_box, survives the phone ending the process in the background, and a reload on the web. Proof: `jet test Compiler --profile cases --filter native_app/saved_state_survives_process_death`.",
+          "text": "ui.saved state, such as the half-typed comment in comment_box, survives the phone ending the process in the background, and a reload on the web. Proof: `jet test Compiler --profile cases --filter NativeApp/saved_state_survives_process_death`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:41.858Z"
+          "at": "2026-11-16T13:05:17.289Z"
         },
         {
           "n": 3,
-          "text": "On resume, live queries resubscribe and the offline queue sends with no app code. Proof: `jet test Compiler --profile cases --filter native_app/resume_resubscribes_and_drains_the_queue`.",
+          "text": "On resume, live queries resubscribe and the offline queue sends with no app code. Proof: `jet test Compiler --profile cases --filter NativeApp/resume_resubscribes_and_drains_the_queue`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:42.914Z"
+          "at": "2026-11-16T13:05:18.236Z"
         }
       ],
       "refs": [],
@@ -99852,8 +99804,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:53.581Z",
-      "updated": "2026-11-15T11:39:03.822Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T13:05:18.236Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -99877,48 +99829,48 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The desktop output writes an MSIX on Windows, a signed and notarized DMG on macOS, and an AppImage and a Flatpak on Linux, signed with the identities named in outputs:. Proof: `jet test Compiler --profile cases --filter build_entry/desktop_output_writes_signed_installers` (it checks the structure and the signature of each package the host can verify).",
+          "text": "The desktop output writes an MSIX on Windows, a signed and notarized DMG on macOS, and an AppImage and a Flatpak on Linux, signed with the identities named in outputs:. Proof: `jet test Compiler --profile cases --filter BuildEntry/desktop_output_writes_signed_installers` (it checks the structure and the signature of each package the host can verify).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:43.882Z"
+          "at": "2026-11-16T13:05:19.201Z"
         },
         {
           "n": 2,
-          "text": "The updates: feed is signed. A client refuses an update whose signature fails or whose version is lower than its own, and applies a delta update when one is offered. Proof: `jet test Compiler --profile cases --filter native_app/update_feed_refuses_bad_signatures_and_downgrades`.",
+          "text": "The updates: feed is signed. A client refuses an update whose signature fails or whose version is lower than its own, and applies a delta update when one is offered. Proof: `jet test Compiler --profile cases --filter NativeApp/update_feed_refuses_bad_signatures_and_downgrades`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:44.841Z"
+          "at": "2026-11-16T13:05:20.134Z"
         },
         {
           "n": 3,
-          "text": "A client below the server's min_client gets the typed UpdateRequired (section 4.12) and is offered the update. Proof: `jet test Compiler --profile cases --filter native_app/client_below_min_client_gets_update_required`.",
+          "text": "A client below the server's min_client gets the typed UpdateRequired (section 4.12) and is offered the update. Proof: `jet test Compiler --profile cases --filter NativeApp/client_below_min_client_gets_update_required`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:45.812Z"
+          "at": "2026-11-16T13:05:21.094Z"
         },
         {
           "n": 4,
-          "text": "`jet package` builds a real, deterministic desktop bundle from the checked package plan, with installer metadata, signing hooks, an updater artifact and a byte, digest and mode receipt, with no placeholder archive and no second bundler. Proof: `jet test Compiler --profile cases --filter package/desktop_bundle_deterministic`.",
+          "text": "`jet package` builds a real, deterministic desktop bundle from the checked package plan, with installer metadata, signing hooks, an updater artifact and a byte, digest and mode receipt, with no placeholder archive and no second bundler. Proof: `jet test Compiler --profile cases --filter Package/desktop_bundle_deterministic`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:04:42.245Z"
+          "at": "2026-11-16T13:05:22.057Z"
         },
         {
           "n": 5,
-          "text": "D-INSTALL1 is ratified and the install page documents only the channel it picks. Proof: `jet test tests/guards --filter install_page_single_channel`. D-INSTALL1 is on Main's ballot list (2026-11-15). (was #5950 c1)",
+          "text": "D-INSTALL1 is ratified and the install page documents only the channel it picks. Proof: `jet test Tests/Guards --filter install_page_single_channel`. D-INSTALL1 is on Main's ballot list (2026-11-15). (was #5950 c1)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:13:15.292Z"
+          "at": "2026-11-16T13:05:23.108Z"
         },
         {
           "n": 6,
@@ -100010,7 +99962,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:54.979Z",
-      "updated": "2026-11-16T01:13:24.793Z",
+      "updated": "2026-11-16T13:05:23.108Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -219983,6 +219935,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:05:23.108Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-INSTALL1 is ratified and the install page documents only the channel it picks. Proof: `jet test tests/guards --filter install_page_single_channel`. D-INSTALL1 is on Main's ballot list (2026-11-15). "
+    },
+    {
+      "at": "2026-11-16T13:05:22.057Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `jet package` builds a real, deterministic desktop bundle from the checked package plan, with installer metadata, signing hooks, an updater artifact and a byte, digest and mode receipt, with no placeh"
+    },
+    {
+      "at": "2026-11-16T13:05:21.094Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A client below the server's min_client gets the typed UpdateRequired (section 4.12) and is offered the update. Proof: `jet test Compiler --profile cases --filter native_app/client_below_min_client_get"
+    },
+    {
+      "at": "2026-11-16T13:05:20.134Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The updates: feed is signed. A client refuses an update whose signature fails or whose version is lower than its own, and applies a delta update when one is offered. Proof: `jet test Compiler --profil"
+    },
+    {
+      "at": "2026-11-16T13:05:19.201Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The desktop output writes an MSIX on Windows, a signed and notarized DMG on macOS, and an AppImage and a Flatpak on Linux, signed with the identities named in outputs:. Proof: `jet test Compiler --pro"
+    },
+    {
+      "at": "2026-11-16T13:05:18.236Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c051j6ab",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: On resume, live queries resubscribe and the offline queue sends with no app code. Proof: `jet test Compiler --profile cases --filter native_app/resume_resubscribes_and_drains_the_queue`."
+    },
+    {
+      "at": "2026-11-16T13:05:17.289Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c051j6ab",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: ui.saved state, such as the half-typed comment in comment_box, survives the phone ending the process in the background, and a reload on the web. Proof: `jet test Compiler --profile cases --filter nati"
+    },
+    {
+      "at": "2026-11-16T13:05:16.373Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c051j6ab",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: start, foreground, background, suspend and terminate reach the app on every target: through scenePhase-equivalent events on phones, window events on desktops and the Page Lifecycle API on the web. nat"
+    },
+    {
+      "at": "2026-11-16T13:05:15.396Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fpntwa",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: In a right-to-left locale, rows, leading and trailing edges and icons that show direction are mirrored, and text from data keeps its own direction. Proof: `jet test Compiler --profile cases --filter u"
+    },
+    {
+      "at": "2026-11-16T13:05:14.443Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fpntwa",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: ui.text(..., one:, plural:) picks the CLDR plural category per locale (one, few, many, other), and ui.date and numbers follow the reader's locale. Proof: `jet test Compiler --profile cases --filter ui"
+    },
+    {
+      "at": "2026-11-16T13:05:13.498Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fpntwa",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: jet i18n --add=de writes one catalog entry per view literal in examples/words.jet. The German build shows the translations, and text passed through ui.verbatim is never looked up. Proof: `jet test Com"
+    },
+    {
+      "at": "2026-11-16T13:05:12.559Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0rom5jy",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: On the web, kit views render as semantic HTML with ARIA: move_button in examples/access.jet is a button named \"Move <title> to <status>\". Proof: `jet test Compiler --profile cases --filter web_app/kit"
+    },
+    {
+      "at": "2026-11-16T13:05:11.208Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0rom5jy",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: ui.announce reaches screen readers as a polite announcement and does not move focus. Proof: `jet test Compiler --profile cases --filter native_app/announce_is_polite_and_keeps_focus`."
+    },
+    {
+      "at": "2026-11-16T13:05:10.260Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0rom5jy",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A kit.icon_button without label: and a ui.image without alt: fail jet check (section 6.5 rows b4 and b5). Proof: `jet test Compiler --profile cases --filter ui_style/missing_alt_and_label_are_compile_"
+    },
+    {
+      "at": "2026-11-16T13:05:09.291Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0rom5jy",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: kit views export their role, name and state: through AccessKit on desktops (UIA, NSAccessibility, AT-SPI), through UIAccessibility on iOS and AccessibilityNodeInfo on Android (the web is a separate cr"
+    },
+    {
+      "at": "2026-11-16T13:05:08.313Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02inyar",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: native.ask gives Granted, Denied or Restricted on every target, and prompts only at first use. native.open_settings opens the app's settings page. Proof: `jet test Compiler --profile cases --filter na"
+    },
+    {
+      "at": "2026-11-16T13:05:07.378Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02inyar",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The build writes each purposes: line into Info.plist usage descriptions and AndroidManifest.xml uses-permission entries. A call that needs a permission with no purposes: line fails the build, naming t"
+    },
+    {
+      "at": "2026-11-16T13:05:06.419Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fqrrpk",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: ui.drop_zone<T> takes only a T. A file or text dropped on the drop zone in examples/drag.jet is refused. The same move is also reachable without dragging, by a single pointer or the keyboard (WCAG 2.2"
+    },
+    {
+      "at": "2026-11-16T13:05:05.492Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fqrrpk",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: native.copy_text and native.paste_text work on every target. On the web, paste runs only inside a user gesture, and a refused read gives None. Proof: `jet test Compiler --profile cases --filter native"
+    },
+    {
+      "at": "2026-11-16T13:05:04.537Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fqrrpk",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: native.share opens the system share sheet on phones, macOS and Windows, and the Web Share API in a browser that has it. Elsewhere it copies the link and says so. Proof: `jet test Compiler --profile ca"
+    },
+    {
+      "at": "2026-11-16T13:05:03.598Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0unyp7q",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Desktop single instance: a second launch with crewboard://tasks/42 hands its URL to the running app, which focuses its window and opens the state, and the second process exits. The reference designs a"
+    },
+    {
+      "at": "2026-11-16T13:05:02.631Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0unyp7q",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The server output serves /.well-known/apple-app-site-association and /.well-known/assetlinks.json, written from the phone output's id and signing identity. Proof: `jet test Compiler --profile cases --"
+    },
+    {
+      "at": "2026-11-16T13:05:01.698Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0unyp7q",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: https://crew.example.com/tasks/<id>, an iOS universal link, an Android App Link and crewboard://tasks/<id> all land on TaskView{id} through the one route table (task IDs are UUIDv7). An unmatched path"
+    },
+    {
+      "at": "2026-11-16T13:05:00.778Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c097myt8",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered. Proof: `jet test Compiler --profile cases --filter native_app/sensor"
+    },
+    {
+      "at": "2026-11-16T13:04:59.845Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c097myt8",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place. In the browser they map to a capture input or getUserMedia, and to the Ge"
+    },
     {
       "at": "2026-11-16T13:04:58.531Z",
       "by": "Main",

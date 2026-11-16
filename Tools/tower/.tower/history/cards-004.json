@@ -103316,6 +103316,56 @@
       "completedAt": "2026-11-13T12:55:56.906Z",
       "questions": [],
       "retiredAt": "2026-11-16T12:55:57.498Z"
+    },
+    {
+      "id": "c0w8eeu5",
+      "num": 6788,
+      "title": "Copy ratchet red on dev: 9 compiler files over their copy ceiling since the lambda cutover",
+      "body": "Found by Main on 2026-11-13: tests/guards/copy_ratchet.jet on dev 78d3db56d8 (seed-b14) reports 9 compiler files over their copy ceilings: FixCommands.jet 5/3, DiagnosticRows.jet 18/16, Lexer Payload.jet 2/1, NamedMarkerGroups.jet 5/4, TestKit Exec.jet 14/13, Golden.jet 15/12, Ui.jet 19/17, Prelude Diagnostics.jet 14/12, and Compiler/test.jet 51/46. Two files are under their ceiling: Lexer Tests/Entry.jet 2/3 and Parser State.jet 3/4. The guard was 151/0 at bf740ddd38. The lambda-shape1 cutover (78d3db56d8) or the g5-fold6 landings brought the new copies.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c1 met by 3310bed0ba."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/guards/copy_ratchet.jet passes on dev with the batch jet. Each new copy in the 9 files is removed at its root (move the last use, borrow or restructure), never by raising a ceiling, and the two files under their ceiling get the lowered ceiling. Proof: the guard file 0 failed, with the batch jet first on PATH.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3310bed0ba (G5DevX2-6788), landed by Lander5 on 2026-11-13 on top of 8c82f027d2. seed-b14: tests/guards/copy_ratchet.jet 153 passed, 0 failed; jet check of JetTestKit, JetLexer, JetParser, JetFoundation, JetCli and Compiler/test.jet rc 0; jet check --prelude Compiler/Prelude/Diagnostics.jet rc 0; DiagnosticRows --check rc 0. No ceiling raised, 5 lowered.",
+          "at": "2026-11-13T13:05:09.677Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T12:24:23.122Z",
+      "updated": "2026-11-13T13:05:11.211Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-13T13:05:11.211Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T13:05:11.375Z"
     }
   ]
 }
