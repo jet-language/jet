@@ -5519,6 +5519,7 @@ tasks never read or change the process registry. The module source is
 | `new(title: String) -> App` | graph | Start the app graph titled `title`, with no screens. |
 | `graph.screen(path, view, signed_in: Bool = false) -> App` | graph | Add the screen `view` shows at `path` to the graph, and give back the graph. See below. |
 | `graph.cache<V>(policy: CachePolicy) -> App` | graph | Answer every `#App.Public` endpoint reply of type `V` under `policy`, and give back the graph. See below. |
+| `graph.sitemap(list) -> App` | graph | List the address of each public screen state `list` gives in the served `/sitemap.xml`, and give back the graph. See below. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -5807,6 +5808,21 @@ re-runs a live query, so a viewer list stays current. Asked outside a live
 binding's run, `presence` only reads the accounts present. A connection
 that closes does not end presence: the account stays present while its
 binding is registered. The state is checked as for `url_of` (E2821).
+
+`graph.sitemap(list)` gives the graph a sitemap. `list` is a named function
+that takes nothing and gives a list of screen states, as
+`fn() -> [GuideView]`, and the sitemap asks it each time a crawler reads
+`/sitemap.xml`. A served web app then answers GET `/sitemap.xml` with the
+sitemaps.org 0.9 `urlset` of each listed state's `url_of` address, once each,
+at the origin the request reached (its `Host`, over `https` when
+`X-Forwarded-Proto` says so). A signed-in screen is never in the sitemap: a
+list whose state's screen only a signed-in caller opens, or that no screen
+opens, gives no address. A graph with a sitemap or a signed-in screen also
+answers GET `/robots.txt`: every crawler is asked to leave each signed-in
+screen (`Disallow: /inbox/*$`, each `:name` segment a `*`, ending at the
+path), and is told the sitemap's address. A program route at either path
+answers it instead. A `list` that takes parameters, or gives no list of
+screen states, is E2810.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

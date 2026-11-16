@@ -14,6 +14,8 @@
 // runs the program's one graph, so its screens are every target's route
 // set: in a program that registers screens, a state that none of them opens
 // is E2821 where an address is taken of it (sema_app_route_diagnostics).
+// `.sitemap(list)` lowers to `App.__sitemap<V>`, which takes each state
+// `list` gives to its address the same way (sema_call_app_sitemap).
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -21,11 +23,16 @@ use jet_foundation.[
     CompilerThreads,
     Diagnostic,
     Expr,
+    Lambda,
+    LambdaBody,
+    LambdaParam,
     ModuleID,
+    NamedSpan,
     NodeKind,
     Span,
     Type,
     ast_binding,
+    ast_empty_lambda_meta,
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
@@ -229,6 +236,74 @@ sema_call_app_cache: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type]
     }
     value: sema_expr_check_declared_method(receiver, receiver_value, SEMA_APP_CACHE, SEMA_APP_CACHE, span, [Type]{}, [Type]{reply}, registration, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: value}
+}
+
+SEMA_APP_SITEMAP: "__sitemap"
+
+SEMA_APP_ADDRESS_TEXT: "__address_text"
+
+// `graph.sitemap(list)` on an `app.App`: `list` is a named function that
+// takes nothing and gives a list of screen states `[V]`, the pages the
+// sitemap lists. Lowers the call to `graph.__sitemap<V>(key, fields, list,
+// fn(graph, state) { [graph.__address_text(state.field), …] })`, the
+// state's fields' address text in field order, so the sitemap takes each
+// listed state's address as `url_of` does. The sitemap lists only states
+// whose screen opens for a caller who is not signed in (app.sitemap).
+sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != 1 {
+        diagnostics.push(sema_call_arity_diagnostic("sitemap", 1, args.len(), false, span))
+        return rejected
+    }
+    if args[0].spread || args[0].label != None {
+        diagnostics.push(sema_error("E0104", args[0].span, "`.sitemap` takes one unlabeled argument", "`.sitemap(list)` takes the function that gives the states of the pages the sitemap lists", "pass the function's name alone"))
+        return rejected
+    }
+    handler: sema_app_named_handler("sitemap", args[0], environment, program, scopes, diagnostics) ?? return rejected
+    shape: "`{handler.name}` must take nothing and give a list of the states of public screens, as `fn() -> [LandingView]`"
+    if handler.function.declaration.params.len() != 0 {
+        diagnostics.push(sema_error("E2810", args[0].span, "App `sitemap` requires a function that takes nothing, and `{handler.name}` takes {handler.function.declaration.params.len()} parameters", "the sitemap asks the function for its pages each time a crawler reads it", shape))
+        return rejected
+    }
+    declared: handler.function.declaration.return_type ?? Type.Named{name: "Unit"}
+    returned: sema_type_resolve_declared(graph, declared, handler.function.symbol.module_identity)
+    listed: sema_app_list_element(returned) ?? {
+        diagnostics.push(sema_error("E2810", args[0].span, "App `sitemap` requires a function that gives a list of screen states, and `{handler.name}` gives `{type_name(returned)}`", "the sitemap lists the address of each state the function gives", shape))
+        return rejected
+    }
+    found: sema_app_state(graph, listed, handler.function.symbol.module_identity) ?? {
+        diagnostics.push(sema_error("E2810", args[0].span, "App `sitemap` requires a list of screen states, and `{type_name(listed)}` is no struct declared outside Core, or has type parameters", "a screen's state is the address the sitemap lists", shape))
+        return rejected
+    }
+    graph_name: "__jet_sitemap_graph_{span.start}"
+    state_name: "__jet_sitemap_state_{span.start}"
+    names := [Expr]{}
+    texts := [Expr]{}
+    loop field in found.fields {
+        names.push(sema_app_text(field, span))
+        read: Expr.Field{base: Expr.Ident{name: state_name, span: span, id: AST_NODE_GENERATED}, member: field.copy(), span: span, id: AST_NODE_GENERATED}
+        texts.push(Expr.MethodCall{receiver: Expr.Ident{name: graph_name, span: span, id: AST_NODE_GENERATED}, method: SEMA_APP_ADDRESS_TEXT, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{sema_app_arg(read, AccessConvention.Read, span)}, id: AST_NODE_GENERATED})
+    }
+    params: [LambdaParam]{
+        LambdaParam{name: graph_name, name_span: span, ty: Val(receiver_value.ty.copy()), ty_span: None, convention: AccessConvention.Read},
+        LambdaParam{name: state_name, name_span: span, ty: Val(listed.copy()), ty_span: None, convention: AccessConvention.Read},
+    }
+    address: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: Expr.ListLit{elements: texts, span: span, id: AST_NODE_GENERATED}}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
+    registration: [CallArg]{
+        sema_app_arg(sema_app_text(found.key, span), AccessConvention.Read, span),
+        sema_app_arg(Expr.ListLit{elements: names, span: span, id: AST_NODE_GENERATED}, AccessConvention.Read, span),
+        args[0].copy(),  // copy: the caller's argument list keeps the written function
+        sema_app_arg(address, AccessConvention.Read, span),
+    }
+    value: sema_expr_check_declared_method(receiver, receiver_value, SEMA_APP_SITEMAP, SEMA_APP_SITEMAP, span, [Type]{}, [Type]{listed}, registration, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
+}
+
+// The element type of the list type `ty`; None when `ty` is no list.
+sema_app_list_element: fn(ty: Type) -> Type? Never! {
+    if ty == .List(element) -> return Val(element)
+    None
 }
 
 // `alias.url_of(view)`, `alias.presence(view)` and

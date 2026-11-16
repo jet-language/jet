@@ -1552,8 +1552,8 @@ priv C_PUSH_NOTES_KEPT: 32
 // state it opens. `new` starts it, and the `.screen` calls of the one package
 // that builds it add the screens. Every target runs this one graph, so its
 // screens are every target's route set. The compiler lowers `.screen`,
-// `app.url_of`, `app.presence` and `app.notify` to the graph's `__` members
-// below.
+// `.cache`, `.sitemap`, `app.url_of`, `app.presence` and `app.notify` to the
+// graph's `__` members below.
 App: struct {
     title: String
 
@@ -1574,6 +1574,31 @@ App: struct {
     __cache: fn<V>(self, reply: String, policy: CachePolicy) -> App Never! {
         held := APP_CACHE.guard_edit()
         held.value[reply.copy()] = policy
+        self.copy()
+    }
+
+    // `.sitemap(list)` as the compiler lowers it: `list` gives the states
+    // `V` of the pages the sitemap lists, `state` names `V` as `__screen`'s
+    // does, and `address` gives a state's fields' address text in the order
+    // of `names` (`__address_arg`). The sitemap asks `list` each time it is
+    // read (`sitemap.addresses`).
+    __sitemap: fn<V>(self, state: String, names: [String], list: &&fn() -> [V] Never!, address: &&fn(App, V) -> [String] Never!) -> App Never! {
+        graph: self.copy()
+        opens: state.copy()
+        fields: names.copy()
+        listed := APP_SITEMAPS.guard_edit()
+        listed.value.push(
+            Shared{AppSitemap{
+                state: state.copy(),
+                addresses: fn() {
+                    found := [String]{}
+                    loop view in list() {
+                        found.push(App.__url_of<V>(opens, fields, address(graph, view)))
+                    }
+                    found
+                },
+            }},
+        )
         self.copy()
     }
 
@@ -1616,6 +1641,10 @@ App: struct {
         tree: live_json.parse(text) ?? return text
         live_json.at<String>(tree, "") ?? text
     }
+
+    // `__address_arg` through a graph, as a lowered `.sitemap` reads each
+    // state's fields (`__sitemap`).
+    __address_text: fn<A: Encode>(self, value: A) -> String Never! { App.__address_arg<A>(value) }
 
     // Who has the screen state at `address` open, as the compiler lowers
     // `presence(view)` (`address` is `__url_of`'s): each account whose live
@@ -1798,6 +1827,114 @@ priv kept_stores: fn() -> [Shared<KeptReplies>] Never! {
 priv kept_store_name: fn(replies: Shared<KeptReplies>) -> String Never! {
     held: replies.guard_read()
     held.value.store.copy()
+}
+
+// A sitemap `.sitemap(list)` gave: the name of the state its list gives,
+// and the address of each state the list gives when asked.
+priv AppSitemap: struct {
+    state: String
+    addresses: fn() -[]> [String] Never!
+}
+
+// The sitemaps the graph gave, in the order it gave them.
+priv APP_SITEMAPS: Shared{[Shared<AppSitemap>]{}}
+
+// What core.web's `/sitemap.xml` and `/robots.txt` answer: the pages the
+// sitemap lists, which are only ever pages a caller who is not signed in
+// opens, and the screens a crawler is asked to leave, which are those only
+// a signed-in caller opens.
+priv(package) sitemap: module {
+    // Whether the graph gave a sitemap.
+    given: fn() -> Bool Never! {
+        listed: APP_SITEMAPS.guard_read()
+        listed.value.len() > 0
+    }
+
+    // The address of each state the sitemaps' lists give now, once each,
+    // in the order given. A list whose state no screen opens, or whose
+    // screen only a signed-in caller opens, gives none.
+    addresses: fn() -> [String] Never! {
+        found := [String]{}
+        loop listed in app_sitemaps() {
+            held: listed.guard_read()
+            if !app_screen_public(held.value.state) -> next
+            loop address in held.value.addresses() {
+                if !found.contains(address) -> found.push(address)
+            }
+        }
+        found
+    }
+
+    // The path of each screen only a signed-in caller opens, sorted, as a
+    // robots.txt rule matches it: each `:name` segment is `*`, and `$` ends
+    // the path, so a public page under it stays open to crawlers.
+    signed_in_paths: fn() -> [String] Never! {
+        held: APP_ROUTES.guard_read()
+        paths := [String]{}
+        loop state in held.value.keys() {
+            screen: held.value.get(state) ?? next
+            if !screen.signed_in -> next
+            segments := [String]{}
+            loop segment in screen.path.split("/") {
+                segments.push(if segment.starts_with(":") -> "*" else -> segment)
+            }
+            rule: "{segments.join("/")}$"
+            if !paths.contains(rule) -> paths.push(rule)
+        }
+        paths.sort()
+        paths
+    }
+}
+
+// The sitemaps, copied out so no list runs under the lock.
+priv app_sitemaps: fn() -> [Shared<AppSitemap>] Never! {
+    listed: APP_SITEMAPS.guard_read()
+    listed.value.copy()
+}
+
+// Whether a screen opens the state named `state` for a caller who is not
+// signed in.
+priv app_screen_public: fn(state: String) -> Bool Never! {
+    held: APP_ROUTES.guard_read()
+    screen: held.value.get(state) ?? return false
+    !screen.signed_in
+}
+
+// The states of a sitemap test's public guide screen and signed-in inbox.
+priv SitemapTestGuide: struct {
+    slug: String
+}
+
+priv SitemapTestInbox: struct {
+    box: String
+}
+
+#Test("a sitemap lists each state its list gives whose screen opens without signing in, and robots leave each signed-in screen") {
+    graph: new("Crew").__screen<SitemapTestGuide>("/guides/:slug", "app.SitemapTestGuide", [String]{}, false).__screen<SitemapTestInbox>("/inbox/:box", "app.SitemapTestInbox", [String]{}, true)
+    _: graph.__sitemap<SitemapTestGuide>(
+        "app.SitemapTestGuide",
+        [String]{"slug"},
+        fn() { [SitemapTestGuide]{SitemapTestGuide{slug: "start here"}, SitemapTestGuide{slug: "faq"}, SitemapTestGuide{slug: "faq"}} },
+        fn(on: App, guide: SitemapTestGuide) { [String]{on.__address_text<String>(guide.slug)} },
+    )
+    _: graph.__sitemap<SitemapTestInbox>(
+        "app.SitemapTestInbox",
+        [String]{"box"},
+        fn() { [SitemapTestInbox]{SitemapTestInbox{box: "mine"}} },
+        fn(on: App, inbox: SitemapTestInbox) { [String]{on.__address_text<String>(inbox.box)} },
+    )
+    // A list whose state no screen opens yet gives no address.
+    _: graph.__sitemap<SitemapTestGuide>(
+        "app.SitemapTestNowhere",
+        [String]{"slug"},
+        fn() { [SitemapTestGuide]{SitemapTestGuide{slug: "lost"}} },
+        fn(on: App, guide: SitemapTestGuide) { [String]{on.__address_text<String>(guide.slug)} },
+    )
+    assert(sitemap.given())
+    assert_eq(sitemap.addresses().join(" "), "/guides/start%20here /guides/faq")
+    paths: sitemap.signed_in_paths()
+    assert(paths.contains("/inbox/*$"))
+    assert(!paths.contains("/guides/*$"))
 }
 
 #Test("a reply type's cache policy is the last `.cache` set for it") {

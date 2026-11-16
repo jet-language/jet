@@ -1,0 +1,50 @@
+// A public guide screen and a signed-in inbox screen, each with a sitemap
+// list. The served `/sitemap.xml` lists the guides' addresses at the origin
+// the crawler asked, and none of the inbox's: a signed-in screen is never in
+// the sitemap. `/robots.txt` asks crawlers to leave the inbox and names the
+// sitemap.
+use {
+    app
+    client: core.http.client
+    net: core.net
+    web: core.web
+}
+
+GuideView: struct {
+    slug: String
+}
+
+InboxView: struct {
+    box: String
+}
+
+guide: fn(view: GuideView) -> String Never! { view.slug }
+
+inbox: fn(view: InboxView) -> String Never! { view.box }
+
+guides: fn() -> [GuideView] Never! { [GuideView{slug: "getting started"}, GuideView{slug: "faq"}] }
+
+inboxes: fn() -> [InboxView] Never! { [InboxView{box: "mine"}] }
+
+// Serves one GET of `path` and prints its status and body, with the
+// address the server listens at written HOST.
+fetch: fn(served: web.App, path: String) {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr: listener.local_addr()
+    serving: task { served.serve_once(listener) ?? panic("serve") }
+    answered: client.get("http://{addr}{path}") ?? panic("get {path}")
+    print("{path}: {answered.status} {answered.header("content-type") ?? "no type"}")
+    print((answered.text() ?? "unreadable").replace(addr, "HOST").trim())
+    serving.join() ?? panic("serve task")
+}
+
+run: fn() {
+    _: app.new("Crew")
+        .screen("/guides/:slug", guide)
+        .screen("/inbox/:box", inbox, signed_in: true)
+        .sitemap(guides)
+        .sitemap(inboxes)
+    served: web.app()
+    fetch(served.copy(), "/sitemap.xml")
+    fetch(served, "/robots.txt")
+}

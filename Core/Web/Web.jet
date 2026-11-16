@@ -590,6 +590,7 @@ App: struct {
     bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError! {
         app_image_route(self)
         app_push_route(self)
+        app_crawl_routes(self)
         http_server.server_bind(address, app_table(self), tls, deadline)
     }
 
@@ -597,6 +598,7 @@ App: struct {
     serve_once: fn(self, listener: TCPListener) HTTPError! -[Net, FS.Read, Time]> {
         app_image_route(self)
         app_push_route(self)
+        app_crawl_routes(self)
         http_server.server_serve_once(listener, app_table(self))
     }
 }
@@ -738,6 +740,7 @@ priv app_serve: fn(app: App, chosen: AppPort) Never! -[Env, IO, Net, FS.Read, Ti
     if dev -> app_dev_reload(table)
     app_image_route(app)
     app_push_route(app)
+    app_crawl_routes(app)
     if !app_has_root_catch_all(table) {
         fallback: app.copy()
         http_server.route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(app_not_found_response(fallback, request)) }), "", #here)
@@ -933,6 +936,103 @@ priv app_push_route: fn(app: App) Never! {
         }
     }
     http_server.route_add(table, "POST", C_APP_PUSH_DEVICES, http_server.__handler(fn(request: HTTPRequest) { Ok(app_push_register(request)) }), "", #here)
+}
+
+// Registers GET `/sitemap.xml` (app_sitemap_response) when the app graph
+// gave a sitemap, and GET `/robots.txt` (app_robots_response) when it gave
+// one or has a screen only a signed-in caller opens, each unless the app
+// routes that path itself or did this before.
+priv app_crawl_routes: fn(app: App) Never! {
+    sitemap: calls.sitemap.given()
+    if !sitemap && calls.sitemap.signed_in_paths().len() == 0 {
+        return
+    }
+    table: app_table(app)
+    taken := [String]{}
+    loop route in http_server.mux_routes(table) {
+        if route.method == "GET" -> taken.push(route.pattern.copy())
+    }
+    if sitemap && !taken.contains("/sitemap.xml") {
+        http_server.route_add(table, "GET", "/sitemap.xml", http_server.__handler(fn(request: HTTPRequest) { Ok(app_sitemap_response(request)) }), "", #here)
+    }
+    if !taken.contains("/robots.txt") {
+        http_server.route_add(table, "GET", "/robots.txt", http_server.__handler(fn(request: HTTPRequest) { Ok(app_robots_response(request)) }), "", #here)
+    }
+}
+
+// The origin a crawler reached the app at: the request's Host, over https
+// when the proxy in front says so (`X-Forwarded-Proto`), else http.
+priv app_crawl_origin: fn(request: HTTPRequest) -> String Never! {
+    scheme: if (request.header("x-forwarded-proto") ?? "") == "https" -> "https" else -> "http"
+    "{scheme}://{request.header("host") ?? "localhost"}"
+}
+
+// The sitemap (sitemaps.org 0.9): the address of each page the graph's
+// sitemap lists now (`calls.sitemap.addresses`), at the origin the request
+// reached. A page only a signed-in caller opens is never one of them.
+priv app_sitemap_response: fn(request: HTTPRequest) -> HTTPResponse Never! {
+    origin: app_crawl_origin(request)
+    entries := [String]{}
+    loop address in calls.sitemap.addresses() {
+        entries.push("<url><loc>{app_html_attr("{origin}{address}")}</loc></url>")
+    }
+    document: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">{entries.join("")}</urlset>\n"
+    fields: core.http.headers_set(core.http.headers(), "content-type", "application/xml; charset=utf-8")
+    http_server.response_body(200, core.http.body_text(document), fields)
+}
+
+// The robots rules: every crawler leaves each screen only a signed-in
+// caller opens (`calls.sitemap.signed_in_paths`) and may crawl the rest,
+// and finds the sitemap when the graph gave one.
+priv app_robots_response: fn(request: HTTPRequest) -> HTTPResponse Never! {
+    lines := [String]{"User-agent: *"}
+    left: calls.sitemap.signed_in_paths()
+    if left.len() == 0 -> lines.push("Disallow:")
+    loop path in left -> lines.push("Disallow: {path}")
+    if calls.sitemap.given() -> lines.push("Sitemap: {app_crawl_origin(request)}/sitemap.xml")
+    fields: core.http.headers_set(core.http.headers(), "content-type", "text/plain; charset=utf-8")
+    http_server.response_body(200, core.http.body_text("{lines.join("\n")}\n"), fields)
+}
+
+// The states of a crawl test's public guide screen and signed-in inbox.
+priv CrawlTestGuide: struct {
+    slug: String
+}
+
+priv CrawlTestInbox: struct {
+    box: String
+}
+
+#Test("the sitemap lists the public pages the graph's sitemap gives, at the origin asked, and robots leave the signed-in screens") {
+    graph: calls.new("Crawl").__screen<CrawlTestGuide>("/help/:slug", "web.CrawlTestGuide", [String]{}, false).__screen<CrawlTestInbox>("/mail/:box", "web.CrawlTestInbox", [String]{}, true)
+    _: graph.__sitemap<CrawlTestGuide>(
+        "web.CrawlTestGuide",
+        [String]{"slug"},
+        fn() { [CrawlTestGuide]{CrawlTestGuide{slug: "a&b"}} },
+        fn(on: calls.App, guide: CrawlTestGuide) { [String]{on.__address_text<String>(guide.slug)} },
+    )
+    _: graph.__sitemap<CrawlTestInbox>(
+        "web.CrawlTestInbox",
+        [String]{"box"},
+        fn() { [CrawlTestInbox]{CrawlTestInbox{box: "mine"}} },
+        fn(on: calls.App, inbox: CrawlTestInbox) { [String]{on.__address_text<String>(inbox.box)} },
+    )
+    served: app()
+    app_crawl_routes(served)
+    table: app_table(served)
+    fields := web_http.headers_set(web_http.headers(), "host", "crew.example")
+    fields = web_http.headers_set(fields, "x-forwarded-proto", "https")
+    listed: http_server.__dispatch(table, web_http.server_request("GET", "/sitemap.xml", web_http.body_text(""), fields.copy()))
+    assert_eq(listed.status, 200)
+    assert_eq(listed.header("content-type"), Val("application/xml; charset=utf-8"))
+    assert_eq(listed.text() ?? "unreadable", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>https://crew.example/help/a%26b</loc></url></urlset>\n")
+    robots: http_server.__dispatch(table, web_http.server_request("GET", "/robots.txt", web_http.body_text(""), fields))
+    assert_eq(robots.status, 200)
+    rules: robots.text() ?? "unreadable"
+    assert(rules.starts_with("User-agent: *\n"))
+    assert(rules.contains("Disallow: /mail/*$\n"))
+    assert(!rules.contains("/help/"))
+    assert(rules.ends_with("Sitemap: https://crew.example/sitemap.xml\n"))
 }
 
 // The body of a device's registration: its push service (`apns`, `fcm` or
