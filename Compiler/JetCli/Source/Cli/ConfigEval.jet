@@ -35,6 +35,7 @@ use {
         JetModuleValuesOutcome,
         NamedCtValue,
         diagnostic_from_registry,
+        jet_config_data_value,
         jet_config_eval_diagnostic,
     ]
     jet_sema.[
@@ -56,9 +57,11 @@ jet_config_evaluate_program: fn(program: String, base_dir: String) -> JetConfigO
 }
 
 // Every immutable value of a module-values program's own module, by name; the
-// program's `JET_CONFIG_VALUE` names that module. A value no config value can
-// hold (a function, say) is named unreadable. The first error of the check
-// keeps its span, a span of the requester's source.
+// program's `JET_CONFIG_VALUE` names that module. Each value is config data
+// (`jet_config_data_value`: an optional field holding no value is left out of
+// its record). A value no config value can hold (a function, say) is named
+// unreadable. The first error of the check keeps its span, a span of the
+// requester's source.
 jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValuesOutcome {
     result: jet_config_checked(program, base_dir, true) ?? return JetModuleValuesOutcome.Refused{diagnostic: err.diagnostic}
     owner := ""
@@ -77,7 +80,9 @@ jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValu
         name: value.key.slice(owner.len()..<value.key.len())
         if name == JET_CONFIG_VALUE_NAME || name.contains(":") -> next
         if sema_user_template_ct_value(value.value) == {
-            .Val(converted) -> { values.push(NamedCtValue{name: name, value: converted}) }
+            .Val(converted) -> {
+                values.push(NamedCtValue{name: name, value: jet_config_data_value(converted)})
+            }
             .None -> unreadable.push(name)
         }
     }

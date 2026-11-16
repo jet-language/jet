@@ -163,12 +163,13 @@ envmodel_collect_funcs: fn(items: [Item]) -> [String:Func] Never! {
 // Resolve the module values before any namespace field runs: every immutable
 // `NAME: value`, with or without `#run`, as the compiler computes every one
 // while building. When each is a plain literal, the literal is its value.
-// Otherwise the sibling compiler checks the source's own declarations as one
-// program and computes every value at once (module_values_evaluate): a
-// typed value, a cycle, an impure `#run` or any other refusal is the
-// compiler's own, at its span in this source. A value the environment can't
-// read as data (a function, say) is refused at its name. The environment
-// reads stay readable beside the module values.
+// Otherwise the sibling compiler checks the source's own declarations, with
+// the environment schema's types (`Prompt`, `Lang`, …), as one program and
+// computes every value at once (module_values_evaluate): a typed value, a
+// cycle, an impure `#run` or any other refusal is the compiler's own, at its
+// span in this source. A value the environment can't read as data (a
+// function, say) is refused at its name. The environment reads stay
+// readable beside the module values.
 envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue]) -> [String:CtValue] EnvModelEvalError! {
     names := [String]{}
     name_spans := [Span]{}
@@ -194,7 +195,8 @@ envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, env
     outcome: module_values_evaluate(items, scope.source, scope.base_dir, environment_globals) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(name_spans[0]), "the module values could not be evaluated: {err.detail}")})
     if outcome == {
         .Refused(diagnostic) -> {
-            span: diagnostic.span ?? name_spans[0]
+            // A span past the source lies in the schema or the program's own lines: the first value.
+            span: if diagnostic.span == .Val(at) && at.end <= scope.source.count_bytes() -> at else -> name_spans[0]
             return Err(EnvModelEvalError{diagnostic: diagnostic_from_registry(diagnostic.code, Val(span), diagnostic.what, diagnostic.why, diagnostic.fix)})
         }
         .Values(values, _) -> {

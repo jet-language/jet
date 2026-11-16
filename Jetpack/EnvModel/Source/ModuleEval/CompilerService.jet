@@ -90,13 +90,21 @@ comptime_evaluate: fn(expr: Expr, source: String, funcs: [String:Func], base_dir
     }
 }
 
+// The typed records of the environment surface, as Jet declarations
+// (`Prompt`, `Lang`, `Reload`, …). Every module-values program ends with
+// them, so the source's values are typed against them.
+ENVMODEL_ENVIRONMENT_SCHEMA: #run embed_file("Schema/Environment.jet.schema")
+
 // Every module value of `source` (parsed as `items`), computed by the
 // sibling compiler in one request (JetCli `jet_config_module_values`): the
-// source's own declarations are checked as one program that keeps the
-// source's offsets, so a refusal's span is a span of `source`.
-// `environment` holds the value of each `$NAME` the source reads.
+// source's own declarations and the environment schema are checked as one
+// program that keeps the source's offsets, so a refusal's span inside the
+// source is a span of `source`, and one past its end lies in the schema or
+// the program's own lines. `environment` holds the value of each `$NAME`
+// the source reads.
 module_values_evaluate: fn(items: [Item], source: String, base_dir: String, environment: [String:CtValue]) -[FS, Env, Exec, Time.Wait]> JetModuleValuesOutcome CompilerServiceError! {
-    program: jet_config_module_values_program(items, source, environment) ?? return Ok(JetModuleValuesOutcome.Refused{diagnostic: err.diagnostic})
+    values: jet_config_module_values_program(items, source, environment) ?? return Ok(JetModuleValuesOutcome.Refused{diagnostic: err.diagnostic})
+    program: "{values}\n{ENVMODEL_ENVIRONMENT_SCHEMA}"
     // copy: the request owns its base directory; `base_dir` is a read parameter the caller keeps.
     response: envmodel_compiler_service(JET_COMPILER_SERVICE_MODULE_VALUES, compiler_service_comptime_request(program, base_dir.copy())) ?? return Err(err)
     outcome: compiler_service_module_values_outcome(response) ?? return Err(CompilerServiceError{detail: "the compiler's answer is not a module-values response"})
