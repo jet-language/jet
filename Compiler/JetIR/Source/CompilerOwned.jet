@@ -411,8 +411,6 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "Dyn", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}},
     {name: "DataEvent", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"}},
     {name: "XMLCanonicalMode", variants: [String]{"Inclusive11", "Exclusive10"}},
-    {name: "PluginLimit", variants: [String]{"Fuel", "Memory", "Table", "Time", "Wire"}},
-    {name: "PluginError", variants: [String]{"Guest", "Denied", "Budget", "Defect"}},
     {name: "NetDNSError", variants: [String]{"NotFound", "Failure"}},
     {name: "NetError", variants: [String]{"InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"}},
     {name: "WatchDomain", variants: [String]{"File", "Process", "Port"}},
@@ -502,12 +500,6 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         if variant == "Char" || variant == "Ctrl" -> return ir_compiler_owned_single(Type.Char)
         if variant == "F" -> return ir_compiler_owned_single(Type.Int)
         return IRCompilerOwnedPayload.Unit
-    }
-    if name == "PluginError" {
-        if variant == "Budget" {
-            return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Named{name: "PluginLimit"}}, TypeTupleField{name: "fault", ty: Type.Named{name: "PluginFault"}}})
-        }
-        return ir_compiler_owned_single(Type.Named{name: "PluginFault"})
     }
     // The canonical twelve DataEvent payloads are the generated Core payload
     // rows (data_event_payload), as are a reflected PreparedValue's.

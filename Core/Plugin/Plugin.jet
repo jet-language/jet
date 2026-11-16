@@ -15,9 +15,28 @@ package: {
 // Component interface, then projects tightened authority to its canonical
 // wire at that same boundary. `load` is the native `jet_plugin_load` route,
 // which decodes the host's load wire into the typed handle.
-// Every export call fails with the compiler-owned
-// `PluginError` (`Guest`, `Denied`, `Budget(limit: PluginLimit, fault)`,
-// `Defect`); each case carries a `PluginFault { export, message, frames }`
-// whose frames are `PluginFrame { function, component, offset }`. The host,
-// sema rows and every tier share that one carrier, so this module declares
-// no second copy of it.
+// Every export call fails with a `PluginError`; each case carries a
+// compiler-owned `PluginFault { export, message, frames }` whose frames are
+// `PluginFrame { function, component, offset }`.
+
+// The budget a plugin call ran out of, the `limit` of `PluginError.Budget`.
+// The runtime builds it by its position (jet.runtime.plugin).
+PluginLimit: enum {
+    Fuel
+    Memory
+    Table
+    Time
+    Wire
+}
+
+// How a plugin load or call failed: the guest trapped or its artifact was
+// refused (`Guest`), the authority refused a host import (`Denied`), a budget
+// ran out (`Budget`), or the host hit an internal defect (`Defect`). The
+// runtime builds it by its position (jet.runtime.plugin).
+#Error
+PluginError: enum {
+    Guest(PluginFault)
+    Denied(PluginFault)
+    Budget(limit: PluginLimit, fault: PluginFault)
+    Defect(PluginFault)
+}
