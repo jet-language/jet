@@ -1,0 +1,29 @@
+# A program declares `TaskStatus` with a payload, the name of core.service's
+# workflow status. The workflow calls still return Core's TaskStatus, and the
+# program's own enum keeps its payload, on every tier.
+fixture: AProgramTaskStatusLeavesWorkflowsReadingCores.fixture
+env: NO_COLOR=1
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "scheduled:Running\nresult:Finished\nbusy own 3\nidle\n"
+step: jet run -O1 run.jet
+exit: 0
+stdout: = "scheduled:Running\nresult:Finished\nbusy own 3\nidle\n"
+step: jet run -O2 run.jet
+exit: 0
+stdout: = "scheduled:Running\nresult:Finished\nbusy own 3\nidle\n"
+step: jet build -O0 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "scheduled:Running\nresult:Finished\nbusy own 3\nidle\n"
+step: jet build -O1 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "scheduled:Running\nresult:Finished\nbusy own 3\nidle\n"
+step: jet build -O2 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "scheduled:Running\nresult:Finished\nbusy own 3\nidle\n"

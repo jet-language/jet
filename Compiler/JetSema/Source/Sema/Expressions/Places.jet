@@ -571,7 +571,8 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     if owner_name != "" {
         core_field: core_record_field(owner_name, member)
         visible: !core_record_field_is_core_only(owner_name, member) || module_is_core(environment.module_identity)
-        if visible && core_field == .Val(core_field_ty) {
+        if visible && core_field == .Val(row_ty) {
+            core_field_ty: sema_expr_core_row_type(row_ty, environment, program)
             core_reference: TFieldRef{owner: None, name: member, ty: core_field_ty, boxed: false}
             core_value: sema_tree_node(core_field_ty, TExprKind.Field{receiver: base, field: core_reference}, span)
             return sema_expr_expected_owned(core_value, expected, environment, program, diagnostics)

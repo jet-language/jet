@@ -36,16 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove this call, or remove the enclosing function&#39;s explicit empty effect bound.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E3403</code>: <code>Tests/UI/clock_system_pure.stderr</code>.</p>
-<pre class="diag">Error [jet.NondeterminismInPureEval]: `Clock.system` is non-deterministic and cannot appear in a pure evaluation.
-  --&gt; Tests/UI/clock_system_pure.jet:3:20
+<p>First UI snapshot mentioning <code>E3403</code>: <code>Tests/UI/Determinism/nondeterministic_time_classification_is_shared_by_purity_and_folding.stderr</code>.</p>
+<pre class="diag">Error [jet.NondeterminismInPureEval]: `time.today` is non-deterministic and cannot appear in a pure evaluation.
+  --&gt; Tests/UI/Determinism/nondeterministic_time_classification_is_shared_by_purity_and_folding.jet:3:44
     |
-  3 |     clock := Clock.system()
-    |                    ^^^^^^
+  3 | pure_today: fn() -[]&gt; String { return date.today().to_string() }
+    |                                            ^^^^^
  Why: Pure evaluation must produce the same result on every machine.
  Fix: Remove this call, or remove the enclosing function&#39;s explicit empty effect bound.
- Denial: pure
- Call chain: Clock.system
 More: jet-lang.dev/e/E3403
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

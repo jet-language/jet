@@ -1,4 +1,4 @@
-Key: tag { deny: [Exec], timing: .Fixed }
+// `Key`, a fixed-timing value tag, is declared at the end of the file.
 
 // An `#Overflow(.Wrapping)` block wraps the arithmetic in its body.
 wrapped_block: fn(k: #Key U64, m: U64) -> U64 {
@@ -13,4 +13,12 @@ wrapped_block: fn(k: #Key U64, m: U64) -> U64 {
     out := U64{0}
     #Overflow(.Stop) { out = k + m }
     out * m
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
 }

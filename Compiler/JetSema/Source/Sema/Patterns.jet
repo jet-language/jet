@@ -186,14 +186,9 @@ sema_pattern_core_payload: fn(owner: String, variant: String) -> [Type]? {
         }
     }
     if owner == {
-        // The canonical twelve generated payload rows.
-        "DataEvent" -> core_enum_variant_payload(owner, variant)
-        "Key" -> if variant == {
-            "Char" | "Ctrl" -> Val([Type.Char])
-            "F" -> Val([Type.Int])
-            "Enter" | "Escape" | "Backspace" | "Tab" | "Delete" | "Up" | "Down" | "Left" | "Right" | "Unknown" -> Val([Type]{})
-            else -> None
-        }
+        // The canonical twelve DataEvent payloads and Key's cases are the
+        // generated payload rows.
+        "DataEvent" | "Key" -> core_enum_variant_payload(owner, variant)
         else -> None
     }
 }
@@ -305,7 +300,7 @@ sema_pattern_payload: fn(subject_ty: Type, variant: String, env: SemaScopeEnviro
         return result
     }
     if program.registration_graph == .Val(graph) {
-        // A compiler-owned runtime enum (`TaskFailure`) is registered once and
+        // A compiler-owned runtime enum (`Ordering`) is registered once and
         // seen from every module, as its canonical owner.
         found_row := sema_pattern_nominal_row(graph, env.module_identity, normalized)
         if found_row == None {

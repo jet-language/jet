@@ -47,12 +47,19 @@ closures: fn() -> String {
     "{log.rows.join(",")} seen {seen} total {total.get()}"
 }
 
-// A click handler and a render body are registered, not run.
+// A click handler, a drop handler and a render body are registered, not run.
 interface: fn() -> String {
     clicks := 0
     save: ui.button("Save", fn() { clicks += 1 })
+    draft: ui.text_input(
+        "draft",
+        UIIMEMode.Native,
+        on_drop: fn(item: UIDropItem) {
+            if item == .Text(value) -> clicks += value.len()
+        },
+    )
     ui.reactive_render(fn() { clicks += 10 })
-    "{save.label} {clicks}"
+    "{save.label} {draft.label} {clicks}"
 }
 
 User: struct {

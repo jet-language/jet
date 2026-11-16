@@ -1,0 +1,137 @@
+// Fetches the page and every asset it links, prints how each linked name
+// is answered, then edits the stylesheet and fetches the page again.
+package: {
+    name: "hashed_assets_client"
+    authority: { allow: [Env, FS.Write, Net, Time] }
+}
+
+use {
+    crypto: core.crypto
+    files: core.files
+    net: core.net
+    sys: core.sys
+    time: core.time
+}
+
+Answer: struct {
+    status: String
+    head: String
+    body: [U8]
+}
+
+// Whether a blank line, CR LF CR LF, starts at `index`.
+header_end: fn(bytes: [U8], index: Int) -> Bool {
+    ends: "\r\n\r\n".bytes()
+    loop at in 0..<4 {
+        if bytes[index + at] != ends[at] -> return false
+    }
+    true
+}
+
+get_address: fn(port: String, path: String) -> Answer {
+    deadline: time.instant() + 30s
+    connected := net.TCPStream?{None}
+    loop {
+        if net.tcp_connect("127.0.0.1:{port}") == {
+            .Ok(stream) -> {
+                connected = Val(stream)
+                break
+            }
+            .Err(error) -> {
+                if time.instant() >= deadline -> panic("the app did not listen on {port}: {error}")
+                time.sleep(50ms)
+            }
+        }
+    }
+    stream := connected ?? panic("connected stream")
+    stream.write_bytes("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".bytes()) ?? panic("request write")
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
+    bytes := [U8]{}
+    loop {
+        part: net.tcp_read_bytes(stream, 65536) ?? panic("response read")
+        if part.len() == 0 -> break
+        loop byte in part -> bytes.push(byte)
+    }
+    split := -1
+    loop index in 0..<bytes.len() - 3 {
+        if header_end(bytes, index) {
+            split = index
+            break
+        }
+    }
+    if split < 0 -> panic("no header end in the answer to {path}")
+    head: String.from_bytes(bytes.slice(0, split)) ?? panic("header UTF-8")
+    lines: head.split("\r\n").to_list()
+    Answer{status: lines[0].split(" ").to_list()[1].copy(), head: head.lower(), body: bytes.slice(split + 4, bytes.len())}
+}
+
+header: fn(answer: Answer, name: String) -> String {
+    loop line in answer.head.split("\r\n") {
+        if line.starts_with("{name}: ") -> return line.slice(name.len() + 2, line.len())
+    }
+    "none"
+}
+
+// The `/assets/` addresses the page at `/` links, in page order.
+linked: fn(port: String, record: String) -> [String] {
+    page: get_address(port, "/")
+    text: String.from_bytes(page.body) ?? panic("page UTF-8")
+    files.write(record, text) ?? panic("record page: {err}")
+    addresses := [String]{}
+    loop (index, piece) in text.split("\"/assets/").to_list() {
+        if index == 0 -> next
+        addresses.push("/assets/{piece.split("\"").to_list()[0]}")
+    }
+    addresses
+}
+
+// The hash a linked name holds before its extension, or "" for none.
+name_hash: fn(address: String) -> String {
+    parts: address.split("/").to_list()
+    pieces: parts[parts.len() - 1].split(".").to_list()
+    if pieces.len() < 3 -> return ""
+    pieces[pieces.len() - 2].copy()
+}
+
+// The address with its hash dropped: the asset's own name.
+own_name: fn(address: String) -> String {
+    hash: name_hash(address)
+    if hash == "" -> return address.copy()
+    marked: ".{hash}."
+    pieces: address.split(marked).to_list()
+    "{pieces[0]}.{pieces[1]}"
+}
+
+linked_as: fn(addresses: [String], own: String) -> String {
+    loop address in addresses {
+        if own_name(address) == own -> return address.copy()
+    }
+    panic("the page links no {own}")
+}
+
+run: fn() {
+    port: sys.get("HASHED_ASSETS_PORT") ?? panic("missing HASHED_ASSETS_PORT")
+    first: linked(port, "page.html")
+    loop address in first {
+        hash: name_hash(address)
+        if hash == "" {
+            print("{address}: linked as written")
+            next
+        }
+        answer: get_address(port, address)
+        digest: crypto.sha256(answer.body).hex()
+        print("{own_name(address)}: {answer.status} | {header(answer, "content-type")} | {header(answer, "cache-control")} | named by its bytes: {digest.starts_with(hash)}")
+    }
+    own: get_address(port, "/assets/app.css")
+    print("/assets/app.css by its own name: {own.status} | {header(own, "cache-control")} | etag: {header(own, "etag") != "none"}")
+    files.write("Public/app.css", "body {{ font-family: \"Body\", serif; }}\n") ?? panic("edit app.css: {err}")
+    second: linked(port, "page-after-edit.html")
+    old_css: linked_as(first, "/assets/app.css")
+    new_css: linked_as(second, "/assets/app.css")
+    print("edited app.css links a new name: {old_css != new_css}")
+    print("unchanged font keeps its name: {linked_as(first, "/assets/fonts/body.woff2") == linked_as(second, "/assets/fonts/body.woff2")}")
+    print("old app.css name: {get_address(port, old_css).status}")
+    fresh: get_address(port, new_css)
+    print("new app.css name: {fresh.status} | {header(fresh, "cache-control")} | the edited bytes: {(String.from_bytes(fresh.body) ?? "").contains("\", serif;")}")
+    print("forged hash: {get_address(port, "/assets/app.0000000000000000.css").status}")
+}

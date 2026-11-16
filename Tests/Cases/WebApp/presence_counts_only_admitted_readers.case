@@ -1,0 +1,20 @@
+# app.presence counts only accounts whose last read of that screen passed its
+# policies. Each viewer's live binding reads task 1 through the tasks table's
+# row policy before it asks who has `/tasks/1` open: a non-member's read is
+# refused, so it is never counted and the others' bindings don't re-run. A
+# member who opens the task joins every viewer's list, and one who loses
+# access drops out at its binding's next read, which re-runs the others
+# without it. Same output on o0/o1/o2.
+fixture: PresenceCountsOnlyAdmittedReaders.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = presence_counts_only_admitted_readers.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

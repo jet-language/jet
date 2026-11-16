@@ -1,7 +1,7 @@
 // Early returns from branches on a `timing: .Fixed` value are masked: every
 // round of the loop runs, and the function returns the value of the first
 // return taken.
-Key: tag { deny: [Exec], timing: .Fixed }
+// `Key`, a fixed-timing value tag, is declared at the end of the file.
 
 #Scrub(Key) reveal_flag: fn(value: #Key Bool) -> Bool { value }
 
@@ -31,4 +31,12 @@ run: fn() {
     print("check {reveal_flag(check_fast(#Key [U8]{1, 2, 3}, [U8]{1, 2, 3}))} {reveal_flag(check_fast(#Key [U8]{1, 2, 3}, [U8]{1, 9, 3}))} {reveal_flag(check_fast(#Key [U8]{1, 2}, [U8]{1, 2, 3}))}")
     items: [U64]{3, 5, 7}
     print("position {reveal(position(#Key U64{5}, items))} {reveal(position(#Key U64{9}, items))} {reveal(position(#Key U64{3}, items))}")
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
 }

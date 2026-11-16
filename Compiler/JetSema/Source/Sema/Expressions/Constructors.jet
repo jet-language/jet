@@ -153,12 +153,12 @@ sema_expression_names_enum: fn(name: String, environment: SemaScopeEnvironment, 
 }
 
 // The tail of Rust `is_known_enum`: Core enum leaves (`core_enum_cases`) and
-// the compiler-owned Core enum families, known whether or not the program
-// imports them.
+// the compiler-owned Core enum families with no Core.rows case list, known
+// whether or not the program imports them.
 sema_expression_core_enum_name: fn(name: String) -> Bool Never! {
     if core_enum_cases(name) != None || core_enum_payload_variants(name) != None -> return true
     if name == {
-        "Key" | "ProcessSignal" | "TextWidthAmbiguous" | "TextWidthControls" | "WatchDomain" | "WatchKind" | "DurationUnit" | "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome" | "NetError" | "NetDNSError" | "DeliveryState" | "ServiceError" | "TaskOutcome" | "TaskStatus" -> true
+        "TextWidthAmbiguous" | "TextWidthControls" | "DurationUnit" | "HookDecision" | "HookOutcome" | "NetError" | "NetDNSError" -> true
         else -> false
     }
 }
@@ -625,11 +625,15 @@ sema_expression_core_record_literal: fn(owner_name: String, fields: [ExprField],
         diagnostics.push(sema_expression_missing_fields("struct literal for `{owner_name}`", "every field must appear exactly once", missing, span))
         return None
     }
+    // The rows spell Core's field types bare; they stay Core's beside a
+    // program type of the same name (`AsyncPolicy.overflow` is core.event's
+    // `Overflow`).
     values := [TStructFieldValue]{}
     loop source in fields {
         loop row in declared {
             if row.name != source.name -> next
-            checked: sema_expression_core_record_field_value(owner_name, row, source.value, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+            field: TypeTupleField{name: row.name, ty: sema_expr_core_row_type(row.ty, environment, program)}
+            checked: sema_expression_core_record_field_value(owner_name, field, source.value, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
             values.push(checked)
             break
         }

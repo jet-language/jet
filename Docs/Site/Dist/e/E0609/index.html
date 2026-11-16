@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Import it from inside its enclosing module, or remove `priv` from the module.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0609</code>: <code>Tests/UI/core_db_handle_import_is_private.stderr</code>.</p>
-<pre class="diag">Error [jet.UsePrivateModuleItem]: `CachedStatement` is private in module `core.db`
-  --&gt; core_db_handle_import_is_private.jet:4:1
+<p>First UI snapshot mentioning <code>E0609</code>: <code>Tests/UI/GenmodImportPrivate/stderr</code>.</p>
+<pre class="diag">Error [jet.UsePrivateModuleItem]: `hidden` is private in module `defs`
+  --&gt; Tests/UI/GenmodImportPrivate/run.jet:1:1
     |
-  4 | use core.db.[CachedStatement]
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: A Core module&#39;s API is the names it exports; its other types and helpers belong to Core alone
- Fix: Use what `core.db` exports instead
+  1 | use defs.hidden
+    | ^^^^^^^^^^^^^^^
+ Why: Only `pub` items can be brought into scope with `use`
+ Fix: Add `pub` before `hidden: module` in the defining file
 More: jet-lang.dev/e/E0609
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

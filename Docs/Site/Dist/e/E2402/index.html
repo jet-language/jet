@@ -36,23 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Add `impl Err.From({err}) { … }` before this function, or change the enclosing return type to `T !{err}`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2402</code>: <code>Tests/UI/carrier_partial_not_kept.stderr</code>.</p>
-<pre class="diag">Error [jet.FailureDomainNotErrorType]: Explicit failure domain `ImportErr` is not an Error type
-  --&gt; Tests/UI/carrier_partial_not_kept.jet:7:36
+<p>First UI snapshot mentioning <code>E2402</code>: <code>Tests/UI/CompilerAPI/compiler_api_rejects_zero_and_extra_arguments_at_checking.stderr</code>.</p>
+<pre class="diag">Error [jet.ArgumentCountMismatch]: `lex` expects 1 argument, got 0
+  --&gt; Tests/UI/CompilerAPI/compiler_api_rejects_zero_and_extra_arguments_at_checking.jet:3:22
     |
-  7 | import_rows: fn(rows: [String]) -&gt; [String] ImportErr! {
-    |                                    ^^^^^^^^^^^^^^^^^^^
- Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
-More: jet-lang.dev/e/E2417
+  3 | VALUE: #run compiler.lex()
+    |                      ^^^
+ Why: Every argument must match a parameter
+ Fix: Check the definition of `lex` in the imported file
+More: jet-lang.dev/e/E0104
 
-Error [jet.MissingErrorConversion]: This implicit fallible call can&#39;t convert `ImportErr` into `Err` — no declared conversion exists
-  --&gt; Tests/UI/carrier_partial_not_kept.jet:13:13
+Error [jet.MissingErrorConversion]: This implicit fallible call can&#39;t convert `CompilerError` into `Err` — no declared conversion exists
+  --&gt; Tests/UI/CompilerAPI/compiler_api_rejects_zero_and_extra_arguments_at_checking.jet:3:22
     |
- 13 |     spotty: import_rows([String]{})
-    |             ^^^^^^^^^^^
- Why: Ordinary fallible calls propagate automatically; `ImportErr` can reach `Err` only through `impl Err.From(ImportErr)`
- Fix: Handle this call locally with `??`, add `impl Err.From(ImportErr) { … }`, or change the return type
+  3 | VALUE: #run compiler.lex()
+    |                      ^^^
+ Why: Ordinary fallible calls propagate automatically; `CompilerError` can reach `Err` only through `impl Err.From(CompilerError)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(CompilerError) { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

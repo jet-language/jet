@@ -472,12 +472,11 @@ THostCall: enum {
 
 TCoreClosureKind: enum {
     Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda)
-    Realtime(rate: TExpr, frames: TExpr, executable: TLambda)
     Guard(executable: TLambda)
     OnCommit(handle_name: String, executable: TLambda)
     OnRollback(handle_name: String, executable: TLambda)
     UIClickSlot(executable: TLambda)
-    UITextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda)
+    UIDropSlot(executable: TLambda)
     ReactiveDerived(executable: TLambda)
     ReactiveEffect(executable: TLambda)
     UIReactiveRender(executable: TLambda)
@@ -510,10 +509,6 @@ THandleOp: enum {
     FileWriterWriteAll
     FileWriterFsync
     FileWriterPath
-    JSONReaderNext
-    JSONWriterWrite
-    JSONWriterFlush
-    JSONWriterFinish
     JSONLReaderNext
     JSONLWriterWrite
     JSONLWriterFlush
@@ -523,10 +518,6 @@ THandleOp: enum {
     XMLWriterWrite
     XMLWriterFlush
     XMLWriterFinish
-    CBORReaderNext
-    CBORWriterWrite
-    CBORWriterFlush
-    CBORWriterFinish
     StdinReadLine
     StdoutWrite
     StdoutWriteLine
@@ -1165,18 +1156,8 @@ tree_each_core_closure_child: fn(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.
             if group == Val(group_value) -> visit(group_value)
             tree_each_lambda_child(executable, visit)
         }
-        .Realtime(rate, frames, executable) -> {
-            visit(rate)
-            visit(frames)
-            tree_each_lambda_child(executable, visit)
-        }
-        .UITextInputOnDrop(state, ime, executable) -> {
-            visit(state)
-            visit(ime)
-            tree_each_lambda_child(executable, visit)
-        }
         .Guard(executable) -> tree_each_lambda_child(executable, visit)
-        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) -> {
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) | .UIDropSlot(executable) -> {
             tree_each_lambda_child(executable, visit)
         }
         .OnCommit(_, executable) | .OnRollback(_, executable) -> {

@@ -65,10 +65,14 @@ replaces the children of `#jet-app`, which the host creates in `document.body`
 if the page has none: one element per leaf, placed absolutely at its frame (a
 `button` for a button, an `input` for a text input, a `span` for text, a `div`
 for any other node; a box stacks its children and adds no element). A click on
-a button runs its Jet handler once the program's `run` has returned 0, and the
-paint that handler causes (for example a `ui.reactive_render` effect re-running
-on a signal it read) replaces the elements again. Under `node app.js` there is
-no document and nothing is recorded.
+a button runs its Jet handler once the program's `run` has returned 0. A drop
+on a text input built with `on_drop:` runs its handler once per dropped item,
+in the order `core.ui.host.drag_drop` reads a drop: nonempty `text/plain` as a
+`UIDropItem.Text`, then each `text/uri-list` line that is neither empty nor a
+`#` comment as a `UIDropItem.URI`. The paint a handler causes (for example a
+`ui.reactive_render` effect re-running on a signal it read) replaces the
+elements again. Under `node app.js` there is no document and nothing is
+recorded.
 
 ## Partition and ABI
 

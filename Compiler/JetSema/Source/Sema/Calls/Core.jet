@@ -1546,9 +1546,17 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `#if #build.target.os` / `#Target(OS.*)`"))
     }
     actual_accesses: loop argument in args -> argument.convention
-    signature: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {
+    signature := sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {
         diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no fixed source typed call contract", "fixed Core checking consumes only a complete Source signature", "use the source-owned special checker for a polymorphic Core operation without a fixed row"))
         return None
+    }
+    // The row spells Core's types bare; they stay Core's beside a program
+    // type of the same name.
+    loop index in 0..<signature.parameters.len() {
+        signature.parameters[index].ty = sema_expr_core_row_type(signature.parameters[index].ty, environment, program)
+    }
+    if signature.return_type == .Val(declared) {
+        signature.return_type = Val(sema_expr_core_row_type(declared, environment, program))
     }
     if !sema_call_core_check_type_args(canonical_record.module_name, canonical_record.member, signature.type_parameters.len(), true, type_args, span, diagnostics) {
         return None

@@ -511,6 +511,9 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
             // belongs to the live `.watch()` callbacks.
             callback_result: if method == "filter" -> Type.Bool else -> Type.String
             callback_type: Type.Fn{params: [Type]{row}, ret: Val(callback_result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+            if method == "filter" && args.len() > 0 {
+                sema_data_filter_push(args[0].expr, row, span, environment, program, scopes, state, tail_store, context, source_args, argument_types, typed)
+            }
             if args.len() > 0 {
                 value: sema_data_expect_core_arg(method, 0, callback_type, args[0], environment, program, scopes, state, tail_store, context, diagnostics)
                 if !sema_data_query_push_argument(args[0], value, source_args, argument_types, typed) {
@@ -636,6 +639,10 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
     // A grouped sum runs the source reducer of its value's numeric type.
     if receiver_type == "DataGroupedQuery" && method == "sum" {
         record.source_target = Val("core.data.{sema_data_group_sum_target(sum_value)}")
+    }
+    // A filter passes its predicate as SQL before the predicate.
+    if receiver_type == "Query" && method == "filter" {
+        record.signature = CoreCallSignature{arity: 4, max_arity: 4, borrow_mask: [Bool]{true, true, true, false}}
     }
     value: sema_data_core_emit(record, "{receiver_type}.{method}", source_args, argument_types, typed, call_type_args, result_type, span, expected, environment, program, scopes, state, context, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: value}

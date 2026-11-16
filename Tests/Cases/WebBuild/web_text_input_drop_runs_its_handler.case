@@ -1,0 +1,15 @@
+# A web build of a core.ui text input with an `on_drop:` handler paints an
+# input that accepts drops. Each dropped item reaches the Jet handler as a
+# UIDropItem, in the order core.ui.host.drag_drop reads a drop: the plain text
+# first, then each link of the uri list, skipping comments and blank lines.
+# The effect's repaint then replaces the elements.
+requires: tool:node
+fixture: WebTextInputDropRunsItsHandler.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "mounted: SPAN \"dropped: nothing\" top=0px height=1px | INPUT \"draft\" top=1px height=1px\ndragover accepted: true\nafter a text drop: SPAN \"dropped: text hello\" top=0px height=1px | INPUT \"draft\" top=1px height=1px\nafter a text and two links: SPAN \"dropped: text note + uri https://example.test/a + uri https://example.test/b\" top=0px height=1px | INPUT \"draft\" top=1px height=1px\n"

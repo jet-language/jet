@@ -155,3 +155,27 @@ priv table_note_kept: fn(notes: db.Table<Int, TableNote>, id: Int) -[DB.Read, DB
     system_reads: table_notes(store)
     assert(app.as_system(fn() { table_note_hidden(system_reads, 1) }))
 }
+
+// How an add answered: "added", or the error it gave.
+priv table_note_answer: fn(result: TableNote db.DBError!) -> String {
+    if result == {
+        .Ok(_) -> "added"
+        .Err(failure) -> failure.message()
+    }
+}
+
+#Test("an add on a taken key is Exists to a caller who may read the row there, and Denied to one who may not") {
+    store: db.open_memory()
+    mia_adds: table_notes(store)
+    first: app.as_caller<String>(mia(), fn() { table_note_answer(mia_adds.add(TableNote{id: 1, owner: mia(), text: "mine"})) })
+    assert_eq(first, "added")
+    mia_again: table_notes(store)
+    again: app.as_caller<String>(mia(), fn() { table_note_answer(mia_again.add(TableNote{id: 1, owner: mia(), text: "again"})) })
+    assert_eq(again, db.DBError.Exists.message())
+    // Ben may add a note of his own, but not learn that mia's key is taken.
+    ben_adds: table_notes(store)
+    taken: app.as_caller<String>(ben(), fn() { table_note_answer(ben_adds.add(TableNote{id: 1, owner: ben(), text: "his"})) })
+    assert_eq(taken, db.DBError.Denied.message())
+    system_reads: table_notes(store)
+    assert_eq(app.as_system(fn() { (system_reads.get(1) ?? panic("the note reads")).text }), "mine")
+}

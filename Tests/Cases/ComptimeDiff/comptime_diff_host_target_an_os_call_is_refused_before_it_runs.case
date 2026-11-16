@@ -1,0 +1,22 @@
+# A host/target mismatch is diagnosed before any effect runs. Built for the
+# no-OS `board.sensor_v1`, a `#run` value whose helper writes a file stops with
+# E3301 at check, even with the `#Impure` gate and `--gate impure=allow`, and
+# the marker is never written. Built hosted, the same program writes the
+# marker while building and prints what the build computed.
+fixture: ComptimeDiffHostTargetAnOSCallIsRefusedBeforeItRuns.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check --gate impure=allow --target=board.sensor_v1 main.jet
+exit: 1
+stderr: ~ "`files.write` is not available on a no-OS target." # E3301 at check
+file: marker.txt absent
+step: jet build --gate impure=allow --target=board.sensor_v1 main.jet
+exit: 1
+stderr: ~ "`files.write` is not available on a no-OS target." # the build stops at the same check
+file: marker.txt absent
+step: jet build --gate impure=allow main.jet
+exit: 0
+file: marker.txt = "written while building"
+step: {work}/.jet/build/main
+exit: 0
+stdout: = "marked\n"

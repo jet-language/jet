@@ -65,6 +65,8 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [ScalarGenerics](Generics/ScalarGenerics.jet)
 - [TypedAST](Generics/TypedAST.jet) — Typed expression AST: the evaluator's result type follows the node type.
 - [TypeTables](Generics/TypeTables.jet) — A generic function branches on its type parameter with an ordinary `if` table.
+- [TypeFunctions/StaticSelf](Generics/TypeFunctions/StaticSelf.jet) — Through a bound, `T.zero()` calls a trait's static method returning `Self` on whichever type the build fills `T` with.
+- [TypeFunctions/TypeParameters](Generics/TypeFunctions/TypeParameters.jet) — A type parameter makes a declaration a recipe built once per type it is used at.
 
 ## Reflection
 
@@ -83,6 +85,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [MarkerSites](Reflection/MarkerSites.jet) — A marker's `expand` body runs at every site its `sites` names.
 - [MarkerUses](Reflection/MarkerUses.jet) — `M.reflect().uses` lists every use of marker struct `M` in the program: each use's typed marker value, then the site that carries it. The list folds to a constant after checking, so the route table and the entity count below cost nothing at run time.
 - [MarkerViews](Reflection/MarkerViews.jet) — `T.reflect()` in comptime is the declared type's TypeInfo.
+- [OutcomeCases](Reflection/OutcomeCases.jet) — Outcome values reflect their built-in cases.
 - [PackageSettings](Reflection/PackageSettings/) — `b.program.packages()` lists the built package's settings: each one's type as written, its default, the value this build selected, and every writer of the value with its kind and where it is written.
 - [ReadOnlyLint](Reflection/ReadOnlyLint.jet) — A read-only lint is a marker whose `expand` row is `-[]>`: it reads the marked type and may warn, but writes no code.
 - [Reflect](Reflection/Reflect.jet) — Aggregate reflection and the typed `@` reader consume the same registered fact carriers.

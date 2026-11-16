@@ -1,0 +1,14 @@
+# An `#App.SignedIn` method of a mounted service runs acting for the account
+# whose session the call carries. The fixture's server signs `ann` in with
+# core.auth. A call that carries her session runs as her, whether the session
+# comes as the `jet_session` cookie from the server's own origin or as a bearer
+# token. Some calls carry no live session: the cookie sent from another origin
+# (the CSRF case), a forged session id, and a call through a Remote with no
+# session. Each of these is answered 401 alike, and the Remote reads that as
+# `CallError.SignedOut`.
+fixture: SignedInEndpointRunsAsTheCaller.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "cookie: 200 {\"ok\":\"ann\"}\nbearer: 200 {\"ok\":\"ann\"}\ncookie from another site: 401 {\"error\":\"`/api/whoami` needs a signed-in caller\"}\nforged: 401 {\"error\":\"`/api/whoami` needs a signed-in caller\"}\nremote: signed out\n"

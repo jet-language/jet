@@ -1577,7 +1577,16 @@ sema_app_route_shape: fn(path: String) -> String {
     "/{parts.join("/")}"
 }
 
-sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method == "screen" && sema_app_is_graph(receiver_value.ty, environment, program) {
+        return sema_call_app_screen(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    if method == "cache" && sema_app_is_graph(receiver_value.ty, environment, program) {
+        return sema_call_app_cache(receiver, receiver_value, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    if method == "sitemap" && sema_app_is_graph(receiver_value.ty, environment, program) {
+        return sema_call_app_sitemap(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     if !sema_app_is_route_table(receiver_value.ty, environment, program) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }

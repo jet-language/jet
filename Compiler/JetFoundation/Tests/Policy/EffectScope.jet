@@ -11,6 +11,9 @@ use jet_foundation.[
     effect_scope_published_effect,
     effect_scope_read_paths,
     effect_scope_split,
+    effect_value_base,
+    effect_value_fields,
+    effect_value_is_valued,
     sema_effect_covers,
 ]
 
@@ -141,4 +144,15 @@ COVERS_TABLE: [String]{
     assert_eq(effect_scope_of_argument("Net", "http://api.example.com:8080", true) ?? "", "api.example.com")
     assert(effect_scope_of_argument("Net", "https://api.", false) == None, "the host continues at run time")
     assert(effect_scope_of_argument("Net", "https://user@evil.example/", true) == None, "user info hides the host")
+}
+
+#Test("a value row entry reads back as its type and fields") {
+    entry: `Bucket{name: "a, b: c", size: -2, open: true}`
+    assert(effect_value_is_valued(entry), "a value names its fields")
+    assert(!effect_value_is_valued("Bucket"), "the bare type names every value")
+    assert_eq(effect_value_base(entry), "Bucket")
+    assert_eq(effect_value_base("Bucket"), "Bucket")
+    fields: loop field in effect_value_fields(entry) -> "{field.name}={field.value}"
+    assert_eq(fields, [String]{`name="a, b: c"`, "size=-2", "open=true"})
+    assert_eq(effect_value_fields("Bucket").len(), 0)
 }

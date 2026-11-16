@@ -1,0 +1,31 @@
+use sys: core.sys
+
+Triple: struct {
+    text: String
+    a: Int
+    b: Int
+}
+
+// The name of core.sys's environment error, with a payload Core's lacks.
+EnvError: enum {
+    Mine(Triple)
+    Other
+}
+
+mine: fn() -> EnvError { EnvError.Mine(Triple{text: "own", a: 1, b: 2}) }
+
+describe: fn(value: EnvError) -> String {
+    if value == {
+        .Mine(triple) -> "{triple.text} {triple.a} {triple.b}"
+        .Other -> "other"
+    }
+}
+
+run: fn() {
+    if sys.unset("BAD=NAME") == {
+        .Ok(found) -> { print("ok {found}") }
+        .Err(error) -> print("err {error}")
+    }
+    print(describe(mine()))
+    print(describe(EnvError.Other))
+}

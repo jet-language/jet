@@ -1,0 +1,37 @@
+# The JS partition's call of an `#Inline(Always)` `#Export(wasm)` function
+# is spliced into its caller on every tier of the web build, as any marked
+# call is: the web build optimizes the whole program as one IR module on the
+# native route before it selects the web module (BuildWeb.jet), and `add`
+# stays the bridge's export. `jet inspect choices` lists the call as inlined,
+# the build's census counts no marked call left (`ir.opt.marked_calls`), and
+# the program prints the sum.
+fixture: InlineAlwaysExportWasmIsInlinedIntoItsJSCaller.fixture
+env: NO_COLOR=1
+step choices_o0: jet inspect choices --target web -O0 main.jet
+exit: 0
+stdout: ~ "main.jet:5 in run: add inlined: marked #Inline(Always)" # the JS caller takes the body at O0
+stdout: ~ "main.jet:2 in add: Wasm: pinned by `#Export(wasm)`" # add stays the bridge's export
+step build_o0: jet build --target web -O0 --trace --phase-counters main.jet
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"ir.opt\",\"marked_calls\":0}" # no marked call left at O0
+step run_o0: node .jet/build/app.js
+exit: 0
+stdout: = "7\n"
+step choices_o1: jet inspect choices --target web -O1 main.jet
+exit: 0
+stdout: ~ "main.jet:5 in run: add inlined: marked #Inline(Always)" # at O1
+step build_o1: jet build --target web -O1 --trace --phase-counters main.jet
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"ir.opt\",\"marked_calls\":0}" # none left at O1
+step run_o1: node .jet/build/app.js
+exit: 0
+stdout: = "7\n"
+step choices_o2: jet inspect choices --target web -O2 main.jet
+exit: 0
+stdout: ~ "main.jet:5 in run: add inlined: marked #Inline(Always)" # at O2
+step build_o2: jet build --target web -O2 --trace --phase-counters main.jet
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"ir.opt\",\"marked_calls\":0}" # none left at O2
+step run_o2: node .jet/build/app.js
+exit: 0
+stdout: = "7\n"

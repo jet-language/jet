@@ -347,7 +347,7 @@ use the same names.
 | --- | --- | --- |
 | `ABI`, `FFILanguage`, `Target`, `Track` | enum | Calling convention, foreign language, code-generation target, and tracking policy values |
 | `InlineMode`, `JobScope`, `KernelMode`, `Layout`, `MemoBound`, `OverflowMode` | enum | Inlining, publication scope, parallel-kernel, representation, memoization, and fixed-width overflow choices |
-| `Effect`, `NamingCase`, `ObligationMode`, `PolicySetting`, `TaintKind` | enum | Effect roots, field naming, proof obligations, policy, and taint values |
+| `Effect`, `NamingCase`, `ObligationMode`, `PolicySetting` | enum | Effect roots, field naming, proof obligations, and policy values |
 | `Path`, `State` | struct | Marker path text and compiler-threaded typestate names |
 
 For example, `#Inline` accepts an imported enum value or a dot literal:
@@ -1822,6 +1822,11 @@ resolves outside the root. A directory serves its `index.html` unless
 `accept-ranges`, an `etag` and `last-modified`; `If-None-Match` and
 `If-Modified-Since` answer `304`, one byte range answers `206` (guarded by
 `If-Range`), an unsatisfiable range `416`, and anything unservable `404`.
+Each file is also served under its hashed name: the first 16 hex digits of
+the SHA-256 of its bytes before its extension, so `fonts/body.woff2` is also
+`fonts/body.<hash16>.woff2`. A hashed name answers with
+`Cache-Control: public, max-age=31536000, immutable` and no validators, and
+once the file's bytes change its old hashed name answers `404`.
 
 The Jet CORS constructor accepts named-origin lists or `.Any`/`.List` policies.
 Empty method/header lists retain the published defaults, credentials default to
@@ -2361,8 +2366,9 @@ after the port was not ready.
 handling a closed event enum. See
 [`watcher.jet`](../../../Examples/Systems/Files/Watcher.jet).
 
-The checked `WatchEvent.kind` field has type `WatchKind`, with the same six
-variant names; it is distinct from the independently exported `WatchEventKind`.
+The checked `WatchEvent.kind` field has type `WatchKind`, which `core.watcher`
+also exports. It has the same six variant names as `WatchEventKind` but is a
+distinct enum.
 Event equality includes all six stored fields. Show prints domain, kind, path,
 and detail; Debug additionally prints pid and port and quotes the text fields.
 
@@ -5116,6 +5122,7 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `node_color(label: String, width: Float, height: Float, color: Color) -> UINode` | node | Construct a node filled with a `core.color` color. |
 | `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
 | `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
+| `asset(path: String) -> UIAsset` | asset | Name a file the program ships, by its path from the calling file's directory. |
 
 Both backends have the same methods. `measure(tree, constraint) -> Size` is a
 box's widest child by its children's summed heights, any other node its own
@@ -5132,6 +5139,16 @@ latest mount drew: `fill(rect, color)` for each leaf but a text, then
 terminal cells: `frame_lines() -> [String]` gives its rows without trailing
 white space and `render_count() -> Int` counts its paints. In a web build the
 page shows each paint.
+
+`UIAsset` is `{path: String}`: a file the program ships with it, such as an
+image, a font or an icon. Its path is resolved as `embed_bytes` resolves its
+path, from the calling file's own directory, so `asset("brand/logo.svg")`
+called in `Screens/home.jet` names `Screens/brand/logo.svg`. The compiler
+checks a path written as a string literal while the program builds. One that
+is absolute or has a `..` part is E0957, as for `embed_bytes`; one that names
+no file, a directory among them, is E2822 (`jet.MissingAsset`), which names
+the path it resolved to. Both are reported at the path. A path built at run
+time is not checked.
 
 `UIPreviewViewport` is `{device: UIPreviewDevice, width: Int, height: Int,
 scale: Int}` and `UIPreview` is `{kind: UIPreviewKind, name: String, viewport:
@@ -5498,15 +5515,25 @@ tasks never read or change the process registry. The module source is
 | `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. For a source whose data the database doesn't track, such as a fetch; a database write already reaches the bindings that read its table. |
 | `watch(socket: WsConn, binding: Live<T, E>) -[Net]>` | — | Send `{"live":"invalidate","binding":<id>}` to the server-side WebSocket `socket` each time `binding` is invalidated, starting with the latest such event when there was one. While the binding is held, the event carries `"after_ms":<n>`: read it again after `n` milliseconds. |
 | `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations, value changes, WebSocket pushes, the per-second re-run cap and the re-runs it held over. |
-| `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
-| `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
+| `remote(service: S, client: String = "") -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. `client` names the client holding it, which a test can cut off (`disconnect`). |
+| `remote_at<S>(address: String, client: String = "") -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. `client` is as for `remote`. |
+| `disconnect(client: String)` | — | The test host cuts client `client` off every server: until `reconnect(client)`, each call through a Remote made for it fails `CallError.Unreachable`, naming the client and the method, and runs nothing on the server. Nothing touches the network, so an offline, catch-up or replay case runs the same each time; the servers and every other client go on. Inside `testing.world` the links are the world's own. A blank name, or one with a control character, panics. |
+| `reconnect(client: String)` | — | Restore the link `disconnect` cut: the client's next call reaches the server. |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
+| `new_id() -[Rand, Time]> String` | ID | A fresh UUIDv7 as lowercase text: the Unix millisecond it was made, then 74 random bits. A client names a row it creates with it, so a row made offline has its final ID at once; a later ID sorts after it. It panics when the system has no random source. |
 | `as_caller<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
 | `as_system<R>(run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for the server itself, which no row policy limits, as a job or a schedule does. |
 | `maybe_caller() -> auth.AccountID?` | account | The account this task acts for: `None` for the system or no one. |
 | `caller() -> auth.AccountID` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
 | `enqueue(fn() { self.job(args...) })` | — | Queue one call of the service's `#App.Job` method `job`, with its arguments evaluated and encoded here; it runs after the call that queued it commits. See below. |
 | `endpoints<S>() -> [String]` | names | The methods of the service `S` that `#App.SignedIn` or `#App.Public` marks, in the order `S` declares them. A job, a schedule, a webhook, a signing key and an unmarked method are server-only and never listed. |
+| `new(title: String) -> App` | graph | Start the app graph titled `title`, with no screens. |
+| `graph.screen(path, view, signed_in: Bool = false) -> App` | graph | Add the screen `view` shows at `path` to the graph, and give back the graph. See below. |
+| `graph.cache<V>(policy: CachePolicy) -> App` | graph | Answer every `#App.Public` endpoint reply of type `V` under `policy`, and give back the graph. See below. |
+| `graph.sitemap(list) -> App` | graph | List the address of each public screen state `list` gives in the served `/sitemap.xml`, and give back the graph. See below. |
+| `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
+| `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
+| `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. It may read the database, fetch over `Net` and wait
@@ -5580,8 +5607,14 @@ A call through the Remote that `remote_at(address)` makes is a POST of the
 arguments, encoded as one JSON array, to `{address}/{method}`. A Public
 method answers `{"ok": value}` or `{"err": error}`, which the call returns as
 the method's value or error. `web.app().mount(prefix, service)` registers
-each marked method of the service as that POST route `{prefix}/{method}`; a
-SignedIn method answers 401 there until the App signs callers in. Since a
+each marked method of the service as that POST route `{prefix}/{method}`.
+There a SignedIn method runs acting for the account whose session the call
+carries. The session can come as an `Authorization: Bearer <id>`, or as the
+`jet_session` cookie that core.auth mints. The cookie counts only on a call
+whose `Origin` names the server, so that another site's page can't call as
+the signed-in user. A call with no live session answers 401. That covers a
+missing, malformed, unknown, expired or forged session, and the answer and
+the time the check takes are the same for each. Since a
 call can fail on the way, its type adds `CallError`, whichever Remote makes
 it: a method `-> T E!` is called as `T E!` and needs an
 `impl app.CallError -> E` conversion, and a method `-> T` is called as
@@ -5594,8 +5627,8 @@ the arguments did not decode; the body
 An endpoint marker may cap its calls: `#App.Public(limit: 30, per: 1min)`
 allows 30 calls from one network address in each one-minute window. `per`
 defaults to one minute, and `limit: 0`, the default, means no limit. A
-SignedIn method counts per account once the App signs callers in, and per
-network address until then. The mount checks `limit` as an Int and `per` as a
+SignedIn method counts a signed-in call per account, and a call with no live
+session per network address. The mount checks `limit` as an Int and `per` as a
 Duration. A call past the limit is answered 429 with `Retry-After` in whole
 seconds. The Remote reads that as `Unreachable`, with text that ends
 `is limited: retry after N s`.
@@ -5658,6 +5691,21 @@ sender stops delivering it, and the call rolls back: its method's writes are
 dropped. A run that fails rolls its record back with the rest, so a delivery
 that failed runs when it comes again. A delivery without an ID, and a webhook
 that uses no store, have nothing to record and run every time.
+
+A Remote call sends a request key, its `Idempotency-Key` header, and sends
+the call again under the same key when no reply comes, up to three times in
+all, waiting 200 ms and then 400 ms. The server reads the key with the
+account the call acts for (none for a call with no caller). When the call
+first uses a store, the store looks the key up in its `__jet_requests`
+table, which keeps each reply for 24 hours from the second the server
+received the call. A key it holds a reply for makes the call roll back, and
+the call is answered 200 with that reply and `Idempotent-Replayed: true`.
+The reply of a call that commits is kept in the transaction of the first
+store it used, with its writes. The reply of a run that fails is kept on its
+own after the rollback, so the call sent again gets the same failure. A call
+that uses no store, and one whose arguments do not decode (422), keep
+nothing and run each time. What a run does before its first store statement
+runs again on a repeat. A key longer than 255 bytes is answered 400.
 
 A method marked `#App.Job` is work a call queues to run after it commits,
 such as a notice to send. `app.enqueue(fn() { self.notify(task, to) })`, in a
@@ -5730,6 +5778,98 @@ Remote calls one, and `app.endpoints<S>()` lists none. A method that
 calls one, each runs as the system (`db.Who.System`), which no row policy
 limits, and `jet inspect choices` lists it as a `rights` row under its
 marker.
+
+The app graph is the program's screens. `app.new(title)` starts it, and
+`graph.screen("/projects/:project/board", board)` adds one. `board` is a named
+function. Its one parameter that is no `app.Remote<S>` is the screen's state:
+a struct declared outside Core with no type parameters, whose fields each
+derive `Encode`. The state is the screen's address. Each `:name` segment of
+the path is the field `name`. A field marked `#App.Query` (`#App.Query q:
+String`) goes after `?`. Every other field must be a path segment. A path that
+is not a string literal starting with `/`, a field in neither place, a
+segment that names no field or names a query field, and a state that two
+screens register are E2820 (`jet.InvalidScreen`). `signed_in: true` marks a
+screen only a signed-in caller opens. Every target runs the one graph, so its
+screens are every target's route set.
+
+`app.url_of(state)` gives the address of the screen whose state is `state`'s
+type. Each path field's value is percent-encoded into its segment, and each
+query field with a non-empty value follows `?` as `name=value`, in field
+order. A string field gives its own text, and any other field its JSON. A
+push opens a state the same way: `app.notify(to:, title:, body:, open:
+state)` sends the notice to each device `to` registered, with
+`url_of(state)` as the address a tap opens. A value that is no struct
+declared outside Core is E2821 (`jet.StateWithoutScreen`) in any program. In
+a program that registers screens, so is a state that no screen opens. A
+program that registers no screen, such as a library checked on its own, is
+not checked against a graph. Running `url_of` before the process has built
+its graph stops the program.
+
+`app.presence(state)` gives the accounts that have the screen state `state`
+open now, each once, sorted. An account has it open while one of its live
+bindings is registered whose latest run asked `presence` of that state, such
+as the binding of a signed-in method that reads the state's row first
+(`_: self.tasks.get(id) ?? return Err(NotFound)`) and then asks. A row
+policy that refuses that read makes the method return before it asks, so an
+account whose last read of the screen's data did not pass its policies is
+not counted, and an account that loses access drops out at its binding's
+next run. A run that asks counts its own account, and each change of the
+accounts present re-runs every other binding that asked, as a write
+re-runs a live query, so a viewer list stays current. Asked outside a live
+binding's run, `presence` only reads the accounts present. A connection
+that closes does not end presence: the account stays present while its
+binding is registered. The state is checked as for `url_of` (E2821).
+
+`graph.sitemap(list)` gives the graph a sitemap. `list` is a named function
+that takes nothing and gives a list of screen states, as
+`fn() -> [GuideView]`, and the sitemap asks it each time a crawler reads
+`/sitemap.xml`. A served web app then answers GET `/sitemap.xml` with the
+sitemaps.org 0.9 `urlset` of each listed state's `url_of` address, once each,
+at the origin the request reached (its `Host`, over `https` when
+`X-Forwarded-Proto` says so). A signed-in screen is never in the sitemap: a
+list whose state's screen only a signed-in caller opens, or that no screen
+opens, gives no address. A graph with a sitemap or a signed-in screen also
+answers GET `/robots.txt`: every crawler is asked to leave each signed-in
+screen (`Disallow: /inbox/*$`, each `:name` segment a `*`, ending at the
+path), and is told the sitemap's address. A program route at either path
+answers it instead. A `list` that takes parameters, or gives no list of
+screen states, is E2810.
+
+`graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
+and the last call for a type holds. `CachePolicy` is `.Private` or
+`.Public{max_age: Duration}`. An `#App.Public` endpoint method whose reply
+type (its `Ok` type, for a method that returns a Result) is `V` is answered
+under the policy. `.Public{max_age}` answers a successful reply with
+`Cache-Control: public, max-age=<whole seconds>` and an `ETag` that names the
+reply's bytes. Such a method also answers GET at its address, its arguments
+the JSON array of the query's `args` field (none is `[]`), and a GET whose
+`If-None-Match` names the reply's ETag is answered 304 with no body. Every
+other endpoint method refuses GET with 405 and `Allow: POST`, so a GET, which
+any site can make a browser send, never runs a method that may write.
+`.Private` answers `Cache-Control: private, no-store`, as every answer of an
+`#App.SignedIn` method is answered, whatever its reply type's policy, and a
+reply type with no policy carries no cache headers. `.cache` without the one
+type argument is E0119.
+
+The server also keeps a `.Public{max_age}` method's successful reply for
+`max_age`, by the call's JSON array of arguments: a call with the same
+arguments within it is answered with the kept reply and its `Age`, and the
+method does not run. `max_age` is a Duration, measured on the monotonic
+clock: a kept reply is fresh through the instant its `max_age` ends and stale
+after it, when the next call runs the method and keeps its new reply. A reply
+is kept for being a reply, not for its value, so `false`, `0` and `""` are
+kept like any other. A failed run, a call replayed under its
+`Idempotency-Key`, or a `max_age` of zero keeps nothing.
+
+Servers of one App that share a database file share these replies. Each
+database file `db.open` opens keeps them in its table `__jet_kept_replies`,
+keyed by the method's address and its arguments, with the instants each
+was kept and stays fresh through, in Unix milliseconds by the file's
+clock. A reply is kept in the App's first file still open; a server that
+keeps no fresh reply of its own answers with one that any open file keeps,
+with its `Age`, and does not run the method. Each keep drops the stale
+rows, so the table holds only fresh replies. No cache server runs, and an
+in-memory database shares nothing.
 
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
@@ -5851,6 +5991,15 @@ boundary. Serving the app (`App.serve`, `App.bind`, `App.serve_once`,
 has no page or already routes something under `/a/`. An address no source
 makes gets the app's not-found page. The row's file reads are charged where
 the first page is registered, so `App.bind` stays `-[Net]>`.
+
+Files under the app's first `assets` root (fonts, icons, scripts, styles and
+any other static file) get the same treatment. A page that links one as a
+quoted `"/assets/<path>"` (an `href`, `src` or other attribute value) is
+served linking its hashed name, `/assets/<dir>/<stem>.<hash16>.<ext>`, which
+answers with immutable caching (see `static_files`). Editing the file changes
+the name the next page links. A path with a query, fragment or escape, or
+that names no file under the root, stays as written. The file's own name
+keeps answering with its validators.
 
 `app.images(formats:, widths:, quality:, enabled:)` sets how variants are
 made. Every option is labelled and optional, and one left out keeps its
@@ -6500,9 +6649,9 @@ subquery from another table) is refused.
 | `open_memory() -[DB]> Store` | store | Open an in-memory database. |
 | `store.table(name: String, key: fn(T) -[]> K) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function. |
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
-| `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row (`DBError.Exists` when its key is held) or insert-or-replace one. |
+| `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row or insert-or-replace one. An `add` whose key is held is `DBError.Exists` when the caller may read the row that holds it and `DBError.Denied` when it may not. |
 | `table.delete(key: K) DBError! -[DB.Read, DB.Write]>` | — | Remove the row with that key, if any. |
-| `table.query() -[DB.Read]> Query<T> DBError!` | query | Read every row the caller may read, in key order, as a `core.data` query. |
+| `table.query() -[DB.Read]> Query<T> DBError!` | query | Every row the caller may read, in key order, as a `core.data` query, read when it is collected; a filter the compiler writes as SQL narrows what it reads. |
 | `table.guard(policy: fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T>` | table | The table judged by a row policy on every read and write. |
 | `pool(url: String, max: Int) -[DB]> DBPool DBError!` | pool | Create a bounded connection pool (`DBPool` → `DBLease`, `DBPoolReceipt`). |
 | `policy(table: String, expression: String) -[DB]> RowPolicy DBError!` | policy | Compile a checked row-access policy. |
@@ -6554,12 +6703,28 @@ table; reading a table that was never written finds no rows. `get` and
 `query` carry `DB.Read`, and `add`,
 `put` and `delete` carry `DB.Read` and `DB.Write` (a write may run the
 table's row policy, which reads), so a function that writes a table must
-allow `DB.Write` (E0740 otherwise). A `get` or `query` made while an
+allow `DB.Write` (E0740 otherwise). A `get`, or a `query` collected, while an
 `app.live` binding's query function runs adds the table to that binding's
 read set, even before the table exists. An `add` or `put`, or a `delete`
 that removes a row, re-runs every binding that reads the table once the write
 is committed: immediately outside a transaction, and at the commit (or
 rollback) inside one, as for a scope's `execute`.
+
+The table also keeps one column per top-level `Int`, `Float`, `Bool`,
+`String` or null field of the first row written to it, named
+`jet_row.<field>`, which every write keeps current. A `query().filter(...)`
+whose predicate compares the row's `Int`, `String` or `Bool` fields with
+values, joined by `&&` and `||`, on a `#Codable` row with no `#Rename` and no
+`migration` block, is written by the compiler as SQL over those columns
+(D-DB-TABLE1); the values are read once, when `filter` is called. Its read
+selects only the rows the condition holds for, and its live binding's read
+set is narrowed to them: a write re-runs it only when the row it changes held
+for the condition before the write or holds for it after. The predicate still
+decides every row read, so a filter means the same either way. Any other
+filter reads the whole table, and a write to the table re-runs its binding; a
+table whose columns lack a field the condition names, such as one created
+before them, is read whole too. `jet inspect choices` lists each filter under
+`live reads` with which it is.
 
 A row type's `migration` block is its table's history (D-DATA-EVOLVE1). A
 read decodes a row an older version of the type stored through the block, as
@@ -6588,7 +6753,10 @@ stored row, and a `put` over a stored row twice, on the stored row and on
 the new one; both must pass. A `put` under a new key is an insert. A row the
 policy refuses to read is never returned: `get` gives `None` and `query`
 leaves the row out. A refused write is `DBError.Denied`, and it writes
-nothing. The policy runs as the system and reads through a store on the
+nothing. An `add` whose key a row already holds is `DBError.Exists` only when
+the caller may read that row; when it may not, the `add` is `Denied`, as a
+refused write is, so a key a client chose tells it nothing of a row it
+can't see. The policy runs as the system and reads through a store on the
 same connection, so it sees the transaction's earlier writes. It runs before
 the write it judges, so a write cannot vouch for itself. An `app.live`
 binding runs as the caller that made it, whoever reads it, and two callers'
@@ -6614,6 +6782,19 @@ counts it as `ws_pushes`. Nothing re-runs a binding but a read: a connection
 that closes stops watching, so a write after that reaches it no longer and
 re-runs nothing until the binding is read again.
 
+The live registry is per process, so a write reaches another server's
+bindings through the database file instead (#6868 c4). When a binding on a
+file store reads a table, its process records that table in the file's
+version map (the `__jet_live_versions` table, one row per such table) and
+polls the map once a second. Each committed write to a recorded table, from
+any process, adds one to its row; a poll that finds a table's version moved
+past what it saw and its own process's writes re-runs every binding there
+over that table, as the write itself would have. So a write on one server
+reaches a binding on another within about a second, and no broker has to
+run. The map does not grow with writes, and an in-memory store has no map.
+A Postgres `LISTEN/NOTIFY` wake-up that makes the poll run at once waits for
+a Postgres client in Core.
+
 `DBPool.acquire(deadline:)` admits waiters first come, first served. A waiter
 leaves the queue when it gets a lease, when its deadline passes, when the pool
 starts draining, or when its task is cancelled at the wait, so a cancelled
@@ -6628,8 +6809,9 @@ Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
 affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads
 preserve every byte, including empty blobs, without text conversion. `DBError`
 is an enum: `Failed(String)` retains the driver's message rather than exposing
-a raw engine pointer, `Exists` is a typed table's `add` meeting a held key,
-and `Denied` is a table's row policy refusing a write. `message()` is the
+a raw engine pointer, `Exists` is a typed table's `add` meeting a key held by
+a row the caller may read, and `Denied` is a table's row policy refusing a
+write, or an `add` meeting a key held by a row the caller may not read. `message()` is the
 text that `Display` and `Debug` show.
 
 Pool receipts remain opaque values produced by a pool. Their equality and
@@ -6784,8 +6966,10 @@ therefore adds no identity-open failures.
 All ten error cases carry a String; their service display is the message alone.
 Receipts retain every original field, including authority and signature, and
 their service display preserves the existing field order and labels.
-`TaskOutcome` retains Finished, Panicked(String), Cancelled and DeadlineBlown:
-display uses the raw panic reason, while Debug quotes and escapes that String.
+`TaskOutcome` is `Finished` or `Failed(TaskFailure)`, the prelude's one task
+failure enum. Its display is `Finished` or the failure's text (`Cancelled`,
+`DeadlineBlown`, or `Panicked(reason)` with the raw reason), while Debug quotes
+and escapes that reason.
 `core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
 original positional order. `Delivery` shows exactly `Delivery(` + its ID + `)`.
 `Delivery.show()` and `DeliveryReceipt.show()` return that same display text.

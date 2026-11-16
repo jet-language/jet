@@ -330,6 +330,25 @@ ir_opt_inline_marked_module: fn(m: &IRModule, report: &IROptReport) Never! {
     compiler_transfer_rows<IRFunction>(m.functions, functions)
 }
 
+// The census of the marked calls left in `m`: each Call whose callee is
+// `#Inline(Always)`. Once ir_opt_inline_marked_module ran it is 0 on every
+// tier (only a cycle of marked calls keeps one, and sema refuses the cycle,
+// E0917); `jet build`, `jet run` and `jet test` trace it as the counter
+// `ir.opt.marked_calls` (JetCLI Host.jet jet_cli_native_program).
+ir_opt_marked_calls: fn(m: IRModule) -> Int Never! {
+    count := 0
+    loop f in m.functions {
+        loop (at, code) in f.op {
+            if code != .Call -> next
+            callee: f.a[at]
+            if callee >= 0 && callee < m.functions.len() && m.functions[callee].inline_always {
+                count += 1
+            }
+        }
+    }
+    count
+}
+
 // Marked function `id` and the marked callees it reaches, each after the
 // ones it calls, onto `order`. `state[g]` is 0 before g's walk, 1 during it
 // and 2 after; a marked call of a function still being walked closes a
@@ -646,7 +665,11 @@ ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
     m.functions.push(ir_opt_inline_test_caller("a", 4, int))
     m.functions.push(ir_opt_inline_test_caller("b", 3, int))
     report := ir_opt_report(0)
+    // h calls g, f calls h, and a and b call each other.
+    assert_eq(ir_opt_marked_calls(m), 4)
     ir_opt_inline_marked_module(m, report)
+    // Only the cycle sema refuses (E0917) keeps its two marked calls.
+    assert_eq(ir_opt_marked_calls(m), 2)
     assert_eq(ir_opt_inline_test_calls(m.functions[1]), 0)
     // f takes h's copy, which already holds g's body.
     assert_eq(ir_opt_inline_test_calls(m.functions[2]), 0)

@@ -1,0 +1,13 @@
+# A push's `open:` state is a screen state of the app graph, and every
+# target runs that one graph, so a tap opens the state through the same
+# route set on each of them. `jet check` refuses an `open:` state that no
+# screen of the graph opens (E2821) where the push names it; the push that
+# opens a task, whose screen the graph has, checks.
+fixture: PushOpenStateWithoutARouteIsACompileError.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: nonzero
+stderr: ~ "No screen of the app graph opens `ProjectView`." # the project push
+stderr: ~ "main.jet:26:" # on its line
+stderr: !~ "`TaskView`" # the task push checks
+stderr: ~ "1 problem found" # only the project push

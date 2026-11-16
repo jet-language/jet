@@ -1,0 +1,75 @@
+// Outcome values reflect their built-in cases. `reflect.of(x).case()` on an
+// optional holds `Val` with the present payload or `None`; on a result it holds
+// `Ok` or `Err` with the payload; on a result of an optional it holds `Val`,
+// `None` or `Err`, one flat three-state outcome. Each case's path is the type's
+// path, then the case. The same cases show wherever a value is reflected: at
+// the root, in a struct field, in an enum case's payload and inside another
+// outcome's payload. A unit success has no payload field.
+//
+// Absence is never another case: `None` of `Int?` is not the named unit case
+// `Gate.Shut`, and the structural unit `()` holds no case at all.
+use reflect: core.reflect
+
+#Error
+Lookup: enum {
+    Negative
+    Missing
+}
+
+Gate: enum {
+    Shut
+    Open(Int?)
+}
+
+Reading: struct {
+    count: Int Lookup!
+    found: Int? Lookup!
+    gate: Gate?
+}
+
+maybe: fn(n: Int) -> Int? {
+    if n > 0 -> return n
+    None
+}
+
+count_of: fn(n: Int) -> Int Lookup! {
+    if n < 0 -> return Err(Lookup.Negative)
+    n
+}
+
+find: fn(n: Int) -> Int? Lookup! {
+    if n < 0 -> return Err(Lookup.Missing)
+    maybe(n)
+}
+
+// The held case of `value`, its path and its payload, each payload value
+// shown the same way; a value with no case shows as it interpolates.
+shown: fn(value: Value) -> String {
+    if value.case() == .Val(held) {
+        payload: (loop field in held.fields() -> "{field.name()}: {shown(field.value())}").join(", ")
+        return "{held.name()} at {held.path()} ({payload})"
+    }
+    "{value.type_name()} {value.display()}"
+}
+
+// A result held as a value, its outcome kept rather than passed up.
+counted: fn(outcome: Int Lookup!) -> String { shown(reflect.of(outcome)) }
+
+found: fn(outcome: Int? Lookup!) -> String { shown(reflect.of(outcome)) }
+
+run: fn() {
+    print(shown(reflect.of(maybe(3))))
+    print(shown(reflect.of(maybe(0))))
+    print(counted(count_of(2)))
+    print(counted(count_of(-1)))
+    print(found(find(4)))
+    print(found(find(0)))
+    print(found(find(-1)))
+    reading: Reading{count: count_of(5), found: find(0), gate: Gate.Open(maybe(0))}
+    loop field in reflect.of(reading).fields() {
+        print("{field.name()}: {field.value().type_name()} -> {shown(field.value())}")
+    }
+    print(shown(reflect.of(Gate.Open(maybe(7)))))
+    print(shown(reflect.of(Gate.Shut)))
+    print(shown(reflect.of(())))
+}

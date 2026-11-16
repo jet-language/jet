@@ -36,14 +36,16 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Add the named effect to the `-[…]&gt;` list, or stop using it (drop the Core call that introduces it, or move it out of this function).</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0740</code>: <code>Tests/UI/E0740_live_query_writes.stderr</code>.</p>
-<pre class="diag">Error [jet.EffectBoundExceeded]: `bump` uses the effect `DB.Write`, which a live query doesn&#39;t allow
-  --&gt; Tests/UI/E0740_live_query_writes.jet:11:23
+<p>First UI snapshot mentioning <code>E0740</code>: <code>Tests/UI/BrowserLock/core_browser_locked_requires_fs_effect.stderr</code>.</p>
+<pre class="diag">Error [jet.EffectBoundExceeded]: `run` uses the effect `FS.Read`, which its signature doesn&#39;t allow
+  --&gt; Tests/UI/BrowserLock/core_browser_locked_requires_fs_effect.jet:3:13
     |
- 11 |     binding: app.live(bump, 1)
-    |                       ^^^^
- Why: `live` re-runs its query whenever the data it read changes, so the query may only read the database
- Fix: Keep the query to `-[DB.Read]&gt;`, or use `subscribe` for a source that also fetches over `Net` or waits on `Time`
+  3 | run: fn() -[IO]&gt; { locked: browser.locked(&quot;chromium&quot;) ?? return }
+    |             ^^
+ Why: The signature declares `-[IO]&gt;`, so the body may only use those; `FS.Read` is outside that set
+ Fix: Add `FS.Read` to the effect list, or stop using it in `run`
+ Denial: invocation
+ Call chain: run
 More: jet-lang.dev/e/E0740
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

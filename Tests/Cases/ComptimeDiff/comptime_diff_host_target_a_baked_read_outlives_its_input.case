@@ -1,0 +1,17 @@
+# The `#Impure` example of Docs/Spec/Reference/metaprogramming.md, byte for
+# byte. Its compile-time read needs the source gate and `--gate impure=allow`
+# (E3411 without the grant). With both, the read happens once, while building:
+# the value lives as long as the program, so the built binary prints it after
+# the file it came from is gone.
+fixture: ComptimeDiffHostTargetABakedReadOutlivesItsInput.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build main.jet
+exit: 1
+stderr: ~ "inside `#Impure` is a Tier-2 comptime effect, but `--gate impure=allow` was not passed" # E3411
+step: jet build --gate impure=allow main.jet
+exit: 0
+remove: config.txt
+step: {work}/.jet/build/main
+exit: 0
+stdout: = "read while building\n"

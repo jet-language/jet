@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Wrap it: `#Unsafe(&quot;why this is safe&quot;) { … }`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E3101</code>: <code>Tests/UI/deref_forbidden.stderr</code>.</p>
-<pre class="diag">Error [jet.MemoryOperationOutsideUnsafe]: `pointer dereference` can only run inside an `#Unsafe` block
-  --&gt; Tests/UI/deref_forbidden.jet:1:29
+<p>First UI snapshot mentioning <code>E3101</code>: <code>Tests/UI/RuntimeImportNeedsUnsafe/stderr</code>.</p>
+<pre class="diag">Error [jet.MemoryOperationOutsideUnsafe]: `#Import(c)` of the Jet runtime symbol `jet_rt_process_exit` can only sit inside `#Unsafe`.
+  --&gt; Tests/UI/RuntimeImportNeedsUnsafe/run.jet:1:12
     |
-  1 | first: fn(p: *Int) -&gt; Int { p.* }
-    |                             ^^^
- Why: This operation can violate memory safety, so it must sit in an audited region
- Fix: Wrap it: #Unsafe(&quot;why this is safe&quot;) { … }
+  1 | #Import(c) raw_exit: fn(code: I64) = &quot;jet_rt_process_exit&quot;
+    |            ^^^^^^^^
+ Why: The runtime&#39;s C exports are its internals, not a checked API, so reaching one directly needs an audited region.
+ Fix: Gate the declaration with `#[Import(c), Unsafe(&quot;why this is safe&quot;)]`, or call the Core function that wraps it.
 More: jet-lang.dev/e/E3101
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

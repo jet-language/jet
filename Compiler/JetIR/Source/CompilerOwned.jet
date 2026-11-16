@@ -381,41 +381,25 @@ IRCompilerOwnedEnum: struct {
     variants: [String]
 }
 
-// Compiler-owned runtime enums (`IOError`, `Key`, `TaskFailure`, ...)
-// are checked values with no Jet declaration. Each joins every program as one
-// row under its bare canonical key, so an enum literal, a variant pattern and
-// the backends name the same IR type as the Rust runtime does.
+// Compiler-owned runtime enums (`IOError`, `Dyn`, `Ordering`, ...): enums no
+// Core source declares. Each joins every program as one row under its bare
+// canonical key, so an enum literal, a variant pattern and the backends name
+// the same IR type as the Rust runtime does. A Core-declared enum needs no
+// row here: its Core declaration claims the bare name wherever its module is
+// loaded. Where its module line lists its cases, that CORE_ENUM_CASE_ROWS row
+// stands in when no single declaration is loaded, carrying the family's Core
+// payload rows (ir_core_enum_payload), so a program that holds a `Key` or a
+// `DataEvent` without loading the declaring module lays it out the same.
 IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
-    {name: "Overflow", variants: [String]{"Block", "DropNewest", "DropOldest"}},
-    {name: "FailurePolicy", variants: [String]{"StopFirst", "Collect", "Log", "Ignore"}},
-    {name: "HookPolicy", variants: [String]{"FirstCancelElseTransform"}},
     {name: "HookOutcome", variants: [String]{"Continue", "Cancel", "Fail"}},
     {name: "HookDecision", variants: [String]{"Continue", "Transform", "Cancel", "Fail"}},
-    {name: "DispatchState", variants: [String]{"Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded"}},
     {name: "DispatchFailure", variants: [String]{"Handler", "Panic"}},
     {name: "Ordering", variants: [String]{"Less", "Equal", "Greater"}},
     {name: "RemoveBy", variants: [String]{"Val", "Slot"}},
-    {name: "TaskFailure", variants: [String]{"Cancelled", "DeadlineBlown", "Panicked"}},
-    {name: "TaskOutcome", variants: [String]{"Finished", "Panicked", "Cancelled", "DeadlineBlown"}},
-    {name: "TaskStatus", variants: [String]{"Running", "Paused", "CancelRequested"}},
     {name: "TaskPauseMode", variants: [String]{"WaitPoints", "CheckLoops"}},
-    {name: "DeliveryState", variants: [String]{"Pending", "Accepted", "Delivering", "Delivered", "DeadLettered", "Cancelled"}},
     {name: "IOError", variants: [String]{"InvalidInput", "NotFound", "PermissionDenied", "TimedOut", "Cancelled", "Closed", "Protocol", "Other", "ResourceLimit", "AlreadyExists", "Unsupported"}},
-    {name: "Key", variants: [String]{"Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Up", "Down", "Left", "Right", "F", "Ctrl", "Unknown"}},
     {name: "DurationUnit", variants: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}},
-    {name: "DataLoaderKind", variants: [String]{"File", "URL", "Database", "Value"}},
-    {name: "DataErrorKind", variants: [String]{"Decode", "Limit", "IO", "Empty", "InvalidArgument", "NonFinite", "Overflow", "State", "Bridge", "Unsupported", "DuplicateKey", "MissingKey", "WrongOwner", "StaleRevision", "InvalidValue"}},
-    {name: "DataFormat", variants: [String]{"CSV", "JSON", "JSONL", "Parquet", "Arrow"}},
-    {name: "DataFreshness", variants: [String]{"Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"}},
-    {name: "DataInvalidationCause", variants: [String]{"NoCause", "Loader", "Input", "ArchiveMember", "Parameters", "Credential", "Capability", "Manual"}},
     {name: "Dyn", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}},
-    {name: "DataEvent", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"}},
-    {name: "XMLCanonicalMode", variants: [String]{"Inclusive11", "Exclusive10"}},
-    {name: "NetDNSError", variants: [String]{"NotFound", "Failure"}},
-    {name: "NetError", variants: [String]{"InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"}},
-    {name: "WatchDomain", variants: [String]{"File", "Process", "Port"}},
-    {name: "WatchKind", variants: [String]{"Created", "Modified", "Removed", "Error", "Exited", "Ready"}},
-    {name: "WsError", variants: [String]{"InvalidURL", "InvalidHandshake", "Protocol", "Timeout", "Closed", "Cancelled", "UnsupportedTarget", "MessageTooLarge", "IO"}},
     // The closed reflection detail menus sema types fact reads with
     // (sema_fact_enum_variants): a read `EXACTNESS.kind` or
     // `OBLIGATION.param_contract[0].zone` is a runtime value of these rows.
@@ -446,19 +430,10 @@ ir_compiler_owned_single: fn(ty: Type) -> IRCompilerOwnedPayload Never! {
     IRCompilerOwnedPayload.Single{ty: ty}
 }
 
-ir_compiler_owned_named: fn(fields: [TypeTupleField]) -> IRCompilerOwnedPayload Never! {
-    IRCompilerOwnedPayload.Named{fields: fields}
-}
-
 // The payload of `name.variant` on a COMPILER_OWNED_ENUMS row, written over
-// the row's type parameters; a plain Core enum row's variants are all unit.
-// NetError and NetDNSError carry their checked variant payloads.
+// the row's type parameters.
 ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerOwnedPayload Never! {
     bytes: Type.List{element: Type.IntN{signed: false, bits: 8}}
-    if name == "TaskFailure" || name == "TaskOutcome" {
-        if variant == "Panicked" -> return ir_compiler_owned_single(Type.String)
-        return IRCompilerOwnedPayload.Unit
-    }
     if name == "HookDecision" || name == "HookOutcome" {
         carries_value: if name == "HookDecision" -> "Transform" else -> "Continue"
         if variant == carries_value -> return ir_compiler_owned_single(Type.Named{name: "T"})
@@ -469,45 +444,14 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         if variant == "Handler" -> return ir_compiler_owned_single(Type.Named{name: "E"})
         return ir_compiler_owned_single(Type.String)
     }
-    if name == "DataEvent" {
-        if variant == "Bool" -> return ir_compiler_owned_single(Type.Bool)
-        if variant == "Int" -> return ir_compiler_owned_single(Type.Int)
-        if variant == "Float" -> return ir_compiler_owned_single(Type.Float)
-        if variant == "Number" || variant == "Text" || variant == "Key" {
-            return ir_compiler_owned_single(Type.String)
-        }
-        if variant == "Bytes" {
-            return ir_compiler_owned_single(Type.List{element: Type.IntN{signed: false, bits: 8}})
-        }
-        return IRCompilerOwnedPayload.Unit
-    }
-    if name == "WsError" {
-        if variant == "MessageTooLarge" {
-            return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Int}})
-        }
-        if variant == "IO" {
-            return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "operation", ty: Type.String}})
-        }
-        return IRCompilerOwnedPayload.Unit
-    }
     if name == "IOError" {
         if variant == "ResourceLimit" {
             return ir_compiler_owned_single(Type.Named{name: "ProcessResourceLimit"})
         }
         return ir_compiler_owned_single(Type.Named{name: "IOContext"})
     }
-    if name == "Key" {
-        if variant == "Char" || variant == "Ctrl" -> return ir_compiler_owned_single(Type.Char)
-        if variant == "F" -> return ir_compiler_owned_single(Type.Int)
-        return IRCompilerOwnedPayload.Unit
-    }
-    // The canonical twelve DataEvent payloads are the generated Core payload
-    // rows (data_event_payload), as are a reflected PreparedValue's.
-    if name == "DataEvent" || name == "PreparedValue" {
-        payload: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
-        if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])
-        return IRCompilerOwnedPayload.Unit
-    }
+    // A reflected PreparedValue's cases are the Core payload rows.
+    if name == "PreparedValue" -> return ir_core_enum_payload(name, variant)
     if name == "Dyn" {
         if variant == "Bool" -> return ir_compiler_owned_single(Type.Bool)
         if variant == "Int" -> return ir_compiler_owned_single(Type.Int)
@@ -524,10 +468,13 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         }
         return IRCompilerOwnedPayload.Unit
     }
-    if name == "NetDNSError" -> return ir_compiler_owned_single(Type.String)
-    if name == "NetError" {
-        if variant == "DNS" -> return ir_compiler_owned_single(Type.Named{name: "NetDNSError"})
-        return ir_compiler_owned_single(Type.Named{name: "NetErrorDetail"})
-    }
+    IRCompilerOwnedPayload.Unit
+}
+
+// The payload of `name.variant` from the family's Core payload row: its one
+// slot, or unit for a unit variant and a family with no rows.
+ir_core_enum_payload: fn(name: String, variant: String) -> IRCompilerOwnedPayload Never! {
+    payload: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
+    if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])
     IRCompilerOwnedPayload.Unit
 }

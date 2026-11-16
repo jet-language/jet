@@ -1,0 +1,8 @@
+use process: core.process
+
+echoed: fn() -[Exec, Time.Wait]> String {
+    output: process.getoutput(process.cmd(["/bin/echo", "child"])) ?? return "can't launch: {err}"
+    output.trim()
+}
+
+run: fn() { print(echoed()) }

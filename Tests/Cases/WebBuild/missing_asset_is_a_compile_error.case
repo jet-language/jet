@@ -1,0 +1,16 @@
+# A `ui.asset` path names a file from the calling file's own directory, as
+# `embed_bytes` names one, and `jet check` refuses a path that names no file
+# there (E2822), naming the path it resolved to, at the call: a file that
+# isn't there and a directory. A path with `..` is E0957, as for
+# `embed_bytes`. The path of a file that is there checks.
+fixture: MissingAssetIsACompileError.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: nonzero
+stderr: ~ "`ui.asset(\"brand/missing.svg\")` names `brand/missing.svg`, and there is no file there." # the file isn't there
+stderr: ~ "main.jet:6:43" # at the path
+stderr: ~ "`ui.asset` path can't use `..`" # a path out of this file's directory
+stderr: ~ "main.jet:8:43" # at the path
+stderr: ~ "`ui.asset(\"brand\")` names `brand`, and there is no file there." # a directory is no file
+stderr: !~ "brand/logo.svg\")` names" # the file that is there checks
+stderr: ~ "3 problems found" # one for each refused path

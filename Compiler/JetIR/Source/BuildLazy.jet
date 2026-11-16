@@ -165,9 +165,9 @@ ir_lazy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: 
         ir_line_release_body(m, p, a, ty, true, span)
     } else if role == "line_clone" { ir_line_clone_body(m, p, a, ty, span) } else if role == "compare" {
         ir_lazy_compare_body(m, p, a, ty, span)
-    } else if role == "indexed" { ir_lazy_indexed_body(m, p, a, ty, span) } else {
-        ir_lazy_callback_body(m, p, a, ty, role == "callback_write", role == "carried", span)
-    }
+    } else if role == "indexed" { ir_lazy_indexed_body(m, p, a, ty, span) } else if role == "ui_drop" {
+        ir_ui_drop_body(m, p, a, ty, span)
+    } else { ir_lazy_callback_body(m, p, a, ty, role == "callback_write", role == "carried", span) }
     failed: ir_failed(a)
     message: a.error.copy()
     ir_resolve_deferred(m, p, a)

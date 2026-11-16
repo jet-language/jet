@@ -96,8 +96,6 @@ use {
         compiler_threads_failure_text,
         compiler_threads_heaviest_first,
         compiler_transfer_rows,
-        core_enum_payload_variants,
-        core_enum_variant_payload,
         core_module_export,
         core_module_has_member,
         core_module_has_type,
@@ -2334,34 +2332,21 @@ sema_registration_compiler_owned_codec_trait: fn(module_id: ModuleID, module_ide
 }
 
 // Compiler-owned enum rows keep their bare canonical identity across modules.
-// Runtime enums (`Ordering`, `RemoveBy`, `TaskFailure`) and artifact-declared
+// Runtime enums (`Ordering`, `RemoveBy`, `TaskPauseMode`) and artifact-declared
 // reflection enums share this checked nominal path; runtime ownership is
 // decided independently by the emitter's native carrier registry.
 sema_registration_is_compiler_owned_enum: fn(nominal: SemaRegistrationNominal) -> Bool Never! {
     nominal.compiler_owned && nominal.generated_provenance == (Val(sema_registration_compiler_owned_enum_provenance()))
 }
 
-// Canonical unit menus come from the runtime or reflection sema oracle;
-// TaskFailure payloads come from the Core enum rows.
+// Canonical unit menus come from the runtime or reflection sema oracle.
 sema_registration_compiler_owned_enum_variants: fn(name: String) -> [Variant]? {
     span: Span{start: 0, end: 0}
-    names := sema_compiler_enum_variants(name) ?? sema_fact_enum_variants(name) ?? [String]{}
-    unit_menu: names.len() > 0
-    if !unit_menu {
-        if name != "TaskFailure" -> return None
-        names = core_enum_payload_variants(name) ?? return None
-    }
+    names: sema_compiler_enum_variants(name) ?? sema_fact_enum_variants(name) ?? return None
+    if names.len() == 0 -> return None
     variants := [Variant]{}
     loop variant_name in names {
-        payload := VariantPayload.Unit
-        if !unit_menu {
-            payload_types: core_enum_variant_payload(name, variant_name) ?? return None
-            if payload_types.len() > 1 -> return None
-            if payload_types.len() == 1 {
-                payload = VariantPayload.Single{ty: payload_types[0], span: span}
-            }
-        }
-        variants.push(Variant{name: variant_name, name_span: span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+        variants.push(Variant{name: variant_name, name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
     }
     Val(variants)
 }
@@ -5200,7 +5185,7 @@ sema_registration_inject_compiler_builtins: fn(graph: &SemaRegistrationGraph) {
     loop (row, nominal) in graph.modules[owner.module_index].nominals {
         graph.compiler_builtin_rows[nominal.symbol.name] = SemaRegistrationRowRef{module_index: owner.module_index, row: row}
     }
-    compiler_enums: [String]{"Ordering", "RemoveBy", "TaskFailure", "TaskPauseMode", "UnitScaleProvenanceKind"}
+    compiler_enums: [String]{"Ordering", "RemoveBy", "TaskPauseMode", "UnitScaleProvenanceKind"}
     loop name in compiler_enums {
         variants: sema_registration_compiler_owned_enum_variants(name) ?? panic("compiler-owned enum has no variant menu")
         module_index: sema_registration_compiler_builtin_module(graph, name) ?? next
@@ -5954,7 +5939,7 @@ sema_registration_parameter_default: fn(parameters: [SemaRegistrationParameter],
 }
 
 sema_registration_apply_graph_module: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    waiting := [SemaScopeProbeConstant]{}
+    waiting := [SemaComptimeWaitingConstant]{}
     sema_registration_apply_graph_module_rows(graph, module_identity, scopes, diagnostics, waiting)
 }
 
@@ -5964,7 +5949,7 @@ sema_registration_apply_graph_module: fn(graph: SemaRegistrationGraph, module_id
 // names (`namespace_bindings`) bind after its own declarations and the
 // imports before `namespace_import_split`, as Rust consults
 // `namespace_owner` after locals and imports.
-sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaScopeProbeConstant]) -> Bool {
+sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaComptimeWaitingConstant]) -> Bool {
     module_index: sema_registration_module_index(graph, module_identity) ?? return false
     module_row: graph.modules[module_index]
     complete := true
@@ -5981,7 +5966,7 @@ sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, modu
             diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, why, symbol.span), module_row.source_segments))
             complete = false
         } else if sema_comptime_symbol_waits(symbol) {
-            waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Symbol{position: position}})
+            waiting.push(SemaComptimeWaitingConstant{binding: scopes.bindings.len() - 1, source: SemaComptimeWaitingSource.Symbol{position: position}})
         }
     }
     namespace_from: if module_row.namespace_import_split < 0 -> module_row.imports.len() else -> module_row.namespace_import_split
@@ -5994,7 +5979,7 @@ sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, modu
                 diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(binding.local, "imported names share the module namespace", binding.symbol.span), module_row.source_segments))
                 complete = false
             } else if sema_comptime_symbol_waits(binding.symbol) {
-                waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Import{import_index: import_index, binding: binding_index}})
+                waiting.push(SemaComptimeWaitingConstant{binding: scopes.bindings.len() - 1, source: SemaComptimeWaitingSource.Import{import_index: import_index, binding: binding_index}})
             }
         }
     }
@@ -6006,7 +5991,7 @@ sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, modu
 
 // Binds the module's package names (`namespace_bindings`), each from its
 // declaring member's current symbol row.
-sema_registration_apply_namespace: fn(graph: SemaRegistrationGraph, module_index: Int, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaScopeProbeConstant]) -> Bool {
+sema_registration_apply_namespace: fn(graph: SemaRegistrationGraph, module_index: Int, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaComptimeWaitingConstant]) -> Bool {
     complete := true
     loop owner_index in 0..<graph.modules[module_index].namespace_bindings.len() {
         symbol: graph.modules[graph.modules[module_index].namespace_bindings[owner_index].module_index].symbols[graph.modules[module_index].namespace_bindings[owner_index].row]
@@ -6014,7 +5999,7 @@ sema_registration_apply_namespace: fn(graph: SemaRegistrationGraph, module_index
             diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, "imported names share the module namespace", symbol.span), graph.modules[module_index].source_segments))
             complete = false
         } else if sema_comptime_symbol_waits(symbol) {
-            waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Namespace{module_index: graph.modules[module_index].namespace_bindings[owner_index].module_index, position: graph.modules[module_index].namespace_bindings[owner_index].row}})
+            waiting.push(SemaComptimeWaitingConstant{binding: scopes.bindings.len() - 1, source: SemaComptimeWaitingSource.Namespace{module_index: graph.modules[module_index].namespace_bindings[owner_index].module_index, position: graph.modules[module_index].namespace_bindings[owner_index].row}})
         }
     }
     complete

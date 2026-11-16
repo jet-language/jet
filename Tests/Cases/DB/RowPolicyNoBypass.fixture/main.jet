@@ -228,8 +228,8 @@ run: fn() (NetError | HTTPError | TaskFailure)! {
     job: task { app.as_system(fn() { texts_now() }) }
     step("a job that runs as the system", job.join() ?? "the job failed")
 
-    // A request acts for no one, whoever serves it and whoever sends it,
-    // until sign-in names a caller.
+    // A request that carries no session acts for no one, whoever serves it
+    // and whoever sends it.
     served: web.app().mount("/api", Desk{secret: "only the desk knows"})
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()

@@ -23,12 +23,14 @@ use {
     core.net.ws.[WsConn]
     tasks: core.tasks
     core.tasks.[TaskID]
+    uuid: core.crypto.uuid
     time: core.time
     rt: jet.runtime.time
     rt_web: jet.runtime.web
     world_rt: jet.runtime.testing
     log_rt: jet.runtime.log
     push_wire: __core_app_push
+    url: core.net.url
 }
 
 SYNC_MAX_SESSION: 256
@@ -208,16 +210,20 @@ priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: S
 // the call is one transaction on each store it uses, as a served call is
 // (`transactions`), and the call's error type takes a `CallError`: a method
 // that fails with `E` needs `impl CallError -> E`, and one that can't fail
-// answers `R CallError!`.
+// answers `R CallError!`. A Remote made for a named client fails each call
+// `.Unreachable`, running nothing, while a test has that client cut off
+// (`disconnect`).
 Remote: struct<S> {
     priv service: S?
     priv address: String
+    priv client: String
 
     // A call of the endpoint method `method` of `S`, which can fail with
     // `E`. The compiler lowers each such call here: `direct` runs it on the
     // service the Remote holds; otherwise `args`, the encoded arguments, go to
     // the server, and `fail` gives a `CallError` as the method's own error.
     __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time.Wait]> R E! {
+        if links_cut(self.client) -> return fail(links_unreachable(self.client, method))
         if self.service == .Val(service) {
             loop _ in 0..<transactions.attempts() {
                 call: transactions.begin() ?? return direct(service)
@@ -241,6 +247,7 @@ Remote: struct<S> {
 
     // A call of the endpoint method `method` of `S`, which can't fail.
     __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time.Wait]> R CallError! {
+        if links_cut(self.client) -> return Err(links_unreachable(self.client, method))
         if self.service == .Val(service) {
             loop _ in 0..<transactions.attempts() {
                 call: transactions.begin() ?? return Ok(direct(service))
@@ -294,36 +301,183 @@ field_error: fn(at: String, reason: String) -> FieldError Never! {
     FieldError{path: at, reason: reason}
 }
 
+// A fresh UUIDv7, as lowercase text, made where it is called: the Unix
+// millisecond it was made, then 74 random bits. A client gives a row it
+// creates this ID, so a row made offline has its final ID at once, and IDs
+// made later sort after it. It stops the task when the system has no
+// random source.
+new_id: fn() -[Rand, Time]> String Never! {
+    clock := time.Clock.new(time.now_utc().to_unix_ms())
+    uuid.v7(clock) ?? panic("app.new_id: {err}")
+}
+
+#Test("a new ID is UUIDv7 text that names the millisecond it was made") {
+    before: time.now_utc().to_unix_ms()
+    first: new_id()
+    second: new_id()
+    after: time.now_utc().to_unix_ms()
+    assert(first != second)
+    assert_eq(first.len(), 36)
+    assert_eq(first.slice(14, 15), "7")
+    assert(first.slice(19, 20) == "8" || first.slice(19, 20) == "9" || first.slice(19, 20) == "a" || first.slice(19, 20) == "b")
+    assert_eq(uuid.parse(first) ?? panic("the ID parses"), first)
+    made := 0
+    loop b in "{first.slice(0, 8)}{first.slice(9, 13)}".bytes() {
+        digit: if b >= 97 -> Int{b} - 87 else -> Int{b} - 48
+        made = made * 16 + digit
+    }
+    assert(made >= before && made <= after)
+}
+
 // The largest reply a remote call reads.
 REMOTE_MAX_REPLY: 16777216
 
 // The Remote of a service the server holds: each call through it runs the
-// marked method on `service` directly.
-remote: fn<S>(service: &&S) -> Remote<S> Never! { Remote<S>{service: Val(service), address: ""} }
+// marked method on `service` directly. `client` names the client that holds
+// it, which a test can cut off (`disconnect`); "" names none.
+remote: fn<S>(service: &&S, client: String{""}) -> Remote<S> Never! {
+    Remote<S>{service: Val(service), address: "", client: client}
+}
 
 // The Remote of a service a server mounts at `address`, its mount prefix
 // (`http://127.0.0.1:8080/api`): each call posts its JSON arguments to
-// `{address}/{method}`.
-remote_at: fn<S>(address: String) -> Remote<S> Never! { Remote<S>{service: None, address: address} }
+// `{address}/{method}`. `client` is as for `remote`.
+remote_at: fn<S>(address: String, client: String{""}) -> Remote<S> Never! {
+    Remote<S>{service: None, address: address, client: client}
+}
+
+// The test host's link between each client and the servers. `disconnect`
+// cuts client `client` off: until `reconnect`, each call through a Remote made
+// for it (`remote(service, client: …)`, `remote_at`) fails `.Unreachable`,
+// naming the client and the method, and runs nothing on the server. Nothing
+// touches the network: the cut is one recorded fact, so an offline, catch-up
+// or replay case runs the same each time. The servers, and every other
+// client, go on; writes made on either side while cut off merge when the
+// client calls again (`sync`). Inside a deterministic world (`testing.world`)
+// the links are the World's own, so each world starts with every client
+// connected. A client name is not blank and has no control character.
+disconnect: fn(client: String) Never! { links_set(client, true) }
+
+// Restores the link `disconnect` cut: the client's next call reaches the
+// server again.
+reconnect: fn(client: String) Never! { links_set(client, false) }
+
+// The clients a test cut off, one name a line, sorted, in one process-wide
+// cell; inside a deterministic world, the World's own cell `app.links`.
+priv LINKS_CELL: Shared{LiveCell{bytes: [U8]{}}}
+
+priv links_load: fn() -> [U8] Never! {
+    if world_rt.world_store_load("app.links") == .Val(bytes) -> return bytes
+    LINKS_CELL.bytes
+}
+
+priv links_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
+    if world_rt.world_store_replace("app.links", expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    cell := LINKS_CELL.guard_edit()
+    if cell.value.bytes != expected -> return false
+    cell.value.bytes = replacement.move()
+    true
+}
+
+priv links_names: fn(raw: [U8]) -> [String] Never! {
+    text: String.from_bytes(raw) ?? return [String]{}
+    if text == "" -> return [String]{}
+    text.split("\n").to_list()
+}
+
+// Whether a test cut client `client` off; a Remote of no client never is.
+priv links_cut: fn(client: String) -> Bool Never! {
+    if client == "" -> return false
+    loop name in links_names(links_load()) {
+        if name == client -> return true
+    }
+    false
+}
+
+priv links_set: fn(client: String, cut: Bool) Never! {
+    if client.trim() == "" || unicode.has_control(client) {
+        panic("app.disconnect: `{client}` is no client name: a name is not blank and has no control character")
+    }
+    loop {
+        seen: links_load()
+        names := [String]{}
+        loop name in links_names(seen) {
+            if name != client -> names.push(name)
+        }
+        if cut -> names.push(client.copy())
+        names.sort()
+        if links_replace(seen, names.join("\n").bytes()) {
+            return
+        }
+    }
+}
+
+priv links_unreachable: fn(client: String, method: String) -> CallError Never! {
+    .Unreachable("client `{client}` is disconnected, so `{method}` did not reach the server")
+}
+
+#Test("the test host cuts one client off until it reconnects, and leaves every other client and the unnamed one connected") {
+    assert(!links_cut("phone"))
+    disconnect("phone")
+    disconnect("phone")
+    disconnect("tablet")
+    assert(links_cut("phone"))
+    assert(!links_cut("desk"))
+    assert(!links_cut(""))
+    assert_eq(links_names(links_load()).join(","), "phone,tablet")
+    assert_eq(links_unreachable("phone", "save"), CallError.Unreachable("client `phone` is disconnected, so `save` did not reach the server"))
+    reconnect("phone")
+    assert(!links_cut("phone"))
+    assert(links_cut("tablet"))
+    reconnect("phone")
+    reconnect("tablet")
+    assert_eq(links_names(links_load()).len(), 0)
+}
+
+// The times a remote call is sent, in all, while its reply is lost: each
+// send carries the call's one request key, so a server that ran the call
+// answers a repeat with the reply it kept, and the call runs once.
+priv REMOTE_SENDS: 3
+
+// The wait before a remote call is sent again, in milliseconds, times the
+// sends so far.
+priv REMOTE_RESEND_MS: 200
 
 // One remote call: POST the JSON array of `args` to `{address}/{method}`;
 // the reply's body on 200, else the failure its status names. The call
 // carries a W3C `traceparent` that starts its trace, and that trace's id as
-// its `x-request-id`, so the server's span of the call has both.
+// its `x-request-id`, so the server's span of the call has both. It also
+// carries a request key, its `idempotency-key`, and is sent again under the
+// same key when no reply comes, up to `REMOTE_SENDS` times.
 priv remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
     seed: "{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}"
     trace: make_trace_id("trace:{seed}", 16)
-    sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_body("[{args.join(",")}]")
-    response: sent.send() ?? return Err(.Unreachable("{address}/{method}: {err}"))
-    text: response.body.text(REMOTE_MAX_REPLY) ?? return Err(.Unreachable("{address}/{method}: {err}"))
-    if {
-        response.status == 200 -> Ok(text)
-        response.status == 401 -> Err(.SignedOut)
-        response.status == 422 -> Err(.Invalid(remote_invalid(text)))
-        response.status == 426 -> Err(.UpdateRequired)
-        response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
-        else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
+    key: make_trace_id("key:{seed}", 16)
+    body: "[{args.join(",")}]"
+    lost := ""
+    loop sends in 0..<REMOTE_SENDS {
+        if sends > 0 -> tasks.sleep(REMOTE_RESEND_MS * sends)
+        sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_header("idempotency-key", key).__with_body(body)
+        response: sent.send() ?? {
+            lost = "{err}"
+            next
+        }
+        text: response.body.text(REMOTE_MAX_REPLY) ?? {
+            lost = "{err}"
+            next
+        }
+        return if {
+            response.status == 200 -> Ok(text)
+            response.status == 401 -> Err(.SignedOut)
+            response.status == 422 -> Err(.Invalid(remote_invalid(text)))
+            response.status == 426 -> Err(.UpdateRequired)
+            response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
+            else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
+        }
     }
+    Err(.Unreachable("{address}/{method}: {lost}"))
 }
 
 // A W3C trace-context id of `n` bytes (16 for a trace, 8 for a span) as
@@ -438,7 +592,10 @@ LiveRegistry: struct {
 // binding's stored result is held until the next second (live_current). Writes
 // between two reads cost one re-run, however many there were. While the
 // source runs, the tables it reads join the binding's read set (`live_reads`).
+// While a server renders a page, the view's reads are noted for the page's
+// resume state (`resume`).
 state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
+    resume_note(binding.id)
     now: rt.clock_mono_ns()
     seen: live_current(binding.id, now)
     if seen.value == .Val(text) {
@@ -458,18 +615,19 @@ state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Load
 
 // Runs `binding`'s source as this task's running binding, so the reads it
 // makes join the binding's read set, and as the caller that made the
-// binding, whoever reads it now.
+// binding, whoever reads it now. The screen addresses the run asked
+// `presence` of become the ones its caller is present at (live_presence_settle).
 live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> T E! {
     me: tasks.current_task()
     live_run_begin(me, binding.id)
     acting_begin(me, binding.acting.copy())
     value: binding.run() ?? {
         acting_end(me)
-        live_run_end(me)
+        live_presence_settle(binding.id, binding.acting, live_run_end(me))
         return Err(err)
     }
     acting_end(me)
-    live_run_end(me)
+    live_presence_settle(binding.id, binding.acting, live_run_end(me))
     Ok(value)
 }
 
@@ -532,11 +690,11 @@ __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
 
 // `invalidate(source, args...)`: exactly that argument list re-runs.
 __live_invalidate: fn(source: String, args: [String]) Never! {
-    live_invalidate(source, Val(live_key(args)))
+    live_invalidate(source, Val(live_key(args)), None, 0)
 }
 
 // `invalidate(source)`: every binding of `source` re-runs.
-__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None) }
+__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None, None, 0) }
 
 // One argument's part of a binding's identity, and one argument of a queued
 // job's call: the argument encoded, or `_`, which no JSON reads, when it
@@ -545,7 +703,10 @@ __live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(va
 
 // A binding's read set, for core.db: while a task runs a binding's source,
 // each table it reads joins that binding's read set, so a write to the table
-// re-runs the binding as it re-runs the table's own bindings.
+// re-runs the binding as it re-runs the table's own bindings. A read the
+// compiler narrowed to the rows a SQL condition holds for joins it as the
+// table narrowed so, `<source>?<condition and values as a JSON list>`, and a
+// write re-runs it only when the condition holds for a row the write changed.
 priv(package) live_reads: module {
     // Whether this task is running a binding's source, so a database read
     // it makes belongs to that binding's read set.
@@ -554,28 +715,75 @@ priv(package) live_reads: module {
     // Adds `source` (a table's `core.db.live:<table>`) to the read set of
     // the binding this task runs. Recorded before the read runs, so a write
     // committed after the read always reaches the binding.
-    record: fn(source: String) Never! {
-        id: live_running(tasks.current_task()) ?? return
-        loop {
-            seen: live_cell_load()
-            registry := live_decode(seen) ?? return
-            index: live_index(registry, id) ?? return
-            if registry.records[index].source == source || registry.records[index].reads.contains(source) {
-                return
+    record: fn(source: String) Never! { live_read_record(source, source) }
+
+    // Adds `source` narrowed by the SQL `condition` over a stored row, with
+    // `values` bound to its `?`s in order, to the read set of the binding
+    // this task runs, unless it read all of `source` already.
+    record_where: fn(source: String, condition: String, values: [String]) Never! {
+        fields := [String]{condition.copy()}
+        fields.extend(values.copy())
+        encoded: live_json.to_string<[String]>(fields) ?? return live_read_record(source, source)
+        live_read_record(source, "{source}?{encoded}")
+    }
+
+    // The narrowed reads of `source` in the bindings' read sets, each once:
+    // its read-set entry, its condition and the values it binds.
+    narrowed: fn(source: String) -> [(entry: String, condition: String, values: [String])] Never! {
+        out := [(entry: String, condition: String, values: [String])]{}
+        registry: live_decode(live_cell_load()) ?? return out
+        prefix: "{source}?"
+        seen := [String]{}
+        loop record in registry.records {
+            loop read in record.reads {
+                if !read.starts_with(prefix) || seen.contains(read) -> next
+                seen.push(read.copy())
+                tree: live_json.parse(read.slice(prefix.len(), read.len())) ?? next
+                fields: tree.decode<[String]>() ?? next
+                if fields.len() == 0 -> next
+                values := [String]{}
+                loop at in 1..<fields.len() -> values.push(fields[at].copy())
+                out.push((entry: read.copy(), condition: fields[0].copy(), values: values))
             }
-            registry.records[index].reads.push(source.copy())  // copy: a lost race retries with the same source
-            if live_cell_replace(seen, live_encode(registry)) {
-                return
-            }
+        }
+        out
+    }
+
+    // Marks for a re-run every binding of `source`, every binding that read
+    // all of it, and every one whose read set holds one of the narrowed reads
+    // `held` (`narrowed`): those whose condition holds for a changed row.
+    invalidate: fn(source: String, held: [String]) Never! {
+        live_invalidate(source, None, Val(held), 0)
+    }
+}
+
+// Adds `entry`, a read of `source`, to the read set of the binding this task
+// runs (`live_reads`), unless that binding is `source`'s own or read all of
+// `source` already.
+live_read_record: fn(source: String, entry: String) {
+    id: live_running(tasks.current_task()) ?? return
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return
+        index: live_index(registry, id) ?? return
+        reads: registry.records[index].reads
+        if registry.records[index].source == source || reads.contains(source) || reads.contains(entry) {
+            return
+        }
+        registry.records[index].reads.push(entry.copy())  // copy: a lost race retries with the same entry
+        if live_cell_replace(seen, live_encode(registry)) {
+            return
         }
     }
 }
 
-// The bindings whose sources are running now, each with its task; a source
-// that reads another binding stacks that binding on its own.
+// The bindings whose sources are running now, each with its task and the
+// screen addresses its run asked `presence` of so far; a source that reads
+// another binding stacks that binding on its own.
 LiveRun: struct {
     task: TaskID
     id: Int
+    asked: [String]
 }
 
 LiveRunning: struct {
@@ -586,19 +794,110 @@ LIVE_RUNNING: Shared{LiveRunning{runs: [LiveRun]{}}}
 
 live_run_begin: fn(task: TaskID, id: Int) {
     running := LIVE_RUNNING.guard_edit()
-    running.value.runs.push(LiveRun{task: task, id: id})
+    running.value.runs.push(LiveRun{task: task, id: id, asked: [String]{}})
 }
 
-live_run_end: fn(task: TaskID) {
+// Ends `task`'s innermost run and gives the addresses it asked `presence` of.
+live_run_end: fn(task: TaskID) -> [String] {
     running := LIVE_RUNNING.guard_edit()
     at := running.value.runs.len()
     loop at > 0 {
         at -= 1
         if task == running.value.runs[at].task {
+            asked: running.value.runs[at].asked.copy()
             _: running.value.runs.remove(at, .Slot)
-            return
+            return asked
         }
     }
+    [String]{}
+}
+
+// Adds `address` to what the run of `task`'s innermost binding asked
+// `presence` of; false when `task` runs no binding.
+live_presence_ask: fn(task: TaskID, address: String) -> Bool {
+    running := LIVE_RUNNING.guard_edit()
+    at := running.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if task == running.value.runs[at].task {
+            if !running.value.runs[at].asked.contains(address) {
+                running.value.runs[at].asked.push(address.copy())
+            }
+            return true
+        }
+    }
+    false
+}
+
+// One account present at a screen address: the latest run of the live
+// binding `binding`, acting for `account`, asked `presence` of `address`.
+AppPresent: struct {
+    binding: Int
+    account: String
+    address: String
+}
+
+APP_PRESENT: Shared{[AppPresent]{}}
+
+// The read-set source of who is present at a screen address: a binding
+// that asked `presence` of the address reads it, so a change of who is
+// present there re-runs the binding.
+LIVE_PRESENCE_SOURCE: "app.presence:"
+
+// Makes `asked`, the addresses the run of binding `id` that just ended asked
+// `presence` of, the ones its account (`acting`) is present at, and re-runs
+// every other binding that reads one whose accounts changed. A run that
+// asked none, such as one a row policy refused before it asked, leaves its
+// account present nowhere through this binding.
+live_presence_settle: fn(id: Int, acting: Acting?, asked: [String]) {
+    account: if acting == .Val(.Account(who)) -> who.raw() else -> ""
+    changed: live_presence_keep(id, account, asked)
+    loop address in changed -> live_invalidate("{LIVE_PRESENCE_SOURCE}{address}", None, None, id)
+}
+
+// Makes `asked` the addresses `account` is present at through binding `id`
+// (none when `account` is ""), and gives each address whose accounts that
+// changes.
+live_presence_keep: fn(id: Int, account: String, asked: [String]) -> [String] {
+    changed := [String]{}
+    had := [String]{}
+    held := APP_PRESENT.guard_edit()
+    kept := [AppPresent]{}
+    loop entry in held.value {
+        mine: entry.binding == id
+        if mine && (account == "" || entry.account != account || !asked.contains(entry.address)) {
+            changed.push(entry.address.copy())
+            next
+        }
+        if mine -> had.push(entry.address.copy())
+        kept.push(entry.copy())
+    }
+    loop address in asked {
+        if account == "" || had.contains(address) -> next
+        kept.push(AppPresent{binding: id, account: account.copy(), address: address.copy()})
+        changed.push(address.copy())
+    }
+    held.value = kept
+    changed
+}
+
+// The accounts present at `address`, sorted, each once: those of the
+// registered bindings whose latest run asked `presence` of it, and
+// `asking`, the account of the run asking now (none when "").
+live_present: fn(address: String, asking: String) -> [auth.AccountID] {
+    names := [String]{}
+    if asking != "" -> names.push(asking.copy())
+    registry: live_decode(live_cell_load())
+    held: APP_PRESENT.guard_read()
+    loop entry in held.value {
+        if entry.address != address || names.contains(entry.account) -> next
+        if registry == .Val(bindings) && live_index(bindings, entry.binding) == None -> next
+        names.push(entry.account.copy())
+    }
+    names.sort()
+    out := [auth.AccountID]{}
+    loop name in names -> out.push(auth.AccountID.from_string(name))
+    out
 }
 
 // The binding `task` is running now, the innermost when it runs several.
@@ -610,6 +909,128 @@ live_running: fn(task: TaskID) -> Int? {
         if running.value.runs[at].task == task -> return Val(running.value.runs[at].id)
     }
     None
+}
+
+// A page's resume state. While a task renders a page (`resume.render`),
+// each binding its view reads (`state`) is noted, but not one a source
+// reads while it runs. The page then carries each noted binding's source
+// wire name, encoded arguments and stored result. A client that resumes the
+// page (`resume.seed`) stores those results as its own bindings' results,
+// so its first `state` of each gives the server's result and runs no source:
+// the client does not run the view's reads again to rebuild the page.
+priv(package) resume: module {
+    // The HTML `view` gives, rendered as this task's page, then the resume
+    // script of the reads it made: `<script type="application/json"
+    // id="jet-resume">` holding a JSON list of `{source, key, value}`, each
+    // `<` written `\u003c`. A read with no stored result, or one a write made
+    // stale since, is left out, so the client runs that one itself.
+    render: fn(view: fn() -> String Never!) -> String Never! {
+        me: tasks.current_task()
+        resume_begin(me)
+        body: view()
+        "{body}{resume_script(resume_end(me))}"
+    }
+
+    // Stores the results the resume script of the served page `page`
+    // carries as the bindings of this task's caller, and gives how many it
+    // stored.
+    seed: fn(page: String) -> Int Never! {
+        start: page.find(RESUME_OPEN)
+        if start < 0 -> return 0
+        rest: page.slice(start + RESUME_OPEN.len(), page.len())
+        end: rest.find("</script>")
+        if end < 0 -> return 0
+        reads: live_json.decode<[AppResumed]>(rest.slice(0, end)) ?? return 0
+        caller: acting_tag(acting_now(tasks.current_task()))
+        stored := 0
+        loop read in reads {
+            id: live_register(read.source, read.key, caller, 0)
+            if id == 0 -> next
+            live_store(id, read.value, -1, None)
+            stored += 1
+        }
+        stored
+    }
+}
+
+priv RESUME_OPEN: "<script type=\"application/json\" id=\"jet-resume\">"
+
+// One read a page carries: its binding's source wire name, encoded
+// argument list and stored result (`ok:` or `err:`, then its JSON).
+priv AppResumed: struct {
+    source: String
+    key: String
+    value: String
+}
+
+// The bindings a task rendering a page read, in first-read order.
+priv AppResumeReads: struct {
+    task: TaskID
+    ids: [Int]
+}
+
+priv APP_RESUME_READS: Shared{[AppResumeReads]{}}
+
+priv resume_begin: fn(task: TaskID) Never! {
+    held := APP_RESUME_READS.guard_edit()
+    held.value.push(AppResumeReads{task: task, ids: [Int]{}})
+}
+
+// Ends `task`'s innermost page and gives the bindings its view read.
+priv resume_end: fn(task: TaskID) -> [Int] Never! {
+    held := APP_RESUME_READS.guard_edit()
+    at := held.value.len()
+    loop at > 0 {
+        at -= 1
+        if task == held.value[at].task {
+            ids: held.value[at].ids.copy()
+            _: held.value.remove(at, .Slot)
+            return ids
+        }
+    }
+    [Int]{}
+}
+
+// Notes that this task's page read binding `id`, when this task renders a
+// page and runs no binding's source.
+priv resume_note: fn(id: Int) Never! {
+    if !resume_rendering() {
+        return
+    }
+    me: tasks.current_task()
+    if live_running(me) != None {
+        return
+    }
+    held := APP_RESUME_READS.guard_edit()
+    at := held.value.len()
+    loop at > 0 {
+        at -= 1
+        if held.value[at].task != me -> next
+        if !held.value[at].ids.contains(id) -> held.value[at].ids.push(id)
+        return
+    }
+}
+
+// Whether any task renders a page now, so a read outside one costs one
+// look at an empty list.
+priv resume_rendering: fn() -> Bool Never! {
+    held: APP_RESUME_READS.guard_read()
+    held.value.len() != 0
+}
+
+// The resume script of the bindings `ids`: each one's stored result, when
+// it has one and no write made it stale.
+priv resume_script: fn(ids: [Int]) -> String Never! {
+    reads := [AppResumed]{}
+    registry: live_decode(live_cell_load()) ?? return "{RESUME_OPEN}[]</script>"
+    loop id in ids {
+        index: live_index(registry, id) ?? next
+        record: registry.records[index]
+        if record.value == "" || record.dirty -> next
+        reads.push(AppResumed{source: record.source.copy(), key: record.key.copy(), value: record.value.copy()})
+    }
+    text: live_json.to_string<[AppResumed]>(reads) ?? "[]"
+    "{RESUME_OPEN}{text.replace("<", "\\u003c")}</script>"
 }
 
 // Whom a task acts for. `as_caller` runs a function for an account and
@@ -723,7 +1144,12 @@ priv(package) callers: module {
     // reads do.
     begin_system: fn() Never! { acting_begin(tasks.current_task(), Val(Acting.System)) }
 
-    // Ends this task's innermost `begin_system`.
+    // This task acts for `account` until `end`, as a signed-in call does.
+    begin_account: fn(account: auth.AccountID) Never! {
+        acting_begin(tasks.current_task(), Val(Acting.Account(account)))
+    }
+
+    // Ends this task's innermost `begin_system` or `begin_account`.
     end: fn() Never! { acting_end(tasks.current_task()) }
 }
 
@@ -766,7 +1192,13 @@ priv(package) callers: module {
 // it; a store that has run the delivery already marks the call repeated, and
 // the framework rolls it back and drops the delivery. A schedule's call
 // carries its due run (`schedule`), which core.db records the same way, so
-// a run another server has done is dropped as well. A job the call queues
+// a run another server has done is dropped as well. A remote call that
+// carries a request key (`ask`) gives its reply (`answer`), which `end`
+// keeps under the key in the first store the call joined: in that store's
+// transaction when the call commits, and on its own after the call rolls
+// back. A store that keeps a reply under the key of a call that joins it
+// gives the call that reply and marks it repeated, so the framework rolls
+// the call back and answers with the kept reply. A job the call queues
 // (`enqueue`) waits for it: `end` keeps the job in the outbox of the first
 // store the call joined, in that store's transaction, under a key of its
 // own, and once the call commits, runs it on a task of its own (`job_run`);
@@ -785,7 +1217,8 @@ CallJoin: struct {
 // time (Unix milliseconds): the server that runs its job takes it again
 // each tick while the job runs (`hold`), and once that time has passed, a
 // serving server takes the row (`take`) and runs the job again, as when the
-// server that ran it stopped.
+// server that ran it stopped. It also keeps the replies of calls that
+// carried a request key (`answered`).
 CallOutbox: struct {
     // Names the store among the open ones: the database file's path, or
     // one of its own for an in-memory database.
@@ -811,6 +1244,10 @@ CallOutbox: struct {
     // Takes the rows of keys `keys` until `until`; false when the store
     // couldn't.
     hold: fn([String], Int) -[]> Bool Never!
+    // Keeps the reply of request `request`, in the transaction of call
+    // `call`, or on its own for call 0 (after the call rolled back); false
+    // when the store couldn't.
+    answered: fn(Int, CallRequest, String) -[]> Bool Never!
 }
 
 // A row a server took from a store's outbox: its job's key, name and
@@ -856,6 +1293,17 @@ CallTick: struct {
     due: Int
 }
 
+// The request key of a remote call: the account the call acts for ("" for
+// none), the key the client gave the call, the same each time it sends the
+// call again, and the second (since the Unix epoch) the server received it.
+// The account scopes the key, so one account's key never answers another's.
+#Equatable
+CallRequest: struct {
+    account: String
+    key: String
+    at: Int
+}
+
 CallRun: struct {
     task: TaskID
     id: Int
@@ -863,6 +1311,8 @@ CallRun: struct {
     refused: Bool
     delivery: CallDelivery?
     tick: CallTick?
+    request: CallRequest?
+    reply: String?
     repeated: Bool
     jobs: [CallJob]
 }
@@ -889,7 +1339,7 @@ priv(package) transactions: module {
             if run.task == me -> return None
         }
         runs.value.made += 1
-        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, tick: None, repeated: false, jobs: [CallJob]{}})
+        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, tick: None, request: None, reply: None, repeated: false, jobs: [CallJob]{}})
         Val(runs.value.made)
     }
 
@@ -979,8 +1429,49 @@ priv(package) transactions: module {
         None
     }
 
+    // Gives call `call` the request key it carries.
+    ask: fn(call: Int, request: CallRequest) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call {
+                runs.value.runs[index].request = Val(request.copy())
+            }
+        }
+    }
+
+    // The request key call `call` carries; None for a call that carries none.
+    request: fn(call: Int) -> CallRequest? Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.request.copy()
+        }
+        None
+    }
+
+    // Gives call `call` its reply: the one a store kept under its request
+    // key already, which a store gives as the call joins it, or else the one
+    // its run gave, which `end` keeps under that key. The first reply the
+    // call is given stands.
+    answer: fn(call: Int, reply: String) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call && runs.value.runs[index].reply == None {
+                runs.value.runs[index].reply = Val(reply.copy())
+            }
+        }
+    }
+
+    // Call `call`'s reply (`answer`); None before it has one.
+    reply: fn(call: Int) -> String? Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.reply.copy()
+        }
+        None
+    }
+
     // Marks call `call` repeated: a store it uses has run its delivery or
-    // its schedule's run.
+    // its schedule's run, or keeps a reply under its request key.
     repeat: fn(call: Int) Never! {
         runs := CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
@@ -989,7 +1480,7 @@ priv(package) transactions: module {
     }
 
     // Whether a store has run call `call`'s delivery or schedule's run
-    // already.
+    // already, or keeps a reply under its request key.
     repeated: fn(call: Int) -> Bool Never! {
         runs: CALLS.guard_read()
         loop run in runs.value.runs {
@@ -1000,16 +1491,20 @@ priv(package) transactions: module {
 
     // Ends call `call`: commits each joined transaction, in the order the
     // call joined them, when `commit` holds and no store refused the call or
-    // had run its delivery, and otherwise rolls each back. False when the
-    // call has to run again: a store refused it, the first store couldn't
-    // keep its jobs, or the first commit failed (and was rolled back). A
-    // call that writes two stores commits each on its own; once one has
-    // committed, a later failed commit can't undo it, so the call stands, and
-    // its jobs run. A call that joined no store runs its jobs as it ends.
+    // had run its delivery, and otherwise rolls each back. A call that
+    // carries a request key keeps its reply (`calls_answered`) in the first
+    // store's transaction before the commits, or on its own once a run that
+    // failed has rolled back. False when the call has to run again: a store
+    // refused it, the first store couldn't keep its jobs or its reply, or the
+    // first commit failed (and was rolled back). A call that writes two
+    // stores commits each on its own; once one has committed, a later failed
+    // commit can't undo it, so the call stands, and its jobs run. A call
+    // that joined no store runs its jobs as it ends, and keeps no reply.
     end: fn(call: Int, commit: Bool) -> Bool Never! {
         ended := calls_take(call) ?? return true
         if ended.refused || ended.repeated || !commit {
             loop joined in ended.joins -> _: joined.end(false)
+            if !ended.refused && !ended.repeated -> _: calls_answered(ended, 0)
             return !ended.refused
         }
         keys := [String]{}
@@ -1022,6 +1517,10 @@ priv(package) transactions: module {
                 }
                 keys.push(key)
             }
+        }
+        if !calls_answered(ended, call) {
+            loop joined in ended.joins -> _: joined.end(false)
+            return false
         }
         loop (index, joined) in ended.joins {
             if joined.end(true) || index > 0 -> next
@@ -1051,6 +1550,17 @@ priv calls_take: fn(call: Int) -> CallRun? Never! {
         if runs.value.runs[index].id == call -> return runs.value.runs.remove(index, .Slot)
     }
     None
+}
+
+// Keeps `run`'s reply under its request key in the first store it joined,
+// in call `call`'s transaction there, or on its own for call 0; true when
+// the run carries no key, has no reply or joined no store.
+priv calls_answered: fn(run: &CallRun, call: Int) -> Bool Never! {
+    if run.joins.len() == 0 -> return true
+    if run.request == .Val(request) {
+        if run.reply == .Val(reply) -> return run.joins[0].outbox.answered(call, request, reply)
+    }
+    true
 }
 
 // A device an account registered for pushes: its push service (`apns`,
@@ -1163,43 +1673,555 @@ priv PUSH_NOTES: Shared{PushNotes{skipped: 0, failed: 0, last: [String]{}}}
 
 priv C_PUSH_NOTES_KEPT: 32
 
-// A push to each device the account `to` registered, as the compiler lowers
-// `app.notify(to:, title:, body:, open:)`: `open` is the wire form of the
-// state a tap opens. Inside a job, a webhook's call or a scheduled run, each
-// push's key is made from the run's key, `to` and `open`, so a run that
-// runs again replaces the pushes it sent; outside one, each push has a
-// fresh key. A device whose push service is not set up is skipped. A push
-// its service refuses is dropped, and when the service says the device is
-// gone, the device is forgotten. Each skip and failure is counted
-// (`jet.push.skipped`, `jet.push.failed`) and kept with its service,
-// account and reason (`push.outcomes`): the published signature declares
-// only Net, so no log record can carry them.
-__notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) Never! -[Net]> {
-    account: to.raw()
-    devices: push.devices(account)
-    if devices.len() == 0 {
-        return
+// The app graph: the screens every target shows, each at the address of the
+// state it opens. `new` starts it, and the `.screen` calls of the one package
+// that builds it add the screens. Every target runs this one graph, so its
+// screens are every target's route set. The compiler lowers `.screen`,
+// `.cache`, `.sitemap`, `app.url_of`, `app.presence` and `app.notify` to the
+// graph's `__` members below.
+App: struct {
+    title: String
+
+    // `.screen(path, view, signed_in:)` as the compiler lowers it, once it
+    // has checked `view`'s state `V` against `path`: `state` names `V`, and
+    // `query` lists its `#App.Query` fields. The screen joins the process's
+    // route set, where `__url_of` finds its address.
+    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool) -> App Never! {
+        held := APP_ROUTES.guard_edit()
+        held.value[state.copy()] = AppScreen{path: path, state: state, query: query, signed_in: signed_in}
+        self.copy()
     }
-    run: push_run_key()
-    key: if run != "" -> push_wire.push_collapse_key(run, account, open_route) else -> {
-        push_wire.push_fresh_key() ?? {
-            loop device in devices -> push_note(false, device.service, account, err.reason)
+
+    // `.cache<V>(policy)` as the compiler lowers it: `reply` names `V` as
+    // an endpoint's reply type is named where it mounts, so each endpoint
+    // method that replies a `V` is answered under `policy`
+    // (`reply_cache.policy`). The last policy set for `V` holds.
+    __cache: fn<V>(self, reply: String, policy: CachePolicy) -> App Never! {
+        held := APP_CACHE.guard_edit()
+        held.value[reply.copy()] = policy
+        self.copy()
+    }
+
+    // `.sitemap(list)` as the compiler lowers it: `list` gives the states
+    // `V` of the pages the sitemap lists, `state` names `V` as `__screen`'s
+    // does, and `address` gives a state's fields' address text in the order
+    // of `names` (`__address_arg`). The sitemap asks `list` each time it is
+    // read (`sitemap.addresses`).
+    __sitemap: fn<V>(self, state: String, names: [String], list: &&fn() -> [V] Never!, address: &&fn(App, V) -> [String] Never!) -> App Never! {
+        graph: self.copy()
+        opens: state.copy()
+        fields: names.copy()
+        listed := APP_SITEMAPS.guard_edit()
+        listed.value.push(
+            Shared{AppSitemap{
+                state: state.copy(),
+                addresses: fn() {
+                    found := [String]{}
+                    loop view in list() {
+                        found.push(App.__url_of<V>(opens, fields, address(graph, view)))
+                    }
+                    found
+                },
+            }},
+        )
+        self.copy()
+    }
+
+    // The address of the screen whose state is `V`, as the compiler lowers
+    // `url_of(view)` and a push's `open:`. `names` are `V`'s fields, in
+    // order, and `values` their address text (`__address_arg`). Each `:name`
+    // segment of the screen's path is its field's value, and each query
+    // field with a value joins the query, in field order; both are
+    // percent-encoded. The compiler refuses a state that no screen of the
+    // program's graph opens, so a state with no screen here is one whose
+    // graph this process has not built.
+    __url_of: fn<V>(state: String, names: [String], values: [String]) -> String Never! {
+        held: APP_ROUTES.guard_read()
+        screen: held.value.get(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before taking an address")
+        parts := [String]{}
+        loop segment in screen.path.split("/") {
+            if !segment.starts_with(":") {
+                parts.push(segment)
+                next
+            }
+            name: segment.removeprefix(":")
+            index: names.index_of(name) ?? panic("`{state}` has no field `{name}` for the path `{screen.path}`")
+            parts.push(url.percent_encode(values[index]))
+        }
+        address := parts.join("/")
+        separator := "?"
+        loop field in screen.query {
+            index: names.index_of(field) ?? next
+            if values[index] == "" -> next
+            address = "{address}{separator}{url.percent_encode(field)}={url.percent_encode(values[index])}"
+            separator = "&"
+        }
+        address
+    }
+
+    // A state field's text in an address: a string's own text, and any
+    // other value's JSON.
+    __address_arg: fn<A: Encode>(value: A) -> String Never! {
+        text: live_json.to_string<A>(value) ?? return ""
+        tree: live_json.parse(text) ?? return text
+        live_json.at<String>(tree, "") ?? text
+    }
+
+    // `__address_arg` through a graph, as a lowered `.sitemap` reads each
+    // state's fields (`__sitemap`).
+    __address_text: fn<A: Encode>(self, value: A) -> String Never! { App.__address_arg<A>(value) }
+
+    // Who has the screen state at `address` open, as the compiler lowers
+    // `presence(view)` (`address` is `__url_of`'s): each account whose live
+    // binding's latest run asked this, sorted. A run that a row policy
+    // refuses before it asks, as a method that reads the state's row first
+    // is refused, leaves its account out, so only accounts whose last read
+    // of the screen's data passed are counted. Asked in a binding's run, the
+    // run's own account is present, and the binding re-runs when the
+    // accounts present change, as a live query does; asked elsewhere, it only
+    // reads them.
+    __presence: fn(address: String) -> [auth.AccountID] Never! {
+        asking := ""
+        if maybe_caller() == .Val(account) && live_presence_ask(tasks.current_task(), address) {
+            asking = account.raw()
+            source: "{LIVE_PRESENCE_SOURCE}{address}"
+            live_read_record(source, source)
+        }
+        live_present(address, asking)
+    }
+
+    // A push to each device the account `to` registered, as the compiler
+    // lowers `app.notify(to:, title:, body:, open:)`: `open_route` is the
+    // address of the state a tap opens (`__url_of`). Inside a job, a
+    // webhook's call or a scheduled run, each push's key is made from the
+    // run's key, `to` and `open_route`, so a run that runs again replaces the
+    // pushes it sent; outside one, each push has a fresh key. A device whose
+    // push service is not set up is skipped. A push its service refuses is
+    // dropped, and when the service says the device is gone, the device is
+    // forgotten. Each skip and failure is counted (`jet.push.skipped`,
+    // `jet.push.failed`) and kept with its service, account and reason
+    // (`push.outcomes`): the published signature declares only Net, so no
+    // log record can carry them.
+    __notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) Never! -[Net]> {
+        account: to.raw()
+        devices: push.devices(account)
+        if devices.len() == 0 {
             return
         }
-    }
-    now: push_wire.push_now()
-    loop device in devices {
-        if !push_wire.push_configured(device.service) {
-            push_note(true, device.service, account, "no {push_wire.push_service_label(device.service)} settings")
-            next
+        run: push_run_key()
+        key: if run != "" -> push_wire.push_collapse_key(run, account, open_route) else -> {
+            push_wire.push_fresh_key() ?? {
+                loop device in devices -> push_note(false, device.service, account, err.reason)
+                return
+            }
         }
-        outcome: push_wire.push_deliver(device.service, device.token, device.key, device.auth, key, title, body, open_route, now)
-        if outcome.reason == "" -> next
-        if outcome.gone {
-            push.forget(device.service, device.token)
-            push_note(false, device.service, account, "{outcome.reason}; the device is forgotten")
-        } else { push_note(false, device.service, account, outcome.reason) }
+        now: push_wire.push_now()
+        loop device in devices {
+            if !push_wire.push_configured(device.service) {
+                push_note(true, device.service, account, "no {push_wire.push_service_label(device.service)} settings")
+                next
+            }
+            outcome: push_wire.push_deliver(device.service, device.token, device.key, device.auth, key, title, body, open_route, now)
+            if outcome.reason == "" -> next
+            if outcome.gone {
+                push.forget(device.service, device.token)
+                push_note(false, device.service, account, "{outcome.reason}; the device is forgotten")
+            } else { push_note(false, device.service, account, outcome.reason) }
+        }
     }
+}
+
+// A field of a screen's state that the address carries after `?`:
+// `#App.Query q: String{""}` is `?q=…`. Every other field of the state is
+// the `:name` segment of its screen's path that has its name.
+Query: struct {
+    impl Marker {
+        sites: [.Field]
+    }
+}
+
+// Starts the app graph, titled `title`.
+new: fn(title: String) -> App Never! { App{title: title} }
+
+// One screen of the route set: the path its state's fields fill, the state's
+// name, its `#App.Query` fields, and whether only a signed-in caller opens it.
+priv AppScreen: struct {
+    path: String
+    state: String
+    query: [String]
+    signed_in: Bool
+}
+
+// The route set: the screen of each state, by the state's name.
+priv APP_ROUTES: Shared{[String:AppScreen]{}}
+
+// How the replies of one type may be kept, as `.cache<V>(policy)` sets it.
+// `.Private` is kept by no one: `Cache-Control: private, no-store`, as
+// every `#App.SignedIn` reply is answered, whatever its type's policy.
+// `.Public(max_age)` lets any cache keep an `#App.Public` reply for
+// `max_age` (`Cache-Control: public, max-age=<seconds>`) and then
+// revalidate it with its `ETag`: a GET whose `If-None-Match` names the
+// reply's ETag is answered 304 with no body.
+CachePolicy: enum {
+    Private
+    Public(max_age: Duration)
+}
+
+// The cache policy of each reply type, by the name `__cache` was given.
+priv APP_CACHE: Shared{[String:CachePolicy]{}}
+
+// A reply a store keeps for a `.Public` policy, as it finds it: the encoded
+// reply and the milliseconds since it was kept, by the store's clock.
+priv KeptReply: struct {
+    reply: String
+    age_ms: Int
+}
+
+// One store's kept replies, which core.db keeps in the table
+// `__jet_kept_replies` of each database file and names as the file opens
+// (`reply_cache.store`), so the servers of an App that share the file
+// share them.
+priv KeptReplies: struct {
+    // Names the store among the open ones, as CallOutbox.store does.
+    store: String
+    // The reply kept under a key while it is fresh by the store's clock:
+    // through the instant its max_age ends, and not after it; None when
+    // there is none, or the store couldn't read it.
+    find: fn(String) -[]> KeptReply? Never!
+    // Keeps a reply under a key for a max_age in milliseconds, in place of
+    // the one kept under it, and drops the stale ones; false when the store
+    // couldn't.
+    keep: fn(String, String, Int) -[]> Bool Never!
+}
+
+// The stores named for kept replies, in the order they opened.
+priv KEPT_REGISTRY: Shared{[Shared<KeptReplies>]{}}
+
+// The cache policies core.web answers endpoint replies under, and the
+// replies the servers that share the App's database files keep under them.
+// core.db names each database file as it opens (`store`). A reply is kept
+// in the first named store that takes it, the App's first store still
+// open, and found in any named store.
+priv(package) reply_cache: module {
+    // The policy `.cache<V>` set for the reply type named `reply`; None when
+    // none was set.
+    policy: fn(reply: String) -> CachePolicy? Never! {
+        held: APP_CACHE.guard_read()
+        found: held.value.get(reply) ?? return None
+        Val(found.copy())
+    }
+
+    // Names a store; a store named again replaces the one of its name.
+    store: fn(replies: &&KeptReplies) Never! {
+        registry := KEPT_REGISTRY.guard_edit()
+        loop index in 0..<registry.value.len() {
+            if kept_store_name(registry.value[index]) == replies.store {
+                registry.value[index] = Shared{replies.move()}
+                return
+            }
+        }
+        registry.value.push(Shared{replies.move()})
+    }
+
+    // The fresh reply a named store keeps under `key`; None when none does.
+    find: fn(key: String) -> KeptReply? Never! {
+        loop replies in kept_stores() {
+            held: replies.guard_read()
+            if held.value.find(key.copy()) == .Val(found) -> return Val(found)
+        }
+        None
+    }
+
+    // Keeps `reply` under `key` for `max_age_ms` in the first named store
+    // that takes it; false when none does.
+    keep: fn(key: String, reply: String, max_age_ms: Int) -> Bool Never! {
+        loop replies in kept_stores() {
+            held: replies.guard_read()
+            if held.value.keep(key.copy(), reply.copy(), max_age_ms) -> return true
+        }
+        false
+    }
+}
+
+// The named stores, copied out so no store runs under the registry's lock.
+priv kept_stores: fn() -> [Shared<KeptReplies>] Never! {
+    registry: KEPT_REGISTRY.guard_read()
+    registry.value.copy()
+}
+
+priv kept_store_name: fn(replies: Shared<KeptReplies>) -> String Never! {
+    held: replies.guard_read()
+    held.value.store.copy()
+}
+
+// A sitemap `.sitemap(list)` gave: the name of the state its list gives,
+// and the address of each state the list gives when asked.
+priv AppSitemap: struct {
+    state: String
+    addresses: fn() -[]> [String] Never!
+}
+
+// The sitemaps the graph gave, in the order it gave them.
+priv APP_SITEMAPS: Shared{[Shared<AppSitemap>]{}}
+
+// What core.web's `/sitemap.xml` and `/robots.txt` answer: the pages the
+// sitemap lists, which are only ever pages a caller who is not signed in
+// opens, and the screens a crawler is asked to leave, which are those only
+// a signed-in caller opens.
+priv(package) sitemap: module {
+    // Whether the graph gave a sitemap.
+    given: fn() -> Bool Never! {
+        listed: APP_SITEMAPS.guard_read()
+        listed.value.len() > 0
+    }
+
+    // The address of each state the sitemaps' lists give now, once each,
+    // in the order given. A list whose state no screen opens, or whose
+    // screen only a signed-in caller opens, gives none.
+    addresses: fn() -> [String] Never! {
+        found := [String]{}
+        loop listed in app_sitemaps() {
+            held: listed.guard_read()
+            if !app_screen_public(held.value.state) -> next
+            loop address in held.value.addresses() {
+                if !found.contains(address) -> found.push(address)
+            }
+        }
+        found
+    }
+
+    // The path of each screen only a signed-in caller opens, sorted, as a
+    // robots.txt rule matches it: each `:name` segment is `*`, and `$` ends
+    // the path, so a public page under it stays open to crawlers.
+    signed_in_paths: fn() -> [String] Never! {
+        held: APP_ROUTES.guard_read()
+        paths := [String]{}
+        loop state in held.value.keys() {
+            screen: held.value.get(state) ?? next
+            if !screen.signed_in -> next
+            segments := [String]{}
+            loop segment in screen.path.split("/") {
+                segments.push(if segment.starts_with(":") -> "*" else -> segment)
+            }
+            rule: "{segments.join("/")}$"
+            if !paths.contains(rule) -> paths.push(rule)
+        }
+        paths.sort()
+        paths
+    }
+}
+
+// The sitemaps, copied out so no list runs under the lock.
+priv app_sitemaps: fn() -> [Shared<AppSitemap>] Never! {
+    listed: APP_SITEMAPS.guard_read()
+    listed.value.copy()
+}
+
+// Whether a screen opens the state named `state` for a caller who is not
+// signed in.
+priv app_screen_public: fn(state: String) -> Bool Never! {
+    held: APP_ROUTES.guard_read()
+    screen: held.value.get(state) ?? return false
+    !screen.signed_in
+}
+
+// The states of a sitemap test's public guide screen and signed-in inbox.
+priv SitemapTestGuide: struct {
+    slug: String
+}
+
+priv SitemapTestInbox: struct {
+    box: String
+}
+
+#Test("a sitemap lists each state its list gives whose screen opens without signing in, and robots leave each signed-in screen") {
+    graph: new("Crew").__screen<SitemapTestGuide>("/guides/:slug", "app.SitemapTestGuide", [String]{}, false).__screen<SitemapTestInbox>("/inbox/:box", "app.SitemapTestInbox", [String]{}, true)
+    _: graph.__sitemap<SitemapTestGuide>(
+        "app.SitemapTestGuide",
+        [String]{"slug"},
+        fn() { [SitemapTestGuide]{SitemapTestGuide{slug: "start here"}, SitemapTestGuide{slug: "faq"}, SitemapTestGuide{slug: "faq"}} },
+        fn(on: App, guide: SitemapTestGuide) { [String]{on.__address_text<String>(guide.slug)} },
+    )
+    _: graph.__sitemap<SitemapTestInbox>(
+        "app.SitemapTestInbox",
+        [String]{"box"},
+        fn() { [SitemapTestInbox]{SitemapTestInbox{box: "mine"}} },
+        fn(on: App, inbox: SitemapTestInbox) { [String]{on.__address_text<String>(inbox.box)} },
+    )
+    // A list whose state no screen opens yet gives no address.
+    _: graph.__sitemap<SitemapTestGuide>(
+        "app.SitemapTestNowhere",
+        [String]{"slug"},
+        fn() { [SitemapTestGuide]{SitemapTestGuide{slug: "lost"}} },
+        fn(on: App, guide: SitemapTestGuide) { [String]{on.__address_text<String>(guide.slug)} },
+    )
+    assert(sitemap.given())
+    assert_eq(sitemap.addresses().join(" "), "/guides/start%20here /guides/faq")
+    paths: sitemap.signed_in_paths()
+    assert(paths.contains("/inbox/*$"))
+    assert(!paths.contains("/guides/*$"))
+}
+
+#Test("a reply type's cache policy is the last `.cache` set for it") {
+    assert(reply_cache.policy("app.CacheTestView") == None)
+    graph: new("Crew").__cache<RouteTestBoard>("app.CacheTestView", CachePolicy.Public{max_age: 10min})
+    assert_eq(graph.title, "Crew")
+    if reply_cache.policy("app.CacheTestView") == .Val(.Public(max_age)) -> assert(max_age == 10min) else {
+        panic("the public policy was not kept")
+    }
+    _: graph.__cache<RouteTestBoard>("app.CacheTestView", CachePolicy.Private)
+    assert(reply_cache.policy("app.CacheTestView") == .Val(.Private))
+}
+
+#Test("a kept reply goes to the first named store that takes it, and is found in any") {
+    refusing: KeptReplies{store: "app.Test refusing replies", find: fn(_: String) { KeptReply?{None} }, keep: fn(_: String, _: String, _: Int) { false }}
+    held: Shared{[String:String]{}}
+    kept: held.copy()
+    found: held.copy()
+    taking: KeptReplies{
+        store: "app.Test kept replies",
+        find: fn(key: String) {
+            seen: found.guard_read()
+            reply: seen.value.get(key) ?? return KeptReply?{None}
+            Val(KeptReply{reply: reply.copy(), age_ms: 0})
+        },
+        keep: fn(key: String, reply: String, _: Int) {
+            guard := kept.guard_edit()
+            guard.value[key] = reply
+            true
+        },
+    }
+    reply_cache.store(refusing)
+    reply_cache.store(taking)
+    assert(reply_cache.find("/api/board [1]") == None)
+    assert(reply_cache.keep("/api/board [1]", "{{\"ok\":false}}", 1000))
+    assert_eq((reply_cache.find("/api/board [1]") ?? panic("the reply was not kept")).reply, "{{\"ok\":false}}")
+    assert(reply_cache.find("/api/board [2]") == None)
+}
+
+// How many times the resume test's source ran.
+priv ResumeTestRuns: struct {
+    runs: Int
+}
+
+priv RESUME_TEST_RUNS: Shared{ResumeTestRuns{runs: 0}}
+
+// The resume test's source: 7 squared, each run counted.
+priv resume_test_square: fn() -> Int AppError! {
+    held := RESUME_TEST_RUNS.guard_edit()
+    held.value.runs += 1
+    Ok(49)
+}
+
+priv resume_test_runs: fn() -> Int Never! {
+    held: RESUME_TEST_RUNS.guard_read()
+    held.value.runs
+}
+
+// The resume test's view: one read, drawn in each of its states.
+priv resume_test_view: fn() -> String Never! {
+    binding: __live_bind<Int, AppError>("app.resume_test_square", [String]{"7"}, fn() { resume_test_square() })
+    if state(binding) == {
+        .Loaded(value) -> "<p>{value}</p>"
+        .Failed(_) -> "<p>failed</p>"
+        .Idle | .Loading -> "<p>loading</p>"
+    }
+}
+
+#Test("a page carries the reads its view made, and a client that resumes the page reads them without running their source") {
+    page: resume.render(fn() { resume_test_view() })
+    assert_eq(resume_test_runs(), 1)
+    assert_eq(page, "<p>49</p><script type=\"application/json\" id=\"jet-resume\">[{{\"source\":\"app.resume_test_square\",\"key\":\"[7]\",\"value\":\"ok:49\"}}]</script>")
+    ann: auth.AccountID.from_string("ann")
+    assert_eq(as_caller(ann, fn() { resume.seed(page) }), 1)
+    assert_eq(as_caller(ann, fn() { resume_test_view() }), "<p>49</p>")
+    assert_eq(resume_test_runs(), 1)
+    // A client that resumed no page runs the read itself.
+    ben: auth.AccountID.from_string("ben")
+    assert_eq(as_caller(ben, fn() { resume_test_view() }), "<p>49</p>")
+    assert_eq(resume_test_runs(), 2)
+    // A read a write made stale before the page was sent is left out, so
+    // the client runs it itself.
+    stale: resume.render(fn() {
+        shown: resume_test_view()
+        __live_invalidate("app.resume_test_square", [String]{"7"})
+        shown
+    })
+    assert_eq(stale, "<p>49</p>{RESUME_OPEN}[]</script>")
+    assert_eq(resume_test_runs(), 2)
+    // A page whose view reads nothing carries an empty list, and a page
+    // without a resume script seeds nothing.
+    assert_eq(resume.render(fn() { "<p>still</p>" }), "<p>still</p>{RESUME_OPEN}[]</script>")
+    assert_eq(resume.seed("<p>49</p>"), 0)
+}
+
+// A board's state, for the route-set test: its project is a path segment and
+// its filter the query.
+priv RouteTestBoard: struct {
+    project: String
+    q: String
+}
+
+#Test("a screen's state is its address: path fields fill their segments, and query fields with a value join the query") {
+    graph: new("Crew").__screen<RouteTestBoard>("/projects/:project/board", "app.RouteTestBoard", [String]{"q"}, true)
+    assert_eq(graph.title, "Crew")
+    names: [String]{"project", "q"}
+    assert_eq(App.__url_of<RouteTestBoard>("app.RouteTestBoard", names, [String]{App.__address_arg<String>("p 1/2"), App.__address_arg<String>("")}), "/projects/p%201%2F2/board")
+    assert_eq(App.__url_of<RouteTestBoard>("app.RouteTestBoard", names, [String]{App.__address_arg<String>("p1"), App.__address_arg<String>("login & fix")}), "/projects/p1/board?q=login%20%26%20fix")
+    assert_eq(App.__address_arg<Int>(42), "42")
+    assert_eq(App.__address_arg<Bool>(true), "true")
+    assert_eq(App.__address_arg<String>("say \"hi\""), "say \"hi\"")
+}
+
+// The accounts the presence test's source refuses, as a row policy would.
+priv PRESENCE_TEST_REFUSED: Shared{[String]{}}
+
+// `account`'s binding of the presence test's source: refused, or who has
+// the task at `/tasks/7` open.
+priv presence_test_bind: fn(account: String) -> Live<String, AppError> {
+    as_caller(auth.AccountID.from_string(account), fn() {
+        __live_bind<String, AppError>("app.test.presence", [String]{account.copy()}, fn() {
+            who: maybe_caller() ?? return Err(AppError.Invalid)
+            if PRESENCE_TEST_REFUSED.guard_read().value.contains(who.raw()) {
+                return Err(AppError.Unsupported)
+            }
+            names := [String]{}
+            loop present in App.__presence("/tasks/7") -> names.push(present.raw())
+            Ok(names.join(","))
+        })
+    })
+}
+
+priv presence_test_read: fn(binding: Live<String, AppError>) -> String {
+    if state(binding) == {
+        .Loaded(names) -> names
+        .Failed(_) -> "refused"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+priv presence_test_refuse: fn(account: String) {
+    refused := PRESENCE_TEST_REFUSED.guard_edit()
+    refused.value.push(account.copy())
+}
+
+#Test("presence counts each account whose binding's latest run asked, and re-runs the other bindings when that changes") {
+    ann: presence_test_bind("ann")
+    assert_eq(presence_test_read(ann), "ann")
+    presence_test_refuse("eve")
+    eve: presence_test_bind("eve")
+    assert_eq(presence_test_read(eve), "refused")
+    assert_eq(presence_test_read(ann), "ann")
+    ben: presence_test_bind("ben")
+    assert_eq(presence_test_read(ben), "ann,ben")
+    assert_eq(presence_test_read(ann), "ann,ben")
+    presence_test_refuse("ben")
+    __live_invalidate("app.test.presence", [String]{"ben"})
+    assert_eq(presence_test_read(ben), "refused")
+    assert_eq(presence_test_read(ann), "ann")
+    asked := [String]{}
+    loop present in App.__presence("/tasks/7") -> asked.push(present.raw())
+    assert_eq(asked.join(","), "ann")
 }
 
 // The key of the run this task is in: its delivery's ID for a job or a
@@ -1930,6 +2952,7 @@ priv outbox_unused: fn() -> CallOutbox Never! {
         failed: fn(_: String, _: Int, _: String, _: Int) { false },
         take: fn(_: [String], _: Int, _: Int) { None },
         hold: fn(_: [String], _: Int) { false },
+        answered: fn(_: Int, _: CallRequest, _: String) { false },
     }
 }
 
@@ -1975,6 +2998,71 @@ priv outbox_unused: fn() -> CallOutbox Never! {
     assert_eq(log.value.join(", "), "commit a, commit b, roll back c, roll back d, commit e, roll back f, roll back g")
 }
 
+#Test("a call that carries a request key keeps its reply in its first store before the commits, or on its own after a rollback, and a repeated or refused call keeps none") {
+    seen: Shared{[String]{}}
+    outbox: fn(name: String) -> CallOutbox {
+        CallOutbox{
+            store: "app.Test request outbox",
+            now: fn() { 0 },
+            keep: fn(_: String, _: String, _: Int) { "" },
+            done: fn(_: String) { 0 },
+            failed: fn(_: String, _: Int, _: String, _: Int) { false },
+            take: fn(_: [String], _: Int, _: Int) { None },
+            hold: fn(_: [String], _: Int) { false },
+            answered: fn(call: Int, request: CallRequest, reply: String) {
+                at: if call == 0 -> "on its own" else -> "in its call"
+                log := seen.guard_edit()
+                log.value.push("{name} keeps {request.account}/{request.key} {reply} {at}")
+                true
+            },
+        }
+    }
+    ends: fn(name: String) -> fn(Bool) -[]> Bool Never! {
+        fn(commit: Bool) {
+            log := seen.guard_edit()
+            log.value.push(if commit -> "commit {name}" else -> "roll back {name}")
+            true
+        }
+    }
+    asked: fn(key: String) -> CallRequest { CallRequest{account: "ann", key: key, at: 1} }
+    committed: transactions.begin() ?? panic("no call is open")
+    assert_eq(transactions.request(committed), CallRequest?{None})
+    transactions.ask(committed, asked("k1"))
+    assert_eq(transactions.request(committed), Val(asked("k1")))
+    transactions.join(committed, ends("a"), outbox("a"))
+    transactions.join(committed, ends("b"), outbox("b"))
+    assert_eq(transactions.reply(committed), String?{None})
+    transactions.answer(committed, "ok 1")
+    // The first reply stands: a store's kept reply comes before the run's.
+    transactions.answer(committed, "ok 2")
+    assert_eq(transactions.reply(committed), Val("ok 1"))
+    assert(transactions.end(committed, true))
+    failed: transactions.begin() ?? panic("no call is open")
+    transactions.ask(failed, asked("k2"))
+    transactions.join(failed, ends("c"), outbox("c"))
+    transactions.answer(failed, "err no")
+    assert(transactions.end(failed, false))
+    repeated: transactions.begin() ?? panic("no call is open")
+    transactions.ask(repeated, asked("k3"))
+    transactions.join(repeated, ends("d"), outbox("d"))
+    transactions.answer(repeated, "kept")
+    transactions.repeat(repeated)
+    assert(transactions.end(repeated, true))
+    refused: transactions.begin() ?? panic("no call is open")
+    transactions.ask(refused, asked("k4"))
+    transactions.join(refused, ends("e"), outbox("e"))
+    transactions.answer(refused, "ok 4")
+    transactions.refuse(refused)
+    assert(!transactions.end(refused, true))
+    // A call whose arguments didn't decode ran nothing, so it has no reply.
+    undecoded: transactions.begin() ?? panic("no call is open")
+    transactions.ask(undecoded, asked("k5"))
+    transactions.join(undecoded, ends("f"), outbox("f"))
+    assert(transactions.end(undecoded, false))
+    log: seen.guard_read()
+    assert_eq(log.value.join(", "), "a keeps ann/k1 ok 1 in its call, commit a, commit b, roll back c, c keeps ann/k2 err no on its own, roll back d, roll back e, roll back f")
+}
+
 // The entries `seen` holds so far.
 priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
     log: seen.guard_read()
@@ -2004,6 +3092,7 @@ priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
             },
             take: fn(_: [String], _: Int, _: Int) { Val([CallQueued]{}) },
             hold: fn(_: [String], _: Int) { true },
+            answered: fn(_: Int, _: CallRequest, _: String) { false },
         }
     }
     tries: Shared{0}
@@ -2251,8 +3340,11 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
 // hub: topic `live:<id>`, the event `live_event` (with the rest of its hold
 // when the binding is held). Only connections that watch that binding
 // (`watch`) receive it; one that starts watching later first receives the
-// topic's latest.
-live_invalidate: fn(source: String, key: String?) {
+// topic's latest. A whole-source invalidation also marks every binding that
+// read `source`: of those that read it narrowed (`live_reads`), only the ones
+// whose narrowed read is in `reached`, when it is given. The binding `skip`
+// (none when 0) is never marked: its own run made the change.
+live_invalidate: fn(source: String, key: String?, reached: [String]?, skip: Int) {
     loop {
         seen: live_cell_load()
         registry := live_decode(seen) ?? return
@@ -2260,11 +3352,14 @@ live_invalidate: fn(source: String, key: String?) {
         hits := [Int]{}
         events := [String]{}
         loop index in 0..<registry.records.len() {
+            if registry.records[index].id == skip -> next
             // An exact-key invalidation names one binding of `source`; a
             // whole-source one also reaches every binding that read it.
             if registry.records[index].source == source {
                 if key == .Val(only) && registry.records[index].key != only -> next
-            } else if key != None || !registry.records[index].reads.contains(source) { next }
+            } else if key != None || !live_read_hit(registry.records[index].reads, source, reached) {
+                next
+            }
             registry.records[index].dirty = true
             registry.records[index].generation += 1
             id: registry.records[index].id
@@ -2282,6 +3377,19 @@ live_invalidate: fn(source: String, key: String?) {
             return
         }
     }
+}
+
+// Whether a binding with read set `reads` read `source`: all of it, or
+// narrowed by a read in `held` (every narrowed read when it is None).
+live_read_hit: fn(reads: [String], source: String, held: [String]?) -> Bool {
+    if reads.contains(source) -> return true
+    prefix: "{source}?"
+    loop read in reads {
+        if !read.starts_with(prefix) -> next
+        if held == .Val(narrowed) && !narrowed.contains(read) -> next
+        return true
+    }
+    false
 }
 
 // The live hub's event for binding `id`: re-read it, or, while it is held,

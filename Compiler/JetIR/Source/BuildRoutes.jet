@@ -6255,8 +6255,9 @@ ir_route_store_err_message: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: 
 // own level, then its cases, as a case count followed by each case's name,
 // path and payload fields, listed as a level's fields are
 // (sema_call_reflection_level_args). The Value record carries the value's
-// Display text, one Value per stored field and, for an enum, the Case it
-// holds with one Value per payload member, each made the same way.
+// Display text, one Value per stored field and, for an enum or an outcome
+// (an optional or a result), the Case it holds with one Value per payload
+// member, each made the same way.
 ir_reflect_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() < 5 -> return ir_fail_slot(b, span, "reflect.of without its checked names")
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -6367,7 +6368,8 @@ ir_reflect_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, fields: Int, fie
 // The cases of one reflect.of level, read from `args` at `at`, for `value`
 // (of `value_ty`) whose Value is `record`: for an enum, a branch per case on
 // the value's tag that makes the Case it holds, its payload members read from
-// the variant, and sets it on `record`. The index after the cases.
+// the variant, and sets it on `record`; for an outcome, the same per built-in
+// case (ir_reflect_outcome_cases). The index after the cases.
 ir_reflect_cases: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, record: Int, args: [Int], at: Int, span: Span) -> Int Never! {
     if at >= args.len() {
         ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
@@ -6377,6 +6379,9 @@ ir_reflect_cases: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, 
     if count <= 0 {
         if count < 0 -> ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
         return at + 1
+    }
+    if ir_is_option(value_ty) || ir_is_result(value_ty) {
+        return ir_reflect_outcome_cases(m, p, b, value_ty, value, record, args, at + 1, count, span)
     }
     // Sema lists every case of a declared enum in declaration order, which is
     // the order of the variant indexes the tag holds.
@@ -6394,23 +6399,13 @@ ir_reflect_cases: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, 
         ir_fail(b, span, "reflect.of cases of {ir_type_name(value_ty)}")
         return at + 1
     }
-    pointer_row: ir_pointer_row(m)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     slot_ty: m.types[b.f.slot_type[value]].ty
     discriminant: ir_enum_tag_of(m, b, value)
     cursor := at + 1
     loop index in 0..<count {
-        if cursor + 2 >= args.len() {
-            ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
-            return cursor
-        }
         members: ir_variant_members(m, p, enum_row, ir_type_args(slot_ty), index) ?? {
             ir_fail(b, span, "reflect.of case {index} of {ir_type_name(value_ty)}")
-            return cursor
-        }
-        if ir_reflect_count(p, b, args[cursor + 2]) != members.len() {
-            case_label: ir_reflect_literal(p, b, args[cursor])
-            ir_fail(b, span, "reflect.of case {case_label} of {ir_type_name(value_ty)}")
             return cursor
         }
         index_slot: ir_temp_like(m, b, discriminant)
@@ -6418,31 +6413,145 @@ ir_reflect_cases: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, 
         test: ir_temp(m, b, bool_row)
         ir_emit(b.f, IROp.Eq, test, discriminant, index_slot, -1, b.line)
         ir_open_if(b.f, test, b.line)
-        capacity: ir_word_const(m, b, members.len())
-        fields: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [Int]{capacity}, pointer_row)
-        entry := cursor + 3
+        held := [IRReflectMember]{}
         loop member in members {
-            if entry >= args.len() {
-                ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
-                return entry
-            }
-            member_ty: m.types[member.ty].ty
-            read: ir_member_read(m, b, value, member)
-            entry = ir_reflect_field(m, p, b, fields, member_ty, read, args, entry, span)
-            if ir_failed(b) -> return entry
+            held.push(IRReflectMember{ty: m.types[member.ty].ty, read: ir_member_read(m, b, value, member)})
         }
-        case_name: ir_expr(m, p, b, args[cursor])
-        case_path: ir_expr(m, p, b, args[cursor + 1])
-        if ir_failed(b) -> return entry
-        held: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_case", [Int]{case_name, case_path, fields}, pointer_row)
-        _: ir_runtime(m, b, "jet_rt_reflect_value_set_case", [Int]{record, held}, -1)
-        ir_release(m, b, case_name)
-        ir_release(m, b, case_path)
+        cursor = ir_reflect_held_case(m, p, b, value_ty, record, held, args, cursor, span)
+        if ir_failed(b) -> return cursor
         ir_else(b.f, b.line)
-        cursor = entry
     }
     loop _ in 0..<count -> ir_end(b.f, b.line)
     cursor
+}
+
+// One payload member of a reflected case: its type and its read, borrowed
+// from the value that holds it.
+IRReflectMember: struct {
+    ty: Type
+    read: Int
+}
+
+// One case entry at `at` (its name, path and member count, then each member's
+// entry) whose payload is `members`, made into the Case set on `record`; the
+// index after the entry.
+ir_reflect_held_case: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, record: Int, members: [IRReflectMember], args: [Int], at: Int, span: Span) -> Int Never! {
+    if at + 2 >= args.len() {
+        ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
+        return at
+    }
+    if ir_reflect_count(p, b, args[at + 2]) != members.len() {
+        case_label: ir_reflect_literal(p, b, args[at])
+        ir_fail(b, span, "reflect.of case {case_label} of {ir_type_name(value_ty)}")
+        return at
+    }
+    pointer_row: ir_pointer_row(m)
+    capacity: ir_word_const(m, b, members.len())
+    fields: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [Int]{capacity}, pointer_row)
+    entry := at + 3
+    loop member in members {
+        if entry >= args.len() {
+            ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
+            return entry
+        }
+        entry = ir_reflect_field(m, p, b, fields, member.ty, member.read, args, entry, span)
+        if ir_failed(b) -> return entry
+    }
+    case_name: ir_expr(m, p, b, args[at])
+    case_path: ir_expr(m, p, b, args[at + 1])
+    if ir_failed(b) -> return entry
+    held: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_case", [Int]{case_name, case_path, fields}, pointer_row)
+    _: ir_runtime(m, b, "jet_rt_reflect_value_set_case", [Int]{record, held}, -1)
+    ir_release(m, b, case_name)
+    ir_release(m, b, case_path)
+    entry
+}
+
+// The held built-in case of an outcome `value`, its `count` cases listed from
+// `at` in sema's order (sema_call_reflection_outcome_cases): an optional's
+// `Val` and `None` on its presence, a result's `Ok` and `Err` on its side,
+// and an optional success's `Val`, `None` and `Err` on both. A payload is
+// read in place, borrowed. The index after the cases.
+ir_reflect_outcome_cases: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, record: Int, args: [Int], at: Int, count: Int, span: Span) -> Int Never! {
+    outcome: ir_untag(value_ty)
+    if outcome == .Option(inner) {
+        if count != 2 {
+            ir_fail(b, span, "reflect.of cases of {ir_type_name(value_ty)}")
+            return at
+        }
+        return ir_reflect_option_cases(m, p, b, value_ty, value, inner, record, args, at, span)
+    }
+    if outcome == .Result(ok, error) {
+        if count != (if ir_is_option(ok) -> 3 else -> 2) || ir_view_result(outcome) {
+            ir_fail(b, span, "reflect.of cases of {ir_type_name(value_ty)}")
+            return at
+        }
+        is_ok: ir_result_is_ok(m, b, value)
+        ir_open_if(b.f, is_ok, b.line)
+        cursor := ir_reflect_success_cases(m, p, b, value_ty, value, ok, record, args, at, span)
+        if ir_failed(b) -> return cursor
+        ir_else(b.f, b.line)
+        failure: ir_reflect_result_payload(m, p, b, value, error, span)
+        cursor = ir_reflect_held_case(m, p, b, value_ty, record, failure, args, cursor, span)
+        ir_end(b.f, b.line)
+        return cursor
+    }
+    ir_fail(b, span, "reflect.of cases of {ir_type_name(value_ty)}")
+    at
+}
+
+// The success cases of the result `value` whose Ok is of type `ok`, listed
+// from `at`: an optional success's `Val` and `None` on the presence of the
+// optional it holds, else the one `Ok`. The index after them.
+ir_reflect_success_cases: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, ok: Type, record: Int, args: [Int], at: Int, span: Span) -> Int Never! {
+    if ir_untag(ok) == .Option(inner) {
+        option_row: ir_value_type(m, p, ok) ?? {
+            ir_fail(b, span, "type {ir_type_name(ok)}")
+            return at
+        }
+        option: ir_load_at(m, b, value, 8, option_row)
+        return ir_reflect_option_cases(m, p, b, value_ty, option, inner, record, args, at, span)
+    }
+    success: ir_reflect_result_payload(m, p, b, value, ok, span)
+    ir_reflect_held_case(m, p, b, value_ty, record, success, args, at, span)
+}
+
+// The `Val` and `None` cases of the optional `option` whose payload is of
+// type `inner`, listed from `at`: the index after them.
+ir_reflect_option_cases: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, option: Int, inner: Type, record: Int, args: [Int], at: Int, span: Span) -> Int Never! {
+    present := [IRReflectMember]{}
+    some: ir_option_is_some(m, b, option)
+    ir_open_if(b.f, some, b.line)
+    if ir_reflect_outcome_payload(inner) {
+        row: ir_value_type(m, p, inner) ?? {
+            ir_fail(b, span, "type {ir_type_name(inner)}")
+            return at
+        }
+        present.push(IRReflectMember{ty: inner, read: ir_option_payload(m, b, option, row)})
+    }
+    cursor := ir_reflect_held_case(m, p, b, value_ty, record, present, args, at, span)
+    if ir_failed(b) -> return cursor
+    ir_else(b.f, b.line)
+    cursor = ir_reflect_held_case(m, p, b, value_ty, record, [IRReflectMember]{}, args, cursor, span)
+    ir_end(b.f, b.line)
+    cursor
+}
+
+// The payload of one side of the result `value` whose payload is of type
+// `ty`, read from its box: none for a unit or `Never`.
+ir_reflect_result_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, span: Span) -> [IRReflectMember] Never! {
+    if !ir_reflect_outcome_payload(ty) -> return [IRReflectMember]{}
+    row: ir_value_type(m, p, ty) ?? {
+        ir_fail(b, span, "type {ir_type_name(ty)}")
+        return [IRReflectMember]{}
+    }
+    [IRReflectMember]{IRReflectMember{ty: ty, read: ir_load_at(m, b, value, 8, row)}}
+}
+
+// Whether an outcome case whose payload is of type `ty` holds one, as sema
+// lists it (sema_call_reflection_outcome_payload): a unit or `Never` holds none.
+ir_reflect_outcome_payload: fn(ty: Type) -> Bool Never! {
+    !ir_unit_type(ir_untag(ty)) && !ir_never_type(ty)
 }
 
 // The Value record's typed scalar: an exact Int (a range-checked one

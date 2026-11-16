@@ -11,11 +11,13 @@ package: {
 
 use {
     core: core
+    builtin: jet_builtins
     tui_text: core.tui
     core.term.[Key]
     core.color.[Color]
     core.ui.host.[UIAccessibility, UIAccessibilityState, UITextRange]
     core.ui.host.ime.[UIIMEComposition]
+    markup: core.text.html
     draw: __core_ui_draw
     wayland: __core_ui_wayland
     internal.[checksum, has_nul, without_key, without_button, leaf, backend_state, measure_tree, layout_state, mount_state, paint_state, dispatch, focus_ring, focused_text, push_scalar, float_text]
@@ -130,7 +132,7 @@ InputEvent: enum {
 // One node of the portable tree: its label, its size in cells, and what
 // hosts and assistive tech read. A box stacks its children top to bottom;
 // a button built with a handler (`button(display, () -> { … })`) holds its click
-// slot.
+// slot, and a text input built with `on_drop:` its drop slot.
 UINode: struct {
     label: String
     width: Float
@@ -144,6 +146,8 @@ UINode: struct {
     priv color: Color?
     // The id the runtime's click registry keeps the handler under; 0 for none.
     priv click: Int
+    // The id the runtime's drop registry keeps the handler under; 0 for none.
+    priv drop: Int
 }
 
 // Whether a backend used an input event.
@@ -188,6 +192,7 @@ box: fn(children: [UINode]) -> UINode Never! {
         children: children,
         color: None,
         click: 0,
+        drop: 0,
     }
 }
 
@@ -216,10 +221,20 @@ __button_click: fn(display: String, shortcut: UIShortcut?, label: String?, click
     result
 }
 
-// A text input over `state`, one cell per scalar, with its IME mode.
+// A text input over `state`, one cell per scalar, with its IME mode. The
+// `on_drop:` form is `text_input_drop`.
 text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
     result := leaf(state, Float{state.chars().len()}, 1.0, Val(UIAriaRole.TextInput), UINodeKind.TextInput, None)
     result.ime = Val(ime)
+    result
+}
+
+// `text_input(state, ime, on_drop: (item: UIDropItem) -> { … })`: the compiler
+// registers the handler with the runtime's drop registry as slot `drop`, then
+// builds the input here.
+#Builtin.Role(.TextInputDrop) priv text_input_drop: fn(state: String, ime: UIIMEMode, drop: Int) -> UINode Never! {
+    result := text_input(state, ime)
+    result.drop = drop
     result
 }
 
@@ -293,6 +308,17 @@ node_shortcut: fn(n: UINode, shortcut: UIShortcut) -> UINode Never! {
     result.shortcut = Val(shortcut)
     result
 }
+
+// A file the program ships with it, such as an image, a font or an icon,
+// named by its path from the calling file's own directory, as `embed_bytes`
+// names one: `asset("brand/logo.svg")` beside `Screens/home.jet` is
+// `Screens/brand/logo.svg`. The compiler checks a written path while the
+// program builds, and a path that names no file there is an error (E2822).
+UIAsset: struct {
+    path: String
+}
+
+asset: fn(path: String) -> UIAsset Never! { UIAsset{path: path} }
 
 preview_registry: fn(entries: &&[UIPreview]) -> UIPreviewRegistry UIPreviewError! {
     if entries.len() > 64 -> return Err(UIPreviewError.TooManyPreviews)
@@ -1629,6 +1655,7 @@ priv internal: module {
             children: [UINode]{},
             color: color,
             click: 0,
+            drop: 0,
         }
     }
 
@@ -1847,10 +1874,10 @@ priv internal: module {
     // A paint's web scene, one record per leaf in paint order: a box adds
     // none and stacks its children as a paint does. A record is its fields
     // separated by tabs, kind (Custom 0, Text 1, Box 2, Button 3, TextInput 4),
-    // click slot (0 for none), x, y, width, height, color (its `to_hex` text,
-    // empty for none) and the label's UTF-8 byte length, then the label and a
-    // newline. A web build's host (JetWeb Host.jet) turns it into the page's
-    // elements.
+    // click slot and drop slot (0 for none), x, y, width, height, color (its
+    // `to_hex` text, empty for none) and the label's UTF-8 byte length, then
+    // the label and a newline. A web build's host (JetWeb Host.jet) turns it
+    // into the page's elements.
     scene_records: fn(node: UINode, frame: Rect, records: &[String]) Never! {
         if node.kind == .Box {
             at := frame.y
@@ -1869,8 +1896,44 @@ priv internal: module {
         }
         color: if node.color == .Val(fill) -> fill.to_hex() else -> ""
         place: "{float_text(frame.x)}\t{float_text(frame.y)}\t{float_text(frame.width)}\t{float_text(frame.height)}"
-        records.push("{kind}\t{node.click}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n")
+        records.push("{kind}\t{node.click}\t{node.drop}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n")
     }
+}
+
+// The tree as HTML, as a server sends a screen: a box is a `<div>` of its
+// children, top to bottom; text is a `<p>`; a button is a `<button
+// type="button">`, its click slot, when it has one, in `data-jet-click`, so a
+// resumed page attaches the handler there instead of building the tree
+// again; a text input is an `<input>` holding its text; any other node is a
+// `<div>` of its label. An accessible name is the element's `aria-label`
+// and a color its `style` color. Text and attributes are escaped.
+priv(package) html: module {
+    node: fn(tree: UINode) -> String Never! {
+        label: markup.escape(tree.label)
+        named: html_name(tree)
+        painted: if tree.color == .Val(fill) -> " style=\"color:{fill.to_hex()}\"" else -> ""
+        if tree.kind == {
+            .Box -> {
+                parts := [String]{}
+                loop child in tree.children -> parts.push(node(child))
+                "<div{named}{painted}>{parts.join("")}</div>"
+            }
+            .Text -> "<p{named}{painted}>{label}</p>"
+            .Button -> {
+                click: if tree.click != 0 -> " data-jet-click=\"{tree.click}\"" else -> ""
+                "<button type=\"button\"{named}{painted}{click}>{label}</button>"
+            }
+            .TextInput -> "<input type=\"text\" value=\"{label}\"{named}{painted}>"
+            .Custom -> "<div{named}{painted}>{label}</div>"
+        }
+    }
+}
+
+// ` aria-label="…"` for a node with an accessible name, else "".
+priv html_name: fn(tree: UINode) -> String Never! {
+    access: tree.accessibility ?? return ""
+    name: access.name ?? return ""
+    " aria-label=\"{markup.escape(name)}\""
 }
 
 #Test("UI aria role constructors") {
@@ -2052,4 +2115,28 @@ priv internal: module {
     }
     assert_eq(covered, 164)
     assert_eq(joined, 1)
+}
+
+#Test("a tree renders to server HTML: a box's children in order, text escaped, a button's click slot and an accessible name") {
+    named: node_accessibility(button("Save"), UIAccessibility{name: Val("Save the <draft>"), description: None, states: [UIAccessibilityState]{}})
+    tree: box(
+        [UINode]{
+            text("Tom & Jerry's \"plan\""),
+            named,
+            __button_click("Go", None, None, 7),
+            text_input("a<b", .Native),
+            node_color("hot", 3.0, 1.0, Color{r: 255, g: 0, b: 0, a: 255}),
+            node("free", 4.0, 1.0),
+        },
+    )
+    assert_eq(
+        html.node(tree),
+        "<div><p>Tom &amp; Jerry&#x27;s &quot;plan&quot;</p><button type=\"button\" aria-label=\"Save the &lt;draft&gt;\">Save</button><button type=\"button\" data-jet-click=\"7\">Go</button><input type=\"text\" value=\"a&lt;b\"><div style=\"color:#ff0000\">hot</div><div>free</div></div>",
+    )
+}
+
+#Test("an asset is named by its path from the calling file") {
+    logo: asset("brand/logo.svg")
+    assert_eq(logo.path, "brand/logo.svg")
+    assert(logo == UIAsset{path: "brand/logo.svg"})
 }

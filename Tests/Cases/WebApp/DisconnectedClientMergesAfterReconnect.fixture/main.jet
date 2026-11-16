@@ -1,0 +1,93 @@
+// Two clients of one shared notes document: the phone and the desk. The test
+// host cuts the phone off mid-test (`app.disconnect`); both sides write; the
+// phone's publish fails without reaching the server; once the test restores
+// the link (`app.reconnect`), the phone's next publish merges both writes, and
+// the desk reads the same document.
+use {
+    app
+    crdt: core.sync
+}
+
+#Error
+NoteError: enum {
+    Denied(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> NoteError {
+    if self == {
+        .Unreachable(why) -> NoteError.Unreachable(why)
+        .Invalid(errors) -> NoteError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> NoteError.Unreachable("signed out")
+        .UpdateRequired -> NoteError.Unreachable("update required")
+    }
+}
+
+// The server's side: each publish merges the client's copy into the session
+// and answers the merged document with its generation.
+Notes: struct {
+    session: String
+    runs: Shared<Int>
+
+    #App.Public publish: fn(self, doc: String) -> String NoteError! {
+        ran := self.runs.guard_edit()
+        ran.value += 1
+        receipt: app.sync(doc, self.session)
+        if receipt.starts_with("SyncError(") -> return Err(NoteError.Denied(receipt))
+        Ok(receipt)
+    }
+}
+
+// One client: its Remote, and its own copy of the notes, which it writes
+// whether or not it reaches the server.
+Client: struct {
+    name: String
+    notes: app.Remote<Notes>
+    local: crdt.SyncList
+}
+
+write: fn(client: &Client, note: String) {
+    client.local = crdt.list_push(client.local, client.name, note)
+}
+
+publish: fn(client: Client) -> String { send(client.notes, crdt.list_show(client.local)) }
+
+send: fn(notes: app.Remote<Notes>, doc: String) -> String { shown(notes.publish(doc)) }
+
+// What a publish gave, as text.
+shown: fn(reply: String NoteError!) -> String {
+    receipt: reply ?? {
+        if err == {
+            .Denied(why) -> return "denied: {why}"
+            .Unreachable(why) -> return "unreachable: {why}"
+        }
+    }
+    receipt
+}
+
+runs: fn(counter: Shared<Int>) -> Int {
+    ran: counter.guard_read()
+    ran.value
+}
+
+run: fn() {
+    counter: Shared{0}
+    service: Notes{session: "notes", runs: counter.copy()}
+    phone := Client{name: "phone", notes: app.remote(service.copy(), client: "phone"), local: crdt.list_new()}
+    desk := Client{name: "desk", notes: app.remote(service.copy(), client: "desk"), local: crdt.list_new()}
+    write(phone, "draft")
+    print("phone: {publish(phone)}")
+    app.disconnect("phone")
+    write(phone, "offline edit")
+    print("phone cut off: {publish(phone)}")
+    print("server runs: {runs(counter)}")
+    write(desk, "server edit")
+    print("desk: {publish(desk)}")
+    app.reconnect("phone")
+    merged: publish(phone)
+    print("phone reconnected: {merged}")
+    seen: publish(desk)
+    print("desk reads: {seen}")
+    print("converged: {merged == seen}")
+    print("server runs: {runs(counter)}")
+}

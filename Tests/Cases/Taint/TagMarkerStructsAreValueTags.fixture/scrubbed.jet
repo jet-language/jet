@@ -1,0 +1,18 @@
+use process: core.process
+
+#FX(!Exec)
+Account: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
+
+account_name: fn() -> #Account String { "Ada" }
+
+// The scrubber returns the value without the tag, so the sink accepts it.
+#Scrub(Account) cleared: fn(name: #Account String) -> String { name.copy() }
+
+run: fn() {
+    receipt: process.cmd(["echo", cleared(account_name())]).run() ?? return Err("test")
+    receipt.drop("only the argument flow matters here")
+}

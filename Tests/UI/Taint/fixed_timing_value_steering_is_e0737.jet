@@ -1,4 +1,4 @@
-Key: tag { deny: [Exec], timing: .Fixed }
+// `Key`, a fixed-timing value tag, is declared at the end of the file.
 
 choose: fn(k: #Key U64, a: U64, b: U64) -> U64 {
     if k == (U64{0}) -> return a
@@ -7,4 +7,12 @@ choose: fn(k: #Key U64, a: U64, b: U64) -> U64 {
     if both -> return b
     picked: if k == (U64{1}) -> a else -> b - a
     wrapping(picked + b)
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
 }

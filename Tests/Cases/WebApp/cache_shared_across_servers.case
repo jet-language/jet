@@ -1,0 +1,11 @@
+# Servers of one app that share a database file share the replies a `.Public`
+# cache policy keeps, in that file. Server A (the program run again as a child
+# process, sharing only the file) answers a call of `greeting` and keeps its
+# reply there; server B (the program) answers the same call with A's reply
+# and its Age, and runs `greeting` no time at all. No cache server runs.
+requires: os:unix
+fixture: CacheSharedAcrossServers.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "server a answers: 200 {\"ok\":\"hello ann, from server a\"} | age: none\nserver a ran greeting: 1\nserver b answers: 200 {\"ok\":\"hello ann, from server a\"} | age: set\nserver b ran greeting: 0\n"

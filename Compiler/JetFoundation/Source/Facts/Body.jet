@@ -448,12 +448,11 @@ JET_COMPTIME_TOOLCHAIN_PREFIX: "toolchain:"
 
 BodyCoreClosureKind: enum {
     Spawn(group: Int?, site: Int, label: String?, executable: BodyLambda)
-    Realtime(rate: Int, frames: Int, executable: BodyLambda)
     Guard(executable: BodyLambda)
     OnCommit(handle_name: String, executable: BodyLambda)
     OnRollback(handle_name: String, executable: BodyLambda)
     UIClickSlot(executable: BodyLambda)
-    UITextInputOnDrop(state: Int, ime: Int, executable: BodyLambda)
+    UIDropSlot(executable: BodyLambda)
     ReactiveDerived(executable: BodyLambda)
     ReactiveEffect(executable: BodyLambda)
     UIReactiveRender(executable: BodyLambda)
@@ -484,10 +483,6 @@ BodyHandleOp: enum {
     FileWriterWriteAll
     FileWriterFsync
     FileWriterPath
-    JSONReaderNext
-    JSONWriterWrite
-    JSONWriterFlush
-    JSONWriterFinish
     JSONLReaderNext
     JSONLWriterWrite
     JSONLWriterFlush
@@ -497,10 +492,6 @@ BodyHandleOp: enum {
     XMLWriterWrite
     XMLWriterFlush
     XMLWriterFinish
-    CBORReaderNext
-    CBORWriterWrite
-    CBORWriterFlush
-    CBORWriterFinish
     StdinReadLine
     StdoutWrite
     StdoutWriteLine
@@ -1467,20 +1458,11 @@ body_each_core_closure_kind_child: fn(tree: BodyTree, value: BodyCoreClosureKind
             if f0 == .Val(inner) -> visit(inner)
             body_each_lambda_child(tree, f3, visit)
         }
-        .Realtime(f0, f1, f2) -> {
-            visit(f0)
-            visit(f1)
-            body_each_lambda_child(tree, f2, visit)
-        }
         .Guard(f0) -> { body_each_lambda_child(tree, f0, visit) }
         .OnCommit(_, f1) -> { body_each_lambda_child(tree, f1, visit) }
         .OnRollback(_, f1) -> { body_each_lambda_child(tree, f1, visit) }
         .UIClickSlot(f0) -> { body_each_lambda_child(tree, f0, visit) }
-        .UITextInputOnDrop(f0, f1, f2) -> {
-            visit(f0)
-            visit(f1)
-            body_each_lambda_child(tree, f2, visit)
-        }
+        .UIDropSlot(f0) -> { body_each_lambda_child(tree, f0, visit) }
         .ReactiveDerived(f0) -> { body_each_lambda_child(tree, f0, visit) }
         .ReactiveEffect(f0) -> { body_each_lambda_child(tree, f0, visit) }
         .UIReactiveRender(f0) -> { body_each_lambda_child(tree, f0, visit) }

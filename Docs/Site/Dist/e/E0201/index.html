@@ -36,67 +36,33 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Declare the parameter or receiver with the take mark `&amp;&amp;`, or call `.move()` where the value is given away.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0201</code>: <code>Tests/UI/close_value_stored_then_used.stderr</code>.</p>
-<pre class="diag">Error [jet.UseAfterMove]: `a.id` was consumed by the struct literal, so it can&#39;t be used here
-  --&gt; Tests/UI/close_value_stored_then_used.jet:28:13
+<p>First UI snapshot mentioning <code>E0201</code>: <code>Tests/UI/Ownership/lent_union_handle_cannot_outlive_the_call.stderr</code>.</p>
+<pre class="diag">Error [jet.ReadOnlyValueNotOwned]: `handle` was not moved here, so it cannot be returned as-is
+  --&gt; Tests/UI/Ownership/lent_union_handle_cannot_outlive_the_call.jet:9:70
     |
- 28 |     print(a.id)
-    |             ^^
-  --&gt; Tests/UI/close_value_stored_then_used.jet:27:21
-    |
- 27 |     h: Holder{item: a}
-    |                     ^ `a.id` moved to the struct literal here
- Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `a.id` after the move, or give the struct literal a copy with `a.id.copy()` where it moved.
-More: jet-lang.dev/e/E0121
+  9 | keep: fn(handle: Directory | FileReader) -&gt; Directory | FileReader { handle }
+    |                                                                      ^^^^^^
+ Why: This function has read access only and does not own the value
+ Fix: Return a copy: `return handle.copy()` — or take ownership: `handle: &amp;&amp;Directory | FileReader`. To return borrowed data, declare `-&gt; View&lt;T&gt; from handle` and return a view derived from `handle`
+More: jet-lang.dev/e/E0120
 
-Error [jet.UseAfterMove]: `a` was consumed by the struct literal, so it can&#39;t be used here
-  --&gt; Tests/UI/close_value_stored_then_used.jet:35:11
+Error [jet.MissingMoveMarker]: `handle` cannot be moved from borrowed storage
+  --&gt; Tests/UI/Ownership/lent_union_handle_cannot_outlive_the_call.jet:11:69
     |
- 35 |     print(a.len())
-    |           ^
-  --&gt; Tests/UI/close_value_stored_then_used.jet:34:21
-    |
- 34 |     g: Group{items: a}
-    |                     ^ `a` moved to the struct literal here
- Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `a` after the move, or give the struct literal a copy with `a.copy()` where it moved.
-More: jet-lang.dev/e/E0121
-
-Error [jet.UseAfterMove]: `a.id` was consumed by the variant payload, so it can&#39;t be used here
-  --&gt; Tests/UI/close_value_stored_then_used.jet:42:13
-    |
- 42 |     print(a.id)
-    |             ^^
-  --&gt; Tests/UI/close_value_stored_then_used.jet:41:18
-    |
- 41 |     s: Slot.Full(a)
-    |                  ^ `a.id` moved to the variant payload here
- Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `a.id` after the move, or give the variant payload a copy with `a.id.copy()` where it moved.
-More: jet-lang.dev/e/E0121
-
-Error [jet.UseAfterMove]: `a` was consumed by `.push()`, so it can&#39;t be used here
-  --&gt; Tests/UI/close_value_stored_then_used.jet:50:13
-    |
- 50 |     print(a.id)
-    |             ^^
-  --&gt; Tests/UI/close_value_stored_then_used.jet:49:14
-    |
- 49 |     out.push(a)
-    |              ^ `a` moved to `.push()` here
- Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `a` after the move, or give `.push()` a copy with `a.copy()` where it moved.
-More: jet-lang.dev/e/E0121
-
-Error [jet.MissingMoveMarker]: `r` cannot be moved from borrowed storage
-  --&gt; Tests/UI/close_value_stored_then_used.jet:54:53
-    |
- 54 | from_parameter: fn(r: Res) -&gt; Holder { Holder{item: r} }
-    |                                                     ^
- Why: `r` is a read or write parameter, so its caller keeps the value, and `Res` can&#39;t be copied into the struct literal
- Fix: Declare the parameter `r: &amp;&amp;Res` so the caller hands the value over
+ 11 | hold: fn(handle: Directory | FileReader) -&gt; Holder { Holder{handle: handle} }
+    |                                                                     ^^^^^^
+ Why: `handle` is a read or write parameter, so its caller keeps the value, and `Directory | FileReader` can&#39;t be copied into the struct literal
+ Fix: Declare the parameter `handle: &amp;&amp;Directory | FileReader` so the caller hands the value over
 More: jet-lang.dev/e/E0201
+
+Error [jet.ReadOnlyValueNotOwned]: `handle` was not moved here, so it cannot be captured by a stored lambda
+  --&gt; Tests/UI/Ownership/lent_union_handle_cannot_outlive_the_call.jet:14:5
+    |
+ 14 |     fn() {
+    |     ^^^^^^
+ Why: This function can access the parameter, but it does not own the value; a capture here takes ownership
+ Fix: Make the parameter owned: `handle: &amp;&amp;Directory | FileReader`
+More: jet-lang.dev/e/E0120
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

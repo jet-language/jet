@@ -223,7 +223,10 @@ jet_cli_emit_ast_item: fn(tables: ASTTables, item: Item) -> JetCLIEmitNode Never
             supertraits: if value.supertraits.len() == 0 -> "" else -> ": {value.supertraits.join(" + ")}"
             jet_cli_emit_node("trait", "{value.name}: trait{supertraits}", children)
         }
-        .Tag(value) -> jet_cli_emit_leaf("tag", "{value.name}: tag")
+        .Tag(value) -> {
+            denials: loop entry in value.deny -> "!{entry.name}"
+            jet_cli_emit_leaf("tag", "#FX({denials.join(", ")}) {value.name}: struct")
+        }
         // An effect name a struct or enum declares in its `impl Effect` block.
         .EffectDecl(value) -> jet_cli_emit_leaf("effect", value.name)
         .Impl(value) -> {

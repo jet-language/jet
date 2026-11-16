@@ -1197,6 +1197,16 @@ sema_expr_expected_type: fn(value: Type, environment: SemaScopeEnvironment, prog
     value.copy()
 }
 
+// A Core row's type (a builtin Core record's field, a fixed Core call's
+// parameter or result) as the caller's module reads it: its bare nominals
+// stay Core's (sema_type_core_row_form).
+sema_expr_core_row_type: fn(value: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
+    if program.registration_graph == {
+        .Val(graph) -> sema_type_core_row_form(graph, value, sema_scope_caller_row(environment, graph))
+        .None -> value
+    }
+}
+
 sema_expr_expected_assignable: fn(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == .Val(graph_value) {
         return sema_type_assignable_in_graph_at(graph_value, required, offered, sema_scope_caller_row(environment, graph_value), environment.generic_params)
@@ -4328,7 +4338,7 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if process.handled -> return process
     time := sema_call_try_time_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if time.handled -> return time
-    app := sema_call_try_app_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    app := sema_call_try_app_method(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if app.handled -> return app
     network := sema_call_try_network_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if network.handled -> return network
@@ -4936,7 +4946,7 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     if unresolved_index == .Val(unresolved) {
         if scopes.bindings[unresolved].symbol.kind == SymbolKind.Constant && sema_scope_binding_type(environment, scopes, unresolved) == None {
             context.name_references.push(sema_name_reference(span, sema_scope_binding_symbol(environment, scopes, unresolved), Val(SymbolKind.Constant)))
-            // A comptime probe reads this reference as a dependency wait; a
+            // A comptime item check reads this reference as a dependency wait; a
             // body check after the comptime run reaches here only when the
             // constant's value never landed, which the reason names.
             sema_check_unsupported(context, "constant `{name}` (read at offset {span.start}) has no staged compile-time value")

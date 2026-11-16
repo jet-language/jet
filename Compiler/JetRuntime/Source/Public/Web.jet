@@ -1,8 +1,13 @@
-// `jet.runtime.web` (#6615): app's live publish, in Jet types. The member
-// is a runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
-// export that is its one body (WsRoutes.jet). It is `priv`: only Core calls
-// it; the live registry and its rules are app's Jet source (Core/App/App.jet).
+// `jet.runtime.web` (#6615): app's live publish and leave signal, in Jet
+// types. Each member is a runtime binding (Guest.jet
+// sema_guest_runtime_binding) of the runtime export that is its one body
+// (WsRoutes.jet). They are `priv`: only Core calls them; the live registry and
+// its rules are app's Jet source (Core/App/App.jet).
 web: module {
     // `event` becomes `topic`'s latest and goes to every joined connection.
     #Import(c) priv live_publish: fn(topic: String, event: String) = "jet_web_live_publish"
+
+    // The topics whose last watching connection closed since the last call,
+    // one per line ("" when none); each is given once.
+    #Import(c) priv live_left: fn() -> String = "jet_web_live_left"
 }

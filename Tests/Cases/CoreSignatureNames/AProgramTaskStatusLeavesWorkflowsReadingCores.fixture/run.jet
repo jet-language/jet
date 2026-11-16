@@ -1,0 +1,48 @@
+package: {
+    name: "program_task_status"
+    version: "0.1.0"
+    authority: { allow: [Env, FS, IO, Mem.Alloc, Rand, Time] }
+}
+
+use {
+    service: core.service
+    testing: core.testing
+}
+
+Detail: struct {
+    text: String
+    count: Int
+}
+
+// The name of core.service's workflow status, with a payload Core's lacks.
+TaskStatus: enum {
+    Busy(Detail)
+    Idle
+}
+
+describe: fn(value: TaskStatus) -> String {
+    if value == {
+        .Busy(detail) -> "busy {detail.text} {detail.count}"
+        .Idle -> "idle"
+    }
+}
+
+worker: fn() {}
+
+run: fn() {
+    temp := testing.temp_dir("program-task-status")
+    path: Path.from(temp).join("workflow.log").to_string()
+    tree := service.tree("checkout")
+    store: service.state_store(path) ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    _endpoint: tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    run_id: tree.workflow_start("checkout", 1) ?? panic("workflow")
+    scheduled: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("schedule")
+    print("scheduled:{scheduled}")
+    result: tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
+    print("result:{result}")
+    tree.stop() ?? panic("stop")
+    print(describe(TaskStatus.Busy(Detail{text: "own", count: 3})))
+    print(describe(TaskStatus.Idle))
+}

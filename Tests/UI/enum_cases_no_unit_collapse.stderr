@@ -1,0 +1,35 @@
+Error [jet.ReturnTypeMismatch]: This value is `Unit`, but `absent_as_unit` returns Int?
+  --> Tests/UI/enum_cases_no_unit_collapse.jet:13:32
+    |
+ 13 | absent_as_unit: fn() -> Int? { () }
+    |                                ^^
+ Why: `absent_as_unit` declares Int? as its result, so the value it hands back must be Int?
+ Fix: Hand back a Int? value: convert this value to Int?, or return the value you meant
+More: jet-lang.dev/e/E0113
+
+Error [jet.UntypedNone]: Bare `None` needs a known optional type here
+  --> Tests/UI/enum_cases_no_unit_collapse.jet:15:32
+    |
+ 15 | shut_as_absent: fn() -> Gate { None }
+    |                                ^^^^
+ Why: `None` only fits where a `T?` is expected (S32)
+ Fix: Write the optional type on the value, `T?{None}`, or use `None` where a `T?` is already expected
+More: jet-lang.dev/e/E0308
+
+Error [jet.PatternTypeMismatch]: Pattern `None` doesn't belong to `Int | Unit`
+  --> Tests/UI/enum_cases_no_unit_collapse.jet:19:9
+    |
+ 19 |         .None -> "nothing"
+    |         ^^^^^
+ Why: Union pattern arms name one member type of the subject union
+ Fix: Use one of the subject union member types
+More: jet-lang.dev/e/E0305
+
+Error [jet.PatternTypeMismatch]: Pattern `Shut` doesn't match `Gate?`
+  --> Tests/UI/enum_cases_no_unit_collapse.jet:24:51
+    |
+ 24 | absent_as_shut: fn(gate: Gate?) -> Bool { gate == .Shut }
+    |                                                   ^^^^^
+ Why: Variant patterns only work on enum values
+ Fix: Match a value with a pattern for its type
+More: jet-lang.dev/e/E0305

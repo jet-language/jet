@@ -36,32 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Consume the `#SingleUse` value before scope end.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0140</code>: <code>Tests/UI/loop_borrowed_task_list.stderr</code>.</p>
-<pre class="diag">Error [jet.ReadOnlyValueNotOwned]: `hs` was not moved here, so this loop can&#39;t take its handles
-  --&gt; Tests/UI/loop_borrowed_task_list.jet:3:15
+<p>First UI snapshot mentioning <code>E0140</code>: <code>Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.stderr</code>.</p>
+<pre class="diag">Error [jet.OwnerMovedWhileViewed]: `cells` cannot be moved while `ints` is still looking into it
+  --&gt; Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet:19:17
     |
-  3 |     loop h in hs -&gt; total += h.join() ?? 0
-    |               ^^
- Why: Each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list
- Fix: Take the list: `hs: &amp;&amp;[Task&lt;Int&gt;]`, or collect the work in a canonical `task.all` or `task.group` block
-More: jet-lang.dev/e/E0120
+ 19 |         release(cells)
+    |                 ^^^^^
+ Why: `ints` is a live read view into `cells`; changing or moving the owner could invalidate that view
+ Fix: Finish using `ints` before changing `cells`, narrow the view&#39;s scope, or make an owned copy
+More: jet-lang.dev/e/E0212
 
-Error [jet.SingleUseLent]: `handles` still owes `consume`, so it can&#39;t be shared
-  --&gt; Tests/UI/loop_borrowed_task_list.jet:9:17
+Error [jet.SingleUseDropped]: `cells` still owes `consume`
+  --&gt; Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet:15:5
     |
-  9 |     print(drain(handles))
-    |                 ^^^^^^^
- Why: This value&#39;s type is `#SingleUse`, so it can only be moved (handed over for good); `drain` would borrow or copy it, and a `#SingleUse` value has no second use to give
- Fix: Give it away with `handles.move()`, or rework `drain` so it takes ownership with a `&amp;&amp;` parameter
-More: jet-lang.dev/e/E0142
-
-Error [jet.SingleUseDropped]: `handles` still owes `consume`
-  --&gt; Tests/UI/loop_borrowed_task_list.jet:8:5
-    |
-  8 |     handles: [task 1, task 2]
-    |     ^^^^^^^
+ 15 |     cells := Cells{a: 11, b: 22}
+    |     ^^^^^
  Why: This value&#39;s type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: pass it to a `&amp;&amp;` parameter, or `return` it — or write `#Unsafe(&quot;reason&quot;) { consume(handles) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `&amp;&amp;` parameter, or `return` it — or write `#Unsafe(&quot;reason&quot;) { consume(cells) }` to discard it deliberately
 More: jet-lang.dev/e/E0140
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

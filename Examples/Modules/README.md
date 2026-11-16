@@ -25,6 +25,7 @@ Run a lesson from the repository root, for example `jet run Examples/Modules/<Le
 - [PubConstants](PubConstants/) — 3A: a public constant is read qualified (`limits.MAX_ITEMS`) or brought into scope by name with a member import (`use limits.[GREETING]`).
 - [PubFile](PubFile.jet)
 - [PublishablePkg](PublishablePkg/)
+- [QualifiedMarker](QualifiedMarker/) — A library's markers are named through the import that brings them in: `use web: routes` makes routes.jet's `Get` `#Web.Get` here.
 - [SelectiveImports](SelectiveImports.jet)
 - [SoftPublic](SoftPublic/)
 - [UseBlocks](UseBlocks.jet)

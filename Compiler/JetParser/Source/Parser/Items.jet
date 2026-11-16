@@ -47,7 +47,6 @@ use {
         Stmt,
         STATE_ARROW_LABEL,
         StructDef,
-        TagDef,
         TestDef,
         TextEdit,
         TraitConstDecl,
@@ -81,6 +80,7 @@ use {
         diagnostic_with_structured_edit,
         effect_scope_argument_valid,
         effect_scope_name,
+        effect_value_text_valid,
         marker_hook_of_declaration,
         marker_registered,
         marker_registered_accepts_arguments,
@@ -103,13 +103,13 @@ use {
         TOKEN_DOT_DOT_DOT,
         TOKEN_EOF,
         TOKEN_EQ,
+        TOKEN_FALSE,
         TOKEN_FLOAT,
         TOKEN_GT,
         TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_INT,
         TOKEN_KW_COPY,
-        TOKEN_KW_EFFECT,
         TOKEN_KW_ELSE,
         TOKEN_KW_ENUM,
         TOKEN_KW_EXTERN,
@@ -140,6 +140,7 @@ use {
         TOKEN_SLASH,
         TOKEN_STAR,
         TOKEN_STRING,
+        TOKEN_TRUE,
         TOKEN_UNIFIED_ARROW,
         Token,
     ]
@@ -256,10 +257,6 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             value: parser_parse_protocol(state, modifiers)
             return ParsedItemOrImport{item: Val(value), handled: true}
         }
-        parser_tag_decl_ahead(state) -> {
-            value: parser_parse_tag_policy(state, modifiers)
-            return ParsedItemOrImport{item: Val(value), handled: true}
-        }
         parser_migration_ahead(state) -> {
             value: parser_parse_migration(state)
             return ParsedItemOrImport{item: Val(Item.Migration{value: value}), handled: true}
@@ -319,9 +316,13 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
         }
         token.kind == TOKEN_KW_STRUCT -> {
             value: parser_parse_struct(state, modifiers)
-            // A fact plane's struct declares the plane alone.
+            // A fact plane's struct declares the plane alone, and a value
+            // tag's struct the tag alone.
             if value.fact == .Val(declaration) {
                 return ParsedItemOrImport{item: Val(Item.FactDecl{value: declaration}), handled: true}
+            }
+            if parser_tag_struct(state, value) == .Val(declaration) {
+                return ParsedItemOrImport{item: Val(Item.Tag{value: declaration}), handled: true}
             }
             return ParsedItemOrImport{item: Val(Item.Struct{value: value}), handled: true, companions: parser_type_companions(value.marker, value.effect_impl)}
         }
@@ -335,14 +336,6 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
         }
         token.kind == TOKEN_KW_IMPL -> return ParsedItemOrImport{item: Val(parser_parse_impl(state, modifiers)), handled: true}
         token.kind == TOKEN_KW_MODULE -> return ParsedItemOrImport{item: Val(parser_parse_module(state, modifiers)), handled: true}
-        token.kind == TOKEN_KW_EFFECT -> {
-            parser_refuse_effect_word(state)
-            return ParsedItemOrImport{item: None, handled: true}
-        }
-        token.kind == TOKEN_KW_TAG -> {
-            value: parser_parse_tag_decl(state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Tag{value: value}), handled: true}
-        }
         token.kind == TOKEN_KW_EXTERN -> return ParsedItemOrImport{item: Val(parser_parse_extern_rust(state)), handled: true}
     }
     ParsedItemOrImport{item: None, handled: false}
@@ -1393,9 +1386,10 @@ parser_parse_effect_row_entries: fn(state: &JetParserState, close: Int) -> [Effe
 }
 
 // An effect path `ident (.ident)*`, with an optional argument: a bounded
-// memory denial (`Mem.Alloc(above: N)`, `Mem.Stack(above: N)`), or a scope
+// memory denial (`Mem.Alloc(above: N)`, `Mem.Stack(above: N)`), a scope
 // string naming a folder, a host or a device (`FS.Read("templates/")`,
-// `Net("api.example.com")`). `Mem.Stack` is only ever bounded.
+// `Net("api.example.com")`), or a value of the effect type
+// (`Bucket{name: "photos"}`). `Mem.Stack` is only ever bounded.
 parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
     first: parser_expect_name(state, "for an effect name")
     name := parser_value(state, first)
@@ -1405,6 +1399,9 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
         segment: parser_expect_name(state, "for an effect path segment after `.`")
         name = "{name}.{parser_value(state, segment)}"
         end = segment.span.end
+    }
+    if parser_current_kind(state) == TOKEN_LBRACE {
+        return parser_effect_value_name(state, name, first.span.start)
     }
     if !parser_memory_bounded(name) && parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
@@ -1455,6 +1452,64 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
 // The memory denials an `above: Bytes` argument bounds.
 parser_memory_bounded: fn(name: String) -> Bool Never! {
     name == "Mem.Alloc" || name == "Mem.Stack"
+}
+
+// A value of the effect type `base` in a row (`Bucket{name: "photos"}`),
+// from its `{`: each field once with a literal, spelled back as
+// `field: literal` pairs joined by `, `. The entry names only that value; the
+// bare type names every value.
+parser_effect_value_name: fn(state: &JetParserState, base: String, start: Int) -> NamedSpan {
+    open: parser_bump(state)
+    fields := [String]{}
+    names := [String]{}
+    loop parser_current_kind(state) != TOKEN_RBRACE && !parser_aborting(state) {
+        label: parser_expect_name(state, "for a field of the effect value")
+        field: parser_value(state, label)
+        if names.contains(field) {
+            parser_add_fatal_code(state, "E0119", label.span, "`{base}{{…}}` gives the field `{field}` twice", "an effect value gives each field of the effect type one value", "remove the second `{field}: …`")
+            return NamedSpan{name: base, span: Span{start: start, end: label.span.end}}
+        }
+        parser_expect(state, TOKEN_COLON, "`:` after the effect value's field name")
+        value: parser_effect_value_literal(state, base, field) ?? return NamedSpan{name: base, span: Span{start: start, end: label.span.end}}
+        fields.push("{field}: {value}")
+        names.push(field)
+        if parser_current_kind(state) == TOKEN_RBRACE -> break
+        parser_expect(state, TOKEN_COMMA, "`,` between the effect value's fields")
+    }
+    close: parser_expect(state, TOKEN_RBRACE, "`}}` to close the effect value")
+    span: Span{start: start, end: close.span.end}
+    if fields.len() == 0 && !parser_aborting(state) {
+        parser_add_fatal_code(state, "E0119", Span{start: open.span.start, end: close.span.end}, "`{base}{{}}` gives no value", "an effect value gives each field of the effect type a value; the bare type names every value", "write `{base}` for every value, or give its fields (`{base}{{name: \"photos\"}}`)")
+    }
+    NamedSpan{name: "{base}{{{fields.join(", ")}}}", span: span}
+}
+
+// One field's literal in an effect value, spelled back: a plain quoted text,
+// an integer, `true` or `false`. None after a fatal report.
+parser_effect_value_literal: fn(state: &JetParserState, base: String, field: String) -> String? {
+    token: parser_current(state)
+    if token.kind == TOKEN_STRING && parser_interpolations(state, token) == 0 {
+        _ := parser_take_text(state, false)
+        text: parser_value(state, token)
+        if !effect_value_text_valid(text) {
+            parser_add_fatal_code(state, "E0119", token.span, "the text of `{field}` in `{base}{{…}}` holds a quote, a backslash or a control character", "an effect value is spelled back into rows and reports as written, so its text is plain", "write `{field}` without quotes, backslashes or control characters")
+            return None
+        }
+        return Val("\"{text}\"")
+    }
+    if token.kind == TOKEN_TRUE || token.kind == TOKEN_FALSE {
+        parser_bump(state)
+        return Val(if token.kind == TOKEN_TRUE -> "true" else -> "false")
+    }
+    negative: token.kind == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_INT
+    if token.kind == TOKEN_INT || negative {
+        if negative -> parser_bump(state)
+        number: parser_bump(state)
+        amount: parser_integer(state, number) ?? 0
+        return Val(if negative -> "-{amount}" else -> "{amount}")
+    }
+    parser_add_fatal_code(state, "E0119", token.span, "`{field}` in `{base}{{…}}` needs a literal value", "an effect value is fixed when the program is checked, so each field holds a plain text, an integer, `true` or `false`", "write a literal, such as `{field}: \"photos\"`")
+    None
 }
 
 // Rust `type_starts_here`, with the `#Tag Type` value-tag prefix.
@@ -3064,29 +3119,4 @@ parser_impl_os_target: fn(state: &JetParserState, markers: [Marker]) -> String? 
         }
     }
     None
-}
-
-parser_parse_tag_decl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> TagDef {
-    start: parser_bump(state)
-    name: parser_expect_name(state, "after `tag`")
-    deny := [NamedSpan]{}
-    from := [NamedSpan]{}
-    end := name.span
-    if {
-        parser_current_kind(state) == TOKEN_LBRACE -> {
-            parser_bump(state)
-            loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
-                keyword: parser_expect_name(state, "in a tag declaration")
-                target: parser_expect_name(state, "after a tag declaration clause")
-                item := NamedSpan{name: parser_value(state, target), span: target.span}
-                if parser_value(state, keyword) == "deny" -> deny.push(item.copy())
-                if parser_value(state, keyword) == "from" -> from.push(item)
-                parser_finish_statement(state)
-            }
-            close: parser_expect(state, TOKEN_RBRACE, "`}}` after tag declaration")
-            end = close.span
-        }
-        else -> parser_finish_statement(state)
-    }
-    TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, end)}
 }

@@ -1,0 +1,10 @@
+# The app graph's sitemap lists only states whose screen opens without
+# signing in. Both a public guide screen and a signed-in inbox screen give a
+# sitemap list; `/sitemap.xml` lists each guide's address at the origin the
+# crawler asked, and no inbox. `/robots.txt` asks every crawler to leave the
+# inbox screen, each path segment a `*`, and names the sitemap.
+fixture: SitemapListsOnlyPublicStates.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "/sitemap.xml: 200 application/xml; charset=utf-8\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>http://HOST/guides/getting%20started</loc></url><url><loc>http://HOST/guides/faq</loc></url></urlset>\n/robots.txt: 200 text/plain; charset=utf-8\nUser-agent: *\nDisallow: /inbox/*$\nSitemap: http://HOST/sitemap.xml\n"

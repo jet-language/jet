@@ -1,0 +1,14 @@
+# Claim: DataEvent is the enum Core/Encoding/Encoding.jet declares, laid out inline like every other Core enum: its values are built, held in lists and options, compared with == and matched by payload, and one event stream written by the JSON and the CBOR file writers reads back equal through their readers, a byte string included on CBOR, while both writers refuse a Number event as Unsupported; on o0, o1 and o2.
+# Hand-derived: the JSON text is the compact encoding of the stream as written; the CBOR stream lists its object keys shortest first, the order the CBOR writer sorts them into, so both formats read back exactly the events written.
+fixture: DataEventIsTheCoreDeclarationAcrossJSONAndCBOR.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --allow=FS.Read,FS.Write -O0 run.jet
+exit: 0 # o0
+stdout: = data_event_is_the_core_declaration_across_json_and_cbor.out # o0
+step: jet run --allow=FS.Read,FS.Write -O1 run.jet
+exit: 0 # o1
+stdout: = data_event_is_the_core_declaration_across_json_and_cbor.out # o1
+step: jet run --allow=FS.Read,FS.Write -O2 run.jet
+exit: 0 # o2
+stdout: = data_event_is_the_core_declaration_across_json_and_cbor.out # o2

@@ -1,0 +1,27 @@
+// The door arm of the "size, one root" cell: it reflects only `Rock`, and also
+// declares and uses `Door`. Reflection retains what its one root reaches, so
+// the build carries `Rock`'s record and none for `Door`.
+use reflect: core.reflect
+
+Rock: struct {
+    weight: Int
+}
+
+Door: enum {
+    Open
+    Shut
+}
+
+label: fn(door: Door) -> String {
+    if door == {
+        .Open -> "open"
+        .Shut -> "shut"
+    }
+}
+
+run: fn() {
+    rock: Rock{weight: 3}
+    shown: reflect.of(rock)
+    print("{shown.path()} {shown.fields().len()}")
+    print("door {label(Door.Shut)}")
+}

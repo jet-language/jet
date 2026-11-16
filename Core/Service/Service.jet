@@ -15,6 +15,7 @@ use {
     service_encoding: core.encoding
     service_crypto: core.crypto
     service_files: core.files
+    core.prelude.[TaskFailure]
 }
 
 // Ordinary source values: construction, matching, equality and ownership use
@@ -103,11 +104,11 @@ TaskStatus: enum {
     CancelRequested
 }
 
+// How a workflow run or one of its activities ended: it finished, or it
+// failed the way a task's join fails. Its text is the failure's own text.
 TaskOutcome: enum {
     Finished
-    Panicked(String)
-    Cancelled
-    DeadlineBlown
+    Failed(TaskFailure)
 
     impl Display {
         display: fn(self) -> String { task_outcome_show(self) }
@@ -116,8 +117,8 @@ TaskOutcome: enum {
     impl Debug {
         debug: fn(&&self) -> String {
             if self == {
-                .Panicked(reason) -> "Panicked({reason:Debug})"
-                .Finished | .Cancelled | .DeadlineBlown -> task_outcome_show(self)
+                .Failed(.Panicked(reason)) -> "Panicked({reason:Debug})"
+                .Finished | .Failed(.Cancelled) | .Failed(.DeadlineBlown) -> task_outcome_show(self)
             }
         }
     }
@@ -126,18 +127,18 @@ TaskOutcome: enum {
 task_outcome_show: fn(outcome: TaskOutcome) -> String Never! {
     if outcome == {
         .Finished -> "Finished"
-        .Panicked(reason) -> "Panicked({reason})"
-        .Cancelled -> "Cancelled"
-        .DeadlineBlown -> "DeadlineBlown"
+        .Failed(.Panicked(reason)) -> "Panicked({reason})"
+        .Failed(.Cancelled) -> "Cancelled"
+        .Failed(.DeadlineBlown) -> "DeadlineBlown"
     }
 }
 
 #Test("task outcome display and debug distinguish raw and quoted panic reasons") {
     assert(task_outcome_show(TaskOutcome.Finished) == "Finished")
-    assert(task_outcome_show(TaskOutcome.Cancelled) == "Cancelled")
-    assert(task_outcome_show(TaskOutcome.DeadlineBlown) == "DeadlineBlown")
-    assert(task_outcome_show(TaskOutcome.Panicked("a\"b")) == "Panicked(a\"b)")
-    outcome: TaskOutcome.Panicked("a\"b")
+    assert(task_outcome_show(TaskOutcome.Failed(.Cancelled)) == "Cancelled")
+    assert(task_outcome_show(TaskOutcome.Failed(.DeadlineBlown)) == "DeadlineBlown")
+    assert(task_outcome_show(TaskOutcome.Failed(.Panicked("a\"b"))) == "Panicked(a\"b)")
+    outcome: TaskOutcome.Failed(.Panicked("a\"b"))
     assert("{outcome:Debug}" == "Panicked(\"a\\\"b\")")
 }
 
@@ -532,9 +533,9 @@ observe: fn(tree: ServiceTree) -> String Never! {
         if workflow.outcome == {
             .None -> { pending += 1 }
             .Val(.Finished) -> { finished += 1 }
-            .Val(.Panicked(_)) -> { panicked += 1 }
-            .Val(.Cancelled) -> { cancelled += 1 }
-            .Val(.DeadlineBlown) -> deadline_blown += 1
+            .Val(.Failed(.Panicked(_))) -> { panicked += 1 }
+            .Val(.Failed(.Cancelled)) -> { cancelled += 1 }
+            .Val(.Failed(.DeadlineBlown)) -> deadline_blown += 1
         }
     }
     rollback: if tree.last_upgrade == {
@@ -2673,10 +2674,10 @@ workflow_token_valid: fn(text: String) -> Bool Never! {
 
 workflow_outcome_from_wire: fn(value: String) -> TaskOutcome ServiceError! {
     if value == "Finished" -> return Ok(TaskOutcome.Finished)
-    if value == "Cancelled" -> return Ok(TaskOutcome.Cancelled)
-    if value == "DeadlineBlown" -> return Ok(TaskOutcome.DeadlineBlown)
+    if value == "Cancelled" -> return Ok(TaskOutcome.Failed(.Cancelled))
+    if value == "DeadlineBlown" -> return Ok(TaskOutcome.Failed(.DeadlineBlown))
     if !value.starts_with("Panicked:") -> return Err(state_error("unknown task outcome"))
-    outcome: TaskOutcome.Panicked(workflow_field(value.removeprefix("Panicked:"), "panic reason"))
+    outcome: TaskOutcome.Failed(.Panicked(workflow_field(value.removeprefix("Panicked:"), "panic reason")))
     if !workflow_valid_outcome(outcome) -> return Err(state_error("invalid task outcome"))
     Ok(outcome)
 }
@@ -2785,7 +2786,7 @@ workflow_apply: fn(workflows: &[TreeWorkflowState], payload: String) ServiceErro
         }
         workflows[index].history.push("sleep-cancelled")
         workflows[index].status = TaskStatus.CancelRequested
-        workflows[index].outcome = Val(TaskOutcome.Cancelled)
+        workflows[index].outcome = Val(TaskOutcome.Failed(.Cancelled))
     } else if payload.starts_with("workflow-wait-sleep-deadline:") {
         run_id: workflow_parse_int(payload.removeprefix("workflow-wait-sleep-deadline:"), "deadline sleep run id")
         if run_id < 1 -> return Err(state_error("workflow deadline sleep run id is invalid"))
@@ -2795,7 +2796,7 @@ workflow_apply: fn(workflows: &[TreeWorkflowState], payload: String) ServiceErro
         }
         workflows[index].history.push("sleep-deadline")
         workflows[index].status = TaskStatus.Paused
-        workflows[index].outcome = Val(TaskOutcome.DeadlineBlown)
+        workflows[index].outcome = Val(TaskOutcome.Failed(.DeadlineBlown))
     } else if payload.starts_with("workflow-wait-activity:") {
         run: workflow_split(payload.removeprefix("workflow-wait-activity:"), "activity wait run id")
         run_id: workflow_parse_int(run.value, "activity wait run id")
@@ -3046,13 +3047,13 @@ workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceError! 
             if state.value.history[cursor] == "sleep-cancelled" {
                 state.value.replay_cursor = cursor + 1
                 state.value.status = TaskStatus.CancelRequested
-                state.value.outcome = Val(TaskOutcome.Cancelled)
+                state.value.outcome = Val(TaskOutcome.Failed(.Cancelled))
                 return Err(ServiceError.Policy("workflow sleep was cancelled"))
             }
             if state.value.history[cursor] == "sleep-deadline" {
                 state.value.replay_cursor = cursor + 1
                 state.value.status = TaskStatus.Paused
-                state.value.outcome = Val(TaskOutcome.DeadlineBlown)
+                state.value.outcome = Val(TaskOutcome.Failed(.DeadlineBlown))
                 return Err(ServiceError.Policy("workflow sleep deadline expired"))
             }
         }
@@ -3239,15 +3240,15 @@ workflow_frame: fn(text: String) -> String Never! { "{text.bytes().len()}:{text}
 
 workflow_valid_outcome: fn(outcome: TaskOutcome) -> Bool Never! {
     if outcome == {
-        .Panicked(reason) -> reason.trim() != "" && workflow_visible(reason, 1048576)
-        .Finished | .Cancelled | .DeadlineBlown -> true
+        .Failed(.Panicked(reason)) -> reason.trim() != "" && workflow_visible(reason, 1048576)
+        .Finished | .Failed(.Cancelled) | .Failed(.DeadlineBlown) -> true
     }
 }
 
 workflow_outcome_wire: fn(outcome: TaskOutcome) -> String Never! {
     if outcome == {
-        .Panicked(reason) -> "Panicked:{workflow_frame(reason)}"
-        .Finished | .Cancelled | .DeadlineBlown -> task_outcome_show(outcome)
+        .Failed(.Panicked(reason)) -> "Panicked:{workflow_frame(reason)}"
+        .Finished | .Failed(.Cancelled) | .Failed(.DeadlineBlown) -> task_outcome_show(outcome)
     }
 }
 
@@ -3356,8 +3357,8 @@ workflow_replay_retry: fn(tree: &ServiceTree, index: Int, key: String, maximum: 
     assert(workflow_i64("2/3") == None)
     assert(workflow_visible("", 1048576))
     assert(!workflow_visible("\n", 1048576))
-    assert(!workflow_valid_outcome(TaskOutcome.Panicked("   ")))
-    assert(workflow_outcome_wire(TaskOutcome.Panicked("λ")) == "Panicked:2:λ")
+    assert(!workflow_valid_outcome(TaskOutcome.Failed(.Panicked("   "))))
+    assert(workflow_outcome_wire(TaskOutcome.Failed(.Panicked("λ"))) == "Panicked:2:λ")
 }
 
 group: fn(tree: &ServiceTree, name: String, workers: [String]) ServiceError! {

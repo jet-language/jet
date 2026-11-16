@@ -1,8 +1,16 @@
-Key: tag { deny: [Exec], timing: .Fixed }
+// `Key`, a fixed-timing value tag, is declared at the end of the file.
 
 sum: fn(k: #Key U64, m: U64) -> U64 {
     a: k + m
     b: wrapping(a * m)
     c: wrapping(b + m - m)
     wrapping(c - m)
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
 }

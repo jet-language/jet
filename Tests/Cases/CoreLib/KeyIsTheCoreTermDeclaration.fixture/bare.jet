@@ -1,0 +1,34 @@
+// run.jet without its `use core.term.[Key]`: the bare Core name.
+show: fn(k: Key) -> String {
+    if k == {
+        .Char(c) -> "char {c}"
+        .F(n) -> "f{n}"
+        .Ctrl(c) -> "ctrl {c}"
+        .Enter -> "enter"
+        .PageDown -> "page down"
+        .CapsLock -> "caps lock"
+        .Escape | .Backspace | .Tab | .Delete | .Insert | .Up | .Down | .Left | .Right | .Home | .End | .PageUp | .Shift | .Control | .Alt | .Super | .Unknown -> "other"
+    }
+}
+
+Pressed: struct {
+    key: Key
+    held: Int
+}
+
+run: fn() {
+    keys: [Key]{Key.Char('a'), .F(12), .Ctrl('c'), .Enter, .PageDown, .CapsLock, .Char('é')}
+    loop k in keys -> print(show(k))
+    print(keys[1] == Key.F(12))
+    print(keys[1] == Key.F(11))
+    print(keys[0] != keys[6])
+    last: keys.last()
+    if last == .Val(.Char(c)) -> print("last char {c}")
+    pressed: Pressed{key: .Ctrl('z'), held: 3}
+    print("{show(pressed.key)} held {pressed.held}")
+    chars := 0
+    loop k in keys {
+        if k == .Char(_) -> chars += 1
+    }
+    print(chars)
+}

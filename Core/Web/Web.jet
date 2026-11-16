@@ -350,34 +350,27 @@ App: struct {
     // (sema lowers each here): `answer` decodes the posted JSON array of the
     // method's arguments, runs it, and gives the encoded reply. `limit` and
     // `window_ns` are the marker's `limit:` and `per:` (`AppRemote`).
-    __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
-        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns)}
+    // `reply` names the method's reply type, whose `.cache<V>` policy the
+    // call is answered under (`app_remote_reply`); a method whose reply type
+    // is cached `.Public` also answers GET `path`
+    // (`app_remote_get_response`).
+    __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, reply: String, at: SourceLocation{#caller}) -> App Never! {
+        endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: reply, kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
-        http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_remote_response(endpoint, request)) }), "", at)
+        table: app_table(self)
+        answers: http_server.__handler(fn(request: HTTPRequest) { Ok(if request.method == "GET" -> app_remote_get_response(endpoint, request) else -> app_remote_response(endpoint, request)) })
+        http_server.route_add(table, "POST", path, answers.copy(), "", at)
+        http_server.route_add(table, "GET", path, answers, "", at)
         self.copy()
     }
 
-    // An `#App.SignedIn` method of `app.mount(service)` answers POST `path`.
-    // An App has no sign-in yet, so no call has a signed-in caller: each one
-    // is refused with 401, which a Remote reads as `CallError.SignedOut`.
-    // A call past the marker's `limit:` is answered 429 first; until sign-in
-    // names an account, the count is per network address.
-    __remote_signed_in: fn(self, path: String, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
-        counted: app_remote_limit(limit, window_ns)
+    // An `#App.SignedIn` method of `app.mount(service)` answers POST `path`
+    // (sema lowers each here) as `__remote_public` does, for a signed-in
+    // caller only (`app_signed_in_response`).
+    __remote_signed_in: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
+        endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: "", kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
-        http_server.route_add(
-            app_table(self),
-            "POST",
-            path,
-            http_server.__handler(fn(request: HTTPRequest) {
-                if app_remote_limited(counted, request) == .Val(wait_ns) {
-                    return Ok(app_limited(wait_ns))
-                }
-                Ok(app_json(401, app_error_json("`{request.path}` needs a signed-in caller")))
-            }),
-            "",
-            at,
-        )
+        http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_signed_in_response(endpoint, request)) }), "", at)
         self.copy()
     }
 
@@ -503,7 +496,8 @@ App: struct {
         self.copy()
     }
 
-    // The first assets root answers GET `/assets/*`.
+    // The first assets root answers GET `/assets/*`, each file under its own
+    // name and its hashed name (immutable); pages link the hashed name.
     assets: fn(self, path: String, at: SourceLocation{#caller}) -> App Never! {
         guard := self.__state.guard_edit()
         if guard.value.assets.len() == 0 {
@@ -596,6 +590,7 @@ App: struct {
     bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError! {
         app_image_route(self)
         app_push_route(self)
+        app_crawl_routes(self)
         http_server.server_bind(address, app_table(self), tls, deadline)
     }
 
@@ -603,6 +598,7 @@ App: struct {
     serve_once: fn(self, listener: TCPListener) HTTPError! -[Net, FS.Read, Time]> {
         app_image_route(self)
         app_push_route(self)
+        app_crawl_routes(self)
         http_server.server_serve_once(listener, app_table(self))
     }
 }
@@ -744,6 +740,7 @@ priv app_serve: fn(app: App, chosen: AppPort) Never! -[Env, IO, Net, FS.Read, Ti
     if dev -> app_dev_reload(table)
     app_image_route(app)
     app_push_route(app)
+    app_crawl_routes(app)
     if !app_has_root_catch_all(table) {
         fallback: app.copy()
         http_server.route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(app_not_found_response(fallback, request)) }), "", #here)
@@ -869,12 +866,40 @@ priv app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, 
             if placed.failure != "" {
                 return app_boundary(500, route.error, "Route error", placed.failure, call)
             }
-            app_html(200, WebPage{title: "{rendered.title}", body: placed.body}, app_route_data(path, request.path, call.data))
+            linked: app_asset_links(app, placed.body)
+            app_html(200, WebPage{title: "{rendered.title}", body: linked}, app_route_data(path, request.path, call.data))
         }
         .Rejected(message) -> app_boundary(400, route.error, "Route error", message, call)
         .Failed(message) -> app_boundary(500, route.error, "Route error", message, call)
         .JSON(_) -> app_boundary(500, route.error, "Route error", "the handler of `{path}` returned data instead of a page", call)
     }
+}
+
+// `body` with each quoted `/assets/<path>` that names a file under the
+// app's first assets root linked by that file's hashed name
+// (http_server.static_hashed), which answers with a year's immutable
+// caching; changing the file changes the name the page links. A path with
+// a query, fragment or escape, or that names no file, stays as written.
+priv app_asset_links: fn(app: App, body: String) -[FS.Read]> String Never! {
+    guard: app.__state.guard_read()
+    if guard.value.assets.len() == 0 -> return body.copy()
+    root: guard.value.assets[0].copy()
+    pieces: body.split("\"/assets/").to_list()
+    out := [String]{}
+    loop (at, piece) in pieces {
+        if at == 0 {
+            out.push("{piece}")
+            next
+        }
+        ends: piece.split("\"").to_list()
+        path: ends[0].copy()
+        plain: ends.len() > 1 && path != "" && !path.contains("?") && !path.contains("#") && !path.contains("%") && !path.contains("&")
+        hashed: if plain -> http_server.static_hashed(root, path) else -> None
+        if hashed == .Val(name) -> out.push("{name}{piece.slice(path.len(), piece.len())}") else {
+            out.push("{piece}")
+        }
+    }
+    out.join("\"/assets/")
 }
 
 priv app_not_found_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
@@ -913,6 +938,103 @@ priv app_push_route: fn(app: App) Never! {
     http_server.route_add(table, "POST", C_APP_PUSH_DEVICES, http_server.__handler(fn(request: HTTPRequest) { Ok(app_push_register(request)) }), "", #here)
 }
 
+// Registers GET `/sitemap.xml` (app_sitemap_response) when the app graph
+// gave a sitemap, and GET `/robots.txt` (app_robots_response) when it gave
+// one or has a screen only a signed-in caller opens, each unless the app
+// routes that path itself or did this before.
+priv app_crawl_routes: fn(app: App) Never! {
+    sitemap: calls.sitemap.given()
+    if !sitemap && calls.sitemap.signed_in_paths().len() == 0 {
+        return
+    }
+    table: app_table(app)
+    taken := [String]{}
+    loop route in http_server.mux_routes(table) {
+        if route.method == "GET" -> taken.push(route.pattern.copy())
+    }
+    if sitemap && !taken.contains("/sitemap.xml") {
+        http_server.route_add(table, "GET", "/sitemap.xml", http_server.__handler(fn(request: HTTPRequest) { Ok(app_sitemap_response(request)) }), "", #here)
+    }
+    if !taken.contains("/robots.txt") {
+        http_server.route_add(table, "GET", "/robots.txt", http_server.__handler(fn(request: HTTPRequest) { Ok(app_robots_response(request)) }), "", #here)
+    }
+}
+
+// The origin a crawler reached the app at: the request's Host, over https
+// when the proxy in front says so (`X-Forwarded-Proto`), else http.
+priv app_crawl_origin: fn(request: HTTPRequest) -> String Never! {
+    scheme: if (request.header("x-forwarded-proto") ?? "") == "https" -> "https" else -> "http"
+    "{scheme}://{request.header("host") ?? "localhost"}"
+}
+
+// The sitemap (sitemaps.org 0.9): the address of each page the graph's
+// sitemap lists now (`calls.sitemap.addresses`), at the origin the request
+// reached. A page only a signed-in caller opens is never one of them.
+priv app_sitemap_response: fn(request: HTTPRequest) -> HTTPResponse Never! {
+    origin: app_crawl_origin(request)
+    entries := [String]{}
+    loop address in calls.sitemap.addresses() {
+        entries.push("<url><loc>{app_html_attr("{origin}{address}")}</loc></url>")
+    }
+    document: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">{entries.join("")}</urlset>\n"
+    fields: core.http.headers_set(core.http.headers(), "content-type", "application/xml; charset=utf-8")
+    http_server.response_body(200, core.http.body_text(document), fields)
+}
+
+// The robots rules: every crawler leaves each screen only a signed-in
+// caller opens (`calls.sitemap.signed_in_paths`) and may crawl the rest,
+// and finds the sitemap when the graph gave one.
+priv app_robots_response: fn(request: HTTPRequest) -> HTTPResponse Never! {
+    lines := [String]{"User-agent: *"}
+    left: calls.sitemap.signed_in_paths()
+    if left.len() == 0 -> lines.push("Disallow:")
+    loop path in left -> lines.push("Disallow: {path}")
+    if calls.sitemap.given() -> lines.push("Sitemap: {app_crawl_origin(request)}/sitemap.xml")
+    fields: core.http.headers_set(core.http.headers(), "content-type", "text/plain; charset=utf-8")
+    http_server.response_body(200, core.http.body_text("{lines.join("\n")}\n"), fields)
+}
+
+// The states of a crawl test's public guide screen and signed-in inbox.
+priv CrawlTestGuide: struct {
+    slug: String
+}
+
+priv CrawlTestInbox: struct {
+    box: String
+}
+
+#Test("the sitemap lists the public pages the graph's sitemap gives, at the origin asked, and robots leave the signed-in screens") {
+    graph: calls.new("Crawl").__screen<CrawlTestGuide>("/help/:slug", "web.CrawlTestGuide", [String]{}, false).__screen<CrawlTestInbox>("/mail/:box", "web.CrawlTestInbox", [String]{}, true)
+    _: graph.__sitemap<CrawlTestGuide>(
+        "web.CrawlTestGuide",
+        [String]{"slug"},
+        fn() { [CrawlTestGuide]{CrawlTestGuide{slug: "a&b"}} },
+        fn(on: calls.App, guide: CrawlTestGuide) { [String]{on.__address_text<String>(guide.slug)} },
+    )
+    _: graph.__sitemap<CrawlTestInbox>(
+        "web.CrawlTestInbox",
+        [String]{"box"},
+        fn() { [CrawlTestInbox]{CrawlTestInbox{box: "mine"}} },
+        fn(on: calls.App, inbox: CrawlTestInbox) { [String]{on.__address_text<String>(inbox.box)} },
+    )
+    served: app()
+    app_crawl_routes(served)
+    table: app_table(served)
+    fields := web_http.headers_set(web_http.headers(), "host", "crew.example")
+    fields = web_http.headers_set(fields, "x-forwarded-proto", "https")
+    listed: http_server.__dispatch(table, web_http.server_request("GET", "/sitemap.xml", web_http.body_text(""), fields.copy()))
+    assert_eq(listed.status, 200)
+    assert_eq(listed.header("content-type"), Val("application/xml; charset=utf-8"))
+    assert_eq(listed.text() ?? "unreadable", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>https://crew.example/help/a%26b</loc></url></urlset>\n")
+    robots: http_server.__dispatch(table, web_http.server_request("GET", "/robots.txt", web_http.body_text(""), fields))
+    assert_eq(robots.status, 200)
+    rules: robots.text() ?? "unreadable"
+    assert(rules.starts_with("User-agent: *\n"))
+    assert(rules.contains("Disallow: /mail/*$\n"))
+    assert(!rules.contains("/help/"))
+    assert(rules.ends_with("Sitemap: https://crew.example/sitemap.xml\n"))
+}
+
 // The body of a device's registration: its push service (`apns`, `fcm` or
 // `web`) and the service's token for it; for Web Push, the subscription's
 // endpoint as the token, and its `p256dh` key and `auth` secret.
@@ -928,13 +1050,12 @@ priv AppPushDevice: struct {
 // is a URL.
 priv C_APP_PUSH_TOKEN_MAX: 4096
 
-// Registers the device the body names for the signed-in caller, so
+// Registers the device the body names for the signed-in caller, the
+// account whose session the request carries (`app_session_account`), so
 // `app.notify` reaches it: 204 once a store keeps it, 401 with no caller,
-// 400 for a body that names no device and 503 when no store takes it. An
-// App has no sign-in yet, so a request names no caller, and each one is
-// refused with 401 until sign-in names an account.
+// 400 for a body that names no device and 503 when no store takes it.
 priv app_push_register: fn(request: HTTPRequest) -[Net]> HTTPResponse Never! {
-    account: calls.maybe_caller() ?? return app_json(401, app_error_json("`{C_APP_PUSH_DEVICES}` needs a signed-in caller"))
+    account: app_session_account(request) ?? return app_json(401, app_error_json("`{C_APP_PUSH_DEVICES}` needs a signed-in caller"))
     body: request.json<AppPushDevice>() ?? return app_json(400, app_error_json("the device's registration is no JSON object of service, token, key and auth"))
     if body.service != "apns" && body.service != "fcm" && body.service != "web" {
         return app_json(400, app_error_json("a device's service is apns, fcm or web"))
@@ -1336,28 +1457,78 @@ priv app_mount_response: fn(handler: AppHandler, request: HTTPRequest) -[Net, FS
     }
 }
 
-// One endpoint method of a mounted service; sema builds `answer` from it.
+// One endpoint method of a mounted service, at `path`; sema builds `answer`
+// from it. `reply` names the method's reply type, for its cache policy
+// (`app_remote_reply`); "" for a signed-in method, whose replies no one
+// keeps. `kept` holds the replies a `.Public` policy lets the server keep,
+// by the call's JSON array of arguments (`app_kept_reply`).
 priv AppRemote: struct {
+    path: String
     answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!
     limit: AppRemoteLimit
+    reply: String
+    kept: Shared<[String:AppKeptReply]>
 }
 
-// An endpoint marker's `limit:`: at most `calls` calls from one network
-// address in each window of `window_ns`, counted in `windows` by address.
-// `calls` 0 is no limit.
+// A reply the server keeps for a `.Public` policy's `max_age`: the encoded
+// reply, whatever it holds (`false`, `0` and `""` are replies like any
+// other), the monotonic instant it was kept, and the last instant it is
+// fresh at.
+priv AppKeptReply: struct {
+    reply: String
+    kept_ns: Int
+    fresh_ns: Int
+}
+
+// The most replies one endpoint keeps; past it, the stale ones are dropped
+// first, and then all of them.
+APP_KEPT_REPLIES: 4096
+
+// The reply `kept` holds for the arguments `args` while it is fresh at
+// `now_ns`: fresh through the instant its `max_age` ends, stale after it.
+priv app_kept_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, now_ns: Int) -> AppKeptReply? Never! {
+    held: kept.guard_read()
+    found: held.value.get(args) ?? return None
+    if now_ns > found.fresh_ns -> return None
+    Val(found.copy())
+}
+
+// Keeps `reply` for the arguments `args` from `now_ns` for `max_age`; a
+// `max_age` of none or less keeps nothing.
+priv app_keep_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, reply: String, now_ns: Int, max_age: Duration) Never! {
+    if max_age.ns <= 0 {
+        return
+    }
+    fresh_ns: if max_age.ns > 9223372036854775807 - now_ns -> 9223372036854775807 else -> now_ns + max_age.ns
+    guard := kept.guard_edit()
+    if guard.value.len() >= APP_KEPT_REPLIES {
+        fresh := [String:AppKeptReply]{}
+        loop key in guard.value.keys() {
+            held: guard.value.get(key) ?? next
+            if now_ns <= held.fresh_ns -> fresh[key] = held
+        }
+        guard.value = if fresh.len() >= APP_KEPT_REPLIES -> [String:AppKeptReply]{} else -> fresh
+    }
+    guard.value[args.copy()] = AppKeptReply{reply: reply.copy(), kept_ns: now_ns, fresh_ns: fresh_ns}
+}
+
+// An endpoint marker's `limit:`: at most `calls` calls from one caller in
+// each window of `window_ns`, counted in `windows` by caller: a signed-in
+// call's account, or else the call's network address. `calls` 0 is no
+// limit.
 priv AppRemoteLimit: struct {
     calls: Int
     window_ns: Int
     windows: Shared<[String:AppRemoteWindow]>
 }
 
-// One address's window: when it began, and the calls counted in it.
+// One caller's window: when it began, and the calls counted in it.
 priv AppRemoteWindow: struct {
     start_ns: Int
     calls: Int
 }
 
-// The most addresses a limit keeps a window for; past it, the windows that
+// The most callers a limit keeps a window for; past it, the windows that
 // have ended are dropped first.
 APP_REMOTE_LIMIT_ADDRESSES: 65536
 
@@ -1365,13 +1536,46 @@ priv app_remote_limit: fn(calls: Int, window_ns: Int) -> AppRemoteLimit Never! {
     AppRemoteLimit{calls: calls, window_ns: window_ns, windows: Shared{[String:AppRemoteWindow]{}}}
 }
 
-// How long until `request`'s address may call again when its window's calls
-// are used up; None counts the call in.
-priv app_remote_limited: fn(limit: AppRemoteLimit, request: HTTPRequest) -> Int? Never! {
+// Who a call counts against in its endpoint's limit: the account it acts
+// for, or else its network address.
+priv app_remote_who: fn(request: HTTPRequest) -> String Never! {
+    if calls.maybe_caller() == .Val(account) -> return "account:{account.raw()}"
+    "address:{request.__peer}"
+}
+
+// The account whose live session `request` carries: the id of an
+// `Authorization: Bearer <id>`, or else its session cookie
+// (`app_session_cookie`). Every id is looked up the same way
+// (`auth.session_validate`), at the second the request was read, and a
+// missing, malformed, unknown, expired or forged one gives None alike.
+priv app_session_account: fn(request: HTTPRequest) -> auth.AccountID? Never! {
+    bearer: request.header("authorization") ?? ""
+    id: if bearer.starts_with("Bearer ") -> bearer.slice(7, bearer.len()).trim() else -> app_session_cookie(request)
+    session: auth.session_validate(id, request.__received * 1000) ?? return None
+    Val(auth.AccountID.from_string(auth.session_user(session)))
+}
+
+// The `jet_session` cookie `request` carries, as core.auth mints it, on a
+// request whose `Origin` names the server it was sent to
+// (`app_same_origin`); "" for none. A cookie on a request with no `Origin`,
+// or another site's, counts for nothing, so another site can't call as the
+// signed-in user.
+priv app_session_cookie: fn(request: HTTPRequest) -> String Never! {
+    if request.header("origin") == None || !app_same_origin(request) -> return ""
+    loop part in (request.header("cookie") ?? "").split(";").to_list() {
+        pair: part.trim()
+        if pair.starts_with("jet_session=") -> return pair.slice(12, pair.len())
+    }
+    ""
+}
+
+// How long until the caller `who` (`app_remote_who`) may call again when
+// its window's calls are used up; None counts the call in.
+priv app_remote_limited: fn(limit: AppRemoteLimit, who: String) -> Int? Never! {
     if limit.calls <= 0 -> return None
     now: rt.clock_mono_ns()
     guard := limit.windows.guard_edit()
-    window := guard.value.get(request.__peer) ?? AppRemoteWindow{start_ns: now, calls: 0}
+    window := guard.value.get(who) ?? AppRemoteWindow{start_ns: now, calls: 0}
     if now - window.start_ns >= limit.window_ns -> window = AppRemoteWindow{start_ns: now, calls: 0}
     if window.calls >= limit.calls -> return Val(window.start_ns + limit.window_ns - now)
     window.calls += 1
@@ -1383,7 +1587,7 @@ priv app_remote_limited: fn(limit: AppRemoteLimit, request: HTTPRequest) -> Int?
         }
         guard.value = kept
     }
-    guard.value[request.__peer.copy()] = window
+    guard.value[who.copy()] = window
     None
 }
 
@@ -1395,19 +1599,149 @@ priv app_limited: fn(wait_ns: Int) -> HTTPResponse Never! {
     refused.__with_header("retry-after", "{seconds}")
 }
 
-// A call of an endpoint method: 200 with its reply, or 422 with the field
-// errors (`app_invalid_json`) when the body is no JSON array of arguments
-// the method takes. The call is one transaction (`app_transacted`): a reply
-// that `__reply_err` made rolls it back.
+// A call of an endpoint method: 200 with its reply (`app_remote_reply`), or
+// 422 with the field errors (`app_invalid_json`) when the body is no JSON
+// array of arguments the method takes; a call past the endpoint's limit is
+// answered 429 first. The call is one transaction (`app_transacted`): a
+// reply that `__reply_err` made rolls it back. A call that carries an
+// `Idempotency-Key` header carries it as its request key, with the account
+// it acts for: the call's reply is kept under the key for 24 hours, and the
+// call sent again under the key is answered with the kept reply.
 priv app_remote_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    if app_remote_limited(endpoint.limit, request) == .Val(wait_ns) -> return app_limited(wait_ns)
-    text: request.text() ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
-    tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
-    app_transacted(None, fn() {
-        reply: endpoint.answer(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
-        (response: app_json(200, reply), commit: !app_reply_failed(reply))
-    })
+    app_remote_call(endpoint, request, None)
 }
+
+// A GET of an `#App.Public` endpoint method, whose arguments are the JSON
+// array of the query's `args` field (none is `[]`), answered as
+// `app_remote_response` answers a POST. Only a method whose reply type is
+// cached `.Public` answers GET, as a read any cache may keep; any other is
+// refused 405 with `Allow: POST`, so a GET, which a link or an image sends
+// from any site, never runs a method that may write.
+priv app_remote_get_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if calls.reply_cache.policy(endpoint.reply) == .Val(.Public(_)) {
+        at: web_http.index_byte(request.path.bytes(), 63)
+        if at < 0 -> return app_remote_call(endpoint, request, Val("[]"))
+        fields: web_http.query_decode_strict(request.path.slice(at + 1, request.path.len())) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's query is malformed: {err}"}}))
+        return app_remote_call(endpoint, request, Val(web_http.query_get(fields, "args") ?? "[]"))
+    }
+    refused: app_json(405, app_error_json("`{request.path}` answers POST: only a method whose reply type is cached `.Public` answers GET"))
+    refused.__with_header("allow", "POST")
+}
+
+// One call of `endpoint` (`app_remote_response`), whose JSON array of
+// arguments is `query`, or the request's body when None. Under a
+// `.Public(max_age)` policy, a call whose arguments have a fresh kept reply
+// is answered with it, with its `Age`, and the method does not run: the
+// reply this server keeps (`app_kept_reply`), or else the one any server of
+// the App keeps in a database file they share (`calls.reply_cache`). A run
+// that succeeds keeps its reply for `max_age` in both.
+priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: String?) -[Net, FS.Read]> HTTPResponse Never! {
+    if app_remote_limited(endpoint.limit, app_remote_who(request)) == .Val(wait_ns) {
+        return app_limited(wait_ns)
+    }
+    key: request.header("idempotency-key") ?? ""
+    if key.len() > APP_REQUEST_KEY_MAX {
+        return app_json(400, app_error_json("an `Idempotency-Key` is at most {APP_REQUEST_KEY_MAX} bytes"))
+    }
+    account := ""
+    if calls.maybe_caller() == .Val(who) -> account = who.raw()
+    asked: if key == "" -> calls.CallRequest?{None} else -> Val(calls.CallRequest{account: account, key: key, at: request.__received})
+    text := query ?? ""
+    if query == None {
+        text = request.text() ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
+    }
+    tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
+    policy: calls.reply_cache.policy(endpoint.reply)
+    now: rt.clock_mono_ns()
+    // The key a reply is kept under in the App's database files, the same on
+    // every server of the App.
+    shared: "{endpoint.path} {text}"
+    if policy == .Val(.Public(_)) {
+        if app_kept_reply(endpoint.kept, text, now) == .Val(hit) {
+            return app_remote_reply(policy, request, hit.reply, Val(now - hit.kept_ns))
+        }
+        if calls.reply_cache.find(shared) == .Val(found) {
+            return app_remote_reply(policy, request, found.reply, Val(found.age_ms * 1000000))
+        }
+    }
+    // The reply of the call's last run, for the server to keep.
+    last: Shared{[String]{}}
+    ran: last.copy()
+    answering: policy.copy()
+    answered: app_transacted(None, asked, fn() {
+        reply: endpoint.answer(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
+        if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
+        guard := ran.guard_edit()
+        guard.value = [String]{reply.copy()}
+        (response: app_remote_reply(answering, request, reply, None), commit: !app_reply_failed(reply))
+    })
+    if policy == .Val(.Public(max_age)) && (answered.status == 200 || answered.status == 304) && answered.header("idempotent-replayed") == None {
+        held: last.guard_read()
+        if held.value.len() == 1 && !app_reply_failed(held.value[0]) {
+            app_keep_reply(endpoint.kept, text, held.value[0], now, max_age)
+            if max_age.ns > 0 {
+                _: calls.reply_cache.keep(shared, held.value[0], max_age.ns /% 1000000)
+            }
+        }
+    }
+    answered
+}
+
+// The 200 answer of a call whose reply is `reply`, under the policy of its
+// reply type (`.cache<V>`; None when it has none): `.Private` is
+// `Cache-Control: private, no-store`; `.Public(max_age)` is
+// `public, max-age=<whole seconds>` with an `ETag` that names the reply's
+// bytes, and a GET whose `If-None-Match` names that ETag is answered 304
+// with no body. A reply the server kept `age_ns` ago carries its `Age` in
+// whole seconds. A failed run's reply is kept by no one.
+priv app_remote_reply: fn(policy: calls.CachePolicy?, request: HTTPRequest, reply: String, age_ns: Int?) -> HTTPResponse Never! {
+    answered: app_json(200, reply)
+    kept: policy ?? return answered
+    if kept == .Public(max_age) && !app_reply_failed(reply) {
+        etag: "\"{http_server.static_hash(reply.bytes())}\""
+        fields := core.http.headers_set(core.http.headers(), "etag", etag)
+        fields = core.http.headers_set(fields, "cache-control", "public, max-age={max_age.ns /% 1000000000}")
+        if age_ns == .Val(elapsed) {
+            fields = core.http.headers_set(fields, "age", "{elapsed /% 1000000000}")
+        }
+        if request.method == "GET" && http_server.etag_matches(request.header("if-none-match") ?? "", etag) {
+            return http_server.response_body(304, core.http.body_empty(), fields)
+        }
+        cached := answered
+        loop field in fields.fields -> cached = cached.__with_header(field.name, field.value)
+        return cached
+    }
+    answered.__with_header("cache-control", "private, no-store")
+}
+
+// A call of an `#App.SignedIn` endpoint method (`app_signed_in_call`). No
+// one keeps its answer, whatever its reply type's policy:
+// `Cache-Control: private, no-store`.
+priv app_signed_in_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    answered: app_signed_in_call(endpoint, request)
+    answered.__with_header("cache-control", "private, no-store")
+}
+
+// A call of an `#App.SignedIn` endpoint method, which runs, as
+// `app_remote_response` runs a public one, acting for the account whose
+// session the call carries (`app_session_account`). A call with no live
+// session counts against its network address and is refused with 401,
+// which a Remote reads as `CallError.SignedOut`; the refusal is the same
+// whatever the session lacked.
+priv app_signed_in_call: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if app_session_account(request) == .Val(account) {
+        calls.callers.begin_account(account)
+        defer calls.callers.end()
+        return app_remote_response(endpoint, request)
+    }
+    if app_remote_limited(endpoint.limit, app_remote_who(request)) == .Val(wait_ns) {
+        return app_limited(wait_ns)
+    }
+    app_json(401, app_error_json("`{request.path}` needs a signed-in caller"))
+}
+
+// The longest request key a call carries, in bytes.
+priv APP_REQUEST_KEY_MAX: 255
 
 // Whether `reply` is a failed run's: `__reply_err` leads it.
 priv app_reply_failed: fn(reply: String) -> Bool Never! { reply.starts_with("{{\"err\":") }
@@ -1420,14 +1754,23 @@ priv app_reply_failed: fn(reply: String) -> Bool Never! { reply.starts_with("{{\
 // `Retry-After`. A call made on a task that runs one already is part of it.
 // A webhook's call runs `delivery` (None for any other call): a store that
 // has run it already makes the call roll back, and the delivery is answered
-// 200 `{"repeated":<ID>}`, so its sender stops delivering it.
-priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]> (response: HTTPResponse, commit: Bool) Never!) -[Net, FS.Read]> HTTPResponse Never! {
+// 200 `{"repeated":<ID>}`, so its sender stops delivering it. A remote
+// call carries `request` (None for a call that carries no request key): a
+// store that keeps a reply under its key makes the call roll back, and the
+// call is answered 200 with that reply, marked `Idempotent-Replayed: true`.
+priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallRequest?, run: fn() -[Net, FS.Read]> (response: HTTPResponse, commit: Bool) Never!) -[Net, FS.Read]> HTTPResponse Never! {
     loop _ in 0..<calls.transactions.attempts() {
         call: calls.transactions.begin() ?? return run().response
         if delivery == .Val(given) -> calls.transactions.deliver(call, given)
+        if request == .Val(asked) -> calls.transactions.ask(call, asked)
         outcome: run()
         if calls.transactions.repeated(call) {
+            kept: calls.transactions.reply(call)
             _: calls.transactions.end(call, false)
+            if request != None && kept == .Val(reply) {
+                replayed: app_json(200, reply)
+                return replayed.__with_header("idempotent-replayed", "true")
+            }
             id: if delivery == .Val(given) -> given.id.copy() else -> ""
             return app_json(200, "{{\"repeated\":{app_json_string(id)}}}")
         }
@@ -1442,7 +1785,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]
     first: runs.copy()
     second: runs.copy()
     // Refused by its store until its third run.
-    flaky: app_transacted(None, fn() {
+    flaky: app_transacted(None, None, fn() {
         count := first.guard_edit()
         count.value += 1
         if count.value < 3 {
@@ -1452,7 +1795,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]
     })
     assert_eq(flaky.status, 200)
     assert_eq(flaky.text(), "{{\"ok\":3}}")
-    refused: app_transacted(None, fn() {
+    refused: app_transacted(None, None, fn() {
         count := second.guard_edit()
         count.value += 1
         calls.transactions.refuse(calls.transactions.current() ?? panic("the call is open"))
@@ -1467,7 +1810,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]
 
 #Test("a delivery a store has run already is answered 200 as repeated, and its call rolls back") {
     delivery: calls.CallDelivery{id: "d-1", at: 1}
-    repeated: app_transacted(Val(delivery.copy()), fn() {
+    repeated: app_transacted(Val(delivery.copy()), None, fn() {
         call: calls.transactions.current() ?? panic("the call is open")
         assert_eq(calls.transactions.delivery(call), Val(delivery))
         calls.transactions.repeat(call)
@@ -1482,6 +1825,136 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, run: fn() -[Net, FS.Read]
     assert_eq(app_webhook_delivery(Signature.Stripe, None, stripe), "evt_1")
     assert_eq(app_webhook_delivery(Signature.Stripe, None, numbered), "")
     assert_eq(calls.transactions.current(), Int?{None})
+}
+
+#Test("a call whose request key a store kept a reply under is answered 200 with that reply, marked replayed, and its call rolls back") {
+    asked: calls.CallRequest{account: "ann", key: "k-1", at: 1}
+    replayed: app_transacted(None, Val(asked.copy()), fn() {
+        call: calls.transactions.current() ?? panic("the call is open")
+        assert_eq(calls.transactions.request(call), Val(asked))
+        // As core.db does when the call joins a store that kept the reply.
+        calls.transactions.answer(call, "{{\"ok\":7}}")
+        calls.transactions.repeat(call)
+        calls.transactions.answer(call, "{{\"err\":\"dropped\"}}")
+        (response: app_json(200, "{{\"err\":\"dropped\"}}"), commit: false)
+    })
+    assert_eq(replayed.status, 200)
+    assert_eq(replayed.text(), "{{\"ok\":7}}")
+    assert_eq(replayed.header("idempotent-replayed"), Val("true"))
+    assert_eq(calls.transactions.current(), Int?{None})
+}
+
+#Test("a signed-in endpoint runs acting for the account whose session the call carries, and refuses every other call alike with 401") {
+    auth.register_user("web-test-ann", "ann's hash") ?? panic("ann registers: {err}")
+    now: core.time.now_utc().to_timestamp()
+    live: auth.password_login("web-test-ann", "ann's hash", now * 1000, 60000) ?? panic("ann signs in: {err}")
+    ended: auth.password_login("web-test-ann", "ann's hash", (now - 60) * 1000, 1) ?? panic("ann signed in before: {err}")
+    served: app().__remote_signed_in("/api/me", fn(args: RemoteArgs) { Ok(args.__reply_value<String>((calls.maybe_caller() ?? auth.AccountID.from_string("no one")).raw())) }, 0, 0)
+    table: app_table(served)
+    id: auth.session_id(live)
+    assert_eq(app_signed_in_test(table, now, "", "Bearer {id}", "theme=dark; jet_session=not-it"), "200 {{\"ok\":\"web-test-ann\"}}")
+    assert_eq(app_signed_in_test(table, now, "https://app.example", "", "theme=dark; jet_session={id}"), "200 {{\"ok\":\"web-test-ann\"}}")
+    refused: "401 {{\"error\":\"`/api/me` needs a signed-in caller\"}}"
+    assert_eq(app_signed_in_test(table, now, "https://elsewhere.example", "", "jet_session={id}"), refused)
+    assert_eq(app_signed_in_test(table, now, "", "", "jet_session={id}"), refused)
+    assert_eq(app_signed_in_test(table, now, "", "", ""), refused)
+    assert_eq(app_signed_in_test(table, now, "", "Bearer {auth.session_id(ended)}", ""), refused)
+    assert_eq(app_signed_in_test(table, now, "", "Bearer sess-{"0".repeat(64)}", ""), refused)
+    assert_eq(app_signed_in_test(table, now, "", "Bearer {id}x", ""), refused)
+    assert_eq(app_signed_in_test(table, now + 120, "", "Bearer {id}", ""), refused)
+    assert_eq(calls.maybe_caller(), auth.AccountID?{None})
+}
+
+// The status and body `table` answers a call of `/api/me`, read at the
+// second `at`, on the server `app.example` that carries the `Origin`
+// `origin`, the `Authorization` `authorization` and the `Cookie` `cookie`
+// ("" sends none of each).
+priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorization: String, cookie: String) -[Net, FS.Read]> String Never! {
+    fields := web_http.headers_set(web_http.headers(), "host", "app.example")
+    if origin != "" -> fields = web_http.headers_set(fields, "origin", origin)
+    if authorization != "" -> fields = web_http.headers_set(fields, "authorization", authorization)
+    if cookie != "" -> fields = web_http.headers_set(fields, "cookie", cookie)
+    request := web_http.server_request("POST", "/api/me", web_http.body_text("[]"), fields)
+    request.__received = at
+    answer: http_server.__dispatch(table, request)
+    "{answer.status} {answer.text() ?? "unreadable"}"
+}
+
+#Test("a public reply cached `.Public` carries its max-age and ETag and is answered 304 to a GET that names the ETag; no one keeps a `.Private` or signed-in reply") {
+    _: calls.new("Cache").__cache<String>("web-test.Cached", calls.CachePolicy.Public{max_age: 10min})
+    served: app().__remote_public("/api/cached", fn(args: RemoteArgs) { Ok(args.__reply_value<Bool>(false)) }, 0, 0, "web-test.Cached")
+    table: app_table(served)
+    posted: http_server.__dispatch(table, web_http.server_request("POST", "/api/cached", web_http.body_text("[]"), web_http.headers()))
+    assert_eq(posted.status, 200)
+    assert_eq(posted.header("cache-control"), Val("public, max-age=600"))
+    etag: posted.header("etag") ?? panic("a public reply carries no ETag")
+    got: http_server.__dispatch(table, web_http.server_request("GET", "/api/cached?args=%5B%5D", web_http.body_empty(), web_http.headers()))
+    assert_eq(got.status, 200)
+    assert_eq(got.header("etag") ?? "", etag)
+    assert_eq(got.text() ?? "unreadable", "{{\"ok\":false}}")
+    asked: web_http.headers_set(web_http.headers(), "if-none-match", etag)
+    unchanged: http_server.__dispatch(table, web_http.server_request("GET", "/api/cached", web_http.body_empty(), asked))
+    assert_eq(unchanged.status, 304)
+    assert_eq(unchanged.header("etag") ?? "", etag)
+    assert_eq(unchanged.text() ?? "unreadable", "")
+    _: calls.new("Cache").__cache<String>("web-test.Cached", calls.CachePolicy.Private)
+    kept: http_server.__dispatch(table, web_http.server_request("POST", "/api/cached", web_http.body_text("[]"), web_http.headers()))
+    assert_eq(kept.header("cache-control"), Val("private, no-store"))
+    assert_eq(kept.header("etag"), String?{None})
+    refused: http_server.__dispatch(table, web_http.server_request("GET", "/api/cached", web_http.body_empty(), web_http.headers()))
+    assert_eq(refused.status, 405)
+    assert_eq(refused.header("allow"), Val("POST"))
+    signed: app().__remote_signed_in("/api/me", fn(args: RemoteArgs) { Ok(args.__reply_value<Bool>(false)) }, 0, 0)
+    unsigned: http_server.__dispatch(app_table(signed), web_http.server_request("POST", "/api/me", web_http.body_text("[]"), web_http.headers()))
+    assert_eq(unsigned.status, 401)
+    assert_eq(unsigned.header("cache-control"), Val("private, no-store"))
+}
+
+#Test("a reply a `.Public` policy keeps answers the same arguments again without a run, whether it is false, 0 or empty text") {
+    _: calls.new("Cache").__cache<Bool>("web-test.Kept", calls.CachePolicy.Public{max_age: 10min})
+    runs: Shared{0}
+    counted: runs.copy()
+    served: app().__remote_public(
+        "/api/kept",
+        fn(args: RemoteArgs) {
+            kind: args.__take<Int>(0) ?? return Err(err)
+            guard := counted.guard_edit()
+            guard.value += 1
+            if kind == 0 -> return Ok(args.__reply_value<Bool>(false))
+            if kind == 1 -> return Ok(args.__reply_value<Int>(0))
+            Ok(args.__reply_value<String>(""))
+        },
+        0,
+        0,
+        "web-test.Kept",
+    )
+    table: app_table(served)
+    replies: [String]{"{{\"ok\":false}}", "{{\"ok\":0}}", "{{\"ok\":\"\"}}"}
+    loop (kind, reply) in replies {
+        first: http_server.__dispatch(table, web_http.server_request("POST", "/api/kept", web_http.body_text("[{kind}]"), web_http.headers()))
+        assert_eq(first.text() ?? "unreadable", reply)
+        assert_eq(first.header("age"), String?{None})
+        again: http_server.__dispatch(table, web_http.server_request("POST", "/api/kept", web_http.body_text("[{kind}]"), web_http.headers()))
+        assert_eq(again.text() ?? "unreadable", reply)
+        assert_eq(again.header("age"), Val("0"))
+    }
+    held: runs.guard_read()
+    assert_eq(held.value, 3)
+}
+
+#Test("a kept reply is fresh through the instant its max_age ends and stale after it") {
+    kept: Shared{[String:AppKeptReply]{}}
+    app_keep_reply(kept, "[1]", "{{\"ok\":0}}", 1000, Duration{ns: 500})
+    assert_eq((app_kept_reply(kept, "[1]", 1000) ?? panic("kept at once")).reply, "{{\"ok\":0}}")
+    assert_eq((app_kept_reply(kept, "[1]", 1500) ?? panic("kept at the instant max_age ends")).kept_ns, 1000)
+    assert_eq(app_kept_reply(kept, "[1]", 1501) == None, true)
+    assert_eq(app_kept_reply(kept, "[2]", 1000) == None, true)
+    app_keep_reply(kept, "[1]", "{{\"ok\":1}}", 1501, Duration{ns: 500})
+    assert_eq((app_kept_reply(kept, "[1]", 2001) ?? panic("kept again after it ran")).reply, "{{\"ok\":1}}")
+    app_keep_reply(kept, "[3]", "{{\"ok\":0}}", 1000, Duration{ns: 0})
+    assert_eq(app_kept_reply(kept, "[3]", 1000) == None, true)
+    app_keep_reply(kept, "[4]", "{{\"ok\":0}}", 1000, Duration{ns: 9223372036854775807})
+    assert_eq(app_kept_reply(kept, "[4]", 9223372036854775807) == None, false)
 }
 
 // One webhook method of a mounted service: how its sender signs, the names
@@ -1520,7 +1993,7 @@ priv app_webhook_response: fn(hook: AppWebhook, request: HTTPRequest) -[Net, FS.
     delivery: if id == "" -> calls.CallDelivery?{None} else -> Val(calls.CallDelivery{id: id, at: request.__received})
     values.push(text)
     arguments: live_json.parse("[{values.join(",")}]") ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
-    app_transacted(delivery, fn() {
+    app_transacted(delivery, None, fn() {
         reply: hook.answer(RemoteArgs{tree: arguments.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
         if app_reply_failed(reply) -> return (response: app_json(500, reply), commit: false)
         (response: app_json(200, reply), commit: true)
@@ -2826,19 +3299,23 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
     }
     calls.push.store(devices)
     apns: "{{\"service\":\"apns\",\"token\":\"a1b2\"}}"
-    assert_eq(app_push_test_status(apns), 401)
-    ann: auth.AccountID.from_string("acct_ann")
-    statuses: calls.as_caller(ann, fn() {
-        [Int]{
-            app_push_test_status(apns),
-            app_push_test_status("{{\"service\":\"sms\",\"token\":\"a1b2\"}}"),
-            app_push_test_status("{{\"service\":\"fcm\",\"token\":\"\"}}"),
-            app_push_test_status("{{\"service\":\"web\",\"token\":\"https://push.example.net/1\"}}"),
-            app_push_test_status("{{\"service\":\"web\",\"token\":\"push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
-            app_push_test_status("{{\"service\":\"web\",\"token\":\"https://push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
-            app_push_test_status("[1]"),
-        }
-    })
+    // A request names its caller only by the session it carries, whoever
+    // serves it.
+    assert_eq(app_push_test_status("", 0, apns), 401)
+    assert_eq(calls.as_caller(auth.AccountID.from_string("acct_ann"), fn() { app_push_test_status("", 0, "{{\"service\":\"apns\",\"token\":\"a1b2\"}}") }), 401)
+    auth.register_user("acct_ann", "ann's hash") ?? panic("ann registers: {err}")
+    now: core.time.now_utc().to_timestamp()
+    session: auth.password_login("acct_ann", "ann's hash", now * 1000, 60000) ?? panic("ann signs in: {err}")
+    ann: "Bearer {auth.session_id(session)}"
+    statuses: [Int]{
+        app_push_test_status(ann, now, apns),
+        app_push_test_status(ann, now, "{{\"service\":\"sms\",\"token\":\"a1b2\"}}"),
+        app_push_test_status(ann, now, "{{\"service\":\"fcm\",\"token\":\"\"}}"),
+        app_push_test_status(ann, now, "{{\"service\":\"web\",\"token\":\"https://push.example.net/1\"}}"),
+        app_push_test_status(ann, now, "{{\"service\":\"web\",\"token\":\"push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
+        app_push_test_status(ann, now, "{{\"service\":\"web\",\"token\":\"https://push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
+        app_push_test_status(ann, now, "[1]"),
+    }
     assert_eq(statuses, [Int]{204, 400, 400, 400, 400, 204, 400})
     held: kept.guard_read()
     assert_eq(held.value.len(), 2)
@@ -2857,15 +3334,20 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
         forget: fn(_: String, _: String) { true },
     }
     calls.push.store(devices)
-    calls.__notify(auth.AccountID.from_string("acct_unset"), "Due today", "Ship v2", "{{\"TaskView\":{{\"id\":7}}}}")
+    calls.App.__notify(auth.AccountID.from_string("acct_unset"), "Due today", "Ship v2", "/tasks/7")
     notes: calls.push.outcomes()
     assert(notes.len() > 0)
     assert_eq(notes[notes.len() - 1], "skipped fcm acct_unset: no FCM settings")
 }
 
-// The status a registration of `body` at `/__jet/push/devices` answers.
-priv app_push_test_status: fn(body: String) -[Net]> Int Never! {
-    request: web_http.server_request("POST", C_APP_PUSH_DEVICES, web_http.body_text(body), web_http.headers())
+// The status a registration of `body` at `/__jet/push/devices` answers,
+// read at the second `at`, with the `Authorization` `authorization` ("" for
+// none).
+priv app_push_test_status: fn(authorization: String, at: Int, body: String) -[Net]> Int Never! {
+    fields := web_http.headers()
+    if authorization != "" -> fields = web_http.headers_set(fields, "authorization", authorization)
+    request := web_http.server_request("POST", C_APP_PUSH_DEVICES, web_http.body_text(body), fields)
+    request.__received = at
     app_push_register(request).status
 }
 
@@ -2923,7 +3405,7 @@ priv app_push_test_status: fn(body: String) -[Net]> Int Never! {
 }
 
 #Test("with no collector named an app runs no trace layer; with one, an endpoint call is one span") {
-    served: app().__remote_public("/api/status", fn(args: RemoteArgs) { Ok(args.__reply_value<String>("up")) }, 0, 0)
+    served: app().__remote_public("/api/status", fn(args: RemoteArgs) { Ok(args.__reply_value<String>("up")) }, 0, 0, "String")
     table: app_table(served)
     // No collector named: nothing is installed, so a request runs no layer.
     assert(!(app_trace_settings([String:String]{}) == .Val(_)))

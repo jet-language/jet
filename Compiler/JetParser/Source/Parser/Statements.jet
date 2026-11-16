@@ -1988,7 +1988,7 @@ parser_report_unknown_word: fn(state: &JetParserState, top_level: Bool) {
     if parser_current(state).kind == TOKEN_KW_MUTATE -> parser_bump(state)
     word: parser_text(state, token)
     site: if top_level -> "declaration" else -> "statement"
-    keyword: token.kind != TOKEN_IDENT || [String]{"fn", "struct", "enum", "trait", "module", "tag", "effect"}.contains(word)
+    keyword: token.kind != TOKEN_IDENT || [String]{"fn", "struct", "enum", "trait", "module"}.contains(word)
     what: if keyword -> "the keyword `{word}` doesn't start a {site}" else -> "`{word}` is not a Jet word"
     why: if top_level -> "a declaration here is `name: value` (`run: fn() {{ … }}`, `Point: struct {{ … }}`) or an `impl`, `use` or `extern`, and a script line is a call, binding or assignment" else -> "a statement here starts with a binding (`name: value`), an assignment, a call, `if`, `loop`, `return`, `break` or `next`"
     parser_add_error(state, token.span, what, why, "start the line with one of these forms")

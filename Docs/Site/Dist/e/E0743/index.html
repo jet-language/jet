@@ -36,14 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Declare an effect row on the trait method, such as `-[]&gt;` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move the dynamic call outside the bounded function.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0743</code>: <code>Tests/UI/crypto_expert_nonce_trait_dispatch_precedence.stderr</code>.</p>
-<pre class="diag">Error [jet.MissingDynamicEffectBound]: Dynamic call `Shape.area` has no effect bound
-  --&gt; Tests/UI/crypto_expert_nonce_trait_dispatch_precedence.jet:12:18
+<p>First UI snapshot mentioning <code>E0743</code>: <code>Tests/UI/Ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr</code>.</p>
+<pre class="diag">Error [jet.ViewOutlivesOwner]: Returned views need a stable owner relationship
+  --&gt; open_dynamic_trait_view_dispatch_is_rejected.jet:6:21
     |
- 12 |     return shape.area()
-    |                  ^^^^
+  6 |     return selector.select(left, right)
+    |                     ^^^^^^
+ Why: Each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources
+ Fix: Return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`
+More: jet-lang.dev/e/E2305
+
+Error [jet.MissingDynamicEffectBound]: Dynamic call `Select.select` has no effect bound
+  --&gt; Tests/UI/Ownership/open_dynamic_trait_view_dispatch_is_rejected.jet:6:21
+    |
+  6 |     return selector.select(left, right)
+    |                     ^^^^^^
  Why: A trait value can select any implementation at runtime, and the program holds none of this method to bound the call, so an enclosing effect ceiling needs the trait method&#39;s declared row or a ceiling in the trait&#39;s `#FX(…)` cap
- Fix: Declare an effect row on `Shape.area`, such as `-[]&gt;` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function
+ Fix: Declare an effect row on `Select.select`, such as `-[]&gt;` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function
 More: jet-lang.dev/e/E0743
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

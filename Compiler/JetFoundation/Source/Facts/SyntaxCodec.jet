@@ -158,6 +158,7 @@ body_codec_put_program: fn(out: &BodyCodecOut, value: Program) Never! {
     body_codec_put_list_string(out, value.used_import_names)
     body_codec_put_list_debugtracesite(out, value.debug_sites)
     body_codec_put_list_approuteroot(out, value.app_route_roots)
+    body_codec_put_list_string(out, value.app_missing_assets)
     body_codec_put_opt_modulecap(out, value.file_cap)
     body_codec_put_list_string(out, value.entry_locals)
     body_codec_put_asttables(out, value.tables)
@@ -181,10 +182,11 @@ body_codec_get_program: fn(bytes: [U8], input: &BodyCodecIn) -> Program Never! {
     f14: body_codec_get_list_string(bytes, input)
     f15: body_codec_get_list_debugtracesite(bytes, input)
     f16: body_codec_get_list_approuteroot(bytes, input)
-    f17: body_codec_get_opt_modulecap(bytes, input)
-    f18: body_codec_get_list_string(bytes, input)
-    f19: body_codec_get_asttables(bytes, input)
-    Program{imports: f0, items: f1, script_body: f2, block_spans: f3, fenced_statements: f4, web_target_ceiling: f5, no_prelude: f6, default_target: f7, html_path: f8, policy_declarations: f9, user_policy_declarations: f10, applied_rules: f11, rule_facts: f12, else_arms: f13, used_import_names: f14, debug_sites: f15, app_route_roots: f16, file_cap: f17, entry_locals: f18, tables: f19}
+    f17: body_codec_get_list_string(bytes, input)
+    f18: body_codec_get_opt_modulecap(bytes, input)
+    f19: body_codec_get_list_string(bytes, input)
+    f20: body_codec_get_asttables(bytes, input)
+    Program{imports: f0, items: f1, script_body: f2, block_spans: f3, fenced_statements: f4, web_target_ceiling: f5, no_prelude: f6, default_target: f7, html_path: f8, policy_declarations: f9, user_policy_declarations: f10, applied_rules: f11, rule_facts: f12, else_arms: f13, used_import_names: f14, debug_sites: f15, app_route_roots: f16, app_missing_assets: f17, file_cap: f18, entry_locals: f19, tables: f20}
 }
 
 body_codec_put_opt_inlineversion: fn(out: &BodyCodecOut, value: InlineVersion?) Never! {
@@ -8251,12 +8253,13 @@ body_codec_put_rulesite: fn(out: &BodyCodecOut, value: RuleSite) Never! {
         .Test -> { body_codec_put_tag(out, 16) }
         .Operation -> { body_codec_put_tag(out, 17) }
         .Text -> { body_codec_put_tag(out, 18) }
-        .Arm -> body_codec_put_tag(out, 19)
+        .Arm -> { body_codec_put_tag(out, 19) }
+        .TypeUse -> body_codec_put_tag(out, 20)
     }
 }
 
 body_codec_get_rulesite: fn(bytes: [U8], input: &BodyCodecIn) -> RuleSite Never! {
-    position: body_codec_get_tag(bytes, input, 20, 0)
+    position: body_codec_get_tag(bytes, input, 21, 0)
     if position == {
         1 -> RuleSite.File
         2 -> RuleSite.Module
@@ -8277,6 +8280,7 @@ body_codec_get_rulesite: fn(bytes: [U8], input: &BodyCodecIn) -> RuleSite Never!
         17 -> RuleSite.Operation
         18 -> RuleSite.Text
         19 -> RuleSite.Arm
+        20 -> RuleSite.TypeUse
         else -> RuleSite.Package
     }
 }

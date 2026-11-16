@@ -1,0 +1,24 @@
+use watcher: core.watcher
+
+// `WatchEvent.kind` is core.watcher's WatchKind, named through the module.
+kind_text: fn(kind: watcher.WatchKind) -> String {
+    if kind == {
+        .Created -> "created"
+        .Modified -> "modified"
+        .Removed -> "removed"
+        .Error -> "error"
+        .Exited -> "exited"
+        .Ready -> "ready"
+    }
+}
+
+run: fn() {
+    // No process has this id, so the first poll reports it exited.
+    handle: watcher.process_pid(2147483646)
+    loop event in handle.poll() {
+        print("{kind_text(event.kind)} {event.kind == WatchKind.Exited}")
+    }
+    handle.cancel()
+    print(kind_text(watcher.WatchKind.Created))
+    print(watcher.WatchKind.Ready == WatchKind.Ready)
+}

@@ -25,11 +25,10 @@ EFFECT_ARROW_OPEN: "-["
 
 EFFECT_ARROW_CLOSE: "]>"
 
-/// The effect-declaration word. An effect is a type: a struct, or an enum
-/// whose cases are a closed family, with an `impl Effect { … }` block; a
-/// package effect that is a kind of another names it with `parent:`. The word
-/// itself declares nothing: a `Root.Leaf: effect` line is refused (E0003)
-/// with that type declaration as its fix.
+/// The retired effect-declaration word. An effect is a type: a struct, or an
+/// enum whose cases are a closed family, with an `impl Effect { … }` block; a
+/// package effect that is a kind of another names it with `parent:`. No rule
+/// accepts `effect Name` or `Name: effect`. Not in `JET_KEYWORD_LIST`.
 KW_EFFECT_DECL: "effect"
 
 /// Reading the program's own arguments. It is a leaf of
@@ -48,21 +47,12 @@ EFFECT_LEAF_TIME_WAIT: "Time.Wait"
 /// as `#Input value` and `#Credential value`.
 KW_TAINTED: "Tainted"
 
-/// Prelude `Credential` fact tag. A credential value reaching `print`, `log`, or
-/// `serialize` sinks is E0722. Part of the closed kind set already ratified in
-/// (`.Input`/`.PII`/`.Secret`/`.Credential`). PascalCase per.
-KW_CREDENTIAL: "Credential"
-
 /// Retired spelling; no rule accepts it. The contract is `#Scrub(Tag)`.
 KW_SANITIZER: "Sanitizer"
 
 /// A typed function contract that removes exactly one
 /// declared fact tag from its result.
 KW_SCRUB: "Scrub"
-
-/// Prelude fact tags. They are declarations, not compiler
-/// flags, and may be used anywhere a declared tag may be used.
-BUILTIN_TAGS: [String]{"Input", "PII", "Secret", "Credential"}
 
 /// The retired typestate fn marker. State types carry its facts: a parameter
 /// typed `Reservation.Confirmed` requires that state (calling with a value in

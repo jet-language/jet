@@ -1,0 +1,14 @@
+use fs: core.files
+
+// Leaves a marker beside the program while building.
+mark: fn() -[FS.Write]> String {
+    fs.write("marker.txt", "written while building") ?? return "can't write the marker: {err}"
+    "marked"
+}
+
+run: fn() {
+    #Impure("the build leaves a marker") {
+        marked: #run mark()
+        print(marked)
+    }
+}

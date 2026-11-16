@@ -1,0 +1,18 @@
+# Reflection and the codecs keep the built-in roles of outcome cases. A
+# reflected optional holds `Val` with its payload or `None`, a reflected
+# result `Ok` or `Err` with its payload, and a plain Int holds no case. A
+# codec writes a present optional as its value and leaves an absent one out,
+# never as a tagged case. A case catalog lists declared cases only: an enum
+# with an `Int` payload has two, and `Int` itself has none, so a payload's
+# infinite value domain is never listed as cases. Every tier prints the same.
+fixture: EnumCasesBuiltinRoles.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "Val[value=3] None[]\nOk[value=4] Err[value=Broken]\nFull[value=9] -\nslot cases 2, int cases 0\n{\"count\":2}\n-1 on\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "Val[value=3] None[]\nOk[value=4] Err[value=Broken]\nFull[value=9] -\nslot cases 2, int cases 0\n{\"count\":2}\n-1 on\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "Val[value=3] None[]\nOk[value=4] Err[value=Broken]\nFull[value=9] -\nslot cases 2, int cases 0\n{\"count\":2}\n-1 on\n"

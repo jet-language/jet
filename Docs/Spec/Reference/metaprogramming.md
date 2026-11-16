@@ -243,12 +243,10 @@ gate and the command-line grant:
 use fs: core.files
 
 run: fn() {
-    #run {
-        #Impure("read an explicitly approved ambient input") {
-            @CONFIG: fs.read("config.txt")
-        }
+    #Impure("read an explicitly approved ambient input") {
+        config: #run fs.read("config.txt")
+        print(config.trim())
     }
-    print(@CONFIG)
 }
 ```
 
@@ -258,7 +256,14 @@ not exercise a Tier 2 compile-time effect and does not by itself require
 source gate and `--gate impure=allow` (E3410, E3411). With both, the call runs
 natively in the compile-time child, as the same call runs in the program: the
 child admits the file system calls of the `#Impure` block and of the functions
-it calls, and every other host effect stays refused. The block's authority is
+it calls, and every other host effect stays refused. The read happens once,
+while building: the program keeps the text it read and never opens the file
+again. The child starts with none of the compiler's environment, so reading or
+changing the environment is refused (E3401) rather than answering None, and
+launching a process is refused (E3401) before the process starts
+([`comptime_diff_host_target_impure_admits_files_only`](../../../Tests/Cases/ComptimeDiff/comptime_diff_host_target_impure_admits_files_only.case);
+[`comptime_diff_host_target_a_baked_read_outlives_its_input`](../../../Tests/Cases/ComptimeDiff/comptime_diff_host_target_a_baked_read_outlives_its_input.case)
+builds this program). The block's authority is
 checked first, so an effect the package or the row denies is E0749 at build
 and at run alike. The `#Impure` marker is a
 gate, not a blanket host permission. Keep declarations, grants, and resulting
@@ -266,6 +271,14 @@ inputs in the package and lock records rather than relying on ambient process
 state. The executable policy is defined at the compiler boundary; the
 source-facing effect names are registered through
 the [syntax registry](../../../Compiler/JetFoundation/Data/Syntax/).
+
+Compile-time code computes for the selected target, not for the compiler's
+host: `sys.usize_max()` in a `#run` value is 2^32 - 1 for `board.sensor_v1`
+and `web` and 2^64 - 1 for a hosted 64-bit target, and a call the target
+can't make, such as `files.write` on a no-OS board, is E3301 at check, before
+any compile-time code runs
+([`comptime_diff_host_target_values_follow_the_target_layout`](../../../Tests/Cases/ComptimeDiff/comptime_diff_host_target_values_follow_the_target_layout.case),
+[`comptime_diff_host_target_an_os_call_is_refused_before_it_runs`](../../../Tests/Cases/ComptimeDiff/comptime_diff_host_target_an_os_call_is_refused_before_it_runs.case)).
 
 ## Build entries and typed generation
 
@@ -673,8 +686,21 @@ whole call with E0112 naming the field. A capture is an ordinary copy of the
 value, so a value that can't be copied (one holding a `#SingleUse` value,
 resource state or a borrowed loan) is refused with E0112 too.
 
+Reflection costs only what a program reflects. A program that imports
+`core.reflect` and reflects nothing builds to the same bytes as the same
+program without the import, and a program that reflects one root carries
+that root's record and none for a type it declares and uses but never
+reflects. The two paired size cells are `reflection_size_pairs` in the
+canonical manifest
+([`measurement-manifest.json`](../../../Tools/Gauntlet/measurement-manifest.json)),
+each checked by its case:
+[`reflection_size_none_is_byte_identical`](../../../Tests/Cases/Reflect/reflection_size_none_is_byte_identical.case)
+and
+[`reflection_size_one_root_keeps_no_door`](../../../Tests/Cases/Reflect/reflection_size_one_root_keeps_no_door.case).
+
 An enum value's `case()` returns the case it held when it was captured as a
-`Case`, and `None` for a value of any other type. `Case.name()` is the case's
+`Case`, an outcome value's its built-in case (below), and `None` for a value
+of any other type. `Case.name()` is the case's
 name (a grouped case's last segment), `path()` its `module.Enum.Case` path,
 the same text as `T.reflect().cases[i].path`, and `fields()` its payload as
 the `Field` list a struct value has: a lone unnamed payload is the field
@@ -685,6 +711,27 @@ whichever case it holds; an enum met again inside its own payload holds no
 case there. [`enum_case_meta`](../../../Tests/Run/Reflect/enum_case_meta.jet)
 walks each kind of case. `jet inspect expand --facts reflect` lists each call
 with the type, field and case tree it retains.
+
+An optional or result value holds the built-in case its patterns name: an
+optional `Val` with the present value or `None`, a result `Ok` or `Err` with
+its payload, and a result of an optional one flat three-state case, `Val`,
+`None` or `Err`. A lone payload is the field `value`; a unit success holds
+none. A case's path is the type's path, then the case (`Int?.Val`,
+`Int? app.Lookup!.Err`), and an outcome type's name and path spell each
+declared type it holds by its leaf name and its canonical path. These cases
+show at every reflected boundary, a struct field, an enum payload and
+another outcome's payload included. Absence is never another case: `None` of
+`Int?` is not a named unit case like `Gate.Shut`, and the unit value `()`
+holds no case. The language keeps them apart the same way: `()` is not an
+absent `Int?` (E0113), bare `None` is not an enum's unit case (E0308), and a
+unit case is not an optional's absence (E0305), as
+[`enum_cases_no_unit_collapse`](../../../Tests/UI/enum_cases_no_unit_collapse.jet)
+shows. A case catalog lists declared cases only: an enum with an `Int`
+payload has its declared cases, never one per `Int`, and a codec writes a
+present optional as its value, never as a tagged case
+([`enum_cases_builtin_roles`](../../../Tests/Cases/Reflect/enum_cases_builtin_roles.case)).
+[`OutcomeCases`](../../../Examples/Metaprogramming/Reflection/OutcomeCases.jet)
+walks each outcome at each boundary.
 
 `info.marker(T)` on a `TypeInfo`, `FieldInfo`, `CaseInfo`, `MethodInfo` or `FunctionInfo`
 (and, in a marker body, on a module's `ModuleInfo`) reads the marker

@@ -1,0 +1,33 @@
+# A marker is a struct implementing Core `Marker`, with no `marker` word. A
+# package marker sets `sites` and `repeatable` as constants of its `impl
+# Marker` and expands its template into the marked type; setting `resolution`
+# changes how the compiler checks code, which only the Prelude's markers may
+# do. The Prelude's `Policy` marker keeps its `.Tighten` rule: an inner
+# setting can't widen the one it inherits. The old `marker Name { … }`
+# declaration fails to parse like any unknown word, with no teaching
+# diagnostic.
+fixture: DeclTypesMarkerStructsFollowTheMarkerLaw.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: ~ "a Point" # the template's member is on the marked type
+stderr: empty
+step resolution: jet check resolution/main.jet
+exit: 1
+stderr: ~ "`resolution` changes how the compiler checks code, so `Merged` can't set it" # a package marker can't set resolution
+stderr: ~ "--> main.jet:6:9" # located at the setting
+stderr: ~ "jet-lang.dev/e/E0936" # the marker-setting code
+stderr: ~ "1 problem found" # one refusal
+step tighten: jet check tighten/main.jet
+exit: 1
+stderr: ~ "Invalid effective `sentries` policy" # the inner block widens the module's setting
+stderr: ~ "--> main.jet:6:5" # located at the inner #Policy
+stderr: ~ "the module rung sets `sentries: .Off` here" # naming the rung it widens
+stderr: ~ "jet-lang.dev/e/E0355" # the scoped-policy code
+step word: jet check word/main.jet
+exit: 1
+stderr: ~ "`marker` is not a Jet word" # the old declaration word is gone
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: !~ "impl Marker" # no teaching diagnostic names the new form
+stderr: ~ "1 problem found" # one parse error

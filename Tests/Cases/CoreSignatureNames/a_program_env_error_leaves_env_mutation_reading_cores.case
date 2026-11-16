@@ -1,0 +1,31 @@
+# A program declares `EnvError` with a payload, the name of core.sys's
+# environment error. sys.unset's Core body reads its native's result through
+# the platform signature's bare `EnvError`, which is still Core's declaration:
+# the mutation status lowers on every tier and the program's own enum keeps its
+# payload.
+fixture: AProgramEnvErrorLeavesEnvMutationReadingCores.fixture
+env: NO_COLOR=1
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "err invalid environment variable name\nown 1 2\nother\n"
+step: jet run -O1 run.jet
+exit: 0
+stdout: = "err invalid environment variable name\nown 1 2\nother\n"
+step: jet run -O2 run.jet
+exit: 0
+stdout: = "err invalid environment variable name\nown 1 2\nother\n"
+step: jet build -O0 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "err invalid environment variable name\nown 1 2\nother\n"
+step: jet build -O1 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "err invalid environment variable name\nown 1 2\nother\n"
+step: jet build -O2 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "err invalid environment variable name\nown 1 2\nother\n"

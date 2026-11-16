@@ -1,6 +1,6 @@
 // The compiler workspace's code suites, run by the test
 // profiles of package.jet: `jet test Compiler --profile packages`, `core`,
-// `fuzz`, `selfhost` or `perf`. Each runs in its own child, where JET names the jet under test,
+// `fuzz`, `selfhost`, `inline_census` or `perf`. Each runs in its own child, where JET names the jet under test,
 // JET_COMPILER_IDENTITY its identity (that jet sets it when the caller didn't)
 // and JET_TEST_SUITE_ROOT this package's directory; the checkout is its
 // parent. A row is one check; the profile compares the rows with
@@ -31,6 +31,7 @@ use {
         kit_history_load,
         kit_pool_run,
         kit_pool_save,
+        kit_golden_discover,
         kit_schedule_claims,
         kit_state_dir,
     ]
@@ -106,6 +107,7 @@ test: fn(t: Test) -> Int {
     t.suite("core", core_rows)
     t.suite("fuzz", fuzz_rows)
     t.suite("selfhost", selfhost_rows)
+    t.suite("inline_census", inline_census_rows)
     t.suite("perf", perf_rows)
     t.run()
 }
@@ -850,6 +852,139 @@ core_rows: fn(rows: TestRows) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// inline_census: the census of the `#Inline(Always)` calls left after
+// inlining, one row per corpus at each CORE_LEVELS level, `<corpus>
+// [<level>]`. Each build traces the Call ops whose callee is marked, counted
+// once its tier's passes ran, as the counter `ir.opt.marked_calls` (JetCLI
+// Host.jet jet_cli_native_program), which JET_PHASE_COUNTERS prints on
+// stderr. The corpora: every Jet golden entry of CENSUS_EXAMPLES (`jet
+// build`), every Core source that declares #Tests (`jet test`, as the core
+// suite runs it) and the compiler's entry CENSUS_COMPILER (`jet build`), each
+// build writing to a scratch directory. A row passes when its builds count
+// zero marked calls in all; it fails on a marked call left and when none of
+// its builds reached the optimizer. A build refused before the optimizer (an
+// example that shows a compile error) counts nothing.
+CENSUS_EXAMPLES: "Examples"
+
+CENSUS_COMPILER: "Compiler/JetCLI/run.jet"
+
+// The stderr line of the counter, before its value and the closing brace.
+CENSUS_COUNTER: "JET_PHASE_COUNTERS {{\"phase\":\"ir.opt\",\"marked_calls\":"
+
+// One census build: the row of `ids` it counts toward, the argument that
+// names the file it builds, and its arguments.
+CensusRun: struct {
+    row: Int
+    file: Int
+    args: [String]
+}
+
+inline_census_rows: fn(rows: TestRows) {
+    setup: suite_setup(rows) ?? return
+    scratch: files.temp_dir("jet-inline-census") ?? {
+        rows.fail("inline census", "couldn't create a scratch directory: {err}")
+        return
+    }
+    discovered: kit_golden_discover(setup.checkout, [String]{CENSUS_EXAMPLES})
+    examples := [Int]{}
+    loop (index, entry) in discovered {
+        if entry.path.ends_with(".jet") -> examples.push(index)
+    }
+    sources := [String]{}
+    jet_sources(setup.checkout, "Core", sources) ?? {
+        rows.fail("Core", err.message)
+        return
+    }
+    sources.sort()
+    core := [Int]{}
+    loop (index, path) in sources {
+        text: files.read(files.join(setup.checkout, path)) ?? {
+            rows.fail(path, "couldn't read `{path}`: {err}")
+            next
+        }
+        if test_names(text).len() > 0 -> core.push(index)
+    }
+    // The compiler's build needs the stack the bootstrap chain gives it.
+    current: sys.stack_limit() ?? {
+        rows.fail("inline census", "couldn't read the stack limit: {err}")
+        return
+    }
+    sys.set_stack_limit(Val(BUILD_STACK), current.hard) ?? {
+        rows.fail("inline census", "couldn't raise the stack limit: {err}")
+        return
+    }
+    ids := [String]{}
+    runs := [CensusRun]{}
+    loop level in CORE_LEVELS {
+        id: "Examples [{level}]"
+        if rows.selects(id) {
+            loop index in examples {
+                out: files.join(scratch.path, "{runs.len()}")
+                runs.push(CensusRun{row: ids.len(), file: 3, args: [String]{"build", "-{level}", "--output-dir={out}", discovered[index].path.copy()}})
+            }
+            ids.push(id)
+        }
+        core_id: "Core [{level}]"
+        if rows.selects(core_id) {
+            loop index in core {
+                runs.push(CensusRun{row: ids.len(), file: 1, args: [String]{"test", sources[index].copy(), "-{level}"}})
+            }
+            ids.push(core_id)
+        }
+        compiler_id: "Compiler [{level}]"
+        if rows.selects(compiler_id) {
+            out: files.join(scratch.path, "{runs.len()}")
+            runs.push(CensusRun{row: ids.len(), file: 3, args: [String]{"build", "-{level}", "--output-dir={out}", CENSUS_COMPILER}})
+            ids.push(compiler_id)
+        }
+    }
+    if runs.len() == 0 {
+        return
+    }
+    trace: files.join(scratch.path, "trace-%p.json")
+    keys := [String]{}
+    specs := [ProcessSpec]{}
+    loop run in runs {
+        keys.push("{ids[run.row]} {run.args[run.file]}")
+        specs.push(jet_command(setup, setup.jet, run.args).env("JET_TRACE_FILE", trace).env("JET_PHASE_COUNTERS", "1"))
+    }
+    results: pool_runs(setup, "compiler-inline-census", keys, specs)
+    loop (row, id) in ids {
+        counted := 0
+        left := [String]{}
+        loop (index, run) in runs {
+            if run.row != row -> next
+            if results[index].receipt == {
+                .Val(receipt) -> {
+                    loop line in receipt.errors.split("\n") {
+                        value: census_marked_calls(line) ?? next
+                        counted += 1
+                        if value > 0 -> left.push("{run.args[run.file]}: {value}")
+                    }
+                }
+                .None -> {
+                    left.push("{run.args[run.file]}: couldn't run `jet {run.args.join(" ")}`: {results[index].error}")
+                }
+            }
+        }
+        if {
+            left.len() > 0 -> rows.fail(id, "marked calls left after inlining: {left.join(", ")}")
+            counted == 0 -> {
+                rows.fail(id, "none of its builds reached the optimizer, so the census counted nothing")
+            }
+            else -> rows.pass(id)
+        }
+    }
+    files.remove_all(scratch.path).drop("the scratch directory holds only this run's builds and traces")
+}
+
+// The value of a census counter line (CENSUS_COUNTER), else None.
+census_marked_calls: fn(line: String) -> Int? {
+    if !line.starts_with(CENSUS_COUNTER) || !line.ends_with("}}") -> return None
+    Val(Int.parse(line.slice(CENSUS_COUNTER.len(), line.len() - 1)) ?? return None)
 }
 
 // ---------------------------------------------------------------------------

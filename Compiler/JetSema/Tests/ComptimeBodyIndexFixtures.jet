@@ -49,7 +49,7 @@ use {
         sema_program_tables_init,
         sema_registration_module_index,
         sema_registration_prepare_graph,
-        sema_scope_environment_enter_probe_module,
+        sema_scope_environment_enter_comptime_module,
         sema_scope_environment_init,
         sema_scope_init,
     ]
@@ -406,13 +406,13 @@ body_index_publication_lifecycle: fn() {
     program := sema_program_tables_init(environment.registration_graph.move(), [TTypeDef]{})
     environment.registration_graph = None
     empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
-    body_index_require(sema_scope_environment_enter_probe_module(environment, program, body_index_module("mod::one"), empty), "an item probe retargets the registered module")
+    body_index_require(sema_scope_environment_enter_comptime_module(environment, program, body_index_module("mod::one"), empty), "an item check retargets the registered module")
     context := sema_check_context_init()
     context.comptime_body_values = environment.comptime_body_values.copy()
-    body_index_require(sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", span, site) == None, "the item probe intentionally sees no body values")
+    body_index_require(sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", span, site) == None, "the item check intentionally sees no body values")
     body_index_require(body_index_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{}:Debug}", "an empty selected view sees the original empty ordered row list")
     full := environment.comptime_body_publication.copy()
-    body_index_require(sema_scope_environment_enter_probe_module(environment, program, body_index_module("mod::one"), full), "the next function restores the publication")
+    body_index_require(sema_scope_environment_enter_comptime_module(environment, program, body_index_module("mod::one"), full), "the next function restores the publication")
     context.comptime_body_values = environment.comptime_body_values.copy()
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", span, site) == Val((first)), "empty item reset cannot erase a published function value")
     body_index_require(body_index_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first}:Debug}", "a full selected view sees ordered row contents, not the Shared cell")
@@ -429,7 +429,7 @@ body_index_publication_lifecycle: fn() {
         } else { panic("append lost its facts owner") }
     } else { panic("the old prefix lost its facts owner") }
     next_full := environment.comptime_body_publication.copy()
-    body_index_require(sema_scope_environment_enter_probe_module(environment, program, body_index_module("mod::one"), next_full), "the next function selects the new publication")
+    body_index_require(sema_scope_environment_enter_comptime_module(environment, program, body_index_module("mod::one"), next_full), "the next function selects the new publication")
     context.comptime_body_values = environment.comptime_body_values.copy()
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", span, site) == Val((first)) && sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", span, next_site) == Val((second)), "the new function sees the entire ordered updated publication")
     body_index_require(body_index_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first, second}:Debug}", "the next full view sees the newly published row order")

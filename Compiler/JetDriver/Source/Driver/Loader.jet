@@ -5,6 +5,7 @@ use {
         AppRouteFile,
         AppRouteRoot,
         ASTTables,
+        CallArg,
         ExprNode,
         ast_expr,
         ast_visit_body,
@@ -139,6 +140,8 @@ use {
         sema_registration_unit_type_name,
         SEMA_UNITS_CATALOG,
         sema_marker_rules_applied_row,
+        sema_comptime_input_named,
+        sema_comptime_input_path_law,
         sema_core_error_family_member,
         sema_eval_entry_show,
         sema_script_entry,
@@ -6731,6 +6734,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     jet_driver_expand_imported_cli_entry(modules, source_units, entry_module_identity)
     modules = jet_driver_order_core_modules(modules, source_units, request.core_sources, bare_modules)
     jet_driver_attach_app_route_roots(modules, source_units, request.authorized_sources)
+    jet_driver_attach_app_missing_assets(modules, source_units, request)
     jet_driver_fill_line_starts(request, source_units)
     provenance: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, generated_records)
     loop diagnostic in provenance.diagnostics -> diagnostics.push(diagnostic)
@@ -6929,4 +6933,77 @@ jet_driver_app_route_has_page: fn(root: JetDriverAuthorizedSourceRoot, path: Str
         return false
     }
     false
+}
+
+// `asset("…")` facts. An asset path is resolved as `embed_bytes` resolves its
+// path: from the calling file's own directory, read through that file's
+// comptime input host (jet_driver_comptime_inputs_for), so the compile records
+// the asset as an input and an edit to it rebuilds. Each literal path a module
+// passes to an `asset` call that the host can't read goes on the module's
+// Program, so sema reports the `ui.asset` call (E2822). A path that breaks the
+// comptime input path law is sema's E0957, not a missing file. A file whose
+// source never spells `asset` isn't searched, and a compile with no comptime
+// input host checks nothing.
+jet_driver_attach_app_missing_assets: fn(modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], request: JetDriverCompileRequest) {
+    snapshot: request.authorized_sources
+    loop index in 0..<modules.len() {
+        unit_index: modules[index].source_unit_index
+        if unit_index < 0 || unit_index >= source_units.len() -> next
+        unit: source_units[unit_index]
+        if unit.root_index < 0 || unit.root_index >= snapshot.roots.len() -> next
+        root: snapshot.roots[unit.root_index]
+        if unit.file_index < 0 || unit.file_index >= root.files.len() -> next
+        if !root.files[unit.file_index].source.contains("asset") -> next
+        paths: jet_driver_app_asset_paths(modules[index].program)
+        if paths.len() == 0 -> next
+        host: jet_driver_comptime_inputs_for(request, unit.path) ?? next
+        loop path in paths {
+            if sema_comptime_input_path_law(sema_comptime_input_named(path)) != None -> next
+            if host.comptime_input("embed_bytes", path, Span{start: 0, end: 0}) == .Err(_) {
+                modules[index].program.app_missing_assets.push(path)
+            }
+        }
+    }
+}
+
+// The literal paths of every `asset("…")` call in the file, once each: a
+// method call named `asset`, or a call of `asset` through an import.
+jet_driver_app_asset_paths: fn(program: Program) -> [String] {
+    paths := [String]{}
+    loop item in program.items {
+        if item == .Func(function) {
+            ast_visit_body(program.tables, function.body, fn(expression: ExprNode) { jet_driver_note_app_asset_path(program.tables, paths, expression) }, false)
+        }
+    }
+    ast_visit_body(program.tables, program.script_body, fn(expression: ExprNode) { jet_driver_note_app_asset_path(program.tables, paths, expression) }, false)
+    paths
+}
+
+jet_driver_note_app_asset_path: fn(tables: ASTTables, paths: &[String], expression: ExprNode) {
+    seen: ast_expr(tables, expression)
+    if seen == .MethodCall(_, method, _, _, _, args, _) {
+        if method == "asset" -> jet_driver_note_app_asset_literal(tables, paths, args)
+        return
+    }
+    if seen == .Call(call, _) {
+        if call.name == "asset" || call.name.ends_with(".asset") {
+            jet_driver_note_app_asset_literal(tables, paths, call.args)
+        }
+    }
+}
+
+// A path written as one string literal; a built path isn't checked.
+jet_driver_note_app_asset_literal: fn(tables: ASTTables, paths: &[String], args: [CallArg]) {
+    if args.len() != 1 {
+        return
+    }
+    if ast_expr(tables, args[0].expr) == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == .Lit(value) -> text = "{text}{value}" else {
+                return
+            }
+        }
+        if !paths.contains(text) -> paths.push(text)
+    }
 }

@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Grant the required memory right or move the call outside the denied boundary.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0921</code>: <code>Tests/UI/arena_bounded_open_multiplicity.stderr</code>.</p>
-<pre class="diag">Error [jet.MemoryDenialViolated]: `!Mem.Alloc(above: 8)` cannot be proved through the open dispatch at arena_bounded_open_multiplicity.jet
-  --&gt; Tests/UI/arena_bounded_open_multiplicity.jet:9:18
+<p>First UI snapshot mentioning <code>E0921</code>: <code>Tests/UI/Pure/pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.stderr</code>.</p>
+<pre class="diag">Error [jet.MemoryDenialViolated]: String interpolation allocates a new `String` at pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.jet violates the effective `!Mem.Alloc` declared at pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.jet
+  --&gt; Tests/UI/Pure/pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.jet:1:43
     |
-  9 |     loop true -&gt; reserve()
-    |                  ^^^^^^^
- Why: Loop iteration count is not statically bounded for arena accounting is reachable through arena_bounded_open_multiplicity.run -&gt; arena_bounded_open_multiplicity.reserve; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: signature denial `-[!Mem.Alloc(above: 8)]&gt;` in arena_bounded_open_multiplicity.jet
- Fix: Seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it
+  1 | format: fn(value: Int) -&gt; String { return &quot;{value}&quot; }
+    |                                           ^^^^^^^^^
+ Why: pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.jet is reachable through pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.compute -&gt; pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.format from code governed by `!Mem.Alloc`; declaration provenance: signature denial `-[!Mem.Alloc]&gt;` in pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.jet; operation provenance: format in pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.jet
+ Fix: Remove or replace the incompatible operation, seal the target set, or move the call outside this denial
 More: jet-lang.dev/e/E0921
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

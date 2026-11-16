@@ -193,6 +193,7 @@ use {
         ir_lint_context,
         ir_lint_module,
         ir_lint_types,
+        ir_opt_marked_calls,
         ir_opt_module_start,
         ir_opt_o0_bodies,
         ir_optimize_module,
@@ -1674,6 +1675,12 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
             jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)
         }
         if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
+    }
+    // The census of the marked calls this tier's passes left (JetIR
+    // OptInline.jet ir_opt_marked_calls): Compiler/test.jet's `inline_census`
+    // suite holds every build of Examples, Core and the compiler to 0.
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.ir.opt.marked_calls", ir_opt_marked_calls(built.program), -1)
     }
     built.program.single_thread = jet_cli_single_thread(built.program, runtime, closure_symbols)
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source, cli_files.cwd() ?? "")

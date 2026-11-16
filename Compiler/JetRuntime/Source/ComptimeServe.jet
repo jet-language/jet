@@ -22,7 +22,8 @@
 // set (an admitted `#Impure` block), with no reply.
 // Replies: 0 HELLO(count) + count entry words; 1 DONE(words); 2 HOST(kind,
 // operands, count, result area); 3 STOP(kind, words); 4 REFUSED(system
-// call, first argument).
+// call, first argument), or REFUSED(effect) with a negative effect
+// (comptime_serve_refuse).
 
 // The outermost serve frame while the image serves the compiler, else 0.
 comptime_serve_root := I64{0}
@@ -238,7 +239,15 @@ comptime_serve_stop_code := I64{0}
 // compiler, which reads their texts. The child then serves on above the
 // stopped call's frames, which never resume, so one child serves a whole
 // compile. Buffered output is flushed first, as the stop's own report would.
+// A refused effect (COMPTIME_STOP_REFUSED, comptime_serve_refuse) is
+// REFUSED instead, and the child exits as the SIGSYS handler's refusal does.
 #Export(c) jet_rt_comptime_serve_stop: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+    if (kind == COMPTIME_STOP_REFUSED) {
+        refusal: alloc_map_try(I64{4096})
+        if (refusal > I64{0}) { comptime_serve_reply(refusal, I64{4}, a, I64{0}, I64{0}, I64{0}) }
+        trap_defect_exit(I64{0})
+        return I64{0}
+    }
     jet_rt_stdout_flush()
     frame: jet_rt_alloc(I64{64}, I64{8})
     comptime_serve_fill(frame, I64{3}, kind, a, b, c)
@@ -271,3 +280,28 @@ comptime_serve_stop_code := I64{0}
     if (frame > I64{0}) { comptime_serve_reply(frame, I64{4}, number, first, I64{0}, I64{0}) }
     trap_defect_exit(I64{0})
 }
+
+// Effects of served code the filter can't refuse by name: the environment,
+// which no system call reads (the child starts with none, so a read would
+// answer None where the program sees the host's value), and a process
+// launch, whose first trapped call is a pipe. JetBackend ComptimeWire.jet
+// names the same numbers.
+COMPTIME_REFUSED_ENVIRONMENT: I64{-1}
+
+COMPTIME_REFUSED_PROCESS: I64{-2}
+
+// While the image serves the compiler, refuses the effect `refused` names as
+// the SIGSYS handler refuses a call: the stop door (Trap.jet trap_stop) hands
+// it to jet_rt_comptime_serve_stop, which sends REFUSED and ends the child.
+// Otherwise returns.
+comptime_serve_refuse: fn(refused: I64) {
+    if !comptime_serving() {
+        return
+    }
+    trap_stop(COMPTIME_STOP_REFUSED, refused, I64{0}, I64{0}, I64{0})
+}
+
+// The stop kind a refused effect reaches the stop door with. It never leaves
+// the child: the compiler's stop kinds (JetBackend Image/ComptimeWire.jet)
+// are 1 through 5.
+COMPTIME_STOP_REFUSED: I64{6}

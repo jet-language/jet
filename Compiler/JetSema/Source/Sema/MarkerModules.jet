@@ -3,7 +3,7 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[AppliedRuleApplication, Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, ast_program, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_none, owned_trait, owned_trait_auto_derive_marker, sema_casing_marker_qualifier]
+    jet_foundation.[AppliedRuleApplication, Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_none, owned_trait, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
@@ -524,7 +524,7 @@ sema_marker_module_check_groups: fn(graph: SemaRegistrationGraph, module_identit
 // The applied-rule argument menus, as Rust RULE_ARG_DECLARATIONS reads them:
 // Core.rows's core.compiler.lang `types { … }` leaves, with `Effect` naming the
 // canonical effect declaration roots (Rust EFFECT_ROOTS: the undotted rows of
-// the pinned Prelude effect module) and `TaintKind` the builtin taint tags.
+// the pinned Prelude effect module).
 sema_marker_module_argument_menus: fn(graph: SemaRegistrationGraph) -> [TAppliedRuleArgumentMenu]? {
     effect_index: sema_registration_module_index(graph, graph.canonical_effect_module_identity) ?? return None
     effect_roots := [String]{}
@@ -533,7 +533,7 @@ sema_marker_module_argument_menus: fn(graph: SemaRegistrationGraph) -> [TApplied
             effect_roots.push(declaration.name)
         }
     }
-    foundation_core_argument_menus(effect_roots, sema_taint_builtin_tag_names())
+    foundation_core_argument_menus(effect_roots)
 }
 
 // The prelude's applied-rule catalog (MARKER_SOURCE) with its argument menus.
@@ -549,8 +549,13 @@ sema_marker_module_catalog_registry: fn(applied: TAppliedRuleCatalog) -> SemaSco
     Val(catalog)
 }
 
+// A qualified marker that no imported module declares (E1023).
+sema_marker_module_unknown_qualified_error: fn(marker: Marker) -> Diagnostic {
+    sema_error("E1023", marker.name_span, "no imported module declares the marker `#{marker.name}`", "a qualified marker names a marker that the module behind its import declares", "check the marker's spelling and the import's local name, or declare the marker in that module")
+}
+
 // The marker laws of every module. A marker no rule or marker declaration
-// names (E0927) is returned per module row in `unknown_rules`,
+// names (E0927, or E1023 when it is qualified) is returned per module row in `unknown_rules`,
 // apart from the other reports: it does not stop registration, and the
 // module's declaration check reports it beside the body errors.
 sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, unknown_rules: &[[Diagnostic]]) -> [Diagnostic] {
@@ -585,7 +590,7 @@ sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRule
                         diagnostics.push(sema_error("E0086", marker.name_span, "this qualified marker has more than one declaring module", "a marker's import path must resolve to one module and one exported row", "give the modules distinct import aliases and qualify the marker with one of them"))
                     }
                     resolved.status == "unknown" -> {
-                        unknown.push(sema_marker_rules_unknown_error(catalog, marker))
+                        unknown.push(sema_marker_module_unknown_qualified_error(marker))
                     }
                     else -> {}
                 }
@@ -684,7 +689,9 @@ sema_marker_package_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRul
                 next
             }
             if resolved.status != "found" || resolved.declaration == None {
-                diagnostics.push(sema_marker_rules_unknown_error(catalog, written))
+                if written.name.contains(".") {
+                    diagnostics.push(sema_marker_module_unknown_qualified_error(written))
+                } else { diagnostics.push(sema_marker_rules_unknown_error(catalog, written)) }
                 next
             }
             marker.declaration_module = Val(resolved.declaring_module_identity)
@@ -717,25 +724,24 @@ sema_marker_package_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRul
     SemaMarkerPackageSite{markers: markers, diagnostics: diagnostics}
 }
 
-// Compiler derive spellings that are not owned traits (Rust `DERIVE_RULES`
-// beyond the OWNED_TRAITS rows and families).
-SEMA_MARKER_COMPILER_DERIVES: [String]{"CLI", "Patchable", "UnitFamily"}
-
-// A trait name becomes its `#Trait` derive spelling, so a trait may share a
-// name with a type-site marker only when that marker is the trait's derive
-// (`Equatable: trait` → `#Equatable`). Any other type marker (`#Layout`) owns
-// its name: `Layout: trait` is E0106 (Rust `register_trait`).
+// No marker shares a name with a trait. A built-in trait and the Prelude
+// marker of its name are one thing: the marker applies that trait
+// (`#Comparable` derives Comparable, `#Close(close)` gives a foreign handle
+// its Close). Any other trait named like a built-in marker (`Layout: trait`,
+// `Job: trait`) is E0106, and so is a marker declared under a built-in
+// trait's name (`Iterable: struct { impl Marker { … } }`).
 sema_marker_module_check_trait_collisions: fn(catalog: SemaScopeMembersMarkerRegistry, items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .Trait(definition) {
-            index: sema_marker_rules_catalog_rule_index(catalog.applied_rules, definition.name) ?? next
-            if !catalog.applied_rules[index].sites.contains(sema_marker_rules_site_name(RuleSite.Type)) {
+            if owned_trait(definition.name) != None -> next
+            if sema_marker_rules_catalog_rule_index(catalog.applied_rules, definition.name) == None {
                 next
             }
-            if owned_trait(definition.name) != None || owned_trait_auto_derive_marker(definition.name) || SEMA_MARKER_COMPILER_DERIVES.contains(definition.name) {
-                next
-            }
-            diagnostics.push(sema_error("E0106", definition.name_span, "the name `{definition.name}` is a non-derive type marker", "trait names become their matching `#Trait` derive spelling, while this marker has different semantics", "choose a trait name that does not collide with a registered type marker"))
+            diagnostics.push(sema_error("E0106", definition.name_span, "the trait name `{definition.name}` is the marker `#{definition.name}`", "a marker and a trait never share a name, so `#{definition.name}` always means the one marker", "choose a trait name that no marker has"))
+        }
+        if item == .MarkerDecl(declaration) {
+            if owned_trait(declaration.name) == None -> next
+            diagnostics.push(sema_error("E0106", declaration.name_span, "the marker name `{declaration.name}` is the built-in trait `{declaration.name}`", "a marker and a trait never share a name, so `{declaration.name}` always means the one trait", "choose a marker name that no trait has"))
         }
     }
 }
@@ -824,6 +830,22 @@ sema_marker_module_prelude_decls: fn() -> [MarkerDecl] {
         if item == .MarkerDecl(declaration) -> declarations.push(declaration)
     }
     declarations
+}
+
+// The value tags of the one marker vocabulary source (`Input`, `PII`,
+// `Secret`, `Credential`), as the parser reads each tag struct.
+// SEMA_PRELUDE_TAGS (PreludeRows.jet) is what this returns, written by
+// Compiler/Toolchain/PreludeRows.
+sema_marker_module_prelude_tags: fn() -> [TagDef] {
+    parsed: parse_generated_source(MARKER_SOURCE.bytes())
+    if parsed.diagnostics.len() > 0 {
+        panic("Prelude/Markers.jet does not parse: {parsed.diagnostics[0].what}")
+    }
+    tags := [TagDef]{}
+    loop item in parsed.program.items {
+        if item == .Tag(declaration) -> tags.push(declaration)
+    }
+    tags
 }
 
 // The Prelude marker declared as `name` in the one marker vocabulary source,

@@ -499,21 +499,21 @@ sema_taint_credential_sink: fn(module_name: String, method: String) -> Bool Neve
     module_name == "core.encoding.jsonl" && method == "to_string"
 }
 
+// A Prelude value tag (Prelude/Markers.jet, read ahead of time into
+// SEMA_PRELUDE_TAGS): every module sees it, and it has no span in the program.
 sema_taint_builtin_tag: fn(name: String) -> SemaTaintTagFact? {
-    injection := [String]{"DB", "Exec", "Net"}
-    if name == "Input" || name == "PII" || name == "Secret" {
-        return Val(SemaTaintTagFact{name: name, module_identity: module_none(), deny: injection, from: [String]{}, span: Span{start: 0, end: 0}, visibility: 2, fixed: name == "Secret", integrity: name == "Input"})
-    }
-    if name == "Credential" {
-        deny := injection
-        deny.push("Log")
-        return Val(SemaTaintTagFact{name: name, module_identity: module_none(), deny: deny, from: [String]{}, span: Span{start: 0, end: 0}, visibility: 2})
+    loop tag_def in SEMA_PRELUDE_TAGS {
+        if tag_def.name != name -> next
+        fact := sema_taint_tag_fact(module_none(), tag_def)
+        fact.span = Span{start: 0, end: 0}
+        fact.visibility = 2
+        return Val(fact)
     }
     None
 }
 
 sema_taint_builtin_tag_names: fn() -> [String] Never! {
-    [String]{"Input", "PII", "Secret", "Credential"}
+    loop tag_def in SEMA_PRELUDE_TAGS -> tag_def.name
 }
 
 sema_taint_add_builtin_tags: fn(catalog: &SemaTaintCatalog) Never! {
@@ -636,7 +636,7 @@ sema_taint_push_invalid_path: fn(diagnostics: &[Diagnostic], name: String, span:
             } else { fix = "use a known effect or a declared function path" }
         }
     }
-    diagnostic := if destination -> sema_error("E0735", span, "`{name}` is not a known tag destination", "a `deny` entry names an effect or a registered sink", fix) else -> sema_error("E0735", span, "`{name}` is not a known tag source", "a `from` entry names an effect or a function path", fix)
+    diagnostic := if destination -> sema_error("E0735", span, "`{name}` is not a known tag destination", "a `!` entry of a tag's `#FX` row names an effect or a registered sink", fix) else -> sema_error("E0735", span, "`{name}` is not a known tag source", "a `from` entry names an effect or a function path", fix)
     if suggestion == {
         .Val(value) -> {
             diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: value}))
@@ -651,14 +651,19 @@ sema_taint_case_is: fn(value: NamedSpan?, name: String) -> Bool Never! {
     false
 }
 
-sema_taint_add_tag_declaration: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, tag_def: TagDef, diagnostics: &[Diagnostic]) {
+// The fact of the tag `tag_def` that `module_identity` declares.
+sema_taint_tag_fact: fn(module_identity: ModuleID, tag_def: TagDef) -> SemaTaintTagFact Never! {
     deny := [String]{}
     from := [String]{}
     loop item in tag_def.deny { deny.push(item.name) }
     loop item in tag_def.from { from.push(item.name) }
     fixed: sema_taint_case_is(tag_def.timing, "Fixed")
     integrity: sema_taint_case_is(tag_def.protects, "Integrity")
-    catalog.tags.push(SemaTaintTagFact{name: tag_def.name, module_identity: module_identity, deny: deny, from: from, span: tag_def.name_span, visibility: if tag_def.is_pub -> 2 else if tag_def.is_package_pub -> 1 else -> 0, fixed: fixed, integrity: integrity})
+    SemaTaintTagFact{name: tag_def.name, module_identity: module_identity, deny: deny, from: from, span: tag_def.name_span, visibility: if tag_def.is_pub -> 2 else if tag_def.is_package_pub -> 1 else -> 0, fixed: fixed, integrity: integrity}
+}
+
+sema_taint_add_tag_declaration: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, tag_def: TagDef, diagnostics: &[Diagnostic]) {
+    catalog.tags.push(sema_taint_tag_fact(module_identity, tag_def))
     loop item in tag_def.deny {
         if !sema_taint_known_destination(item.name) {
             sema_taint_push_invalid_path(diagnostics, item.name, item.span, true, catalog)
@@ -972,6 +977,13 @@ sema_taint_find_field: fn(catalog: SemaTaintCatalog, module_identity: ModuleID, 
     Val(fact)
 }
 
+// The E0733 fix that declares the missing tag `tag_value`.
+sema_taint_declare_tag_fix: fn(tag_value: String) -> String Never! {
+    "declare it first as a tag struct, `#FX(!Net) {tag_value}: struct {{ impl Marker {{ sites: [.TypeUse] }} }}`, or check the spelling"
+}
+
+SEMA_TAINT_UNKNOWN_TAG_WHY: "a value tag must name a declared tag struct"
+
 sema_taint_validate_tag_in_catalog: fn(tag_value: String, module_identity: ModuleID, catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if sema_taint_find_tag(catalog, graph, module_identity, tag_value) != None -> return true
     candidates := sema_taint_tag_candidate_names(catalog)
@@ -979,11 +991,9 @@ sema_taint_validate_tag_in_catalog: fn(tag_value: String, module_identity: Modul
     fix := ""
     if suggestion == {
         .Val(value) -> { fix = "did you mean `{value}`?" }
-        .None -> {
-            fix = "declare it first with `{tag_value}: tag {{ deny: [Effect] }}`, or check the spelling"
-        }
+        .None -> { fix = sema_taint_declare_tag_fix(tag_value) }
     }
-    diagnostic := sema_error("E0733", span, "there's no tag called `{tag_value}`", "a value tag must name a declared `tag`", fix)
+    diagnostic := sema_error("E0733", span, "there's no tag called `{tag_value}`", SEMA_TAINT_UNKNOWN_TAG_WHY, fix)
     if suggestion == {
         .Val(value) -> {
             diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: value}))
@@ -1008,16 +1018,14 @@ sema_taint_validate_tag: fn(tag_value: String, env: SemaScopeEnvironment, progra
     if sema_taint_builtin_tag(tag_value) != None || tag_value == SEMA_TAINT_ORIGIN_NET || tag_value == SEMA_TAINT_ORIGIN_FS || tag_value == SEMA_TAINT_ORIGIN_ENV || tag_value == SEMA_TAINT_ORIGIN_PROCESS || tag_value == SEMA_TAINT_ORIGIN_FFI {
         return true
     }
-    candidates := [String]{"Input", "PII", "Secret", "Credential"}
+    candidates := sema_taint_builtin_tag_names()
     suggestion := sema_taint_closest(tag_value, candidates)
     fix := ""
     if suggestion == {
         .Val(value) -> { fix = "did you mean `{value}`?" }
-        .None -> {
-            fix = "declare it first with `{tag_value}: tag {{ deny: [Effect] }}`, or check the spelling"
-        }
+        .None -> { fix = sema_taint_declare_tag_fix(tag_value) }
     }
-    diagnostic := sema_error("E0733", span, "there's no tag called `{tag_value}`", "a value tag must name a declared `tag`", fix)
+    diagnostic := sema_error("E0733", span, "there's no tag called `{tag_value}`", SEMA_TAINT_UNKNOWN_TAG_WHY, fix)
     if suggestion == {
         .Val(value) -> {
             diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: value}))
@@ -3218,7 +3226,7 @@ sema_taint_register_scrubbers: fn(catalog: SemaTaintCatalog, graph: SemaRegistra
         declared := sema_taint_find_tag(catalog, graph, fact.module_identity, tag_value) != None
         if {
             !declared -> {
-                found.push(sema_error("E0733", fact.span, "there's no tag called `{tag_value}`", "a value tag must name a declared `tag`", "declare it first with `{tag_value}: tag {{ deny: [Effect] }}`, or check the spelling"))
+                found.push(sema_error("E0733", fact.span, "there's no tag called `{tag_value}`", SEMA_TAINT_UNKNOWN_TAG_WHY, sema_taint_declare_tag_fix(tag_value)))
             }
             else -> {
                 consumes := false

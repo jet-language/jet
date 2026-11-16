@@ -612,11 +612,17 @@ tasks_demo: fn() {
 // ============================================================================
 // TAGS, TYPESTATE, LINEAR & TAINT  (the value-fact tier)
 // ============================================================================
-// Two qualifier kinds: `trait` (has methods, dispatches) vs `tag` (no methods,
-// erases). Beginner rule: methods need a trait; no methods need a tag (D-QUAL2).
+// Two qualifier kinds: `trait` (has methods, dispatches) vs a value tag (no
+// methods, erases). Beginner rule: methods need a trait; no methods need a tag
+// (D-QUAL2). A value tag is a field-less struct marked at type uses; its
+// `#FX(!…)` row lists the destinations its values may not reach (D-TAG-MARKER1).
 
-Reviewed: tag                                   // marker tag, erases at runtime
-Internal: tag { }
+#FX(!Net)
+Reviewed: struct {                              // value tag, erases at runtime
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
 Greeter: trait { greet: fn(self) -> String }
 
 // A type lists its states and moves once, and state types name them

@@ -1,0 +1,26 @@
+# `NetError`, `NetDNSError` and `WsError` are the enums core.net and
+# core.net.ws declare. A value built under the bare name, one built through
+# the qualified name, and one a runtime route returns (a failed parse, a
+# refused TCP connect, a refused WebSocket connect) all match the same
+# declared variants and payloads, on every tier.
+fixture: CoreNetAndWsErrorsAreTheirModulesEnums.fixture
+env: NO_COLOR=1
+step: jet run -A -O0 main.jet
+exit: 0
+stdout: = "dns not found example.test\ndns failure no server\ntrue\ninvalid parse IP address\nrefused tcp connect\ntoo large 9\nother this build target lacks websocket client connect\nio connect\n"
+step: jet run -A -O1 main.jet
+exit: 0
+stdout: = "dns not found example.test\ndns failure no server\ntrue\ninvalid parse IP address\nrefused tcp connect\ntoo large 9\nother this build target lacks websocket client connect\nio connect\n"
+step: jet run -A -O2 main.jet
+exit: 0
+stdout: = "dns not found example.test\ndns failure no server\ntrue\ninvalid parse IP address\nrefused tcp connect\ntoo large 9\nother this build target lacks websocket client connect\nio connect\n"
+step: jet build -A -O0 main.jet
+exit: 0
+step: {work}/.jet/build/main
+exit: 0
+stdout: = "dns not found example.test\ndns failure no server\ntrue\ninvalid parse IP address\nrefused tcp connect\ntoo large 9\nother this build target lacks websocket client connect\nio connect\n"
+step: jet build -A -O2 main.jet
+exit: 0
+step: {work}/.jet/build/main
+exit: 0
+stdout: = "dns not found example.test\ndns failure no server\ntrue\ninvalid parse IP address\nrefused tcp connect\ntoo large 9\nother this build target lacks websocket client connect\nio connect\n"

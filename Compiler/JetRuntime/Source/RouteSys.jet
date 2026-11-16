@@ -78,6 +78,7 @@ sys_groups: fn(size: I64, list: I64) -> I64 {
 // is drained first so the child never re-emits bytes the parent already
 // printed. The forking thread blocks on each lock and never parks a fiber.
 #Export(c) jet_sys_fork_raw: fn(available: I64, value: I64, errno: I64) {
+    comptime_serve_refuse(COMPTIME_REFUSED_PROCESS)
     scheduler: scheduler_root
     if (scheduler != I64{0}) { sync_thread_lock(scheduler) }
     root: thread_tls_registry
@@ -695,6 +696,7 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
 // logical overlay never writes it). musl getenv finds no name holding '=' (or
 // empty); std refuses an interior NUL as absent.
 #Export(c) jet_sys_host_env_raw: fn(name: I64, data_out: I64, length_out: I64) -> I64 {
+    comptime_serve_refuse(COMPTIME_REFUSED_ENVIRONMENT)
     rt_test_reads_text(I64{69}, name)
     host_arguments_require()
     length: rt_text_len(name)

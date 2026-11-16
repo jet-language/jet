@@ -45,6 +45,8 @@ use {
         X64_COMPTIME_INT,
         X64_COMPTIME_READ,
         X64_COMPTIME_REFUSED,
+        X64_COMPTIME_REFUSED_ENVIRONMENT,
+        X64_COMPTIME_REFUSED_PROCESS,
         X64_COMPTIME_RETURN,
         X64_COMPTIME_STOP,
         X64_COMPTIME_STOP_LIST_BOUNDS,
@@ -976,18 +978,21 @@ jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
     jet_eval_ir_problem(s, "the comptime child stopped with kind {kind} ({a}, {b}, {c}, {d})")
 }
 
-// System call `number` (first argument `first`) the filter refused. Runtime
-// execution has no host for it (unsupported), except under `jet eval`, whose
-// evaluator mode refuses it as an ambient effect (E3401), and inside a build
+// System call `number` (first argument `first`) the filter refused, or an
+// effect the child's runtime refused itself (a negative `number`,
+// JetRuntime ComptimeServe.jet comptime_serve_refuse). Runtime execution has
+// no host for it (unsupported), except under `jet eval`, whose evaluator
+// mode refuses it as an ambient effect (E3401), and inside a build
 // invocation's `#Impure` Core call, which is a Tier-2 effect (E3411). A
 // comptime evaluation refuses it as the effect it is: ambient time and
 // randomness are E3403, any other effect is observable outside the program,
 // so folding it would bake one build-time result into every run (E3410).
 // The refusal names the item's effectful call (s.effect_call) when sema found
-// one, else the system call's effect class.
+// one, else the effect's class.
 jet_eval_native_refused: fn(s: &JetEvalIRState, number: Int, first: Int) {
+    class: jet_eval_native_refused_class(number, first)
     if s.runtime_execution && !s.eval_entry && s.impure_sites == 0 {
-        jet_eval_ir_unsupported(s, "system call {number}")
+        jet_eval_ir_unsupported(s, class)
         return
     }
     // The runtime's process abort (JetRuntime Alloc.jet alloc_abort) resets
@@ -998,7 +1003,14 @@ jet_eval_native_refused: fn(s: &JetEvalIRState, number: Int, first: Int) {
         jet_eval_ir_problem(s, if report == "" -> "the comptime child aborted" else -> "the comptime child aborted: {report}")
         return
     }
-    class: if number == {
+    what: s.effect_call ?? class
+    jet_eval_ir_effect_refused(s, what, number == 228 || number == 318)
+}
+
+jet_eval_native_refused_class: fn(number: Int, first: Int) -> String {
+    if number == X64_COMPTIME_REFUSED_ENVIRONMENT -> return "reading or changing the environment"
+    if number == X64_COMPTIME_REFUSED_PROCESS -> return "launching a process"
+    if number == {
         1 | 20 -> if first == 1 -> "standard output" else -> "system call {number}"
         257 | 2 -> "opening a file"
         0 -> "reading a file"
@@ -1009,8 +1021,6 @@ jet_eval_native_refused: fn(s: &JetEvalIRState, number: Int, first: Int) {
         318 -> "OS randomness"
         else -> "system call {number}"
     }
-    what: s.effect_call ?? class
-    jet_eval_ir_effect_refused(s, what, number == 228 || number == 318)
 }
 
 // A comptime evaluation's refusal of host effect `what` (`nondeterministic`:

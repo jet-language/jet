@@ -8,7 +8,6 @@ use jet_lexer.[
     TOKEN_IDENT,
     TOKEN_KW_EXTERN,
     TOKEN_KW_MODULE,
-    TOKEN_KW_TAG,
     TOKEN_LBRACE,
     TOKEN_LPAREN,
     TOKEN_LT,
@@ -37,7 +36,6 @@ parser_item_declaration_ahead_at: fn(state: &JetParserState, offset: Int) -> Boo
             next_kind == TOKEN_DOT || next_kind == TOKEN_MINUS || next_kind == TOKEN_LBRACE || next_kind == TOKEN_SEMI || next_kind == TOKEN_LT || next_kind == TOKEN_LPAREN || next_kind == TOKEN_COLON
         }
         TOKEN_KW_EXTERN -> parser_kind_at(state, offset + 1) == TOKEN_IDENT && parser_value_at(state, offset + 1) == "rust"
-        TOKEN_KW_TAG -> true
         TOKEN_HASH -> {
             if parser_kind_at(state, offset + 1) != TOKEN_IDENT -> return false
             marker_name: parser_value_at(state, offset + 1)

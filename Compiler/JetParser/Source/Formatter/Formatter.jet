@@ -2278,7 +2278,7 @@ jet_format_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult 
 
 // jet_format_source for a Core library or compiler prelude source. Those
 // spell the reserved `__name` namespace, so they lex and parse as the loader
-// reads embedded Core (parse_generated_source); a user file never formats
+// reads embedded Core (parse_generated_layout); a user file never formats
 // this way.
 jet_format_library_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
     jfmt_format_source_in(src, simplify_requested, true)
@@ -2291,7 +2291,7 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool) 
         return JetFormatResult{ok: false, text: "", diagnostics: lexed.diagnostics}
     }
     simplify := simplify_requested
-    parsed: if library -> parse_generated_source(source) else -> parse_source(source)
+    parsed: if library -> parse_generated_layout(source) else -> parse_source_layout(source)
     if jfmt_check_parse_accepts(parsed.diagnostics) {
         // A recovered control-body diagnostic leaves only a recovery
         // scaffold; simplify must remain a no-op there.
@@ -2318,8 +2318,8 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool) 
         // The source with its expanded assignments written as the compound
         // assignments the format printed.
         compared: jfmt_apply_source_edits(src, f.compound_rewrites) ?? src
-        source_program: if library -> parse_generated_source(compared.bytes()).program else -> parse_source(compared.bytes()).program
-        reparsed: if library -> parse_generated_source(text.bytes()) else -> parse_source(text.bytes())
+        source_program: if library -> parse_generated_layout(compared.bytes()).program else -> parse_source_layout(compared.bytes()).program
+        reparsed: if library -> parse_generated_layout(text.bytes()) else -> parse_source_layout(text.bytes())
         if jfmt_structure_change(source_program, reparsed.program, reparsed.diagnostics) == .Val(change) {
             return JetFormatResult{ok: false, text: "", diagnostics: [Diagnostic]{}, structure_change: Val(change)}
         }
@@ -2335,7 +2335,7 @@ jet_format_redundant_grouping: fn(src: String) -> [Span]? {
     source: src.bytes()
     lexed: lex(source)
     if lexed.diagnostics.len() > 0 -> return None
-    parsed: parse_source(source)
+    parsed: parse_source_layout(source)
     if !jfmt_fmt_parse_accepts(parsed.diagnostics) -> return None
     f := jfmt_new(parsed.program, src, lexed.tokens, false)
     f.drop_grouping = true

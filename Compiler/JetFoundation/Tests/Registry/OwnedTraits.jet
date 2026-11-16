@@ -3,7 +3,7 @@
 // or syntax constant keeps a second list of them.
 use {
     owned_traits_files: core.files
-    jet_foundation.[OWNED_TRAITS, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_implies, owned_trait_literal, owned_trait_requirers, owned_trait_requires_listed, owned_trait_structural_names]
+    jet_foundation.[MARKER_SOURCE_RULES, OWNED_TRAITS, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_implies, owned_trait_literal, owned_trait_requirers, owned_trait_requires_listed, owned_trait_structural_names]
 }
 
 // The one file that may list the owned trait names.
@@ -133,8 +133,8 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
 
 // A syntax constant spelled as an owned trait is a second home for it. A
 // marker constant may share a trait's spelling only when the marker is not one
-// of the table's derive or bundle markers (`#Close(close)` is a foreign-handle
-// marker, not the trait).
+// of the table's derive or bundle markers (`#Close(close)` is the foreign
+// handle's Close, not a derive).
 #Test("no syntax constant spells an owned trait or its markers") {
     violations := [String]{}
     loop item in owned_traits_files.walk(OWNED_TRAITS_SYNTAX, None) {
@@ -152,6 +152,48 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
             }
             violations.push("{entry.path}:{index + 1} spells `{value}` as {parts[0]}; OWNED_TRAITS owns it")
         }
+    }
+    assert_eq(violations.join("\n"), "")
+}
+
+// The sources that declare the traits a marker name could collide with.
+OWNED_TRAITS_DECLARING: [String]{"Compiler/Prelude", "Core"}
+
+// The name a source line declares as a trait (`Name: trait {`), else None.
+owned_traits_declared: fn(line: String) -> String? Never! {
+    trimmed: line.trim_start()
+    declaration: if trimmed.starts_with("pub ") -> trimmed.slice(4, trimmed.len()) else -> trimmed
+    at: declaration.index_of(": trait") ?? return None
+    name: declaration.slice(0, at)
+    rest: declaration.slice(at + 7, declaration.len())
+    if name == "" || name.contains(" ") || (rest != "" && !rest.starts_with(" ")) -> return None
+    Val(name)
+}
+
+// No marker shares a name with a trait. A Prelude marker spelled as a trait
+// applies that trait: it derives it (`#Comparable`), re-exposes it on a
+// distinct type (`#Numeric`), or is `#Close(close)`, which gives a foreign
+// handle its Close. Any other marker of a Prelude or Core trait's name fails.
+#Test("no marker shares a name with a trait it does not apply") {
+    traits := [String]{}
+    loop root in OWNED_TRAITS_DECLARING {
+        loop item in owned_traits_files.walk(root, None) {
+            entry: item ?? panic("walk {root}: {err}")
+            if entry.is_dir || !entry.path.ends_with(".jet") -> next
+            source: owned_traits_files.read(entry.path) ?? panic("read {entry.path}: {err}")
+            loop line in source.split("\n") {
+                name: owned_traits_declared(line) ?? next
+                if !traits.contains(name) -> traits.push(name)
+            }
+        }
+    }
+    violations := [String]{}
+    loop rule in MARKER_SOURCE_RULES {
+        if !traits.contains(rule.name) -> next
+        if owned_trait(rule.name) != None && (owned_trait_auto_derive_marker(rule.name) || owned_trait_bundle(rule.name) || rule.name == "Close") {
+            next
+        }
+        violations.push("`#{rule.name}` shares its name with the trait `{rule.name}`")
     }
     assert_eq(violations.join("\n"), "")
 }

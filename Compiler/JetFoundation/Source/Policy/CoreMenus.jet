@@ -1,7 +1,7 @@
 // Applied-rule argument menus are projected from the specialized
 // core.compiler.lang declaration in embedded Prelude/Core.rows, and the
-// Maturity menu from core.meta's. The authority roots and builtin taint tags
-// remain inputs from their Source registries.
+// Maturity menu from core.meta's. The authority roots remain an input from
+// their Source registry.
 
 foundation_core_menu_ascii_lower: fn(text: String) -> String Never! {
     bytes := text.bytes()
@@ -32,16 +32,10 @@ foundation_core_menu_variant: fn(name: String, variant: String) -> String? {
     Val(variant)
 }
 
-foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots: [String], builtin_tags: [String]) -> [String]? {
+foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots: [String]) -> [String]? {
     if name == "Effect" {
         return if kind == {
             .Enum(_) -> Val(effect_roots)
-            .Plain | .Generic(_) | .CryptoNominal -> None
-        }
-    }
-    if name == "TaintKind" {
-        return if kind == {
-            .Enum(_) -> Val(builtin_tags)
             .Plain | .Generic(_) | .CryptoNominal -> None
         }
     }
@@ -74,7 +68,7 @@ foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots
 // from the canonical Source fixed-width integer registry, which mirrors the
 // native canonical_rule_arg_variants ordering instead of maintaining a
 // menu-local width table.
-foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String]) -> [TAppliedRuleArgumentMenu]? {
+foundation_core_argument_menus: fn(effect_roots: [String]) -> [TAppliedRuleArgumentMenu]? {
     module_name := "core.compiler.lang"
     declaration: core_module_export(module_name) ?? return None
     menus := [TAppliedRuleArgumentMenu]{}
@@ -84,7 +78,7 @@ foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String
             if core_module_enum_cases(module_name, name) == .Val(enum_variants) {
                 kind = CoreLeafKind.Enum{variants: enum_variants}
             }
-            variants: foundation_core_menu_variants(name, kind, effect_roots, builtin_tags) ?? return None
+            variants: foundation_core_menu_variants(name, kind, effect_roots) ?? return None
             menus.push(
                 TAppliedRuleArgumentMenu{
                     name: name,

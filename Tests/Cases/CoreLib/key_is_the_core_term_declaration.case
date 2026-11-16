@@ -1,0 +1,23 @@
+# Claim: Key is the enum Core/Term/Term.jet declares, with no compiler-owned copy: its values are built, held in a list, a struct field and an option, compared with == and != and matched exhaustively over its 23 cases with the Char, F and Ctrl payloads bound, and a program that names Key bare, without importing core.term, sees the same cases and payloads and prints the same lines as one that imports it; on o0, o1 and o2.
+# Hand-derived: each line is show() of the listed key in order, then the three comparisons, the last key's character, the struct's key and count, and the two Char keys counted.
+fixture: KeyIsTheCoreTermDeclaration.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 run.jet
+exit: 0 # o0
+stdout: = key_is_the_core_term_declaration.out # o0
+step: jet run -O1 run.jet
+exit: 0 # o1
+stdout: = key_is_the_core_term_declaration.out # o1
+step: jet run -O2 run.jet
+exit: 0 # o2
+stdout: = key_is_the_core_term_declaration.out # o2
+step: jet run -O0 bare.jet
+exit: 0 # bare o0
+stdout: = key_is_the_core_term_declaration.out # bare o0
+step: jet run -O1 bare.jet
+exit: 0 # bare o1
+stdout: = key_is_the_core_term_declaration.out # bare o1
+step: jet run -O2 bare.jet
+exit: 0 # bare o2
+stdout: = key_is_the_core_term_declaration.out # bare o2

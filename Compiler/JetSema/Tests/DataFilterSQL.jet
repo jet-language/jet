@@ -1,0 +1,51 @@
+// A filter predicate becomes SQL over a table's field columns only when it is
+// comparisons of the row's fields with values, joined by `&&` and `||`.
+use {
+    jet_parser.[parse_source]
+    jet_foundation.[Expr]
+    jet_sema.[SemaDataFilterField, sema_data_filter_condition]
+}
+
+data_filter_sql_test_fields: fn() -> [SemaDataFilterField] Never! {
+    [SemaDataFilterField]{SemaDataFilterField{name: "team", bound: "?", ordered: false}, SemaDataFilterField{name: "points", bound: "CAST(? AS INTEGER)", ordered: true}, SemaDataFilterField{name: "done", bound: "(? = 'true')", ordered: false}}
+}
+
+// The condition `predicate` over a row named `row` becomes and how many
+// values it binds, or "none".
+data_filter_sql_test: fn(predicate: String) -> String {
+    parsed: parse_source("probe: fn() {{\n    rows.filter(fn(row) {{ {predicate} }})\n}}\n".bytes())
+    if parsed.diagnostics.len() != 0 -> panic("`{predicate}` parses")
+    if parsed.program.items[0] == .Func(function) && function.body[0] == .Expr(call) {
+        if call == .MethodCall(_, _, _, _, _, args, _) && args[0].expr == .Lambda(lambda, _) {
+            if lambda.body == .Expr(body) -> return data_filter_sql_test_condition(body)
+            if lambda.body == .Block(statements) && statements[0] == .Expr(body) {
+                return data_filter_sql_test_condition(body)
+            }
+        }
+    }
+    panic("`{predicate}` is a lambda body")
+}
+
+data_filter_sql_test_condition: fn(body: Expr) -> String Never! {
+    values := [Expr]{}
+    condition: sema_data_filter_condition(body, "row", data_filter_sql_test_fields(), values) ?? return "none"
+    "{condition} [{values.len()}]"
+}
+
+#Test("a filter of field comparisons joined by && and || becomes SQL, binding each value once") {
+    assert_eq(data_filter_sql_test("row.team == team"), "\"jet_row.team\" = ? [1]")
+    assert_eq(data_filter_sql_test("row.points >= 3 && (row.done == false || row.team != \"ops\")"), "(\"jet_row.points\" >= CAST(? AS INTEGER)) AND ((\"jet_row.done\" = (? = 'true')) OR (\"jet_row.team\" <> ?)) [3]")
+    assert_eq(data_filter_sql_test("limit.most < row.points"), "\"jet_row.points\" > CAST(? AS INTEGER) [1]")
+    assert_eq(data_filter_sql_test("row.points == -1"), "\"jet_row.points\" = CAST(? AS INTEGER) [1]")
+}
+
+#Test("any other filter reads the whole table") {
+    assert_eq(data_filter_sql_test("row.team.contains(\"a\")"), "none")
+    assert_eq(data_filter_sql_test("row.team < \"m\""), "none")
+    assert_eq(data_filter_sql_test("row.title == \"x\""), "none")
+    assert_eq(data_filter_sql_test("row.points == row.points"), "none")
+    assert_eq(data_filter_sql_test("row.points > 1 && keep(row)"), "none")
+    assert_eq(data_filter_sql_test("!row.done"), "none")
+    assert_eq(data_filter_sql_test("row.team == \"{{row.done}}\""), "none")
+    assert_eq(data_filter_sql_test("row.points == most()"), "none")
+}

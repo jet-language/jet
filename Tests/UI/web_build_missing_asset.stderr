@@ -1,0 +1,8 @@
+Error [jet.MissingAsset]: `ui.asset("brand/missing.svg")` names `Tests/UI/brand/missing.svg`, and there is no file there.
+  --> Tests/UI/web_build_missing_asset.jet:6:40
+    |
+  6 | logo: fn() -> String Never! { ui.asset("brand/missing.svg").path }
+    |                                        ^^^^^^^^^^^^^^^^^^^
+ Why: An asset path names a file from the calling file's own directory, as `embed_bytes` names one, and every target ships that file with the program; the path is checked while the program builds, so a path with no file would leave the image, font or icon missing on every target.
+ Fix: Put the file at `Tests/UI/brand/missing.svg`, or name a file that is there, relative to this file's directory.
+More: jet-lang.dev/e/E2822

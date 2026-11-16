@@ -1,0 +1,106 @@
+use {
+    app
+    db: core.db
+    core.reactive.loadable.[Loadable]
+}
+
+#Error
+ChoreError: enum {
+    Unopened
+    Read
+}
+
+#Codable
+Chore: struct {
+    id: Int
+    team: String
+    title: String
+}
+
+// The store the query functions read through, and how many times each ran.
+Chores: struct {
+    store: db.Store?
+    team_runs: Int
+    word_runs: Int
+}
+
+CHORES: Shared{Chores{store: None, team_runs: 0, word_runs: 0}}
+
+chores_of: fn(store: db.Store) -> db.Table<Int, Chore> {
+    store.table("chores", key: fn(chore: Chore) { chore.id })
+}
+
+ids: fn(rows: [Chore]) -> [String] {
+    out := [String]{}
+    loop chore in rows -> out.push("{chore.id}")
+    out
+}
+
+// A team's chores. Its filter compares a field with a value, so the compiler
+// writes it as SQL: the table reads only the team's rows, and a write re-runs
+// it only when the row it changes is the team's before or after.
+team_chores: fn(team: String) -[DB.Read]> [String] ChoreError! {
+    chores := CHORES.guard_edit()
+    chores.value.team_runs += 1
+    store: chores.value.store ?? return Err(ChoreError.Unopened)
+    query: chores_of(store).query() ?? return Err(ChoreError.Read)
+    ids(query.filter(fn(chore) { chore.team == team }).collect() ?? return Err(ChoreError.Read))
+}
+
+// The chores whose title holds a word. Its filter calls a method, which is
+// no SQL, so it reads the whole table and every write re-runs it.
+titled_chores: fn(word: String) -[DB.Read]> [String] ChoreError! {
+    chores := CHORES.guard_edit()
+    chores.value.word_runs += 1
+    store: chores.value.store ?? return Err(ChoreError.Unopened)
+    query: chores_of(store).query() ?? return Err(ChoreError.Read)
+    ids(query.filter(fn(chore) { chore.title.contains(word) }).collect() ?? return Err(ChoreError.Read))
+}
+
+shown: fn(state: Loadable<[String], ChoreError>) -> String {
+    if state == {
+        .Loaded(list) -> "[{list.join(",")}]"
+        .Failed(_) -> "failed"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+runs: fn() -> String {
+    chores: CHORES.guard_read()
+    "team runs={chores.value.team_runs} word runs={chores.value.word_runs}"
+}
+
+remember: fn(store: db.Store) {
+    chores := CHORES.guard_edit()
+    chores.value.store = Val(store.copy())
+}
+
+run: fn() {
+    store: db.open_memory()
+    remember(store)
+    chores: chores_of(store)
+    _: chores.add(Chore{id: 1, team: "jet", title: "sweep"}) ?? panic("add 1")
+    _: chores.add(Chore{id: 2, team: "ops", title: "mop"}) ?? panic("add 2")
+
+    team: app.live(team_chores, "jet")
+    word: app.live(titled_chores, "sweep")
+    print("bound {shown(app.state(team))} {shown(app.state(word))}, {runs()}")
+
+    // Another team's row: the narrowed binding stays current.
+    _: chores.put(Chore{id: 3, team: "ops", title: "dust"}) ?? panic("put 3")
+    print("another team's row {shown(app.state(team))} {shown(app.state(word))}, {runs()}")
+
+    // A row of the team: both re-run.
+    _: chores.put(Chore{id: 4, team: "jet", title: "sweep the porch"}) ?? panic("put 4")
+    print("the team's row {shown(app.state(team))} {shown(app.state(word))}, {runs()}")
+
+    // A row that joins the team, then one that leaves it: each re-runs it.
+    _: chores.put(Chore{id: 2, team: "jet", title: "mop"}) ?? panic("put 2 in")
+    print("a row joins {shown(app.state(team))}, {runs()}")
+    _: chores.put(Chore{id: 2, team: "ops", title: "mop"}) ?? panic("put 2 out")
+    print("a row leaves {shown(app.state(team))}, {runs()}")
+
+    // Deleting another team's row: the narrowed binding stays current.
+    chores.delete(3) ?? panic("delete 3")
+    print("another team's delete {shown(app.state(team))} {shown(app.state(word))}, {runs()}")
+}

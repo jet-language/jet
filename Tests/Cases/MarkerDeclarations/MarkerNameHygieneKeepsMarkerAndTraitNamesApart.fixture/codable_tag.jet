@@ -1,0 +1,13 @@
+use json: core.encoding.json
+
+// The case key of a coded enum is an option of `#Codable`.
+#Codable(tag: .Field("kind"))
+Shape: enum {
+    Circle(radius: Int)
+    Dot
+}
+
+run: fn() {
+    circle: Shape.Circle{radius: 2}
+    print(json.to_string(circle) ?? panic("circle"))
+}

@@ -2,9 +2,18 @@ use net: core.net
 
 // A program tag whose `from` is Net tags what a Core network read returns,
 // and that value steers the Core function it is passed to.
-Key: tag { deny: [Exec], timing: .Fixed, from: [Net] }
+// `Key` is declared at the end of the file.
 
 lookup: fn() -[Net, Time.Wait]> Int NetError! {
     host: net.gethostbyname("example.com")
     net.getservbyname(host)
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+        from: [Net]
+    }
 }

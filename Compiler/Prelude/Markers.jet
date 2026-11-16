@@ -19,6 +19,14 @@
 // `sites` is the only public legal-site declaration form. Fields are typed
 // use-site arguments; every setting is fixed declaration metadata.
 //
+// A value tag is a field-less marker struct with `sites: [.TypeUse]`, written
+// on a value's type (`#PII String`). Its `#FX(!…)` row lists the destinations
+// a tagged value may not reach, and its block may also give:
+//
+//   from         the effects or functions whose results carry the tag
+//   timing       .Fixed: the value's timing must not depend on it
+//   protects     .Integrity: it guards what may flow into a trusted place
+//
 Policy: struct {
     settings: [PolicySetting]
 
@@ -706,5 +714,37 @@ Allow: struct {
 Static: struct {
     impl Marker {
         sites: [.Constant]
+    }
+}
+
+// The built-in value tags. `Input` is untrusted input, so it protects the
+// integrity of what it may flow into; `Secret` keeps its value out of timing.
+#FX(!DB, !Exec, !Net)
+Input: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        protects: .Integrity
+    }
+}
+
+#FX(!DB, !Exec, !Net)
+PII: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
+
+#FX(!DB, !Exec, !Net)
+Secret: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
+}
+
+#FX(!DB, !Exec, !Net, !Log)
+Credential: struct {
+    impl Marker {
+        sites: [.TypeUse]
     }
 }

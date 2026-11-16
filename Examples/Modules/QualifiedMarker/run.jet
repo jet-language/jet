@@ -1,0 +1,23 @@
+// A library's markers are named through the import that brings them in:
+// `use web: routes` makes routes.jet's `Get` and `Router` `#Web.Get` and
+// `#Web.Router` here. The bare `#Get` would be an error (E0085), and so
+// would a name routes.jet does not declare.
+use web: routes
+
+#Web.Router
+Jokes: struct {
+    count: Int
+
+    #Web.Get("/jokes") list: fn(self) -> String { "{self.count} jokes" }
+
+    #Web.Get("/jokes/:id") joke: fn(self) -> String { "joke" }
+
+    // Not a route: no `#Web.Get`.
+    reset: fn(self) -> String { "reset" }
+}
+
+run: fn() {
+    jokes: Jokes{count: 3}
+    print(jokes.routes())
+    print(jokes.list())
+}

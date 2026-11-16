@@ -1,0 +1,43 @@
+// A Board mounted at /api whose `tick` replies how often it has run, a type
+// the app graph caches `.Public` for one second. The client calls it at
+// once, again within that second, and again once the second has passed.
+use {
+    app
+    client: core.http.client
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+Board: struct {
+    runs: Shared<Int>
+
+    #App.Public tick: fn(self) -> Int {
+        guard := self.runs.guard_edit()
+        guard.value += 1
+        guard.value
+    }
+}
+
+// A response's status, its body and the headers a cache reads.
+shown: fn(response: HTTPResponse) -> String {
+    "{response.status} {response.text() ?? "unreadable"} | cache-control: {response.header("cache-control") ?? "none"} | age: {response.header("age") ?? "none"}"
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    _: app.new("Board").cache<Int>(.Public{max_age: 1s})
+    served: web.app().mount("/api", Board{runs: Shared{0}})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        served.serve_once(listener)
+        served.serve_once(listener)
+        served.serve_once(listener)
+    }
+    url: "http://{addr}/api/tick"
+    print("at once: {shown(client.post(url, "[]"))}")
+    print("within the second: {shown(client.post(url, "[]"))}")
+    time.sleep(1100ms)
+    print("after the second: {shown(client.post(url, "[]"))}")
+    serving.join()
+}

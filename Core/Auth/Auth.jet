@@ -507,17 +507,23 @@ password_login: fn(user_id: String, password_hash: String, now_ms: Int, ttl_ms: 
     }
 }
 
-/// The live session named by `session_id` at `now_ms`.
+/// The live session named by `session_id` at `now_ms`. Every id, whatever
+/// its shape, is compared with every session the store keeps, so how long
+/// the check takes doesn't tell a malformed or forged id from an unknown or
+/// expired one.
 session_validate: fn(session_id: String, now_ms: Int) -[DB]> Session Err! {
-    if !valid_session_id(session_id) -> return Err("missing: session")
+    shaped: valid_session_id(session_id)
     records: decode_store(store_load()) ?? return Err("auth store is unavailable")
-    loop record in records {
-        if record.kind == 2 && ct_text(record.a, session_id) {
-            if now_ms >= record.n -> return Err("token expired")
-            return Ok(Session{id: record.a, user_id: record.b, cookie: record.c, expires_at: record.n})
+    found := -1
+    loop index in 0..<records.len() {
+        if records[index].kind == 2 && ct_text(records[index].a, session_id) && found < 0 {
+            found = index
         }
     }
-    Err("missing: session")
+    if !shaped || found < 0 -> return Err("missing: session")
+    record: records[found]
+    if now_ms >= record.n -> return Err("token expired")
+    Ok(Session{id: record.a, user_id: record.b, cookie: record.c, expires_at: record.n})
 }
 
 /// Issue a single-use magic-link token for a registered delivery identity.
@@ -761,16 +767,16 @@ valid_identifier: fn(value: String, max: Int) -> Bool Never! {
     value.trim().len() > 0 && value.bytes().len() <= max && !has_unicode_control(value)
 }
 
+// Whether `text` has a session id's shape, `sess-` and 64 lowercase hex
+// digits. It reads every byte, whichever one is wrong.
 valid_session_id: fn(text: String) -> Bool Never! {
     raw: text.bytes()
-    if raw.len() != 69 || !starts(text, "sess-") -> return false
-    i := 5
-    loop i < raw.len() {
+    shaped := raw.len() == 69 && starts(text, "sess-")
+    loop i in 0..<raw.len() {
         n: Int{raw[i]}
-        if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return false
-        i += 1
+        if i >= 5 && !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> shaped = false
     }
-    true
+    shaped
 }
 
 /// The delivery identity a magic link may be sent to: one `@`, a dot-atom

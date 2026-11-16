@@ -1,0 +1,31 @@
+// A named unit case, an optional's absence and the structural unit are three
+// different things, and nothing treats one as another. A program that relies
+// on the collapse is refused at each place it does: the unit value is not an
+// absent `Int?`, bare `None` is not the unit case `Shut`, a unit union has no
+// `None` case, and an absent `Gate?` is not `Shut`. Reflection keeps them
+// apart the same way: absence is `None` of its optional type, `Shut` keeps
+// its enum path, and `()` holds no case.
+Gate: enum {
+    Shut
+    Open(Int)
+}
+
+absent_as_unit: fn() -> Int? { () }
+
+shut_as_absent: fn() -> Gate { None }
+
+unit_as_absent: fn(value: Int | ()) -> String {
+    if value == {
+        .None -> "nothing"
+        else -> "something"
+    }
+}
+
+absent_as_shut: fn(gate: Gate?) -> Bool { gate == .Shut }
+
+run: fn() {
+    print(absent_as_unit() ?? 0)
+    print(shut_as_absent() == .Shut)
+    print(unit_as_absent(()))
+    print(absent_as_shut(None))
+}

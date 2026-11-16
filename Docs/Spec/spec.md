@@ -192,9 +192,11 @@ vocabulary](vocabulary.md).
   namespace, may be bare; imported markers always
   name their local import alias in PascalCase, acronyms in caps, as in
   `#Web.Get(...)` through `use web: core.http.server` (D-MARKER-CASE1=A);
-  a lowercase library part is E0087. Group members bind in the declaring
-  module, not in whichever module applies the group. A public group cannot
-  publish a private member (D-MARKER-MODULE1=A).
+  a lowercase library part is E0087. A qualified marker that no imported
+  module declares is E1023, one declared inside a `priv module` is E0605, and
+  one whose import path reaches two declarations is E0086. Group members bind
+  in the declaring module, not in whichever module applies the group. A public
+  group cannot publish a private member (D-MARKER-MODULE1=A).
 - Decimal `Int` and `Float` literals are exact arbitrary-precision values.
   A decimal `Float` has digits on both sides of `.`, with an optional `e` or
   `E` exponent. `_` may separate digits. `0x`, `0o`, and `0b` introduce
@@ -947,7 +949,10 @@ A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
 dynamic dispatch with invisible boxing. A trait value prints, interpolates and
 debug-prints as the concrete value it holds, so `print(shapes)` shows each
 shape; it can be shown a way only when every type implementing the trait can.
-Generic bounds use `f: fn<T: Bound>(…)` and `Pair: struct<T> { … }`. Built-in
+Generic bounds use `f: fn<T: Bound>(…)` and `Pair: struct<T> { … }`. Inside
+such a function `T.name(…)` calls a static method a bound declares (one
+without `self`, such as `zero: fn() -> Self`): `Self` reads as `T`, and each
+instance calls the implementation its concrete type has. Built-in
 `Printable`, `Equatable`, `Debug`, `Comparable`, `Encode`, and `Decode` derive
 when every field qualifies. The
 package default can deny `auto_derive` through
@@ -1035,16 +1040,32 @@ Its default bound is 128 entries; `#Memo(bound: none)` makes it unbounded.
 including before the first call. The shared Prelude owns eviction and counters;
 emitters only marshal the checked function identity, argument key, and bound.
 
-`Name: tag { deny: [Net] }` declares an erased dataflow fact and its policy.
-`deny` is required and nonempty; `from` is optional. Direct `#Name` tags attach
-to values, fields, parameters, and returns. `#Scrub(Name)` removes exactly that
-tag. Tags have no methods: a method in a tag body is E0732, and using a tag
-where dispatch or method attachment is expected is E0731. Tag names are
-PascalCase. Prelude declares `Input`, `PII`, `Secret`, and `Credential`
-(D-QUAL2, D-TAG-SURFACE1, D-CASING1).
+A value tag is a field-less struct whose `impl Marker` block names
+`sites: [.TypeUse]`; it declares an erased dataflow fact and its policy. Its
+denials are its own `#FX(!…)` row, which is required, names at least one
+destination and holds no ceiling entry (E0734):
 
-A tag body may also write `timing: .Free | .Fixed` and `protects: .Secrecy |
-.Integrity` (core.compiler.lang `TagTiming`, `TagProtects`). Left out, they are
+```jet
+#FX(!Net)
+Audited: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        from: [Net]
+    }
+}
+```
+
+`from` is optional and lists the effects or functions whose results carry the
+tag; an unknown `#FX(!…)` destination or `from` entry is E0735. Direct `#Name`
+tags attach to values, fields, parameters, and returns. `#Scrub(Name)` removes
+exactly that tag. Tags have no fields or methods: a field or method in a tag
+struct is E0732, and using a tag where dispatch or method attachment is
+expected is E0731. Tag names are PascalCase. Prelude declares `Input`, `PII`,
+`Secret`, and `Credential` as tag structs (D-QUAL2, D-TAG-MARKER1, D-CASING1).
+
+A tag's `impl Marker` block may also write `timing: .Free | .Fixed` and
+`protects: .Secrecy | .Integrity` (core.compiler.lang `TagTiming`,
+`TagProtects`). Left out, they are
 `.Free` and `.Secrecy`; `Secret` is `.Fixed` and `Input` is `.Integrity`. A
 `.Fixed` value must not decide a branch, a loop, a `&&` or `||` right side, an
 index, a slice bound, a division, a shift amount, an exponent, an allocation
@@ -2555,10 +2576,13 @@ FS: enum {
 ```
 
 An `FS.Read` call inside `#Transact` is allowed; an `FS.Write` call is E0746.
-An effect is a type with an `impl Effect` block; `effect` is not a declaration
-word. A `Log.Audit: effect` line is E0003, and its fix declares
-`Audit: struct { impl Effect { parent: Log } }`, a package effect that is a
-kind of `Log` (see the package-effect paragraph after the E0757 entries).
+An effect is a type that implements `Effect`, in its body or in an
+`impl Name.Effect { … }` block beside it in the same file, which joins the
+type as if the body held it; a second block is E0908. `effect` is not a
+declaration word: a `Log.Audit: effect` line is the ordinary E0003 parse
+error, and `Audit: struct {}` with `impl Audit.Effect { parent: Log }`
+declares a package effect that is a kind of `Log` (see the package-effect
+paragraph after the E0757 entries).
 
 A root that has declared leaves is closed: the Prelude's own leaves
 (`FS.Read`) and an effect family's cases (`Query.Read`) are the only dotted
@@ -2622,6 +2646,31 @@ E0749. A row that names one kind allows only that kind and the kinds of it:
 two packages may each declare an `Audit` kind of `Log` without clashing, and
 a function whose row names `audit.Audit` and that reaches `billing.Audit` is
 E0759 unless its row also names `billing.Audit` or `Log`.
+
+A library effect that is a struct with fields has *values*. A row may name
+one value by giving every field a literal, `-[Bucket{name: "photos"}]>`, and
+the bare type `-[Bucket]>` names every value (D-EFFTYPE-MODVALUE1):
+
+```jet
+Bucket: struct {
+    name: String
+
+    impl Effect {}
+}
+
+upload: fn() -[Bucket{name: "photos"}]> {}
+
+sync: fn() -[Bucket]> { upload() }
+```
+
+A value covers only itself: a function whose row names values of an effect,
+and not the bare effect, may reach only those values, so `upload` calling
+`sync` (every value) or a `Bucket{name: "logs"}` function is E0740. The
+field order doesn't matter. Each field is a `String`, `Int` or `Bool` and
+gets one plain text, integer, `true` or `false` literal; a field left out,
+one the effect doesn't declare, a literal of another type, or a value of a
+Prelude effect is E0119. Denying a value denies the bare effect, which names
+every value, and denying the bare effect denies every value (E0749).
 
 `Panic` and `Mem` are deny-only rows. `Panic` can be named in a prohibition but
 cannot be granted by an authority, positive effect ceiling, or package budget.

@@ -1,0 +1,41 @@
+// A reactive core.ui text input built for the web with an `on_drop:`
+// handler. Each item dropped on the input runs the Jet handler, and the
+// effect's repaint replaces the elements.
+package: {
+    name: "ui_web_drop"
+    authority: { allow: [Browser, Mem.Alloc] }
+}
+
+#Target(Web)
+
+use {
+    ui: core.ui
+    reactive: core.reactive
+}
+
+run: fn() {
+    dropped: reactive.signal("nothing")
+    backend: ui.null_backend()
+    ui.reactive_render(
+        fn() {
+            current: dropped.get()
+            tree: ui.box(
+                [
+                    ui.text("dropped: {current}"),
+                    ui.text_input(
+                        "draft",
+                        UIIMEMode.Native,
+                        on_drop: fn(item: UIDropItem) {
+                            if item == {
+                                .Text(value) -> dropped.set("text {value}")
+                                .URI(value) -> dropped.set("{dropped.get()} + uri {value}")
+                                .File(_) -> dropped.set("a file")
+                            }
+                        },
+                    ),
+                ],
+            )
+            ui.mount(backend, tree, ui.constraint(0.0, 0.0, 240.0, 120.0))
+        },
+    )
+}

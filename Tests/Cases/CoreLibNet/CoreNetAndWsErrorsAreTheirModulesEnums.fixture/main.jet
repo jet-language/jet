@@ -1,0 +1,47 @@
+use {
+    net: core.net
+    ws: core.net.ws
+}
+
+describe: fn(error: net.NetError) -> String {
+    if error == {
+        .ConnectionRefused(detail) -> "refused {detail.operation}"
+        .DNS(.NotFound(name)) -> "dns not found {name}"
+        .DNS(.Failure(reason)) -> "dns failure {reason}"
+        .InvalidInput(detail) -> "invalid {detail.operation}"
+        .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) -> "other {error}"
+    }
+}
+
+ws_describe: fn(error: ws.WsError) -> String {
+    if error == {
+        .MessageTooLarge(limit) -> "too large {limit}"
+        .IO(operation) -> "io {operation}"
+        .InvalidURL -> "invalid url"
+        .InvalidHandshake | .Protocol | .Timeout | .Closed | .Cancelled | .UnsupportedTarget -> "other {error}"
+    }
+}
+
+run: fn() -[IO, Net, Time.Wait]> {
+    print(describe(NetError.DNS(NetDNSError.NotFound("example.test"))))
+    built: net.NetError.DNS(NetDNSError.Failure("no server"))
+    print(describe(built))
+    print(built == NetError.DNS(NetDNSError.Failure("no server")))
+    if net.ip_addr("not an address") == {
+        .Ok(_) -> { print("parsed") }
+        .Err(error) -> print(describe(error))
+    }
+    if net.tcp_connect("127.0.0.1:1") == {
+        .Ok(_) -> { print("connected") }
+        .Err(error) -> print(describe(error))
+    }
+    print(ws_describe(WsError.MessageTooLarge{limit: 9}))
+    if ws.connect("http://example.test/") == {
+        .Ok(_) -> { print("ws connected") }
+        .Err(error) -> print(ws_describe(error))
+    }
+    if ws.connect("ws://127.0.0.1:1/") == {
+        .Ok(_) -> { print("ws connected") }
+        .Err(error) -> print(ws_describe(error))
+    }
+}

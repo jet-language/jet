@@ -2910,7 +2910,8 @@ declaring module and declaration, not a process-wide short name. A module may
 write its own marker bare. An imported marker always uses the import's local
 name: `use web: core.http.server` followed by `#web.Get(...)`. Nested exports
 retain their path, such as `#library.inner.LibraryNote`. Bare imported markers teach
-E0085; an ambiguous qualified path is E0086. Unknown names remain E0927 and
+E0085; an ambiguous qualified path is E0086. An unknown bare name remains E0927,
+an unknown qualified name is E1023, and
 private exports remain E0605. Group members resolve lexically in the group's
 declaring module, so a caller's marker or alias cannot capture them. A public
 group containing a private member is E0605; publishing a group cannot leak
@@ -3169,9 +3170,11 @@ source location. `.origin()` and `.@track_origin` are retired. Runtime output
 is possible only when ordinary comptime folding produces the value; no runtime
 metadata channel exists.
 
-**D-QUAL2 — Tag vs trait**: exactly two qualifier kinds — `trait` (has
-methods and dispatches) and `tag` (declares an erased dataflow fact and its
-policy). A tag requires a nonempty `deny` list and may declare `from`. Methods
+**D-QUAL2 — Tag vs trait** *(amended by D-TAG-MARKER1=A)*: exactly two
+qualifier kinds — `trait` (has methods and dispatches) and the value tag
+(declares an erased dataflow fact and its policy). A value tag is a field-less
+struct whose `impl Marker` block names `sites: [.TypeUse]`; its own `#FX(!…)`
+row is its nonempty denial list, and it may declare `from`. Fields or methods
 on a tag are E0732; tag where dispatch is expected is E0731. **D-QUAL4**:
 type-position value tags use a direct prefix, such as `#PII String`.
 
@@ -3701,8 +3704,8 @@ positional branches is one parse error (E1117), with no successful lowering.
 
 **D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
 2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:
-`join()` returns `T !TaskFailure`. `TaskFailure` is a normal enum with
-`.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
+`join()` returns `T !TaskFailure`. `TaskFailure` is a normal enum the prelude
+declares, with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
 same rail: positional form returns its ordered list and named form its
 anonymous tuple/record. A joined child panic becomes `.Panicked(reason)`;
 it does not kill the process. The reason uses the canonical task identity and
@@ -3711,7 +3714,9 @@ wrong-variant getters and
 numeric stops follow this same task-publication boundary. `trace()`,
 `exception()`, `TaskOutcome`, and
 `TaskStatus` are deleted from the task-handle surface. D-SERVICE1 retains
-`TaskOutcome` and `TaskStatus` as typed service-workflow facts; that domain API
+`TaskOutcome` and `TaskStatus` as typed service-workflow facts; a
+`TaskOutcome` is `.Finished` or `.Failed(TaskFailure)`, so a workflow's failure
+is the same value a join gives. That domain API
 is not `TaskHandle.outcome()` or `TaskHandle.status()` and does not restore
 `trace()` or `exception()`. It amends D-COROUTINE1 and retires
 D-CONC-OUTCOME1=A; conversion uses D-FAIL-CONV1.
@@ -3902,7 +3907,7 @@ tag and returns an untagged value. Bare `sanitizer` remains E0059 with this fix.
 `#Credential T` attaches the Prelude credential tag through the shared fact
 lattice. Credential facts spread by dataflow and may not reach `print`, `log`,
 or serialization sinks (E0722); `#Scrub(Credential)` is the exact audited strip
-point. Other tags follow their declared `deny` and optional `from` policy.
+point. Other tags follow their own `#FX(!…)` denials and optional `from` policy.
 
 **D-DET1 — Determinism** *(D-DET-CAPAPI)*: an explicit `-[]>` bound implies reproducible —
 wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
