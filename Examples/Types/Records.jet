@@ -1,0 +1,32 @@
+// A record is an unnamed struct: named members in braces, as a type
+// (`{min: Int, max: Int}`) and as a value (`{min: 3, max: 13}`). Two records
+// with the same members are the same type, in any member order. A function
+// that returns a record writes it inside its body's braces.
+Bounds: {min: Int, max: Int}
+
+bounds: fn(xs: [Int]) -> {min: Int, max: Int} {
+    {min: xs[0], max: xs[xs.len() - 1]}
+}
+
+widen: fn(b: Bounds, by: Int) -> Bounds {
+    {max: b.max + by, min: b.min - by}
+}
+
+run: fn() {
+    scores: [3, 5, 8, 13]
+    // A statement-start record pattern binds the members it names.
+    {min, max}: bounds(scores)
+    print("{min}..{max}")
+    wide: widen(bounds(scores), 2)
+    print("{wide.min}..{wide.max}")
+    point: {x: 4, y: -2}
+    print(point.x + point.y)
+    rows: [{name: "ada", n: 3}, {name: "bob", n: 5}]
+    doubled: rows.map(fn(r) { {name: r.name, n: r.n * 2} })
+    print("{doubled[1].name}={doubled[1].n}")
+}
+// --- expected output --------------------------------------------------
+// 3..13
+// 1..15
+// 2
+// bob=10

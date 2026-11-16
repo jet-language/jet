@@ -1534,7 +1534,18 @@ parser_parse_unit_fallible_return: fn(state: &JetParserState) -> ParsedType? {
 
 // A result after `->` or `-[E]>` is a type only when a
 // declaration-body boundary follows it, so `-> n * 2` stays an expression.
+// A `{…}` there is a record type when it parses as one and a body, a
+// contract or another result part follows it; before the end of a line or
+// a list it is a record type only when each member's type starts as a type
+// does, so a one-line body `{ x: count }` stays a body.
 parser_result_type_follows_arrow: fn(state: &JetParserState) -> Bool {
+    record: parser_current_kind(state) == TOKEN_LBRACE
+    if record {
+        end: parser_record_type_end_at(state, 0) ?? return false
+        follower: parser_kind_at(state, end)
+        line_end: follower == TOKEN_SEMI || follower == TOKEN_EOF || follower == TOKEN_RBRACE || follower == TOKEN_COMMA || follower == TOKEN_RPAREN || follower == TOKEN_RBRACKET
+        if line_end && !parser_record_type_members_typed_at(state, 0) -> return false
+    }
     saved_position: state.position
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
@@ -1543,6 +1554,7 @@ parser_result_type_follows_arrow: fn(state: &JetParserState) -> Bool {
     saved_type_gt_span: Span{start: state.pending_type_gt_span.start, end: state.pending_type_gt_span.end}
     saved_semicolon: state.explicit_semicolon_reported
     parsed: parser_parse_type(state, 0)
+    clean: !record || state.diagnostics.len() == saved_diagnostics
     failed: parser_aborting(state) && state.abort_mark > saved_diagnostics
     next: parser_current(state)
     kind: next.kind
@@ -1553,7 +1565,7 @@ parser_result_type_follows_arrow: fn(state: &JetParserState) -> Bool {
     state.pending_type_gt = saved_type_gt
     state.pending_type_gt_span = saved_type_gt_span
     state.explicit_semicolon_reported = saved_semicolon
-    !failed && boundary
+    clean && !failed && boundary
 }
 
 // The result after the one arrow. Current forms are `-> T`,

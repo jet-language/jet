@@ -2694,7 +2694,8 @@ sema_registration_reserved_type_rule: fn(module_text: String, item: Item, name: 
 // The registration rules of the Rust
 // reference's `register_distinct` and `register_type_alias`. A distinct
 // built on a distinct declared earlier (E0129) and an alias without type
-// parameters (E0324) are not registered; a range constraint on a base other
+// parameters (E0324) are not registered, unless the alias names a record
+// type (`Bounds: {min: Int, max: Int}`); a range constraint on a base other
 // than `Int` is reported and the type still registers.
 sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item: Item, diagnostics: &[Diagnostic]) -> Bool {
     if item == {
@@ -2714,7 +2715,7 @@ sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item:
             }
         }
         .TypeAlias(definition) -> {
-            if definition.type_params.len() == 0 && !(definition.target == .Named(_)) {
+            if definition.type_params.len() == 0 && !(definition.target == .Named(_)) && !sema_registration_record_type(definition.target) {
                 if sema_casing_alias_number_zero(definition) == .Val(zero) {
                     diagnostics.push(sema_casing_alias_number_diagnostic(definition, zero))
                     return false
@@ -2726,6 +2727,19 @@ sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item:
         .Func(_) | .Struct(_) | .Enum(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     true
+}
+
+// Whether `target` is a record type: a tuple type whose members all carry
+// names. A record has no other name, so a plain alias may give it one.
+sema_registration_record_type: fn(target: Type) -> Bool Never! {
+    if target == .Tuple(fields) {
+        if fields.len() == 0 -> return false
+        loop field in fields {
+            if field.name == "" -> return false
+        }
+        return true
+    }
+    false
 }
 
 // Indexed reads keep each candidate row in place; a two-name walk over the

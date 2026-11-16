@@ -1,0 +1,47 @@
+// A headless `{name: value, …}` is a record when its context names no struct:
+// with no expected type it has its own record type, and against an expected
+// record type it checks as that record, in any member order. A lone pun `{x}`
+// is never a record.
+brace_record_errors: fn(source: String) -> [String] {
+    codes := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        if diagnostic.code.starts_with("E") -> codes.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    codes
+}
+
+#Test("brace_records_check_as_unnamed_structs") {
+    accepted: `Bounds: {min: Int, max: Int}
+
+bounds: fn(xs: [Int]) -> {min: Int, max: Int} {
+    {min: xs[0], max: xs[xs.len() - 1]}
+}
+
+widen: fn(b: Bounds) -> (min: Int, max: Int) {
+    {max: b.max + 1, min: b.min - 1}
+}
+
+run: fn() {
+    {min, max}: bounds([3, 9])
+    pair: {x: 1, y: 2}
+    both: {min, max}
+    rows: [{name: "a", n: 1}, {n: 2, name: "b"}]
+    wide: widen({max: max, min: min})
+    doubled: rows.map(fn(r) { {name: r.name, n: r.n * 2} })
+    print(pair.x + pair.y + both.max + rows[1].n + wide.min + doubled[0].n)
+}
+`
+    assert_eq(brace_record_errors(accepted).join("; "), "")
+}
+
+#Test("a_lone_pun_is_not_a_record") {
+    errors: brace_record_errors(
+        `run: fn() {
+    x: 1
+    y: {x}
+    print(y)
+}
+`,
+    )
+    assert(errors.len() == 1 && errors[0].starts_with("E0119"), errors.join("; "))
+}

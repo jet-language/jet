@@ -233,6 +233,14 @@ sema_expression_list_element_is_inferred_struct: fn(element: Expr) -> Bool Never
     }
 }
 
+// `[{x: 1}, {x: 2}]`: a headless item with record fields is a record.
+sema_expression_list_element_is_record: fn(element: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if element == .StructLit(_, _, _, as_trait, fields, inferred, _, _) {
+        return inferred && as_trait == None && sema_expression_brace_record(fields, None, environment, program)
+    }
+    false
+}
+
 // `[["41"], [], ["x"]]`: an empty item takes its type from a sibling.
 sema_expression_list_element_is_empty_list: fn(element: Expr) -> Bool Never! {
     if element == {
@@ -421,9 +429,13 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, env
         if first == None {
             loop deferred_index in deferred {
                 element := elements[deferred_index]
-                // No sibling names a type, so an inferred struct item has none.
-                if sema_expression_list_element_is_inferred_struct(element) {
-                    diagnostics.push(sema_error("E0119", expr_span(element), "`{{ … }}` needs a known struct type here", "the inferred construction form requires an expected type from the surrounding context (binding annotation, return type, etc.)", "name the type at the value, e.g. `x: Point{{x: 1, y: 2}}`, or inside a list `[Point{{ … }}, {{ … }}]`"))
+                // No sibling names a type, so an inferred struct item has
+                // none; the first record item names the list's record type.
+                record: sema_expression_list_element_is_inferred_struct(element) && sema_expression_list_element_is_record(element, environment, program)
+                if sema_expression_list_element_is_inferred_struct(element) && !(record && first == None) {
+                    if !record {
+                        diagnostics.push(sema_error("E0119", expr_span(element), "`{{ … }}` needs a known struct type here", "the inferred construction form requires an expected type from the surrounding context (binding annotation, return type, etc.)", "name the type at the value, e.g. `x: Point{{x: 1, y: 2}}`, or inside a list `[Point{{ … }}, {{ … }}]`"))
+                    }
                     next
                 }
                 checked: sema_check_expression(element, None, environment, program, scopes, state, tail_store, context, diagnostics)
