@@ -4,27 +4,65 @@
 // unknown key stops at jet_rt_unreachable. A copy is one more owner of the
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
-use jet_foundation.[Span, SymbolID, BodyCallArg, NodeKind, TComptimeField, TComptimeValue, TMethodRef, TTryConvert, Type, name_rows_set, name_rows_value, sha256_bytes, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, BodyCallArg, NodeKind, TComptimeField, TComptimeValue, TMethodRef, TTryConvert, TTypeDef, Type, name_rows_set, name_rows_value, sha256_bytes, type_carrier_identity]
 
-// The payload key of concrete type `ty`: a function of its identity alone
-// (56 bits of the identity's SHA-256, from 1), so it does not depend on the
-// order the build met the types in. `m.trait_keys` holds the keys given, and
-// two identities that would share a key stop the build.
-ir_trait_key: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
+// The payload key of concrete type `ty`: the key the program gave its
+// identity (IRProgram.trait_keys), or, for a type no implementation is
+// declared for, the first of its candidate keys no implementer holds
+// (ir_trait_key_free). Either depends on the program's implementations and
+// the identity alone, so every part of a build gives a type the same key
+// whatever order it met the types in, and no implementer shares its key.
+ir_trait_key: fn(p: IRProgram, ty: Type) -> Int Never! {
     identity: ir_trait_identity(p, ty)
-    if name_rows_value(m.trait_keys, identity) == .Val(key) -> return key
-    bytes: identity.bytes()
+    p.trait_keys.keys.get(identity) ?? ir_trait_key_free(p.trait_keys, identity, ir_trait_key_hash(identity, 0))
+}
+
+// The payload keys of the types a program declares trait implementations
+// for (ir_trait_key_table): each identity's key, and the keys they hold.
+IRTraitKeys: struct {
+    keys: [String:Int]
+    held: [Int:Bool]
+}
+
+// Candidate `salt` of the payload key of `identity`: 56 bits of the SHA-256
+// of the identity (followed by `#salt` past the first candidate), from 1.
+ir_trait_key_hash: fn(identity: String, salt: Int) -> Int Never! {
+    bytes: if salt == 0 -> identity.bytes() else -> "{identity}#{salt}".bytes()
     digest: sha256_bytes(bytes[0..<bytes.len()])
     key := 0
     loop index in 0..<7 -> key = key * 256 + (Int{digest[index]})
-    key += 1
-    loop (index, given) in m.trait_keys.rows {
-        if given == key {
-            panic("trait payload keys of {m.trait_keys.texts[index]} and {identity} collide")
-        }
+    key + 1
+}
+
+// The key of `identity` from candidate `first` on (then its later
+// candidates, ir_trait_key_hash): the first that no other identity of
+// `table` holds.
+ir_trait_key_free: fn(table: IRTraitKeys, identity: String, first: Int) -> Int Never! {
+    key := first
+    salt := 0
+    loop table.held.get(key) != None && table.keys.get(identity) != .Val(key) {
+        salt += 1
+        key = ir_trait_key_hash(identity, salt)
     }
-    name_rows_set(m.trait_keys, identity, key)
     key
+}
+
+// The payload keys of `identities` (each type a trait implementation is
+// declared for, in any order, repeats allowed), each with its first
+// candidate key: in identity order each takes its first candidate no
+// identity before it holds (ir_trait_key_free), so no two types share a
+// key and no key depends on the order the program declared its types in.
+ir_trait_key_table: fn(identities: &&[(identity: String, first: Int)]) -> IRTraitKeys Never! {
+    order := identities.move()
+    order.sort_by(fn(left: (identity: String, first: Int), right: (identity: String, first: Int)) { left.identity <=> right.identity })
+    table := IRTraitKeys{keys: [String:Int]{}, held: [Int:Bool]{}}
+    loop entry in order.move() {
+        if table.keys.get(entry.identity) != None -> next
+        key: ir_trait_key_free(table, entry.identity, entry.first)
+        table.held[key] = true
+        table.keys[entry.identity] = key
+    }
+    table
 }
 
 // The clone key of a trait value row: a copy retains the box (ir_clone).
@@ -115,7 +153,7 @@ ir_trait_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) ->
     loop concrete in owners {
         payload_row := -1
         if !ir_unit_type(concrete) -> payload_row = ir_value_type(m, p, concrete) ?? next
-        payload_key: ir_trait_key(m, p, concrete)
+        payload_key: ir_trait_key(p, concrete)
         expected: ir_word_const(m, a, payload_key)
         selected: ir_bool_op(m, a, IROp.Eq, key, expected)
         ir_open_if(a.f, selected, a.line)
@@ -154,7 +192,7 @@ ir_render_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slo
         if !ir_unit_type(concrete) {
             payload_row = ir_value_type(m, p, concrete) ?? return ir_fail(b, span, "display of {ir_type_name(concrete)}")
         }
-        payload_key: ir_trait_key(m, p, concrete)
+        payload_key: ir_trait_key(p, concrete)
         expected: ir_word_const(m, b, payload_key)
         selected: ir_bool_op(m, b, IROp.Eq, key, expected)
         ir_open_if(b.f, selected, b.line)
@@ -183,7 +221,7 @@ ir_trait_reflect_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, 
     key: ir_load_word(m, b, slot, 0)
     loop index in 0..<count {
         entry: names + 3 + index * 3
-        payload_key: ir_trait_key(m, p, Type.Named{name: ir_reflect_literal(p, b, args[entry])})
+        payload_key: ir_trait_key(p, Type.Named{name: ir_reflect_literal(p, b, args[entry])})
         expected: ir_word_const(m, b, payload_key)
         selected: ir_bool_op(m, b, IROp.Eq, key, expected)
         ir_open_if(b.f, selected, b.line)
@@ -202,8 +240,14 @@ ir_trait_reflect_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, 
 // spells the name: a boxed value's type is module-qualified, an
 // implementation's owner type is the name its body wrote.
 ir_trait_identity: fn(p: IRProgram, ty: Type) -> String Never! {
+    ir_type_identity(p.type_rows, p.types, ty)
+}
+
+// ir_trait_identity over the type rows `type_rows` of `types`, before a
+// program holds them (ir_program_declared).
+ir_type_identity: fn(type_rows: [String:Int], types: [TTypeDef], ty: Type) -> String Never! {
     plain: ir_untag(ty)
-    if plain == .Named(_) -> return ir_render_type_key(p.type_rows, p.types, plain)
+    if plain == .Named(_) -> return ir_render_type_key(type_rows, types, plain)
     type_carrier_identity(plain)
 }
 
@@ -347,7 +391,7 @@ ir_trait_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written:
     }
     slot: ir_expr(m, p, b, value)
     if ir_failed(b) -> return -1
-    payload_key: ir_trait_key(m, p, concrete)
+    payload_key: ir_trait_key(p, concrete)
     box_bytes: ir_trait_box_bytes(m, payload_row)
     boxed: ir_box_alloc(m, b, box_bytes, row)
     key: ir_word_const(m, b, payload_key)
@@ -443,7 +487,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     arm_states := [[IROwnState]]{}
     arm_leaves := [Bool]{}
     loop target in targets {
-        target_key: ir_trait_key(m, p, target.concrete)
+        target_key: ir_trait_key(p, target.concrete)
         expected: ir_word_const(m, b, target_key)
         selected: ir_bool_op(m, b, IROp.Eq, key, expected)
         ir_open_if(b.f, selected, b.line)
@@ -513,4 +557,23 @@ ir_trait_unreachable: fn(m: &IRModule, b: &IRBuilder) Never! {
     message: ir_static_text(m, b, "unknown native trait method key")
     _: ir_runtime(m, b, "jet_rt_unreachable", message, -1)
     ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+}
+
+#Test("two types whose first payload keys collide each get a key of their own, whatever order they are declared in") {
+    forward := [(identity: String, first: Int)]{(identity: "main::Point", first: 7), (identity: "main::Line", first: 7), (identity: "main::Point", first: 7)}
+    backward := [(identity: String, first: Int)]{(identity: "main::Line", first: 7), (identity: "main::Point", first: 7)}
+    tables := [IRTraitKeys]{ir_trait_key_table(forward), ir_trait_key_table(backward)}
+    loop table in tables {
+        line: table.keys.get("main::Line") ?? -1
+        point: table.keys.get("main::Point") ?? -1
+        assert_eq(line, 7)
+        assert_eq(point, ir_trait_key_hash("main::Point", 1))
+        assert(point != line, "the colliding types hold distinct keys")
+        assert_eq(table.keys.len(), 2)
+        // An implementer's key is its own from any candidate on.
+        assert_eq(ir_trait_key_free(table, "main::Point", 7), point)
+        // A type no implementation is declared for passes the keys the
+        // implementers hold.
+        assert_eq(ir_trait_key_free(table, "main::Circle", 7), ir_trait_key_hash("main::Circle", 1))
+    }
 }

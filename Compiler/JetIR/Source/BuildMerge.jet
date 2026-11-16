@@ -243,21 +243,6 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
         row: g.data_ids[group]
         if row >= 0 -> name_rows_set(out.constant_rows, g.data_keys[group], row)
     }
-    given := [Int:String]{}
-    loop part in 0..<parts.len() {
-        table: parts[part].trait_keys
-        loop (index, identity) in table.texts {
-            key: table.rows[index]
-            if given.get(key) == .Val(other) {
-                if other != identity {
-                    panic("trait payload keys of {other} and {identity} collide")
-                }
-                next
-            }
-            given[key] = identity.copy()
-            name_rows_set(out.trait_keys, identity, key)
-        }
-    }
     // A host literal's key names its function and a slot of its body, so the
     // parts that built one function hold the one value under it.
     loop part in 0..<parts.len() {

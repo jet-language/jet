@@ -650,8 +650,10 @@ name, so `Point` declared in the inline module `geo` of `app.jet` is
 ([`ReflectPaths`](../../../Examples/Metaprogramming/Reflection/ReflectPaths.jet)).
 An erased trait value (`[Shape]{Square{side: 2}}[0]`) reflects as the concrete
 value its box holds: its `type_name` and `path` name the declared type whose
-payload key the box carries. The key is a hash of the type's identity alone,
-so it does not change in a build that adds a module. A value of a builtin or
+payload key the box carries. The key is a hash of the type's identity; a type
+whose hash another implementer's key already holds takes its next hash, so no
+two types share a key. A build that adds a module keeps each key unless a type
+it adds held it first. A value of a builtin or
 generic implementer keeps the trait's own names. `fields()` is populated for
 a struct and is empty for a non-struct value. A struct field's `value()`
 lists that struct's own fields, so `.fields()[i].value()` walks a nested value
