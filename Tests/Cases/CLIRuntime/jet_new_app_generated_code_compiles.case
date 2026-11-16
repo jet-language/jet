@@ -1,0 +1,74 @@
+# Every file `jet new service|route|job|migration` writes compiles unchanged
+# in an app that serves `Routes/` by file routing, and is already formatted.
+# A service is `#App` methods, a job an `#App.Job` method queued with
+# `app.enqueue`, a migration one `db.migrate` call keyed by its version and
+# name, and each file and declaration is named from the inputs alone. Each
+# route page declares its own `page`, which stays its file's: the app still
+# compiles with one, two and three generated routes.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: shop/package.jet = "name: \"shop\"\nversion: \"0.1.0\"\n"
+write: shop/run.jet = "use web: core.web\n\nrun: fn() { web.app().routes(from: \"Routes\").serve() }\n"
+step: jet new service OrderBoard
+cwd: {work}/shop
+exit: 0
+file: shop/Services/OrderBoard.jet ~ "OrderBoard: struct" # the type is the name in PascalCase
+step: jet new job send_digest
+cwd: {work}/shop
+exit: 0
+file: shop/Jobs/SendDigest.jet ~ "SendDigest: struct" # any spelling of the name gives one type
+file: shop/Jobs/SendDigest.jet ~ "    #App.Job send_digest: fn(self, id: Int) -> Int Never!" # the job method is the snake_case name
+file: shop/Jobs/SendDigest.jet ~ "app.enqueue(fn()" # queued through app.enqueue
+step: jet new route --path /orders/:order_id
+cwd: {work}/shop
+exit: 0
+stderr: !~ "next:" # run.jet already serves Routes/
+file: shop/Routes/Orders/[OrderId].jet ~ "page: fn() -> WebPage" # a capture names its [Name] part
+step: jet check run.jet
+cwd: {work}/shop
+exit: 0
+step: jet new route OrderItems
+cwd: {work}/shop
+exit: 0
+file: shop/Routes/OrderItems.jet ~ "page: fn() -> WebPage" # a second page file with its own `page`
+step: jet check run.jet
+cwd: {work}/shop
+exit: 0
+stderr: !~ "is declared in two files" # two route pages don't clash
+step: jet check Routes/OrderItems.jet
+cwd: {work}/shop
+exit: 0
+step: jet new route --path /
+cwd: {work}/shop
+exit: 0
+file: shop/Routes/Index.jet ~ "<h1>Home</h1>" # `/` is Routes/Index.jet
+step: jet check run.jet
+cwd: {work}/shop
+exit: 0
+stderr: !~ "is declared in two files" # nor do three
+step: jet check Routes/Index.jet
+cwd: {work}/shop
+exit: 0
+step: jet check Routes/Orders/[OrderId].jet
+cwd: {work}/shop
+exit: 0
+step: jet new migration AddIndex --up 'CREATE INDEX orders_by_user ON orders (user_id)'
+cwd: {work}/shop
+exit: 0
+file: shop/Migrations/001_add_index.jet ~ "migrate_001_add_index: fn(scope: db.DBScope) -[DB, Time.Wait]> Int db.DBError!" # versioned file and function
+file: shop/Migrations/001_add_index.jet ~ "db.migrate(scope, \"001_add_index\", [db.SQL]" # the steps run once under that key
+step: jet check Services/OrderBoard.jet
+cwd: {work}/shop
+exit: 0
+step: jet check Jobs/SendDigest.jet
+cwd: {work}/shop
+exit: 0
+step: jet check Migrations/001_add_index.jet
+cwd: {work}/shop
+exit: 0
+step: jet check run.jet
+cwd: {work}/shop
+exit: 0
+step: jet fmt --check
+cwd: {work}/shop
+exit: 0

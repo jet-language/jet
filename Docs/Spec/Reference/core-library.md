@@ -5545,6 +5545,7 @@ tasks never read or change the process registry. The module source is
 | `graph.cache<V>(policy: CachePolicy) -> App` | graph | Answer every `#App.Public` endpoint reply of type `V` under `policy`, and give back the graph. See below. |
 | `graph.sitemap(list) -> App` | graph | List the address of each public screen state `list` gives in the served `/sitemap.xml`, and give back the graph. See below. |
 | `graph.head(head) -> App` | graph | Put the metadata `head` gives a screen's state in the `<head>` of that screen's server HTML, and give back the graph. See below. |
+| `graph.installable(name: String, icon: String, color: Int) -> App` | graph | Make the app installable from a browser: a served web app answers a web app manifest with icons made from `icon`, and every page links it; give back the graph. See below. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -5974,6 +5975,27 @@ each becomes an absolute URL. A page is
 and a signed-in screen's page always is, whatever its head says, as is its
 401 page. A `head` that takes other than one state, a state that is no
 struct declared outside Core, or one that doesn't derive `Decode`, is E2810.
+
+`graph.installable(name:, icon:, color:)` makes the app installable from a
+browser; the last call holds. `icon` is the path of a PNG or JPEG file,
+relative to the working directory like every app path, and `color` is
+`0xRRGGBB`. A served web app answers GET `/manifest.webmanifest`
+(`application/manifest+json`, `Cache-Control: no-cache`) with the manifest:
+`name` and `short_name` are `name`, `start_url` and `scope` are `/`,
+`display` is `standalone`, `theme_color` and `background_color` are `color`
+as `#rrggbb`, and `icons` lists three PNGs made from the one icon file: 192
+and 512 pixels, the image scaled to fit and centered on a transparent
+square, and a maskable 512 (`"purpose": "maskable"`), the image inside the
+inner 80% of the square, the safe zone no platform mask cuts, on `color`.
+Each icon's address under `/__jet/icons/` holds a key of the icon file's
+bytes, its size and its fill, so it answers with
+`Cache-Control: public, max-age=31536000, immutable`, and an edited icon file
+gets new addresses. Every HTML page the app serves ends its `<head>` with
+`<link rel="manifest" href="/manifest.webmanifest">` and
+`<meta name="theme-color" content="#rrggbb">`. An empty name or icon path,
+or a color outside `0x000000..0xFFFFFF`, panics; an icon file that can't be
+read, or is no PNG or JPEG the image codec reads, stops the app before it
+serves. A program route at `/manifest.webmanifest` answers it instead.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

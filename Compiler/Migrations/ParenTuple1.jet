@@ -15,7 +15,6 @@
 // read the same way, and so is a Markdown file's ```jet fence; a record in
 // an interpolation hole is reported instead.
 use {
-    jet_foundation.[Program]
     jet_lexer.[Token, TokenTables, lex_generated, STRING_PART_INTERPOLATION, TOKEN_BANG, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_GT, TOKEN_IDENT, TOKEN_KW_FN, TOKEN_KW_MODULE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_MINUS, TOKEN_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SELF, TOKEN_SEMI, TOKEN_SHR, TOKEN_STRING, TOKEN_UNIFIED_ARROW, lexer_without_comments]
     jet_parser.[jfmt_structure, jfmt_structure_difference, parse_generated_source]
 }
@@ -244,16 +243,20 @@ paren_tuple1_fences: fn(bytes: [U8]) -> [ParenTupleFence] {
 }
 
 // Why `after`, the plan's rewrite of `before`, does not mean what `before`
-// means, or None when it does. A Jet source's two texts must parse to the
-// same program (paren_tuple1_same_source); a Markdown file's ```jet fences
-// must, one by one, and its other text must stay as written.
+// means, or None when it does. The parser no longer reads paren records, so
+// `before` is read in the rewrite's own terms: the plan's rewrite of it,
+// which changes only delimiters, is what `after` must mean.
+// A Jet source's two texts must parse to the same program
+// (paren_tuple1_same_source); a Markdown file's ```jet fences must, one by
+// one, and its other text must stay as written.
 paren_tuple1_same_meaning: fn(path: String, before: String, after: String, source: Bool) -> String? {
     if before == after -> return None
     if source || path.ends_with(".jet") || path.ends_with(".template") {
-        return paren_tuple1_same_source(before, after)
+        return paren_tuple1_same_source(paren_tuple1_source(path, before).text, after)
     }
     if !path.ends_with(".md") -> return Val("the plan rewrites no such file")
-    old: before.bytes()
+    planned: paren_tuple1_markdown(path, before).text
+    old: planned.bytes()
     new: after.bytes()
     old_fences: paren_tuple1_fences(old)
     new_fences: paren_tuple1_fences(new)
@@ -279,8 +282,7 @@ paren_tuple1_same_meaning: fn(path: String, before: String, after: String, sourc
 }
 
 // Why the Jet source `after` does not mean what `before` means, or None.
-// Both parse with the parser that reads paren and brace records, and their
-// programs compare without positions (paren_tuple1_structure). A string
+// Their programs compare without positions (jfmt_structure). A string
 // literal that changed must hold a Jet program, compared the same way, and
 // it is put back as written before the programs compare.
 paren_tuple1_same_source: fn(before: String, after: String) -> String? {
@@ -311,22 +313,12 @@ paren_tuple1_same_source: fn(before: String, after: String) -> String? {
     if new_errors != old_errors {
         return Val("the source parses with {old_errors} errors, the rewrite with {new_errors}")
     }
-    old_shape: paren_tuple1_structure(old_parse.program)
-    new_shape: paren_tuple1_structure(new_parse.program)
+    old_shape: jfmt_structure(old_parse.program)
+    new_shape: jfmt_structure(new_parse.program)
     if old_shape == new_shape -> return None
     Val(jfmt_structure_difference(old_shape, new_shape))
 }
 
 paren_tuple1_strings: fn(tokens: [Token]) -> [Token] {
     tokens.filter(fn(token) { token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING })
-}
-
-// A program's structure, as the formatter compares it (jfmt_structure, no
-// positions or node ids), with a paren record value `(a: 1, b: 2)` and a
-// headless brace value `{a: 1, b: 2}` written as one node: the members are
-// the same, and only the brace node records each name's position. Record
-// types and destructures already parse to one node either way.
-paren_tuple1_structure: fn(program: Program) -> String {
-    shape: jfmt_structure(program)
-    shape.replace("StructLit {{ type_name: \"\", type_args: [], import_ns: None, as_trait: None, fields: [", "TupleLit {{ fields: [").replace("ExprField {{ name: ", "TupleField {{ name: ").replace("\", name_span: S, value: ", "\", value: ").replace("], inferred: true, span: S, id:  }}", "], span: S, ty: None, id:  }}")
 }

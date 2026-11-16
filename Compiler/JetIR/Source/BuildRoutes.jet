@@ -964,6 +964,18 @@ ir_string_with_capacity: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver:
     ir_runtime(m, b, "jet_rt_string_with_capacity", args, string_row)
 }
 
+// The core.mem allocator family (`Arena`, `Bump`, `Pool`, `Fixed`) of a
+// checked allocator method's receiver, bare or by Core identity: the runtime
+// type its handle row declares (`JetArena`) without the runtime's prefix.
+// The family names its storage exports (`jet_rt_mem_arena_storage_alloc`).
+ir_allocator_family: fn(receiver: Type) -[]> String? Never! {
+    if ir_handle_type_without_tags(receiver) == .Named(name) {
+        handle: ir_runtime_handle(name) ?? return None
+        if handle.runtime.starts_with("Jet") -> return Val(handle.runtime.removeprefix("Jet"))
+    }
+    None
+}
+
 // `alloc.alloc(value)` / `alloc.try_alloc(value)` / `alloc.reset()` on a
 // core.mem Arena/Bump/Pool/Fixed (Sema Memory.jet
 // sema_call_memory_allocator_method): the runtime storage reserves the
@@ -977,13 +989,8 @@ ir_string_with_capacity: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver:
 // the requested bytes and the allocator.
 ir_allocator_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(p, b, receiver)
-    allocator: ir_handle_allocator_name(receiver_ty) ?? return ir_fail_slot(b, span, "allocator method on {ir_type_name(receiver_ty)}")
-    storage: if allocator == {
-        "Arena" -> "jet_rt_mem_arena_storage_"
-        "Bump" -> "jet_rt_mem_bump_storage_"
-        "Pool" -> "jet_rt_mem_pool_storage_"
-        else -> "jet_rt_mem_fixed_storage_"
-    }
+    allocator: ir_allocator_family(receiver_ty) ?? return ir_fail_slot(b, span, "allocator method on {ir_type_name(receiver_ty)}")
+    storage: "jet_rt_mem_{allocator.to_lower()}_storage_"
     if operation == .AllocReset {
         if args.len() != 0 {
             return ir_fail_slot(b, span, "{allocator}.reset with {args.len()} arguments")

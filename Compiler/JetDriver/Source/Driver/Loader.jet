@@ -3426,8 +3426,11 @@ jet_driver_bind_package_namespaces: fn(
         // `build: fn(b: Build)`: the build query reports two of them (E3520).
         // The `run: fn` an entry file's top-level statements become, whose
         // name is zero-width, stays its file's own: beside another `run` in
-        // the package it is E0621 (sema_check_script_entries).
+        // the package it is E0621 (sema_check_script_entries). A page file
+        // under one of the package's `.routes(from:)` roots keeps its
+        // `page: fn` too: file routing gives every such file its own page.
         names := [[NamedSpan]]{}
+        route_directories: jet_driver_package_route_directories(modules, source_units, members, request.authorized_sources)
         loop module_index in members {
             unit: source_units[modules[module_index].source_unit_index]
             named_entry: loop entry_module in package.outputs.entry_modules {
@@ -3442,6 +3445,7 @@ jet_driver_bind_package_namespaces: fn(
                 "test.jet" -> "test"
                 else -> ""
             }
+            route_page: jet_driver_unit_is_route_page(unit, request.authorized_sources, route_directories)
             member_names := [NamedSpan]{}
             member_private := [String]{}
             build_entry: loop item in modules[module_index].program.items {
@@ -3450,7 +3454,7 @@ jet_driver_bind_package_namespaces: fn(
                 }
             } ?? false
             loop declared in jet_driver_namespace_item_names(modules[module_index].program.items, jet_driver_namespace_first_item(modules[module_index])) {
-                if (named_entry && declared.name == "run") || declared.name == role_command || (build_entry && declared.name == "build") || (declared.name == "run" && declared.span.start == declared.span.end) {
+                if (named_entry && declared.name == "run") || declared.name == role_command || (build_entry && declared.name == "build") || (declared.name == "run" && declared.span.start == declared.span.end) || (route_page && declared.name == "page") {
                     member_private.push(declared.name)
                     next
                 }
@@ -6892,16 +6896,60 @@ jet_driver_note_app_route_name: fn(tables: ASTTables, names: &[String], expressi
 }
 
 jet_driver_app_route_root: fn(root: JetDriverAuthorizedSourceRoot, directory: String, name: String) -> AppRouteRoot {
+    files := [AppRouteFile]{}
+    found: jet_driver_app_route_walk(root, jet_driver_app_route_directory(directory, name), "", files)
+    files.sort_by(fn(left: AppRouteFile, right: AppRouteFile) { left.path <=> right.path })
+    AppRouteRoot{root: name, found: found, files: files}
+}
+
+// The directory `.routes(from: name)` names, resolved against `directory`,
+// the directory of the file that calls it.
+jet_driver_app_route_directory: fn(directory: String, name: String) -> String Never! {
     relative := name
     if relative.starts_with("./") -> relative = relative.slice(2, relative.len())
     if relative.ends_with("/") && relative.len() > 1 {
         relative = relative.slice(0, relative.len() - 1)
     }
-    target: if relative.starts_with("/") -> relative else if directory == "/" -> "/{relative}" else -> "{directory}/{relative}"
-    files := [AppRouteFile]{}
-    found: jet_driver_app_route_walk(root, target, "", files)
-    files.sort_by(fn(left: AppRouteFile, right: AppRouteFile) { left.path <=> right.path })
-    AppRouteRoot{root: name, found: found, files: files}
+    if {
+        relative.starts_with("/") -> relative
+        directory == "/" -> "/{relative}"
+        else -> "{directory}/{relative}"
+    }
+}
+
+// The route directories the package's members name with `.routes(from:)`,
+// resolved as jet_driver_attach_app_route_roots resolves them.
+jet_driver_package_route_directories: fn(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], members: [Int], snapshot: JetDriverAuthorizedSourceSnapshot) -> [String] Never! {
+    directories := [String]{}
+    loop module_index in members {
+        unit: source_units[modules[module_index].source_unit_index]
+        if unit.root_index < 0 || unit.root_index >= snapshot.roots.len() -> next
+        root: snapshot.roots[unit.root_index]
+        if unit.file_index < 0 || unit.file_index >= root.files.len() -> next
+        if !root.files[unit.file_index].source.contains("routes") -> next
+        directory: jet_driver_parent_path(root.files[unit.file_index].path)
+        loop name in jet_driver_app_route_names(modules[module_index].program) {
+            directories.push(jet_driver_app_route_directory(directory, name))
+        }
+    }
+    directories
+}
+
+// Whether the unit is a page file of one of `directories`: a `.jet` file
+// below a route directory whose name doesn't opt out of routing with `_`
+// (jet_driver_app_route_walk).
+jet_driver_unit_is_route_page: fn(unit: JetDriverSourceUnit, snapshot: JetDriverAuthorizedSourceSnapshot, directories: [String]) -> Bool Never! {
+    if directories.len() == 0 || unit.root_index < 0 || unit.root_index >= snapshot.roots.len() {
+        return false
+    }
+    root: snapshot.roots[unit.root_index]
+    if unit.file_index < 0 || unit.file_index >= root.files.len() -> return false
+    path: root.files[unit.file_index].path
+    if jet_driver_path_leaf(path).starts_with("_") -> return false
+    loop directory in directories {
+        if path.starts_with("{directory}/") -> return true
+    }
+    false
 }
 
 jet_driver_app_route_walk: fn(root: JetDriverAuthorizedSourceRoot, directory: String, relative: String, files: &[AppRouteFile]) -> Bool {

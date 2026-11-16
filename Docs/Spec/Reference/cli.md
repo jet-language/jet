@@ -1244,8 +1244,29 @@ repository), the template's `run.jet` (the `jet run` home), the three
 comment-only command homes `build.jet`, `dev.jet` and `test.jet` for
 `overrides`, and `.gitignore`, then the status lines on stderr
 (muted by `--quiet`). A bare `jet new` prints the command help with exit 2.
-The backend scaffolds (`jet new service|route|job|migration`) are refused with
-E2104 until they are ported.
+Inside an app package, `jet new service <Name>`, `jet new job <Name>`,
+`jet new route [<Name>] [--path /orders/:id]` and
+`jet new migration <Name> --up <SQL>` generate code from those inputs alone:
+`Services/<Name>.jet` (a struct with one `#App.Public` method), `Jobs/<Name>.jet`
+(an `#App.SignedIn` method that queues its `#App.Job` method with
+`app.enqueue`), the page file that file routing serves at the address
+(`/orders/:id` is `Routes/Orders/[Id].jet`, `/` is `Routes/Index.jet`; a route
+without `--path` is at `/<name in kebab-case>`), and
+`Migrations/NNN_<name>.jet` (a `db.migrate` step keyed `NNN_<name>`, numbered
+one past every migration in the folder and in the receipts). Names are
+cased as Jet cases names (`order-board`, `order_board` and `OrderBoard` give
+`OrderBoard`); an address file routing would not answer from one file of its
+own is E2104. Each file is formatted as `jet fmt` writes it, and none is ever
+overwritten (E2105). The run records the files and their SHA-256 in
+`.jet/generated/<kind>-<name>.receipt` and prints the undo command.
+`--preview` prints each file and the receipt and writes nothing. `--remove`
+deletes exactly the files the receipt lists; when one was edited since, it
+refuses with E2105 and removes nothing. The receipt stays, marked removed, so
+a migration generated again reuses its number. A route generator prints the
+`.routes(from: "Routes")` line to add when no root file serves `Routes/`; it
+never edits the app's builder. A `jet new` flag the generators don't read
+(`--template`, `--annotated`, `--model`, `--lock`, `--down`, `--risk`,
+`--apply`) is E2104 with them, not ignored.
 
 `jet init [<script.jet>]` writes `package.jet` in the working directory,
 named after the directory (`app` when it has no name) and pinned with
