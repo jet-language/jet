@@ -1,0 +1,34 @@
+# Hover on an immutable `name: value` inside a block gives the reason it fell
+# back to run time, the same reason `jet inspect semindex` gives: a run-time
+# input, a call that reaches the outside world, a value no build can keep, or
+# a computation that stopped (here on the evaluator's step limit). A local
+# compiling computed shows its value.
+session lsp content-length: jet self lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp
+stdout: ~ "hoverProvider" # the server answers initialize before any hover
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/fallback_reasons.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"square: fn(value: Int) -> Int { value * value }\\n\\nnoisy: fn(value: Int) -> Int {\\n    print(\\\"noisy\\\")\\n    value\\n}\\n\\nspin: fn() -> Int {\\n    i := 0\\n    loop i >= 0 -> i += 1\\n    i\\n}\\n\\nreasons: fn(count: Int, deep: Bool) -> Int {\\n    total := 0\\n    loop step in 0..<2 {\\n        computed: square(6)\\n        input: count + step\\n        total += computed + input\\n    }\\n    if count > 0 {\\n        printed: noisy(3)\\n        doubler: fn(value: Int) -> Int { value * 2 }\\n        total += printed + doubler(1)\\n    }\\n    if deep {\\n        spun: spin()\\n        total += spun\\n    }\\n    total\\n}\\n\\nrun: fn() { print(reasons(2, false)) }\\n\"}}}"
+recv lsp
+stdout: ~ "publishDiagnostics" # the document is checked before the hovers
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/fallback_reasons.jet\"},\"position\":{\"line\":16,\"character\":9}}}"
+recv lsp
+stdout: ~ "Computed while compiling: `36`." # the call of pure code is computed while compiling
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/fallback_reasons.jet\"},\"position\":{\"line\":17,\"character\":9}}}"
+recv lsp
+stdout: ~ "Computed at run time: it reads `count`, which only the running program knows." # a run-time input
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/fallback_reasons.jet\"},\"position\":{\"line\":21,\"character\":9}}}"
+recv lsp
+stdout: ~ "Computed at run time: it calls `noisy`, which prints text or reads input." # an outside effect
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/fallback_reasons.jet\"},\"position\":{\"line\":22,\"character\":9}}}"
+recv lsp
+stdout: ~ "which a build can't keep." # a value no build can keep; the reason also names the held type, whose spelling is not part of this contract
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/fallback_reasons.jet\"},\"position\":{\"line\":26,\"character\":9}}}"
+recv lsp
+stdout: ~ "Computed at run time: computing it stops (" # a computation that stopped
+stdout: ~ "fuel" # the stop names the spent step budget
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+stdout: ~ "result" # shutdown answers
+close lsp
+exit: any # the session ends when the server closes

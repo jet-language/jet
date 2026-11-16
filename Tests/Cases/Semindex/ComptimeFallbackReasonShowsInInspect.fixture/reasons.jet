@@ -1,0 +1,33 @@
+square: fn(value: Int) -> Int { value * value }
+
+noisy: fn(value: Int) -> Int {
+    print("noisy")
+    value
+}
+
+spin: fn() -> Int {
+    i := 0
+    loop i >= 0 -> i += 1
+    i
+}
+
+reasons: fn(count: Int, deep: Bool) -> Int {
+    total := 0
+    loop step in 0..<2 {
+        computed: square(6)
+        input: count + step
+        total += computed + input
+    }
+    if count > 0 {
+        printed: noisy(3)
+        doubler: fn(value: Int) -> Int { value * 2 }
+        total += printed + doubler(1)
+    }
+    if deep {
+        spun: spin()
+        total += spun
+    }
+    total
+}
+
+run: fn() { print(reasons(2, false)) }
