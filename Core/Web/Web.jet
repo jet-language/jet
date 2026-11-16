@@ -24,6 +24,8 @@ use {
     // core.web.forms values and calls, so core.web reaches that module.
     core.web.forms.[WebFormTyped]
     core.prelude.[SourceLocation]
+    // A mounted method's call is one transaction (`app_transacted`).
+    calls: app
     app.[Signature, make_trace_id, webhook_header, webhook_signed]
     log: core.log
     core.log.[LogField, TraceSpan]
@@ -1330,13 +1332,63 @@ priv RemoteArgs: struct {
 
 // A call of an endpoint method: 200 with its reply, or 422 with the field
 // errors (`app_invalid_json`) when the body is no JSON array of arguments
-// the method takes.
+// the method takes. The call is one transaction (`app_transacted`): a reply
+// that `__reply_err` made rolls it back.
 priv app_remote_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     if app_remote_limited(endpoint.limit, request) == .Val(wait_ns) -> return app_limited(wait_ns)
     text: request.text() ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
     tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
-    reply: endpoint.answer(RemoteArgs{tree: tree}) ?? return app_json(422, app_invalid_json(err))
-    app_json(200, reply)
+    app_transacted(fn() {
+        reply: endpoint.answer(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
+        (response: app_json(200, reply), commit: !app_reply_failed(reply))
+    })
+}
+
+// Whether `reply` is a failed run's: `__reply_err` leads it.
+priv app_reply_failed: fn(reply: String) -> Bool Never! { reply.starts_with("{{\"err\":") }
+
+// Runs one call of a mounted service's method, `run`, which gives the
+// response and whether the call succeeded, as one transaction on each store
+// it uses (app.transactions): a success commits, anything else rolls back.
+// A call a busy store refused rolls back and runs again, up to
+// `transactions.attempts()` times in all; past them it is answered 503 with
+// `Retry-After`. A call made on a task that runs one already is part of it.
+priv app_transacted: fn(run: fn() -[Net, FS.Read]> (response: HTTPResponse, commit: Bool) Never!) -[Net, FS.Read]> HTTPResponse Never! {
+    loop _ in 0..<calls.transactions.attempts() {
+        call: calls.transactions.begin() ?? return run().response
+        outcome: run()
+        if calls.transactions.end(call, outcome.commit) -> return outcome.response
+    }
+    busy: app_json(503, app_error_json("the database stayed busy: retry after 1 s"))
+    busy.__with_header("retry-after", "1")
+}
+
+#Test("a call a busy store refuses runs again, and is answered 503 once its attempts are spent") {
+    runs: Shared{0}
+    first: runs.copy()
+    second: runs.copy()
+    // Refused by its store until its third run.
+    flaky: app_transacted(fn() {
+        count := first.guard_edit()
+        count.value += 1
+        if count.value < 3 {
+            calls.transactions.refuse(calls.transactions.current() ?? panic("the call is open"))
+        }
+        (response: app_json(200, "{{\"ok\":{count.value}}}"), commit: true)
+    })
+    assert_eq(flaky.status, 200)
+    assert_eq(flaky.text(), "{{\"ok\":3}}")
+    refused: app_transacted(fn() {
+        count := second.guard_edit()
+        count.value += 1
+        calls.transactions.refuse(calls.transactions.current() ?? panic("the call is open"))
+        (response: app_json(200, "{{\"ok\":0}}"), commit: true)
+    })
+    assert_eq(refused.status, 503)
+    assert_eq(refused.header("retry-after"), Val("1"))
+    total: runs.guard_read()
+    assert_eq(total.value, 3 + calls.transactions.attempts())
+    assert_eq(calls.transactions.current(), Int?{None})
 }
 
 // One webhook method of a mounted service: how its sender signs, the names
@@ -1353,8 +1405,9 @@ priv AppWebhook: struct {
 // go to the signing-key method; no key, no signature header or a signature
 // that its MAC under the key does not match answers 401, all before the body
 // is decoded. Then the webhook runs on the path parameters and the decoded
-// body: 200 with its reply, 500 when it fails, or 422 with the field errors
-// when the body is no JSON the method takes.
+// body, as one transaction (`app_transacted`): 200 with its reply, 500 when
+// it fails, which rolls it back, or 422 with the field errors when the body
+// is no JSON the method takes.
 priv app_webhook_response: fn(hook: AppWebhook, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     unsigned: app_json(401, app_error_json("`{request.path}` takes only deliveries signed with its key"))
     values := [String]{}
@@ -1368,10 +1421,11 @@ priv app_webhook_response: fn(hook: AppWebhook, request: HTTPRequest) -[Net, FS.
     _ := live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
     values.push(text)
     delivery: live_json.parse("[{values.join(",")}]") ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
-    reply: hook.answer(RemoteArgs{tree: delivery}) ?? return app_json(422, app_invalid_json(err))
-    // `__reply_err` leads a failed run's reply.
-    if reply.starts_with("{{\"err\":") -> return app_json(500, reply)
-    app_json(200, reply)
+    app_transacted(fn() {
+        reply: hook.answer(RemoteArgs{tree: delivery.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
+        if app_reply_failed(reply) -> return (response: app_json(500, reply), commit: false)
+        (response: app_json(200, reply), commit: true)
+    })
 }
 
 // ── Traces ──────────────────────────────────────────────────────────────
