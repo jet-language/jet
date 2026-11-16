@@ -2370,6 +2370,18 @@ App: struct {
         held.value.install.copy()
     }
 
+    // The paths of the graph's services when it queues the writes it can't
+    // send (`.offline(.Queue)`), which a browser's service worker holds;
+    // none when it doesn't.
+    __queued_apis: fn(self) -> [String] Never! {
+        held: APP_GRAPH.guard_read()
+        paths := [String]{}
+        if held.value.offline != .Queue -> return paths
+        loop service in held.value.apis.keys() -> paths.push(held.value.apis[service].path.copy())
+        paths.sort()
+        paths
+    }
+
     // Opens `screen` at the address whose field texts are `fields`, by field
     // name, as a renderer does: the HTML of what its view shows, or None
     // when the texts make no state of the screen.

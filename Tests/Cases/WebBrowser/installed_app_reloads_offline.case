@@ -1,0 +1,25 @@
+# An installable app's service worker, on the browser test scaffold: the
+# notes app is installable and queues offline writes (`.offline(.Queue)`).
+# Its worker caches the shell and the hashed stylesheet the shell links. Once
+# the test stops the server, a reload still shows the shell, styled by the
+# cached stylesheet. Two notes added offline are answered 202 and held in the
+# worker's queue, which survives another offline reload. When the server
+# serves again, the worker sends them in order and the server lists them.
+env: NO_COLOR=1
+copy: {root}/Tests/Cases/WebBrowser/Fixtures/InstalledApp {work}/notes
+when probe chromium --version
+when probe chromedriver --version
+step: jetpack browser lock chromium --binary {tool:chromium} --driver {tool:chromedriver}
+cwd: {work}/notes
+env: JET_PROJECT_ROOT={work}/notes
+exit: 0
+step: jet test
+cwd: {work}/notes
+env: JET_PROJECT_ROOT={work}/notes
+env: JET_APP_PORT={free-port:app}
+env: JET_TEST_WEB_SERVER_URL=http://127.0.0.1:{free-port:app}/
+exit: 0
+stdout: ~ "the installed app reloads offline and holds its queue: pass" # the test passes on chromium
+stdout: ~ "1 passed, 0 failed, 0 skipped" # the run's summary
+end when
+end when
