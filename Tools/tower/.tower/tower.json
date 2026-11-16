@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110310,
+    "rev": 110325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100048,6 +100048,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:05:29.311Z"
+        },
+        {
+          "n": 15,
+          "text": "The app's ui.asset files are packaged per native target: a desktop bundle, an iOS asset catalog with Info.plist entries, and Android resources with manifest entries. (Moved from #6816 c2.) Proof: `jet test Compiler --profile cases --filter BuildEntry/assets_are_packaged_per_target`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T18:47:06.329Z"
         }
       ],
       "refs": [],
@@ -100058,9 +100067,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:54.979Z",
-      "updated": "2026-11-16T13:05:29.311Z",
+      "updated": "2026-11-16T18:47:06.329Z",
       "updatedBy": "Main",
-      "criteriaLastN": 14
+      "criteriaLastN": 15
     },
     {
       "id": "c0gvf2dr",
@@ -100319,20 +100328,20 @@
         {
           "n": 4,
           "text": "Cache lifetimes are Durations, and an entry is fresh up to its expiry instant and stale after it. Proof: `jet test Compiler --profile cases --filter WebApp/cache_expiry_boundary`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:41.681Z"
+          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/cache_expiry_boundary PASS 1/1 (Speed-3-3-6814-c4c5, c6497febfa)",
+          "at": "2026-11-16T19:12:10.558Z"
         },
         {
           "n": 5,
           "text": "Two server instances share one cache store: both read a cached false value, a write to the source invalidates it for both, and a cache store failure falls through to the source instead of failing the request. Proof: `jet test Compiler --profile cases --filter WebApp/shared_cache_two_instances`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:42.652Z"
+          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/shared_cache_two_instances PASS 1/1 (c6497febfa)",
+          "at": "2026-11-16T19:12:12.140Z"
         }
       ],
       "refs": [],
@@ -100343,7 +100352,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:00.487Z",
-      "updated": "2026-11-16T18:32:09.385Z",
+      "updated": "2026-11-16T19:12:12.140Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -100406,7 +100415,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -100414,25 +100423,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All criteria met (c1 PASS on p221); the font half of the old c2 moved to #6817 c6 and native packaging to #6810 c15. Closed by Main."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A ui.asset path with no file is a compile error that names the path. Proof: `jet test Compiler --profile cases --filter WebBuild/missing_asset_is_a_compile_error`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:45.602Z"
-        },
-        {
-          "n": 2,
-          "text": "The first screen's fonts get preload hints on the web. The same assets are packaged per target: a desktop bundle, an iOS asset catalog and Android resources. Proof: `jet test Compiler --profile cases --filter BuildEntry/assets_are_packaged_per_target`.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:46.553Z"
+          "evidence": "p221 batch compiler (dev 88dc8f59b9): jet test Compiler --profile cases --filter WebBuild/missing_asset_is_a_compile_error PASS 1/1",
+          "at": "2026-11-16T18:47:02.240Z"
         }
       ],
       "refs": [],
@@ -100443,9 +100449,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:03.765Z",
-      "updated": "2026-11-16T13:05:46.553Z",
+      "updated": "2026-11-16T18:57:10.711Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-16T18:57:10.711Z"
     },
     {
       "id": "c0ha077m",
@@ -100516,6 +100523,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:05:51.795Z"
+        },
+        {
+          "n": 6,
+          "text": "Fonts belong to the graph's theme (D-THEME2): `.theme(ui.theme(tokens, font: ui.font(\"Inter\", files: [ui.asset(\"fonts/Inter.woff2\")])))` exists in Core, the web build bundles each ui.asset's bytes under a hashed URL, and the first screen's theme fonts get preload hints. (Moved from #6816 c2, which needs the theme API and web asset bundling this card builds.) Proof: `jet test Compiler --profile cases --filter WebBuild/first_screen_fonts_get_preload_hints`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T18:56:54.944Z"
         }
       ],
       "refs": [],
@@ -100526,9 +100542,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:05.205Z",
-      "updated": "2026-11-16T13:05:51.796Z",
+      "updated": "2026-11-16T18:56:54.944Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0akrada",
@@ -101318,20 +101334,20 @@
         {
           "n": 9,
           "text": "Jobs are kept only in a core.db store's outbox, in the transaction of the call that queued them. core.app has no public job-store slot, so no app code can weaken the contract. Every engine core.db opens passes the contract rows of c1, c6, c7 and c8, and the case states the in-memory case: jobs last as long as the rows that queued them. Proof: `jet test Compiler --profile cases --filter WebApp/job_store_contract_per_engine`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T18:39:43.072Z"
+          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/job_store_contract_per_engine PASS 1/1 (2bbb2acc1a)",
+          "at": "2026-11-16T19:12:13.770Z"
         },
         {
           "n": 10,
-          "text": "Each push or mail a job sends gets its own key, made from the run key, the recipient and the send open: or link: value, sent hashed to fit each transport limit. app.notify and app.mail pass it to the transport: APNs apns-collapse-id, FCM android.notification.tag on a non-collapsible message, Web Push Topic header and notification tag, and mail Message-ID. A retried run repeats each key even when its query returns rows in another order, so a repeat replaces its earlier copy, and two different sends from one job never share a key. Proof: `jet test Compiler --profile cases --filter WebApp/job_sends_repeat_their_keys_on_retry`.",
+          "text": "Each push a job sends gets its own key, made from the run key, the recipient and the send open: or link: value, sent hashed to fit each transport limit. app.notify passes it to the transport: APNs apns-collapse-id, FCM android.notification.tag on a non-collapsible message, and Web Push Topic header and notification tag. A retried run repeats each key even when its query returns rows in another order, so a repeat replaces its earlier copy, and two different sends from one job never share a key. Proof: `jet test Compiler --profile cases --filter WebApp/job_sends_repeat_their_keys_on_retry`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:55.635Z"
+          "at": "2026-11-16T18:41:12.320Z"
         }
       ],
       "refs": [],
@@ -101342,7 +101358,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-16T18:39:43.072Z",
+      "updated": "2026-11-16T19:12:13.770Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -101469,6 +101485,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:13:29.261Z"
+        },
+        {
+          "n": 12,
+          "text": "Each mail a job sends gets its own Message-ID, made from the run key, the recipient and the send open: or link: value, hashed to fit the header, and app.mail passes it to the transport. A retried run repeats each Message-ID even when its query returns rows in another order, and two different mails from one job never share one. (Moved from #6825 c10; needs c4.) Proof: `jet test Compiler --profile cases --filter WebApp/job_mail_repeats_its_message_id_on_retry`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T18:41:13.294Z"
         }
       ],
       "refs": [],
@@ -101479,9 +101504,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:12.993Z",
-      "updated": "2026-11-16T13:06:05.061Z",
+      "updated": "2026-11-16T18:41:13.294Z",
       "updatedBy": "Main",
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c0w7y8wz",
@@ -106004,12 +106029,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A route declares typed path and search parameters, its loader and its navigation contract; a link or navigation to an unknown route or with a wrong parameter type is a compile error with a registered diagnostic and a UI snapshot. Proof: `jet test Compiler --profile ui --filter web_route_`.",
+          "text": "A screen's route is its state struct (typed `:field` path parameters and `#App.Query` search parameters), its view is the loader, and url_of, go and current are its navigation; a link or navigation to an unknown route or with a wrong parameter type is a compile error with a registered diagnostic and a UI snapshot. Proof: `jet test Compiler --profile ui --filter web_route_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T02:52:15.741Z"
+          "at": "2026-11-16T19:06:06.761Z"
         },
         {
           "n": 2,
@@ -106059,7 +106084,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:52:15.741Z",
-      "updated": "2026-11-16T13:07:06.451Z",
+      "updated": "2026-11-16T19:06:06.761Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -106519,12 +106544,12 @@
         },
         {
           "n": 4,
-          "text": "Invalidations reach subscribers on other servers through a broker, Postgres LISTEN/NOTIFY first. Proof: `jet test Compiler --profile cases --filter WebApp/live_query_cross_server_invalidation`.",
+          "text": "Invalidations reach subscribers on other servers: a write on one server invalidates the matching live reads on every other server that shares the store, on O0, debug and release. Proof: `jet test Compiler --profile cases --filter WebApp/live_query_cross_server_invalidation`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:07:18.775Z"
+          "at": "2026-11-16T18:47:03.199Z"
         },
         {
           "n": 5,
@@ -106547,11 +106572,11 @@
         {
           "n": 7,
           "text": "app.presence counts only accounts whose last read of that screen passed its policies: a refused reader is not counted. Proof: `jet test Compiler --profile cases --filter WebApp/presence_counts_only_admitted_readers`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:20.715Z"
+          "evidence": "p221 batch compiler (dev 88dc8f59b9): jet test Compiler --profile cases --filter WebApp/presence_counts_only_admitted_readers PASS 1/1",
+          "at": "2026-11-16T18:47:01.248Z"
         },
         {
           "n": 8,
@@ -106629,7 +106654,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-16T17:56:27.946Z",
+      "updated": "2026-11-16T18:47:03.199Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -109826,6 +109851,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:10:45.608Z"
+        },
+        {
+          "n": 15,
+          "text": "When the store is Postgres, live-query invalidations travel between servers through Postgres LISTEN/NOTIFY instead of polling the store, so a write wakes the other servers' subscribers within one notification. Needs a Postgres client in core.db. (Moved from #6868 c4.) Proof: `jet test Compiler --profile cases --filter WebApp/live_query_invalidation_through_postgres_notify`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T18:47:04.195Z"
         }
       ],
       "refs": [],
@@ -109840,9 +109874,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:31:05.913Z",
-      "updated": "2026-11-16T13:10:45.608Z",
+      "updated": "2026-11-16T18:47:04.195Z",
       "updatedBy": "Main",
-      "criteriaLastN": 14
+      "criteriaLastN": 15
     },
     {
       "id": "c0t3qh8f",
@@ -220910,6 +220944,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T19:12:13.771Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0se7lpr",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-16T19:12:12.140Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0b8qwec",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-16T19:12:10.558Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0b8qwec",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T19:06:06.761Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0drmvwg",
+      "note": "#1: Names the ratified app shape (the screen state struct is the route) without changing the requirement or proof.; was: A route declares typed path and search parameters, its loader and its navigation contract; a link or navigation to an unknown route or with a wrong parameter type is a compile error with a registered "
+    },
+    {
+      "at": "2026-11-16T18:57:10.712Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tgi103",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T18:56:58.406Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0tgi103",
+      "note": "#2: Moved to #6817 (styling build-out): the preload hint needs ui.theme/ui.font, graph .theme and web bundling of ui.asset bytes, none of which exist; a CSS @font-face path would be a second font mechanism beside the ratified theme fonts.; was [open]: The first screen's fonts get preload hints on the web build. Proof: `jet test Compiler --profile cases --filter WebBuild/first_screen_fonts_get_preload_hints`."
+    },
+    {
+      "at": "2026-11-16T18:56:54.944Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ha077m",
+      "note": "#6 Fonts belong to the graph's theme (D-THEME2): `.theme(ui.the"
+    },
+    {
+      "at": "2026-11-16T18:47:06.329Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0s5hn28",
+      "note": "#15 The app's ui.asset files are packaged per native target: a d"
+    },
+    {
+      "at": "2026-11-16T18:47:05.214Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0tgi103",
+      "note": "#2: Per-target native packaging (desktop bundle, iOS asset catalog, Android resources) does not exist in the compiler; it moves to #6810 as its own criterion so #6816 closes on the web half.; was: The first screen's fonts get preload hints on the web. The same assets are packaged per target: a desktop bundle, an iOS asset catalog and Android resources. Proof: `jet test Compiler --profile cases "
+    },
+    {
+      "at": "2026-11-16T18:47:04.195Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ujz0kr",
+      "note": "#15 When the store is Postgres, live-query invalidations travel "
+    },
+    {
+      "at": "2026-11-16T18:47:03.199Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00cqn1l",
+      "note": "#4: The Postgres LISTEN/NOTIFY broker needs a Postgres client, which Core does not have; that half moves to #6889 (core.db tools) as its own criterion so #6868 is not held by an unbuilt client.; was: Invalidations reach subscribers on other servers through a broker, Postgres LISTEN/NOTIFY first. Proof: `jet test Compiler --profile cases --filter WebApp/live_query_cross_server_invalidation`."
+    },
+    {
+      "at": "2026-11-16T18:47:02.240Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tgi103",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-16T18:47:01.248Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00cqn1l",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-16T18:41:13.295Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b5xq4b",
+      "note": "#12 Each mail a job sends gets its own Message-ID, made from the"
+    },
+    {
+      "at": "2026-11-16T18:41:12.320Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0se7lpr",
+      "note": "#10: The mail half needs app.mail, which #6826 c4 owns and which is not built; it moves to #6826 as a criterion so it is kept and does not hold #6825 open.; was: Each push or mail a job sends gets its own key, made from the run key, the recipient and the send open: or link: value, sent hashed to fit each transport limit. app.notify and app.mail pass it to the "
+    },
     {
       "at": "2026-11-16T18:40:39.795Z",
       "by": "Main",
