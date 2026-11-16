@@ -984,12 +984,18 @@ export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) Land
 // copied and nothing is checked out.
 git_view: fn(repo: String, commit: String, dir: String) LandError! -[Exec, FS, Time.Wait]> {
     common: git(repo, [String]{"rev-parse", "--path-format=absolute", "--git-common-dir"})
-    if common.code != 0 -> return Err(LandError{message: "git rev-parse --git-common-dir failed: {first_line(common)}"})
+    if common.code != 0 {
+        return Err(LandError{message: "git rev-parse --git-common-dir failed: {first_line(common)}"})
+    }
     made: git(dir, [String]{"init", "-q"})
-    if made.code != 0 -> return Err(LandError{message: "git init in {dir} failed: {first_line(made)}"})
+    if made.code != 0 {
+        return Err(LandError{message: "git init in {dir} failed: {first_line(made)}"})
+    }
     files.write("{dir}/.git/objects/info/alternates", "{common.output.trim()}/objects\n") ?? return Err(LandError{message: "the snapshot's alternates cannot be written: {err}"})
     indexed: git(dir, [String]{"read-tree", commit})
-    if indexed.code != 0 -> return Err(LandError{message: "git read-tree {commit} in {dir} failed: {first_line(indexed)}"})
+    if indexed.code != 0 {
+        return Err(LandError{message: "git read-tree {commit} in {dir} failed: {first_line(indexed)}"})
+    }
     Ok()
 }
 

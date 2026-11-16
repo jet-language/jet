@@ -1306,7 +1306,9 @@ ir_lint_source_at: fn(m: IRModule, f: IRFunction, at: Int) -> String Never! {
     site: ir_code_line_site(line)
     if site > 0 {
         callee: f.inline_sites[IR_INLINE_SITE_WORDS * (site - 1)]
-        if callee >= 0 && callee < m.functions.len() -> return "{m.functions[callee].source_file}:{source}"
+        if callee >= 0 && callee < m.functions.len() {
+            return "{m.functions[callee].source_file}:{source}"
+        }
     }
     "{f.source_file}:{source}"
 }

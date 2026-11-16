@@ -631,8 +631,12 @@ parser_expression_form_parse_dispatch_table: fn(state: &JetParserState, subject:
             }
             if {
                 // A pattern arm here is already refused (E0948).
-                parser_dispatch_hole_marked(subject) -> parser_expression_form_error(state, "E0003", close.span, "a hole table used as a value needs a final `else` arm", "a hole table's arms are tests, not cases of one type, so no set of its arms is proven complete", "add `else -> value` so every path produces a value")
-                !all_patterns -> parser_expression_form_error(state, "E0003", close.span, "a value dispatch needs a final `else` arm", "only a table whose every arm is a pattern can prove one arm always matches; this one has a comparison or Bool arm", "add `else -> value` so every path produces a value")
+                parser_dispatch_hole_marked(subject) -> {
+                    parser_expression_form_error(state, "E0003", close.span, "a hole table used as a value needs a final `else` arm", "a hole table's arms are tests, not cases of one type, so no set of its arms is proven complete", "add `else -> value` so every path produces a value")
+                }
+                !all_patterns -> {
+                    parser_expression_form_error(state, "E0003", close.span, "a value dispatch needs a final `else` arm", "only a table whose every arm is a pattern can prove one arm always matches; this one has a comparison or Bool arm", "add `else -> value` so every path produces a value")
+                }
             }
             break
         }
@@ -724,7 +728,9 @@ parser_dispatch_hole_is: fn(expr: Expr) -> Bool Never! {
 // The holes of `header` written `_` (among parser_dispatch_hole_count's
 // places), in source order.
 parser_dispatch_underscore_holes: fn(expr: Expr, underscores: &[Span]) {
-    if parser_dispatch_hole_count(expr) == 0 -> return
+    if parser_dispatch_hole_count(expr) == 0 {
+        return
+    }
     if expr == .Ident(name, span, _) {
         if name == PARSER_DISPATCH_UNDERSCORE -> underscores.push(span.copy())
         return
@@ -883,7 +889,9 @@ parser_dispatch_hole_check_header: fn(state: &JetParserState, header: Expr, cond
     loop span in underscores {
         parser_add_error_code_edit(state, "E0443", span, "an `if` table's hole is written `<>`, not `_`", "`_` is a value thrown away, so it can't stand for the candidate each arm puts in the header", "write `<>` in place of `_`", TextEdit{span: span, new_text: PARSER_DISPATCH_HOLE})
     }
-    if underscores.len() > 0 || holes != 1 -> return
+    if underscores.len() > 0 || holes != 1 {
+        return
+    }
     compared: parser_dispatch_hole_comparison(header) ?? return
     plain: parser_dispatch_hole_plain_text(state, cond, compared)
     parser_add_error_code_edit(state, "E0441", cond, "this header only compares with `<>`, so it is the plain table `if {plain} {{`", "a plain `subject OP {{` table compares each arm with its subject itself, and it keeps pattern and range arms and their coverage", "write `if {plain} {{` without the `<>`", TextEdit{span: cond, new_text: plain})
@@ -960,8 +968,12 @@ parser_dispatch_hole_plain_text: fn(state: JetParserState, cond: Span, compared:
     // the left, and from the first token to the operator for one on the right.
     subject := Span{start: state.tokens[first].span.start, end: state.tokens[last].span.end}
     if {
-        compared.hole_left -> subject.start = state.tokens[parser_dispatch_written_token(state, hole, 1)].span.end
-        else -> subject.end = state.tokens[parser_dispatch_written_token(state, hole, -1)].span.start
+        compared.hole_left -> {
+            subject.start = state.tokens[parser_dispatch_written_token(state, hole, 1)].span.end
+        }
+        else -> {
+            subject.end = state.tokens[parser_dispatch_written_token(state, hole, -1)].span.start
+        }
     }
     "{parser_source_text(state, subject).trim()} {op_text}"
 }

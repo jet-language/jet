@@ -2483,7 +2483,9 @@ sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScop
             // A hole table's arm test: its header, marked as in
             // sema_expr_check_paren (E0442).
             outer: scopes.hole_header
-            if inner == .Paren(_, inner_span, _) && inner_span == span -> scopes.hole_header = Val(span)
+            if inner == .Paren(_, inner_span, _) && inner_span == span {
+                scopes.hole_header = Val(span)
+            }
             checked: sema_expression_check_condition_inner(inner, environment, program, scopes, state, tail_store, context, diagnostics)
             scopes.hole_header = outer
             return checked
