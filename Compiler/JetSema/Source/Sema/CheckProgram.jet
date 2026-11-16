@@ -12273,7 +12273,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // what the walk leaves.
     taint_reports := [Diagnostic]{}
     taint_catalog: taint_prepared.pop() ?? panic("the side checks left no taint catalog")
-    walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, threads, taint_reports)
+    walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, modules, effect_inputs, threads, taint_reports)
     effect_threads: compiler_threads_beside(threads, walk_inputs.workers)
     walked := SemaFinalizeWalked{found: [[Diagnostic]]{}, masked: [[Span]]{}, fixed: [[String]]{}}
     // The effect graph reads every checked body in place and stamps each
@@ -12581,21 +12581,29 @@ SEMA_CORE_JOBS_PER_THREAD: 8
 // The tag dataflow's inputs (the Rust reference's `check_fact_tags_and_states`
 // taint walk), taken from `prepared` (sema_taint_prepare of the graph): its
 // catalog, its modules heaviest source first, and the threads the walk
-// admits, at most a quarter of `threads`' limit since it runs beside the
-// effect pass (sema_finalize_program): on the compiler the walk is
-// about 1.6 s of CPU against the pass's 2.7 s over 570 ms, so on a quarter
-// it still ends inside the pass, which keeps the rest. Its own reports move
-// onto `reports`; the E0307 reports among `existing_diagnostics` (the
-// bundle's reports so far) settle switch coverage
-// (sema_taint_coverage_reports).
-sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaFinalizeWalkInputs {
+// admits beside the effect pass (sema_finalize_program). The pass's
+// threaded steps admit a thread per SEMA_EFFECT_LOOKUPS_PER_THREAD of its
+// `effect_inputs`' functions (sema_effect_function_nodes), so the walk may
+// take whatever of `threads`' limit those leave, and always a quarter of it:
+// on the compiler the walk is about 1.6 s of CPU against the pass's 2.7 s
+// over 570 ms, so on a quarter it still ends inside the pass, which keeps
+// the rest, while a program whose pass needs one thread walks on all the
+// others. Its own reports move onto `reports`; the E0307 reports among
+// `existing_diagnostics` (the bundle's reports so far) settle switch
+// coverage (sema_taint_coverage_reports).
+sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: [SemaGraphModuleResult], effect_inputs: [SemaEffectModuleInput], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaFinalizeWalkInputs {
     taken: prepared.move()
     reports.extend(taken.reports.move())
     taint_weights: taken.weights.move()
     work := 0
     loop weight in taint_weights -> work += weight
-    quarter: compiler_threads_capped(threads, (compiler_threads_limit(threads) + 3) /% 4)
-    workers: compiler_threads_admit(quarter, taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
+    lookups := 0
+    loop input in effect_inputs -> lookups += modules[input.module_index].functions.len() + 1
+    limit: compiler_threads_limit(threads)
+    share := limit - compiler_threads_admit(threads, effect_inputs.len(), lookups, SEMA_EFFECT_LOOKUPS_PER_THREAD, 0, 0)
+    quarter: (limit + 3) /% 4
+    if share < quarter -> share = quarter
+    workers: compiler_threads_admit(compiler_threads_capped(threads, share), taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
     SemaFinalizeWalkInputs{catalog: taken.catalog.move(), coverage: sema_taint_coverage_reports(existing_diagnostics), taint_order: compiler_threads_heaviest_first(taint_weights), workers: workers}
 }
 
