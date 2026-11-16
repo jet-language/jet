@@ -4366,7 +4366,7 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if process.handled -> return process
     time := sema_call_try_time_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if time.handled -> return time
-    app := sema_call_try_app_method(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    app := sema_call_try_app_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if app.handled -> return app
     network := sema_call_try_network_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if network.handled -> return network
@@ -4749,6 +4749,13 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     // Core declares the UI backends' `set_focus_group`, so its focus-ring lint
     // runs ahead of the declared-method check, not among the builtin routes.
     sema_call_ui_backend_lint(receiver_value, method, args, method_span, environment, program, scopes, diagnostics)
+    // The app graph's methods lower before the declared-method check, which
+    // matches a receiver by its leaf name: Core's `web.App` declares a
+    // `cache` of its own.
+    if sema_app_is_graph(receiver_value.ty, environment, program) {
+        graph_method := sema_call_app_graph_method(receiver, receiver_value, method, type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if graph_method.handled -> return graph_method.value
+    }
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
