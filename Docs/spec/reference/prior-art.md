@@ -799,6 +799,54 @@ The run's live captures of Jet are its own evidence and need no row.
 - https://vite.dev/guide/features.md
 - https://vite.dev/config/server-options.md
 
+### Jai Any: type information beside a value pointer (mined 2026-11-15)
+
+Run any-NXt-20261115, report
+[any-type-info-pointer-2026-11-15](../../audits/any-type-info-pointer-2026-11-15.md)
+(ballot D-PRIM-ANY1, which recommends option C: no `Any`, and a checked type
+arm over a trait value; Tower #3102, #4723, #4730, #6727, #6833, #6839, #6845
+and #6883 hold the gaps it found). The clip's 117 comments were read from the
+run's own capture. Recall audit 1 (seed 4417) and recall audit 2 (seed 90211)
+both failed on missed concepts. After each, the run was re-mined; after audit
+2, every segment was re-split comment by comment and line by line. Recall
+audit 3 (seed 2026, V1, V2, C1 and C2) passed, matching all 72 concepts.
+Recall audit 4 (seed 1116, V2, V1, C2 and C3) passed with no miss across 58
+concepts, recall audit 5 (seed 7351, V2, V1, C3 and C1) with no miss across
+71, recall audit 6 (seed 27295, V1, V2, C3 and C2) with no miss across 73,
+recall audit 7 (seed 52011, V2, V1, C1 and C3) with no miss across 86,
+recall audit 8 (seed 9545, V1, V2, C1 and C2) with no miss across 97,
+recall audit 9 (seed 11815, V1, V2, C1 and C3) with no miss across 92,
+recall audit 10 (seed 28892, V1, V2, C2 and C1) with no miss across 97, and
+recall audit 11 (seed 14666, V2, V1, C3 and C1) with no miss across 125.
+The Java JEPs are the peer for a type test that binds, raised in comment #22.
+The Go spec, the Rust `Any` docs and 1.86 release notes, Swift's type casting
+chapter, C# type patterns and Kotlin's `is` and sealed classes are the peers
+for taking a type back from an interface or trait value. Rust's `downcast_ref`
+and C++'s `std::any_cast` on a pointer are the peers for returning a borrow
+of the payload rather than a copy; `any_cast` on a value copies or throws.
+The Go 1.13 errors post is the peer for what such tests cost a library:
+"wrapping an error makes that error part of your API". The Odin overview is
+the peer for an `any` that stores a type ID. TypeScript's `unknown`, C#
+boxing and Zig's `anytype` are the peers for a narrowing top type, a boxed
+top type and a compile-time stand-in.
+
+- https://www.youtube.com/watch?v=NXt-qH-rLJo
+- https://openjdk.org/jeps/394
+- https://openjdk.org/jeps/441
+- https://go.dev/ref/spec#Type_switches
+- https://go.dev/blog/go1.13-errors
+- https://odin-lang.org/docs/overview/
+- https://doc.rust-lang.org/std/any/trait.Any.html
+- https://blog.rust-lang.org/2025/04/03/Rust-1.86.0/
+- https://en.cppreference.com/w/cpp/utility/any/any_cast
+- https://docs.swift.org/swift-book/documentation/the-swift-programming-language/typecasting/
+- https://learn.microsoft.com/dotnet/csharp/language-reference/operators/patterns
+- https://kotlinlang.org/docs/typecasts.html
+- https://kotlinlang.org/docs/sealed-classes.html
+- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-0.html
+- https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/types/boxing-and-unboxing
+- https://ziglang.org/documentation/master/#Function-Parameter-Type-Inference
+
 ## Developer experience (e14)
 
 Sources from the nine e14 DX census manifests. IDs are manifest IDs; local paths remain provenance records.
