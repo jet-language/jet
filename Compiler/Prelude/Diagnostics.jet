@@ -22557,6 +22557,32 @@ LiveNotOneRemoteCall: struct {
     }
 }
 
+EnqueueNotOneJobCall: struct {
+    found: String
+
+    impl Diagnostic {
+        code: "E2817"
+        safety_class: .Soundness
+        safety_reason: "A queued job is kept as its job's name and its encoded arguments, to run after its call commits; a closure that did anything else would run work the outbox does not record and that a retry could not repeat."
+        expert_path: "none: a method marked `#App.Job` is the form for work that runs after a call commits"
+        stage: [.Compile]
+        meaning: "An `app.enqueue` closure that is not one call of an `#App.Job` method of its service with codable arguments"
+        detail: true
+
+        what: fn(self) -> String {
+            "This `app.enqueue` call does not queue one call of an `#App.Job` method of its service: {self.found}."
+        }
+
+        why: fn(self) -> String {
+            "A queued job is stored in its call's transaction as the job's name and its arguments, encoded where `enqueue` is called, and runs after the call commits, again after a failure; only one call of a job method with codable arguments can be stored and run again so."
+        }
+
+        fix: fn(self) -> String {
+            "Make the closure's whole body one call, `self.method(args)`, in a method of the service, where `method` is marked `#App.Job` and each argument's type derives `Encode` and `Decode`."
+        }
+    }
+}
+
 UnmountedHttpRoutes: struct {
     method: String
     type: String

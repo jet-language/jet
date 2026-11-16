@@ -1358,7 +1358,7 @@ priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
     held.began += 1
     held.open = held.began
     held.call = call
-    app.transactions.join(call, fn(commit: Bool) { db_end(state, commit) })
+    app.transactions.join(call, fn(commit: Bool) { db_end(state, commit) }, db_outbox(state))
     delivery: app.transactions.delivery(call) ?? return Ok()
     if db_delivered(held.driver, delivery) == {
         .Ok(ran) -> {
@@ -1404,6 +1404,49 @@ priv db_delivered: fn(driver: &DBDriver, delivery: app.CallDelivery) -> Bool DBE
 priv db_end: fn(state: Shared<DBState>, commit: Bool) -> Bool Never! {
     if commit -> return db_commit(state) == .Ok(_)
     db_rollback(state) == .Ok(_)
+}
+
+// The store's outbox (app.CallOutbox): the table `__jet_jobs`, a row for
+// each job a committed call queued that hasn't run yet. A job that failed
+// every run keeps its row, which records the runs and the last error.
+priv db_outbox: fn(state: Shared<DBState>) -> app.CallOutbox Never! {
+    app.CallOutbox{
+        keep: fn(job: String, args: String) { db_job_keep(state, job, args) },
+        done: fn(row: Int) { db_job_done(state, row) },
+        failed: fn(row: Int, runs: Int, error: String) { db_job_failed(state, row, runs, error) },
+    }
+}
+
+// Keeps job `job` with its encoded arguments in the transaction the call
+// running on this task has open on the store; its row, or 0 when that
+// failed.
+priv db_job_keep: fn(state: Shared<DBState>, job: String, args: String) -> Int Never! {
+    guard := state.guard_edit()
+    _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS __jet_jobs (id INTEGER PRIMARY KEY, job TEXT NOT NULL, args TEXT NOT NULL, runs INTEGER NOT NULL DEFAULT 0, error TEXT)", [DBValue]{}) ?? return 0
+    _: __driver_execute(guard.value.driver, "INSERT INTO __jet_jobs (job, args) VALUES (?, ?)", [DBValue]{.Text(job.copy()), .Text(args.copy())}) ?? return 0
+    found: __driver_query_one(guard.value.driver, "SELECT last_insert_rowid() AS id", [DBValue]{}) ?? return 0
+    if found.get("id") == .Val(.Int(id)) -> return id
+    0
+}
+
+// Deletes row `row` of the outbox in the call running on this task, as its
+// job runs in that call: 1; 0 when another run has deleted it; -1 when the
+// store couldn't.
+priv db_job_done: fn(state: Shared<DBState>, row: Int) -> Int Never! {
+    guard := state.guard_edit()
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return -1
+    if db_join(guard.value, state, call) == .Err(_) -> return -1
+    __driver_execute(guard.value.driver, "DELETE FROM __jet_jobs WHERE id = ?", [DBValue]{.Int(row)}) ?? -1
+}
+
+// Records on row `row` of the outbox that its job ran `runs` times and
+// failed each time, the last with `error`; false when the store couldn't.
+priv db_job_failed: fn(state: Shared<DBState>, row: Int, runs: Int, error: String) -> Bool Never! {
+    guard := state.guard_edit()
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return false
+    if db_join(guard.value, state, 0) == .Err(_) -> return false
+    __driver_execute(guard.value.driver, "UPDATE __jet_jobs SET runs = ?, error = ? WHERE id = ?", [DBValue]{.Int(runs), .Text(error.copy()), .Int(row)}) == .Ok(_)
 }
 
 #Codable
@@ -1492,6 +1535,57 @@ priv call_deliver: fn(counts: Table<Int, CallCount>, id: String, at: Int, count:
     assert_eq(call_count(counts), 6)
     assert(!call_deliver(counts, "d-1", came + DB_DELIVERY_KEPT + 1, 7, true))
     assert_eq(call_count(counts), 7)
+}
+
+// How many jobs the store's outbox keeps, and each one's runs and last error.
+priv db_jobs_kept: fn(store: Store) -> String {
+    guard := store.state.guard_edit()
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? panic("the outbox waits for open calls")
+    found: __driver_query_one(guard.value.driver, "SELECT count(*) AS n, group_concat(runs || ' ' || error) AS failed FROM __jet_jobs", [DBValue]{}) ?? panic("the outbox reads")
+    kept: if found.get("n") == .Val(.Int(n)) -> n else -> -1
+    failed: if found.get("failed") == .Val(.Text(text)) -> text else -> ""
+    "{kept}: {failed}"
+}
+
+#Test("a call keeps its jobs in its store's outbox in its transaction, and each runs after the commit and deletes its row; a rolled-back call keeps none") {
+    store: open_memory()
+    counts: call_counts(store)
+    _: counts.put(CallCount{id: 1, count: 0}) ?? panic("the first row")
+    dropped: Shared{0}
+    rolled: app.transactions.begin() ?? panic("no call is open")
+    _: counts.put(CallCount{id: 1, count: 1}) ?? panic("the call writes")
+    app.__enqueue("db.Test.never", [String]{}, 0, fn(args) {
+        count := dropped.guard_edit()
+        count.value += 1
+        Ok(args.__reply_value<Int>(0))
+    })
+    assert(app.transactions.end(rolled, false))
+    assert_eq(call_count(counts), 0)
+    tries: Shared{0}
+    writes: store.copy()
+    committed: app.transactions.begin() ?? panic("no call is open")
+    _: counts.put(CallCount{id: 1, count: 2}) ?? panic("the call writes")
+    app.__enqueue("db.Test.set", [String]{app.__live_arg<Int>(20)}, 1, fn(args) {
+        count := tries.guard_edit()
+        count.value += 1
+        if count.value == 1 -> return Ok(args.__reply_err<String>("once"))
+        set: args.__take<Int>(0) ?? return Err(err)
+        _: call_counts(writes).put(CallCount{id: 1, count: set}) ?? return Ok(args.__reply_err<String>("the job writes"))
+        Ok(args.__reply_value<Int>(set))
+    })
+    app.__enqueue("db.Test.fail", [String]{}, 0, fn(args) { Ok(args.__reply_err<String>("no")) })
+    assert(app.transactions.end(committed, true))
+    assert_eq(call_count(counts), 2)
+    loop _ in 0..<1000 {
+        if call_count(counts) == 20 && db_jobs_kept(store) == "1: 1 {{\"err\":\"no\"}}" -> break
+        core.tasks.sleep(10)
+    }
+    assert_eq(call_count(counts), 20)
+    assert_eq(db_jobs_kept(store), "1: 1 {{\"err\":\"no\"}}")
+    ran: tries.guard_read()
+    assert_eq(ran.value, 2)
+    never_ran: dropped.guard_read()
+    assert_eq(never_ran.value, 0)
 }
 
 priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {

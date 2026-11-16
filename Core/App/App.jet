@@ -16,6 +16,7 @@ use {
     http: core.http
     crypto: core.crypto
     live_json: core.encoding.json
+    core.encoding.[Dyn]
     core.reactive.loadable.[Loadable]
     ws: core.net.ws
     core.net.ws.[WsConn]
@@ -94,6 +95,21 @@ Webhook: struct {
 // parameters, by name, and gives the key the sender signs with, or None,
 // which answers 401. It is server-only.
 SigningKey: struct {
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+// A job: `#App.Job(retries: 3)` makes a method of a service a job, which the
+// service's own methods queue with `enqueue(fn() { self.method(args) })`.
+// Queued inside a call, a job waits for the call: when the call commits it
+// runs, once its transaction is done, and when the call rolls back it never
+// runs. A job runs as the system (`as_system`), in a call of its own, and a
+// run that fails runs again after a backoff, up to `retries:` more times. A
+// job is no endpoint: no Remote calls it.
+Job: struct {
+    retries: Int{5}
+
     impl Marker {
         sites: [.Method]
     }
@@ -498,7 +514,9 @@ __live_invalidate: fn(source: String, args: [String]) Never! {
 // `invalidate(source)`: every binding of `source` re-runs.
 __live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None) }
 
-// One argument's part of a binding's identity.
+// One argument's part of a binding's identity, and one argument of a queued
+// job's call: the argument encoded, or `_`, which no JSON reads, when it
+// doesn't encode, so a job given it fails each run.
 __live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
 
 // A binding's read set, for core.db: while a task runs a binding's source,
@@ -717,11 +735,43 @@ priv(package) callers: module {
 // then runs it again. A webhook's call carries its delivery (`deliver`),
 // whose ID core.db records in each store's transaction as the call joins
 // it; a store that has run the delivery already marks the call repeated, and
-// the framework rolls it back and drops the delivery.
+// the framework rolls it back and drops the delivery. A job the call queues
+// (`enqueue`) waits for it: `end` keeps the job in the outbox of the first
+// store the call joined, in that store's transaction, and once the call
+// commits, runs it on a task of its own (`job_run`); a call that rolls back
+// drops its jobs with its writes.
 CallJoin: struct {
     // Commits (true) or rolls back (false) one store's transaction; false
     // when it couldn't do as asked.
     end: fn(Bool) -[]> Bool Never!
+    outbox: CallOutbox
+}
+
+// One store's outbox: the jobs committed calls queued there that haven't
+// run yet, a row each.
+CallOutbox: struct {
+    // Keeps job `name` with its encoded arguments, in the transaction of
+    // the call this task runs; the job's row, or 0 when the store couldn't
+    // keep it.
+    keep: fn(String, String) -[]> Int Never!
+    // Deletes row `row`, in the transaction of the call this task runs, as
+    // its job runs there: 1; 0 when the row has gone, as another run did the
+    // job; -1 when the store couldn't delete it.
+    done: fn(Int) -[]> Int Never!
+    // Records on row `row` that its job ran `runs` times and failed each
+    // time, the last with `error`; false when the store couldn't.
+    failed: fn(Int, Int, String) -[]> Bool Never!
+}
+
+// A job a call queued: its name (`<service module>.<Service>.<method>`), its
+// arguments as one encoded JSON array, the runs it gets after a first that
+// fails, and the function that decodes the arguments and runs it, which
+// replies `{"err":...}` when the job failed.
+CallJob: struct {
+    name: String
+    args: String
+    retries: Int
+    run: fn(RemoteArgs) -> String [FieldError]!
 }
 
 // A webhook delivery a call runs: the ID its sender gives it, the same each
@@ -740,6 +790,7 @@ CallRun: struct {
     refused: Bool
     delivery: CallDelivery?
     repeated: Bool
+    jobs: [CallJob]
 }
 
 CallRuns: struct {
@@ -764,7 +815,7 @@ priv(package) transactions: module {
             if run.task == me -> return None
         }
         runs.value.made += 1
-        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, repeated: false})
+        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, repeated: false, jobs: [CallJob]{}})
         Val(runs.value.made)
     }
 
@@ -778,12 +829,24 @@ priv(package) transactions: module {
         None
     }
 
-    // Joins one store's transaction, which `end` finishes, to call `call`.
-    join: fn(call: Int, end: &&fn(Bool) -[]> Bool Never!) Never! {
+    // Joins one store's transaction, which `end` finishes, and that store's
+    // outbox to call `call`.
+    join: fn(call: Int, end: &&fn(Bool) -[]> Bool Never!, outbox: &&CallOutbox) Never! {
         runs := CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call {
-                runs.value.runs[index].joins.push(CallJoin{end: end.move()})
+                runs.value.runs[index].joins.push(CallJoin{end: end.move(), outbox: outbox.move()})
+                return
+            }
+        }
+    }
+
+    // Queues `job` in call `call`, to run once the call commits.
+    enqueue: fn(call: Int, job: &&CallJob) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call {
+                runs.value.runs[index].jobs.push(job.move())
                 return
             }
         }
@@ -845,20 +908,44 @@ priv(package) transactions: module {
     // Ends call `call`: commits each joined transaction, in the order the
     // call joined them, when `commit` holds and no store refused the call or
     // had run its delivery, and otherwise rolls each back. False when the
-    // call has to run again: a store refused it, or the first commit failed
-    // (and was rolled back). A call that writes two stores commits each on
-    // its own; once one has committed, a later failed commit can't undo it,
-    // so the call stands.
+    // call has to run again: a store refused it, the first store couldn't
+    // keep its jobs, or the first commit failed (and was rolled back). A
+    // call that writes two stores commits each on its own; once one has
+    // committed, a later failed commit can't undo it, so the call stands, and
+    // its jobs run. A call that joined no store runs its jobs as it ends.
     end: fn(call: Int, commit: Bool) -> Bool Never! {
-        ended: calls_take(call) ?? return true
+        ended := calls_take(call) ?? return true
         if ended.refused || ended.repeated || !commit {
             loop joined in ended.joins -> _: joined.end(false)
             return !ended.refused
+        }
+        rows := [Int]{}
+        if ended.joins.len() > 0 {
+            loop job in ended.jobs {
+                row: ended.joins[0].outbox.keep(job.name, job.args)
+                if row == 0 {
+                    loop joined in ended.joins -> _: joined.end(false)
+                    return false
+                }
+                rows.push(row)
+            }
         }
         loop (index, joined) in ended.joins {
             if joined.end(true) || index > 0 -> next
             loop rest in 1..<ended.joins.len() -> _: ended.joins[rest].end(false)
             return false
+        }
+        if ended.joins.len() == 0 {
+            loop job in ended.jobs.move() -> job_start(job, None, 0)
+            return true
+        }
+        // The jobs' runs share the first store's outbox.
+        first := ended.joins.remove(0, .Slot) ?? return true
+        outbox: Shared{first.outbox.move()}
+        at := 0
+        loop job in ended.jobs.move() {
+            job_start(job, Val(outbox.copy()), rows[at])
+            at += 1
         }
         true
     }
@@ -871,6 +958,123 @@ priv calls_take: fn(call: Int) -> CallRun? Never! {
         if runs.value.runs[index].id == call -> return runs.value.runs.remove(index, .Slot)
     }
     None
+}
+
+// The arguments of a mounted method's call or of a job, decoded from their
+// JSON array, and the reply each gives.
+priv RemoteArgs: struct {
+    tree: Dyn
+
+    // The argument at `index`, decoded as the method's parameter type.
+    __take: fn<T: Decode>(self, index: Int) -> T [FieldError]! {
+        live_json.at<T>(self.tree, "/{index}")
+    }
+
+    // The reply of a call that failed: `{"err": error}`.
+    __reply_err: fn<E: Encode>(self, error: E) -> String Never! {
+        "{{\"err\":{live_json.to_string<E>(error) ?? "null"}}}"
+    }
+
+    // The reply of a call that gave `value`: `{"ok": value}`.
+    __reply_value: fn<R: Encode>(self, value: R) -> String Never! {
+        "{{\"ok\":{live_json.to_string<R>(value) ?? "null"}}}"
+    }
+
+    // The reply of a job that failed with an error that doesn't encode.
+    __failed: fn<E>(self, _error: E) -> String Never! { "{{\"err\":null}}" }
+
+    // The reply of a job that ran, whatever it gave.
+    __ran: fn<R>(self, _value: R) -> String Never! { "" }
+}
+
+// A job's call, as the compiler lowers `enqueue(fn() { self.method(args)
+// })`: `name` names the job, `args` are its arguments, each encoded
+// (`__live_arg`), `retries` are its `#App.Job`'s, and `run` decodes the
+// arguments and calls the method on a copy of the service. Queued in a call,
+// the job runs once the call commits (`transactions`); queued outside one,
+// it runs at once, on a task of its own.
+__enqueue: fn(name: String, args: [String], retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) Never! {
+    job: CallJob{name: name, args: "[{args.join(",")}]", retries: retries, run: run.move()}
+    call: transactions.current() ?? return job_start(job, None, 0)
+    transactions.enqueue(call, job)
+}
+
+// The wait before a failed job's next run, in milliseconds: half a second
+// after its first failure, doubling after each one after, to an hour at
+// most.
+JOB_BACKOFF_FIRST_MS: 500
+
+JOB_BACKOFF_MOST_MS: 3600000
+
+priv job_backoff_ms: fn(failures: Int) -> Int Never! {
+    wait := JOB_BACKOFF_FIRST_MS
+    loop _ in 1..<failures {
+        wait *= 2
+        if wait >= JOB_BACKOFF_MOST_MS -> return JOB_BACKOFF_MOST_MS
+    }
+    wait
+}
+
+// Runs `job` on a task of its own; `outbox` keeps it as row `row` (None: it
+// is kept nowhere).
+priv job_start: fn(job: &&CallJob, outbox: &&Shared<CallOutbox>?, row: Int) Never! {
+    runner: task { job_run(job, outbox, row) }
+    runner.detach()
+}
+
+// Runs `job` until a run succeeds, each run as the system and in a call of
+// its own, which also deletes the job's row from `outbox`. A run that fails
+// runs again after a backoff, up to `job.retries` more times; the row then
+// records the last failure and stays.
+priv job_run: fn(job: CallJob, outbox: Shared<CallOutbox>?, row: Int) Never! {
+    runs := 0
+    loop {
+        runs += 1
+        failure: job_attempt(job, outbox, row)
+        if failure == "" {
+            return
+        }
+        if runs > job.retries {
+            if outbox == .Val(store) {
+                kept: store.guard_read()
+                _: kept.value.failed(row, runs, failure)
+            }
+            return
+        }
+        tasks.sleep(job_backoff_ms(runs))
+    }
+}
+
+// One run of `job` in a call of its own: "" when it ran, or when another run
+// had done it already (its row is gone); otherwise why it failed.
+priv job_attempt: fn(job: CallJob, outbox: Shared<CallOutbox>?, row: Int) -> String Never! {
+    call: transactions.begin() ?? panic("a job's task runs no other call")
+    reply: as_system<String>(fn() { job_reply(job.run, job.args) })
+    failed: reply.starts_with("{{\"err\":")
+    removed := 1
+    if !failed {
+        if outbox == .Val(store) {
+            kept: store.guard_read()
+            removed = kept.value.done(row)
+        }
+    }
+    committed: transactions.end(call, !failed && removed == 1)
+    if failed -> return reply
+    if removed < 0 -> return "the store couldn't delete the job's row"
+    if !committed -> return "the job's call couldn't commit"
+    ""
+}
+
+// What `run` replies to the encoded arguments `args`.
+priv job_reply: fn(run: fn(RemoteArgs) -> String [FieldError]!, args: String) -> String Never! {
+    tree: live_json.parse(args) ?? return "{{\"err\":\"the job's arguments are not JSON\"}}"
+    run(RemoteArgs{tree: tree}) ?? "{{\"err\":\"the job's arguments don't decode\"}}"
+}
+
+// An outbox that keeps nothing, for the calls of the test below, which queue
+// no job.
+priv outbox_unused: fn() -> CallOutbox Never! {
+    CallOutbox{keep: fn(_: String, _: String) { 0 }, done: fn(_: Int) { 0 }, failed: fn(_: Int, _: Int, _: String) { false }}
 }
 
 #Test("a call commits or rolls back every transaction joined to it, runs again when one refused it, and rolls back a delivery run already") {
@@ -886,33 +1090,100 @@ priv calls_take: fn(call: Int) -> CallRun? Never! {
     call: transactions.begin() ?? panic("no call is open")
     assert_eq(transactions.begin(), Int?{None})
     assert_eq(transactions.current(), Val(call))
-    transactions.join(call, note("a", true))
-    transactions.join(call, note("b", true))
+    transactions.join(call, note("a", true), outbox_unused())
+    transactions.join(call, note("b", true), outbox_unused())
     assert(transactions.end(call, true))
     assert_eq(transactions.current(), Int?{None})
     failed: transactions.begin() ?? panic("no call is open")
-    transactions.join(failed, note("c", true))
+    transactions.join(failed, note("c", true), outbox_unused())
     assert(transactions.end(failed, false))
     refused: transactions.begin() ?? panic("no call is open")
-    transactions.join(refused, note("d", true))
+    transactions.join(refused, note("d", true), outbox_unused())
     transactions.refuse(refused)
     assert(transactions.refused(refused))
     assert(!transactions.end(refused, true))
     lost: transactions.begin() ?? panic("no call is open")
-    transactions.join(lost, note("e", false))
-    transactions.join(lost, note("f", true))
+    transactions.join(lost, note("e", false), outbox_unused())
+    transactions.join(lost, note("f", true), outbox_unused())
     assert(!transactions.end(lost, true))
     delivered: transactions.begin() ?? panic("no call is open")
     assert_eq(transactions.delivery(delivered), CallDelivery?{None})
     transactions.deliver(delivered, CallDelivery{id: "d-1", at: 1})
     assert_eq(transactions.delivery(delivered), Val(CallDelivery{id: "d-1", at: 1}))
-    transactions.join(delivered, note("g", true))
+    transactions.join(delivered, note("g", true), outbox_unused())
     assert(!transactions.repeated(delivered))
     transactions.repeat(delivered)
     assert(transactions.repeated(delivered))
     assert(transactions.end(delivered, true))
     log: seen.guard_read()
     assert_eq(log.value.join(", "), "commit a, commit b, roll back c, roll back d, commit e, roll back f, roll back g")
+}
+
+// The entries `seen` holds so far.
+priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
+    log: seen.guard_read()
+    log.value.copy()
+}
+
+#Test("a committed call keeps each job it queued in its first store's outbox and runs it after the commit, again after a failure; a rolled-back call runs none") {
+    seen: Shared{[String]{}}
+    outbox: fn() -> CallOutbox {
+        CallOutbox{
+            keep: fn(name: String, args: String) {
+                log := seen.guard_edit()
+                log.value.push("keep {name} {args}")
+                7
+            },
+            done: fn(row: Int) {
+                log := seen.guard_edit()
+                log.value.push("done {row}")
+                1
+            },
+            failed: fn(row: Int, runs: Int, error: String) {
+                log := seen.guard_edit()
+                log.value.push("failed {row} after {runs}: {error}")
+                true
+            },
+        }
+    }
+    tries: Shared{0}
+    flaky: fn(args: RemoteArgs) -> String [FieldError]! {
+        count := tries.guard_edit()
+        count.value += 1
+        taken: args.__take<Int>(0)
+        if count.value == 1 -> return Ok(args.__reply_err<String>("once"))
+        Ok(args.__reply_value<Int>(taken))
+    }
+    failing: fn(args: RemoteArgs) -> String [FieldError]! { Ok(args.__reply_err<String>("always")) }
+    dropped: Shared{0}
+    never: fn(args: RemoteArgs) -> String [FieldError]! {
+        count := dropped.guard_edit()
+        count.value += 1
+        Ok(args.__reply_value<Int>(0))
+    }
+    rolled: transactions.begin() ?? panic("no call is open")
+    transactions.join(rolled, fn(_: Bool) { true }, outbox())
+    __enqueue("app.Test.never", [String]{}, 0, never)
+    assert(transactions.end(rolled, false))
+    committed: transactions.begin() ?? panic("no call is open")
+    transactions.join(committed, fn(_: Bool) { true }, outbox())
+    __enqueue("app.Test.flaky", [String]{__live_arg<Int>(2)}, 1, flaky)
+    __enqueue("app.Test.failing", [String]{}, 1, failing)
+    assert(transactions.end(committed, true))
+    loop _ in 0..<1000 {
+        if jobs_seen(seen).len() >= 4 -> break
+        tasks.sleep(10)
+    }
+    log := jobs_seen(seen)
+    log.sort()
+    assert_eq(log.join(", "), "done 7, failed 7 after 2: {{\"err\":\"always\"}}, keep app.Test.failing [], keep app.Test.flaky [2]")
+    assert_eq(job_backoff_ms(1), 500)
+    assert_eq(job_backoff_ms(3), 2000)
+    assert_eq(job_backoff_ms(40), JOB_BACKOFF_MOST_MS)
+    taken: tries.guard_read()
+    assert_eq(taken.value, 2)
+    never_ran: dropped.guard_read()
+    assert_eq(never_ran.value, 0)
 }
 
 LIVE_MAX_QUERIES: 1024
