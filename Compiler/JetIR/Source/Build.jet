@@ -1348,10 +1348,10 @@ ir_nominal_key: fn(p: IRProgram, name: String) -> String Never! {
     p.types[row].key.copy()
 }
 
-// ir_nominal_key for type identity: a Core declaration of a compiler-owned
-// row's leaf (core.term's `Key: enum` beside the runtime `Key` a platform
-// signature names) keys as that leaf, so the two spellings of one Core type
-// are one type.
+// ir_nominal_key for type identity: a Core declaration whose leaf a
+// compiler-owned row still holds under the bare name (a compiler-owned Core
+// record, or a Core enum leaf more than one loaded Core source declares) keys
+// as that leaf, so the two spellings of one Core type are one type.
 ir_identity_key: fn(p: IRProgram, name: String) -> String Never! {
     key: ir_nominal_key(p, name)
     if !key.starts_with("<corelib>/") -> return key

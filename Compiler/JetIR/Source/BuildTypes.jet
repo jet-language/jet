@@ -3729,10 +3729,10 @@ IRCompilerOwnedTypeRow: struct {
 }
 
 // Every compiler-owned row, in program order, built when the compiler itself
-// is built: each runtime enum (IR_COMPILER_OWNED_ENUMS), each plain Core enum
-// leaf (CORE_ENUM_CASE_ROWS), then `FieldError`, `Range` and the carrier, Core
-// and math records. Rows leave their module identity empty; a program fills
-// in its own.
+// is built: each runtime enum (IR_COMPILER_OWNED_ENUMS), each Core enum leaf
+// (CORE_ENUM_CASE_ROWS, with its Core payload rows), then `FieldError`,
+// `Range` and the carrier, Core and math records. Rows leave their module
+// identity empty; a program fills in its own.
 IR_COMPILER_OWNED_TYPE_ROWS: #run ir_compiler_owned_type_rows()
 
 ir_compiler_owned_type_rows: fn() -> [IRCompilerOwnedTypeRow] Never! {
@@ -3743,7 +3743,7 @@ ir_compiler_owned_type_rows: fn() -> [IRCompilerOwnedTypeRow] Never! {
     }
     loop core_row in CORE_ENUM_CASE_ROWS {
         if core_row.kind == .Enum(names) {
-            variants: loop variant in names -> ir_compiler_owned_variant(variant, IRCompilerOwnedPayload.Unit)
+            variants: loop variant in names -> ir_compiler_owned_variant(variant, ir_core_enum_payload(core_row.name, variant))
             rows.push(IRCompilerOwnedTypeRow{class: .CoreEnum, definition: ir_compiler_owned_def(module_none(), core_row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
         }
     }

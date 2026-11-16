@@ -381,15 +381,15 @@ IRCompilerOwnedEnum: struct {
     variants: [String]
 }
 
-// Compiler-owned runtime enums (`IOError`, `Key`, `Dyn`, ...). Each joins
-// every program as one row under its bare canonical key, so an enum literal,
-// a variant pattern and the backends name the same IR type as the Rust
-// runtime does. A Core-declared enum needs no row here: its Core declaration
-// claims the bare name wherever its module is loaded, which is wherever a
-// value of it can arise. Where its module line lists its cases, that
-// CORE_ENUM_CASE_ROWS row stands in when no single declaration is loaded. The
-// Core-declared families still here carry payloads that row can't hold, and
-// a program can hold their values without loading the declaring module.
+// Compiler-owned runtime enums (`IOError`, `Dyn`, `Ordering`, ...): enums no
+// Core source declares. Each joins every program as one row under its bare
+// canonical key, so an enum literal, a variant pattern and the backends name
+// the same IR type as the Rust runtime does. A Core-declared enum needs no
+// row here: its Core declaration claims the bare name wherever its module is
+// loaded. Where its module line lists its cases, that CORE_ENUM_CASE_ROWS row
+// stands in when no single declaration is loaded, carrying the family's Core
+// payload rows (ir_core_enum_payload), so a program that holds a `Key` or a
+// `DataEvent` without loading the declaring module lays it out the same.
 IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "HookOutcome", variants: [String]{"Continue", "Cancel", "Fail"}},
     {name: "HookDecision", variants: [String]{"Continue", "Transform", "Cancel", "Fail"}},
@@ -398,7 +398,6 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "RemoveBy", variants: [String]{"Val", "Slot"}},
     {name: "TaskPauseMode", variants: [String]{"WaitPoints", "CheckLoops"}},
     {name: "IOError", variants: [String]{"InvalidInput", "NotFound", "PermissionDenied", "TimedOut", "Cancelled", "Closed", "Protocol", "Other", "ResourceLimit", "AlreadyExists", "Unsupported"}},
-    {name: "Key", variants: [String]{"Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Insert", "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown", "Shift", "Control", "Alt", "Super", "CapsLock", "F", "Ctrl", "Unknown"}},
     {name: "DurationUnit", variants: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}},
     {name: "Dyn", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}},
     // The closed reflection detail menus sema types fact reads with
@@ -432,7 +431,7 @@ ir_compiler_owned_single: fn(ty: Type) -> IRCompilerOwnedPayload Never! {
 }
 
 // The payload of `name.variant` on a COMPILER_OWNED_ENUMS row, written over
-// the row's type parameters; a plain Core enum row's variants are all unit.
+// the row's type parameters.
 ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerOwnedPayload Never! {
     bytes: Type.List{element: Type.IntN{signed: false, bits: 8}}
     if name == "HookDecision" || name == "HookOutcome" {
@@ -451,12 +450,8 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         }
         return ir_compiler_owned_single(Type.Named{name: "IOContext"})
     }
-    // Key's cases and a reflected PreparedValue's are the Core payload rows.
-    if name == "Key" || name == "PreparedValue" {
-        payload: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
-        if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])
-        return IRCompilerOwnedPayload.Unit
-    }
+    // A reflected PreparedValue's cases are the Core payload rows.
+    if name == "PreparedValue" -> return ir_core_enum_payload(name, variant)
     if name == "Dyn" {
         if variant == "Bool" -> return ir_compiler_owned_single(Type.Bool)
         if variant == "Int" -> return ir_compiler_owned_single(Type.Int)
@@ -473,5 +468,13 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         }
         return IRCompilerOwnedPayload.Unit
     }
+    IRCompilerOwnedPayload.Unit
+}
+
+// The payload of `name.variant` from the family's Core payload row: its one
+// slot, or unit for a unit variant and a family with no rows.
+ir_core_enum_payload: fn(name: String, variant: String) -> IRCompilerOwnedPayload Never! {
+    payload: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
+    if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])
     IRCompilerOwnedPayload.Unit
 }
