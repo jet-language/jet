@@ -110,6 +110,7 @@ use {
         builtin_codec_trait_ref,
         ModuleID,
         ModuleTable,
+        NamedCtValue,
         module_count,
         module_find,
         module_index,
@@ -664,6 +665,15 @@ SemaRegistrationModuleInput: struct {
     // module's, which SemaRegistrationModule.derive_captures records, and a
     // compile bound to that Core takes them from the record.
     derive_memo: SemaDeriveMemo{SemaDeriveMemo{}}
+    // The values the build computed for the module values its root `#loop`
+    // declarations read (`#loop row in ROWS` over `ROWS: #run rows()`):
+    // the driver computes them in a first pass and hands them to the
+    // registration that expands the loops (UserTemplates.jet
+    // sema_derive_template_loop_waits).
+    loop_values: [NamedCtValue]{[NamedCtValue]{}}
+    // Set on that first pass: a root `#loop` over a value not computed yet
+    // is left out, without a report, until the value is known.
+    loop_values_pending: Bool{false}
 }
 
 SemaForeignImportBinding: struct {
@@ -3253,7 +3263,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     sema_marker_rules_validate_allow(module_row.program, diagnostics)
     // Root `#loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
-    sema_derive_expand_template_loops(module_row.program.items, diagnostics)
+    sema_derive_expand_template_loops(module_row.program.items, owned.loop_values.move(), owned.loop_values_pending, diagnostics)
     // Each `protocol` becomes its generated `.Client`/`.Server` handle types
     // and transition methods before any declaration is registered.
     sema_protocols_expand(module_row.program.items, diagnostics)

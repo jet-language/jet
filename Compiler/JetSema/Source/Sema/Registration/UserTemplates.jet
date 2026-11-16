@@ -17,6 +17,7 @@ use jet_foundation.[
     DeriveBodyItem,
     Diagnostic,
     EffectRowEntry,
+    Expr,
     Func,
     ImplConstValue,
     ImplDef,
@@ -26,6 +27,7 @@ use jet_foundation.[
     Marker,
     MarkerCallArg,
     MarkerDecl,
+    ModuleTable,
     NamedCtValue,
     NamedType,
     RuleSite,
@@ -153,19 +155,26 @@ sema_user_template_function_info: fn(graph: SemaRegistrationGraph, module_index:
 
 // ---------------------------------------------------------------------------
 // Root `#loop` declarations (Rust `expand_item_template_loops`). They
-// expand before registration in the module's known-time constant scope.
+// expand before registration in the module's known-time constant scope: the
+// constants whose values are literal data, and the module values the build
+// computed for the loops that read them. A loop over a module value that
+// is not literal data (`#loop row in ROWS` over `ROWS: #run rows()`) waits
+// on that value: the driver's first pass registers the module without the
+// loop and computes the value, and the registration it hands the value to
+// expands the loop (JetDriver Pipeline.jet jet_driver_compile_stages).
 
-// Expands the root `#loop` items of `items` in place; a list without one
-// is left untouched (not copied).
-sema_derive_expand_template_loops: fn(items: &[Item], diagnostics: &[Diagnostic]) {
-    has_loop: loop item in items {
-        if item == .TemplateLoop(_) {
-            break true
-        }
-    } ?? false
-    if !has_loop {
-        return
-    }
+// A module value a root `#loop` waits on, by its module's identity text and
+// its name, and the value the first pass computed for it (None until then,
+// or when computing it failed).
+SemaRootLoopValue: struct {
+    module_identity: String
+    name: String
+    value: CtValue?
+}
+
+// The constants of `items` whose values are literal data, in declaration
+// order.
+sema_derive_template_loop_scope: fn(items: [Item]) -> [NamedCtValue] {
     scope := [NamedCtValue]{}
     loop item in items {
         if item == .Const(definition) {
@@ -177,9 +186,98 @@ sema_derive_expand_template_loops: fn(items: &[Item], diagnostics: &[Diagnostic]
             scope.push(NamedCtValue{name: definition.name, value: known})
         }
     }
+    scope
+}
+
+// The module value a root `#loop` over `source` waits on: a constant of
+// `items` outside `scope`, named by the loop's source.
+sema_derive_template_loop_wait: fn(items: [Item], scope: [NamedCtValue], source: Expr) -> String? Never! {
+    if source == .Ident(name, _, _) {
+        loop known in scope {
+            if known.name == name -> return None
+        }
+        loop item in items {
+            if item == .Const(definition) {
+                if definition.name == name -> return Val(name)
+            }
+        }
+    }
+    None
+}
+
+// The module values the root `#loop` declarations of `items` wait on, each
+// once.
+sema_derive_template_loop_waits: fn(items: [Item]) -> [String] {
+    waits := [String]{}
+    has_loop: loop item in items {
+        if item == .TemplateLoop(_) {
+            break true
+        }
+    } ?? false
+    if !has_loop -> return waits
+    scope: sema_derive_template_loop_scope(items)
+    loop item in items {
+        if item == .TemplateLoop(template) {
+            name: sema_derive_template_loop_wait(items, scope, template.source) ?? next
+            seen: loop known in waits {
+                if known == name {
+                    break true
+                }
+            } ?? false
+            if !seen -> waits.push(name)
+        }
+    }
+    waits
+}
+
+// Fills in each of `waits` the value a first pass computed: the value of
+// the constant of that name in that module, as a template value.
+sema_derive_template_loop_landed: fn(waits: &[SemaRootLoopValue], table: ModuleTable, sources: [SemaComptimeItemSource], values: [SemaComptimeItemValue]) {
+    loop index in 0..<waits.len() {
+        waits[index].value = sema_derive_template_loop_value(waits[index], table, sources, values)
+    }
+}
+
+// The computed value of the constant `wait` names, None when the first
+// pass computed none.
+sema_derive_template_loop_value: fn(wait: SemaRootLoopValue, table: ModuleTable, sources: [SemaComptimeItemSource], values: [SemaComptimeItemValue]) -> CtValue? {
+    loop source in sources {
+        if source.kind == SemaComptimeItemKind.Constant && source.name == wait.name && module_text(table, source.module_identity) == wait.module_identity {
+            loop value in values {
+                if value.key == source.key -> return sema_user_template_ct_value(value.value)
+            }
+            return None
+        }
+    }
+    None
+}
+
+// Expands the root `#loop` items of `items` in place; a list without one
+// is left untouched (not copied). `computed` holds the values the build
+// computed for the module values the loops wait on. While `pending` (the
+// driver's first pass), a loop over a value not computed yet is left out
+// without a report; after it, a loop whose value could not be computed is
+// E0956.
+sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue], pending: Bool, diagnostics: &[Diagnostic]) {
+    has_loop: loop item in items {
+        if item == .TemplateLoop(_) {
+            break true
+        }
+    } ?? false
+    if !has_loop {
+        return
+    }
+    scope := sema_derive_template_loop_scope(items)
+    loop value in computed -> scope.push(value)
     expanded := [Item]{}
     loop item in items {
         if item == .TemplateLoop(template) {
+            if sema_derive_template_loop_wait(items, scope, template.source) == .Val(name) {
+                if !pending {
+                    diagnostics.push(sema_error("E0956", expr_span(template.source), "this `#loop` waits on `{name}`, which the build could not compute", "a root `#loop` over a module value expands once the build has computed that value", "fix the error that stops `{name}` from being computed, or give `{name}` a value written as literal data"))
+                }
+                next
+            }
             body: [DeriveBodyItem]{DeriveBodyItem.Loop{var: template.var, var_span: template.var_span, source: template.source, body: template.body, span: template.span}}
             generated: sema_derive_expand_template_body(body, scope, diagnostics) ?? next
             loop generated_item in generated -> expanded.push(generated_item)
