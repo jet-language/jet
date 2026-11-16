@@ -936,9 +936,12 @@ overlap and are E0908, conditions or not. A conditional impl stays outside
 its type's body: a nested impl cannot state the bounds.
 
 A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
-dynamic dispatch with invisible boxing. Generic bounds use `f: fn<T: Bound>(…)`
-and `Pair: struct<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
-`Comparable`, `Encode`, and `Decode` derive when every field qualifies. The
+dynamic dispatch with invisible boxing. A trait value prints, interpolates and
+debug-prints as the concrete value it holds, so `print(shapes)` shows each
+shape; it can be shown a way only when every type implementing the trait can.
+Generic bounds use `f: fn<T: Bound>(…)` and `Pair: struct<T> { … }`. Built-in
+`Printable`, `Equatable`, `Debug`, `Comparable`, `Encode`, and `Decode` derive
+when every field qualifies. The
 package default can deny `auto_derive` through
 `policy: { lints: { deny: [auto_derive] } }`. A signed type marker opts one
 trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.

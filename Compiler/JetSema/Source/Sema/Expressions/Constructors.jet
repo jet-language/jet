@@ -1724,7 +1724,19 @@ sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvi
             }
             return true
         }
-        .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> return false
+        .TraitObject(bounds) -> {
+            graph: program.registration_graph ?? return false
+            impls: sema_call_reflection_trait_impls(graph, bounds) ?? return false
+            loop reference in graph.impl_trait_name_buckets[impls] {
+                held: graph.modules[reference.module_index].impls[reference.row].target_type
+                if sema_call_reflection_secret_bearing(held) -> return false
+                if !sema_expression_typed_literal_printable(held, environment, program) && !sema_call_reflection_is_displayable(held, environment, program) {
+                    return false
+                }
+            }
+            return true
+        }
+        .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> return false
         .Named(name) -> {
             if program.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None {
                 return true

@@ -1669,6 +1669,12 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
     // implementation, at the top level and for nested values alike.
     selected: if mode == .Debug -> ir_render_debug_impl(m, p, b, slot) else -> ir_render_impl(m, p, b, slot, mode)
     if selected >= 0 -> return selected
+    // A trait value shows the concrete value its box holds (ir_render_trait).
+    if ir_untag(m.types[b.f.slot_type[slot]].ty) == .TraitObject(_) {
+        builder: ir_text_builder(m, b)
+        ir_render_push(m, p, b, builder, slot, mode, false, span)
+        return ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    }
     // A Dyn shows its scalar leaf bare and a container as its tree text
     // (JetRuntime Dyn.jet jet_rt_handle_show_dyn over a runtime tree).
     if mode != .Debug {
@@ -1889,6 +1895,10 @@ ir_render_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot
     if selected >= 0 {
         _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, selected}, -1)
         ir_release(m, b, selected)
+        return
+    }
+    if ir_untag(ty) == .TraitObject(_) {
+        ir_render_trait(m, p, b, builder, slot, mode, member, span)
         return
     }
     // A core.math precise value inside another renders as its own text does.

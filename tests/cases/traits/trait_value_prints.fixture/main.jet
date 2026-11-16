@@ -1,0 +1,47 @@
+// A trait value prints, interpolates and debug-prints as the concrete value
+// its box holds: alone, inside a list and in a loop, for user structs and
+// builtin types.
+Shape: trait {
+    area: fn(self) -> Int
+}
+
+Square: struct {
+    side: Int
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+Circle: struct {
+    radius: Int
+
+    impl Shape {
+        area: fn(self) -> Int { 3 * self.radius * self.radius }
+    }
+}
+
+Label: trait {
+    width: fn(self) -> Int
+}
+
+impl Int.Label {
+    width: fn(self) -> Int { 8 }
+}
+
+impl String.Label {
+    width: fn(self) -> Int { self.len() }
+}
+
+run: fn() {
+    shapes: [Shape]{Square{side: 2}, Circle{radius: 1}}
+    print(shapes[0])
+    print("{shapes[1]}")
+    print(shapes)
+    loop shape in shapes -> print("{shape} has area {shape.area()}")
+    print("{shapes[0]:Debug}")
+    labels: [Label]{14, "hi"}
+    print(labels)
+    loop label in labels -> print(label)
+    print("{labels[1]:Debug}")
+}
