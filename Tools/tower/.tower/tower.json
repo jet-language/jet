@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 108300,
+    "rev": 108312,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -119854,30 +119854,30 @@
         },
         {
           "n": 7,
-          "text": "(was #6414 c2)",
+          "text": "For every corpus program, `jet build` (default flags) runs within 1.10x of its assembly reference in cycles, with identical output; any program over that bound has a named codegen root on a card. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` shows every program at or under 1.10x cycles. (was #6414 c2)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:42:54.525Z"
+          "at": "2026-11-16T01:20:16.447Z"
         },
         {
           "n": 8,
-          "text": "(was #6414 c3)",
+          "text": "The perf gate fails any corpus program over the bound, and a plan document (Docs/proposals) names the codegen and runtime design changes, with modelled gains, that close the gap without per-program tricks. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` exits non-zero on a program over the bound, and `git ls-files \"Docs/proposals/*asm-ceiling*\"` names the plan. (was #6414 c3)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:42:55.458Z"
+          "at": "2026-11-16T01:20:17.555Z"
         },
         {
           "n": 9,
-          "text": "(was #6414 c15)",
+          "text": "Work backwards from hand-optimized machine code (owner direction 2026-11-11). A kernel catalog covers each common code shape: counted and iterator loops, list sum and map, text scan and compare, struct copy and move, enum match, option and error return, hash lookup, bounds-checked index, call and return, allocation and drop. Each kernel has a small Jet program and a hand-written, maximally optimized x86-64 reference that does the same work with the same safety checks. For each kernel, a checker compares the hot code that `jet build` emits with the reference: instruction count, spills, loads and stores, checks, and calls. Every extra instruction is named with its root (bounds check not hoisted, value spilled, copy not elided, loop not vectorized, call not inlined, or atomic reference count). Each root is fixed once, in the general lowering, never per kernel, and is proved on a second program that uses the feature differently. Each kernel then gets a machine-code golden that pins the emitted hot loop at O1 and O2, so a regression fails the gate. The gate fails any kernel whose emitted hot code is over its reference in instructions or cycles. Every new codegen feature adds its kernel and reference before it lands. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` over the catalog cells and `jet test Compiler --profile golden --filter codegen_kernels` (machine-code goldens at O1 and O2), with instructions per element recorded before and after each step. (was #6414 c15)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:42:56.596Z"
+          "at": "2026-11-16T01:20:18.705Z"
         }
       ],
       "refs": [],
@@ -119891,7 +119891,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:51.726Z",
-      "updated": "2026-11-16T00:42:56.596Z",
+      "updated": "2026-11-16T01:20:18.706Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -119988,21 +119988,21 @@
         },
         {
           "n": 9,
-          "text": "(was #3039 c9)",
+          "text": "Sema facts (types, integer bounds, exclusivity, purity and comptime values) reach JetIR through one typed fact channel, with no second side table. Proof: `jet test Compiler --profile cases --filter jetir_facts` has one case per fact class that fails when the fact is dropped. (was #3039 c9)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:34:12.975Z"
+          "at": "2026-11-16T01:20:19.772Z"
         },
         {
           "n": 10,
-          "text": "(was #3039 c10)",
+          "text": "At least one existing optimization consumes each sema fact class without re-deriving sema policy in codegen, and absent facts keep the current conservative behavior. Proof: `jet test Compiler --profile cases --filter jetir_facts/consumer_per_fact_class`. (was #3039 c10)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:34:16.188Z"
+          "at": "2026-11-16T01:20:20.808Z"
         }
       ],
       "refs": [],
@@ -120016,7 +120016,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:52.679Z",
-      "updated": "2026-11-16T00:34:16.189Z",
+      "updated": "2026-11-16T01:20:20.808Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -120163,12 +120163,12 @@
         },
         {
           "n": 6,
-          "text": "(was #6954 c5)",
+          "text": "nbody at O2 has Jet/{C, Zig, Rust} < 1.00 in the default profile and jet-expert below c-expert and rust-expert, with byte-identical output, matched expert implementations, the same SIMD policy, and vectorized f64 lanes in the default profile with output identical to `#Scalar`. Proof: `node Tools/gauntlet/harness/run.mjs --entry nbody` shows no in-group loss. (was #6954 c5)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:45:18.886Z"
+          "at": "2026-11-16T01:20:21.942Z"
         }
       ],
       "refs": [],
@@ -120182,7 +120182,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:54.524Z",
-      "updated": "2026-11-16T00:45:18.886Z",
+      "updated": "2026-11-16T01:20:21.942Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -120343,57 +120343,57 @@
         },
         {
           "n": 6,
-          "text": "(was #3549 c19)",
+          "text": "Each core.os fact is computed once, in Core, not inside the runtime host, and reports the same value on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter os/facts` on O0, O1 and O2, with the core.os examples passing. (was #3549 c19)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:39:05.935Z"
+          "at": "2026-11-16T01:20:23.050Z"
         },
         {
           "n": 7,
-          "text": "(was #6615 c4)",
+          "text": "Every runtime function Core calls is a pub function of jet_runtime with a Jet name, Jet types (Int, not I64; typed handles) and a declared effect row. A generated comparison over every bound function proves each declared row equals the effect_kind and effect_leaf the compiler row held before the cutover, with zero differences. Proof: `jet test Compiler --profile cases --filter runtime/declared_rows_match` shows zero differences. (was #6615 c4)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:43:57.729Z"
+          "at": "2026-11-16T01:20:24.089Z"
         },
         {
           "n": 8,
-          "text": "(was #6615 c6)",
+          "text": "A safe package that names a runtime function that isn't pub fails with the ordinary visibility diagnostic, and reaching a runtime C symbol needs #Import(c) inside #Unsafe. Proof: a UI snapshot for each. (was #6615 c6)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:43:59.702Z"
+          "at": "2026-11-16T01:20:25.068Z"
         },
         {
           "n": 9,
-          "text": "(was #6615 c8)",
+          "text": "The runtime is an ordinary library (D-HOST-LEAF1=E) and the IR route tables (IR_RUNTIME_ROUTES, the route.export rows and the generated handle helpers) are deleted, so Core's runtime calls take the ordinary call path. Proof: `git grep -n -E 'IR_RUNTIME_ROUTES|route\\.export' -- Compiler` prints nothing and `jet test Compiler --profile golden` passes on o0, o1 and o2. (was #6615 c8)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:44:00.630Z"
+          "at": "2026-11-16T01:20:26.318Z"
         },
         {
           "n": 10,
-          "text": "(was #6615 c11)",
+          "text": "The compiler's effect-scope covers check reaches the runtime's one covers rule through the jet.runtime.authority binding `covers` (Compiler/JetRuntime/Source/Public/Authority.jet, export jet_authority_right_covers), not a C import. Compiler/JetFoundation/Source/Policy/EffectScope.jet declares no #Import(c) and no #Unsafe, tests/guards/c_imports.jet has no CI_ALLOWED row for it, the C-string export jet_authority_covers is gone, and jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet passes the 33-row covers table on a jet built with it. SUBs: G8Scope-1c (any train), then G8Scope-1d (after a seed with 1c). Placed on #6615 rather than #6129 so this follow-up to G8Scope-1b's interim CI_ALLOWED row doesn't hold G8's closure. Proof: `jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet` passes the 33-row table and `git grep -n jet_authority_covers -- Compiler` prints nothing. (was #6615 c11)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:44:02.531Z"
+          "at": "2026-11-16T01:20:27.551Z"
         },
         {
           "n": 11,
-          "text": "(was #6615 c16)",
+          "text": "Sema classifies the reachable Prelude closure into core, alloc and hosted layers (D-FREESTAND-PRELUDE1=A), and a program that reaches a layer its target lacks is refused with a registered error. Proof: `jet test Compiler --profile ui --filter freestanding_missing_layer_`. (was #6615 c16)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:44:03.477Z"
+          "at": "2026-11-16T01:20:28.842Z"
         }
       ],
       "refs": [
@@ -120408,7 +120408,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T11:29:21.054Z",
-      "updated": "2026-11-16T00:44:03.477Z",
+      "updated": "2026-11-16T01:20:28.842Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -224534,6 +224534,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T01:20:28.842Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07py9jv",
+      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6615 c16)"
+    },
+    {
+      "at": "2026-11-16T01:20:27.551Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07py9jv",
+      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6615 c11)"
+    },
+    {
+      "at": "2026-11-16T01:20:26.318Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07py9jv",
+      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6615 c8)"
+    },
+    {
+      "at": "2026-11-16T01:20:25.068Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07py9jv",
+      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6615 c6)"
+    },
+    {
+      "at": "2026-11-16T01:20:24.089Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07py9jv",
+      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6615 c4)"
+    },
+    {
+      "at": "2026-11-16T01:20:23.050Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07py9jv",
+      "note": "#6: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3549 c19)"
+    },
+    {
+      "at": "2026-11-16T01:20:21.942Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0g80ty3",
+      "note": "#6: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6954 c5)"
+    },
+    {
+      "at": "2026-11-16T01:20:20.809Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lpm2b4",
+      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3039 c10)"
+    },
+    {
+      "at": "2026-11-16T01:20:19.772Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lpm2b4",
+      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3039 c9)"
+    },
+    {
+      "at": "2026-11-16T01:20:18.706Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05y3url",
+      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6414 c15)"
+    },
+    {
+      "at": "2026-11-16T01:20:17.555Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05y3url",
+      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6414 c3)"
+    },
+    {
+      "at": "2026-11-16T01:20:16.447Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05y3url",
+      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6414 c2)"
+    },
     {
       "at": "2026-11-16T01:20:15.018Z",
       "by": "Main",
