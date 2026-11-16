@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Rename the declaration so it does not shadow a built-in.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0106</code>: <code>Tests/UI/marker_trait_collision.stderr</code>.</p>
-<pre class="diag">Error [jet.BuiltinRedefined]: The name `Layout` is a non-derive type marker
-  --&gt; Tests/UI/marker_trait_collision.jet:1:1
+<p>First UI snapshot mentioning <code>E0106</code>: <code>Tests/UI/marker_named_like_a_trait.stderr</code>.</p>
+<pre class="diag">Error [jet.BuiltinRedefined]: The marker name `Iterable` is the built-in trait `Iterable`
+  --&gt; Tests/UI/marker_named_like_a_trait.jet:2:1
     |
-  1 | Layout: trait {
-    | ^^^^^^
- Why: Trait names become their matching `#Trait` derive spelling, while this marker has different semantics
- Fix: Choose a trait name that does not collide with a registered type marker
+  2 | Iterable: struct {
+    | ^^^^^^^^
+ Why: A marker and a trait never share a name, so `Iterable` always means the one trait
+ Fix: Choose a marker name that no trait has
 More: jet-lang.dev/e/E0106
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

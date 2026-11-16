@@ -192,9 +192,11 @@ vocabulary](vocabulary.md).
   namespace, may be bare; imported markers always
   name their local import alias in PascalCase, acronyms in caps, as in
   `#Web.Get(...)` through `use web: core.http.server` (D-MARKER-CASE1=A);
-  a lowercase library part is E0087. Group members bind in the declaring
-  module, not in whichever module applies the group. A public group cannot
-  publish a private member (D-MARKER-MODULE1=A).
+  a lowercase library part is E0087. A qualified marker that no imported
+  module declares is E1023, one declared inside a `priv module` is E0605, and
+  one whose import path reaches two declarations is E0086. Group members bind
+  in the declaring module, not in whichever module applies the group. A public
+  group cannot publish a private member (D-MARKER-MODULE1=A).
 - Decimal `Int` and `Float` literals are exact arbitrary-precision values.
   A decimal `Float` has digits on both sides of `.`, with an optional `e` or
   `E` exponent. `_` may separate digits. `0x`, `0o`, and `0b` introduce

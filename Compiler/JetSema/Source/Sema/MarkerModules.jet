@@ -549,8 +549,13 @@ sema_marker_module_catalog_registry: fn(applied: TAppliedRuleCatalog) -> SemaSco
     Val(catalog)
 }
 
+// A qualified marker that no imported module declares (E1023).
+sema_marker_module_unknown_qualified_error: fn(marker: Marker) -> Diagnostic {
+    sema_error("E1023", marker.name_span, "no imported module declares the marker `#{marker.name}`", "a qualified marker names a marker that the module behind its import declares", "check the marker's spelling and the import's local name, or declare the marker in that module")
+}
+
 // The marker laws of every module. A marker no rule or marker declaration
-// names (E0927) is returned per module row in `unknown_rules`,
+// names (E0927, or E1023 when it is qualified) is returned per module row in `unknown_rules`,
 // apart from the other reports: it does not stop registration, and the
 // module's declaration check reports it beside the body errors.
 sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, unknown_rules: &[[Diagnostic]]) -> [Diagnostic] {
@@ -585,7 +590,7 @@ sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRule
                         diagnostics.push(sema_error("E0086", marker.name_span, "this qualified marker has more than one declaring module", "a marker's import path must resolve to one module and one exported row", "give the modules distinct import aliases and qualify the marker with one of them"))
                     }
                     resolved.status == "unknown" -> {
-                        unknown.push(sema_marker_rules_unknown_error(catalog, marker))
+                        unknown.push(sema_marker_module_unknown_qualified_error(marker))
                     }
                     else -> {}
                 }
@@ -684,7 +689,9 @@ sema_marker_package_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRul
                 next
             }
             if resolved.status != "found" || resolved.declaration == None {
-                diagnostics.push(sema_marker_rules_unknown_error(catalog, written))
+                if written.name.contains(".") {
+                    diagnostics.push(sema_marker_module_unknown_qualified_error(written))
+                } else { diagnostics.push(sema_marker_rules_unknown_error(catalog, written)) }
                 next
             }
             marker.declaration_module = Val(resolved.declaring_module_identity)

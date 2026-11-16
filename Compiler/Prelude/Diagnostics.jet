@@ -24264,6 +24264,26 @@ AmbiguousMarker: struct {
     }
 }
 
+UnknownLibraryMarker: struct {
+    impl Diagnostic {
+        code: "E1023"
+        safety_class: .Soundness
+        safety_reason: "No imported module declares a marker of that name, so the marker would apply nothing."
+        expert_path: "none: a qualified marker names a marker its import's module declares"
+        meaning: "Qualified marker that no imported module declares"
+
+        what: fn(self) -> String { "No imported module declares this qualified marker." }
+
+        why: fn(self) -> String {
+            "A qualified marker names a marker that the module behind its import declares."
+        }
+
+        fix: fn(self) -> String {
+            "Check the marker's spelling and the import's local name, or declare the marker in that module."
+        }
+    }
+}
+
 MarkerLibraryCasing: struct {
     impl Diagnostic {
         code: "E0087"

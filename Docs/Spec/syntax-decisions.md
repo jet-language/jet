@@ -2910,7 +2910,8 @@ declaring module and declaration, not a process-wide short name. A module may
 write its own marker bare. An imported marker always uses the import's local
 name: `use web: core.http.server` followed by `#web.Get(...)`. Nested exports
 retain their path, such as `#library.inner.LibraryNote`. Bare imported markers teach
-E0085; an ambiguous qualified path is E0086. Unknown names remain E0927 and
+E0085; an ambiguous qualified path is E0086. An unknown bare name remains E0927,
+an unknown qualified name is E1023, and
 private exports remain E0605. Group members resolve lexically in the group's
 declaring module, so a caller's marker or alias cannot capture them. A public
 group containing a private member is E0605; publishing a group cannot leak
