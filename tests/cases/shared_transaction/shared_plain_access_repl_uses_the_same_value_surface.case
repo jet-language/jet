@@ -1,0 +1,12 @@
+# tests/shared_transaction.rs::shared_plain_access_repl_uses_the_same_value_surface at tests/shared_transaction.rs:12; hand-port
+fixture: shared_plain_access_repl_uses_the_same_value_surface.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: shared_plain_access_repl_uses_the_same_value_surface.fixture/input.txt
+exit: any # run_transcript returned text, not a process status
+stdout: ~ "1 : Int" # tests/shared_transaction.rs:22-25 REPL shared access reads the updated field
+stdout+stderr: !~ "E1116" # tests/shared_transaction.rs:26-29 REPL must not ask for the retired closure form

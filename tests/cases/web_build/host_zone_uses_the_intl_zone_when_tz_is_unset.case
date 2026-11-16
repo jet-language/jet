@@ -1,0 +1,15 @@
+# core.time.host_zone on the web target: with no TZ in the program's
+# environment the host sets it to Intl's resolved zone, so the zone is the
+# host's, as /etc/localtime makes it on Linux.
+requires: tool:node
+fixture: host_zone_uses_the_intl_zone_when_tz_is_unset.fixture
+env: NO_COLOR=1
+env: TZ=Asia/Kolkata
+env: JET_TZDB_DIR={root}/Core/Time/tzdb
+step: jet build --target web main.jet
+exit: 0
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = host_zone_uses_the_intl_zone_when_tz_is_unset.stdout.expected

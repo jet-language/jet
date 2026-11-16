@@ -1,0 +1,210 @@
+// The emission boundary: what a code generator hands the object writer
+// (Object.jet), its DWARF (Dwarf.jet) and the linkers. Compiled functions
+// carry their machine code, relocations and debug facts; the module carries
+// its read-only data objects, its debug files and types, and each function's
+// source facts.
+
+X64FunctionID: struct {
+    value: Int
+}
+
+X64DataID: struct {
+    value: Int
+}
+
+// A relocation's target: a compiled function, a runtime function (a call),
+// a data object of the module, or a runtime data object (its address, read
+// RIP-relative: the runtime object exports it, RuntimeObject.jet
+// X64DataExport).
+X64RelocTarget: enum {
+    Function(id: X64FunctionID)
+    Runtime(symbol: String)
+    Data(id: X64DataID)
+    RuntimeData(symbol: String)
+}
+
+// A rel32 field at `at` (offset in the function's code) that must hold the
+// distance from the end of the field to the target.
+X64Reloc: struct {
+    at: Int
+    target: X64RelocTarget
+}
+
+// `align`: the function's start alignment in `.text`, a power of two of at
+// least X64_FUNCTION_ALIGN; code inside it aligned to `align` stays aligned.
+X64CompiledFunction: struct {
+    id: X64FunctionID
+    name: String
+    code: [U8]
+    relocs: [X64Reloc]
+    align: Int
+}
+
+// Debug facts of one compiled function for Image/Dwarf.jet: a line row
+// where each run of code from one source line starts, the end of the
+// prologue, the call frame instructions of its FDE, and where each debug
+// variable lives over which code range.
+X64LineRow: struct {
+    at: Int
+    line: Int
+}
+
+// A register (hardware number; xmm n as 16 + n), a frame slot at `offset`
+// from rbp, or the frame address rbp + `offset` itself (a StackSlot's
+// address).
+X64DebugLocation: enum {
+    Register(reg: Int)
+    Frame(offset: Int)
+    FrameAddress(offset: Int)
+}
+
+// X64FunctionSource.variables[variable] is at `location` for code offsets
+// start..<end.
+X64VariableRange: struct {
+    variable: Int
+    start: Int
+    end: Int
+    location: X64DebugLocation
+}
+
+// The code offsets start..<end hold code of inline site `site` (a row of
+// X64FunctionSource.inlines, from 1) or of a site nested in it.
+X64InlineRange: struct {
+    site: Int
+    start: Int
+    end: Int
+}
+
+X64FunctionDebug: struct {
+    lines: [X64LineRow]
+    body: Int
+    cfi: [U8]
+    ranges: [X64VariableRange]
+    // The most stack the function's own code holds at once, its return
+    // address included and its callees' frames not: `jet inspect memory`
+    // adds these up along the call graph (JetIR X64Stack.jet).
+    stack: Int{0}
+    // Whether it calls through a function value, whose targets the call
+    // graph does not name.
+    dynamic: Bool{false}
+    // The runs of inlined code, by start, each run before the runs nested
+    // in it; the slow paths after the epilogue are the function's own code.
+    inlines: [X64InlineRange]{[X64InlineRange]{}}
+}
+
+// The source types of the debug variables, described by their machine
+// layout.
+X64DebugEncoding: enum {
+    Signed
+    Unsigned
+    Float
+    Bool
+    Char
+}
+
+X64DebugMember: struct {
+    name: String
+    offset: Int
+    ty: Int
+}
+
+X64DebugEnumerator: struct {
+    name: String
+    value: Int
+}
+
+// Type references are rows of X64ModuleDebug.types; -1 is no type (an
+// untyped pointer). `Opaque` has a name and size but no known contents.
+X64DebugTypeKind: enum {
+    Base(encoding: X64DebugEncoding)
+    Pointer(target: Int)
+    Struct(members: [X64DebugMember])
+    Union(members: [X64DebugMember])
+    Enum(enumerators: [X64DebugEnumerator])
+    Typedef(target: Int)
+    Opaque
+}
+
+X64DebugType: struct {
+    name: String
+    size: Int
+    kind: X64DebugTypeKind
+}
+
+// A source variable: a parameter or a named local. `indirect` when the
+// carried value is the address of the variable's bytes (an inline aggregate)
+// rather than the variable itself. `site`: the inline site it belongs to
+// (X64FunctionSource.inlines, from 1), 0 for the function's own.
+X64DebugVariable: struct {
+    name: String
+    ty: Int
+    line: Int
+    parameter: Bool
+    indirect: Bool
+    site: Int{0}
+}
+
+// `directory` is the compilation directory relative `files` resolve
+// against; "" leaves that to the debugger (its working directory).
+X64ModuleDebug: struct {
+    directory: String
+    files: [String]
+    types: [X64DebugType]
+}
+
+// Read-only module objects, including immutable aggregate constant trees.
+X64DataReloc: struct {
+    offset: Int
+    target: X64DataID
+    addend: Int
+}
+
+// `read_only`: no code writes the object (a text row's bytes). The object
+// writer puts such an object in `.rodata`, which loads read-only, when it
+// holds no address word; every other object is writable `.data`.
+X64Data: struct {
+    id: X64DataID
+    bytes: [U8]
+    align: Int
+    relocs: [X64DataReloc]
+    read_only: Bool{false}
+}
+
+// The source facts of one compiled function: `file` is a row of
+// X64ModuleDebug.files, -1 for generated code (glue, helpers, the generated
+// entry), which has no source name or variables. `inlines[s - 1]` is inline
+// site s of its optimized body.
+X64FunctionSource: struct {
+    name: String
+    file: Int
+    line: Int
+    variables: [X64DebugVariable]
+    inlines: [X64InlineSite]{[X64InlineSite]{}}
+}
+
+// A function inlined into a compiled one (JetIR OptInline.jet): its row in
+// the module (-1 when unknown), which identifies it across sites, its name,
+// file (a row of X64ModuleDebug.files, -1 for generated code) and
+// declaration line, the site it was inlined in (0: the compiled function's
+// own code) and the line of the call there.
+X64InlineSite: struct {
+    function: Int
+    name: String
+    file: Int
+    line: Int
+    parent: Int
+    call_line: Int
+}
+
+x64_function_source_none: fn() -> X64FunctionSource Never! {
+    X64FunctionSource{name: "", file: -1, line: 0, variables: [X64DebugVariable]{}}
+}
+
+// What the object writer reads besides the compiled functions: the data
+// objects (`data[i].id.value == i`), the debug files and types, and the
+// source facts of the function with id `i` at `functions[i]`.
+X64ObjectModule: struct {
+    data: [X64Data]
+    debug: X64ModuleDebug
+    functions: [X64FunctionSource]
+}

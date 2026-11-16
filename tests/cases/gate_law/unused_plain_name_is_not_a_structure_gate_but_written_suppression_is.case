@@ -1,0 +1,9 @@
+# Original tests/gate_law.rs:42-48; source and predicates preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+fixture: unused_plain_name_is_not_a_structure_gate_but_written_suppression_is.fixture
+step: jet inspect gates plain.jet --json
+exit: 0
+json: stdout doc $.gates.entries[?kind="structure"] #= 0
+step: jet inspect gates suppressed.jet --json
+exit: 0
+json: stdout doc $.gates.entries[?kind="structure"][?subject~="_unused_value"] #>= 1

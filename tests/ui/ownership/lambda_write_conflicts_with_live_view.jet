@@ -1,0 +1,11 @@
+// A call of a lambda that pushes into `items` changes `items`, so it is
+// refused while the view `window` is still read after it.
+run: fn() {
+    items := [1, 2, 3]
+    add: fn(n: Int) {
+        items.push(n)
+    }
+    window: items[0..2]
+    add(4)
+    print(window[0])
+}

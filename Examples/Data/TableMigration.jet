@@ -1,0 +1,60 @@
+// A typed table upgrades across a change to its row type through the type's one `migration` block.
+// The previous release stored `OldTask` rows under the table `tasks`. This
+// release's `Task` renames `name` to `title` and adds `done`, and its
+// migration block says so. A read decodes an old row through the block, a
+// write stores the current shape, and `upgrade` rewrites the rows still in the
+// old shape, once.
+package: {
+    name: "table_migration"
+    authority: { allow: [DB, IO] }
+}
+
+use db: core.db
+
+#Codable
+OldTask: struct {
+    id: Int
+    name: String
+}
+
+#Codable(published) Task: struct {
+    id: Int
+    title: String
+    done: Bool
+}
+
+migration Task {
+    rename name -> title
+    add done: Bool = false
+}
+
+// The text the table stored for every row, in key order.
+stored: fn(store: db.Store) -[DB]> String {
+    policy: db.policy("tasks", "true") ?? panic("policy")
+    rows: store.with_policy(policy, "system").query(SQL{"SELECT jet_row FROM tasks ORDER BY key"}) ?? panic("raw read")
+    out := [String]{}
+    loop row in rows {
+        cell: row.get("jet_row") ?? panic("no jet_row column")
+        out.push(cell.text() ?? panic("jet_row is not text"))
+    }
+    out.join(" ")
+}
+
+run: fn() {
+    store: db.open_memory()
+    previous: store.table("tasks", key: fn(task: OldTask) { task.id })
+    _: previous.add(OldTask{id: 1, name: "write docs"}) ?? panic("add 1")
+    _: previous.add(OldTask{id: 2, name: "ship"}) ?? panic("add 2")
+    print("stored before: {stored(store)}")
+
+    tasks: store.table("tasks", key: fn(task: Task) { task.id })
+    first: tasks.get(1) ?? panic("get 1")
+    print("read 1: {first.title}, done: {first.done}")
+    _: tasks.put(Task{id: 2, title: "ship", done: true}) ?? panic("put 2")
+    print("stored after a put of 2: {stored(store)}")
+    upgraded: tasks.upgrade() ?? panic("upgrade")
+    print("upgraded: {upgraded}")
+    print("stored after the upgrade: {stored(store)}")
+    again: tasks.upgrade() ?? panic("upgrade again")
+    print("upgraded again: {again}")
+}

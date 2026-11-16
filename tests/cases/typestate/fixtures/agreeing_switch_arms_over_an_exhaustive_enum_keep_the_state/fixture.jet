@@ -1,0 +1,38 @@
+Order: struct {
+    state {
+        Draft -> Confirmed, Cancelled
+        Confirmed -> Closed
+        Cancelled -> Closed
+        Closed
+    }
+
+    id: Int
+
+    start: fn(id: Int) -[]> Order.Draft { return Order{id: id} }
+
+    confirm: fn(self: &&Order.Draft) -[]> Order.Confirmed { return self }
+
+    cancel: fn(self: &&Order.Draft) -[]> Order.Cancelled { return self }
+
+    close: fn(self: &&Order.Confirmed) -[]> Order.Closed { return self }
+
+    archive: fn(self: &&Order.Cancelled) -[]> Order.Closed { return self }
+
+    ship: fn(self: Order.Confirmed) -[]> Int { return self.id }
+}
+
+Mode: enum {
+    Fast
+    Slow
+}
+
+decide: fn(m: Mode) {
+    order := Order.start(1)
+    if m == {
+        .Fast -> { order = order.confirm() }
+        .Slow -> order = order.confirm()
+    }
+    print(order.ship())
+}
+
+run: fn() { decide(Mode.Fast) }

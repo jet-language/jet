@@ -1,0 +1,12 @@
+#Policy(copies: .Explicit)
+
+// A read parameter that fills an owned field is a copy site, so
+// `copies: .Explicit` reports it with the Safe `.copy()` edit.
+User: struct {
+    name: String
+    tags: [String]
+}
+
+make: fn(label: String) -> User { User{name: label, tags: [String]{}} }
+
+run: fn() { print(make("Ada").name) }

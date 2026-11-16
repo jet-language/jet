@@ -1,0 +1,13 @@
+# tests/concurrency_boundaries.rs::local_cell_rejects_task_channel_shared_and_parallel_crossings at tests/concurrency_boundaries.rs:66; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Sources copied verbatim; original predicates; PENDING-SAME-HEAD (heavy lane paused).
+fixture: local_cell_rejects_task_channel_shared_and_parallel_crossings.fixture
+env: NO_COLOR=1
+step check1: jet check source-1.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1102"] #>= 1 # original predicate: code membership
+step check2: jet check source-2.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1102"] #>= 1 # original predicate: code membership
+step check3: jet check source-3.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1102"] #>= 1 # original predicate: code membership

@@ -1,0 +1,15 @@
+// A TypeInfo has no string query for a trait; the typed `traits` list is
+// the one read.
+Shape: trait {
+    area: fn(self) -> Int
+}
+
+Square: struct {
+    side: Int
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+run: fn() { print(Square.reflect().implements("Shape")) }

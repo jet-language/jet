@@ -1,0 +1,8 @@
+Error [jet.ArenaViewEscapes]: `x` cannot be shared — it does not live long enough to be returned
+  --> tests/ui/context_scratch_escape.jet:7:12
+    |
+  7 |     return x
+    |            ^
+ Why: `x` is a view into `context.scratch`; sharing it outside the region would let it outlive `context.scratch` and point into freed memory
+ Fix: Keep `x` inside the `context.scratch` region, or copy what you need out with `x.copy()` before it leaves
+More: jet-lang.dev/e/E0631

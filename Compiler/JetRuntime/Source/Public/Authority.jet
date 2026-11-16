@@ -1,0 +1,14 @@
+// `jet.runtime.authority` (#6129): the runtime's one covers rule for effect
+// rights (spec.md "Effect scopes"), in Jet types. The member is a runtime
+// binding (Guest.jet sema_guest_runtime_binding) of the runtime export that is
+// its one body (Authority.jet), so the compiler's checks and a running
+// program's Authority values answer by the same code. It is pure.
+authority: module {
+    // Whether the right `bound` covers the right `need`: a right covers itself
+    // and every leaf below it, a bare right every scoped instance of itself and
+    // its leaves, and a scoped right only the scoped rights its scope's law
+    // admits (paths by whole components after normalization, hosts by
+    // ASCII-case-insensitive equality without a trailing `.`, any other scope by
+    // equality).
+    #Import(c) covers: fn(bound: String, need: String) -> Bool = "jet_authority_right_covers"
+}

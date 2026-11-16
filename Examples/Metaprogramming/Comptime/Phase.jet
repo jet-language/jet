@@ -1,0 +1,22 @@
+// `#phase` is the `Phase` of the compiled copy that runs it: `.Preparation`
+// inside `#run` code, `.Build` in the build entry's copy, and `.Runtime`
+// in the running program. Each copy folds its own phase, not the tier, so
+// every tier prints the same.
+PREPARED: #run #phase
+
+describe: fn(phase: Phase) -> String {
+    if phase == {
+        .Preparation -> "while building"
+        .Build -> "in the build entry"
+        .Runtime -> "while running"
+    }
+}
+
+run: fn() {
+    print(#phase)
+    print(PREPARED)
+    local: #run #phase
+    print(describe(local))
+    print(describe(#phase))
+    if #phase == .Runtime -> print("this line runs in the program")
+}

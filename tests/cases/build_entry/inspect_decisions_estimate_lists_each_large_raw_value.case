@@ -1,0 +1,23 @@
+# `jet inspect decisions --estimate` lists each data row of at least 64 KiB in
+# the optimized program: a preview of its first 16 bytes, the bytes the image
+# stores for it, and the size core.archive.zstd compresses them to. The folded
+# `big` is 100000 bytes of "ab"; its frame is the 13-byte header, a 3-byte
+# block header, 3 bytes of raw literals ("ab") and one 7-byte sequence section
+# (literals 2, offset 2, match 99998). `small` stays under the line, and
+# without the flag no row is computed.
+fixture: inspect_decisions_estimate_lists_each_large_raw_value.fixture
+env: NO_COLOR=1
+step estimate: jet inspect decisions --estimate main.jet
+exit: 0
+stdout: ~ "large value \"abababababababab\": 100000 bytes stored, zstd estimate 26 bytes\n" # the folded value's stored and estimated size
+stdout: !~ "large value \"cccc" # a value under 64 KiB is not large
+step plain: jet inspect decisions main.jet
+exit: 0
+stdout: ~ "main: " # the report itself
+stdout: !~ "large value" # the estimate runs only when asked
+step json: jet inspect decisions --estimate --json main.jet
+exit: 0
+stdout: ~ "\"large_values\":[\"large value \\\"abababababababab\\\": 100000 bytes stored, zstd estimate 26 bytes\"]" # the JSON status carries the rows
+step json_plain: jet inspect decisions --json main.jet
+exit: 0
+stdout: !~ "large_values" # and only under the flag

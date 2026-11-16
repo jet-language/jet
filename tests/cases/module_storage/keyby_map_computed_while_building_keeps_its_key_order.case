@@ -1,0 +1,18 @@
+# A Map keyed by a KeyBy struct that is computed while building, as a local
+# value or a module global, keeps the key order a Map built at run time has
+# on every tier: the compile-time run reaches the type's `key` method even
+# when no call in the program names it.
+fixture: keyby_map_computed_while_building_keeps_its_key_order.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = keyby_map_computed_while_building_keeps_its_key_order.out
+step o1: jet run -O1 main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = keyby_map_computed_while_building_keeps_its_key_order.out
+step o2: jet run -O2 main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = keyby_map_computed_while_building_keeps_its_key_order.out

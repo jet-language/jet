@@ -1,0 +1,12 @@
+use core.mem
+
+run: fn() {
+    #Unsafe("the read takes an Int of a block already released") {
+        block: mem.alloc_raw(16, 8) ?? panic("no memory")
+        words: block.cast<Int>()
+        mem.volatile_write<Int>(words, 4)
+        print(mem.volatile_read<Int>(words))
+        mem.free_raw(block)
+        print(mem.volatile_read<Int>(words))
+    }
+}

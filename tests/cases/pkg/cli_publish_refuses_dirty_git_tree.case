@@ -1,0 +1,34 @@
+# PORT tests/pkg.rs::cli_publish_refuses_dirty_git_tree; original helpers172-293 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+fixture: cli_publish_refuses_dirty_git_tree.fixture
+requires: tool:git
+mkdir: store
+step: git init -b main
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git config user.email test@jet.test
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git config user.name "Jet Test"
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git add .
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git commit -m initial
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+copy: dirty.txt proj/untracked.jet
+step: jet registry publish
+cwd: {work}/proj
+env: JET_PACKAGE_STORE_DIR={work}/store
+exit: nonzero
+stderr: ~ "E2605" # Original contains predicate.
+step: jet registry publish --force
+cwd: {work}/proj
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_REGISTRY_URL=file://{work}/nonexistent.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+exit: any # Original helper status unasserted.
+stderr: ~ "warning" # Original contains predicate.
+stderr: ~ "uncommitted" # Original contains predicate.

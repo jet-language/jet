@@ -1,0 +1,16 @@
+# tests/marker_rule_signatures.rs::field_and_variant_sites_reject_every_non_applicable_example at tests/marker_rule_signatures.rs:186; hand-port
+# Claim: each non-applicable site example yields E0355 (tests/marker_rule_signatures.rs:193)
+# Not ported: Rust asserts exactly one E0355 per example; the CLI check shows stderr only, so the count is not pinned (E0355 presence is)
+fixture: field_and_variant_sites_reject_every_non_applicable_example.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check struct_job/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:193 exactly one E0355
+stderr: ~ "E0355" # tests/marker_rule_signatures.rs:193 exactly one E0355
+step: jet check variant_comparable/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:193 exactly one E0355
+stderr: ~ "E0355" # tests/marker_rule_signatures.rs:193 exactly one E0355
+step: jet check variant_skip/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:193 exactly one E0355
+stderr: ~ "E0355" # tests/marker_rule_signatures.rs:193 exactly one E0355

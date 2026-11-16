@@ -1,0 +1,9 @@
+// `JetcFd` is core.files.sealed's own file-descriptor owner and
+// core.files.sealed does not export it. A forged `JetcFd{fd: 1}` would close
+// stdout when it drops, so user code can't name the type at all.
+use core.files.sealed.[JetcFd]
+
+run: fn() {
+    f: JetcFd{fd: 1}
+    print("made")
+}

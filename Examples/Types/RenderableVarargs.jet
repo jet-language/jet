@@ -1,0 +1,40 @@
+// `parts: ...Renderable` — a trait-bounded
+// heterogeneous variadic. Each call-site argument is checked against
+// `Renderable` and monomorphized to its own concrete type — zero boxing, no
+// dynamic dispatch. `Renderable` is satisfied by anything already
+// interpolatable (`{value}`): every primitive, and any struct/enum that's
+// auto-printable or has an explicit `Display` impl.
+log_all: fn(parts: ...Renderable) {
+    loop p in parts -> print("{p}")
+}
+
+// `parts: ...[A, B]` bounds each argument by every listed trait, so the loop
+// body may use a method from any of them: `{p}` needs `Renderable`, and
+// `p.shout()` needs `Loud`.
+Loud: trait {
+    shout: fn(self) -> String
+}
+
+announce: fn(parts: ...[Renderable, Loud]) {
+    loop p in parts -> print("{p} says {p.shout()}")
+}
+
+Point: struct {
+    x: Int
+    y: Int
+
+    impl Display {
+        display: fn(self) -> String { "({self.x}, {self.y})" }
+    }
+
+    impl Loud {
+        shout: fn(self) -> String { "POINT!" }
+    }
+}
+
+run: fn() {
+    p: Point{x: 3, y: 4}
+    log_all(1, "two", true, p)
+    log_all(3.5, false)
+    announce(p)
+}

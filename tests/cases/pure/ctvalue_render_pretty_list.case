@@ -1,0 +1,13 @@
+# tests/pure.rs::ctvalue_render_pretty_list at tests/pure.rs:638; hand-port
+# Claim: a list value renders with `[` and comma-separated items (tests/pure.rs:642-644)
+# Fixture migrated: Rust fn returns [Int]; no value return in jet eval, so the value is printed from fn run under jet run
+# Not ported: CtValue::List Rust construction and render_pretty one-item-per-line layout (tests/pure.rs:640-641): jet eval prints the inline spelling; the Rust assertions are substring checks
+fixture: ctvalue_render_pretty_list.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/pure.rs:642-644
+stdout: ~ "[" # tests/pure.rs:642-644
+stdout: ~ "1," # tests/pure.rs:642-644
+stdout: ~ "2," # tests/pure.rs:642-644

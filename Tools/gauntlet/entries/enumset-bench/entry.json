@@ -1,0 +1,26 @@
+{
+  "name": "enumset-bench",
+  "mode": "tool",
+  "description": "The enum-set representation bench Tools/perf/enumset_bench.py and its Jet twin Tools/perf/enumset_bench/run.jet, #5072 c7: every refusal, each exit 2 with nothing on stdout (no --json, a bad count, a size out of range, a value that is not a number, an option without its value, an unknown option, an ambiguous option, an explicit-value help, an extra argument, arguments after `--`); a size that is not a number, exit 1; a run with a relative state root and `--jet sh` reaching the stand-in build script in the fixtures, so the Rust builds fail on the relative source path, one Jet arm runs and is measured, one exits 3 with a long non-ASCII stderr, one prints no phase timings and one fails its build with a long CRLF tail, and the report goes to a normalised --json path; and a run with an absolute state root that builds and measures both Rust arms with the real rustc and the allocation counter, so the BTreeSet arm is compared with rust_native for parity and ratios. The check prints the report as a JSON value with two-space indents, so it compares what the report says, not how its text escapes characters.",
+  "tool": {
+    "original": "Tools/perf/enumset_bench.py",
+    "jet": "Tools/perf/enumset_bench/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": [], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--samples", "0", "--json", "x"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--rounds", "7", "--json", "x"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--sizes", "8,99", "--json", "x"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--samples", "x", "--json", "x"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--json"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--bogus", "--json", "x"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--s", "3", "--json", "x"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--help=3"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--json", "x", "extra"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--json", "x", "--", "a", "--", "--b"], "exit": 2, "expected": "expected/refused.out"},
+      {"args": ["--sizes", "8,x", "--json", "x"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--jet", "sh", "--sizes", "8", "--rounds", "8", "--samples", "3", "--json", "./out//report.json"], "env": {"JET_STATE_ROOT": "state"}, "check": "check.jet", "expected": "expected/stand-in.out"},
+      {"args": ["--jet", "true", "--sizes", "8", "--rounds", "8", "--samples", "2", "--json", "out/report.json"], "env": {"JET_STATE_ROOT": "/tmp/jet-enumset-gauntlet"}, "check": "check.jet", "expected": "expected/measured.out"}
+    ]
+  }
+}

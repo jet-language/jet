@@ -1,0 +1,15 @@
+use {
+    web: core.web
+    server: core.http.server
+}
+
+handle: fn(key: String) -> HTTPResponse HTTPError! { return Ok(server.response(200, key)) }
+
+run: fn() {
+    mux: web.app()
+    methods: ["PURGE", "GET"]
+    mux.custom(methods[0], "/cache/:key", handle)
+    print("registered {methods[0]}")
+    mux.custom(methods[1], "/cache/:key", handle)
+    print("unreachable")
+}

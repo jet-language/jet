@@ -1,0 +1,10 @@
+// @all_diags
+// Not a kernel file: plain `priv` lets a sibling file in, but a kernel type's
+// `priv` field stays with the kernel files.
+run: fn() {
+    forged: Owner{base: 4096}
+    print(owner_base(forged))
+    kept := owner_new()
+    kept.base = 4096
+    print(owner_base(kept))
+}

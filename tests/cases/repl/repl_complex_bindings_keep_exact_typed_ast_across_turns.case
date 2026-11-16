@@ -1,0 +1,15 @@
+# PORT tests/repl.rs:1429-1450; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_complex_bindings_keep_exact_typed_ast_across_turns.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_complex_bindings_keep_exact_typed_ast_across_turns.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout: !~ "error [" # original predicate
+stderr: !~ "error [" # original predicate
+stdout|stderr: ~ "7 : Int" # original predicate
+stdout|stderr: ~ "5 : Int" # original predicate
+stdout|stderr: ~ "\"repl\" : String" # original predicate

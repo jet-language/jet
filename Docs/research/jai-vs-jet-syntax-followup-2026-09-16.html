@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jai vs Jet follow-up — signature correction — 2026-09-16</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --paper: #fffcf7; --ink: #1c1915; --muted: #5c564c;
+    --line: #ddd6c8; --accent: #6b3f12; --settled: #215c3a; --settled-bg: #e7f4eb;
+    --parked: #8a4b12; --parked-bg: #fbeeda; --fact: #1d4d78; --fact-bg: #e7f0f8;
+    --rec: #3d4a1f; --rec-bg: #eef3dc; --code: #f1ebe1;
+    --now: #e7f0f8; --danger: #7a1f1f; --danger-bg: #f8e7e7;
+    --codefont: "IBM Plex Mono", "Source Code Pro", ui-monospace, Menlo, Consolas, monospace;
+    --sans: "Source Sans 3", "IBM Plex Sans", "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161410; --paper: #1e1b16; --ink: #f3eee4; --muted: #b7afa2;
+      --line: #3a342b; --accent: #e0b27a; --settled: #9dd4b0; --settled-bg: #1c3326;
+      --parked: #f0c08a; --parked-bg: #3a2a16; --fact: #9ec4e8; --fact-bg: #1b2c3c;
+      --rec: #d5e08a; --rec-bg: #2a3018; --code: #2a261f;
+      --now: #1b2c3c; --danger: #f0a0a0; --danger-bg: #3a1a1a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.5 var(--sans); }
+  .wrap { max-width: 52rem; margin: 0 auto; padding: 1.6rem 1.1rem 5rem; }
+  main { background: var(--paper); padding: 1.6rem 1.7rem 2.5rem; border: 1px solid var(--line); border-radius: 10px; }
+  h1 { font-size: 1.7rem; line-height: 1.15; margin: 0 0 .4rem; }
+  h2 { margin: 1.8rem 0 .5rem; font-size: 1.25rem; padding-top: .4rem; border-top: 1px solid var(--line); }
+  p, li { max-width: 46rem; }
+  .lede { color: var(--muted); }
+  .meta { color: var(--muted); font-size: 13.5px; }
+  a { color: var(--accent); }
+  code, pre { font-family: var(--codefont); }
+  code { font-size: .88em; background: var(--code); padding: .04em .28em; border-radius: 4px; }
+  pre { background: var(--code); padding: .8rem .9rem; overflow: auto; font-size: 13px; line-height: 1.42; border-radius: 8px; border: 1px solid var(--line); }
+  .trio { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .6rem; margin: .6rem 0 1rem; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: .7rem .8rem; }
+  .card h4 { margin: 0 0 .3rem; }
+  .box { border-radius: 10px; padding: .75rem .9rem; margin: .7rem 0 1rem; }
+  .box.danger { background: var(--danger-bg); }
+  .box.settled { background: var(--settled-bg); }
+  .box h4 { margin: 0 0 .3rem; font-size: 13px; letter-spacing: .05em; text-transform: uppercase; }
+  @media (max-width: 900px) { .trio { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<main>
+<p class="meta">16 Sep 2026 · companion to the <a href="./jai-vs-jet-metaprogramming-boundary-2026-09-16.html">build-time functions page</a> · not a Tower ballot</p>
+<h1>One arrow. Type after it. Body in braces.</h1>
+<p class="lede">You asked to move the return type to the other side of the existing arrow. You did not ask for a second arrow.</p>
+
+<div class="box danger">
+  <h4>Discarded misreading</h4>
+  <p>Not <code>fn f() -&gt; Int -&gt; { … }</code>. Not <code>fn f() -&gt; Int -[IO]&gt; { … }</code>. Not <code>fn f() -[IO]&gt; -&gt; Int { … }</code>.</p>
+</div>
+
+<div class="trio">
+  <div class="card" style="background:var(--now)">
+    <h4>Jet today</h4>
+<pre>fn double(n: Int) Int -&gt; n * 2
+
+fn load(path: String) String -[IO]&gt; {
+    files.read(path)?
+}</pre>
+  </div>
+  <div class="card" style="background:var(--settled-bg)">
+    <h4>What you named</h4>
+<pre>fn func2(...) -&gt; Int { ... }
+
+fn myFunc(...) -[IO]&gt; Int { ... }</pre>
+  </div>
+  <div class="card" style="background:var(--danger-bg)">
+    <h4>Not this</h4>
+<pre>fn func2(...) -&gt; Int -&gt; { ... }
+
+fn myFunc(...) -[IO]&gt; -&gt; Int { ... }</pre>
+  </div>
+</div>
+
+<p>Unit stays <code>fn run() { ... }</code>. Effectful unit stays <code>fn announce() -[IO]&gt; { ... }</code>. <code>if cond -&gt; expr</code> is a different place in the language, not a second arrow on the function.</p>
+
+<h2>Where the rest went</h2>
+<p>Build-time functions, what <code>b</code> is, what a plan is, and why <code>b.action</code> is not how Jet functions run: <a href="./jai-vs-jet-metaprogramming-boundary-2026-09-16.html">the rewritten page</a>.</p>
+<div class="box settled">
+  <h4>Heard, not ratified</h4>
+  <ul>
+    <li>Braces on named functions. One-line <code>-&gt;</code> stays on <code>if</code> / <code>loop</code>.</li>
+    <li>Type after the one arrow / fused <code>-[IO]&gt;</code>.</li>
+    <li><code>name :: fn(...)</code> still open.</li>
+  </ul>
+</div>
+</main>
+</div>
+</body>
+</html>

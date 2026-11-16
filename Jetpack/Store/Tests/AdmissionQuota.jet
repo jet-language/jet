@@ -1,0 +1,29 @@
+// Hangar quota footprint claims: the walk counts a listed node that another
+// process removed before it was read as holding no bytes, and a missing walk
+// root still fails.
+
+#Test("store quota footprint counts a listed node removed before its read as empty") {
+    roots: store_test_temp_roots()
+    tree: files.join(roots.root, "quota-tree")
+    inner: files.join(tree, "inner")
+    files.create_dir_all(inner) ?? panic("fixture dir")
+    files.write(files.join(tree, "a"), "12345") ?? panic("fixture a")
+    files.write(files.join(inner, "b"), "123") ?? panic("fixture b")
+    assert_eq(store_quota_footprint(tree, None) ?? panic("footprint"), 8)
+    // A listed file, then a listed directory, removed before the walk reads it.
+    files.remove(files.join(tree, "a")) ?? panic("remove a")
+    assert_eq(store_quota_walk(files.join(tree, "a"), None, true) ?? panic("listed file"), 0)
+    files.remove_all(inner) ?? panic("remove inner")
+    assert_eq(store_quota_walk(inner, None, true) ?? panic("listed directory"), 0)
+    assert_eq(store_quota_footprint(tree, None) ?? panic("emptied footprint"), 0)
+    store_test_drop_roots(roots)
+}
+
+#Test("store quota footprint of a missing root fails") {
+    roots: store_test_temp_roots()
+    missing: files.join(roots.root, "no-such-tree")
+    assert(store_quota_footprint(missing, None) == .Err(_))
+    assert(store_quota_walk(missing, None, false) == .Err(_))
+    assert(store_admission_size(missing) == .Err(_))
+    store_test_drop_roots(roots)
+}

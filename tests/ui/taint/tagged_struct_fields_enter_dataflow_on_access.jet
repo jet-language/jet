@@ -1,0 +1,12 @@
+use process: core.process
+
+PII: tag { deny: [Exec] }
+
+Row: struct {
+    secret: #PII String
+}
+
+run: fn() {
+    row := Row{secret: "Ada"}
+    process.run(["echo", row.secret]) ?? return Err("test")
+}

@@ -1,0 +1,27 @@
+# app.live binds a `-[DB.Read]>` query function and returns a typed binding,
+# and the tables the query reads are its read set: a committed write to one
+# of them re-runs it, a write to another table or one that changes no row
+# does not, a write inside a transaction reaches it at the commit, and a
+# failing query is a typed failure. The same lines print at O0, O1 and O2 and
+# under node on web.
+fixture: app_live_reruns_on_overlapping_writes.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = app_live_reruns_on_overlapping_writes.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default
+when tool node
+step: jet build --target web main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: == default
+end when

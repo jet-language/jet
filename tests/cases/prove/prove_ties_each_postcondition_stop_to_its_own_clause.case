@@ -1,0 +1,14 @@
+# Two `#Post` clauses share the literal text "positive". One fails only where
+# a test expects it; the other fails where no test expects it. A `#Post` stop
+# is placed at its own clause, so prove ties each stop to its clause: the
+# expected failure is a passed row and the other is the one failed row.
+fixture: prove_ties_each_postcondition_stop_to_its_own_clause.fixture
+step: jet prove . --json
+limit: time=120
+exit: 70
+stdout: ~ "\"contract\":{\"declared\":2,\"failed\":1,\"notObserved\":0,\"observed\":2,\"passed\":1,\"selected\":2,\"skipped\":0}" # one clause failed, the other met its expectation
+stdout: ~ "\"code\":\"E3005\"" # the unexpected failure keeps its stop
+step: jet prove .
+limit: time=120
+exit: 70
+stderr: ~ "#Post contract failed: positive" # the stop is shown

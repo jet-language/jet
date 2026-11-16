@@ -1,0 +1,17 @@
+Error [jet.FixedTimingSteer]: A `Key` value decides a `??` fallback (it branches on whether the value is there)
+  --> tests/ui/taint/fixed_timing_option_payload_tag_is_e0737.jet:4:8
+    |
+  4 |     k: key ?? U8{1}
+    |        ^^^
+ Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
+ Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Key)` function first
+More: jet-lang.dev/e/E0737
+
+Error [jet.FixedTimingSteer]: A `Key` value decides a branch that can't be masked (an arm returns, breaks, calls, can stop or writes memory)
+  --> tests/ui/taint/fixed_timing_option_payload_tag_is_e0737.jet:5:8
+    |
+  5 |     if k == (U8{0}) -> print("zero key")
+    |        ^^^^^^^^^^^^
+ Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
+ Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Key)` function first
+More: jet-lang.dev/e/E0737

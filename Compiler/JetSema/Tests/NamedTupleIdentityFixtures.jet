@@ -1,0 +1,31 @@
+// Inspect the real registry metadata without invoking Core-private leaves.
+use jet_foundation.[core_platform_fixed_signature, type_identity_equal, Type, TypeTupleField]
+
+named_tuple_identity_registry_return: fn(module_name: String, member: String) -> Type Never! {
+    signature: core_platform_fixed_signature(module_name, member) ?? panic("missing tuple signature")
+    signature.return_type ?? panic("tuple signature has no return type")
+}
+
+named_tuple_identity_line_from_source: fn() -> (cause: String?, eof: Bool, line: String) {
+    (eof: false, line: "", cause: None)
+}
+
+named_tuple_identity_fixture: fn() {
+    sample_type: Type.Tuple{
+        fields: [TypeTupleField]{
+            {name: "seconds", ty: Type.Int},
+            {name: "nanoseconds", ty: Type.Int},
+            {name: "before_epoch", ty: Type.Bool},
+        },
+    }
+    clock_type: Type.Tuple{
+        fields: [TypeTupleField]{
+            {name: "clock_available", ty: Type.Bool},
+            {name: "nanos", ty: Type.String},
+        },
+    }
+    assert(type_identity_equal(named_tuple_identity_registry_return("core.net.tls", "__host_wall_sample"), sample_type))
+    assert(type_identity_equal(named_tuple_identity_registry_return("core.files", "__temp_clock_raw"), clock_type))
+    line: named_tuple_identity_line_from_source()
+    assert(!line.eof && line.line == "" && line.cause == None)
+}

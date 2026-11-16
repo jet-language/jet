@@ -1,0 +1,57 @@
+# Network
+
+HTTP clients and servers, sockets, URLs and browser automation.
+
+Run a lesson from the repository root, for example `jet run Examples/Network/<Lesson>.jet`. Each lesson's expected output sits beside it as `<Lesson>.out`.
+
+## Lessons
+
+- [AppComposition](AppComposition.jet) — An app built by an ordinary function of what it needs, with no container: one catalog is shared by every request, a missing one stops before anything binds and names the calling line, and a fake catalog changes the answers with no global state.
+- [AppLifecycle](AppLifecycle.jet) — A web app over a database pool: the pool is ready before the listener binds, shutdown stops admission before the pool drains, a handler still blocked when the shutdown grace runs out is cancelled and sends nothing, and the pool closes last.
+- [DNSLookup](DNSLookup.jet) — DNS PTR + well-known service port table (core.net).
+- [IPPublicDestination](IPPublicDestination.jet) — Reachable versus safe to fetch.
+- [IPSpecialProfile](IPSpecialProfile.jet) — IANA IPv4 Special-Purpose Address Space, updated 2025-10-09.
+- [NetworkProjection](NetworkProjection.jet) — Loopback TCP/UDP, readiness, typed addresses, and DNS records.
+- [ReadInto](ReadInto.jet) — `read_into` appends each read to one buffer the caller keeps, on TCP, Unix and TLS streams and file readers.
+- [RequestContinuity](RequestContinuity.jet) — Requests side by side keep their own principal and transaction outcome: a rollback writes nothing, a hung-up client's payment still reports committed, an expired deadline stops dispatch, and the pool outlives the app.
+- [ServiceHTTPSeam](ServiceHTTPSeam.jet) — One service behind one handler, called in process and over loopback HTTP: the same verdict both ways, denied and malformed requests never reach the service, a fake store keeps every verdict, and nothing listens after shutdown.
+- [SocketAddrs](SocketAddrs.jet) — `socket_addrs` returns every address a host names, in the resolver's order; a numeric host is its one address.
+- [SocketEcho](SocketEcho.jet) — Typed addresses, TCP echo, UDP datagrams, Unix sockets.
+- [TLSPeerIdentity](TLSPeerIdentity.jet) — A real loopback TLS handshake uses only the checked-in test CA, then exposes the verified name, chain and version.
+- [URLMIME](URLMIME.jet)
+- [URLSourceLiteral](URLSourceLiteral.jet) — No import: the typed URL head loads its source-owned carrier and constructor.
+- [WSEcho](WSEcho.jet) — core.net.ws client/server echo over cleartext WebSocket.
+
+## Backend starter
+
+- [BackendStarter](BackendStarter/workspace.jet) — A production-minded starter workspace: a deployable order service on the first-party `backend` battery and its client, both built from one shared contract library. The service takes its address, state directory and operator credential from the environment (it ships none), applies only additive migrations, answers a readiness probe (`client health`) and drains on interrupt. Build each program with `jet build Examples/Network/BackendStarter/Packages/Service` (and `.../Client`); `tests/cases/backend_starter/` deploys the built artifacts.
+
+## Browser
+
+- [BrowserAgent](Browser/BrowserAgent.jet) — Agent-facing browser automation cookbook.
+- [BrowserArtifacts](Browser/BrowserArtifacts.jet) — Storage, files, screenshots, and PDF.
+- [BrowserCDP](Browser/BrowserCDP.jet) — Checked expert CDP supplement.
+- [BrowserLifecycle](Browser/BrowserLifecycle.jet) — Browser/context/page/tab/frame lifecycle.
+- [BrowserLocators](Browser/BrowserLocators.jet) — Semantic locators, actions, and deterministic waits.
+- [BrowserLockedProvision](Browser/BrowserLockedProvision.jet) — Project-locked browser provisioning.
+- [BrowserNetwork](Browser/BrowserNetwork.jet) — Events, network inspection, and interception.
+- [BrowserPrivacy](Browser/BrowserPrivacy.jet) — Cleanup, profile isolation, privacy, and redaction.
+
+## HTTP
+
+- [HTTPClient](HTTP/HTTPClient.jet) — core.http is the one-shot rung; core.http.client is the configurable rung.
+- [HTTPMessageValues](HTTP/HTTPMessageValues.jet) — Checked HTTP message values: methods, statuses, versions, fields and bodies.
+- [HTTPObservability](HTTP/HTTPObservability.jet) — Static responses and access records share the server surface.
+- [HTTPRestService](HTTP/HTTPRestService.jet) — Realistic core.http client + server, no third-party package.
+- [HTTPRouteMarkers](HTTP/HTTPRouteMarkers.jet) — Tags expose only this explicitly mounted value.
+- [HTTPRoutes](HTTP/HTTPRoutes.jet) — HTTP router — typed path inputs, 404/405.
+- [HTTPServeEntry](HTTP/HTTPServeEntry.jet) — `app.bind(address, deadline:)` binds a loopback server whose route deadline is a per-request #Context; `shutdown` drains it and returns the shutdown report.
+- [HTTPServer](HTTP/HTTPServer.jet) — core.http.server: function-first routes on `web.app()` with path params, served on a loopback listener and answered for a client in the same program.
+- [HTTPServerDate](HTTP/HTTPServerDate.jet) — Every server response carries one Date header in IMF-fixdate form, read from the program clock; a handler-set Date passes through unchanged.
+- [HTTPServerLifecycle](HTTP/HTTPServerLifecycle.jet) — One bound Server owns bounded serve and graceful shutdown.
+- [HTTPServerReasons](HTTP/HTTPServerReasons.jet) — A status line takes its reason from the one registered table: 503, 429 and 422 send theirs, an unregistered code sends an empty reason, and the server's own 404 page uses the same table.
+- [HTTPServerLimits](HTTP/HTTPServerLimits.jet) — Reject ambiguous framing and oversized bodies before handlers run.
+- [HTTPServerMiddleware](HTTP/HTTPServerMiddleware.jet) — Middleware composes on the same Handler server engine.
+- [HTTPServerTrailers](HTTP/HTTPServerTrailers.jet) — Trailers live on HTTP messages, not Body.
+- [HTTPServerWASIP2](HTTP/HTTPServerWASIP2.jet) — The same HTTP server Prelude runs as a WASI Preview 2 Component.
+- [HTTPWebDefaults](HTTP/HTTPWebDefaults.jet) — The three defaults a browser front end plus a Jet API needs.

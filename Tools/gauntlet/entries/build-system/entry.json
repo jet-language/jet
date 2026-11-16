@@ -1,0 +1,16 @@
+{
+  "name": "build-system",
+  "mode": "tool",
+  "description": "The gauntlet's build_system axis harness Tools/gauntlet/harness/build-system.mjs, Jet's build system against Nix on the axis project, and its Jet twin Tools/gauntlet/harness/build-system/run.jet over the kit's BuildSystem module and the jet_build_system_project package, #5072 c8, both over the repository's own measurement manifest. A measured case needs Nix's network-fetched nixpkgs and minutes per cell, so the cases cover what the harness decides before it measures: a work directory whose parent is a file (fixtures/blocker) stops the setup, so every cell is unmeasured, the receipt records the requested samples and warmups, the stand-in jet's version and one failure, and the exit is 1; the same without a receipt prints only the table; a missing --jet is the usage error and an unknown flag its own, both exit 1 with nothing on stdout.",
+  "tool": {
+    "original": "Tools/gauntlet/harness/build-system.mjs",
+    "jet": "Tools/gauntlet/harness/build-system/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--jet", "./fake-jet", "--work-dir", "blocker/work", "--receipt", "receipt.json", "--samples", "2", "--warmups", "0"], "exit": 1, "check": "check.jet", "expected": "expected/blocked.out"},
+      {"args": ["--jet", "./fake-jet", "--work-dir", "blocker/work"], "exit": 1, "check": "check.jet", "expected": "expected/blocked-table.out"},
+      {"args": ["--work-dir", "work"], "exit": 1, "check": "check.jet", "expected": "expected/usage.out"},
+      {"args": ["--jet", "./fake-jet", "--bogus", "x"], "exit": 1, "check": "check.jet", "expected": "expected/unknown.out"}
+    ]
+  }
+}

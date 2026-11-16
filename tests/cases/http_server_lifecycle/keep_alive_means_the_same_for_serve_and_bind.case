@@ -1,0 +1,31 @@
+# Keep-alive means one thing however an app is served: a client asking for
+# `Connection: keep-alive` gets one response with `Connection: close`, and the
+# connection is closed after it, from `app.serve()` and from
+# `app.bind(addr).serve()` alike. Both go through the same HTTPServer.
+fixture: keep_alive_means_the_same_for_serve_and_bind.fixture
+env: NO_COLOR=1
+
+spawn served: jet run serve_app.jet
+env: JET_APP_PORT={free-port:served}
+stdout: file served.stdout
+stderr: file served.stderr
+step serve_client: jet run client.jet
+env: KEEP_ALIVE_PORT={free-port:served}
+exit: 0
+stdout: = keep_alive_means_the_same_for_serve_and_bind.stdout.expected
+signal served: TERM
+wait: served timeout 30s
+exit: any # the server's stop is not part of this proof
+file: served.stdout ~ "serving http://127.0.0.1:{free-port:served}\n" # app.serve() printed its ready line
+
+spawn bound: jet run bind_app.jet
+env: KEEP_ALIVE_PORT={free-port:bound}
+stdout: file bound.stdout
+stderr: file bound.stderr
+step bind_client: jet run client.jet
+env: KEEP_ALIVE_PORT={free-port:bound}
+exit: 0
+stdout: = keep_alive_means_the_same_for_serve_and_bind.stdout.expected
+signal bound: TERM
+wait: bound timeout 30s
+exit: any # the server's stop is not part of this proof

@@ -1,0 +1,20 @@
+// A template's written names resolve where the template was written:
+// `describe` calls web's private `greeting`, not this file's, and its local
+// `total` is its own. This file's `greeting` and `total` keep their meaning
+// here, and the pasted `#{tname}` names this file's `Point`.
+use web
+
+greeting: fn() -> String { "mine" }
+
+total: fn() -> Int { 5 }
+
+#Web.Describe
+Point: struct {
+    x: Int
+}
+
+run: fn() {
+    print(Point{x: 1}.describe())
+    print(greeting())
+    print(total())
+}

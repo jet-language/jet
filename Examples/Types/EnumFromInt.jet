@@ -1,0 +1,24 @@
+// A numbered payload-free enum turns a number back into its case with the
+// generated `from_int`. The numbers can be sparse and negative. A number the
+// backing type holds that no case has is refused, and so is a number the
+// backing type can't hold; each refusal names the number and the enum.
+#Layout(I16)
+Mode: enum {
+    Reverse = -1
+    Idle = 0
+    Slow = 3
+    Fast = 10
+}
+
+describe: fn(value: Int) -> String {
+    mode: Mode.from_int(value) ?? return "refused: {err:Debug}"
+    "{value} is {mode:Debug}"
+}
+
+run: fn() {
+    loop value in [-1, 0, 3, 10, 7, 40000] -> print(describe(value))
+    loop mode in [Mode.Reverse, Mode.Idle, Mode.Slow, Mode.Fast] {
+        back: Mode.from_int(mode.to_int()) ?? Mode.Idle
+        print(back == mode)
+    }
+}

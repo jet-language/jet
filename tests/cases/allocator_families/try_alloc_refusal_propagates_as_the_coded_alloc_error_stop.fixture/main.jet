@@ -1,0 +1,12 @@
+// A refused `try_alloc` with no `??` propagates its AllocError implicitly; out
+// of `run` it is the program's coded stop, naming the bytes, the allocator and
+// the failing line.
+use core.mem
+
+run: fn() AllocError! {
+    fixed: mem.Fixed.new(size: 40)
+    first: fixed.try_alloc(7)
+    print("first {first}")
+    second: fixed.try_alloc(9)
+    print("unexpected {second}")
+}

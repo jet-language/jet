@@ -1,0 +1,7 @@
+# Port of tests/build_entry.rs:1996-2018; original sources verbatim, canonical machine diagnostics.
+# PENDING-SAME-HEAD; source acceptance != complete direct-driver nominal proof.
+fixture: fixtures/ungranted_action_fails_before_process_spawn
+step: jet build main.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E3503"] #>= 1
+file: out absent

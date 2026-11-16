@@ -1,0 +1,248 @@
+// One guarded table of notes, each its owner's alone. eve, an account that
+// owns no note, tries every path that reaches the table, and so does a task
+// that acts for no one: a direct read and write, a live query, a task spawned
+// as a job's worker is, a mounted endpoint and a webhook delivery. Each
+// attempt is refused or finds nothing. ann, the owner, and a run that acts
+// for the system are the contrast.
+use {
+    app
+    crypto: core.crypto
+    db: core.db
+    hex: core.encoding.hex
+    http: core.http
+    net: core.net
+    web: core.web
+    core.reactive.loadable.[Loadable]
+}
+
+#Codable
+Note: struct {
+    id: Int
+    owner: String
+    text: String
+}
+
+#Error
+NoteError: enum {
+    Unopened
+    Read
+}
+
+// The store every path reads through. Each path opens the table from here
+// rather than capturing it, as a request handler or a job would.
+Notes: struct {
+    store: db.Store?
+}
+
+NOTES: Shared{Notes{store: None}}
+
+notes_in: fn(store: db.Store) -> db.Table<Int, Note> {
+    store.table("notes", key: fn(note: Note) { note.id }).guard(note_policy)
+}
+
+// The guarded notes table.
+notes_now: fn() -> db.Table<Int, Note> {
+    notes := NOTES.guard_edit()
+    store: notes.value.store ?? panic("the notes store is open")
+    notes_in(store)
+}
+
+// A note is its owner's alone: an account reads and writes only its own,
+// and a caller with no account touches none.
+note_policy: fn(row: Note, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    if who == {
+        .Account(account) -> Ok(row.owner == account)
+        .System -> Ok(true)
+        .Anonymous -> Ok(false)
+    }
+}
+
+// The texts of the notes the caller may read, a query function an app binds
+// with app.live.
+note_texts: fn() -[DB.Read]> [String] NoteError! {
+    notes := NOTES.guard_edit()
+    store: notes.value.store ?? return Err(NoteError.Unopened)
+    rows: (notes_in(store).query() ?? return Err(NoteError.Read)).collect() ?? return Err(NoteError.Read)
+    texts := [String]{}
+    loop note in rows -> texts.push(note.text)
+    texts
+}
+
+shown: fn(state: Loadable<[String], NoteError>) -> String {
+    if state == {
+        .Loaded(list) -> "[{list.join(", ")}]"
+        .Failed(_) -> "failed"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+// What the caller reads now, without a binding.
+texts_now: fn() -[DB.Read]> String {
+    if note_texts() == {
+        .Ok(list) -> "[{list.join(", ")}]"
+        .Err(_) -> "failed"
+    }
+}
+
+// What a task spawned here reads: a task acts for no one unless it runs as
+// someone itself.
+spawned_reads: fn() -[DB.Read]> String TaskFailure! {
+    worker: task { texts_now() }
+    worker.join() ?? "the task failed"
+}
+
+note_read: fn(id: Int) -[DB.Read]> String {
+    if notes_now().get(id) == {
+        .Val(note) -> note.text
+        .None -> "none"
+        .Err(failure) -> failure.message()
+    }
+}
+
+wrote: fn(result: Note db.DBError!) -> String {
+    if result == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+added: fn(row: Note) -[DB.Read, DB.Write]> String { wrote(notes_now().add(row)) }
+
+replaced: fn(row: Note) -[DB.Read, DB.Write]> String { wrote(notes_now().put(row)) }
+
+deleted: fn(id: Int) -[DB.Read, DB.Write]> String {
+    if notes_now().delete(id) == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+acting: fn() -> String { app.maybe_caller() ?? "no one" }
+
+Event: struct {
+    action: String
+}
+
+#Error
+DeskError: enum {
+    Unreachable(String)
+    SignedOut
+}
+
+impl app.CallError -> DeskError {
+    if self == {
+        .Unreachable(why) -> DeskError.Unreachable(why)
+        .Invalid(errors) -> DeskError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> DeskError.SignedOut
+        .UpdateRequired -> DeskError.Unreachable("update required")
+    }
+}
+
+Desk: struct {
+    secret: String
+
+    // Any caller asks whom its request acts for.
+    #App.Public whoami: fn(self) -> String DeskError! { Ok(acting()) }
+
+    // A signed-in caller's own notes; no request has a signed-in caller yet.
+    #App.SignedIn mine: fn(self) -> String DeskError! { Ok(acting()) }
+
+    #App.Webhook(path: "/hooks/notes/:project", signature: app.Signature.GitHub, key: "signing_key") on_event: fn(self, project: String, event: Event) -> String {
+        "{project}: {event.action} as {acting()}"
+    }
+
+    #App.SigningKey signing_key: fn(self, project: String) -> String? { Val(self.secret.copy()) }
+}
+
+refused: fn(failure: DeskError) -> String {
+    if failure == {
+        .Unreachable(why) -> "unreachable: {why}"
+        .SignedOut -> "signed out"
+    }
+}
+
+// Whom a public request acts for.
+public_call: fn(desk: app.Remote<Desk>) -> String Never! {
+    found: desk.whoami() ?? return refused(err)
+    found
+}
+
+// Whom a signed-in request acts for.
+signed_in_call: fn(desk: app.Remote<Desk>) -> String Never! {
+    found: desk.mine() ?? return refused(err)
+    found
+}
+
+// POST `body` to `project`'s hook, signed with `key` as GitHub signs.
+deliver: fn(addr: String, project: String, key: String, body: String) -> String HTTPError! {
+    mac: hex.encode(crypto.hmac_sha256(key.bytes(), body.bytes()))
+    fields: http.headers_set(http.headers(), "X-Hub-Signature-256", "sha256={mac}")
+    answer: http.send_request(http.request_with(.Post, "http://{addr}/api/hooks/notes/{project}", fields, http.body_text(body)))
+    Ok("{answer.status} {answer.text()}")
+}
+
+step: fn(label: String, outcome: String) { print("{label}: {outcome}") }
+
+keep: fn(store: db.Store) {
+    notes := NOTES.guard_edit()
+    notes.value.store = Val(store.copy())
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    keep(db.open_memory())
+    step("ann adds her plan", app.as_caller("ann", fn() { added(Note{id: 1, owner: "ann", text: "plan"}) }))
+    step("ann adds her diary", app.as_caller("ann", fn() { added(Note{id: 2, owner: "ann", text: "diary"}) }))
+    step("ann reads her notes", app.as_caller("ann", fn() { texts_now() }))
+
+    // A direct read or write.
+    step("eve reads every note", app.as_caller("eve", fn() { texts_now() }))
+    step("eve reads note 1", app.as_caller("eve", fn() { note_read(1) }))
+    step("eve takes note 1", app.as_caller("eve", fn() { replaced(Note{id: 1, owner: "eve", text: "taken"}) }))
+    step("eve adds a note in ann's name", app.as_caller("eve", fn() { added(Note{id: 3, owner: "ann", text: "forged"}) }))
+    step("eve deletes note 2", app.as_caller("eve", fn() { deleted(2) }))
+    step("no one acts here", acting())
+    step("no one reads every note", texts_now())
+    step("no one adds a note", added(Note{id: 4, owner: "eve", text: "unsigned"}))
+
+    // A live query runs as the caller that bound it, whoever reads it.
+    eve_live: app.as_caller("eve", fn() { app.live(note_texts) })
+    ann_live: app.as_caller("ann", fn() { app.live(note_texts) })
+    step("eve's live query", shown(app.state(eve_live)))
+    step("ann's live query", shown(app.state(ann_live)))
+    step("ann adds her list", app.as_caller("ann", fn() { added(Note{id: 5, owner: "ann", text: "list"}) }))
+    step("eve's live query after ann writes, read in ann's run", app.as_caller("ann", fn() { shown(app.state(eve_live)) }))
+    step("ann's live query after her write, read by no one", shown(app.state(ann_live)))
+    step("a live query no one bound", shown(app.state(app.live(note_texts))))
+
+    // A task spawned as a job's worker is spawned acts for no one.
+    step("a task eve spawns", app.as_caller("eve", fn() { spawned_reads() ?? "the task did not start" }))
+    step("a task ann spawns", app.as_caller("ann", fn() { spawned_reads() ?? "the task did not start" }))
+    job: task { app.as_system(fn() { texts_now() }) }
+    step("a job that runs as the system", job.join() ?? "the job failed")
+
+    // A request acts for no one, whoever serves it and whoever sends it,
+    // until sign-in names a caller.
+    served: web.app().mount("/api", Desk{secret: "only the desk knows"})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        app.as_caller<Int>("ann", fn() {
+            answered := 0
+            loop _ in 0..<4 {
+                if served.serve_once(listener) == .Ok(_) -> answered += 1
+            }
+            answered
+        })
+    }
+    // Each lambda owns what it captures, so each gets its own address.
+    public_api: "http://{addr}/api"
+    signed_in_api: "http://{addr}/api"
+    step("eve's public request acts for", app.as_caller("eve", fn() { public_call(app.remote_at<Desk>(public_api)) }))
+    step("eve's signed-in request", app.as_caller("eve", fn() { signed_in_call(app.remote_at<Desk>(signed_in_api)) }))
+    step("a delivery under a guessed key", deliver(addr, "jet", "a guess", "{{\"action\":\"opened\"}}"))
+    step("a delivery under the desk's key", deliver(addr, "jet", "only the desk knows", "{{\"action\":\"opened\"}}"))
+    answered: serving.join()
+    step("the server, serving in ann's run, answered", "{answered} requests")
+
+    step("the system reads every note", app.as_system(fn() { texts_now() }))
+}

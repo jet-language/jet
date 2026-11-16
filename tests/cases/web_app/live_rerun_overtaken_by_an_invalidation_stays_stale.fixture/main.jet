@@ -1,0 +1,75 @@
+use {
+    app
+    core.reactive.loadable.[Loadable]
+}
+
+#Error
+CountError: enum {
+    NoProject
+}
+
+Tasks: struct {
+    count: Int
+    runs: Int
+    racing: Bool
+}
+
+TASKS: Shared{Tasks{count: 1, runs: 0, racing: false}}
+
+// One run's read of the tasks. While `racing` is set, another request
+// commits a new task right after this read.
+read_tasks: fn() -> Tasks {
+    tasks := TASKS.guard_edit()
+    tasks.value.runs += 1
+    read: tasks.value.copy()
+    if read.racing {
+        tasks.value.count += 1
+        tasks.value.racing = false
+    }
+    read
+}
+
+// The source reads the task count. In a racing run, the other request's
+// write commits between this read and the store of its result, so that
+// write's invalidation reaches the binding while this re-run is in flight.
+task_count: fn(project: String) -[DB.Read]> Int CountError! {
+    if project == "" -> return Err(CountError.NoProject)
+    read: read_tasks()
+    if read.racing -> app.invalidate(task_count, project)
+    read.count
+}
+
+shown: fn(state: Loadable<Int, CountError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(reason) -> if reason == {
+            .NoProject -> "failed: no project"
+        }
+        .Idle | .Loading -> "pending"
+    }
+}
+
+runs: fn() -> Int {
+    tasks := TASKS.guard_edit()
+    tasks.value.runs
+}
+
+// A write adds task 2, and the next run races with the write of task 3.
+add_task_then_race: fn() {
+    tasks := TASKS.guard_edit()
+    tasks.value.count = 2
+    tasks.value.racing = true
+}
+
+run: fn() {
+    count: app.live(task_count, "jet")
+    print("first read {shown(app.state(count))}, runs {runs()}")
+    add_task_then_race()
+    app.invalidate(task_count, "jet")
+    // This re-run reads 2; the write of task 3 commits before it stores.
+    print("re-run overtaken {shown(app.state(count))}, runs {runs()}")
+    // The stored 2 is stale, so this read runs the source again.
+    print("next read {shown(app.state(count))}, runs {runs()}")
+    // Nothing changed since: the stored 3 is current.
+    print("read again {shown(app.state(count))}, runs {runs()}")
+}

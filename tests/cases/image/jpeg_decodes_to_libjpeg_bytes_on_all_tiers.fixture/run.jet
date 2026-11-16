@@ -1,0 +1,33 @@
+// cjpeg -quality 75 wrote these from one 16 x 16 gradient: YCbCr 4:2:0,
+// YCbCr 4:4:4 with a restart after every MCU, grayscale and progressive.
+// Each decoded image prints as a rolling hash of its pixels; djpeg -dct int
+// -nosmooth hashes to the same values.
+use {
+    files: core.files
+    image: core.image
+}
+
+pixel_hash: fn(decoded: image.Image) -> Int {
+    hash := (decoded.width * 31 + decoded.height) % 1000000007
+    at := 0
+    loop at < decoded.pixels.len() {
+        word: (Int{decoded.pixels[at]} << 24) + (Int{decoded.pixels[at + 1]} << 16) + (Int{decoded.pixels[at + 2]} << 8) + Int{decoded.pixels[at + 3]}
+        hash = (hash * 31 + word) % 1000000007
+        at += 4
+    }
+    hash
+}
+
+run: fn() {
+    limits: image.Limits{max_input_bytes: 100000, max_pixels: 100000, max_output_bytes: 400000}
+    loop name in ([String]{"c420.jpg", "c444r.jpg", "gray.jpg", "prog.jpg"}) {
+        bytes: files.read_bytes(name) ?? panic("read {name}")
+        if image.decode(bytes, limits) == {
+            .Ok(decoded) -> {
+                info: image.inspect(bytes, limits) ?? panic("inspect {name}")
+                print("{name} {info.color:Debug} {decoded.width}x{decoded.height} {pixel_hash(decoded)}")
+            }
+            .Err(error) -> { print("{name} {error:Debug}") }
+        }
+    }
+}

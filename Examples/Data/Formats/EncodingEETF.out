@@ -1,0 +1,38 @@
+COUNT-ETF-131: {"count":2}
+COUNT-ETF-131 atom key: {"count":2}
+atom: "hello"
+atom nil: "nil"
+atom true: true
+binary: "aGk="
+byte list: [104,105]
+tuple: [1,"ok"]
+list: [1,2]
+bignum: 18446744073709551616
+negative: -5
+float: 1.5
+trailing bytes: Syntax at byte 3 : trailing bytes after the term
+version: Syntax at byte 0 : a standalone ETF term starts with version byte 131, not 130
+truncated binary: Truncated at byte 6 $: the term ends 8 bytes early
+pid: Unsupported at byte 2 $: a pid (tag 88) is a native identity, not data
+improper list: Unsupported at byte 8 $: an improper list (its tail is not NIL)
+bitstring: Unsupported at byte 7 $: a bitstring whose last byte holds 3 bits is not byte-aligned
+duplicate key: Syntax at byte 17 $: two map keys are the text "a"
+depth limit: Limit at byte 11 $[0][0]: max_depth 2 exceeded
+item limit: Limit at byte 6 $: max_item_bytes 4 exceeded by a binary of 5 bytes
+typed atom key: count 2
+typed binary key: count 2
+binary as String: hi
+byte list as String: error at '': expected Text, found a list
+byte list as UTF8ByteList String: hi
+binary as [U8]: [104, 105]
+atom as Atom: hello
+binary as Atom: error at '': expected an atom, found aGk=
+atom true as Bool: true
+bignum as Int: 18446744073709551616
+pid as record: error at '$': Unsupported: a pid (tag 88) is a native identity, not data
+encode CountRecord: true 8374000000017705636f756e746102
+encode Packet: 83740000000477046e616d656d0000000268697704646174616d000000020102770673746174757377026f6b7704746167736c000000016d00000001616a
+round trip: hi [1, 2] ok (none) [a]
+encode Packet as proplist of byte lists: 836c00000004680277046e616d656b0002686968027704646174616b000201026802770673746174757377026f6b68027704746167736c000000016b0001616a6a
+proplist round trip: hi [1, 2] ok [a]
+long atom: Limit: an atom has at most 255 characters

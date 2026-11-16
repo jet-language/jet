@@ -1,0 +1,28 @@
+// `#As` on one stored field lets the struct pass where that field's type is
+// expected, read as that field. A `Labeled` goes straight to a function that
+// takes its `Point`.
+Point: struct {
+    x: Int
+    y: Int
+}
+
+Labeled: struct {
+    #As at: Point
+    label: String
+}
+
+square_distance: fn(p: Point) -> Int { p.x * p.x + p.y * p.y }
+
+describe: fn(p: Point) -> String { "({p.x}, {p.y})" }
+
+run: fn() {
+    home: Labeled{at: Point{x: 3, y: 4}, label: "home"}
+    print(square_distance(home))
+    print("{home.label} is at {describe(home)}")
+    // A `Point` value still passes as itself.
+    print(describe(home.at))
+}
+// --- expected output --------------------------------------------------
+// 25
+// home is at (3, 4)
+// (3, 4)

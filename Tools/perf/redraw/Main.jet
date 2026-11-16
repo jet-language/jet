@@ -1,0 +1,121 @@
+#!/usr/bin/env jet
+// Full-redraw time of core.ui's rasterizer at 2560x1440 (#6731): a headless
+// window draws one dashboard frame per refresh and times the drawing alone.
+// The frame has the parts of the Showcase redraw that #6731 measured: an
+// opaque backdrop (a clear, a gradient title bar and a solid sidebar),
+// eight panels with borders, gradient headers and text, a row of labels,
+// and a reticle of about 5,500 one-pixel runs (two ring outlines and two
+// diagonals). Every frame redraws the whole window, so each one repaints
+// all 14.7 MB of pixels.
+// It prints the first frame, which also allocates the canvas, and then the
+// minimum, median and maximum of the frames after it. It exits 1 when the
+// median exceeds the limit.
+// Usage (from the repository root; build with --release for O2):
+//   jet build --release Tools/perf/redraw/Main.jet
+//   Tools/perf/redraw/.jet/build/Main [--frames N] [--limit MS]
+// Defaults: 40 frames, a 6 ms limit.
+use {
+    core.color.[Color]
+    process: core.process
+    term: core.term
+    time: core.time
+    ui: core.ui
+}
+
+WIDTH: 2560
+
+HEIGHT: 1440
+
+shade: fn(r: Int, g: Int, b: Int, a: Int) -> Color { Color{r: U8{r}, g: U8{g}, b: U8{b}, a: U8{a}} }
+
+// One full frame of the dashboard.
+draw_dashboard: fn(frame: ui.Frame, index: Int) {
+    // The backdrop: every pixel, then a title bar and a sidebar.
+    frame.clear_background(shade(11, 11, 13, 255))
+    frame.draw_rectangle_gradient_v(0, 0, WIDTH, 96, shade(30, 32, 44, 255), shade(18, 20, 28, 255))
+    frame.draw_rectangle(0, 96, 48, HEIGHT - 96, shade(16, 17, 22, 255))
+    // Two rows of four panels, each with a border and a gradient header.
+    loop row in 0..<2 {
+        loop column in 0..<4 {
+            x: 80 + column * 610
+            y: 140 + row * 620
+            frame.draw_rectangle(x, y, 560, 560, shade(24, 26, 34, 255))
+            frame.draw_rectangle_lines(x, y, 560, 560, shade(60, 64, 80, 255))
+            frame.draw_rectangle_gradient_h(x, y, 560, 48, shade(232, 35, 42, 255), shade(120, 20, 26, 255))
+            frame.draw_text("Panel {row * 4 + column + 1}", x + 16, y + 10, 28, shade(245, 245, 245, 255))
+            loop line in 0..<8 {
+                frame.draw_text("metric {line}: {(index * 7 + line * 13) % 1000} units", x + 24, y + 80 + line * 56, 22, shade(200, 204, 214, 255))
+            }
+        }
+    }
+    // Labels along the top.
+    loop label in 0..<12 {
+        frame.draw_text("LABEL {label}", 80 + label * 200, 60, 18, shade(150, 156, 170, 255))
+    }
+    // The reticle: two ring outlines and two diagonals, one-pixel runs, and
+    // a crosshair of two straight runs.
+    center_x: WIDTH /% 2
+    center_y: HEIGHT /% 2
+    reticle: shade(232, 35, 42, 200)
+    frame.draw_circle_lines(center_x, center_y, 200, reticle)
+    frame.draw_circle_lines(center_x, center_y, 400, reticle)
+    frame.draw_line(center_x - 540, center_y - 540, center_x + 540, center_y + 540, reticle)
+    frame.draw_line(center_x - 540, center_y + 540, center_x + 540, center_y - 540, reticle)
+    frame.draw_line(center_x, center_y - 600, center_x, center_y + 600, reticle)
+    frame.draw_line(center_x - 600, center_y, center_x + 600, center_y, reticle)
+}
+
+usage: fn() -[IO]> Int Never! {
+    term.eprint("usage: Main [--frames N] [--limit MS]")
+    64
+}
+
+millis: fn(ns: Int) -> Float { Float{ns} / 1000000.0 }
+
+redraw: fn() -[Env, Exec.Args, IO, Net, Time]> Int Never! {
+    args: process.args()
+    frames := 40
+    limit := Float{6}
+    at := 0
+    loop at < args.len() {
+        if at + 1 >= args.len() -> return usage()
+        if {
+            args[at] == "--frames" -> frames = Int.parse(args[at + 1]) ?? return usage()
+            args[at] == "--limit" -> limit = Float.parse(args[at + 1]) ?? return usage()
+            else -> return usage()
+        }
+        at += 2
+    }
+    if frames < 2 -> return usage()
+    script := [[ui.UIEvent]]{}
+    loop _ in 0..<frames -> script.push([ui.UIEvent]{})
+    window: ui.headless(width: WIDTH, height: HEIGHT, script: script) ?? {
+        term.eprint("redraw: no headless window: {err}")
+        return 1
+    }
+    times := [Int]{}
+    loop frame in window.frames() {
+        if frame.index >= frames -> break
+        started: time.instant()
+        draw_dashboard(frame, frame.index)
+        times.push(started.elapsed().ns)
+    }
+    first: times[0]
+    steady := times.slice(1, times.len())
+    steady.sort()
+    median: steady[steady.len() /% 2]
+    print("full redraw {WIDTH}x{HEIGHT}, {steady.len()} frames after the first")
+    print("first frame (allocates the canvas): {millis(first):Fixed(2)} ms")
+    print("min {millis(steady[0]):Fixed(2)} ms, median {millis(median):Fixed(2)} ms, max {millis(steady[steady.len() - 1]):Fixed(2)} ms")
+    if millis(median) > limit {
+        print("median exceeds the {limit:Fixed(2)} ms limit")
+        return 1
+    }
+    print("median within the {limit:Fixed(2)} ms limit")
+    0
+}
+
+run: fn() {
+    code: redraw()
+    if code != 0 -> process.exit(code)
+}

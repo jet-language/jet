@@ -1,0 +1,14 @@
+# HAND-PORT tests/web_build.rs:1427-1483 js_source_map_uses_line_markers_and_hides_host_paths
+# The JS emitter is retired (Main, 2026-11-13); its map is now app.wasm.map, named by app.wasm's sourceMappingURL custom section.
+# verify.mjs: repeat-build equality, the entry's text and no host path, the marker-like string kept as data, the custom section's length-prefixed URL, and mappings landing on both statements of main.jet.
+fixture: js_source_map_uses_line_markers_and_hides_host_paths.fixture
+env: NO_COLOR=1
+step: jet build --target=web private/build-host/project/main.jet
+exit: 0
+file: .jet/build/app.wasm.map is-file # the map the copy below reads
+copy: .jet/build/app.wasm first-app.wasm
+copy: .jet/build/app.wasm.map first-map.json
+step: jet build --target=web private/build-host/project/main.jet
+exit: 0
+step: node verify.mjs
+exit: 0

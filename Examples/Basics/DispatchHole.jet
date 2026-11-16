@@ -1,0 +1,161 @@
+// A `_` in an `if` header is its hole. Each arm head is a candidate that
+// fills the hole, so the test is written once and every arm reads as a value.
+label: fn(n: Int) -> String {
+    return if n % _ == 0 {
+        15 -> "FizzBuzz"
+        3 -> "Fizz"
+        5 -> "Buzz"
+        else -> "{n}"
+    }
+}
+
+// The header runs again for each candidate tried. A candidate that is never
+// reached never runs, and a group `(2 | 3)` stops at its first match.
+trace: fn(n: Int) -> Int {
+    print("  try {n}")
+    n
+}
+
+pick: fn(n: Int) {
+    if trace(_) == n {
+        1 -> print("one")
+        (2 | 3) -> print("two or three")
+        else -> print("other")
+    }
+}
+
+// After a candidate, `&&` and `||` are ordinary operators:
+// `2 && ready || emergency` reads `(trace(2) == n && ready) || emergency`.
+gate: fn(n: Int, ready: Bool, emergency: Bool) -> String {
+    return if trace(_) == n {
+        2 && ready || emergency -> "open"
+        else -> "shut"
+    }
+}
+
+// A Bool candidate is written in parentheses.
+both: fn(a: Bool, b: Bool) -> Bool { a && b }
+
+sign: fn(n: Int) -> String {
+    return if both(_, n > 0) {
+        (n % 2 == 0) -> "positive and even"
+        (n < 10) -> "positive, odd and small"
+        else -> "something else"
+    }
+}
+
+// A case candidate fills the hole as a value.
+Light: enum {
+    Red
+    Amber
+    Green
+}
+
+wait_secs: fn(light: Light) -> Int {
+    if light == {
+        .Red -> 30
+        .Amber -> 5
+        .Green -> 0
+    }
+}
+
+first_longer: fn(limit: Int) -> String {
+    return if wait_secs(_) > limit {
+        .Green -> "green"
+        .Amber -> "amber"
+        .Red -> "red"
+        else -> "none"
+    }
+}
+
+// `subject == _` compares the subject with each arm: pattern arms bind
+// payloads and cover every case, so the table needs no `else`.
+Shape: enum {
+    Circle(Int)
+    Square(Int)
+}
+
+area: fn(shape: Shape) -> Int {
+    return if shape == _ {
+        .Circle(r) -> 3 * r * r
+        .Square(side) -> side * side
+    }
+}
+
+// An error raised while the header runs leaves the table and the function,
+// as any other call's error would. A table at the end of a body is its value.
+#Error
+ReadError: enum {
+    Empty
+}
+
+width: fn(text: String) -> Int ReadError! {
+    if text == "" -> return Err(ReadError.Empty)
+    text.count_bytes()
+}
+
+parity: fn(text: String) -> String ReadError! {
+    if width(text) % _ == 0 {
+        2 -> "even"
+        else -> "odd"
+    }
+}
+
+run: fn() {
+    print(label(9))
+    print(label(10))
+    print(label(15))
+    print(label(7))
+    pick(1)
+    pick(3)
+    pick(9)
+    print(gate(2, true, false))
+    print(gate(2, false, false))
+    print(gate(5, false, true))
+    print(sign(4))
+    print(sign(3))
+    print(sign(-2))
+    print(first_longer(10))
+    print(first_longer(2))
+    print(first_longer(60))
+    print(area(Shape.Circle(2)))
+    print(area(Shape.Square(3)))
+    print(parity("ab") ?? "failed")
+    print(parity("abc") ?? "failed")
+    if parity("") == {
+        .Ok(word) -> { print(word) }
+        .Err(_) -> print("the header's error reached the caller")
+    }
+}
+// --- expected output --------------------------------------------------
+// Fizz
+// Buzz
+// FizzBuzz
+// 7
+//   try 1
+// one
+//   try 1
+//   try 2
+//   try 3
+// two or three
+//   try 1
+//   try 2
+//   try 3
+// other
+//   try 2
+// open
+//   try 2
+// shut
+//   try 2
+// open
+// positive and even
+// positive, odd and small
+// something else
+// red
+// amber
+// none
+// 12
+// 9
+// even
+// odd
+// the header's error reached the caller

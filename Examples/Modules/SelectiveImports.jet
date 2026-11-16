@@ -1,0 +1,44 @@
+// `use mod.[a, b]` is the one member-list form after
+// `use`, `use mod.item` brings one item in unqualified, and
+// `use alias: mod.item` names a single item (#6542).
+// Items are brought into scope directly; aliases resolve name conflicts.
+// Grouped: `abs` imported under the local name `absolute`.
+use {
+    numeric.[clamp]
+    absolute: numeric.abs
+    scale.[double, triple]
+    scale.quadruple
+    // The prefix may be a dotted path: `core.encoding.[json]` walks the same
+    // members as `core.[encoding.json]`.
+    core.encoding.[json]
+}
+
+numeric: module {
+    clamp: fn(x: Int, lo: Int, hi: Int) -> Int {
+        if x < lo -> return lo
+        if x > hi -> return hi
+        return x
+    }
+
+    abs: fn(x: Int) -> Int {
+        if x < 0 -> return -x
+        return x
+    }
+}
+
+scale: module {
+    double: fn(n: Int) -> Int { n * 2 }
+
+    triple: fn(n: Int) -> Int { n * 3 }
+
+    quadruple: fn(n: Int) -> Int { n * 4 }
+}
+
+run: fn() {
+    print(clamp(15, 0, 10))
+    print(absolute(-7))
+    print(json.to_string(Dyn.Text("jet")) ?? panic("JSON encode"))
+    print(double(5))
+    print(triple(4))
+    print(quadruple(3))
+}

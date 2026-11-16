@@ -1,0 +1,8 @@
+# tests/generics.rs::generic_module_diagnostics_hide_instance_mangling at tests/generics.rs:267; hand-port
+fixture: generic_module_diagnostics_hide_instance_mangling.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/generics.rs:290 is rejected
+stderr: !~ "M5BoxedEntry" # tests/generics.rs:290 absent from the diagnostics

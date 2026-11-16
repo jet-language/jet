@@ -1,0 +1,16 @@
+// An unannotated body that can't fail is inferred infallible, so
+// `make_error` writes its default `Err` route (spec.md:971-988) explicitly.
+#Error
+DomainError: struct {
+    reason: String
+}
+
+make_error: fn() -> DomainError Err! { DomainError{reason: "bad"} }
+
+domain_call: fn() DomainError! {
+    return Err(
+        make_error(),
+    )
+}
+
+run: fn() {}

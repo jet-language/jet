@@ -1,0 +1,55 @@
+# HAND-PORT tests/receipt_store.rs:135-178 project_check_does_not_replay_after_higher_priority_entry_appears
+# PENDING-SEAM(receipt-store): exact assertions; no runtime parity claim.
+fixture: project_check_does_not_replay_after_higher_priority_entry_appears.fixture
+refused: receipt-store
+# #[test]
+# fn project_check_does_not_replay_after_higher_priority_entry_appears() {
+#     let root = temp_root("stale-entry");
+#     let source_dir = root.join("src");
+#     let store = root.join("store");
+#     std::fs::create_dir_all(&source_dir).unwrap();
+#     std::fs::write(
+#         root.join("package.jet"),
+#         "name: \"stale-entry\"\nversion: \"0.1.0\"\n",
+#     )
+#     .unwrap();
+#     std::fs::write(source_dir.join("run.jet"), "fn run() {}\n").unwrap();
+#     let jet = env!("CARGO_BIN_EXE_jet");
+#     let check = || {
+#         Command::new(jet)
+#             .args(["check", "--verbose"])
+#             .current_dir(&root)
+#             .env("JET_STORE_DIR", &store)
+#             .output()
+#             .unwrap()
+#     };
+# 
+#     let first = check();
+#     assert!(
+#         first.status.success(),
+#         "initial project check failed:\n{}",
+#         String::from_utf8_lossy(&first.stderr)
+#     );
+# 
+#     std::fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
+#     let second = check();
+#     assert!(
+#         second.status.success(),
+#         "project check after entry creation failed:\n{}",
+#         String::from_utf8_lossy(&second.stderr)
+#     );
+#     let nodes = check_nodes(&root, &store, "run.jet");
+#     assert!(
+#         !nodes.is_empty() && nodes.iter().all(|(_, why)| why != "reused"),
+#         "new higher-priority entry must check fresh, not replay the old receipt: {nodes:?}"
+#     );
+# 
+#     let _ = std::fs::remove_dir_all(root);
+# }
+env: JET_STORE_DIR={work}/store
+step first: jet check --verbose
+exit: 0
+write: run.jet new-entry.template
+step second: jet check --verbose
+exit: 0
+

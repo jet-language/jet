@@ -1,0 +1,11 @@
+Error [jet.BuildAuthorityDenied]: `b.pin(.bounds, .Report)` weakens checking in a build that holds a `Compiler` value
+  --> tests/ui/workspace_compiler_after_unchecked_option.jet:8:12
+    |
+  8 |     _ := b.compiler(app)
+    |            ^^^^^^^^
+ Why: Every session a `Compiler` value builds is checked like any compile, and generated or rewritten code must never run with a check skipped
+ Fix: Remove the `b.pin(.bounds, .Report)` call, or build this output without `b.compiler`
+More: jet-lang.dev/e/E3503
+
+1 problem found
+run `jet explain E3503` to learn more

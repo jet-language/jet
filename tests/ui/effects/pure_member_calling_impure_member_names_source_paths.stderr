@@ -1,0 +1,10 @@
+Error [jet.ImpureCallInPureContext]: `shouty.bill` calls the impure function `my_data.total`
+  --> tests/ui/effects/pure_member_calling_impure_member_names_source_paths.jet:9:35
+    |
+  9 |     bill: fn() -[]> Int { my_data.total() }
+    |                                   ^^^^^
+ Why: `my_data.total` is impure, but `shouty.bill` declares `-[]>`
+ Fix: Remove the call from `shouty.bill`, or drop the `-[]>` bound from `shouty.bill` so its effects are inferred
+ Denial: pure
+ Call chain: shouty.bill → my_data.total
+More: jet-lang.dev/e/E3401

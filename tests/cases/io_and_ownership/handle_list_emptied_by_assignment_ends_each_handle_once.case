@@ -1,0 +1,19 @@
+# Emptying a List of file readers by assignment (`xs = [files.FileReader]{}`,
+# lowered as an in-place clear) ends each reader once on every tier: the
+# variable's close ends its readers, and the clear then leaves those handles
+# alone, as the List's own drop does. Before, the clear dropped each closed
+# reader a second time and the program hung on the freed reader's lock. The
+# field and write-parameter forms clear the same way; the ambient `input`'s
+# file walk depends on the field form.
+fixture: handle_list_emptied_by_assignment_ends_each_handle_once.fixture
+env: NO_COLOR=1
+step default: jet run --quiet main.jet
+limit: time=60
+exit: 0
+stdout: = handle_list_emptied_by_assignment_ends_each_handle_once.out
+stderr: empty
+step release: jet run --quiet --release main.jet
+limit: time=60
+exit: 0
+stdout: = handle_list_emptied_by_assignment_ends_each_handle_once.out
+stderr: empty

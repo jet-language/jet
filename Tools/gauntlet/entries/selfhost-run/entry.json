@@ -1,0 +1,28 @@
+{
+  "name": "selfhost-run",
+  "mode": "tool",
+  "description": "The self-hosting study driver Tools/perf/selfhost/run.mjs and its Jet twin Tools/perf/selfhost/run/run.jet, #5072 c20: read the study manifest, run the requested phases of the selected workloads in a fresh run directory under JET_SELFHOST_SCRATCH, and print the receipt (and write it to --output). The cases cover help, the workload list, usage, refused options, a workload's file identity, every workload's source complexity, a reasoning capture that is accepted and written to --output, captures rejected for a duplicate task, a bad evidence class, a claim of port approval, broken JSON, another workload and a missing file, and a mode a workload does not support. Each receipt case's check.jet prints the receipt with the run root, the case directory, the time and every latency and peak memory figure held fixed, and states whether --output holds the printed receipt. The phases that run the compiler are left out: their receipts hold the compiler's own output, which changes with the compiler.",
+  "tool": {
+    "original": "Tools/perf/selfhost/run.mjs",
+    "jet": "Tools/perf/selfhost/run/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--help"], "expected": "expected/usage.out"},
+      {"args": [], "expected": "expected/usage.out"},
+      {"args": ["--list"], "expected": "expected/list.out"},
+      {"args": ["--bogus"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--phase"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--phase", "nope"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--phase", "identity", "--workload", "scan-parse"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/identity.out"},
+      {"args": ["--phase", "complexity"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/complexity.out"},
+      {"args": ["--phase", "reasoning", "--workload", "scan-parse", "--reasoning-file", "capture-ok.json", "--output", "out/receipt.json"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/reasoning-ok.out"},
+      {"args": ["--phase", "reasoning", "--workload", "scan-parse", "--reasoning-file", "capture-dup.json"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/reasoning-dup.out"},
+      {"args": ["--phase", "reasoning", "--workload", "scan-parse", "--reasoning-file", "capture-class.json"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/reasoning-class.out"},
+      {"args": ["--phase", "reasoning", "--workload", "scan-parse", "--reasoning-file", "capture-approved.json"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/reasoning-approved.out"},
+      {"args": ["--phase", "reasoning", "--workload", "scan-parse", "--reasoning-file", "capture-broken.json"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/reasoning-broken.out"},
+      {"args": ["--phase", "reasoning", "--workload", "symbol-type", "--reasoning-file", "capture-ok.json"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/reasoning-other.out"},
+      {"args": ["--phase", "reasoning", "--workload", "scan-parse", "--reasoning-file", "missing.json"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/reasoning-missing.out"},
+      {"args": ["--phase", "build", "--mode", "run-interpret", "--workload", "foreign-interaction"], "env": {"JET_SELFHOST_SCRATCH": "scratch"}, "check": "check.jet", "expected": "expected/unsupported.out"}
+    ]
+  }
+}

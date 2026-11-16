@@ -1,0 +1,8 @@
+// core-conformance: core.sys.group_ids
+use os: core.sys
+
+run: fn() {
+    // getresgid's real and effective IDs are the ones getgid and getegid read.
+    ids: os.group_ids() ?? panic("group_ids")
+    print(ids.real == os.getgid() && ids.effective == os.getegid() && ids.saved >= 0)
+}

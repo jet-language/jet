@@ -1,0 +1,11 @@
+// Package policy mirrors source policy and disables only the
+// runtime witness for this package.
+use core.mem
+
+run: fn() {
+    cell: 42
+    #Unsafe("the local cell is live for this package-policy proof") {
+        pointer: *cell
+        print(pointer.*)
+    }
+}

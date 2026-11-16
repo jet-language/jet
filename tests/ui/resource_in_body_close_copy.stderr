@@ -1,0 +1,17 @@
+Error [jet.CopyNotSupported]: `Stream` can't be copied
+  --> tests/ui/resource_in_body_close_copy.jet:15:8
+    |
+ 15 |     b: a.copy()
+    |        ^^^^^^
+ Why: A resource owns one cleanup duty; copying it would create two owners that could close the same handle
+ Fix: Move it instead with `.move()`, or acquire a second resource
+More: jet-lang.dev/e/E0211
+
+Error [jet.CopyNotSupported]: `FileReader` can't be copied
+  --> tests/ui/resource_in_body_close_copy.jet:18:8
+    |
+ 18 |     s: r.copy()
+    |        ^^^^^^
+ Why: Copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet
+ Fix: Move it instead with `.move()` if this is its last use, or change the type so every part can be copied
+More: jet-lang.dev/e/E0211

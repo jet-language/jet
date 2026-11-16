@@ -1,0 +1,18 @@
+# A retired `#State` marker is one E0175 per owner, and `jet fix` applies its
+# edit: the markers go, each signature names its states, and the state list
+# gains the move the arrow marker made. The fixed file runs.
+fixture: fixtures/state_marker_fix
+step: jet check fix.jet
+exit: nonzero
+stderr: ~ "`#State` markers on `Lamp` are retired" # one report for the owner
+stderr: count "jet-lang.dev/e/E0175" = 1 # not one per marker
+step: jet fix fix.jet
+exit: 0
+file: fix.jet !~ "#State" # every marker is gone
+file: fix.jet ~ "    state {\n        Off -> On\n        On\n    }" # the list gains the marker's move
+file: fix.jet ~ "make: fn(watts: Int) -> Lamp.Off {" # the entry's result names its start state
+file: fix.jet ~ "turn_on: fn(self: &&Lamp.Off) -> Lamp.On {" # the move's receiver and result name its states
+file: fix.jet ~ "shine: fn(self: Lamp.On) -> Int {" # a required state types the receiver
+step: jet run fix.jet
+exit: 0
+stdout: ~ "60" # the fixed lamp shines

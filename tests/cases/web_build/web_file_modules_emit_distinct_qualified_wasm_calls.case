@@ -1,0 +1,13 @@
+# HAND-PORT tests/web_build.rs:3601-3637 web_file_modules_emit_distinct_qualified_wasm_calls
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_file_modules_emit_distinct_qualified_wasm_calls.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_file_modules_emit_distinct_qualified_wasm_calls.stdout.expected

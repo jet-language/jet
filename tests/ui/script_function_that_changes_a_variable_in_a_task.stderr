@@ -1,0 +1,8 @@
+Error [jet.ConcurrentCaptureNotOwned]: `bump` changes the script's `count`, so it can't be called in a task
+  --> tests/ui/script_function_that_changes_a_variable_in_a_task.jet:8:19
+    |
+  8 |     child: task { bump() }
+    |                   ^^^^
+ Why: Each call of `bump` passes the script's `count` to its extra `&` parameter `count:`, and a task runs beside the script, so the change would race it
+ Fix: Call `bump` outside the task, or pass the task's own value by name: `bump(…, count: …)`
+More: jet-lang.dev/e/E1101

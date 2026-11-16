@@ -1,0 +1,17 @@
+# A scalar Int Wasm export with a loop-shaped body is reached from a JS-side
+# caller: the build writes the runtime and app Wasm partitions, and the loader
+# prints the golden table.
+requires: tool:node
+fixture: web_wasm_int_export_reachability_golden.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"target\": \"web\"" # the manifest names the web target
+file: .jet/build/web.manifest.json ~ "{\"name\": \"runtime\", \"module\": \"rt.wasm\"" # the runtime partition; its data bounds vary with the runtime
+file: .jet/build/web.manifest.json ~ "{\"name\": \"app\", \"module\": \"app.wasm\"" # the app partition holding the export
+file: .jet/build/app.wasm is-file
+file: .jet/build/rt.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_wasm_int_export_reachability_golden.stdout.expected

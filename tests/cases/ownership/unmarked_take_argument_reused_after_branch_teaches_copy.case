@@ -1,0 +1,12 @@
+# tests/ownership.rs::unmarked_take_argument_reused_after_branch_teaches_copy at tests/ownership.rs:2804; hand-port
+# Claim: jet check exits 1 with E0209 at the take inside the branch (tests/ownership.rs:2820-2824)
+# Claim: the fix text contains msg.copy() (tests/ownership.rs:2825)
+# Fixture migrated: none: source is the verbatim Rust raw string
+fixture: unmarked_take_argument_reused_after_branch_teaches_copy.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/ownership.rs:2820-2825
+stderr: ~ "E0209" # tests/ownership.rs:2820-2825
+stderr: ~ "msg.copy()" # tests/ownership.rs:2820-2825

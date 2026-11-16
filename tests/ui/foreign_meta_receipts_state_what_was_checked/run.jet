@@ -1,0 +1,36 @@
+// @programmable_build
+// @cli_build
+// A checker over the program's C bindings. Their evidence is the boundary
+// record beside the binding (`.jet/bindings/c/c.provenance`), read through the
+// FFI contract: one receipt per obligation, naming its basis and the checker
+// that examined it. The record trusts `exceptions` and `task-thread` and
+// leaves `copy-cost` unknown, so neither binding is verified, and each report
+// states what was checked and what was not.
+use libc: c.c
+
+build: fn(b: Build) {
+    loop binding in b.program.foreign() {
+        checked := [String]{}
+        unverified := [String]{}
+        loop receipt in binding.evidence {
+            assumed: receipt.assumptions.join("; ")
+            if receipt.verified {
+                checked.push("{receipt.name} {receipt.basis} by {receipt.checker}")
+            } else {
+                unverified.push("{receipt.name} {receipt.basis} by {receipt.checker} ({assumed})")
+            }
+        }
+        if !binding.verified {
+            unchecked: unverified.join(", ")
+            examined: checked.join(", ")
+            b.error(binding.span, "FFI01", "`{binding.name}` links `{binding.symbol}` from {binding.artifact} on unchecked evidence: {unchecked}", "{checked.len()} of {binding.evidence.len()} obligations were checked: {examined}", "check the open obligations, then regenerate the binding with `jet inspect bind`")
+        }
+    }
+    app: b.add_executable("app", ["run.jet"], [])
+    b.default(app)
+}
+
+run: fn() {
+    print(libc.strlen("hello, jet"))
+    print(libc.abs(-7))
+}

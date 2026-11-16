@@ -1,0 +1,8 @@
+Error [jet.InvalidAuthorityBlock]: The package's `authority:` block is malformed
+  --> tests/ui/authority_memory_bound_belongs_in_deny.jet:6:5
+    |
+  6 |     authority: { allow: [IO, Mem.Alloc(above: 65536)] }
+    |     ^^^^^^^^^
+ Why: `Mem.Alloc(above:65536)` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there
+ Fix: `authority:` declares `allow`, `deny`, `needs`, `grants`, `trust`, and `providers` using canonical rights
+More: jet-lang.dev/e/E1221

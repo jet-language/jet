@@ -1,0 +1,138 @@
+Error [jet.UntypedEmptyList]: An empty list needs a type
+  --> tests/ui/empty_start_names_next_use.jet:4:14
+    |
+  4 |     names := []
+    |              ^^
+  --> tests/ui/empty_start_names_next_use.jet:5:16
+    |
+  5 |     names.push("Ada")
+    |                ^^^^^ this use makes `names` a `[String]`
+ Why: Line 5 pushes a `String` onto `names`, so `names` is `[String]`
+ Fix: Write `[String]{}`; `jet fix` writes it
+More: jet-lang.dev/e/E0501
+
+Error [jet.UntypedEmptyList]: An empty list needs a type
+  --> tests/ui/empty_start_names_next_use.jet:10:15
+    |
+ 10 |     counts := []
+    |               ^^
+  --> tests/ui/empty_start_names_next_use.jet:11:11
+    |
+ 11 |     counts["ada"] = 1
+    |           ^^^^^^^ this use makes `counts` a `[String:Int]`
+ Why: Line 11 stores an `Int` under a `String` key in `counts`, so `counts` is `[String:Int]`
+ Fix: Write `[String:Int]{}`; `jet fix` writes it
+More: jet-lang.dev/e/E0501
+
+Error [jet.UntypedEmptyList]: An empty list needs a type
+  --> tests/ui/empty_start_names_next_use.jet:16:15
+    |
+ 16 |     scores := []
+    |               ^^
+  --> tests/ui/empty_start_names_next_use.jet:18:49
+    |
+ 18 |         previous := scores.add("round {round}", 2)
+    |                                                 ^ this use makes `scores` a `[String:Int]`
+ Why: Line 18 adds an `Int` under a `String` key to `scores`, so `scores` is `[String:Int]`
+ Fix: Write `[String:Int]{}`; `jet fix` writes it
+More: jet-lang.dev/e/E0501
+
+Error [jet.UntypedEmptyList]: An empty list needs a type
+  --> tests/ui/empty_start_names_next_use.jet:25:14
+    |
+ 25 |     slots := []
+    |              ^^
+  --> tests/ui/empty_start_names_next_use.jet:26:21
+    |
+ 26 |     slots.insert(0, "first")
+    |                     ^^^^^^^ this use makes `slots` a `[String]`
+ Why: Line 26 inserts a `String` into `slots`, so `slots` is `[String]`
+ Fix: Write `[String]{}`; `jet fix` writes it
+More: jet-lang.dev/e/E0501
+
+Error [jet.UntypedNone]: Bare `None` needs a known optional type here
+  --> tests/ui/empty_start_names_next_use.jet:31:13
+    |
+ 31 |     best := None
+    |             ^^^^
+  --> tests/ui/empty_start_names_next_use.jet:32:12
+    |
+ 32 |     best = Val(3)
+    |            ^^^^^ this use makes `best` an `Int?`
+ Why: Line 32 assigns `best` an `Int?`, so `best` is `Int?`
+ Fix: Write `Int?{None}`; `jet fix` writes it
+More: jet-lang.dev/e/E0308
+
+Error [jet.UntypedEmptyList]: An empty list needs a type
+  --> tests/ui/empty_start_names_next_use.jet:37:12
+    |
+ 37 |     ids := []
+    |            ^^
+  --> tests/ui/empty_start_names_next_use.jet:38:23
+    |
+ 38 |     if stop -> return ids
+    |                       ^^^ this use makes `ids` a `[Int]`
+ Why: Line 38 returns `ids` as the function's `[Int]`, so `ids` is `[Int]`
+ Fix: Write `[Int]{}`; `jet fix` writes it
+More: jet-lang.dev/e/E0501
+
+Error [jet.UntypedEmptyList]: An empty list needs a type
+  --> tests/ui/empty_start_names_next_use.jet:43:12
+    |
+ 43 |     ids := []
+    |            ^^
+  --> tests/ui/empty_start_names_next_use.jet:44:5
+    |
+ 44 |     ids
+    |     ^^^ this use makes `ids` a `[Int]`
+ Why: Line 44 gives `ids` as the block's `[Int]` value, so `ids` is `[Int]`
+ Fix: Write `[Int]{}`; `jet fix` writes it
+More: jet-lang.dev/e/E0501
+
+Error [jet.UntypedEmptyList]: An empty list needs a type
+  --> tests/ui/empty_start_names_next_use.jet:50:15
+    |
+ 50 |     values := []
+    |               ^^
+  --> tests/ui/empty_start_names_next_use.jet:51:17
+    |
+ 51 |     print(total(values))
+    |                 ^^^^^^ this use makes `values` a `[Float]`
+ Why: Line 51 passes `values` to `total` as a `[Float]`, so `values` is `[Float]`
+ Fix: Write `[Float]{}`; `jet fix` writes it
+More: jet-lang.dev/e/E0501
+
+Error [jet.UntypedEmptyList]: An empty list needs a type
+  --> tests/ui/empty_start_names_next_use.jet:55:14
+    |
+ 55 |     sizes := []
+    |              ^^
+  --> tests/ui/empty_start_names_next_use.jet:56:17
+    |
+ 56 |     size: total(sizes)
+    |                 ^^^^^ this use makes `sizes` a `[Float]`
+ Why: Line 56 passes `sizes` to `total` as a `[Float]`, so `sizes` is `[Float]`
+ Fix: Write `[Float]{}`; `jet fix` writes it
+More: jet-lang.dev/e/E0501
+
+Error [jet.UntypedNone]: Bare `None` needs a known optional type here
+  --> tests/ui/empty_start_names_next_use.jet:61:14
+    |
+ 61 |     level := None
+    |              ^^^^
+  --> tests/ui/empty_start_names_next_use.jet:62:13
+    |
+ 62 |     level = 2
+    |             ^ this use makes `level` an `Int?`
+ Why: Line 62 assigns `level` an `Int`, so `level` is `Int?`
+ Fix: Write `Int?{None}`; `jet fix` writes it
+More: jet-lang.dev/e/E0308
+
+Error [jet.UntypedEmptyList]: An empty list needs a type
+  --> tests/ui/empty_start_names_next_use.jet:67:14
+    |
+ 67 |     names := []
+    |              ^^
+ Why: Write `[]` only where the list type is already known from around it
+ Fix: Name the element type on the literal: `[T]{}` for a list of `T`
+More: jet-lang.dev/e/E0501

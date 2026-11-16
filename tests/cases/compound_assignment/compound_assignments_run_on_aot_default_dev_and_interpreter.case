@@ -1,0 +1,17 @@
+# Compound assignments to locals and fields (`n += 1`, `p.hp -= amount`), and
+# an expanded indexed one (`xs[0] = xs[0] + 1`, whose compound form is E0164),
+# give the same result on the default run, dev and the AOT build: each prints
+# "80\n".
+fixture: compound_assignments_run_on_aot_default_dev_and_interpreter.fixture
+env: NO_COLOR=1
+step: jet run assignments.jet
+exit: 0
+stdout: = "80\n"
+step: jet dev assignments.jet --watch=off
+exit: 0
+stdout: = "80\n"
+step: jet build assignments.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "80\n"

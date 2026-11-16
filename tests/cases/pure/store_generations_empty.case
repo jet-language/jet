@@ -1,0 +1,10 @@
+# tests/pure.rs::store_generations_empty at tests/pure.rs:699; hand-port
+# Claim: listing generations on a fresh store succeeds (tests/pure.rs:703)
+# Fixture migrated: profile commands are not in the seed jet binary; the Rust Store API maps to jet profile, which the seed rejects
+# Not ported: jet::Store::list_generations Rust API (tests/pure.rs:700-703): replaced by the jet profile generations CLI on a fresh project
+fixture: store_generations_empty.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet profile generations dev --json
+exit: 0 # tests/pure.rs:703

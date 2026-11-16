@@ -1,0 +1,12 @@
+# Port of tests/cli_parts/commands.rs:282-292; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# PENDING-GRAMMAR(batch-four): history filtered line predicates; pure source rustc availability guard erased for Jet-native execution.
+fixture: fixtures/explicit_record_save_still_fails_closed
+requires: os:unix
+mkdir: .jet/records
+chmod: .jet/records 555
+step: jet test --record=keep
+unset: JET_RECEIPT_BYPASS
+exit: != 0 # original predicate
+stderr: ~ "E2105" # original predicate
+chmod: .jet/records 755

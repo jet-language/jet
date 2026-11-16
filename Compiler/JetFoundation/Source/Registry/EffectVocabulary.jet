@@ -1,0 +1,328 @@
+// The effect vocabulary, derived while the compiler builds from the toolchain
+// tree's own effect sources: Compiler/Prelude/Effects.jet
+// (the machine effects), then Core/Effects/Effects.jet (Core's service
+// effects), then Core/Compiler/Meta.jet (the metaprogramming effects). Each
+// declares `Name: struct {` or `Name: enum {` types that implement `Effect`;
+// an enum is a family, each case a `Root.Case` leaf. A family is irreversible
+// when any of its cases is. A Core or Meta effect has a `#FX` or `#FX(…)` line
+// right above it, its entries machine effects: the `kernel` a row naming it
+// may use. A source that breaks this form stops the build (E3010) naming the
+// file and line.
+//
+// The compiler's closed `Effect` type, the machine roots alone, is authored
+// in Registry/EffectRoots.jet and checked against EFFECT_VOCABULARY_MACHINE_ROOTS
+// while the compiler builds; Jetpack's BuildEffect is checked to name only
+// roots of EFFECT_VOCABULARY_ROOTS. Both checks read the authored enum with
+// effect_vocabulary_enum_cases.
+
+EffectVocabularyRow: struct {
+    name: String
+    irreversible: Bool
+    // Empty for a machine effect; for a Core effect, the machine effects
+    // the `#FX(…)` above its declaration lists.
+    kernel: [String]
+}
+
+// Every declared root and leaf, in source order.
+EFFECT_VOCABULARY_ROWS: #run effect_vocabulary_rows(embed_file("toolchain:Compiler/Prelude/Effects.jet"), embed_file("toolchain:Core/Effects/Effects.jet"), embed_file("toolchain:Core/Compiler/Meta.jet"))
+
+// The declared roots, in source order.
+EFFECT_VOCABULARY_ROOTS: #run effect_vocabulary_names(EFFECT_VOCABULARY_ROWS, false)
+
+// The declared leaves (`Root.Member`), in source order.
+EFFECT_VOCABULARY_LEAVES: #run effect_vocabulary_names(EFFECT_VOCABULARY_ROWS, true)
+
+// The roots Compiler/Prelude/Effects.jet declares (the machine roots), in
+// source order.
+EFFECT_VOCABULARY_MACHINE_ROOTS: #run effect_vocabulary_names(effect_vocabulary_source_rows(embed_file("toolchain:Compiler/Prelude/Effects.jet"), EFFECT_VOCABULARY_MACHINE_PATH, None), false)
+
+// The canonical effect module, made while the compiler builds so a compile
+// registers it without parsing it: the three files in order, each without
+// its trailing blank lines, one blank line between them.
+EFFECT_CANONICAL_MODULE: #run effect_vocabulary_canonical_module(embed_file("toolchain:Compiler/Prelude/Effects.jet"), embed_file("toolchain:Core/Effects/Effects.jet"), embed_file("toolchain:Core/Compiler/Meta.jet"))
+
+EFFECT_VOCABULARY_MACHINE_PATH: "Compiler/Prelude/Effects.jet"
+
+// An effect module's text, the byte where each of its lines starts, and the
+// effect declarations it holds (EffectVocabularyScan) with spans into the
+// text.
+EffectModuleSource: struct {
+    source: String
+    line_starts: [Int]
+    decls: [EffectDecl]
+}
+
+effect_vocabulary_canonical_module: fn(machine_source: String, core_source: String, meta_source: String) -> EffectModuleSource {
+    machine_text: machine_source.trim_end()
+    core_text: core_source.trim_end()
+    machine: effect_vocabulary_source_scan(machine_source, EFFECT_VOCABULARY_MACHINE_PATH, None, 0)
+    core_base: machine_text.bytes().len() + 2
+    core: effect_vocabulary_source_scan(core_source, "Core/Effects/Effects.jet", Val(machine.rows), core_base)
+    meta: effect_vocabulary_source_scan(meta_source, "Core/Compiler/Meta.jet", Val(machine.rows), core_base + core_text.bytes().len() + 2)
+    decls := [EffectDecl]{}
+    loop declaration in machine.decls -> decls.push(declaration)
+    loop declaration in core.decls -> decls.push(declaration)
+    loop declaration in meta.decls -> decls.push(declaration)
+    effect_vocabulary_module_source("{machine_text}\n\n{core_text}\n\n{meta_source.trim_end()}\n", decls)
+}
+
+// The effect module of one source written as Compiler/Prelude/Effects.jet
+// is, with no `#FX` lines.
+effect_vocabulary_module: fn(source: String) -> EffectModuleSource {
+    effect_vocabulary_module_source(source, effect_vocabulary_source_scan(source, "the effect source", None, 0).decls)
+}
+
+effect_vocabulary_module_source: fn(source: String, decls: [EffectDecl]) -> EffectModuleSource {
+    line_starts := [Int]{0}
+    loop (index, byte) in source.bytes() {
+        if byte == (U8{10}) -> line_starts.push(index + 1)
+    }
+    EffectModuleSource{source: source, line_starts: line_starts, decls: decls}
+}
+
+// The rows of the three sources, in order.
+effect_vocabulary_rows: fn(machine_source: String, core_source: String, meta_source: String) -> [EffectVocabularyRow] {
+    machine: effect_vocabulary_source_rows(machine_source, EFFECT_VOCABULARY_MACHINE_PATH, None)
+    rows := machine.copy()
+    loop row in effect_vocabulary_source_rows(core_source, "Core/Effects/Effects.jet", Val(machine)) {
+        rows.push(row.copy())
+    }
+    loop row in effect_vocabulary_source_rows(meta_source, "Core/Compiler/Meta.jet", Val(machine)) {
+        loop seen in rows {
+            if seen.name == row.name -> panic("Core/Compiler/Meta.jet: duplicate effect {row.name}")
+        }
+        rows.push(row.copy())
+    }
+    rows
+}
+
+// The effect names that are leaves (`Root.Member`) or, with `leaf` false, roots.
+effect_vocabulary_names: fn(rows: [EffectVocabularyRow], leaf: Bool) -> [String] {
+    out := [String]{}
+    loop row in rows {
+        if row.name.contains(".") == leaf -> out.push(row.name.copy())
+    }
+    out
+}
+
+// The cases of `<type_name>: enum { … }` in `text`: the words of a one-line
+// declaration, or those of a block's lines up to its first blank line (where
+// the enum's methods start) or its closing brace. None when `text` declares
+// no such enum.
+effect_vocabulary_enum_cases: fn(text: String, type_name: String) -> [String]? {
+    head: "{type_name}: enum {{"
+    cases := [String]{}
+    inside := false
+    loop line in text.split("\n") {
+        if inside {
+            if line == "}}" || line.trim() == "" -> return Val(cases)
+            loop word in effect_vocabulary_words(line) -> cases.push(word)
+            next
+        }
+        if !line.starts_with(head) -> next
+        if line.ends_with("}}") && line != head {
+            return Val(effect_vocabulary_words(line.removeprefix(head).removesuffix("}}")))
+        }
+        if line != head -> return None
+        inside = true
+    }
+    if inside -> Val(cases) else -> None
+}
+
+// The names of `found` that `known` does not hold, in `found`'s order.
+effect_vocabulary_strays: fn(found: [String], known: [String]) -> [String] {
+    out := [String]{}
+    loop name in found {
+        if !known.contains(name) -> out.push(name.copy())
+    }
+    out
+}
+
+// The whitespace-separated words of `text`.
+effect_vocabulary_words: fn(text: String) -> [String] {
+    out := [String]{}
+    loop word in text.split(" ") {
+        loop part in word.split("\t") {
+            trimmed: part.trim()
+            if trimmed != "" -> out.push(trimmed)
+        }
+    }
+    out
+}
+
+// The rows one source declares. With `machine` (the rows of
+// Compiler/Prelude/Effects.jet) each type needs its `#FX` line.
+effect_vocabulary_source_rows: fn(source: String, path: String, machine: [EffectVocabularyRow]?) -> [EffectVocabularyRow] {
+    effect_vocabulary_source_scan(source, path, machine, 0).rows
+}
+
+// What one source declares: its rows, and its effect declarations as the
+// parser builds them (parser_finish_effect_type), each type's name and then
+// each case of a family as `Root.Case`, in source order. A declaration's
+// span is its name's, in a text that holds `source` from byte `base`.
+EffectVocabularyScan: struct {
+    rows: [EffectVocabularyRow]
+    decls: [EffectDecl]
+}
+
+effect_vocabulary_source_scan: fn(source: String, path: String, machine: [EffectVocabularyRow]?, base: Int) -> EffectVocabularyScan {
+    rows := [EffectVocabularyRow]{}
+    decls := [EffectDecl]{}
+    lines: source.split("\n").to_list()
+    type_name := ""
+    type_span := Span{start: 0, end: 0}
+    family := false
+    cases := [String]{}
+    case_spans := [Span]{}
+    body := String?{None}
+    impl_seen := false
+    in_impl := false
+    kernel := [String]{}
+    listed := false
+    impl_head: "irreversible: fn(self) -> Bool {{ "
+    offset := base
+    loop index in 0..<lines.len() {
+        raw: lines[index]
+        // The byte where the line's first word starts.
+        start: offset + raw.bytes().len() - raw.trim_start().bytes().len()
+        offset += raw.bytes().len() + 1
+        comment: raw.find(COMMENT_PREFIX)
+        line: (if comment < 0 -> raw.copy() else -> foundation_byte_text(raw.bytes(), 0, comment)).trim()
+        if line == "" -> next
+        fields: effect_vocabulary_words(line)
+        place: "{path}:{index + 1}"
+        if type_name == "" {
+            if machine == .Val(known) {
+                if line == "#FX" && !listed {
+                    kernel = [String]{}
+                    listed = true
+                    next
+                }
+                if line.starts_with("#FX(") && line.ends_with(")") && !listed {
+                    kernel = effect_vocabulary_kernel(line, known, place)
+                    listed = true
+                    next
+                }
+                if !listed {
+                    panic("{place}: expected the `#FX` or `#FX(…)` line above a Core effect")
+                }
+            }
+            if fields.len() != 3 || !fields[0].ends_with(":") || (fields[1] != "struct" && fields[1] != "enum") || fields[2] != "{{" {
+                panic("{place}: expected `Name: struct {{` or `Name: enum {{`")
+            }
+            name: fields[0].removesuffix(":")
+            loop seen in rows {
+                if seen.name == name -> panic("{place}: duplicate effect {name}")
+            }
+            if machine == .Val(known) {
+                loop seen in known {
+                    if seen.name == name {
+                        panic("{place}: `{name}` is already a machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
+                    }
+                }
+            }
+            type_name = name
+            type_span = Span{start: start, end: start + name.bytes().len()}
+            family = fields[1] == "enum"
+            cases = [String]{}
+            case_spans = [Span]{}
+            body = None
+            impl_seen = false
+            next
+        }
+        if in_impl {
+            if line == "}}" {
+                in_impl = false
+                next
+            }
+            if body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") {
+                panic("{place}: expected one `irreversible: fn(self) -> Bool {{ … }}` line in `impl Effect`")
+            }
+            body = Val(line.removeprefix(impl_head).removesuffix(" }}").trim())
+            next
+        }
+        if line == "impl Effect {{}}" || line == "impl Effect {{" {
+            if impl_seen -> panic("{place}: `{type_name}` has a second `impl Effect` block")
+            impl_seen = true
+            in_impl = line == "impl Effect {{"
+            next
+        }
+        if line == "}}" {
+            if !impl_seen -> panic("{place}: `{type_name}` has no `impl Effect` block")
+            if family && cases.len() == 0 {
+                panic("{place}: the effect family `{type_name}` has no cases")
+            }
+            case_rows := [EffectVocabularyRow]{}
+            any := false
+            loop member in cases {
+                irreversible: effect_vocabulary_fact(body, cases, Val(member)) ?? panic("{place}: `{type_name}`'s `irreversible` body is not `true`, `false`, `self == .Case` or an `||` of those")
+                if irreversible -> any = true
+                case_rows.push(EffectVocabularyRow{name: "{type_name}.{member}", irreversible: irreversible, kernel: kernel.copy()})
+            }
+            root := any
+            if !family {
+                root = effect_vocabulary_fact(body, cases, None) ?? panic("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`")
+            }
+            rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy()})
+            decls.push(EffectDecl{name: "{type_name}", name_span: type_span, irreversible: root, span: type_span})
+            loop (at, row) in case_rows {
+                decls.push(EffectDecl{name: "{row.name}", name_span: case_spans[at], irreversible: row.irreversible, span: case_spans[at]})
+                rows.push(row.copy())
+            }
+            type_name = ""
+            kernel = [String]{}
+            listed = false
+            next
+        }
+        if !family || fields.len() != 1 || impl_seen {
+            panic("{place}: expected an effect family case name, `impl Effect` or `}}`")
+        }
+        if cases.contains(line) -> panic("{place}: duplicate effect {type_name}.{line}")
+        case_spans.push(Span{start: start, end: start + line.bytes().len()})
+        cases.push(line)
+    }
+    if type_name != "" -> panic("{path}: `{type_name}` is not closed")
+    if rows.len() == 0 -> panic("{path} declares no effects")
+    EffectVocabularyScan{rows: rows, decls: decls}
+}
+
+// The machine effects of a `#FX(…)` line above a Core effect: each entry a
+// root or leaf of `machine`, listed once.
+effect_vocabulary_kernel: fn(line: String, machine: [EffectVocabularyRow], place: String) -> [String] {
+    kernel := [String]{}
+    loop part in line.removeprefix("#FX(").removesuffix(")").split(",") {
+        entry: part.trim()
+        known := false
+        loop row in machine {
+            if row.name == entry -> known = true
+        }
+        if !known {
+            panic("{place}: `{entry}` is no machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
+        }
+        if kernel.contains(entry) -> panic("{place}: `{entry}` is listed twice")
+        kernel.push(entry)
+    }
+    if kernel.len() == 0 -> panic("{place}: the `#FX(…)` line lists no machine effect")
+    kernel
+}
+
+// An `irreversible` body's value for one case (None for a struct), or None
+// when the body is not the effect fact form. No body is `false`.
+effect_vocabulary_fact: fn(body: String?, cases: [String], member: String?) -> Bool? {
+    written: body ?? return Val(false)
+    holds := false
+    loop part in written.split("||") {
+        term: part.trim()
+        if {
+            term == "true" -> holds = true
+            term == "false" -> {}
+            term.starts_with("self == .") -> {
+                named: term.removeprefix("self == .")
+                if member == None || !cases.contains(named) -> return None
+                if member == .Val(case_name) && case_name == named -> holds = true
+            }
+            else -> return None
+        }
+    }
+    Val(holds)
+}

@@ -1,0 +1,35 @@
+sema_function_types_compatible: fn(required: Type, offered: Type) -> Bool Never! {
+    required_normalized: type_with_effective_fn_returns(required)
+    offered_normalized: type_with_effective_fn_returns(offered)
+    if required_normalized == {
+        .Fn(required_params, required_ret, required_effects, _, _, _) -> {
+            if offered_normalized == {
+                .Fn(offered_params, offered_ret, offered_effects, _, _, _) -> {
+                    if required_params.len() != offered_params.len() -> return false
+                    loop (index, required_param) in required_params {
+                        if !sema_type_carrier_compatible(required_param, offered_params[index]) {
+                            return false
+                        }
+                    }
+                    // A callable that never returns (`-> Never`: it panics,
+                    // exits or loops) fits any return slot; no caller ever
+                    // reads its result.
+                    return_compatible: if sema_fn_return_is_never(offered_ret) -> true else -> if required_ret == {
+                        .Val(required_value) -> if offered_ret == {
+                            .Val(offered_value) -> sema_type_carrier_compatible(required_value, offered_value) || sema_never_failing_return_fits(required_value, offered_value)
+                            .None -> type_is_unit_callable_return(required_value)
+                        }
+                        .None -> if offered_ret == {
+                            .Val(offered_value) -> type_is_unit_callable_return(offered_value)
+                            .None -> true
+                        }
+                    }
+                    return return_compatible && sema_effect_bound_compatible(required_effects, offered_effects)
+                }
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    false
+}

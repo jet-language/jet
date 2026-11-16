@@ -1,0 +1,10 @@
+// D-TAIL-CALL1=A: compile-time code runs tail calls as jumps too, so a
+// `#run` walk 10 million deep folds to its value.
+walk: fn(n: Int, acc: Int) -> Int {
+    if n == 0 -> return acc
+    walk(n - 1, acc + n)
+}
+
+W: #run walk(10000000, 0)
+
+run: fn() { print(W) }

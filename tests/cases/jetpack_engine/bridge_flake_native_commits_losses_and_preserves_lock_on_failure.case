@@ -1,0 +1,22 @@
+# HAND-PORT tests/jetpack_engine.rs:7194-7255 bridge_flake_native_commits_losses_and_preserves_lock_on_failure
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: bridge_flake_native_commits_losses_and_preserves_lock_on_failure.fixture
+env: NO_COLOR=1
+mkdir: project
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout: ~ "packages: [fd]" # original contains predicate
+stderr: ~ "L0204" # original contains predicate
+stderr: ~ "shellHook" # original contains predicate
+file: project/.jet/lock ~ "shellHook" # original contains predicate
+copy: project/.jet/lock before.lock
+copy: failure.nix project/flake.nix
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 1
+stderr: ~ "E1256" # original contains predicate
+file: project/.jet/lock == before.lock
+

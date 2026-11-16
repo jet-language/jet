@@ -1,0 +1,13 @@
+# `impl Trait using field` in a struct body delegates the trait to the field,
+# formats unchanged, and its field is checked like a top-level delegation's.
+fixture: nested_using_delegates.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "b\nhello b\nhello b hello b\n"
+step: jet fmt --check main.jet
+exit: 0 # the `using` head prints back as written
+step: jet check bad.jet
+exit: 1
+stderr: ~ "`Outer` has no field `missing`" # E2401 names the missing field
+stderr: ~ "`Inner` doesn't implement `Greet`, so it can't delegate" # E2401 names the field type

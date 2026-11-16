@@ -1,0 +1,9 @@
+# Port of tests/output_callable.rs:606-640; source and original record predicate verbatim.
+# PENDING-SAME-HEAD; have_rustc guard erased. Partial record predicate is exactly the original contains.
+fixture: service_edge_emits_one_structured_report_record.fixture
+env: NO_COLOR=1
+step: jet run --output api main.jet
+exit: 1
+stderr.filter(^= "{"): lines = 1 # original records.len() == 1
+stderr.filter(^= "{"): ~ "{\"target\":\"service\",\"report\":\"Error [SVC503]: service unavailable\\n\"}" # original records[0].contains predicate
+stdout: empty

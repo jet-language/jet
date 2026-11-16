@@ -1,0 +1,10 @@
+# PORT tests/structural_merge.rs::structural_merge_composes_disjoint_edits_and_rechecks_output
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: structural_merge_composes_disjoint_edits_and_rechecks_output.fixture
+step: jet merge --structural {work}/base.jet {work}/ours.jet {work}/theirs.jet --out {work}/merged.jet
+exit: 0
+file: merged.jet ~ "return 10" # Original contains predicate.
+file: merged.jet ~ "return 20" # Original contains predicate.
+file: merged.jet ~ "retained file header" # Original contains predicate.
+step: jet check {work}/merged.jet
+exit: 0

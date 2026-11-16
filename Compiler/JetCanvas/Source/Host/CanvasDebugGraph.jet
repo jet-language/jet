@@ -1,0 +1,110 @@
+// Where a Canvas debug stop sits on the graph: the graph document's node and
+// wires whose source spans touch the stopped line. The dev loop (JetCli
+// CanvasDebug.jet) places each stop on the graph of the source it ran.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[Span, foundation_json_integer, foundation_json_parse]
+}
+
+// At most this many wires on one stop's path.
+CANVAS_DEBUG_MAX_WIRE_PATH: 64
+
+// The narrowest node whose span touches the stop, the graph that holds it,
+// and the wires whose spans touch it (at most CANVAS_DEBUG_MAX_WIRE_PATH).
+// Every id is "" or empty when the graph is not of the stopped revision.
+CanvasDebugPlace: struct {
+    graph_id: String
+    node_id: String
+    wire_ids: [String]
+    wires_truncated: Bool
+}
+
+CanvasDebugRecord: struct {
+    id: String
+    span: Span
+}
+
+// The place of `active` on the last good graph, when that graph is of
+// `revision`.
+canvas_host_debug_place: fn(state: Shared<CanvasHostState>, revision: String, active: Span) -> CanvasDebugPlace {
+    place := CanvasDebugPlace{graph_id: "", node_id: "", wire_ids: [String]{}, wires_truncated: false}
+    root: canvas_debug_graph_root(state, revision) ?? return place
+    nodes := [CanvasDebugRecord]{}
+    canvas_debug_records(root, "node_id", nodes)
+    wires := [CanvasDebugRecord]{}
+    canvas_debug_records(root, "wire_id", wires)
+    width := -1
+    loop node in nodes {
+        if !spans_touch(node.span, active) -> next
+        span_width: if node.span.end > node.span.start -> node.span.end - node.span.start else -> 0
+        if width >= 0 && span_width >= width -> next
+        width = span_width
+        place.node_id = node.id
+    }
+    loop wire in wires {
+        if !spans_touch(wire.span, active) || place.wire_ids.contains(wire.id) -> next
+        if place.wire_ids.len() >= CANVAS_DEBUG_MAX_WIRE_PATH {
+            place.wires_truncated = true
+            break
+        }
+        place.wire_ids.push(wire.id)
+    }
+    place.graph_id = canvas_debug_graph_id(place.node_id)
+    place
+}
+
+// The last good graph document, parsed, when it is of `revision`.
+canvas_debug_graph_root: fn(state: Shared<CanvasHostState>, revision: String) -> Dyn? {
+    permit: state.guard_read()
+    if permit.value.version == 0 || permit.value.accepted_revision != revision -> return None
+    if foundation_json_parse(permit.value.graph) == {
+        .Ok(root) -> Val(root)
+        .Err(_) -> None
+    }
+}
+
+// Every object under `value` that carries a string `id_key` and a
+// `source_span` object, in document order.
+canvas_debug_records: fn(value: Dyn, id_key: String, records: &[CanvasDebugRecord]) Never! {
+    if value == {
+        .Object(members) -> {
+            id := String?{None}
+            span := Span?{None}
+            loop member in members {
+                if member.key == id_key && member.value == .Text(text) -> id = Val(text)
+                if member.key == "source_span" -> span = canvas_debug_span(member.value)
+            }
+            if id == .Val(found) && span == .Val(range) {
+                records.push(CanvasDebugRecord{id: found, span: range})
+            }
+            loop member in members -> canvas_debug_records(member.value, id_key, records)
+        }
+        .Array(items) -> {
+            loop item in items -> canvas_debug_records(item, id_key, records)
+        }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
+    }
+}
+
+canvas_debug_span: fn(value: Dyn) -> Span? Never! {
+    if value == .Object(members) {
+        start := Int?{None}
+        end := Int?{None}
+        loop member in members {
+            if member.key == "start" -> start = foundation_json_integer(member.value)
+            if member.key == "end" -> end = foundation_json_integer(member.value)
+        }
+        if start == .Val(first) && end == .Val(last) -> return Val(Span{start: first, end: last})
+    }
+    None
+}
+
+// The graph a node id names: the id before its `:entry`, `:stmt:` or
+// `:expr:` part.
+canvas_debug_graph_id: fn(node_id: String) -> String Never! {
+    markers: [String]{":entry", ":stmt:", ":expr:"}
+    loop marker in markers {
+        if node_id.split_once(marker) == .Val(parts) -> return parts.before
+    }
+    ""
+}

@@ -1,0 +1,9 @@
+// A released walk slot panics instead of reading its freed path.
+use files: jet.runtime.files
+
+run: fn() -[IO, FS]> {
+    key: files.walk_context("walktree", "", false)
+    ancestors: files.walk_ancestors(key, 0)
+    loop ancestor in ancestors -> files.walk_release(key, ancestor)
+    loop ancestor in ancestors -> print(files.walk_shown(key, ancestor))
+}

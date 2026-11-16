@@ -1,0 +1,18 @@
+# D-DX-QUEUE1=A: a package authority file that grants group or other access is
+# refused with a typed ServiceError.Policy and is never overwritten.
+fixture: job_queue_refuses_a_shared_authority_file.fixture
+env: NO_COLOR=1
+env: JET_JOB_QUEUE_DB={work}/state/jobs.db
+step: jet run main.jet
+exit: 0
+stdout: = "before:0\nafter:1\n"
+step: chmod 644 state/jobs.db.authority
+exit: 0
+step: jet run main.jet
+exit: 0
+stdout: ~ "refused: job queue authority `" # the typed ServiceError.Policy text names the file
+stdout: ~ "jobs.db.authority` is readable or writable by group or others; restrict it with `chmod 600` or remove it" # and how to fix it
+stdout: !~ "before:" # the queue never opens
+step: stat -c %a state/jobs.db.authority
+exit: 0
+stdout: ~ "644" # the refused file is left as it was, never overwritten

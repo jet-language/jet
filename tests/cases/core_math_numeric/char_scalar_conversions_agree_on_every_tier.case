@@ -1,0 +1,13 @@
+# Char.from_u32 accepts every Unicode scalar value,
+# including 0 and noncharacters, and is None for a surrogate or a word above
+# 0x10FFFF; U32.from_char never fails and round-trips. The default and the
+# release tiers agree.
+fixture: char_scalar_conversions_agree_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "0 -> 0\n65 -> 65\n55295 -> 55295\n55296 -> None\n57343 -> None\n57344 -> 57344\n65534 -> 65534\n1114111 -> 1114111\n1114112 -> None\n4294967295 -> None\n97\n128512\n233\né\n"
+step: jet run --release main.jet
+exit: 0
+stdout: = "0 -> 0\n65 -> 65\n55295 -> 55295\n55296 -> None\n57343 -> None\n57344 -> 57344\n65534 -> 65534\n1114111 -> 1114111\n1114112 -> None\n4294967295 -> None\n97\n128512\n233\né\n"

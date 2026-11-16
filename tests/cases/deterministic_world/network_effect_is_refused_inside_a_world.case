@@ -1,0 +1,14 @@
+# A world has no controlled network provider, so a TCP connect inside
+# testing.world stops the program before any socket is opened.
+fixture: network_effect_is_refused_inside_a_world.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 70
+stdout: = "before world\n"
+stderr: ~ "panic: deterministic world has no controlled network provider" # the stop report wraps the runtime refusal in E3001 text
+step: jet build main.jet
+exit: 0
+step: built
+exit: 70
+stdout: = "before world\n"
+stderr: ~ "panic: deterministic world has no controlled network provider" # the stop report wraps the runtime refusal in E3001 text

@@ -1,0 +1,29 @@
+# core.testing (D-TESTKIT1): a snap mismatch reports `snapshot differs` with golden's bounded unified diff; `jet test -u` writes a missing golden file, parent folders included, and a plain run then passes against it.
+fixture: testing_golden_update_writes_and_snap_mismatch_reports_its_diff.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+
+step snap: jet test snap.jet
+cwd: snap
+exit: nonzero # the mismatched snapshot fails its test
+stderr: ~ "snapshot differs: case" # the failure names the snapshot
+stderr: ~ "--- expected __snapshots__/case.snap" # the diff header names the stored file
+stderr: ~ "-expected\n+actual\n" # the bounded unified diff body
+file: snap/__snapshots__/case.snap ~ "expected\n" # a plain run leaves the snapshot alone
+
+step missing: jet test gold.jet
+cwd: gold
+exit: nonzero # without -u a missing golden file fails
+stderr: ~ "golden file is missing: expected/nested/gold.out" # the failure names the missing file
+file: gold/expected/nested/gold.out absent # and nothing is written
+
+step update: jet test -u gold.jet
+cwd: gold
+exit: 0 # -u writes the golden file and passes
+file: gold/expected/nested/gold.out ~ "written\n" # the value lands under the new parent folders
+
+step check: jet test gold.jet
+cwd: gold
+exit: 0 # the written file now matches

@@ -1,0 +1,11 @@
+# Port of tests/source_import.rs:744-766; original sources and every predicate retained.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: javascript_import_does_not_rewrite_foreign_names_inside_strings.fixture
+mkdir: python/app
+step: jet import js javascript/app
+exit: 0
+file: jet/app/labels.jet ~ "return \"console.log(\"" # original predicate
+file: javascript/app/labels.js = labels.js.bytes
+step: jet run jet/app/labels.jet
+exit: 0
+stdout: = labels.out

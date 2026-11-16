@@ -1,0 +1,19 @@
+// Let-bound static text and static data: literals and pure calls a build
+// computes ahead of time. Each prints the same length as the direct argument.
+greeting: fn() -> String { "computed ahead" }
+
+digits: fn() -> [Int] { [Int]{3, 1, 4, 1, 5} }
+
+run: fn() {
+    text: "let-bound"
+    print("let {text.len()} {text}")
+    print("direct {"let-bound".len()}")
+    folded: greeting()
+    print("let call {folded.len()} {folded}")
+    print("direct call {greeting().len()}")
+    empty: ""
+    print("let empty {empty.len()}")
+    list: digits()
+    print("let list {list.len()}")
+    print("direct list {digits().len()}")
+}

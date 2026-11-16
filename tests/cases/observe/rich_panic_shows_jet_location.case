@@ -1,0 +1,28 @@
+# tests/observe.rs::rich_panic_shows_jet_location at tests/observe.rs:219; hand-port
+# Claim: exit 70 (tests/observe.rs:238)
+# Claim: header `Stop [E3001]: `panic: must be positive`` followed by a newline (tests/observe.rs:240)
+# Claim: the function name `in check` is shown (tests/observe.rs:245)
+# Claim: the source line `assert(n > 0` is shown (tests/observe.rs:250)
+# Claim: a caret `^` is shown (tests/observe.rs:254)
+# Claim: no raw Rust panic banner (tests/observe.rs:256)
+# Not ported: interpreter tier (Rust loop native/default/interpret, tests/observe.rs:233-237): `jet run --interpret` is E2102 on the seed (reported by IRC); not a CLI step. The Rust "native" tier is mapped to `jet run --profile=debug` [INFERENCE]
+fixture: rich_panic_shows_jet_location.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run rich_panic.jet
+exit: 70 # tests/observe.rs:225-259 default tier
+stderr: ~ "Stop [E3001]: `panic: must be positive`" # tests/observe.rs:225-259 default tier
+stderr: ~ "in check" # tests/observe.rs:225-259 default tier
+stderr: ~ "assert(n > 0" # tests/observe.rs:225-259 default tier
+stderr: ~ "^" # tests/observe.rs:225-259 default tier
+stderr: !~ "panicked at" # tests/observe.rs:225-259 default tier
+stderr: !~ "thread 'main' panicked" # tests/observe.rs:225-259 default tier
+step: jet run --profile=debug rich_panic.jet
+exit: 70 # tests/observe.rs:225-259 debug tier (stands in for native)
+stderr: ~ "Stop [E3001]: `panic: must be positive`" # tests/observe.rs:225-259 debug tier (stands in for native)
+stderr: ~ "in check" # tests/observe.rs:225-259 debug tier (stands in for native)
+stderr: ~ "assert(n > 0" # tests/observe.rs:225-259 debug tier (stands in for native)
+stderr: ~ "^" # tests/observe.rs:225-259 debug tier (stands in for native)
+stderr: !~ "panicked at" # tests/observe.rs:225-259 debug tier (stands in for native)
+stderr: !~ "thread 'main' panicked" # tests/observe.rs:225-259 debug tier (stands in for native)

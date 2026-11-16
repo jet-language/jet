@@ -1,0 +1,621 @@
+{
+  "version": 1,
+  "approved": "owner chat 2026-08-27: seed matrix approved; net-services and long-lived web app mandatory coverage; systems-embedded may stay uncovered for now; zig+go rails added to flake; nbody expert pair in seed",
+  "personas": [
+    {
+      "id": "novice",
+      "name": "True novice",
+      "description": "First programming language; no prior mental model."
+    },
+    {
+      "id": "student",
+      "name": "Student",
+      "description": "One semester of another language; knows variables and loops."
+    },
+    {
+      "id": "generalist",
+      "name": "Working generalist",
+      "description": "Product engineer shipping features across the stack."
+    },
+    {
+      "id": "switcher-py",
+      "name": "Python switcher",
+      "description": "Fluent Python; expects batteries and low ceremony."
+    },
+    {
+      "id": "switcher-sys",
+      "name": "Systems switcher",
+      "description": "Rust/C engineer; expects control, predictable performance, and auditability."
+    },
+    {
+      "id": "analyst",
+      "name": "Data analyst",
+      "description": "Code is a tool, not the job; exploration and one-shot answers."
+    },
+    {
+      "id": "agent",
+      "name": "Unattended coding agent",
+      "description": "Closed loop with a machine oracle: read, edit, check, repeat. Authoring cost and diagnostics-hit are its metrics."
+    }
+  ],
+  "domains": [
+    {
+      "id": "text",
+      "name": "Text processing"
+    },
+    {
+      "id": "formats",
+      "name": "Data formats (JSON, CSV, binary)"
+    },
+    {
+      "id": "numerics",
+      "name": "Numerics and math"
+    },
+    {
+      "id": "files",
+      "name": "Files and automation"
+    },
+    {
+      "id": "time",
+      "name": "Time and calendars"
+    },
+    {
+      "id": "concurrency",
+      "name": "Concurrency and parallelism"
+    },
+    {
+      "id": "cli",
+      "name": "CLI tooling"
+    },
+    {
+      "id": "webfront",
+      "name": "Web frontend"
+    },
+    {
+      "id": "netserv",
+      "name": "Networked services"
+    },
+    {
+      "id": "embedded",
+      "name": "Systems and embedded"
+    },
+    {
+      "id": "games",
+      "name": "Games"
+    }
+  ],
+  "taskKinds": [
+    "application",
+    "cli",
+    "service",
+    "web",
+    "embedded",
+    "data-numeric",
+    "scripting",
+    "notebook"
+  ],
+  "cells": [
+    {
+      "id": "text.kernel",
+      "domain": "text",
+      "kind": "data-numeric",
+      "personas": [
+        "switcher-sys",
+        "generalist",
+        "agent"
+      ],
+      "description": "String/hash-heavy kernels: frequency counts, scanning."
+    },
+    {
+      "id": "text.regex-kernel",
+      "domain": "text",
+      "kind": "data-numeric",
+      "personas": [
+        "switcher-sys",
+        "agent"
+      ],
+      "description": "Regex-driven scanning over large text."
+    },
+    {
+      "id": "text.regex-find-all-large",
+      "domain": "text",
+      "kind": "data-numeric",
+      "personas": [
+        "switcher-sys",
+        "agent"
+      ],
+      "description": "Full-buffer repeated regex find-all over a deterministic large corpus."
+    },
+    {
+      "id": "text.report-cli",
+      "domain": "text",
+      "kind": "cli",
+      "personas": [
+        "generalist",
+        "agent"
+      ],
+      "description": "Stream a large log, aggregate, render a report."
+    },
+    {
+      "id": "text.script",
+      "domain": "text",
+      "kind": "scripting",
+      "personas": [
+        "student",
+        "switcher-py"
+      ],
+      "description": "One-shot text munging."
+    },
+    {
+      "id": "formats.binary-kernel",
+      "domain": "formats",
+      "kind": "data-numeric",
+      "personas": [
+        "switcher-sys",
+        "agent"
+      ],
+      "description": "Binary record parsing and checksums."
+    },
+    {
+      "id": "formats.csv-cli",
+      "domain": "formats",
+      "kind": "cli",
+      "personas": [
+        "generalist",
+        "analyst",
+        "agent"
+      ],
+      "description": "CSV filter/aggregate/emit pipeline."
+    },
+    {
+      "id": "formats.json-app",
+      "domain": "formats",
+      "kind": "application",
+      "personas": [
+        "generalist",
+        "agent"
+      ],
+      "description": "JSON-backed persistent application state."
+    },
+    {
+      "id": "numerics.float-kernel",
+      "domain": "numerics",
+      "kind": "data-numeric",
+      "personas": [
+        "switcher-sys",
+        "student",
+        "agent"
+      ],
+      "description": "Floating-point simulation kernels (n-body class)."
+    },
+    {
+      "id": "numerics.fft",
+      "domain": "numerics",
+      "kind": "data-numeric",
+      "personas": [
+        "analyst",
+        "switcher-sys",
+        "agent"
+      ],
+      "description": "Forward FFT with a fully materialized and validated complex spectrum."
+    },
+    {
+      "id": "numerics.tensor-map",
+      "domain": "numerics",
+      "kind": "data-numeric",
+      "personas": [
+        "analyst",
+        "switcher-py",
+        "agent"
+      ],
+      "description": "Dense elementwise tensor mapping with independent inputs and a complete output checksum."
+    },
+    {
+      "id": "numerics.int-kernel",
+      "domain": "numerics",
+      "kind": "data-numeric",
+      "personas": [
+        "switcher-sys",
+        "student",
+        "agent"
+      ],
+      "description": "Integer/array kernels (sieve class)."
+    },
+    {
+      "id": "numerics.script",
+      "domain": "numerics",
+      "kind": "scripting",
+      "personas": [
+        "analyst",
+        "switcher-py"
+      ],
+      "description": "Descriptive statistics as a one-shot script."
+    },
+    {
+      "id": "numerics.notebook",
+      "domain": "numerics",
+      "kind": "notebook",
+      "personas": [
+        "analyst"
+      ],
+      "description": "Exploratory incremental analysis loop."
+    },
+    {
+      "id": "files.script",
+      "domain": "files",
+      "kind": "scripting",
+      "personas": [
+        "novice",
+        "switcher-py",
+        "agent"
+      ],
+      "description": "Glob/walk/rename bulk file automation."
+    },
+    {
+      "id": "files.orchestration",
+      "domain": "files",
+      "kind": "application",
+      "personas": [
+        "generalist",
+        "agent"
+      ],
+      "description": "Process spawning, pipelines, timeouts."
+    },
+    {
+      "id": "time.script",
+      "domain": "time",
+      "kind": "scripting",
+      "personas": [
+        "generalist",
+        "analyst"
+      ],
+      "description": "Timezone/duration/calendar computation."
+    },
+    {
+      "id": "time.notebook",
+      "domain": "time",
+      "kind": "notebook",
+      "personas": [
+        "analyst"
+      ],
+      "description": "Interactive calendar exploration."
+    },
+    {
+      "id": "concurrency.app",
+      "domain": "concurrency",
+      "kind": "application",
+      "personas": [
+        "switcher-sys",
+        "generalist",
+        "agent"
+      ],
+      "description": "Structured task fan-out over real work."
+    },
+    {
+      "id": "concurrency.service",
+      "domain": "concurrency",
+      "kind": "service",
+      "personas": [
+        "switcher-sys",
+        "agent"
+      ],
+      "description": "Long-lived concurrent worker (queue/scheduler)."
+    },
+    {
+      "id": "cli.app",
+      "domain": "cli",
+      "kind": "cli",
+      "personas": [
+        "novice",
+        "generalist",
+        "agent"
+      ],
+      "description": "Typed-args CRUD CLI application."
+    },
+    {
+      "id": "cli.hello",
+      "domain": "cli",
+      "kind": "scripting",
+      "personas": [
+        "novice",
+        "generalist",
+        "agent"
+      ],
+      "description": "The smallest script: time from `jet run` to its one-line answer."
+    },
+    {
+      "id": "webfront.widget",
+      "domain": "webfront",
+      "kind": "web",
+      "personas": [
+        "student",
+        "generalist"
+      ],
+      "description": "Finite wasm widget with JS bridge."
+    },
+    {
+      "id": "webfront.app",
+      "domain": "webfront",
+      "kind": "application",
+      "personas": [
+        "generalist",
+        "agent"
+      ],
+      "description": "Long-lived interactive DOM application."
+    },
+    {
+      "id": "netserv.client",
+      "domain": "netserv",
+      "kind": "cli",
+      "personas": [
+        "generalist",
+        "agent"
+      ],
+      "description": "HTTP client: fetch, parse, report."
+    },
+    {
+      "id": "netserv.service",
+      "domain": "netserv",
+      "kind": "service",
+      "personas": [
+        "generalist",
+        "switcher-sys",
+        "agent"
+      ],
+      "description": "Long-lived HTTP JSON service under load."
+    },
+    {
+      "id": "embedded.kernel",
+      "domain": "embedded",
+      "kind": "embedded",
+      "personas": [
+        "switcher-sys"
+      ],
+      "description": "Resource-bounded systems target."
+    },
+    {
+      "id": "embedded.data",
+      "domain": "embedded",
+      "kind": "data-numeric",
+      "personas": [
+        "switcher-sys"
+      ],
+      "description": "Fixed-memory data processing."
+    },
+    {
+      "id": "games.frame",
+      "domain": "games",
+      "kind": "application",
+      "personas": [
+        "generalist",
+        "switcher-sys",
+        "agent"
+      ],
+      "description": "2D game frame loop on a software canvas: tiles, translucent sprites, HUD text."
+    }
+  ],
+  "rails": {
+    "always": [
+      "rust",
+      "python",
+      "node"
+    ],
+    "perf": [
+      "c",
+      "zig"
+    ],
+    "run": [
+      "lua",
+      "luajit",
+      "python",
+      "node"
+    ],
+    "incumbents": {
+      "webfront": "js",
+      "netserv": "go"
+    }
+  },
+  "metric_applicability": {
+    "default": "required",
+    "not_applicable": "explicit_structural_reason",
+    "missing": "unmeasured_and_publication_blocked"
+  },
+  "strict_performance_policy": {
+    "schema": "jet.strict-performance-policy.v3",
+    "id": "AGENTS.md#strict-performance-gate",
+    "version": 3,
+    "comparison": "per_cell_and_metric",
+    "comparators": {
+      "win": "<1",
+      "loss": ">=1"
+    },
+    "failure_statuses": [
+      "missing",
+      "wrong",
+      "unavailable",
+      "uncovered",
+      "mismatched",
+      "inconclusive"
+    ],
+    "foundations": [
+      {
+        "id": "numerics",
+        "required": true,
+        "cells": [
+          "numerics.float-kernel",
+          "numerics.fft",
+          "numerics.tensor-map",
+          "numerics.int-kernel"
+        ],
+        "metrics": "all"
+      },
+      {
+        "id": "text",
+        "required": true,
+        "cells": [
+          "text.kernel",
+          "text.regex-kernel",
+          "text.regex-find-all-large",
+          "text.report-cli",
+          "text.script"
+        ],
+        "metrics": "all"
+      },
+      {
+        "id": "files",
+        "required": true,
+        "cells": [
+          "files.script",
+          "files.orchestration"
+        ],
+        "metrics": "all"
+      },
+      {
+        "id": "concurrency",
+        "required": true,
+        "cells": [
+          "concurrency.app",
+          "concurrency.service"
+        ],
+        "metrics": "all"
+      },
+      {
+        "id": "networking",
+        "required": true,
+        "cells": [
+          "netserv.client",
+          "netserv.service"
+        ],
+        "metrics": "all"
+      },
+      {
+        "id": "build_time",
+        "required": true,
+        "cells": "all",
+        "metrics": [
+          "cold_build_seconds",
+          "warm_build_seconds"
+        ]
+      },
+      {
+        "id": "run_time",
+        "required": true,
+        "cells": "all",
+        "metrics": "runtime"
+      }
+    ],
+    "critical_areas": [
+      {
+        "id": "web",
+        "required": true,
+        "cells": [
+          "webfront.widget",
+          "webfront.app"
+        ],
+        "metrics": "all"
+      },
+      {
+        "id": "games",
+        "required": false,
+        "activation": "first_party_battery",
+        "cells": [],
+        "metrics": "all"
+      },
+      {
+        "id": "cli_and_scripts",
+        "required": true,
+        "cells": [
+          "cli.app",
+          "cli.hello",
+          "text.report-cli",
+          "text.script",
+          "formats.csv-cli",
+          "files.script"
+        ],
+        "metrics": "all"
+      },
+      {
+        "id": "data_analysis",
+        "required": true,
+        "cells": [
+          "formats.csv-cli",
+          "numerics.script",
+          "numerics.notebook"
+        ],
+        "metrics": "all"
+      },
+      {
+        "id": "backend_services",
+        "required": true,
+        "cells": [
+          "concurrency.service",
+          "netserv.service"
+        ],
+        "metrics": "all"
+      },
+      {
+        "id": "ai_ml_applications",
+        "required": false,
+        "activation": "first_party_battery",
+        "cells": [],
+        "metrics": "all"
+      },
+      {
+        "id": "gui_applications",
+        "required": false,
+        "activation": "first_party_battery",
+        "cells": [],
+        "metrics": "all"
+      },
+      {
+        "id": "embedded",
+        "required": true,
+        "cells": [
+          "embedded.kernel",
+          "embedded.data"
+        ],
+        "metrics": "all"
+      }
+    ],
+    "first_party_battery_required": true,
+    "historical_receipts": "immutable_recorded_policy",
+    "ceiling": {
+      "stages": [
+        {
+          "id": "peer_floor",
+          "role": "initial",
+          "against": "every_matched_peer",
+          "comparators": {
+            "win": "<1",
+            "loss": ">=1"
+          }
+        },
+        {
+          "id": "machine_ceiling",
+          "role": "final",
+          "against": "hand_written_machine_code",
+          "comparators": {
+            "meet": "<=1",
+            "miss": ">1"
+          }
+        }
+      ],
+      "closes_cell": "peer_floor",
+      "peer_win_closes_cell": true,
+      "ceiling_gate": "reported_until_hill_climbing_opens",
+      "required_cells": "every_required_cell",
+      "metrics": {
+        "runtime": "cycles",
+        "latency": "cycles",
+        "binary": "bytes"
+      },
+      "references": "Tools/perf/asm-parity/cells.json",
+      "reference_source": "ref.S",
+      "reference_link": "gauntlet",
+      "missing_reference": "uncovered",
+      "reference_technique": "best_known_for_the_workload",
+      "better_technique": "replaces_reference_and_raises_target"
+    },
+    "text": "Jet's performance target has two stages. The first stage is the peer floor, and it is a hard, structural requirement: a Jet program must be faster and use less peak memory than the same program in every other language. Jet/peer must be below `1.00` for every matched peer, for each required cell and for both wall time and peak memory. Rust is judged like every other peer, with no parity band. A loss to any peer on either metric is a codegen, runtime or Core failure. It is fixed generally and structurally, so that any Jet program beats the other languages, never only the measured one. The second and final stage is the machine ceiling: hand-written, maximally optimized machine code for the same workload, which Jet must match or beat in both cycles and bytes (Jet/ceiling at most `1.00`). Jet aims as close to the ceiling as it can. Closing the remaining ceiling gap is the hill-climbing stage: until the owner opens it, a cell passes the gate on the peer floor, and its ceiling ratio is measured and reported but does not fail the gate.\n\nEvery required cell needs a ceiling reference: an asm-parity cell (Tools/perf/asm-parity) that names its gauntlet cell and does the work with the best known technique for the workload (SIMD, algorithmic, or syscall-level), not a naive transliteration. A cell without a reference is uncovered and fails the gate once hill climbing opens the ceiling stage. A better technique replaces the reference and raises the target.\n\nRequired cells cover the foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it; never claim a niche win without one.\n\nApply the comparator separately to each cell and metric. Never average away a loss, substitute an easier workload or tier, drop a peer, or accept wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts stay immutable under the policy they were recorded with and never weaken the current gate."
+  }
+}

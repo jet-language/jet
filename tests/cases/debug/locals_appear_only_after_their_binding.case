@@ -1,0 +1,12 @@
+# Each local's DWARF range starts at its binding, not at the function's
+# entry: a stop shows only the locals whose bindings have run, and each
+# `next` past a binding adds that local with its value.
+fixture: locals_appear_only_after_their_binding.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: locals_appear_only_after_their_binding.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:3  in run()\n3 |     second: first + 1        <- here\nLocals:  first = 1\n" # second and third are not bound yet
+stdout: ~ "(Jet) n\n4 |     third: second * 3        <- here\nLocals:  first = 1   second = 2\n" # second appears once its binding ran
+stdout: ~ "        <- here\nLocals:  first = 1   second = 2   third = 6\n" # then third, on the print line
+stdout: ~ "1 2 6\nProgram finished\n" # the program's own output is unchanged

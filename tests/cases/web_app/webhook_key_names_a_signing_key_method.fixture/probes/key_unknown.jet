@@ -1,0 +1,16 @@
+// `key:` names no method of the service, though another one is marked
+// `#App.SigningKey`.
+use {
+    app
+    web: core.web
+}
+
+Hooks: struct {
+    #App.Webhook(path: "/hooks/:project", signature: app.Signature.GitHub, key: "secret") on_event: fn(self, project: String, event: String) -> Int {
+        project.len() + event.len()
+    }
+
+    #App.SigningKey webhook_secret: fn(self, project: String) -> String? { Val(project.copy()) }
+}
+
+run: fn() { _: web.app().mount(Hooks{}) }

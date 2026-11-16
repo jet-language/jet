@@ -1,0 +1,20 @@
+# The command homes are the plain package-root files `run.jet`, `build.jet`,
+# `dev.jet` and `test.jet`: `jet run`, `jet build`, `jet dev` and `jet test`
+# each start at the function in its home. `src/build.jet` is below the root, so
+# it is ordinary source the run home calls.
+fixture: fixtures/command_homes/homes
+artifact: from-build-home
+env: NO_COLOR=1
+step: jet run
+exit: 0
+stdout: = "run home: ordinary source\n"
+step: jet build
+exit: 0
+file: .jet/build/from-build-home exists
+step: jet test --serial --capture=all
+exit: 0
+stdout: ~ "test home" # the test home ran first
+stdout: ~ "home body: pass" # then its suite ran the package tests
+step: jet dev --watch=off
+exit: 0
+stdout: = "dev home\n"

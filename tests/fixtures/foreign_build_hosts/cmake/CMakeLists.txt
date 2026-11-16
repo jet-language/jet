@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(jet_cmake_host C)
+find_package(Jet REQUIRED)
+jet_library(jet_loadable ENTRY library.jet OUTPUT core LIBRARY loadable DEPENDS package.jet .jet/lock library.jet extra.jet LOADABLE)
+add_executable(host host.c)
+target_link_libraries(host PRIVATE jet_loadable)

@@ -1,0 +1,343 @@
+// Private continuation of WebHost: the host's start, its dev clock (the one
+// writer of the resident session), the build marks the dev loop calls and
+// the terminal status.
+use {
+    webhost_files: core.files
+    webhost_random: core.crypto.random
+    webhost_term: core.term
+    webhost_time: core.time
+    core.http.server.[HTTPServer]
+    jetpack_foundation.[ColorChoice, terminal_erase_lines, terminal_esc, terminal_write_output]
+    jet_foundation.[JetReleaseDevtoolsPolicy]
+}
+
+WEB_HOST_SECRET_BYTES: 32
+// 25 ticks of LIVE_RELOAD_POLL_MS: a second.
+WEB_HOST_RECORDING_TICKS: 25
+
+// A host for `file` serving the output root `root` under `policy`; it
+// listens once web_host_bind binds it.
+web_host_new: fn(file: String, root: String, verbose: Bool, &&policy: JetReleaseDevtoolsPolicy) -> Shared<WebHostState> WebHostError! {
+    canonical: webhost_files.canonicalize(root) ?? return Err(WebHostError{message: "error: couldn't open static output `{root}`: {err}"})
+    secret: webhost_random.token_hex(WEB_HOST_SECRET_BYTES) ?? return Err(WebHostError{message: "error: couldn't make the dev session secret: {err}"})
+    session: ResidentDevSession.new(file, 0, 0) ?? return Err(WebHostError{message: "error: couldn't start the dev session for `{file}`: {err}"})
+    session_id: "{session.session_id}"
+    browser: BrowserWebState.new(session_id) ?? return Err(WebHostError{message: "error: couldn't start the browser devtools view: {err}"})
+    tty: webhost_term.stderr().is_tty()
+    Ok(Shared{WebHostState{
+        facts: web_host_facts(file, 0), session: session, session_id: session_id, root: canonical, secret: secret, policy: policy.move(),
+        color: ColorChoice.Auto.resolve(tty), pinned: tty && !verbose, verbose: verbose, trace_enabled: false,
+        relays: [BrowserTraceRelay]{}, nonce: "", noted: [String]{}, dropped: [String]{}, beacons: [[U8]]{},
+        envelopes: [JetDevtoolsDecodedEnvelope]{}, selections: [String]{}, browser: browser, requests: [String]{},
+        commands: None, assets: None, recording: "", recording_ticks: 0, log: [String]{}, dirty: true, block_lines: 0, stopped: None,
+    }})
+}
+
+// Listens on `port`, or on the first free one from APPLICATION_PORT_FIRST to
+// APPLICATION_PORT_LAST when `port` is None, and prints the address.
+web_host_bind: fn(state: Shared<WebHostState>, port: Int?) -> HTTPServer WebHostError! {
+    app: web_host_app(state)
+    if port == .Val(wanted) {
+        bound: app.bind("{WEB_HOST_BIND}:{wanted}") ?? return Err(WebHostError{message: "error: couldn't bind application preview to port {wanted}: {err}\n fix: stop whatever's using port {wanted}, or pick another with --port=<N>"})
+        web_host_listening(state, bound, wanted)
+        return Ok(bound)
+    }
+    // HTTPError names no busy port, so any refusal moves on to the next one.
+    last := ""
+    candidate := APPLICATION_PORT_FIRST
+    loop candidate <= APPLICATION_PORT_LAST {
+        if app.bind("{WEB_HOST_BIND}:{candidate}") == {
+            .Ok(bound) -> {
+                web_host_listening(state, bound, candidate)
+                return Ok(bound)
+            }
+            .Err(error) -> last = "{error}"
+        }
+        candidate += 1
+    }
+    Err(WebHostError{message: "error: every application preview port from {APPLICATION_PORT_FIRST} to {APPLICATION_PORT_LAST} is already in use ({last})\n fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N>"})
+}
+
+web_host_listening: fn(state: Shared<WebHostState>, server: HTTPServer, requested: Int) {
+    address: server.local_addr() ?? "{WEB_HOST_BIND}:{requested}"
+    parts: address.split(":").to_list()
+    port: Int.parse(parts[parts.len() - 1]) ?? requested
+    permit := state.guard_edit()
+    permit.value.facts.port = port
+    permit.value.session.application_port_number = port
+    permit.value.dirty = true
+    webhost_term.print("App preview: http://{WEB_HOST_BIND}:{port}/")
+}
+
+// Serves until the listener stops: its serve in one task, the dev clock
+// beside it. Returns why serving stopped.
+web_host_serve: fn(state: Shared<WebHostState>, server: HTTPServer) -> String {
+    task.group web_host {
+        serving: task {
+            if server.serve() == {
+                .Ok(_) -> web_host_stop(state, "the preview server shut down")
+                .Err(error) -> web_host_stop(state, "{error}")
+            }
+        }
+        loop web_host_stopped(state) == None {
+            // LIVE_RELOAD_POLL_MS
+            webhost_time.sleep(40ms)
+            web_host_tick(state)
+        }
+        serving.join().drop("the preview server's stop is reported from its state")
+    }
+    web_host_finish(state)
+    web_host_stopped(state) ?? "the preview server stopped"
+}
+
+web_host_stopped: fn(state: Shared<WebHostState>) -> String? {
+    permit: state.guard_read()
+    if permit.value.stopped == .Val(reason) -> return Val("{reason}")
+    None
+}
+
+web_host_stop: fn(state: Shared<WebHostState>, reason: String) {
+    permit := state.guard_edit()
+    if permit.value.stopped == None -> permit.value.stopped = Val("{reason}")
+}
+
+web_host_finish: fn(state: Shared<WebHostState>) {
+    permit := state.guard_edit()
+    permit.value.close_relay()
+    permit.value.session.mark_stopped()
+}
+
+// One tick of the dev clock: what the handlers queued reaches the session,
+// the frames they hand out are refilled and a changed status is drawn.
+web_host_tick: fn(state: Shared<WebHostState>) {
+    output: web_host_step(state, clock_time())
+    if output != "" -> terminal_write_output(output)
+}
+
+web_host_step: fn(state: Shared<WebHostState>, clock: String) -> String {
+    permit := state.guard_edit()
+    permit.value.step(clock)
+}
+
+// A build started; the trace relay of the last build ends with it.
+web_host_mark_building: fn(state: Shared<WebHostState>) {
+    permit := state.guard_edit()
+    permit.value.close_relay()
+    permit.value.facts.building()
+    permit.value.session.mark_building()
+    permit.value.dirty = true
+}
+
+// A good build of `build_ms`; a rebuild publishes the next revision.
+web_host_mark_ready: fn(state: Shared<WebHostState>, build_ms: Int, rebuild: Bool) {
+    clock: clock_time()
+    permit := state.guard_edit()
+    if permit.value.trace_enabled -> permit.value.open_relay()
+    permit.value.facts.ready(build_ms, rebuild)
+    permit.value.session.mark_ready()
+    permit.value.dirty = true
+    if rebuild -> permit.value.log_rebuild(clock, "rebuilt {format_build_time(build_ms)}")
+}
+
+// A failed build; the last good output stays served.
+web_host_mark_error: fn(state: Shared<WebHostState>, code: String, diagnostic: String, rebuild: Bool) {
+    clock: clock_time()
+    permit := state.guard_edit()
+    permit.value.facts.failed(code, diagnostic)
+    permit.value.session.mark_error(code, diagnostic)
+    permit.value.dirty = true
+    if rebuild {
+        permit.value.log_rebuild(clock, "error {code}")
+        permit.value.note_log(diagnostic)
+    }
+}
+
+// Publishes a completed bundle; no static read runs while the output root is
+// swapped.
+web_host_publish: fn(state: Shared<WebHostState>, staging: String, out_dir: String, root: String) IOError! {
+    publication := state.guard_edit()
+    publication.value.dirty = true
+    web_output_publish(staging, out_dir, root)
+}
+
+impl WebHostState {
+    step: fn(&self, clock: String) -> String {
+        self.apply_clients()
+        loop envelope in self.envelopes {
+            if self.session.ingest_devtools_envelope(envelope) == .Err(error) -> self.note_log("{clock}  devtools envelope refused: {error}")
+        }
+        self.envelopes = [JetDevtoolsDecodedEnvelope]{}
+        loop selection in self.selections {
+            if self.session.set_devtools_selection(selection) == .Err(error) -> self.note_log("{clock}  devtools selection refused: {error}")
+        }
+        self.selections = [String]{}
+        if browser_web_sync_session(self.browser, self.session) == .Err(error) -> self.note_log("{clock}  browser devtools sync failed: {error}")
+        if self.relays.len() > 0 {
+            // A beacon's row that doesn't fit the trace is dropped, as the
+            // page doesn't wait for an answer.
+            loop body in self.beacons -> self.relays[0].record(body).drop("a browser trace beacon is best-effort")
+        }
+        self.beacons = [[U8]]{}
+        self.take_trace_request()
+        self.refill_frames()
+        out := ""
+        loop row in self.requests -> out = "{out}{clock}  {row}\n"
+        self.requests = [String]{}
+        loop line in self.log -> out = "{out}{line}\n"
+        self.log = [String]{}
+        if self.dirty {
+            out = "{out}{self.render()}"
+            self.dirty = false
+        }
+        out
+    }
+
+    // A clean drop is a closed page; a lease that runs out with no page left
+    // is a lost connection.
+    apply_clients: fn(&self) {
+        clean := false
+        loop client in self.noted -> self.session.note_client(client)
+        loop client in self.dropped {
+            self.session.drop_client(client)
+            clean = true
+        }
+        self.noted = [String]{}
+        self.dropped = [String]{}
+        count: self.session.client_count()
+        lost := self.facts.reconnecting
+        if self.facts.clients > 0 && count == 0 -> lost = true
+        if count > 0 || clean -> lost = false
+        if count != self.facts.clients || lost != self.facts.reconnecting {
+            self.facts.clients = count
+            self.facts.reconnecting = lost
+            self.dirty = true
+        }
+    }
+
+    // `jet perf --browser` asks for the trace; the next pages load with the
+    // perf script.
+    take_trace_request: fn(&self) {
+        taken: browser_trace_take_request() ?? false
+        if !taken -> return
+        self.trace_enabled = true
+        self.open_relay()
+        self.facts.version += 1
+        self.dirty = true
+    }
+
+    open_relay: fn(&self) {
+        self.close_relay()
+        manifest: read_web_manifest(self.root) ?? return
+        relay: BrowserTraceRelay.new(manifest) ?? return
+        self.nonce = "{relay.nonce}"
+        self.relays.push(relay)
+    }
+
+    close_relay: fn(&self) {
+        loop relay in self.relays -> relay.close()
+        self.relays = [BrowserTraceRelay]{}
+        self.nonce = ""
+    }
+
+    refill_frames: fn(&self) {
+        if self.commands == None {
+            frame: if self.session.browser_game_control_frame() == {
+                .Ok(body) -> WebHostFrame{status: 200, body: "{body}"}
+                .Err(error) -> WebHostFrame{status: 500, body: "{error}"}
+            }
+            self.commands = Val(frame)
+        }
+        if self.assets == None -> self.assets = Val(self.session.browser_game_asset_frame())
+        if self.recording == "" || self.recording_ticks > 0 {
+            self.recording = self.session.recording_json()
+            if self.recording_ticks > 0 -> self.recording_ticks -= 1
+        }
+    }
+
+    note_log: fn(&self, text: String) {
+        if self.verbose -> self.log.push("{text}")
+    }
+
+    log_rebuild: fn(&self, clock: String, outcome: String) {
+        if self.verbose -> self.log.push("{clock}  save {self.facts.file}  →  {outcome}")
+    }
+
+    // The status: a block redrawn in place on a terminal, otherwise a line per
+    // change and a failed build's diagnostic as the compiler wrote it.
+    render: fn(&self) -> String {
+        words: self.facts.words()
+        line: if self.color -> format_line_colored(words.word, words.rest) else -> format_line_plain(words.word, words.rest)
+        failed: self.facts.state == "error"
+        if !self.pinned {
+            if failed && !self.verbose -> return "{line}\n{self.facts.diagnostic}\n"
+            return "{line}\n"
+        }
+        lines := [String]{line, "         watching {self.facts.file}"}
+        if failed {
+            loop framed in frame_lines(self.facts.code, self.facts.diagnostic) -> lines.push(framed)
+        }
+        erase: if self.block_lines > 0 -> terminal_erase_lines(self.block_lines) else -> ""
+        self.block_lines = lines.len()
+        block: lines.join("\n")
+        "{erase}{block}\n"
+    }
+}
+
+// The wall clock's time of day (UTC) for the request and rebuild log.
+clock_time: fn() -> String {
+    seconds: webhost_time.unix_seconds(webhost_time.now())
+    of_day: seconds % 86400
+    "{web_host_two_digits(of_day /% 3600)}:{web_host_two_digits((of_day % 3600) /% 60)}:{web_host_two_digits(of_day % 60)}"
+}
+
+web_host_two_digits: fn(value: Int) -> String Never! {
+    if value < 10 -> "0{value}" else -> "{value}"
+}
+
+format_line_colored: fn(word: String, rest: String) -> String Never! {
+    sgr: if word == {
+        "ready" -> "32"
+        "building" | "reconnecting" -> "33"
+        "error" -> "31"
+        else -> "37"
+    }
+    esc: terminal_esc()
+    "jet dev  {esc}[{sgr}m●{esc}[0m {word} · {rest}"
+}
+
+format_line_plain: fn(word: String, rest: String) -> String Never! {
+    "jet dev  [{word}] {rest}"
+}
+
+// A diagnostic in a box headed by its code, 20 to 96 columns wide.
+frame_lines: fn(code: String, diagnostic: String) -> [String] Never! {
+    lines: web_host_lines(diagnostic)
+    width := code.len() + 2
+    loop line in lines {
+        scalars := 0
+        loop _ in line.chars() -> scalars += 1
+        if scalars > width -> width = scalars
+    }
+    if width < 20 -> width = 20
+    if width > 96 -> width = 96
+    dashes := width - code.len() - 3
+    if dashes < 1 -> dashes = 1
+    top: "─".repeat(dashes)
+    out := [String]{"┌ {code} {top}"}
+    loop line in lines -> out.push("│ {line}")
+    bottom: "─".repeat(width + 2)
+    out.push("└{bottom}")
+    out
+}
+
+// `text`'s lines without their line ends; a final line end starts no line.
+web_host_lines: fn(text: String) -> [String] Never! {
+    out := [String]{}
+    if text == "" -> return out
+    pieces: text.split("\n").to_list()
+    loop (index, piece) in pieces {
+        if index == pieces.len() - 1 && piece == "" -> break
+        if piece.ends_with("\r") -> out.push(piece.slice(0, piece.len() - 1)) else -> out.push("{piece}")
+    }
+    out
+}

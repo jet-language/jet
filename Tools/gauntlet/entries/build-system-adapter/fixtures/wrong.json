@@ -1,0 +1,54 @@
+{
+  "status": "optional",
+  "schema": "gauntlet-axis-build-system-v0",
+  "metric": "rss",
+  "harness": "Tools/gauntlet/harness/other.mjs",
+  "peers": [
+    {
+      "id": "jet",
+      "required": true
+    },
+    {
+      "id": "nix",
+      "required": false
+    }
+  ],
+  "cells": [
+    {
+      "id": "eval",
+      "jet": [],
+      "nix": [
+        "nix",
+        "eval"
+      ],
+      "target": {
+        "ratio_lt": 2
+      }
+    },
+    {
+      "id": "noop",
+      "jet": "jet build",
+      "nix": [
+        "nix",
+        "build"
+      ],
+      "target": {}
+    },
+    {
+      "id": "scratch",
+      "jet": [
+        "jet",
+        "build"
+      ],
+      "nix": [
+        "nix",
+        "build"
+      ],
+      "target": {
+        "ratio_max": 0.25
+      }
+    }
+  ],
+  "samples": 0,
+  "warmups": -1
+}

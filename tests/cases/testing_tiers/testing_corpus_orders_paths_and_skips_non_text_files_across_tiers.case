@@ -1,0 +1,17 @@
+# tests/testing_tiers.rs::testing_corpus_orders_paths_and_skips_non_text_files_across_tiers at tests/testing_tiers.rs:46; hand-port (corpus/ holds z.txt, a.txt, b.bin (byte 255) and the empty dir c.dir, as tests/testing_tiers.rs:50-53 wrote them)
+fixture: testing_corpus_orders_paths_and_skips_non_text_files_across_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+mkdir: corpus/c.dir
+
+step run: jet run run.jet
+exit: 0
+stdout: = testing_corpus_orders_paths_and_skips_non_text_files_across_tiers.1.out
+step build: jet build run.jet
+exit: 0
+step aot: built
+exit: == run
+stdout: == run
+stderr: == run

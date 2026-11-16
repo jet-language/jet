@@ -1,0 +1,18 @@
+use {
+    web: core.web
+    server: core.http.server
+    env: core.sys
+}
+
+handle: fn(id: String?, name: String?) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "ok"))
+}
+
+run: fn() {
+    // Run-time patterns: the clash is found when the second one registers.
+    routes: web.app()
+    first: "/users/{env.get("JET_HTTP_TEST_FIRST") ?? ":id"}"
+    second: "/users/{env.get("JET_HTTP_TEST_SECOND") ?? ":name"}"
+    _: routes.get(first, handle)
+    _: routes.get(second, handle)
+}

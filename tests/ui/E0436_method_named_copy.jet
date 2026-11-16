@@ -1,0 +1,13 @@
+// E0436: `x.copy()` is the compiler's own copy of a named value, so a
+// method may not take the name: every call would reach the built-in copy.
+Point: struct {
+    x: Int
+    y: Int
+
+    copy: fn(self) -> Point { Point{x: self.x, y: self.y} }
+}
+
+run: fn() {
+    p: Point{x: 1, y: 2}
+    print(p.x)
+}

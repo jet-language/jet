@@ -1,0 +1,35 @@
+# Port of tests/cli_parts/surface.rs:179-265; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+# PENDING-SEAM(compiler-lib): COMMANDS canonical/RETIRED_COMMANDS help route inventory and man retired-row exclusions :200-216,256-264; ledger-only subclaims.
+step: jet --help
+env: NO_COLOR=1
+exit: 0
+stdout: !~i "hangar" # original ed77c235f tests/cli_parts/surface.rs:197 !stdout.to_ascii_lowercase().contains("hangar")
+step: jet help
+env: NO_COLOR=1
+exit: 0
+stdout: !~i "hangar" # original ed77c235f tests/cli_parts/surface.rs:197 !stdout.to_ascii_lowercase().contains("hangar")
+step: jet env --help
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "jet env hook" # original predicate
+stdout: ~ "jet env test" # original predicate
+stdout: ~ "jet env sync" # original predicate
+stdout: ~ "jet env info" # original predicate
+step: jet self completions bash
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "env" # original predicate
+step: jet self completions zsh
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "env" # original predicate
+step: jet self completions fish
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "env" # original predicate
+step: jet self completions powershell
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "env" # original predicate

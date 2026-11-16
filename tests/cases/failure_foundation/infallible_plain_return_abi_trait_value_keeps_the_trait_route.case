@@ -1,0 +1,28 @@
+# A call through a trait value or a trait bound takes the trait method's
+# failure route, never one implementation's: `Circle.area` cannot fail but
+# `Square.area` can, and the trait's plain `-> Int` keeps the default `Err`
+# route, so `through_value` and `through_bound` stay fallible. `??` handles
+# their failure, and an unhandled one reports its origin instead of trapping.
+fixture: infallible_plain_return_abi_trait_value_keeps_the_trait_route.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 1
+stdout: = "4\n5\n-1\n5\n-2\n"
+stderr: ~ "Error: negative side" # the report's trail lines carry tier-dependent frames
+stderr: ~ "failed here: area (main.jet:10)" # the origin, without the trail that follows it
+stderr: !~ "SIGILL" # a trapped trait call faults instead of reporting
+step o1: jet run -O1 main.jet
+exit: 1
+stdout: = "4\n5\n-1\n5\n-2\n"
+stderr: ~ "Error: negative side" # the report's trail lines carry tier-dependent frames
+stderr: ~ "failed here: area (main.jet:10)" # the origin, without the trail that follows it
+stderr: !~ "SIGILL" # a trapped trait call faults instead of reporting
+step o2: jet run -O2 main.jet
+exit: 1
+stdout: = "4\n5\n-1\n5\n-2\n"
+stderr: ~ "Error: negative side" # the report's trail lines carry tier-dependent frames
+stderr: ~ "failed here: area (main.jet:10)" # the origin, without the trail that follows it
+stderr: !~ "SIGILL" # a trapped trait call faults instead of reporting

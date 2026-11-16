@@ -1,0 +1,31 @@
+// 83 — Self-mutation in `&self` methods.
+// A `&self` method may change its receiver in place: assign a field
+// (`self.field = v`), update one in place (`self.field += v`, S17), or
+// reassign the whole receiver (`self = New{…}`).
+Tracker: struct {
+    hits: Int
+    streak: Int
+
+    take_hit: fn(&self) {
+        // Field assignment + compound update on `self`.
+        self.hits += 1
+        self.streak += 1
+    }
+
+    reset: fn(&self) {
+        // Whole-`self` reassignment back to a fresh value.
+        self = Tracker{hits: 0, streak: 0}
+    }
+}
+
+run: fn() {
+    t := Tracker{hits: 0, streak: 0}
+    t.take_hit()
+    t.take_hit()
+    t.take_hit()
+    print(t.hits)
+    print(t.streak)
+    t.reset()
+    print(t.hits)
+    print(t.streak)
+}

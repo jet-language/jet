@@ -1,0 +1,14 @@
+# tests/core_testing_history.rs::core_testing_histories_error_is_stable_across_i9_tiers at tests/core_testing_history.rs:88; hand-port
+fixture: core_testing_histories_error_is_stable_across_i9_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 1
+stdout: empty
+stderr: ~ "history seed is invalid" # original assert
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 1
+stdout: empty
+stderr: ~ "history seed is invalid" # original assert

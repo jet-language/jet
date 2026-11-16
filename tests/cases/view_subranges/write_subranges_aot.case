@@ -1,0 +1,29 @@
+# tests/view_subranges.rs::write_subranges_aot at tests/view_subranges.rs:66; hand-port
+fixture: write_subranges_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build --release run.jet
+cwd: returned_write_window
+exit: 0
+step returned_write_window: built
+cwd: returned_write_window
+exit: 0 # tests/view_subranges.rs:48
+stdout: = write_subranges_aot.1.out
+
+step: jet build --release run.jet
+cwd: nested_returned_write_window
+exit: 0
+step nested_returned_write_window: built
+cwd: nested_returned_write_window
+exit: 0 # tests/view_subranges.rs:48
+stdout: = write_subranges_aot.2.out
+
+step: jet build --release run.jet
+cwd: view_subranges_golden
+exit: 0
+step view_subranges_golden: built
+cwd: view_subranges_golden
+exit: 0 # tests/view_subranges.rs:48
+stdout: = write_subranges_aot.3.out

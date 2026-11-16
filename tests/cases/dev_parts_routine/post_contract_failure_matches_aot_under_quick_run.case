@@ -1,0 +1,15 @@
+# tests/dev_parts/routine.rs::post_contract_failure_matches_aot_under_quick_run at tests/dev_parts/routine.rs:1791; hand-port
+fixture: post_contract_failure_matches_aot_under_quick_run.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step quick: jet run post_failure.jet
+exit: 70
+stderr: ~ "#Post contract failed: must equal 99" # original predicate: stderr.contains
+step: jet build post_failure.jet
+exit: 0
+step aot: built
+exit: == quick
+stdout: == quick
+stderr: == quick

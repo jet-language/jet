@@ -1,0 +1,13 @@
+# core.image resizes by area average (alpha-weighted) and by nearest pixel, down and up, and refuses output over its budget, the same pixels under jet run and a built binary.
+fixture: resize_scales_by_area_and_nearest_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step default: jet run run.jet
+exit: 0
+stdout: = resize_scales_by_area_and_nearest_on_all_tiers.out
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = resize_scales_by_area_and_nearest_on_all_tiers.out
+stdout: == default # the built binary agrees with jet run

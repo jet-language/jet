@@ -1,0 +1,118 @@
+// Every declaration has a typed reflection record. ProgramInfo.definitions()
+// lists each one with its DeclarationKind, its path, and its scope: the path
+// of the declaration that holds it, or the module's name at module scope. A
+// type's, function's, method's, trait's or constant's path is the identity
+// of its own record, so TypeInfo, FunctionInfo, MethodInfo, TraitInfo and
+// ConstantInfo are found by it; a TraitInfo or ConstantInfo carries the same
+// scope. A package setting names itself and, as its scope, the package that
+// lists it, beside its type, its selected value and the writer
+// that chose it, and ProgramInfo.complete() and revision() say whether every
+// body checked and at which revision of the sources.
+LIMIT: 3
+
+Shape: enum {
+    Circle(radius: Int)
+    Square
+}
+
+Point: struct {
+    x: Int
+    y: Int
+
+    norm: fn(self) -> Int { self.x + self.y }
+
+    impl Named {
+        label: fn(self) -> String { "point" }
+    }
+}
+
+#Printable
+Meters: distinct Int
+
+Named: trait {
+    label: fn(self) -> String
+}
+
+helper: fn(count: Int) -> Int {
+    total: count + LIMIT
+    total
+}
+
+build: fn(b: Build) {
+    shown: [String]{"run.LIMIT", "run.Shape", "run.Shape.Circle", "run.Shape.Square", "run.Point", "run.Point.x", "run.Point.y", "run.Point.norm", "run.Meters", "run.Named", "run.Named.label", "run.helper", "run.helper.count", "run.helper.total"}
+    records := [String:String]{}
+    loop info in b.program.types() {
+        records[info.identity.identity] = "TypeInfo, kind {info.kind}"
+        if info.kind == "struct" {
+            loop field in info.fields {
+                records["{info.identity.identity}.{field.name}"] = "FieldInfo of {info.name}"
+            }
+        }
+        loop method in info.methods -> records[method.identity] = "MethodInfo of {info.name}"
+    }
+    loop info in b.program.functions() {
+        records[info.identity] = "FunctionInfo"
+        loop param in info.signature.params {
+            records["{info.identity}.{param.name}"] = "ParamInfo of {info.name}"
+        }
+    }
+    loop info in b.program.traits() {
+        records[info.identity] = "TraitInfo in {info.scope}, {info.methods.len()} method"
+        loop method in info.methods -> records[method.identity] = "MethodInfo of {info.name}"
+    }
+    loop info in b.program.constants() {
+        records[info.identity] = "ConstantInfo in {info.scope}, value {info.value ?? "unknown"}"
+    }
+    rows := [String]{}
+    loop definition in b.program.definitions() {
+        if !shown.contains(definition.path) -> next
+        word: if definition.kind.kind == {
+            .Constant -> "constant"
+            .Enum -> "enum"
+            .Variant -> "variant"
+            .Struct -> "struct"
+            .Field -> "field"
+            .Method -> "method"
+            .Distinct -> "distinct"
+            .Trait -> "trait"
+            .Function -> "function"
+            .Parameter -> "parameter"
+            .Local -> "local"
+            else -> "other"
+        }
+        rows.push("{word} {definition.path} in {definition.scope}: {records.get(definition.path) ?? "its definition"}")
+    }
+    loop package in b.program.packages() {
+        if package.name != "declaration_facts" -> next
+        loop setting in package.settings {
+            if setting.name == "report" -> next
+            value := "a value"
+            if setting.selected == .String(text) -> value = "\"{text}\""
+            origin := "no writer"
+            loop contribution in setting.contributions {
+                if !contribution.selected -> next
+                origin = if contribution.kind == {
+                    .Declaration -> "its declaration"
+                    .Profile -> "a profile"
+                    .Build -> "fn build"
+                    .CommandLine -> "the command line"
+                }
+            }
+            rows.push("setting {setting.identity}: {setting.type.name} {value} from {origin}, scoped to its package: {setting.scope == package.identity}")
+        }
+    }
+    rows.push("every body checked: {b.program.complete()}")
+    rows.push("revision digest: {b.program.revision().len()} hex digits")
+    b.contribute("report", rows.join("\n"))
+}
+
+run: fn() {
+    print(#build.settings.report)
+    point: Point{x: 1, y: 2}
+    print("{point.label()} {helper(point.norm())} {Meters{4}}")
+    shape: Shape.Circle{radius: 2}
+    if shape == {
+        .Circle(radius) -> { print("circle {radius}") }
+        .Square -> print("square")
+    }
+}

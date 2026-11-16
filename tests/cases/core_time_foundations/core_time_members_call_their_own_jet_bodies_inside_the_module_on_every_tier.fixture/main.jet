@@ -1,0 +1,14 @@
+use time: core.time
+
+// Each line pairs a call whose body calls another member of its own module
+// with that member called from outside. Both run the member's Jet body.
+run: fn() {
+    print("time {time.time(7, 8, 9)} {time.local_time(7, 8, 9)}")
+    print("datetime {time.datetime(2024, 2, 29, 1, 2, 3)} {time.new(2024, 2, 29)} {time.local_time(1, 2, 3)}")
+    print("from_timestamp {time.from_timestamp(86400)} {time.zoned(time.from_timestamp(86400), time.utc())}")
+    print("start_of_day {time.utc().start_of_day(time.new(1970, 1, 2))}")
+    print("format {time.new(2024, 3, 1).format("%Y/%m/%d %H:%M")}")
+    print("parse {time.parse("2024-03-01") ?? time.new(1, 1, 1)} {time.parse_time("23:59:58") ?? time.local_time(0, 0, 0)}")
+    print("iso_week {time.parse_iso_week_date("2024-W09-4") ?? time.new(1, 1, 1)}")
+    print("bad {time.parse("2024-13-01") ?? time.new(1, 1, 1)} {time.parse_time("25:00:00") ?? time.local_time(0, 0, 0)}")
+}

@@ -1,0 +1,29 @@
+# HAND-PORT tests/web_build.rs:1485-1608 web_build_publishes_maps_and_release_omits_them
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: web_build_publishes_maps_and_release_omits_them.fixture
+requires: tool:rustc
+step: jet build --target=web main.jet
+exit: 0
+file: .jet/build/app.js ~ "//# sourceMappingURL=app.js.map" # original predicate
+file: .jet/build/app.js.map ~ "\"version\":3" # original predicate
+file: .jet/build/app.js.map ~ "\"sourcesContent\":[" # original predicate
+file: .jet/build/app.wasm.map ~ "\"file\":\"app.wasm\"" # original predicate
+file: .jet/build/app.wasm.map ~ "\"sourcesContent\":[" # original predicate
+file: .jet/build/app.wasm ~ "sourceMappingURL" # original predicate
+file: .jet/build/app.wasm ~ "app.wasm.map" # original predicate
+file: .jet/build/app.js.map !~ "/home/" # original predicate
+capture: default_size = size file .jet/build/app.wasm
+step: jet build --target=web --profile=release main.jet
+exit: 0
+file: .jet/build/app.js !~ "sourceMappingURL=" # original predicate
+file: .jet/build/app.js.map absent
+file: .jet/build/app.wasm.map absent
+file: .jet/build/web.manifest.json !~ "\"sourceMap\"" # original predicate
+file: .jet/build/app.wasm !~ "sourceMappingURL" # original predicate
+file: .jet/build/app.wasm size <= {cap:default_size} # original predicate
+file: .jet/build/app.wasm !~ ".debug_" # original predicate
+step: jet build --target=web wasm.jet
+exit: 0
+file.split("\"mappings\":", 1).split(",", 0): .jet/build/app.wasm.map ~ "\"" # original predicate
+file.split("\"mappings\":", 1).split(",", 0): .jet/build/app.wasm.map len > 3 # original predicate
+

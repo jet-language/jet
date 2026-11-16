@@ -1,0 +1,14 @@
+# HAND-PORT tests/jetpack_engine.rs:9860-9894 jetos_plan_rejects_invalid_package_system_without_mutating_store
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: jetos_plan_rejects_invalid_package_system_without_mutating_store.fixture
+env: NO_COLOR=1
+mkdir: project
+mkdir: project/jet-root
+step: jet os plan workstation --json --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/project/jet-root
+exit: 2
+stderr: ~ "E1340" # original contains predicate
+stderr: ~ "outputs.workstation.services.ssh.enable" # original contains predicate
+file: project/jet-root/systems absent
+

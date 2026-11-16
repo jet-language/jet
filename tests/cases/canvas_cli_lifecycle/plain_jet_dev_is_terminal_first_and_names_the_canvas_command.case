@@ -1,0 +1,32 @@
+# Claim: plain `jet dev` is terminal-first. On a terminal it runs the program,
+# watches, and once it is ready prints one hint naming the exact command
+# `jet dev app.jet --canvas`; a rebuild prints no second hint, and no Canvas
+# endpoint starts. With stderr off a terminal it prints no hint at all.
+requires: os:unix
+fixture: plain_jet_dev_is_terminal_first_and_names_the_canvas_command.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+session dev raw: jet dev app.jet
+pty: true
+recv dev until ~ "for the Canvas IDE" within 60s # the hint follows the first watch line
+stdout: ~ "jet dev: watching" # the terminal loop is running
+stdout: ~ "jet dev: for the Canvas IDE, run `jet dev app.jet --canvas`" # the exact command
+stdout: !~ "Canvas: http" # no Canvas endpoint
+write: app.jet plain_jet_dev_is_terminal_first_and_names_the_canvas_command.v2.template
+recv dev until ~ "plain-dev-v2" within 60s # the edit reruns the program
+stdout: ~ "jet dev: change detected, rebuilding" # the same loop saw the edit
+stdout: !~ "for the Canvas IDE" # the rebuild prints no second hint
+sleep: 1s
+signal dev: KILL
+close dev
+exit: any # killed on purpose
+stdout: !~ "for the Canvas IDE" # one hint per start
+stdout: !~ "Canvas: http" # no Canvas endpoint
+session piped raw: sh -c "exec {jet} dev app.jet 2>&1"
+recv piped until ~ "jet dev: watching" within 60s # ready, with stderr on a pipe
+sleep: 1s
+signal piped: KILL
+close piped
+exit: any # killed on purpose
+stdout: !~ "for the Canvas IDE" # no hint off a terminal

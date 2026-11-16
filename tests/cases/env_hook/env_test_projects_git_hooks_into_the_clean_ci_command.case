@@ -1,0 +1,9 @@
+# Port of tests/env_hook.rs:904-952. Original contains(canonical hooks path).
+# PENDING-GRAMMAR: tool token and effective caller PATH. Runtime PENDING-SAME-HEAD.
+requires: tool:git
+fixture: git-hooks-ci.fixture
+env: PATH={env:PATH}
+mkdir: scripts/githooks
+step: jetpack env --trust --env ci --no-color test -- {tool:git} config --get core.hooksPath
+exit: 0
+stdout: ~ {work}/scripts/githooks # original predicate

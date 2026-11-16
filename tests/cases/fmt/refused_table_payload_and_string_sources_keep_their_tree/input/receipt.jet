@@ -1,0 +1,32 @@
+jet_cli_receipt_context_identity: fn(verb: String, argv: [String], terminal: [U8]) -[FS, Env]> [U8] JetCLIReadError! {
+    if verb == "" -> return Err(jet_cli_read_error("receipt verb is empty"))
+    if terminal.len() != 3 -> return Err(jet_cli_read_error("receipt terminal identity requires three host bits"))
+    loop bit in terminal {
+        if bit != (U8{48}) && bit != (U8{49}) -> return Err(jet_cli_read_error("receipt terminal identity requires three host bits"))
+    }
+    out := jet_cli_receipt_section_marker(JET_CLI_RECEIPT_MAGIC)
+    jet_cli_receipt_frame(out, verb.bytes())
+    jet_cli_receipt_frame(out, (cli_sys.current_dir() ?? ".").bytes())
+    jet_cli_receipt_frame(out, jet_cli_receipt_argv_identity(argv))
+    names: cli_sys.vars() ?? return Err(jet_cli_read_error("could not read receipt environment: {err}"))
+    jet_cli_receipt_frame(out, jet_cli_receipt_environment_identity(names))
+    tools := [U8]{}
+    loop name in ([String]{"jet", "jetpack", "rustc", "cargo", "wasm-tools"}) {
+        jet_cli_receipt_frame(tools, name.bytes())
+        path: jet_cli_receipt_tool_path(name) ?? {
+            jet_cli_receipt_frame(tools, "missing".bytes())
+            next
+        }
+        jet_cli_receipt_frame(tools, path.bytes())
+        digest: if name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error(jet_cli_identity_missing().what)) else -> {
+            if cli_files.read_bytes(path) == {
+                .Ok(bytes) -> receipt_crypto.sha256(bytes).hex()
+                .Err(_) -> "unreadable"
+            }
+        }
+        jet_cli_receipt_frame(tools, digest.bytes())
+    }
+    jet_cli_receipt_frame(out, tools)
+    jet_cli_receipt_frame(out, terminal)
+    Ok(out)
+}

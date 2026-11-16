@@ -1,0 +1,8 @@
+Error [jet.InvalidStatement]: `get_#{field}` glues a paste onto letters
+  --> tests/ui/template_paste_glued_to_letters.jet:9:21
+    |
+  9 |                     get_#{field}: fn(self) -> Int { self.#{field} }
+    |                     ^^^^^^^^^^^^
+ Why: A paste `#{…}` stands for a whole name; it never joins the letters beside it, so `pkg#1.4` and `[Int#4]` keep their meaning
+ Fix: Build the name as a string first, as in `method: "get_{field.name}"`, then paste `#{method}`
+More: jet-lang.dev/e/E0003

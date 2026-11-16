@@ -1,0 +1,25 @@
+#[Target(Web), HTML(Path{"index.html"})]
+
+use {
+    ui: core.ui
+    reactive: core.reactive
+}
+
+run: fn() {
+    count: reactive.signal(0)
+    ui.reactive_render(fn() {
+        n := count.get()
+        tree: ui.box(
+            [
+                ui.text("Orders island count: {n}"),
+                ui.button(
+                    "Refresh",
+                    on_click: fn() {
+                        count.set(count.get() + 1)
+                    },
+                ),
+            ],
+        )
+        ui.mount(ui.null_backend(), tree, ui.constraint(0.0, 0.0, 360.0, 120.0))
+    })
+}

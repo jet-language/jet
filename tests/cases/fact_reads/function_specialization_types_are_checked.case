@@ -1,0 +1,9 @@
+# `f.reflect(types: [...])` names one specialization of a generic function:
+# a list with another count than the function's type parameters, or an
+# element that names no type, is E0119.
+fixture: function_specialization_types_are_checked.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: nonzero
+stderr: ~ "`pick` expects 1 type argument, got 2" # the count must match `fn<T>`
+stderr: ~ "`types:` lists the type arguments of `pick`, and this is not a type" # a value is no type argument

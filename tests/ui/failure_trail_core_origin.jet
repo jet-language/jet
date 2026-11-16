@@ -1,0 +1,12 @@
+// A failing Core call is the origin: the report shows the call of
+// `files.read` where the failure started, its conversion to Err, and the
+// program's call that passed it up.
+use files: core.files
+
+size: fn(path: String) -> Int {
+    text: files.read(path)
+    text.len()
+}
+
+run: fn() { print(size("no-such-file.txt")) }
+// @run_cli

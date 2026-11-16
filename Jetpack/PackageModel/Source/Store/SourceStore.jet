@@ -1,0 +1,316 @@
+// The machine artifact store and canonical Hangar remain distinct stores; this
+// source store holds path/git dependency trees identified by their full lock
+// fingerprint. All filesystem operations reuse Foundation's retained authority.
+use {
+    jet_foundation.[Diagnostic, ENV_JET_PACKAGE_STORE_DIR, diagnostic_from_registry]
+    jetpack_foundation.[FoundationDirectoryAuthority, foundation_open_directory_authority]
+    sys: core.sys
+    files: core.files
+}
+
+#Error
+PackageSourceStoreError: struct {
+    diagnostic: Diagnostic
+}
+
+PackageSourceSnapshot: struct {
+    directory: FoundationDirectoryAuthority
+    content_hash: String
+    parent: FoundationDirectoryAuthority
+    name: String
+
+    path: fn(self) -> String Never! { self.directory.path() }
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            // Never remove a replacement bound at the private snapshot name.
+            self.directory.revalidate() ?? return
+            self.parent.remove_tree(self.name).drop("snapshot cleanup must not replace the caller's outcome")
+        }
+    }
+}
+
+PackageSourceEntry: struct {
+    path: String
+    content_hash: String
+}
+
+pkg_source_store_dir: fn() -[Env]> String Never! {
+    explicit: sys.get(ENV_JET_PACKAGE_STORE_DIR)
+    if explicit == .Val(path) -> return path
+    home: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
+    files.join(files.join(home, ".jet"), "store")
+}
+
+pkg_source_store_path: fn(name: String, version: String, fingerprint: String) -[Env]> String Never! {
+    fp: fingerprint.removeprefix("sha256-")
+    files.join(pkg_source_store_dir(), "{name}-{version}-{fp}")
+}
+
+pkg_source_store_component: fn(value: String) PackageSourceStoreError! {
+    invalid := value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") || value.contains(":")
+    // Unicode C0/C1 controls, exactly char::is_control in the reference.
+    bytes: value.bytes()
+    loop index in 0..<bytes.len() {
+        code: Int{bytes[index]}
+        // C1 controls encode as C2 80..9F in UTF-8.
+        if code < 32 || code == 127 || (code == 194 && index + 1 < bytes.len() && Int{bytes[index + 1]} >= 128 && Int{bytes[index + 1]} <= 159) {
+            invalid = true
+        }
+    }
+    if invalid {
+        return Err(
+            PackageSourceStoreError{
+                diagnostic: diagnostic_from_registry(
+                    "E1299",
+                    None,
+                    "package store path component `{value}` is not allowed",
+                    "the value must be one safe path component",
+                    "use a package name, version, and fingerprint without path separators",
+                ),
+            },
+        )
+    }
+}
+
+pkg_source_store_io: fn(action: String, path: String, error: IOError) -> PackageSourceStoreError Never! {
+    PackageSourceStoreError{
+        diagnostic: diagnostic_from_registry(
+            "E1224",
+            None,
+            "I/O error while {action} at `{path}`",
+            "a filesystem operation failed during package installation",
+            "check permissions and disk space: {error}",
+        ),
+    }
+}
+
+pkg_source_snapshot_tree: fn(path: String) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+    source: foundation_open_directory_authority(path) ?? return Err(pkg_source_store_io("checking package source", path, err))
+    pkg_source_snapshot_authority(source)
+}
+
+pkg_source_snapshot_authority: fn(source: FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+    root: pkg_source_store_dir()
+    store: foundation_open_directory_authority(root, true) ?? return Err(pkg_source_store_io("creating source snapshot store", root, err))
+    snapshots: store.child(".snapshots", true) ?? return Err(pkg_source_store_io("opening source snapshot root", files.join(root, ".snapshots"), err))
+    pkg_source_snapshot_into(source, snapshots)
+}
+
+// The snapshot takes `snapshots`: it removes its stage through that handle on close.
+pkg_source_snapshot_into: fn(source: FoundationDirectoryAuthority, snapshots: &&FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+    stage: snapshots.private_child("source") ?? return Err(pkg_source_store_io("creating source snapshot", snapshots.path(), err))
+    name: files.basename(stage.path())
+    stage.copy_tree_from(source) ?? {
+        snapshots.remove_tree(name).drop("snapshot cleanup must preserve the copy error")
+        return Err(pkg_source_store_io("snapshotting package source", source.path(), err))
+    }
+    hash: stage.tree_hash() ?? {
+        snapshots.remove_tree(name).drop("snapshot cleanup must preserve the hash error")
+        return Err(pkg_source_store_io("hashing source snapshot", stage.path(), err))
+    }
+    Ok(PackageSourceSnapshot{directory: stage, content_hash: hash, parent: snapshots.move(), name: name})
+}
+
+// Path and git dependencies use this one install path, as ensure_git_dep does
+// in the reference. The caller must retain its source snapshot while installing.
+pkg_source_store_ensure: fn(name: String, version: String, fingerprint: String, source: FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceEntry PackageSourceStoreError! {
+    pkg_source_store_component(name)
+    pkg_source_store_component(version)
+    fp: fingerprint.removeprefix("sha256-")
+    pkg_source_store_component(fp)
+    root: pkg_source_store_dir()
+    destination_name: "{name}-{version}-{fp}"
+    destination: files.join(root, destination_name)
+    parent: foundation_open_directory_authority(root, true) ?? return Err(pkg_source_store_io("creating store entry parent", root, err))
+    if parent.child(destination_name) == {
+        .Ok(existing) -> {
+            hash: existing.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", destination, err))
+            return Ok(PackageSourceEntry{path: destination, content_hash: hash})
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> {}
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                    return Err(pkg_source_store_io("checking store entry", destination, error))
+                }
+            }
+        }
+    }
+    stage: parent.private_child("entry") ?? return Err(pkg_source_store_io("creating store staging entry", root, err))
+    stage_name: files.basename(stage.path())
+    result: pkg_source_store_publish_copy(parent, stage, stage_name, destination_name, destination, source)
+    parent.remove_tree(stage_name).drop("install cleanup must preserve the publication outcome")
+    hash: result
+    Ok(PackageSourceEntry{path: destination, content_hash: hash})
+}
+
+pkg_source_store_publish_copy: fn(parent: FoundationDirectoryAuthority, stage: FoundationDirectoryAuthority, stage_name: String, destination_name: String, destination: String, source: FoundationDirectoryAuthority) -[FS]> String PackageSourceStoreError! {
+    stage.copy_tree_from(source) ?? return Err(pkg_source_store_io("copying to store", destination, err))
+    hash: stage.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", destination, err))
+    parent.rename(stage_name, destination_name) ?? {
+        if err == {
+            .AlreadyExists(_) -> {}
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
+                return Err(pkg_source_store_io("publishing store entry", destination, err))
+            }
+        }
+        winner: parent.child(destination_name) ?? return Err(pkg_source_store_io("opening concurrent store entry", destination, err))
+        winner_hash: winner.tree_hash() ?? return Err(pkg_source_store_io("hashing concurrent store entry", destination, err))
+        if winner_hash != hash {
+            return Err(pkg_source_store_io("publishing store entry", destination, IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(destination), os_code: None, cause: Val("concurrent store entry has different contents")})))
+        }
+        return Ok(winner_hash)
+    }
+    parent.fsync() ?? return Err(pkg_source_store_io("publishing store entry", destination, err))
+    Ok(hash)
+}
+
+pkg_source_store_verify: fn(name: String, entry: String, expected: String) PackageSourceStoreError! -[FS, Env]> {
+    source: foundation_open_directory_authority(entry) ?? {
+        if err == .NotFound(_) {
+            return Err(
+                PackageSourceStoreError{
+                    diagnostic: diagnostic_from_registry(
+                        "E1204",
+                        None,
+                        "the store entry for `{name}` is missing",
+                        "a package source tree must be present in the store",
+                        "run `jet fetch` to re-download the package",
+                    ),
+                },
+            )
+        }
+        return Err(pkg_source_store_io("checking store entry", entry, err))
+    }
+    if expected == "" {
+        return Err(
+            PackageSourceStoreError{
+                diagnostic: diagnostic_from_registry(
+                    "E1204",
+                    None,
+                    "the store entry for `{name}` has no content hash",
+                    "locked package sources must carry a content hash before they are used",
+                    "run `jet fetch` to recreate the lock with verified content hashes",
+                ),
+            },
+        )
+    }
+    actual: source.tree_hash() ?? {
+        // A tree-shape refusal (too deep, too many files, a special entry) means
+        // the entry is no longer a tree this store published: it was modified.
+        if err == .InvalidInput(context) {
+            return Err(
+                PackageSourceStoreError{
+                    diagnostic: diagnostic_from_registry(
+                        "E1204",
+                        None,
+                        "the store entry for `{name}` has been modified",
+                        "its tree no longer hashes as a package tree: {context.cause ?? "invalid tree"}",
+                        "delete the store entry and run `jet fetch` to re-install",
+                    ),
+                },
+            )
+        }
+        return Err(pkg_source_store_io("hashing store entry", entry, err))
+    }
+    if actual != expected {
+        return Err(
+            PackageSourceStoreError{
+                diagnostic: diagnostic_from_registry(
+                    "E1204",
+                    None,
+                    "the store entry for `{name}` has been modified",
+                    "expected content hash `{expected}` but got `{actual}`",
+                    "delete the store entry and run `jet fetch` to re-install",
+                ),
+            },
+        )
+    }
+}
+
+// A project's dependency view is a private copy of its store entry, never a
+// link to it, so a store file keeps its single link and a build reads the
+// store with single-link authority. The view is checked against the store
+// entry's digest, which the caller has verified against the lock. A view
+// that hashes as the entry stays untouched. Any other view is stale: one
+// that differs, no longer hashes as a package tree, or still shares files
+// with another tree. A staged copy swaps in for it in one rename. The result
+// says whether a stale view was replaced.
+pkg_source_store_view_into_project: fn(store_entry: String, view_root: String) -[FS, Env, Time]> Bool PackageSourceStoreError! {
+    source: foundation_open_directory_authority(store_entry) ?? return Err(pkg_source_store_io("checking store entry", store_entry, err))
+    expected: source.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", store_entry, err))
+    parent_path: if files.dirname(view_root) == "" -> "." else -> files.dirname(view_root)
+    view_name: files.basename(view_root)
+    parent: foundation_open_directory_authority(parent_path, true) ?? return Err(pkg_source_store_io("creating dependency view parent", parent_path, err))
+    stale := false
+    if parent.child(view_name) == {
+        .Ok(existing) -> {
+            if existing.tree_hash(reject_hardlinks: true) == {
+                .Ok(actual) -> {
+                    if actual == expected -> return Ok(false)
+                }
+                // A tree-shape refusal, or a file linked from elsewhere
+                // (refused without an OS code), marks the view stale; an OS
+                // failure stops the fetch.
+                .Err(error) -> {
+                    if error == {
+                        .InvalidInput(_) -> {}
+                        .PermissionDenied(context) -> {
+                            if context.os_code != None {
+                                return Err(pkg_source_store_io("hashing dependency view", view_root, error))
+                            }
+                        }
+                        .NotFound(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                            return Err(pkg_source_store_io("hashing dependency view", view_root, error))
+                        }
+                    }
+                }
+            }
+            stale = true
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> {}
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                    return Err(pkg_source_store_io("checking dependency view", view_root, error))
+                }
+            }
+        }
+    }
+    stage: parent.private_child("dep-view") ?? return Err(pkg_source_store_io("creating dependency view staging dir", parent_path, err))
+    stage_name: files.basename(stage.path())
+    result: pkg_source_store_publish_view(parent, stage, stage_name, view_name, view_root, source, expected, stale)
+    // After a swap the stage name holds the stale view, removed here too.
+    parent.remove_tree(stage_name).drop("dependency view cleanup must preserve the publication outcome")
+    result
+}
+
+pkg_source_store_publish_view: fn(parent: FoundationDirectoryAuthority, stage: FoundationDirectoryAuthority, stage_name: String, view_name: String, view_root: String, source: FoundationDirectoryAuthority, expected: String, stale: Bool) -[FS]> Bool PackageSourceStoreError! {
+    stage.copy_tree_from(source, reject_hardlinks: false) ?? return Err(pkg_source_store_io("copying dependency view", view_root, err))
+    actual: stage.tree_hash(reject_hardlinks: true) ?? return Err(pkg_source_store_io("hashing staged dependency view", view_root, err))
+    if actual != expected {
+        return Err(pkg_source_store_io("checking staged dependency view", view_root, IOError.InvalidInput(IOContext{operation: .Read, resource: Val(view_root), os_code: None, cause: Val("staged dependency view does not match its immutable store entry")})))
+    }
+    if stale {
+        parent.rename(stage_name, view_name, if_exists: .Swap) ?? return Err(pkg_source_store_io("replacing stale dependency view", view_root, err))
+        parent.fsync() ?? return Err(pkg_source_store_io("replacing stale dependency view", view_root, err))
+        return Ok(true)
+    }
+    parent.rename(stage_name, view_name) ?? {
+        if err == {
+            .AlreadyExists(_) -> {}
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
+                return Err(pkg_source_store_io("publishing dependency view", view_root, err))
+            }
+        }
+        winner: parent.child(view_name) ?? return Err(pkg_source_store_io("opening concurrent dependency view", view_root, err))
+        winner_hash: winner.tree_hash() ?? return Err(pkg_source_store_io("hashing concurrent dependency view", view_root, err))
+        if winner_hash != expected {
+            return Err(pkg_source_store_io("publishing dependency view", view_root, IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(view_root), os_code: None, cause: Val("concurrent dependency view has different contents")})))
+        }
+        return Ok(false)
+    }
+    parent.fsync() ?? return Err(pkg_source_store_io("publishing dependency view", view_root, err))
+    Ok(false)
+}

@@ -1,0 +1,12 @@
+# Docs/spec/reference/environment.md: a toolchain root `jet` is given or finds is read, never
+# replaced by the Core sources built into `jet`: a `JET_TOOLCHAIN_ROOT` that holds no Core
+# sources refuses (E2105) and names the first Core file it could not read.
+env: NO_COLOR=1
+requires: os:unix
+mkdir: empty
+copy: {root}/Examples/Basics/Hello.jet app/hello.jet
+step: jet check app/hello.jet
+env: JET_TOOLCHAIN_ROOT={work}/empty
+exit: 1
+stdout: empty
+stderr: = toolchain_root_without_core_sources_names_the_missing_file.stderr

@@ -1,0 +1,16 @@
+use {
+    files: core.files
+    testing: core.testing
+}
+
+// The program's own record, spelled like the record core.testing's temp_dir
+// joins its path through. temp_dir still reads its own.
+TempPath: struct {
+    parts: [String]
+}
+
+run: fn() -[FS, IO]> {
+    mine: TempPath{parts: ["a", "b"]}
+    dir: testing.temp_dir("names")
+    print("{mine.parts.len()} {files.is_dir(dir)}")
+}

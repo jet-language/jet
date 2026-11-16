@@ -1,0 +1,19 @@
+# Shared memory words are the cross-process atomics: two forked processes
+# count one word up with compare_exchange and lose no increment, and a byte
+# region written before a word store reads whole once the flag word loads.
+# Misaligned and out-of-bounds words and values wider than 64 bits are
+# refused.
+requires: os-name:linux
+fixture: shared_memory_words_order_across_processes.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run -A main.jet
+exit: 0
+stdout: = "-1\n-2\na value wider than 64 bits is refused\n-9223372036854775808\nfalse\nready\n40000\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "-1\n-2\na value wider than 64 bits is refused\n-9223372036854775808\nfalse\nready\n40000\n"
+stderr: empty

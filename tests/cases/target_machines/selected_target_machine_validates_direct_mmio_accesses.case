@@ -1,0 +1,8 @@
+# Port of tests/target_machines.rs::selected_target_machine_validates_direct_mmio_accesses.
+# 0x40000100 lies inside board.sensor_v1's `peripherals` MMIO region and the
+# accesses carry a nonempty #Unsafe reason, so the build is accepted.
+fixture: fixtures/selected_target_machine_validates_direct_mmio_accesses
+step: jet build main.jet --target board.sensor_v1
+env: NO_COLOR=1
+exit: 0
+stderr: !~ "E3313" # no MMIO fact failure

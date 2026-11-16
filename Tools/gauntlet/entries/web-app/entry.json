@@ -1,0 +1,134 @@
+{
+  "name": "web-app",
+  "tier": "program",
+  "cells": ["webfront.app"],
+  "mode": "web-app",
+  "perf": false,
+  "languages": ["jet", "js", "node", "go", "rust", "python", "lua", "luajit", "c", "zig"],
+  "build": {
+    "jet": ["build", "--target=web", "--release", "run.jet"],
+    "go": ["sh", "-c", "cp -f \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" . && env GOOS=js GOARCH=wasm GO111MODULE=off GOCACHE=\"$PWD/go-cache\" go build -o main.wasm main.go"],
+    "rust": ["rustc", "--target", "wasm32-unknown-unknown", "-O", "--crate-type", "cdylib", "main.rs", "-o", "main.wasm"],
+    "c": ["sh", "-c", "NIX_HARDENING_ENABLE= clang --target=wasm32 -nostdlib -Os -c main.c -o main.o && wasm-ld --no-entry -o main.wasm main.o"],
+    "zig": ["zig", "build-exe", "-target", "wasm32-freestanding", "-fno-entry", "-rdynamic", "-O", "ReleaseSmall", "--cache-dir", "zig-cache", "--global-cache-dir", "zig-global-cache", "-femit-bin=main.wasm", "main.zig"]
+  },
+  "spec": {
+    "behavior": "Mount a long-lived DOM counter with a count display initially showing `count: 0`, an increment button, and a reset button. Replay three increment clicks, read the display, click reset, and read the display again.",
+    "args": [],
+    "fixtureGen": null,
+    "expected": "expected.out",
+    "run": {
+      "jet": ["node", "runner.mjs"],
+      "js": ["node", "runner.mjs"],
+      "node": ["node", "main.mjs"],
+      "python": ["python3", "main.py"],
+      "lua": ["lua", "main.lua"],
+      "luajit": ["luajit", "main.lua"]
+    }
+  },
+  "metric_applicability": {
+    "js": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript app rail runs through the host Node interpreter and has no entry-local compile phase.", "evidence": "The harness invokes node runner.mjs directly for the declared JS app rail and produces no JavaScript executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript app rail runs through the host Node interpreter and has no entry-local compile phase.", "evidence": "The harness invokes node runner.mjs directly for the declared JS app rail and produces no JavaScript executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript app rail has no entry-local executable artifact.", "evidence": "The harness run command is node runner.mjs; no JavaScript binary is built or measured."}
+    },
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."}
+    }
+  },
+  "authoring": {
+    "jet": {
+      "author": "luna-max",
+      "turns": 12,
+      "retries": 10,
+      "diagnosticsHit": [
+        "E1803: application authority is undecided for `Browser, Mem.Alloc`",
+        "SyntaxError: Duplicate parameter name not allowed in this context",
+        "E0121: `increment` was given away earlier, so it can't be used here",
+        "E-WEB-UNSUPPORTED: web output cannot compile `run` yet",
+        "E1803: application authority is undecided for `DB, Env, Exec, FFI, FS, GPU, IO, Log, Net, Rand, Secret, Time`"
+      ],
+      "notes": "`jet build main.jet` infers the Web target from `#Target(Web)` and produces `build/app.js` plus `build/app.wasm`; `node runner.mjs` replays the real generated DOM path and matches expected.out. The package declares broad authority so native `jet run main.jet` launches; it exits 0 with empty stdout. Jet interaction-replay mechanism is not reachable from the shipped `jet` CLI; the web AOT build plus `node runner.mjs` is the closest CLI-reachable proof. Hoisted button handlers avoid a generated-JS duplicate-capture failure when two inline handlers capture one signal. The known 2px real-DOM button measurement was not encountered."
+    },
+    "js": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "`fixtures/domshim.mjs` is a minimal hand-rolled DOM shim for Node replay, not a browser. `index.html` and `app.mjs` are the plain browser implementation."
+    },
+    "node": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Mirrors the JS DOM interaction replay with an in-process counter."
+    },
+    "go": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "GOOS=js GOARCH=wasm: main mounts the display and buttons through syscall/js with js.FuncOf click handlers, then parks; runner.mjs loads it with Go's own wasm_exec.js (copied from GOROOT by the build) into the same DOM shim as the JS rail and replays the clicks."
+    },
+    "rust": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "A #![no_std] wasm32-unknown-unknown cdylib owns the counter state (increment, reset, count exports over an AtomicI32), as the Rust web-widget rail exports its kernel; with no wasm-bindgen, runner.mjs mounts the DOM shim's display and buttons and its click handlers call the exports."
+    },
+    "python": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Mirrors the Node rail's in-process counter replay; Python has no browser runtime for the DOM half."
+    },
+    "lua": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Mirrors the Node rail's in-process counter replay; Lua has no browser runtime for the DOM half."
+    },
+    "luajit": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Runs lua/main.lua."
+    },
+    "c": {
+      "author": "CardCloser-2",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Freestanding C to wasm32, no libc and no library. The module owns the counter and renders `count: <n>` into linear memory. runner.mjs mounts the display and buttons through the JS peer's `fixtures/domshim.mjs` and binds the clicks to the exports, the JS glue any C-to-Wasm page needs for the DOM. Built like web-widget's C rail: clang --target=wasm32 with NIX_HARDENING_ENABLE cleared, then wasm-ld."
+    },
+    "zig": {
+      "author": "CardCloser-2",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Freestanding Zig to wasm32 with std.fmt.bufPrint for the label, no other library. The module owns the counter and renders `count: <n>` into linear memory. runner.mjs (shared with the C rail) mounts the DOM through the JS peer's `fixtures/domshim.mjs` and binds the clicks to the exports."
+    }
+  },
+  "rewrite_provenance": {
+    "worker": "CorpusWebApp",
+    "variant": "jet",
+    "changed": "Rebuilt the reactive tree inside the render effect with direct canonical button handlers, removing the hoisted callback and per-render node copies while retaining the stable signal, null backend, explicit numeric layout, and display/button order.",
+    "matched": "Same no-argument replay as the peers: mount `count: 0`, apply three increment clicks, read `count: 3`, click reset, and read `count: 0`; labels, event order, DOM structure, side effects, and output formatting are unchanged.",
+    "expected_output_sha256": "dc20b2e207f78ce129a356dddbd52e8ce1342b602fdc9ca96f45a45953971752",
+    "measurement": "unrun: source-only rewrite; runtime, output, and performance proof intentionally not executed"
+  }
+}

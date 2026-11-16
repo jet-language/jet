@@ -1,0 +1,15 @@
+# HAND-PORT tests/lib_use.rs:252-294 unrealized_library_points_at_build_when_preparation_is_refused
+# PENDING-GRAMMAR: approved batch-two/four forms.
+fixture: unrealized_library_points_at_build_when_preparation_is_refused.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/hangar-root
+mkdir: hangar-root/hangar
+mkdir: app/.jet/build
+step: jet run main.jet --no-prepare
+cwd: app
+exit: nonzero
+stderr: ~ "E0983" # original predicate
+stderr: ~ "the library package `jsonutil` hasn't been built yet" # original predicate
+stderr: ~ "its source staged in the shared store (hangar)" # original predicate
+stderr: ~ "run `jetpack env --prep` to realize `jsonutil`" # original predicate
+

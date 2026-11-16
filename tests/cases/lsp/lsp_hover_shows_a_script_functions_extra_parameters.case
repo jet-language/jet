@@ -1,0 +1,22 @@
+# Hover on a script function shows the extra label-only parameters it takes
+# for the script variables it uses: `count`, which it writes, and `limit`,
+# which it reads. Hover shows a signature's parameters without their defaults,
+# as completion and signature help do; `jet inspect expand --facts
+# callable-signature` shows each one defaulting to its variable.
+session lsp content-length: jet self lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp
+stdout: ~ "hoverProvider" # the server answers initialize before any hover
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_script_helper.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"limit: 3\\ncount := 0\\nnote: fn(word: String) {\\n    count += 1\\n    if count <= limit -> print(word)\\n}\\nnote(\\\"apple\\\")\\n\"}}}"
+recv lsp
+stdout: ~ "publishDiagnostics" # the document is checked before the hover
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_script_helper.jet\"},\"position\":{\"line\":6,\"character\":1}}}"
+recv lsp
+stdout: ~ "note: fn(word: String, *," # the written parameter comes first, then the extra label-only ones
+stdout: ~ "note: fn(word: String, *, count: Int, limit: Int)" # the written `count` and the read `limit` are extra label-only parameters
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+stdout: ~ "result" # shutdown answers
+close lsp
+exit: any # the session ends when the server closes

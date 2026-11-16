@@ -1,0 +1,12 @@
+# tests/tir_unsafe_and_runtime.rs::every_unsafe_region_kind_enters_its_own_sentry_scope at tests/tir_unsafe_and_runtime.rs:236; hand-port
+# The original compiled the run build and the #Test harness and found each region's jet_sentry_scope call in the generated Rust.
+# The Jet backend emits no Rust, so the case builds and runs both: the gated fn, the block region and the #Test region.
+fixture: every_unsafe_region_kind_enters_its_own_sentry_scope.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run regions.jet
+exit: 0 # tests/tir_unsafe_and_runtime.rs:263 the run build compiles
+stdout: = "42\n" # tests/tir_unsafe_and_runtime.rs:247 the block region calls the gated reader
+step: jet test regions.jet
+exit: 0 # tests/tir_unsafe_and_runtime.rs:266 the test harness compiles and its region runs

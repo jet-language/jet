@@ -1,0 +1,13 @@
+# Claim: a callee signature that spells an imported type bare (`use kinds.[Effect]`)
+# names that import's type in every caller, even one that also sees another
+# package's `Effect`; it never re-resolves in the caller's scope
+# (Registration/QualifiedTypes.jet; the `jet check Compiler` break dc57d9b2d7 patched)
+fixture: imported_type_in_a_callee_signature_resolves_in_its_declaring_module.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check app/main.jet
+exit: 0
+step: jet run app/main.jet
+exit: 0
+stdout: = "net\nquiet\n"

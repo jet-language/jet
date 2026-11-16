@@ -1,0 +1,15 @@
+# tests/pure.rs::ctvalue_render_pretty_nested at tests/pure.rs:649; hand-port
+# Claim: a nested struct with a list of strings renders its type, field labels and quoted items (tests/pure.rs:665-669)
+# Fixture migrated: Rust fn returns Report; no value return in jet eval, so the value is printed from fn run under jet run
+# Not ported: CtValue::Struct/List Rust construction and render_pretty layout (tests/pure.rs:651-663): jet eval prints the single-line debug spelling; the Rust assertions are substring checks
+fixture: ctvalue_render_pretty_nested.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/pure.rs:665-669
+stdout: ~ "Report" # tests/pure.rs:665-669
+stdout: ~ "total:" # tests/pure.rs:665-669
+stdout: ~ "items:" # tests/pure.rs:665-669
+stdout: ~ "\"a\"" # tests/pure.rs:665-669
+stdout: ~ "\"b\"" # tests/pure.rs:665-669

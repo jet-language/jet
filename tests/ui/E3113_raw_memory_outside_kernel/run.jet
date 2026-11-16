@@ -1,0 +1,8 @@
+// @all_diags
+use core.mem
+
+// Not a kernel file: the same raw memory operation is refused here.
+#Unsafe("the caller releases the storage with `free_raw`, exactly once")
+_grab: fn() -> mem.Ptr<U8>? { mem.alloc_raw(16, 8) }
+
+run: fn() {}

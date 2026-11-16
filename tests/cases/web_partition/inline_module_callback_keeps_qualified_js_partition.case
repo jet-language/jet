@@ -1,0 +1,13 @@
+# tests/web_partition.rs::inline_module_callback_keeps_qualified_js_partition at tests/web_partition.rs:338; hand-port
+# Claim: A JS fn inside an inline module (handlers.init) stays in the JS bucket under its qualified name handlers__init (tests/web_partition.rs:354)
+# Claim: Entry run stays JS (tests/web_partition.rs:358)
+# Not ported: Rust checks the qualified bucket key in the JSON manifest; no CLI-visible manifest is known, so only the build outcome and the report's handlers.init mention are checked
+fixture: inline_module_callback_keeps_qualified_js_partition.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target=web --explain-partition main.jet
+exit: 0 # tests/web_partition.rs:354-358 handlers.init and run are JS
+stdout: ~ "handlers" # tests/web_partition.rs:354-358 handlers.init and run are JS
+stdout: ~ "init" # tests/web_partition.rs:354-358 handlers.init and run are JS
+stdout: ~ "JS" # tests/web_partition.rs:354-358 handlers.init and run are JS

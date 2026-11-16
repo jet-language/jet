@@ -1,0 +1,28 @@
+Res: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+#Error
+Problem: enum {
+    Bad
+}
+
+make: fn(name: String) -> Res Problem! { Ok(Res{name: name}) }
+
+// The payload of the matched temporary moves into the returned Result, so the
+// resource closes once, with its final owner.
+acquire: fn() -> Res Problem! {
+    if make("held") == {
+        .Ok(held) -> return Ok(held)
+        .Err(e) -> return Err(e)
+    }
+}
+
+run: fn() {
+    r: acquire() ?? panic("no resource")
+    print("got {r.name}")
+}

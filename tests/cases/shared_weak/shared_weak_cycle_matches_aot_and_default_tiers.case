@@ -1,0 +1,13 @@
+# HAND-PORT tests/shared_weak.rs:76-128 shared_weak_cycle_matches_aot_and_default_tiers
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Both original native/default exact outputs; original rustc-only harness availability requirement retires with Rust native emitter, never skipped by new guard.
+fixture: shared_weak_cycle_matches_aot_and_default_tiers.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = shared_weak_cycle_matches_aot_and_default_tiers.stdout.expected
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = shared_weak_cycle_matches_aot_and_default_tiers.stdout.expected

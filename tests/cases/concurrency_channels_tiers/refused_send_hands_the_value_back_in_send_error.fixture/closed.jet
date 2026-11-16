@@ -1,0 +1,12 @@
+// A refused send is not a closed receive: `SendError<Int>` does not fit a
+// `Closed` contract, so a send inside one needs its own handling.
+pass_on: fn(rx: Receiver<Int>, tx: Sender<Int>) -> Int Closed! {
+    value: rx.receive()
+    tx.send(value)
+    value
+}
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+    print(pass_on(rx, tx) ?? -1)
+}

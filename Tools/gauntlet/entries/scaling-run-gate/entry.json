@@ -1,0 +1,22 @@
+{
+  "name": "scaling-run-gate",
+  "mode": "tool",
+  "description": "The compiler scaling gate's per-shape runner run-gate.mjs and its Jet twin run-gate/run.jet over the jet_scaling_gate and jet_scaling_reports packages, #5072 c7. Each run gates one or two stress shapes (ladder 2,4,8 plus the N=1 baseline) in counter-only mode with fake.sh as the `command:` compiler, one receipt and report.md per shape under work/run-<shape> and the whole run's report.md in work: linear work passes; quadratic work fails its growth; a counter that is zero below the top rung appears (the report prints its in-memory ratio as inf); a compiler failing from N=4 is a compile failure and an incomplete ladder; an unknown placeholder is a run error (exit 2). The check prints stdout with the case directory as <case> (progress lines up to their timings, sorted) and every report.md with the receipts' start and finish times as <time>. The other cases cover --help and invalid invocations (exit 2, the message on stderr). Timing mode is not a case: its verdicts depend on the machine's speed.",
+  "tool": {
+    "original": "Tools/perf/scaling/run-gate.mjs",
+    "jet": "Tools/perf/scaling/run-gate/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--compiler", "lin=command:sh ../../../fake.sh linear {n} {trace}", "--shape", "small-fns", "--shape", "deep-nesting", "--ladder", "small-fns=2,4,8", "--ladder", "deep-nesting=2,4,8", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 0, "check": "check.jet", "expected": "expected/linear.out"},
+      {"args": ["--compiler", "quad=command:sh ../../../fake.sh quadratic {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4,8", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 1, "check": "check.jet", "expected": "expected/quadratic.out"},
+      {"args": ["--compiler", "late=command:sh ../../../fake.sh appears {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4,8", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 1, "check": "check.jet", "expected": "expected/appears.out"},
+      {"args": ["--compiler", "lin=command:sh ../../../fake.sh linear {n} {trace}", "--compiler", "broken=command:sh ../../../fake.sh broken {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4,8", "--mode", "counters", "--jobs", "2", "--work-dir", "work", "--build-root", "build"], "exit": 1, "check": "check.jet", "expected": "expected/broken.out"},
+      {"args": ["--compiler", "odd=command:sh ../../../fake.sh linear {bogus} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--help"], "exit": 0, "check": "check.jet", "expected": "expected/help.out"},
+      {"args": ["--shape", "small-fns"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--bogus", "x"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--shape", "nope"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--mode", "fast"], "exit": 2, "expected": "expected/empty.out"}
+    ]
+  }
+}

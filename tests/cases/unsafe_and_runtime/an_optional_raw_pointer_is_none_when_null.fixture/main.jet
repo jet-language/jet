@@ -1,0 +1,25 @@
+use core.mem
+
+// The pointer itself when `keep`, else None.
+pick: fn(pointer: *Int, keep: Bool) -> mem.Ptr<Int>? {
+    if keep -> return Val(pointer)
+    None
+}
+
+run: fn() {
+    cell := 41
+    address: mem.address_of(cell)
+    #Unsafe("each pointer names the live local cell, or is null and never read") {
+        pointer: mem.Ptr<Int>.from_addr(address)
+        if pick(pointer, true) == .Val(kept) -> print(kept.* + 1) else -> print("lost")
+        if pick(pointer, false) == .Val(_) -> print("present") else -> print("absent")
+        null: pick(mem.Ptr<Int>.from_addr(0), true)
+        if null == .Val(_) -> print("null present") else -> print("null is None")
+        slots: [pick(pointer, false), pick(pointer, true), null]
+        present := 0
+        loop slot in slots {
+            if slot == .Val(_) -> present += 1
+        }
+        print(present)
+    }
+}

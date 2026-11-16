@@ -1,0 +1,171 @@
+// Functions and methods reflect one typed CallableSignature. Its parameter
+// list holds a ParamInfo per parameter: the parameter's name, the label a
+// call writes, its zone, its type (a TypeId, printed by its `name`), how it
+// takes the argument, where its default is written (a DefaultInfo whose
+// `source` span is read, never run) and whether it is variadic, so nothing
+// here parses a signature string; its `return_type` is a TypeId too. Effects
+// read the same way: `declared` is the row a signature writes (None when it
+// writes none), `inferred` is the row the checker solves from the body, and
+// `values` is the row known where it is read. `send.reflect().effects` is a
+// fact read, so it is compile-time only: `#run` folds it inside the check,
+// where `inferred` is None and `values` is the written row. Fn build reads
+// the rows after the check (`b.program.functions()`): a written row is a
+// ceiling, so `send` solves to an empty row, and `announce`, which writes
+// none, solves to the IO its body reaches.
+// A name bound to a lambda reflects as a ClosureInfo: the same signature, the
+// span of its name, plus a CaptureInfo per captured binding with the span of
+// that binding and the mode the checker chose: `Read` in place, `Write` to
+// the owner's binding, `Copy` into an escaping closure, `Materialize` for an
+// owned copy of a view, `Move` when it takes the value.
+// A generic type named with its arguments (`Shelf<Int>.reflect()`) reflects
+// that specialization: its identity names the arguments, its fields and
+// method signatures read them in place of `T`, and each signature's
+// `generic_bindings` pairs `T` with its argument. A generic function names
+// its specialization with `types:`: `pick.reflect(types: [String])`.
+// A function type reads the same contract: a TypeId's `signature` is the
+// CallableSignature of a function type (None for any other type), so the
+// type of `apply`'s `step` lists its parameter types, its return type and
+// the effect row it bounds.
+// Every read is a typed fact of the checked signature, so changing a
+// callee's signature changes what the code that reads it sees at its next
+// check.
+connect: fn(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
+    "{host}:{seconds}:{tls}"
+}
+
+Log: struct {
+    lines: [String]
+
+    note: fn(self, text: String, tags: ...String) -> Int { self.lines.len() + tags.len() }
+
+    drain: fn(self, sink: &[String], batch: &&[String]) -> Int { sink.len() + batch.len() }
+}
+
+Shelf: struct<T> {
+    items: [T]
+
+    size_with: fn(self, extra: [T]) -> Int { self.items.len() + extra.len() }
+}
+
+send: fn(text: String) -[Net]> Int { text.len() }
+
+announce: fn(text: String) { print(text) }
+
+apply: fn(value: Int, step: fn(Int) -[]> String) -> String { step(value) }
+
+// The effect rows of `send` and `announce` as the checker solved them.
+build: fn(b: Build) {
+    rows := [String]{}
+    loop function in b.program.functions() {
+        if function.name != "send" && function.name != "announce" -> next
+        effects: function.signature.effects
+        declared: if effects.declared == .Val(row) -> row.join(", ") else -> "nothing"
+        solved: if effects.inferred == .Val(row) -> "[{row.join(", ")}]" else -> "nothing yet"
+        rows.push("{function.name} declares {declared}, solves {solved} and reads as [{effects.values.join(", ")}]")
+    }
+    b.contribute("effects", rows.join("\n"))
+}
+
+pick: fn<T>(first: T, second: T) -> T { first }
+
+capture_mode: fn(mode: CaptureMode) -> String {
+    if mode == {
+        .Read -> "reads"
+        .Write -> "writes"
+        .Copy -> "copies"
+        .Materialize -> "materializes"
+        .Move -> "takes"
+    }
+}
+
+show_closure: fn(info: ClosureInfo) {
+    params: (loop param in info.signature.params -> "{param.name}: {param.type.name}").join(", ")
+    line: if info.location == .Val(at) -> at.line else -> 0
+    named: info.span.end - info.span.start
+    print("{info.name}({params}) -> {info.signature.return_type?.name ?? "nothing"}, bound on line {line} by a {named}-byte name in {info.span.file}")
+    loop capture in info.captures {
+        place: if capture.span.end <= info.span.start -> "declared before it" else -> "declared after it"
+        print("  {info.name} {capture_mode(capture.mode)} {capture.name} ({capture.type.name}), {place}")
+    }
+}
+
+run: fn() {
+    loop param in connect.reflect().signature.params {
+        zone: if param.zone == {
+            .PositionalOnly -> "positional"
+            .Either -> "either"
+            .LabelOnly -> "label-only"
+        }
+        default: if param.default == .Val(written) -> "a {written.source.end - written.source.start}-byte default in {written.source.file}, never run" else -> "required"
+        print("connect {param.name}: label {param.label}, {zone}, {param.type.name}, {default}")
+    }
+    loop method in Log.reflect().methods {
+        loop param in method.signature.params {
+            if param.name == "self" -> next
+            access: if param.access == {
+                .Read -> "reads"
+                .Write -> "writes"
+                .Move -> "takes"
+            }
+            shape: if param.variadic -> "variadic" else -> "single"
+            print("Log.{method.name} {access} {param.name} ({shape})")
+        }
+    }
+    effects: #run send.reflect().effects
+    declared: if effects.declared == .Val(row) -> row.join(", ") else -> "nothing"
+    solved: if effects.inferred == None -> "not solved yet" else -> "solved"
+    print("send declares {declared}; inside the check its body row is {solved}, so it reads as {effects.values.join(", ")}")
+    print(#build.settings.effects)
+    announce("the catalog announces itself")
+    signature: connect.reflect().signature
+    convention: if signature.calling_convention == {
+        .Jet -> "Jet"
+        .Kernel -> "kernel"
+        .Foreign -> "foreign"
+    }
+    print("connect returns {signature.return_type?.name ?? "nothing"} by the {convention} calling convention")
+    print(connect("db"))
+    limit: 3
+    factor: 2
+    count := 0
+    keep: fn(name: String) -> Bool {
+        count += 1
+        name.len() <= limit
+    }
+    budget: fn() -> Int { limit * factor }
+    show_closure(keep.reflect())
+    show_closure(budget.reflect())
+    kept: [budget]
+    first: keep("ada")
+    second: keep("grace")
+    print("keep ada {first}, grace {second}; {count} calls; budget {kept[0]()}")
+    shelf: Shelf<Int>.reflect()
+    bound: (loop binding in shelf.generic_bindings -> "{binding.name} = {binding.type.name}").join(", ")
+    print("{shelf.name} with {bound}")
+    loop field in shelf.fields -> print("  field {field.name}: {field.type.name}")
+    loop method in shelf.methods {
+        params: (loop param in method.signature.params if param.name != "self" -> "{param.name}: {param.type.name}").join(", ")
+        binds: (loop binding in method.signature.generic_bindings -> "{binding.name} = {binding.type.name}").join(", ")
+        print("  {method.name}({params}) -> {method.signature.return_type?.name ?? "nothing"}, binding {binds}")
+    }
+    words: Shelf<String>.reflect()
+    print("Shelf<Int> and Shelf<String> are distinct instances: {shelf.identity.identity != words.identity.identity}")
+    numbers: Shelf<Int>{items: [Int]{1, 2}}
+    print("a Shelf<Int> of 2 with 1 more holds {numbers.size_with([Int]{3})}")
+    picked: pick.reflect(types: [String])
+    picks: (loop param in picked.signature.params -> "{param.name}: {param.type.name}").join(", ")
+    chose: (loop binding in picked.signature.generic_bindings -> "{binding.name} = {binding.type.name}").join(", ")
+    print("pick({picks}) -> {picked.signature.return_type?.name ?? "nothing"}, binding {chose}")
+    print("pick for String and for Int are distinct instances: {picked.identity != pick.reflect(types: [Int]).identity}")
+    print("pick of a and b is {pick("a", "b")}")
+    loop param in apply.reflect().signature.params {
+        if param.type.signature == None {
+            print("apply {param.name} takes {param.type.name}, no function")
+        }
+        callee: param.type.signature ?? next
+        takes: (loop inner in callee.params -> inner.type.name).join(", ")
+        callee_row: if callee.effects.declared == .Val(row) -> "[{row.join(", ")}]" else -> "no row"
+        print("apply {param.name} takes a function of ({takes}) -> {callee.return_type?.name ?? "nothing"} bounded by {callee_row}")
+    }
+    print("apply 4 gives {apply(4, fn(n: Int) -> String { "{n}!" })}")
+}

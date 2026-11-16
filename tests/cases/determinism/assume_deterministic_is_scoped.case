@@ -1,0 +1,9 @@
+# tests/determinism.rs::assume_deterministic_is_scoped at tests/determinism.rs:507; hand-port
+# Fixture migrated: `time.now()` returns `DateTime`, so the pure function returns `time.DateTime` instead of `Int`
+fixture: assume_deterministic_is_scoped.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet --json
+exit: 1 # tests/determinism.rs:524 is rejected
+json: stdout doc $.reports[?code="E3403"] #>= 1 # tests/determinism.rs:524 reports E3403

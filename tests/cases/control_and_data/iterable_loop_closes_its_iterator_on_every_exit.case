@@ -1,0 +1,24 @@
+# A loop over an Iterable closes the iterator it owns once, when the loop
+# ends: at its end, at `break`, at a `return` or a propagated failure from
+# inside the body, and per pass of a nested loop; `next` does not close it.
+# Every tier and the built binary print the same close lines.
+fixture: iterable_loop_closes_its_iterator_on_every_exit.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step: jet run -O0 main.jet
+exit: 0
+stdout: = iterable_loop_closes_its_iterator_on_every_exit.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = iterable_loop_closes_its_iterator_on_every_exit.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = iterable_loop_closes_its_iterator_on_every_exit.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = iterable_loop_closes_its_iterator_on_every_exit.out

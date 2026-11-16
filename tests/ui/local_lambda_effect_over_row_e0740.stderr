@@ -1,0 +1,10 @@
+Error [jet.EffectBoundExceeded]: `wide` uses the effect `IO`, which its signature doesn't allow
+  --> tests/ui/local_lambda_effect_over_row_e0740.jet:3:14
+    |
+  3 | wide: fn() -[FS.Read]> Int {
+    |              ^^^^^^^
+ Why: The signature declares `-[FS.Read]>`, so the body may only use those; `IO` is outside that set
+ Fix: Add `IO` to the effect list, or stop using it in `wide`
+ Denial: invocation
+ Call chain: wide
+More: jet-lang.dev/e/E0740

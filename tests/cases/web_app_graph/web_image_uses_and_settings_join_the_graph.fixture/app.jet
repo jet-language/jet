@@ -1,0 +1,21 @@
+// Two handlers name images; home names the tile twice.
+use {
+    web: core.web
+    core.image.[ImageFormat]
+}
+
+home: fn() -> WebPage {
+    web.page("Home", "{web.image("Images/tile.png", alt: "tile")}{web.image("Images/tile.png", alt: "again")}")
+}
+
+about: fn() -> WebPage {
+    web.page("About", "{web.image("Images/photo.jpg", alt: "photo")}{web.image("Images/tile.png", alt: "tile")}")
+}
+
+run: fn() {
+    web.app()
+        .images(formats: [ImageFormat]{.JPEG, .PNG}, widths: [Int]{320, 160}, quality: 70)
+        .route("/", home)
+        .route("/about", about)
+        .serve()
+}

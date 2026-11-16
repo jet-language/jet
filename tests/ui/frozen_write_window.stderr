@@ -1,0 +1,17 @@
+Error [jet.FrozenValueWrite]: `frozen` cannot be passed with write access; it was frozen at `freeze(...)` at line 5, column 15
+  --> tests/ui/frozen_write_window.jet:6:17
+    |
+  6 |     scale(frozen[0..2])
+    |                 ^^^^^^
+ Why: `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot.
+ Fix: Create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional
+More: jet-lang.dev/e/E1113
+
+Error [jet.FrozenValueWrite]: `frozen` cannot be edited; it was frozen at `freeze(...)` at line 5, column 15
+  --> tests/ui/frozen_write_window.jet:7:11
+    |
+  7 |     edit: &frozen[1..2]
+    |           ^^^^^^^^^^^^^
+ Why: `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot.
+ Fix: Create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional
+More: jet-lang.dev/e/E1113

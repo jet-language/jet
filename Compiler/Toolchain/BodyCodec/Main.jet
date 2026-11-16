@@ -1,0 +1,720 @@
+// The checked-body codecs: a put and a get function for every struct and
+// enum a checked function body (FnBody) holds, written into
+// JetFoundation/Source/Facts/BodyCodec.jet from the declarations under
+// JetFoundation/Source; for every one a parsed program (Program) holds
+// besides, written into JetFoundation/Source/Facts/SyntaxCodec.jet; and for
+// every one the packet a function's check leaves for its module pass
+// (SemaParallelBody) holds besides, written into
+// JetSema/Source/Sema/BodyPacketCodec.jet. A put writes a value's fields in
+// declaration order, an enum its variant's position first; a get reads them
+// back in the same order and builds the value. The halves no declaration
+// spells (integers, strings, the symbol, declaration and module ids a body
+// names) are written by hand in Facts/BodyCodecRows.jet. This tool's
+// --check, one of the ratchets every commit keeps (Tools/agent/Land.jet
+// RATCHETS), fails on a stale codec, so an edited body or syntax type fails
+// until this runs again.
+// Usage (from the checkout root): jet Compiler/Toolchain/BodyCodec/Main.jet [--check|--write]
+// --check fails when a generated file differs in any byte; --write
+// rewrites them.
+use {
+    files: core.files
+    process: core.process
+    jet_foundation.[DIAGNOSTIC_ERROR, EnumDef, Item, StructDef, Type, TypeAliasDef]
+    jet_parser.[jet_format_source, parse_source]
+}
+
+WRITE_COMMAND: "jet Compiler/Toolchain/BodyCodec/Main.jet --write"
+
+FOUNDATION_SOURCE: "Compiler/JetFoundation/Source"
+
+SEMA_SOURCE: "Compiler/JetSema/Source"
+
+BODY_CODEC: "Compiler/JetFoundation/Source/Facts/BodyCodec.jet"
+
+SYNTAX_CODEC: "Compiler/JetFoundation/Source/Facts/SyntaxCodec.jet"
+
+// The hand-written half: a named type whose put it declares
+// (`body_codec_put_<lowercase name>`), such as a fixed-width integer or an id
+// that names a row of a compile's own tables, is written by it.
+BODY_CODEC_ROWS: "Compiler/JetFoundation/Source/Facts/BodyCodecRows.jet"
+
+HAND_PUT: "body_codec_put_"
+
+// One generated file: the codec of every named type `roots` reach, from the
+// declarations under `shape_dirs`, written into `output`. A named type one of
+// `hand_files` declares a put for is written there. When `package` is not
+// empty the hand files, and the declarations outside `own_dir`, are that
+// package's, and the output imports the names it uses of them, and the
+// names in `named` besides: a type the signature of a called hand put spells
+// bare, which the output names as that package does even where its own
+// text does not. `header` is the comment the output starts with.
+CodecTarget: struct {
+    output: String
+    header: String
+    roots: [String]
+    shape_dirs: [String]
+    own_dir: String
+    hand_files: [String]
+    package: String
+    named: [String]
+}
+
+// The generated files, in the order they are written: a later one's hand
+// files may be an earlier one's output.
+codec_targets: fn() -> [CodecTarget] Never! {
+    // A checked function body, and a checked standalone expression.
+    body: CodecTarget{output: BODY_CODEC, header: BODY_HEADER, roots: [String]{"FnBody", "BodyExpr"}, shape_dirs: [String]{FOUNDATION_SOURCE}, own_dir: FOUNDATION_SOURCE, hand_files: [String]{BODY_CODEC_ROWS}, package: "", named: [String]{}}
+    // A parsed program: what a Core unit's declaration heads parse to, which
+    // the Core interface holds (JetDriver CoreInterface.jet).
+    syntax: CodecTarget{output: SYNTAX_CODEC, header: SYNTAX_HEADER, roots: [String]{"Program"}, shape_dirs: [String]{FOUNDATION_SOURCE}, own_dir: FOUNDATION_SOURCE, hand_files: [String]{BODY_CODEC_ROWS, BODY_CODEC}, package: "", named: [String]{}}
+    // What one function's check leaves for its module pass: its result, and
+    // the diagnostics and facts the check gathered.
+    packet: CodecTarget{output: "Compiler/JetSema/Source/Sema/BodyPacketCodec.jet", header: PACKET_HEADER, roots: [String]{"SemaParallelBody"}, shape_dirs: [String]{FOUNDATION_SOURCE, SEMA_SOURCE}, own_dir: SEMA_SOURCE, hand_files: [String]{BODY_CODEC_ROWS, BODY_CODEC, SYNTAX_CODEC}, package: "jet_foundation", named: [String]{"Type"}}
+    [CodecTarget]{body, syntax, packet}
+}
+
+#Error
+BodyCodecError: struct {
+    message: String
+}
+
+codec_fail: fn(message: String) -> BodyCodecError Never! {
+    BodyCodecError{message: "body codec: {message}"}
+}
+
+CodecField: struct {
+    name: String
+    ty: Type
+}
+
+// An enum variant: no payload (`unit`), one positional payload (`single`,
+// its one field named ""), or named fields.
+CodecVariant: struct {
+    name: String
+    unit: Bool
+    single: Bool
+    fields: [CodecField]
+}
+
+// A declared struct, enum or type alias. A name declared more than once is
+// `twice`, and a value of it is refused; a generic declaration is refused.
+CodecShape: struct {
+    is_enum: Bool
+    alias: Type?
+    fields: [CodecField]
+    variants: [CodecVariant]
+    twice: Bool
+    generic: Bool
+    // Whether a read that already failed still ends: every field of a struct
+    // ends, and an enum has a variant (`fallback`) whose fields all end.
+    ends: Bool
+    fallback: Int
+    // Whether a value of it can take no bytes (a struct with no field that
+    // takes any).
+    empty: Bool
+    // Whether the target's package declares it (CodecTarget.package).
+    imported: Bool
+}
+
+CodecOut: struct {
+    shapes: [CodecShape]
+    // Each declared name's position in `shapes`.
+    index: [String:Int]
+    // The put functions the hand files declare, by name.
+    hand: [String:Bool]
+    // The top-level names the target's package declares in its hand files.
+    imported: [String:Bool]
+    // The named types the roots reach, in the order they were reached.
+    reached: [String]
+    seen: [String:Bool]
+    // The list, option and map types written so far, by mangled name.
+    written: [String:Bool]
+    blocks: [String]
+}
+
+// The put functions the hand file at `path` declares: each top-level
+// function whose name starts with HAND_PUT. When the target imports from a
+// package, the hand files are that package's, and every top-level name they
+// declare is `imported`.
+read_hand: fn(out: &CodecOut, path: String, target: CodecTarget) BodyCodecError! -[FS]> {
+    imported: target.package != ""
+    text: files.read(path) ?? return Err(codec_fail("cannot read {path}: {err}"))
+    loop line in text.split("\n") {
+        name: top_level_name(line)
+        if name == "" -> next
+        if imported -> out.imported["{name}"] = true
+        if name.starts_with(HAND_PUT) -> out.hand[name] = true
+    }
+    Ok()
+}
+
+// The name a line declares at the top level (`name: ...`), or "".
+top_level_name: fn(line: String) -> String Never! {
+    parts: line.split(":").to_list()
+    if parts.len() < 2 || parts[0] == "" -> return ""
+    loop scalar in parts[0].chars() {
+        if !word_scalar("{scalar}") -> return ""
+    }
+    parts[0]
+}
+
+word_scalar: fn(piece: String) -> Bool Never! {
+    piece.is_alphabetic() || piece.is_numeric() || piece == "_"
+}
+
+// The struct, enum and alias declarations of every file under `dir`; when
+// the target imports from a package and `dir` is not its own, those it adds
+// are that package's.
+read_shapes: fn(out: &CodecOut, dir: String, target: CodecTarget) BodyCodecError! -[FS]> {
+    imported: target.package != "" && dir != target.own_dir
+    entries: files.walk_files(dir).list() ?? return Err(codec_fail("cannot list {dir}: {err}"))
+    paths := [String]{}
+    loop entry in entries.move() {
+        if entry.relative.ends_with(".jet") -> paths.push(entry.relative.move())
+    }
+    paths.sort()
+    first: out.shapes.len()
+    loop relative in paths {
+        path: files.join(dir, relative)
+        text: files.read(path) ?? return Err(codec_fail("cannot read {path}: {err}"))
+        parsed: parse_source(text.bytes())
+        loop diagnostic in parsed.diagnostics {
+            if diagnostic.severity == DIAGNOSTIC_ERROR {
+                return Err(codec_fail("{path} does not parse: {diagnostic.what}"))
+            }
+        }
+        loop item in parsed.program.items.move() -> add_item(out, item.move())
+    }
+    if imported {
+        loop position in first..<out.shapes.len() -> out.shapes[position].imported = true
+    }
+    Ok()
+}
+
+add_item: fn(out: &CodecOut, item: &&Item) Never! {
+    if item == .Struct(_) {
+        if item.move() == .Struct(def) -> add_struct(out, def.move())
+        return
+    }
+    if item == .Enum(_) {
+        if item.move() == .Enum(def) -> add_enum(out, def.move())
+        return
+    }
+    if item.move() == .TypeAlias(def) -> add_alias(out, def.move())
+}
+
+empty_shape: fn() -> CodecShape Never! {
+    CodecShape{is_enum: false, alias: None, fields: [CodecField]{}, variants: [CodecVariant]{}, twice: false, generic: false, ends: false, fallback: 0, empty: false, imported: false}
+}
+
+add_struct: fn(out: &CodecOut, def: &&StructDef) Never! {
+    shape := empty_shape()
+    shape.generic = def.type_params.len() > 0
+    loop field in def.fields.move() {
+        if field.computed != None -> next
+        shape.fields.push(CodecField{name: field.name.move(), ty: field.ty.move()})
+    }
+    add_shape(out, def.name.move(), shape.move())
+}
+
+add_enum: fn(out: &CodecOut, def: &&EnumDef) Never! {
+    shape := empty_shape()
+    shape.is_enum = true
+    shape.generic = def.type_params.len() > 0
+    loop variant in def.variants.move() {
+        row := CodecVariant{name: variant.name.move(), unit: false, single: false, fields: [CodecField]{}}
+        if variant.payload.move() == {
+            .Unit -> { row.unit = true }
+            .Single(ty, _) -> {
+                row.single = true
+                row.fields.push(CodecField{name: "", ty: ty.move()})
+            }
+            .Named(fields) -> {
+                loop field in fields.move() {
+                    row.fields.push(CodecField{name: field.name.move(), ty: field.ty.move()})
+                }
+            }
+        }
+        shape.variants.push(row.move())
+    }
+    add_shape(out, def.name.move(), shape.move())
+}
+
+add_alias: fn(out: &CodecOut, def: &&TypeAliasDef) Never! {
+    shape := empty_shape()
+    shape.generic = def.type_params.len() > 0 || def.choices.len() > 0
+    shape.alias = Val(def.target.move())
+    add_shape(out, def.name.move(), shape.move())
+}
+
+// The first declaration of a name keeps its place; another one marks it
+// declared twice.
+add_shape: fn(out: &CodecOut, name: &&String, shape: &&CodecShape) Never! {
+    if out.index.get(name) == .Val(at) {
+        out.shapes[at].twice = true
+        return
+    }
+    out.index[name.move()] = out.shapes.len()
+    out.shapes.push(shape.move())
+}
+
+// Whether a hand file writes the named type `name`.
+is_hand_written: fn(out: CodecOut, name: String) -> Bool Never! {
+    out.hand.get("{HAND_PUT}{name.lower()}") != None
+}
+
+// `ty` with each alias it names replaced by the alias's target.
+resolved: fn(out: CodecOut, ty: Type, at: String) -> Type BodyCodecError! {
+    if ty == .Named(name) {
+        if is_hand_written(out, name) -> return Ok(ty)
+        position: out.index.get(name) ?? return Err(codec_fail("{at}: no struct, enum or alias {name}"))
+        shape: out.shapes[position]
+        if shape.twice -> return Err(codec_fail("{at}: {name} is declared more than once"))
+        if shape.generic {
+            return Err(codec_fail("{at}: {name} is generic, which the codec does not write"))
+        }
+        if shape.alias == .Val(target) -> return resolved(out, target, "{at} ({name})")
+        return Ok(ty)
+    }
+    if ty == .List(element) {
+        return Ok(Type.List{element: resolved(out, element, at) ?? return Err(err)})
+    }
+    if ty == .Option(inner) {
+        return Ok(Type.Option{inner: resolved(out, inner, at) ?? return Err(err)})
+    }
+    if ty == .Map(key, _, value) {
+        return Ok(Type.Map{key: resolved(out, key, at) ?? return Err(err), key_span: None, value: resolved(out, value, at) ?? return Err(err)})
+    }
+    if ty == .Int || ty == .Float || ty == .Bool || ty == .Char || ty == .String || ty == .IntN(_, _) {
+        return Ok(ty)
+    }
+    Err(codec_fail("{at}: its declared type has no codec here"))
+}
+
+// The Jet spelling of a resolved type.
+spelled: fn(ty: Type) -> String Never! {
+    if ty == .Int -> return "Int"
+    if ty == .Float -> return "Float"
+    if ty == .Bool -> return "Bool"
+    if ty == .Char -> return "Char"
+    if ty == .String -> return "String"
+    if ty == .IntN(signed, bits) -> return "{if signed -> "I" else -> "U"}{bits}"
+    if ty == .List(element) -> return "[{spelled(element)}]"
+    if ty == .Option(inner) -> return "{spelled(inner)}?"
+    if ty == .Map(key, _, value) -> return "[{spelled(key)}:{spelled(value)}]"
+    if ty == .Named(name) -> return "{name}"
+    "Never"
+}
+
+// The name part of a resolved type's put and get functions.
+mangled: fn(ty: Type) -> String Never! {
+    if ty == .Int -> return "int"
+    if ty == .Float -> return "float"
+    if ty == .Bool -> return "bool"
+    if ty == .Char -> return "char"
+    if ty == .String -> return "string"
+    if ty == .IntN(signed, bits) -> return "{if signed -> "i" else -> "u"}{bits}"
+    if ty == .List(element) -> return "list_{mangled(element)}"
+    if ty == .Option(inner) -> return "opt_{mangled(inner)}"
+    if ty == .Map(key, _, value) -> return "map_{mangled(key)}_to_{mangled(value)}"
+    if ty == .Named(name) -> return name.lower()
+    "never"
+}
+
+// Every named type `ty` reaches, added to `out.reached` once each.
+reach: fn(out: &CodecOut, ty: Type, at: String) BodyCodecError! {
+    if ty == .List(element) -> return reach(out, element, at)
+    if ty == .Option(inner) -> return reach(out, inner, at)
+    if ty == .Map(key, _, value) {
+        reach(out, key, at) ?? return Err(err)
+        return reach(out, value, at)
+    }
+    if ty == .Named(name) {
+        if is_hand_written(out, name) || out.seen.get(name) != None -> return Ok()
+        out.seen["{name}"] = true
+        out.reached.push("{name}")
+        position: out.index.get(name) ?? return Err(codec_fail("{at}: no struct or enum {name}"))
+        // Each field's type, resolved in place, and kept to reach next.
+        types := [Type]{}
+        loop index in 0..<out.shapes[position].fields.len() {
+            where: "{name}.{out.shapes[position].fields[index].name}"
+            types.push(resolved(out, out.shapes[position].fields[index].ty, where) ?? return Err(err))
+            out.shapes[position].fields[index].ty = resolved(out, out.shapes[position].fields[index].ty, where) ?? return Err(err)
+        }
+        loop variant_index in 0..<out.shapes[position].variants.len() {
+            loop index in 0..<out.shapes[position].variants[variant_index].fields.len() {
+                where: "{name}.{out.shapes[position].variants[variant_index].name}"
+                types.push(resolved(out, out.shapes[position].variants[variant_index].fields[index].ty, where) ?? return Err(err))
+                out.shapes[position].variants[variant_index].fields[index].ty = resolved(out, out.shapes[position].variants[variant_index].fields[index].ty, where) ?? return Err(err)
+            }
+        }
+        loop field_type in types -> reach(out, field_type, name) ?? return Err(err)
+    }
+    Ok()
+}
+
+// Whether a failed read of a resolved type ends: a list, an option and a map
+// read nothing more once a read failed, and a named type ends when its shape
+// does (`ends`).
+type_ends: fn(out: CodecOut, ty: Type) -> Bool Never! {
+    if ty == .Named(name) {
+        if is_hand_written(out, name) -> return true
+        position: out.index.get(name) ?? return false
+        return out.shapes[position].ends
+    }
+    true
+}
+
+// Whether a value of a resolved type can take no bytes.
+type_empty: fn(out: CodecOut, ty: Type) -> Bool Never! {
+    if ty == .Named(name) {
+        if is_hand_written(out, name) -> return false
+        position: out.index.get(name) ?? return false
+        return out.shapes[position].empty
+    }
+    false
+}
+
+// Marks which reached shapes end on a failed read, and each enum's fallback
+// variant (the first with no payload, else the first whose fields all end),
+// until nothing changes; a shape that never ends is refused.
+settle: fn(out: &CodecOut) BodyCodecError! {
+    loop name in out.reached {
+        position: out.index.get(name) ?? return Err(codec_fail("no struct or enum {name}"))
+        shape: out.shapes[position]
+        out.shapes[position].empty = !shape.is_enum
+    }
+    changed := true
+    loop changed {
+        changed = false
+        loop name in out.reached {
+            position: out.index.get(name) ?? return Err(codec_fail("no struct or enum {name}"))
+            shape: out.shapes[position]
+            if !shape.is_enum && shape.empty {
+                all_empty := true
+                loop field in shape.fields {
+                    if !type_empty(out, field.ty) -> all_empty = false
+                }
+                if !all_empty {
+                    out.shapes[position].empty = false
+                    changed = true
+                }
+            }
+            if shape.ends -> next
+            fallback: shape_end(out, shape)
+            if fallback < 0 -> next
+            out.shapes[position].fallback = fallback
+            out.shapes[position].ends = true
+            changed = true
+        }
+    }
+    loop name in out.reached {
+        position: out.index.get(name) ?? return Err(codec_fail("no struct or enum {name}"))
+        if !out.shapes[position].ends {
+            return Err(codec_fail("{name} has no value a failed read can end on"))
+        }
+    }
+    Ok()
+}
+
+// Where a failed read of `shape` ends: an enum's fallback variant (the first
+// with no payload, else the first whose fields all end), 0 for a struct whose
+// fields all end, and -1 while it does not end.
+shape_end: fn(out: CodecOut, shape: CodecShape) -> Int Never! {
+    if !shape.is_enum -> return if fields_end(out, shape.fields) -> 0 else -> -1
+    loop (index, variant) in shape.variants {
+        if variant.unit -> return index
+    }
+    loop (index, variant) in shape.variants {
+        if fields_end(out, variant.fields) -> return index
+    }
+    -1
+}
+
+// Whether a failed read of every field in `fields` ends.
+fields_end: fn(out: CodecOut, fields: [CodecField]) -> Bool Never! {
+    loop field in fields {
+        if !type_ends(out, field.ty) -> return false
+    }
+    true
+}
+
+put_call: fn(ty: Type, value: String) -> String Never! {
+    "body_codec_put_{mangled(ty)}(out, {value})"
+}
+
+get_call: fn(ty: Type) -> String Never! { "body_codec_get_{mangled(ty)}(bytes, input)" }
+
+// The put and get functions of the list, option or map type `ty`, and of
+// those its parts are, once each.
+write_container: fn(out: &CodecOut, ty: Type) Never! {
+    name: mangled(ty)
+    if ty == .Named(_) || ty == .Int || ty == .Float || ty == .Bool || ty == .Char || ty == .String || ty == .IntN(_, _) {
+        return
+    }
+    if out.written.get(name) != None || out.hand.get("{HAND_PUT}{name}") != None {
+        return
+    }
+    out.written[name] = true
+    text: spelled(ty)
+    if ty == .List(element) -> return write_list(out, name, text, element)
+    if ty == .Option(inner) -> return write_option(out, name, text, inner)
+    if ty == .Map(key, _, value) -> write_map(out, name, text, key, value)
+}
+
+// The put and get functions of the list type `text` of `element`.
+write_list: fn(out: &CodecOut, name: String, text: String, element: Type) Never! {
+    write_container(out, element)
+    least: if type_empty(out, element) -> 0 else -> 1
+    lines := [String]{}
+    lines.push("body_codec_put_{name}: fn(out: &BodyCodecOut, values: {text}) Never! {{")
+    lines.push("    body_codec_put_count(out, values.len())")
+    lines.push("    loop value in values -> {put_call(element, "value")}")
+    lines.push("}}")
+    lines.push("")
+    lines.push("body_codec_get_{name}: fn(bytes: [U8], input: &BodyCodecIn) -> {text} Never! {{")
+    lines.push("    count: body_codec_get_count(bytes, input, {least})")
+    lines.push("    values := {text}{{}}")
+    lines.push("    loop _ in 0..<count -> values.push({get_call(element)})")
+    lines.push("    values")
+    lines.push("}}")
+    out.blocks.push(lines.join("\n"))
+}
+
+// The put and get functions of the option type `text` of `inner`.
+write_option: fn(out: &CodecOut, name: String, text: String, inner: Type) Never! {
+    write_container(out, inner)
+    lines := [String]{}
+    lines.push("body_codec_put_{name}: fn(out: &BodyCodecOut, value: {text}) Never! {{")
+    lines.push("    if value == .Val(inner) {{")
+    lines.push("        body_codec_put_bool(out, true)")
+    lines.push("        {put_call(inner, "inner")}")
+    lines.push("        return")
+    lines.push("    }}")
+    lines.push("    body_codec_put_bool(out, false)")
+    lines.push("}}")
+    lines.push("")
+    lines.push("body_codec_get_{name}: fn(bytes: [U8], input: &BodyCodecIn) -> {text} Never! {{")
+    lines.push("    if body_codec_get_bool(bytes, input) -> return Val({get_call(inner)})")
+    lines.push("    None")
+    lines.push("}}")
+    out.blocks.push(lines.join("\n"))
+}
+
+// The put and get functions of the map type `text` from `key` to `value`.
+write_map: fn(out: &CodecOut, name: String, text: String, key: Type, value: Type) Never! {
+    write_container(out, key)
+    write_container(out, value)
+    lines := [String]{}
+    lines.push("body_codec_put_{name}: fn(out: &BodyCodecOut, values: {text}) Never! {{")
+    lines.push("    body_codec_put_count(out, values.len())")
+    lines.push("    loop (key, value) in values {{")
+    lines.push("        {put_call(key, "key")}")
+    lines.push("        {put_call(value, "value")}")
+    lines.push("    }}")
+    lines.push("}}")
+    lines.push("")
+    lines.push("body_codec_get_{name}: fn(bytes: [U8], input: &BodyCodecIn) -> {text} Never! {{")
+    lines.push("    count: body_codec_get_count(bytes, input, 1)")
+    lines.push("    values := {text}{{}}")
+    lines.push("    loop _ in 0..<count {{")
+    lines.push("        key: {get_call(key)}")
+    lines.push("        values[key] = {get_call(value)}")
+    lines.push("    }}")
+    lines.push("    values")
+    lines.push("}}")
+    out.blocks.push(lines.join("\n"))
+}
+
+// The put and get functions of the reached struct `name`, whose shape is
+// `shape`.
+write_struct: fn(out: &CodecOut, name: String, shape: CodecShape) Never! {
+    function: name.lower()
+    lines := [String]{}
+    if shape.fields.len() == 0 {
+        lines.push("body_codec_put_{function}: fn(_: &BodyCodecOut, _: {name}) Never! {{}}")
+        lines.push("")
+        lines.push("body_codec_get_{function}: fn(_: [U8], _: &BodyCodecIn) -> {name} Never! {{ {name}{{}} }}")
+        out.blocks.push(lines.join("\n"))
+        return
+    }
+    lines.push("body_codec_put_{function}: fn(out: &BodyCodecOut, value: {name}) Never! {{")
+    loop field in shape.fields -> lines.push("    {put_call(field.ty, "value.{field.name}")}")
+    lines.push("}}")
+    lines.push("")
+    lines.push("body_codec_get_{function}: fn(bytes: [U8], input: &BodyCodecIn) -> {name} Never! {{")
+    built := [String]{}
+    loop (index, field) in shape.fields {
+        lines.push("    f{index}: {get_call(field.ty)}")
+        built.push("{field.name}: f{index}")
+    }
+    lines.push("    {name}{{{built.join(", ")}}}")
+    lines.push("}}")
+    out.blocks.push(lines.join("\n"))
+}
+
+// The value of `variant` of the enum `name` built from the gets of its
+// fields, as the lines of a match arm `indent` deep.
+variant_read: fn(name: String, variant: CodecVariant, indent: String) -> [String] Never! {
+    if variant.unit -> return [String]{"{name}.{variant.name}"}
+    lines := [String]{"{{"}
+    built := [String]{}
+    loop (index, field) in variant.fields {
+        lines.push("{indent}    f{index}: {get_call(field.ty)}")
+        built.push(if variant.single -> "f{index}" else -> "{field.name}: f{index}")
+    }
+    lines.push(if variant.single -> "{indent}    {name}.{variant.name}({built.join(", ")})" else -> "{indent}    {name}.{variant.name}{{{built.join(", ")}}}")
+    lines.push("{indent}}}")
+    lines
+}
+
+// The put and get functions of the reached enum `name`, whose shape is
+// `shape`. A get reads the variant's position (body_codec_get_tag), and a
+// position past the last variant, or any read once one failed, reads the
+// shape's fallback variant.
+write_enum: fn(out: &CodecOut, name: String, shape: CodecShape) Never! {
+    function: name.lower()
+    lines := [String]{}
+    lines.push("body_codec_put_{function}: fn(out: &BodyCodecOut, value: {name}) Never! {{")
+    lines.push("    if value == {{")
+    loop (index, variant) in shape.variants {
+        if variant.unit {
+            lines.push("        .{variant.name} -> body_codec_put_tag(out, {index})")
+            next
+        }
+        binds: loop (field_index, _) in variant.fields -> "p{field_index}"
+        lines.push("        .{variant.name}({binds.join(", ")}) -> {{")
+        lines.push("            body_codec_put_tag(out, {index})")
+        loop (field_index, field) in variant.fields {
+            lines.push("            {put_call(field.ty, "p{field_index}")}")
+        }
+        lines.push("        }}")
+    }
+    lines.push("    }}")
+    lines.push("}}")
+    lines.push("")
+    lines.push("body_codec_get_{function}: fn(bytes: [U8], input: &BodyCodecIn) -> {name} Never! {{")
+    if shape.variants.len() == 1 {
+        lines.push("    body_codec_skip_tag(bytes, input, 1)")
+        // A one-line read is the value; a longer one is a block, whose
+        // inner lines this function's body takes.
+        read: variant_read(name, shape.variants[0], "")
+        if read.len() == 1 -> lines.push("    {read[0]}")
+        loop index in 1..<read.len() - 1 -> lines.push(read[index])
+        lines.push("}}")
+        out.blocks.push(lines.join("\n"))
+        return
+    }
+    lines.push("    position: body_codec_get_tag(bytes, input, {shape.variants.len()}, {shape.fallback})")
+    lines.push("    if position == {{")
+    loop (index, variant) in shape.variants {
+        if index == shape.fallback -> next
+        read: variant_read(name, variant, "        ")
+        lines.push("        {index} -> {read[0]}")
+        loop line_index in 1..<read.len() -> lines.push(read[line_index])
+    }
+    read: variant_read(name, shape.variants[shape.fallback], "        ")
+    lines.push("        else -> {read[0]}")
+    loop line_index in 1..<read.len() -> lines.push(read[line_index])
+    lines.push("    }}")
+    lines.push("}}")
+    out.blocks.push(lines.join("\n"))
+}
+
+// The put and get functions of the reached struct or enum `name`, after
+// those of the list, option and map types its fields are.
+write_shape: fn(out: &CodecOut, name: String) BodyCodecError! {
+    position: out.index.get(name) ?? return Err(codec_fail("no struct or enum {name}"))
+    shape: out.shapes[position]
+    loop field in shape.fields -> write_container(out, field.ty)
+    loop variant in shape.variants {
+        loop field in variant.fields -> write_container(out, field.ty)
+    }
+    if shape.is_enum -> write_enum(out, name, shape) else -> write_struct(out, name, shape)
+    Ok()
+}
+
+BODY_HEADER: "// The checked-body codec, generated by Compiler/Toolchain/BodyCodec; do not\n// edit. Regenerate it from the checkout root with `{WRITE_COMMAND}`.\n// Each struct and enum a checked body holds has a put, which writes its\n// fields in declaration order (an enum its variant's position first), and a\n// get, which reads them back in that order. The hand-written halves are in\n// BodyCodecRows.jet.\n"
+
+SYNTAX_HEADER: "// The syntax codec, generated by Compiler/Toolchain/BodyCodec; do not edit.\n// Regenerate it from the checkout root with `{WRITE_COMMAND}`.\n// Each struct and enum a parsed program (Program) holds, besides those of a\n// checked body (BodyCodec.jet), has a put, which writes its fields in\n// declaration order (an enum its variant's position first), and a get, which\n// reads them back in that order. The hand-written halves are in\n// BodyCodecRows.jet.\n"
+
+PACKET_HEADER: "// The checked-body packet codec, generated by Compiler/Toolchain/BodyCodec;\n// do not edit. Regenerate it from the checkout root with\n// `{WRITE_COMMAND}`.\n// Each struct and enum a function check's packet (SemaParallelBody) holds,\n// besides those of the body (JetFoundation Facts/BodyCodec.jet) and of a\n// parsed program (Facts/SyntaxCodec.jet), has a put, which writes its fields\n// in declaration order (an enum its variant's position first), and a get,\n// which reads them back in that order. The hand-written halves are in\n// JetFoundation Facts/BodyCodecRows.jet.\n"
+
+render: fn(target: CodecTarget) -[FS]> String BodyCodecError! {
+    out := CodecOut{shapes: [CodecShape]{}, index: [String:Int]{}, hand: [String:Bool]{}, imported: [String:Bool]{}, reached: [String]{}, seen: [String:Bool]{}, written: [String:Bool]{}, blocks: [String]{}}
+    importing: target.package != ""
+    loop path in target.hand_files -> read_hand(out, path, target) ?? return Err(err)
+    loop dir in target.shape_dirs -> read_shapes(out, dir, target) ?? return Err(err)
+    loop root in target.roots -> reach(out, Type.Named{name: root}, root) ?? return Err(err)
+    settle(out) ?? return Err(err)
+    names: loop name in out.reached -> name
+    loop name in names -> write_shape(out, name) ?? return Err(err)
+    body: out.blocks.join("\n\n")
+    uses: if importing -> imports_of(out, target.package, body, target.named) else -> ""
+    // Written as `jet fmt` writes it, so the formatter leaves the file as is.
+    formatted: jet_format_source("{target.header}\n{uses}{body}\n", false)
+    if !formatted.ok {
+        return Err(codec_fail("the formatter refused the generated codec {target.output}: {formatted.diagnostics:Debug}"))
+    }
+    Ok(formatted.text)
+}
+
+// The `use` line of the names `text` uses that `package` declares and of
+// `named`, sorted, or "" when there are none. A name after a `.` is a field
+// or variant, not one.
+imports_of: fn(out: CodecOut, package: String, text: String, named: [String]) -> String Never! {
+    names := [String:Bool]{}
+    loop name in named -> names[name] = true
+    word := ""
+    after_dot := false
+    previous := ""
+    loop scalar in "{text} ".chars() {
+        piece: "{scalar}"
+        if word_scalar(piece) {
+            if word == "" -> after_dot = previous == "."
+            word = "{word}{piece}"
+            previous = piece
+            next
+        }
+        if word != "" && !after_dot && is_imported(out, word) -> names[word] = true
+        word = ""
+        previous = piece
+    }
+    if names.len() == 0 -> return ""
+    used := [String]{}
+    loop (name, _) in names -> used.push("{name}")
+    used.sort()
+    "use {package}.[{used.join(", ")}]\n\n"
+}
+
+// Whether `word` names a hand file's declaration or a declaration of the
+// target's package.
+is_imported: fn(out: CodecOut, word: String) -> Bool Never! {
+    if out.imported.get(word) != None -> return true
+    position: out.index.get(word) ?? return false
+    out.shapes[position].imported
+}
+
+body_codec_main: fn(args: [String]) -[FS]> String BodyCodecError! {
+    mode: if args.len() == 0 -> "--check" else -> args[0]
+    if args.len() > 1 || (mode != "--check" && mode != "--write") {
+        return Err(codec_fail("usage: jet Compiler/Toolchain/BodyCodec/Main.jet [--check|--write]"))
+    }
+    reports := [String]{}
+    loop target in codec_targets() {
+        generated: render(target) ?? return Err(err)
+        current: if files.exists(target.output) -> files.read(target.output) ?? return Err(codec_fail("cannot read {target.output}: {err}")) else -> ""
+        if current == generated {
+            reports.push("body codec matches: {target.output}")
+            next
+        }
+        if mode != "--write" {
+            return Err(codec_fail("{target.output} differs from what the declarations generate; run {WRITE_COMMAND} from the checkout root"))
+        }
+        files.write(target.output, generated) ?? return Err(codec_fail("cannot write {target.output}: {err}"))
+        reports.push("body codec written: {target.output}")
+    }
+    Ok(reports.join("\n"))
+}
+
+run: fn() { print(body_codec_main(process.args()) ?? process.fail(1, err.message)) }

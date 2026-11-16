@@ -1,0 +1,8 @@
+Error [jet.MarkerRowOutsideContract]: `FS` in `Cached`'s template row is outside `Marker.expand`'s row
+  --> tests/ui/effects/marker_row_outside_contract_is_e0774.jet:5:44
+    |
+  5 |         expand: fn(self, target: Target) -[FS, Meta.Generate]> {
+    |                                            ^^
+ Why: A marker's template runs inside the compiler, where its row may name `Meta.Generate` and nothing else; reading the program needs no effect
+ Fix: Remove `FS`: write `-[Meta.Generate]>` for a template that writes code, or `-[]>` for one that only reads
+More: jet-lang.dev/e/E0774

@@ -1,0 +1,44 @@
+use {
+    web: core.web
+    http: core.http.client
+    server: core.http.server
+    net: core.net
+}
+
+HandlerState: struct {
+    label: String
+}
+
+route_error: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    if req.path() == "/error" -> return Err(.InvalidFraming)
+    return Err(.InvalidFraming)
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address: listener.local_addr() ?? panic("address")
+    state: Shared{HandlerState{label: "before registration"}}
+    mux: web.app()
+    mux.get("/zero", fn() { Ok(server.response(200, "zero")) })
+    mux.get("/items/:id", fn(id: String, req: HTTPRequest) {
+        header: req.header("x-state") ?? "missing"
+        path: req.path()
+        return Ok(server.response(200, "{path}|{id}|{header}|{state.label}"))
+    })
+    mux.get("/error", route_error)
+    state.label = "captured"
+    t: task {
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+    }
+    zero: http.request("GET", "http://{address}/zero").send() ?? panic("zero")
+    print(zero.text() ?? "zero body")
+    detail: http.request("GET", "http://{address}/items/42")
+        .header("x-state", "captured-header")
+        .send() ?? panic("detail")
+    print(detail.text() ?? "detail body")
+    failed: http.request("GET", "http://{address}/error").send() ?? panic("error")
+    print(failed.status())
+    t.join() ?? panic("join")
+}

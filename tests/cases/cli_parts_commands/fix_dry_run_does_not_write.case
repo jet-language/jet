@@ -1,0 +1,11 @@
+# Port of tests/cli_parts/commands.rs:1229-1262; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates and oracles, no runtime run.
+fixture: fixtures/fix
+step: jet fix {work}/jet_cli_fix.jet --dry-run
+exit: any # original predicate: status ignored for dry run
+stderr: ~ "dry run" # original predicate
+stdout: ~ "print" # original predicate
+file: jet_cli_fix.jet = fix-original.out
+step: jet fix {work}/jet_cli_fix.jet
+exit: 0
+file: jet_cli_fix.jet ~ "print(\"hi\")" # original predicate

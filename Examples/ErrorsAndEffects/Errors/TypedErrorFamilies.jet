@@ -1,0 +1,69 @@
+// Typed error families and error conversion.
+// `#Error` declares application-owned result families; `impl Target.From(Source)`
+// is the one conversion rail. It is not a logging layer or a generic alias.
+#Error
+FileErr: enum {
+    NotFound(String)
+    PermDenied
+}
+
+#Error
+ParseErr: enum {
+    Empty
+    BadInt(String)
+}
+
+#Error
+AppErr: enum {
+    File(FileErr)
+    Parse(ParseErr)
+    Missing(String)
+}
+
+// Each conversion preserves the original source error as a payload in the
+// application family. Its `from` receives that error. Without
+// `impl AppErr.From(FileErr)`, the `read_config(path)` call in `load` is
+// rejected because `FileErr` has no route into `AppErr`
+// (tests/ui/error_family_missing_conversion.jet records the rejection and
+// this repair).
+impl AppErr.From(FileErr) {
+    from: fn(error: FileErr) -> AppErr { AppErr.File(error) }
+}
+
+impl AppErr.From(ParseErr) {
+    from: fn(error: ParseErr) -> AppErr { AppErr.Parse(error) }
+}
+
+read_config: fn(path: String) -> String FileErr! {
+    if path == "" -> return Err(FileErr.NotFound("(empty path)"))
+    Ok("42")
+}
+
+parse_int: fn(text: String) -> Int ParseErr! {
+    if text == "" -> return Err(ParseErr.Empty)
+    if text == "x" -> return Err(ParseErr.BadInt(text.copy()))
+    Ok(42)
+}
+
+// Plain fallible calls propagate automatically. At each call, the declared
+// conversion changes only the error carrier; the success payload stays intact.
+// `load` reads `path`, changes nothing, and returns either the port or the
+// first converted failure; `parse_int` never runs when `read_config` fails.
+load: fn(path: String) -> Int AppErr! {
+    raw: read_config(path)  // FileErr -> AppErr.File
+    port: parse_int(raw)  // ParseErr -> AppErr.Parse
+    Ok(port)
+}
+
+run: fn() {
+    // Fallback recovery handles either converted failure locally and keeps
+    // this entry moving. It is distinct from propagation inside `load`.
+    loaded_value: load("config.txt") ?? 0
+    print(loaded_value)
+    // This pattern observes the declared FileErr -> AppErr conversion inside
+    // `load`; both result routes are handled here rather than propagated.
+    if load("") == {
+        .Ok(value) -> { print(value) }
+        .Err(_error) -> { print("error") }
+    }
+}

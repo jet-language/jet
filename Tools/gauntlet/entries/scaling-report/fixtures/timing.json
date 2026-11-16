@@ -1,0 +1,59 @@
+{
+  "schema": "jet.scaling-gate/v3",
+  "startedAt": "2026-11-09T10:00:00Z",
+  "finishedAt": "2026-11-09T11:00:00Z",
+  "mode": "timing",
+  "compilers": [{ "label": "rust", "kind": "bootstrap", "path": "/opt/jet", "template": null }, { "label": "jetc", "kind": "command", "path": null, "template": "jet:{dir}" }, { "label": "bare", "kind": "bootstrap", "path": "/opt/bare", "template": null }],
+  "failures": ["modules[files]/rust: phase.sema.bodies grows x2.50 faster than N log N", "modules[files]/rust: floor", "modules[files]/rust: timeout"],
+  "series": [
+    {
+      "shape": "modules", "layout": "files", "compiler": "rust", "mode": "timing", "done": true, "truncated": "wall budget",
+      "points": [
+        { "x": 1000, "ok": true, "metrics": { "wall_seconds": 0.125, "peak_rss_kb": 524288, "phase.sema.bodies": 0.05 } },
+        { "x": 2000, "ok": true, "metrics": { "wall_seconds": 2.25, "peak_rss_kb": 1048576, "phase.sema.bodies": 1.5 } },
+        { "x": 4000, "ok": false, "metrics": { "wall_seconds": 120, "peak_rss_kb": 2097152 } }
+      ],
+      "failures": [
+        { "kind": "growth", "metric": "phase.sema.bodies", "phase": "sema.bodies", "counter": "counter.sema.items", "ratio": 2.5, "exponent": 1.005, "text": "phase.sema.bodies grows x2.50 faster than N log N from N=1000 to 2000 (exponent 1.01; bound x1.5); dominating counter counter.sema.items x2.50" },
+        { "kind": "growth", "metric": "wall_seconds", "phase": "wall_seconds", "counter": null, "ratio": 1.55, "exponent": -0.001, "text": "wall_seconds grows x1.55 faster than N log N from N=1000 to 2000 (exponent -0.00; bound x1.5)" },
+        { "kind": "growth", "metric": "counter.parse.tokens", "phase": "parse", "counter": null, "ratio": null, "exponent": null, "text": "counter.parse.tokens grows x? faster than N log N from N=? to ? (exponent ?; bound x1.2)" },
+        { "kind": "floor", "phase": "end to end", "text": "1200 lines/s < 5000" },
+        { "kind": "compile", "phase": "parse", "text": "exit 1" },
+        { "kind": "timeout", "phase": "sema.bodies", "text": "timed out after 120 s" }
+      ],
+      "profile": {
+        "phases": {
+          "sema.bodies": { "samples": 40, "inclusive": [
+            { "symbol": "check_item", "source": "Sema.jet:10", "share": 0.4567 },
+            { "symbol": "check_body", "source": null, "share": 0.205 },
+            { "symbol": "lower", "source": null, "share": 0.125 },
+            { "symbol": "late", "source": "late.jet", "share": 0.01 }
+          ] },
+          "wall_seconds": { "samples": 0, "inclusive": [] },
+          "parse": { "samples": 3, "inclusive": [{ "symbol": "parse_file", "source": "Parse.jet:3", "share": 0.3333 }] }
+        }
+      }
+    },
+    {
+      "shape": "generics", "layout": "single", "compiler": "jetc", "mode": "timing", "done": false,
+      "points": [
+        { "x": 8, "ok": true, "metrics": { "wall_seconds": 2.675, "peak_rss_kb": 1500000 } },
+        { "x": 16, "ok": true, "metrics": { "wall_seconds": 3, "peak_rss_kb": 2097152 } }
+      ],
+      "failures": [{ "kind": "truncated", "phase": null, "text": "rung 3 cut" }]
+    },
+    { "shape": "fan-in", "layout": "files", "compiler": "rust", "mode": "timing", "points": [], "truncated": null },
+    {
+      "shape": "web", "layout": "files", "compiler": "rust", "mode": "timing", "done": true, "failures": [],
+      "points": [{ "x": 125000, "ok": true, "metrics": { "wall_seconds": 1.25, "peak_rss_kb": 3000000, "phase.parse": 0.5, "phase.sema": 0.5, "phase.lower": 0.004 } }],
+      "projection": { "measured_at_lines": 125000, "target_lines": 1000000, "target_seconds": 10, "phases": {
+        "wall_seconds": { "measured_s": 1.25, "at_lines": 125000, "exponent": 1.1, "projected_s": 12.25 },
+        "phase.parse": { "measured_s": 0.5, "at_lines": 125000, "exponent": 1.02, "projected_s": 4.05 },
+        "phase.sema": { "measured_s": 0.5, "at_lines": 125000, "exponent": 1, "projected_s": 4.05 },
+        "phase.lower": { "measured_s": 0.004, "at_lines": 125000, "exponent": 2, "projected_s": 0.256 }
+      } }
+    },
+    { "shape": "cli", "layout": "files", "compiler": "rust", "mode": "timing", "done": true, "points": [{ "x": 500, "ok": false, "metrics": { "wall_seconds": 0.5, "peak_rss_kb": 1024 } }], "failures": [{ "kind": "compile", "phase": null, "text": "N=500: exit 1" }] },
+    { "shape": "game", "layout": "files", "compiler": "rust", "mode": "counters", "points": [{ "x": 7, "ok": true, "metrics": { "wall_seconds": 5, "peak_rss_kb": 1 } }], "done": true, "failures": [] }
+  ]
+}

@@ -1,0 +1,90 @@
+// A field's type, default and offset read the same at every rung: a marker
+// body that adds a method to another type, a marker that adds a method to
+// the type it marks, a comptime constant, ordinary code through
+// `Rock.reflect()` and fn build each print one line per field of `Rock`.
+// `type` is a TypeId, `offset` the field's byte offset, and `default` the
+// DefaultInfo whose `source` is where the written default stands (`size`'s
+// `1.5`), or None for `name`, which has none. Reading it never runs it.
+Facts: struct {}
+
+// The marker-body rung: the generated method matches the spliced
+// DefaultInfo record itself.
+FromMarker: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            impl Facts {
+                from_marker: fn() -> String {
+                    out := ""
+                    #loop field in target.reflect().fields {
+                        default: if field.default == {
+                            Val(d) -> "{d.source.start}..{d.source.end}"
+                            None -> "none"
+                        }
+                        out = "{out} {field.name}: {field.type.name} default={default} offset={field.offset ?? -1};"
+                    }
+                    out
+                }
+            }
+        }
+    }
+}
+
+// The derive rung: the template reads the default's span through `?.`.
+Describe: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            tname: target.name
+            impl #{tname} {
+                described: fn(self) -> String {
+                    out := ""
+                    #loop field in target.reflect().fields {
+                        start: field.default?.source?.start ?? -1
+                        end: field.default?.source?.end ?? -1
+                        default: if start < 0 -> "none" else -> "{start}..{end}"
+                        out = "{out} {field.name}: {field.type.name} default={default} offset={field.offset ?? -1};"
+                    }
+                    out
+                }
+            }
+        }
+    }
+}
+
+#[FromMarker, Describe]
+Rock: struct {
+    size: Float{1.5}
+    name: String
+}
+
+// The comptime, ordinary-code and fn build rungs share one function.
+describe: fn(info: TypeInfo) -> String {
+    out := ""
+    loop field in info.fields {
+        default: if field.default == {
+            Val(d) -> "{d.source.start}..{d.source.end}"
+            None -> "none"
+        }
+        out = "{out} {field.name}: {field.type.name} default={default} offset={field.offset ?? -1};"
+    }
+    out
+}
+
+ROCK: #run describe(Rock.reflect())
+
+build: fn(b: Build) {
+    loop info in b.program.types() {
+        if info.name == "Rock" -> b.contribute("seen", describe(info))
+    }
+}
+
+run: fn() {
+    print("marker:  {Facts.from_marker()}")
+    print("derive:  {Rock{name: "r"}.described()}")
+    print("comptime:{ROCK}")
+    print("code:    {describe(Rock.reflect())}")
+    print("build:   {#build.settings.seen}")
+}

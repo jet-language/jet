@@ -1,0 +1,20 @@
+// #4717 c81: a borrowed parameter and its enum payload are stable provenance roots (no false E2305).
+enum Packet {
+    Data([Int])
+    Empty
+}
+
+fn head(packet: Packet, spare: [Int]) -> View<Int> from packet | spare {
+    if packet == .Data(items) -> return items[0..1]
+    spare[0..0]
+}
+
+fn run() {
+    p :: Packet.Data([Int]{7, 8, 9})
+    s :: [Int]{0}
+    v :: head(p, s)
+    print(v.len())
+    print(v)
+    xs :: [Int]{7, 8, 9}
+    print(xs[0..1])
+}

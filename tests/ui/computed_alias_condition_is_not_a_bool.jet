@@ -1,0 +1,17 @@
+// A computed alias's condition is a `Bool` its number parameters decide; `N`
+// alone is an `Int`.
+Store: trait {
+    count: fn(self) -> Int
+}
+
+Heap: struct {
+    items: [Int]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+    }
+}
+
+Storage<N: Int>: Store #run { if N -> Heap else -> Heap }
+
+run: fn() { print(1) }

@@ -1,0 +1,18 @@
+# Port of tests/corelib_parts/platform.rs:1106-1207; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_terminal_policy_and_capabilities_are_typed_and_resizable
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "true\ntrue\ntrue\nfalse\nterminal:ok\nplain child has no terminal\nplain\n"
+step: jet check typo.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0302"][?what~="`TerminalFact` has no key `reszie`"][?fix~="`TerminalFact.resize`"] #>= 1 # original diagnostic conjunction
+step: jet check preview.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0302"][?what~="`reszie` looks like `resize`"][?fix~="`TerminalFact.resize`"] #>= 1 # original diagnostic conjunction
+step: jet check plain.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0311"][?what="`.resize()` needs `TerminalSession`, not `TerminalSession?`"][?fix~="session.resize(size)"] #>= 1 # original diagnostic conjunction

@@ -1,0 +1,29 @@
+// core.files.path splits a path into its components lexically, as pathlib's
+// parts: the anchor first, then each named component. Rows cover roots,
+// empty paths, `.`, `..`, doubled and trailing separators, a `//srv/share`
+// prefix, and drive prefixes with and without a root (a drive counts as
+// absolute). Each row also spells the parts back through from_parts.
+use path: core.files.path
+
+row: fn(raw: String) {
+    p: path.of(raw)
+    pieces: path.parts(p)
+    parts := ""
+    loop piece in pieces -> parts = "{parts}<{piece}>"
+    print("{raw:Debug} parts=[{parts}] root={path.root(p):Debug} anchor={path.anchor(p):Debug} drive={path.drive(p):Debug} absolute={path.is_absolute(p)} rebuilt={path.from_parts(pieces).raw:Debug}")
+}
+
+run: fn() {
+    row("/")
+    row("/a/b")
+    row("a/b")
+    row("")
+    row(".")
+    row("./a")
+    row("a/../b")
+    row("a//b/")
+    row("//srv/share/x")
+    row("C:\\x\\y")
+    row("C:/x/y")
+    row("C:x")
+}

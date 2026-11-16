@@ -1,0 +1,29 @@
+{
+ "max": 20,
+ "stop": "session.end",
+ "replies": {
+  "session.status": "{\"ready\":true,\"message\":\"ready\"}",
+  "session.new": "{\"sessionId\":\"network\",\"capabilities\":{\"browserName\":\"mock\",\"browserVersion\":\"1\"}}",
+  "session.subscribe": "{}",
+  "network.addIntercept": "{\"intercept\":\"intercept-{n}\"}",
+  "network.continueRequest": "{}",
+  "network.failRequest": "{}",
+  "network.provideResponse": "{}",
+  "network.removeIntercept": "{}",
+  "session.end": "{}"
+ },
+ "require": {
+  "network.provideResponse": [
+   "\"statusCode\":200"
+  ]
+ },
+ "after": {
+  "network.addIntercept#1": [
+   "{\"type\":\"event\",\"method\":\"network.beforeRequestSent\",\"params\":{\"isBlocked\":true,\"request\":{\"request\":\"req-1\",\"method\":\"GET\",\"url\":\"https://example.test/app.js?token=PAGE_TOKEN\"},\"response\":null}}"
+  ],
+  "network.addIntercept#2": [
+   "{\"type\":\"event\",\"method\":\"network.beforeRequestSent\",\"params\":{\"isBlocked\":true,\"request\":{\"request\":\"req-2\",\"method\":\"POST\",\"url\":\"https://api.example.test/items\"},\"response\":null}}",
+   "{\"type\":\"event\",\"method\":\"network.beforeRequestSent\",\"params\":{\"isBlocked\":true,\"request\":{\"request\":\"req-3\",\"method\":\"GET\",\"url\":\"https://tracker.example.test/pixel\"},\"response\":null}}"
+  ]
+ }
+}

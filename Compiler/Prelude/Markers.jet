@@ -1,0 +1,690 @@
+// The marker vocabulary is written here, not in Rust.
+//
+// This is ordinary Jet source: each marker is a struct with an
+// `impl Marker { … }` block. The compiler reads this file to build its
+// registry, so a marker exists exactly when it is written here (law zero).
+//
+// A field is an argument the use site writes: `name: Type` with an optional
+// `{default}`; a last list field with no default takes the remaining
+// arguments. The `impl Marker` settings are facts about the rule itself:
+//
+//   sites        the attachment points the rule accepts, `[]` for none
+//   repeatable   the rule may be written more than once on one target
+//   owns_menu    the rule teaches its own argument menu in its own error
+//   inherits     the rule takes part in lexical policy inheritance
+//   resolution   how nested writings combine: .Override, .Merge, .Tighten
+//   scopes       the policy scopes the rule may be written at
+//   companion    `[Rule, .Site]` — one extra site a companion rule opens
+//
+// `sites` is the only public legal-site declaration form. Fields are typed
+// use-site arguments; every setting is fixed declaration metadata.
+//
+Policy: struct {
+    settings: [PolicySetting]
+
+    impl Marker {
+        sites: [.Package, .Module, .Function, .Method, .Block]
+        inherits: true
+        resolution: .Tighten
+        scopes: [.Package, .Module, .Function, .Block]
+    }
+}
+
+// `#Overflow(.Wrapping)`: the fixed-width overflow mode of one function,
+// method or block body. It is lexical, so it has no module or package site.
+Overflow: struct {
+    mode: OverflowMode
+
+    impl Marker {
+        sites: [.Function, .Method, .Block]
+    }
+}
+
+Unsafe: struct {
+    reason: String
+    obligations: ObligationMode{.None}
+
+    impl Marker {
+        sites: [.Function, .Method, .Block, .Operation]
+    }
+}
+
+Scrub: struct {
+    tag: Ident
+
+    impl Marker {
+        sites: [.Function, .Method]
+    }
+}
+
+// Stores a pure function result or a computed field result until its checked
+// inputs change. A function uses the bounded default or `bound: none`; the
+// field form is bare `#Memo` before `name: T -> expr`.
+Memo: struct {
+    bound: MemoBound{.Default}
+
+    impl Marker {
+        sites: [.Function, .Field]
+    }
+}
+
+// A precondition on a function signature, `#Pre(cond, "msg")`. The condition
+// is a pure expression (the `#Pure` checker); it is checked in every build
+// unless a module's build policy strips it.
+Pre: struct {
+    condition: Value
+    message: String
+
+    impl Marker {
+        sites: [.Function, .Method]
+        repeatable: true
+    }
+}
+
+// A postcondition, `#Post(cond, "msg")`; `result` names the return value
+// inside `cond`.
+Post: struct {
+    condition: Value
+    message: String
+
+    impl Marker {
+        sites: [.Function, .Method]
+        repeatable: true
+    }
+}
+
+// These rows stay separate. Kernel requests a checked
+// worker-boundary proof; Inline(Always) is a checked promise, not a hint.
+// `#Kernel(.parallel) name: fn …`: the mode is a closed argument, so another
+// execution mode needs a new owner ruling.
+Kernel: struct {
+    mode: KernelMode
+
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+// `#Inline` on a function or method is a soft hint to inline it; sema never
+// rejects it and the compiler may ignore it.
+Inline: struct {
+    mode: InlineMode{.Hint}
+
+    impl Marker {
+        sites: [.Function, .Method, .Constant]
+    }
+}
+
+// `#MaxDepth(n)` on a function or method: at most n calls of it wait at
+// once on one thread, counting the first. The call after n stops with the
+// stack-overflow report on every build level, and the stack bound
+// (`!Mem.Stack(above: N)`, `jet inspect memory`) counts n calls of it on a
+// recursive path. Depth 0 is invalid.
+MaxDepth: struct {
+    depth: Int
+
+    impl Marker {
+        sites: [.Function, .Method]
+    }
+}
+
+// Native auto-vectorization is the safe default; this explicit
+// function/method marker keeps scalar codegen available for reproducibility or
+// a workload whose measured result favors scalar execution.
+Scalar: struct {
+    impl Marker {
+        sites: [.Function, .Method]
+    }
+}
+
+// A typed Add/Mul impl may derive its reverse lookup.
+Commutative: struct {
+    impl Marker {
+        sites: [.Impl]
+    }
+}
+
+Job: struct {
+    scope: JobScope{.Dev}
+    packages: Value{[]}
+    cwd: Value{none}
+    inputs: Value{[]}
+    outputs: Value{[]}
+    skip: Value{none}
+    cache: Value{.Uncached}
+    limits: Value{none}
+    after: Value{[]}
+    parallel: Value{none}
+    // The schedule: a positive Duration cadence or a daily
+    // UTC "HH:MM" time.
+    every: Duration | String{none}
+
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+Replayable: struct {
+    impl Marker {
+        sites: [.Function, .Method]
+    }
+}
+
+// Retired: state types carry what `#State(S)` and `#State(A -> B)` said,
+// and the parser reports each marker with the edit that writes them (E0175).
+// The shape stays declared, the arrow binding `to`, so old sources parse.
+State: struct {
+    state: State
+    to: State{none}
+
+    impl Marker {
+        sites: [.Function, .Method]
+    }
+}
+
+FFI: struct {
+    language: FFILanguage
+
+    impl Marker {
+        sites: [.Function]
+        owns_menu: true
+    }
+}
+
+// `#Undo(inverse)` names the compensating function a foreign binding
+// registers on the enclosing transaction's rollback path.
+Undo: struct {
+    inverse: Ident
+
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+// `#Close(close)` joins a returned foreign handle to the consuming
+// `close(handle)` protocol; the named foreign function is checked against the
+// returned handle before the binding is registered.
+Close: struct {
+    close: Ident
+
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+// A C declaration's native calling convention. C is the implicit default;
+// another ABI is never inherited.
+ABI: struct {
+    name: ABI
+
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+MustUse: struct {
+    impl Marker {
+        sites: [.Function, .Method, .Type]
+    }
+}
+
+// Marks a named type as an allowed explicit error domain for an `Error!`
+// callable contract.
+Error: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+// The one retiring lifecycle rung. `removed_in` is
+// optional until package editions own removal; before then it remains warn-only.
+Deprecated: struct {
+    since: String
+    use: String
+    removed_in: String{none}
+
+    impl Marker {
+        sites: [.Function, .Method, .Type]
+    }
+}
+
+// `#Codable` on a type derives its wire codecs, Encode and Decode. Its
+// options pick a variant of that one contract: `only:` derives a single
+// direction, `unknown: .Deny` refuses a decoded key the struct doesn't
+// declare, `tag:` sets how an enum names its case (`.External`, the default;
+// `.Field("kind")`, a key beside the payload; `.None`, no name), and the bare
+// word `published` pins a struct's wire shape for schema snapshots and
+// migrations. On a distinct type it asks for the base's codec, which the type
+// has by default. On a field it takes one form: `.Skip` leaves the field off
+// the wire and `.Flatten` splices a struct field's keys into the enclosing
+// object.
+Codable: struct {
+    form: CodableField{none}
+    only: CodableDirection{none}
+    unknown: CodableUnknown{none}
+    tag: CodableTag{none}
+    published: Bool{false}
+
+    impl Marker {
+        sites: [.Type, .Field]
+    }
+}
+
+// Named typed receipt section declaration.
+Receipt: struct {
+    name: String
+
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+Comparable: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+Equatable: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+Debug: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+Numeric: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+Printable: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+// `#CLI` on a struct: a resolved `run: fn(args: T)` parameter type owns
+// parsing, defaults, help, completion, validation and audit facts. The marker
+// is optional; plain `run: fn()` stays a complete entry.
+CLI: struct {
+    pack: Ident{none}
+
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+// Derives a nested `T.Patch` with `apply`, `diff` and `merge`, Codable by
+// construction.
+Patchable: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+UnitFamily: struct {
+    family: Ident
+    dimension: Value{nominal}
+    base: Ident{"first member when converting"}
+
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+SingleUse: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+// Structs use the second argument for `align(N)`; enums retain
+// the legacy bare tag-width argument in this same registry slot.
+// The layout parser teaches the menu: `c`, `columnar`, and an enum's
+// backing width `U8` … `I64`, with E1105 otherwise.
+Layout: struct {
+    kind: Layout
+    tag: Value{none}
+
+    impl Marker {
+        sites: [.Type]
+        owns_menu: true
+    }
+}
+
+// Every case of a numbered enum (`#Layout(U8)` or `#Layout(c)`) states its
+// number: `#[Specified, Layout(U8)] Op: enum { Add = 1, Sub = 2 }`. A case
+// without one is E1124, and the marker on a type without case numbers is
+// E1125.
+Specified: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+// After a match arm's body, the next arm's body runs too, without the next
+// arm's bindings: `1 -> { a() } #Through`. The last arm has no next arm
+// (E1126), the next body may not read its own arm's bindings (E1127), and an
+// arm that never reaches its end, or one of a table that gives a value, has
+// nothing to run on into (E1128).
+Through: struct {
+    impl Marker {
+        sites: [.Arm]
+    }
+}
+
+// On one stored field, the struct passes where that field's type is expected,
+// read as the field: `Labeled: struct { #As at: Point, label: String }` passes
+// to a `Point` parameter as its `at`. A second `#As` field is E1129, and `#As`
+// on a computed field is E1131.
+As: struct {
+    impl Marker {
+        sites: [.Field]
+    }
+}
+
+Redact: struct {
+    impl Marker {
+        sites: [.Field]
+    }
+}
+
+// A string renames one field or variant (keeping the
+// projection arguments below); a NamingCase (`.Camel`) on a type sets the
+// wire casing of all its fields or variants.
+Rename: struct {
+    name: String | NamingCase
+    json: String{none}
+    cbor: String{none}
+    csv: String{none}
+    toml: String{none}
+    yaml: String{none}
+    xml: String{none}
+    args: String{none}
+    env: String{none}
+    db: String{none}
+    layout: String{none}
+
+    impl Marker {
+        sites: [.Field, .Variant, .Type]
+    }
+}
+
+// Field and command help for CLI-derived arguments.
+Doc: struct {
+    text: String
+
+    impl Marker {
+        sites: [.Field, .Type, .Variant, .Method]
+        companion: [Job, .Function]
+    }
+}
+
+// The one `#CLI` field marker. `flag_only: true` keeps a required
+// value field off bare positional input; `short:` is a one-letter alias and
+// `env:` the environment fallback. Command input beats the environment, which
+// beats the typed default.
+Arg: struct {
+    flag_only: Bool{false}
+    short: String{none}
+    env: String{none}
+
+    impl Marker {
+        sites: [.Field]
+    }
+}
+
+// A dev-tier contract on a module-level binding: the value survives `jet dev`
+// hot reloads (identity is module path plus binding name). Inert in release
+// builds.
+Persist: struct {
+    impl Marker {
+        sites: [.Declaration]
+    }
+}
+
+Track: struct {
+    impl Marker {
+        sites: [.Declaration]
+    }
+}
+
+Local: struct {
+    impl Marker {
+        sites: [.Declaration]
+    }
+}
+
+Shared: struct {
+    impl Marker {
+        sites: [.Declaration]
+    }
+}
+
+Meta: struct {
+    category: String{""}
+    tunable: Bool{false}
+    maturity: Maturity{.Tested}
+
+    impl Marker {
+        sites: [.Function, .Method, .Declaration, .Constant]
+    }
+}
+
+// Exported devtools panels are discovered from one typed
+// function marker; no startup registration call or second metadata surface.
+DevPanel: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+Todo: struct {
+    impl Marker {
+        sites: [.Expression]
+    }
+}
+
+Shield: struct {
+    impl Marker {
+        sites: [.Block]
+    }
+}
+
+Impure: struct {
+    reason: String{none}
+
+    impl Marker {
+        sites: [.Block]
+    }
+}
+
+FX: struct {
+    grant: [Effect]
+
+    impl Marker {
+        sites: [.Block]
+    }
+}
+
+Transact: struct {
+    name: Ident
+
+    impl Marker {
+        sites: [.Block]
+    }
+}
+
+Region: struct {
+    name: Ident
+
+    impl Marker {
+        sites: [.Block]
+    }
+}
+
+Live: struct {
+    impl Marker {
+        sites: [.Block]
+    }
+}
+
+Nondeterministic: struct {
+    reason: String
+
+    impl Marker {
+        sites: [.Block]
+    }
+}
+
+Context: struct {
+    allocator: Value{default}
+    logger: Value{default}
+
+    impl Marker {
+        sites: [.Block]
+    }
+}
+
+// A package's own context value: `#ContextKey frame_index: 0` declares
+// a snake_case key whose value is the default. `#Context(frame_index: 3)`
+// sets it for a region, `context.get(frame_index)` reads it, and a spawned
+// task inherits the value its parent set. A key may not reuse a `context`
+// field name (E0761).
+ContextKey: struct {
+    impl Marker {
+        sites: [.Declaration]
+    }
+}
+
+// `#Deadline(limit)` bounds the waits of a block or a function body: a
+// `Duration` from entry or an `Instant`. A nested deadline can only shorten
+// the one in force; the earliest wins.
+Deadline: struct {
+    limit: Duration | Instant
+
+    impl Marker {
+        sites: [.Block, .Function]
+    }
+}
+
+Reactive: struct {
+    impl Marker {
+        sites: [.Function, .Method, .Block]
+    }
+}
+
+// `#Off` erases a statement or block from every build; `#Off(.Release)` only
+// from release builds. Either body is type-checked in every build.
+Off: struct {
+    build: BuildCondition{none}
+
+    impl Marker {
+        sites: [.Statement, .Block]
+    }
+}
+
+// `#On(.Deep)` keeps a statement or block out of every build unless the
+// compile's `--deep-checks` request selects its function. The body is
+// type-checked in every build.
+On: struct {
+    build: BuildCondition
+
+    impl Marker {
+        sites: [.Statement, .Block]
+    }
+}
+
+// Test-only effect substitution is configured by one typed
+// marker argument; the harness owns fail-nth scheduling.
+// `.expect_fail([E30xx,] message: "text")` checks a
+// region's raw stop message. Whole-test expected_fail remains the known-bug mark.
+Test: struct {
+    name: String{"function name"}
+    faults: [Effect]{[]}
+    expected_fail: Bool{false}
+
+    impl Marker {
+        sites: [.Test]
+    }
+}
+
+Target: struct {
+    target: Target
+
+    impl Marker {
+        sites: [.File, .Module, .Function]
+    }
+}
+
+// #2793: target interrupt vector plus bounded effect row.
+Interrupt: struct {
+    vector: Ident
+    effects: [Effect]
+
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+// Marks a free function's first bare-read parameter as the receiver for the
+// equivalent `value.function(…)` spelling.
+Root: struct {
+    impl Marker {
+        sites: [.Parameter]
+    }
+}
+
+HTML: struct {
+    page: Path
+
+    impl Marker {
+        sites: [.File, .Block]
+    }
+}
+
+NoPrelude: struct {
+    impl Marker {
+        sites: [.File]
+    }
+}
+
+SQL: struct {
+    row: Type{none}
+
+    impl Marker {
+        sites: [.Block]
+    }
+}
+
+Bindgen: struct {
+    impl Marker {
+        sites: [.Module]
+    }
+}
+
+// `#Allow(jet.FloatMoney, "why")` on a declaration, field or statement
+// silences that one lint there; the lint is named by its diagnostic type path
+// (JetSema/Source/Sema/LintAllowances.jet).
+Allow: struct {
+    lint: Ident
+    reason: String{none}
+
+    impl Marker {
+        sites: [.Declaration, .Field, .Statement]
+        repeatable: true
+    }
+}
+
+// Stable-address storage is not a code-generation hint.
+Static: struct {
+    impl Marker {
+        sites: [.Constant]
+    }
+}

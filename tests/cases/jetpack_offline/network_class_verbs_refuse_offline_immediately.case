@@ -1,0 +1,20 @@
+# Port of tests/jetpack_offline.rs:282-306; runtime PENDING-SAME-HEAD.
+mkdir: project
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+env: JETPACK_DENY_NETWORK=1
+step: jetpack update --no-color --offline
+cwd: project
+exit: 2
+stderr: ~ "E1276" # original predicate
+stderr: ~ "network-class command" # original predicate
+step: jetpack outdated --no-color --offline
+cwd: project
+exit: 2
+stderr: ~ "E1276" # original predicate
+stderr: ~ "network-class command" # original predicate
+step: jetpack add ripgrep@nixpkgs --no-color --offline
+cwd: project
+exit: 2
+stderr: ~ "E1276" # original predicate
+stderr: ~ "network-class command" # original predicate

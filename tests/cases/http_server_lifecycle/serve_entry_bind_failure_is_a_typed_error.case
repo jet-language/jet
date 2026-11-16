@@ -1,0 +1,19 @@
+# A failed bind in `app.bind(address, deadline:)` is an `HTTPError` returned to
+# the caller, not a panic or an exit: the program matches it and keeps running.
+# The fixture binds the fixed loopback 127.0.0.1:8080, so it runs in a network
+# namespace of its own, where it holds 8080 before the server tries it.
+fixture: serve_entry_bind_failure_is_a_typed_error.fixture
+host-port: 8080
+env: NO_COLOR=1
+step o0: jet run run.jet
+exit: 0
+stdout: ~ "serve: " # the bind failure reached the caller
+stdout: ~ "bind on `127.0.0.1:8080` failed" # naming the address
+stdout: $= "after serve\n" # and the program went on
+stdout: !~ "unexpected" # the held port was not bound twice
+stderr: !~ "panic" # no panic on the server path
+step: jet build run.jet
+exit: 0
+step: built
+exit: 0
+stdout: == o0 # the built program prints the same

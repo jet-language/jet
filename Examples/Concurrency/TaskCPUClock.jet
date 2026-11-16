@@ -1,0 +1,42 @@
+// Each task has its own CPU clock, which advances only while the task runs.
+package: {
+    name: "task_cpu_clock"
+    authority: { allow: [IO, Mem.Alloc, Time, Time.Wait] }
+}
+
+use {
+    tasks: core.tasks
+    time: core.time
+}
+
+spin: fn(rounds: Int) -> Int {
+    total := 0
+    loop n in 0..<rounds -> total += n % 7
+    total
+}
+
+// The CPU time one round of spinning costs the task that runs it.
+spin_cost: fn(rounds: Int) -[Time]> Int {
+    before: tasks.cpu_ns()
+    if spin(rounds) < 0 -> panic("spin total went negative")
+    tasks.cpu_ns() - before
+}
+
+run: fn() {
+    before: tasks.cpu_ns()
+    time.sleep(100ms)
+    parked: tasks.cpu_ns() - before
+    print("sleeping 100 ms cost under 20 ms of CPU: {parked < 20000000}")
+
+    started: time.instant()
+    spent: spin_cost(5000000)
+    wall: started.elapsed().ns
+    print("computing advanced the clock: {spent > 0}")
+    print("CPU time stayed within wall time: {spent <= wall}")
+
+    worker: task spin_cost(5000000)
+    waiting: tasks.cpu_ns()
+    worker_spent: worker.join() ?? panic("worker task failed")
+    waited: tasks.cpu_ns() - waiting
+    print("the waiting task paid less than the worker: {waited < worker_spent}")
+}

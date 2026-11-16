@@ -1,0 +1,19 @@
+# HAND-PORT tests/jetpack_engine.rs:3959-4002 add_then_remove_edits_env_file
+# PENDING-GRAMMAR: approved batch-two/four forms, no runtime parity claim.
+fixture: add_then_remove_edits_env_file.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack add hello@mine --no-color
+cwd: project
+exit: 0
+stderr: ~ "✓ hello     0.1.0" # original predicate
+file: project/env.jet ~ "hello" # original predicate
+file: project/env.jet ~ "pkg.packages" # original predicate
+step: jetpack remove hello@mine --no-color --yes
+cwd: project
+exit: 0
+file: project/env.jet !~ "\"hello@mine\"" # original predicate
+

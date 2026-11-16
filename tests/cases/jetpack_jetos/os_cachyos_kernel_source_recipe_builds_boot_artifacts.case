@@ -1,0 +1,12 @@
+# Port of tests/jetpack_jetos.rs:2491-2557; fixtures and predicates copied verbatim.
+# Runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_cachyos_kernel_source_recipe_builds_boot_artifacts.fixture
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+step: jet os build box --name kernel-source-built --no-color --offline
+cwd: project
+exit: 0
+file: package-root/systems/generations/kernel-source-built/boot/kernel ~ "built cachyos kernel" # original predicate
+file: package-root/systems/generations/kernel-source-built/boot/facts.json ~ "\"bootstrap\":\"source-built\"" # original predicate

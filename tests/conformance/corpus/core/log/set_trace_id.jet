@@ -1,0 +1,15 @@
+// core-conformance: core.log.set_trace_id
+use {
+    core: core
+    log: core.log
+}
+
+run: fn() -[FS.Read, IO, Log]> {
+    _state: core.service.state_store("trace-state") ?? panic("state")
+    print(
+        (fn() {
+            log.set_trace_id("trace-conformance")
+            true
+        })(),
+    )
+}

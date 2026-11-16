@@ -1,0 +1,21 @@
+// Every type a computed alias chooses implements its bound. `Plain` isn't
+// `Store`, so the alias is refused where it is declared.
+Store: trait {
+    count: fn(self) -> Int
+}
+
+Heap: struct {
+    items: [Int]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+    }
+}
+
+Plain: struct {
+    items: [Int]
+}
+
+Storage<N: Int>: Store #run { if N <= 16 -> Plain else -> Heap }
+
+run: fn() { print(1) }

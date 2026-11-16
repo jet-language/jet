@@ -1,0 +1,11 @@
+#!/bin/sh
+printf '%s\n' "$*" >> "$JET_TEST_GIT_LOG"
+last=""
+for arg in "$@"; do
+    last="$arg"
+done
+if [ "$last" = "--version" ]; then
+    exit 0
+fi
+touch "$JET_TEST_GIT_INVOKED"
+exit 99

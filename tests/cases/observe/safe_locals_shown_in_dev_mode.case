@@ -1,0 +1,16 @@
+# tests/observe.rs::safe_locals_shown_in_dev_mode at tests/observe.rs:264; hand-port
+# Claim: exit 70 (tests/observe.rs:280)
+# Claim: Stop [E3001] is reported (tests/observe.rs:282)
+# Claim: count = 3 is shown (tests/observe.rs:288)
+# Claim: active = true is shown (tests/observe.rs:293)
+# Claim: the String local name = is absent (tests/observe.rs:299)
+fixture: safe_locals_shown_in_dev_mode.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --profile=debug safe_locals.jet
+exit: 70 # tests/observe.rs:272-302 scalar locals in, String local out
+stderr: ~ "Stop [E3001]" # tests/observe.rs:272-302 scalar locals in, String local out
+stderr: ~ "count = 3" # tests/observe.rs:272-302 scalar locals in, String local out
+stderr: ~ "active = true" # tests/observe.rs:272-302 scalar locals in, String local out
+stderr: !~ "name = " # tests/observe.rs:272-302 scalar locals in, String local out

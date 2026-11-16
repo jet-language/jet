@@ -1,0 +1,27 @@
+// A refill of an owned local's resource field: each resource closes once,
+// also when the callee stops.
+Res: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+next: fn(r: &&Res) -> Res {
+    if r.name == "a" -> panic("stop")
+    Res{name: "b"}
+}
+
+Holder: struct {
+    r: Res
+}
+
+run: fn() {
+    calm := Holder{r: Res{name: "x"}}
+    calm.r = next(calm.r.move())
+    print("refilled {calm.r.name}")
+    h := Holder{r: Res{name: "a"}}
+    h.r = next(h.r.move())
+    print("not reached")
+}

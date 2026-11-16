@@ -1,0 +1,30 @@
+// The error type minted from an unannotated function's own `Err(.Case(…))`
+// cases has text, so `{error}` shows a caught failure: a unit case by its
+// name, a payload case with its payload, and a named case with its fields.
+Point: struct {
+    x: Int
+    y: Int
+}
+
+load: fn(key: String) -> Int {
+    if key == "" -> return Err(.Empty)
+    if key == "gone" -> return Err(.NotFound(key))
+    if key == "far" -> return Err(.OutOfRange(Point{x: 9, y: 4}))
+    if key == "wide" -> return Err(.TooWide{limit: 3, width: key.len()})
+    key.len()
+}
+
+show: fn(key: String) {
+    if load(key) == {
+        .Ok(value) -> { print("loaded {value}") }
+        .Err(error) -> print("failed: {error}")
+    }
+}
+
+run: fn() {
+    show("abc")
+    show("")
+    show("gone")
+    show("far")
+    show("wide")
+}

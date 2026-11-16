@@ -1,0 +1,30 @@
+// A marker is a struct that implements the Core `Marker` trait: its settings
+// are the trait's constants, read as `T.sites` like any other trait constant.
+// A setting the block leaves out reads as the trait's default.
+Traced: struct {
+    label: String
+
+    impl Marker {
+        sites: [.Function, .Method]
+        repeatable: true
+    }
+}
+
+Audited: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+describe: fn<T: Marker>(marker: T) -> String {
+    bound: T.resolution == MarkerResolution.SiteBound
+    "{T.sites.len()} sites, repeatable {T.repeatable}, site-bound {bound}, scopes {T.scopes.len()}"
+}
+
+run: fn() {
+    print("Traced.sites = {Traced.sites.len()}")
+    print("Traced.repeatable = {Traced.repeatable}")
+    print("Audited.repeatable = {Audited.repeatable}")
+    print("Traced: {describe(Traced{label: "x"})}")
+    print("Audited: {describe(Audited{})}")
+}

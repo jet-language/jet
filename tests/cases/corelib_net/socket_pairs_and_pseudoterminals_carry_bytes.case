@@ -1,0 +1,17 @@
+# A socket pair carries bytes both ways, and a standalone pseudoterminal
+# delivers what its primary writes to its secondary as one canonical-mode
+# line ("hi\n"), echoing it to the primary as "hi\r\n".
+requires: os-name:linux
+fixture: socket_pairs_and_pseudoterminals_carry_bytes.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run -A main.jet
+exit: 0
+stdout: = "ping\npong\ntrue\n[104, 105, 10]\n[104, 105, 13, 10]\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "ping\npong\ntrue\n[104, 105, 10]\n[104, 105, 13, 10]\n"
+stderr: empty

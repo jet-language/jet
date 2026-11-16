@@ -1,0 +1,11 @@
+// #4717 c79: an explicit owner move across a live view is rejected; a read-only borrow is kept.
+fn consume(text: ^String) {
+    print(text.len())
+}
+
+fn run() {
+    owner := "jetstream".copy()
+    view :: owner.after("jet")
+    consume(^owner)
+    print(view)
+}

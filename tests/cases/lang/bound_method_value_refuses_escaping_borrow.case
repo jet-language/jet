@@ -1,0 +1,12 @@
+# A bound method value keeps its receiver as any closure keeps a capture.
+# `counter.bump` returned from `bumper` writes the lent `counter` after the
+# call that lent it ends, so the read is refused naming the receiver (E0120),
+# exactly as the closure `fn(by) { counter.bump(by) }` is.
+fixture: bound_method_value_refuses_escaping_borrow.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+exit: 1
+stderr: ~ "Error [jet.ReadOnlyValueNotOwned]: `counter` was not moved here, so a returned lambda cannot write it" # the error names the receiver
+stderr: ~ "main.jet:10:52" # it points at the bound method value `bump`
+stderr: ~ "1 problem found" # nothing else is reported

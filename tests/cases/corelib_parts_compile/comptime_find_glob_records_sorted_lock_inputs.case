@@ -1,0 +1,9 @@
+# tests/corelib_parts/compile.rs::comptime_find_glob_records_sorted_lock_inputs at tests/corelib_parts/compile.rs:243; hand-port
+# The original read the in-process comptime_inputs record (sorted matched paths, 64-hex hashes). The CLI-observable
+# half is the sorted match list the prep `find` returns; the hash record is compiler-internal.
+fixture: comptime_find_glob_records_sorted_lock_inputs.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "inputs/alpha-1.txt|inputs/nested/beta-2.txt\n"

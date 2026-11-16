@@ -1,0 +1,17 @@
+# tests/dev_parts/routine.rs::range_values_run_in_resident_jit_without_fallback at tests/dev_parts/routine.rs:2400; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: range_values_run_in_resident_jit_without_fallback.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step unboxed: jet run range_unboxed.jet
+cwd: unboxed
+exit: any # original asserts only stdout
+stdout: = range_values_run_in_resident_jit_without_fallback.1.out
+step: jet check main.jet
+cwd: values
+exit: 0
+step values: jet run main.jet
+cwd: values
+exit: any # original asserts only stdout
+stdout: = range_values_run_in_resident_jit_without_fallback.2.out

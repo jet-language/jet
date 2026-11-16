@@ -1,0 +1,11 @@
+use reactive: core.reactive
+
+// `#Local` locks the one-thread form; the task crossing breaks the lock.
+run: fn() {
+    #Local pending := reactive.signal(0)
+    worker: task {
+        pending.set(1)
+    }
+    worker.join() ?? panic("task failed")
+    print(pending.get())
+}

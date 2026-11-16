@@ -1,0 +1,14 @@
+{
+  "name": "run-tools",
+  "mode": "tool",
+  "description": "The tool-probe export of the gauntlet harness, Tools/gauntlet/harness/run.mjs (probeAxisTools), and its Jet twin in the Axis module of the jet_gauntlet_kit package (Tools/gauntlet/kit/Source/Axis.jet), #5072 c8, each run by a driver that probes the tools of each fixture case through Tools/agent/JetEnv.jet: the Jet binary as a file, absent and a directory; sh and the shell builtins true and false (whose version command fails); entr, whose own version command (-V) fails; an absent tool and names a shell must quote (an apostrophe, a dollar sign and a space); and runners that declare no tools or tools that are not a list. Paths in the case directory read <cwd>; store paths, tool versions and stderr are masked, so a dev-shell update changes no output. Then an unknown command (exit 64).",
+  "tool": {
+    "original": "Tools/gauntlet/harness/drivers/run-tools.mjs",
+    "jet": "Tools/gauntlet/entries/run-tools/driver/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["probe", "cases.json"], "expected": "expected/probe.out"},
+      {"args": ["census"], "exit": 64, "expected": "expected/usage.out"}
+    ]
+  }
+}

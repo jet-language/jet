@@ -1,0 +1,35 @@
+use {
+    logic
+    json: core.encoding.json
+}
+
+// A local distinct type needs no codec marker either.
+#Printable
+Note: distinct String
+
+#Codable
+Task: struct {
+    id: logic.TaskID
+    depth: logic.Depth
+    level: logic.Level
+    note: Note
+}
+
+attempt: fn(label: String, raw: String) {
+    task: json.decode<Task>(raw) ?? {
+        print("{label}: {err}")
+        return
+    }
+    print("{label}: decoded {task.id.raw()}")
+}
+
+run: fn() {
+    task: Task{id: logic.TaskID.from_string("t1"), depth: logic.Depth.from_int(3), level: logic.Level.from_int(4), note: Note.from_string("hi")}
+    wire: json.to_string(task) ?? panic("encode")
+    print(wire)
+    back: json.decode<Task>(wire) ?? panic("decode: {err}")
+    print("back: {back.id.raw()} {back.depth.raw()} {back.level.raw()} {back.note}")
+    print("alone: {json.to_string(logic.TaskID.from_string("t2")) ?? panic("alone")}")
+    attempt("depth bad", "{{\"id\":\"t1\",\"depth\":\"x\",\"level\":4,\"note\":\"hi\"}}")
+    attempt("level bad", "{{\"id\":\"t1\",\"depth\":3,\"level\":11,\"note\":\"hi\"}}")
+}

@@ -1,0 +1,127 @@
+// sema.failure reads each module's failure facts on compiler threads, one
+// part of the modules each (sema_failure_candidate_parts,
+// sema_failure_union_row_parts), joining the parts in module order: the
+// checked program is the same on one thread and on eight.
+use {
+    jet_sema.[
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_collect_comptime_declarations,
+        sema_finalize_registration_graph,
+        sema_has_error_since,
+        sema_registration_prepare_graph,
+    ]
+    jet_parser.[parse_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_foundation.[CompilerThreads, ModuleTable, Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
+}
+
+FAILURE_THREADS_MODULES: 4
+
+// Module `index`'s `count` groups: a leaf that can't fail, a caller of it,
+// a function that creates its own error case, a caller of that, and one
+// that fails with a message. Module 0 also holds `run`.
+failure_threads_source: fn(index: Int, count: Int) -> String {
+    parts := [String]{}
+    loop group in 0..<count {
+        parts.push("leaf{group}: fn(value: Int) -> Int {{\n    value + {group}\n}}\n")
+        parts.push("chain{group}: fn(value: Int) -> Int {{\n    leaf{group}(value) * 2\n}}\n")
+        parts.push("find{group}: fn(value: Int) -> Int {{\n    if value < {group} -> return Err(.Below{index}(value))\n    value\n}}\n")
+        parts.push("relay{group}: fn(value: Int) -> Int {{\n    find{group}(value) + leaf{group}(value)\n}}\n")
+        parts.push("message{group}: fn(value: Int) -> Int {{\n    if value == {group} -> return Err(\"odd input\")\n    value\n}}\n")
+    }
+    if index == 0 -> parts.push("run: fn() {{\n    print(\"{{chain0(1)}}\")\n}}\n")
+    parts.join("")
+}
+
+failure_threads_input: fn(table: &ModuleTable, index: Int, count: Int, failures: &[String]) -> SemaRegistrationModuleInput? {
+    source: failure_threads_source(index, count)
+    parsed := parse_source(source.bytes())
+    if sema_has_error_since(parsed.diagnostics, 0) {
+        failures.push("module {index}: source parsing failed: {parsed.diagnostics:Debug}")
+        return None
+    }
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "m{index}.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    Val(SemaRegistrationModuleInput{package_identity: "failure-threads", module_identity: module_intern(table, "failure-threads::m{index}"), module_name: "m{index}", core_source_alias: "", module_path: "m{index}.jet", source_file: "m{index}.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source})
+}
+
+// Each checked function's return and failure carrier, then the
+// diagnostics, of the program checked on `threads`.
+failure_threads_rows: fn(count: Int, threads: CompilerThreads, failures: &[String]) -> [String] {
+    label: "{threads.cores} cores"
+    table := module_table()
+    inputs := [SemaRegistrationModuleInput]{}
+    loop index in 0..<FAILURE_THREADS_MODULES {
+        input: failure_threads_input(table, index, count, failures) ?? return [String]{}
+        inputs.push(input)
+    }
+    main_id: inputs[0].module_identity
+    canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
+        failures.push("{label}: canonical effect module declares no effects")
+        return [String]{}
+    }
+    canonical_id: canonical.module_identity
+    inputs.push(canonical)
+    facts: SemaBuildFacts{package_name: "failure-threads", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    graph := sema_registration_prepare_graph(inputs, [SemaRegistrationImportEdge]{}, "failure-threads", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, threads) ?? {
+        failures.push("{label}: registration failed: {err}")
+        return [String]{}
+    }
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    // Declaration checking loans the graph to its stage, which returns it.
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, threads, None)
+    declared := stage.graph.move()
+    stage.graph = None
+    graph = declared.move() ?? {
+        failures.push("{label}: the declaration pass lost its registration graph")
+        return [String]{}
+    }
+    checked := sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, None)
+    if !checked.complete {
+        failures.push("{label}: checking failed {checked.diagnostics:Debug}")
+        return [String]{}
+    }
+    rows := [String]{}
+    infallible := 0
+    minted := 0
+    loop module_row in checked.modules {
+        loop function in module_row.functions {
+            text: "{function.key} {function.ret:Debug} {function.failure_carrier:Debug}"
+            if function.name.starts_with("chain") && text.contains("Never") -> infallible += 1
+            if function.name.starts_with("relay") && text.contains("Error") -> minted += 1
+            rows.push(text)
+        }
+    }
+    if infallible == 0 -> failures.push("{label}: no caller of a leaf was proved infallible")
+    if minted == 0 -> failures.push("{label}: no caller of a minted case took its error type")
+    loop diagnostic in checked.diagnostics -> rows.push("{diagnostic:Debug}")
+    rows
+}
+
+#Test("failure_solve_threads") {
+    failures := [String]{}
+    // Enough functions that eight threads admit more than one part.
+    count: 160
+    single: failure_threads_rows(count, compiler_threads_single(), failures)
+    eight: failure_threads_rows(count, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}, failures)
+    if single.len() != eight.len() {
+        failures.push("one thread checked {single.len()} rows, eight threads {eight.len()}")
+    }
+    loop (row, text) in single {
+        if row < eight.len() && eight[row] != text {
+            failures.push("row {row}: one thread {text}, eight threads {eight[row]}")
+        }
+    }
+    if failures.len() > 0 {
+        panic("FailureSolveThreads collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
+}

@@ -1,0 +1,12 @@
+# core.data defines the plot enums and core.data.plot re-exports them with `from(core.data)`; core.ui.host
+# re-exports the drag and IME enums of core.ui.host.drag_drop and core.ui.host.ime with `from(...)`. A re-exported
+# name resolves through either module to the one type, so a value built through one module's name has the other's
+# type, its variants and its methods.
+fixture: a_reexported_core_enum_is_one_type_through_each_module.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+exit: 0 # every qualified name resolves and every assignment across the two modules type-checks
+step: jet run main.jet
+exit: 0
+stdout: = "bar bar\ndrop copy commit text\n" # the values keep their variants through either module's type

@@ -1,0 +1,73 @@
+// A file trace keeps its events in memory and writes them in blocks
+// (Request.jet jet_cli_trace_write): at a top-level span's begin and end, and
+// at the finish, which adds the trace's `trace.bytes` and `trace.flushes`
+// counters (jet_cli_trace_finish).
+use {
+    blocks_files: core.files
+    blocks_process: core.process
+    blocks_sys: core.sys
+    jet_cli.[JetCLITraceSink, JetCLITraceSpan, JetCLITraceState, JetCLITraceUsage, jet_cli_trace_finish, jet_cli_trace_opening_lanes]
+    jet_foundation.[CompilerTraceSink]
+}
+
+// A file sink holding only its `[` header.
+blocks_test_sink: fn(path: String) -> JetCLITraceSink {
+    blocks_files.write(path, "[\n") ?? panic("write the trace header: {err}")
+    JetCLITraceSink{
+        target: path,
+        human: false,
+        start_us: 0,
+        pid: 7,
+        functions: false,
+        phase_counters: false,
+        state: Shared{JetCLITraceState{
+            writing: true,
+            writer: blocks_files.append(path) ?? panic("open the trace: {err}"),
+            stacks: [Int:[JetCLITraceSpan]]{},
+            lanes: jet_cli_trace_opening_lanes(),
+            progress_at: [String:Int]{},
+            progress_calls: [String:Int]{},
+            process: JetCLITraceUsage{cpu_ns: -1, proc_cpu_ns: -1, majflt: -1},
+            memory: None,
+            process_ms: -1,
+            spliced: 0,
+        }},
+    }
+}
+
+// The value of the counter event `name` in `trace`, or -1 when it has none.
+blocks_counter: fn(trace: String, name: String) -> Int Never! {
+    head: "{{\"name\":\"{name}\",\"ph\":\"C\","
+    marker: "\"args\":{{\"value\":"
+    loop line in trace.lines() {
+        if !line.starts_with(head) -> next
+        at: line.find(marker)
+        if at < 0 -> return -1
+        return Int.parse(line.slice(at + marker.len(), line.len() - 3)) ?? -1
+    }
+    -1
+}
+
+#Test("nested events wait for a top-level span's begin or end, and the finish writes the rest with the trace's counters") {
+    path: "{blocks_sys.temp_dir()}/jet-trace-blocks-{blocks_process.current_pid()}.json"
+    sink: blocks_test_sink(path)
+    sink.begin("phase", "", -1, -1)
+    begun: blocks_files.read(path) ?? panic("read the trace: {err}")
+    assert(begun.contains("\"name\":\"phase\",\"cat\":\"phase\",\"ph\":\"B\""))
+    sink.begin("step", "", 0, 2)
+    sink.end("step", 1)
+    sink.progress("items", 1, 2)
+    assert_eq(blocks_files.read(path) ?? panic("read the trace: {err}"), begun)
+    sink.end("phase", 1)
+    ended: blocks_files.read(path) ?? panic("read the trace: {err}")
+    assert(ended.contains("\"name\":\"step\""))
+    assert(ended.contains("\"name\":\"phase\",\"cat\":\"phase\",\"ph\":\"E\""))
+    jet_cli_trace_finish(sink)
+    finished: blocks_files.read(path) ?? panic("read the trace: {err}")
+    blocks_files.remove(path).drop("the test's trace file")
+    assert(finished.starts_with(ended))
+    // Every event before the counters, the header aside; three blocks: the
+    // phase's begin, its end, and the finish.
+    assert_eq(blocks_counter(finished, "trace.bytes"), ended.count_bytes() - 2)
+    assert_eq(blocks_counter(finished, "trace.flushes"), 3)
+}

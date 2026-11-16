@@ -1,0 +1,6 @@
+# The deny-only Unsafe fact comes only from `#Unsafe` gates outside Core, so
+# a `-[!Unsafe]>` row over Core calls and safe user code checks clean.
+fixture: unsafe_denial_spares_sealed_core.fixture
+step: jet check clean.jet
+exit: 0
+stderr: !~ "Error [" # Core's sealed internals and safe user code never reach Unsafe

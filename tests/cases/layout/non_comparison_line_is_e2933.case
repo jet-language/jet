@@ -1,0 +1,9 @@
+# tests/layout.rs::non_comparison_line_is_e2933 at tests/layout.rs:174; hand-port
+fixture: non_comparison_line_is_e2933.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check fixture.jet --json
+exit: 1 # tests/layout.rs:183 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/layout.rs:183 the errors are exactly E2933
+json: stdout doc $.reports[?code="E2933"] #= 1 # tests/layout.rs:183 reports E2933

@@ -1,0 +1,15 @@
+// CL1 probe. Must fail: a client calls server-only methods. The webhook,
+// its signing key, the job and the unmarked helper are each an error,
+// because app.Remote<Crew> has only the marked methods.
+use {
+    app
+    logic
+}
+
+steal: fn(crew: app.Remote<logic.Crew>, id: logic.TaskID) -> Int logic.TaskError! {
+    _: crew.on_event("crewboard", "push")
+    _: crew.webhook_secret("crewboard")
+    _: crew.tell_assignee(id)
+    _: crew.next_id(id)
+    Ok(0)
+}

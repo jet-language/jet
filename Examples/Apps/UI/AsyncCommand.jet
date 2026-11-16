@@ -1,0 +1,105 @@
+// An async command (a Save button) on the task contract alone. Its status is
+// a signal a view reads; here an autorun prints each status it takes. A
+// disabled command and a command that is already running ignore activation,
+// a refused save surfaces as Failed rather than a panic, a cancelled save is
+// Failed(cancelled), and the task group that owns a save joins it before the
+// owner goes away.
+package: {
+    name: "async_command"
+    authority: { allow: [IO, Mem.Alloc, Time] }
+}
+
+use {
+    reactive: core.reactive
+    time: core.time
+}
+
+#Error
+SaveError: enum {
+    Negative(Int)
+}
+
+Status: enum {
+    Idle
+    Running
+    Done(Int)
+    Failed(String)
+}
+
+label: fn(status: Status) -> String {
+    if status == {
+        .Idle -> "Idle"
+        .Running -> "Running"
+        .Done(saved) -> "Done({saved})"
+        .Failed(why) -> "Failed({why})"
+    }
+}
+
+save: fn(value: Int, wait: Duration) -> Int SaveError! {
+    time.sleep(wait)
+    if value < 0 -> return Err(SaveError.Negative(value))
+    Ok(value * 2)
+}
+
+// The job owns its domain result: a refused save is a status.
+save_job: fn(value: Int, wait: Duration) -> Status {
+    if save(value, wait) == {
+        .Ok(saved) -> Status.Done(saved)
+        .Err(.Negative(bad)) -> Status.Failed("negative value {bad}")
+    }
+}
+
+// A finished, cancelled or failed task becomes the command's status.
+settle: fn(job: &&Task<Status>) -> Status {
+    if job.join() == {
+        .Ok(status) -> status
+        .Err(.Cancelled) -> Status.Failed("cancelled")
+        .Err(.DeadlineBlown) -> Status.Failed("deadline blown")
+        .Err(.Panicked(reason)) -> Status.Failed("panicked: {reason}")
+    }
+}
+
+// Activation starts a save only when the command is enabled and not running.
+can_start: fn(enabled: Bool, status: Status) -> Bool {
+    if status == {
+        .Running -> false
+        .Idle | .Done(_) | .Failed(_) -> enabled
+    }
+}
+
+click: fn(enabled: Bool, status: Status) -> String {
+    if can_start(enabled, status) -> "starts" else -> "ignored"
+}
+
+run: fn() {
+    status := reactive.signal(Status.Idle)
+    watch: reactive.autorun(fn() { print("status {label(status.get())}") })
+
+    print("click while disabled: {click(false, status.get())}")
+
+    print("click: {click(true, status.get())}")
+    status.set(Status.Running)
+    first: task save_job(21, 10ms)
+    print("click while running: {click(true, status.get())}")
+    status.set(settle(first.move()))
+
+    print("click with a bad value: {click(true, status.get())}")
+    status.set(Status.Running)
+    status.set(settle(task save_job(-1, 10ms)))
+
+    print("click, then cancel: {click(true, status.get())}")
+    status.set(Status.Running)
+    long: task save_job(5, 500ms)
+    long.cancel()
+    status.set(settle(long.move()))
+
+    task.group owner {
+        status.set(Status.Running)
+        pending: task save_job(7, 500ms)
+        print("owner closing")
+        pending.cancel()
+        status.set(settle(pending.move()))
+    }
+    print("owner joined")
+    watch.unsubscribe()
+}

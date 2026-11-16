@@ -1,0 +1,22 @@
+# tests/core_files_foundations.rs::core_files_canonicalize_resolves_symlinks_and_rejects_missing_paths at tests/core_files_foundations.rs:85; hand-port
+# Claim: canonicalize of a target and of a symlink to it are equal and absolute (tests/core_files_foundations.rs:109-112)
+# Claim: canonicalize of a missing path returns Err (tests/core_files_foundations.rs:113)
+# Claim: default run and AOT build produce identical stdout "true\ntrue\ntrue\n" (tests/core_files_foundations.rs:121)
+# Fixture migrated: Rust canonicalized scratch root -> fixture-relative "fixture"
+# Fixture migrated: symlink is created at run time by files.symlink with a link-relative target "target-dir/target.txt" (a symlink inside the package tree blocks compile: E2105)
+fixture: core_files_canonicalize_resolves_symlinks_and_rejects_missing_paths.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: rm -rf fixture
+exit: 0 # tests/core_files_foundations.rs:85 fresh fixture root per tier
+step: jet run main.jet
+exit: 0 # tests/core_files_foundations.rs:85 default tier stdout
+stdout: = core_files_canonicalize_resolves_symlinks_and_rejects_missing_paths-2.out # tests/core_files_foundations.rs:85 default tier stdout
+step: rm -rf fixture
+exit: 0 # tests/core_files_foundations.rs:85 fresh fixture root per tier
+step: jet build main.jet
+exit: 0 # tests/core_files_foundations.rs:85 AOT tier builds
+step: built
+exit: 0 # tests/core_files_foundations.rs:85 AOT tier stdout equals default
+stdout: = core_files_canonicalize_resolves_symlinks_and_rejects_missing_paths-5.out # tests/core_files_foundations.rs:85 AOT tier stdout equals default

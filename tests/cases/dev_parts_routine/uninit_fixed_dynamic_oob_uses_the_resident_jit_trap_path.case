@@ -1,0 +1,15 @@
+# tests/dev_parts/routine.rs::uninit_fixed_dynamic_oob_uses_the_resident_jit_trap_path at tests/dev_parts/routine.rs:3968; hand-port
+fixture: uninit_fixed_dynamic_oob_uses_the_resident_jit_trap_path.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check uninit_fixed_dynamic_oob.jet
+exit: 0
+step dev: jet run uninit_fixed_dynamic_oob.jet
+exit: 70
+stderr: ~ "Stop [E3010]" # original predicate: stderr.contains
+stderr: ~ "the list has 2 items" # original predicate: stderr.contains
+stderr: ~ "doesn't exist" # original predicate: stderr.contains
+stderr: !~ "E0953" # original predicate: no comptime voice
+stderr: !~ "comptime" # original predicate: no comptime voice

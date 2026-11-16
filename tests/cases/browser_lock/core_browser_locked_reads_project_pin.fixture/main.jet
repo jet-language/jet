@@ -1,0 +1,10 @@
+use browser: core.browser
+
+run: fn() -[FS, IO]> {
+    locked: browser.locked("chromium") ?? panic("missing lock")
+    print("engine:{locked.engine()}")
+    print("version:{locked.version()}")
+    print("protocol:{locked.protocol()}")
+    locked.verify() ?? panic("verify")
+    print("verified:true")
+}

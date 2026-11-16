@@ -1,0 +1,38 @@
+use files: core.files
+
+Point: struct {
+    x: Int
+    y: Int
+}
+
+Light: enum {
+    Red
+    Green
+}
+
+Meters: distinct Int
+
+Pair<T>: Point
+
+// None of these values can be None, so each `!=` with `None` is refused. An
+// `==` with `None` gets the same E0109 from the same rule.
+struct_value: fn(point: Point) -> Bool { point != None }
+
+enum_value: fn(light: Light) -> Bool { light != None }
+
+distinct_value: fn(distance: Meters) -> Bool { distance != None }
+
+alias_of_struct: fn(pair: Pair<Int>) -> Bool { pair != None }
+
+fixed_width: fn(small: I32) -> Bool { small != None }
+
+text: fn(name: String) -> Bool { name != None }
+
+list: fn(items: [Int]) -> Bool { items != None }
+
+// `??` takes both the error and the absent lock, so `lock` is a plain
+// `FileLock`.
+run: fn() -[FS, Env, IO]> {
+    lock: files.try_lock("refused.lk") ?? panic("the lock is held")
+    print(lock != None)
+}

@@ -1,0 +1,15 @@
+# The example drives the scripted WebDriver BiDi mock, which answers each
+# command from BrowserNetwork.bidi.json, sends the paused-request events, and
+# prints each method it received.
+session bidi raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:bidi} BrowserNetwork.bidi.json
+await: file BrowserNetwork.bidi.ready timeout 30s
+step: built ws://127.0.0.1:{free-port:bidi}/session
+exit: 0
+stdout: = BrowserNetwork.out
+stdout: !~ "PAGE_TOKEN" # a request URL reaches the program only as a hash
+close bidi
+exit: 0
+stdout: has-line "network.continueRequest" # the first request went on
+stdout: has-line "network.provideResponse" # the API call got the program's response
+stdout: has-line "network.failRequest" # the tracker request failed
+stdout: $= "session.end\n" # the example ended its session last

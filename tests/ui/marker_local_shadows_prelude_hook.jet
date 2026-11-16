@@ -1,0 +1,15 @@
+// A marker the module declares under a Prelude name is its own marker: the
+// Prelude `#MustUse` hook never sees it, so the bare call below is only a
+// thrown-away pure result (E0433), not an ignored `#MustUse` result (E0419).
+MustUse: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+#MustUse answer: fn() -> Int { 42 }
+
+run: fn() {
+    answer()
+    print("done")
+}

@@ -1,0 +1,25 @@
+# testing.world gives the web build the same clock and RNG providers as the
+# native tiers:
+# - the wall clock is the world's;
+# - advance moves it by exactly the amount;
+# - two worlds seeded alike draw the same journaled stream.
+# Tasks are not yet available on the web target, so this program spawns none.
+fixture: world_clock_and_rng_agree_on_native_and_web.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = world_clock_and_rng_agree_on_native_and_web.out
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = world_clock_and_rng_agree_on_native_and_web.out
+when tool node
+step: jet build --target web main.jet
+env: JET_STORE_DIR={work}/cache/web
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = world_clock_and_rng_agree_on_native_and_web.out
+end when

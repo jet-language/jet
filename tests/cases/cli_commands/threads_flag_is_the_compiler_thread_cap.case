@@ -1,0 +1,21 @@
+# Port of cli_parts/commands.rs::threads_flag_is_the_compiler_thread_cap.
+fixture: fixtures/flags
+step: jet check run.jet --threads 1
+step: jet check run.jet --threads=2
+step: jet run run.jet --threads 1
+stdout: = ok.out
+step: jet build run.jet --jobs 2
+exit: 2
+stderr: = threads-jobs.stderr
+step: jet build run.jet -j 2
+exit: 2
+stderr: = threads-j.stderr
+step: jet check run.jet --threads 0
+exit: 2
+stderr: = threads-zero.stderr
+step: jet check run.jet --threads x
+exit: 2
+stderr: = threads-invalid.stderr
+step: jet fmt run.jet --threads 2
+exit: 2
+stderr: = threads-fmt.stderr

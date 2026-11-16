@@ -1,0 +1,19 @@
+// x^n for a whole n and e^(y ln x), correctly rounded: the same bits on
+// every tier, exact powers exact, and every Int exponent taken exactly.
+use math: core.math
+
+run: fn() {
+    print(math.pow_n(Float{3.0}, 5))
+    print(math.pow_n(Float{-2.0}, -3))
+    print(math.pow_n(math.NAN, 0))
+    print(math.pow_n(Float{0.1}, 3))
+    // (1 + 2^-52)^(2^53 + 1) is e^2 to within a few ulps.
+    print(math.pow_n(Float{1.0000000000000002}, 9007199254740993))
+
+    print(math.pow_r(Float{2.0}, Float{0.5}))
+    print(math.pow_r(Float{4.0}, Float{-0.5}))
+    print(math.pow_r(Float{10.0}, Float{-2.0}))
+    print(math.pow_r(Float{-8.0}, Float{3.0}))
+    print(math.pow_r(Float{0.0}, Float{0.0}))
+    print(math.pow_r(Float{0.0}, Float{-1.0}))
+}

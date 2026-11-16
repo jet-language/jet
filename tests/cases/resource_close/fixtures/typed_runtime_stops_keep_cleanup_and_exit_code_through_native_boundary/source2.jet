@@ -1,0 +1,15 @@
+Resource: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("auto {self.name}") }
+    }
+}
+
+recurse: fn(n: Int) -> Int { return recurse(n + 1) }
+
+run: fn() {
+    resource := Resource{name: "stack"}
+    print("body")
+    print(recurse(0))
+}

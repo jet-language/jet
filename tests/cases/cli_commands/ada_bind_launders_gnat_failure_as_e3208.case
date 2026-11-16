@@ -1,0 +1,7 @@
+# Port of cli_parts/commands.rs::ada_bind_launders_gnat_failure_as_e3208.
+requires: tool:gnatmake
+fixture: fixtures/bind-ada
+step: jet inspect bind ada {work}/broken.ads --pkg broken
+exit: nonzero
+stderr: = bind-ada.stderr
+stderr: !~ broken.adb: # original predicate

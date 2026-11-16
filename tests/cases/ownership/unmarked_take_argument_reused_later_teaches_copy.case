@@ -1,0 +1,14 @@
+# tests/ownership.rs::unmarked_take_argument_reused_later_teaches_copy at tests/ownership.rs:2586; hand-port
+# Claim: jet check exits 1 with E0209 at the take argument (tests/ownership.rs:598-602)
+# Claim: the fix text teaches msg.copy() or a reorder (tests/ownership.rs:603-607)
+# Fixture migrated: none: source is the verbatim Rust raw string
+# Not ported: the no-E0121 assertion (tests/ownership.rs:608-611) is a sibling-code check; kept as stderr_lacks
+fixture: unmarked_take_argument_reused_later_teaches_copy.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/ownership.rs:598-611
+stderr: ~ "E0209" # tests/ownership.rs:598-611
+stderr: ~ "msg.copy()" # tests/ownership.rs:598-611
+stderr: !~ "E0121" # tests/ownership.rs:598-611

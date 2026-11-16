@@ -1,0 +1,15 @@
+// A String edit reserves its receiver two-phase: the arguments read the
+// text before the edit begins, through a `:=` binding or a `&String`.
+wrap_end: fn(text: &String) {
+    text.insert(text.len(), "]")
+    text.truncate(text.len() - 1)
+}
+
+run: fn() {
+    s := "abc"
+    s.insert(s.len(), "!")
+    s.remove(0, s.len() - 2)
+    s.reserve(s.capacity() + 8)
+    wrap_end(s)
+    print(s)
+}

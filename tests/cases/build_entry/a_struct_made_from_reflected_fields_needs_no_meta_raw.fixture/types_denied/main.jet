@@ -1,0 +1,19 @@
+// `Row`'s reflected fields under a row that denies `Meta.Types`: declaring a
+// type is what the row refuses.
+Row: struct {
+    id: I64
+    total: I32
+}
+
+build: fn(b: Build) -[!Meta.Types]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields := [CompilerField]{}
+    loop field in Row.reflect().fields {
+        fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+    }
+    meta.add_struct("Shape", fields, scope: "shape")
+    b.default(app)
+}
+
+run: fn() { print(Shape{id: I64{40}, total: I32{2}}.id) }

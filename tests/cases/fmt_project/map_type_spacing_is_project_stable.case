@@ -1,0 +1,11 @@
+# Port of tests/fmt_project.rs::map_type_spacing_is_project_stable (735-765).
+# PENDING-SAME-HEAD: original predicates, no reference snapshot or blessing.
+# ORACLE-LITERAL tests/fmt_project.rs:751-753.
+fixture: map_type_spacing_is_project_stable.fixture
+step: jet fmt {work}/main.jet
+exit: 0
+file: main.jet = map-type.out
+copy: main.jet after-first.txt
+step: jet fmt --check {work}/main.jet
+exit: 0
+file: main.jet == after-first.txt

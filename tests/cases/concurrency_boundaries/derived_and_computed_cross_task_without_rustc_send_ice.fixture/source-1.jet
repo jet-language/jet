@@ -1,0 +1,10 @@
+use reactive: core.reactive
+
+run: fn() {
+    base := reactive.signal(1)
+    twice := reactive.derived(fn() { (base.get() * 2) })
+    worker: task {
+        print(twice.get())
+    }
+    worker.join() ?? panic("task failed")
+}

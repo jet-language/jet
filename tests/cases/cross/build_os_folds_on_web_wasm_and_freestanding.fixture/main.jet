@@ -1,0 +1,10 @@
+// Each OS-less target folds `#build.target.os` on its own arm, never on the host's.
+run: fn() {
+    #if #build.target.os == {
+        .Web -> { print("web arm") }
+        .Wasm -> { print("wasm arm") }
+        .Freestanding -> { print("freestanding arm") }
+        .Linux | .MacOS | .Windows -> { print("native arm") }
+    }
+    print(#build.target.os)
+}

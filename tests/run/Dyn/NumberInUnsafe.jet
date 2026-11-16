@@ -1,0 +1,12 @@
+// Any package may build `Dyn.Number` from a numeric lexeme inside an audited
+// `#Unsafe` region, under the same rule Core's JSON reader follows. The text
+// is kept as written, so rendering writes `1.50` back unchanged.
+use json: core.encoding.json
+
+run: fn() {
+    #Unsafe("the literal below is a valid JSON number lexeme") {
+        value: Dyn.Number("1.50")
+        print(json.to_string(value))
+        if value == .Number(text) -> print("number {text}")
+    }
+}

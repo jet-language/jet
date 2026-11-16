@@ -1,0 +1,22 @@
+use core.mem
+
+// A raw window lives no longer than the owner it names: releasing the owner
+// while the window is still read is refused.
+#SingleUse Cells: struct {
+    a: Int
+    b: Int
+}
+
+release: fn(cells: &&Cells) {
+    #Unsafe("the cells hold no resource, so spending them frees nothing") { consume(cells) }
+}
+
+run: fn() {
+    cells := Cells{a: 11, b: 22}
+    #Unsafe("the window covers exactly the two Int fields, which `cells` keeps") {
+        ints: mem.window(cells, mem.Ptr<Int>.from_addr(mem.address_of(cells)), 2)
+        print(ints[0])
+        release(cells)
+        print(ints[1])
+    }
+}

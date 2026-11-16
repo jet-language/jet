@@ -1,0 +1,17 @@
+// `app.bind(address, deadline:)` binds a loopback server
+// whose route deadline is a per-request #Context; `shutdown` drains it and
+// returns the shutdown report. A failed bind is an `HTTPError` the caller
+// handles.
+package: {
+    name: "http_serve_entry"
+    authority: { allow: [IO, Net, Time.Wait] }
+}
+
+use web: core.web
+
+run: fn() {
+    app: web.app()
+    running: app.bind("127.0.0.1:0", deadline: 5s) ?? return
+    _report: running.shutdown() ?? return
+    print("serve:shutdown")
+}

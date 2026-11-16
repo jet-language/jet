@@ -1,0 +1,45 @@
+// Shell file chores as core.files calls: `stat -c %s` is `getsize(path) ?? -1`,
+// `dir/*.files` is `list_dir(dir, matching:)`, `readlink -f` is
+// `canonicalize(path, missing_last: true)`, `ln -sfn` is
+// `symlink(target, link, replace: true)`, `echo >>` is `append_all`, and
+// `find -name .jet -prune` is `walk_files(root, skip:)`.
+package: {
+    name: "shell_files"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+use {
+    fs: core.files
+    testing: core.testing
+}
+
+run: fn() {
+    root: testing.temp_dir("shell-files-example")
+    fs.create_dir_all(fs.join(root, "tree/.jet")) ?? panic("mkdir")
+    fs.create_dir_all(fs.join(root, "v2")) ?? panic("mkdir v2")
+    fs.write(fs.join(root, "core.files"), "Core/A.jet\n") ?? panic("core")
+    fs.write(fs.join(root, "tools.files"), "") ?? panic("tools")
+    fs.write(fs.join(root, "notes.txt"), "notes") ?? panic("notes")
+    fs.write(fs.join(root, "tree/main.jet"), "main") ?? panic("main")
+    fs.write(fs.join(root, "tree/.jet/cache"), "cache") ?? panic("cache")
+
+    fs.append_all(fs.join(root, "core.files"), "Core/B.jet\n") ?? panic("append")
+    print("size: {fs.getsize(fs.join(root, "core.files")) ?? -1}")
+    print("missing: {fs.getsize(fs.join(root, "gone")) ?? -1}")
+
+    lists: fs.list_dir(root, matching: "*.files") ?? panic("list")
+    loop entry in lists -> print("list: {entry.name}")
+
+    base: fs.canonicalize(root) ?? panic("canonical")
+    fresh: fs.canonicalize(fs.join(root, "fresh.log"), missing_last: true) ?? panic("missing last")
+    print("readlink -f: {fresh == fs.join(base, "fresh.log")}")
+
+    link: fs.join(root, "current")
+    fs.symlink("tree", link) ?? panic("link")
+    fs.symlink("v2", link, replace: true) ?? panic("relink")
+    print("current -> {fs.read_link(link) ?? panic("read link")}")
+
+    loop entry in fs.walk_files(fs.join(root, "tree"), skip: [String]{".jet"}) {
+        print("walk: {(entry ?? panic("walk")).relative}")
+    }
+}

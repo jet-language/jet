@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# The core-activation entry's stand-in jet, run in an arm's directory.
+# `--version` names it; `check` and `run` print. `build --release STEM.jet`
+# writes .jet/build/STEM and STEM.rs: bin/small for the control and import
+# arms, bin/big for the use arm, bin/failing for time's use arm, a shell
+# script for the data battery (it allocates through libc), no build at all
+# for http's use arm, and no Rust for regex.
+set -euo pipefail
+here=$(dirname "$(readlink -f "$0")")
+case $1 in
+  --version) echo "jet stand-in 1.0" ;;
+  check) echo "ok: \`$2\` has no problems" ;;
+  run) echo "42" ;;
+  build)
+    stem=${3%.jet}
+    battery=${stem%_*}
+    arm=${stem##*_}
+    if [[ $battery == http && $arm == use ]]; then
+      echo "building $3"
+      echo "error: core.http has no status_ok" >&2
+      exit 1
+    fi
+    mkdir -p .jet/build
+    bin=small
+    [[ $arm == use ]] && bin=big
+    [[ $battery == time && $arm == use ]] && bin=failing
+    if [[ $battery == data ]]; then
+      printf '#!/bin/sh\necho 42\n' > ".jet/build/$stem"
+      chmod +x ".jet/build/$stem"
+    else
+      cp "$here/bin/$bin" ".jet/build/$stem"
+    fi
+    if [[ $battery != regex ]]; then
+      {
+        echo "fn corelib_x3e_sCore_sprelude_sprint() {}"
+        [[ $arm != control ]] && echo "fn corelib_x3e_sCore_s${battery}_sopen() {} fn corelib_x3e_sCore_sprelude_sprint() {}"
+        [[ $arm == use ]] && echo "fn corelib_x3e_sCore_sdyn_snew() {} fn corelib_x3e_sCore_sa_b_sc() {}"
+        true
+      } > ".jet/build/$stem.rs"
+    fi
+    ;;
+  *) echo "fake-jet: unknown command $1" >&2; exit 2 ;;
+esac

@@ -1,0 +1,16 @@
+package: {
+    name: "minimal_no_capture"
+    authority: { allow: [Net] }
+}
+
+use {
+    web: core.web
+    server: core.http.server
+}
+
+run: fn() {
+    mux: web.app()
+    mux.get("/", fn(_req: HTTPRequest) {
+        return Ok(server.response(200, "ok"))
+    })
+}

@@ -1,0 +1,11 @@
+# Port of tests/jetpack_dispatch.rs:225-243. PENDING-SAME-HEAD and batch-four grammar.
+# Sources/literal predicates copied verbatim, helper templates expanded exactly.
+mkdir: root
+env: JETPACK_ROOT={work}/root
+step: jet run postgres@nixpkgs --no-color
+env: PATH=
+exit: 2
+stderr: ~ "E1272" # original contains predicate
+stderr: ~ "postgres@nixpkgs" # original contains predicate
+stderr: ~ "does not invoke an installed Nix executable" # original contains predicate
+stderr: !~ "couldn't run `nix`" # original absent predicate

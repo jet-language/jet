@@ -1,0 +1,22 @@
+// Ordinary type declarations and generic instances need no `Compiler`
+// value and no Meta effect: the build denies the whole Meta family.
+build: fn(b: Build) -[!Meta]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    b.default(app)
+}
+
+Point: struct {
+    x: Int
+    y: Int
+}
+
+Pair: struct<T> {
+    first: T
+    second: T
+}
+
+run: fn() {
+    point: Point{x: 1, y: 2}
+    pair: Pair<Int>{first: point.x, second: point.y}
+    print(pair.first + pair.second)
+}

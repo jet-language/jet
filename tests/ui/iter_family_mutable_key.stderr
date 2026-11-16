@@ -1,0 +1,17 @@
+Error [jet.ImmutableAssignment]: `k` is a loop variable, so it can't change
+  --> tests/ui/iter_family_mutable_key.jet:6:27
+    |
+  6 |     loop k in m.keys() -> k = "z"
+    |                           ^
+ Why: A loop variable holds the item of the current pass, and each pass binds it afresh
+ Fix: Make a changeable copy inside the loop body: `n := k`
+More: jet-lang.dev/e/E0111
+
+Error [jet.ImmutableAssignment]: `n` is a loop variable, so it can't change
+  --> tests/ui/iter_family_mutable_key.jet:9:29
+    |
+  9 |     loop n in s.values() -> n += 10
+    |                             ^
+ Why: A loop variable holds the item of the current pass, and each pass binds it afresh
+ Fix: Make a changeable copy inside the loop body: `m := n`
+More: jet-lang.dev/e/E0111

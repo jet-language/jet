@@ -1,0 +1,8 @@
+# HAND-PORT tests/run_entry.rs:358-376 imported_scripts_are_rejected_before_their_body_can_run
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original import files/source bytes and E0620 predicate, not generic failure.
+fixture: imported_scripts_are_rejected_before_their_body_can_run.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0620"] #>= 1

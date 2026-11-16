@@ -1,0 +1,1359 @@
+package: {
+    name: "app"
+    version: "0.0.1"
+    edition: "2026"
+    description: "Process-level live queries, subscriptions, invalidation and sync."
+    license: "MIT"
+    outputs: {
+        app: .Library{ entry: app }
+    }
+}
+
+// Live bindings live in one process-wide registry below; sync sessions are
+// records of that registry under LIVE_SYNC_SOURCE.
+use {
+    unicode: core.text
+    http: core.http
+    crypto: core.crypto
+    live_json: core.encoding.json
+    core.reactive.loadable.[Loadable]
+    ws: core.net.ws
+    core.net.ws.[WsConn]
+    tasks: core.tasks
+    core.tasks.[TaskID]
+    rt: jet.runtime.time
+    rt_web: jet.runtime.web
+    world_rt: jet.runtime.testing
+}
+
+SYNC_MAX_SESSION: 256
+
+SYNC_MAX_DOCUMENT: 4194304
+
+SYNC_MAX_TEXT: 1048576
+
+SYNC_MAX_ENTRIES: 100000
+
+SYNC_MAX_REPLICAS: 4096
+
+SYNC_MAX_INT: 9223372036854775807
+
+#Error
+AppError: enum {
+    Invalid
+    Unsupported
+}
+
+// Endpoint markers. A method of a mounted service is an endpoint only when
+// one of these marks it: `#App.SignedIn` for a signed-in caller,
+// `#App.Public` for any caller. An unmarked method is server-only.
+// `limit:` caps the calls one caller makes in each `per` window
+// (`#App.Public(limit: 30, per: 1min)`); a call past it is answered 429
+// with `Retry-After`, which a Remote reads as `CallError.Unreachable`.
+// `#App.Public` counts per network address; `#App.SignedIn` counts per
+// account once sign-in names one, and per network address until then.
+// `limit: 0`, the default, is no limit.
+SignedIn: struct {
+    limit: Int{0}
+    per: Duration{1min}
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+Public: struct {
+    limit: Int{0}
+    per: Duration{1min}
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+// A webhook: `#App.Webhook(path: "/hooks/github/:project", signature:
+// app.Signature.GitHub, key: "webhook_secret")` makes a method of a mounted
+// service answer POST `path` for a sender that signs each delivery. Its
+// parameters are the path's parameters, then the delivery's decoded JSON
+// body. `key:` names the service's `#App.SigningKey` method, which gives the
+// delivery's key from the same path parameters. A delivery runs only when
+// that key is there and the delivery carries a valid `signature` under it,
+// checked in constant time before the body is decoded; any other is answered
+// 401. A webhook is no endpoint: no Remote calls it.
+Webhook: struct {
+    path: String
+    signature: Signature
+    key: String
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+// The method a webhook's `key:` names. It takes some of the webhook's path
+// parameters, by name, and gives the key the sender signs with, or None,
+// which answers 401. It is server-only.
+SigningKey: struct {
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+// How a webhook's sender signs a delivery: an HMAC-SHA256, hex-encoded,
+// under the webhook's key.
+Signature: enum {
+    GitHub
+    Stripe
+}
+
+// GitHub: `X-Hub-Signature-256: sha256=<mac>`, the MAC of the body.
+// Stripe: `Stripe-Signature: t=<seconds>,v1=<mac>`, the MAC of
+// `<seconds>.<body>`; any one `v1` entry may match.
+
+// The request header that carries a delivery's `signature`.
+priv webhook_header: fn(signature: Signature) -> String Never! {
+    if signature == {
+        .GitHub -> "x-hub-signature-256"
+        .Stripe -> "stripe-signature"
+    }
+}
+
+// Whether `sent`, the delivery's signature header, signs `body` under `key`
+// by `signature`. Each MAC is compared in constant time, and every `v1`
+// entry of a Stripe header is compared.
+priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: String) -> Bool Never! {
+    if signature == {
+        .GitHub -> {
+            expected: "sha256={crypto.hex_encode(crypto.hmac_sha256(key.bytes(), body.bytes()))}"
+            crypto.constant_time_equal_bytes(expected.bytes(), sent.bytes())
+        }
+        .Stripe -> {
+            stamp := ""
+            macs := [String]{}
+            loop part in sent.split(",") {
+                entry: part.trim()
+                if entry.starts_with("t=") -> stamp = entry.slice(2, entry.len())
+                if entry.starts_with("v1=") -> macs.push(entry.slice(3, entry.len()))
+            }
+            if stamp == "" -> return false
+            expected: crypto.hex_encode(crypto.hmac_sha256(key.bytes(), "{stamp}.{body}".bytes()))
+            matched := false
+            loop mac in macs {
+                if crypto.constant_time_equal_bytes(expected.bytes(), mac.bytes()) -> matched = true
+            }
+            matched
+        }
+    }
+}
+
+#Test("webhook signatures check the sender's MAC") {
+    // GitHub's published example delivery.
+    github: "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
+    assert(webhook_signed(.GitHub, "It's a Secret to Everybody", github, "Hello, World!"))
+    assert(!webhook_signed(.GitHub, "It's a Secret to Everybody", github, "Hello, World?"))
+    assert(!webhook_signed(.GitHub, "another key", github, "Hello, World!"))
+    assert(!webhook_signed(.GitHub, "It's a Secret to Everybody", "", "Hello, World!"))
+    mac: crypto.hex_encode(crypto.hmac_sha256("whsec".bytes(), "1700000000.{{\"id\":\"evt_1\"}}".bytes()))
+    assert(webhook_signed(.Stripe, "whsec", "t=1700000000,v1=00,v1={mac}", "{{\"id\":\"evt_1\"}}"))
+    assert(!webhook_signed(.Stripe, "whsec", "t=1700000001,v1={mac}", "{{\"id\":\"evt_1\"}}"))
+    assert(!webhook_signed(.Stripe, "whsec", "v1={mac}", "{{\"id\":\"evt_1\"}}"))
+    assert_eq(webhook_header(.Stripe), "stripe-signature")
+}
+
+// A client of the service `S`. It offers only the methods of `S` that
+// `#App.SignedIn` or `#App.Public` marks: a call of any other method of `S`
+// is E2812, and the service itself stays out of reach. A call through a
+// Remote that `remote` made runs the method directly on that service; one
+// through a Remote that `remote_at` made posts it to the server. Either way
+// the call's error type takes a `CallError`: a method that fails with `E`
+// needs `impl CallError -> E`, and one that can't fail answers
+// `R CallError!`.
+Remote: struct<S> {
+    priv service: S?
+    priv address: String
+
+    // A call of the endpoint method `method` of `S`, which can fail with
+    // `E`. The compiler lowers each such call here: `direct` runs it on the
+    // service the Remote holds; otherwise `args`, the encoded arguments, go to
+    // the server, and `fail` gives a `CallError` as the method's own error.
+    __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time.Wait]> R E! {
+        if self.service == .Val(service) -> return direct(service)
+        reply: remote_post(self.address, method, args) ?? return fail(err)
+        tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
+        if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
+        value: live_json.at<R>(tree, "/ok") ?? return fail(.Unreachable("the server's reply to `{method}` has no value"))
+        Ok(value)
+    }
+
+    // A call of the endpoint method `method` of `S`, which can't fail.
+    __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time.Wait]> R CallError! {
+        if self.service == .Val(service) -> return Ok(direct(service))
+        reply: remote_post(self.address, method, args)
+        tree: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
+        value: live_json.at<R>(tree, "/ok") ?? return Err(.Unreachable("the server's reply to `{method}` has no value"))
+        Ok(value)
+    }
+
+    // One argument of a remote call, encoded.
+    __arg: fn<A: Encode>(self, value: A) -> String Never! {
+        live_json.to_string<A>(value) ?? "null"
+    }
+
+    // `failure` as an error of the call; the compiler's `fail` binds it, so
+    // the method's error type takes it through its conversion.
+    __raise: fn<R>(self, failure: CallError) -> R CallError! { Err(failure) }
+}
+
+// How a remote call failed. Every call through a `Remote` can fail this way,
+// so the error type of a service method converts from it.
+#Error
+CallError: enum {
+    Unreachable(String)
+    Invalid([FieldError])
+    SignedOut
+    UpdateRequired
+}
+
+// No answer: the server is down or unreachable, or its reply was not one
+// a Remote reads.
+// The server could not decode the call's arguments (HTTP 422): the field
+// errors its reply names.
+// The method needs a signed-in caller, and the call had none (HTTP 401).
+// The server no longer accepts this client's wire version (HTTP 426).
+
+// A field error a method reports for one of its arguments, from a rule the
+// argument's `validate` block can't check (one that reads the database):
+// `at` is the path of the field it is about, in that argument (`assignee`,
+// `tasks[3].title`, `tasks[{index}].title`), and `reason` what is wrong with
+// it. `at` must be a string literal, interpolated only inside a `[…]` index,
+// that walks to a stored field of a struct argument of the method that
+// reports it (E2813), so the error shows beside that field, as a failed
+// `validate` check does.
+field_error: fn(at: String, reason: String) -> FieldError Never! {
+    FieldError{path: at, reason: reason}
+}
+
+// The largest reply a remote call reads.
+REMOTE_MAX_REPLY: 16777216
+
+// The Remote of a service the server holds: each call through it runs the
+// marked method on `service` directly.
+remote: fn<S>(service: &&S) -> Remote<S> Never! { Remote<S>{service: Val(service), address: ""} }
+
+// The Remote of a service a server mounts at `address`, its mount prefix
+// (`http://127.0.0.1:8080/api`): each call posts its JSON arguments to
+// `{address}/{method}`.
+remote_at: fn<S>(address: String) -> Remote<S> Never! { Remote<S>{service: None, address: address} }
+
+// One remote call: POST the JSON array of `args` to `{address}/{method}`;
+// the reply's body on 200, else the failure its status names. The call
+// carries a W3C `traceparent` that starts its trace, and that trace's id as
+// its `x-request-id`, so the server's span of the call has both.
+priv remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
+    seed: "{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}"
+    trace: make_trace_id("trace:{seed}", 16)
+    sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_body("[{args.join(",")}]")
+    response: sent.send() ?? return Err(.Unreachable("{address}/{method}: {err}"))
+    text: response.body.text(REMOTE_MAX_REPLY) ?? return Err(.Unreachable("{address}/{method}: {err}"))
+    if {
+        response.status == 200 -> Ok(text)
+        response.status == 401 -> Err(.SignedOut)
+        response.status == 422 -> Err(.Invalid(remote_invalid(text)))
+        response.status == 426 -> Err(.UpdateRequired)
+        response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
+        else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
+    }
+}
+
+// A W3C trace-context id of `n` bytes (16 for a trace, 8 for a span) as
+// lowercase hex: the leading bytes of `seed`'s SHA-256. Each caller's seed
+// holds a clock reading and a count, so no two ids it makes repeat; ids
+// need no random source, which a handler's effects do not allow.
+priv make_trace_id: fn(seed: String, n: Int) -> String Never! {
+    digest: crypto.sha256(seed)
+    crypto.hex_encode(digest.bytes.slice(0, n))
+}
+
+// The process's count of the trace seeds a Remote makes.
+TRACE_SEEDS: Shared{0}
+
+priv trace_next: fn() -> Int Never! {
+    guard := TRACE_SEEDS.guard_edit()
+    guard.value += 1
+    guard.value
+}
+
+// The field errors of a 422 reply, `{"invalid": [{"path": …, "reason":
+// …}, …]}`; a reply that is not that shape is one error with its text.
+priv remote_invalid: fn(text: String) -> [FieldError] Never! {
+    tree: live_json.parse(text) ?? return [FieldError]{FieldError{path: "", reason: "{text}"}}
+    errors := [FieldError]{}
+    index := 0
+    loop {
+        reason: live_json.at<String>(tree, "/invalid/{index}/reason") ?? break
+        path: live_json.at<String>(tree, "/invalid/{index}/path") ?? ""
+        errors.push(FieldError{path: path, reason: reason})
+        index += 1
+    }
+    if errors.len() == 0 -> return [FieldError]{FieldError{path: "", reason: "{text}"}}
+    errors
+}
+
+// A live binding: one source function applied to one argument list, run as
+// the caller that made it. The compiler builds it from
+// `live(source, args...)` or `subscribe(source, args...)`; `state` reads it.
+// A source may read the database, fetch over the network and wait, nothing
+// more, so `state` runs on every target that has those, the web included.
+Live: struct<T, E> {
+    id: Int
+    run: fn() -[DB.Read, Net, Time]> T E!
+    priv acting: Acting?
+}
+
+// One registry binding, named by its source's wire name, its encoded
+// argument list and `caller`, the caller it runs as (`acting_tag`), so two
+// callers never share a result. `value` is the last result, `ok:` or `err:`
+// then its JSON, and empty before the first run; `generation` counts the
+// invalidations that reached the binding; `overtaken` counts its runs in a
+// row that an invalidation overtook, and `held_ns` is the monotonic time
+// until which a stale binding serves its stored result (0: none); `every_ns`
+// is the poll interval (0: none) and `ran_ns` the monotonic time of the last
+// run. `reads` is its read set: the other sources (a table's
+// `core.db.live:<table>`) its runs read (`live_reads`), so a write to any of
+// them re-runs it too.
+LiveRecord: struct {
+    id: Int
+    source: String
+    key: String
+    value: String
+    dirty: Bool
+    generation: Int
+    overtaken: Int
+    held_ns: Int
+    every_ns: Int
+    ran_ns: Int
+    reads: [String]
+    caller: String
+}
+
+// What `state` reads before it runs a binding: the stored result when it is
+// current, held, or capped (live_current), and the binding's generation then.
+LiveCurrent: struct {
+    value: String?
+    generation: Int
+}
+
+// `capped` counts the re-runs the per-second cap turned into holds;
+// `window_ns` starts the current second of re-runs and `window_runs` counts
+// the re-runs in it.
+LiveRegistry: struct {
+    next_id: Int
+    invalidations: Int
+    changes: Int
+    evictions: Int
+    ws_pushes: Int
+    capped: Int
+    window_ns: Int
+    window_runs: Int
+    records: [LiveRecord]
+}
+
+// The live registry lives in a process-wide runtime byte cell; every update
+// reads the cell, edits the decoded registry and installs it only if the cell
+// is unchanged, retrying otherwise, so concurrent callers never lose an update.
+//
+// The compiler checks `live`, `subscribe`, `push` and `invalidate` against
+// their source function and lowers them to the `__live_*` helpers below.
+
+// The binding's current state. The source re-runs when the binding has no
+// result yet, was invalidated, or its poll interval has passed; the stored
+// result changes only when the re-run's encoding differs. A re-run that an
+// invalidation overtook stores its result but leaves the binding stale, since
+// what it read may predate that write. Under writes that keep overtaking it, a
+// binding settles: from its second overtaken run in a row, its stale result
+// is served for a hold (live_store) instead of running the source on every
+// read, and its watchers (`watch`) are told when to read it again. A server
+// re-runs at most LIVE_MAX_RERUNS_PER_SECOND bindings a second; past that, a
+// binding's stored result is held until the next second (live_current). Writes
+// between two reads cost one re-run, however many there were. While the
+// source runs, the tables it reads join the binding's read set (`live_reads`).
+state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
+    now: rt.clock_mono_ns()
+    seen: live_current(binding.id, now)
+    if seen.value == .Val(text) {
+        if live_value_state<T, E>(text) == .Val(current) -> return current
+    }
+    value: live_run(binding) ?? {
+        if live_json.to_string<E>(err) == .Ok(encoded) {
+            live_store(binding.id, "err:{encoded}", now, Val(seen.generation))
+        }
+        return Loadable.Failed(err)
+    }
+    if live_json.to_string<T>(value) == .Ok(encoded) {
+        live_store(binding.id, "ok:{encoded}", now, Val(seen.generation))
+    }
+    Loadable.Loaded(value)
+}
+
+// Runs `binding`'s source as this task's running binding, so the reads it
+// makes join the binding's read set, and as the caller that made the
+// binding, whoever reads it now.
+live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> T E! {
+    me: tasks.current_task()
+    live_run_begin(me, binding.id)
+    acting_begin(me, binding.acting.copy())
+    value: binding.run() ?? {
+        acting_end(me)
+        live_run_end(me)
+        return Err(err)
+    }
+    acting_end(me)
+    live_run_end(me)
+    Ok(value)
+}
+
+// `socket`, a server-side WebSocket connection, receives
+// `{"live":"invalidate","binding":<id>}` each time `binding` is invalidated,
+// starting with the latest such event when there was one. While the binding
+// is held (live_store), the event carries `"after_ms":<n>`: a read in the
+// next n milliseconds gets the held stale result, so the client reads again
+// after them, and the binding's first current result after the hold sends the
+// event again. A connection receives only the bindings its handler watches;
+// the handler holds `binding` because it read it for its own caller under
+// that caller's policy.
+watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) Never! -[Net]> {
+    ws.__live_watch(socket, "live:{binding.id}")
+}
+
+// `changes` counts stored results that differed from the one before;
+// `ws_pushes` counts the publishes to the WebSocket live hub: one per
+// `invalidate` that marked a binding, and one per hold's start and end;
+// `capped` counts the re-runs the per-second cap held over.
+live_stats: fn() -> String Never! {
+    registry: live_decode(live_cell_load()) ?? return "LiveStats(error=live registry unavailable)"
+    "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes={registry.ws_pushes}, reruns_per_second={LIVE_MAX_RERUNS_PER_SECOND}, capped={registry.capped})"
+}
+
+// The live bindings of `registry`; sync's session records are not queries.
+live_query_count: fn(registry: LiveRegistry) -> Int {
+    count := 0
+    loop record in registry.records {
+        if record.source != LIVE_SYNC_SOURCE -> count += 1
+    }
+    count
+}
+
+// `live(source, args...)`: `args` are the encoded arguments. The binding
+// runs as this task's caller.
+__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
+    acting: acting_now(tasks.current_task())
+    Live<T, E>{id: live_register(source, live_key(args), acting_tag(acting), 0), run: run, acting: acting}
+}
+
+// `subscribe(source, args..., every:)`: a binding polled every `every`.
+__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
+    every_ns := 0
+    if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
+    acting: acting_now(tasks.current_task())
+    Live<T, E>{id: live_register(source, live_key(args), acting_tag(acting), every_ns), run: run, acting: acting}
+}
+
+// `push(source, args..., value:)` stores `value` as that binding's result,
+// registering the binding when nothing has read it yet. Only the binding of
+// this task's caller gets it: a value one caller computed never reaches
+// another's binding.
+__live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
+    encoded: live_json.to_string<T>(value) ?? return
+    key: live_key(args)
+    id: live_register(source, key, acting_tag(acting_now(tasks.current_task())), 0)
+    live_store(id, "ok:{encoded}", -1, None)
+}
+
+// `invalidate(source, args...)`: exactly that argument list re-runs.
+__live_invalidate: fn(source: String, args: [String]) Never! {
+    live_invalidate(source, Val(live_key(args)))
+}
+
+// `invalidate(source)`: every binding of `source` re-runs.
+__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None) }
+
+// One argument's part of a binding's identity.
+__live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
+
+// A binding's read set, for core.db: while a task runs a binding's source,
+// each table it reads joins that binding's read set, so a write to the table
+// re-runs the binding as it re-runs the table's own bindings.
+priv(package) live_reads: module {
+    // Whether this task is running a binding's source, so a database read
+    // it makes belongs to that binding's read set.
+    running: fn() -> Bool Never! { live_running(tasks.current_task()) != None }
+
+    // Adds `source` (a table's `core.db.live:<table>`) to the read set of
+    // the binding this task runs. Recorded before the read runs, so a write
+    // committed after the read always reaches the binding.
+    record: fn(source: String) Never! {
+        id: live_running(tasks.current_task()) ?? return
+        loop {
+            seen: live_cell_load()
+            registry := live_decode(seen) ?? return
+            index: live_index(registry, id) ?? return
+            if registry.records[index].source == source || registry.records[index].reads.contains(source) {
+                return
+            }
+            registry.records[index].reads.push(source.copy())  // copy: a lost race retries with the same source
+            if live_cell_replace(seen, live_encode(registry)) {
+                return
+            }
+        }
+    }
+}
+
+// The bindings whose sources are running now, each with its task; a source
+// that reads another binding stacks that binding on its own.
+LiveRun: struct {
+    task: TaskID
+    id: Int
+}
+
+LiveRunning: struct {
+    runs: [LiveRun]
+}
+
+LIVE_RUNNING: Shared{LiveRunning{runs: [LiveRun]{}}}
+
+live_run_begin: fn(task: TaskID, id: Int) {
+    running := LIVE_RUNNING.guard_edit()
+    running.value.runs.push(LiveRun{task: task, id: id})
+}
+
+live_run_end: fn(task: TaskID) {
+    running := LIVE_RUNNING.guard_edit()
+    at := running.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if task == running.value.runs[at].task {
+            _: running.value.runs.remove(at, .Slot)
+            return
+        }
+    }
+}
+
+// The binding `task` is running now, the innermost when it runs several.
+live_running: fn(task: TaskID) -> Int? {
+    running := LIVE_RUNNING.guard_edit()
+    at := running.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if running.value.runs[at].task == task -> return Val(running.value.runs[at].id)
+    }
+    None
+}
+
+// Whom a task acts for. `as_caller` runs a function for an account and
+// `as_system` for the server itself. A task that runs neither acts for no
+// one, and so does a task another one spawns: a caller never passes to
+// another task. A guarded core.db table asks its row policy as this caller,
+// and as no one, never as the system, when there is none. A live binding
+// runs as the caller that made it.
+Acting: enum {
+    Account(String)
+    System
+}
+
+// The runs of `as_caller`, `as_system` and binding sources, each with its
+// task and the caller it acts for (None: no one); a task's innermost run
+// names its caller.
+ActingRun: struct {
+    task: TaskID
+    acting: Acting?
+}
+
+ActingRuns: struct {
+    runs: [ActingRun]
+}
+
+ACTING: Shared{ActingRuns{runs: [ActingRun]{}}}
+
+// Runs `run` acting for the account `account` and gives what it gives; the
+// account is `maybe_caller()` within it. `run` handles its own failures, so
+// a caller with any failure contract may call this.
+as_caller: fn<R>(account: String, run: fn() -> R Never!) -> R Never! {
+    acting_within(Val(Acting.Account(account.copy())), run)
+}
+
+// Runs `run` acting for the server itself, which no row policy limits, and
+// gives what it gives. A job or a schedule that reads every row runs so; a
+// request never does.
+as_system: fn<R>(run: fn() -> R Never!) -> R Never! { acting_within(Val(Acting.System), run) }
+
+// The account this task acts for: None when it acts for the system or for
+// no one.
+maybe_caller: fn() -> String? Never! {
+    if acting_now(tasks.current_task()) == .Val(.Account(account)) -> return Val(account)
+    None
+}
+
+// The account this task acts for, where a caller is certain: the compiler
+// accepts a call only on a path that starts at an `#App.SignedIn` method or
+// inside `as_caller`. A path the compiler can't follow (a function value
+// another task runs) that reaches it acting for no account stops here.
+caller: fn() -> String Never! { maybe_caller() ?? panic("app.caller() ran acting for no account") }
+
+priv acting_within: fn<R>(acting: Acting?, run: fn() -> R Never!) -> R Never! {
+    me: tasks.current_task()
+    acting_begin(me, acting)
+    defer acting_end(me)
+    run()
+}
+
+priv acting_begin: fn(task: TaskID, acting: Acting?) {
+    runs := ACTING.guard_edit()
+    runs.value.runs.push(ActingRun{task: task, acting: acting})
+}
+
+priv acting_end: fn(task: TaskID) {
+    runs := ACTING.guard_edit()
+    at := runs.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if task == runs.value.runs[at].task {
+            _: runs.value.runs.remove(at, .Slot)
+            return
+        }
+    }
+}
+
+// The caller `task` acts for now: None for no one.
+priv acting_now: fn(task: TaskID) -> Acting? {
+    runs := ACTING.guard_edit()
+    at := runs.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if runs.value.runs[at].task == task -> return runs.value.runs[at].acting.copy()
+    }
+    None
+}
+
+// A binding's registry name for the caller `acting`: empty for no one.
+priv acting_tag: fn(acting: Acting?) -> String {
+    if acting == {
+        .Val(.Account(account)) -> "account:{account}"
+        .Val(.System) -> "system"
+        .None -> ""
+    }
+}
+
+// The caller this task acts for, for core.db's row policies.
+priv(package) callers: module {
+    // Whether this task acts for the system.
+    system: fn() -> Bool Never! {
+        if acting_now(tasks.current_task()) == .Val(.System) -> return true
+        false
+    }
+
+    // The account this task acts for: None for the system or no one.
+    account: fn() -> String? Never! { maybe_caller() }
+
+    // This task acts for the system until `end`, as a row policy's own
+    // reads do.
+    begin_system: fn() Never! { acting_begin(tasks.current_task(), Val(Acting.System)) }
+
+    // Ends this task's innermost `begin_system`.
+    end: fn() Never! { acting_end(tasks.current_task()) }
+}
+
+#Test("a task acts for its innermost run's caller, and a task it spawns for no one") {
+    assert_eq(maybe_caller(), String?{None})
+    seen: as_caller<String>("ann", fn() {
+        assert(as_system(fn() { callers.system() }))
+        assert_eq(as_system(fn() { maybe_caller() }), String?{None})
+        assert_eq(as_caller("ben", fn() { maybe_caller() }), Val("ben"))
+        spawned: task { maybe_caller() ?? "no one" }
+        assert_eq(spawned.join() ?? panic("the spawned task runs"), "no one")
+        assert(!callers.system())
+        maybe_caller() ?? "no one"
+    })
+    assert_eq(seen, "ann")
+    assert_eq(maybe_caller(), String?{None})
+    as_caller("ben", fn() {
+        assert_eq(maybe_caller(), Val("ben"))
+        assert_eq(caller(), "ben")
+        assert(!callers.system())
+    })
+    assert_eq(maybe_caller(), String?{None})
+    assert_eq(acting_tag(Val(Acting.Account("ann"))), "account:ann")
+    assert_eq(acting_tag(None), "")
+}
+
+LIVE_MAX_QUERIES: 1024
+
+LIVE_MAX_PAYLOAD: 4194304
+
+// A binding whose runs this many times in a row were overtaken serves its
+// stale result for a hold before it runs again.
+LIVE_HOLD_AFTER: 2
+
+// The shortest hold, in nanoseconds; a run that took longer holds as long as
+// it took, so a binding over a busy table spends at most half its time
+// running.
+LIVE_HOLD_MIN_NS: 100000000
+
+// The re-runs a server makes in one second, over all its bindings; a binding
+// due past them serves its stored result until the next second.
+LIVE_MAX_RERUNS_PER_SECOND: 1000
+
+LIVE_RERUN_WINDOW_NS: 1000000000
+
+// The registry source of sync's session records: a session keeps its
+// generation and document as the record's value.
+LIVE_SYNC_SOURCE: "app.sync"
+
+// The encoded registry, in one process-wide cell. A replacement installs only
+// while the cell still holds the bytes its caller read, so a concurrent change
+// makes the caller retry instead of being lost. Inside a deterministic world
+// the registry is the World's own cell instead, starting empty, so a world and
+// its tasks never read or change the process registry.
+LiveCell: struct {
+    bytes: [U8]
+}
+
+LIVE_CELL: Shared{LiveCell{bytes: [U8]{}}}
+
+live_cell_load: fn() -> [U8] {
+    if world_rt.world_store_load("app.live") == .Val(bytes) -> return bytes
+    LIVE_CELL.bytes
+}
+
+live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
+    if world_rt.world_store_replace("app.live", expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    cell := LIVE_CELL.guard_edit()
+    if cell.value.bytes != expected -> return false
+    cell.value.bytes = replacement.move()
+    true
+}
+
+live_key: fn(args: [String]) -> String { "[{args.join(",")}]" }
+
+// The id of the binding named by `source`, `key` and `caller` (acting_tag),
+// registered when absent; a full registry evicts its oldest binding. Two
+// registrations of one binding poll at the shorter interval. 0 when the
+// registry is unavailable.
+live_register: fn(source: String, key: String, caller: String, every_ns: Int) -> Int {
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return 0
+        found := 0
+        loop index in 0..<registry.records.len() {
+            if registry.records[index].source != source || registry.records[index].key != key || registry.records[index].caller != caller {
+                next
+            }
+            found = registry.records[index].id
+            current: registry.records[index].every_ns
+            if every_ns <= 0 || (current > 0 && current <= every_ns) -> return found
+            registry.records[index].every_ns = every_ns
+        }
+        if found == 0 {
+            found = registry.next_id + 1
+            registry.next_id = found
+            if live_query_count(registry) >= LIVE_MAX_QUERIES {
+                kept := [LiveRecord]{}
+                evicted := false
+                loop record in registry.records {
+                    if !evicted && record.source != LIVE_SYNC_SOURCE {
+                        evicted = true
+                        next
+                    }
+                    kept.push(record)
+                }
+                registry.records = kept
+                registry.evictions += 1
+            }
+            // copy: a lost race retries with the same source, key and caller
+            registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: every_ns, ran_ns: 0, reads: [String]{}, caller: caller.copy()})
+        }
+        if live_cell_replace(seen, live_encode(registry)) -> return found
+    }
+}
+
+// The stored result of binding `id` when it is current at `now`, or stale
+// but held, and its generation; None when the binding must re-run. A re-run
+// takes one of this second's LIVE_MAX_RERUNS_PER_SECOND; once they are spent,
+// the stored result is held until the next second, its start published as a
+// hold's is (live_store), so watchers read again when it ends and every write
+// before then costs the one re-run that follows it. A first run is not capped:
+// it has no result to hold.
+live_current: fn(id: Int, now: Int) -> LiveCurrent {
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return LiveCurrent{value: None, generation: 0}
+        index: live_index(registry, id) ?? return LiveCurrent{value: None, generation: 0}
+        generation: registry.records[index].generation
+        if registry.records[index].value == "" {
+            return LiveCurrent{value: None, generation: generation}
+        }
+        dirty: registry.records[index].dirty
+        held: now < registry.records[index].held_ns
+        every_ns: registry.records[index].every_ns
+        polled: every_ns > 0 && now - registry.records[index].ran_ns >= every_ns
+        if held || (!dirty && !polled) {
+            return LiveCurrent{value: Val(registry.records[index].value.copy()), generation: generation}  // copy: the registry snapshot is dropped here
+        }
+        if now - registry.window_ns >= LIVE_RERUN_WINDOW_NS {
+            registry.window_ns = now
+            registry.window_runs = 0
+        }
+        event := ""
+        if registry.window_runs < LIVE_MAX_RERUNS_PER_SECOND -> registry.window_runs += 1 else {
+            ends: registry.window_ns + LIVE_RERUN_WINDOW_NS
+            registry.records[index].held_ns = ends
+            registry.capped += 1
+            registry.ws_pushes += 1
+            event = live_event(id, Val(live_hold_ms(ends - now)))
+        }
+        if live_cell_replace(seen, live_encode(registry)) {
+            if event == "" -> return LiveCurrent{value: None, generation: generation}
+            rt_web.live_publish("live:{id}", event)
+            return LiveCurrent{value: Val(registry.records[index].value.copy()), generation: generation}  // copy: the registry snapshot is dropped here
+        }
+    }
+}
+
+live_value_state: fn<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> Loadable<T, E>? {
+    if text.starts_with("ok:") {
+        value: live_json.decode<T>(text.slice(3, text.len())) ?? return None
+        return Val(Loadable.Loaded(value))
+    }
+    if !text.starts_with("err:") -> return None
+    reason: live_json.decode<E>(text.slice(4, text.len())) ?? return None
+    Val(Loadable.Failed(reason))
+}
+
+// Stores `value` as binding `id`'s result; a value that differs from the
+// stored one counts as a change. The binding becomes clean unless `started`,
+// its generation when the run began, is older than its generation now: an
+// invalidation that arrived during the run keeps it stale, so the next read
+// runs it again. From the LIVE_HOLD_AFTER-th such run in a row, the stale
+// result is held: reads serve it until the hold ends (as long as the run took,
+// at least LIVE_HOLD_MIN_NS), and the first read after that runs the source
+// again, so the binding never runs on every read. A hold is never served as
+// current: its start publishes the binding's event with `after_ms`, so a
+// watching client that read the held result reads again once it ends, and the
+// first current result after a hold publishes the event again, so every
+// watcher reads it. A push (`started` None) is current as stored. `now`, the
+// time the run began, < 0 keeps the last run time.
+live_store: fn(id: Int, value: String, now: Int, started: Int?) {
+    if value.len() > LIVE_MAX_PAYLOAD {
+        return
+    }
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return
+        index: live_index(registry, id) ?? return
+        if registry.records[index].value != value {
+            registry.records[index].value = value.copy()  // copy: a lost race retries with the same value
+            registry.changes += 1
+        }
+        overtaken := false
+        if started == .Val(generation) && registry.records[index].generation != generation {
+            overtaken = true
+        }
+        // The hub event this store publishes: a hold's start or its end.
+        event := ""
+        if overtaken {
+            registry.records[index].overtaken += 1
+            if registry.records[index].overtaken >= LIVE_HOLD_AFTER && now >= 0 {
+                ended: rt.clock_mono_ns()
+                took: ended - now
+                hold: if took > LIVE_HOLD_MIN_NS -> took else -> LIVE_HOLD_MIN_NS
+                registry.records[index].held_ns = ended + hold
+                event = live_event(id, Val(live_hold_ms(hold)))
+            }
+        } else {
+            if registry.records[index].held_ns != 0 -> event = live_event(id, None)
+            registry.records[index].dirty = false
+            registry.records[index].overtaken = 0
+            registry.records[index].held_ns = 0
+        }
+        if event != "" -> registry.ws_pushes += 1
+        if now >= 0 -> registry.records[index].ran_ns = now
+        if live_cell_replace(seen, live_encode(registry)) {
+            if event != "" -> rt_web.live_publish("live:{id}", event)
+            return
+        }
+    }
+}
+
+// Marks dirty every binding of `source`, or only the one whose key is `key`,
+// then publishes each marked binding's invalidation to the WebSocket live
+// hub: topic `live:<id>`, the event `live_event` (with the rest of its hold
+// when the binding is held). Only connections that watch that binding
+// (`watch`) receive it; one that starts watching later first receives the
+// topic's latest.
+live_invalidate: fn(source: String, key: String?) {
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return
+        now: rt.clock_mono_ns()
+        hits := [Int]{}
+        events := [String]{}
+        loop index in 0..<registry.records.len() {
+            // An exact-key invalidation names one binding of `source`; a
+            // whole-source one also reaches every binding that read it.
+            if registry.records[index].source == source {
+                if key == .Val(only) && registry.records[index].key != only -> next
+            } else if key != None || !registry.records[index].reads.contains(source) { next }
+            registry.records[index].dirty = true
+            registry.records[index].generation += 1
+            id: registry.records[index].id
+            held: registry.records[index].held_ns
+            hits.push(id)
+            events.push(live_event(id, if held > now -> Val(live_hold_ms(held - now)) else -> None))
+        }
+        if hits.len() == 0 {
+            return
+        }
+        registry.invalidations += hits.len()
+        registry.ws_pushes += 1
+        if live_cell_replace(seen, live_encode(registry)) {
+            loop at in 0..<hits.len() -> rt_web.live_publish("live:{hits[at]}", events[at])
+            return
+        }
+    }
+}
+
+// The live hub's event for binding `id`: re-read it, or, while it is held,
+// re-read it after `after_ms`, since a read before then gets its held stale
+// result.
+live_event: fn(id: Int, after_ms: Int?) -> String {
+    if after_ms == .Val(ms) {
+        return "{{\"live\":\"invalidate\",\"binding\":{id},\"after_ms\":{ms}}}"
+    }
+    "{{\"live\":\"invalidate\",\"binding\":{id}}}"
+}
+
+// `ns` in whole milliseconds, rounded up, so a client that waits them reads
+// after the hold.
+live_hold_ms: fn(ns: Int) -> Int { (ns + 999999) /% 1000000 }
+
+live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
+    loop index in 0..<registry.records.len() {
+        if registry.records[index].id == id -> return Val(index)
+    }
+    None
+}
+
+// The cell holds the registry as length-prefixed fields: next id,
+// invalidations, changes, evictions, WebSocket pushes, capped re-runs, the
+// re-run window's start and count, then twelve fields per binding, the
+// eleventh its read set joined by newlines and the last its caller.
+live_encode: fn(registry: LiveRegistry) -> [U8] {
+    out := [U8]{}
+    live_put(out, "{registry.next_id}")
+    live_put(out, "{registry.invalidations}")
+    live_put(out, "{registry.changes}")
+    live_put(out, "{registry.evictions}")
+    live_put(out, "{registry.ws_pushes}")
+    live_put(out, "{registry.capped}")
+    live_put(out, "{registry.window_ns}")
+    live_put(out, "{registry.window_runs}")
+    loop record in registry.records {
+        live_put(out, "{record.id}")
+        live_put(out, record.source)
+        live_put(out, record.key)
+        live_put(out, record.value)
+        live_put(out, if record.dirty -> "1" else -> "0")
+        live_put(out, "{record.generation}")
+        live_put(out, "{record.overtaken}")
+        live_put(out, "{record.held_ns}")
+        live_put(out, "{record.every_ns}")
+        live_put(out, "{record.ran_ns}")
+        live_put(out, record.reads.join("\n"))
+        live_put(out, record.caller)
+    }
+    out
+}
+
+live_put: fn(out: &[U8], text: String) {
+    loop byte in "{text.len()}:".bytes() -> out.push(byte)
+    loop byte in text.bytes() -> out.push(byte)
+}
+
+// An empty cell is the empty registry; None when the bytes are malformed.
+live_decode: fn(raw: [U8]) -> LiveRegistry? {
+    if raw.len() == 0 {
+        return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, capped: 0, window_ns: 0, window_runs: 0, records: [LiveRecord]{}})
+    }
+    fields: live_fields(raw) ?? return None
+    if fields.len() < 8 || (fields.len() - 8) % 12 != 0 -> return None
+    next_id: Int.parse(fields[0]) ?? return None
+    invalidations: Int.parse(fields[1]) ?? return None
+    changes: Int.parse(fields[2]) ?? return None
+    evictions: Int.parse(fields[3]) ?? return None
+    ws_pushes: Int.parse(fields[4]) ?? return None
+    capped: Int.parse(fields[5]) ?? return None
+    window_ns: Int.parse(fields[6]) ?? return None
+    window_runs: Int.parse(fields[7]) ?? return None
+    records := [LiveRecord]{}
+    at := 8
+    loop at < fields.len() {
+        id: Int.parse(fields[at]) ?? return None
+        generation: Int.parse(fields[at + 5]) ?? return None
+        overtaken: Int.parse(fields[at + 6]) ?? return None
+        held_ns: Int.parse(fields[at + 7]) ?? return None
+        every_ns: Int.parse(fields[at + 8]) ?? return None
+        ran_ns: Int.parse(fields[at + 9]) ?? return None
+        reads: if fields[at + 10] == "" -> [String]{} else -> fields[at + 10].split("\n").to_list()
+        records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", generation: generation, overtaken: overtaken, held_ns: held_ns, every_ns: every_ns, ran_ns: ran_ns, reads: reads, caller: fields[at + 11]})
+        at += 12
+    }
+    Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, ws_pushes: ws_pushes, capped: capped, window_ns: window_ns, window_runs: window_runs, records: records})
+}
+
+// The length-prefixed fields (`<decimal byte length>:<bytes>`) of `raw`.
+live_fields: fn(raw: [U8]) -> [String]? {
+    fields := [String]{}
+    at := 0
+    loop at < raw.len() {
+        length := 0
+        loop {
+            if at >= raw.len() -> return None
+            n: Int{raw[at]}
+            at += 1
+            if n == 58 -> break
+            if n < 48 || n > 57 -> return None
+            length = length * 10 + n - 48
+        }
+        if at + length > raw.len() -> return None
+        fields.push(String.from_bytes(raw.slice(at, at + length)) ?? return None)
+        at += length
+    }
+    Val(fields)
+}
+
+// Publish the canonical display of a CRDT document onto session `over`
+// (jet_sync_publish). A session keeps its generation and merged document; a
+// publication that changes the document advances the generation, and a
+// duplicate delivery returns the existing receipt. The document merges only
+// facts that survive the display: map keys with equal values, list members and
+// counter components. A conflicting map value or a differing text document is
+// denied rather than replaced by a lexical winner. The Rust adapter also handed
+// each change to the installed live transport subscribers; the native runtime
+// installs none.
+sync: fn(doc_show: String, over: String) -> String Never! {
+    if over.trim() == "" || over.len() > SYNC_MAX_SESSION || unicode.has_control(over) {
+        return "SyncError(invalid session)"
+    }
+    document: sync_document_parse(doc_show) ?? return "SyncError(document is not a canonical CRDT value)"
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return "SyncError(session registry is unavailable)"
+        found := -1
+        sessions := 0
+        loop index in 0..<registry.records.len() {
+            if registry.records[index].source != LIVE_SYNC_SOURCE -> next
+            sessions += 1
+            if registry.records[index].key == over -> found = index
+        }
+        generation := 0
+        current := document.copy()
+        if found >= 0 {
+            stored: sync_session_decode(registry.records[found].value) ?? return "SyncError(session registry is unavailable)"
+            generation = stored.generation
+            current = stored.document.copy()
+        } else if sessions >= SYNC_MAX_ENTRIES { return "SyncError(session limit exceeded)" }
+        changed := false
+        if current != document {
+            merged: sync_document_merge(current, document) ?? return "SyncError(document merge denied)"
+            if merged != current {
+                if generation >= SYNC_MAX_INT -> return "SyncError(session generation exhausted)"
+                generation += 1
+                current = merged
+                changed = true
+            }
+        } else if generation == 0 {
+            generation = 1
+            changed = true
+        }
+        receipt: "SyncOver(session={over}, generation={generation}, doc={current})"
+        if !changed -> return receipt
+        value: "{generation}:{current}"
+        if found >= 0 -> registry.records[found].value = value else {
+            id: registry.next_id + 1
+            registry.next_id = id
+            registry.records.push(LiveRecord{id: id, source: LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: 0, ran_ns: 0, reads: [String]{}, caller: ""})
+        }
+        if live_cell_replace(seen, live_encode(registry)) -> return receipt
+    }
+}
+
+SyncSession: struct {
+    generation: Int
+    document: String
+}
+
+sync_session_decode: fn(value: String) -> SyncSession? {
+    colon: value.find(":")
+    if colon < 0 -> return None
+    generation: Int.parse(value.slice(0, colon)) ?? return None
+    Val(SyncSession{generation: generation, document: value.slice(colon + 1, value.len())})
+}
+
+// The canonical document `value` names, or None when it is malformed or not in
+// canonical order (JetSyncDocument::parse).
+sync_document_parse: fn(value: String) -> String? {
+    if value == "" || value.trim() != value || value.len() > SYNC_MAX_DOCUMENT || unicode.has_control(value) {
+        return None
+    }
+    if !value.ends_with(")") -> return None
+    if value.starts_with("SyncText(") -> return Val(value.copy())
+    canonical := ""
+    if value.starts_with("SyncMap(") {
+        canonical = sync_map_show(sync_map_entries(value) ?? return None)
+    } else if value.starts_with("SyncList(") {
+        canonical = sync_list_show(sync_list_items(value) ?? return None)
+    } else if value.starts_with("PNCounter(") {
+        canonical = sync_counter_show(sync_counter_entries(value) ?? return None)
+    } else { return None }
+    if canonical != value -> return None
+    Val(canonical)
+}
+
+sync_document_merge: fn(left: String, right: String) -> String? {
+    if left == right -> return Val(left.copy())
+    merged := ""
+    if left.starts_with("SyncMap(") && right.starts_with("SyncMap(") {
+        entries := sync_map_entries(left) ?? return None
+        other: sync_map_entries(right) ?? return None
+        loop key in other.keys() {
+            value: other.get(key) ?? next
+            if entries.get(key) == .Val(existing) {
+                if existing != value -> return None
+            } else { _: entries.add(key, value) }
+        }
+        if entries.len() > SYNC_MAX_ENTRIES -> return None
+        merged = sync_map_show(entries)
+    } else if left.starts_with("SyncList(") && right.starts_with("SyncList(") {
+        items := sync_list_items(left) ?? return None
+        loop item in sync_list_items(right) ?? return None {
+            items = sync_pair_insert(items, item) ?? items
+        }
+        if items.len() > SYNC_MAX_ENTRIES -> return None
+        merged = sync_list_show(items)
+    } else if left.starts_with("PNCounter(") && right.starts_with("PNCounter(") {
+        counts := sync_counter_entries(left) ?? return None
+        other: sync_counter_entries(right) ?? return None
+        loop replica in other.keys() {
+            count: other.get(replica) ?? next
+            slot: counts.get(replica) ?? SyncCount{positive: 0, negative: 0}
+            positive: if count.positive > slot.positive -> count.positive else -> slot.positive
+            negative: if count.negative > slot.negative -> count.negative else -> slot.negative
+            _: counts.add(replica, SyncCount{positive: positive, negative: negative})
+        }
+        if counts.len() > SYNC_MAX_REPLICAS -> return None
+        merged = sync_counter_show(counts)
+    } else { return None }
+    sync_document_parse(merged)
+}
+
+SyncPair: struct {
+    first: String
+    second: String
+}
+
+SyncCount: struct {
+    positive: Int
+    negative: Int
+}
+
+sync_map_entries: fn(value: String) -> [String:String]? {
+    body: sync_document_body(value, "SyncMap(") ?? return None
+    entries := [String:String]{}
+    if body == "" -> return Val(entries)
+    loop entry in sync_split(body, ",") ?? return None {
+        pair: sync_split_once(entry, "=") ?? return None
+        key: sync_unescape(pair.first) ?? return None
+        item: sync_unescape(pair.second) ?? return None
+        if !sync_token_valid(key) || item.len() > SYNC_MAX_TEXT || entries.get(key) != .None {
+            return None
+        }
+        _: entries.add(key, item)
+    }
+    Val(entries)
+}
+
+sync_map_show: fn(entries: [String:String]) -> String {
+    keys := [String]{}
+    loop key in entries.keys() -> keys.push(key)
+    keys.sort()
+    shown := [String]{}
+    loop key in keys {
+        value: entries.get(key) ?? next
+        shown.push("{sync_escape(key)}={sync_escape(value)}")
+    }
+    "SyncMap({shown.join(",")})"
+}
+
+sync_list_items: fn(value: String) -> [SyncPair]? {
+    body: sync_document_body(value, "SyncList(") ?? return None
+    items := [SyncPair]{}
+    if body == "" -> return Val(items)
+    loop raw in sync_split(body, "|") ?? return None {
+        pair: sync_split_once(raw, ":") ?? return None
+        replica: sync_unescape(pair.first) ?? return None
+        item: sync_unescape(pair.second) ?? return None
+        if !sync_token_valid(replica) || item.len() > SYNC_MAX_TEXT -> return None
+        items = sync_pair_insert(items, SyncPair{first: replica, second: item}) ?? return None
+    }
+    if items.len() > SYNC_MAX_ENTRIES -> return None
+    Val(items)
+}
+
+// `items` with `item` in (first, second) order; None when already present.
+sync_pair_insert: fn(items: [SyncPair], item: SyncPair) -> [SyncPair]? {
+    out := [SyncPair]{}
+    placed := false
+    loop existing in items {
+        if existing.first == item.first && existing.second == item.second -> return None
+        later: if existing.first == item.first -> existing.second > item.second else -> existing.first > item.first
+        if !placed && later {
+            out.push(item.copy())
+            placed = true
+        }
+        out.push(existing.copy())
+    }
+    if !placed -> out.push(item.copy())
+    Val(out)
+}
+
+sync_list_show: fn(items: [SyncPair]) -> String {
+    shown := [String]{}
+    loop item in items -> shown.push("{sync_escape(item.first)}:{sync_escape(item.second)}")
+    "SyncList({shown.join("|")})"
+}
+
+sync_counter_entries: fn(value: String) -> [String:SyncCount]? {
+    body: sync_document_body(value, "PNCounter(") ?? return None
+    counts := [String:SyncCount]{}
+    if body == "" -> return Val(counts)
+    loop entry in sync_split(body, ",") ?? return None {
+        pair: sync_split_once(entry, "=") ?? return None
+        replica: sync_unescape(pair.first) ?? return None
+        sides: sync_split_once(pair.second, "/") ?? return None
+        positive: sync_count_parse(sync_unescape(sides.first) ?? return None, "+") ?? return None
+        negative: sync_count_parse(sync_unescape(sides.second) ?? return None, "-") ?? return None
+        if !sync_token_valid(replica) || counts.get(replica) != .None -> return None
+        _: counts.add(replica, SyncCount{positive: positive, negative: negative})
+    }
+    if counts.len() > SYNC_MAX_REPLICAS -> return None
+    // The checked total of positive minus negative counts must stay an Int.
+    total := 0
+    loop replica in counts.keys() {
+        count: counts.get(replica) ?? next
+        if total > 0 && count.positive > SYNC_MAX_INT - total -> return None
+        total += count.positive
+        if total < 0 && count.negative > SYNC_MAX_INT + total + 1 -> return None
+        total -= count.negative
+    }
+    Val(counts)
+}
+
+sync_counter_show: fn(counts: [String:SyncCount]) -> String {
+    replicas := [String]{}
+    loop replica in counts.keys() -> replicas.push(replica)
+    replicas.sort()
+    shown := [String]{}
+    loop replica in replicas {
+        count: counts.get(replica) ?? next
+        shown.push("{sync_escape(replica)}=+{count.positive}/-{count.negative}")
+    }
+    "PNCounter({shown.join(",")})"
+}
+
+// `text` is `sign` then decimal digits; its value.
+sync_count_parse: fn(text: String, sign: String) -> Int? {
+    if !text.starts_with(sign) || text.len() == 1 -> return None
+    digits: text.slice(1, text.len())
+    loop byte in digits.bytes() {
+        n: Int{byte}
+        if n < 48 || n > 57 -> return None
+    }
+    Val(Int.parse(digits) ?? return None)
+}
+
+sync_document_body: fn(value: String, prefix: String) -> String? {
+    if !value.starts_with(prefix) || !value.ends_with(")") || value.len() < prefix.len() + 1 {
+        return None
+    }
+    Val(value.slice(prefix.len(), value.len() - 1))
+}
+
+sync_token_valid: fn(value: String) -> Bool {
+    value.trim() != "" && value.len() <= SYNC_MAX_TEXT && !unicode.has_control(value)
+}
+
+sync_is_separator: fn(scalar: String) -> Bool {
+    scalar == "," || scalar == "=" || scalar == "|" || scalar == ":" || scalar == "/"
+}
+
+sync_escape: fn(value: String) -> String {
+    out := ""
+    loop scalar in unicode.scalars(value) {
+        if scalar == "\\" || sync_is_separator(scalar) -> out = "{out}\\"
+        out = "{out}{scalar}"
+    }
+    out
+}
+
+// None when an escape is dangling or names no separator, or when a separator
+// appears unescaped.
+sync_unescape: fn(value: String) -> String? {
+    out := ""
+    escaped := false
+    loop scalar in unicode.scalars(value) {
+        if escaped {
+            if scalar != "\\" && !sync_is_separator(scalar) -> return None
+            out = "{out}{scalar}"
+            escaped = false
+        } else if scalar == "\\" { escaped = true } else if sync_is_separator(scalar) {
+            return None
+        } else { out = "{out}{scalar}" }
+    }
+    if escaped -> return None
+    Val(out)
+}
+
+// The parts of `value` between unescaped `separator`s, escapes kept.
+sync_split: fn(value: String, separator: String) -> [String]? {
+    parts := [String]{}
+    current := ""
+    escaped := false
+    loop scalar in unicode.scalars(value) {
+        if escaped {
+            current = "{current}\\{scalar}"
+            escaped = false
+        } else if scalar == "\\" { escaped = true } else if scalar == separator {
+            parts.push(current)
+            current = ""
+        } else { current = "{current}{scalar}" }
+    }
+    if escaped -> return None
+    parts.push(current)
+    Val(parts)
+}
+
+// `value` split at its first unescaped `separator`; None without one.
+sync_split_once: fn(value: String, separator: String) -> SyncPair? {
+    before := ""
+    escaped := false
+    at := 0
+    loop scalar in unicode.scalars(value) {
+        at += scalar.len()
+        if escaped -> escaped = false else if scalar == "\\" -> escaped = true else if scalar == separator {
+            return Val(SyncPair{first: before, second: value.slice(at, value.len())})
+        }
+        before = "{before}{scalar}"
+    }
+    None
+}

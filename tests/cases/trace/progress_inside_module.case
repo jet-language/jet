@@ -1,0 +1,16 @@
+# A traced build of one large module, written by gen.jet, reports progress
+# inside the module's phases. In sema.bodies the compiler threads check the
+# module's bodies before its module span opens, and the calling thread
+# reports the bodies claimed so far as `sema.bodies` progress directly under
+# the phase; lower reports the rows its reachability has read.
+fixture: progress_inside_module.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step: jet run --allow=FS gen.jet
+exit: 0
+stdout: = ""
+step: jet build -O0 --threads 4 --trace main.jet
+exit: 0
+stderr: ~ "]       ~ sema.bodies 3000/3001 " # the body loop inside main's module span reports its items, the last always
+stderr: ~ "]     ~ sema.bodies " # the threads' claims report under sema.bodies itself, before main's module span opens
+stderr: ~ "]   ~ lower " # lower reports the rows its reachability has read

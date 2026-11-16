@@ -1,0 +1,32 @@
+# tests/dev_parts/routine.rs::aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders at tests/dev_parts/routine.rs:1310; hand-port
+fixture: aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build aggregate_trait_returns.jet
+cwd: order0
+exit: 0
+step aot0: built
+cwd: order0
+exit: 0
+stdout: = aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders.1.out
+stderr: empty
+step dev0: jet run aggregate_trait_returns.jet
+cwd: order0
+exit: 0
+stdout: = aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders.1.out
+stderr: empty
+step: jet build aggregate_trait_returns.jet
+cwd: order1
+exit: 0
+step aot1: built
+cwd: order1
+exit: 0
+stdout: = aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders.1.out
+stderr: empty
+step dev1: jet run aggregate_trait_returns.jet
+cwd: order1
+exit: 0
+stdout: = aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders.1.out
+stderr: empty

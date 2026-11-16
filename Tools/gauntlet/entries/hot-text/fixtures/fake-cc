@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# The hot-text entry's C compiler: `fake-cc -O2 -o TRACER SOURCE` logs its
+# arguments to cc.log and writes TRACER, a stand-in for fntrace that runs the
+# program, logs the run to trace.log and writes a fixed set of the listed
+# addresses for each command: some twice, one that is not listed, and a
+# blank line.
+set -euo pipefail
+here=$PWD
+echo "cc $1 $2 ${3##*/} ${4##*/Tools/}" >> "$here/cc.log"
+cat > "$3" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+addresses=\$1 entered=\$2
+shift 3
+mapfile -t all < "\$addresses"
+"\$@" > /dev/null
+echo "trace \${XDG_CACHE_HOME##*/} in \${PWD##*/} [\$(ls | tr '\n' ' ')] \$(cat ./*.jet | sha256sum | cut -c1-16) \${1##*/} \${*:2} (\${#all[@]} listed)" >> "$here/trace.log"
+case \$2 in
+  script.jet) printf '%s\n' "\${all[0]}" "\${all[1]}" "\${all[0]}" ;;
+  run) printf '%s\n' "\${all[2]}" "\${all[0]}" ;;
+  check) printf '%s\n' 1 "" "\${all[1]}" ;;
+  build) for ((i = \${#all[@]} - 1; i >= 0; i--)); do echo "\${all[i]}"; done ;;
+esac > "\$entered"
+EOF
+chmod +x "$3"

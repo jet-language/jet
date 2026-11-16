@@ -1,0 +1,26 @@
+Error [jet.InvalidTagPolicy]: `.Constant` is not a tag `timing` case
+  --> tests/ui/taint/tag_timing_and_protects_cases_are_e0734.jet:2:35
+    |
+  2 | Key: tag { deny: [Exec], timing: .Constant }
+    |                                   ^^^^^^^^
+ Why: A tag's `timing` is `.Free` or `.Fixed`
+ Fix: Write `timing: .Free` or `timing: .Fixed`
+More: jet-lang.dev/e/E0734
+
+Error [jet.InvalidTagPolicy]: Tag `timing` is repeated
+  --> tests/ui/taint/tag_timing_and_protects_cases_are_e0734.jet:3:43
+    |
+  3 | Seal: tag { deny: [Exec], timing: .Fixed, timing: .Free }
+    |                                           ^^^^^^
+ Why: Each tag policy field is declared once
+ Fix: Keep one `timing: .Free` or `timing: .Fixed` field
+More: jet-lang.dev/e/E0734
+
+Error [jet.InvalidTagPolicy]: `.Authenticity` is not a tag `protects` case
+  --> tests/ui/taint/tag_timing_and_protects_cases_are_e0734.jet:4:39
+    |
+  4 | Trust: tag { deny: [Exec], protects: .Authenticity }
+    |                                       ^^^^^^^^^^^^
+ Why: A tag's `protects` is `.Secrecy` or `.Integrity`
+ Fix: Write `protects: .Secrecy` or `protects: .Integrity`
+More: jet-lang.dev/e/E0734

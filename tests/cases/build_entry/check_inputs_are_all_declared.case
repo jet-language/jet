@@ -1,0 +1,87 @@
+# Port of build_entry.rs::check_inputs_are_all_declared.
+# PENDING-GRAMMAR: filtered/projected JSON, count/prefix/relational operations.
+fixture: fixtures/check-inputs
+env: JET_STORE_DIR={work}/store
+step: jet check plain.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step plainfresh: jet inspect explain-build plain.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"] #>= 1
+json: stdout doc $.nodes[?kind="check"] !has {"why_ran":"reused"}
+step: jet check plain.jet
+env: JET_CHECK_READS_AUDIT=1
+unset: JET_CHECK_READS_INJECT
+step: jet check plain.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step plainreplayed: jet inspect explain-build plain.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"][*].why_ran = "reused"
+step: jet check embed.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step embedfresh: jet inspect explain-build embed.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"] #>= 1
+json: stdout doc $.nodes[?kind="check"] !has {"why_ran":"reused"}
+step: jet check embed.jet
+env: JET_CHECK_READS_AUDIT=1
+unset: JET_CHECK_READS_INJECT
+step: jet check embed.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step embedreplayed: jet inspect explain-build embed.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"][*].why_ran = "reused"
+step: jet check bytes.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step bytesfresh: jet inspect explain-build bytes.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"] #>= 1
+json: stdout doc $.nodes[?kind="check"] !has {"why_ran":"reused"}
+step: jet check bytes.jet
+env: JET_CHECK_READS_AUDIT=1
+unset: JET_CHECK_READS_INJECT
+step: jet check bytes.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step bytesreplayed: jet inspect explain-build bytes.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"][*].why_ran = "reused"
+step: jet check find.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step findfresh: jet inspect explain-build find.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"] #>= 1
+json: stdout doc $.nodes[?kind="check"] !has {"why_ran":"reused"}
+step: jet check find.jet
+env: JET_CHECK_READS_AUDIT=1
+unset: JET_CHECK_READS_INJECT
+step: jet check find.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step findreplayed: jet inspect explain-build find.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"][*].why_ran = "reused"
+step: jet check embed.jet
+env: JET_CHECK_READS_AUDIT=1
+env: JET_CHECK_READS_INJECT={work}/undeclared.txt
+exit: 101
+stderr: ~ check read audit # Original audit diagnostic containment assertion.
+stderr: ~ undeclared.txt # Original injected-input diagnostic containment assertion.
+copy: changed-motd.txt assets/motd.txt
+step: jet check embed.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step changed: jet inspect explain-build embed.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"] !has {"why_ran":"reused"}
+step: jet check embed.jet
+unset: JET_CHECK_READS_AUDIT
+unset: JET_CHECK_READS_INJECT
+step changedreplayed: jet inspect explain-build embed.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="check"][*].why_ran = "reused"

@@ -1,0 +1,13 @@
+# tests/diagnostic_snapshots.rs::loop_grammar_history_stays_distinct_from_collection_mutation at tests/diagnostic_snapshots.rs:1013; hand-port
+# Claim: retired loop spellings are rejected (tests/diagnostic_snapshots.rs:1025)
+# Claim: foreign loop spelling retains E0003 (tests/diagnostic_snapshots.rs:1026-1029)
+# Claim: grammar mismatch is not relabeled E0507 (tests/diagnostic_snapshots.rs:1030-1033)
+# Not ported: compile_with_path diagnostics Vec: checked as CLI stderr codes instead
+fixture: loop_grammar_history_stays_distinct_from_collection_mutation.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check foreign_for.jet
+exit: 1 # tests/diagnostic_snapshots.rs:1025-1033 expect_err; E0003 present, E0507 absent
+stderr: ~ "E0003" # tests/diagnostic_snapshots.rs:1025-1033 expect_err; E0003 present, E0507 absent
+stderr: !~ "E0507" # tests/diagnostic_snapshots.rs:1025-1033 expect_err; E0003 present, E0507 absent

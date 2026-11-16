@@ -1,0 +1,60 @@
+# HAND-PORT tests/jetpack_engine.rs:1626-1665 package_generation_build_rejects_unresolved_exact_path_collision
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: package_generation_build_rejects_unresolved_exact_path_collision.fixture
+env: NO_COLOR=1
+refused: store-ingest
+# Full original setup, observations and predicates preserved: this refusal is NOT a passing replacement.
+# #[test]
+# fn package_generation_build_rejects_unresolved_exact_path_collision() {
+#     let project = Scratch::new("profile-generation-collision-project");
+#     let root = Scratch::new("profile-generation-collision-root");
+#     let fixtures = Scratch::new("profile-generation-collision-fixtures");
+# 
+#     for (package, contents) in [("left", "left editor\n"), ("right", "right editor\n")] {
+#         seed_profile_fixture(&root.path, &fixtures.path, package, |staging| {
+#             let bin = staging.join("bin");
+#             fs::create_dir_all(&bin).unwrap();
+#             let editor = bin.join("editor");
+#             fs::write(&editor, contents).unwrap();
+#             #[cfg(unix)]
+#             {
+#                 use std::os::unix::fs::PermissionsExt;
+#                 fs::set_permissions(&editor, fs::Permissions::from_mode(0o755)).unwrap();
+#             }
+#         });
+#     }
+# 
+#     fs::write(
+#         project.join("env.jet"),
+#         "module profile.dev { packages: [default.left, default.right] }\n",
+#     )
+#     .unwrap();
+#     let output = jetpack()
+#         .args(["profile", "build", "dev", "--no-color", "--offline"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert_eq!(output.status.code(), Some(2));
+#     let stderr = String::from_utf8_lossy(&output.stderr);
+#     assert!(stderr.contains("E1335"), "{stderr}");
+#     assert!(stderr.contains("unresolved package collision"), "{stderr}");
+#     assert!(stderr.contains("left@default"), "{stderr}");
+#     assert!(stderr.contains("right@default"), "{stderr}");
+#     assert!(stderr.contains("sha256-"), "{stderr}");
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack profile build dev --no-color --offline
+cwd: project
+exit: 2
+stderr: ~ "E1335" # original contains predicate
+stderr: ~ "unresolved package collision" # original contains predicate
+stderr: ~ "left@default" # original contains predicate
+stderr: ~ "right@default" # original contains predicate
+stderr: ~ "sha256-" # original contains predicate
+

@@ -1,0 +1,8 @@
+Error [jet.FailureDomainNotErrorType]: `impl Celsius -> Float` converts failures into `Float`, which is not an Error type
+  --> tests/ui/error_conversions/value_target_is_not_an_error_type.jet:8:17
+    |
+  8 | impl Celsius -> Float {
+    |                 ^^^^^
+ Why: `impl Source -> Target` is a failure conversion: it applies when a `Source` failure propagates where a `Target` failure is expected, and a value type such as `Float` describes no failure.
+ Fix: To turn a `Celsius` value into a `Float`, write a function that takes `Celsius` and returns `Float`; to convert failures, name `Err`, a Core error or an `#Error` type as the target.
+More: jet-lang.dev/e/E2417

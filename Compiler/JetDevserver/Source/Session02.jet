@@ -1,0 +1,582 @@
+// The session's lifecycle, transaction, debugger and recording edits, its
+// JSON views and the request helpers they share.
+use {
+    session_view_time: core.time
+    jet_foundation.[foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json, foundation_parse_protocol_json_with_limit, jettrace_has_control]
+}
+
+impl ResidentDevSession {
+    publish_session_state: fn(&self, state_name: String, code: String, diagnostic: String) {
+        lifecycle: session_lifecycle_state(state_name)
+        now: session_unix_ms()
+        self.devtools.set_lifecycle(lifecycle)
+        self.devtools.set_freshness(if lifecycle == .Ready -> JetDevtoolsFreshnessFact.fresh(now) else -> JetDevtoolsFreshnessFact.stale(now))
+        fields: "{{\"state\":{session_json_value(state_name)},\"code\":{session_json_value(code)},\"diagnostic\":{session_json_value(diagnostic)}}}"
+        if JetDevtoolsEvent.from_parts(now, "devserver", "state", "session", fields) == .Ok(event) {
+            self.push_devtools_event(event.move()).drop("a refused state event leaves the lifecycle fact already set")
+        }
+    }
+    // Records `event` under the sequence the envelope assigns next, then
+    // appends it; the live cursor follows the recording's tail.
+    push_devtools_event: fn(&self, &&event: JetDevtoolsEvent) -> Int Err! {
+        sequence: self.devtools.next_sequence
+        if self.recording == .Val(current) {
+            state := current
+            recorded: SessionEvent.new(sequence, event.timestamp_ms, event.source(), event.kind(), event.entity(), event.fields_json(), event.payload_json()) ?? return Err("{err}")
+            _: state.recording.append_event(recorded) ?? return Err("{err}")
+            state.cursor = ReplayCursor{identity: state.recording.identity, generation: state.recording.generation, position: state.recording.events.len(), sequence: state.recording.last_retained_sequence()}
+            state.checkpoints = [String:SessionCheckpoint]{}
+            self.recording = Val(state)
+        }
+        Ok(self.devtools.push(event.move()))
+    }
+    mark_last_good: fn(&self, revision: String, program: String) {
+        if revision == "" -> return
+        self.last_good_revision = revision
+        self.last_good_program = program
+    }
+    remember_last_good_view: fn(&self, kind: String, source_id: String, revision: String, payload: String) {
+        if !(kind == "graph" || kind == "debugger" || kind == "runtime") || revision == "" || payload == "" || payload.bytes().len() > SESSION_MAX_RETAINED_VIEW_BYTES -> return
+        self.last_good_views[kind] = RetainedView{revision: revision, source_id: source_id, payload: payload}
+    }
+    last_good_view: fn(self, kind: String, source_id: String) -> (revision: String, payload: String)? Never! {
+        view: self.last_good_views.get(kind) ?? return None
+        if view.source_id != source_id -> return None
+        Val((revision: view.revision, payload: view.payload))
+    }
+    clear_last_good_view: fn(&self, kind: String) { _: self.last_good_views.remove(kind) }
+    accept_transaction: fn(&self, request: String, revision: String) {
+        kind: session_request_string(request, "op")
+        self.select_project_source(session_request_string(request, "source_id"))
+        self.observe_source(revision)
+        if revision != "" -> self.accepted_revision = revision
+        self.push_receipt(Receipt{kind: if kind == "" -> "source" else -> kind, status: "accepted", before: session_request_string(request, "revision"), after: revision, client: session_request_string(request, "client_id"), output: session_request_string(request, "output"), live: None})
+    }
+    refuse_transaction: fn(&self, request: String, current_revision: String) {
+        self.observe_source(current_revision)
+        self.push_receipt(Receipt{kind: session_request_string(request, "op"), status: "refused", before: session_request_string(request, "revision"), after: current_revision, client: session_request_string(request, "client_id"), output: session_request_string(request, "output"), live: None})
+    }
+    record_command: fn(&self, request: String) {
+        action: session_request_string(request, "action_id")
+        self.select_project_source(session_request_string(request, "source_id"))
+        if action.contains("test") -> self.test_state = "requested"
+        self.push_receipt(Receipt{kind: if action == "" -> "command" else -> action, status: "requested", before: "", after: self.current_revision_text, client: session_request_string(request, "client_id"), output: self.selected_output_name, live: None})
+    }
+    record_debug: fn(&self, request: String) {
+        self.select_project_source(session_request_string(request, "source_id"))
+        if session_request_bool(request, "stop") || session_request_string(request, "op") == "disconnect" {
+            self.debugger = DebuggerSnapshot.idle()
+            self.clear_last_good_view("debugger")
+            return
+        }
+        self.debugger.state = "active"
+        session_id: session_request_string(request, "session_id")
+        if session_id != "" -> self.debugger.session_id = session_id
+        source_id: session_request_string(request, "source_id")
+        if source_id != "" -> self.debugger.source_id = source_id
+        revision: session_request_string(request, "revision")
+        if revision != "" -> self.debugger.revision = revision
+        tier: session_request_string(request, "tier")
+        if tier != "" -> self.debugger.tier = tier
+    }
+    record_debug_response: fn(&self, request: String, response: String) {
+        self.record_debug(request)
+        if session_request_bool(request, "stop") -> return
+        snapshot: session_find_debugger_snapshot(response) ?? return
+        state: if snapshot.state == {
+            "running" -> "active"
+            "stopped" -> "idle"
+            else -> snapshot.state
+        }
+        self.debugger = DebuggerSnapshot{state: state, session_id: snapshot.session_id, source_id: snapshot.source_id, revision: snapshot.revision, tier: snapshot.tier}
+        source_id: if snapshot.source_id == "" -> session_request_string(request, "source_id") else -> snapshot.source_id
+        revision := snapshot.revision
+        if revision == "" {
+            requested: session_request_string(request, "revision")
+            revision = if requested == "" -> self.current_revision_text else -> requested
+        }
+        self.remember_last_good_view("debugger", source_id, revision, response)
+    }
+    select_project_source: fn(&self, source_id: String) {
+        if source_id != "" -> self.selected_source_id = source_id
+    }
+    select_project_source_from_payload: fn(&self, payload: String) {
+        if session_json_string_any(payload, "source_id") == .Val(source_id) -> self.select_project_source(source_id)
+    }
+    select_output: fn(&self, request: String) {
+        self.select_output_values(session_optional_fact(session_request_string(request, "output")), session_optional_fact(session_request_string(request, "target")))
+    }
+    select_output_values: fn(&self, output: String?, target: String?) {
+        if output == .Val(selected) {
+            if selected != "" -> self.selected_output_name = selected
+        }
+        if target == .Val(selected) {
+            if selected != "" -> self.selected_target_name = selected
+        }
+    }
+    id: fn(self) -> String Never! { self.session_id }
+    selected_target: fn(self) -> String? Never! { session_optional_fact(self.selected_target_name) }
+    selected_output: fn(self) -> String? Never! { session_optional_fact(self.selected_output_name) }
+    application_port: fn(self) -> Int Never! { self.application_port_number }
+    canvas_port: fn(self) -> Int Never! { self.canvas_port_number }
+    application_host: fn(self) -> String Never! { self.application_host_name }
+    json: fn(self) -> String {
+        live_protocol := "null"
+        live_session_id := "null"
+        live_source_id := "null"
+        live_build_id := "null"
+        live_revision := "null"
+        live_world_id := "null"
+        if self.live_lineage == .Val(lineage) {
+            live_protocol = session_json_value(lineage.protocol)
+            live_session_id = session_json_value(lineage.session_id)
+            live_source_id = session_json_value(lineage.source_id)
+            live_build_id = session_json_value(lineage.build_id)
+            live_revision = session_json_value(lineage.revision)
+            live_world_id = session_json_value(lineage.world_id)
+        }
+        live_values := [String]{}
+        loop value in self.live_values -> live_values.push(session_live_value_fact_json(value))
+        now: self.clock.elapsed_millis()
+        clients := 0
+        loop seen in self.clients.values() {
+            if now - seen <= SESSION_CLIENT_TTL_MS -> clients += 1
+        }
+        listener_entries := [String]{}
+        if self.canvas_port_number != 0 -> listener_entries.push("\"canvas\":{{\"host\":{session_json_value(self.canvas_host)},\"port\":{self.canvas_port_number},\"transport\":\"canvas\",\"listener\":\"canvas\",\"shared\":false}}")
+        if self.application_port_number != 0 -> listener_entries.push("\"application\":{{\"host\":{session_json_value(self.application_host_name)},\"port\":{self.application_port_number},\"transport\":\"application\",\"listener\":\"application\",\"routes\":\"application-owned\",\"shared\":false}}")
+        custom_server_listener: if self.application_port_number != 0 -> "\"application\"" else -> "null"
+        receipts := [String]{}
+        loop receipt in self.receipts {
+            live: if receipt.live == .Val(value) -> session_live_receipt_json(value) else -> "null"
+            receipts.push("{{\"kind\":{session_json_value(receipt.kind)},\"status\":{session_json_value(receipt.status)},\"before\":{session_json_value(receipt.before)},\"after\":{session_json_value(receipt.after)},\"client\":{session_json_value(receipt.client)},\"output\":{session_json_value(receipt.output)},\"live\":{live}}}")
+        }
+        debugger: self.debugger
+        views: "{{\"graph\":{session_retained_view_json(self.last_good_views.get("graph"))},\"debugger\":{session_retained_view_json(self.last_good_views.get("debugger"))},\"runtime\":{session_retained_view_json(self.last_good_views.get("runtime"))}}}"
+        identity: "\"id\":{session_json_value(self.session_id)},\"protocol\":{live_protocol},\"session_id\":{live_session_id},\"source_id\":{live_source_id},\"build_id\":{live_build_id},\"revision\":{live_revision},\"world_id\":{live_world_id},\"values\":[{live_values.join(",")}],\"entry\":{session_json_value(self.entry)},\"project_context\":{{\"source_id\":{session_json_value(self.selected_source_id)}}}"
+        revisions: "\"source_revision\":{session_json_value(self.current_revision_text)},\"accepted_revision\":{session_json_value(self.accepted_revision)},\"last_good_revision\":{session_json_value(self.last_good_revision)},\"last_good_program\":{session_json_value(self.last_good_program)},\"state\":{session_json_value(self.state)},\"diagnostic_code\":{session_json_value(self.diagnostic_code)},\"diagnostic\":{session_json_value(self.diagnostic)},\"diagnostic_revision\":{session_json_value(self.diagnostic_revision)}"
+        run: "\"last_good_views\":{views},\"clients\":{clients},\"run\":{{\"output\":{session_json_value(self.selected_output_name)},\"target\":{session_json_value(self.selected_target_name)}}},\"debugger\":{{\"state\":{session_json_value(debugger.state)},\"session_id\":{session_json_value(debugger.session_id)},\"source_id\":{session_json_value(debugger.source_id)},\"revision\":{session_json_value(debugger.revision)},\"tier\":{session_json_value(debugger.tier)}}},\"tests\":{{\"state\":{session_json_value(self.test_state)}}}"
+        hosts: "\"history\":{{\"count\":{self.receipts.len()},\"receipts\":[{receipts.join(",")}]}},\"listeners\":{{{listener_entries.join(",")}}},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\",\"listener\":{custom_server_listener}}}"
+        "{{{identity},{revisions},{run},{hosts}}}"
+    }
+    push_receipt: fn(&self, &&receipt: Receipt) {
+        self.receipts.push(receipt.move())
+        if self.receipts.len() > SESSION_MAX_RECEIPTS -> _: self.receipts.remove(0, .Slot)
+    }
+    // Session teardown: the queued commands, receipts and browser controls go
+    // with the session.
+    clear_commands: fn(&self) {
+        self.commands.clear()
+        self.browser_game_controls = [JetDevtoolsGameControlRequest]{}
+    }
+    scrub: fn(&self, sequence: Int) -> ReplayProjection Err! {
+        state := self.recording ?? return Err(session_recording_unavailable())
+        projection: state.cursor.seek(state.recording, sequence) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
+    }
+    scrub_time: fn(&self, timestamp_ms: Int) -> ReplayProjection Err! {
+        state := self.recording ?? return Err(session_recording_unavailable())
+        projection: state.cursor.seek_time(state.recording, timestamp_ms) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
+    }
+    // Replay steps forward only; a backward step is refused by the control.
+    step: fn(&self) -> ReplayProjection Err! {
+        state := self.recording ?? return Err(session_recording_unavailable())
+        projection: state.cursor.step(state.recording, .Forward) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
+    }
+    // Up to `count` forward steps; the tail stops the walk early.
+    skip: fn(&self, count: Int) -> ReplayProjection Err! {
+        state := self.recording ?? return Err(session_recording_unavailable())
+        loop _ in 0..<count {
+            if state.cursor.step(state.recording, .Forward) == .Err(_) -> break
+        }
+        projection: state.recording.projection(state.cursor) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
+    }
+    checkpoint: fn(&self, name: String) -> SessionCheckpoint Err! {
+        session_validate_devtools_text(name, "checkpoint name")
+        state := self.recording ?? return Err(session_recording_unavailable())
+        checkpoint: state.recording.checkpoint(state.cursor) ?? return Err("{err}")
+        state.checkpoints[name] = checkpoint
+        saved: state.checkpoints.get(name) ?? return Err("{RecordingError.CheckpointUnavailable}")
+        self.recording = Val(state)
+        Ok(saved)
+    }
+    restore: fn(&self, name: String) -> ReplayProjection Err! {
+        session_validate_devtools_text(name, "checkpoint name")
+        state := self.recording ?? return Err(session_recording_unavailable())
+        checkpoint: state.checkpoints.get(name) ?? return Err("{RecordingError.CheckpointUnavailable}")
+        state.cursor = state.recording.restore_checkpoint(checkpoint) ?? return Err("{err}")
+        projection: state.recording.projection(state.cursor) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
+    }
+    divergence: fn(self) -> DevtoolsRecordingDivergence Err! {
+        state: self.recording ?? return Err(session_recording_unavailable())
+        identity: state.recording.identity
+        expected_sequence := Int?{None}
+        if state.first_sequence == .Val(first) {
+            if self.devtools.latest_sequence() == .Val(sequence) {
+                if sequence >= first -> expected_sequence = Val(sequence)
+            }
+        }
+        actual_sequence: state.recording.last_retained_sequence()
+        same_identity := false
+        if self.devtools.source_identity == .Val(published) -> same_identity = published.source_id == Val(identity.source_id) && published.build_id == Val(identity.build_id)
+        reason := String?{None}
+        if !same_identity -> reason = Val("resident source/build identity differs from recording")
+        else if expected_sequence != actual_sequence -> reason = Val("resident event tail differs from recording")
+        else if state.recording.projection(state.cursor) == .Err(error) -> reason = Val("{error}")
+        truncation: state.recording.truncation()
+        Ok(DevtoolsRecordingDivergence{divergent: reason != None, reason: reason, identity: identity, expected_sequence: expected_sequence, actual_sequence: actual_sequence, retained_events: state.recording.events.len(), dropped_events: truncation.dropped_events, truncation: truncation})
+    }
+    recording_control: fn(&self, payload: String) -> String Err! {
+        root: foundation_parse_protocol_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return Err("recording control must be valid bounded JSON")
+        object: recording_object_fields(root) ?? return Err("recording control must be a JSON object")
+        operation := session_field_text(object, "op")
+        if operation == None -> operation = session_field_text(object, "action")
+        op: operation ?? return Err("recording control must include string op")
+        if op == {
+            "scrub" -> {
+                sequence: session_field_count(object, "sequence") ?? return Err("recording scrub requires non-negative sequence")
+                self.scrub(sequence).drop("a refused scrub leaves the cursor; the recording view reports it")
+            }
+            "scrub_time" -> {
+                timestamp_ms: session_field_count(object, "timestamp_ms") ?? return Err("recording scrub_time requires non-negative timestamp_ms")
+                self.scrub_time(timestamp_ms).drop("a refused scrub leaves the cursor; the recording view reports it")
+            }
+            "step" -> {
+                direction: session_field_text(object, "direction") ?? "forward"
+                if direction == "backward" || direction == "reverse" -> return Err("recording step is forward-only")
+                if direction != "forward" -> return Err("unknown recording step direction `{direction}`")
+                _: self.step()
+            }
+            "skip" -> {
+                count: session_field_count(object, "count") ?? return Err("recording skip requires non-negative count")
+                _: self.skip(count)
+            }
+            "checkpoint" -> {
+                name: session_field_text(object, "name") ?? return Err("recording checkpoint requires string name")
+                _: self.checkpoint(name)
+            }
+            "restore" -> {
+                name: session_field_text(object, "name") ?? return Err("recording restore requires string name")
+                _: self.restore(name)
+            }
+            "divergence" -> { _: self.divergence() }
+            else -> return Err("unknown recording operation `{op}`")
+        }
+        Ok(self.recording_json())
+    }
+    recording_json: fn(self) -> String {
+        divergence := DevtoolsRecordingDivergence?{None}
+        if self.divergence() == .Ok(found) -> divergence = Val(found)
+        state: self.recording ?? return session_recording_unavailable_json(self.session_id, "source/build identity is unavailable")
+        projection: state.recording.projection(state.cursor) ?? return session_recording_unavailable_json(self.session_id, "{err}")
+        session_recording_json_for_state(self.session_id, state, projection, divergence)
+    }
+    set_devtools_source_identity: fn(&self, source_id: String?, build_id: String?, revision: String?, world_id: String?) Err! {
+        recording_identity := SessionRecordingIdentity?{None}
+        if source_id == .Val(source) {
+            if build_id == .Val(build) {
+                identity: SessionRecordingIdentity.new(source, build) ?? return Err("{err}")
+                recording_identity = Val(identity)
+            }
+        }
+        self.devtools.set_source_identity(Val(JetDevtoolsSourceIdentityFact{source_id: source_id, build_id: build_id, revision: revision, world_id: world_id}))
+        first_sequence: self.devtools.next_sequence
+        self.set_recording_identity(recording_identity, Val(first_sequence))
+        Ok()
+    }
+    // A new source/build identity starts a new recording; the same identity
+    // keeps the one already running.
+    set_recording_identity: fn(&self, identity: SessionRecordingIdentity?, first_sequence: Int?) Err! {
+        wanted: identity ?? {
+            self.recording = None
+            return Ok()
+        }
+        if self.recording == .Val(state) {
+            if state.recording.identity.matches(wanted) -> return Ok()
+        }
+        recording: SessionRecording.new(wanted) ?? return Err("{err}")
+        self.recording = Val(ResidentRecordingState.new(recording, first_sequence))
+        Ok()
+    }
+    set_devtools_selection: fn(&self, request: String) Err! {
+        root: foundation_parse_protocol_json(request) ?? return Err("devtools selection must be valid JSON")
+        object: recording_object_fields(root) ?? return Err("devtools selection must be an object")
+        nested := [(key: String, value: Dyn)]{}
+        clear := false
+        if recording_lookup(object, "selection") == .Val(selection) {
+            if selection == .Null -> clear = true
+            if recording_object_fields(selection) == .Val(fields) -> nested = fields
+        }
+        if recording_lookup(object, "clear") == .Val(value) {
+            if value == .Bool(flag) {
+                if flag -> clear = true
+            }
+        }
+        panel_id := session_selection_field(object, nested, "panel_id")
+        if panel_id == None -> panel_id = session_selection_field(object, nested, "target")
+        item_key := session_selection_field(object, nested, "item_key")
+        if item_key == None -> item_key = session_selection_field(object, nested, "source_id")
+        if item_key == None -> item_key = session_selection_field(object, nested, "output")
+        origin: session_selection_field(object, nested, "origin") ?? "host"
+        session_validate_devtools_text(origin, "selection origin")
+        if panel_id == .Val(value) -> session_validate_devtools_text(value, "panel_id")
+        if item_key == .Val(value) -> session_validate_devtools_text(value, "item_key")
+        if !clear && panel_id == None && item_key == None -> return Err("devtools selection has no selected value")
+        if clear {
+            self.selected_source_id = ""
+            self.selected_output_name = ""
+            self.selected_target_name = ""
+            self.devtools.set_selection(None)
+        } else {
+            source := session_selection_field(object, nested, "source_id")
+            if source == None -> source = item_key
+            if source == .Val(selected) -> self.select_project_source(selected)
+            run_target := session_selection_field(object, nested, "target")
+            if run_target == None -> run_target = panel_id
+            self.select_output_values(session_selection_field(object, nested, "output"), run_target)
+            selected_panel := panel_id ?? ""
+            selected_item := item_key
+            if self.devtools.selection() == .Val(prior) {
+                if panel_id == None -> selected_panel = prior.panel_id
+                if item_key == None -> selected_item = prior.item_key
+            }
+            self.devtools.set_selection(Val(JetDevtoolsSelection.new(selected_panel, selected_item)))
+        }
+        panel_json: if clear -> "null" else -> session_optional_json(panel_id)
+        item_json: if clear -> "null" else -> session_optional_json(item_key)
+        event: JetDevtoolsEvent.from_parts(session_unix_ms(), origin, "Selection", "session", "{{\"panel_id\":{panel_json},\"item_key\":{item_json},\"cleared\":{clear}}}")
+        _: self.push_devtools_event(event.move())
+        Ok()
+    }
+    set_devtools_cursor: fn(&self, request: String) Err! {
+        root: foundation_parse_protocol_json(request) ?? return Err("devtools cursor must be valid JSON")
+        object: recording_object_fields(root) ?? return Err("devtools cursor must be an object")
+        origin: session_field_text(object, "origin") ?? "host"
+        session_validate_devtools_text(origin, "cursor origin")
+        cursor_value := recording_lookup(object, "cursor")
+        if cursor_value == None -> cursor_value = recording_lookup(object, "sequence")
+        sequence := Int?{None}
+        if cursor_value == .Val(value) {
+            target := value
+            if recording_object_fields(value) == .Val(entries) -> target = recording_lookup(entries, "sequence") ?? return Err("devtools cursor must be a sequence")
+            if !(target == .Null) -> sequence = Val(session_count(target) ?? return Err("devtools cursor must be a sequence"))
+        }
+        self.devtools.set_cursor(sequence)
+        sequence_json: if sequence == .Val(number) -> "{number}" else -> "null"
+        event: JetDevtoolsEvent.from_parts(session_unix_ms(), origin, "Cursor", "session", "{{\"sequence\":{sequence_json}}}")
+        _: self.push_devtools_event(event.move())
+        Ok()
+    }
+}
+
+impl ResidentDevSession.RecordIndexCaptureSink {
+    Error: CaptureSinkError
+
+    // A skipped capture keeps its skip inside the start fact's eligibility.
+    record_capture_start: fn(&self, &&fact: CaptureStartFact) CaptureSinkError! {
+        self.validate_capture_identity(fact.identity)
+        self.capture_fact_list.push(CaptureSessionFact.Start{fact: fact.move()})
+        self.trim_capture_facts()
+        Ok()
+    }
+    record_capture_fault: fn(&self, &&fact: CaptureFaultFact) CaptureSinkError! {
+        self.validate_capture_identity(fact.identity)
+        self.capture_fact_list.push(CaptureSessionFact.Fault{fact: fact.move()})
+        self.trim_capture_facts()
+        Ok()
+    }
+}
+
+session_unix_ms: fn() -> Int { session_view_time.unix_ns() /% 1000000 }
+
+session_optional_fact: fn(value: String) -> String? Never! {
+    if value == "" -> return None
+    Val(value)
+}
+
+session_lifecycle_state: fn(value: String) -> JetDevtoolsLifecycleState Never! {
+    if value == {
+        "starting" -> .Starting
+        "building" -> .Building
+        "ready" -> .Ready
+        "error" -> .Error
+        "stopped" -> .Stopped
+        else -> .Unavailable
+    }
+}
+
+session_client_id_is_valid: fn(client: String) -> Bool Never! {
+    client != "" && client.bytes().len() <= SESSION_MAX_CLIENT_ID && !jettrace_has_control(client)
+}
+
+session_lineage_part: fn(value: String) -> Bool Never! { value != "" && !jettrace_has_control(value) }
+
+// Empty text is absent: it renders as JSON null.
+session_json_value: fn(value: String) -> String Never! {
+    if value == "" -> return "null"
+    foundation_json_quote(value)
+}
+
+session_optional_json: fn(value: String?) -> String Never! {
+    if value == .Val(text) -> return session_json_value(text)
+    "null"
+}
+
+session_optional_int_json: fn(value: Int?) -> String Never! {
+    if value == .Val(number) -> return "{number}"
+    "null"
+}
+
+session_live_value_fact_json: fn(value: LiveValueFact) -> String Never! {
+    "{{\"value_id\":{session_json_value(value.value_id)},\"type_identity\":{session_json_value(value.type_identity)},\"disposition\":{session_json_value(value.disposition)},\"reason\":{session_json_value(value.reason)}}}"
+}
+
+session_live_receipt_json: fn(receipt: LiveReceipt) -> String Never! {
+    values := [String]{}
+    loop value in receipt.values -> values.push(session_live_value_fact_json(value))
+    lineage: receipt.lineage
+    "{{\"protocol\":{session_json_value(lineage.protocol)},\"session_id\":{session_json_value(lineage.session_id)},\"source_id\":{session_json_value(lineage.source_id)},\"build_id\":{session_json_value(lineage.build_id)},\"revision\":{session_json_value(lineage.revision)},\"world_id\":{session_json_value(lineage.world_id)},\"values\":[{values.join(",")}]}}"
+}
+
+session_retained_view_json: fn(view: RetainedView?) -> String Never! {
+    retained: view ?? RetainedView{revision: "", source_id: "", payload: ""}
+    "{{\"revision\":{session_json_value(retained.revision)},\"source_id\":{session_json_value(retained.source_id)},\"payload\":{session_json_value(retained.payload)}}}"
+}
+
+session_recording_unavailable: fn() -> String Never! { "devtools recording is unavailable because source/build identity is not installed" }
+
+session_recording_unavailable_json: fn(session_id: String, reason: String) -> String Never! {
+    "{{\"protocol\":{session_json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{session_json_value(session_id)},\"kind\":\"session.recording\",\"available\":false,\"reason\":{session_json_value(reason)},\"events\":[],\"cursor\":null,\"divergence\":null}}"
+}
+
+session_recording_json_for_state: fn(session_id: String, state: ResidentRecordingState, projection: ReplayProjection, divergence: DevtoolsRecordingDivergence?) -> String Never! {
+    identity: state.recording.identity
+    events := [String]{}
+    loop event in state.recording.events -> events.push(session_recording_event_json(event))
+    names := state.checkpoints.keys().to_list()
+    names.sort()
+    checkpoints := [String]{}
+    loop name in names -> checkpoints.push(session_recording_checkpoint_json(name, state.checkpoints[name]))
+    current_event: if projection.event == .Val(event) -> session_recording_event_json(event) else -> "null"
+    truncation: state.recording.truncation()
+    divergence_json: if divergence == .Val(found) -> session_recording_divergence_json(found) else -> "null"
+    head: "\"protocol\":{session_json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{session_json_value(session_id)},\"kind\":\"session.recording\",\"available\":true,\"identity\":{{\"source_id\":{session_json_value(identity.source_id)},\"build_id\":{session_json_value(identity.build_id)}}},\"events\":[{events.join(",")}]"
+    limits: "\"truncation\":{{\"event_limit\":{truncation.event_limit},\"byte_limit\":{truncation.byte_limit},\"retained_events\":{truncation.retained_events},\"retained_bytes\":{truncation.retained_bytes},\"dropped_events\":{truncation.dropped_events},\"dropped_bytes\":{truncation.dropped_bytes},\"event_limit_reached\":{truncation.event_limit_reached},\"byte_limit_reached\":{truncation.byte_limit_reached},\"first_dropped_sequence\":{session_optional_int_json(truncation.first_dropped_sequence)},\"last_dropped_sequence\":{session_optional_int_json(truncation.last_dropped_sequence)},\"first_retained_sequence\":{session_optional_int_json(truncation.first_retained_sequence)},\"last_retained_sequence\":{session_optional_int_json(truncation.last_retained_sequence)}}}"
+    cursor: "\"cursor\":{{\"identity\":{{\"source_id\":{session_json_value(projection.identity.source_id)},\"build_id\":{session_json_value(projection.identity.build_id)}}},\"generation\":{state.cursor.generation},\"position\":{projection.position},\"sequence\":{session_optional_int_json(projection.sequence)},\"timestamp_ms\":{session_optional_int_json(projection.timestamp_ms)},\"previous_sequence\":{session_optional_int_json(projection.previous_sequence)},\"next_sequence\":{session_optional_int_json(projection.next_sequence)},\"event\":{current_event}}}"
+    "{{{head},{limits},{cursor},\"checkpoints\":[{checkpoints.join(",")}],\"divergence\":{divergence_json}}}"
+}
+
+session_recording_event_json: fn(event: SessionEvent) -> String Never! {
+    "{{\"sequence\":{event.sequence},\"timestamp_ms\":{event.timestamp_ms},\"source\":{session_json_value(event.source)},\"kind\":{session_json_value(event.kind)},\"entity\":{session_json_value(event.entity)},\"fields\":{event.fields_json},\"payload\":{event.payload_json ?? "null"}}}"
+}
+
+session_recording_checkpoint_json: fn(name: String, checkpoint: SessionCheckpoint) -> String Never! {
+    "{{\"name\":{session_json_value(name)},\"identity\":{{\"source_id\":{session_json_value(checkpoint.identity.source_id)},\"build_id\":{session_json_value(checkpoint.identity.build_id)}}},\"generation\":{checkpoint.generation},\"position\":{checkpoint.position},\"sequence\":{session_optional_int_json(checkpoint.sequence)},\"timestamp_ms\":{session_optional_int_json(checkpoint.timestamp_ms)}}}"
+}
+
+session_recording_divergence_json: fn(divergence: DevtoolsRecordingDivergence) -> String Never! {
+    "{{\"divergent\":{divergence.divergent},\"reason\":{session_optional_json(divergence.reason)},\"expected_sequence\":{session_optional_int_json(divergence.expected_sequence)},\"actual_sequence\":{session_optional_int_json(divergence.actual_sequence)},\"retained_events\":{divergence.retained_events},\"dropped_events\":{divergence.dropped_events}}}"
+}
+
+session_validate_devtools_text: fn(value: String, label: String) Err! {
+    if value == "" || value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES || jettrace_has_control(value) -> return Err("devtools {label} is empty, too long, or contains control text")
+    Ok()
+}
+
+// A non-negative exact JSON integer.
+session_count: fn(value: Dyn) -> Int? Never! {
+    number: foundation_json_integer(value) ?? return None
+    if number < 0 -> return None
+    Val(number)
+}
+
+session_field_text: fn(fields: [(key: String, value: Dyn)], key: String) -> String? Never! {
+    value: recording_lookup(fields, key) ?? return None
+    recording_text(value)
+}
+
+session_field_count: fn(fields: [(key: String, value: Dyn)], key: String) -> Int? Never! {
+    value: recording_lookup(fields, key) ?? return None
+    session_count(value)
+}
+
+// A selection field at the top level, else inside `selection`.
+session_selection_field: fn(fields: [(key: String, value: Dyn)], nested: [(key: String, value: Dyn)], key: String) -> String? Never! {
+    if session_field_text(fields, key) == .Val(text) -> return Val(text)
+    session_field_text(nested, key)
+}
+
+session_request_string: fn(text: String, key: String) -> String Never! {
+    root: foundation_parse_protocol_json(text) ?? return ""
+    fields: recording_object_fields(root) ?? return ""
+    session_field_text(fields, key) ?? ""
+}
+
+session_request_bool: fn(text: String, key: String) -> Bool Never! {
+    root: foundation_parse_protocol_json(text) ?? return false
+    fields: recording_object_fields(root) ?? return false
+    value: recording_lookup(fields, key) ?? return false
+    value == .Bool(true)
+}
+
+// The first string `key` anywhere in the JSON tree, depth first.
+session_json_string_any: fn(text: String, key: String) -> String? Never! {
+    root: foundation_parse_protocol_json(text) ?? return None
+    session_find_string(root, key)
+}
+
+session_find_string: fn(value: Dyn, key: String) -> String? Never! {
+    if recording_object_fields(value) == .Val(fields) {
+        if session_field_text(fields, key) == .Val(found) -> return Val(found)
+        loop field in fields {
+            if session_find_string(field.value, key) == .Val(found) -> return Val(found)
+        }
+        return None
+    }
+    if value == .Array(items) {
+        loop item in items {
+            if session_find_string(item, key) == .Val(found) -> return Val(found)
+        }
+    }
+    None
+}
+
+// The first object whose `id` names a Canvas debug session.
+session_find_debugger_snapshot: fn(text: String) -> DebuggerSnapshot? Never! {
+    root: foundation_parse_protocol_json(text) ?? return None
+    session_find_debugger(root)
+}
+
+session_find_debugger: fn(value: Dyn) -> DebuggerSnapshot? Never! {
+    if recording_object_fields(value) == .Val(fields) {
+        if session_field_text(fields, "id") == .Val(session_id) {
+            if session_id.starts_with("canvas-debug-") {
+                return Val(DebuggerSnapshot{state: session_field_text(fields, "state") ?? "", session_id: session_id, source_id: session_field_text(fields, "source_id") ?? "", revision: session_field_text(fields, "revision") ?? "", tier: session_field_text(fields, "tier") ?? ""})
+            }
+        }
+        loop field in fields {
+            if session_find_debugger(field.value) == .Val(found) -> return Val(found)
+        }
+        return None
+    }
+    if value == .Array(items) {
+        loop item in items {
+            if session_find_debugger(item) == .Val(found) -> return Val(found)
+        }
+    }
+    None
+}

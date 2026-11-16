@@ -1,0 +1,24 @@
+// @all_diags
+use core.mem
+
+// A kernel file's public function reads at the address its caller chose: code
+// outside the kernel would pick a raw address no audit checked.
+_peek: fn(address: Int) -> Int {
+    value := 0
+    #Unsafe("the caller hands the address of a live Int") {
+        pointer: mem.Ptr<Int>.from_addr(address)
+        value = mem.volatile_read(pointer)
+    }
+    value
+}
+
+// A private function is reached only from the kernel files.
+priv _peek_inside: fn(address: Int) -> Int {
+    value := 0
+    #Unsafe("kernel code hands the address of a live Int") {
+        value = mem.volatile_read(mem.Ptr<Int>.from_addr(address))
+    }
+    value
+}
+
+run: fn() {}

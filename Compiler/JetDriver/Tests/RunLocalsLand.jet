@@ -1,0 +1,145 @@
+// Assemble with the Compiler source unit. An explicit `name: #run value`
+// local in a function body lands in the body that holds it (JetSema
+// Comptime/LocalSplice.jet), as a local value does: the compile checks the
+// program once, with no full recheck after finalization, and under
+// recheck_verify the landed result is the full recheck's.
+use {
+    run_locals_files: core.files
+    run_locals_sys: core.sys
+    run_locals_process: core.process
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverCoreSource,
+        jet_driver_has_errors,
+        jet_driver_lowering_inputs,
+    ]
+    jet_cli.[jet_cli_driver_request, jet_cli_native_session_at]
+    jet_foundation.[CompilerTraceSink]
+    jet_sema.[SchemaSnapshot]
+}
+
+// A trace sink that appends each span's open and close, each counter and
+// each progress report to `path`, one line each.
+RunLocalsTrace: struct {
+    path: String
+
+    impl CompilerTraceSink {
+        begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS, Time]> {
+            run_locals_files.append_all(self.path, "> {name} {detail} ({index}/{total})\n") ?? panic("cannot write the trace: {err}")
+        }
+
+        begin_item: fn(self, name: String, file: String, item: String) Never! -[FS, Time]> {
+            run_locals_files.append_all(self.path, "> {name} {item} ({file})\n") ?? panic("cannot write the trace: {err}")
+        }
+
+        end: fn(self, name: String, items: Int) Never! -[FS, Time]> {
+            run_locals_files.append_all(self.path, "< {name} items={items}\n") ?? panic("cannot write the trace: {err}")
+        }
+
+        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
+            line: if name.starts_with("counters.") -> "{name} = {done}\n" else -> "~ {name} {done}/{total}\n"
+            run_locals_files.append_all(self.path, line) ?? panic("cannot write the trace: {err}")
+        }
+
+        functions: fn(self) -[]> Bool Never! { false }
+
+        cpu_ns: fn(self) -[Time]> Int Never! { 0 }
+    }
+}
+
+run_locals_sink: fn(trace: &&RunLocalsTrace) -> CompilerTraceSink Never! { trace.move() }
+
+// The compiler under test, never this test binary, owns the runtime pack
+// the `#run` values run on (as InspectBuild.jet's planned `build: fn`).
+run_locals_runtime_dir: fn() -> String {
+    jet: run_locals_sys.get("JET") ?? (run_locals_process.which("jet") ?? panic("set JET to the compiler under test"))
+    parts := jet.split("/").to_list()
+    _ := parts.pop()
+    "{parts.join("/")}/jet-runtime"
+}
+
+// The case's program.
+RUN_LOCALS_SOURCE: "fact: fn(n: Int) -> Int {{\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}}\n\nrepeat: fn(word: String, times: Int) -> String {{\n    out := \"\"\n    loop _ in 0..<times -> out = \"{{out}}{{word}}\"\n    out\n}}\n\nshout: fn(text: String) -> String {{\n    \"{{text}}!\"\n}}\n\nrun: fn() {{\n    big: #run fact(10)\n    word: #run repeat(\"ab\", 3)\n    print(\"{{big}} {{big + 1}} {{shout(word)}} {{shout(word)}}\")\n}}\n"
+
+// A program whose `#run` values reach functions over several calls, one of
+// which splices a `#run` local of its own.
+RUN_LOCALS_REACH_SOURCE: "fact: fn(n: Int) -> Int {{\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}}\n\ntwice: fn(n: Int) -> Int {{\n    n + n\n}}\n\nsquare: fn(n: Int) -> Int {{\n    n * n\n}}\n\nscaled: fn(n: Int) -> Int {{\n    base: #run fact(3)\n    square(twice(n)) * base\n}}\n\nsum: fn(n: Int) -> Int {{\n    total := 0\n    loop at in 0..<n -> total += scaled(at)\n    total\n}}\n\nrun: fn() {{\n    big: #run sum(4)\n    small: #run twice(fact(4))\n    print(\"{{big}} {{small}} {{scaled(2)}}\")\n}}\n"
+
+// The request that compiles `source` on `threads` compiler threads, its
+// trace going to `path`.
+run_locals_request: fn(path: String, source: String, threads: Int) -> JetDriverCompileRequest {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/run-locals",
+                identity: "run-locals-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/run-locals/main.jet", relative_path: "main.jet", identity: "run-locals-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "run-locals-root",
+        entry_path: "/run-locals/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(threads), JetDriverCompileMode.Program)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request.eval_config.native = Val(jet_cli_native_session_at(run_locals_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
+    request.trace_sink = Val(run_locals_sink(RunLocalsTrace{path: path}))
+    request
+}
+
+#Test("explicit_run_locals_land") {
+    path: run_locals_files.join(run_locals_sys.temp_dir(), "jet-run-locals-land-{run_locals_process.current_pid()}.trace")
+    loop verify in ([Bool]{false, true}) {
+        run_locals_files.write(path, "") ?? panic("cannot start the trace: {err}")
+        request := run_locals_request(path, RUN_LOCALS_SOURCE, 1)
+        request.recheck_verify = verify
+        front: jet_driver_lowering_inputs(request, None)
+        trace: run_locals_files.read(path) ?? panic("cannot read the trace: {err}")
+        problems := [String]{}
+        loop diagnostic in front.compile.diagnostics {
+            problems.push("{diagnostic.code} {diagnostic.what}")
+        }
+        assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics) && front.inputs != None, "recheck_verify {verify}: the program did not compile: {front.compile.internal_problem:Debug} {problems:Debug}")
+        assert(trace.contains("counters.sema.local_values_spliced = "), "recheck_verify {verify}: `big` and `word` did not land in `run`:\n{trace}")
+        assert(!trace.contains("counters.sema.local_values_refused"), "recheck_verify {verify}: a pass fell back to the full recheck:\n{trace}")
+        assert(!trace.contains("> comptime.body.recheck"), "recheck_verify {verify}: the program was checked again after finalization:\n{trace}")
+    }
+    run_locals_files.remove(path) ?? panic("cannot remove the trace: {err}")
+}
+
+// On more than one compiler thread a pass checks the functions its `#run`
+// values reach ahead of their closures, keeping a check that splices a
+// `#run` local only while that local has not landed: the program lowers to
+// the same functions as on one thread.
+#Test("run_locals_land_the_same_on_threads") {
+    path: run_locals_files.join(run_locals_sys.temp_dir(), "jet-run-locals-threads-{run_locals_process.current_pid()}.trace")
+    lowered := [String]{}
+    loop threads in ([Int]{1, 4}) {
+        run_locals_files.write(path, "") ?? panic("cannot start the trace: {err}")
+        front: jet_driver_lowering_inputs(run_locals_request(path, RUN_LOCALS_REACH_SOURCE, threads), None)
+        trace: run_locals_files.read(path) ?? panic("cannot read the trace: {err}")
+        problems := [String]{}
+        loop diagnostic in front.compile.diagnostics {
+            problems.push("{diagnostic.code} {diagnostic.what}")
+        }
+        assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "{threads} threads: the program did not compile: {front.compile.internal_problem:Debug} {problems:Debug}")
+        inputs: front.inputs ?? panic("{threads} threads: the program has no lowering inputs")
+        if threads > 1 {
+            prefetched := false
+            loop line in trace.split("\n") {
+                if line.starts_with("< comptime.prefetch items=") && line != "< comptime.prefetch items=0" {
+                    prefetched = true
+                }
+            }
+            assert(prefetched, "{threads} threads: no pass checked a function ahead:\n{trace}")
+        }
+        lowered.push("{inputs.functions:Debug}")
+    }
+    assert(lowered[0] == lowered[1], "the program lowers differently on four threads")
+    run_locals_files.remove(path) ?? panic("cannot remove the trace: {err}")
+}

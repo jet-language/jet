@@ -1,0 +1,43 @@
+# D-TEST1: a parameterized `#Test fn` is a property test. `jet test` runs it on generated inputs of every generatable type, shrinks a failing case to its minimal inputs, prints the seed, and replays the run under JET_PROP_SEED; an ungeneratable parameter type is E0613.
+fixture: property_tests_generate_shrink_and_replay.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step pass: jet test --show-default --capture=all pass.jet
+exit: 0 # every generated case of each property passes
+stdout: ~ "addition_commutes: pass" # a property test reports as one claim
+stdout: ~ "generated_values_keep_their_bounds: pass" # lists, Bool, Char, String, Float, Option, sized integers and F32 generate
+stdout: ~ "3 passed, 0 failed" # properties and the unit claim share the summary
+
+step release: jet test --show-default --release pass.jet
+exit: 0 # the optimized tier runs the same properties
+stdout: ~ "3 passed, 0 failed" # release tier summary
+
+step shrink: jet test fail.jet
+exit: nonzero # the failing property fails the run
+stdout: ~ "always_small: FAIL" # the property is the failing claim
+stderr: ~ "property failed on case " # the report names the failing case
+stderr: ~ "; replay with JET_PROP_SEED=" # and how to replay its seed
+stderr: ~ "minimized_inputs: n = 50" # the failure shrinks to the boundary input
+stderr: ~ "E3001" # with the minimized case's own assertion report
+
+step seeded: jet test fail.jet
+env: JET_PROP_SEED=424242
+exit: nonzero # the seeded run fails as well
+stderr: ~ "(seed 424242; replay with JET_PROP_SEED=424242)" # the given seed is the run seed
+stderr: ~ "minimized_inputs: n = 50" # the seeded run shrinks to the same boundary
+capture: first stderr line ^= "property failed on case " # the failure line names the case and seed
+
+step replay: jet test fail.jet
+env: JET_PROP_SEED=424242
+exit: nonzero # replaying the seed fails again
+stderr: ~ "{cap:first}" # on the same generated case
+
+step bad_seed: jet test fail.jet
+env: JET_PROP_SEED=seed
+exit: nonzero # an invalid seed fails the property
+stderr: ~ "JET_PROP_SEED must be an integer from 0 to 9223372036854775807" # the failure names the accepted seeds
+
+step bad_type: jet test bad_type.jet
+exit: nonzero # an ungeneratable parameter type is refused before running
+stderr: ~ "E0613" # the property-test generator diagnostic

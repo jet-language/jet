@@ -1,0 +1,15 @@
+# Port of tests/library_outputs.rs:163-240; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# PENDING-GRAMMAR(batch-four): host-name conditional; missing mandatory C/C++ compiler remains REFUSED, not PASS.
+fixture: ../../fixtures/guest_import_library
+step: jet build --lib library.jet
+file: .jet/build/libguestimport.a is-file
+file: .jet/build/guestimport.h is-file
+when os-name linux: step: {tool:cc|gcc|clang} -std=c11 -I .jet/build foreign.c .jet/build/libguestimport.a -o foreign-c -ldl -lpthread -lm
+when os-name !linux: step: {tool:cc|gcc|clang} -std=c11 -I .jet/build foreign.c .jet/build/libguestimport.a -o foreign-c
+step: {work}/foreign-c
+stdout: = guest_import_library_calls_native_c_and_cpp_hosts.out
+when os-name linux: step: {tool:c++|g++|clang++} -std=c++17 -I .jet/build foreign.cpp .jet/build/libguestimport.a -o foreign-cpp -pthread -ldl -lpthread -lm
+when os-name !linux: step: {tool:c++|g++|clang++} -std=c++17 -I .jet/build foreign.cpp .jet/build/libguestimport.a -o foreign-cpp -pthread
+step: {work}/foreign-cpp
+stdout: = guest_import_library_calls_native_c_and_cpp_hosts.out

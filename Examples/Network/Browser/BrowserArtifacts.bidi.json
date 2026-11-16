@@ -1,0 +1,38 @@
+{
+ "max": 40,
+ "stop": "session.end",
+ "replies": {
+  "session.status": "{\"ready\":true,\"message\":\"ready\"}",
+  "session.new": "{\"sessionId\":\"artifacts\",\"capabilities\":{\"browserName\":\"mock\",\"browserVersion\":\"1\"}}",
+  "browser.setDownloadBehavior": "{}",
+  "browser.createUserContext": "{\"userContext\":\"user-1\"}",
+  "browsingContext.create": "{\"context\":\"page-1\"}",
+  "browsingContext.navigate": "{\"url\":\"https://example.test/app\",\"navigation\":\"nav-1\"}",
+  "storage.setCookie": "{}",
+  "storage.getCookies": "{\"cookies\":[{\"name\":\"theme\",\"value\":{\"type\":\"string\",\"value\":\"dark\"},\"domain\":\"example.test\",\"path\":\"/\"}],\"partitionKey\":{\"userContext\":\"user-1\"}}",
+  "storage.deleteCookies": "{}",
+  "script.callFunction": {
+   "if_contains": "getItem",
+   "then": "{\"result\":{\"type\":\"string\",\"value\":\"hello\"}}",
+   "else": "{\"result\":{\"type\":\"undefined\"}}"
+  },
+  "browsingContext.locateNodes": "{\"nodes\":[{\"type\":\"node\",\"sharedId\":\"file-input\"}]}",
+  "input.setFiles": "{}",
+  "browsingContext.captureScreenshot": "{\"data\":\"iVBORw0KGgo=\"}",
+  "browsingContext.print": "{\"data\":\"JVBERi0xLjQ=\"}",
+  "session.subscribe": "{}",
+  "browsingContext.close": "{}",
+  "browser.removeUserContext": "{}",
+  "session.end": "{}"
+ },
+ "require": {
+  "input.setFiles": [
+   "report.csv"
+  ]
+ },
+ "after": {
+  "session.subscribe": [
+   "{\"type\":\"event\",\"method\":\"browsingContext.downloadWillBegin\",\"params\":{\"context\":\"page-1\",\"navigation\":\"nav-dl\",\"timestamp\":1.0,\"url\":\"https://cdn.example.test/QUARTERLY_REPORT.pdf\",\"download\":\"dl-1\",\"suggestedFilename\":\"QUARTERLY_REPORT.pdf\"}}"
+  ]
+ }
+}

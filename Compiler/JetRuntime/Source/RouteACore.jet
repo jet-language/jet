@@ -1,0 +1,78 @@
+// Small raw leaves of core.tui, core.jobs and core.tasks. Rust providers:
+// (TUI capability environment bytes), (job-queue devtools event, raw sleep),
+// (task flags):3146-3152 (Condition notify).
+
+// A fresh [U8] copy of `length` packed bytes; its data word, length returned.
+packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
+    data: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+    at := I64{0}
+    loop at < length {
+        host_u8_put(data, at, rt_text_byte(wrapping(bytes + at)))
+        at += I64{1}
+    }
+    rt_text_store(output, data)
+    length
+}
+
+// std::env::var_os(name) as its encoded bytes, None when unset.
+#Export(c) jet_tui_cap_env_bytes: fn(name: I64, some: I64, some_len: I64) -> I64 {
+    value: host_environment_value(name)
+    if (value == I64{0}) { return I64{0} }
+    rt_text_store(some_len, packed_bytes_out(value, host_startup_byte_length(value), some))
+    I64{1}
+}
+
+// JetDevtoolsEvent::from_parts then jet_devtools_publish_event, which reaches
+// only installed event sinks; the native runtime installs none, so the event
+// has no observer to build for.
+#Export(c) jet_job_queue_publish_parts: fn(timestamp_ms: I64, source: I64, kind: I64, entity: I64, fields: I64) {
+    _ := jet_int_owned_to_i64(timestamp_ms)
+}
+
+// std::thread::sleep(Duration::from_millis(millis as u64)): nanosleep, resumed
+// with the remainder after EINTR. The controlled scheduler's clock does not
+// advance.
+#Export(c) jet_job_queue_sleep_ms: fn(millis: I64) {
+    native: jet_int_owned_to_i64(millis)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
+    request: jet_rt_alloc(I64{32}, I64{8})
+    // u64 millis: floor(millis / 1000) = floor(floor(millis / 2) / 500).
+    seconds: ((native >> I64{1}).bit_and(I64{9223372036854775807})) /% I64{500}
+    remainder: wrapping(native - seconds * I64{1000})
+    rt_text_store(request, seconds)
+    rt_text_store(wrapping(request + I64{8}), remainder * I64{1000000})
+    loop {
+        if (rt_text_word(request) == I64{0} && rt_text_word(wrapping(request + I64{8})) == I64{0}) {
+            break
+        }
+        result: host_call(I64{35}, request, request + I64{16}, I64{0})
+        if (result != I64{-4}) { break }
+        rt_text_store(request, rt_text_word(wrapping(request + I64{16})))
+        rt_text_store(wrapping(request + I64{8}), rt_text_word(wrapping(request + I64{24})))
+    }
+    jet_rt_free(request, I64{32}, I64{8})
+}
+
+// Whether the current host task is cancelled; no task is None.
+#Export(c) jet_scheduler_task_cancelled_state: fn(some: I64) -> I64 {
+    control: scheduler_control_current()
+    if (control == I64{0}) { return I64{0} }
+    rt_text_store(some, if (sync_load(wrapping(control + I64{16})) != I64{0}) -> I64{1} else -> I64{0})
+    I64{1}
+}
+
+// core.tasks.quiesce: join the scheduler's carrier and timer threads
+// (jet_rt_scheduler_shutdown); false, with nothing stopped, while a task or
+// a timer is pending. The threads start again on the next use.
+#Export(c) jet_tasks_quiesce: fn() -> Bool { jet_rt_scheduler_shutdown() >= I64{0} }
+
+// The shared Condition48 protocol.
+#Export(c) jet_condition_notify_one: fn(condition: I64) {
+    jet_rt_native_condition_notify_one(condition)
+}
+
+#Export(c) jet_condition_notify_all: fn(condition: I64) {
+    jet_rt_native_condition_notify_all(condition)
+}

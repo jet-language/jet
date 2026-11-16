@@ -1,0 +1,9 @@
+# tests/arena.rs::reset_on_branch_invalidates_view_at_join at tests/arena.rs:284; hand-port
+fixture: reset_on_branch_invalidates_view_at_join.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check fixture.jet --json
+exit: 1 # tests/arena.rs:297 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/arena.rs:297 the errors are exactly E0632
+json: stdout doc $.reports[?code="E0632"] #= 1 # tests/arena.rs:297 reports E0632

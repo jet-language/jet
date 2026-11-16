@@ -1,0 +1,17 @@
+# HAND-PORT tests/jetpack_engine.rs:1277-1312 package_generation_plan_uses_the_production_source_backed_resolver
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: package_generation_plan_uses_the_production_source_backed_resolver.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+step: jetpack profile plan dev --json --offline
+cwd: project
+exit: 0
+stdout: ~ "\"raw\":\"ripgrep@default\"" # original contains predicate
+stdout: ~ "\"provider\":\"nix\"" # original contains predicate
+stdout: ~ "\"fingerprint\":\"sha256-" # original contains predicate
+stdout: ~ "\"provider_facts\":{" # original contains predicate
+stdout: ~ "\"profile\":\"dev\"" # original contains predicate
+stdout: ~ "\"bin/editor\":\"fd@default\"" # original contains predicate
+

@@ -1,0 +1,11 @@
+// `show`'s inferred row is `IO`, so a caller whose row allows only `Net`
+// can't call it.
+Counter: struct {
+    n: Int
+
+    show: fn(self) { print("count: {self.n}") }
+}
+
+quiet: fn(c: Counter) -[Net]> { c.show() }
+
+run: fn() { quiet(Counter{n: 1}) }

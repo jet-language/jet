@@ -1,0 +1,35 @@
+# The `#` requests: `#run use`, an unbraced `#run` call, name
+# chain and literal, a braced `#run { … }` value, `#if`, `#loop` over
+# declarations, a `<N: Int>` number parameter, a `#run` literal hook and a
+# `#run { … }` statement region print the same lines on every tier, and
+# main.jet is already in `jet fmt` form. The retired comptime word is an
+# ordinary name: retired/main.jet doesn't compile, and nothing teaches the
+# new spelling.
+fixture: d_meta_spell1_forms.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = d_meta_spell1_forms.stdout.expected
+stderr: empty
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = d_meta_spell1_forms.stdout.expected
+stderr: empty
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = d_meta_spell1_forms.stdout.expected
+stderr: empty
+step fmt: jet fmt --check main.jet tables.jet
+exit: 0 # the `#` forms round-trip through the formatter unchanged
+stdout: empty
+stderr: empty
+step retired: jet run retired/main.jet
+exit: 1
+stdout: empty
+stderr: ~ "Error" # the retired word no longer asks for compile time
+stderr: ~ "retired/main.jet:3" # reported at the binding that uses it
+stderr: !~ "#run" # the old word gets no teaching diagnostic
+stderr: !~ "is retired" # no diagnostic names the word as a retired spelling

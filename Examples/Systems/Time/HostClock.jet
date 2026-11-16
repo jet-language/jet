@@ -1,0 +1,14 @@
+use time: core.time
+
+// `in_host_zone()` shows an instant on the host's wall clock: the zone `TZ`
+// names, else /etc/localtime, else UTC. The no-pad flag `%-I` writes the hour
+// without its leading zero, as glibc's strftime does.
+run: fn() {
+    morning: time.datetime(2024, 1, 5, 6, 5, 5)
+    print(morning.format("%-I:%M:%S %p"))
+    print(morning.format("%-d/%-m/%Y, day %-j"))
+    local: morning.in_host_zone()
+    print("same instant: {local.to_datetime() == morning}")
+    checked: morning.format_checked("%-y") ?? "rejected"
+    print("%-y: {checked}")
+}

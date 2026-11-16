@@ -1,0 +1,12 @@
+# An imported `#Root` function takes the receiver-first spelling: the
+# graph notes that one is registered (graph.root_functions), so the dot
+# call still walks the imports (RootCalls.jet sema_root_call_imported),
+# while a graph with none skips that walk for every method call.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: lib.jet = "twice: fn(#Root value: Int) -> Int {\n    value * 2\n}\n"
+write: main.jet = "use {\n    lib: \"./lib\"\n}\n\nrun: fn() {\n    value: 21\n    print(value.twice())\n    print(lib.twice(value))\n    print(\"{value}\".len())\n}\n"
+step: jet run main.jet
+exit: 0
+stdout: = "42\n42\n2\n"
+stderr: empty

@@ -1,0 +1,13 @@
+use core.mem
+
+run: fn() {
+    #Unsafe("a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it") {
+        if mem.alloc_raw(8, 8) == .Val(bytes) {
+            again: bytes.cast<U8>()
+            mem.free_raw(bytes)
+            print("released")
+            mem.free_raw(again)
+            print("released again")
+        }
+    }
+}

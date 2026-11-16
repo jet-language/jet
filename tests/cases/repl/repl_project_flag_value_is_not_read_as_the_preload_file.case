@@ -1,0 +1,9 @@
+# PORT tests/repl.rs:3599-3625, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: repl_project_flag_value_is_not_read_as_the_preload_file.fixture
+env: NO_COLOR=1
+mkdir: project
+copy: helper.jet.txt project/helper.jet
+step: jet repl --project {work}/project
+exit: any # Original status unasserted rs3611-3624.
+stderr: !~ "E2105" # Original project flag must not become preload rs3622.

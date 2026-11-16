@@ -1,0 +1,88 @@
+// Jetpack's own spellings and limits: the ones the syntax registry
+// (Compiler/JetFoundation/Data/Syntax) does not hold. Every registry spelling
+// the unit reads comes from SyntaxRegistry.jet, which
+// Tools/agent/JetpackSyntax.jet generates from the registry and which refuses
+// a registry name declared here.
+
+// ── Package refs ──
+
+// Direct Maven ecosystem root.
+REF_SOURCE_MAVEN: "maven"
+
+// Direct NuGet ecosystem root.
+REF_SOURCE_NUGET: "nuget"
+
+// Direct Conan ecosystem root.
+REF_SOURCE_CONAN: "conan"
+
+// Direct vcpkg ecosystem root.
+REF_SOURCE_VCPKG: "vcpkg"
+
+// Direct Homebrew ecosystem root.
+REF_SOURCE_HOMEBREW: "homebrew"
+
+// A verified binary artifact named by URL and digest.
+REF_SOURCE_BINARY: "binary"
+
+// ── Environment fingerprint bounds (jet_foundation SHA256 tree limits) ──
+
+MAX_TREE_FILE_BYTES: 536870912
+
+MAX_TREE_TOTAL_BYTES: 4294967296
+
+MAX_TREE_FILES: 1000000
+
+MAX_TREE_DEPTH: 256
+
+// ── PackageModel Foreign bridge ──
+
+// The `asm.<lib>` namespace root.
+ASM_MODULE_ROOT: "asm"
+
+// ── String escapes ──
+
+// S31: string escape markers and their decoded characters, index for index
+// (`{{`/`}}` are literal braces).
+ESCAPE_MARKERS: [String]{"n", "t", "\"", "\\"}
+
+ESCAPE_DECODED: [String]{"\n", "\t", "\"", "\\"}
+
+// ── CLI env ──
+
+ENV_FETCH_TOOLCHAIN_VERB: "fetch-toolchain"
+
+// ── `build:` profile vocabulary ──
+
+BUILD_FIELD_ALLOW: "allow"
+
+BUILD_FIELD_OPTIMIZE: "optimize"
+
+BUILD_FIELD_DEBUG_INFO: "debug_info"
+
+BUILD_FIELD_SMALL: "small"
+
+BUILD_FIELD_PANIC: "panic"
+
+BUILD_FIELD_SETTINGS: "settings"
+
+// The package build entry.
+BUILD_ENTRY_FN: "build"
+
+// The role home a bare command resolves to (`command_role_file`).
+syntax_command_role_file: fn(command: String) -> String? Never! {
+    if command == {
+        "run" -> Val(COMMAND_FILE_RUN)
+        "build" -> Val(COMMAND_FILE_BUILD)
+        "dev" -> Val(COMMAND_FILE_DEV)
+        "test" -> Val(COMMAND_FILE_TEST)
+        else -> None
+    }
+}
+
+// Whether `name` is a UI capability right `authority.needs` accepts.
+syntax_is_ui_capability: fn(name: String) -> Bool Never! { UI_CAPABILITY_NAMES.contains(name) }
+
+// ── JetOS ──
+
+// The jetos verbs this engine builds.
+OS_BUILT_VERBS: #run { [String]{OS_VERB_CHECK, OS_VERB_PLAN} }

@@ -1,0 +1,15 @@
+{
+  "name": "run-result",
+  "mode": "tool",
+  "description": "The result-shape export of the gauntlet harness, Tools/gauntlet/harness/run.mjs (validateResultShape), and its Jet twin, the Result module of the jet_gauntlet_kit package (Tools/gauntlet/kit/Source/Result.jet), #5072 c8, each run by a driver over a directory of result JSON files, against a matrix and against none: a complete batch result; web-app and service results; a result that is not an object or has no entry identity; selected and aggregate keys at any depth of rows, comparisons and Jet tiers; unsupported modes and invalid or unpublishable statuses; missing, duplicate and non-string languages, missing and duplicate cells, required matrix rails and unknown cells; row identity, status, not-applicable, disqualification, verification, metrics, provenance and source-hash faults; missing, failed, not-applicable, undeclared and unmeasured Jet tiers and gated cache states; and peer comparisons with wrong status, configuration, applicability, peer-sample identity and tier policy, missing or undeclared tiers, sub-millisecond cells without strict confidence evidence and cells whose ratio or verdict is not Jet over peer.",
+  "tool": {
+    "original": "Tools/gauntlet/harness/drivers/run-result.mjs",
+    "jet": "Tools/gauntlet/entries/run-result/driver/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["results", "matrix.json", "results"], "expected": "expected/results.out"},
+      {"args": ["results", "-", "results"], "expected": "expected/results-no-matrix.out"},
+      {"args": ["census"], "exit": 64, "expected": "expected/usage.out"}
+    ]
+  }
+}

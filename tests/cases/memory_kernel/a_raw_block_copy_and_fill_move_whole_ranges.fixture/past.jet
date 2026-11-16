@@ -1,0 +1,11 @@
+use core.mem
+
+run: fn() {
+    cell := (a: 1, b: 2)
+    #Unsafe("the fill runs one Int past the tuple, so the sentry stops it before any write") {
+        first: mem.Ptr<Int>.from_addr(mem.address_of(cell))
+        print(first.*)
+        mem.fill(first, 7, 3)
+        print(first.*)
+    }
+}

@@ -1,0 +1,17 @@
+# Claim: a `#Target(Wasm)` function that is no `#Export(wasm)` has no JS/Wasm boundary, so an ordinary struct parameter needs no ABI rule: the web build accepts it, and the built app prints under node what native `jet run` prints
+requires: tool:node
+fixture: ordinary_struct_param_of_a_wasm_pin_builds_and_runs_on_node_as_natively.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target=web main.jet
+exit: 0 # the web build accepts the program
+stderr: !~ "E-WEB-" # no web refusal
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = ordinary_struct_param_of_a_wasm_pin_builds_and_runs_on_node_as_natively.stdout.expected # the web build prints what the native build prints
+step: jet run main.jet
+exit: 0
+stdout: = ordinary_struct_param_of_a_wasm_pin_builds_and_runs_on_node_as_natively.stdout.expected # the native output

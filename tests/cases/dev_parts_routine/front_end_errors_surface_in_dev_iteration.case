@@ -1,0 +1,10 @@
+# tests/dev_parts/routine.rs::front_end_errors_surface_in_dev_iteration at tests/dev_parts/routine.rs:5559; hand-port (the interpreter dev iteration was the Rust crate API; `jet check` reports the same front-end problems)
+fixture: front_end_errors_surface_in_dev_iteration.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check jet_dev_broken.jet
+exit: nonzero
+stderr: ~ "Error [" # original predicate: problems are non-empty
+stderr: !~ "Warning" # original predicate: every problem has Error severity

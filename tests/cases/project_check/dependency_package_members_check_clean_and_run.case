@@ -1,0 +1,17 @@
+# tests/project_check.rs::dependency_package_members_check_clean_and_run at tests/project_check.rs:426; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: dependency_package_members_check_clean_and_run.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check .
+cwd: {work}/dependency_members/app
+env: JET_RECEIPT_BYPASS=1
+exit: 0
+stdout+stderr: !~ "Warning" # original predicate
+stdout+stderr: !~ "Error" # original predicate
+stdout+stderr: !~ "internal" # original predicate
+step: jet run
+cwd: {work}/dependency_members/app
+env: JET_RECEIPT_BYPASS=1
+exit: 0
+stdout: = dependency_package_members_check_clean_and_run.out

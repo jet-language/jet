@@ -1,0 +1,16 @@
+// core-conformance: core.files.data.read
+use {
+    data: core.data
+    files: core.files
+    files_data: core.files.data
+    testing: core.testing
+}
+
+run: fn() {
+    root: testing.temp_dir("files-data-read")
+    path: Path.from(root).join("rows.csv").to_string()
+    files.write(path, "value\n1\n") ?? panic("fixture")
+    loader := data.file<String>(path, "csv", data.DataLimits.safe()) ?? panic("loader")
+    files_data.read(loader) ?? panic("read")
+    print(data.snapshot(loader).is_ok())
+}

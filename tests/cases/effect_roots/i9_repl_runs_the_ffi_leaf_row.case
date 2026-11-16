@@ -1,0 +1,10 @@
+# Original tests/effect_roots.rs:183-187; original inputs and exact public subclaims.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD.
+fixture: i9_repl_runs_the_ffi_leaf_row.fixture
+# Preload source from main.jet; stdin contains only :run/:quit, so ffi leaf cannot match cooked input echo.
+step: jet repl main.jet
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: i9_repl_runs_the_ffi_leaf_row.fixture/input.txt
+exit: any # original library transcript did not assert process exit
+stdout+stderr: ~ "ffi leaf" # original transcript.contains, no startup/prompt/turn overlap

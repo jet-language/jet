@@ -1,0 +1,7 @@
+// A dependency upgrade that does more: this package writes no effect rows and
+// no grants. Jet infers what each function does, and `.jet/lock` records the
+// effect row of each dependency, so when an upgrade makes `greeter` read
+// files, `jet build --locked` refuses it and names the call path to the read.
+use greeter
+
+run: fn() { print(greeter.greet()) }

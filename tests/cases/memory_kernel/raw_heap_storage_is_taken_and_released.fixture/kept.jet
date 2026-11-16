@@ -1,0 +1,13 @@
+use core.mem
+
+run: fn() {
+    #Unsafe("a copy of the pointer is read after its block is released, so the sentry stops the read") {
+        if mem.alloc_raw(8, 8) == .Val(bytes) {
+            kept: bytes.cast<Int>()
+            mem.volatile_write(kept, 5)
+            print(kept.*)
+            mem.free_raw(bytes)
+            print(kept.*)
+        }
+    }
+}

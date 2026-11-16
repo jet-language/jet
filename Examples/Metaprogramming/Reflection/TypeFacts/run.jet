@@ -1,0 +1,94 @@
+// A TypeInfo lists the associated constants its traits give, with their
+// values; the generic bindings of a type named with its arguments; and, for
+// a number type, its signedness and width in bits. A marker body, a comptime
+// constant, ordinary code and fn build read them the same way. `Square`
+// gives `sides` and leaves `label` to the trait's default. `Pair` named
+// alone binds nothing, and a type that is not a number has no `numeric`.
+Shape: trait {
+    sides: Int
+    label: String{"shape"}
+    area: fn(self) -> Float
+}
+
+#Facts
+Square: struct {
+    side: Float
+
+    impl Shape {
+        sides: 4
+
+        area: fn(self) -> Float { self.side * self.side }
+    }
+}
+
+Pair: struct<A, B> {
+    first: A
+    second: B
+}
+
+Meters: distinct I32
+
+Holder: struct {}
+
+// The marker-body rung reads the constants of the type it marks.
+Facts: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            sides: target.reflect().constants[0]
+            label: target.reflect().constants[1]
+            seen: "{sides.trait_name}.{sides.name}: {sides.type.name} = {sides.value ?? "?"}, {label.trait_name}.{label.name}: {label.type.name} = {label.value ?? "?"}"
+            impl Holder {
+                from_marker: fn() -> String { #{seen} }
+            }
+        }
+    }
+}
+
+constants: fn(info: TypeInfo) -> String {
+    (loop constant in info.constants -> "{constant.trait_name}.{constant.name}: {constant.type.name} = {constant.value ?? "?"}").join(", ")
+}
+
+bindings: fn(info: TypeInfo) -> String {
+    if info.generic_bindings.len() == 0 -> return "none"
+    (loop binding in info.generic_bindings -> "{binding.name} = {binding.type.name}").join(", ")
+}
+
+numeric: fn(info: TypeInfo) -> String {
+    if info.numeric == {
+        Val(form) -> "signed={form.signed} bits={form.bits} float={form.is_float}"
+        None -> "none"
+    }
+}
+
+CONSTANTS: #run constants(Square.reflect())
+
+BINDINGS: #run bindings(Pair<Int, String>.reflect())
+
+NUMERIC: #run numeric(I32.reflect())
+
+build: fn(b: Build) {
+    loop info in b.program.types() {
+        if info.name == "Square" -> b.contribute("constants", constants(info))
+        if info.name == "Meters" -> b.contribute("numeric", numeric(info))
+    }
+    b.contribute("bindings", bindings(Pair<Int, String>.reflect()))
+}
+
+run: fn() {
+    print("constants marker:   {Holder.from_marker()}")
+    print("constants comptime: {CONSTANTS}")
+    print("constants code:     {constants(Square.reflect())}")
+    print("constants build:    {#build.settings.constants}")
+    print("bindings comptime:  {BINDINGS}")
+    print("bindings code:      {bindings(Pair<Int, String>.reflect())}")
+    print("bindings build:     {#build.settings.bindings}")
+    print("bindings of Pair:   {bindings(Pair.reflect())}")
+    print("Pair<Int, String>.first: {Pair<Int, String>.reflect().fields[0].type.name}")
+    print("I32:    {NUMERIC}")
+    print("U8:     {numeric(U8.reflect())}")
+    print("F32:    {numeric(F32.reflect())}")
+    print("Meters: {numeric(Meters.reflect())} (build: {#build.settings.numeric})")
+    print("Square: {numeric(Square.reflect())}")
+}

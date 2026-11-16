@@ -1,0 +1,16 @@
+# PORT tests/repl.rs:1483-1512; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_declared_types_survive_empty_and_absent_values.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_declared_types_survive_empty_and_absent_values.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout: !~ "error [" # original predicate
+stderr: !~ "error [" # original predicate
+stdout|stderr: ~ "names : [String]" # original predicate
+stdout|stderr: ~ "missing : String?" # original predicate
+stdout|stderr: ~ "0 : Int" # original predicate
+stdout|stderr: ~ "\"fallback\" : String" # original predicate

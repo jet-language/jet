@@ -1,0 +1,10 @@
+# Port of tests/cli_parts/budget.rs:687-719.
+# PENDING-SAME-HEAD: no runtime reference run.
+# PENDING-GRAMMAR(batch-four): pending predicate and step forms remain explicit.
+fixture: fixtures/imported_report
+copy: src/entry.source src/run.jet
+step: jet budget check --annotations github
+exit: 1
+stderr: ~ " --> src/perf_defs.jet:2:15" # original predicate
+stderr: ~ "::error file=src/perf_defs.jet,line=2,col=15,title=Jet E2907::" # original predicate
+file: .jet/perf/reports first ~ "\"source\":\"src/perf_defs.jet:2\"" # original predicate

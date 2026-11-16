@@ -1,0 +1,17 @@
+Warning [jet.TolerantFormDecode]: `form_decode` keeps a broken escape as written and turns invalid UTF-8 into U+FFFD.
+  --> tests/ui_lint/tolerant_form_decode.jet:7:51
+    |
+  7 | city: fn(body: String) -> String { query_get(http.form_decode(body), "city") ?? "" }
+    |                                                   ^^^^^^^^^^^
+ Why: The tolerant decoder follows the browser standard, so two different inputs can decode to the same value; code that picks a file or an account from that value must refuse bad input instead.
+ Fix: If the value names a file or an account, call `form_decode_strict` and handle its `FormDecodeError`; otherwise keep this call. `jet fix --all` writes the strict call.
+More: jet-lang.dev/e/L0208
+
+Warning [jet.TolerantFormDecode]: `query_decode` keeps a broken escape as written and turns invalid UTF-8 into U+FFFD.
+  --> tests/ui_lint/tolerant_form_decode.jet:9:53
+    |
+  9 | page: fn(target: String) -> String { query_get(http.query_decode(target), "page") ?? "1" }
+    |                                                     ^^^^^^^^^^^^
+ Why: The tolerant decoder follows the browser standard, so two different inputs can decode to the same value; code that picks a file or an account from that value must refuse bad input instead.
+ Fix: If the value names a file or an account, call `query_decode_strict` and handle its `FormDecodeError`; otherwise keep this call. `jet fix --all` writes the strict call.
+More: jet-lang.dev/e/L0208

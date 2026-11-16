@@ -1,0 +1,10 @@
+# A handler that decodes its body with `request.json<T>()` declares that body
+# in its route contract whether the decode propagates its failure or answers
+# it with `?? return ...`: both operations in web.openapi carry a
+# requestBody with the decoded type's fields.
+fixture: openapi_request_body_survives_a_decode_fallback.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run openapi_body_fallback.jet
+exit: 0
+stdout: = "true\ntrue\n" # the propagating decode, then the decode with a fallback

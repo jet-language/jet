@@ -1,0 +1,16 @@
+// `\q` is no escape of quoted text, so a function body that is quoted text
+// right after its return type's name is E0001 after every return-type form,
+// with or without an effect row, exactly as after `-> String`. Text after
+// `Name {` or `[U8] {` could also be a typed head's body, so the parser picks
+// its reading and reports its E0001 once the file lexes.
+
+unknown_plain: fn() -> String { "\q41" }
+unknown_empty_row: fn() -[]> String { "\q41" }
+unknown_one_effect: fn() -[IO]> String { "\q41" }
+unknown_effects: fn() -[IO, FS]> String { "\q41" }
+unknown_generic_fn: fn<T>(x: T) -[IO]> String { "\q41" }
+unknown_bytes: fn() -[IO]> [U8] { "\q41".bytes() }
+
+run: fn() {
+    print(unknown_plain())
+}

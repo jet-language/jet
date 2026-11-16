@@ -1,0 +1,89 @@
+use {
+    core: core
+    storage: core.browser.storage
+    local_storage: core.browser.storage.local
+}
+
+// The shipped process-default store is separate from local storage. Web is
+// registered-unsupported, not a tab store.
+SessionStorage: struct {
+    entries: [String:String]
+}
+
+init_session_storage: fn() -> Shared<SessionStorage> Never! {
+    Shared{SessionStorage{entries: [String:String]{}}}
+}
+
+get: fn(key: String) -[Browser]> String? Never! {
+    if storage.world_entries("core.browser.storage.session") == .Val(entries) {
+        return entries.get(key)
+    }
+    state: core.mem.__process_shared(init_session_storage)
+    guard: state.guard_read()
+    guard.value.entries.get(key)
+}
+
+set: fn(key: String, value: String) Never! -[Browser]> {
+    if storage.world_set("core.browser.storage.session", key, value) {
+        return
+    }
+    state: core.mem.__process_shared(init_session_storage)
+    guard := state.guard_edit()
+    _: guard.value.entries.add(key.copy(), value.copy())
+}
+
+remove: fn(key: String) Never! -[Browser]> {
+    if storage.world_remove("core.browser.storage.session", key) {
+        return
+    }
+    state: core.mem.__process_shared(init_session_storage)
+    guard := state.guard_edit()
+    _: guard.value.entries.remove(key)
+}
+
+clear: fn() Never! -[Browser]> {
+    if storage.world_clear("core.browser.storage.session") {
+        return
+    }
+    state: core.mem.__process_shared(init_session_storage)
+    guard := state.guard_edit()
+    guard.value.entries.clear()
+}
+
+get_or: fn(key: String, fallback: String) -> String Never! { get(key) ?? fallback }
+
+has: fn(key: String) -> Bool Never! { get(key) != None }
+
+test_helper_effects: fn() Never! -[Browser]> {
+    key: "Core.browser.storage.session.helper.effects"
+    remove(key)
+    assert_eq(get_or(key, "fallback"), "fallback")
+    assert_eq(has(key), false)
+}
+
+#Test("session helper calls fit the shipped Browser effect row") {
+    test_helper_effects()
+}
+
+#Test("session storage preserves miss, replacement and removal") {
+    key: "Core.browser.storage.session.contract"
+    remove(key)
+    assert_eq(get(key), None)
+    set(key, "first")
+    set(key, "second")
+    assert_eq(get(key), Val("second"))
+    remove(key)
+    assert_eq(get(key), None)
+}
+
+#Test("session clear removes all session entries without clearing local") {
+    key: "Core.browser.storage.clear"
+    local_storage.set(key, "local")
+    set(key, "session")
+    set("", "empty key")
+    clear()
+    assert_eq(get(key), None)
+    assert_eq(get(""), None)
+    assert_eq(local_storage.get(key), Val("local"))
+    local_storage.remove(key)
+}

@@ -1,0 +1,37 @@
+// A typed expression tree refuses an Int node where a Bool is required, in
+// both encodings of Examples/Metaprogramming/Generics/TypedAST.jet: one enum
+// per result type, and a phantom-typed `Expr<T>` over one untyped node enum.
+IntExpr: enum {
+    Lit(Int)
+    Add(a: IntExpr, b: IntExpr)
+    If(c: BoolExpr, t: IntExpr, e: IntExpr)
+}
+
+BoolExpr: enum {
+    Lit(Bool)
+    Eq(a: IntExpr, b: IntExpr)
+    If(c: BoolExpr, t: BoolExpr, e: BoolExpr)
+}
+
+Node: enum {
+    ILit(Int)
+    BLit(Bool)
+    If(c: Node, t: Node, e: Node)
+}
+
+Expr: struct<T> {
+    node: Node
+    #Codable(.Skip) marker: T?
+}
+
+int_lit: fn(v: Int) -> Expr<Int> { {node: Node.ILit(v), marker: None} }
+
+cond: fn<T>(c: Expr<Bool>, t: Expr<T>, e: Expr<T>) -> Expr<T> {
+    {node: Node.If{c: c.node, t: t.node, e: e.node}, marker: None}
+}
+
+run: fn() {
+    per_type: IntExpr.If{c: IntExpr.Lit(1), t: IntExpr.Lit(10), e: IntExpr.Lit(0)}
+    phantom: cond(int_lit(1), int_lit(10), int_lit(0))
+    print("{per_type} {phantom.node}")
+}

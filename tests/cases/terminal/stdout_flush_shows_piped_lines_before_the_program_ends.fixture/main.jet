@@ -1,0 +1,16 @@
+use {
+    term: core.term
+    time: core.time
+}
+
+// A piped stdout is buffered, so a line reaches the pipe at a flush. Two
+// lines go out before `flush()` and one after it, then the program sleeps past
+// the step's kill, so no exit drains the buffer: only the flushed lines show.
+run: fn() {
+    print("a printed line before the flush")
+    out := term.stdout()
+    out.write("a stdout write before the flush\n") ?? return
+    out.flush() ?? return
+    print("a printed line after the flush")
+    time.sleep(5s)
+}

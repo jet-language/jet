@@ -1,0 +1,13 @@
+use files: core.files
+
+// A mapped file's computed `path` and its `bytes` field read on every tier:
+// the bytes are the whole mapping, the same length `len()` reports.
+run: fn() IOError! -[FS, IO]> {
+    m: files.map("data.txt")
+    print(m.path)
+    bytes: m.bytes
+    print(bytes.len())
+    print(bytes[0])
+    print(bytes[bytes.len() - 1])
+    print(bytes.len() == m.len())
+}

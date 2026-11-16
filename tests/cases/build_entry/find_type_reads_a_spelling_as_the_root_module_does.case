@@ -1,0 +1,17 @@
+# `meta.find_type(text)` gives the `TypeId` of the one type `text` spells,
+# each type it names read as the program's root module reads it, or as a
+# struct this build already made with `meta.add_struct`. The build checks
+# that the spelling of each reflected field (a type of the root, an
+# imported module's type alone and in a list, a builtin) gives that very
+# field's `TypeId`, that a made struct is found by its name, and that
+# text naming no type, or more than one type, gives None. A struct the
+# build makes from found types runs.
+fixture: find_type_reads_a_spelling_as_the_root_module_does.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build found/main.jet --write-generated=on
+exit: 0
+file: found/.jet/generated/main/holder.jet ~ "    made: [Made]\n" # a found struct is written as it was spelled
+step: {work}/found/.jet/build/app
+exit: 0
+stdout: = "4\n5\n"

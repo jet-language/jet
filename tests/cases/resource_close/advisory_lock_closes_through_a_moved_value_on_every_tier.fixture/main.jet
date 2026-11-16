@@ -1,0 +1,19 @@
+use files: core.files
+
+lock_here: fn() -[FS]> AdvisoryLock IOError! {
+    directory: files.open_directory(".")
+    if directory.lock() == {
+        .Ok(lock) -> return Ok(lock)
+        .Err(e) -> return Err(e)
+    }
+}
+
+run: fn() IOError! -[FS, IO]> {
+    lock: lock_here()
+    print("locked")
+    close(lock.move())
+    print("unlocked")
+    again: lock_here()
+    print("locked again")
+    close(again.move())
+}

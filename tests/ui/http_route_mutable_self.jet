@@ -1,0 +1,18 @@
+use {
+    web: core.web
+    server: core.http.server
+}
+
+Jokes: struct {
+    count: Int
+
+    #Server.Get("/jokes") joke: fn(&self) -> HTTPResponse HTTPError! {
+        self.count += 1
+        Ok(server.response(200, "joke"))
+    }
+}
+
+run: fn() {
+    mux: web.app()
+    mux.mount(Jokes{count: 0})
+}

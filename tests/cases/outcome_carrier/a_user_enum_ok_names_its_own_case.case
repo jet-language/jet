@@ -1,0 +1,13 @@
+# A user enum declaring `Ok`/`Err` cases is matched by its own cases when a call returns it; a fallible call's carrier is still matched by `.Ok`/`.Err`, also when the callee declares its failure and its success enum declares those cases.
+fixture: a_user_enum_ok_names_its_own_case.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "4\n0\nok 5\nerr none\n6\nnone\nnot an error\nhalf 4\nodd\nnegative\n"
+stderr: empty
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "4\n0\nok 5\nerr none\n6\nnone\nnot an error\nhalf 4\nodd\nnegative\n"
+stderr: empty

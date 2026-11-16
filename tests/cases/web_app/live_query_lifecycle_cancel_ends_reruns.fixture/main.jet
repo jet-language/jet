@@ -1,0 +1,105 @@
+use {
+    app
+    db: core.db
+    core.reactive.loadable.[Loadable]
+    net: core.net
+    ws: core.net.ws
+    server: core.http.server
+    web: core.web
+}
+
+titles: fn(state: Loadable<[[String:db.DBValue]], db.DBError>) -> String {
+    if state == {
+        .Loaded(rows) -> {
+            out := [String]{}
+            loop row in rows -> out.push(db.row_text(row, "title") ?? "?")
+            "[{out.join(",")}]"
+        }
+        .Failed(reason) -> "failed {reason.message()}"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+insert: fn(scope: db.DBScope, title: String) {
+    owner: "alice"
+    _: scope.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}) ?? panic("insert")
+}
+
+// The registry's invalidations and stored-result changes, from live_stats.
+counts: fn() -> String {
+    stats: app.live_stats()
+    invalidations: stats.split("invalidations=").to_list()[1].split(",").to_list()[0]
+    changes: stats.split("changes=").to_list()[1].split(",").to_list()[0]
+    "invalidations={invalidations} changes={changes}"
+}
+
+// A subscription: the server side of a device's connection binds the
+// caller's query, watches it, and answers each text the device sends with
+// what it reads; it ends when the device closes the connection.
+subscription: fn(req: HTTPRequest, scope: db.DBScope) -> HTTPResponse HTTPError! {
+    sock: ws.upgrade(req) ?? panic("upgrade")
+    mine: scope.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live")
+    app.watch(sock, mine)
+    sock.send_text("ready") ?? panic("ready")
+    loop {
+        message: sock.recv() ?? break
+        if message.is_close() -> break
+        if message.is_text() -> sock.send_text(titles(app.state(mine))) ?? break
+    }
+    Ok(server.response(500, "unused"))
+}
+
+// The next text a device receives that is not a live event.
+answer: fn(device: WsConn) -> String {
+    loop {
+        message: device.recv() ?? panic("device recv")
+        if !message.is_text() -> next
+        text: message.text() ?? panic("text")
+        if !text.starts_with("{{") -> return text
+    }
+}
+
+// Waits for the next live event a device receives.
+event: fn(device: WsConn) -> String {
+    loop {
+        message: device.recv() ?? panic("device recv")
+        if !message.is_text() -> next
+        text: message.text() ?? panic("text")
+        if text.starts_with("{{") -> return "an event"
+    }
+}
+
+run: fn() {
+    conn: db.open_memory()
+    policy: db.policy("tasks", "owner == user") ?? panic("policy")
+    alice: conn.with_policy(policy, "alice")
+    _: db.migrate(alice, "tasks-v1", [db.SQL]{SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}}) ?? panic("migrate")
+    insert(alice, "one")
+    mine: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live")
+    print("bound {titles(app.state(mine))}, {counts()}")
+
+    // A device subscribes, and each write's event has it read again.
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr: listener.local_addr() ?? panic("address")
+    mux: web.app()
+    mux.get("/live", fn(req: HTTPRequest) { subscription(req, alice) })
+    serving: task { mux.serve_once(listener) ?? panic("serve") }
+    device: ws.connect("ws://{addr}/live") ?? panic("connect")
+    print("subscribed: {answer(device)}")
+    insert(alice, "two")
+    print("a write sends the subscriber {event(device)}")
+    device.send_text("read") ?? panic("read")
+    print("it reads again {answer(device)}, {counts()}")
+
+    // Cancelling the subscription ends its re-runs: the writes after it reach
+    // no one and run nothing, so the stored result stays where it was.
+    device.close(1000, "") ?? panic("close")
+    serving.join() ?? panic("server join")
+    insert(alice, "three")
+    insert(alice, "four")
+    insert(alice, "five")
+    print("three writes after cancelling, {counts()}")
+
+    // The next read re-runs the query once for all the writes it missed.
+    print("next read {titles(app.state(mine))}, {counts()}")
+}

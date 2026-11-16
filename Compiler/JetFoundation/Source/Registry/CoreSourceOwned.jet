@@ -1,0 +1,34 @@
+// One Core source the compiler loads: a Core.rows `source_module` row, a
+// private part (Compiler/Prelude/CoreSourceParts.tsv) or a runtime unit
+// (`Core/<area>/Runtime/**/<Unit>.jet`).
+CoreSourceOwnedRow: struct {
+    module_name: String
+    alias: String
+    path: String
+    owner: String
+    owned_members: [String]
+    type_exports: [String]
+    impl_types: [String]
+    runtime: Bool
+}
+
+// A nominal is source-owned only when this registration row and a loaded
+// source declaration agree. Opaque impl ownership uses the module's row.
+// Core.rows's source rows in order, then the parts, then the runtime units;
+// a row's type exports are its module's Core.rows types.
+CORE_SOURCE_OWNED_ROWS: #run core_source_owned_rows(CORE_DECLARATIONS)
+
+core_source_owned_rows: fn(declared: CoreDeclarations) -> [CoreSourceOwnedRow] Never! {
+    rows := [CoreSourceOwnedRow]{}
+    loop group in ([[CoreDeclarationSource]]{declared.source_rows, declared.parts, declared.runtime}) {
+        loop row in group {
+            owner: core_declarations_module(declared.modules, row.module_name)
+            types := [String]{}
+            if owner == .Val(found) {
+                loop leaf in found.types -> types.push(leaf.name.copy())
+            }
+            rows.push(CoreSourceOwnedRow{module_name: row.module_name.copy(), alias: row.alias.copy(), path: row.path.copy(), owner: row.owner.copy(), owned_members: row.members.copy(), type_exports: types, impl_types: row.impl_types.copy(), runtime: row.runtime})
+        }
+    }
+    rows
+}

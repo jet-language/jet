@@ -1,0 +1,26 @@
+# A false `#Post` is disproved with values that satisfy the `#Pre`, checked
+# before they are shown. The run fails with the ratified E2950 render
+# (proof-replay-decisions.md:597-603).
+fixture: prove_solver_counterexample_renders_e2950.fixture
+step: jet prove bad_fee.jet --lens solver
+limit: time=120
+exit: 1
+stderr: = ../../cli/prove_solver_counterexample_e2950.txt
+stdout: ~ "SOLVER   proved 0; disproved 1; unknown 0; unavailable 0" # the disproof is counted
+step: jet prove bad_fee.jet --lens solver --json
+exit: 1
+stdout: ~ "\"counterexample\":[{\"name\":\"cents\",\"value\":\"1\"},{\"name\":\"result\",\"value\":\"1\"}]" # the checked values, by name
+stdout: ~ "\"obligationKind\":\"function_postcondition\"" # one obligation per #Post clause
+stdout: ~ "\"line\":1,\"path\":\"bad_fee.jet\"},\"state\":\"checked\"" # the row is at its #Post clause
+stdout: ~ "\"code\":\"E2950\"" # the diagnostic rides in the report
+step: jet prove bad_fee.jet --lens all --lens solver
+exit: 1
+stderr: = ../../cli/prove_solver_counterexample_e2950.txt
+stdout: ~ "LENSES   all, solver" # all plus solver is the complete view
+step: jet prove bad_fee.jet --lens tests --lens solver
+exit: 1
+stderr: = ../../cli/prove_solver_counterexample_e2950.txt
+step: jet prove bad_fee.jet --lens all
+exit: 0
+stderr: empty
+stdout: !~ "SOLVER" # all never runs the solver

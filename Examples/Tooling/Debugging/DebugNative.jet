@@ -1,0 +1,36 @@
+package: {
+    name: "tooling_debug_native"
+    version: "0.1.0"
+    authority: { allow: [FS, FS.Read, IO, Mem.Alloc] }
+}
+
+// `jet debug` builds the real program's native O0 image with DWARF debug
+// information and steps it under LLDB, including native-only Core modules.
+//
+// Run it normally:              jet run Examples/Tooling/Debugging/DebugNative.jet
+// Step through it (native):     jet debug Examples/Tooling/Debugging/DebugNative.jet
+// Stop first in word_count:     jet debug Examples/Tooling/Debugging/DebugNative.jet --break DebugNative.jet:25
+// From an editor (VS Code):     jet debug --dap Examples/Tooling/Debugging/DebugNative.jet
+//
+// `use core.files` touches the host file system. At the `(Jet)` prompt
+// (step/next/finish/continue/break/print/locals/backtrace/quit) every stop
+// shows the Jet source line, the Jet frames and the locals as Jet values;
+// `locals` lists each with its Jet type. `--dap` speaks the Debug Adapter
+// Protocol over stdio to the same session. `--raw-frames` (the native frames
+// as LLDB sees them) is not ported yet; `jet debug` says so when given it.
+use fs: core.files
+
+word_count: fn(text: String) -> Int {
+    total := 0
+    loop word in text.split(" ") -> total += 1
+    return total
+}
+
+run: fn() {
+    path: "/tmp/jet_189_debug_native_notes.txt"
+    fs.write(path, "jet debug steps the full feature set") ?? panic("write failed")
+    text: fs.read(path) ?? ""
+    n: word_count(text)
+    print("that note has {n} words")
+    fs.remove(path) ?? panic("remove failed")
+}

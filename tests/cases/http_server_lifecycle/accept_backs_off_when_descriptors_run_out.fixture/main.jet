@@ -1,0 +1,76 @@
+// The process runs out of descriptors while a connection is being served
+// and another waits in the listen queue: accept fails with EMFILE, the
+// server backs off instead of stopping, the served connection goes on, and
+// once descriptors are free again the waiting connection is answered.
+package: {
+    name: "accept_backs_off"
+    authority: { allow: [Env, Exec, FS.Read, Net, Time] }
+}
+
+use {
+    files: core.files
+    server: core.http.server
+    net: core.net
+    sys: core.sys
+    time: core.time
+    web: core.web
+}
+
+crlf: fn() -> String { "\r\n" }
+
+status_of: fn(stream: TCPStream) -> String {
+    parts := [String]{}
+    loop {
+        part: stream.read(8192) ?? panic("response read")
+        if part == "" -> break
+        parts.push(part)
+    }
+    line: parts.join("").split_once(crlf()) ?? panic("response framing")
+    line.before
+}
+
+finish: fn(stream: TCPStream) -> String {
+    stream.write_bytes("Host: test{crlf()}{crlf()}".bytes()) ?? panic("request write")
+    status_of(stream)
+}
+
+// Closes the last filler when this call returns: popped in `run`, it would
+// stay open until `run` ends, so the waiting connect would find no descriptor.
+close_one: fn(fillers: &[FileReader]) { _: fillers.pop() }
+
+run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
+    app: web.app().get("/hi", fn() { Ok(server.response(200, "hi")) })
+    listening: app.bind("127.0.0.1:0")
+    addr: listening.local_addr()
+    serving: task {
+        listening.serve() ?? panic("serve")
+    }
+    active: net.tcp_connect(addr)
+    active.write_bytes("GET /hi HTTP/1.1{crlf()}".bytes())
+    time.sleep(100ms)
+
+    limit: sys.open_file_limit()
+    held: (files.listdir("/proc/self/fd") ?? panic("listing descriptors")).len()
+    sys.set_open_file_limit(Val(held + 32), limit.hard)
+    fillers := [FileReader]{}
+    loop {
+        if files.open("/dev/null") == {
+            .Ok(reader) -> fillers.push(reader)
+            .Err(_) -> break
+        }
+    }
+    // One descriptor is closed now, for the waiting connection; the next
+    // accept then finds none.
+    close_one(fillers)
+    waiting: net.tcp_connect(addr)
+    waiting.write_bytes("GET /hi HTTP/1.1{crlf()}".bytes())
+    time.sleep(300ms)
+    print("served while out of descriptors: {finish(active)}")
+
+    fillers.clear()
+    sys.set_open_file_limit(limit.soft, limit.hard)
+    print("answered once descriptors are free: {finish(waiting)}")
+    report: listening.shutdown(100ms)
+    serving.join()
+    print("accepted {report.accepted} completed {report.completed}")
+}

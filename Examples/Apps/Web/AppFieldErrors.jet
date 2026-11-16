@@ -1,0 +1,64 @@
+// A service method reports the rules its argument can't check by itself as
+// field errors: `app.field_error(at:, reason:)` names the field by its path
+// in the argument, which the compiler checks against the argument's type
+// (`at: "asignee"` would not compile). The Crew refuses an assignee who is
+// not in the crew and a step with no title, each at its own field.
+use app
+
+// One step of a task.
+Step: struct {
+    title: String
+}
+
+// A new task, as a client sends it.
+TaskDraft: struct {
+    title: String
+    assignee: String?
+    steps: [Step]
+}
+
+#Error
+TaskError: enum {
+    Invalid([FieldError])
+}
+
+Crew: struct {
+    members: [String]
+
+    // A signed-in caller adds a task: its assignee must be in the crew, and
+    // each of its steps needs a title.
+    #App.SignedIn add_task: fn(self, draft: TaskDraft) -> Int TaskError! {
+        errors := [FieldError]{}
+        if draft.assignee == .Val(who) {
+            if !self.members.contains(who) {
+                errors.push(app.field_error(at: "assignee", reason: "Pick someone in this project."))
+            }
+        }
+        loop (index, step) in draft.steps {
+            if step.title == "" {
+                errors.push(app.field_error(at: "steps[{index}].title", reason: "Give the step a title."))
+            }
+        }
+        if errors.len() > 0 -> return Err(TaskError.Invalid(errors))
+        Ok(draft.steps.len())
+    }
+}
+
+// What one add answers: its step count, or each field error beside its path.
+add: fn(crew: Crew, draft: TaskDraft) -> String {
+    steps: crew.add_task(draft) ?? {
+        return if err == {
+            .Invalid(errors) -> {
+                shown: loop field in errors -> "  {field.path}: {field.reason}"
+                "refused:\n{shown.join("\n")}"
+            }
+        }
+    }
+    "added with {steps} steps"
+}
+
+run: fn() {
+    crew: Crew{members: [String]{"ada", "lin"}}
+    print(add(crew, TaskDraft{title: "Ship", assignee: Val("ada"), steps: [Step]{{title: "Build"}, {title: "Test"}}}))
+    print(add(crew, TaskDraft{title: "Ship", assignee: Val("bob"), steps: [Step]{{title: "Build"}, {title: ""}}}))
+}

@@ -1,0 +1,84 @@
+use {
+    app
+    core.reactive.loadable.[Loadable]
+}
+
+TaskID: struct {
+    value: Int
+}
+
+#Error
+TaskError: enum {
+    NotFound
+    Unreachable(String)
+}
+
+// A call through an `app.Remote<Crew>` can fail on the way.
+impl app.CallError -> TaskError {
+    if self == {
+        .Unreachable(why) -> TaskError.Unreachable(why)
+        .Invalid(errors) -> TaskError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> TaskError.Unreachable("signed out")
+        .UpdateRequired -> TaskError.Unreachable("update required")
+    }
+}
+
+Crew: struct {
+    name: String
+
+    // Any caller looks a task up.
+    #App.Public lookup: fn(self, id: TaskID) -> Int TaskError! {
+        if id.value < 0 -> return Err(TaskError.NotFound)
+        Ok(id.value + 1)
+    }
+
+    // Any caller counts a project's tasks.
+    #App.Public count: fn(self, project: String, done: Bool) -> Int TaskError! {
+        if project == "" -> return Err(TaskError.NotFound)
+        Ok(if done -> 2 else -> 5)
+    }
+}
+
+shown: fn(state: Loadable<Int, TaskError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(reason) -> if reason == {
+            .NotFound -> "failed: not found"
+            .Unreachable(why) -> "failed: unreachable: {why}"
+        }
+        .Idle | .Loading -> "pending"
+    }
+}
+
+// A view's binding of one task through the Remote it is given.
+task_of: fn(crew: app.Remote<Crew>, id: TaskID) -> app.Live<Int, TaskError> {
+    app.live(fn() { crew.lookup(id) })
+}
+
+// The same method with literal arguments, and one with two arguments.
+literal_task: fn(crew: app.Remote<Crew>) -> app.Live<Int, TaskError> {
+    app.live(fn() { crew.lookup(TaskID{value: 41}) })
+}
+
+open_count: fn(crew: app.Remote<Crew>, project: String) -> app.Live<Int, TaskError> {
+    app.live(fn() { crew.count(project, false) })
+}
+
+// Each binding is one call of a Crew endpoint, keyed by the method and its
+// arguments: the same call shares a binding, and another argument or another
+// method has its own.
+run: fn() {
+    crew: app.remote(Crew{name: "crew"})
+    task: task_of(crew, TaskID{value: 41})
+    print("task {shown(app.state(task))}")
+    again: literal_task(crew)
+    print("the same call shares its binding: {again.id == task.id}")
+    missing: task_of(crew, TaskID{value: -1})
+    print("missing {shown(app.state(missing))}")
+    print("another argument has its own: {missing.id != task.id}")
+    open: open_count(crew, "crewboard")
+    print("open {shown(app.state(open))}")
+    print("another method has its own: {open.id != task.id && open.id != missing.id}")
+    reopened: open_count(crew, "crewboard")
+    print("the same arguments share it: {reopened.id == open.id}")
+}

@@ -1,0 +1,51 @@
+// `#Codable(only: .Encode)` alone derives one direction.
+#Codable(only: .Encode)
+Receipt: struct {
+    total: Int
+    #Codable(.Skip) cache: Int
+    #Codable(.Flatten)
+    meta: Meta
+}
+
+#[Debug, Codable(only: .Decode)]
+Meta: struct {
+    tag: String
+}
+
+#[Codable, Rename(.Camel)]
+Both: struct { value: Int }
+
+#Codable(unknown: .Deny)
+Strict: struct { value: Int }
+
+#Codable(published)
+Account: struct { id: Int }
+
+#[Codable(published), Rename(.Camel)]
+Profile: struct { name: String }
+
+#Codable(tag: .Field("type"))
+Shape: enum { Circle(radius: Int), Dot }
+
+#Codable(tag: .None)
+Value: enum { Number(Int), Text(String) }
+
+#!Encode
+Secret: struct { bytes: [U8] }
+
+#[Comparable, Printable]
+TaskID: distinct Int
+
+UserID: distinct String
+
+#Codable(only: .Encode)
+Kept: struct { value: Int }
+
+#Test("a marker in a string keeps its quotes and its line escapes")
+quoted: fn() {
+    source: "#Codable(tag: .Field(\"kind\"))\nShape: enum \{ A, B \}\nID: distinct Int\n#Codable(published)\nRow: struct \{ id: ID \}"
+    print(source)
+}
+
+#Discriminant
+Broken: enum { A, B }

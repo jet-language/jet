@@ -1,0 +1,16 @@
+// The safe way to call native code is a typed binding: `extern rust` names a
+// crate and gives each imported function a Jet signature, so every call is
+// type-checked and needs no unsafe block. C libraries take the same path
+// through `#Import c.<lib>` (see NativeC).
+package: {
+    name: "lowlevel_ffi"
+    version: "0.1.0"
+    authority: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] }
+}
+
+extern rust "base64@0.22" {
+    b64encode: fn(s: String) -> String = "base64::encode"
+
+}
+
+run: fn() { print(b64encode("hi")) }

@@ -1,0 +1,89 @@
+// `jet perf run` (JetCli Cli/Perf/Session.jet): the program's CPU-time
+// samples. When JET_PERF_SAMPLES names a file, the observation start
+// (ObserveLive.jet jet_rt_observe_runtime_start_from_env) opens it and arms
+// the process's profiling timer (setitimer ITIMER_PROF), which sends SIGPROF
+// for each PERF_SAMPLES_INTERVAL_US of CPU time the process uses, to the
+// thread that was running. Each SIGPROF appends the program counter it
+// interrupted, less the image's load bias, as one little-endian word: a
+// link-time address in the image `jet run` writes beside the file, where the
+// image's location table names its function and line, as Linux perf names
+// the same image's samples. The handler allocates nothing and takes no lock:
+// it is one write of a stack word.
+
+// O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC.
+PERF_SAMPLES_OPEN: I64{525377}
+
+PERF_SAMPLES_SIGNAL: I64{27}
+
+// One sample per millisecond of CPU time.
+PERF_SAMPLES_INTERVAL_US: I64{1000}
+
+// The samples file, -1 until the start opens it, and the bias its addresses
+// are taken less.
+perf_samples_fd := I64{-1}
+
+perf_samples_bias := I64{0}
+
+// Start sampling when JET_PERF_SAMPLES names a file; once per process.
+perf_samples_start: fn() {
+    if (perf_samples_fd >= I64{0}) {
+        return
+    }
+    path: rt_env_get(env_name_jet_perf_samples())
+    if (path == I64{0}) {
+        return
+    }
+    fd := I64{-1}
+    if (rt_text_len(path) != I64{0}) {
+        name: fd_c_path(path)
+        fd = host_call(I64{2}, name, PERF_SAMPLES_OPEN, I64{384})
+        fd_c_path_drop(name, path)
+    }
+    jet_rt_string_drop(path)
+    if (fd < I64{0}) {
+        return
+    }
+    bias: alloc_check_bias(alloc_check_image())
+    #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
+        perf_samples_bias = bias
+        perf_samples_fd = fd
+    }
+    status := I64{0}
+    // sa_flags SA_SIGINFO | SA_RESTORER | SA_ONSTACK | SA_RESTART: the
+    // handler reads the interrupted context, runs on the thread's alternate
+    // signal stack where it has one, and an interrupted system call resumes.
+    #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
+        status = os_syscall_stack4_i64(I64{13}, PERF_SAMPLES_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
+    }
+    if (status >= I64{0}) {
+        // The itimerval: the interval, then the first expiry, each as
+        // seconds and microseconds; no old value is read back.
+        #Unsafe("setitimer borrows the four-word itimerval on the stack") {
+            status = os_syscall_stack4_i64(I64{38}, I64{2}, I64{0}, PERF_SAMPLES_INTERVAL_US, I64{0}, PERF_SAMPLES_INTERVAL_US, I64{0})
+        }
+    }
+    if (status < I64{0}) {
+        #Unsafe("no timer is armed, so no handler reads the descriptor") {
+            perf_samples_fd = I64{-1}
+        }
+        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    }
+}
+
+// Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
+rt_perf_samples_signal_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// The SIGPROF handler (SA_SIGINFO): the interrupted rip is ucontext_t's
+// mcontext gregs[16], at 168. A write the kernel refuses loses that one
+// sample; O_APPEND puts each word after the last.
+#Export(c) jet_rt_perf_samples_signal: fn(_signal: I64, _info: I64, context: I64) -> I64 {
+    fd: perf_samples_fd
+    if (fd < I64{0} || context == I64{0}) { return I64{0} }
+    pc: rt_text_word(wrapping(context + I64{168}))
+    #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
+        _ := os_write_word_i64(fd, wrapping(pc - perf_samples_bias), I64{8})
+    }
+    I64{0}
+}

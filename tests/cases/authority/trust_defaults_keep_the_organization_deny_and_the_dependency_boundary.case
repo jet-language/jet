@@ -1,0 +1,24 @@
+# Trusting by default (`trust: { default: allow }`) lifts no denial and widens
+# no dependency's limit. The package's own `deny` row holding under it is
+# build_entry/trust_default_keeps_the_package_deny.case; here:
+# - organization: the package allows Net and trusts by default, yet the
+#   organization policy's `authority: { deny: [Net] }` refuses its Net call
+#   (E0749 naming the policy file). Without the policy the same check passes.
+# - boundary: the root allows Net and trusts by default, yet its grant line
+#   gives the third-party `netprobe` only IO, so the dependency's Net call is
+#   outside its limit (E1220 naming the dependency).
+fixture: trust_defaults_keep_the_organization_deny_and_the_dependency_boundary.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step boundary: jet check boundary/main.jet
+exit: 1
+stderr: ~ E1220 # the dependency stays inside its grant line under the trust default
+stderr: ~ "`netprobe` function" # the dependency is named
+stderr: ~ "uses the `Net` effect, which its `authority.grants` line doesn't grant" # its effect is outside its grant line
+step open: jet check organization/run.jet
+exit: 0 # the package's own rows allow the Net call
+step organization: jet check organization/run.jet
+env: JET_ORG_UNSAFE_POLICY={work}/org-policy.jet
+exit: 1
+stderr: ~ E0749 # the organization's denial holds under the trust default
+stderr: ~ "`port_is_free` reaches the `Net` effect, which the organization policy `{work}/org-policy.jet` denies with `authority: { deny: [Net] }`" # the report names the organization policy

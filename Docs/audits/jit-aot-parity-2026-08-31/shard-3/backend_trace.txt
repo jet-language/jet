@@ -1,0 +1,56 @@
+# backend attribution (c727/c730)
+# resident_jit = native Cranelift; deopt_interp = tiered deopt to tier-0
+# run_tier_broken = AOT-green but the default jet run refuses (D-VERDICT-1254-1)
+# tier_divergent = both tiers ran and the named stream(s) disagree
+# parity = pure-interpreter + default tiered + optimized AOT identity
+# only when the row has no interpreter_refused: CODE detail
+basics/callbacks	aot_broken	AOT compile or run failed
+basics/functions	resident_jit
+basics/named_args	frontend_rejected	E0003: expected a call, binding, assignment, or `return`, found `{`
+basics/value_loop_search	resident_jit
+collections/card2308_int_map	resident_jit
+collections/iter_hook	aot_broken	AOT compile or run failed
+collections/queue	resident_jit	interpreter_refused: E2201
+comptime/comptime_block	resident_jit
+comptime/find	resident_jit
+concurrency/parallel_iter	resident_jit	interpreter_refused: E2201
+concurrency/shield_commit	resident_jit
+contracts/inline_contracts	deopt_interp
+crypto/vault_key_wrap	resident_jit
+effects/effect_declarations	resident_jit
+effects/move_no_uaf	resident_jit
+errors/discard_fallible	resident_jit
+errors/env_divisor_trap	expected_exit	golden expects non-zero exit
+functions/lambda_bare_params	resident_jit
+io/args_spec	resident_jit
+io/files	run_tier_broken	E1803
+io/os_stop_cleanup	run_tier_broken	E1803
+io/terminal	deopt_interp
+lowlevel/os_target_gating	deopt_interp
+math/floor_div	resident_jit	interpreter_refused: E2201
+math/power_operator	resident_jit
+memory/effect_denials	resident_jit
+memory/ref_field	resident_jit
+memory/unsafe_sentries_provenance	expected_exit	golden expects non-zero exit
+memory/unsafe_sentries_source_off	deopt_interp
+modules/selective_imports	run_tier_broken	E1803
+net/http_readiness	aot_broken	AOT compile or run failed
+net/tls_peer_identity	aot_broken	AOT compile or run failed
+patterns/refutable_test_bind	frontend_rejected	E2417: explicit failure domain `String (text)` is not an Error type; E0330: can't infer the enum type for `.Ok`; E2417: explicit failure domain `String (text)` is not an Error type; E0330: can't infer the enum type for `.Err`; E0305: pattern `Ok` doesn't match Int (a whole number); E0305: pattern `Ok` doesn't match Int (a whole number); E0409: `err` is not available after a pure pattern miss
+serde/csv_typed	aot_broken	AOT compile or run failed
+serde/decode_migration	aot_broken	AOT compile or run failed
+strings/slice_range	resident_jit
+text/duration_facts	resident_jit
+text/hex_base64	frontend_rejected	E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0305: pattern `Ok` doesn't match [U8]; E0305: pattern `Err` doesn't match [U8]
+text/unicode_17	resident_jit
+tooling/bench	resident_jit
+tooling/compute_ndarray	run_tier_broken	E1803
+tooling/data_schema	frontend_rejected	E0405: `?? return` can't return a value here
+tooling/para_map_crossover_bench	run_tier_broken	E0956
+tooling/sync_crdt	frontend_rejected	E0405: `?? return` can't return a value here
+types/capability_bundles	resident_jit
+types/external_methods	deopt_interp
+types/patchable	aot_broken	AOT compile or run failed
+types/unit_literals	resident_jit
+ui/ui_typed_style	run_tier_broken	E1803
+web/web_wasm_map	resident_jit

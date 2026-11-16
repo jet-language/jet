@@ -1,0 +1,31 @@
+snapshot: fn(source_revision: String, build_revision: String, body: String, signal_value: String, island_identity: String) -> WebModuleSwapSnapshot {
+    state: [WebModuleSwapStateFact]{
+        WebModuleSwapStateFact.Signal(WebSignalFact.new("count", "Int", WebStateValue.Text(signal_value))),
+        WebModuleSwapStateFact.Store(WebStoreFact.new("session", "Session-v1", WebStateValue.Text("store-value"))),
+        WebModuleSwapStateFact.QueryCache(WebQueryCacheFact.new("todos", "TodoList-v1", WebStateValue.Text("cached"))),
+        WebModuleSwapStateFact.FormDraft(WebFormDraftFact.new("profile", "ProfileForm-v1", WebStateValue.Text("dirty-draft"))),
+        WebModuleSwapStateFact.Scroll(WebScrollFact.new("main", "Scroll-v1", WebStateValue.Integer(I64{42}))),
+        WebModuleSwapStateFact.Focus(WebFocusFact.new("email", "Focus-v1", WebStateValue.Boolean(true))),
+        WebModuleSwapStateFact.Island(WebIslandFact.new("home", island_identity, "Island-v1", WebStateValue.Text("island-state")))
+    }
+    modules: [WebModuleFact]{WebModuleFact.new("app", "iface-1", body)}
+    WebModuleSwapSnapshot.new(WebModuleSwapIdentity.new("app", "/"), source_revision, build_revision, WebPageFact.new("/", "page-{build_revision}"), modules, state) ?? panic("snapshot")
+}
+
+#Test("web_module_swap_plan_refuses_without_a_checked_hot_swap_decision") {
+    before: snapshot("source-1", "build-1", "body-1", "7", "island-a")
+    after: snapshot("source-2", "build-2", "body-2", "0", "island-a")
+    refused: if WebModuleSwapPlan.from_hot_swap_decision(before, after) == {
+        .Ok(_) -> panic("expected the web module swap plan to refuse")
+        .Err(error) -> error
+    }
+    assert_eq(refused, WebModuleSwapError.Unavailable{feature: "checked hot-swap decision"})
+    assert("{refused}".contains("web module swap is not available"))
+}
+#Test("web_module_swap_state_keeps_the_committed_snapshot_without_a_plan") {
+    before: snapshot("source-1", "build-1", "body-1", "7", "island-a")
+    state: WebModuleSwapState.new(before) ?? panic("state")
+    assert_eq(state.phase(), WebModuleSwapPhase.Committed)
+    assert_eq(state.committed(), before)
+    assert_eq(state.active(), before)
+}

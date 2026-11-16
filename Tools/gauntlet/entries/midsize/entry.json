@@ -1,0 +1,32 @@
+{
+  "name": "midsize",
+  "mode": "tool",
+  "description": "The mid-size build-time workload generator midsize.mjs and its Jet twin midsize/run.jet (over the jet_midsize_units package's Midsize.jet), #5072 c7 and c20: write main.jet, main.go, main.zig and main.rs (90 units folded into one checksum line) into OUT_DIR, making the directory and its parents, and overwriting a stale workload while leaving other files alone; no OUT_DIR is a 64 refusal that writes nothing. Each writing case's check.jet states how much the program printed and every file in the case directory with its size and digest, so the four sources match byte for byte.",
+  "tool": {
+    "original": "Tools/perf/build-time/midsize.mjs",
+    "jet": "Tools/perf/build-time/midsize/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {
+        "args": ["out"],
+        "check": "check.jet",
+        "expected": "expected/out.out"
+      },
+      {
+        "args": ["deep/er/out"],
+        "check": "check.jet",
+        "expected": "expected/deep.out"
+      },
+      {
+        "args": ["stale"],
+        "check": "check.jet",
+        "expected": "expected/stale.out"
+      },
+      {
+        "args": [],
+        "exit": 64,
+        "expected": "expected/none.out"
+      }
+    ]
+  }
+}

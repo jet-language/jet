@@ -1,0 +1,13 @@
+use core.mem
+
+run: fn() {
+    values: (a: 10, b: 20, c: 30, d: 40)
+    #Unsafe("every step stays inside the `values` tuple, which outlives each read") {
+        first: mem.Ptr<Int>.from_addr(mem.address_of(values))
+        third: first.offset(2)
+        print(third.*)
+        print(third.offset(-1).*)
+        print(first.byte_offset(24).*)
+        print(first.offset(3).byte_offset(-8).*)
+    }
+}

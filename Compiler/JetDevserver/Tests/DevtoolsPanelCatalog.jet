@@ -1,0 +1,58 @@
+catalog_test_descriptor: fn(id: JetDevtoolsPanelID, order: Int, &&hosts: [JetDevtoolsHostKind]) -> JetDevtoolsPanelDescriptor {
+    JetDevtoolsPanelDescriptor{id, title: id.title(), order, required_capabilities: [JetDevtoolsPanelCapability]{.BuildRead}, authority: .BuildRead, supported_hosts: hosts.move(), freshness: .EventDriven}
+}
+
+#Test("the canonical catalog is ordered and unique") {
+    catalog: JetDevtoolsPanelCatalog.canonical() ?? panic("canonical panel catalog")
+    listed: catalog.descriptors()
+    ids: JetDevtoolsPanelID.all()
+    assert_eq(listed.len(), ids.len())
+    loop (index, descriptor) in listed {
+        assert(descriptor.id == ids[index])
+        if index > 0 -> assert(listed[index - 1].order < descriptor.order)
+    }
+}
+
+#Test("duplicate ids and orders are rejected") {
+    twice := [JetDevtoolsPanelDescriptor]{catalog_test_descriptor(.Build, 1, JetDevtoolsHostKind.all()), catalog_test_descriptor(.Build, 2, JetDevtoolsHostKind.all())}
+    assert(JetDevtoolsPanelCatalog.new(twice) == .Err(.DuplicateID(.Build)))
+    same_order := [JetDevtoolsPanelDescriptor]{catalog_test_descriptor(.Build, 1, JetDevtoolsHostKind.all()), catalog_test_descriptor(.Routes, 1, JetDevtoolsHostKind.all())}
+    assert(JetDevtoolsPanelCatalog.new(same_order) == .Err(.DuplicateOrder(1)))
+}
+
+#Test("availability keeps unauthorized rows") {
+    catalog: JetDevtoolsPanelCatalog.canonical() ?? panic("canonical panel catalog")
+    rows: catalog.available_for(.Terminal, [JetDevtoolsPanelCapability]{.BuildRead})
+    assert_eq(rows.len(), JetDevtoolsPanelID.all().len())
+    assert(rows[0].is_available())
+    assert(rows[1].unavailable_reasons() == [JetDevtoolsPanelUnavailableReason]{JetDevtoolsPanelUnavailableReason.MissingCapability{capability: .RequestRead}, JetDevtoolsPanelUnavailableReason.MissingCapability{capability: .SourceRead}})
+    database := false
+    loop row in rows {
+        if row.descriptor.id == .Database -> database = true
+    }
+    assert(database)
+}
+
+#Test("an unsupported host is an explicit reason") {
+    catalog: JetDevtoolsPanelCatalog.new([JetDevtoolsPanelDescriptor]{catalog_test_descriptor(.Build, 1, [JetDevtoolsHostKind]{.Headless})}) ?? panic("catalog")
+    rows: catalog.available_for(.Terminal, [JetDevtoolsPanelCapability]{.BuildRead})
+    assert_eq(rows.len(), 1)
+    assert(rows[0].unavailable_reasons() == [JetDevtoolsPanelUnavailableReason]{JetDevtoolsPanelUnavailableReason.UnsupportedHost{host: .Terminal}})
+}
+
+#Test("projection routes events to their panel and keeps the selection") {
+    envelope := JetDevtoolsEnvelope.new("s1", 0)
+    _: envelope.push(JetDevtoolsEvent.from_parts(1, "runtime", "Query", "users", `{}`) ?? panic("query event"))
+    _: envelope.push(JetDevtoolsEvent.from_parts(2, "runtime", "Build", "app", `{}`) ?? panic("build event"))
+    envelope.set_selection(Val(JetDevtoolsSelection.new("queries", None)))
+    catalog: JetDevtoolsPanelCatalog.canonical() ?? panic("canonical panel catalog")
+    panels: catalog.project(envelope, .BrowserInApp, JetDevtoolsPanelCapability.all())
+    assert_eq(panels.len(), JetDevtoolsPanelID.all().len())
+    assert_eq(panels[0].events.len(), 1)
+    assert(!panels[0].selected)
+    assert_eq(panels[2].events.len(), 1)
+    assert(panels[2].selected)
+    assert_eq(panels[2].cursor, Val(2))
+    assert(catalog.panel_for_event(panels[2].events[0]) == Val(JetDevtoolsPanelID.Queries))
+    assert(catalog.panel_for_event(JetDevtoolsEvent.from_parts(3, "runtime", "Unknown", "x", `{}`) ?? panic("unknown event")) == None)
+}

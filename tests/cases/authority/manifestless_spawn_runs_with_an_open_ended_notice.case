@@ -1,0 +1,47 @@
+# Claim: a program with no package block may start a process (every effect is
+# allowed unless a row denies it); before it runs, the notice says it starts other
+# programs, which a list of effects can't bound. `-A` hides the notice,
+# `--deny=Exec` refuses the spawn with E1803 before anything runs, and reading
+# its own arguments is the floor, so it is never named.
+# Fixture migrated: the scripts sit in per-script dirs (one fn run per package namespace); package none; marker is fixture-relative spawned.txt
+# Fixture migrated: core.process items imported as use core.process.[args, cmd] (seed rejects process.args() in this position, E1004); calls changed to args()/cmd()
+fixture: manifestless_spawn_runs_with_an_open_ended_notice.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run spawn/spawn.jet spawned.txt
+exit: 0 # default: the spawn runs
+stdout: = "spawned code=0\n" # default: the spawn runs
+stderr: ~ "starts other programs, which this list does not limit (-A hides this)" # default: the notice names the open-ended effect
+file: spawned.txt exists # the process ran (default)
+remove: spawned.txt
+step: jet run -A spawn/spawn.jet spawned.txt
+exit: 0 # default: -A acknowledges every effect
+stdout: = "spawned code=0\n" # default: -A acknowledges every effect
+stderr: !~ "note:" # default: -A hides the notice
+remove: spawned.txt
+step: jet run --deny=Exec spawn/spawn.jet spawned.txt
+exit: 1 # default: the denied spawn stops the run
+stdout: = "" # default: no user code ran
+stderr: ~ "E1803" # default: the denied spawn stops the run
+stderr: ~ "Drop `--deny=Exec` from the command" # default: the Fix names the denial
+file: spawned.txt absent # no process started (default)
+step: jet run --release spawn/spawn.jet spawned.txt
+exit: 0 # release: the spawn runs
+stdout: = "spawned code=0\n" # release: the spawn runs
+stderr: ~ "starts other programs, which this list does not limit (-A hides this)" # release: the notice names the open-ended effect
+file: spawned.txt exists # the process ran (release)
+remove: spawned.txt
+step: jet run --release --deny=Exec spawn/spawn.jet spawned.txt
+exit: 1 # release: the denied spawn stops the run
+stdout: = "" # release: no user code ran
+stderr: ~ "E1803" # release: the denied spawn stops the run
+file: spawned.txt absent # no process started (release)
+step: jet run argv/argv.jet a b
+exit: 0 # default: args read
+stdout: = "args=2\n" # default: args read
+stderr: !~ "note:" # default: reading its arguments is the floor
+step: jet run --release argv/argv.jet a b
+exit: 0 # release: args read
+stdout: = "args=2\n" # release: args read
+stderr: !~ "note:" # release: reading its arguments is the floor

@@ -1,0 +1,13 @@
+# tests/power_and_exclusive_or.rs::exclusive_or_needs_matching_integer_widths at tests/power_and_exclusive_or.rs:180; hand-port
+fixture: exclusive_or_needs_matching_integer_widths.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check xor_same_width/main.jet
+exit: 0
+step: jet check xor_mixed_width/main.jet
+exit: 1
+stderr: ~ "E0109" # tests/power_and_exclusive_or.rs:190 mixed widths report E0109
+step: jet check xor_floats/main.jet
+exit: 1
+stderr: ~ "E0109" # tests/power_and_exclusive_or.rs:195 exclusive-or on floats reports E0109

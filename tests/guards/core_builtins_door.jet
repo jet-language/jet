@@ -1,0 +1,188 @@
+// Core's one door to the compiler. The compiler provides its operations,
+// storage types and markers to Core through one module, `jet_builtins`
+// (Core/Builtins/Builtins.jet), and only Core sources may import it (E1013).
+// Here a compiler-known Core name is a reserved `__` name that a top-level
+// Core declaration takes and that the compiler spells: a row of
+// Compiler/Prelude/Core.rows names it, or a compiler `.jet` source writes it
+// as a word outside a comment (the compiler's tests aside). Each one
+// declared outside the door is counted, and the count only falls: a slice
+// that moves names into `jet_builtins` lowers CBD_CEILING to the new count,
+// and a new compiler-known name goes into the door, not beside it.
+use cbd_files: core.files
+
+CBD_DOOR: "Core/Builtins/Builtins.jet"
+
+CBD_ROWS: "Compiler/Prelude/Core.rows"
+
+CBD_CEILING: 308
+
+CBD_SKIPPED: [String]{"Tests", ".jet", "target", "node_modules"}
+
+cbd_walk: fn(path: String, out: &[String]) {
+    if !cbd_files.is_dir(path) {
+        if path.ends_with(".jet") -> out.push(path.copy())
+        return
+    }
+    loop child in (cbd_files.list_dir(path) ?? panic("list {path}: {err}")) {
+        skipped := false
+        loop name in CBD_SKIPPED {
+            if child.name == name -> skipped = true
+        }
+        if !skipped -> cbd_walk(child.path, out)
+    }
+}
+
+cbd_ident_start: fn(byte: U8) -> Bool Never! {
+    code: Int{byte}
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+cbd_ident_byte: fn(byte: U8) -> Bool Never! {
+    code: Int{byte}
+    cbd_ident_start(byte) || (code >= 48 && code <= 57)
+}
+
+// The end of the identifier that starts at `at` of `raw`.
+cbd_ident_end: fn(raw: [U8], at: Int) -> Int Never! {
+    end := at
+    loop end < raw.len() && cbd_ident_byte(raw[end]) -> end += 1
+    end
+}
+
+// Each reserved `__` word of `text`, added to `words`: a word that starts
+// with two underscores and does not continue another word. A `//` comment
+// names nothing; a string runs to its closing quote or the line's end.
+cbd_spelled: fn(text: String, words: &[String:Bool]) Never! {
+    raw: text.bytes()
+    at := 0
+    quoted := false
+    loop at + 2 < raw.len() {
+        byte: raw[at]
+        if {
+            byte == (U8{10}) -> quoted = false
+            quoted && byte == (U8{92}) -> at += 1
+            byte == (U8{34}) -> quoted = !quoted
+            !quoted && byte == (U8{47}) && raw[at + 1] == (U8{47}) -> {
+                loop at < raw.len() && raw[at] != (U8{10}) -> at += 1
+                next
+            }
+        }
+        if byte != (U8{95}) || raw[at + 1] != (U8{95}) || (at > 0 && cbd_ident_byte(raw[at - 1])) {
+            at += 1
+            next
+        }
+        end: cbd_ident_end(raw, at)
+        if end > at + 2 && cbd_ident_start(raw[at + 2]) {
+            words[String.from_bytes(raw.slice(at, end)) ?? ""] = true
+        }
+        at = end
+    }
+}
+
+// The reserved `__` name a top-level declaration on `line` takes, or "": the
+// line starts at column 0, a marker such as `#Unsafe("…")` may lead it, and
+// `priv` may come before the name.
+cbd_declared_name: fn(line: String) -> String Never! {
+    raw: line.bytes()
+    at := 0
+    if raw.len() > 0 && raw[0] == (U8{35}) {
+        depth := 0
+        quoted := false
+        loop at < raw.len() {
+            byte: raw[at]
+            at += 1
+            if quoted {
+                if {
+                    byte == (U8{92}) -> at += 1
+                    byte == (U8{34}) -> quoted = false
+                }
+                next
+            }
+            if {
+                byte == (U8{34}) -> quoted = true
+                byte == (U8{40}) || byte == (U8{91}) -> depth += 1
+                byte == (U8{41}) || byte == (U8{93}) -> {
+                    depth -= 1
+                    if depth == 0 -> break
+                }
+                byte == (U8{32}) && depth == 0 -> break
+            }
+        }
+        loop at < raw.len() && raw[at] == (U8{32}) -> at += 1
+    }
+    if at + 5 <= raw.len() && (String.from_bytes(raw.slice(at, at + 5)) ?? "") == "priv " -> at += 5
+    if at + 2 >= raw.len() || raw[at] != (U8{95}) || raw[at + 1] != (U8{95}) || !cbd_ident_start(raw[at + 2]) {
+        return ""
+    }
+    end: cbd_ident_end(raw, at)
+    if end >= raw.len() || raw[end] != (U8{58}) -> return ""
+    String.from_bytes(raw.slice(at, end)) ?? ""
+}
+
+// The compiler-known Core names declared outside the door, sorted.
+cbd_outside: fn() -> [String] {
+    spelled := [String:Bool]{}
+    compiler := [String]{}
+    cbd_walk("Compiler", compiler)
+    assert(compiler.len() > 1000, "the walk found only {compiler.len()} compiler sources")
+    loop path in compiler {
+        cbd_spelled(cbd_files.read(path) ?? panic("read {path}: {err}"), spelled)
+    }
+    cbd_spelled(cbd_files.read(CBD_ROWS) ?? panic("read {CBD_ROWS}: {err}"), spelled)
+    core := [String]{}
+    cbd_walk("Core", core)
+    found := [String:Bool]{}
+    loop path in core {
+        if path == CBD_DOOR -> next
+        source: cbd_files.read(path) ?? panic("read {path}: {err}")
+        loop line in source.lines() {
+            name: cbd_declared_name(line)
+            if name != "" && spelled.get(name) != None -> found[name] = true
+        }
+    }
+    names := [String]{}
+    loop (name, _) in found -> names.push(name.copy())
+    names.sort()
+    names
+}
+
+#Test("the compiler-known Core names outside jet_builtins only fall") {
+    guards_enter_root()
+    names: cbd_outside()
+    assert(names.len() <= CBD_CEILING, "{names.len()} compiler-known Core names stand outside jet_builtins, over the ceiling of {CBD_CEILING}; declare the new one in {CBD_DOOR}: {names.join(", ")}")
+    assert(names.len() >= CBD_CEILING, "{names.len()} compiler-known Core names stand outside jet_builtins, under the ceiling of {CBD_CEILING}; lower CBD_CEILING to {names.len()}")
+}
+
+#Test("the door is Core's own module, refused to every other program") {
+    guards_enter_root()
+    door: cbd_files.read(CBD_DOOR) ?? panic("read {CBD_DOOR}: {err}")
+    loop line in door.lines() {
+        name: cbd_declared_name(line)
+        assert(name == "", "{CBD_DOOR} declares `{name}`; a name behind the door drops its `__`")
+    }
+    rows: cbd_files.read(CBD_ROWS) ?? panic("read {CBD_ROWS}: {err}")
+    assert(rows.contains("source_module jet_builtins path {CBD_DOOR} "), "{CBD_ROWS} must place `jet_builtins` at {CBD_DOOR}")
+    diagnostics: cbd_files.read("Compiler/Prelude/Diagnostics.jet") ?? panic("read Compiler/Prelude/Diagnostics.jet: {err}")
+    assert(diagnostics.contains("code: \"E1013\""), "E1013 must stay a registered diagnostic")
+    snapshot: cbd_files.read("tests/ui/core_builtins_private.stderr") ?? panic("read the E1013 UI snapshot: {err}")
+    assert(snapshot.contains("[jet.BuiltinsOutsideCore]"), "the E1013 UI snapshot must show the refusal")
+}
+
+#Test("the door census reads declarations and whole reserved words") {
+    assert_eq(cbd_declared_name("__AppCall: struct {{"), "__AppCall")
+    assert_eq(cbd_declared_name("priv __clock_now: fn() -> Int"), "__clock_now")
+    assert_eq(cbd_declared_name("#Unsafe(\"the (pages) are \\\"fresh\\\"\") __region_reserve: fn(bytes: Int) -> Int"), "__region_reserve")
+    assert_eq(cbd_declared_name("#[Inline(Always), Unsafe(\"why\")] __ptr_offset: fn<T>(p: *T) -> *T"), "__ptr_offset")
+    assert_eq(cbd_declared_name("    __field: Int"), "")
+    assert_eq(cbd_declared_name("// __note: a comment"), "")
+    assert_eq(cbd_declared_name("AppCall: struct {{"), "")
+    assert_eq(cbd_declared_name("__AppCall.call(x)"), "")
+    words := [String:Bool]{}
+    cbd_spelled("a.__AppCall(x) + b__inner + \"__TempPath // \\\"x\" __Rows // core.time's __ClockObserver\n\"a\" __", words)
+    assert(words.get("__AppCall") != None)
+    assert(words.get("__TempPath") != None)
+    assert(words.get("__Rows") != None)
+    assert(words.get("__inner") == None)
+    assert(words.get("__ClockObserver") == None)
+    assert_eq(words.len(), 3)
+}

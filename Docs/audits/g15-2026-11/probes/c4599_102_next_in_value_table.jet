@@ -1,0 +1,17 @@
+// #4599 c102 (was #4606): `next` as an arm of a value table inside a loop.
+fn labels(xs: [Int]) -> [String] {
+    out := [String]{}
+    loop x in xs {
+        label :: if x == {
+            0 -> next
+            1 -> "one"
+            else -> "many"
+        }
+        out.push(label)
+    }
+    out
+}
+
+fn run() {
+    print(labels([0, 1, 2, 0, 1]))
+}

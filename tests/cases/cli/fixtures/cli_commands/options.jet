@@ -1,0 +1,16 @@
+// No command fns: the parser written for these inputs holds one table per
+// argv form (`--name=value`, `--name`, `-x`), not adjacent guards per input.
+#CLI
+Args: struct {
+    #[Doc("who to greet"), Arg(short: "n")] name: String{"world"}
+    #[Doc("how many"), Arg(short: "c")] count: Int{1}
+    #[Doc("how loud"), Arg(short: "s")] scale: Float{1.0}
+    #Doc("a label") label: String{"none"}
+    #[Doc("shout"), Arg(short: "l")] loud: Bool
+    #Doc("whisper") quiet: Bool
+    #Doc("change nothing") dry: Bool
+}
+
+run: fn(args: Args) {
+    print("{args.name} {args.count} {args.scale} {args.label} {args.loud} {args.quiet} {args.dry}")
+}

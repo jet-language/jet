@@ -1,0 +1,12 @@
+# Original tests/semindex.rs:229-249; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: affine_unit_point_and_delta_members_are_cataloged.fixture
+step: jet find "CelsiusPoint.from_float" source_affine_unit_members.jet --json
+exit: 0
+json: stdout doc $.matches[?name="CelsiusPoint.from_float"] #>= 1
+step: jet find "CelsiusDelta.from_float" source_affine_unit_members.jet --json
+exit: 0
+json: stdout doc $.matches[?name="CelsiusDelta.from_float"] #>= 1
+step: jet find "Celsius.from_float" source_affine_unit_members.jet --json
+exit: 0
+json: stdout doc $.matches[?name="Celsius.from_float"] #= 0

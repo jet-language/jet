@@ -1,0 +1,102 @@
+// An enum with a rare wide variant: `Shape.Wide` and `Shape.Pair` hold a
+// struct of eight words, past the width a variant keeps inline, while the
+// common variants hold one or two words. Every value of the enum keeps its
+// meaning whatever its storage: a copy is its own value, a move hands the
+// payload over, equality compares payloads, Debug shows them, a
+// binding by reference writes through, and a value dropped mid-way (a
+// loop, a reassignment, a panic during construction) is released once.
+
+Wide: struct {
+    name: String
+    a: Int
+    b: Int
+    c: Int
+    d: Int
+    e: Int
+    f: Int
+    g: Int
+}
+
+Shape: enum {
+    Dot(Int)
+    Line(from: Int, to: Int)
+    Wide(Wide)
+    Pair(left: Wide, note: String)
+}
+
+wide: fn(name: String, seed: Int) -> Wide {
+    Wide{name: name, a: seed, b: seed + 1, c: seed + 2, d: seed + 3, e: seed + 4, f: seed + 5, g: seed + 6}
+}
+
+total: fn(shape: Shape) -> Int {
+    if shape == {
+        .Dot(n) -> n
+        .Line(from, to) -> to - from
+        .Wide(w) -> w.a + w.b + w.c + w.d + w.e + w.f + w.g
+        .Pair(left, note) -> left.g + note.len()
+    }
+}
+
+label: fn(shape: Shape) -> String {
+    if shape == {
+        .Wide(w) -> w.name
+        .Pair(left, note) -> "{left.name}/{note}"
+        .Dot(_) | .Line(_, _) -> "narrow"
+    }
+}
+
+boom: fn(left: Int) -> String {
+    if left == 0 -> panic("mid-construction")
+    "tag"
+}
+
+run: fn() {
+    original: Shape.Wide(wide("first", 1))
+
+    // A copy is its own value: a write through a binding by reference into
+    // the copy never shows in the original.
+    second := original
+    if &second == {
+        .Wide(w) -> {
+            w.name = "second"
+            w.g = 100
+        }
+        .Dot(_) | .Line(_, _) | .Pair(_, _) -> {}
+    }
+    print("copy: {label(original)} {total(original)} / {label(second)} {total(second)}")
+
+    // A move hands the payload over whole.
+    moved: Shape.Pair{left: wide("left", 10), note: "moved"}
+    taken: moved.move()
+    print("move: {label(taken)}")
+
+    // Equality compares the payload, wide or narrow.
+    again: Shape.Wide(wide("first", 1))
+    print("equal: {original == again} {original == second} {Shape.Dot(3) == Shape.Dot(3)} {Shape.Line{from: 1, to: 2} == Shape.Dot(1)}")
+
+    // Debug shows the payload.
+    print("debug: {Shape.Pair{left: wide("dbg", 0), note: "t"}:Debug}")
+    print("debug: {Shape.Line{from: 4, to: 9}:Debug}")
+
+    // Drops: a loop that builds, copies, reassigns and drops wide and narrow
+    // values releases each once.
+    churn := Shape.Dot(0)
+    sum := 0
+    loop i in 0..<100000 {
+        made: if {
+            i % 4 == 0 -> Shape.Wide(wide("w", i))
+            i % 4 == 1 -> Shape.Pair{left: wide("p", i), note: "x"}
+            else -> Shape.Dot(i)
+        }
+        kept: made
+        sum += total(kept) % 7
+        churn = kept
+    }
+    print("churn: {sum} {label(churn)}")
+
+    // A panic while the wide variant is being built releases what was built.
+    built: task { label(Shape.Pair{left: wide("half", 2), note: boom(0)}) }
+    print("panic: {built.join() ?? "failed"}")
+    finished: task { label(Shape.Pair{left: wide("whole", 2), note: boom(1)}) }
+    print("panic: {finished.join() ?? "failed"}")
+}

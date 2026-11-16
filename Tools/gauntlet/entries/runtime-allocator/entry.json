@@ -1,0 +1,19 @@
+{
+  "name": "runtime-allocator",
+  "mode": "tool",
+  "description": "Tools/perf/runtime-library/allocator.mjs and its Jet twin runtime-library/allocator/run.jet, the matched runtime-object allocator cell (one C driver over the Jet runtime at O0 and O1 and over Rust's std::alloc, seven pinned rounds). The fixtures stand in for the runtime objects with files that are not objects, so every run stops before timing: the refusals of the arguments (no arguments, a CPU that is not a list), a missing or empty measure-job variable, evidence already in the output directory, an input that does not exist (after the output directory is made), and a full build in the checkout: both CheckRuntimeExports steps fail on the stand-ins, allocator.c and allocator.rs build, build.json records the pins and the four steps, and the run exits 1 before linking. The check prints the printed text with the case directory as <case>, the output directories' entries and build.json with the two source hashes as <sha256>.",
+  "tool": {
+    "original": "Tools/perf/runtime-library/allocator.mjs",
+    "jet": "Tools/perf/runtime-library/allocator/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": [], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["out", "o0.o", "o1.o", "remaining.a", "eight"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["out", "o0.o", "o1.o", "remaining.a", "0"], "env": {"PQ_JOB": "job-1"}, "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["out", "o0.o", "o1.o", "remaining.a", "0"], "env": {"PQ_JOB": "job-1", "FINAL_E2_SHA": "", "COMPOSED_SHA": "c0"}, "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["done", "o0.o", "o1.o", "remaining.a", "0"], "env": {"PQ_JOB": "job-1", "FINAL_E2_SHA": "e2", "COMPOSED_SHA": "c0"}, "exit": 1, "check": "check.jet", "expected": "expected/overwrite.out"},
+      {"args": ["out", "missing.o", "o1.o", "remaining.a", "0-1"], "env": {"PQ_JOB": "job-1", "FINAL_E2_SHA": "e2", "COMPOSED_SHA": "c0"}, "exit": 1, "check": "check.jet", "expected": "expected/missing-input.out"},
+      {"args": ["out", "o0.o", "o1.o", "remaining.a", "0,2"], "env": {"PQ_JOB": "job-1", "FINAL_E2_SHA": "e2", "COMPOSED_SHA": "c0"}, "exit": 1, "check": "check.jet", "expected": "expected/build-fails.out"}
+    ]
+  }
+}

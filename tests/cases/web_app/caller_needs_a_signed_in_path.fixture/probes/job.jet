@@ -1,0 +1,20 @@
+// A signed-in method hands work to a background task: the task acts for no
+// account, so the job it runs has no caller.
+use {
+    app
+    web: core.web
+}
+
+Crew: struct {
+    #App.SignedIn mine: fn(self) -> String {
+        job: task { record() }
+        job.join() ?? "not recorded"
+    }
+}
+
+record: fn() -> String {
+    who: app.caller()
+    "recorded {who}"
+}
+
+run: fn() { _: web.app().mount(Crew{}) }

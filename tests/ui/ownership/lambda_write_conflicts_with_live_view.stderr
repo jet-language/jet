@@ -1,0 +1,8 @@
+Error [jet.OwnerMovedWhileViewed]: `items` cannot be changed by calling `add` while `window` is still looking into it
+  --> tests/ui/ownership/lambda_write_conflicts_with_live_view.jet:9:5
+    |
+  9 |     add(4)
+    |     ^^^
+ Why: `window` is a live read view into `items[…]`; changing or moving the owner could invalidate that view
+ Fix: Finish using `window` before changing `items`, narrow the view's scope, or make an owned copy
+More: jet-lang.dev/e/E0212

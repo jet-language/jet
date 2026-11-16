@@ -1,0 +1,14 @@
+# tests/marker_rule_signatures.rs::contract_messages_use_function_parameter_types at tests/marker_rule_signatures.rs:541; hand-port
+# Claim: valid #Pre/#Post with String message produces no E0930 (tests/marker_rule_signatures.rs:551)
+# Claim: Int message parameter yields E0930 (tests/marker_rule_signatures.rs:562-565, asserted twice)
+# Not ported: Rust asserts exactly 2 E0930; CLI pins E0930 presence only
+fixture: contract_messages_use_function_parameter_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:551 no E0930
+stderr: !~ "E0930" # tests/marker_rule_signatures.rs:551 no E0930
+step: jet check wrong/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:562 E0930 twice
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:562 E0930 twice

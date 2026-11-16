@@ -1,0 +1,13 @@
+# Port of tests/pkg.rs:5710-5751; all source/helper-expanded manifest bytes verbatim.
+# fetch success retains manifest parse/dependency-resolution claim; exact deps block checked on bytes.
+# PENDING-GRAMMAR(batch-four): mkdir.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: {root}/tests/cases/pkg/fixtures/manifests/inline-deps.txt package.jet
+copy: {root}/tests/cases/pkg/fixtures/dependency/mylib/package.jet mylib/package.jet
+copy: {root}/tests/cases/pkg/fixtures/dependency/mylib/mylib.jet mylib/mylib.jet
+step: jet add mylib --path ./mylib
+exit: 0
+file: package.jet ~ "deps: {\n    mylib: ./mylib,\n}\n" # original predicate
+step: jet fetch
+exit: 0

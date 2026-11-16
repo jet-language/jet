@@ -1,0 +1,68 @@
+// The memory kernel's byte fill (mem.fill<U8>): 4096 fills whose sizes run
+// from 1 byte to 16 KiB, weighted to the small ones, each at an offset of 0
+// to 63 bytes into one block with a byte of its own. `n` passes over them;
+// the sum is the first and the last byte each fill wrote.
+use mem: core.mem
+
+#CLI
+Args: struct {
+    n: Int
+}
+
+// One fill: `size` bytes of `value` from `to` in the block.
+Op: struct {
+    size: Int
+    to: Int
+    value: Int
+}
+
+OPS: 4096
+
+// The largest size, and the room past it for the offsets, in one
+// page-aligned block, as the reference lays it out.
+LARGEST: 16384
+
+FILL_ROOM: 64
+
+// The next state of a 31-bit linear congruential generator.
+next: fn(state: Int) -> Int { (state * 1103515245 + 12345).bit_and(2147483647) }
+
+// The fills: per fill one draw picks the size (its top three bits a size
+// class of up to 8, 16, 32, 64, 128, 512, 2048 or 16384 bytes, the size from
+// bits 12 up) and a second the offset (bits 16 to 21) and the byte (bits 22
+// to 29). The generator's low bits repeat too soon to pick a class.
+operations: fn() -> [Op] {
+    ops := [Op]{}
+    state := 12345
+    loop _ in 0..<OPS {
+        state = next(state)
+        class: (state >> 28).bit_and(7)
+        bits: if class < 5 -> class + 3 else if class == 5 -> 9 else if class == 6 -> 11 else -> 14
+        size: 1 + (state >> 12).bit_and((1 << bits) - 1)
+        state = next(state)
+        ops.push(Op{size: size, to: (state >> 16).bit_and(63), value: (state >> 22).bit_and(255)})
+    }
+    ops
+}
+
+run: fn(args: Args) {
+    passes: if args.n > 0 -> args.n else -> 1
+    ops: operations()
+    total := 0
+    #Unsafe("the block holds LARGEST bytes and their room, every fill stays inside it, and the block is freed once after the passes") {
+        block: mem.alloc_raw(LARGEST + FILL_ROOM, 4096) ?? panic("no memory")
+        loop _ in 0..<passes {
+            loop op in ops {
+                // A use is the line of its call alone: the pointer and the
+                // byte are the work's, computed before it, as the reference
+                // computes them.
+                to: block.byte_offset(op.to)
+                value: U8{op.value}
+                mem.fill<U8>(to, value, op.size)
+                total += Int{block.byte_offset(op.to).*} + Int{block.byte_offset(op.to + op.size - 1).*}
+            }
+        }
+        mem.free_raw(block)
+    }
+    print("sum {total}")
+}

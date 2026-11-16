@@ -1,0 +1,31 @@
+// Two routes whose patterns differ only in a parameter's name match the same
+// requests, so the later registration is E2804 with the earlier one as its
+// second span, whether both are an App's handler routes, a router's, or an
+// App's marked method beside a handler route. Partly overlapping patterns
+// (`/files/:name/raw` and `/files/latest/:kind`) are no error: the static
+// segment wins where they differ.
+use {
+    http: core.http
+    server: core.http.server
+    web: core.web
+}
+
+Marked: struct {
+    #Server.Get("/crew/:name") member: fn(self, name: String) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "crew {name}"))
+    }
+}
+
+run: fn() {
+    app: web.app()
+    app.get("/jokes/:id", fn(id: Int) { Ok(server.response(200, "joke {id}")) })
+    app.get("/jokes/:slug", fn(slug: String) { Ok(server.response(200, "joke {slug}")) })
+    app.get("/files/:name/raw", fn(name: String) { Ok(server.response(200, "raw {name}")) })
+    app.get("/files/latest/:kind", fn(kind: String) { Ok(server.response(200, "latest {kind}")) })
+    app.get("/crew/:id", fn(id: Int) { Ok(server.response(200, "crew {id}")) })
+    app.mount(Marked{}).drop("checked only")
+
+    router: http.router()
+    router.get("/users/:id", fn(id: Int) { Ok(server.response(200, "user {id}")) })
+    router.get("/users/:login", fn(login: String) { Ok(server.response(200, "user {login}")) })
+}

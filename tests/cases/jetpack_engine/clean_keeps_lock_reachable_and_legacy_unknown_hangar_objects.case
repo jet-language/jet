@@ -1,0 +1,39 @@
+# HAND-PORT tests/jetpack_engine.rs:3279-3303 clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+refused: hangar-fixture-backdate
+# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
+# #[test]
+# fn clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects() {
+#     let root = Scratch::new("root");
+#     let project = Scratch::new("proj");
+#     let (live, live_hash) = write_hangar_meta(&root.path, "live-1", "live", "1.0", Some(1));
+#     let legacy = write_hangar_meta(&root.path, "legacy-1", "legacy", "1.0", None).0;
+#     write_lock_with_live_output(&project.path, "live", "1.0", &live_hash);
+# 
+#     let out = jetpack()
+#         .args(["hangar", "clean", "--no-color", "--yes"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         out.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&out.stderr)
+#     );
+#     assert!(live.exists(), "lock-reachable object should be kept");
+#     assert!(
+#         legacy.exists(),
+#         "legacy object without timestamps should be kept"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack hangar clean --no-color --yes
+cwd: project
+exit: 0
+

@@ -1,0 +1,16 @@
+# Port of comptime_cli_parity.rs:1563-1599. PENDING-GRAMMAR: copy/remove/step env/file equality.
+fixture: fixtures/build-stamp
+copy: .jet/lock original-lock
+# Original run_jet (comptime_cli_parity.rs:70) creates each cache root, not its run child.
+mkdir: cache/first
+step: jet build --release --locked build_stamp.jet
+env: JET_STORE_DIR={work}/cache/first/run
+file: .jet/lock == original-lock
+copy: .jet/build/build_stamp first-binary
+remove: .jet/build
+mkdir: cache/second
+step: jet build --release --locked build_stamp.jet
+env: JET_STORE_DIR={work}/cache/second/run
+file: .jet/lock == original-lock
+file: .jet/build/build_stamp == first-binary
+remove: .jet/build

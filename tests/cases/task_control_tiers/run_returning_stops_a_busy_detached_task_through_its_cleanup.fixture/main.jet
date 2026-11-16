@@ -1,0 +1,35 @@
+// When `run` returns, the runtime cancels every live task. A detached task
+// busy in a loop that never waits stops at its next iteration and runs its
+// deferred close before the process exits.
+
+// A close that shows the stopped task's cleanup ran.
+Marker: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+// Says it started, then counts with no call and no wait point: only the
+// check each iteration starts with can stop it.
+spin: fn(started: Sender<Int>) -> Int {
+    started.send(1)
+    n := 0
+    loop n >= 0 -> n += 1
+    n
+}
+
+run: fn() {
+    { sender: started, receiver: began }: channel<Int>()
+    busy: task {
+        marker: Marker{name: "the spinner's marker"}
+        defer close(marker)
+        print(spin(started))
+    }
+    busy.detach()
+    // Return only once the spinner has started, so the exit's cancel meets it
+    // in its loop.
+    _ := began.receive() ?? panic("the spinner never started")
+    print("run returns")
+}

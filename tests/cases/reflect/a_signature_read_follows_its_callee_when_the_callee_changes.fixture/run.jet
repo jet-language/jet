@@ -1,0 +1,15 @@
+// Reads the signature of `connect`, which net.jet declares, once in a
+// constant folded at the check and once at run time.
+describe: fn(signature: CallableSignature) -> String {
+    params: (loop param in signature.params -> "{param.label}: {param.type.name}").join(", ")
+    row: if signature.effects.declared == .Val(written) -> written.join(", ") else -> "no written row"
+    "connect({params}) -> {signature.return_type?.name ?? "nothing"}, {row}"
+}
+
+FOLDED: #run describe(connect.reflect().signature)
+
+run: fn() {
+    print("folded: {FOLDED}")
+    print("read: {describe(connect.reflect().signature)}")
+    print("called: {connect("db")}")
+}

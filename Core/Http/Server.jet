@@ -1,0 +1,2226 @@
+use {
+    core: core
+    http: core.http
+    core.http.[Body, Header, Headers, HTTPError, HTTPRequest, HTTPResponse]
+    json_codec: core.encoding.json
+    route_url: core.net.url
+    server_tls: core.net.tls
+    core.encoding.[Dyn]
+    core.prelude.[SourceLocation]
+    rt: jet.runtime.time
+}
+
+// core.http.server — HTTP/1.1 serving over core.net TCP, or over core.net.tls
+// when bound with `tls: server.tls(cert, key)`.
+//
+// A route table (HTTPMux, which a `web.app()` owns) holds routes and
+// middleware layers; a server owns one listener, serves each connection on
+// its own task (at most 10000 at once, 256 from one peer address) and
+// answers one request per connection with `Connection: close`. Request
+// framing and limits, routing, CORS, request ids, static files and the Date
+// header are decided here.
+// Static files are read through `core.files` and the Date header through the
+// `core.time` wall clock, so serving needs Net, FS.Read and Time.
+
+// Body-less route markers record route facts. Only `app.mount(value)`
+// exposes the tagged methods of that value's struct. A route path is text or
+// a `Path`, as at `app.get(path, handler)`.
+Get: struct {
+    path: String | Path
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+Post: struct {
+    path: String | Path
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+Put: struct {
+    path: String | Path
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+Delete: struct {
+    path: String | Path
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+Patch: struct {
+    path: String | Path
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+Head: struct {
+    path: String | Path
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+Options: struct {
+    path: String | Path
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+// `#Server.Custom(token, path)`: a route of the custom method `token`, a
+// static String kept in its exact case (core.http `__method_token_check`).
+Custom: struct {
+    token: String
+    path: String | Path
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+C_MAX_HEAD_BYTES: 32768
+
+C_MAX_LINE_BYTES: 8192
+
+C_MAX_FIELDS: 100
+
+C_MAX_BODY_BYTES: 1048576
+
+C_MAX_CHUNK_DIGITS: 8
+
+C_READ_BYTES: 16384
+
+C_IO_NS: 30000000000
+
+C_ACCEPT_ONCE_NS: 5000000000
+
+C_ACCEPT_POLL_NS: 50000000
+
+C_MAX_REQUEST_ID_BYTES: 128
+
+// Connections served at once, and from one peer address: one past either is
+// answered 503 and closed.
+C_MAX_CONNECTIONS: 10000
+
+C_MAX_PEER_CONNECTIONS: 256
+
+C_DRAIN_POLL_MS: 5
+
+// The built-in readiness probe's path (HTTPReadiness); a route of the app on
+// it takes its place.
+C_READY_PATH: "/__jet/ready"
+
+C_ACCEPT_BACKOFF_MIN_MS: 5
+
+C_ACCEPT_BACKOFF_MAX_MS: 1000
+
+HTTPCorsOrigins: enum {
+    Any
+    List([String])
+}
+
+HTTPCorsPolicy: struct {
+    origins: HTTPCorsOrigins
+    allow_methods: String
+    allow_headers: String
+    credentials: Bool
+    max_age_secs: Int
+}
+
+// Server TLS credentials, kept verbatim until a listener loads them. The
+// identity check and handshake are reached through `__ops`, which only
+// `tls(cert, key)` fills, so a server without `tls:` links no TLS.
+HTTPServerTLS: struct {
+    cert_pem: String
+    key_pem: String
+    __ops: Shared<HTTPTLSOps>
+}
+
+priv HTTPTLSOps: struct {
+    // The bind-time identity check: "" or the reason the identity is unusable.
+    check: fn(String, String) -[Net]> String Never!
+    // The server handshake over an accepted stream, within the budget; None
+    // drops a failed handshake. A function value's parameters only read, so
+    // the stream arrives as the one item of a shared list the handshake pops
+    // it from: the TLS stream is then its one owner, and the caller, whose
+    // list is empty, does not close it again.
+    accept: fn(Shared<[TCPStream]>, String, String, Duration) -[Net, Time.Wait]> HTTPSecure? Never!
+}
+
+/// What one served lifetime did: connections accepted, refused (over the
+/// connection limits, or while draining), answered, and cancelled at shutdown.
+HTTPShutdownReport: struct {
+    accepted: Int
+    overloaded: Int
+    completed: Int
+    cancelled: Int
+}
+
+/// Whether a server should be sent traffic, as `readiness()` and the built-in
+/// `GET /__jet/ready` probe read it. A bound server is NotReady until `serve`
+/// starts, then Ready. From `shutdown`, or an accept a signal cancelled, it is
+/// Draining while the connections in flight finish, and Closed once `serve`
+/// reports. A server shut down before it served is Closed, never Ready. It
+/// displays as the probe's body: `not ready`, `ready`, `draining`, `closed`.
+HTTPReadiness: enum {
+    NotReady
+    Ready
+    Draining
+    Closed
+
+    impl Display {
+        display: fn(self) -> String { readiness_word(self) }
+    }
+}
+
+priv HTTPHandlerCell: struct {
+    call: fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!
+}
+
+/// A request handler: what a route runs and what middleware wraps. Copies
+/// share the one handler.
+HTTPHandler: struct {
+    __cell: Shared<HTTPHandlerCell>
+
+    handle: fn(self, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
+        guard: self.__cell.guard_read()
+        guard.value.call(request)
+    }
+}
+
+__handler: fn(call: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
+    HTTPHandler{__cell: Shared{HTTPHandlerCell{call: call.move()}}}
+}
+
+priv HTTPSegment: enum {
+    Static(String)
+    Param(String)
+    CatchAll(String)
+}
+
+priv HTTPRoute: struct {
+    method: String
+    pattern: String
+    segments: [HTTPSegment]
+    handler: HTTPHandler
+    // The compiler-checked endpoint contract an `app.get(…)`-style
+    // registration carries ("" for Core's own static and page routes);
+    // `web.openapi(app)` renders it.
+    contract: String
+    // The registering call, which a later duplicate names.
+    at: SourceLocation
+}
+
+priv HTTPParsedRoute: struct {
+    segments: [HTTPSegment]
+    problem: String
+}
+
+// A layer builds the handler that wraps `next`; the handler's own row
+// (`HTTPHandler.handle`) is the layer's, as a lambda body's row is its
+// enclosing function's.
+priv HTTPLayerCell: struct {
+    wrap: fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler
+}
+
+priv HTTPMuxState: struct {
+    routes: [HTTPRoute]
+    layers: [Shared<HTTPLayerCell>]
+    request_seq: Int
+}
+
+/// One route table: routes and middleware layers. A `web.app()` owns one and
+/// so does an `http.router()`; copies share the one table.
+HTTPMux: struct {
+    __state: Shared<HTTPMuxState>
+}
+
+// A route whose pattern was checked while building: its contract is the one
+// the compiler wrote complete. `at` is the place of the registering call, so
+// a refused route names its line.
+priv route_add: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
+    parsed: route_parse(pattern)
+    if parsed.problem != "" {
+        route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
+    }
+    mux_register(mux, method, pattern, parsed.segments, handler, contract, at)
+}
+
+// A route whose pattern is a run-time value: its contract (`"pattern":""`)
+// gets its path inputs from the pattern registered.
+priv route_add_dynamic: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
+    parsed: route_parse(pattern)
+    if parsed.problem != "" {
+        route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
+    }
+    checked: route_contract(method, pattern, parsed.segments, contract, at)
+    mux_register(mux, method, pattern, parsed.segments, handler, checked, at)
+}
+
+// A custom route whose method token is a run-time value: the token passes
+// core.http's one method token check here, at the registering line, and
+// completes the contract (`"method":""`). A static token was checked while
+// building and registers as any verb does.
+priv route_add_custom: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
+    if http.__method_token_check(method) == .Err(refused) {
+        route_stop("E2808", "HTTP route method `{method}` is refused: {refused.reason}.", at)
+    }
+    route_add_dynamic(mux, method, pattern, handler, contract, at)
+}
+
+// A middleware layer: the first registered layer is the outermost.
+priv layer_add: fn(mux: HTTPMux, layer: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! {
+    guard := mux.__state.guard_edit()
+    guard.value.layers.push(Shared{HTTPLayerCell{wrap: layer.move()}})
+}
+
+priv mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [HTTPSegment], handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
+    shape: route_shape(segments)
+    loop existing in mux_routes(mux) {
+        if existing.method == method && route_shape(existing.segments) == shape {
+            route_stop("E2804", "Two routes both match `{method} {pattern}`; the other is `{existing.pattern}` at {existing.at.file}:{existing.at.line}.", at)
+        }
+    }
+    guard := mux.__state.guard_edit()
+    guard.value.routes.push(HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract, at: at})
+}
+
+// A refused registration, reported at the registering call in the stop
+// report's own `  --> file:line in function` form (core.rt.__coded_stop adds
+// the registry row's Why/Fix).
+priv route_stop: fn(code: String, message: String, at: SourceLocation) -> Never {
+    core.rt.__coded_stop(code, "{message}\n  --> {at.file}:{at.line} in {at.function}")
+}
+
+// `live` counts the connections being served, `refusing` those taken while
+// draining only to be answered 503, and `peers` how many of either each peer
+// address holds; each connection's task gives its count back. `grace_ns` is
+// the drain budget `shutdown` set (-1 until it does), and `drained` marks
+// that budget run out: a connection whose handler is still running then
+// never sends its response.
+priv HTTPServerState: struct {
+    phase: Int
+    stopping: Bool
+    report: HTTPShutdownReport?
+    live: Int{0}
+    refusing: Int{0}
+    completed: Int{0}
+    peers: [String:Int]{[String:Int]{}}
+    grace_ns: Int{-1}
+    drained: Bool{false}
+}
+
+/// A bound listener and its mux. `serve` answers connections until
+/// `shutdown` or a cancelled accept; the report is the same for every caller.
+/// The listener closes when the drain ends, so nothing listens after serving.
+HTTPServer: struct {
+    __state: Shared<HTTPServerState>
+    // The bound listener, the one item until serving closes it
+    // (server_close_listener).
+    __listener: Shared<[TCPListener]>
+    __mux: HTTPMux
+    __deadline: Duration?
+    __tls: HTTPServerTLS?
+    __done: Sender<Int>
+    __finished: Receiver<Int>
+
+    local_addr: fn(self) -[Net]> String HTTPError! {
+        listener: server_listener(self) ?? return Err(.IO{operation: "local address: the server has stopped serving, so its listener is closed"})
+        listener.local_addr() ?? return Err(.IO{operation: "local address: {err}"})
+    }
+
+    // What a readiness probe reads now (HTTPReadiness). It does no I/O.
+    readiness: fn(self) -> HTTPReadiness Never! { server_readiness(self.__state) }
+
+    // Each admitted connection is served by its own task, so a held
+    // connection does not hold up the next; one over the connection limits
+    // is answered 503 and closed. A connection's task shields its request
+    // from cancellation, so a delivered signal (which cancels every task)
+    // stops accepting while the requests in flight are answered. Serving
+    // then waits up to one connection deadline for them; the report counts
+    // the connections still open after that as cancelled.
+    serve: fn(self) -[Net, FS.Read, Time]> HTTPShutdownReport HTTPError! {
+        if !server_begin(self) -> return Err(.IO{operation: "HTTP server can only be served once"})
+        accepted := 0
+        overloaded := 0
+        failure := HTTPError?{None}
+        running := true
+        backoff := 0
+        loop running && !server_stopping(self) {
+            listener: server_listener(self) ?? break
+            if listener.accept(deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
+                .Ok(stream) -> {
+                    accepted += 1
+                    backoff = 0
+                    peer: peer_host(stream)
+                    if server_stopping(self) {
+                        // A shutdown began while this accept waited: the
+                        // server reads Draining, so the connection is told so.
+                        overloaded += 1
+                        take_while_draining(self, stream)
+                    } else if admit(self.__state, peer) {
+                        state: self.__state
+                        mux: self.__mux
+                        tls: self.__tls
+                        deadline: self.__deadline
+                        // The stream reaches its task in a one-item list,
+                        // as it reaches the TLS handshake.
+                        handoff: Shared{[TCPStream]{stream}}
+                        connection: task &&handoff {
+                            serve_admitted(state, handoff, peer, tls, mux, deadline)
+                        }
+                        connection.detach()
+                    } else {
+                        overloaded += 1
+                        refuse(stream, self.__tls)
+                    }
+                }
+                .Err(error) -> {
+                    // A cancelled accept (the serving task's cancel, or the
+                    // process's on a delivered `process.on_signal` signal)
+                    // stops serving as a shutdown does: the report stands.
+                    if accept_cancelled(error) -> running = false else if accept_transient(error) {
+                        // A failed accept the listener recovers from waits,
+                        // doubling from 5 ms to 1 s, instead of retrying at
+                        // once; the connections being served go on.
+                        backoff = if {
+                            backoff == 0 -> C_ACCEPT_BACKOFF_MIN_MS
+                            backoff * 2 > C_ACCEPT_BACKOFF_MAX_MS -> C_ACCEPT_BACKOFF_MAX_MS
+                            else -> backoff * 2
+                        }
+                        core.tasks.sleep(backoff)
+                    } else if !accept_timed_out(error) {
+                        failure = Val(HTTPError.IO{operation: "accept: {error}"})
+                        running = false
+                    }
+                }
+            }
+        }
+        // Accepting work has stopped, and the server reads Draining. Until
+        // the connections in flight end or the drain budget runs out, the
+        // listener stays open: a new connection within the connection limits
+        // is answered 503 (the readiness probe reads `draining`) and counts as
+        // overloaded, so a balancer can tell a draining server from a dead
+        // one. Then the listener closes, so the port is free (a connect is
+        // refused), and the server reads Closed once it reports.
+        server_mark_stopping(self)
+        #Shield {
+            drain_end: rt.clock_mono_ns() + drain_budget(self.__state, self.__deadline)
+            loop __live(self.__state) > 0 && rt.clock_mono_ns() < drain_end {
+                if server_listener(self) == .Val(listener) {
+                    if listener.accept(deadline: Duration{ns: C_DRAIN_POLL_MS * 1000000}) == {
+                        .Ok(stream) -> {
+                            accepted += 1
+                            overloaded += 1
+                            take_while_draining(self, stream)
+                        }
+                        .Err(error) -> {
+                            if !accept_timed_out(error) -> core.tasks.sleep(C_DRAIN_POLL_MS)
+                        }
+                    }
+                } else { core.tasks.sleep(C_DRAIN_POLL_MS) }
+            }
+        }
+        server_close_listener(self)
+        report: drain_close(self.__state, accepted, overloaded)
+        server_finish(self, report)
+        server_signal_done(self.__done).drop("the server holds its own finish end")
+        if failure == .Val(error) -> return Err(error)
+        Ok(report)
+    }
+
+    wait: fn(self) -[Net, FS.Read, Time]> HTTPShutdownReport HTTPError! { self.serve() }
+
+    // `serve` answers the connections in flight before it reports, for at
+    // most `grace` (none by default), and shutdown waits for that report.
+    shutdown: fn(self, grace: Duration{0ms}) -[Net]> HTTPShutdownReport HTTPError! {
+        phase: server_request_stop(self, grace)
+        if phase == 0 {
+            return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
+        }
+        if phase == 1 {
+            _: self.__finished.receive() ?? 0
+            server_signal_done(self.__done).drop("the server holds its own finish end")
+        }
+        Ok(server_report(self))
+    }
+}
+
+// The finish signal; the server holds the receiving end, so only a cancelled
+// wait refuses it.
+priv server_signal_done: fn(done: Sender<Int>) Err! { done.send(1) }
+
+priv server_begin: fn(server: HTTPServer) -> Bool Never! {
+    guard := server.__state.guard_edit()
+    if guard.value.phase != 0 -> return false
+    guard.value.phase = 1
+    true
+}
+
+// The server's listener while it accepts; None once serving closed it.
+priv server_listener: fn(server: HTTPServer) -> TCPListener? Never! {
+    guard: server.__listener.guard_read()
+    if guard.value.len() == 0 -> return None
+    Val(guard.value[0])
+}
+
+// The listener's one holder lets it go, so its socket closes.
+priv server_close_listener: fn(server: HTTPServer) Never! {
+    guard := server.__listener.guard_edit()
+    _: guard.value.pop()
+}
+
+priv server_stopping: fn(server: HTTPServer) -> Bool Never! {
+    guard: server.__state.guard_read()
+    guard.value.stopping
+}
+
+// Accepting work has stopped (a shutdown, a cancelled accept or a failed
+// one): from here the server reads Draining.
+priv server_mark_stopping: fn(server: HTTPServer) Never! {
+    guard := server.__state.guard_edit()
+    guard.value.stopping = true
+}
+
+priv server_readiness: fn(state: Shared<HTTPServerState>) -> HTTPReadiness Never! {
+    guard: state.guard_read()
+    if {
+        guard.value.phase == 2 -> HTTPReadiness.Closed
+        guard.value.phase == 0 && guard.value.stopping -> HTTPReadiness.Closed
+        guard.value.phase == 0 -> HTTPReadiness.NotReady
+        guard.value.stopping -> HTTPReadiness.Draining
+        else -> HTTPReadiness.Ready
+    }
+}
+
+// The body of the readiness probe's answer.
+priv readiness_word: fn(readiness: HTTPReadiness) -> String Never! {
+    if readiness == {
+        .NotReady -> "not ready"
+        .Ready -> "ready"
+        .Draining -> "draining"
+        .Closed -> "closed"
+    }
+}
+
+priv server_finish: fn(server: HTTPServer, report: HTTPShutdownReport) Never! {
+    guard := server.__state.guard_edit()
+    guard.value.phase = 2
+    guard.value.report = Val(report)
+}
+
+priv server_request_stop: fn(server: HTTPServer, grace: Duration) -> Int Never! {
+    guard := server.__state.guard_edit()
+    guard.value.stopping = true
+    guard.value.grace_ns = if grace.ns < 0 -> 0 else -> grace.ns
+    guard.value.phase
+}
+
+// How long serving waits for the connections in flight once accepting
+// stops: the grace `shutdown` gave, else (a cancelled accept: the serving
+// task's cancel or a delivered signal) one connection deadline.
+priv drain_budget: fn(state: Shared<HTTPServerState>, deadline: Duration?) -> Int Never! {
+    guard: state.guard_read()
+    if guard.value.grace_ns >= 0 -> return guard.value.grace_ns
+    if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
+}
+
+// The drain's end: the connections still open are cancelled, and from now
+// on one whose handler returns sends nothing (drain_ended).
+priv drain_close: fn(state: Shared<HTTPServerState>, accepted: Int, overloaded: Int) -> HTTPShutdownReport Never! {
+    guard := state.guard_edit()
+    guard.value.drained = true
+    HTTPShutdownReport{accepted: accepted, overloaded: overloaded, completed: guard.value.completed, cancelled: guard.value.live}
+}
+
+// Whether the drain of `server` (None: a lone `serve_once` connection, which
+// no drain ends) ran out before this connection's handler returned.
+priv drain_ended: fn(server: Shared<HTTPServerState>?) -> Bool Never! {
+    state: server ?? return false
+    guard: state.guard_read()
+    guard.value.drained
+}
+
+priv server_report: fn(server: HTTPServer) -> HTTPShutdownReport Never! {
+    guard: server.__state.guard_read()
+    guard.value.report ?? HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0}
+}
+
+// The peer's address without its port: what the per-peer limit counts.
+priv peer_host: fn(stream: TCPStream) -[Net]> String Never! {
+    addr: stream.peer_addr() ?? return ""
+    parts: addr.split(":").to_list()
+    if parts.len() < 2 -> return addr
+    parts.slice(0, parts.len() - 1).join(":")
+}
+
+// Count a connection in, unless the server or its peer is at the limit.
+priv admit: fn(state: Shared<HTTPServerState>, peer: String) -> Bool Never! {
+    guard := state.guard_edit()
+    held: guard.value.peers.get(peer) ?? 0
+    if guard.value.live >= C_MAX_CONNECTIONS || held >= C_MAX_PEER_CONNECTIONS -> return false
+    guard.value.live += 1
+    guard.value.peers[peer] = held + 1
+    true
+}
+
+// Count a connection taken while draining in, unless the server or its peer
+// is at the limit. It is not work, so the drain does not wait for it.
+priv admit_refusing: fn(state: Shared<HTTPServerState>, peer: String) -> Bool Never! {
+    guard := state.guard_edit()
+    held: guard.value.peers.get(peer) ?? 0
+    if guard.value.live + guard.value.refusing >= C_MAX_CONNECTIONS || held >= C_MAX_PEER_CONNECTIONS {
+        return false
+    }
+    guard.value.refusing += 1
+    guard.value.peers[peer] = held + 1
+    true
+}
+
+// One connection of `peer` gives its count back.
+priv peer_leave: fn(state: &HTTPServerState, peer: String) Never! {
+    held: state.peers.get(peer) ?? 1
+    if held <= 1 -> _: state.peers.remove(peer) else -> state.peers[peer] = held - 1
+}
+
+// One admitted connection's task: the TLS handshake and its request, then its
+// count given back, all shielded from cancellation so a signal lets the
+// request finish and the count reach the drain.
+priv serve_admitted: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
+    #Shield {
+        answered: serve_taken(state, handoff, tls, mux, deadline, false)
+        guard := state.guard_edit()
+        guard.value.live -= 1
+        if answered -> guard.value.completed += 1
+        peer_leave(guard.value, peer)
+    }
+}
+
+// A connection taken once accepting work stopped: within the limits, its own
+// task answers it 503 (or the readiness probe); past them, it is refused now.
+priv take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) Never! -[Net, FS.Read, Time]> {
+    peer: peer_host(stream)
+    if admit_refusing(server.__state, peer) {
+        state: server.__state
+        mux: server.__mux
+        tls: server.__tls
+        deadline: server.__deadline
+        handoff: Shared{[TCPStream]{stream}}
+        refusal: task &&handoff { serve_refusing(state, handoff, peer, tls, mux, deadline) }
+        refusal.detach()
+    } else { refuse(stream, server.__tls) }
+}
+
+// A connection taken while draining: its request is answered 503, or by the
+// readiness probe, and its count given back.
+priv serve_refusing: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
+    #Shield {
+        _: serve_taken(state, handoff, tls, mux, deadline, true)
+        guard := state.guard_edit()
+        guard.value.refusing -= 1
+        peer_leave(guard.value, peer)
+    }
+}
+
+// The handed-off stream's handshake and request; true when it was answered.
+// A `refusing` connection, taken while draining, is answered 503.
+priv serve_taken: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
+    stream: taken_stream(handoff) ?? return false
+    conn: accept_conn(stream, tls, deadline) ?? return false
+    serve_connection(conn, mux, deadline, Val(state), refusing)
+}
+
+// A connection over the limits: a plain one is told 503, then closed.
+priv refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) Never! -[Net, Time]> {
+    plain := true
+    if tls == .Val(_) -> plain = false
+    if plain {
+        if stream.write_bytes(error_wire(503), deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+    }
+    if stream.close() == {
+        .Ok(_) -> {}
+        .Err(_) -> {}
+    }
+}
+
+__live: fn(state: Shared<HTTPServerState>) -> Int Never! {
+    guard: state.guard_read()
+    guard.value.live
+}
+
+priv accept_timed_out: fn(error: NetError) -> Bool Never! {
+    if error == {
+        .Timeout(_) -> true
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+    }
+}
+
+priv accept_cancelled: fn(error: NetError) -> Bool Never! {
+    if error == {
+        .Cancelled(_) -> true
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+    }
+}
+
+// An accept(2) failure the listener recovers from: a connection reset or
+// aborted before it was taken (ECONNABORTED, EPROTO), or the process or
+// system out of descriptors (EMFILE, ENFILE) or buffer memory (ENOBUFS,
+// ENOMEM). Any other failure ends serving.
+priv accept_transient: fn(error: NetError) -> Bool Never! {
+    if error == {
+        .ConnectionReset(_) -> true
+        .Other(detail) -> accept_transient_code(detail.os_code)
+        .Protocol(detail) -> accept_transient_code(detail.os_code)
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .DNS(_) -> false
+    }
+}
+
+priv accept_transient_code: fn(os_code: Int?) -> Bool Never! {
+    code: os_code ?? return false
+    code == 12 || code == 23 || code == 24 || code == 71 || code == 105
+}
+
+// An empty route table: a `web.app()`'s, and the one an `http.router()`
+// routes with.
+priv mux_new: fn() -> HTTPMux Never! {
+    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0}}}
+}
+
+// Answer one connection the listener accepts (`app.serve_once(listener)`).
+priv server_serve_once: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
+    stream: listener.accept(deadline: Duration{ns: C_ACCEPT_ONCE_NS}) ?? {
+        if accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
+        return Err(.IO{operation: "accept: {err}"})
+    }
+    peer: peer_host(stream)
+    _: serve_connection(HTTPConn{tcp: Val(stream), tls: None, peer: peer}, mux, None, None, false)
+    Ok()
+}
+
+// `app.bind(addr, tls:, deadline:)` (Docs/spec/syntax-decisions.md:5083,
+// Docs/spec/spec.md:1928-1931): the labelled `tls:` option serves HTTPS. Its
+// identity is checked here, so an unusable certificate or key fails the bind
+// instead of every handshake.
+priv server_bind: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
+    if tls == .Val(identity) {
+        ops: identity.__ops.guard_read()
+        problem: ops.value.check(identity.cert_pem, identity.key_pem)
+        if problem != "" -> return Err(.IO{operation: problem})
+    }
+    listener: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
+    Ok(server_on(listener, mux, tls, deadline))
+}
+
+// A server over a listener its caller bound (core.web's app listen step,
+// which tells a busy port from other bind failures).
+priv server_on: fn(listener: TCPListener, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -> HTTPServer Never! {
+    pair: core.tasks.__channel_bounded<Int>(1)
+    HTTPServer{
+        __state: Shared{HTTPServerState{phase: 0, stopping: false, report: None}},
+        __listener: Shared{[TCPListener]{listener}},
+        __mux: mux,
+        __deadline: deadline,
+        __tls: tls,
+        __done: pair.sender,
+        __finished: pair.receiver,
+    }
+}
+
+// `app.static_files(prefix, root)`: GET `{prefix}/*` answers from `root`.
+priv mount_static_files: fn(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?, at: SourceLocation) Never! {
+    mount: HTTPStaticMount{root: root, index: index ?? true, dotfiles: dotfiles ?? false, follow_links: follow_links ?? false}
+    base: trim_trailing_slashes(prefix)
+    route_add(mux, "GET", "{base}/*jet_static_path", __handler(fn(request: HTTPRequest) { Ok(static_serve(mount, request)) }), "", at)
+}
+
+response: fn(status: Int, body: String) -> HTTPResponse Never! {
+    payload: core.http.body_text(body)
+    fields: core.http.headers()
+    response_body(status, payload, fields)
+}
+
+// Head policy stays in Jet: an out-of-range status is a 500.
+response_body: fn(status: Int, body: &&Body, headers: &&Headers) -> HTTPResponse Never! {
+    if status < 100 || status > 599 {
+        return core.http.make_response(500, core.http.body_text(status_text(500)), headers)
+    }
+    core.http.make_response(status, body, headers)
+}
+
+// The server's own error page body, `404 Not Found`: the status and its
+// reason from the one table, `http.reason_phrase`, that the status line uses.
+priv status_text: fn(status: Int) -> String Never! { "{status} {http.reason_phrase(status)}" }
+
+priv status_page: fn(status: Int) -> HTTPResponse Never! { response(status, status_text(status)) }
+
+json: fn<T: Encode>(status: Int, body: T) -> HTTPResponse HTTPError! {
+    text: json_codec.to_string(body.encode()) ?? return Err(HTTPError.InvalidFraming)
+    fields: core.http.headers_set(core.http.headers(), "content-type", "application/json; charset=utf-8")
+    payload: core.http.body_text(text)
+    response_body(status, payload, fields)
+}
+
+static_file: fn(path: String, content_type: String) -[Net, FS.Read]> HTTPResponse HTTPError! {
+    bytes: file_read(path) ?? return Err(.IO{operation: "static file `{path}` could not be opened with held identity"})
+    Ok(bytes_response(200, bytes, content_type))
+}
+
+static_file_range: fn(request: HTTPRequest, path: String, content_type: String) -[Net, FS.Read]> HTTPResponse HTTPError! {
+    bytes: file_read(path) ?? return Err(.IO{operation: "static file `{path}` could not be opened with held identity"})
+    spec: request.header("range") ?? return Ok(bytes_response(200, bytes, content_type))
+    span: range_spec(spec, bytes.len()) ?? return Ok(response(416, "range not satisfiable"))
+    partial := bytes_response(206, bytes.slice(span.start, span.end + 1), content_type)
+    partial.headers = http.headers_set(partial.headers, "content-range", "bytes {span.start}-{span.end}/{bytes.len()}")
+    Ok(partial)
+}
+
+tls: fn(cert: String, key: String) -> HTTPServerTLS Never! {
+    HTTPServerTLS{cert_pem: cert, key_pem: key, __ops: Shared{HTTPTLSOps{check: tls_check, accept: tls_accept}}}
+}
+
+priv tls_check: fn(cert_pem: String, key_pem: String) -[Net]> String Never! {
+    _: server_tls.server_tls_context(cert_pem, key_pem) ?? return "{err}"
+    ""
+}
+
+// The stream out of the one-item list it was handed over in.
+priv taken_stream: fn(accepted: Shared<[TCPStream]>) -> TCPStream? Never! {
+    guard := accepted.guard_edit()
+    guard.value.pop()
+}
+
+priv tls_accept: fn(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> HTTPSecure? Never! {
+    tcp: taken_stream(accepted) ?? return None
+    secure: server_tls.__server(tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
+    staged: Shared{[U8]{}}
+    Val(HTTPSecure{
+        read_into: fn(limit: Int, deadline: Duration) {
+            guard := staged.guard_edit()
+            secure.read_into(guard.value, limit, deadline: deadline)
+        },
+        staged: staged,
+        write_all: fn(bytes: [U8], deadline: Duration) {
+            if secure.write_bytes(bytes, deadline: deadline) == {
+                .Ok(_) -> true
+                .Err(_) -> false
+            }
+        },
+        close: fn() {
+            if secure.close() == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        },
+    })
+}
+
+sse: fn(body: String) -> HTTPResponse Never! {
+    fields: core.http.headers_set(core.http.headers(), "content-type", "text/event-stream")
+    headers: core.http.headers_set(fields, "cache-control", "no-cache")
+    payload: core.http.body_text("data: {body}\n\n")
+    response_body(200, payload, headers)
+}
+
+cors_policy: fn(origins: [String] | HTTPCorsOrigins, methods: [String]{[String]{}}, headers: [String]{[String]{}}, credentials: Bool{false}, max_age: Int{86400}) -> HTTPCorsPolicy HTTPError! {
+    selected: if origins == {
+        .M__String_(names) -> HTTPCorsOrigins.List(names)
+        .HTTPCorsOrigins(value) -> value
+    }
+    if credentials && selected == .Any {
+        return Err(HTTPError.Policy{reason: "CORS credentials need named origins. An `.Any` origin with credentials would let every website read this API, and browsers refuse the pair. List the origins you trust, or set credentials to false."})
+    }
+    HTTPCorsPolicy{
+        origins: selected,
+        allow_methods: cors_join(methods, "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"),
+        allow_headers: cors_join(headers, "content-type, authorization, x-request-id"),
+        credentials: credentials,
+        max_age_secs: max_age,
+    }
+}
+
+access_log: fn(request: HTTPRequest, status: Int) -[Net]> String Never! {
+    template: access_log_template(request)
+    access_log_parts(request.method, request.path, template, status)
+}
+
+access_log_template: fn(request: HTTPRequest) -> String? Never! { request.__route_template.copy() }
+
+access_log_parts: fn(method: String, path: String, template: String?, status: Int) -> String Never! {
+    route: template ?? access_log_path(path)
+    "{method} {route} {status}"
+}
+
+access_log_path: fn(path: String) -> String Never! {
+    raw: path.bytes()
+    end := 0
+    loop end < raw.len() && raw[end] != (U8{63}) -> end += 1
+    if end == raw.len() -> return path.copy()
+    String.from_bytes(raw.slice(0, end)) ?? panic("query separator is not a UTF-8 boundary")
+}
+
+cors_join: fn(values: [String], fallback: &&String) -> String Never! {
+    if values.len() == 0 -> return fallback
+    result := ""
+    loop i in 0..<values.len() {
+        if i > 0 -> result = "{result}, "
+        result = "{result}{values[i]}"
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Middleware layers
+
+priv cors_handler: fn(policy: HTTPCorsPolicy, next: HTTPHandler) -> HTTPHandler Never! {
+    __handler(fn(request: HTTPRequest) { cors_apply(policy, next, request) })
+}
+
+priv cors_allow_origin: fn(policy: HTTPCorsPolicy, origin: String) -> String? Never! {
+    if policy.origins == {
+        .Any -> Val("*")
+        .List(names) -> {
+            loop name in names {
+                if name == origin -> return Val(origin)
+            }
+            None
+        }
+    }
+}
+
+priv cors_apply: fn(policy: HTTPCorsPolicy, next: HTTPHandler, request: HTTPRequest) -> HTTPResponse HTTPError! {
+    origin: request.header("origin") ?? return next.handle(request)
+    allowed: cors_allow_origin(policy, origin) ?? return next.handle(request)
+    if request.method == "OPTIONS" && request.header("access-control-request-method") != None {
+        fields := http.headers_set(http.headers(), "vary", "origin")
+        fields = http.headers_set(fields, "access-control-allow-origin", allowed)
+        fields = http.headers_set(fields, "access-control-allow-methods", policy.allow_methods)
+        fields = http.headers_set(fields, "access-control-allow-headers", policy.allow_headers)
+        if policy.credentials {
+            fields = http.headers_set(fields, "access-control-allow-credentials", "true")
+        }
+        if policy.max_age_secs > 0 {
+            fields = http.headers_set(fields, "access-control-max-age", "{policy.max_age_secs}")
+        }
+        empty: http.body_empty()
+        return Ok(response_body(204, empty, fields))
+    }
+    answered := next.handle(request) ?? return Err(err)
+    answered.headers = http.headers_set(answered.headers, "access-control-allow-origin", allowed)
+    vary: answered.header("vary") ?? ""
+    if vary == "" -> answered.headers = http.headers_set(answered.headers, "vary", "origin") else if !list_has_token(vary, "origin") {
+        answered.headers = http.headers_set(answered.headers, "vary", "{vary}, origin")
+    }
+    if policy.credentials {
+        answered.headers = http.headers_set(answered.headers, "access-control-allow-credentials", "true")
+    }
+    Ok(answered)
+}
+
+priv request_id_handler: fn(next: HTTPHandler) -> HTTPHandler Never! {
+    __handler(fn(request: HTTPRequest) { request_id_apply(next, request) })
+}
+
+priv request_id_apply: fn(next: HTTPHandler, request: HTTPRequest) -> HTTPResponse HTTPError! {
+    id: request.header("x-request-id") ?? ""
+    answered := next.handle(request) ?? return Err(err)
+    if id != "" && answered.header("x-request-id") == None {
+        answered.headers = http.headers_set(answered.headers, "x-request-id", id)
+    }
+    Ok(answered)
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch
+
+priv mux_routes: fn(mux: HTTPMux) -> [HTTPRoute] Never! {
+    guard: mux.__state.guard_read()
+    guard.value.routes.copy()
+}
+
+priv mux_layers: fn(mux: HTTPMux) -> [Shared<HTTPLayerCell>] Never! {
+    guard: mux.__state.guard_read()
+    guard.value.layers.copy()
+}
+
+priv mux_next_seq: fn(mux: HTTPMux) -> Int Never! {
+    guard := mux.__state.guard_edit()
+    guard.value.request_seq += 1
+    guard.value.request_seq
+}
+
+// A served request's handler run, cancellation deferred until it answers.
+priv dispatch_shielded: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    reply := status_page(500)
+    #Shield { reply = __dispatch(mux, request) }
+    reply
+}
+
+__dispatch: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    tagged: with_request_id(mux, request)
+    layers: mux_layers(mux)
+    current := __handler(fn(routed: HTTPRequest) { select(mux, routed) })
+    i := layers.len()
+    loop i > 0 {
+        i -= 1
+        layer: layers[i].guard_read()
+        current = layer.value.wrap(current)
+    }
+    if current.handle(tagged) == {
+        .Ok(answered) -> answered
+        .Err(error) -> error_response(error)
+    }
+}
+
+priv error_response: fn(error: HTTPError) -> HTTPResponse Never! {
+    if error == {
+        .BodyTooLarge(_) -> empty_response(413)
+        .InvalidFraming -> empty_response(400)
+        .UnsupportedEncoding -> empty_response(415)
+        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .Cancelled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> status_page(500)
+    }
+}
+
+priv empty_response: fn(status: Int) -> HTTPResponse Never! {
+    empty: http.body_empty()
+    fields: http.headers()
+    response_body(status, empty, fields)
+}
+
+priv valid_request_id: fn(id: String) -> Bool Never! {
+    raw: id.bytes()
+    if raw.len() == 0 || raw.len() > C_MAX_REQUEST_ID_BYTES -> return false
+    loop b in raw {
+        n: Int{b}
+        if n < 33 || n > 126 -> return false
+    }
+    true
+}
+
+priv with_request_id: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPRequest Never! {
+    if request.header("x-request-id") == .Val(id) {
+        if valid_request_id(id) -> return request.copy()
+    }
+    seq: mux_next_seq(mux)
+    out := request.copy()
+    out.headers = http.headers_set(out.headers, "x-request-id", "req-{__hex(rt.clock_mono_ns())}-{__hex(seq)}")
+    out
+}
+
+// The route a request selects, or the answer it gets without one: OPTIONS *,
+// 400, 404 or 405. `index` is the selected route's position in `routes`.
+priv HTTPPick: struct {
+    answer: HTTPResponse?
+    index: Int
+    request: HTTPRequest
+    routes: [HTTPRoute]
+}
+
+priv mux_pick: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPPick Never! {
+    routes: mux_routes(mux)
+    if request.method == "OPTIONS" && request.path == "*" {
+        everything := [String]{}
+        loop route in routes {
+            if !list_contains(everything, route.method) -> everything.push(route.method)
+        }
+        allowed := empty_response(204)
+        allowed.headers = http.headers_set(allowed.headers, "Allow", allow_value(everything))
+        return HTTPPick{answer: Val(allowed), index: -1, request: request, routes: routes}
+    }
+    segments: path_segments(access_log_path(request.path)) ?? return HTTPPick{answer: Val(status_page(400)), index: -1, request: request, routes: routes}
+    best := -1
+    matched := [String]{}
+    loop index in 0..<routes.len() {
+        route: routes[index]
+        if !route_matches(route.segments, segments) -> next
+        if !list_contains(matched, route.method) -> matched.push(route.method)
+        if route.method != request.method && !(request.method == "HEAD" && route.method == "GET") {
+            next
+        }
+        if best < 0 || route_better(route.segments, routes[best].segments) -> best = index
+    }
+    if best < 0 {
+        if matched.len() == 0 {
+            return HTTPPick{answer: Val(status_page(404)), index: -1, request: request, routes: routes}
+        }
+        refused := status_page(405)
+        refused.headers = http.headers_set(refused.headers, "Allow", allow_value(matched))
+        return HTTPPick{answer: Val(refused), index: -1, request: request, routes: routes}
+    }
+    routed := request.copy()
+    routed.__params = route_params(routes[best].segments, segments)
+    routed.__route_template = Val(routes[best].pattern)
+    HTTPPick{answer: None, index: best, request: routed, routes: routes}
+}
+
+priv select: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
+    pick: mux_pick(mux, request)
+    if pick.answer == .Val(answer) -> return Ok(answer)
+    pick.routes[pick.index].handler.handle(pick.request)
+}
+
+// Sorted methods, HEAD wherever GET is served, then OPTIONS.
+priv allow_value: fn(methods: [String]) -> String Never! {
+    names := methods.copy()
+    if list_contains(names, "GET") && !list_contains(names, "HEAD") -> names.push("HEAD")
+    sorted: sorted_text(names)
+    out := ""
+    loop name in sorted {
+        if name == "OPTIONS" -> next
+        out = if out == "" -> name else -> "{out}, {name}"
+    }
+    if out == "" -> return "OPTIONS"
+    "{out}, OPTIONS"
+}
+
+priv sorted_text: fn(values: [String]) -> [String] Never! {
+    out := [String]{}
+    loop value in values {
+        at := out.len()
+        loop at > 0 && text_less(value, out[at - 1]) -> at -= 1
+        rebuilt := [String]{}
+        loop i in 0..<out.len() {
+            if i == at -> rebuilt.push(value.copy())
+            rebuilt.push(out[i])
+        }
+        if at == out.len() -> rebuilt.push(value.copy())
+        out = rebuilt
+    }
+    out
+}
+
+priv text_less: fn(left: String, right: String) -> Bool Never! {
+    a: left.bytes()
+    b: right.bytes()
+    i := 0
+    loop i < a.len() && i < b.len() {
+        if a[i] != b[i] -> return (Int{a[i]}) < (Int{b[i]})
+        i += 1
+    }
+    a.len() < b.len()
+}
+
+priv list_contains: fn(values: [String], wanted: String) -> Bool Never! {
+    loop value in values {
+        if value == wanted -> return true
+    }
+    false
+}
+
+// Whether a comma-separated header list names `token`, ignoring case.
+priv list_has_token: fn(list: String, token: String) -> Bool Never! {
+    loop item in comma_items(list) {
+        if http.ascii_lower(item) == token -> return true
+    }
+    false
+}
+
+priv comma_items: fn(list: String) -> [String] Never! {
+    raw: list.bytes()
+    out := [String]{}
+    start := 0
+    i := 0
+    loop i <= raw.len() {
+        if i == raw.len() || raw[i] == (U8{44}) {
+            item: http.trim(String.from_bytes(raw.slice(start, i)) ?? "")
+            if item != "" -> out.push(item)
+            start = i + 1
+        }
+        i += 1
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Route patterns: `/`, static segments, `:name` parameters and one final
+// `*name` catch-all.
+
+priv route_problem: fn(problem: String) -> HTTPParsedRoute Never! {
+    HTTPParsedRoute{segments: [HTTPSegment]{}, problem: problem}
+}
+
+priv route_name_ok: fn(name: [U8]) -> Bool Never! {
+    if name.len() == 0 -> return false
+    loop i in 0..<name.len() {
+        n: Int{name[i]}
+        letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
+        digit: n >= 48 && n <= 57
+        if !letter && (i == 0 || !digit) -> return false
+    }
+    true
+}
+
+priv route_parse: fn(pattern: String) -> HTTPParsedRoute Never! {
+    raw: pattern.bytes()
+    if raw.len() == 0 || raw[0] != (U8{47}) -> return route_problem("a route starts with `/`")
+    segments := [HTTPSegment]{}
+    if raw.len() == 1 -> return HTTPParsedRoute{segments: segments, problem: ""}
+    names := [String]{}
+    closed := false
+    start := 1
+    i := 1
+    loop i <= raw.len() {
+        if i == raw.len() || raw[i] == (U8{47}) {
+            piece: raw.slice(start, i)
+            if piece.len() == 0 -> return route_problem("empty path segment")
+            if closed -> return route_problem("a catch-all must be the last segment")
+            if http.index_byte(piece, 123) >= 0 || http.index_byte(piece, 125) >= 0 {
+                return route_problem("braces are not route syntax; write `:name`")
+            }
+            first: Int{piece[0]}
+            if first == 58 || first == 42 {
+                name_bytes: piece.slice(1, piece.len())
+                if !route_name_ok(name_bytes) {
+                    return route_problem("a parameter needs a name of letters, digits and `_`")
+                }
+                name: String.from_bytes(name_bytes) ?? return route_problem("parameter name is not UTF-8")
+                if list_contains(names, name) {
+                    return route_problem("parameter `{name}` appears twice")
+                }
+                names.push(name.copy())
+                if first == 58 -> segments.push(HTTPSegment.Param(name)) else {
+                    segments.push(HTTPSegment.CatchAll(name))
+                    closed = true
+                }
+            } else {
+                text: segment_decode(piece) ?? return route_problem("invalid static segment")
+                segments.push(HTTPSegment.Static(text))
+            }
+            start = i + 1
+        }
+        i += 1
+    }
+    HTTPParsedRoute{segments: segments, problem: ""}
+}
+
+priv route_shape: fn(segments: [HTTPSegment]) -> String Never! {
+    out := ""
+    loop segment in segments {
+        piece: if segment == {
+            .Static(text) -> "s{text.bytes().len()}:{text}"
+            .Param(_) -> "p"
+            .CatchAll(_) -> "w"
+        }
+        out = "{out}/{piece}"
+    }
+    out
+}
+
+// The OpenAPI path of a parsed route: static segments percent-encoded,
+// parameters as `{name}` (jet_http_route_openapi_path).
+priv route_openapi_path: fn(segments: [HTTPSegment]) -> String Never! {
+    path := "/"
+    loop (index, segment) in segments {
+        if index > 0 -> path = "{path}/"
+        piece: if segment == {
+            .Static(text) -> route_url.percent_encode(text)
+            .Param(name) | .CatchAll(name) -> "{{{name}}}"
+        }
+        path = "{path}{piece}"
+    }
+    path
+}
+
+// A registration's checked contract, completed and checked once
+// (jet_http_mux_register): a dynamic pattern's contract (`"pattern":""`) gets
+// its path inputs from the pattern registered, and a run-time custom method's
+// (`"method":""`) gets that method.
+priv route_contract: fn(method: String, pattern: String, segments: [HTTPSegment], contract: String, at: SourceLocation) -> String Never! {
+    completed: if contract.contains("\"pattern\":\"\"") || contract.contains("\"method\":\"\"") -> route_complete_contract(method, pattern, segments, contract) else -> contract
+    route_require_contract(method, pattern, completed, at)
+    completed
+}
+
+priv contract_member: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? {
+    loop pair in fields {
+        if pair.key == name -> return Val(pair.value)
+    }
+    None
+}
+
+priv contract_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? {
+    value: contract_member(fields, name) ?? return None
+    if value == {
+        .Text(text) -> return Val(text)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return None
+    }
+}
+
+// `fields` with member `name` replaced (it must be present).
+priv contract_set: fn(fields: [(key: String, value: Dyn)], name: String, value: Dyn) -> [(key: String, value: Dyn)] Never! {
+    out := [(key: String, value: Dyn)]{}
+    found := false
+    loop pair in fields {
+        if pair.key == name {
+            out.push((key: name.copy(), value: value.copy()))
+            found = true
+        } else { out.push(pair.copy()) }
+    }
+    if !found -> panic("checked HTTP route descriptor has no `{name}`")
+    out
+}
+
+priv route_complete_contract: fn(method: String, pattern: String, segments: [HTTPSegment], contract: String) -> String Never! {
+    parsed: json_codec.parse(contract) ?? panic("invalid checked HTTP route descriptor")
+    fields := if parsed == {
+        .Object(members) -> members
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> panic("checked HTTP route descriptor is not an object")
+    }
+    inputs: contract_member(fields, "parameters") ?? panic("checked HTTP route descriptor has no inputs")
+    parameters: if inputs == {
+        .Array(items) -> items
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("checked HTTP route descriptor inputs are not an array")
+    }
+    loop segment in segments {
+        name: if segment == {
+            .Param(found) | .CatchAll(found) -> found
+            .Static(_) -> {
+                next
+            }
+        }
+        bound := false
+        loop parameter in parameters {
+            if parameter == .Object(members) {
+                if (contract_text(members, "name") ?? "") == name -> bound = true
+            }
+        }
+        if !bound -> panic("HTTP route `{pattern}` path field `{name}` has no typed handler input")
+    }
+    completed := [Dyn]{}
+    loop parameter in parameters {
+        members := if parameter == {
+            .Object(entries) -> entries
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> panic("checked HTTP route input is not an object")
+        }
+        name: contract_text(members, "name") ?? panic("checked HTTP route input has no name")
+        catch_all := Bool?{None}
+        loop segment in segments {
+            if segment == {
+                .Param(candidate) -> {
+                    if candidate == name -> catch_all = Val(false)
+                }
+                .CatchAll(candidate) -> {
+                    if candidate == name -> catch_all = Val(true)
+                }
+                .Static(_) -> {}
+            }
+        }
+        if catch_all == .Val(wildcard) {
+            members = contract_set(members, "in", Dyn.Text("path"))
+            members = contract_set(members, "required", Dyn.Bool(true))
+            members = contract_set(members, "catch_all", Dyn.Bool(wildcard))
+        } else if method != "GET" && method != "HEAD" {
+            panic("HTTP route `{pattern}` has unbound non-GET handler input `{name}`")
+        }
+        completed.push(Dyn.Object(members))
+    }
+    fields = contract_set(fields, "parameters", Dyn.Array(completed))
+    fields = contract_set(fields, "method", Dyn.Text(method.copy()))
+    fields = contract_set(fields, "pattern", Dyn.Text(pattern.copy()))
+    fields = contract_set(fields, "path", Dyn.Text(route_openapi_path(segments)))
+    fields = contract_set(fields, "operation_id", Dyn.Text(""))
+    json_codec.dump(Dyn.Object(fields)) ?? panic("checked HTTP route descriptor does not render: {err.reason}")
+}
+
+// jet_http_require_route_contract, for a mux route: its responses may be empty
+// at registration; `web.openapi` refuses that later.
+priv route_require_contract: fn(method: String, pattern: String, contract: String, at: SourceLocation) Never! {
+    // E2805 in the registry row's words (core.rt.__coded_stop adds its Why/Fix).
+    invalid: "Invalid HTTP route `{pattern}`: its checked `{method}` endpoint contract"
+    parsed: json_codec.parse(contract) ?? route_stop("E2805", "{invalid} is not valid JSON.", at)
+    fields: if parsed == {
+        .Object(members) -> members
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> route_stop("E2805", "{invalid} is not an object.", at)
+    }
+    names: [String]{"method", "pattern", "path", "operation_id", "summary", "parameters", "request_body", "responses", "security", "provenance"}
+    loop field in names {
+        if contract_kind(fields, field) == "" {
+            route_stop("E2805", "{invalid} has no `{field}`.", at)
+        }
+    }
+    if (contract_text(fields, "method") ?? "") != method || (contract_text(fields, "pattern") ?? "") != pattern {
+        route_stop("E2805", "{invalid} names another route.", at)
+    }
+    if contract_kind(fields, "responses") != "array" {
+        route_stop("E2805", "{invalid} has invalid responses.", at)
+    }
+    if contract_kind(fields, "parameters") != "array" {
+        route_stop("E2805", "{invalid} has invalid parameters.", at)
+    }
+    if contract_kind(fields, "security") != "array" {
+        route_stop("E2805", "{invalid} has an invalid security policy.", at)
+    }
+    body: contract_member(fields, "request_body") ?? route_stop("E2805", "{invalid} has an invalid request body.", at)
+    valid: if body == {
+        .Null -> true
+        .Object(members) -> contract_kind(members, "required") == "bool" && (contract_text(members, "content_type") ?? "") != "" && contract_kind(members, "schema") == "object"
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
+    }
+    if !valid -> route_stop("E2805", "{invalid} has an invalid request body.", at)
+}
+
+// The JSON kind of member `name`; "" when it is absent.
+priv contract_kind: fn(fields: [(key: String, value: Dyn)], name: String) -> String Never! {
+    value: contract_member(fields, name) ?? return ""
+    if value == {
+        .Null -> "null"
+        .Bool(_) -> "bool"
+        .Array(_) -> "array"
+        .Object(_) -> "object"
+        .Text(_) -> "text"
+        .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> "number"
+    }
+}
+
+// A path's decoded segments; `None` for a target the router refuses.
+priv path_segments: fn(path: String) -> [String]? Never! {
+    raw: path.bytes()
+    if raw.len() == 0 || raw[0] != (U8{47}) -> return None
+    out := [String]{}
+    if raw.len() == 1 -> return Val(out)
+    start := 1
+    i := 1
+    loop i <= raw.len() {
+        if i == raw.len() || raw[i] == (U8{47}) {
+            piece: segment_decode(raw.slice(start, i)) ?? return None
+            out.push(piece)
+            start = i + 1
+        }
+        i += 1
+    }
+    Val(out)
+}
+
+// Strict percent-decoding of one segment: no `+` rewriting, no encoded `/`,
+// and never `.` or `..`.
+priv segment_decode: fn(raw: [U8]) -> String? Never! {
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{37}) {
+            if i + 2 >= raw.len() -> return None
+            hi: http.from_hex(raw[i + 1])
+            lo: http.from_hex(raw[i + 2])
+            if hi < 0 || lo < 0 -> return None
+            value: hi * 16 + lo
+            if value == 47 -> return None
+            out.push(U8{value})
+            i += 3
+        } else {
+            out.push(raw[i])
+            i += 1
+        }
+    }
+    text: String.from_bytes(out) ?? return None
+    if text == "." || text == ".." -> return None
+    Val(text)
+}
+
+priv route_matches: fn(pattern: [HTTPSegment], path: [String]) -> Bool Never! {
+    loop i in 0..<pattern.len() {
+        if pattern[i] == {
+            .Static(text) -> {
+                if i >= path.len() || path[i] != text -> return false
+            }
+            .Param(_) -> {
+                if i >= path.len() || path[i] == "" -> return false
+            }
+            .CatchAll(_) -> return true
+        }
+    }
+    pattern.len() == path.len()
+}
+
+priv route_params: fn(pattern: [HTTPSegment], path: [String]) -> [Header] Never! {
+    out := [Header]{}
+    loop i in 0..<pattern.len() {
+        if pattern[i] == {
+            .Static(_) -> {}
+            .Param(name) -> { out.push(Header{name: name, value: path[i]}) }
+            .CatchAll(name) -> {
+                rest := ""
+                loop j in i..<path.len() -> rest = if j == i -> path[j] else -> "{rest}/{path[j]}"
+                out.push(Header{name: name, value: rest})
+            }
+        }
+    }
+    out
+}
+
+priv segment_rank: fn(segment: HTTPSegment) -> Int Never! {
+    if segment == {
+        .Static(_) -> 2
+        .Param(_) -> 1
+        .CatchAll(_) -> 0
+    }
+}
+
+// Static beats parameter beats catch-all, segment by segment; then the
+// shorter pattern; a full tie keeps the earlier registration.
+priv route_better: fn(candidate: [HTTPSegment], current: [HTTPSegment]) -> Bool Never! {
+    shared_len: if candidate.len() < current.len() -> candidate.len() else -> current.len()
+    loop i in 0..<shared_len {
+        a: segment_rank(candidate[i])
+        b: segment_rank(current[i])
+        if a != b -> return a > b
+    }
+    candidate.len() < current.len()
+}
+
+// ---------------------------------------------------------------------------
+// One connection: read one request, answer it, close.
+
+#Error
+priv HTTPFault: enum {
+    Reply(Int)
+    Drop
+}
+
+priv HTTPWire: struct {
+    buffer: [U8]
+    end_ns: Int
+}
+
+priv HTTPChunked: struct {
+    body: [U8]
+    trailers: Headers
+}
+
+// One accepted connection: exactly one of tcp/tls. A server bound with
+// `tls: server.tls(cert, key)` serves the TCP stream after the TLS handshake
+// (Docs/spec/syntax-decisions.md:5083).
+priv HTTPConn: struct {
+    tcp: TCPStream?
+    tls: HTTPSecure?
+    // The peer's address without its port, which a request carries as
+    // `__peer` for per-network limits ("" when the socket has none).
+    peer: String{""}
+}
+
+// A TLS connection's stream, held only by these operations; `tls_accept`
+// builds them, so a server without `tls:` reaches no TLS code.
+priv HTTPSecure: struct {
+    // Appends up to the limit's plaintext bytes to `staged`: the count, 0 at
+    // the end of the stream. `staged` keeps its capacity across reads.
+    read_into: fn(Int, Duration) -[Net, Time.Wait]> Int IOError!
+    staged: Shared<[U8]>
+    // Whether every byte was sent within the deadline.
+    write_all: fn([U8], Duration) -[Net, Time.Wait]> Bool
+    // Sends close_notify and closes the socket the stream owns.
+    close: fn() -[Net, Time.Wait]> ()
+}
+
+// The accepted stream, which the connection now owns, after the server
+// handshake within the connection budget when the server has a TLS identity;
+// None drops a failed handshake.
+priv accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> HTTPConn? Never! {
+    peer: peer_host(stream)
+    if tls == .Val(identity) {
+        budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
+        ops: identity.__ops.guard_read()
+        accepted: Shared{[TCPStream]{stream.move()}}
+        secure: ops.value.accept(accepted, identity.cert_pem, identity.key_pem, Duration{ns: budget}) ?? return None
+        return Val(HTTPConn{tcp: None, tls: Val(secure), peer: peer})
+    }
+    Val(HTTPConn{tcp: Val(stream), tls: None, peer: peer})
+}
+
+// Whether the connection's request was answered by the mux. A request the
+// handler upgraded to a WebSocket gets no HTTP response, and its socket is
+// left to the upgraded connection rather than closed here. When the drain of
+// `server` ran out while the handler ran, the connection was reported
+// cancelled, so its response is not sent and the socket just closes. The
+// server answers the readiness probe, and a `refusing` connection, itself
+// (server_answer).
+priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, server: Shared<HTTPServerState>?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
+    budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
+    wire := HTTPWire{buffer: [U8]{}, end_ns: rt.clock_mono_ns() + budget}
+    answered := false
+    upgraded := false
+    if read_request(stream, wire) == {
+        .Ok(received) -> {
+            own: server_answer(server, mux, received, refusing)
+            if own == .Val(answer) {
+                bytes: response_wire(received.method, answer) ?? error_wire(503)
+                answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
+            } else {
+                fd: if stream.tcp == .Val(plain) -> core.net.__tcp_fd(plain) else -> -1
+                cell: http.upgrade_cell(fd)
+                request := received
+                request.__upgrade = Val(cell)
+                request.__peer = stream.peer.copy()
+                // The handler runs as its own task, so a panic in it is this
+                // connection's 500 and serving goes on; it is shielded as its
+                // connection is.
+                routed: request.copy()
+                handling: task { dispatch_shielded(mux, routed) }
+                reply: handling.join() ?? status_page(500)
+                upgraded = http.cell_upgraded(cell)
+                if upgraded -> answered = true else if !drain_ended(server) {
+                    bytes: response_wire(request.method, reply) ?? error_wire(500)
+                    answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
+                }
+            }
+        }
+        .Err(fault) -> {
+            if fault == .Reply(status) {
+                _: __send(stream, error_wire(status), rt.clock_mono_ns() + budget)
+            }
+        }
+    }
+    // A TLS stream sends close_notify and closes the socket it owns.
+    if stream.tls == .Val(secure) -> secure.close()
+    if !upgraded && stream.tcp == .Val(plain) {
+        if plain.close() == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+    }
+    answered
+}
+
+// What the server answers itself instead of the mux: `GET /__jet/ready`, 200
+// `ready` or 503 with the state, unless a route of the app takes that path;
+// and a 503 for any other request on a `refusing` connection. None: the mux
+// answers. A lone `serve_once` connection (no `server`) has neither.
+priv server_answer: fn(server: Shared<HTTPServerState>?, mux: HTTPMux, request: HTTPRequest, refusing: Bool) -> HTTPResponse? Never! {
+    state: server ?? return None
+    if request.method == "GET" && request.path == C_READY_PATH && mux_pick(mux, request).answer == .Val(_) {
+        readiness: server_readiness(state)
+        status: if readiness == .Ready -> 200 else -> 503
+        return Val(response(status, readiness_word(readiness)))
+    }
+    if refusing -> return Val(status_page(503))
+    None
+}
+
+__send: fn(stream: HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
+    remaining: end_ns - rt.clock_mono_ns()
+    if remaining <= 0 -> return false
+    if stream.tls == .Val(secure) -> return secure.write_all(bytes, Duration{ns: remaining})
+    if stream.tcp == .Val(plain) {
+        return if plain.write_bytes(bytes, deadline: Duration{ns: remaining}) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
+    }
+    false
+}
+
+// Append what the peer sends next; false at end of stream. Both streams
+// append with read_into, so a connection's reads reuse their buffers.
+priv wire_fill: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> Bool HTTPFault! {
+    remaining: wire.end_ns - rt.clock_mono_ns()
+    if remaining <= 0 -> return Err(.Reply(408))
+    if stream.tls == .Val(secure) {
+        count: secure.read_into(C_READ_BYTES, Duration{ns: remaining}) ?? {
+            if err == .TimedOut(_) -> return Err(.Reply(408))
+            return Ok(false)
+        }
+        if count == 0 -> return Ok(false)
+        guard := secure.staged.guard_edit()
+        loop b in guard.value -> wire.buffer.push(b)
+        guard.value.clear()
+        return Ok(true)
+    }
+    if stream.tcp == .Val(plain) {
+        count: plain.read_into(wire.buffer, C_READ_BYTES, deadline: Duration{ns: remaining}) ?? {
+            if accept_timed_out(err) -> return Err(.Reply(408))
+            return Ok(false)
+        }
+        return Ok(count > 0)
+    }
+    Ok(false)
+}
+
+// Fill until `need` bytes are buffered; a short stream is a bad request.
+priv wire_need: fn(stream: HTTPConn, wire: &HTTPWire, need: Int) HTTPFault! -[Net, Time.Wait]> {
+    loop wire.buffer.len() < need {
+        more: wire_fill(stream, wire) ?? return Err(err)
+        if !more -> return Err(.Reply(400))
+    }
+    Ok()
+}
+
+// The index of the CRLF ending the line at `from`, filling as needed.
+priv wire_line: fn(stream: HTTPConn, wire: &HTTPWire, from: Int) -[Net, Time.Wait]> Int HTTPFault! {
+    at := crlf_at(wire.buffer, from)
+    loop at < 0 {
+        if wire.buffer.len() - from > C_MAX_LINE_BYTES -> return Err(.Reply(400))
+        more: wire_fill(stream, wire) ?? return Err(err)
+        if !more -> return Err(.Reply(400))
+        at = crlf_at(wire.buffer, from)
+    }
+    Ok(at)
+}
+
+priv crlf_at: fn(raw: [U8], from: Int) -> Int Never! {
+    i := from
+    loop i + 1 < raw.len() {
+        if raw[i] == (U8{13}) && raw[i + 1] == (U8{10}) -> return i
+        i += 1
+    }
+    -1
+}
+
+priv forbidden_trailer: fn(lower: String) -> Bool Never! {
+    list_contains([String]{"authorization", "connection", "content-encoding", "content-length", "content-range", "content-type", "cookie", "host", "keep-alive", "proxy-authenticate", "proxy-authorization", "proxy-connection", "set-cookie", "te", "trailer", "transfer-encoding", "upgrade"}, lower)
+}
+
+// One `name: value` field line, or `None` when it is malformed.
+priv field_line: fn(raw: [U8]) -> Header? Never! {
+    if raw.len() == 0 -> return None
+    first: Int{raw[0]}
+    if first == 32 || first == 9 -> return None
+    col: http.index_byte(raw, 58)
+    if col <= 0 -> return None
+    name: String.from_bytes(raw.slice(0, col)) ?? return None
+    if !http.valid_header_name(name) -> return None
+    value_raw: raw.slice(col + 1, raw.len())
+    if http.has_ctl(value_raw) -> return None
+    value: String.from_bytes(value_raw) ?? return None
+    Val(Header{name: name, value: http.trim(value)})
+}
+
+priv read_request: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> HTTPRequest HTTPFault! {
+    split := http.find_double_crlf(wire.buffer)
+    loop split < 0 {
+        if wire.buffer.len() > C_MAX_HEAD_BYTES -> return Err(.Reply(431))
+        more: wire_fill(stream, wire) ?? return Err(err)
+        if !more {
+            if wire.buffer.len() == 0 -> return Err(.Drop)
+            return Err(.Reply(400))
+        }
+        split = http.find_double_crlf(wire.buffer)
+    }
+    if split > C_MAX_HEAD_BYTES -> return Err(.Reply(431))
+    if !http.strict_crlf(wire.buffer, split) -> return Err(.Reply(400))
+    head: String.from_bytes(wire.buffer.slice(0, split - 4)) ?? return Err(.Reply(400))
+    lines: http.split_lines(head)
+    if lines.len() == 0 || lines[0].bytes().len() > C_MAX_LINE_BYTES -> return Err(.Reply(400))
+    parts: http.split_space_line(lines[0])
+    if parts.len() != 3 -> return Err(.Reply(400))
+    method: parts[0]
+    target: parts[1]
+    version: parts[2]
+    if !http.valid_method(method) -> return Err(.Reply(400))
+    if version != "HTTP/1.1" && version != "HTTP/1.0" {
+        if version.starts_with("HTTP/") -> return Err(.Reply(505))
+        return Err(.Reply(400))
+    }
+    http11: version == "HTTP/1.1"
+    if !http.valid_target(target) -> return Err(.Reply(400))
+    if target == "*" && method != "OPTIONS" -> return Err(.Reply(400))
+    if lines.len() - 1 > C_MAX_FIELDS -> return Err(.Reply(431))
+    fields := http.headers()
+    loop index in 1..<lines.len() {
+        field: field_line(lines[index].bytes()) ?? return Err(.Reply(400))
+        fields.fields.push(field)
+    }
+    hosts: http.headers_all(fields, "host")
+    if hosts.len() > 1 || (http11 && hosts.len() == 0) -> return Err(.Reply(400))
+    codings: http.headers_all(fields, "transfer-encoding")
+    lengths: http.headers_all(fields, "content-length")
+    if codings.len() > 1 -> return Err(.Reply(400))
+    if codings.len() > 0 && lengths.len() > 0 -> return Err(.Reply(400))
+    chunked := false
+    if codings.len() == 1 {
+        if !http11 || http.ascii_lower(codings[0]) != "chunked" -> return Err(.Reply(400))
+        chunked = true
+    }
+    length := 0
+    loop index in 0..<lengths.len() {
+        value: http.parse_decimal(lengths[index]) ?? return Err(.Reply(400))
+        if index > 0 && value != length -> return Err(.Reply(400))
+        length = value
+    }
+    if length > C_MAX_BODY_BYTES -> return Err(.Reply(413))
+    if http.headers_get(fields, "content-encoding") != None -> return Err(.Reply(415))
+    declared := [String]{}
+    loop value in http.headers_all(fields, "trailer") {
+        loop name in comma_items(value) {
+            lower: http.ascii_lower(name)
+            if !http.valid_header_name(name) || forbidden_trailer(lower) -> return Err(.Reply(400))
+            declared.push(lower)
+        }
+    }
+    if declared.len() > 0 && !chunked -> return Err(.Reply(400))
+    if http.headers_get(fields, "expect") == .Val(expect) {
+        if !http11 || http.ascii_lower(expect) != "100-continue" -> return Err(.Reply(417))
+        if !__send(stream, "HTTP/1.1 100 Continue\r\n\r\n".bytes(), wire.end_ns) {
+            return Err(.Drop)
+        }
+    }
+    content := [U8]{}
+    trailers := Headers?{None}
+    if chunked {
+        decoded: read_chunked(stream, wire, split, declared) ?? return Err(err)
+        content = decoded.body
+        trailers = Val(decoded.trailers)
+    } else if length > 0 {
+        wire_need(stream, wire, split + length) ?? return Err(err)
+        content = wire.buffer.slice(split, split + length)
+    }
+    body := http.body_bytes(content)
+    if String.from_bytes(content) == {
+        .Ok(text) -> { body = http.body_text(text) }
+        .Err(_) -> {}
+    }
+    request := http.server_request(method, target, body, fields)
+    request.__trailers = trailers
+    Ok(request)
+}
+
+priv chunk_size: fn(line: [U8]) -> Int? Never! {
+    end := http.index_byte(line, 59)
+    if end < 0 -> end = line.len()
+    if end == 0 || end > C_MAX_CHUNK_DIGITS -> return None
+    size := 0
+    loop i in 0..<end {
+        digit: http.from_hex(line[i])
+        if digit < 0 -> return None
+        size = size * 16 + digit
+    }
+    Val(size)
+}
+
+priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [String]) -[Net, Time.Wait]> HTTPChunked HTTPFault! {
+    at := start
+    body := [U8]{}
+    loop {
+        line_end: wire_line(stream, wire, at) ?? return Err(err)
+        size: chunk_size(wire.buffer.slice(at, line_end)) ?? return Err(.Reply(400))
+        at = line_end + 2
+        if size == 0 -> break
+        if body.len() + size > C_MAX_BODY_BYTES -> return Err(.Reply(413))
+        wire_need(stream, wire, at + size + 2) ?? return Err(err)
+        loop b in wire.buffer.slice(at, at + size) -> body.push(b)
+        if wire.buffer[at + size] != (U8{13}) || wire.buffer[at + size + 1] != (U8{10}) {
+            return Err(.Reply(400))
+        }
+        at = at + size + 2
+    }
+    trailers := http.headers()
+    loop {
+        line_end: wire_line(stream, wire, at) ?? return Err(err)
+        if line_end == at -> break
+        field: field_line(wire.buffer.slice(at, line_end)) ?? return Err(.Reply(400))
+        if !list_contains(declared, http.ascii_lower(field.name)) -> return Err(.Reply(400))
+        if trailers.fields.len() >= C_MAX_FIELDS -> return Err(.Reply(431))
+        trailers.fields.push(field)
+        at = line_end + 2
+    }
+    Ok(HTTPChunked{body: body, trailers: trailers})
+}
+
+priv error_wire: fn(status: Int) -[Time]> [U8] Never! {
+    "HTTP/1.1 {status} {http.reason_phrase(status)}\r\nDate: {imf_now()}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".bytes()
+}
+
+priv push_text: fn(out: &[U8], text: String) Never! {
+    loop b in text.bytes() -> out.push(b)
+}
+
+// The response on the wire. Framing fields are the server's: user
+// Content-Length, Transfer-Encoding, Trailer and Connection fields, and any
+// field Connection names, are not sent.
+priv response_wire: fn(method: String, reply: HTTPResponse) -[Net, Time]> [U8] HTTPError! {
+    status: reply.status
+    head_only: method == "HEAD"
+    no_body: (status >= 100 && status < 200) || status == 204 || status == 304
+    skipped := [String]{"content-length", "transfer-encoding", "trailer", "connection"}
+    loop value in http.headers_all(reply.headers, "connection") {
+        loop name in comma_items(value) -> skipped.push(http.ascii_lower(name))
+    }
+    trailer_fields: reply.__trailers ?? http.headers()
+    trailer_names := [String]{}
+    trailer_lowers := [String]{}
+    loop field in trailer_fields.fields {
+        lower: http.ascii_lower(field.name)
+        if !http.client_header_name(field.name) || !http.client_header_value(field.value) || forbidden_trailer(lower) {
+            return Err(.InvalidHeader)
+        }
+        if !list_contains(trailer_lowers, lower) {
+            trailer_lowers.push(lower)
+            trailer_names.push(field.name)
+        }
+    }
+    if trailer_names.len() > 0 && (no_body || status == 205) -> return Err(.InvalidFraming)
+    chunked: trailer_names.len() > 0 && !head_only
+    content: http.body_all(reply.body) ?? return Err(err)
+    out := [U8]{}
+    push_text(out, "HTTP/1.1 {status} {http.reason_phrase(status)}\r\n")
+    if http.headers_get(reply.headers, "date") == None -> push_text(out, "Date: {imf_now()}\r\n")
+    loop field in reply.headers.fields {
+        if list_contains(skipped, http.ascii_lower(field.name)) -> next
+        push_text(out, "{field.name}: {field.value}\r\n")
+    }
+    if chunked {
+        names := ""
+        loop name in trailer_names -> names = if names == "" -> name else -> "{names}, {name}"
+        push_text(out, "Transfer-Encoding: chunked\r\nTrailer: {names}\r\n")
+    } else if status == 205 { push_text(out, "Content-Length: 0\r\n") } else if !no_body {
+        push_text(out, "Content-Length: {content.len()}\r\n")
+    }
+    push_text(out, "Connection: close\r\n\r\n")
+    if head_only || no_body || status == 205 -> return Ok(out)
+    if chunked {
+        if content.len() > 0 {
+            push_text(out, "{__hex(content.len())}\r\n")
+            loop b in content -> out.push(b)
+            push_text(out, "\r\n")
+        }
+        push_text(out, "0\r\n")
+        loop field in trailer_fields.fields -> push_text(out, "{field.name}: {field.value}\r\n")
+        push_text(out, "\r\n")
+        return Ok(out)
+    }
+    loop b in content -> out.push(b)
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Static files
+
+priv HTTPStaticMount: struct {
+    root: String
+    index: Bool
+    dotfiles: Bool
+    follow_links: Bool
+}
+
+priv HTTPStaticFile: struct {
+    path: String
+    modified_seconds: Int
+}
+
+priv HTTPRange: struct {
+    start: Int
+    end: Int
+}
+
+priv trim_trailing_slashes: fn(prefix: String) -> String Never! {
+    raw: prefix.bytes()
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{47}) -> end -= 1
+    String.from_bytes(raw.slice(0, end)) ?? ""
+}
+
+// A file's bytes through its canonical path.
+priv file_read: fn(path: String) -[FS.Read]> [U8]? Never! {
+    canonical: core.files.canonicalize(path) ?? return None
+    bytes: core.files.read_bytes(canonical) ?? return None
+    Val(bytes)
+}
+
+priv bytes_response: fn(status: Int, bytes: [U8], content_type: String) -> HTTPResponse Never! {
+    payload: http.body_bytes(bytes)
+    fields: http.headers_set(http.headers(), "content-type", content_type)
+    response_body(status, payload, fields)
+}
+
+// `bytes=a-b`, `bytes=a-` or `bytes=-n` against `length` bytes; one range.
+priv range_spec: fn(spec: String, length: Int) -> HTTPRange? Never! {
+    if length == 0 || !spec.starts_with("bytes=") -> return None
+    raw: spec.bytes()
+    rest: raw.slice(6, raw.len())
+    if http.index_byte(rest, 44) >= 0 -> return None
+    dash: http.index_byte(rest, 45)
+    if dash < 0 -> return None
+    left: String.from_bytes(rest.slice(0, dash)) ?? return None
+    right: String.from_bytes(rest.slice(dash + 1, rest.len())) ?? return None
+    if left == "" {
+        suffix: http.parse_decimal(right) ?? return None
+        if suffix == 0 -> return None
+        first: if suffix >= length -> 0 else -> length - suffix
+        return Val(HTTPRange{start: first, end: length - 1})
+    }
+    first: http.parse_decimal(left) ?? return None
+    if first >= length -> return None
+    if right == "" -> return Val(HTTPRange{start: first, end: length - 1})
+    asked: http.parse_decimal(right) ?? return None
+    last: if asked > length - 1 -> length - 1 else -> asked
+    if first > last -> return None
+    Val(HTTPRange{start: first, end: last})
+}
+
+priv mime: fn(path: String) -> String Never! {
+    raw: path.bytes()
+    dot := raw.len() - 1
+    loop dot >= 0 && raw[dot] != (U8{46}) && raw[dot] != (U8{47}) -> dot -= 1
+    if dot < 0 || raw[dot] != (U8{46}) -> return "application/octet-stream"
+    extension: http.ascii_lower(String.from_bytes(raw.slice(dot + 1, raw.len())) ?? "")
+    if extension == "css" -> return "text/css; charset=utf-8"
+    if extension == "html" || extension == "htm" -> return "text/html; charset=utf-8"
+    if extension == "js" || extension == "mjs" -> return "text/javascript; charset=utf-8"
+    if extension == "txt" -> return "text/plain; charset=utf-8"
+    if extension == "gif" -> return "image/gif"
+    if extension == "jpeg" || extension == "jpg" -> return "image/jpeg"
+    if extension == "json" -> return "application/json"
+    if extension == "png" -> return "image/png"
+    if extension == "svg" -> return "image/svg+xml"
+    if extension == "wasm" -> return "application/wasm"
+    "application/octet-stream"
+}
+
+// The file a mounted request names, refusing dot-files, links and anything
+// that resolves outside the root.
+priv static_target: fn(mount: HTTPStaticMount, relative: String) -[FS.Read]> HTTPStaticFile? Never! {
+    current := trim_trailing_slashes(mount.root)
+    loop segment in relative.split("/").to_list() {
+        if segment == "" -> next
+        if segment == "." || segment == ".." -> return None
+        if http.index_byte_str(segment, 92) >= 0 || http.index_byte_str(segment, 0) >= 0 {
+            return None
+        }
+        if !mount.dotfiles && segment.starts_with(".") -> return None
+        current = "{current}/{segment}"
+        entry: core.files.stat(current) ?? return None
+        if entry.is_symlink && !mount.follow_links -> return None
+    }
+    info := core.files.stat(current, links: .Follow) ?? return None
+    if info.is_dir {
+        if !mount.index -> return None
+        current = "{current}/index.html"
+        link: core.files.stat(current) ?? return None
+        if link.is_symlink && !mount.follow_links -> return None
+        info = core.files.stat(current, links: .Follow) ?? return None
+    }
+    if !info.is_file -> return None
+    root: core.files.canonicalize(mount.root) ?? return None
+    resolved: core.files.canonicalize(current) ?? return None
+    if !resolved.starts_with("{trim_trailing_slashes(root)}/") -> return None
+    Val(HTTPStaticFile{path: resolved, modified_seconds: info.modified.to_timestamp()})
+}
+
+priv etag_matches: fn(list: String, etag: String) -> Bool Never! {
+    weak: "W/{etag}"
+    loop item in comma_items(list) {
+        if item == "*" || item == etag || item == weak -> return true
+    }
+    false
+}
+
+priv static_serve: fn(mount: HTTPStaticMount, request: HTTPRequest) -[FS.Read]> HTTPResponse Never! {
+    relative: request.param("jet_static_path") ?? ""
+    target: static_target(mount, relative) ?? return status_page(404)
+    bytes: core.files.read_bytes(target.path) ?? return status_page(404)
+    seconds: target.modified_seconds
+    etag: "\"{__hex(bytes.len())}-{__hex(seconds)}\""
+    modified: imf_date(seconds)
+    fields := http.headers_set(http.headers(), "content-type", mime(target.path))
+    fields = http.headers_set(fields, "accept-ranges", "bytes")
+    fields = http.headers_set(fields, "etag", etag)
+    fields = http.headers_set(fields, "last-modified", modified)
+    fresh := false
+    if request.header("if-none-match") == .Val(tags) -> fresh = etag_matches(tags, etag) else if request.header("if-modified-since") == .Val(since) {
+        fresh = since == modified
+    }
+    if fresh {
+        empty: http.body_empty()
+        return response_body(304, empty, fields)
+    }
+    ranged := request.header("range")
+    if request.header("if-range") == .Val(validator) {
+        if validator != etag && validator != modified -> ranged = None
+    }
+    if ranged == .Val(spec) -> return range_response(bytes, spec, fields)
+    payload: http.body_bytes(bytes)
+    response_body(200, payload, fields)
+}
+
+priv range_response: fn(bytes: [U8], spec: String, fields: Headers) -> HTTPResponse Never! {
+    total: bytes.len()
+    picked: range_spec(spec, total) ?? return range_unsatisfiable(total, fields)
+    ranged: http.headers_set(fields, "content-range", "bytes {picked.start}-{picked.end}/{total}")
+    payload: http.body_bytes(bytes.slice(picked.start, picked.end + 1))
+    response_body(206, payload, ranged)
+}
+
+priv range_unsatisfiable: fn(total: Int, fields: Headers) -> HTTPResponse Never! {
+    unsatisfied: http.headers_set(fields, "content-range", "bytes */{total}")
+    empty: http.body_empty()
+    response_body(416, empty, unsatisfied)
+}
+
+// ---------------------------------------------------------------------------
+// Text helpers and the IMF-fixdate clock
+
+__hex: fn(value: Int) -> String Never! {
+    if value <= 0 -> return "0"
+    digits := [U8]{}
+    n := value
+    loop n > 0 {
+        d: n %% 16
+        if d < 10 -> digits.push(U8{48 + d}) else -> digits.push(U8{87 + d})
+        n = n /% 16
+    }
+    out := [U8]{}
+    i := digits.len()
+    loop i > 0 {
+        i -= 1
+        out.push(digits[i])
+    }
+    String.from_bytes(out) ?? "0"
+}
+
+priv pad: fn(value: Int, width: Int) -> String Never! {
+    text := "{value}"
+    loop text.bytes().len() < width -> text = "0{text}"
+    text
+}
+
+priv imf_now: fn() -[Time]> String Never! { imf_date(core.time.now_utc().to_timestamp()) }
+
+// `Www, DD Mon YYYY HH:MM:SS GMT` for Unix `seconds` (before 1970 reads as
+// the epoch).
+priv imf_date: fn(seconds: Int) -> String Never! {
+    total: if seconds < 0 -> 0 else -> seconds
+    days: total /% 86400
+    clock: total - days * 86400
+    weekday: (days + 4) %% 7
+    z: days + 719468
+    era: z /% 146097
+    doe: z - era * 146097
+    yoe: (doe - doe /% 1460 + doe /% 36524 - doe /% 146096) /% 365
+    doy: doe - (365 * yoe + yoe /% 4 - yoe /% 100)
+    mp: (5 * doy + 2) /% 153
+    day: doy - (153 * mp + 2) /% 5 + 1
+    month: if mp < 10 -> mp + 3 else -> mp - 9
+    year: if month <= 2 -> yoe + era * 400 + 1 else -> yoe + era * 400
+    names: [String]{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+    months: [String]{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
+    "{names[weekday]}, {pad(day, 2)} {months[month - 1]} {pad(year, 4)} {pad(clock /% 3600, 2)}:{pad((clock /% 60) %% 60, 2)}:{pad(clock %% 60, 2)} GMT"
+}
+
+#Test("CORS policy defaults and explicit values") {
+    value: cors_policy(.Any) ?? panic("default CORS policy")
+    assert(value.allow_methods == "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
+    assert(value.allow_headers == "content-type, authorization, x-request-id")
+    assert(!value.credentials)
+    assert(value.max_age_secs == 86400)
+    named: cors_policy(.List([String]{"https://example.test"}), methods: [String]{"GET", "PATCH"}, headers: [String]{"x-token"}, credentials: true, max_age: -1) ?? panic("named origins")
+    assert(named.allow_methods == "GET, PATCH")
+    assert(named.allow_headers == "x-token")
+    assert(named.credentials)
+    assert(named.max_age_secs == -1)
+    minimum: cors_policy(.List([String]{"https://example.test"}), max_age: -9223372036854775808) ?? panic("explicit minimum max age")
+    assert(minimum.max_age_secs == -9223372036854775808)
+    if cors_policy(.Any, credentials: true) == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("wildcard credentials must be refused")
+    }
+}
+
+#Test("server TLS construction preserves PEM text without validation") {
+    value: tls("certificate\n", "private key\n")
+    assert(value.cert_pem == "certificate\n")
+    assert(value.key_pem == "private key\n")
+    empty: tls("", "")
+    assert(empty.cert_pem == "" && empty.key_pem == "")
+}
+
+#Test("access log retains route-template presence and strips only fallback query") {
+    assert(access_log_parts("GET", "/logs/42?secret=x", None, 200) == "GET /logs/42 200")
+    assert(access_log_parts("POST", "/logs/42?secret=x", Val("/logs/:id"), 201) == "POST /logs/:id 201")
+    assert(access_log_parts("GET", "/ignored?query=x", Val(""), -7) == "GET  -7")
+    assert(access_log_parts("GET", "/ignored", Val("/template?unchanged"), 200) == "GET /template?unchanged 200")
+    assert(access_log_parts("GET", "/雪/☃?secret=x", None, 200) == "GET /雪/☃ 200")
+    assert(access_log_parts("GET", "?secret=x", None, 200) == "GET  200")
+    assert(access_log_parts("GET", "", None, 200) == "GET  200")
+}
+
+#Test("response policy normalizes only statuses outside 100 through 599") {
+    assert(response(99, "discarded").status == 500)
+    assert(response(100, "").status == 100)
+    assert(response(599, "retained").status == 599)
+    assert(response(600, "discarded").status == 500)
+    assert(response(-9223372036854775808, "discarded").status == 500)
+    assert(response(9223372036854775807, "discarded").status == 500)
+}
+
+#Test("response transport accepts every source body kind by move") {
+    empty: core.http.body_empty()
+    empty_headers: core.http.headers()
+    assert(response_body(204, empty, empty_headers).status == 204)
+    text: core.http.body_text("text")
+    text_headers: core.http.headers()
+    assert(response_body(200, text, text_headers).status == 200)
+    bytes: core.http.body_bytes([U8]{0, 255})
+    bytes_headers: core.http.headers()
+    assert(response_body(201, bytes, bytes_headers).status == 201)
+}
+
+#Test("JSON response encoding rejects non-finite numbers on the HTTP error rail") {
+    if json(200, Float.NAN) == {
+        .Err(error) -> { assert(error == .InvalidFraming) }
+        .Ok(_) -> panic("non-finite JSON response accepted")
+    }
+    response: json(201, "witness") ?? panic("JSON response")
+    assert(response.status == 201)
+}
+
+#Test("route patterns parse, refuse malformed shapes and rank static first") {
+    assert(route_parse("/").problem == "")
+    assert(route_parse("/").segments.len() == 0)
+    routed: route_parse("/api/:name/*path")
+    assert(routed.problem == "")
+    assert(route_shape(routed.segments) == "/s3:api/p/w")
+    assert(route_parse("api").problem != "")
+    assert(route_parse("/a//b").problem != "")
+    assert(route_parse("/a/{{id}}").problem != "")
+    assert(route_parse("/a/*").problem != "")
+    assert(route_parse("/a/*rest/b").problem != "")
+    assert(route_parse("/:id/:id").problem != "")
+    assert(route_parse("/a/..").problem != "")
+    path: path_segments("/api/ada/profile/x%20y") ?? panic("segments")
+    assert(route_matches(routed.segments, path))
+    params: route_params(routed.segments, path)
+    assert(params[0].value == "ada")
+    assert(params[1].value == "profile/x y")
+    assert(path_segments("/a/%2F") == None)
+    assert(path_segments("/a/%2e%2e") == None)
+    assert(route_better(route_parse("/a/b").segments, route_parse("/a/:x").segments))
+    assert(route_better(route_parse("/a/:x").segments, route_parse("/a/*rest").segments))
+    assert(!route_better(route_parse("/a/*rest").segments, route_parse("/a/:x").segments))
+}
+
+#Test("byte ranges follow single-range request semantics") {
+    middle: range_spec("bytes=2-5", 10) ?? panic("range")
+    assert(middle.start == 2 && middle.end == 5)
+    tail: range_spec("bytes=-3", 10) ?? panic("suffix")
+    assert(tail.start == 7 && tail.end == 9)
+    open: range_spec("bytes=4-", 10) ?? panic("open")
+    assert(open.start == 4 && open.end == 9)
+    clamped: range_spec("bytes=8-99", 10) ?? panic("clamped")
+    assert(clamped.end == 9)
+    assert(range_spec("bytes=10-", 10) == None)
+    assert(range_spec("bytes=5-2", 10) == None)
+    assert(range_spec("bytes=0-1,3-4", 10) == None)
+    assert(range_spec("items=0-1", 10) == None)
+    assert(range_spec("bytes=0-1", 0) == None)
+}
+
+#Test("IMF-fixdate renders Unix seconds in GMT") {
+    assert(imf_date(0) == "Thu, 01 Jan 1970 00:00:00 GMT")
+    assert(imf_date(1791223200) == "Mon, 05 Oct 2026 18:00:00 GMT")
+    assert(imf_date(951868799) == "Tue, 29 Feb 2000 23:59:59 GMT")
+    assert(__hex(255) == "ff")
+    assert(__hex(0) == "0")
+}

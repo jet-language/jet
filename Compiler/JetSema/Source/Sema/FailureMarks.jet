@@ -1,0 +1,229 @@
+// Failure marks under `#Policy(failures: .Explicit)`. A call that can fail
+// passes its failure up by itself and the signature says so; the policy asks
+// that the text show it too: `parse(text)?`, or `(load(path)?).rows` for a
+// call read as a receiver, where `?.` would read as an optional chain. Under
+// the policy a call that can pass a failure up without a written `?` or
+// `?(text)` is E0434, with a Safe edit to the mark. A marked call checks
+// exactly as the unmarked one does. Outside the policy a call's bare `?` is
+// the E-ERR-PROPAGATE refusal: the call already propagates.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
+    Expr,
+    MARKER_POLICY,
+    Marker,
+    PolicyDeclaration,
+    PolicyKey,
+    Span,
+    TTryConvert,
+    TextEdit,
+    TryConvert,
+    Type,
+    diagnostic_with_edit_grade,
+    expr_node_id,
+    expr_source_span,
+    expr_source_start,
+    expr_span,
+    ModuleID,
+]
+
+sema_failure_marks_declaration: fn(declaration: PolicyDeclaration) -> Bool Never! {
+    if declaration.key != PolicyKey.Failures -> return false
+    if declaration.value == {
+        .Explicit -> true
+        .Enabled | .Limit(_) | .Forbid | .Default | .GateOnly | .Obligations | .Relaxed | .PerSite | .Track | .Skip | .Allow | .On | .Off | .Arithmetic(_) -> false
+    }
+}
+
+sema_failure_marks_marker: fn(marker: Marker) -> Bool Never! {
+    if marker.name != MARKER_POLICY -> return false
+    loop (index, label) in marker.arg_labels {
+        written: label ?? next
+        if written.name != "failures" || index >= marker.args.len() -> next
+        if marker.args[index] == .Expr(value) {
+            if value == .EnumLit(type_name, variant, _, args, _, _, _) {
+                if type_name == "" && variant == "Explicit" && args.len() == 0 -> return true
+            }
+        }
+    }
+    false
+}
+
+// A package or module `failures: .Explicit` declaration, or the function's
+// own `#Policy(failures: .Explicit)` marker.
+sema_failure_marks_apply_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
+    position: sema_scope_module_policy(table, graph, module_identity)
+    table.failures_explicit = table.policy_rows[position].failures_explicit
+    loop marker in markers {
+        if sema_failure_marks_marker(marker) -> table.failures_explicit = true
+    }
+}
+
+// A block `#Policy(failures: .Explicit) { … }` turns the policy on for its
+// body. Returns the enclosing setting for the matching pop.
+sema_failure_marks_push_policy: fn(table: &SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
+    previous: table.failures_explicit
+    loop declaration in declarations {
+        if sema_failure_marks_declaration(declaration) -> table.failures_explicit = true
+    }
+    previous
+}
+
+// The node of the value `expr` reads a member of or calls: a mark on that
+// value is written `(call()?)`, since `call()?.member` is an optional chain
+// and `call()?(args)` a context frame. AST_NODE_GENERATED, which no mark is
+// owed at, for any other expression.
+sema_failure_marks_receiver: fn(expr: Expr) -> Int Never! {
+    if expr == .MethodCall(receiver, _, _, _, _, _, _) -> return expr_node_id(receiver)
+    if expr == .OptMethodCall(receiver, _, _, _, _, _, _) -> return expr_node_id(receiver)
+    if expr == .Field(base, _, _, _) -> return expr_node_id(base)
+    if expr == .OptField(base, _, _, _, _, _) -> return expr_node_id(base)
+    if expr == .CallValue(callee, _, _, _) -> return expr_node_id(callee)
+    AST_NODE_GENERATED
+}
+
+// Whether a parsed `value?` is a call's mark: the parser's bare `?` after a
+// call. Generated trees spell out their own `?` and stay ordinary.
+sema_failure_marks_written: fn(value: Expr, conversion: TryConvert, note: Expr?, try_id: Int) -> Bool Never! {
+    if try_id == AST_NODE_GENERATED || note != None -> return false
+    if conversion == .NoConversion {
+        if value == .Call(_, _) -> return true
+        if value == .MethodCall(_, _, _, _, _, _, _) -> return true
+        if value == .OptMethodCall(_, _, _, _, _, _, _) -> return true
+        if value == .CallValue(_, _, _, _) -> return true
+    }
+    false
+}
+
+// A call written `call()?`: under the policy it checks as the unmarked call
+// does, which owes no mark; outside it the `?` is refused.
+sema_failure_marks_check_written: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !scopes.failures_explicit {
+        mark: Span{start: span.end - 1, end: span.end}
+        diagnostics.push(sema_error("E-ERR-PROPAGATE", mark, "A bare `?` has no meaning.", "Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.", "remove the trailing `?`, or write `?(text)` to add one context frame."))
+        return None
+    }
+    previous: context.failure_mark_written
+    context.failure_mark_written = expr_node_id(value)
+    checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    context.failure_mark_written = previous
+    checked
+}
+
+// E0434 for a call that passes a failure up unmarked under the policy. The
+// report is an obligation of the bundle failure solve while the callee's
+// failure set is still inferred: a callee the solve finds infallible owes no
+// mark.
+sema_failure_marks_require: fn(expr: Expr, conversion: TTryConvert, callee: SemaFailureCallee?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if conversion == .Never {
+        return
+    }
+    id: expr_node_id(expr)
+    if id == AST_NODE_GENERATED || id == context.failure_mark_written || context.compiler_generated {
+        return
+    }
+    name := "this call"
+    if expr == .Call(written, _) -> name = "`{written.name}`"
+    if expr == .MethodCall(_, method, _, _, _, _, _) -> name = "`.{method}`"
+    receiver: id == context.failure_mark_receiver
+    fix: if receiver -> "write the call as `(…?)`; a `?` before `.` or `(` would read as `?.` or a context frame" else -> "write `?` after the call, or `?(text)` to add a context frame"
+    reported: sema_error("E0434", expr_span(expr), "{name} can fail, so the call is written with `?`", "`#Policy(failures: .Explicit)` writes `?` at every call that can pass a failure up, so each early exit shows in the text", fix)
+    close: sema_failure_marks_call_end(expr, environment, program)
+    if close == .Val(end) {
+        start: expr_source_start(expr)
+        first: if receiver -> TextEdit{span: Span{start: start, end: start}, new_text: "("} else -> TextEdit{span: Span{start: end, end: end}, new_text: "?"}
+        diagnostic := diagnostic_with_edit_grade(reported, first, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+        if receiver {
+            diagnostic.fix_edits.push(TextEdit{span: Span{start: end, end: end}, new_text: "?)"})
+        }
+        diagnostics.push(diagnostic)
+    }
+    if close == None -> diagnostics.push(reported)
+    sema_failure_defer_obligation(callee, diagnostics).drop("the report is the obligation; the call's conversion is already settled")
+}
+
+// The byte just past a call's closing `)`. The tree keeps the callee's name
+// and each argument's span but not the parentheses, so the source is read on
+// from the last argument, or from the name through any type arguments and
+// the `(`, to the `)`. A trailing block argument ends the call itself. None
+// when the source does not show the call there.
+sema_failure_marks_call_end: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Int? {
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_index(environment, graph) ?? return None
+    raw: graph.modules[caller].source.bytes()
+    from := expr_span(expr).end
+    last := Span{start: 0, end: 0}
+    found := false
+    if expr == .Call(call, _) {
+        if call.args.len() > 0 {
+            last = call.args[call.args.len() - 1].span
+            found = true
+        }
+    }
+    if expr == .MethodCall(_, _, _, _, _, args, _) {
+        if args.len() > 0 {
+            last = args[args.len() - 1].span
+            found = true
+        }
+    }
+    if expr == .OptMethodCall(_, _, _, _, args, _, _) {
+        if args.len() > 0 {
+            last = args[args.len() - 1].span
+            found = true
+        }
+    }
+    if expr == .CallValue(callee, args, _, _) {
+        from = expr_source_span(callee).end
+        if args.len() > 0 {
+            last = args[args.len() - 1].span
+            found = true
+        }
+    }
+    if found -> from = last.end
+    if from < 0 || from > raw.len() -> return None
+    at := sema_failure_marks_skip_space(raw, from)
+    if !found {
+        at = sema_failure_marks_skip_type_args(raw, at)
+        if at >= raw.len() || raw[at] != (U8{40}) -> return None
+        at = sema_failure_marks_skip_space(raw, at + 1)
+    }
+    if at < raw.len() && raw[at] == (U8{41}) -> return Val(at + 1)
+    if found -> return Val(from)
+    None
+}
+
+// The first byte at or past `at` that is not a space, a separating comma, or
+// part of a `//` comment.
+sema_failure_marks_skip_space: fn(raw: [U8], at: Int) -> Int Never! {
+    position := at
+    loop position < raw.len() {
+        byte: raw[position]
+        if sema_stmt_ascii_space(byte) || byte == (U8{44}) {
+            position += 1
+            next
+        }
+        if byte != (U8{47}) || position + 1 >= raw.len() || raw[position + 1] != (U8{47}) -> break
+        loop position < raw.len() && raw[position] != (U8{10}) -> position += 1
+    }
+    position
+}
+
+// Past a written `<…>` type-argument list at `at`, to the byte after it and
+// any space; `at` itself when none is written there.
+sema_failure_marks_skip_type_args: fn(raw: [U8], at: Int) -> Int Never! {
+    if at >= raw.len() || raw[at] != (U8{60}) -> return at
+    depth := 0
+    position := at
+    loop position < raw.len() {
+        byte: raw[position]
+        position += 1
+        if byte == (U8{60}) -> depth += 1
+        if byte == (U8{62}) {
+            depth -= 1
+            if depth == 0 -> return sema_failure_marks_skip_space(raw, position)
+        }
+    }
+    at
+}

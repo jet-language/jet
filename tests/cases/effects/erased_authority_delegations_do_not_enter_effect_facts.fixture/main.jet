@@ -1,0 +1,12 @@
+use process: core.process
+
+delegation_witness: fn() {
+    #FX(authority: Exec, IO, Time.Wait) {
+        #Off {
+            _erased: process.run(["echo", "erased"], authority)
+        }
+        _active: process.run(["echo", "active"], authority)
+    }
+}
+
+run: fn() { delegation_witness() }

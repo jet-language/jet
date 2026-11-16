@@ -1,0 +1,30 @@
+use core.[files, time]
+
+#CLI
+Args: struct {
+    input: String
+}
+
+run: fn(args: Args) {
+    levels := [String:Int]{}
+    errors := [String:Int]{}
+    first := ""
+    last := ""
+    first_ms := 0
+    last_ms := 0
+    loop line in files.open(args.input).lines() {
+        fields: line.split(" ").take(3).to_list()
+        last_ms = time.parse_rfc3339(fields[0]).to_unix_ms()
+        if first == "" {
+            first = fields[0].copy()
+            first_ms = last_ms
+        }
+        last = fields[0].copy()
+        levels[fields[1]] = (levels.get(fields[1]) ?? 0) + 1
+        if fields[1] == "ERROR" -> errors[fields[2]] = (errors.get(fields[2]) ?? 0) + 1
+    }
+    loop level in ["DEBUG", "INFO", "WARN", "ERROR"] -> print("{level} {levels.get(level) ?? 0}")
+    print("top-error-components:")
+    loop item in errors.top_n(3) -> print("{item.value} {item.key}")
+    print("span {first} .. {last} ({(last_ms - first_ms) /% 1000}s)")
+}

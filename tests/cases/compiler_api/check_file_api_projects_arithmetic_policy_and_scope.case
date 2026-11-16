@@ -1,0 +1,14 @@
+# HAND-PORT tests/compiler_api.rs:236-248 check_file_api_projects_arithmetic_policy_and_scope
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# Public exact typed compiler JSON projection; original per-diagnostic/semantic facts retained.
+fixture: check_file_api_projects_arithmetic_policy_and_scope.fixture
+env: NO_COLOR=1
+step: jet inspect compiler check main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+json: stdout doc $.compiler.value.semantic_index.arithmetic[0].operation = "add"
+json: stdout doc $.compiler.value.semantic_index.arithmetic[0].policy = "Wrapping"
+capture: op-start stdout doc $.compiler.value.semantic_index.arithmetic[0].operation_span.start
+capture: op-end stdout doc $.compiler.value.semantic_index.arithmetic[0].operation_span.end
+json: stdout doc $.compiler.value.semantic_index.arithmetic[0].scope_span.start < {cap:op-start}
+json: stdout doc $.compiler.value.semantic_index.arithmetic[0].scope_span.end > {cap:op-end}

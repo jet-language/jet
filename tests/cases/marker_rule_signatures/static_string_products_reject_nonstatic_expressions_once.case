@@ -1,0 +1,14 @@
+# tests/marker_rule_signatures.rs::static_string_products_reject_nonstatic_expressions_once at tests/marker_rule_signatures.rs:687; hand-port
+# Claim: `#HTML(runtime_name)` yields E0930 (tests/marker_rule_signatures.rs:692-700)
+# Claim: `#Test(runtime_name) {}` yields E0930 (tests/marker_rule_signatures.rs:692-700)
+# Not ported: Rust asserts E0930 exactly once per source; CLI pins E0930 presence only
+fixture: static_string_products_reject_nonstatic_expressions_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check html/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:692 E0930 once
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:692 E0930 once
+step: jet check test/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:692 E0930 once
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:692 E0930 once

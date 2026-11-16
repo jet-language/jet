@@ -1,0 +1,13 @@
+# tests/rights_matrix.rs::invocation_deny_wins_after_leaf_expansion at tests/rights_matrix.rs:123; hand-port
+# RightsRow::invocation(["FS"], ["FS.Write"]) is the declared row -[FS, !FS.Write]>: FS expands to its leaves,
+# the FS.Write denial wins over the FS allow, FS.Read stays allowed.
+fixture: invocation_deny_wins_after_leaf_expansion.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check allowed/run.jet
+exit: 0 # tests/rights_matrix.rs decide(FS.Read) is Allowed under allow FS, deny FS.Write
+step: jet check denied/run.jet
+exit: 1 # tests/rights_matrix.rs decide(FS.Write) is Denied: deny wins after leaf expansion
+stderr: ~ "E0749" # the invocation row denies the FS.Write leaf
+stderr: ~ "Denial: invocation" # the denial comes from the invocation row

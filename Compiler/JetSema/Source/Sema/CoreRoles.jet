@@ -1,0 +1,156 @@
+// The roles a Core function fills. `#Builtin.Role(.AbsF32)`, jet_builtins'
+// Role marker, makes the function it marks the one that fills role `AbsF32`.
+// Lowering then finds that function through its role (FnBody.role and JetIR
+// ir_core_role_row), never through its name.
+use jet_foundation.[CORE_BUILTINS_MODULE, Diagnostic, Marker, ModuleID, Span, diagnostic_registry_row, module_is_core]
+
+// The jet_builtins marker that gives a Core function its role.
+SEMA_CORE_ROLE_MARKER: "Role"
+
+// The role that `markers`, written on a function of module
+// `module_identity`, give it: the RoleKind case that `#Builtin.Role(.X)`
+// names. "" when no role marker marks it. Only a Core function fills a role.
+sema_core_role: fn(markers: [Marker], graph: SemaRegistrationGraph, module_identity: ModuleID) -> String {
+    if !module_is_core(module_identity) -> return ""
+    loop marker in markers {
+        if marker.negated || marker.args.len() != 1 -> next
+        resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
+        if resolved.status != "found" -> next
+        declaration: resolved.declaration ?? next
+        if declaration.name != SEMA_CORE_ROLE_MARKER -> next
+        index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? next
+        if graph.modules[index].module_name != CORE_BUILTINS_MODULE -> next
+        if marker.args[0] == .Expr(value) {
+            if value == .EnumLit(_, variant, _, _, _, _, _) -> return "{variant}"
+        }
+    }
+    ""
+}
+
+// A top-level Core function that fills a role: its module and its name.
+SemaCoreRoleFunction: struct {
+    module_identity: ModuleID
+    name: String
+}
+
+// The top-level Core functions that fill one of `roles` (sema_core_role).
+sema_core_role_functions: fn(graph: SemaRegistrationGraph, roles: [String]) -> [SemaCoreRoleFunction] {
+    found := [SemaCoreRoleFunction]{}
+    if roles.len() == 0 -> return found
+    loop module_row in graph.modules {
+        if !module_is_core(module_row.module_identity) -> next
+        loop function in module_row.functions {
+            if function.declaration.markers.len() == 0 -> next
+            role: sema_core_role(function.declaration.markers, graph, module_row.module_identity)
+            if role != "" && roles.contains(role) {
+                found.push(SemaCoreRoleFunction{module_identity: module_row.module_identity, name: function.declaration.name})
+            }
+        }
+    }
+    found
+}
+
+// The jet_builtins enum whose cases are the roles.
+SEMA_CORE_ROLE_KIND: "RoleKind"
+
+// Where jet_builtins' RoleKind enum is registered: its module row and its
+// nominal row.
+SemaCoreRoleKind: struct {
+    module_index: Int
+    nominal_index: Int
+}
+
+// The roles the loaded Core functions fill. `fillers` holds, for each case of
+// RoleKind in case order, the name of the first function that fills it, or ""
+// when none does. `kind` is None when jet_builtins declares no RoleKind.
+SemaCoreRoleFill: struct {
+    kind: SemaCoreRoleKind?
+    fillers: [String]
+}
+
+// A role problem and the row of the module it is in.
+SemaCoreRoleProblem: struct {
+    module_index: Int
+    diagnostic: Diagnostic
+}
+
+// Where jet_builtins' RoleKind enum is registered, when it is.
+sema_core_role_kind: fn(graph: SemaRegistrationGraph) -> SemaCoreRoleKind? {
+    loop (module_index, module_row) in graph.modules {
+        if module_row.module_name != CORE_BUILTINS_MODULE -> next
+        loop (nominal_index, nominal) in module_row.nominals {
+            if nominal.kind == SemaRegistrationNominalKind.Enum && nominal.symbol.name == SEMA_CORE_ROLE_KIND {
+                return SemaCoreRoleKind{module_index: module_index, nominal_index: nominal_index}
+            }
+        }
+    }
+    None
+}
+
+// The RoleKind case that `role` names: its row among the enum's cases.
+sema_core_role_case: fn(graph: SemaRegistrationGraph, kind: SemaCoreRoleKind, role: String) -> Int? {
+    loop (index, variant) in graph.modules[kind.module_index].nominals[kind.nominal_index].variants {
+        if variant.symbol.name == role -> return index
+    }
+    None
+}
+
+// Each role is filled at most once: a Core function that fills a role an
+// earlier one already fills is E1014, at its name. Gives the roles the loaded
+// Core functions fill, for sema_core_roles_check_filled.
+sema_core_roles_check: fn(graph: &SemaRegistrationGraph) -> SemaCoreRoleFill {
+    kind: sema_core_role_kind(graph) ?? return SemaCoreRoleFill{kind: None, fillers: [String]{}}
+    fillers := [String]{}
+    loop _ in graph.modules[kind.module_index].nominals[kind.nominal_index].variants {
+        fillers.push("")
+    }
+    problems := [SemaCoreRoleProblem]{}
+    loop (module_index, module_row) in graph.modules {
+        if !module_is_core(module_row.module_identity) -> next
+        loop function in module_row.functions {
+            if function.declaration.markers.len() == 0 -> next
+            role: sema_core_role(function.declaration.markers, graph, module_row.module_identity)
+            if role == "" -> next
+            slot: sema_core_role_case(graph, kind, role) ?? next
+            if {
+                fillers[slot] == "" -> fillers[slot] = function.declaration.name
+                else -> {
+                    problems.push(SemaCoreRoleProblem{module_index: module_index, diagnostic: sema_duplicate_core_role(function.declaration.name, role, fillers[slot], function.declaration.name_span)})
+                }
+            }
+        }
+    }
+    loop problem in problems {
+        sema_registration_push_graph_diagnostic(graph, problem.module_index, problem.diagnostic)
+    }
+    SemaCoreRoleFill{kind: kind, fillers: fillers}
+}
+
+// With every Core module loaded (`jet check Core` and the Core library's
+// check), each case of jet_builtins' RoleKind that no function fills is
+// E1015, at the case.
+sema_core_roles_check_filled: fn(graph: &SemaRegistrationGraph, fill: SemaCoreRoleFill) {
+    kind: fill.kind ?? return
+    problems := [Diagnostic]{}
+    loop (index, variant) in graph.modules[kind.module_index].nominals[kind.nominal_index].variants {
+        if fill.fillers[index] == "" {
+            problems.push(sema_missing_core_role(variant.symbol.name, variant.symbol.span))
+        }
+    }
+    loop problem in problems {
+        sema_registration_push_graph_diagnostic(graph, kind.module_index, problem)
+    }
+}
+
+// E1014: `name` fills `role`, which `first` already fills.
+sema_duplicate_core_role: fn(name: String, role: String, first: String, span: Span) -> Diagnostic {
+    row: diagnostic_registry_row("E1014") ?? panic("E1014 has no registry row")
+    what: row.what.replace("{{name}}", name).replace("{{role}}", role).replace("{{first}}", first)
+    sema_error("E1014", span, what, row.why, row.fix.replace("{{role}}", role))
+}
+
+// E1015: no Core function fills `role`.
+sema_missing_core_role: fn(role: String, span: Span) -> Diagnostic {
+    row: diagnostic_registry_row("E1015") ?? panic("E1015 has no registry row")
+    sema_error("E1015", span, row.what.replace("{{role}}", role), row.why, row.fix.replace("{{role}}", role))
+}

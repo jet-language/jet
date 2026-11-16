@@ -1,0 +1,26 @@
+// Inside a table arm where `it` is live: a table on `it` itself, and a table whose subject reads `it`.
+fn find(xs: [Int], n: Int) -> Int? {
+    loop i in 0..<xs.len() {
+        if xs[i] == n -> return Val(i)
+    }
+    None
+}
+
+fn run() {
+    xs :: [Int]{4, 5, 6}
+    if find(xs, 6) == {
+        .Val(_) -> {
+            // A table on `it` is a table on a plain name: its arms keep the outer `it`.
+            if it == {
+                .Val(i) -> print("same it {i} {it ?? -1}")
+                else -> print("none")
+            }
+            // A subject that reads `it` is evaluated first; its arms see the new `it`.
+            if (it ?? 0) * 10 == {
+                0 -> print("zero")
+                else -> print("new it {it}")
+            }
+        }
+        else -> print("none")
+    }
+}

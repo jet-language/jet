@@ -1,0 +1,13 @@
+# tests/mir_constant_identity.rs::aliased_single_member_import_uses_the_grouped_member_resolution
+# Exact original sources/predicates; runtime UNRUN.
+fixture: aliased_single_member_import_uses_the_grouped_member_resolution.fixture
+env: NO_COLOR=1
+step: jet run public/main.jet
+stdin: null
+exit: 0
+step: jet run --json private/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E0609"] #>= 1
+step: jet run aliased/main.jet
+stdin: null
+exit: 0

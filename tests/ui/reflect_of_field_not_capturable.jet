@@ -1,0 +1,20 @@
+// E0112: `reflect.of(x)` captures every stored field of `x` or refuses `x`.
+// The vault shows itself, but its `key` field would expose a secret.
+use {
+    crypto: core.crypto
+    reflect: core.reflect
+}
+
+Vault: struct {
+    label: String
+    key: crypto.Secret
+
+    impl Display {
+        display: fn(self) -> String { "Vault({self.label})" }
+    }
+}
+
+run: fn() {
+    vault: Vault{label: "main", key: crypto.Secret.from_text("opaque")}
+    _: reflect.of(vault)
+}

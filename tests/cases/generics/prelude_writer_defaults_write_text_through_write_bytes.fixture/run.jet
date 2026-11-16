@@ -1,0 +1,45 @@
+// A byte sink of the program's own writes only `write_bytes` and `flush`;
+// `write` and `write_line` come from the Prelude Writer's defaults, called on
+// the named type and through a `Writer` bound. core.files' FileWriter gains
+// the same two, and the screen keeps its own.
+use {
+    files: core.files
+    term: core.term
+}
+
+Sink: struct {
+    bytes: [U8]
+    flushes: Int
+
+    impl Writer {
+        write_bytes: fn(&self, bytes: [U8]) IOError! {
+            loop byte in bytes -> self.bytes.push(byte)
+        }
+
+        flush: fn(&self) IOError! { self.flushes += 1 }
+    }
+}
+
+// Greets `name` on `out` through the bound, then flushes it.
+greet: fn<W: Writer>(out: &W, name: String) IOError! {
+    out.write("hello, ") ?? return Err(err)
+    out.write_line(name) ?? return Err(err)
+    out.flush()
+}
+
+run: fn() {
+    sink := Sink{bytes: [U8]{}, flushes: 0}
+    sink.write("a") ?? panic("sink write")
+    sink.write_line("b") ?? panic("sink write_line")
+    greet(sink, "sink") ?? panic("greet sink")
+    print("sink {sink.flushes}: {(String.from_bytes(sink.bytes) ?? "?").replace("\n", "/")}")
+
+    file := files.create("out.txt") ?? panic("create out.txt")
+    file.write("one ") ?? panic("file write")
+    file.write_line("two") ?? panic("file write_line")
+    greet(file, "file") ?? panic("greet file")
+    print("file: {(files.read("out.txt") ?? "<unread>").replace("\n", "/")}")
+
+    screen := term.stdout()
+    greet(screen, "screen") ?? panic("greet screen")
+}

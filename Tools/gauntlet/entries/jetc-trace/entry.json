@@ -1,0 +1,24 @@
+{
+  "name": "jetc-trace",
+  "mode": "tool",
+  "description": "The compiler trace summarizer summarize.mjs and its Jet twin Summarize.jet (#5072 c21, c22, c24): read a JET_TRACE_FILE trace one event per line (an unterminated array whose last line may be half written), print one row per span kind with its count, total and longest seconds, items and peak MB, then the trace time and the spans still open with their progress counter and the time left at the current rate. compile.json is the first 800 lines of a real compile's trace, cut mid-run, without its trace.start line (whose 'last event N s ago' depends on the clock); progress.json holds counter restarts, an index/total span, a stray end, a category kind, a half-written last line and durations whose seconds sit on a rounding edge (2.675 s prints 2.67, 14.45 s prints 14.4).",
+  "tool": {
+    "original": "Tools/perf/jetc-trace/summarize.mjs",
+    "jet": "Tools/perf/jetc-trace/Summarize.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {
+        "args": [
+          "compile.json"
+        ],
+        "expected": "expected/compile.out"
+      },
+      {
+        "args": [
+          "progress.json"
+        ],
+        "expected": "expected/progress.out"
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+// Errors inside a nested flow: plain calls propagate, ?(note) adds a frame, ?? falls back.
+fn parse(raw: String) -> Int {
+    if raw == "" -> return Err("empty input")
+    raw.len()
+}
+
+fn check(n: Int) -> Int {
+    if n > 3 -> return Err("too big")
+    n
+}
+
+fn scale(n: Int, by: Int) -> Int { n * by }
+
+fn nested(raw: String) -> Int {
+    scale(check(parse(raw)?("reading the count")), 10)
+}
+
+fn staged(raw: String) -> Int {
+    count :: parse(raw)?("reading the count")
+    checked :: check(count)
+    scale(checked, 10)
+}
+
+fn run() {
+    print(nested("ab"))
+    print(staged("ab"))
+    print(scale(check(parse("") ?? 1), 10))
+    print(staged("abcd") ?? -1)
+    print(nested(""))
+}

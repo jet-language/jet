@@ -1,0 +1,917 @@
+#!/usr/bin/env jet
+// The codegen gate (#6414 c15): a golden machine-code catalog of small
+// kernels, counted from the release build. Tools/perf/codegen-ceiling/
+// catalog/main.jet holds the kernels. golden.tsv holds, per function, the
+// counts of the last accepted compiler and the hand-written ceiling of its
+// hot loop. The gate builds the catalog with `--release --debug-info=true`,
+// runs it against expected.out, and disassembles each function with
+// objdump. A row's symbol names the function exactly or as the prefix of a
+// specialized name (`main_list_sum` matches `main_list_sum__value_<hash>`).
+// A row also counts the parts the backend moved out of its function (PART),
+// as if they were still in it. It counts:
+// - insns: instructions in the function;
+// - pushes and pops: saves and restores of callee-saved registers;
+// - frame_slots: instructions that address a frame slot below rbp (spills,
+//   reloads, frame storage);
+// - loops: innermost loops. A loop is a back edge (a jump to its own address
+//   or an earlier one) whose target dominates its source in the code's flow
+//   (Flow: every path from the function's entry to the jump runs the target
+//   first, so the target also reaches the jump); an innermost one holds no
+//   other. So a kernel the backend versions into several copies counts each
+//   copy. A jump back from code laid out after `ret` is no loop: neither the
+//   stop exit's `jmp` back into the epilogue nor a slow path's `jmp` back
+//   into its loop, whose loop counts once, by its own back edge. A cycle
+//   with no back edge (one entered at two instructions) is a loop too;
+// - loop_insns: instructions in those loops: those from a loop's target to
+//   its back edge, and the blocks of its body laid out elsewhere (a slow
+//   path or a drop that returns into the loop). A cycle with no back edge
+//   counts the instructions from its first to its last.
+// A count above its golden value is a regression and fails the gate. A
+// count below it is a gain: `--update` lowers golden.tsv to the new counts,
+// and only when nothing regressed. loop_insns against the ceiling (the
+// instructions of one hand-written loop, 0 for none) is the codegen gap,
+// which the gate reports per row.
+// A submission that touches Compiler/JetIR, Compiler/JetBackend or
+// Compiler/JetRuntime lists `jet Tools/perf/CodegenCeiling.jet --check` in
+// its tests, and a gain lands with its `--update` (the orchestration skill's
+// intake reference).
+// `--zero-cost` checks the zero-cost pair instead (ZERO_COST below): the
+// kernel program's machine code against the direct program's at -O1 and
+// -O2.
+// Usage (from the repository root; needs objdump and nm):
+//   jet Tools/perf/CodegenCeiling.jet --check [--jet PATH]
+//   jet Tools/perf/CodegenCeiling.jet --update [--jet PATH]
+//   jet Tools/perf/CodegenCeiling.jet --zero-cost [--jet PATH]
+// The default compiler is Tools/agent/JetEnv.jet's `jet`.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+DIR: "Tools/perf/codegen-ceiling"
+
+GOLDEN: "Tools/perf/codegen-ceiling/golden.tsv"
+
+JET_ENV: "Tools/agent/JetEnv.jet"
+
+USAGE: "usage: jet Tools/perf/CodegenCeiling.jet --check|--update|--zero-cost [--jet PATH]"
+
+HEADER: "symbol\tinsns\tpushes\tpops\tframe_slots\tloops\tloop_insns\tceiling_loop_insns"
+
+FIELDS: 8
+
+// The catalog's argument: big enough to run every loop, small enough to
+// finish at once.
+CATALOG_N: "1000"
+
+Counts: struct {
+    insns: Int
+    pushes: Int
+    pops: Int
+    frame_slots: Int
+    loops: Int
+    loop_insns: Int
+}
+
+Row: struct {
+    symbol: String
+    golden: Counts
+    ceiling: Int
+}
+
+fail: fn(message: String) -[IO]> Int Never! {
+    term.eprint("codegen gate: {message}")
+    1
+}
+
+number: fn(text: String) -> Int Never! {
+    if Int.parse(text) == {
+        .Ok(value) -> value
+        .Err(_) -> -1
+    }
+}
+
+hex_digit: fn(code: Int) -> Int Never! {
+    if code >= 48 && code <= 57 -> return code - 48
+    if code >= 97 && code <= 102 -> return code - 87
+    return -1
+}
+
+// A lowercase hexadecimal number, -1 when it is not one.
+hex: fn(text: String) -> Int Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 -> return -1
+    value := 0
+    loop byte in bytes {
+        digit: hex_digit(Int{byte})
+        if digit < 0 -> return -1
+        value = value * 16 + digit
+    }
+    value
+}
+
+// The rows of golden.tsv after its header, or why it is unreadable.
+parse_golden: fn(text: String) -> [Row] Err! {
+    lines: text.split("\n").to_list()
+    if lines.len() == 0 || lines[0] != HEADER {
+        return Err("{GOLDEN}: the header is not `{HEADER}`")
+    }
+    rows := [Row]{}
+    loop index in 1..<lines.len() {
+        line: lines[index]
+        if line == "" || line.starts_with("#") -> next
+        fields: line.split("\t").to_list()
+        if fields.len() != FIELDS -> return Err("{GOLDEN}:{index + 1}: {FIELDS} fields expected")
+        values: loop at in 1..<FIELDS -> number(fields[at])
+        loop value in values {
+            if value < 0 -> return Err("{GOLDEN}:{index + 1}: a count is not a number")
+        }
+        golden: Counts{insns: values[0], pushes: values[1], pops: values[2], frame_slots: values[3], loops: values[4], loop_insns: values[5]}
+        rows.push(Row{symbol: fields[0].copy(), golden: golden, ceiling: values[6]})
+    }
+    if rows.len() == 0 -> return Err("{GOLDEN}: no rows")
+    Ok(rows)
+}
+
+// How each instruction of a listing leaves it: whether it falls through to
+// the next one, the index its direct jump goes to (-1 for none, or for a
+// target outside the function: a tail call), and whether it jumps
+// indirectly. `ret`, `ud2` and `hlt` end the path; a call that never
+// returns is followed by `ud2`, so its path ends there. Any other call
+// returns to the next instruction.
+Flow: struct {
+    falls: [Bool]
+    jumps: [Int]
+    indirect: [Bool]
+}
+
+// The words of an instruction's text.
+words_of: fn(text: String) -> [String] Never! {
+    words := [String]{}
+    loop word in text.split(" ") {
+        if word != "" -> words.push(word.copy())
+    }
+    words
+}
+
+flow_of: fn(addresses: [Int], texts: [String]) -> Flow Never! {
+    falls := [Bool]{}
+    jumps := [Int]{}
+    indirect := [Bool]{}
+    loop text in texts {
+        ends: text.starts_with("ret") || text.starts_with("ud2") || text.starts_with("hlt")
+        falls.push(!ends && !text.starts_with("jmp"))
+        target := -1
+        far := false
+        if text.starts_with("j") {
+            // `jne    401040 <main_list_sum+0x10>`: the target is the word
+            // before the symbolic name; `jmp    *%rax` jumps indirectly.
+            words: words_of(text)
+            direct: words.len() >= 3 && words[2].starts_with("<")
+            if direct {
+                address: hex(words[1])
+                loop (at, other) in addresses {
+                    if other == address -> target = at
+                }
+            }
+            far = !direct && words.len() >= 2 && words[1].starts_with("*")
+        }
+        jumps.push(target)
+        indirect.push(far)
+    }
+    Flow{falls: falls, jumps: jumps, indirect: indirect}
+}
+
+// The instructions that may run right after instruction `at`: the next one
+// when it falls through and its direct jump's target. An indirect jump may
+// go to any instruction.
+successors: fn(flow: Flow, at: Int) -> [Int] Never! {
+    count: flow.falls.len()
+    found := [Int]{}
+    if flow.indirect[at] {
+        loop other in 0..<count -> found.push(other)
+        return found
+    }
+    if flow.falls[at] && at + 1 < count -> found.push(at + 1)
+    if flow.jumps[at] >= 0 -> found.push(flow.jumps[at])
+    found
+}
+
+// The instructions that may run right before each instruction.
+predecessors: fn(flow: Flow) -> [[Int]] Never! {
+    count: flow.falls.len()
+    preceding := [[Int]]{}
+    loop _ in 0..<count -> preceding.push([Int]{})
+    loop at in 0..<count {
+        loop other in successors(flow, at) -> preceding[other].push(at)
+    }
+    preceding
+}
+
+// Each instruction's immediate dominator: the closest instruction that
+// every path from the function's entry to it runs first. The entry is its
+// own, and an instruction no path runs has -1. The iterative algorithm of
+// Cooper, Harvey and Kennedy, over the instructions in reverse postorder.
+dominators: fn(flow: Flow, preceding: [[Int]]) -> [Int] Never! {
+    count: flow.falls.len()
+    idom := [Int]{}
+    loop _ in 0..<count -> idom.push(-1)
+    if count == 0 -> return idom
+    following := [[Int]]{}
+    loop at in 0..<count -> following.push(successors(flow, at))
+    // Postorder numbers, from a depth-first walk from the entry.
+    number := [Int]{}
+    visited := [Bool]{}
+    taken := [Int]{}
+    loop _ in 0..<count {
+        number.push(-1)
+        visited.push(false)
+        taken.push(0)
+    }
+    postorder := [Int]{}
+    stack := [Int]{0}
+    visited[0] = true
+    loop stack.len() > 0 {
+        top: stack[stack.len() - 1]
+        if taken[top] < following[top].len() {
+            child: following[top][taken[top]]
+            taken[top] = taken[top] + 1
+            if !visited[child] {
+                visited[child] = true
+                stack.push(child)
+            }
+            next
+        }
+        _ := stack.pop()
+        number[top] = postorder.len()
+        postorder.push(top)
+    }
+    idom[0] = 0
+    changed := true
+    loop changed {
+        changed = false
+        index := postorder.len() - 1
+        loop index >= 0 {
+            node: postorder[index]
+            index -= 1
+            if node == 0 -> next
+            chosen := -1
+            loop other in preceding[node] {
+                if idom[other] < 0 -> next
+                if chosen < 0 {
+                    chosen = other
+                    next
+                }
+                // The closest common dominator of the two.
+                left := other
+                right := chosen
+                loop left != right {
+                    loop number[left] < number[right] -> left = idom[left]
+                    loop number[right] < number[left] -> right = idom[right]
+                }
+                chosen = left
+            }
+            if chosen >= 0 && idom[node] != chosen {
+                idom[node] = chosen
+                changed = true
+            }
+        }
+    }
+    idom
+}
+
+// Whether every path from the function's entry to instruction `at` runs
+// instruction `above` first (`idom` from dominators).
+dominates: fn(idom: [Int], above: Int, at: Int) -> Bool Never! {
+    if idom[at] < 0 -> return false
+    node := at
+    loop node != above && node != 0 -> node = idom[node]
+    node == above
+}
+
+// The body of the natural loop of the back edge from `tail` to `head`:
+// the head and every instruction that reaches the tail without passing
+// the head. It holds the blocks laid out away from the loop's range, such
+// as a slow path that returns into the loop.
+natural_body: fn(preceding: [[Int]], idom: [Int], head: Int, tail: Int) -> [Int] Never! {
+    seen := [Bool]{}
+    loop _ in idom -> seen.push(false)
+    seen[head] = true
+    body := [Int]{head}
+    work := [Int]{}
+    if !seen[tail] {
+        seen[tail] = true
+        body.push(tail)
+        work.push(tail)
+    }
+    loop work.len() > 0 {
+        node: work.pop() ?? head
+        loop other in preceding[node] {
+            if seen[other] || idom[other] < 0 -> next
+            seen[other] = true
+            body.push(other)
+            work.push(other)
+        }
+    }
+    body
+}
+
+// The cycles that have no back edge: with every back edge (an edge whose
+// target dominates its source) removed, the code's flow keeps a cycle only
+// where it can be entered at more than one instruction (an irreducible
+// loop). Each such cycle, a strongly connected set of at least two
+// instructions, comes back as its instructions. Tarjan's algorithm, with
+// an explicit stack.
+irreducible_cycles: fn(flow: Flow, idom: [Int]) -> [[Int]] Never! {
+    count: flow.falls.len()
+    forward := [[Int]]{}
+    number := [Int]{}
+    low := [Int]{}
+    held := [Bool]{}
+    taken := [Int]{}
+    loop at in 0..<count {
+        kept := [Int]{}
+        if idom[at] >= 0 {
+            loop other in successors(flow, at) {
+                if !dominates(idom, other, at) -> kept.push(other)
+            }
+        }
+        forward.push(kept)
+        number.push(-1)
+        low.push(-1)
+        held.push(false)
+        taken.push(0)
+    }
+    cycles := [[Int]]{}
+    held_stack := [Int]{}
+    order := 0
+    loop root in 0..<count {
+        if idom[root] < 0 || number[root] >= 0 -> next
+        number[root] = order
+        low[root] = order
+        order += 1
+        held_stack.push(root)
+        held[root] = true
+        calls := [Int]{root}
+        loop calls.len() > 0 {
+            node: calls[calls.len() - 1]
+            if taken[node] < forward[node].len() {
+                child: forward[node][taken[node]]
+                taken[node] = taken[node] + 1
+                if number[child] < 0 {
+                    number[child] = order
+                    low[child] = order
+                    order += 1
+                    held_stack.push(child)
+                    held[child] = true
+                    calls.push(child)
+                } else if held[child] && number[child] < low[node] { low[node] = number[child] }
+                next
+            }
+            _ := calls.pop()
+            if calls.len() > 0 {
+                parent: calls[calls.len() - 1]
+                if low[node] < low[parent] -> low[parent] = low[node]
+            }
+            if low[node] != number[node] -> next
+            members := [Int]{}
+            loop {
+                member: held_stack.pop() ?? node
+                held[member] = false
+                members.push(member)
+                if member == node -> break
+            }
+            if members.len() > 1 -> cycles.push(members)
+        }
+    }
+    cycles
+}
+
+// The counts of one function's `objdump -d --no-show-raw-insn` listing.
+count_listing: fn(listing: String) -> Counts Never! {
+    addresses := [Int]{}
+    texts := [String]{}
+    loop line in listing.split("\n") {
+        // `  401000:\tpush   %rbp`: the address, then the instruction.
+        parts: line.split("\t").to_list()
+        if parts.len() < 2 -> next
+        head: parts[0].trim()
+        if !head.ends_with(":") -> next
+        address: hex(head.removesuffix(":"))
+        if address < 0 -> next
+        addresses.push(address)
+        texts.push(parts[1].trim())
+    }
+    flow: flow_of(addresses, texts)
+    preceding: predecessors(flow)
+    idom: dominators(flow, preceding)
+    pushes := 0
+    pops := 0
+    frame_slots := 0
+    starts := [Int]{}
+    ends := [Int]{}
+    bodies := [[Int]]{}
+    loop index in 0..<texts.len() {
+        text: texts[index]
+        if text.starts_with("push") -> pushes += 1
+        if text.starts_with("pop") -> pops += 1
+        if text.contains("(%rbp)") && text.contains("-0x") -> frame_slots += 1
+        target: flow.jumps[index]
+        if target >= 0 && addresses[target] <= addresses[index] && dominates(idom, target, index) {
+            starts.push(addresses[target])
+            ends.push(addresses[index])
+            bodies.push(natural_body(preceding, idom, target, index))
+        }
+    }
+    // An irreducible loop has no back edge; it counts as the instructions
+    // from its first to its last.
+    loop cycle in irreducible_cycles(flow, idom) {
+        first := cycle[0]
+        last := cycle[0]
+        loop member in cycle {
+            if member < first -> first = member
+            if member > last -> last = member
+        }
+        starts.push(addresses[first])
+        ends.push(addresses[last])
+        bodies.push(cycle)
+    }
+    loops := 0
+    // An instruction in two overlapping innermost loops counts once.
+    inside := [Bool]{}
+    loop _ in addresses -> inside.push(false)
+    loop loop_index in 0..<starts.len() {
+        inner := true
+        loop other in 0..<starts.len() {
+            if other == loop_index -> next
+            nested: starts[other] >= starts[loop_index] && ends[other] <= ends[loop_index]
+            same: starts[other] == starts[loop_index] && ends[other] == ends[loop_index]
+            if nested && !same -> inner = false
+        }
+        if !inner -> next
+        loops += 1
+        // The loop's range, and the blocks of its body laid out outside it.
+        loop index in 0..<addresses.len() {
+            if addresses[index] >= starts[loop_index] && addresses[index] <= ends[loop_index] {
+                inside[index] = true
+            }
+        }
+        loop member in bodies[loop_index] -> inside[member] = true
+    }
+    loop_insns := 0
+    loop flag in inside {
+        if flag -> loop_insns += 1
+    }
+    Counts{insns: texts.len(), pushes: pushes, pops: pops, frame_slots: frame_slots, loops: loops, loop_insns: loop_insns}
+}
+
+counts_line: fn(counts: Counts) -> String Never! {
+    "{counts.insns}\t{counts.pushes}\t{counts.pops}\t{counts.frame_slots}\t{counts.loops}\t{counts.loop_insns}"
+}
+
+// Each count above its golden value, as `name golden -> current`.
+regressions: fn(golden: Counts, current: Counts) -> [String] Never! {
+    names: [String]{"insns", "pushes", "pops", "frame_slots", "loops", "loop_insns"}
+    was: [Int]{golden.insns, golden.pushes, golden.pops, golden.frame_slots, golden.loops, golden.loop_insns}
+    now: [Int]{current.insns, current.pushes, current.pops, current.frame_slots, current.loops, current.loop_insns}
+    found := [String]{}
+    loop index in 0..<names.len() {
+        if now[index] > was[index] -> found.push("{names[index]} {was[index]} -> {now[index]}")
+    }
+    found
+}
+
+// The gap of a row's hot loops against the hand-written ceiling, in
+// hundredths (100: at the ceiling).
+gap: fn(loop_insns: Int, ceiling: Int) -> String Never! {
+    if ceiling <= 0 -> return "-"
+    hundredths: (loop_insns * 100 + ceiling /% 2) /% ceiling
+    cents: hundredths % 100
+    pad: if cents < 10 -> "0" else -> ""
+    "{hundredths /% 100}.{pad}{cents}"
+}
+
+run_command: fn(command: [String], cwd: String, scratch: String) -[Exec, Env, IO, Time.Wait]> String Err! {
+    receipt: process.cmd(command).cwd(cwd).env("TMPDIR", scratch).output_limit(67108864).run() ?? return Err("{command[0]} could not start: {err}")
+    if receipt.code != 0 || receipt.signal != None {
+        return Err("`{command.join(" ")}` exited {receipt.code}:\n{receipt.output}{receipt.errors}")
+    }
+    Ok(receipt.output)
+}
+
+// A part of a function the backend moved out of it: a continuation the
+// function leaves to (`<symbol>__general_<hash>`, and its tail-call
+// variants `.own<mask>`). A row counts its function's parts with it, so a
+// split lowers a count only by removing instructions.
+PART: "__general_"
+
+// The functions of `nm` output that a row's symbol names: first the
+// function, the symbol itself or a specialization of it, then its parts
+// (PART). Err when no function or several match.
+resolve: fn(symbols: String, symbol: String) -> [String] Err! {
+    names := [String]{}
+    loop line in symbols.split("\n") {
+        words: line.split(" ").to_list()
+        if words.len() == 3 -> names.push(words[2].copy())
+    }
+    found := [String]{}
+    loop name in names {
+        if !name.contains(PART) && (name == symbol || name.starts_with("{symbol}__")) {
+            found.push(name.copy())
+        }
+    }
+    if found.len() == 0 -> return Err("no function {symbol} in the release build")
+    if found.len() > 1 -> return Err("{symbol} names {found.len()} functions: {found.join(", ")}")
+    function: found[0].copy()
+    loop name in names {
+        if name.starts_with("{function}{PART}") -> found.push(name.copy())
+    }
+    Ok(found)
+}
+
+// The counts of several functions as one.
+add_counts: fn(a: Counts, b: Counts) -> Counts Never! {
+    Counts{insns: a.insns + b.insns, pushes: a.pushes + b.pushes, pops: a.pops + b.pops, frame_slots: a.frame_slots + b.frame_slots, loops: a.loops + b.loops, loop_insns: a.loop_insns + b.loop_insns}
+}
+
+gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    text: files.read("{root}/{GOLDEN}") ?? return fail("missing {GOLDEN}: {err}")
+    rows: parse_golden(text) ?? return fail("{err}")
+    source: files.read("{root}/{DIR}/catalog/main.jet") ?? return fail("missing {DIR}/catalog/main.jet: {err}")
+    expected: files.read("{root}/{DIR}/catalog/expected.out") ?? return fail("missing {DIR}/catalog/expected.out: {err}")
+    files.write("{run_dir}/main.jet", source) ?? return fail("cannot copy the catalog: {err}")
+    build := jet.copy()
+    build.extend([String]{"build", "--release", "--debug-info=true", "main.jet"})
+    run_command(build, run_dir, scratch) ?? return fail("the catalog does not build: {err}")
+    binary: "{run_dir}/.jet/build/main"
+    output: run_command([String]{binary, "--n", CATALOG_N}, run_dir, scratch) ?? return fail("the catalog does not run: {err}")
+    if output != expected {
+        return fail("the catalog prints other output than {DIR}/catalog/expected.out:\n{output}")
+    }
+    symbols: run_command([String]{"nm", binary}, run_dir, scratch) ?? return fail("{err}")
+    failures := 0
+    lines := [String]{HEADER}
+    loop row in rows {
+        functions := [String]{}
+        if resolve(symbols, row.symbol) == {
+            .Ok(found) -> { functions = found }
+            .Err(error) -> term.eprint("MISSING {error}")
+        }
+        if functions.is_empty() {
+            failures += 1
+            next
+        }
+        current := Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
+        loop name in functions {
+            listing: run_command([String]{"objdump", "-d", "--no-show-raw-insn", "--disassemble={name}", binary}, run_dir, scratch) ?? return fail("{err}")
+            current = add_counts(current, count_listing(listing))
+        }
+        print("{row.symbol}\t{counts_line(current)}\tgolden {counts_line(row.golden)}\tceiling {row.ceiling}\tgap {gap(current.loop_insns, row.ceiling)}")
+        worse: regressions(row.golden, current)
+        loop item in worse -> term.eprint("REGRESSION {row.symbol}: {item}")
+        failures += worse.len()
+        lines.push("{row.symbol}\t{counts_line(current)}\t{row.ceiling}")
+    }
+    if failures != 0 -> return fail("{failures} regression(s)")
+    if update {
+        files.write("{root}/{GOLDEN}", "{lines.join("\n")}\n") ?? return fail("cannot write {GOLDEN}: {err}")
+        print("codegen gate: {GOLDEN} updated")
+    }
+    print("codegen gate: pass functions={rows.len()}")
+    0
+}
+
+// A function's name without the hashes the compiler adds to a specialized
+// one (`main_scan__value_3a05…` reads `main_scan__value`): two builds of the
+// same function hash differently when their programs differ.
+stem: fn(name: String) -> String Never! {
+    kept := [String]{}
+    loop segment in name.split("_") {
+        if segment.len() == 16 && hex(segment) >= 0 -> next
+        kept.push(segment.copy())
+    }
+    kept.join("_")
+}
+
+// A listing's instructions without what differs between two builds of the
+// same code: addresses, rip-relative displacements, comments and the hashes
+// in the names of jump and call targets.
+normal_listing: fn(listing: String) -> [String] Never! {
+    found := [String]{}
+    loop line in listing.split("\n") {
+        parts: line.split("\t").to_list()
+        if parts.len() < 2 || !parts[0].trim().ends_with(":") -> next
+        text: parts[1].split("#").to_list()
+        words: words_of(text[0])
+        kept := [String]{}
+        loop index in 0..<words.len() {
+            word: words[index]
+            if index + 1 < words.len() && words[index + 1].starts_with("<") -> next
+            if word.starts_with("<") {
+                // `<name+0x8>`: the hashes go, the offset stays.
+                pieces: word.removeprefix("<").removesuffix(">").split("+").to_list()
+                offset: if pieces.len() > 1 -> "+{pieces[1]}" else -> ""
+                kept.push("<{stem(pieces[0])}{offset}>")
+            } else if word.contains("(%rip)") {
+                kept.push("(%rip){word.split("(%rip)").to_list()[1]}")
+            } else { kept.push(word.copy()) }
+        }
+        found.push(kept.join(" "))
+    }
+    found
+}
+
+// How many functions of each stem `nm` output holds.
+function_stems: fn(symbols: String) -> [String:Int] Never! {
+    counts := [String:Int]{}
+    loop line in symbols.split("\n") {
+        words: line.split(" ").to_list()
+        if words.len() != 3 || (words[1] != "t" && words[1] != "T") -> next
+        name: stem(words[2])
+        counts[name] = (counts.get(name) ?? 0) + 1
+    }
+    counts
+}
+
+// Each stem the kernel build keeps more functions of than the direct one:
+// a kernel method or a core.mem primitive that stayed a function of its own
+// (or code only the kernel's spelling brought in).
+kept_functions: fn(kernel: String, direct: String) -> [String] Never! {
+    theirs: function_stems(direct)
+    found := [String]{}
+    loop (name, count) in function_stems(kernel) {
+        extra: count - (theirs.get(name) ?? 0)
+        if extra > 0 -> found.push("{name} x{extra}")
+    }
+    found.sort()
+    found
+}
+
+// The zero-cost pair (`--zero-cost`): two programs that do the same memory
+// work: alloc, free, resize, raw reads and writes, copy, fill, compare,
+// atomics and mapping. zero-cost/kernel goes through a kernel package whose
+// owner types wrap the core.mem primitives in `#Inline(Always)` methods;
+// zero-cost/direct spells every operation in place, with the same checks.
+// At -O1 and at -O2 the gate builds both, runs each against
+// zero-cost/expected.out, and holds the kernel to the direct program:
+// - every function the kernel build keeps, the direct build keeps too. A
+//   kernel method or a core.mem primitive left as a function of its own did
+//   not inline (KEPT);
+// - each hot function's machine code is the direct one's (identical, once
+//   addresses and name hashes are set aside), or none of its counts is
+//   above the direct one's (LARGER otherwise).
+// Tools/perf/ZeroCostPair.jet runs this check, then times the pair.
+ZERO_COST: "Tools/perf/codegen-ceiling/zero-cost"
+
+ZERO_COST_ARMS: [String]{"kernel", "direct"}
+
+ZERO_COST_FILES: [[String]]{[String]{"package.jet", "kernel.jet", "main.jet"}, [String]{"main.jet"}}
+
+ZERO_COST_LEVELS: [String]{"-O1", "-O2"}
+
+ZERO_COST_HOT: [String]{"main_churn", "main_grow", "main_scan", "main_tally", "main_pages", "main_run"}
+
+// One arm built at one level: its binary and its `nm` output.
+ZeroCostBuild: struct {
+    binary: String
+    symbols: String
+}
+
+zero_cost_build: fn(root: String, jet: [String], arm: Int, level: String, expected: String, run_dir: String, scratch: String) -[Exec, Env, FS, IO, Time.Wait]> ZeroCostBuild Err! {
+    name: ZERO_COST_ARMS[arm]
+    dir: "{run_dir}/{name}{level}"
+    files.create_dir_all(dir) ?? return Err("cannot create {dir}: {err}")
+    loop file in ZERO_COST_FILES[arm] {
+        source: files.read("{root}/{ZERO_COST}/{name}/{file}") ?? return Err("missing {ZERO_COST}/{name}/{file}: {err}")
+        files.write("{dir}/{file}", source) ?? return Err("cannot copy {name}/{file}: {err}")
+    }
+    build := jet.copy()
+    build.extend([String]{"build", "--release", level, "--debug-info=true", "main.jet"})
+    run_command(build, dir, scratch) ?? return Err("{name} {level} does not build: {err}")
+    binary: "{dir}/.jet/build/main"
+    output: run_command([String]{binary, "--n", CATALOG_N}, dir, scratch) ?? return Err("{name} {level} does not run: {err}")
+    if output != expected {
+        return Err("{name} {level} prints other output than {ZERO_COST}/expected.out:\n{output}")
+    }
+    symbols: run_command([String]{"nm", binary}, dir, scratch)
+    Ok(ZeroCostBuild{binary: binary, symbols: symbols})
+}
+
+// A hot function of one build: its counts and its normalized instructions.
+ZeroCostFunction: struct {
+    counts: Counts
+    text: [String]
+}
+
+// A hot function of one build, as one: the function and every function
+// named after it (`main_scan__value_<hash>`, its parts), in `nm` order. A
+// build may keep a function both as itself and as the value the program
+// reads it as; the pair holds the two builds to the same sum.
+zero_cost_function: fn(build: ZeroCostBuild, symbol: String, run_dir: String, scratch: String) -[Exec, Env, IO, Time.Wait]> ZeroCostFunction Err! {
+    counts := Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
+    text := [String]{}
+    found := 0
+    loop line in build.symbols.split("\n") {
+        words: line.split(" ").to_list()
+        if words.len() != 3 || (words[2] != symbol && !words[2].starts_with("{symbol}__")) -> next
+        listing: run_command([String]{"objdump", "-d", "--no-show-raw-insn", "--disassemble={words[2]}", build.binary}, run_dir, scratch)
+        counts = add_counts(counts, count_listing(listing))
+        text.extend(normal_listing(listing))
+        found += 1
+    }
+    if found == 0 -> return Err("no function {symbol}")
+    Ok(ZeroCostFunction{counts: counts, text: text})
+}
+
+zero_cost: fn(root: String, jet: [String], run_dir: String, scratch: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    expected: files.read("{root}/{ZERO_COST}/expected.out") ?? return fail("missing {ZERO_COST}/expected.out: {err}")
+    failures := 0
+    loop level in ZERO_COST_LEVELS {
+        kernel: zero_cost_build(root, jet, 0, level, expected, run_dir, scratch) ?? return fail("{err}")
+        direct: zero_cost_build(root, jet, 1, level, expected, run_dir, scratch) ?? return fail("{err}")
+        loop item in kept_functions(kernel.symbols, direct.symbols) {
+            term.eprint("KEPT {level} {item}")
+            failures += 1
+        }
+        loop symbol in ZERO_COST_HOT {
+            ours: zero_cost_function(kernel, symbol, run_dir, scratch) ?? return fail("kernel {level}: {err}")
+            theirs: zero_cost_function(direct, symbol, run_dir, scratch) ?? return fail("direct {level}: {err}")
+            worse: regressions(theirs.counts, ours.counts)
+            verdict: if ours.text == theirs.text -> "identical" else if worse.is_empty() -> "no larger" else -> "LARGER"
+            print("{level}\t{symbol}\tkernel {counts_line(ours.counts)}\tdirect {counts_line(theirs.counts)}\t{verdict}")
+            loop item in worse -> term.eprint("LARGER {level} {symbol}: {item}")
+            failures += worse.len()
+        }
+    }
+    if failures != 0 {
+        return fail("zero-cost: {failures} loss(es) of the kernel against the direct program")
+    }
+    print("codegen gate: zero-cost pass levels={ZERO_COST_LEVELS.len()} functions={ZERO_COST_HOT.len()}")
+    0
+}
+
+codegen_gate: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    args: process.args()
+    jet := [String]{}
+    mode := ""
+    index := 0
+    loop index < args.len() {
+        if (args[index] == "--check" || args[index] == "--update" || args[index] == "--zero-cost") && mode == "" {
+            mode = args[index].copy()
+            index += 1
+            next
+        }
+        if args[index] == "--jet" && index + 1 < args.len() {
+            jet = [String]{args[index + 1].copy()}
+            index += 2
+            next
+        }
+        return fail(USAGE)
+    }
+    if mode == "" -> return fail(USAGE)
+    update: mode == "--update"
+    root: files.cwd() ?? return fail("cannot read the working directory: {err}")
+    if jet.len() == 0 -> jet = [String]{"{root}/{JET_ENV}", "jet"}
+    home: process.env_get_or("HOME", "")
+    cache: process.env_get_or("XDG_CACHE_HOME", "{home}/.cache")
+    state: process.env_get_or("JET_STATE_ROOT", "{cache}/jet-dev")
+    scratch_env: process.env_get_or("TMPDIR", "")
+    scratch: if scratch_env == "" -> process.env_get_or("JET_SCRATCH_ROOT", state) else -> scratch_env
+    files.create_dir_all(scratch) ?? return fail("cannot create {scratch}: {err}")
+    made: run_command([String]{"mktemp", "-d", "{scratch}/codegen-ceiling.XXXXXX"}, root, scratch) ?? return fail("{err}")
+    run_dir: made.trim()
+    code: if mode == "--zero-cost" -> zero_cost(root, jet, run_dir, scratch) else -> gate(root, jet, update, run_dir, scratch)
+    files.rmtree(run_dir).drop("codegen gate run directory")
+    code
+}
+
+run: fn() {
+    code: codegen_gate()
+    if code != 0 -> process.exit(code)
+}
+
+#Test("a stem drops the hashes of a specialized name") {
+    assert_eq(stem("main_scan__value_3a05f1c2d4e5b6a7"), "main_scan__value")
+    assert_eq(stem("core_mem_from_addr__4802937694827900"), "core_mem_from_addr_")
+    assert_eq(stem("kernel_claim"), "kernel_claim")
+}
+
+#Test("two builds of the same code read the same once addresses and hashes are set aside") {
+    ours: "  401000:\tcall   40b630 <jet_ir_drop_9afa72ef4523a3b8>\n  401005:\tmov    0x256a0(%rip),%rax        # 426aa5 <x>\n  40100c:\tjne    401000 <main_k__value_3a05f1c2d4e5b6a7>\n"
+    theirs: "  402000:\tcall   40c000 <jet_ir_drop_0d69d289780faae2>\n  402005:\tmov    0x1000(%rip),%rax        # 403005 <y>\n  40200c:\tjne    402000 <main_k__value_4d91aa00bb11cc22>\n"
+    assert_eq(normal_listing(ours), normal_listing(theirs))
+    assert_eq(normal_listing(ours)[1], "mov (%rip),%rax")
+}
+
+#Test("a function only the kernel build keeps is reported with how many more it keeps") {
+    kernel: "000000000040b630 T kernel_claim\n000000000040b700 t jet_ir_drop_9afa72ef4523a3b8\n000000000040b800 t jet_ir_drop_0d69d289780faae2\n0000000000433980 D data_row\n"
+    direct: "000000000040c000 t jet_ir_drop_0d69d289780faae2\n"
+    assert_eq(kept_functions(kernel, direct), [String]{"jet_ir_drop x1", "kernel_claim x1"})
+}
+
+#Test("a listing counts saves, frame slots and its innermost loop") {
+    listing: "0000000000401000 <main_k>:\n  401000:\tpush   %rbp\n  401001:\tmov    %rsp,%rbp\n  401004:\tmov    %rdi,-0x8(%rbp)\n  401008:\tadd    (%rax),%rcx\n  40100b:\tadd    $0x8,%rax\n  40100f:\tcmp    %rdx,%rax\n  401012:\tjne    401008 <main_k+0x8>\n  401014:\tpop    %rbp\n  401015:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.insns, 9)
+    assert_eq(counts.pushes, 1)
+    assert_eq(counts.pops, 1)
+    assert_eq(counts.frame_slots, 1)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 4)
+}
+
+#Test("only the innermost of nested loops counts, and a forward jump is no loop") {
+    listing: "  10:\tnop\n  11:\tnop\n  12:\tjmp    11 <k+0x1>\n  13:\tje     20 <k+0x10>\n  14:\tjne    10 <k>\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 2)
+}
+
+#Test("an instruction in two overlapping innermost loops counts once") {
+    listing: "  10:\tnop\n  11:\tnop\n  12:\tjne    10 <k>\n  13:\tjne    11 <k+0x1>\n  14:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 2)
+    assert_eq(counts.loop_insns, 4)
+}
+
+#Test("a loop with an early return inside it counts every instruction from its head to its back edge") {
+    listing: "  10:\tcmp    %rdx,%rax\n  13:\tjne    17 <k+0x7>\n  15:\tpop    %rbp\n  16:\tret\n  17:\tadd    $0x8,%rax\n  1b:\tjne    10 <k>\n  1d:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 6)
+}
+
+#Test("the stop exit's jump back into the epilogue after `ret` is no loop") {
+    listing: "  10:\tadd    (%rax),%rcx\n  13:\tjne    10 <k>\n  15:\ttest   %edx,%edx\n  17:\tjne    1d <k+0xd>\n  19:\txor    %edx,%edx\n  1b:\tpop    %rbp\n  1c:\tret\n  1d:\tmov    $0x1,%edx\n  22:\tjmp    1b <k+0xb>\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 2)
+    // A path that ends in `ud2` reaches no back edge after it either.
+    trapped: count_listing("  10:\ttest   %eax,%eax\n  12:\tjne    19 <k+0x9>\n  14:\tnop\n  15:\tud2\n  19:\tjmp    14 <k+0x4>\n")
+    assert_eq(trapped.loops, 0)
+}
+
+#Test("a cycle entered at two instructions has no back edge and still counts") {
+    // 10 enters the cycle at 14 by falling through and at 19 by its jump,
+    // so neither entry dominates the other and 20's jump is no back edge.
+    listing: "  10:\ttest   %eax,%eax\n  12:\tjne    19 <k+0x9>\n  14:\tadd    $0x1,%rcx\n  18:\tnop\n  19:\tadd    $0x2,%rcx\n  1d:\tcmp    %rdx,%rcx\n  20:\tjne    14 <k+0x4>\n  22:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 5)
+}
+
+#Test("a slow path laid out after `ret` that jumps back into its loop is no loop of its own, and counts in its loop") {
+    listing: "  10:\tadd    %rcx,%rax\n  13:\tjo     30 <k+0x20>\n  15:\tcmp    %rdx,%rax\n  18:\tjne    10 <k>\n  1a:\tret\n  30:\tcall   401000 <jet_int_add>\n  35:\tjmp    15 <k+0x5>\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    // The loop's four instructions and the slow path's two; not the `ret`
+    // between them.
+    assert_eq(counts.loop_insns, 6)
+}
+
+#Test("a loop whose body calls a function that can stop still counts") {
+    listing: "  10:\tcall   401000 <main_step>\n  15:\ttest   %edx,%edx\n  17:\tjne    20 <k+0x10>\n  19:\tadd    $0x1,%rbx\n  1d:\tjmp    10 <k>\n  20:\tmov    $0x1,%edx\n  25:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 5)
+}
+
+#Test("a count above golden is a regression, below it a gain") {
+    golden: Counts{insns: 10, pushes: 2, pops: 2, frame_slots: 0, loops: 1, loop_insns: 4}
+    assert_eq(regressions(golden, Counts{insns: 9, pushes: 2, pops: 2, frame_slots: 0, loops: 1, loop_insns: 3}).len(), 0)
+    worse: regressions(golden, Counts{insns: 10, pushes: 3, pops: 2, frame_slots: 1, loops: 2, loop_insns: 4})
+    assert_eq(worse.join(", "), "pushes 2 -> 3, frame_slots 0 -> 1, loops 1 -> 2")
+    assert_eq(gap(6, 4), "1.50")
+    assert_eq(gap(4, 4), "1.00")
+    assert_eq(gap(5, 0), "-")
+}
+
+#Test("golden rows need the header and eight numeric fields") {
+    assert(parse_golden("kernel\tinsns\n") == .Err(_))
+    assert(parse_golden("{HEADER}\nmain_k\t1\t2\t3\n") == .Err(_))
+    rows: parse_golden("{HEADER}\n# a note\nmain_k\t9\t1\t1\t0\t1\t4\t3\n") ?? panic("{err}")
+    assert_eq(rows.len(), 1)
+    assert_eq(rows[0].golden.loops, 1)
+    assert_eq(rows[0].ceiling, 3)
+}
+
+#Test("a row's symbol names its function or one specialization of it") {
+    symbols: "0000000000411df0 T jet_rt_alloc_8\n000000000040dc50 t main_list_sum__value_dac2\n000000000040e720 t main_list_sum_wide__value_ba4a\n"
+    assert_eq((resolve(symbols, "jet_rt_alloc_8") ?? panic("{err}")).join(" "), "jet_rt_alloc_8")
+    assert_eq((resolve(symbols, "main_list_sum") ?? panic("{err}")).join(" "), "main_list_sum__value_dac2")
+    assert(resolve(symbols, "main_point_sum") == .Err(_))
+    twice: "1 t main_k__a\n2 t main_k__b\n"
+    assert(resolve(twice, "main_k") == .Err(_))
+}
+
+#Test("a row counts the continuations its function leaves to as part of it") {
+    symbols: "1 t main_list_sum__value_dac2\n2 t main_list_sum__value_dac2__general_77aa\n3 t main_list_sum__value_dac2__general_77aa.own3\n4 t main_list_sum_wide__value_ba4a__general_10ff\n"
+    found: resolve(symbols, "main_list_sum") ?? panic("main_list_sum does not resolve")
+    assert_eq(found.join(" "), "main_list_sum__value_dac2 main_list_sum__value_dac2__general_77aa main_list_sum__value_dac2__general_77aa.own3")
+    // The kernel keeps its fast loop; the continuation holds the general one.
+    kernel: count_listing("  10:\tpush   %rbx\n  11:\tadd    (%rax),%rcx\n  14:\tjne    11 <k+0x1>\n  16:\tpop    %rbx\n  17:\tret\n")
+    general: count_listing("  20:\tpush   %rbx\n  21:\tmov    %rcx,-0x8(%rbp)\n  25:\tcall   30 <jet_int_add>\n  2a:\tjmp    21 <c+0x1>\n")
+    both: add_counts(kernel, general)
+    assert_eq(counts_line(both), "9\t2\t1\t1\t2\t5")
+}

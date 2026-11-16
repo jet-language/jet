@@ -1,0 +1,31 @@
+Shape: enum {
+    Rect(w: Int, h: Int)
+    Circle(Int)
+}
+
+// A guarded arm in a value table, with unguarded arms that cover every case.
+kind: fn(s: Shape) -> String {
+    label: if s == {
+        .Rect(w, h) && w == h -> "square {w}"
+        .Rect(w, h) -> "rect {w}x{h}"
+        .Circle(r) -> "circle {r}"
+    }
+    label
+}
+
+run: fn() {
+    print(kind(Shape.Rect{w: 2, h: 2}))
+    print(kind(Shape.Rect{w: 2, h: 3}))
+    print(kind(Shape.Circle(4)))
+    // The same table in statement position.
+    total := 0
+    shapes: [Shape]{Shape.Rect{w: 5, h: 5}, Shape.Rect{w: 1, h: 2}, Shape.Circle(3)}
+    loop s in shapes {
+        if s == {
+            .Rect(w, h) && w == h -> { total += w }
+            .Rect(_, h) -> { total += h * 10 }
+            .Circle(r) -> total += r * 100
+        }
+    }
+    print(total)
+}

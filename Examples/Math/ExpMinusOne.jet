@@ -1,0 +1,19 @@
+// 2^x - 1 and 10^x - 1, correctly rounded: the same bits on every tier, and
+// full precision for small x, where exp2(x) - 1 cancels.
+use math: core.math
+
+run: fn() {
+    print(math.exp2_m1(Float{1.0}))
+    print(math.exp2_m1(Float{-1.0}))
+    print(math.exp2_m1(Float{10.0}))
+    print(math.exp2_m1(-math.INFINITY))
+    print(math.exp10_m1(Float{3.0}))
+    print(math.exp10_m1(Float{-2.0}))
+    print(math.exp10_m1(Float{0.5}))
+
+    // exp2(x) - 1 loses what exp2_m1(x) keeps.
+    print(math.exp2_m1(Float{1e-20}))
+    print(math.exp2(Float{1e-20}) - Float{1.0})
+    print(math.exp10_m1(Float{1e-10}))
+    print(math.exp10(Float{1e-10}) - Float{1.0})
+}

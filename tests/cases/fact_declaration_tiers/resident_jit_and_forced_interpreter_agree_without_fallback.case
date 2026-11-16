@@ -1,0 +1,13 @@
+# tests/fact_declaration_tiers.rs::resident_jit_and_forced_interpreter_agree_without_fallback at tests/fact_declaration_tiers.rs:115; hand-port
+# app.jet is the original SOURCE, verbatim. The resident JIT (`jet dev`) and the forced interpreter exit 0, print
+# EXPECTED and write nothing to stderr.
+fixture: resident_jit_and_forced_interpreter_agree_without_fallback.fixture
+env: NO_COLOR=1
+step: jet dev app.jet --watch=off
+exit: 0
+stdout: = "fact declaration\n"
+stderr: empty
+step: jet run app.jet
+exit: 0
+stdout: = "fact declaration\n"
+stderr: empty

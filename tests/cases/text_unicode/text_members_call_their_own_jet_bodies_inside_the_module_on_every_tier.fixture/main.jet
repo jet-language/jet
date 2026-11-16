@@ -1,0 +1,29 @@
+use {
+    text: core.text
+    parse: core.text.parse
+    fmt: core.text.fmt
+}
+
+// Each line pairs a call whose body calls another member of its own module
+// with that member called from outside. Both run the member's Jet body.
+run: fn() {
+    padded: "　 \tJet "
+    print("trim [{text.trim(padded)}] [{text.trim_end(text.trim_start(padded))}]")
+    print("caseless {text.caseless_eq("STRASSE", "straße")} {text.casefold("STRASSE") == text.casefold("straße")}")
+    print("nfc {text.nfc("é").bytes().len()} alpha {text.is_alphabetic("Aéα")} {text.is_alphabetic("A1")}")
+    print("numeric {text.is_numeric("1²Ⅷ")} space {text.is_whitespace(" \u{85}")} ascii {text.is_ascii("")} {text.is_ascii("é")}")
+    print("starts {parse.startswith("jetpack", "jet")} {parse.starts_with("jetpack", "jet")} ends {parse.endswith("jetpack", "pack")}")
+    print("prefix [{parse.removeprefix("jetpack", "jet")}] [{parse.strip_prefix("jetpack", "jet")}] suffix [{parse.removesuffix("jetpack", "pack")}]")
+    print("digits {parse.isdecimal("123")} {parse.isnumeric("12a")} {parse.isdigit("")} {parse.is_digit("42")}")
+    print("classes {parse.isalpha("abc")} {parse.isalnum("a1")} {parse.isascii("abc")} {parse.isspace(" \t")} {parse.isidentifier("_x1")}")
+    print("case {parse.islower("abc")} {parse.isupper("ABC")} {parse.istitle("Hello World")} {parse.isprintable("a\tb")}")
+    print("strip [{parse.strip("  pad  ")}] [{parse.lstrip(parse.rstrip("  pad  "))}] [{parse.lstrip("  l")}] [{parse.rstrip("r  ")}]")
+    print("find {parse.find("banana", "an")} {parse.rfind("banana", "an")} {parse.find("banana", "x")}")
+    once: parse.split_once("k=v=w", "=")
+    print("split_once {once.found} [{once.head}] [{once.tail}]")
+    part: parse.partition("k=v=w", "=")
+    rpart: parse.rpartition("k=v=w", "=")
+    print("partition [{part.head}|{part.sep}|{part.tail}] [{rpart.head}|{rpart.sep}|{rpart.tail}]")
+    print("mapping [{parse.capitalize("hELLO wORLD")}] [{parse.title("hello world")}] [{parse.swapcase("Hello")}] [{parse.expandtabs("a\tb", 4)}]")
+    print("decimal {fmt.decimal(3.14159, 2)} {fmt.decimal(-0.5, 0)}")
+}

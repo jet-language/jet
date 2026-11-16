@@ -1,0 +1,14 @@
+# Port of tests/fmt_project.rs:248-300.
+# PENDING-SEAM(manifest-facts-parse): rs293-299 PackageFacts::parse and ConfigFacts::parse accepted.
+# No realizing command, added source, or retired assertion substitutes for those facts-only checks.
+# PENDING-SAME-HEAD; formatting and --check predicates preserved now.
+refused: manifest-facts-parse
+fixture: epoch5-typed-formatter.fixture
+copy: package.jet package.before
+copy: config/dev.jet config.before
+step: jet fmt {work}
+exit: 0
+file: package.jet != package.before
+file: config/dev.jet != config.before
+step: jet fmt --check {work}
+exit: 0

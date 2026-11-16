@@ -1,0 +1,147 @@
+{
+  "name": "scaling-report",
+  "mode": "tool",
+  "description": "The compiler scaling gate's receipt report report.mjs and its Jet twin report/run.jet, #5072 c7: the markdown report of two receipts that exercise every section (ladders with string, null and overflowing metrics, superlinear phases with and without a profile, floors, compile failures and incomplete ladders, a projection with ties and mixed field types, counter-only coverage), a minimal receipt with empty arrays, receipts gathered from --runs-dir directories (only run-* directories holding a receipt.json, in name order, each file once), --findings, --output with its summary line (check.jet prints the written report), a finished proofq plan (--wait-proofq and --plan) with missing receipts (exit 2), and the refusals: no receipts (exit 2), --runs-dir without a directory, unreadable or malformed receipts, a receipt without its required arrays (`{}`), a series without points and --wait-proofq without --plan (exit 1, nothing printed).",
+  "tool": {
+    "original": "Tools/perf/scaling/report.mjs",
+    "jet": "Tools/perf/scaling/report/run.jet",
+    "fixtures": "fixtures",
+    "token_gaps": [
+      "#5072 c51",
+      "#5072 c59",
+      "#5072 c53",
+      "#6281 c175",
+      "#6281 c176"
+    ],
+    "cases": [
+      {
+        "args": [
+          "timing.json",
+          "counters.json"
+        ],
+        "expected": "expected/receipts.out"
+      },
+      {
+        "args": [
+          "--runs-dir",
+          "./runs/",
+          "timing.json",
+          "--runs-dir",
+          "runs",
+          "--runs-dir",
+          "absent"
+        ],
+        "expected": "expected/runs-dirs.out"
+      },
+      {
+        "args": [
+          "timing.json",
+          "timing.json",
+          "--findings",
+          "findings.md"
+        ],
+        "expected": "expected/findings.out"
+      },
+      {
+        "args": [
+          "--output",
+          "report.md",
+          "counters.json"
+        ],
+        "check": "check.jet",
+        "expected": "expected/output.out"
+      },
+      {
+        "args": [
+          "--wait-proofq",
+          "done",
+          "--plan",
+          "plan.json"
+        ],
+        "exit": 2,
+        "expected": "expected/wait-plan.out"
+      },
+      {
+        "args": [
+          "--plan",
+          "plan.json",
+          "--output",
+          "planned.md",
+          "counters.json"
+        ],
+        "check": "check.jet",
+        "exit": 2,
+        "expected": "expected/plan-output.out"
+      },
+      {
+        "args": [],
+        "exit": 2,
+        "expected": "expected/no-receipts.out"
+      },
+      {
+        "args": [
+          "--runs-dir",
+          "absent"
+        ],
+        "exit": 2,
+        "expected": "expected/absent-runs-dir.out"
+      },
+      {
+        "args": [
+          "--runs-dir"
+        ],
+        "exit": 1,
+        "expected": "expected/runs-dir-without-directory.out"
+      },
+      {
+        "args": [
+          "bad.json"
+        ],
+        "exit": 1,
+        "expected": "expected/bad-json.out"
+      },
+      {
+        "args": [
+          "missing.json"
+        ],
+        "exit": 1,
+        "expected": "expected/missing-arrays.out"
+      },
+      {
+        "args": [
+          "no-points.json"
+        ],
+        "exit": 1,
+        "expected": "expected/no-points.out"
+      },
+      {
+        "args": [
+          "minimal.json"
+        ],
+        "expected": "expected/minimal.out"
+      },
+      {
+        "args": [
+          "absent.json"
+        ],
+        "exit": 1,
+        "expected": "expected/missing-receipt.out"
+      },
+      {
+        "args": [
+          "--wait-proofq",
+          "done",
+          "timing.json"
+        ],
+        "exit": 1,
+        "expected": "expected/wait-without-plan.out"
+      },
+      {
+        "args": [
+          "off-schema/compiler-without-target.json"
+        ],
+        "expected": "expected/compiler-without-target.out"
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+# Port of tests/cli_parts/expand.rs:901-933; exact original sources and predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): text split/filter, cap comparisons, zero-key JSON.
+fixture: fixtures/bad
+step: jet inspect expand --json {work}/bad.jet
+env: NO_COLOR=1
+exit: 1
+stdout: ^= "{\"schema\":\"jet.status/v1\"" # original predicate
+stdout: ~ "\"code\":\"E0102\"" # original predicate
+json: stdout doc $ valid # original predicate: JSON parses
+stdout: !~ "Error [" # original predicate
+stderr: empty

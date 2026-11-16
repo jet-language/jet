@@ -1,0 +1,15 @@
+{
+  "name": "run-probe",
+  "mode": "tool",
+  "description": "The HTTP probe exports of the gauntlet harness, Tools/gauntlet/harness/run.mjs (httpProbe and probeMatches), and their Jet twin, the Probe module of the jet_gauntlet_kit package (Tools/gauntlet/kit/Source/Probe.jet), #5072 c8, each run by a driver: probeMatches over line and HTTP cases (bodies, statuses and bodies that are absent, null, strings or other types, results that are not ok or whose ok is truthy or falsy, expected and actual headers that are missing, empty, arrays, strings, non-string values, named in any case, repeated in any case, trimmed, and content types compared by media type with sorted parameters, flags, spaces, equals signs and trailing semicolons); and httpProbe of a fixture service that answers raw response bytes one connection at a time (JSON, other, missing and parameterized content types, repeated, cookie and single-valued headers, 201, 302 not followed, 404, 503, chunked, UTF-8 and close-delimited bodies, echoed GET, POST, PUT and DELETE requests with string, number, null, UTF-8 and empty bodies, a query, the default path, an unknown path, a slow answer within and past the timeout, a dropped connection and a refused one), each shown with whether it matches; and an unknown command (exit 64).",
+  "tool": {
+    "original": "Tools/gauntlet/harness/drivers/run-probe.mjs",
+    "jet": "Tools/gauntlet/entries/run-probe/driver/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["matches", "matches.json"], "expected": "expected/matches.out"},
+      {"args": ["probe", "service.json"], "expected": "expected/probe.out"},
+      {"args": ["census"], "exit": 64, "expected": "expected/usage.out"}
+    ]
+  }
+}

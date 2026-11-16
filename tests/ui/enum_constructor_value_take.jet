@@ -1,0 +1,12 @@
+// A constructor takes a payload it can't copy out of a read parameter, so
+// its value fits only a function type that marks that take.
+use core.files.[FileWriter]
+
+Sink: enum {
+    Out(FileWriter)
+    Closed
+}
+
+wrap: fn(make: fn(FileWriter) -> Sink) -> Int { 1 }
+
+run: fn() { print(wrap(Sink.Out)) }

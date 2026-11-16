@@ -1,0 +1,206 @@
+// Canonical SHA-256 for compiler-owned identity bytes.
+//
+// A text's digest (sha256_hex) is Core's (core.crypto sha256), which runs
+// on the host's SHA extensions where they exist. A byte window's
+// (sha256_bytes) is computed here, reading the borrowed window in place:
+// full blocks are read where they lie, and only the final partial block is
+// padded with the standard big-endian bit length. Compression runs on `U32`
+// words with wrapping addition; identity helpers emit lowercase
+// hexadecimal. The round constants stay `Int` tables and are widened to
+// `U32` once per digest.
+use {
+    hash_crypto: core.crypto
+}
+
+SHA256_LENGTH_MASK: 0xffffffffffffffff
+
+SHA256_K: #run { [Int]{
+    0x428a2f98,
+    0x71374491,
+    0xb5c0fbcf,
+    0xe9b5dba5,
+    0x3956c25b,
+    0x59f111f1,
+    0x923f82a4,
+    0xab1c5ed5,
+    0xd807aa98,
+    0x12835b01,
+    0x243185be,
+    0x550c7dc3,
+    0x72be5d74,
+    0x80deb1fe,
+    0x9bdc06a7,
+    0xc19bf174,
+    0xe49b69c1,
+    0xefbe4786,
+    0x0fc19dc6,
+    0x240ca1cc,
+    0x2de92c6f,
+    0x4a7484aa,
+    0x5cb0a9dc,
+    0x76f988da,
+    0x983e5152,
+    0xa831c66d,
+    0xb00327c8,
+    0xbf597fc7,
+    0xc6e00bf3,
+    0xd5a79147,
+    0x06ca6351,
+    0x14292967,
+    0x27b70a85,
+    0x2e1b2138,
+    0x4d2c6dfc,
+    0x53380d13,
+    0x650a7354,
+    0x766a0abb,
+    0x81c2c92e,
+    0x92722c85,
+    0xa2bfe8a1,
+    0xa81a664b,
+    0xc24b8b70,
+    0xc76c51a3,
+    0xd192e819,
+    0xd6990624,
+    0xf40e3585,
+    0x106aa070,
+    0x19a4c116,
+    0x1e376c08,
+    0x2748774c,
+    0x34b0bcb5,
+    0x391c0cb3,
+    0x4ed8aa4a,
+    0x5b9cca4f,
+    0x682e6ff3,
+    0x748f82ee,
+    0x78a5636f,
+    0x84c87814,
+    0x8cc70208,
+    0x90befffa,
+    0xa4506ceb,
+    0xbef9a3f7,
+    0xc67178f2,
+} }
+
+SHA256_H0: #run { [Int]{
+    0x6a09e667,
+    0xbb67ae85,
+    0x3c6ef372,
+    0xa54ff53a,
+    0x510e527f,
+    0x9b05688c,
+    0x1f83d9ab,
+    0x5be0cd19,
+} }
+
+sha256_word: fn(bytes: View<U8>, offset: Int) -> U32 Never! {
+    (U32{bytes[offset]} << 24).bit_or((U32{bytes[offset + 1]} << 16)).bit_or((U32{bytes[offset + 2]} << 8)).bit_or(U32{bytes[offset + 3]})
+}
+
+sha256_compress: fn(state: &[U32], words: &[U32], k: [U32], block: View<U8>, offset: Int) Never! {
+    loop index in 0..<16 -> words[index] = sha256_word(block, offset + index * 4)
+    loop index in 16..<64 {
+        s0: ((words[index - 15].rotate_right(7)).bit_xor(words[index - 15].rotate_right(18))).bit_xor((words[index - 15] >> 3))
+        s1: ((words[index - 2].rotate_right(17)).bit_xor(words[index - 2].rotate_right(19))).bit_xor((words[index - 2] >> 10))
+        words[index] = wrapping(wrapping(wrapping(words[index - 16] + s0) + words[index - 7]) + s1)
+    }
+
+    a := state[0]
+    b := state[1]
+    c := state[2]
+    d := state[3]
+    e := state[4]
+    f := state[5]
+    g := state[6]
+    h := state[7]
+    loop index in 0..<64 {
+        s1: ((e.rotate_right(6)).bit_xor(e.rotate_right(11))).bit_xor(e.rotate_right(25))
+        ch: (((e).bit_and(f))).bit_xor(((((e).bit_xor(U32{0xffffffff}))).bit_and(g)))
+        temp1: wrapping(wrapping(wrapping(wrapping(h + s1) + ch) + k[index]) + words[index])
+        s0: ((a.rotate_right(2)).bit_xor(a.rotate_right(13))).bit_xor(a.rotate_right(22))
+        maj: ((((a).bit_and(b))).bit_xor(((a).bit_and(c)))).bit_xor(((b).bit_and(c)))
+        temp2: wrapping(s0 + maj)
+        h = g
+        g = f
+        f = e
+        e = wrapping(d + temp1)
+        d = c
+        c = b
+        b = a
+        a = wrapping(temp1 + temp2)
+    }
+    state[0] = wrapping(state[0] + a)
+    state[1] = wrapping(state[1] + b)
+    state[2] = wrapping(state[2] + c)
+    state[3] = wrapping(state[3] + d)
+    state[4] = wrapping(state[4] + e)
+    state[5] = wrapping(state[5] + f)
+    state[6] = wrapping(state[6] + g)
+    state[7] = wrapping(state[7] + h)
+}
+
+sha256_bytes: fn(data: View<U8>) -> [U8] Never! {
+    state := [U32]{}
+    loop word in SHA256_H0 -> state.push(U32{word})
+    k := [U32]{}
+    loop word in SHA256_K -> k.push(U32{word})
+    words := [U32]{}
+    loop _ in 0..<64 -> words.push(U32{0})
+    offset := 0
+    loop offset + 64 <= data.len() {
+        sha256_compress(state, words, k, data, offset)
+        offset += 64
+    }
+    msg := [U8]{}
+    loop position in offset..<data.len() -> msg.push(data[position])
+    msg.push(U8{128})
+    loop msg.len() % 64 != 56 -> msg.push(U8{0})
+    bit_length: ((data.len() * 8)).bit_and(SHA256_LENGTH_MASK)
+    index := 7
+    loop index >= 0 {
+        length_byte: ((bit_length >> (8 * index))).bit_and(255)
+        msg.push(U8{length_byte})
+        index -= 1
+    }
+    padded: msg[0..<msg.len()]
+    offset = 0
+    loop offset < msg.len() {
+        sha256_compress(state, words, k, padded, offset)
+        offset += 64
+    }
+    output := [U8]{}
+    loop lane in state {
+        word: Int{lane}
+        first: ((word >> 24)).bit_and(255)
+        second: ((word >> 16)).bit_and(255)
+        third: ((word >> 8)).bit_and(255)
+        fourth: (word).bit_and(255)
+        output.push(U8{first})
+        output.push(U8{second})
+        output.push(U8{third})
+        output.push(U8{fourth})
+    }
+    output
+}
+
+// The lowercase hex digit of `value` (0..15).
+sha256_hex_digit: fn(value: Int) -> U8 Never! {
+    if value < 10 -> U8{48 + value} else -> U8{87 + value}
+}
+
+// Lowercase hex of `bytes`: the digits are gathered as bytes and made a
+// String once.
+sha256_hex_bytes: fn(bytes: [U8]) -> String Never! {
+    digits := [U8]{}
+    digits.try_reserve(bytes.len() * 2) ?? panic("hex digit allocation failed")
+    loop byte in bytes {
+        value: Int{byte}
+        digits.push(sha256_hex_digit(((value >> 4)).bit_and(15)))
+        digits.push(sha256_hex_digit((value).bit_and(15)))
+    }
+    String.from_bytes(digits) ?? panic("hex digits are ASCII")
+}
+
+// The lowercase hex SHA-256 of `value`'s UTF-8 bytes: Core's digest, which
+// runs on the host's SHA extensions where they exist. A text owns its bytes,
+// so nothing is copied for it.
+sha256_hex: fn(value: String) -> String Never! { hash_crypto.sha256(value).hex() }

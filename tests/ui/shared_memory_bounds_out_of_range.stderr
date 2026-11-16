@@ -1,0 +1,17 @@
+Error [jet.LiteralOutsideRange]: `0` is outside `Int(1..1073741824)`'s range 1..1073741824
+  --> tests/ui/shared_memory_bounds_out_of_range.jet:4:33
+    |
+  4 |     memory := sys.shared_memory(0) ?? panic("shared memory: {err}")
+    |                                 ^
+ Why: A range type only holds values inside its bounds; `0` can never be an `Int(1..1073741824)`
+ Fix: Use a value in `1..1073741824`, or widen the type's range
+More: jet-lang.dev/e/E0135
+
+Error [jet.LiteralOutsideRange]: `1073741825` is outside `Int(0..1073741824)`'s range 0..1073741824
+  --> tests/ui/shared_memory_bounds_out_of_range.jet:5:18
+    |
+  5 |     memory.write(1073741825, [U8]{1}) ?? panic("write: {err}")
+    |                  ^^^^^^^^^^
+ Why: A range type only holds values inside its bounds; `1073741825` can never be an `Int(0..1073741824)`
+ Fix: Use a value in `0..1073741824`, or widen the type's range
+More: jet-lang.dev/e/E0135

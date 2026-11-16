@@ -1,0 +1,36 @@
+# Port of tests/event_observations.rs:235-347; program bytes in current syntax.
+# The debugger reads the runtime's event observations through `jet inspect <plane> --live PID`,
+# which renders the closed, payload-free record lines (JetCli LiveEvents.jet). The original also read
+# the Canvas runtime_events projection; Canvas has no CLI route, and it projects the same records.
+fixture: fixtures/debugger_sees_pressure_drop_failure_close_and_single_terminals
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0
+session app raw: built
+env: JET_OBSERVE=1
+env: JET_DEVTOOLS_RELAY_SESSION_ID=event-observation-session
+env: JET_DEVTOOLS_RELAY_SOURCE_ID=observed
+env: JET_DEVTOOLS_RELAY_BUILD_ID=event-observation-build
+env: JET_DEVTOOLS_RELAY_REVISION=event-observation-revision
+env: JET_DEVTOOLS_RELAY_WORLD_ID=event-observation-world
+env: JET_SCHEDULER_THREADS=2
+recv app until = "READY\n" within 30s
+poll events: jet inspect structure --live {pid:app} until exit: 0 && stdout: ~ "terminal=Closed" timeout 5s every 25ms # original debugger_events waits for the Closed terminal, 5s deadline, 25ms polling
+stdout: !~ "ASYNC_FAILURE_SECRET" # original: the debugger never shows the failure payload
+stdout: ~ "capacity=1 overflow=DropNewest" # original rendered.contains
+stdout: ~ "queued=1" # original rendered.contains
+stdout: ~ "blocked=1" # original rendered.contains
+stdout: ~ "priority=23" # original rendered.contains
+stdout: ~ "failure=Handler terminal=None" # original rendered.contains
+stdout: ~ "terminal=DroppedNewest" # original rendered.contains
+stdout: ~ "terminal=HandlerFailed" # original rendered.contains
+stdout: ~ "terminal=Closed" # original rendered.contains
+stdout: ~ "terminal=Cancelled" # original rendered.contains
+stdout: ~ "source=AsyncEvent" # original Canvas runtime fact, read from the same records
+capture: dropped = text stdout.filter(~ "terminal=DroppedNewest").line(0).split(" dispatch=", 1).split(" ", 0)
+stdout.filter(~ "terminal=DroppedNewest"): count-lines ~ " dispatch={cap:dropped} " = 1 # original: the drop terminal publishes once for its dispatch
+signal app: KILL
+close app
+exit: any # original Running guard kills and ignores the wait status

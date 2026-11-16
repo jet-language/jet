@@ -1,0 +1,9 @@
+# HAND-PORT tests/compiler_api.rs:250-262 check_file_api_keeps_semindex_absent_when_errors_exist
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# Public exact typed compiler JSON projection; original per-diagnostic/semantic facts retained.
+fixture: check_file_api_keeps_semindex_absent_when_errors_exist.fixture
+env: NO_COLOR=1
+step: jet inspect compiler check main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?severity="error"] #>= 1
+json: stdout doc $.compiler.value.semantic_index = null

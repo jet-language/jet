@@ -1,0 +1,125 @@
+// Applied-rule argument menus are projected from the specialized
+// core.compiler.lang declaration in embedded Prelude/Core.rows, and the
+// Maturity menu from core.meta's. The authority roots and builtin taint tags
+// remain inputs from their Source registries.
+
+foundation_core_menu_ascii_lower: fn(text: String) -> String Never! {
+    bytes := text.bytes()
+    loop index in 0..<bytes.len() {
+        code: Int{bytes[index]}
+        if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
+    }
+    String.from_bytes(bytes) ?? text
+}
+
+foundation_core_menu_variant: fn(name: String, variant: String) -> String? {
+    if name == "ABI" || name == "FFILanguage" || name == "KernelMode" || name == "Layout" || name == "NamingCase" {
+        return Val(foundation_core_menu_ascii_lower(variant))
+    }
+    if name == "MemoBound" && variant == "Unset" -> return Val("none")
+    if name == "CodableTag" && variant == "Untagged" -> return Val("None")
+    if name == "ObligationMode" && variant == "Unspecified" -> return Val("None")
+    if name == "PolicySetting" {
+        if variant == "Allow" || variant == "Deny" -> return None
+        if variant == "Unsafe" -> return Val("unsafe")
+        if variant == "GC" -> return Val("gc")
+        if variant == "ExplicitUnits" -> return Val("explicit_units")
+        if variant == "Copies" -> return Val("copies")
+        if variant == "Sentries" -> return Val("sentries")
+        if variant == "Writes" -> return Val("writes")
+        if variant == "Failures" -> return Val("failures")
+    }
+    Val(variant)
+}
+
+foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots: [String], builtin_tags: [String]) -> [String]? {
+    if name == "Effect" {
+        return if kind == {
+            .Enum(_) -> Val(effect_roots)
+            .Plain | .Generic(_) | .CryptoNominal -> None
+        }
+    }
+    if name == "TaintKind" {
+        return if kind == {
+            .Enum(_) -> Val(builtin_tags)
+            .Plain | .Generic(_) | .CryptoNominal -> None
+        }
+    }
+    if name == "Path" || name == "State" {
+        if kind == CoreLeafKind.Plain -> return Val([String]{})
+        return None
+    }
+    if kind == {
+        .Enum(variants) -> {
+            result := [String]{}
+            loop variant in variants {
+                canonical: foundation_core_menu_variant(name, variant)
+                if canonical == .Val(value) -> result.push(value)
+            }
+            Val(result)
+        }
+        .Plain | .Generic(_) | .CryptoNominal -> None
+    }
+}
+
+// Project the menu-shaped leaf metadata of Core.rows's specialized
+// `module core.compiler.lang … types { … }` declaration for the applied-rule
+// catalog. The generated CORE_MODULE_EXPORTS row names the module's type
+// exports and CORE_ENUM_ROWS carries each enum leaf's variants, both generated
+// from that declaration (the same projection native CoreModuleExports reads);
+// an exported leaf without an enum row is `plain`. `#Meta(maturity: …)` takes
+// the Maturity enum of core.meta, which declares it beside the Module record
+// whose `maturity` field it is.
+//
+// IntType is intentionally absent from core.compiler.lang. Its variants come
+// from the canonical Source fixed-width integer registry, which mirrors the
+// native canonical_rule_arg_variants ordering instead of maintaining a
+// menu-local width table.
+foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String]) -> [TAppliedRuleArgumentMenu]? {
+    module_name := "core.compiler.lang"
+    declaration: core_module_export(module_name) ?? return None
+    menus := [TAppliedRuleArgumentMenu]{}
+    loop name in declaration.type_exports {
+        if name != "IntType" {
+            kind := CoreLeafKind.Plain
+            if core_module_enum_variants(module_name, name) == .Val(enum_variants) {
+                kind = CoreLeafKind.Enum{variants: enum_variants}
+            }
+            variants: foundation_core_menu_variants(name, kind, effect_roots, builtin_tags) ?? return None
+            menus.push(
+                TAppliedRuleArgumentMenu{
+                    name: name,
+                    variants: variants,
+                    first_variant_segment: name == "Effect" || name == "Target",
+                },
+            )
+        }
+    }
+    maturity: core_module_enum_variants("core.meta", "Maturity") ?? return None
+    menus.push(
+        TAppliedRuleArgumentMenu{
+            name: "Maturity",
+            variants: maturity,
+            first_variant_segment: false,
+        },
+    )
+    int_type_variants := [String]{}
+    loop kind in foundation_fixed_integers() -> int_type_variants.push(kind.name)
+    menus.push(
+        TAppliedRuleArgumentMenu{
+            name: "IntType",
+            variants: int_type_variants,
+            first_variant_segment: false,
+        },
+    )
+    Val(menus)
+}
+
+// The canonical rule-argument declaration named `name` among the projected
+// menus, never a raw Core enum slot.
+rule_arg_declaration: fn(name: String, menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleArgumentMenu? Never! {
+    loop menu in menus {
+        if menu.name == name -> return Val(menu.copy())
+    }
+    None
+}

@@ -1,0 +1,30 @@
+use json: core.encoding.json
+
+via_parse: fn(text: String) -> String {
+    tree: json.parse(text) ?? return "err {err}"
+    "ok {json.dumps(tree)}"
+}
+
+via_decode: fn(text: String) -> String {
+    tree: json.decode(text) ?? return "err {err}"
+    "ok {json.dumps(tree)}"
+}
+
+via_loads: fn(text: String) -> String {
+    tree: json.loads(text) ?? return "err {err}"
+    "ok {json.dumps(tree)}"
+}
+
+via_load: fn(text: String) -> String {
+    tree: json.load(text) ?? return "err {err}"
+    "ok {json.dumps(tree)}"
+}
+
+// decode, loads and load call parse inside their own module; parse is
+// also called from outside. Every spelling gives the same answer.
+run: fn() {
+    inputs: [String]{`{"b": [1, 2.5, null], "a": "x"}`, "[true, false]", `"\u00e9"`, `{"a": 1, "a": 2}`, "[1,]", ""}
+    loop text in inputs {
+        print("{via_parse(text)} | {via_decode(text)} | {via_loads(text)} | {via_load(text)}")
+    }
+}

@@ -1,0 +1,13 @@
+use app
+
+#Error
+BumpError: enum {
+    Conflict
+}
+
+bump: fn(id: Int) -[DB.Write]> Int BumpError! { id + 1 }
+
+run: fn() {
+    binding: app.live(bump, 1)
+    print(app.live_stats())
+}

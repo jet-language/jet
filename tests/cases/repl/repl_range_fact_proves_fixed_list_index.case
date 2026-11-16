@@ -1,0 +1,14 @@
+# PORT tests/repl.rs:727-745; original predicate forms, literal inputs, no blessed snapshot.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+# CLI banner: crates/jet-repl/src/Render.rs24-37; prompts: Render.rs67-74, lib.rs2528-2535.
+# No assertion needle appears in the fixed banner/prompt; no stripping/projection.
+# lib.rs2469-2470: cooked floor mirrors transcript; EOF does not append :quit.
+fixture: repl_range_fact_proves_fixed_list_index.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_range_fact_proves_fixed_list_index.fixture/input.txt
+exit: any # original library predicate did not assert process status
+stdout|stderr: ~ "two : String" # original predicate
+stdout: !~ "E0965" # original predicate
+stderr: !~ "E0965" # original predicate

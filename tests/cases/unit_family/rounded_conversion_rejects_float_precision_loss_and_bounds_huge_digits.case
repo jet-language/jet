@@ -1,0 +1,19 @@
+# tests/unit_family.rs::rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits at tests/unit_family.rs:750; hand-port
+# Claim: unrepresentable scale rounds to Err, falls back to -1.0 (tests/unit_family.rs:753)
+# Claim: huge digits keep exact finite Float values (tests/unit_family.rs:761)
+# Claim: 2001-digit neighbor cases resolve per mode (tests/unit_family.rs:798)
+# Fixture migrated: jet_foundation Err(UNIT_ROUNDING_UNREPRESENTABLE) expressed as `?? fallback` in Jet
+# Not ported: direct jet_foundation API calls (tests/unit_family.rs:753-tests/unit_family.rs:853): Rust API; the rounding behavior is ported through Jet CLI programs
+fixture: rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run unrep/main.jet
+exit: 0 # unrepresentable scale rounds to Err, falls back to -1.0 (tests/unit_family.rs:753)
+stdout: = rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits-1.out # unrepresentable scale rounds to Err, falls back to -1.0 (tests/unit_family.rs:753)
+step: jet run huge/main.jet
+exit: 0 # unrepresentable scale rounds to Err, falls back to -1.0 (tests/unit_family.rs:753)
+stdout: = rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits-2.out # unrepresentable scale rounds to Err, falls back to -1.0 (tests/unit_family.rs:753)
+step: jet run neigh/main.jet
+exit: 0 # unrepresentable scale rounds to Err, falls back to -1.0 (tests/unit_family.rs:753)
+stdout: = rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits-3.out # unrepresentable scale rounds to Err, falls back to -1.0 (tests/unit_family.rs:753)

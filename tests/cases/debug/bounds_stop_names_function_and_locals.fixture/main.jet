@@ -1,0 +1,14 @@
+// A list index past the end stops the way a `panic` does: the report names
+// the function, shows the line under a caret and lists the frame's locals.
+pick: fn(xs: [Int], at: Int) -> Int {
+    total: xs.len() + at
+    late: at >= xs.len()
+    scale: Float{1.5}
+    if late && scale > 1.0 -> print("past the end")
+    xs[at] + total
+}
+
+run: fn() {
+    xs: [Int]{1, 2, 3}
+    print("{pick(xs, 7)}")
+}

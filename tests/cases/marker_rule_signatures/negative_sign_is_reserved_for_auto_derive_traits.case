@@ -1,0 +1,14 @@
+# tests/marker_rule_signatures.rs::negative_sign_is_reserved_for_auto_derive_traits at tests/marker_rule_signatures.rs:178; hand-port
+# Claim: `#!Pure` on a fn yields E0931 (tests/marker_rule_signatures.rs:181)
+# Claim: `#[!Inline]` on a fn yields E0931 (tests/marker_rule_signatures.rs:181)
+# Not ported: Rust asserts the diagnostic list is exactly [E0931]; the CLI check shows stderr only, so only E0931 presence is pinned
+fixture: negative_sign_is_reserved_for_auto_derive_traits.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check pure/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:181 #!Pure yields E0931
+stderr: ~ "E0931" # tests/marker_rule_signatures.rs:181 #!Pure yields E0931
+step: jet check inline/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:181 #[!Inline] yields E0931
+stderr: ~ "E0931" # tests/marker_rule_signatures.rs:181 #[!Inline] yields E0931

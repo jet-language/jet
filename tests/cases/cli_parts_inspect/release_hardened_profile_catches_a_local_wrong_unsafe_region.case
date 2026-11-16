@@ -1,0 +1,20 @@
+# Port of tests/cli_parts/inspect.rs:150-194; exact original sources and assertions.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): setup actions and prepend/append line transforms.
+# ORACLE-LITERAL inspect.rs:190. Each profile retains original independent project root.
+fixture: fixtures/release
+step: jet run --profile=release main.jet
+cwd: release
+env: NO_COLOR=1
+exit: 0
+stdout: = seven.out
+stderr: !~ "Runtime fault [R0802]" # original predicate
+step: jet run --profile=hardened main.jet
+cwd: hardened
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "Runtime fault [R0802]" # original predicate
+stderr: ~ "in #Unsafe gate" # original predicate
+stderr: ~ "Why:" # original predicate
+stderr: ~ "Fix:" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate

@@ -1,0 +1,48 @@
+// A `??` fallback that hands back a value built from `err.copy()` keeps the
+// left side's type: the rows it binds answer their methods and bind their
+// patterns, on every tier.
+Fact: enum {
+    Program(String)
+    Note(String)
+}
+
+#Error
+LoadError: struct {
+    reason: String
+    source: SourceSpan?
+}
+
+Answer: struct {
+    rows: [Fact]
+    failure: LoadError?
+}
+
+load: fn(ok: Bool) -> [Fact] LoadError! {
+    if !ok -> return Err(LoadError{reason: "no input", source: None})
+    [Fact]{.Program("main"), .Note("draft"), .Program("lib")}
+}
+
+collect: fn(ok: Bool) -> Answer {
+    rows: load(ok) ?? return Answer{rows: [Fact]{}, failure: Val(err.copy())}
+    print("rows {rows.len()}")
+    loop row in rows {
+        if row == .Program(fact) -> print("program {fact}")
+    }
+    Answer{rows: rows, failure: None}
+}
+
+notes: fn(ok: Bool) {
+    rows: load(ok) ?? [Fact]{.Note(err.copy().reason)}
+    loop row in rows {
+        if row == .Note(text) -> print("note {text}")
+    }
+}
+
+run: fn() {
+    kept: collect(true)
+    print("kept {kept.rows.len()}")
+    failed: collect(false)
+    if failed.failure == .Val(found) -> print("failed: {found.reason}, span {found.source == None}")
+    notes(true)
+    notes(false)
+}

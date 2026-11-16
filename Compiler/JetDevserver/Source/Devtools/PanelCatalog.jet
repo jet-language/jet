@@ -1,0 +1,406 @@
+// The one canonical, typed first-party panel catalog and its projection map.
+// The catalog owns panel vocabulary and availability; the jet.devtools.v1
+// envelope owns bounded events and metadata. Hosts render these projections
+// and never reinterpret event JSON.
+
+impl JetDevtoolsPanelID {
+    // Every panel in canonical order. This is protocol vocabulary, not a host
+    // rendering preference.
+    all: fn() -> [JetDevtoolsPanelID] Never! {
+        [JetDevtoolsPanelID]{.Build, .Routes, .Queries, .Mutations, .Forms, .Table, .Store, .Traces, .Cost, .Gates, .Structure, .Tests, .Jobs, .UITree, .Database, .Topology, .Game, .World, .Profiler}
+    }
+    as_str: fn(self) -> String Never! {
+        if self == {
+            .Build -> "build"
+            .Routes -> "routes"
+            .Queries -> "queries"
+            .Mutations -> "mutations"
+            .Forms -> "forms"
+            .Table -> "table"
+            .Store -> "store"
+            .Traces -> "traces"
+            .Cost -> "cost"
+            .Gates -> "gates"
+            .Structure -> "structure"
+            .Tests -> "tests"
+            .Jobs -> "jobs"
+            .UITree -> "ui-tree"
+            .Database -> "database"
+            .Topology -> "topology"
+            .Game -> "game"
+            .World -> "world"
+            .Profiler -> "profiler"
+        }
+    }
+    title: fn(self) -> String Never! {
+        if self == {
+            .Build -> "Build"
+            .Routes -> "Routes"
+            .Queries -> "Queries"
+            .Mutations -> "Mutations"
+            .Forms -> "Forms"
+            .Table -> "Table"
+            .Store -> "Store"
+            .Traces -> "Traces"
+            .Cost -> "Cost"
+            .Gates -> "Gates"
+            .Structure -> "Structure"
+            .Tests -> "Tests"
+            .Jobs -> "Jobs"
+            .UITree -> "UI tree"
+            .Database -> "Database"
+            .Topology -> "Topology"
+            .Game -> "Game"
+            .World -> "World"
+            .Profiler -> "Profiler"
+        }
+    }
+    canonical_order: fn(self) -> Int Never! {
+        if self == {
+            .Build -> 1
+            .Routes -> 2
+            .Queries -> 3
+            .Mutations -> 4
+            .Forms -> 5
+            .Table -> 6
+            .Store -> 7
+            .Traces -> 8
+            .Cost -> 9
+            .Gates -> 10
+            .Structure -> 11
+            .Tests -> 12
+            .Jobs -> 13
+            .UITree -> 14
+            .Database -> 15
+            .Topology -> 16
+            .Game -> 17
+            .World -> 18
+            .Profiler -> 19
+        }
+    }
+    // The event kinds this panel projects. The catalog owns this map so hosts
+    // never rediscover semantic families from JSON field names.
+    accepts_event: fn(self, event: JetDevtoolsEvent) -> Bool Never! {
+        kind: event.kind()
+        if self == {
+            .Build -> kind == "Build"
+            .Routes -> devtools_kind_in(kind, [String]{"Route", "Request", "Response", "Access", "Exception", "LogLink"})
+            .Queries -> kind == "Query" || kind == "DatabaseQuery"
+            .Mutations -> kind == "Mutation"
+            .Forms -> kind == "Form"
+            .Table -> kind == "Table"
+            .Store -> kind == "Store" || kind == "State"
+            .Traces -> devtools_kind_in(kind, [String]{"Trace", "Frame", "TraceLink", "LogLink"})
+            .Cost -> kind == "Cost"
+            .Gates -> kind == "Gate"
+            .Structure -> kind == "Structure"
+            .Tests -> kind == "Test"
+            .Jobs -> kind == "Job"
+            .UITree -> kind == "UI" || kind == "UiTree"
+            .Database -> devtools_kind_in(kind, [String]{"Database", "DatabasePool", "DatabaseQuery", "DatabaseExplainRequest", "DatabaseExplainResult"})
+            .Topology -> devtools_kind_in(kind, [String]{"Topology", "Supervisor", "Process", "Task", "Readiness", "Endpoint"})
+            .Game -> kind == "Game"
+            .World -> kind == "World"
+            .Profiler -> devtools_kind_in(kind, [String]{"Profile", "Metric", "Log", "Telemetry", "SlowWork"})
+        }
+    }
+}
+
+devtools_kind_in: fn(kind: String, kinds: [String]) -> Bool Never! {
+    loop candidate in kinds {
+        if candidate == kind -> return true
+    }
+    false
+}
+
+// The host projections the shared devtools surface accepts.
+impl JetDevtoolsHostKind {
+    all: fn() -> [JetDevtoolsHostKind] Never! {
+        [JetDevtoolsHostKind]{.BrowserInApp, .BrowserWorkbench, .Terminal, .Editor, .NativeOverlay, .Headless}
+    }
+    as_str: fn(self) -> String Never! {
+        if self == {
+            .BrowserInApp -> "browser-in-app"
+            .BrowserWorkbench -> "browser-workbench"
+            .Terminal -> "terminal"
+            .Editor -> "editor"
+            .NativeOverlay -> "native-overlay"
+            .Headless -> "headless"
+        }
+    }
+}
+
+// The closed authority vocabulary for first-party panel reads and controls. A
+// grant is an authority fact, not a string a host supplies; its one wire
+// spelling is the jet.devtools.v1 grant name below (`Devtools.UiInspect` keeps
+// its protocol spelling).
+impl JetDevtoolsPanelCapability {
+    all: fn() -> [JetDevtoolsPanelCapability] Never! {
+        [JetDevtoolsPanelCapability]{.BuildRead, .SourceRead, .RequestRead, .QueryRead, .MutationObserve, .FormInspect, .TableInspect, .StateInspect, .TraceRead, .TelemetryRead, .CostRead, .GateRead, .StructureRead, .TestRead, .JobRead, .UIInspect, .AccessibilityInspect, .DatabaseStatsRead, .DatabaseExplain, .TopologyRead, .GameInspect, .GameControl}
+    }
+    grant: fn(self) -> String Never! {
+        if self == {
+            .BuildRead -> "Devtools.BuildRead"
+            .SourceRead -> "Devtools.SourceRead"
+            .RequestRead -> "Devtools.RequestRead"
+            .QueryRead -> "Devtools.QueryRead"
+            .MutationObserve -> "Devtools.MutationObserve"
+            .FormInspect -> "Devtools.FormInspect"
+            .TableInspect -> "Devtools.TableInspect"
+            .StateInspect -> "Devtools.StateInspect"
+            .TraceRead -> "Devtools.TraceRead"
+            .TelemetryRead -> "Devtools.TelemetryRead"
+            .CostRead -> "Devtools.CostRead"
+            .GateRead -> "Devtools.GateRead"
+            .StructureRead -> "Devtools.StructureRead"
+            .TestRead -> "Devtools.TestRead"
+            .JobRead -> "Devtools.JobRead"
+            .UIInspect -> "Devtools.UiInspect"
+            .AccessibilityInspect -> "Devtools.AccessibilityInspect"
+            .DatabaseStatsRead -> "Devtools.DatabaseStatsRead"
+            .DatabaseExplain -> "Devtools.DatabaseExplain"
+            .TopologyRead -> "Devtools.TopologyRead"
+            .GameInspect -> "Devtools.GameInspect"
+            .GameControl -> "Devtools.GameControl"
+        }
+    }
+    as_str: fn(self) -> String Never! { self.grant() }
+}
+
+// How a panel decides that its checked facts need a new projection.
+impl JetDevtoolsPanelFreshnessPolicy {
+    as_str: fn(self) -> String Never! {
+        if self == {
+            .EventDriven -> "event-driven"
+            .TimeCursor -> "time-cursor"
+            .Snapshot -> "snapshot"
+            .Frame -> "frame"
+            .OnDemand -> "on-demand"
+        }
+    }
+}
+
+// One immutable, backend-neutral panel declaration. `authority` is the
+// primary grant; every entry of `required_capabilities` is needed.
+JetDevtoolsPanelDescriptor: struct {
+    id: JetDevtoolsPanelID
+    title: String
+    order: Int
+    required_capabilities: [JetDevtoolsPanelCapability]
+    authority: JetDevtoolsPanelCapability
+    supported_hosts: [JetDevtoolsHostKind]
+    freshness: JetDevtoolsPanelFreshnessPolicy
+}
+
+impl JetDevtoolsPanelDescriptor {
+    // A descriptor every host supports, ordered by its id's canonical order.
+    canonical: fn(id: JetDevtoolsPanelID, &&required_capabilities: [JetDevtoolsPanelCapability], authority: JetDevtoolsPanelCapability, freshness: JetDevtoolsPanelFreshnessPolicy) -> JetDevtoolsPanelDescriptor Never! {
+        JetDevtoolsPanelDescriptor{id, title: id.title(), order: id.canonical_order(), required_capabilities: required_capabilities.move(), authority, supported_hosts: JetDevtoolsHostKind.all(), freshness}
+    }
+    supports_host: fn(self, host: JetDevtoolsHostKind) -> Bool Never! {
+        loop supported in self.supported_hosts {
+            if supported == host -> return true
+        }
+        false
+    }
+    requires: fn(self, capability: JetDevtoolsPanelCapability) -> Bool Never! {
+        loop required in self.required_capabilities {
+            if required == capability -> return true
+        }
+        false
+    }
+}
+
+// The first-party descriptors in canonical order. They carry no host
+// implementation or payload storage.
+descriptors: fn() -> [JetDevtoolsPanelDescriptor] Never! {
+    [JetDevtoolsPanelDescriptor]{
+        JetDevtoolsPanelDescriptor.canonical(.Build, [JetDevtoolsPanelCapability]{.BuildRead}, .BuildRead, .EventDriven),
+        JetDevtoolsPanelDescriptor.canonical(.Routes, [JetDevtoolsPanelCapability]{.RequestRead, .SourceRead}, .RequestRead, .EventDriven),
+        JetDevtoolsPanelDescriptor.canonical(.Queries, [JetDevtoolsPanelCapability]{.QueryRead}, .QueryRead, .TimeCursor),
+        JetDevtoolsPanelDescriptor.canonical(.Mutations, [JetDevtoolsPanelCapability]{.MutationObserve}, .MutationObserve, .TimeCursor),
+        JetDevtoolsPanelDescriptor.canonical(.Forms, [JetDevtoolsPanelCapability]{.FormInspect}, .FormInspect, .Snapshot),
+        JetDevtoolsPanelDescriptor.canonical(.Table, [JetDevtoolsPanelCapability]{.TableInspect}, .TableInspect, .Snapshot),
+        JetDevtoolsPanelDescriptor.canonical(.Store, [JetDevtoolsPanelCapability]{.StateInspect}, .StateInspect, .TimeCursor),
+        JetDevtoolsPanelDescriptor.canonical(.Traces, [JetDevtoolsPanelCapability]{.TraceRead, .TelemetryRead}, .TraceRead, .TimeCursor),
+        JetDevtoolsPanelDescriptor.canonical(.Cost, [JetDevtoolsPanelCapability]{.CostRead}, .CostRead, .TimeCursor),
+        JetDevtoolsPanelDescriptor.canonical(.Gates, [JetDevtoolsPanelCapability]{.GateRead}, .GateRead, .EventDriven),
+        JetDevtoolsPanelDescriptor.canonical(.Structure, [JetDevtoolsPanelCapability]{.StructureRead, .SourceRead}, .StructureRead, .Snapshot),
+        JetDevtoolsPanelDescriptor.canonical(.Tests, [JetDevtoolsPanelCapability]{.TestRead}, .TestRead, .EventDriven),
+        JetDevtoolsPanelDescriptor.canonical(.Jobs, [JetDevtoolsPanelCapability]{.JobRead}, .JobRead, .TimeCursor),
+        JetDevtoolsPanelDescriptor.canonical(.UITree, [JetDevtoolsPanelCapability]{.UIInspect, .AccessibilityInspect, .SourceRead}, .UIInspect, .Snapshot),
+        JetDevtoolsPanelDescriptor.canonical(.Database, [JetDevtoolsPanelCapability]{.DatabaseStatsRead, .DatabaseExplain}, .DatabaseStatsRead, .OnDemand),
+        JetDevtoolsPanelDescriptor.canonical(.Topology, [JetDevtoolsPanelCapability]{.TopologyRead}, .TopologyRead, .Snapshot),
+        JetDevtoolsPanelDescriptor.canonical(.Game, [JetDevtoolsPanelCapability]{.GameInspect, .GameControl}, .GameInspect, .Frame),
+        JetDevtoolsPanelDescriptor.canonical(.World, [JetDevtoolsPanelCapability]{.GameInspect}, .GameInspect, .Frame),
+        JetDevtoolsPanelDescriptor.canonical(.Profiler, [JetDevtoolsPanelCapability]{.TelemetryRead, .TraceRead}, .TelemetryRead, .Frame),
+    }
+}
+
+// Why one host under one grant set cannot project a descriptor.
+JetDevtoolsPanelUnavailableReason: enum {
+    UnsupportedHost(host: JetDevtoolsHostKind)
+    MissingCapability(capability: JetDevtoolsPanelCapability)
+}
+
+impl JetDevtoolsPanelUnavailableReason {
+    as_str: fn(self) -> String Never! {
+        if self == {
+            .UnsupportedHost(_) -> "unsupported-host"
+            .MissingCapability(_) -> "missing-capability"
+        }
+    }
+    host: fn(self) -> JetDevtoolsHostKind? Never! {
+        if self == {
+            .UnsupportedHost(host) -> Val(host)
+            .MissingCapability(_) -> None
+        }
+    }
+    capability: fn(self) -> JetDevtoolsPanelCapability? Never! {
+        if self == {
+            .UnsupportedHost(_) -> None
+            .MissingCapability(capability) -> Val(capability)
+        }
+    }
+}
+
+// One complete availability row. An unavailable row stays in the list with
+// its reasons, so a host can explain every missing panel.
+JetDevtoolsPanelAvailability: struct {
+    descriptor: JetDevtoolsPanelDescriptor
+    reasons: [JetDevtoolsPanelUnavailableReason]
+}
+
+impl JetDevtoolsPanelAvailability {
+    is_available: fn(self) -> Bool Never! { self.reasons.len() == 0 }
+    unavailable_reasons: fn(self) -> [JetDevtoolsPanelUnavailableReason] Never! { self.reasons }
+}
+
+// One panel's view over the canonical envelope. Every host gets the same
+// event records and cursor metadata; adapters only render this row.
+JetDevtoolsPanelProjection: struct {
+    availability: JetDevtoolsPanelAvailability
+    events: [JetDevtoolsEvent]
+    selected: Bool
+    cursor: Int?
+    freshness: JetDevtoolsFreshnessFact
+    reset: Bool
+    truncated: Bool
+}
+
+impl JetDevtoolsPanelCatalogError {
+    message: fn(self) -> String Never! {
+        if self == {
+            .Empty -> "devtools panel catalog is empty"
+            .DuplicateID(id) -> "devtools panel id `{id.as_str()}` is duplicated"
+            .DuplicateOrder(order) -> "devtools panel order `{order}` is duplicated"
+            .ZeroOrder(id) -> "devtools panel `{id.as_str()}` has zero order"
+            .EmptyTitle(id) -> "devtools panel `{id.as_str()}` has an empty title"
+            .NoCapabilities(id) -> "devtools panel `{id.as_str()}` has no required authority"
+            .NoSupportedHosts(id) -> "devtools panel `{id.as_str()}` has no supported host"
+            .AuthorityNotRequired(id, authority) -> "devtools panel `{id.as_str()}` primary authority `{authority.grant()}` is not required"
+            .DuplicateCapability(id, capability) -> "devtools panel `{id.as_str()}` repeats authority `{capability.grant()}`"
+            .DuplicateHost(id, host) -> "devtools panel `{id.as_str()}` repeats host `{host.as_str()}`"
+        }
+    }
+}
+
+// One validated first-party panel catalog, in ascending order.
+JetDevtoolsPanelCatalog: struct {
+    descriptor_list: [JetDevtoolsPanelDescriptor]
+}
+
+impl JetDevtoolsPanelCatalog {
+    // Validate `descriptors` and keep them sorted by their unique order.
+    new: fn(&&descriptors: [JetDevtoolsPanelDescriptor]) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
+        if descriptors.len() == 0 -> return Err(JetDevtoolsPanelCatalogError.Empty)
+        loop descriptor in descriptors {
+            id: descriptor.id
+            if descriptor.order == 0 -> return Err(JetDevtoolsPanelCatalogError.ZeroOrder{id: id})
+            if descriptor.title == "" -> return Err(JetDevtoolsPanelCatalogError.EmptyTitle{id: id})
+            if descriptor.required_capabilities.len() == 0 -> return Err(JetDevtoolsPanelCatalogError.NoCapabilities{id: id})
+            if descriptor.supported_hosts.len() == 0 -> return Err(JetDevtoolsPanelCatalogError.NoSupportedHosts{id: id})
+            if !descriptor.requires(descriptor.authority) -> return Err(JetDevtoolsPanelCatalogError.AuthorityNotRequired{id: id, authority: descriptor.authority})
+            loop (index, capability) in descriptor.required_capabilities {
+                loop later in (index + 1)..<descriptor.required_capabilities.len() {
+                    if descriptor.required_capabilities[later] == capability -> return Err(JetDevtoolsPanelCatalogError.DuplicateCapability{id: id, capability: capability})
+                }
+            }
+            loop (index, host) in descriptor.supported_hosts {
+                loop later in (index + 1)..<descriptor.supported_hosts.len() {
+                    if descriptor.supported_hosts[later] == host -> return Err(JetDevtoolsPanelCatalogError.DuplicateHost{id: id, host: host})
+                }
+            }
+        }
+        loop (index, descriptor) in descriptors {
+            loop later in (index + 1)..<descriptors.len() {
+                if descriptors[later].id == descriptor.id -> return Err(JetDevtoolsPanelCatalogError.DuplicateID{id: descriptor.id})
+                if descriptors[later].order == descriptor.order -> return Err(JetDevtoolsPanelCatalogError.DuplicateOrder{order: descriptor.order})
+            }
+        }
+        sorted := descriptors.move()
+        sorted.sort_by(fn(a: JetDevtoolsPanelDescriptor, b: JetDevtoolsPanelDescriptor) { a.order <=> b.order })
+        Ok(JetDevtoolsPanelCatalog{descriptor_list: sorted})
+    }
+    // The validated catalog of the first-party descriptors.
+    canonical: fn() -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! { JetDevtoolsPanelCatalog.new(descriptors()) }
+    descriptors: fn(self) -> [JetDevtoolsPanelDescriptor] Never! { self.descriptor_list }
+    get: fn(self, id: JetDevtoolsPanelID) -> JetDevtoolsPanelDescriptor? Never! {
+        loop descriptor in self.descriptor_list {
+            if descriptor.id == id -> return Val(descriptor)
+        }
+        None
+    }
+    // The panel a protocol event belongs to, so no host adapter matches
+    // event families itself.
+    panel_for_event: fn(self, event: JetDevtoolsEvent) -> JetDevtoolsPanelID? Never! {
+        loop descriptor in self.descriptor_list {
+            if descriptor.id.accepts_event(event) -> return Val(descriptor.id)
+        }
+        None
+    }
+    // Every descriptor in order. A row the host does not support or the
+    // grants do not cover stays, with its typed reasons; no panel disappears.
+    available_for: fn(self, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelAvailability] Never! {
+        loop descriptor in self.descriptor_list -> devtools_panel_availability(descriptor, host, grants)
+    }
+    // Every first-party panel projected from one envelope.
+    project: fn(self, envelope: JetDevtoolsEnvelope, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelProjection] Never! {
+        selected_panel: if envelope.selection() == {
+            .Val(selection) -> selection.panel_id
+            None -> ""
+        }
+        events: envelope.events()
+        projections := [JetDevtoolsPanelProjection]{}
+        loop availability in self.available_for(host, grants) {
+            id: availability.descriptor.id
+            matching := [Int]{}
+            loop (index, event) in events {
+                if id.accepts_event(event) -> matching.push(index)
+            }
+            projections.push(JetDevtoolsPanelProjection{
+                selected: selected_panel == id.as_str(),
+                events: loop index in matching -> events[index],
+                availability,
+                cursor: envelope.cursor(),
+                freshness: envelope.freshness,
+                reset: envelope.reset,
+                truncated: envelope.truncated,
+            })
+        }
+        projections
+    }
+}
+
+devtools_panel_availability: fn(descriptor: JetDevtoolsPanelDescriptor, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> JetDevtoolsPanelAvailability Never! {
+    reasons := [JetDevtoolsPanelUnavailableReason]{}
+    if !descriptor.supports_host(host) -> reasons.push(JetDevtoolsPanelUnavailableReason.UnsupportedHost{host: host})
+    loop capability in descriptor.required_capabilities {
+        granted := false
+        loop grant in grants {
+            if grant == capability -> granted = true
+        }
+        if !granted -> reasons.push(JetDevtoolsPanelUnavailableReason.MissingCapability{capability: capability})
+    }
+    JetDevtoolsPanelAvailability{descriptor, reasons}
+}

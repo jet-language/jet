@@ -1,0 +1,19 @@
+# tests/single_use.rs::task_handles_owe_join_or_detach at tests/single_use.rs:384; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Sources copied verbatim; original predicates; PENDING-SAME-HEAD (heavy lane paused).
+fixture: task_handles_owe_join_or_detach.fixture
+env: NO_COLOR=1
+step check1: jet check source-1.jet --json
+exit: any # original predicate: codes_of only projects diagnostics; no success assertion
+json: stdout doc $.reports[?code="L1101"] #>= 1 # original predicate: obligation code membership
+step check2: jet check source-2.jet --json
+exit: any # original predicate: codes_of only projects diagnostics; no success assertion
+json: stdout doc $.reports[?code="L1101"] #>= 1 # original predicate: obligation code membership
+step check3: jet check source-3.jet --json
+exit: any # original predicate: codes_of only projects diagnostics; no success assertion
+json: stdout doc $.reports[?code="L1101"] #= 0 # original predicate: code absence
+step check4: jet check source-4.jet --json
+exit: any # original predicate: codes_of only projects diagnostics; no success assertion
+json: stdout doc $.reports[?code="L1101"] #= 0 # original predicate: code absence
+step check5: jet check source-5.jet --json
+exit: any # original predicate: codes_of only projects diagnostics; no success assertion
+json: stdout doc $.reports[?code="L1101"] #= 0 # original predicate: code absence

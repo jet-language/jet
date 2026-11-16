@@ -1,0 +1,12 @@
+# A v1 reader reads the u16 major and minor right after the magic and refuses
+# any other schema before it parses the header (proof-replay-decisions wire
+# format): a 2.0 artifact is E3620, not a corrupt artifact.
+fixture: prove_replay_rejects_an_unsupported_schema_major_before_the_header.fixture
+write: future.jetproof-replay = "JREPLAYXaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+poke: future.jetproof-replay at 7 hex "00"
+poke: future.jetproof-replay at 8 hex "0200000000000000"
+step: jet prove main.jet --replay=future.jetproof-replay --json
+exit: 1
+stdout: ~ "\"code\":\"E3620\"" # the one JSON report is the schema refusal
+stdout: ~ "Unsupported replay schema 2.0" # the refusal names the artifact's own version
+stderr: empty

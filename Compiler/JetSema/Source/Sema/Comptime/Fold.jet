@@ -1,0 +1,612 @@
+// A constant whose checked initializer is a plain literal lands as its own
+// value, unevaluated (#3661: evaluating one lowered, assembled and ran an IR
+// fragment holding every module's declarations). Jet's comptime runs only as
+// native code, and a host with no execution child (the bootstrap factory, the
+// native CLI) evaluates nothing. So every value that is literal data folds
+// here: Int, sized-integer (`I64{208}`, `U8{7}`), Float, Bool, Char and string
+// literals, their negation, the checked Int-to-fixed conversion of a literal,
+// lists, map literals (each key a scalar, payload-free enum case or struct of
+// them, no key repeated), struct literals (sema has already filled each omitted field's
+// default), enum constructors with positional or named payloads, `Val(x)` and
+// `None`, constants that already landed, and integer, Float and Bool arithmetic
+// and comparison over them. It reads the same checked facts evaluation does: a
+// `T.reflect().layout` read is the LayoutInfo sema computed for the selected target (a
+// CtLit) and `.size` its field; `x ?? panic(..)` on a present value is that
+// value; a value `if`/else-if chain takes the arm its folded condition selects;
+// shifts stay within the checked width. Aggregates take the shape the evaluator
+// returns: the declared type name, field and named payload labels. A value
+// outside its checked type, a selected arm that stops (`panic`), an integer
+// division, a power, a call, and any other shape is not folded: it is
+// evaluated, and the evaluator reports it.
+//
+// The fold reads each node and its checked type in place in the tree (no
+// node or type copy per visited node): a generated data table folds millions
+// of nodes. A precheck thread folds a call-free item with no landed values
+// (sema_comptime_precheck_fold); its result is final, because only a
+// `ConstRef` reads `values` and an unlanded one fails the whole fold. `symbols`
+// is the run's table, which names a `ConstRef`'s constant and an enum
+// constructor's variant.
+use jet_foundation.[
+    BodyEnumPayload,
+    BodyIfCond,
+    BodyMapEntry,
+    BodyTree,
+    NodeKind,
+    TBinaryOp,
+    TBuiltinOp,
+    TComptimeEnumArg,
+    TComptimeField,
+    TComptimeKey,
+    TComptimeKeyField,
+    TComptimeMapEntry,
+    TComptimeReport,
+    TComptimeValue,
+    TUnaryOp,
+    SymbolTable,
+    Type,
+    body_type_id,
+    checked_comptime_integer_key,
+    name_index,
+    name_intern,
+    name_table,
+    symbol_key,
+]
+
+// The fold over `program`'s run table.
+sema_comptime_fold_in: fn(program: SemaProgramTables, tree: BodyTree, expression: Int, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
+    if program.registration_graph == .Val(graph) {
+        return sema_comptime_fold(tree, expression, values, graph.symbols)
+    }
+    sema_comptime_fold(tree, expression, values, program.symbols)
+}
+
+sema_comptime_fold: fn(tree: BodyTree, expression: Int, values: [SemaComptimeItemValue], symbols: SymbolTable) -> TComptimeValue? Never! {
+    // Passed straight through: a local binding of a row would copy it.
+    sema_comptime_fold_node(tree, expression, tree.nodes[sema_comptime_fold_node_row(tree, expression)].kind, tree.types.types[body_type_id(tree, expression)], values, symbols)
+}
+
+// The row of node `id` in `tree.nodes` (body_node without the copy).
+sema_comptime_fold_node_row: fn(tree: BodyTree, id: Int) -> Int Never! {
+    low := 0
+    high := tree.nodes.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if tree.nodes[middle].id < id -> low = middle + 1 else -> high = middle
+    }
+    if low < tree.nodes.len() && tree.nodes[low].id == id -> return low
+    panic("body tree has no node {id}")
+}
+
+// The payload node of a module `Shared{X}` holder: `expression` is the
+// `Shared.new` static (`jet_std::JetShared`) over its one argument. The build
+// folds the payload; the program allocates the cell on its first read
+// (JetIR ir_shared_holder_read).
+sema_comptime_shared_payload: fn(tree: BodyTree, expression: Int) -> Int? Never! {
+    if tree.nodes[sema_comptime_fold_node_row(tree, expression)].kind == .StaticCall(owner, _, method, _, args) {
+        if owner == .Prelude(rooted, path, _) && rooted && path == "jet_std::JetShared" && method.name == "new" && args.len() == 1 {
+            return Val(args[0].value)
+        }
+    }
+    None
+}
+
+sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, expression_ty: Type, values: [SemaComptimeItemValue], symbols: SymbolTable) -> TComptimeValue? Never! {
+    if kind == {
+        .IntLit(value, _) -> return sema_comptime_fold_int(value, expression_ty)
+        .FloatLit(value) -> {
+            if expression_ty == Type.Float {
+                return Val(TComptimeValue.Float{value: value, bits: 64})
+            }
+        }
+        .BoolLit(value) -> return Val(TComptimeValue.Bool{value: value})
+        .CharLit(value) -> return Val(TComptimeValue.Char{value: value})
+        .StrLit(parts) -> {
+            if expression_ty != Type.String -> return None
+            if parts.len() == 0 -> return Val(TComptimeValue.String{value: ""})
+            if parts.len() == 1 {
+                if parts[0] == .Literal(text) -> return Val(TComptimeValue.String{value: text})
+            }
+        }
+        // A checked literal that already carries its value (an
+        // integer outside the i64 range is a BigInt constant; a `$` fact read
+        // is its reflection record).
+        .CtLit(value) -> {
+            if sema_comptime_fold_data(value) -> return Val(value)
+        }
+        .Field(receiver, field) -> {
+            folded: sema_comptime_fold(tree, receiver, values, symbols) ?? return None
+            if folded == .Struct(_, fields) {
+                loop member in fields {
+                    if member.name == field.name -> return Val(member.value)
+                }
+            }
+        }
+        .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
+            if then_body.len() != 0 || else_body.len() != 0 -> return None
+            selected: sema_comptime_fold_condition(tree, cond, values, symbols) ?? return None
+            return sema_comptime_fold(tree, if selected -> then_value else -> else_value, values, symbols)
+        }
+        .ConstRef(symbol) -> return sema_comptime_fold_landed(values, symbol_key(symbols, tree.symbols, symbol))
+        // Copying a constant's value is that value.
+        .Clone(value, _) | .ExplicitCopy(value) -> return sema_comptime_fold(tree, value, values, symbols)
+        .StructLit(fields) -> {
+            type_name: sema_comptime_fold_type_name(expression_ty) ?? return None
+            folded := [TComptimeField]{}
+            loop field in fields {
+                folded.push(TComptimeField{name: field.field.name, value: sema_comptime_fold(tree, field.value, values, symbols) ?? return None})
+            }
+            return Val(TComptimeValue.Struct{type_name: type_name, fields: folded})
+        }
+        .EnumCtor(_, variant, payload) -> {
+            type_name: sema_comptime_fold_type_name(expression_ty) ?? return None
+            return sema_comptime_fold_enum(tree, type_name, sema_comptime_fold_after_last(symbol_key(symbols, tree.symbols, variant), false), payload, values, symbols)
+        }
+        .EnumLit(enum_type, variant, payload) -> return sema_comptime_fold_enum(tree, sema_comptime_fold_after_last(enum_type, true), variant, payload, values, symbols)
+        .Present(value) -> {
+            if expression_ty == .Option(_) {
+                return Val(TComptimeValue.Present{value: sema_comptime_fold(tree, value, values, symbols) ?? return None})
+            }
+        }
+        .Absent -> {
+            // copy: `inner` is a payload of read parameter `expression_ty`, which keeps the original; field `ty` of the new TComptimeReport.Clean owns this one
+            if expression_ty == .Option(inner) {
+                return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner.copy()}})
+            }
+        }
+        // `x ?? fallback`: a present value is itself, an absent one takes a
+        // folded value fallback. `String.from_bytes([U8]{…})` is the
+        // generators' spelling of a string holding a control character (no
+        // escape spells NUL): present when the folded bytes are UTF-8.
+        .OrFallback(value, fallback, _) -> {
+            subject: sema_comptime_fold(tree, value, values, symbols) ?? sema_comptime_fold_from_bytes(tree, value, values, symbols) ?? return None
+            if subject == .Present(inner) -> return Val(inner)
+            if subject == .Failed(_) {
+                if fallback == .Value(otherwise) {
+                    return sema_comptime_fold(tree, otherwise, values, symbols)
+                }
+            }
+        }
+        .Unary(op, operand) -> {
+            folded: sema_comptime_fold(tree, operand, values, symbols) ?? return None
+            if op == TUnaryOp.Neg {
+                if folded == .Int(number) {
+                    return sema_comptime_fold_int(0 - number, expression_ty)
+                }
+                // `-170141…728` checks as the negation of a BigInt literal.
+                if folded == .BigInt(decimal) {
+                    return sema_comptime_fold_int(0 - (Int.parse(decimal) ?? return None), expression_ty)
+                }
+                if folded == .Float(number, bits) {
+                    if bits == 64 && expression_ty == Type.Float {
+                        return Val(TComptimeValue.Float{value: number * -1.0, bits: 64})
+                    }
+                }
+            }
+            if op == TUnaryOp.Not && expression_ty == Type.Bool {
+                if folded == .Bool(flag) -> return Val(TComptimeValue.Bool{value: !flag})
+            }
+        }
+        // `I64{n}` checked without its head: the checked Int-to-fixed
+        // conversion of a literal, which traps exactly when n is outside.
+        .NumericMethod(receiver, operation) -> {
+            if operation == .CheckedIntToFixed(_, _) {
+                folded: sema_comptime_fold(tree, receiver, values, symbols) ?? return None
+                if folded == .Int(number) -> return sema_comptime_fold_int(number, expression_ty)
+                if folded == .BigInt(decimal) {
+                    return sema_comptime_fold_int(Int.parse(decimal) ?? return None, expression_ty)
+                }
+            }
+        }
+        .Binary(op, _, _, lhs, rhs) -> {
+            left: sema_comptime_fold(tree, lhs, values, symbols) ?? return None
+            right: sema_comptime_fold(tree, rhs, values, symbols) ?? return None
+            return sema_comptime_fold_binary(op, expression_ty, left, right)
+        }
+        .List(elements, coercion) -> {
+            if coercion == None -> return sema_comptime_fold_list(tree, elements, values, symbols)
+        }
+        .ListLit(elements) -> return sema_comptime_fold_list(tree, elements, values, symbols)
+        .Map(entries) | .MapLit(entries) -> {
+            if expression_ty == .Map(_, _, _) {
+                return sema_comptime_fold_map(tree, entries, values, symbols)
+            }
+        }
+        // An unsuffixed decimal literal checks as `Decimal.from_str("…")`
+        // (sema_expr_decimal_literal); its value is the Core Decimal record.
+        .PreciseBuiltin(type_name, function, args) -> {
+            if type_name == "Decimal" && function == "from_str" && args.len() == 1 {
+                folded: sema_comptime_fold(tree, args[0], values, symbols) ?? return None
+                if folded == .String(text) -> return sema_comptime_fold_decimal(text)
+            }
+        }
+        .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .CompareChain(_, _, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .JSONLit(_, _, _) | .ListSpread(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+    }
+    None
+}
+
+// Core math.jet `__decimal_from_str` over a literal spelling: the record
+// {negative, magnitude, scale} it returns (magnitude unnormalized), or None
+// when it would stop on the text or the exponent is out of reach.
+sema_comptime_fold_decimal: fn(text: String) -> TComptimeValue? Never! {
+    bytes: text.trim().bytes()
+    if bytes.len() == 0 -> return None
+    index := 0
+    negative := false
+    if (Int{bytes[0]}) == 45 || (Int{bytes[0]}) == 43 {
+        negative = Int{bytes[0]} == 45
+        index = 1
+    }
+    magnitude := 0
+    digits := 0
+    fractional := 0
+    point := false
+    loop index < bytes.len() && (Int{bytes[index]}) != 101 && (Int{bytes[index]}) != 69 {
+        code: Int{bytes[index]}
+        if code == 46 {
+            if point -> return None
+            point = true
+        } else {
+            if code < 48 || code > 57 -> return None
+            digits += 1
+            if digits > 4000 -> return None
+            magnitude = magnitude * 10 + code - 48
+            if point -> fractional += 1
+        }
+        index += 1
+    }
+    if digits == 0 -> return None
+    exponent := 0
+    if index < bytes.len() {
+        index += 1
+        exponent_negative := false
+        if index < bytes.len() && (Int{bytes[index]} == 45 || Int{bytes[index]} == 43) {
+            exponent_negative = Int{bytes[index]} == 45
+            index += 1
+        }
+        start: index
+        loop index < bytes.len() {
+            code: Int{bytes[index]}
+            if code < 48 || code > 57 -> return None
+            exponent = exponent * 10 + code - 48
+            if exponent > 4000 -> return None
+            index += 1
+        }
+        if index == start -> return None
+        if exponent_negative -> exponent = 0 - exponent
+    }
+    places := fractional - exponent
+    loop places < 0 {
+        magnitude *= 10
+        places += 1
+    }
+    magnitude_value: if sema_comptime_fold_small_int(magnitude) -> TComptimeValue.Int{value: magnitude} else -> TComptimeValue.BigInt{decimal: "{magnitude}"}
+    Val(TComptimeValue.Struct{
+        type_name: "Decimal",
+        fields: [TComptimeField]{
+            TComptimeField{name: "negative", value: TComptimeValue.Bool{value: negative && magnitude != 0}},
+            TComptimeField{name: "magnitude", value: magnitude_value},
+            TComptimeField{name: "scale", value: TComptimeValue.Int{value: places}},
+        },
+    })
+}
+
+// A landed value is data: no closure anywhere in it.
+sema_comptime_fold_data: fn(value: TComptimeValue) -> Bool Never! {
+    if value == {
+        .List(items) -> {
+            loop item in items {
+                if !sema_comptime_fold_data(item) -> return false
+            }
+        }
+        .Map(entries) -> {
+            loop entry in entries {
+                if !sema_comptime_fold_data(entry.value) -> return false
+            }
+        }
+        .Struct(_, fields) -> {
+            loop field in fields {
+                if !sema_comptime_fold_data(field.value) -> return false
+            }
+        }
+        .Enum(_, _, args) -> {
+            loop argument in args {
+                if !sema_comptime_fold_data(argument.value) -> return false
+            }
+        }
+        .Present(inner) -> return sema_comptime_fold_data(inner)
+        .Failed(report) -> {
+            if report == .Told(inner) -> return sema_comptime_fold_data(inner)
+        }
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Unit -> {}
+    }
+    true
+}
+
+// A value `if` condition: a folded Bool, or both halves of `&&`-joined ones.
+sema_comptime_fold_condition: fn(tree: BodyTree, cond: BodyIfCond, values: [SemaComptimeItemValue], symbols: SymbolTable) -> Bool? Never! {
+    if cond == {
+        .Plain(value) -> {
+            folded: sema_comptime_fold(tree, value, values, symbols) ?? return None
+            if folded == .Bool(flag) -> return Val(flag)
+            None
+        }
+        .And(left, right) -> {
+            if !(sema_comptime_fold_condition(tree, left, values, symbols) ?? return None) {
+                return Val(false)
+            }
+            sema_comptime_fold_condition(tree, right, values, symbols)
+        }
+        .IfLet(_, _) -> None
+    }
+}
+
+// `String.from_bytes(<folded [U8]>)` as its Result: the decoded text, or a
+// clean failure when the bytes are not UTF-8.
+sema_comptime_fold_from_bytes: fn(tree: BodyTree, value: Int, values: [SemaComptimeItemValue], symbols: SymbolTable) -> TComptimeValue? Never! {
+    if tree.nodes[sema_comptime_fold_node_row(tree, value)].kind == .BuiltinMethod(receiver, operation, args) {
+        if operation != TBuiltinOp.StringFromBytes || args.len() != 0 -> return None
+        folded: sema_comptime_fold(tree, receiver, values, symbols) ?? return None
+        bytes := [U8]{}
+        if folded == {
+            // A checked `[U8]{"…"}` byte value folds to its bytes.
+            // copy: `values_bytes` is a payload of `folded`, which keeps the original
+            .Bytes(values_bytes) -> bytes = values_bytes.copy()
+            .List(items) -> {
+                loop item in items {
+                    if item == .Int(number) -> bytes.push(checked(U8{number}) ?? return None) else {
+                        return None
+                    }
+                }
+            }
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return None
+        }
+        decoded: String.from_bytes(bytes) ?? return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "UTF8Error"}}})
+        return Val(TComptimeValue.Present{value: TComptimeValue.String{value: decoded}})
+    }
+    None
+}
+
+sema_comptime_fold_list: fn(tree: BodyTree, elements: [Int], values: [SemaComptimeItemValue], symbols: SymbolTable) -> TComptimeValue? Never! {
+    folded := [TComptimeValue]{}
+    loop element in elements {
+        folded.push(sema_comptime_fold(tree, element, values, symbols) ?? return None)
+    }
+    Val(TComptimeValue.List{values: folded})
+}
+
+// A map literal's entries in their written order. A key is a scalar, a
+// payload-free enum case, or a struct of keys; a repeated key is not folded,
+// so the evaluator's later-entry-wins insert decides it.
+sema_comptime_fold_map: fn(tree: BodyTree, entries: [BodyMapEntry], values: [SemaComptimeItemValue], symbols: SymbolTable) -> TComptimeValue? Never! {
+    folded := [TComptimeMapEntry]{}
+    // Each key's spelling by name id, and whether an entry wrote it.
+    spellings := name_table()
+    taken := [Bool]{false}
+    loop entry in entries {
+        key: sema_comptime_fold_key(sema_comptime_fold(tree, entry.key, values, symbols) ?? return None) ?? return None
+        id: name_index(name_intern(spellings, sema_comptime_fold_key_text(key)))
+        if id == taken.len() -> taken.push(false)
+        if taken[id] -> return None
+        taken[id] = true
+        folded.push(TComptimeMapEntry{key: key, value: sema_comptime_fold(tree, entry.value, values, symbols) ?? return None})
+    }
+    Val(TComptimeValue.Map{entries: folded})
+}
+
+// The map key a folded key value spells; None for a value no key spells.
+sema_comptime_fold_key: fn(value: TComptimeValue) -> TComptimeKey? Never! {
+    if value == {
+        .Int(number) -> Val(checked_comptime_integer_key(number))
+        .BigInt(decimal) -> Val(TComptimeKey.BigInt{decimal: decimal})
+        .String(text) -> Val(TComptimeKey.String{value: text})
+        .Bool(flag) -> Val(TComptimeKey.Bool{value: flag})
+        .Char(code) -> Val(TComptimeKey.Char{value: code})
+        .Enum(type_name, variant, args) -> {
+            if args.len() > 0 -> return None
+            Val(TComptimeKey.Enum{type_name: type_name, variant: variant})
+        }
+        .Struct(type_name, fields) -> {
+            keys := [TComptimeKeyField]{}
+            loop field in fields {
+                keys.push(TComptimeKeyField{name: field.name, key: sema_comptime_fold_key(field.value) ?? return None})
+            }
+            Val(TComptimeKey.Struct{type_name: type_name, fields: keys})
+        }
+        .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit -> None
+    }
+}
+
+// One text per distinct key: each part is tagged and each text is
+// length-prefixed, so two different keys never spell the same text.
+sema_comptime_fold_key_text: fn(key: TComptimeKey) -> String Never! {
+    if key == {
+        .Int(value) -> "i{value};"
+        .BigInt(decimal) -> "i{decimal};"
+        .String(value) -> "s{value.bytes().len()}:{value}"
+        .Bool(value) -> "b{value};"
+        .Char(value) -> "c{value};"
+        .Tuple(fields) -> "t{sema_comptime_fold_key_fields(fields)}"
+        .Struct(type_name, fields) -> "r{type_name.bytes().len()}:{type_name}{sema_comptime_fold_key_fields(fields)}"
+        .Enum(type_name, variant) -> "e{type_name.bytes().len()}:{type_name}{variant.bytes().len()}:{variant}"
+    }
+}
+
+// The field part of a tuple or struct key's text.
+sema_comptime_fold_key_fields: fn(fields: [TComptimeKeyField]) -> String Never! {
+    parts := [String]{}
+    loop field in fields {
+        parts.push("{field.name.bytes().len()}:{field.name}{sema_comptime_fold_key_text(field.key)}")
+    }
+    "{fields.len()}({parts.join("")})"
+}
+
+sema_comptime_fold_enum: fn(tree: BodyTree, type_name: String, variant: String, payload: BodyEnumPayload, values: [SemaComptimeItemValue], symbols: SymbolTable) -> TComptimeValue? Never! {
+    args := [TComptimeEnumArg]{}
+    if payload == {
+        .Unit -> {}
+        .Positional(positional) -> {
+            loop argument in positional {
+                args.push(TComptimeEnumArg{name: None, value: sema_comptime_fold(tree, argument.value, values, symbols) ?? return None})
+            }
+        }
+        .Named(named) -> {
+            loop argument in named {
+                args.push(TComptimeEnumArg{name: Val(argument.name), value: sema_comptime_fold(tree, argument.value.value, values, symbols) ?? return None})
+            }
+        }
+    }
+    Val(TComptimeValue.Enum{type_name: type_name, variant: variant, args: args})
+}
+
+// The declared (leaf) name of a nominal checked type, the name a landed
+// aggregate carries and constant lowering resolves against its type.
+sema_comptime_fold_type_name: fn(ty: Type) -> String? Never! {
+    if ty == {
+        .Named(name) -> Val(sema_comptime_fold_after_last(name, true))
+        .Apply(name, _) -> Val(sema_comptime_fold_after_last(name, true))
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+    }
+}
+
+// The last segment of `name` split on `::` (`pair`) or on `:`, as
+// `name.split(sep).to_list()`'s last element: separators match left to
+// right without overlap, so the segment starts after the last match.
+sema_comptime_fold_after_last: fn(name: String, pair: Bool) -> String Never! {
+    bytes: name.bytes()
+    start := 0
+    index := 0
+    loop index < bytes.len() {
+        if bytes[index] != (U8{58}) -> index += 1 else if !pair {
+            index += 1
+            start = index
+        } else if index + 1 < bytes.len() && bytes[index + 1] == (U8{58}) {
+            index += 2
+            start = index
+        } else { index += 1 }
+    }
+    if start == 0 -> return name.copy()
+    String.from_bytes(bytes.slice(start, bytes.len())) ?? name.copy()
+}
+
+// The value of a constant that already landed in this run. A `Shared`
+// holder's landed value is its payload, not the holder, so it folds no read.
+sema_comptime_fold_landed: fn(values: [SemaComptimeItemValue], key: String) -> TComptimeValue? Never! {
+    loop value in values {
+        if value.kind == SemaComptimeItemKind.Constant && value.key == key && !value.shared_holder {
+            return Val(value.value)
+        }
+    }
+    None
+}
+
+// An integer value of checked type `ty`: any exact Int, or a fixed width of
+// at most 64 bits only when it lies in that type's range.
+sema_comptime_fold_int: fn(value: Int, ty: Type) -> TComptimeValue? Never! {
+    if ty == Type.Int {
+        // An exact Int outside the i64 range is a BigInt value.
+        if !sema_comptime_fold_small_int(value) {
+            return Val(TComptimeValue.BigInt{decimal: "{value}"})
+        }
+        return Val(TComptimeValue.Int{value: value})
+    }
+    if ty == .IntN(signed, bits) {
+        if bits < 8 || bits > 64 -> return None
+        low := 0
+        high := 18446744073709551615
+        if bits < 64 {
+            high = (1 << bits) - 1
+            if signed {
+                low = 0 - (1 << (bits - 1))
+                high = (1 << (bits - 1)) - 1
+            }
+        } else if signed {
+            low = -9223372036854775807 - 1
+            high = 9223372036854775807
+        }
+        if value < low || value > high -> return None
+        return Val(TComptimeValue.Int{value: value})
+    }
+    None
+}
+
+sema_comptime_fold_binary: fn(op: TBinaryOp, ty: Type, left: TComptimeValue, right: TComptimeValue) -> TComptimeValue? Never! {
+    if left == .Int(a) {
+        if right == .Int(b) {
+            if ty == Type.Bool {
+                if op == {
+                    .Eq -> return Val(TComptimeValue.Bool{value: a == b})
+                    .Ne -> return Val(TComptimeValue.Bool{value: a != b})
+                    .Lt -> return Val(TComptimeValue.Bool{value: a < b})
+                    .Gt -> return Val(TComptimeValue.Bool{value: a > b})
+                    .Le -> return Val(TComptimeValue.Bool{value: a <= b})
+                    .Ge -> return Val(TComptimeValue.Bool{value: a >= b})
+                    .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare | .And | .Or -> return None
+                }
+            }
+            if op == {
+                .Add -> return sema_comptime_fold_int(a + b, ty)
+                .Sub -> return sema_comptime_fold_int(a - b, ty)
+                .Mul -> return sema_comptime_fold_int(a * b, ty)
+                .BitAnd -> return sema_comptime_fold_int(a.bit_and(b), ty)
+                .BitOr -> return sema_comptime_fold_int(a.bit_or(b), ty)
+                .BitXor -> return sema_comptime_fold_int(a.bit_xor(b), ty)
+                // A non-negative value shifted by less than its width; the
+                // result must still fit the checked type.
+                .Shl -> {
+                    if a < 0 || b < 0 || b > 63 -> return None
+                    return sema_comptime_fold_int(a * (1 << b), ty)
+                }
+                .Shr -> {
+                    if a < 0 || b < 0 || b > 63 -> return None
+                    return sema_comptime_fold_int(a /% (1 << b), ty)
+                }
+                .Div | .FloorDiv | .Mod | .Rem | .Pow | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> return None
+            }
+        }
+        return None
+    }
+    if left == .Float(a, left_bits) {
+        if right == .Float(b, right_bits) {
+            if left_bits != 64 || right_bits != 64 -> return None
+            if ty == Type.Bool {
+                if op == {
+                    .Eq -> return Val(TComptimeValue.Bool{value: a == b})
+                    .Ne -> return Val(TComptimeValue.Bool{value: a != b})
+                    .Lt -> return Val(TComptimeValue.Bool{value: a < b})
+                    .Gt -> return Val(TComptimeValue.Bool{value: a > b})
+                    .Le -> return Val(TComptimeValue.Bool{value: a <= b})
+                    .Ge -> return Val(TComptimeValue.Bool{value: a >= b})
+                    .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare | .And | .Or -> return None
+                }
+            }
+            if ty != Type.Float -> return None
+            if op == {
+                .Add -> return Val(TComptimeValue.Float{value: a + b, bits: 64})
+                .Sub -> return Val(TComptimeValue.Float{value: a - b, bits: 64})
+                .Mul -> return Val(TComptimeValue.Float{value: a * b, bits: 64})
+                // IEEE-754 binary64 division never traps: a zero divisor
+                // gives an infinity or NaN, as the evaluator's does.
+                .Div -> return Val(TComptimeValue.Float{value: a / b, bits: 64})
+                .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> return None
+            }
+        }
+        return None
+    }
+    if left == .Bool(a) {
+        if right == .Bool(b) {
+            if ty != Type.Bool -> return None
+            if op == {
+                .And -> return Val(TComptimeValue.Bool{value: a && b})
+                .Or -> return Val(TComptimeValue.Bool{value: a || b})
+                .Eq -> return Val(TComptimeValue.Bool{value: a == b})
+                .Ne -> return Val(TComptimeValue.Bool{value: a != b})
+                .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Lt | .Gt | .Le | .Ge | .Compare -> return None
+            }
+        }
+    }
+    None
+}
+
+sema_comptime_fold_small_int: fn(value: Int) -> Bool Never! {
+    value >= -9223372036854775807 - 1 && value <= 9223372036854775807
+}

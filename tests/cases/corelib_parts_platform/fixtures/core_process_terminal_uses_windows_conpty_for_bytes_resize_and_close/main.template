@@ -1,0 +1,28 @@
+
+use process: core.process
+
+run: fn() {
+    policy: TerminalPolicy{
+        size: TerminalSize{ cols: 80, rows: 24 },
+        mode: .Cooked
+    }
+    child: process.cmd(["cmd.exe", "/D", "/Q", "/C", "{work}/conpty_probe.cmd"])
+        .cwd("{work}")
+        .terminal(policy)
+        .spawn() ?? panic("ConPTY spawn failed")
+    session: child.terminal ?? panic("missing ConPTY session")
+    session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("ConPTY resize failed")
+    child.stdin.write("typed\r\n") ?? panic("ConPTY input failed")
+    result: child.wait() ?? panic("ConPTY wait failed")
+    print(result.success)
+    print(result.output)
+    if child.stdin.write("late") == {
+        .Ok(_) -> { print("closed:accepted") }
+        .Err(error) -> {
+            if error == {
+                .Closed(_) -> { print("closed:typed") }
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { print("closed:wrong") }
+            }
+        }
+    }
+}

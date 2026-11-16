@@ -1,0 +1,19 @@
+# A machine without an OS has only the services its profile declares.
+# `board.sensor_v1` declares a monotonic clock (its systick) and no wall clock,
+# so `time.now()` is E3311 at the call, at check and at build for the board,
+# and `time.instant()` is accepted. The build stops at the check, before any
+# image.
+fixture: e3311_wall_clock_on_board_sensor_v1.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check --target=board.sensor_v1 test.jet
+exit: 1
+stderr: ~ "Target `board.sensor_v1` lacks the required `Time.Wall` capability." # the check is for the selected machine
+stderr: ~ "test.jet:5:13" # reported at the `now` call
+stderr: !~ "Time.Monotonic" # the board declares a monotonic clock
+step: jet build --target=board.sensor_v1 test.jet
+exit: 1
+stderr: ~ "Target `board.sensor_v1` lacks the required `Time.Wall` capability." # the build checks for the selected machine
+stderr: ~ "test.jet:5:13" # reported at the `now` call
+stderr: !~ "Time.Monotonic" # the board declares a monotonic clock
+stderr: !~ "is not built yet" # the refusal comes from the check, before any image

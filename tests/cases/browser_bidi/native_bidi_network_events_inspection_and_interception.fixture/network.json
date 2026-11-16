@@ -1,0 +1,38 @@
+{
+ "max": 20,
+ "stop": "session.end",
+ "replies": {
+  "session.status": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"ready\":true,\"message\":\"ready\"}}"
+  },
+  "session.new": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"sessionId\":\"mock-session\",\"capabilities\":{\"browserName\":\"mock\",\"browserVersion\":\"1\"}}}"
+  },
+  "session.subscribe": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "network.addIntercept": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"intercept\":\"intercept-{n}\"}}"
+  },
+  "network.continueRequest": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "network.failRequest": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "network.provideResponse": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "network.removeIntercept": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "session.end": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  }
+ },
+ "after": {
+  "network.addIntercept#1": [
+   "{\"type\":\"event\",\"method\":\"network.beforeRequestSent\",\"params\":{\"isBlocked\":true,\"request\":{\"request\":\"req-secret-1\",\"method\":\"GET\",\"url\":\"https://leak.example/TOP_SECRET_TOKEN\"},\"response\":null}}"
+  ]
+ }
+}

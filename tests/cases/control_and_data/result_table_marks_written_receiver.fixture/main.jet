@@ -1,0 +1,33 @@
+#Error
+ReadError: struct {
+    message: String
+}
+
+Source: struct {
+    items: [Int]
+
+    pick: fn(&self, index: Int) -> Int ReadError! {
+        if index >= self.items.len() -> return Err(ReadError{message: "out of range"})
+        Ok(self.items[index])
+    }
+}
+
+run: fn() {
+    source := Source{items: [4, 5]}
+    x: if source.pick(1) == {
+        .Ok(v) -> v
+        .Err(e) -> {
+            print("failed {e.message}")
+            0
+        }
+    }
+    print("{x}")
+    y: if source.pick(5) == {
+        .Ok(v) -> v
+        .Err(e) -> {
+            print("failed {e.message}")
+            0
+        }
+    }
+    print("{y}")
+}

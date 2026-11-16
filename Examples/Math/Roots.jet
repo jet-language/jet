@@ -1,0 +1,17 @@
+// The nth root of x and (1 + x)^n, correctly rounded: the same bits on every
+// tier, exact roots exact, and 1 + x never rounded first.
+use math: core.math
+
+run: fn() {
+    print(math.root_n(Float{-8.0}, 3))
+    print(math.root_n(Float{16.0}, -4))
+    print(math.root_n(Float{2.0}, 3))
+    print(math.root_n(Float{-8.0}, 2))
+    print(math.root_n(Float{0.0}, -3))
+
+    print(math.compound_n(Float{0.05}, 10))
+    print(math.compound_n(Float{0.1}, -1))
+    // (1 + 2^-60)^(2^60) is e; 1 + 2^-60 itself rounds to 1.
+    print(math.compound_n(Float{8.673617379884035e-19}, 1152921504606846976))
+    print(math.compound_n(Float{-2.0}, 3))
+}

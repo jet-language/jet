@@ -1,0 +1,9 @@
+# tests/ring_layer.rs::solve_import_infers_alloc_layer at tests/ring_layer.rs:74; hand-port
+# assert_eq!(bundle.inferred_layer, Alloc) reads a loader bundle field with no CLI projection; this case keeps the no-error assertion. The receiver write carries today's required `&` mark (E0224); the program is otherwise the original.
+fixture: solve_import_infers_alloc_layer.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check run.jet
+exit: 0 # tests/ring_layer.rs:89 no Error diagnostic

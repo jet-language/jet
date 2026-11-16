@@ -1,0 +1,17 @@
+# `Panic` and `Mem` are deny-only: a deny row or `--deny` may refuse them, but
+# nothing grants them. A package's `authority.needs` naming `Mem.Alloc` or
+# `Panic` is a malformed authority block (E1221), and a function bound
+# `-[Panic]>` is E0751.
+fixture: panic_and_mem_grants_are_refused.fixture
+env: NO_COLOR=1
+step mem: jet check needs_mem
+exit: 1
+stderr: ~ "Error [jet.InvalidAuthorityBlock]" # the authority block is refused
+stderr: ~ "`Mem.Alloc` is deny-only and cannot be declared in `authority.needs`" # a Mem leaf is no grant
+step panic: jet check needs_panic
+exit: 1
+stderr: ~ "`Panic` is deny-only and cannot be declared in `authority.needs`" # nor is Panic
+step bound: jet check bound_panic.jet
+exit: 1
+stderr: ~ "Error [jet.PanicGranted]: `Panic` can't be granted, only denied" # a positive bound can't grant Panic
+stderr: ~ "E0751" # its code

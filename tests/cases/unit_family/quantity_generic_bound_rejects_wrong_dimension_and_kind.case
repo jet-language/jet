@@ -1,0 +1,18 @@
+# tests/unit_family.rs::quantity_generic_bound_rejects_wrong_dimension_and_kind at tests/unit_family.rs:875; hand-port
+# Claim: 3s into Quantity<Length,.Linear> rejected E0905 (tests/unit_family.rs:875)
+# Claim: CelsiusPoint into Quantity<Temperature,.Delta> rejected E0905 (tests/unit_family.rs:875)
+# Claim: undetermined choose() rejected E0904 (tests/unit_family.rs:875)
+# Fixture migrated: bound fixtures use print(value) in place of .raw()
+fixture: quantity_generic_bound_rejects_wrong_dimension_and_kind.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check dim/main.jet
+exit: 1 # 3s into Quantity<Length,.Linear> rejected E0905 (tests/unit_family.rs:875)
+stderr: ~ "E0905" # 3s into Quantity<Length,.Linear> rejected E0905 (tests/unit_family.rs:875)
+step: jet check kind/main.jet
+exit: 1 # 3s into Quantity<Length,.Linear> rejected E0905 (tests/unit_family.rs:875)
+stderr: ~ "E0905" # 3s into Quantity<Length,.Linear> rejected E0905 (tests/unit_family.rs:875)
+step: jet check undet/main.jet
+exit: 1 # 3s into Quantity<Length,.Linear> rejected E0905 (tests/unit_family.rs:875)
+stderr: ~ "E0904" # 3s into Quantity<Length,.Linear> rejected E0905 (tests/unit_family.rs:875)

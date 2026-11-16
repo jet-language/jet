@@ -1,0 +1,19 @@
+use term: core.term
+
+// A written `Reader` or `Cursor` names the handle's Core declaration
+// (core.term's `Reader`, core.text's `Cursor`); its take patterns are the
+// handle's, as on a value `Reader.over` or `Cursor.over` returns.
+read_head: fn(r: Reader) Err! {
+    head: r.take_pattern([U8]{"AB{x:U8}{y:U16le}"}) ?? return
+    term.print("reader {head.x} {head.y} remaining={r.remaining()}")
+}
+
+read_key: fn(c: Cursor) Err! {
+    key: c.take_pattern("k={n:Int};") ?? return
+    term.print("cursor {key.n}")
+}
+
+run: fn() Err! {
+    read_head(Reader.over([U8]{65, 66, 7, 0x34, 0x12, 9})) ?? return
+    read_key(Cursor.over("k=42;rest")) ?? return
+}

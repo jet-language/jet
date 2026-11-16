@@ -1,0 +1,44 @@
+// `#phase` is the phase of the compiled copy that runs it: `.Preparation` in
+// `#run` code and in a function's compile-time copy, `.Build` in the copy
+// the build entry runs, and `.Runtime` in the program, so one helper called
+// from all three reads all three. A value made while preparing keeps the
+// phase it was made in, so the program can tell a prepared record from one it
+// makes itself. Each copy folds its own phase, not the optimizer, so every
+// tier and the built program print the same lines.
+PREPARED: #run #phase
+
+Stamp: struct {
+    phase: Phase
+    value: Int
+}
+
+PREP_STAMP: #run { Stamp{phase: #phase, value: 6 * 7} }
+
+current_phase: fn() -> Phase { #phase }
+
+HELPER_PHASE: #run current_phase()
+
+phase_label: fn(phase: Phase) -> String {
+    if phase == {
+        .Preparation -> "preparation"
+        .Build -> "build"
+        .Runtime -> "runtime"
+    }
+}
+
+build: fn(b: Build) {
+    b.contribute("build_phase", phase_label(#phase))
+    b.contribute("helper_phase", phase_label(current_phase()))
+}
+
+run: fn() {
+    print(phase_label(PREPARED))
+    print(#build.settings.build_phase)
+    print(phase_label(#phase))
+    run_stamp: Stamp{phase: #phase, value: 6 * 7}
+    print("{phase_label(PREP_STAMP.phase)} {PREP_STAMP.value}")
+    print("{phase_label(run_stamp.phase)} {run_stamp.value}")
+    print(PREP_STAMP.value == run_stamp.value && PREP_STAMP.phase != run_stamp.phase)
+    print("helper {phase_label(HELPER_PHASE)} {#build.settings.helper_phase} {phase_label(current_phase())}")
+    if #phase == .Runtime -> print("this line runs in the program")
+}

@@ -1,0 +1,139 @@
+use rr_files: core.files
+
+// Three counts over the diagnostic registry, each pinned to its ceiling. A
+// count may only fall: one above its ceiling fails, and one below it fails
+// until the ceiling drops to the new count, so a fixed row stays fixed.
+// - no UI snapshot: an active row a compiler stage emits that no tests/ui
+//   snapshot shows (the generated tests/diagnostics_census.tsv; a code only
+//   a tool, the runtime, Jetpack or Core emits has no UI snapshot to show it);
+// - generic Why: an active row whose Why is empty or only says that a
+//   registered rule applies (`The registered sema rule applies here`);
+// - decision ID: a row that names a decision (`D-SHAPE3a`) in a column a
+//   user reads (meaning, what, why, fix, next, no-fix reason).
+RR_CENSUS: "tests/diagnostics_census.tsv"
+
+RR_REGISTRY: "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"
+
+RR_USER_COLUMNS: [String]{"meaning", "what", "why", "fix", "next", "no_fix_reason"}
+
+RR_CEILING_NO_UI: 25
+
+RR_CEILING_GENERIC_WHY: 0
+
+RR_CEILING_DECISION_ID: 0
+
+// Does the Why text `value` (as dt_row_value reads it, closing quote kept)
+// explain nothing beyond the code's own existence.
+rr_generic_why: fn(value: String) -> Bool {
+    text: value.trim_end().to_lower()
+    if text == "\"," || text == "\"" -> return true
+    text.starts_with("the registered ") && text.contains(" rule applies here")
+}
+
+// The active, compiler-emitted rows the census shows without a UI snapshot.
+rr_no_ui_codes: fn() -> [String] {
+    text: rr_files.read(RR_CENSUS) ?? panic("read {RR_CENSUS}: {err}")
+    codes := [String]{}
+    loop line in text.split("\n").to_list() {
+        if line.starts_with("#") -> next
+        columns: line.split("\t").to_list()
+        if columns.len() < 5 -> next
+        if columns[2] == "active" && columns[3] == "compiler" && columns[4] != "ui" {
+            codes.push(columns[0])
+        }
+    }
+    codes
+}
+
+// The code of the registry line `code: "E0107",`, else "".
+rr_row_code: fn(line: String) -> String {
+    value: dt_row_value(line, [String]{"code"})
+    end: s5_grammar_find(value, "\"", 0)
+    if end < 0 -> return ""
+    s5_grammar_slice_bytes(value, 0, end)
+}
+
+RrRegistryRows: struct {
+    generic: [String]
+    decisions: [String]
+}
+
+// The registry rows with a generic Why, and the rows naming a decision in a
+// user-facing column, read from the generated registry `text`.
+rr_registry_counts: fn(text: String) -> RrRegistryRows {
+    generic := [String]{}
+    decisions := [String]{}
+    code := ""
+    active := false
+    loop line in text.split("\n").to_list() {
+        trimmed: line.trim()
+        if trimmed.starts_with("//") -> next
+        row_code: rr_row_code(line)
+        if row_code != "" {
+            code = row_code
+            active = false
+            next
+        }
+        if trimmed.starts_with("status: ") {
+            active = trimmed.contains(".Active")
+            next
+        }
+        value: dt_row_value(line, RR_USER_COLUMNS)
+        if value == "" -> next
+        if active && trimmed.starts_with("why: ") && rr_generic_why(value) && !generic.contains(code) {
+            generic.push(code.copy())
+        }
+        loop id in dt_ids(value) {
+            if id.starts_with("D-") && !decisions.contains(code) -> decisions.push(code.copy())
+        }
+    }
+    RrRegistryRows{generic: generic, decisions: decisions}
+}
+
+// The failure for `name` counting `codes` against `ceiling`, else "".
+rr_check: fn(name: String, codes: [String], ceiling: Int, constant: String) -> String {
+    count: codes.len()
+    if count > ceiling {
+        return "{name}: {count} rows, above the ceiling {ceiling}; fix the new rows ({codes.join(", ")})"
+    }
+    if count < ceiling {
+        return "{name}: {count} rows, below the ceiling {ceiling}; lower {constant} to {count}"
+    }
+    ""
+}
+
+#Test("diagnostic_registry_counts_only_fall") {
+    guards_enter_root()
+    registry: rr_files.read(RR_REGISTRY) ?? panic("read {RR_REGISTRY}: {err}")
+    no_ui: rr_no_ui_codes()
+    rows: rr_registry_counts(registry)
+    generic: rows.generic
+    decisions: rows.decisions
+    print("diagnostic registry: {no_ui.len()} active compiler rows without a UI snapshot, {generic.len()} rows with a generic Why, {decisions.len()} rows naming a decision")
+    failures := [String]{}
+    checks: [String]{
+        rr_check("no UI snapshot", no_ui, RR_CEILING_NO_UI, "RR_CEILING_NO_UI"),
+        rr_check("generic Why", generic, RR_CEILING_GENERIC_WHY, "RR_CEILING_GENERIC_WHY"),
+        rr_check("decision ID", decisions, RR_CEILING_DECISION_ID, "RR_CEILING_DECISION_ID"),
+    }
+    loop failure in checks {
+        if failure != "" -> failures.push(failure)
+    }
+    assert(failures.len() == 0, "the diagnostic registry counts may only fall:\n{failures.join("\n")}")
+}
+
+#Test("diagnostic_registry_ratchet_reads_each_kind") {
+    guards_enter_root()
+    assert(rr_generic_why("The registered sema rule applies here\","), "the registered-rule Why is generic")
+    assert(rr_generic_why("\","), "an empty Why is generic")
+    assert(!rr_generic_why("A name must be declared before it's used\","), "a specific Why is not generic")
+    probe: "    {{\n        code: \"E0001\",\n        status: DiagnosticRegistryStatus.Active,\n        what: \"see D-SHAPE3a\",\n        why: \"The registered parse rule applies here\",\n    }},\n    {{\n        code: \"E0002\",\n        status: DiagnosticRegistryStatus.Retired,\n        why: \"The registered sema rule applies here\",\n        fix: \"keep I64 and c1\",\n    }},\n"
+    rows: rr_registry_counts(probe)
+    generic: rows.generic
+    decisions: rows.decisions
+    assert_eq(generic, [String]{"E0001"})
+    assert_eq(decisions, [String]{"E0001"})
+    assert(rr_check("probe", [String]{"E0001"}, 0, "C") != "", "a count above its ceiling fails")
+    assert(rr_check("probe", [String]{}, 1, "C").contains("lower C to 0"), "a count below its ceiling asks for the lower ceiling")
+    assert(rr_check("probe", [String]{"E0001"}, 1, "C") == "", "a count at its ceiling passes")
+}

@@ -1,0 +1,702 @@
+// ScriptBench: Jet against the scripting runtimes on the fifteen script workloads.
+//
+//   jet Tools/perf/scriptbench/Bench.jet --list
+//   jet Tools/perf/scriptbench/Bench.jet --data DIR --out DIR [--only w05,w13] [--jet PATH]
+//   jet Tools/perf/scriptbench/Bench.jet --check-floor --out DIR [--jet PATH]
+//
+// Run it from the repository root. manifest.json is the single source of truth:
+// the pinned peer runtimes, the method, the comparator and the workloads. Each
+// run writes the inputs (Gen.jet), builds every run.jet at O0, O1 and O2 (`jet
+// build --release`), checks that every Jet build, each `jet run` phase and every
+// peer prints the workload's expected.out, then times the jet-bin tier, the two
+// jet-run phases and every peer with hyperfine. Peak memory comes from the
+// gauntlet's launcher instead (LAUNCHER). It prints one cell per workload,
+// tier, peer and metric, writes the cells to OUT/cells.tsv, and exits 1 on any
+// LOSS or any wrong output.
+//
+// `jet run` keeps no program, so every jet-run run compiles. The phases each
+// run under their own user cache, OUT/cache/ID-PHASE: jet-run-first empties it
+// before every timed run; jet-run-edit runs a copy of run.jet,
+// OUT/edit/ID/run.jet, whose last line `Bench.jet --edit FILE` changes before
+// every timed run.
+//
+// `--check-floor` holds the launcher's peak against a reference reading: the
+// release hello and coreutils `true` each print one row with the launcher's
+// median and their /proc VmHWM's (check_floor), and it exits 1 unless both
+// sit within 5%.
+package: {
+    name: "scriptbench"
+    authority: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Net, Time, Time.Wait] }
+}
+
+use {
+    encoding: core.encoding
+    fs: core.files
+    http: core.http
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+Method: struct {
+    rounds: Int
+    warmup: Int
+    runs: Int
+    slow_ms: Int
+    slow_warmup: Int
+    slow_runs: Int
+    timeout_s: Int
+}
+
+Peer: struct {
+    name: String
+    file: String
+    argv: [String]
+}
+
+Server: struct {
+    port: Int
+    delay_ms: Int
+}
+
+Workload: struct {
+    id: String
+    dir: String
+    what: String
+    cards: [String]
+    args: [String]
+    servers: [Server]
+    peers: [String]
+}
+
+Manifest: struct {
+    method: Method
+    hyperfine: String
+    server: [String]
+    path: [String]
+    report_only: [String]
+    peers: [Peer]
+    workloads: [Workload]
+}
+
+// One timed command: a Jet tier or a peer.
+Command: struct {
+    name: String
+    argv: [String]
+    slow: Bool
+    // The user cache (XDG_CACHE_HOME) a jet-run phase runs under; "" inherits
+    // the caller's.
+    cache: String
+    // What hyperfine runs before each timed run ("" for nothing).
+    prepare: String
+}
+
+// What the rounds measured for one command. wall is the median run, cpu the
+// mean user + system, rss the largest peak; times are microseconds, rss bytes.
+Stat: struct {
+    name: String
+    wall: Int
+    cpu: Int
+    rss: Int
+    timed_out: Bool
+}
+
+Options: struct {
+    list: Bool
+    check_floor: Bool
+    only: [String]
+    data: String
+    out: String
+    jet: String
+    edit: String
+}
+
+fail: fn(message: String) -> Never {
+    print("scriptbench: {message}")
+    process.exit(2)
+}
+
+member: fn(d: Dyn, name: String) -> Dyn { d.field(name) ?? fail("manifest: no `{name}`") }
+
+text_of: fn(d: Dyn, name: String) -> String {
+    member(d, name).text() ?? fail("manifest: `{name}` is not text")
+}
+
+int_of: fn(d: Dyn, name: String) -> Int {
+    member(d, name).int() ?? fail("manifest: `{name}` is not an integer")
+}
+
+items: fn(d: Dyn) -> [Dyn] {
+    if d == {
+        .Array(values) -> values
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> fail("expected a JSON array")
+    }
+}
+
+texts_of: fn(d: Dyn, name: String) -> [String] {
+    out := [String]{}
+    loop item in items(member(d, name)) {
+        out.push(item.text() ?? fail("manifest: `{name}` holds a non-text item"))
+    }
+    out
+}
+
+load: fn(path: String) -> Manifest {
+    raw: fs.read(path) ?? fail("can't read {path}")
+    tree: json.parse(raw) ?? fail("{path} is not JSON")
+    md: member(tree, "method")
+    method: Method{
+        rounds: int_of(md, "rounds"),
+        warmup: int_of(md, "warmup"),
+        runs: int_of(md, "runs"),
+        slow_ms: int_of(md, "slow_ms"),
+        slow_warmup: int_of(md, "slow_warmup"),
+        slow_runs: int_of(md, "slow_runs"),
+        timeout_s: int_of(md, "timeout_s"),
+    }
+    report := [String]{}
+    loop item in items(member(tree, "report_only")) {
+        report.push("{text_of(item, "workload")}/{text_of(item, "tier")}")
+    }
+    peers := [Peer]{}
+    loop item in items(member(tree, "peers")) {
+        peers.push(Peer{name: text_of(item, "name"), file: text_of(item, "file"), argv: texts_of(item, "argv")})
+    }
+    workloads := [Workload]{}
+    loop item in items(member(tree, "workloads")) {
+        servers := [Server]{}
+        loop s in items(member(item, "servers")) {
+            servers.push(Server{port: int_of(s, "port"), delay_ms: int_of(s, "delay_ms")})
+        }
+        workloads.push(
+            Workload{
+                id: text_of(item, "id"),
+                dir: text_of(item, "dir"),
+                what: text_of(item, "what"),
+                cards: texts_of(item, "cards"),
+                args: texts_of(item, "args"),
+                servers: servers,
+                peers: texts_of(item, "peers"),
+            },
+        )
+    }
+    Manifest{
+        method: method,
+        hyperfine: text_of(tree, "hyperfine"),
+        server: texts_of(tree, "server"),
+        path: texts_of(tree, "path"),
+        report_only: report,
+        peers: peers,
+        workloads: workloads,
+    }
+}
+
+peer_named: fn(m: Manifest, name: String) -> Peer {
+    loop p in m.peers {
+        if p.name == name -> return p.copy()
+    }
+    fail("manifest: no peer `{name}`")
+}
+
+options: fn() -> Options {
+    argv: process.args()
+    opts := Options{list: false, check_floor: false, only: [String]{}, data: "", out: "", jet: process.which("jet") ?? "", edit: ""}
+    i := 0
+    loop i < argv.len() {
+        flag: argv[i]
+        value: if i + 1 < argv.len() -> argv[i + 1].copy() else -> ""
+        if flag == {
+            "--list" -> {
+                opts.list = true
+                i += 1
+                next
+            }
+            "--check-floor" -> {
+                opts.check_floor = true
+                i += 1
+                next
+            }
+            "--only" -> opts.only = value.split(",").to_list()
+            "--data" -> opts.data = value
+            "--out" -> opts.out = value
+            "--jet" -> opts.jet = value
+            "--edit" -> opts.edit = value
+            else -> {
+                fail("unknown argument `{flag}`; usage: Bench.jet --list | --check-floor --out DIR [--jet PATH] | --data DIR --out DIR [--only w01,w02] [--jet PATH]")
+            }
+        }
+        i += 2
+    }
+    opts
+}
+
+list: fn(m: Manifest) -> Int {
+    missing := 0
+    print("peers:")
+    loop p in m.peers {
+        state: if fs.exists(p.argv[0]) -> "ok" else -> "MISSING"
+        if state != "ok" -> missing += 1
+        print("  {p.name.pad_end(7, " ")} {state.pad_end(8, " ")} {p.argv.join(" ")}")
+    }
+    tools: [m.hyperfine.copy(), m.server[0].copy()]
+    loop tool in tools {
+        state: if fs.exists(tool) -> "ok" else -> "MISSING"
+        if state != "ok" -> missing += 1
+        print("  tool    {state.pad_end(8, " ")} {tool}")
+    }
+    print("workloads:")
+    loop w in m.workloads {
+        print("  {w.id} {w.dir.pad_end(13, " ")} {w.cards.join(",").pad_end(13, " ")} {w.what} [{w.peers.join(" ")}]")
+    }
+    print("comparator: every cell is Jet over one peer for one metric; 1.00 or more is a LOSS; no averaging")
+    if missing > 0 -> return 1
+    0
+}
+
+// Parses a JSON number's text (for example 0.0123 or 1.5e-05) as microseconds.
+micros: fn(d: Dyn) -> Int {
+    spelled: d.to_text() ?? fail("hyperfine: a number is not numeric")
+    lower: spelled.to_lower()
+    halves: lower.split("e").to_list()
+    exp_text: if halves.len() > 1 -> halves[1].copy() else -> "0"
+    exp: Int.parse(if exp_text.starts_with("+") -> exp_text.slice(1, exp_text.count_bytes()) else -> exp_text) ?? 0
+    parts: halves[0].split(".").to_list()
+    frac: if parts.len() > 1 -> parts[1].copy() else -> ""
+    digits: Int.parse("{parts[0]}{frac}") ?? fail("hyperfine: bad number {spelled}")
+    k := exp - frac.count_bytes() + 6
+    value := digits
+    loop k > 0 {
+        value *= 10
+        k -= 1
+    }
+    loop k < 0 {
+        value = value /% 10
+        k += 1
+    }
+    value
+}
+
+ms_text: fn(us: Int) -> String {
+    tenths: (us + 50) /% 100
+    "{tenths /% 10}.{tenths %% 10}ms"
+}
+
+mb_text: fn(bytes: Int) -> String {
+    tenths: (bytes * 10 + 524288) /% 1048576
+    "{tenths /% 10}.{tenths %% 10}MB"
+}
+
+ratio_text: fn(jet: Int, peer: Int) -> String {
+    if peer <= 0 -> return "inf"
+    hundredths: (jet * 100 + peer /% 2) /% peer
+    cents: hundredths %% 100
+    if cents < 10 -> return "{hundredths /% 100}.0{cents}"
+    "{hundredths /% 100}.{cents}"
+}
+
+with_path: fn(spec: ProcessSpec, m: Manifest) -> ProcessSpec {
+    inherited: process.env_get("PATH") ?? ""
+    spec.env("PATH", "{m.path.join(":")}:{inherited}")
+}
+
+jet_env: fn(spec: ProcessSpec) -> ProcessSpec {
+    spec.env("JET_TEST_STATE_DIR", process.env_get("JET_TEST_STATE_DIR") ?? "")
+}
+
+// `spec` under the user cache of a jet-run phase, when it has its own.
+with_cache: fn(spec: ProcessSpec, c: Command) -> ProcessSpec {
+    if c.cache == "" -> return spec.copy()
+    spec.env("XDG_CACHE_HOME", c.cache.copy())
+}
+
+// The gauntlet's launcher, from the repository's root. It reads each process's
+// exact VmHWM at its exit, and the largest is the peak. hyperfine's
+// memory_usage_byte can't give the peak: it is ru_maxrss, which Linux carries
+// across exec, so a command reads at least hyperfine's own high-water mark
+// (about 3.7 MB).
+LAUNCHER: "Tools/gauntlet/harness/launch.c"
+
+// Builds the launcher into OUT and returns its path.
+build_launcher: fn(root: String, out: String) -> String {
+    built: "{out}/launch"
+    receipt: process.cmd(["cc", "-O2", "-o", built.copy(), "{root}/{LAUNCHER}"]).output_limit(16777216).run() ?? fail("cc could not start")
+    if !receipt.success -> fail("the launcher {LAUNCHER} does not build: {receipt.errors}")
+    built
+}
+
+// The last line of a jet-run-edit copy of run.jet, before its count.
+EDIT_HEAD: "bench_edit: fn() -> Int {{ "
+
+// `Bench.jet --edit FILE`: counts up the last line of a jet-run-edit copy, so
+// the next run compiles an edited declaration and the output stays the same.
+edit: fn(file: String) -> Int {
+    source: fs.read(file) ?? fail("can't read {file}")
+    parts: source.rpartition(EDIT_HEAD)
+    if parts.sep == "" -> fail("{file} has no `{EDIT_HEAD}` line")
+    count: Int.parse(parts.tail.partition(" ").head) ?? fail("{file}: the `{EDIT_HEAD}` line holds no count")
+    fs.write(file, "{parts.head}{EDIT_HEAD}{count + 1} }}\n") ?? fail("can't write {file}")
+    0
+}
+
+// Builds run.jet at one level into OUT/bin/ID/LEVEL and returns the binary.
+build: fn(opts: Options, bench: String, w: Workload, level: String, flag: String) -> String? {
+    out: "{opts.out}/bin/{w.id}/{level}"
+    fs.create_dir_all(out) ?? fail("mkdir {out}")
+    receipt: process.cmd([opts.jet.copy(), "build", flag.copy(), "--output-dir={out}", "{bench}/{w.dir}/run.jet"]).output_limit(16777216).run() ?? fail("{opts.jet} could not start")
+    if !receipt.success {
+        print("  {w.id} build {level} FAILED (exit {receipt.code})")
+        loop line in "{receipt.output}{receipt.errors}".lines().take(12) -> print("    {line}")
+        return None
+    }
+    return .Val("{out}/run")
+}
+
+// Runs a command once in the data directory; returns the elapsed milliseconds,
+// or None after printing why the output is wrong.
+check: fn(m: Manifest, opts: Options, c: Command, expected: String, wid: String) -> Int? {
+    started: time.instant()
+    spec: with_cache(with_path(process.cmd(c.argv.copy()).cwd(opts.data).timeout(time.duration_ms(m.method.timeout_s * 1000)).output_limit(67108864), m), c)
+    receipt: spec.run() ?? {
+        print("  {wid} {c.name}: could not start {c.argv[0]}")
+        return None
+    }
+    elapsed: started.elapsed_millis()
+    if receipt.timed_out {
+        print("  {wid} {c.name}: TIMEOUT after {m.method.timeout_s} s")
+        return .Val(-1)
+    }
+    if !receipt.success || receipt.output != expected {
+        print("  {wid} {c.name}: WRONG OUTPUT (exit {receipt.code})")
+        loop line in "{receipt.output}{receipt.errors}".lines().take(6) -> print("    {line}")
+        return None
+    }
+    return .Val(elapsed)
+}
+
+// The runs of one command in one round: wall times and CPU (user + system)
+// per timed run in microseconds, and the peak memory of the round's memory run
+// in bytes.
+Sample: struct {
+    walls: [Int]
+    cpu: [Int]
+    rss: [Int]
+}
+
+// Times one command for one round with hyperfine, then runs it once more
+// through the launcher for its peak memory (peak_memory).
+round: fn(m: Manifest, opts: Options, c: Command, file: String, launcher: String) -> Sample? {
+    warmup: if c.slow -> m.method.slow_warmup else -> m.method.warmup
+    runs: if c.slow -> m.method.slow_runs else -> m.method.runs
+    argv := [m.hyperfine.copy(), "-N", "--style", "none", "--warmup", "{warmup}", "--runs", "{runs}", "--export-json", file.copy(), "-n", c.name.copy()]
+    if c.prepare != "" {
+        argv.push("--prepare")
+        argv.push(c.prepare.copy())
+    }
+    argv.push(c.argv.join(" "))
+    receipt: with_cache(with_path(process.cmd(argv).cwd(opts.data).output_limit(16777216), m), c).run() ?? fail("hyperfine could not start")
+    if !receipt.success {
+        print("  {c.name}: hyperfine failed (exit {receipt.code})")
+        loop line in "{receipt.output}{receipt.errors}".lines().take(6) -> print("    {line}")
+        return None
+    }
+    tree: json.parse(fs.read(file) ?? fail("can't read {file}")) ?? fail("{file} is not JSON")
+    result: items(member(tree, "results"))[0]
+    sample := Sample{walls: [Int]{}, cpu: [Int]{}, rss: [Int]{}}
+    loop t in items(member(result, "times")) -> sample.walls.push(micros(t))
+    per_run: micros(member(result, "user")) + micros(member(result, "system"))
+    loop _ in 0..<runs -> sample.cpu.push(per_run)
+    sample.rss.push(peak_memory(m, opts, c, launcher, "{file}.launch") ?? return None)
+    return .Val(sample)
+}
+
+// Runs a command once through the launcher, after its prepare command as
+// hyperfine runs it, and returns its peak memory in bytes; None after printing
+// why the run failed.
+peak_memory: fn(m: Manifest, opts: Options, c: Command, launcher: String, report: String) -> Int? {
+    if c.prepare != "" {
+        prepared: with_cache(with_path(process.cmd(c.prepare.split(" ").to_list()).cwd(opts.data).output_limit(16777216), m), c).run() ?? fail("the prepare command of {c.name} could not start")
+        if !prepared.success {
+            print("  {c.name}: the prepare command failed (exit {prepared.code})")
+            return None
+        }
+    }
+    argv := [launcher.copy(), report.copy()]
+    argv.extend(c.argv.copy())
+    receipt: with_cache(with_path(process.cmd(argv).cwd(opts.data).timeout(time.duration_ms(m.method.timeout_s * 1000)).output_limit(67108864), m), c).run() ?? fail("the launcher could not start")
+    // The launcher's end line: exit code, wall ns, first stdout ns, peak KiB,
+    // user us, system us, exec errno.
+    end := [String]{}
+    loop line in (fs.read(report) ?? "").lines() {
+        fields: line.split(" ").to_list()
+        if fields[0] == "end" -> end = fields
+    }
+    if receipt.timed_out || end.len() != 8 || end[1] != "0" {
+        print("  {c.name}: the memory run failed (exit {receipt.code})")
+        loop line in receipt.errors.lines().take(6) -> print("    {line}")
+        return None
+    }
+    .Val((Int.parse(end[4]) ?? 0) * 1024)
+}
+
+// The workload whose release binary is the hello of the floor check.
+HELLO: "w01"
+
+// The reference reader the floor check holds the launcher against, from the
+// repository's root: it traces one process alone and reads its VmHWM at the
+// exit stop.
+READER: "Tools/perf/scriptbench/vmhwm.c"
+
+// Readings per command in the floor check, and how far, in percent, the
+// launcher's median may sit from the reader's.
+FLOOR_RUNS: 11
+
+FLOOR_PERCENT: 5
+
+median: fn(values: [Int]) -> Int {
+    sorted := values.copy()
+    sorted.sort()
+    sorted[sorted.len() /% 2]
+}
+
+// The reader's VmHWM of one run of `argv` in `cwd`, in KiB.
+reader_kb: fn(reader: String, report: String, argv: [String], cwd: String) -> Int {
+    full := [reader.copy(), report.copy()]
+    full.extend(argv.copy())
+    receipt: process.cmd(full).cwd(cwd).output_limit(16777216).run() ?? fail("the reader could not start")
+    kb: Int.parse((fs.read(report) ?? "").trim().removeprefix("vmhwm ")) ?? -1
+    if !receipt.success || kb < 0 {
+        fail("the reader's run of {argv[0]} failed (exit {receipt.code}): {receipt.errors}")
+    }
+    kb
+}
+
+// `--check-floor`: the release hello (HELLO) and coreutils `true`, each read
+// FLOOR_RUNS times through the launcher as every rss cell is (peak_memory)
+// and through the reader (READER), one row each with both medians. Returns 1
+// unless each launcher median sits within FLOOR_PERCENT of its VmHWM.
+check_floor: fn(m: Manifest, opts: Options, root: String, bench: String, launcher: String) -> Int {
+    reader: "{opts.out}/vmhwm"
+    built: process.cmd(["cc", "-O2", "-o", reader, "{root}/{READER}"]).output_limit(16777216).run() ?? fail("cc could not start")
+    if !built.success -> fail("the reader {READER} does not build: {built.errors}")
+    hello := ""
+    loop w in m.workloads {
+        if w.id == HELLO {
+            hello = build(opts, bench, w, "O2", "--release") ?? fail("the hello {w.dir} does not build")
+        }
+    }
+    if hello == "" -> fail("manifest: no workload `{HELLO}`")
+    names: ["hello", "true"]
+    programs: [hello, process.which("true") ?? fail("no `true` on PATH")]
+    failed := 0
+    loop k in 0..<names.len() {
+        c: Command{name: names[k].copy(), argv: [programs[k].copy()], slow: false, cache: "", prepare: ""}
+        launched := [Int]{}
+        exact := [Int]{}
+        loop _ in 0..<FLOOR_RUNS {
+            launched.push((peak_memory(m, opts, c, launcher, "{opts.out}/floor.launch") ?? fail("the launcher's run of {c.name} failed")) /% 1024)
+            exact.push(reader_kb(reader, "{opts.out}/floor.vmhwm", c.argv, opts.data))
+        }
+        got: median(launched)
+        want: median(exact)
+        gap: if got > want -> got - want else -> want - got
+        tenths: if want > 0 -> gap * 1000 /% want else -> 1000
+        within: gap * 100 <= want * FLOOR_PERCENT
+        if !within -> failed += 1
+        verdict: if within -> "ok" else -> "FAIL"
+        print("floor {c.name.pad_end(5, " ")} launcher {"{got}".pad_start(7, " ")} kB  /proc VmHWM {"{want}".pad_start(7, " ")} kB  off {tenths /% 10}.{tenths %% 10}%  {verdict} (within {FLOOR_PERCENT}%; medians of {FLOOR_RUNS}; {c.argv[0]})")
+    }
+    if failed > 0 -> 1 else -> 0
+}
+
+measure: fn(m: Manifest, opts: Options, wid: String, commands: [Command], launcher: String) -> [Stat]? {
+    walls := [[Int]]{}
+    cpus := [[Int]]{}
+    rsss := [[Int]]{}
+    loop _ in commands {
+        walls.push([Int]{})
+        cpus.push([Int]{})
+        rsss.push([Int]{})
+    }
+    n: commands.len()
+    loop r in 0..<m.method.rounds {
+        loop k in 0..<n {
+            i: (k + r) %% n
+            file: "{opts.out}/json/{wid}-{commands[i].name}-{r}.json"
+            sample: round(m, opts, commands[i], file, launcher) ?? return None
+            loop v in sample.walls -> walls[i].push(v)
+            loop v in sample.cpu -> cpus[i].push(v)
+            loop v in sample.rss -> rsss[i].push(v)
+        }
+    }
+    stats := [Stat]{}
+    loop i in 0..<n {
+        w := walls[i].copy()
+        w.sort()
+        cpu_total := 0
+        loop v in cpus[i] -> cpu_total += v
+        peak := 0
+        loop v in rsss[i] {
+            if v > peak -> peak = v
+        }
+        stats.push(Stat{name: commands[i].name.copy(), wall: w[w.len() /% 2], cpu: cpu_total /% cpus[i].len(), rss: peak, timed_out: false})
+    }
+    return .Val(stats)
+}
+
+// The index of the named command's stats, or -1 when it was not timed.
+stat_index: fn(stats: [Stat], name: String) -> Int {
+    loop i in 0..<stats.len() {
+        if stats[i].name == name -> return i
+    }
+    -1
+}
+
+start_servers: fn(m: Manifest, bench: String, w: Workload) -> [ProcessChild] {
+    children := [ProcessChild]{}
+    loop s in w.servers {
+        argv: [m.server[0].copy(), "{bench}/{m.server[1]}", "{s.port}", "{s.delay_ms}"]
+        child: process.cmd(argv).stdout(.Inherit).spawn() ?? fail("the fixture server could not start")
+        children.push(child)
+        ready := false
+        loop _ in 0..<100 {
+            if http.get("http://127.0.0.1:{s.port}/item/0") == .Ok(_) {
+                ready = true
+                break
+            }
+            time.sleep(50ms)
+        }
+        if !ready -> fail("the fixture server on port {s.port} never answered")
+    }
+    children
+}
+
+run: fn() {
+    opts := options()
+    if opts.edit != "" -> process.exit(edit(opts.edit))
+    root: sys.current_dir() ?? fail("no working directory")
+    bench: "{root}/Tools/perf/scriptbench"
+    m: load("{bench}/manifest.json")
+    if opts.list -> process.exit(list(m))
+    if opts.check_floor && opts.out != "" && opts.jet != "" {
+        fs.create_dir_all(opts.out) ?? fail("mkdir {opts.out}")
+        floor_opts: Options{list: false, check_floor: true, only: [String]{}, data: opts.out.copy(), out: opts.out.copy(), jet: opts.jet.copy(), edit: ""}
+        process.exit(check_floor(m, floor_opts, root, bench, build_launcher(root, opts.out)))
+    }
+    if opts.data == "" || opts.out == "" || opts.jet == "" {
+        fail("--data, --out and a jet compiler (--jet or PATH) are required; --check-floor needs --out and the compiler")
+    }
+    fs.create_dir_all("{opts.out}/json") ?? fail("mkdir {opts.out}/json")
+    launcher: build_launcher(root, opts.out)
+    gen: process.cmd([opts.jet.copy(), "run", "{bench}/Gen.jet", "--", opts.data.copy()]).output_limit(16777216).run() ?? fail("Gen.jet could not start")
+    if !gen.success -> fail("Gen.jet failed (exit {gen.code}): {gen.output}{gen.errors}")
+    errors := 0
+    losses := 0
+    rows := ["workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcards"]
+    loop w in m.workloads {
+        if opts.only.len() > 0 && !opts.only.contains(w.id) -> next
+        print("== {w.id} {w.dir}: {w.what} ({w.cards.join(", ")})")
+        expected: fs.read("{bench}/{w.dir}/expected.out") ?? fail("no {w.dir}/expected.out")
+        levels: ["O0", "O1", "O2"]
+        flags: ["-O0", "-O1", "--release"]
+        bins := [String]{}
+        loop k in 0..<3 {
+            if build(opts, bench, w, levels[k], flags[k]) == .Val(bin) -> bins.push(bin) else {
+                errors += 1
+            }
+        }
+        if bins.len() != 3 -> next
+        servers: start_servers(m, bench, w)
+        commands := [Command]{}
+        candidates := [Command]{}
+        loop k in 0..<2 {
+            argv := [bins[k].copy()]
+            loop a in w.args -> argv.push(a.copy())
+            candidates.push(Command{name: "jet-O{k}", argv: argv, slow: false, cache: "", prepare: ""})
+        }
+        bin_argv := [bins[2].copy()]
+        loop a in w.args -> bin_argv.push(a.copy())
+        candidates.push(Command{name: "jet-bin", argv: bin_argv, slow: false, cache: "", prepare: ""})
+        edit_dir: "{opts.out}/edit/{w.id}"
+        fs.create_dir_all(edit_dir) ?? fail("mkdir {edit_dir}")
+        source: fs.read("{bench}/{w.dir}/run.jet") ?? fail("can't read {w.dir}/run.jet")
+        fs.write("{edit_dir}/run.jet", "{source}\n{EDIT_HEAD}0 }}\n") ?? fail("can't write {edit_dir}/run.jet")
+        phases: ["first", "edit"]
+        loop phase in phases {
+            cache: "{opts.out}/cache/{w.id}-{phase}"
+            fs.remove_all(cache).drop("a cache left by an earlier ScriptBench run may be absent")
+            entry: if phase == "edit" -> "{edit_dir}/run.jet" else -> "{bench}/{w.dir}/run.jet"
+            prepare: if phase == "edit" -> "{opts.jet} {bench}/Bench.jet --edit {entry}" else -> "rm -rf {cache}"
+            run_argv := [opts.jet.copy(), "run", entry]
+            if w.args.len() > 0 -> run_argv.push("--")
+            loop a in w.args -> run_argv.push(a.copy())
+            candidates.push(Command{name: "jet-run-{phase}", argv: run_argv, slow: false, cache: cache, prepare: prepare})
+        }
+        loop name in w.peers {
+            p: peer_named(m, name)
+            argv := p.argv.copy()
+            argv.push("{bench}/{w.dir}/{p.file}")
+            loop a in w.args -> argv.push(a.copy())
+            candidates.push(Command{name: name.copy(), argv: argv, slow: false, cache: "", prepare: ""})
+        }
+        timed_out := [String]{}
+        loop c in candidates {
+            if check(m, opts, c, expected, w.id) == .Val(ms) {
+                if ms < 0 {
+                    timed_out.push(c.name.copy())
+                    if c.name.starts_with("jet") -> errors += 1
+                } else if c.name != "jet-O0" && c.name != "jet-O1" {
+                    commands.push(Command{name: c.name.copy(), argv: c.argv.copy(), slow: ms > m.method.slow_ms, cache: c.cache.copy(), prepare: c.prepare.copy()})
+                }
+            } else { errors += 1 }
+        }
+        measured: measure(m, opts, w.id, commands, launcher)
+        loop child in servers -> child.kill().drop("the fixture server may already be gone")
+        if measured == .Val(stats) {
+            loop s in stats {
+                print("  {s.name.pad_end(13, " ")} wall {ms_text(s.wall).pad_start(11, " ")}  cpu {ms_text(s.cpu).pad_start(11, " ")}  rss {mb_text(s.rss).pad_start(9, " ")}")
+            }
+            loop t in timed_out {
+                print("  {t.pad_end(13, " ")} TIMEOUT (over {m.method.timeout_s} s)")
+            }
+            tiers: ["jet-bin", "jet-run-first", "jet-run-edit"]
+            loop tier in tiers {
+                ji: stat_index(stats, tier)
+                if ji < 0 -> next
+                j: stats[ji]
+                report_only: m.report_only.contains("{w.id}/{tier}")
+                owners: w.cards.join(",")
+                loop name in w.peers {
+                    pi: stat_index(stats, name)
+                    if pi < 0 {
+                        if timed_out.contains(name) {
+                            rows.push("{w.id}\t{tier}\t{name}\twall\t{j.wall}\t>{m.method.timeout_s}s\t<1\twin\t{owners}")
+                            print("  {tier} / {name}: the peer overran {m.method.timeout_s} s (wall and cpu win as a lower bound; rss unmeasured)")
+                        }
+                        next
+                    }
+                    p: stats[pi]
+                    metrics: ["wall", "cpu", "rss"]
+                    jets: [j.wall, j.cpu, j.rss]
+                    peers: [p.wall, p.cpu, p.rss]
+                    loop k in 0..<3 {
+                        metric: metrics[k]
+                        jv: jets[k]
+                        pv: peers[k]
+                        lost: jv >= pv
+                        verdict: if lost && report_only -> "loss (report-only)" else if lost -> "LOSS" else -> "win"
+                        if lost && !report_only -> losses += 1
+                        shown_j: if metric == "rss" -> mb_text(jv) else -> ms_text(jv)
+                        shown_p: if metric == "rss" -> mb_text(pv) else -> ms_text(pv)
+                        rows.push("{w.id}\t{tier}\t{name}\t{metric}\t{jv}\t{pv}\t{ratio_text(jv, pv)}\t{verdict}\t{owners}")
+                        owned: if lost -> " ({owners})" else -> ""
+                        print("  {tier} / {name.pad_end(6, " ")} {metric.pad_end(4, " ")} {shown_j.pad_start(11, " ")} vs {shown_p.pad_start(11, " ")}  {ratio_text(jv, pv).pad_start(6, " ")}  {verdict}{owned}")
+                    }
+                }
+            }
+        } else { errors += 1 }
+    }
+    fs.write("{opts.out}/cells.tsv", "{rows.join("\n")}\n") ?? fail("can't write {opts.out}/cells.tsv")
+    print("scriptbench: {rows.len() - 1} cells, {losses} LOSS, {errors} errors; cells in {opts.out}/cells.tsv")
+    if losses > 0 || errors > 0 -> process.exit(1)
+}

@@ -1,0 +1,10 @@
+# A detached child blocked on a full channel when run returns no longer stops
+# the process with a parked-task report: the exit cancels it at its send and
+# the process exits with run's status, 0.
+fixture: a_task_blocked_on_a_full_channel_is_cancelled_at_exit.fixture
+env: NO_COLOR=1
+step run: jet run main.jet
+exit: 0
+stdout: = "leaving\n"
+stderr: !~ "Stop [" # the blocked child is cancelled, not reported
+stderr: !~ "E3013" # the retired parked-task report never prints

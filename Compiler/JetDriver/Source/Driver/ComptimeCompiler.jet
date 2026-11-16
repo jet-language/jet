@@ -1,0 +1,384 @@
+// `core.compiler` queries in compile-time code: the driver's
+// answer to the evaluator's compiler query route (JetEvalCompilerQueryHost).
+// `lex` and `parse` run the compiler's own lexer and parser over the query's
+// source; `check` runs the same check query `jet inspect compiler check`
+// runs (jet_driver_compiler_check) over the syntax tree's source, under this
+// compile's Core sources, host facts and evaluator; `source_map` reads the
+// generated-Rust markers `jet inspect compiler source-map` reads. These read
+// only their argument: no path, package or sibling source. The package views
+// (`manifest`, `package`, `lock`, `profiles`) read the compile's pinned
+// package root (ComptimePackageViews.jet). `schema` answers the running
+// toolchain's executable schema (jet_driver_compiler_schema); `receipt`
+// reads a recorded run's receipt file under that root through the one
+// run-receipt reader (RunReceipt.jet; jet_driver_compiler_receipt).
+use {
+    jet_foundation.[
+        CORE_COMPILER_COMPILER_STAGE,
+        CORE_COMPILER_FACT_KIND,
+        CORE_COMPILER_METADATA_ERROR,
+        CORE_COMPILER_METADATA_FAILURE,
+        CORE_COMPILER_PAIR,
+        CORE_COMPILER_RUN_RECEIPT,
+        CORE_COMPILER_SCHEMA_FACT,
+        CORE_COMPILER_SCHEMA_SNAPSHOT,
+        CORE_COMPILER_SCOPE_ID,
+        CORE_COMPILER_SNAPSHOT_ID,
+        CompilerThreads,
+        Diagnostic,
+        EffectModuleSource,
+        Span,
+        TComptimeEnumArg,
+        TComptimeField,
+        TComptimeReport,
+        TComptimeValue,
+        Type,
+        diagnostic_from_registry,
+        schema_fact_digest,
+        schema_fact_rows,
+    ]
+    jet_eval.[
+        JET_COMPILER_SERVICES_SCHEMA_VERSION,
+        JetCompilerServicesSourceInput,
+        JetCompilerServicesSourcePreparation,
+        JetEvalBuildReply,
+        JetEvalCompilerQueryHost,
+        JetEvalConfig,
+        jet_eval_compiler_services_diagnostic_values,
+        jet_eval_compiler_services_source_map,
+        jet_eval_compiler_services_source_map_value,
+        jet_eval_compiler_services_int,
+        jet_eval_compiler_services_lex,
+        jet_eval_compiler_services_option_span,
+        jet_eval_compiler_services_parse,
+        jet_eval_compiler_services_span,
+        jet_eval_compiler_services_string,
+    ]
+    jet_pkg_model.[AuthorityError, AuthorityResolver]
+    jet_sema.[sema_comptime_reflection_written_signature, sema_comptime_reflection_doc_source, sema_comptime_reflection_documentation]
+}
+
+JET_DRIVER_COMPILER_SOURCE_IDENTITY: "compiler-eval-source"
+
+JET_DRIVER_COMPILER_SOURCE_FILE: "core.compiler.jet"
+
+// What a check query compiles under: the requesting compile's facts.
+JetDriverComptimeCompilerContext: struct {
+    root: String
+    canonical_effects: EffectModuleSource
+    core_sources: [JetDriverCoreSource]
+    host_facts: JetDriverHostFacts
+    eval_config: JetEvalConfig
+    compiler_threads: CompilerThreads
+}
+
+JetDriverComptimeCompiler: struct {
+    context: Shared<JetDriverComptimeCompilerContext>
+
+    impl JetEvalCompilerQueryHost {
+        clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost Never! {
+            // copy: the evaluator forks the host for each machine; the forks share one context.
+            JetDriverComptimeCompiler{context: self.context.copy()}
+        }
+
+        compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply? {
+            if query == "lex" {
+                source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                lexed: jet_eval_compiler_services_lex(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: lexed.value}})
+            }
+            if query == "parse" {
+                source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: parsed.value}})
+            }
+            if query == "check" {
+                return Val(jet_driver_compiler_query_check(self.context, args, span))
+            }
+            if query == "source_map" {
+                source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                map: jet_eval_compiler_services_source_map_value(jet_eval_compiler_services_source_map(source))
+                return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: map}})
+            }
+            if query == "manifest" || query == "package" || query == "lock" || query == "profiles" {
+                permit: self.context.guard_read()
+                return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_package_view(query, args, permit.value.root)})
+            }
+            if query == "schema" {
+                return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_schema()})
+            }
+            if query == "receipt" {
+                path: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                permit: self.context.guard_read()
+                return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_receipt(path, permit.value.root, span)})
+            }
+            None
+        }
+    }
+}
+
+// A compiler query's source input: its inline `package: { }` carrier masked
+// (a malformed carrier is the only diagnostic), as the loader masks it.
+jet_driver_compiler_source_input: fn(source: String) -> JetCompilerServicesSourceInput {
+    carrier: jet_driver_inline_package(source)
+    masked: jet_driver_mask_inline_package(source, carrier)
+    preparation: if carrier.error == .Val(error) -> JetCompilerServicesSourcePreparation.Rejected{diagnostic: error} else -> JetCompilerServicesSourcePreparation.Masked{source: masked}
+    JetCompilerServicesSourceInput{source: source, preparation: Val(preparation)}
+}
+
+// The one-file source snapshot a check query compiles: `source` as
+// `core.compiler.jet` under `root` (metadata only; imports resolve there).
+jet_driver_compiler_source_snapshot: fn(root: String, source: String) -> JetDriverAuthorizedSourceSnapshot {
+    path: if root == "/" -> "/{JET_DRIVER_COMPILER_SOURCE_FILE}" else -> "{root}/{JET_DRIVER_COMPILER_SOURCE_FILE}"
+    JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_DRIVER_COMPILER_SOURCE_FILE, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, source: source}}, foreign_cache_files: []}},
+        entry_root_identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY,
+        entry_path: path,
+    }
+}
+
+// The compiler query host of `request`'s compile-time code.
+jet_driver_comptime_compiler_for: fn(request: JetDriverCompileRequest) -> JetEvalCompilerQueryHost {
+    // copy: the host keeps the facts a check query compiles under; the request keeps its own.
+    context: Shared{JetDriverComptimeCompilerContext{
+        root: jet_driver_entry_root_path(request.authorized_sources),
+        canonical_effects: request.canonical_effects.copy(),
+        core_sources: request.core_sources.copy(),
+        host_facts: request.host_facts.copy(),
+        eval_config: jet_driver_comptime_eval_config(request.eval_config, None, None),
+        compiler_threads: request.compiler_threads.copy(),
+    }}
+    JetDriverComptimeCompiler{context: context}
+}
+
+// The String argument of `lex(source)` / `parse(source)`.
+jet_driver_compiler_query_text: fn(args: [TComptimeValue]) -> String? {
+    if args.len() != 1 -> return None
+    if args[0] == .String(text) -> return Val(text)
+    None
+}
+
+jet_driver_compiler_query_lost: fn(query: String, span: Span) -> JetEvalBuildReply Never! {
+    JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.{query}` has no answer", "the compiler couldn't read the query's checked argument or project its result", "report this compiler bug")}
+}
+
+// `compiler.schema()`: the running toolchain's executable schema
+// (schema_fact_rows) as a `core.compiler.SchemaSnapshot`, identified by the
+// digest of its rows.
+jet_driver_compiler_schema: fn() -> TComptimeValue Never! {
+    rows: schema_fact_rows()
+    facts := [TComptimeValue]{}
+    loop row in rows {
+        scope: loop place in row.scope -> jet_eval_compiler_services_string(place)
+        facts.push(
+            TComptimeValue.Struct{
+                type_name: CORE_COMPILER_SCHEMA_FACT,
+                fields: [TComptimeField]{
+                    TComptimeField{name: "kind", value: TComptimeValue.Enum{type_name: CORE_COMPILER_FACT_KIND, variant: row.kind.copy(), args: [TComptimeEnumArg]{}}},
+                    TComptimeField{name: "name", value: jet_eval_compiler_services_string(row.name)},
+                    TComptimeField{name: "scope", value: TComptimeValue.List{values: scope}},
+                },
+            },
+        )
+    }
+    identity: TComptimeValue.Struct{
+        type_name: CORE_COMPILER_SNAPSHOT_ID,
+        fields: [TComptimeField]{
+            TComptimeField{name: "digest", value: jet_eval_compiler_services_string(schema_fact_digest(rows))},
+        },
+    }
+    TComptimeValue.Struct{
+        type_name: CORE_COMPILER_SCHEMA_SNAPSHOT,
+        fields: [TComptimeField]{
+            TComptimeField{name: "id", value: identity},
+            TComptimeField{name: "facts", value: TComptimeValue.List{values: facts}},
+        },
+    }
+}
+
+// `compiler.receipt(path)`: the run receipt at `path` under the compile's
+// pinned root, read through the one run-receipt reader
+// (jet_driver_run_receipt_decode) as a `core.compiler.RunReceipt`. No file
+// there is `Unavailable` (a receipt exists once its run has emitted it), a
+// path the root's authority refuses is `Denied`, and bytes the reader refuses
+// are `Invalid`, with the reader's refusal as their diagnostic.
+jet_driver_compiler_receipt: fn(path: String, root: String, span: Span) -[FS, Env]> TComptimeValue Never! {
+    resolver: AuthorityResolver.open(root) ?? return jet_driver_compiler_receipt_denied(root, err, span)
+    bytes := [U8]{}
+    if resolver.checked_file(path) == {
+        .Ok(file) -> { bytes = file.bytes }
+        .Err(error) -> {
+            if !error.is_missing() -> return jet_driver_compiler_receipt_denied(root, error, span)
+            stage: TComptimeValue.Enum{type_name: CORE_COMPILER_COMPILER_STAGE, variant: "Emitted", args: [TComptimeEnumArg]{}}
+            return jet_driver_compiler_receipt_failed(
+                "Unavailable",
+                [TComptimeEnumArg]{
+                    TComptimeEnumArg{name: Val("required_stage"), value: stage},
+                    TComptimeEnumArg{name: Val("reason"), value: jet_eval_compiler_services_string("no run receipt at `{path}`")},
+                },
+                span,
+            )
+        }
+    }
+    if jet_driver_run_receipt_decode(bytes) == {
+        .Ok(receipt) -> {
+            sections := [TComptimeValue]{}
+            loop section in receipt.sections {
+                sections.push(jet_driver_compiler_pair(section.name, section.type_name))
+            }
+            TComptimeValue.Present{
+                value: TComptimeValue.Struct{
+                    type_name: CORE_COMPILER_RUN_RECEIPT,
+                    fields: [TComptimeField]{
+                        TComptimeField{name: "path", value: jet_eval_compiler_services_string(path)},
+                        TComptimeField{name: "status", value: jet_eval_compiler_services_int(receipt.status)},
+                        TComptimeField{name: "digest", value: jet_eval_compiler_services_string(receipt.digest)},
+                        TComptimeField{name: "claim", value: jet_driver_compiler_pair(receipt.claim.verb, receipt.claim.key)},
+                        TComptimeField{name: "sections", value: TComptimeValue.List{values: sections}},
+                        TComptimeField{name: "consumed", value: jet_driver_compiler_links(receipt.consumed)},
+                        TComptimeField{name: "produced", value: jet_driver_compiler_links(receipt.produced)},
+                    },
+                },
+            }
+        }
+        .Err(error) -> {
+            diagnostic: diagnostic_from_registry("E2105", Val(span), "`{path}` is not a valid run receipt: {error.message}", "a run receipt is read only when it decodes and its digest authenticates its body", "record the run again to write its receipt")
+            jet_driver_compiler_receipt_failed(
+                "Invalid",
+                [TComptimeEnumArg]{
+                    TComptimeEnumArg{name: None, value: jet_eval_compiler_services_diagnostic_values([Diagnostic]{diagnostic})},
+                },
+                span,
+            )
+        }
+    }
+}
+
+// A path the pinned root's authority refuses: `Denied` in that root.
+jet_driver_compiler_receipt_denied: fn(root: String, error: AuthorityError, span: Span) -> TComptimeValue Never! {
+    scope: TComptimeValue.Struct{
+        type_name: CORE_COMPILER_SCOPE_ID,
+        fields: [TComptimeField]{
+            TComptimeField{name: "name", value: jet_eval_compiler_services_string("package root `{root}`")},
+        },
+    }
+    jet_driver_compiler_receipt_failed(
+        "Denied",
+        [TComptimeEnumArg]{
+            TComptimeEnumArg{name: Val("scope"), value: scope},
+            TComptimeEnumArg{name: Val("reason"), value: jet_eval_compiler_services_string("{error.message()}: {jet_driver_package_authority_reason(error)}")},
+        },
+        span,
+    )
+}
+
+// `receipt`'s `MetadataError` with failure `variant(args)`, at the call.
+jet_driver_compiler_receipt_failed: fn(variant: String, args: [TComptimeEnumArg], span: Span) -> TComptimeValue Never! {
+    TComptimeValue.Failed{
+        report: TComptimeReport.Told{
+            value: TComptimeValue.Struct{
+                type_name: CORE_COMPILER_METADATA_ERROR,
+                fields: [TComptimeField]{
+                    TComptimeField{name: "kind", value: TComptimeValue.Enum{type_name: CORE_COMPILER_METADATA_FAILURE, variant: variant, args: args}},
+                    TComptimeField{name: "query", value: jet_eval_compiler_services_string("receipt")},
+                    TComptimeField{name: "source", value: jet_eval_compiler_services_option_span(Val(span), "")},
+                },
+            },
+        },
+    }
+}
+
+jet_driver_compiler_pair: fn(left: String, right: String) -> TComptimeValue Never! {
+    TComptimeValue.Struct{
+        type_name: CORE_COMPILER_PAIR,
+        fields: [TComptimeField]{
+            TComptimeField{name: "left", value: jet_eval_compiler_services_string(left)},
+            TComptimeField{name: "right", value: jet_eval_compiler_services_string(right)},
+        },
+    }
+}
+
+// Record links as `core.compiler.Pair`s of record kind and artifact id.
+jet_driver_compiler_links: fn(links: [JetDriverRecordLink]) -> TComptimeValue Never! {
+    values: loop link in links -> jet_driver_compiler_pair(link.kind, link.artifact_id)
+    TComptimeValue.List{values: values}
+}
+
+// `check(syntax)`: the check query over the syntax tree's source. A source
+// whose load stops before checking keeps its syntax and diagnostics, with no
+// effects or semantic index (no-bundle path).
+jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerContext>, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply Never! {
+    source := String?{None}
+    if args.len() == 1 && args[0] == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == "source" && field.value == .String(text) -> source = Val(text)
+        }
+    }
+    text: source ?? return jet_driver_compiler_query_lost("check", span)
+    parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(text)) ?? return jet_driver_compiler_query_lost("check", span)
+    permit: context.guard_read()
+    request: JetDriverCompileRequest{
+        authorized_sources: jet_driver_compiler_source_snapshot(permit.value.root, text),
+        canonical_effects: permit.value.canonical_effects.copy(),
+        core_sources: permit.value.core_sources.copy(),
+        host_facts: permit.value.host_facts.copy(),
+        eval_config: jet_driver_comptime_eval_config(permit.value.eval_config, None, None),
+        record_store: None,
+        trace_sink: None,
+        compiler_threads: permit.value.compiler_threads.copy(),
+        mode: JetDriverCompileMode.Doc,
+    }
+    // copy: the check takes the request; a failed check's records name its file.
+    checked_file: request.authorized_sources.entry_path.copy()
+    result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed.copy(), request: request, retain_projection: false}) ?? return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", "the check query failed before returning its diagnostics", "report this compiler bug")}
+    if result.internal_problem == .Val(problem) {
+        return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", problem, "report this compiler bug")}
+    }
+    if result.product == {
+        .CheckedCompilerValue(checked) -> JetEvalBuildReply.Value{value: TComptimeValue.Present{value: checked.value}}
+        .RetainedCheckedProjection(_) -> JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` returned a retained projection", "a compile-time check query asks for its compiler value", "report this compiler bug")}
+        .Failed -> {
+            functions := [TComptimeValue]{}
+            module_text: sema_comptime_reflection_doc_source(text, checked_file)
+            loop item in parsed.parsed.program.items {
+                if item == .Func(function) && function.name != "build" {
+                    functions.push(
+                        TComptimeValue.Struct{
+                            type_name: "FunctionInfo",
+                            fields: [TComptimeField]{
+                                TComptimeField{name: "name", value: jet_eval_compiler_services_string(function.name)},
+                                TComptimeField{name: "module", value: jet_eval_compiler_services_string("core.compiler")},
+                                TComptimeField{name: "identity", value: jet_eval_compiler_services_string("core.compiler.{function.name}")},
+                                TComptimeField{name: "package", value: jet_eval_compiler_services_string("")},
+                                TComptimeField{name: "signature", value: sema_comptime_reflection_written_signature(function, checked_file)},
+                                TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span, checked_file)},
+                                TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
+                                TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: []}},
+                                TComptimeField{name: "facts", value: TComptimeValue.List{values: []}},
+                                TComptimeField{name: "markers", value: TComptimeValue.List{values: []}},
+                                // The failed check registered no module, so no source places the function.
+                                TComptimeField{name: "location", value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceLocation"}}}},
+                                TComptimeField{name: "documentation", value: TComptimeValue.List{values: sema_comptime_reflection_documentation(module_text, Val(function.name_span))}},
+                            },
+                        },
+                    )
+                }
+            }
+            JetEvalBuildReply.Value{
+                value: TComptimeValue.Present{
+                    value: TComptimeValue.Struct{
+                        type_name: "CompilerChecked",
+                        fields: [TComptimeField]{
+                            TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+                            TComptimeField{name: "source", value: jet_eval_compiler_services_string(text)},
+                            TComptimeField{name: "syntax", value: parsed.value},
+                            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(result.diagnostics)},
+                            TComptimeField{name: "functions", value: TComptimeValue.List{values: functions}},
+                            TComptimeField{name: "effects", value: TComptimeValue.List{values: []}},
+                            TComptimeField{name: "semantic_index", value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}},
+                        },
+                    },
+                },
+            }
+        }
+    }
+}

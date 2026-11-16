@@ -1,0 +1,17 @@
+Error [jet.ViewOutlivesOwner]: This view points into `mapped`, which this function owns
+  --> tests/ui/mapped_window_outlives_its_map.jet:6:12
+    |
+  6 |     mapped.window_len(0, 1)
+    |            ^^^^^^^^^^
+ Why: `mapped` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
+ Fix: Return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it
+More: jet-lang.dev/e/E2305
+
+Error [jet.ViewOutlivesOwner]: Returned views need a stable owner relationship
+  --> tests/ui/mapped_window_outlives_its_map.jet:10:13
+    |
+ 10 |     window: leak("table.txt") ?? return
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: Each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources
+ Fix: Return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`
+More: jet-lang.dev/e/E2305

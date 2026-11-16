@@ -1,0 +1,1371 @@
+// Copy, clone, view-materialization, and memory facts.
+//
+// This module is the one semantic authority for a value duplication judgment.
+// It receives the immutable semantic environment and the caller's proven
+// string-view fact; it does not read a mutable scope singleton or guess
+// nominal capabilities from a successful lowering.
+use jet_foundation.[
+    symbol_table_key,
+    Diagnostic,
+    InternalTag,
+    Span,
+    SymbolKind,
+    TDeclarationOwnership,
+    TGenericParam,
+    TagMarker,
+    Type,
+    core_enum_payload_variants,
+    core_enum_variant_payload,
+    core_record_literal_fields,
+    core_source_owns_type,
+    type_name,
+    core_type_modules,
+    core_identity_is,
+    IR_RUNTIME_HANDLES,
+    core_record_field_types,
+    ir_host_value_name,
+    ir_runtime_handle_row,
+    module_is_core,
+    NameTable,
+    name_count,
+    name_find,
+    name_index,
+    name_intern,
+    name_table_sized,
+]
+
+SemaCopyIntent: enum {
+    Explicit
+    Clone
+    Materialize
+}
+
+SemaCopyLowering: enum {
+    ExplicitCopy
+    Clone
+    MaterializeView
+}
+
+SemaCopyMemoryKind: enum {
+    NoEvent
+    Allocation
+    RetainRelease
+}
+
+SemaCopyFacts: struct {
+    source: Type
+    target: Type
+    intent: SemaCopyIntent
+    lowering: SemaCopyLowering
+    materializes_view: Bool
+    observable_clock: Bool
+    memory: SemaCopyMemoryKind
+    resource: Bool
+    holds_resource: Bool
+    dynamic_loan: Bool
+    copyable: Bool
+    cloneable: Bool
+    accepted: Bool
+    complete: Bool
+}
+
+SemaCopyEvent: struct {
+    span: Span
+    facts: SemaCopyFacts
+}
+
+SemaCopyTypeFacts: struct {
+    copyable: Bool
+    cloneable: Bool
+    heap: Bool
+    observable_clock: Bool
+    resource: Bool
+    // The value is a resource or holds one by value at any depth (a field,
+    // an element, a payload): duplicating its bits would give one cleanup
+    // duty two owners. `resource` is the value's own Close duty only.
+    holds_resource: Bool
+    dynamic_loan: Bool
+    complete: Bool
+}
+
+sema_copy_type_facts_known: fn(
+    copyable: Bool,
+    cloneable: Bool,
+    heap: Bool,
+    observable_clock: Bool,
+    resource: Bool,
+    dynamic_loan: Bool,
+    complete: Bool,
+) -> SemaCopyTypeFacts Never! {
+    SemaCopyTypeFacts{
+        copyable: copyable,
+        cloneable: cloneable,
+        heap: heap,
+        observable_clock: observable_clock,
+        resource: resource,
+        holds_resource: resource,
+        dynamic_loan: dynamic_loan,
+        complete: complete,
+    }
+}
+
+// `facts` with the parts' resources folded in: a container, record or
+// payload holds a resource when any part holds one.
+sema_copy_facts_holding: fn(facts: SemaCopyTypeFacts, parts_hold: Bool) -> SemaCopyTypeFacts Never! {
+    result := facts
+    result.holds_resource = facts.holds_resource || parts_hold
+    result
+}
+
+// One copy-facts query. A recursive nominal reaches itself through its
+// fields, and a shared type graph (a compiler AST: every node reaches `Expr`)
+// reaches one nominal by many paths. `active` holds the nominals on the
+// current path, by identity alone so a generic that recurses with growing
+// arguments still terminates; a nominal still being decided contributes the
+// neutral facts (cloneable, no heap, no clock). `finished` keeps each
+// instantiation's facts, so each is walked once per query (#3661); a walk
+// that re-entered every path took minutes on the compiler's own parser.
+// `tainted` marks facts true of this query only: they read a nominal still
+// being decided (a cycle), or a name only the caller's scope resolves (a bare
+// or unresolved name). Untainted facts are the same in every query, which is
+// what lets sema_copy_facts_table keep them per nominal row.
+//
+// The table's walk (`table`) settles cycles instead of tainting them. It
+// finds the strongly connected components of the instantiations it visits
+// (Tarjan: `visits` numbers each one on entry, `low` is the lowest number the
+// current one reaches back to). The `path_*` rows mirror the nominals on the
+// path; `path_self` records an instantiation that reaches itself directly.
+// An instantiation whose cycle closes further up keeps provisional facts in
+// `finished`, its number in `pending`, and its parts in `scc`. When the
+// component's first instantiation finishes, its members are combined again
+// from their parts until no fact changes. Every member then holds the facts
+// its whole cycle decides: an `or` fact (heap, clock, dynamic loan) holds if a
+// part it reaches holds it, and an `and` fact (cloneable, complete) holds
+// unless a part it reaches refutes it. That is the answer a query's walk
+// gives when it starts at that member. Reaching another instantiation of a
+// generic on the path still taints.
+SemaCopyWalk: struct {
+    active: [String]
+    // The walk keys (sema_copy_walk_key) of the instantiations reached, each
+    // id a row of `finished` and `pending` (-1: not pending).
+    keys: NameTable
+    finished: [SemaCopyWalkRow?]
+    tainted: Bool
+    table: Bool
+    visits: Int
+    low: Int
+    path_ids: [String]
+    path_keys: [Int]
+    path_index: [Int]
+    path_self: [Bool]
+    pending: [Int]
+    scc: [SemaCopySccMember]
+}
+
+SemaCopyWalkRow: struct {
+    facts: SemaCopyTypeFacts
+    tainted: Bool
+}
+
+// One instantiation of an unfinished component: its walk key's id and number,
+// and what sema_copy_nominal_combine needs to combine its facts again.
+SemaCopySccMember: struct {
+    key: Int
+    index: Int
+    actual: Type
+    declared: [Type]
+    distinct: Bool
+    resource: Bool
+    single_use: Bool
+    complete: Bool
+}
+
+// NameTable id 0 is the empty key, which no instantiation has, so each column
+// starts with its row.
+sema_copy_walk: fn() -> SemaCopyWalk Never! {
+    SemaCopyWalk{
+        active: [String]{},
+        keys: name_table_sized(16),
+        finished: [SemaCopyWalkRow?]{None},
+        tainted: false,
+        table: false,
+        visits: 0,
+        low: 0,
+        path_ids: [String]{},
+        path_keys: [Int]{},
+        path_index: [Int]{},
+        path_self: [Bool]{},
+        pending: [Int]{-1},
+        scc: [SemaCopySccMember]{},
+    }
+}
+
+// The id of walk key `key` in `walk.keys`, its `finished` and `pending` rows
+// grown to it.
+sema_copy_walk_key_id: fn(walk: &SemaCopyWalk, key: String) -> Int Never! {
+    id: name_index(name_intern(walk.keys, key))
+    loop walk.finished.len() <= id {
+        walk.finished.push(None)
+        walk.pending.push(-1)
+    }
+    id
+}
+
+// The untainted copy facts of every non-generic, non-trait nominal, by
+// registration row (`rows[module_index][row]`). They are computed once per
+// program tables, with one shared table walk, which settles recursive
+// nominals. A None row (generic, trait or tainted) is walked by each query.
+// `close` holds every nominal row's sema_copy_nominal_has_impl(…, "Close")
+// answer, which the walk and the ownership Close-owner check read once per
+// visited nominal.
+SemaCopyFactsTable: struct {
+    rows: [[SemaCopyTypeFacts?]]
+    close: [[(known: Bool, value: Bool)]]
+}
+
+sema_copy_facts_table_empty: fn() -> SemaCopyFactsTable Never! {
+    SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[(known: Bool, value: Bool)]]{}}
+}
+
+// The graph is read in place through the `.Val(…)` pattern on the parameter;
+// binding `registered: graph` (with or without `??`) copies the whole
+// graph.
+sema_copy_facts_table: fn(graph: SemaRegistrationGraph?) -> SemaCopyFactsTable Never! {
+    if graph == .Val(registered) {
+        close := [[(known: Bool, value: Bool)]]{}
+        loop module_index in 0..<registered.modules.len() {
+            close.push((loop nominal in registered.modules[module_index].nominals -> sema_copy_nominal_has_impl(graph, nominal, "Close")))
+        }
+        table := SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: close.move()}
+        rows := [[SemaCopyTypeFacts?]]{}
+        walk := sema_copy_walk()
+        walk.table = true
+        loop module_index in 0..<registered.modules.len() {
+            module_rows := [SemaCopyTypeFacts?]{}
+            loop row in 0..<registered.modules[module_index].nominals.len() {
+                entry := SemaCopyTypeFacts?{None}
+                if registered.modules[module_index].nominals[row].generic_params.len() == 0 && registered.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.Trait {
+                    walk.tainted = false
+                    facts: sema_copy_nominal_facts(registered.modules[module_index].nominals[row], SemaRegistrationRowRef{module_index: module_index, row: row}, Type.Named{name: registered.modules[module_index].nominals[row].symbol.name}, graph, table, -1, [TGenericParam]{}, walk)
+                    if !walk.tainted -> entry = Val(facts)
+                }
+                module_rows.push(entry)
+            }
+            rows.push(module_rows)
+        }
+        table.rows = rows.move()
+        return table.move()
+    }
+    sema_copy_facts_table_empty()
+}
+
+sema_copy_table_facts: fn(table: SemaCopyFactsTable, row: SemaRegistrationRowRef) -> SemaCopyTypeFacts? Never! {
+    if row.module_index >= table.rows.len() || row.row >= table.rows[row.module_index].len() {
+        return None
+    }
+    table.rows[row.module_index][row.row]
+}
+
+// Whether the nominal at `row` implements Close: the table's answer, or a
+// scan of the graph's impls when the table has no such row (an empty table
+// before the program facts are computed).
+sema_copy_nominal_close: fn(graph: SemaRegistrationGraph?, table: SemaCopyFactsTable, nominal: SemaRegistrationNominal, row: SemaRegistrationRowRef) -> (known: Bool, value: Bool) Never! {
+    if row.module_index < table.close.len() && row.row < table.close[row.module_index].len() {
+        return table.close[row.module_index][row.row]
+    }
+    sema_copy_nominal_has_impl(graph, nominal, "Close")
+}
+
+sema_copy_walk_key: fn(identity: String, actual: Type) -> String Never! {
+    if actual == {
+        .Apply(_, args) -> {
+            names: (loop arg in args -> type_name(arg))
+            joined: names.join(", ")
+            "{identity}<{joined}>"
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> identity
+    }
+}
+
+// The Core-declared types that own one runtime resource whatever their declared
+// fields copy like: each is closed once, so a copy would close it twice.
+sema_copy_named_is_builtin_resource: fn(name: String) -> Bool Never! {
+    if name == {
+        "FileReader" | "FileWriter" | "FileScope" | "FileLock" | "TLSStream" | "Arena" | "Bump" | "Pool" | "Fixed" -> true
+        else -> false
+    }
+}
+
+// A runtime handle no declaration lays out (`WsConn`, `TcpStream`) is the
+// value its registration describes. One registered without `clone` has no
+// `jet_rt_handle_clone_<runtime>` routine: its owner is the only one, so it
+// and every value holding it move instead of copying (#6581). A handle whose
+// copies soundly share one runtime object registers `clone` (a channel
+// `Receiver` retains its queue).
+sema_copy_handle_without_clone: fn(name: String) -> Bool Never! {
+    row: ir_runtime_handle_row(name) ?? return false
+    !IR_RUNTIME_HANDLES[row].clone
+}
+
+// One Atomic owner recognition shared by copy policy and field initialization.
+sema_atomic_type_name: fn(name: String) -> Bool Never! { name == "Atomic" }
+
+sema_copy_apply_is_noncloneable: fn(name: String) -> Bool Never! {
+    if sema_atomic_type_name(name) -> return true
+    if name == {
+        "Atomic" | "DataArrowBatch" | "MutationPlan" | "VaultWrite" | "ExpiringSecret" | "ViewMut" | "ViewIter" | "CellReadGuard" | "CellEditGuard" | "SharedGuard" -> true
+        else -> false
+    }
+}
+
+sema_copy_apply_is_canonical_task: fn(
+    ty: Type,
+    name: String,
+    graph: SemaRegistrationGraph?,
+    caller: Int,
+) -> Bool Never! {
+    if name != "Task" -> return false
+    if graph == .Val(registered) {
+        if sema_type_resolve_nominal_row_at(registered, ty, caller) != None -> return false
+        owner: sema_registration_core_builtin_owner(registered, name) ?? return false
+        return owner.ownership == TDeclarationOwnership.Owned
+    }
+    false
+}
+
+sema_copy_apply_is_dynamic_loan: fn(name: String) -> Bool Never! {
+    if name == {
+        "CellReadGuard" | "CellEditGuard" -> true
+        else -> false
+    }
+}
+
+sema_copy_named_is_core: fn(name: String) -> Bool Never! {
+    // CoreModuleExports is the canonical closed Core type surface. The
+    // language carriers below are intrinsic and intentionally have no module
+    // export row, nor do the process handles, the HTTP handles (exported as
+    // `core.http` leaves such as `Server`), the `Bits`/`Bytes` collection
+    // handles and the `Condition` carrier that the checker types itself (Rust
+    // `core_type_known`); all other Core names come from the generated table.
+    if name == "Unit" || name == "Never" || name == "Err" || name == "U8" || name == "str" || name == "bytes" || name == "Complex" || name == "Range" || name == "Condition" || name == "Bits" || name == "Bytes" {
+        return true
+    }
+    if sema_process_handle_type(name) || sema_call_http_known_receiver_type(name) -> return true
+    core_type_modules(name).len() > 0
+}
+
+sema_copy_copyable_scalar: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int -> true
+        .Float -> true
+        .Bool -> true
+        .IntN(_, _) -> true
+        .Float32 -> true
+        .Char -> true
+        .Measure(_) -> true
+        .Quantity(_, _) -> true
+        .Tagged(_, inner) -> sema_copy_copyable_scalar(inner)
+        .InlineRange(base, _, _) -> sema_copy_copyable_scalar(base)
+        .Apply(name, args) -> name == "Ptr" && args.len() == 1
+        .Named(name) -> name == "Complex" || name == "Range" || name == "IOOperation"
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) -> false
+    }
+}
+
+sema_copy_owned_view_type: fn(ty: Type, string_view: Bool) -> (ty: Type, materialized: Bool) Never! {
+    if string_view && ty == Type.String -> return (materialized: true, ty: Type.String)
+    if ty == {
+        .Apply(name, args) -> {
+            if name == "View" && args.len() == 1 {
+                if args[0] == (Type.Named{name: "str"}) {
+                    return (materialized: true, ty: Type.String)
+                }
+                return (materialized: true, ty: Type.List{element: args[0]})
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    (materialized: false, ty: ty)
+}
+
+sema_copy_generic_bindings: fn(nominal: SemaRegistrationNominal, actual: Type) -> (bindings: [SemaInferenceBinding], complete: Bool) Never! {
+    if nominal.generic_params.len() == 0 {
+        return (bindings: [SemaInferenceBinding]{}, complete: true)
+    }
+    if actual == {
+        .Apply(_, args) -> {
+            if args.len() != nominal.generic_params.len() {
+                return (bindings: [SemaInferenceBinding]{}, complete: false)
+            }
+            parameters: sema_inference_registration_params(nominal.generic_params)
+            return (bindings: sema_inference_bindings_for_type_args(parameters, args), complete: true)
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return (bindings: [SemaInferenceBinding]{}, complete: false)
+    }
+}
+
+// Each member type resolves in the nominal's module before the caller's
+// type arguments are bound into it.
+sema_copy_nominal_declared_types: fn(nominal: SemaRegistrationNominal, bindings: [SemaInferenceBinding], graph: SemaRegistrationGraph?) -> [Type] Never! {
+    types := [Type]{}
+    if nominal.source == {
+        .SourceAST(item) -> {
+            if item == {
+                .TypeAlias(definition) -> {
+                    types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, definition.target), bindings))
+                }
+                .Distinct(definition) -> {
+                    types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, definition.base), bindings))
+                }
+                .Func(_) | .Struct(_) | .Enum(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            }
+        }
+        .ForeignHandle(_) | .CompilerBuiltinTrait(_) -> {}
+    }
+    loop field in nominal.fields {
+        types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings))
+    }
+    loop variant in nominal.variants {
+        if variant.payload_type == .Val(payload) {
+            types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, payload), bindings))
+        }
+    }
+    types
+}
+
+sema_copy_foreign_handle_facts: fn(
+    nominal: SemaRegistrationNominal,
+    facts: SemaRegistrationForeignHandleFacts,
+) -> SemaCopyTypeFacts Never! {
+    close_key_present: (facts.close_function_key ?? "") != ""
+    identity_complete: facts.library != "" && facts.typedef_name != "" && facts.jet_name == nominal.symbol.name && facts.close != "" && close_key_present
+    ownership_complete: facts.ownership == "Owned"
+    close_source_complete: facts.close_source == "conventional" || facts.close_source == "overlay"
+    thread_safety_complete: facts.thread_safety == "unspecified" || facts.thread_safety == "safe" || facts.thread_safety == "unsafe"
+    complete: identity_complete && ownership_complete && close_source_complete && thread_safety_complete
+    sema_copy_type_facts_known(false, false, false, false, ownership_complete, false, complete)
+}
+
+// Whether an impl of the trait spelled `trait_name` targets `nominal`: an
+// `impl` block in the nominal's own body (`Stream: struct { impl Close {…} }`),
+// or an impl whose declared trait name or registered trait symbol spells it,
+// and whose target resolves to the nominal. With the registration index built,
+// only that name's impl rows are read (the same rows the full scan would
+// accept, in the same order); before then every impl is scanned. The graph
+// and its impl rows are read in place through the `.Val(…)` pattern on the
+// parameter. No impl found is a known answer when the nominal's package
+// registered in full (sema_registration_package_settled), so one package's
+// registration error under JET_KEEP_GOING leaves every other package's
+// copy facts known.
+sema_copy_nominal_has_impl: fn(
+    graph: SemaRegistrationGraph?,
+    nominal: SemaRegistrationNominal,
+    trait_name: String,
+) -> (known: Bool, value: Bool) Never! {
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.trait_name == trait_name || block.trait_name.ends_with(".{trait_name}") {
+                return (known: true, value: true)
+            }
+        }
+    }
+    if graph == .Val(registered) {
+        if registered.impl_traits_indexed {
+            if registered.impl_trait_name_slots.get(trait_name) == .Val(found) {
+                loop impl_row in registered.impl_trait_name_buckets[found] {
+                    target_matches: sema_type_graph_impl_matches_nominal(registered, registered.modules[impl_row.module_index].impls[impl_row.row], nominal) ?? next
+                    if target_matches -> return (known: true, value: true)
+                }
+            }
+            return (known: sema_registration_package_settled(registered, nominal.symbol.module_identity), value: false)
+        }
+        loop graph_module in registered.modules {
+            loop implementation in graph_module.impls {
+                trait_matches := false
+                if implementation.trait_name == .Val(implementation_trait) {
+                    if implementation_trait == trait_name -> trait_matches = true
+                }
+                if implementation.trait_symbol == .Val(trait_symbol) {
+                    if trait_symbol.name == trait_name -> trait_matches = true
+                }
+                if !trait_matches -> next
+                target_matches: sema_type_graph_impl_matches_nominal(registered, implementation, nominal) ?? next
+                if target_matches -> return (known: true, value: true)
+            }
+        }
+        return (known: sema_registration_package_settled(registered, nominal.symbol.module_identity), value: false)
+    }
+    (known: false, value: false)
+}
+
+// Whether `param` is bounded by the trait named `bound_name`. A bound is a
+// registered trait id, so only a graph carries one.
+sema_copy_generic_bound: fn(param: TGenericParam, bound_name: String, graph: SemaRegistrationGraph?) -> Bool Never! {
+    if graph == .Val(registered) {
+        loop bound in param.bounds {
+            if symbol_table_key(registered.symbols, bound).ends_with(":{bound_name}") -> return true
+        }
+    }
+    false
+}
+
+sema_copy_generic_param_facts: fn(ty: Type, params: [TGenericParam], graph: SemaRegistrationGraph?) -> SemaCopyTypeFacts? {
+    if ty == {
+        .Named(name) -> {
+            loop param in params {
+                if param.name == name {
+                    resource: sema_copy_generic_bound(param, "Close", graph)
+                    return Val(sema_copy_type_facts_known(false, !resource, false, false, resource, false, true))
+                }
+            }
+            None
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+    }
+}
+
+sema_copy_type_facts: fn(
+    ty: Type,
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    if sema_copy_generic_param_facts(ty, generic_params, graph) == .Val(facts) -> return facts
+    if ty == {
+        .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .Measure(_) -> sema_copy_type_facts_known(true, true, false, false, false, false, true)
+        .String -> sema_copy_type_facts_known(false, true, true, false, false, false, true)
+        .Case(_, payload) -> sema_copy_type_facts(payload, graph, table, caller, generic_params, walk)
+        .List(inner) -> {
+            nested: sema_copy_type_facts(inner, graph, table, caller, generic_params, walk)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, nested.cloneable, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
+        }
+        .Map(key, _, value) -> {
+            key_facts: sema_copy_type_facts(key, graph, table, caller, generic_params, walk)
+            value_facts: sema_copy_type_facts(value, graph, table, caller, generic_params, walk)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, key_facts.cloneable && value_facts.cloneable, true, key_facts.observable_clock || value_facts.observable_clock, false, key_facts.dynamic_loan || value_facts.dynamic_loan, key_facts.complete && value_facts.complete), key_facts.holds_resource || value_facts.holds_resource)
+        }
+        .Shared(inner) -> {
+            nested: sema_copy_type_facts(inner, graph, table, caller, generic_params, walk)
+            sema_copy_type_facts_known(false, true, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
+        }
+        .Option(inner) -> {
+            nested: sema_copy_type_facts(inner, graph, table, caller, generic_params, walk)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
+        }
+        .Result(ok, err) -> {
+            ok_facts: sema_copy_type_facts(ok, graph, table, caller, generic_params, walk)
+            err_facts: sema_copy_type_facts(err, graph, table, caller, generic_params, walk)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, ok_facts.cloneable && err_facts.cloneable, ok_facts.heap || err_facts.heap, ok_facts.observable_clock || err_facts.observable_clock, false, ok_facts.dynamic_loan || err_facts.dynamic_loan, ok_facts.complete && err_facts.complete), ok_facts.holds_resource || err_facts.holds_resource)
+        }
+        .Fn(_, _, _, _, _, _) -> sema_copy_type_facts_known(false, false, false, false, false, false, true)
+        .TraitObject(_) -> sema_copy_type_facts_known(false, false, true, false, false, false, true)
+        .Tuple(fields) -> {
+            copyable := true
+            cloneable := true
+            heap := false
+            clock := false
+            dynamic_loan := false
+            complete := true
+            holds := false
+            loop field in fields {
+                nested: sema_copy_type_facts(field.ty, graph, table, caller, generic_params, walk)
+                copyable = copyable && nested.copyable
+                cloneable = cloneable && nested.cloneable
+                heap = heap || nested.heap
+                clock = clock || nested.observable_clock
+                dynamic_loan = dynamic_loan || nested.dynamic_loan
+                complete = complete && nested.complete
+                holds = holds || nested.holds_resource
+            }
+            sema_copy_facts_holding(sema_copy_type_facts_known(copyable, cloneable, heap, clock, false, dynamic_loan, complete), holds)
+        }
+        .FixedList(inner, _) -> {
+            nested: sema_copy_type_facts(inner, graph, table, caller, generic_params, walk)
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, nested.cloneable, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
+        }
+        .InlineRange(base, _, _) -> {
+            nested: sema_copy_type_facts(base, graph, table, caller, generic_params, walk)
+            sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
+        }
+        .Tagged(marker, inner) -> {
+            nested: sema_copy_type_facts(inner, graph, table, caller, generic_params, walk)
+            deterministic: marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_call_is_clock_type(inner)
+            sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, if deterministic -> false else -> nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
+        }
+        .Union(members) -> {
+            cloneable := true
+            heap := false
+            clock := false
+            dynamic_loan := false
+            complete := true
+            holds := false
+            loop member in members {
+                nested: sema_copy_type_facts(member, graph, table, caller, generic_params, walk)
+                cloneable = cloneable && nested.cloneable
+                heap = heap || nested.heap
+                clock = clock || nested.observable_clock
+                dynamic_loan = dynamic_loan || nested.dynamic_loan
+                complete = complete && nested.complete
+                holds = holds || nested.holds_resource
+            }
+            sema_copy_facts_holding(sema_copy_type_facts_known(false, cloneable, heap, clock, false, dynamic_loan, complete), holds)
+        }
+        .Quantity(base, _) -> {
+            nested: sema_copy_type_facts(base, graph, table, caller, generic_params, walk)
+            sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
+        }
+        .Named(name) -> {
+            facts := sema_copy_named_facts(ty, name, graph, table, caller, generic_params, walk)
+            // Core's Clock reads ambient time, whatever its declared fields
+            // say: a value that holds one observes it.
+            if sema_call_is_clock_type(ty) -> facts.observable_clock = true
+            facts
+        }
+        .Apply(name, args) -> sema_copy_apply_facts(ty, name, args, graph, table, caller, generic_params, walk)
+    }
+}
+
+sema_copy_named_facts: fn(
+    ty: Type,
+    name: String,
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    if graph == .Val(registered) {
+        // A part typed by a trait name holds a trait value, which copies like
+        // `.TraitObject` (known, never duplicable on its own). The name
+        // resolves to a Trait symbol, which the nominal-row lookup (Type
+        // symbols only) never returns, so it is tested first. One lookup
+        // serves both.
+        resolved: sema_type_graph_lookup_symbol_at(registered, caller, name)
+        // Only a canonical `module::Name` that resolves names one symbol from
+        // every caller; any other name is the caller's scope's reading. The
+        // table's walk has no caller: it reads the parts of a nominal, which
+        // resolved in the nominal's own module. Only a compiler-owned, Core or
+        // unresolved name stays bare there, and it means the same from no
+        // caller as it did in that module.
+        if !walk.table && (resolved == None || !name.contains("::")) -> walk.tainted = true
+        if resolved == .Val(found) {
+            if sema_resolved_kind(registered, found) == SymbolKind.Trait {
+                return sema_copy_type_facts_known(false, false, true, false, false, false, true)
+            }
+        }
+        if sema_type_lookup_nominal_row(registered, resolved, name, caller) == .Val(row) {
+            if registered.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Trait {
+                return sema_copy_type_facts_known(false, false, true, false, false, false, true)
+            }
+            if sema_copy_table_facts(table, row) == .Val(known) {
+                // Facts computed with the nominal's own name: only `copyable`
+                // reads the spelling at hand.
+                if registered.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.ForeignHandle {
+                    return known
+                }
+                return SemaCopyTypeFacts{copyable: sema_copy_copyable_scalar(ty), cloneable: known.cloneable, heap: known.heap, observable_clock: known.observable_clock, resource: known.resource, holds_resource: known.holds_resource, dynamic_loan: known.dynamic_loan, complete: known.complete}
+            }
+            return sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], row, ty, graph, table, caller, generic_params, walk)
+        }
+    }
+    // Core-only naming does not remove the runtime enum's Copy capability.
+    if name == "IOOperation" {
+        return sema_copy_type_facts_known(true, true, false, false, false, false, true)
+    }
+    if {
+        sema_copy_named_is_builtin_resource(name) || sema_copy_handle_without_clone(name) -> sema_copy_type_facts_known(false, false, false, false, true, false, true)
+        name == "Clock" -> sema_copy_type_facts_known(false, true, false, true, false, false, true)
+        sema_copy_named_is_core(name) -> sema_copy_type_facts_known(name == "Complex" || name == "Range", true, false, false, false, false, true)
+        // A compiler value is one word naming it in the evaluator's host
+        // table; a copy copies that word.
+        ir_host_value_name(name) -> sema_copy_type_facts_known(false, true, false, false, false, false, true)
+        else -> sema_copy_core_row_facts(ty, name, graph, table, caller, generic_params, walk) ?? sema_copy_type_facts_known(false, false, false, false, false, false, false)
+    }
+}
+
+// A compiler-owned Core enum family or record without a module export or a
+// nominal row (`IOError`, `IOContext`, `ProcessResourceLimit`,
+// `RealtimeReceipt`) is declared by its generated payload rows, its literal
+// row or its field rows, so its facts walk those parts.
+sema_copy_core_row_facts: fn(
+    ty: Type,
+    name: String,
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts? Never! {
+    parts := [Type]{}
+    if {
+        core_enum_payload_variants(name) == .Val(variants) -> {
+            loop variant in variants {
+                if core_enum_variant_payload(name, variant) == .Val(payload) {
+                    loop part in payload -> parts.push(part)
+                }
+            }
+        }
+        core_record_literal_fields(name) == .Val(fields) -> {
+            loop field in fields -> parts.push(field.ty)
+        }
+        else -> {
+            typed: core_record_field_types(name) ?? return None
+            loop part in typed -> parts.push(part)
+        }
+    }
+    key: "<core-row>::{name}"
+    if walk.active.contains(key) {
+        return Val(sema_copy_type_facts_known(false, true, false, false, false, false, true))
+    }
+    walk.active.push(key)
+    cloneable := true
+    heap := false
+    clock := false
+    dynamic_loan := false
+    complete := true
+    holds := false
+    loop part in parts {
+        nested: sema_copy_type_facts(part, graph, table, caller, generic_params, walk)
+        cloneable = cloneable && nested.cloneable
+        heap = heap || nested.heap
+        clock = clock || nested.observable_clock
+        dynamic_loan = dynamic_loan || nested.dynamic_loan
+        complete = complete && nested.complete
+        holds = holds || nested.holds_resource
+    }
+    _ := walk.active.pop()
+    Val(sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), cloneable, heap, clock, false, dynamic_loan, complete), holds))
+}
+
+sema_copy_nominal_facts: fn(
+    nominal: SemaRegistrationNominal,
+    row: SemaRegistrationRowRef,
+    actual: Type,
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    key: nominal.identity_key
+    if walk.active.contains(key) {
+        if !walk.table || !sema_copy_walk_back_edge(walk, key, actual) -> walk.tainted = true
+        return sema_copy_type_facts_known(false, true, false, false, false, false, true)
+    }
+    if nominal.kind == SemaRegistrationNominalKind.ForeignHandle {
+        if nominal.source == {
+            .ForeignHandle(facts) -> return sema_copy_foreign_handle_facts(nominal, facts)
+            .SourceAST(_) | .CompilerBuiltinTrait(_) -> return sema_copy_type_facts_known(false, false, false, false, false, false, false)
+        }
+    }
+    finished_key: sema_copy_walk_key_id(walk, sema_copy_walk_key(key, actual))
+    if walk.finished[finished_key] == .Val(known) {
+        if known.tainted -> walk.tainted = true
+        pending_index: walk.pending[finished_key]
+        if walk.table && pending_index >= 0 && pending_index < walk.low -> walk.low = pending_index
+        return known.facts
+    }
+    outer_tainted: walk.tainted
+    walk.tainted = false
+    outer_low: walk.low
+    index: walk.visits
+    walk.active.push(key.copy())
+    if walk.table {
+        walk.visits += 1
+        walk.low = index
+        walk.path_ids.push(key.copy())
+        walk.path_keys.push(finished_key)
+        walk.path_index.push(index)
+        walk.path_self.push(false)
+    }
+    bindings_result: sema_copy_generic_bindings(nominal, actual)
+    bindings: bindings_result.bindings
+    complete := bindings_result.complete
+    resource_impl: sema_copy_nominal_close(graph, table, nominal, row)
+    resource := resource_impl.value
+    if !resource_impl.known -> complete = false
+    if module_is_core(nominal.symbol.module_identity) && sema_copy_named_is_builtin_resource(nominal.symbol.name) {
+        resource = true
+    }
+    single_use: sema_copy_nominal_single_use(nominal)
+    distinct: nominal.kind == SemaRegistrationNominalKind.Distinct
+    declared_types := sema_copy_nominal_declared_types(nominal, bindings, graph)
+    result := sema_copy_nominal_combine(actual, declared_types, distinct, resource, single_use, complete, graph, table, caller, generic_params, walk)
+    _ := walk.active.pop()
+    if walk.table {
+        _ := walk.path_ids.pop()
+        _ := walk.path_keys.pop()
+        _ := walk.path_index.pop()
+        self_loop: walk.path_self.pop() ?? false
+        member := SemaCopySccMember{key: finished_key, index: index, actual: actual, declared: declared_types.move(), distinct: distinct, resource: resource, single_use: single_use, complete: complete}
+        return sema_copy_scc_finish(member, result, self_loop, outer_tainted, outer_low, graph, table, caller, generic_params, walk)
+    }
+    walk.finished[finished_key] = Val(SemaCopyWalkRow{facts: result, tainted: walk.tainted})
+    walk.tainted = outer_tainted || walk.tainted
+    result
+}
+
+// A nominal's facts from its declared part types and its own capabilities. A
+// `#SingleUse` nominal closes nothing, so it is no resource, but its one duty
+// has one owner just as a resource's cleanup does: it never copies, and a
+// value holding one holds a duty, so it is never copied out of a place either.
+sema_copy_nominal_combine: fn(
+    actual: Type,
+    declared_types: [Type],
+    distinct: Bool,
+    resource: Bool,
+    single_use: Bool,
+    complete_parts: Bool,
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    cloneable := true
+    heap := false
+    clock := false
+    dynamic_loan := false
+    complete := complete_parts
+    holds := resource || single_use
+    loop declared in declared_types {
+        nested: sema_copy_type_facts(declared, graph, table, caller, generic_params, walk)
+        cloneable = cloneable && nested.cloneable
+        heap = heap || nested.heap
+        clock = clock || nested.observable_clock
+        dynamic_loan = dynamic_loan || nested.dynamic_loan
+        complete = complete && nested.complete
+        holds = holds || nested.holds_resource
+    }
+    if distinct -> cloneable = true
+    if resource || single_use -> cloneable = false
+    SemaCopyTypeFacts{
+        copyable: sema_copy_copyable_scalar(actual),
+        cloneable: cloneable,
+        heap: heap,
+        observable_clock: clock,
+        resource: resource,
+        holds_resource: holds,
+        dynamic_loan: dynamic_loan,
+        complete: complete,
+    }
+}
+
+// A table walk reaching a nominal on its path: the same instantiation is a
+// cycle, which lowers `low` to that instantiation's number; another
+// instantiation of the same generic is not, and taints as in a query.
+sema_copy_walk_back_edge: fn(walk: &SemaCopyWalk, key: String, actual: Type) -> Bool Never! {
+    // An instantiation on the path has its key interned, so a key the walk
+    // never reached is another instantiation.
+    found: name_find(walk.keys, sema_copy_walk_key(key, actual)) ?? return false
+    finished_key: name_index(found)
+    position := walk.path_ids.len() - 1
+    loop position >= 0 {
+        if walk.path_ids[position] == key {
+            if walk.path_keys[position] != finished_key -> return false
+            if walk.path_index[position] < walk.low -> walk.low = walk.path_index[position]
+            if position == walk.path_ids.len() - 1 -> walk.path_self[position] = true
+            return true
+        }
+        position -= 1
+    }
+    false
+}
+
+sema_copy_facts_same: fn(left: SemaCopyTypeFacts, right: SemaCopyTypeFacts) -> Bool Never! {
+    left.copyable == right.copyable && left.cloneable == right.cloneable && left.heap == right.heap && left.observable_clock == right.observable_clock && left.resource == right.resource && left.holds_resource == right.holds_resource && left.dynamic_loan == right.dynamic_loan && left.complete == right.complete
+}
+
+// Finishes one instantiation of a table walk. One whose walk reached further
+// up the path joins the open component (`scc`) with provisional facts. The
+// first instantiation of a component (or one that reaches itself) closes it:
+// its members are combined again from their parts, reading each other's
+// latest facts, until no fact changes. The provisional facts start at the
+// neutral end (no `or` fact, every `and` fact), so each round only moves a
+// fact away from it and the rounds end. A tainted component is not settled:
+// no table row keeps facts that read it.
+sema_copy_scc_finish: fn(
+    member: &&SemaCopySccMember,
+    result: &&SemaCopyTypeFacts,
+    self_loop: Bool,
+    outer_tainted: Bool,
+    outer_low: Int,
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    tainted: walk.tainted
+    low: walk.low
+    walk.finished[member.key] = Val(SemaCopyWalkRow{facts: result, tainted: tainted})
+    walk.tainted = outer_tainted || tainted
+    if low < member.index {
+        walk.pending[member.key] = member.index
+        walk.scc.push(member)
+        walk.low = if outer_low < low -> outer_low else -> low
+        return result
+    }
+    walk.low = outer_low
+    root_index: member.index
+    root_key: member.key
+    members := [SemaCopySccMember]{}
+    loop walk.scc.len() > 0 && walk.scc[walk.scc.len() - 1].index > root_index {
+        open := walk.scc.pop() ?? break
+        walk.pending[open.key] = -1
+        // Every member reaches the root, so a tainted root taints them all.
+        if tainted {
+            if walk.finished[open.key] == .Val(provisional) {
+                walk.finished[open.key] = Val(SemaCopyWalkRow{facts: provisional.facts, tainted: true})
+            }
+        }
+        members.push(open)
+    }
+    if tainted || (members.len() == 0 && !self_loop) -> return result
+    members.push(member)
+    changed := true
+    loop changed {
+        changed = false
+        loop member_index in 0..<members.len() {
+            facts: sema_copy_nominal_combine(members[member_index].actual, members[member_index].declared, members[member_index].distinct, members[member_index].resource, members[member_index].single_use, members[member_index].complete, graph, table, caller, generic_params, walk)
+            if walk.finished[members[member_index].key] == .Val(previous) {
+                if !sema_copy_facts_same(previous.facts, facts) {
+                    walk.finished[members[member_index].key] = Val(SemaCopyWalkRow{facts: facts, tainted: false})
+                    changed = true
+                }
+            }
+        }
+    }
+    walk.low = outer_low
+    walk.tainted = outer_tainted
+    if walk.finished[root_key] == .Val(settled) -> return settled.facts
+    result
+}
+
+sema_copy_apply_nested_facts: fn(
+    args: [Type],
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    nested := sema_copy_type_facts_known(false, true, false, false, false, false, true)
+    loop arg in args {
+        nested = sema_copy_nested_join(nested, sema_copy_type_facts(arg, graph, table, caller, generic_params, walk))
+    }
+    nested
+}
+
+// The facts of the arguments a struct or enum stores in its parts. A phantom
+// argument (a coordinate-space tag such as `Screen`) is never a value, so it
+// does not decide how the value copies, as with structural derives
+// (sema_comparability_equatable_arguments).
+sema_copy_stored_nested_facts: fn(
+    nominal: SemaRegistrationNominal,
+    args: [Type],
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    if nominal.source == .SourceAST(item) {
+        if (item == .Struct(_) || item == .Enum(_)) && nominal.generic_params.len() == args.len() {
+            nested := sema_copy_type_facts_known(false, true, false, false, false, false, true)
+            loop (index, parameter) in nominal.generic_params {
+                if sema_comparability_stored_parameter(item, parameter.name) {
+                    nested = sema_copy_nested_join(nested, sema_copy_type_facts(args[index], graph, table, caller, generic_params, walk))
+                }
+            }
+            return nested
+        }
+    }
+    sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, walk)
+}
+
+// Arguments' facts so far, joined with one more argument's.
+sema_copy_nested_join: fn(nested: SemaCopyTypeFacts, facts: SemaCopyTypeFacts) -> SemaCopyTypeFacts Never! {
+    sema_copy_facts_holding(sema_copy_type_facts_known(false, nested.cloneable && facts.cloneable, nested.heap || facts.heap, nested.observable_clock || facts.observable_clock, false, nested.dynamic_loan || facts.dynamic_loan, nested.complete && facts.complete), nested.holds_resource || facts.holds_resource)
+}
+
+sema_copy_apply_facts: fn(
+    ty: Type,
+    name: String,
+    args: [Type],
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    dynamic_loan: sema_copy_apply_is_dynamic_loan(name)
+    if core_source_owns_type(name) && core_identity_is(name, "core.crypto.vault", "ExpiringSecret") {
+        nested: sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, walk)
+        return sema_copy_facts_holding(sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true), nested.holds_resource)
+    }
+    if graph == .Val(registered) {
+        // A bare head taints a query, not the table's walk (sema_copy_named_facts).
+        if !walk.table && !name.contains("::") -> walk.tainted = true
+        if sema_type_resolve_nominal_row_at(registered, ty, caller) == .Val(row) {
+            nested: sema_copy_stored_nested_facts(registered.modules[row.module_index].nominals[row.row], args, graph, table, caller, generic_params, walk)
+            nominal_facts: sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], row, ty, graph, table, caller, generic_params, walk)
+            return SemaCopyTypeFacts{
+                copyable: sema_copy_copyable_scalar(ty),
+                cloneable: nominal_facts.cloneable && nested.cloneable,
+                heap: nominal_facts.heap || nested.heap,
+                observable_clock: nominal_facts.observable_clock || nested.observable_clock,
+                resource: nominal_facts.resource,
+                holds_resource: nominal_facts.holds_resource || nested.holds_resource,
+                dynamic_loan: dynamic_loan || nested.dynamic_loan || nominal_facts.dynamic_loan,
+                complete: nominal_facts.complete && nested.complete,
+            }
+        }
+        if !walk.table -> walk.tainted = true
+    }
+    nested: sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, walk)
+    if sema_copy_apply_is_noncloneable(name) || sema_copy_apply_is_canonical_task(ty, name, graph, caller) {
+        return sema_copy_facts_holding(sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true), nested.holds_resource)
+    }
+    if name == "View" && args.len() == 1 {
+        return sema_copy_type_facts_known(false, true, false, nested.observable_clock, false, nested.dynamic_loan, nested.complete)
+    }
+    if name == {
+        "Pool" -> return sema_copy_type_facts_known(false, false, true, nested.observable_clock, true, nested.dynamic_loan, true)
+        "KeyRef" -> return sema_copy_type_facts_known(false, true, true, nested.observable_clock, false, nested.dynamic_loan, true)
+        "Rotation" -> return sema_copy_type_facts_known(false, true, nested.heap, nested.observable_clock, false, nested.dynamic_loan, true)
+        else -> {}
+    }
+    // Native generic applications derive Clone from their arguments. A
+    // foreign application with a non-cloneable argument is a known E0211;
+    // only an unresolved argument keeps this judgment incomplete.
+    sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, nested.complete), nested.holds_resource)
+}
+
+sema_copy_classify: fn(
+    source: Type,
+    intent: SemaCopyIntent,
+    env: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    generic_params: [TGenericParam],
+    string_view: Bool,
+) -> SemaCopyFacts Never! {
+    owned: sema_copy_owned_view_type(source, string_view)
+    materializes_view: owned.materialized
+    caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
+    source_walk := sema_copy_walk()
+    source_facts: sema_copy_type_facts(source, program.registration_graph, program.copy_facts, caller, generic_params, source_walk)
+    // Only a materialized view copies into a different type; otherwise the
+    // target is the source and its facts are the ones just walked.
+    target_facts := source_facts
+    if materializes_view {
+        target_walk := sema_copy_walk()
+        target_facts = sema_copy_type_facts(owned.ty, program.registration_graph, program.copy_facts, caller, generic_params, target_walk)
+    }
+    lowering: if {
+        materializes_view -> SemaCopyLowering.MaterializeView
+        intent == SemaCopyIntent.Explicit -> SemaCopyLowering.ExplicitCopy
+        else -> SemaCopyLowering.Clone
+    }
+    accepted: source_facts.complete && target_facts.complete && !source_facts.resource && (source_facts.copyable || target_facts.cloneable)
+    memory: if owned.ty == {
+        .Shared(_) -> SemaCopyMemoryKind.RetainRelease
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> if target_facts.heap -> SemaCopyMemoryKind.Allocation else -> SemaCopyMemoryKind.NoEvent
+    }
+    SemaCopyFacts{
+        source: source,
+        target: owned.ty,
+        intent: intent,
+        lowering: lowering,
+        materializes_view: materializes_view,
+        observable_clock: source_facts.observable_clock,
+        memory: memory,
+        resource: source_facts.resource,
+        holds_resource: source_facts.holds_resource,
+        dynamic_loan: source_facts.dynamic_loan,
+        copyable: source_facts.copyable,
+        cloneable: target_facts.cloneable,
+        accepted: accepted,
+        complete: source_facts.complete && target_facts.complete,
+    }
+}
+
+// Whether a value of `ty` holds a Clock that is not deterministic at any
+// depth (Rust `type_contains_observable_clock`): comparing, formatting or
+// copying it reads ambient time.
+sema_copy_observable_clock: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .String -> return false
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
+    walk := sema_copy_walk()
+    sema_copy_type_facts(ty, program.registration_graph, program.copy_facts, caller, generic_params, walk).observable_clock
+}
+
+// Whether a semantic copy of `ty` forks: `ty` is a Clock, bare or tagged,
+// or a list, option, fixed list, map, result, tuple, union, struct or enum
+// that holds one at any depth. A `Shared` value is one handle on its state,
+// so its copy shares and forks nothing it holds; a function value, a trait
+// value and a generic parameter fork nothing either.
+sema_copy_holds_fork: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
+    // The copy-fact table answers most copies at once: a value with no
+    // observable Clock forks only through a deterministic one it names.
+    if !sema_copy_observable_clock(ty, env, program, generic_params) && !sema_copy_names_deterministic_clock(ty) {
+        return false
+    }
+    caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
+    seen := name_table_sized(16)
+    sema_copy_holds_fork_walk(ty, program.registration_graph, caller, generic_params, seen)
+}
+
+// Whether `ty` names a deterministic Clock (the type `Clock.new(…)` gives)
+// outside a declared field. A declared field's type never carries the tag,
+// so only an inferred element, payload or type argument does.
+sema_copy_names_deterministic_clock: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(marker, inner) -> (marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_call_is_clock_type(inner)) || sema_copy_names_deterministic_clock(inner)
+        .List(inner) | .Case(_, inner) -> sema_copy_names_deterministic_clock(inner)
+        .Option(inner) -> sema_copy_names_deterministic_clock(inner)
+        .FixedList(inner, _) -> sema_copy_names_deterministic_clock(inner)
+        .InlineRange(base, _, _) -> sema_copy_names_deterministic_clock(base)
+        .Map(key, _, value) -> sema_copy_names_deterministic_clock(key) || sema_copy_names_deterministic_clock(value)
+        .Result(ok, err) -> sema_copy_names_deterministic_clock(ok) || sema_copy_names_deterministic_clock(err)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_copy_names_deterministic_clock(field.ty) -> return true
+            }
+            false
+        }
+        .Union(members) -> {
+            loop member in members {
+                if sema_copy_names_deterministic_clock(member) -> return true
+            }
+            false
+        }
+        .Apply(_, args) -> {
+            loop argument in args {
+                if sema_copy_names_deterministic_clock(argument) -> return true
+            }
+            false
+        }
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Named(_) -> false
+    }
+}
+
+sema_copy_holds_fork_walk: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &NameTable) -> Bool Never! {
+    if sema_call_is_clock_type(ty) -> return true
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) -> false
+        .List(inner) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
+        .Option(inner) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
+        .FixedList(inner, _) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
+        .InlineRange(base, _, _) -> sema_copy_holds_fork_walk(base, graph, caller, generic_params, seen)
+        .Tagged(_, inner) | .Case(_, inner) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
+        .Map(key, _, value) -> sema_copy_holds_fork_walk(key, graph, caller, generic_params, seen) || sema_copy_holds_fork_walk(value, graph, caller, generic_params, seen)
+        .Result(ok, err) -> sema_copy_holds_fork_walk(ok, graph, caller, generic_params, seen) || sema_copy_holds_fork_walk(err, graph, caller, generic_params, seen)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_copy_holds_fork_walk(field.ty, graph, caller, generic_params, seen) {
+                    return true
+                }
+            }
+            false
+        }
+        .Union(members) -> {
+            loop member in members {
+                if sema_copy_holds_fork_walk(member, graph, caller, generic_params, seen) {
+                    return true
+                }
+            }
+            false
+        }
+        .Named(name) -> {
+            loop parameter in generic_params {
+                if parameter.name == name -> return false
+            }
+            sema_copy_holds_fork_nominal(ty, graph, caller, generic_params, seen)
+        }
+        .Apply(_, _) -> sema_copy_holds_fork_nominal(ty, graph, caller, generic_params, seen)
+    }
+}
+
+// Each instance of a nominal is walked once: a walk that found a Clock has
+// already answered, so an instance seen before adds nothing.
+sema_copy_holds_fork_nominal: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &NameTable) -> Bool Never! {
+    if graph == .Val(registered) {
+        row: sema_copy_fork_row_at(ty, registered, caller) ?? return false
+        instance: "{registered.modules[row.module_index].nominals[row.row].identity_key}<{type_name(ty)}>"
+        known: name_count(seen)
+        _ := name_intern(seen, instance)
+        if name_count(seen) == known -> return false
+        loop part in sema_copy_fork_parts(registered.modules[row.module_index].nominals[row.row], ty, graph) {
+            if sema_copy_holds_fork_walk(part, graph, caller, generic_params, seen) -> return true
+        }
+        return false
+    }
+    false
+}
+
+// The row of the registered struct or enum `ty` names from the copy's
+// module. Any other nominal (a distinct type, an alias, a foreign handle) is
+// not rebuilt part by part.
+sema_copy_fork_row: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationRowRef? {
+    if program.registration_graph == .Val(graph) {
+        return sema_copy_fork_row_at(ty, graph, sema_type_module_row(graph, env.module_identity))
+    }
+    None
+}
+
+sema_copy_fork_row_at: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int) -> SemaRegistrationRowRef? {
+    name: if ty == {
+        .Named(found) -> found
+        .Apply(found, _) -> found
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+            return None
+        }
+    }
+    resolved: sema_type_graph_lookup_symbol_at(graph, caller, name)
+    row: sema_type_lookup_nominal_row(graph, resolved, name, caller) ?? return None
+    kind: graph.modules[row.module_index].nominals[row.row].kind
+    if kind != SemaRegistrationNominalKind.Struct && kind != SemaRegistrationNominalKind.Enum {
+        return None
+    }
+    Val(row)
+}
+
+// The part types a copy of `nominal` rebuilds, with `ty`'s arguments bound:
+// a struct's stored fields (a computed field stores nothing), or each enum
+// variant's payload.
+sema_copy_fork_parts: fn(nominal: SemaRegistrationNominal, ty: Type, graph: SemaRegistrationGraph?) -> [Type] Never! {
+    bindings: sema_copy_generic_bindings(nominal, ty).bindings
+    parts := [Type]{}
+    loop field in nominal.fields {
+        if !field.computed {
+            parts.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings))
+        }
+    }
+    loop variant in nominal.variants {
+        if variant.payload_type == .Val(payload) {
+            parts.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, payload), bindings))
+        }
+    }
+    parts
+}
+
+// A struct or enum declared `#SingleUse`.
+sema_copy_nominal_single_use: fn(nominal: SemaRegistrationNominal) -> Bool Never! {
+    if nominal.source == .SourceAST(item) {
+        if item == .Struct(definition) -> return definition.is_single_use
+        if item == .Enum(definition) -> return definition.is_single_use
+    }
+    false
+}
+
+// The most type instances one sema_copy_holds_single_use walk visits.
+SEMA_COPY_SINGLE_USE_WALK: 256
+
+// Whether a value of `ty` is or holds a `#SingleUse` value at any depth: a
+// field, an enum payload, an element or an entry. A type argument counts
+// where the nominal's parts hold it (sema_copy_fork_parts substitutes it).
+// `seen` holds each instance walked once; a nominal whose parts grow its own
+// arguments without end (`Node<T>` holding a `Node<[T]>`) stops at
+// SEMA_COPY_SINGLE_USE_WALK instances.
+sema_copy_holds_single_use: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int, seen: &[String]) -> Bool {
+    if ty == {
+        .Named(_) | .Apply(_, _) -> {
+            row: sema_copy_fork_row_at(ty, graph, caller) ?? return false
+            nominal: graph.modules[row.module_index].nominals[row.row]
+            if sema_copy_nominal_single_use(nominal) -> return true
+            shown: type_name(ty)
+            if seen.contains(shown) || seen.len() >= SEMA_COPY_SINGLE_USE_WALK -> return false
+            seen.push(shown)
+            loop part in sema_copy_fork_parts(nominal, ty, Val(graph)) {
+                if sema_copy_holds_single_use(part, graph, caller, seen) -> return true
+            }
+            false
+        }
+        .List(inner) | .FixedList(inner, _) | .Option(inner) -> sema_copy_holds_single_use(inner, graph, caller, seen)
+        .Result(ok, err) -> sema_copy_holds_single_use(ok, graph, caller, seen) || sema_copy_holds_single_use(err, graph, caller, seen)
+        .Map(key, _, value) -> sema_copy_holds_single_use(key, graph, caller, seen) || sema_copy_holds_single_use(value, graph, caller, seen)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_copy_holds_single_use(field.ty, graph, caller, seen) -> return true
+            }
+            false
+        }
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// `sema_copy_holds_single_use` from a checked scope.
+sema_copy_holds_single_use_in: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    graph: program.registration_graph ?? return false
+    seen := [String]{}
+    sema_copy_holds_single_use(ty, graph, sema_type_module_row(graph, environment.module_identity), seen)
+}
+
+// A refused copy's diagnostic. A value that is or holds a `#SingleUse` value
+// is refused for its duty, whatever else it holds.
+sema_copy_refusal: fn(facts: SemaCopyFacts, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {
+    if facts.accepted || !facts.complete -> return None
+    if !sema_copy_holds_single_use_in(facts.source, environment, program) {
+        return sema_copy_diagnostic(facts, span)
+    }
+    shown: type_name(facts.source)
+    fix: "move it instead with `.move()`; a second one has to come from wherever this one came from"
+    if program.registration_graph == .Val(graph) {
+        if sema_copy_fork_row_at(facts.source, graph, sema_type_module_row(graph, environment.module_identity)) == .Val(row) {
+            if sema_copy_nominal_single_use(graph.modules[row.module_index].nominals[row.row]) {
+                return Val(sema_error("E0211", span, "`{shown}` can't be copied", "`{shown}` is `#SingleUse`: it carries one duty that has to be done exactly once, and a copy would let that duty be done twice", fix))
+            }
+        }
+    }
+    Val(sema_error("E0211", span, "`{shown}` can't be copied", "it holds a `#SingleUse` value, which carries one duty that has to be done exactly once, and a copy would let that duty be done twice", fix))
+}
+
+// Why a value holding a duty can't be copied out of its place: the duty is a
+// resource's cleanup or a `#SingleUse` value's job.
+sema_copy_place_duty_why: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
+    if sema_copy_holds_single_use_in(ty, environment, program) {
+        return "it holds a `#SingleUse` value, whose one duty has one owner; this position takes an owned value, so the copy and the place would both owe that duty"
+    }
+    "it holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource"
+}
+
+sema_copy_diagnostic: fn(facts: SemaCopyFacts, span: Span) -> Diagnostic? {
+    if facts.accepted || !facts.complete -> return None
+    cell_guard: facts.dynamic_loan
+    shown := type_name(facts.source)
+    if cell_guard {
+        if facts.source == {
+            .Apply(name, args) -> {
+                if (name == "CellReadGuard" || name == "CellEditGuard") && args.len() == 1 {
+                    shown = "{name}<{type_name(args[0])}>"
+                }
+            }
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        }
+    }
+    if {
+        cell_guard -> Val(sema_error("E0211", span, "`{shown}` can't be copied", "a Cell guard owns one live dynamic loan; copying it would create two handles for the same loan", "move it instead with `guard.move()`, or create a new guard after this one is dropped"))
+        facts.resource -> Val(sema_error("E0211", span, "`{shown}` can't be copied", "a resource owns one cleanup duty; copying it would create two owners that could close the same handle", "move it instead with `.move()`, or acquire a second resource"))
+        else -> Val(sema_error("E0211", span, "`{shown}` can't be copied", "copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet", "move it instead with `.move()` if this is its last use, or change the type so every part can be copied"))
+    }
+}
+
+sema_copy_effect_name: fn(facts: SemaCopyFacts) -> String? {
+    if facts.observable_clock -> Val("Time") else -> None
+}
+
+sema_copy_memory_operation: fn(facts: SemaCopyFacts) -> String? {
+    if !facts.accepted -> return None
+    prefix: if facts.intent == SemaCopyIntent.Explicit -> "`copy`" else -> "implicit copy"
+    if facts.memory == {
+        .RetainRelease -> Val("{prefix} of `{type_name(facts.target)}` retains a shared reference")
+        .Allocation -> Val("{prefix} of `{type_name(facts.target)}` allocates owned heap data")
+        .NoEvent -> None
+    }
+}

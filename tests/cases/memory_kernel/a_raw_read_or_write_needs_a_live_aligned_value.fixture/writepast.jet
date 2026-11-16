@@ -1,0 +1,12 @@
+use core.mem
+
+run: fn() {
+    #Unsafe("the write stores the Int just past the block") {
+        block: mem.alloc_raw(16, 8) ?? panic("no memory")
+        words: block.cast<Int>()
+        mem.volatile_write<Int>(words.offset(1), 4)
+        print(mem.volatile_read<Int>(words.offset(1)))
+        mem.volatile_write<Int>(words.offset(2), 5)
+        mem.free_raw(block)
+    }
+}

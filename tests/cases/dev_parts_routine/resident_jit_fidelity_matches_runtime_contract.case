@@ -1,0 +1,59 @@
+# tests/dev_parts/routine.rs::resident_jit_fidelity_matches_runtime_contract at tests/dev_parts/routine.rs:3474; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: resident_jit_fidelity_matches_runtime_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run jet_jit_fidelity_valid_interp.jet
+cwd: valid
+exit: 0
+stdout: = resident_jit_fidelity_matches_runtime_contract.1.out
+stderr: empty
+step: jet build jet_jit_fidelity_valid_interp.jet
+cwd: valid
+exit: 0
+step aot: built
+cwd: valid
+exit: 0
+stdout: = resident_jit_fidelity_matches_runtime_contract.1.out
+stderr: empty
+step negative: jet run run.jet
+cwd: negative
+exit: 1
+stderr: ~ "OutOfRange" # original predicate: stderr.contains
+stderr: ~ "PerfError" # original predicate: stderr.contains
+step negative_state: jet run run.jet
+cwd: negative_state
+exit: 0
+stdout: = resident_jit_fidelity_matches_runtime_contract.2.out
+stderr: empty
+step above_one: jet run run.jet
+cwd: above_one
+exit: 1
+stderr: ~ "OutOfRange" # original predicate: stderr.contains
+stderr: ~ "PerfError" # original predicate: stderr.contains
+step above_one_state: jet run run.jet
+cwd: above_one_state
+exit: 0
+stdout: = resident_jit_fidelity_matches_runtime_contract.2.out
+stderr: empty
+step infinite: jet run run.jet
+cwd: infinite
+exit: 1
+stderr: ~ "OutOfRange" # original predicate: stderr.contains
+stderr: ~ "PerfError" # original predicate: stderr.contains
+step infinite_state: jet run run.jet
+cwd: infinite_state
+exit: 0
+stdout: = resident_jit_fidelity_matches_runtime_contract.2.out
+stderr: empty
+step nan: jet run run.jet
+cwd: nan
+exit: 1
+stderr: ~ "OutOfRange" # original predicate: stderr.contains
+stderr: ~ "PerfError" # original predicate: stderr.contains
+step nan_state: jet run run.jet
+cwd: nan_state
+exit: 0
+stdout: = resident_jit_fidelity_matches_runtime_contract.2.out
+stderr: empty

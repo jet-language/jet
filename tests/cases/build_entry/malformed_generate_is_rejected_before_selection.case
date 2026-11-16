@@ -1,0 +1,7 @@
+# Port of tests/build_entry.rs:2438-2459; sources verbatim.
+# PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: fixtures/malformed_generate_is_rejected_before_selection
+step: jet build main.jet  --json
+exit: nonzero
+json: machine doc $.reports[?code="E0003"] #>= 1
+file: .jet/generated/main/ignored.jet absent

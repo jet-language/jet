@@ -1,0 +1,344 @@
+// Binding compiled functions to the runtime image without their object. A
+// compile-time batch (JetEval Native.jet) is bound at a program base once
+// per batch, as MemoryLink.jet x64_bind_runtime_image_at binds the object
+// Image/Object.jet x64_object_functions_threads writes of it (no own
+// sections, the one export `main`, no debug info). x64_bind_functions_at
+// writes that executable straight from the functions, their unwind rows and
+// the module's data, byte for byte, with no ELF object serialized and read
+// back: the bind's layout (link_bind_layout), startup (link_bind_startup),
+// program header table (link_bind_header), section headers
+// (link_bind_class_headers) and symbols (link_bind_symbols). Anything the
+// object writer or the bind reports (a call or data row not in the module, a
+// bad data relocation, an import the image does not define, a value out of
+// range, an image without an export index) goes the object route instead,
+// so the report is that route's own.
+use jet_foundation.[CompilerThreads, NameTable, name_index, name_intern, name_table_sized]
+
+// Bind the program of `functions` (with `debug`, their unwind rows; `main`
+// the function of id -1) and `program`'s data, named `name` in reports, to
+// the runtime image `image` with its part at `program_base`, as
+// x64_bind_runtime_image_at binds their object. With `unwritten` the errors
+// are the object writer's. The image is the executable's image part, bound
+// or not.
+x64_bind_functions_at: fn(name: String, program: &&X64ObjectModule, functions: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], threads: CompilerThreads, image: &&[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
+    c := link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
+    exe := x64_executable_whole([U8]{})
+    if link_direct_bind(c, exe, program, functions, debug, program_base, gap_at, gap) {
+        exe.image = c.bufs.remove(1, .Slot) ?? [U8]{}
+        return X64BindResult{executable: exe, errors: [String]{}}
+    }
+    taken: c.bufs.remove(1, .Slot) ?? [U8]{}
+    exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
+    object: x64_object_functions_threads(program.move(), functions.move(), debug.move(), exports, [X64DataExport]{}, threads, false, false)
+    if object.errors.len() > 0 {
+        failed := x64_executable_whole([U8]{})
+        failed.image = taken.move()
+        return X64BindResult{executable: failed, errors: object.errors.move(), unwritten: true}
+    }
+    x64_bind_runtime_image_at(name, object.bytes.move(), taken.move(), program_base, gap_at, gap)
+}
+
+// The executable x64_bind_runtime_image_at makes of the object of
+// `functions`, written into `exe` but for its image part (input 1 of `c`);
+// false, with `exe` unfinished, when the object route must make it.
+link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], program_base: Int, gap_at: Int, gap: Int) -> Bool Never! {
+    view := link_image_view(c, 1, gap_at, gap)
+    if c.errors.len() > 0 || view.exports_slots == 0 -> return false
+    if program_base.bit_and(LINK_PAGE - 1) != 0 || program_base < view.program_base -> return false
+    view.program_base = program_base
+    c.base = view.base
+    if functions.len() == 0 || debug.len() != functions.len() -> return false
+    // Per function id + 1 its first row, as the object writer finds a
+    // call's target; `main` is id -1.
+    max_id := -1
+    loop function in functions {
+        if function.id.value < -1 -> return false
+        if function.id.value > max_id -> max_id = function.id.value
+    }
+    function_rows := [Int]{}
+    loop _ in 0..<(max_id + 2) -> function_rows.push(-1)
+    loop (index, function) in functions {
+        if function_rows[function.id.value + 1] < 0 -> function_rows[function.id.value + 1] = index
+    }
+    main_row: function_rows[0]
+    if main_row < 0 -> return false
+    // The object's `.text`: each function on its alignment, in order.
+    offsets := [Int]{}
+    sizes := [Int]{}
+    text_size := 0
+    text_align := X64_FUNCTION_ALIGN
+    loop function in functions {
+        if function.align > text_align -> text_align = function.align
+        loop text_size % function.align != 0 -> text_size += 1
+        offsets.push(text_size)
+        sizes.push(function.code.len())
+        text_size += function.code.len()
+    }
+    if !x64_fits_i32(text_size) -> return false
+    // The object's `.data` and `.rodata` (x64_object_data_place), and which
+    // of them the bind loads: those the code reaches, and `.rodata` when
+    // `.data` is loaded and reaches it.
+    placed := [Bool]{}
+    data_offsets := [Int]{}
+    loop _ in program.data {
+        placed.push(false)
+        data_offsets.push(0)
+    }
+    order := [Int]{}
+    data_live := false
+    rodata_live := false
+    loop function in functions {
+        loop reloc in function.relocs {
+            if reloc.target == .Function(id) {
+                if id.value < -1 || id.value + 1 >= function_rows.len() || function_rows[id.value + 1] < 0 {
+                    return false
+                }
+            }
+            if reloc.target == .Data(id) {
+                if id.value < 0 || id.value >= program.data.len() -> return false
+                if x64_object_read_only(program.data[id.value]) -> rodata_live = true else {
+                    data_live = true
+                }
+                x64_object_data_place(program.data, id.value, placed, order)
+            }
+        }
+    }
+    data := [U8]{}
+    data_align := 1
+    rodata := [U8]{}
+    rodata_align := 1
+    loop index in order {
+        object: program.data[index]
+        if x64_object_read_only(object) {
+            elf64_pad(rodata, object.align)
+            if object.align > rodata_align -> rodata_align = object.align
+            data_offsets[index] = rodata.len()
+            rodata.extend(object.bytes)
+        } else {
+            elf64_pad(data, object.align)
+            if object.align > data_align -> data_align = object.align
+            data_offsets[index] = data.len()
+            data.extend(object.bytes)
+        }
+    }
+    loop (index, object) in program.data {
+        if !placed[index] -> next
+        loop reloc in object.relocs {
+            if reloc.offset < 0 || reloc.offset % 8 != 0 || reloc.offset > object.bytes.len() - 8 {
+                return false
+            }
+            if reloc.target.value < 0 || reloc.target.value >= program.data.len() -> return false
+            if data_live && x64_object_read_only(program.data[reloc.target.value]) {
+                rodata_live = true
+            }
+        }
+    }
+    // A loaded section of no bytes still moves what follows to its
+    // alignment; the object route lays it out.
+    if (data_live && data.len() == 0) || (rodata_live && rodata.len() == 0) -> return false
+    eh: dwarf_eh_frame(debug, offsets, sizes, X64DwarfSymbols{text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS, functions: [Int]{}})
+    frames: link_image_defines(c, view, "__register_frame_info")
+    startup: link_bind_startup(frames)
+    // link_bind_layout's layout: the program header table, `.rodata` and
+    // `.eh_frame` (and its terminator) read-only; the program's code, then
+    // the startup's, from the next page; `.data` and the startup's `.bss`
+    // writable from the page after.
+    has_rw: data_live || frames
+    phnum: view.phnum + 2 + (if has_rw -> 1 else -> 0)
+    addr := program_base + LINK_PHDR_SIZE * phnum
+    rodata_at := addr
+    if rodata_live {
+        rodata_at = link_align(addr, rodata_align)
+        addr = rodata_at + rodata.len()
+    }
+    // The end of `.rodata` when it is loaded.
+    rodata_end: addr
+    eh_start: link_align(addr, 8)
+    eh_size: eh.bytes.len() + 4
+    r_end: eh_start + eh_size
+    text_start: link_align(r_end, LINK_PAGE)
+    code_at: link_align(text_start, text_align)
+    startup_at: link_align(code_at + text_size, 16)
+    text_end: startup_at + startup.text.len()
+    rw_start: link_align(text_end, LINK_PAGE)
+    data_at := rw_start
+    file_end := rw_start
+    if data_live {
+        data_at = link_align(rw_start, data_align)
+        file_end = data_at + data.len()
+    }
+    bss_at := file_end
+    mem_end := file_end
+    if frames {
+        bss_at = link_align(file_end, 16)
+        mem_end = bss_at + startup.bss
+    }
+    layout: LinkLayout{
+        order: [[Int]]{},
+        phnum: phnum,
+        r_end: r_end,
+        text_start: text_start,
+        text_end: text_end,
+        rw_start: rw_start,
+        file_end: file_end,
+        mem_end: mem_end,
+        has_rw: has_rw,
+        has_tls: false,
+        tdata_end: rw_start,
+        init_start: rw_start,
+        init_end: rw_start,
+        fini_start: rw_start,
+        fini_end: rw_start,
+        preinit_start: rw_start,
+        preinit_end: rw_start,
+        bss_start: file_end,
+        note_at: 0,
+        notes: [Int:Int]{},
+        packed: false,
+        rw_shift: 0,
+    }
+    main_at: code_at + offsets[main_row]
+    start: link_direct_startup_address(startup, "__jet_bind_main", startup_at, bss_at)
+    origin: program_base - c.base
+    exe.image_end = view.load_end
+    exe.image_gap_at = gap_at
+    exe.image_gap = gap
+    exe.tail_at = origin
+    out := [U8]{}
+    elf := link_bind_header(c, exe, out, view, layout, start)
+    if c.errors.len() > 0 -> return false
+    // The loaded bytes, as link_write_contents writes them: zeros before
+    // data, int3 before code.
+    if rodata_live {
+        link_pad_to(out, rodata_at - program_base, 0)
+        out.extend(rodata)
+    }
+    link_pad_to(out, eh_start - program_base, 0)
+    eh_from: out.len()
+    out.extend(eh.bytes)
+    loop rela in eh.relas {
+        value: code_at + rela.addend - (eh_start + rela.at)
+        if !link_fits32(value) -> return false
+        link_put32(out, eh_from + rela.at, value)
+    }
+    loop _ in 0..<4 -> out.push(U8{0})
+    link_pad_to(out, code_at - program_base, 0xcc)
+    code_from: out.len()
+    // Each import's address in the image by its id in `names`, once looked up.
+    names := name_table_sized(64)
+    looked := [Bool]{}
+    import_at := [Int]{}
+    loop (index, function) in functions {
+        link_pad_to(out, code_from + offsets[index], 0xcc)
+        out.extend(function.code)
+        loop reloc in function.relocs {
+            target: if reloc.target == {
+                .Function(id) -> code_at + offsets[function_rows[id.value + 1]]
+                .Runtime(symbol) -> link_direct_import(c, view, names, looked, import_at, symbol)
+                .RuntimeData(symbol) -> link_direct_import(c, view, names, looked, import_at, symbol)
+                .Data(id) -> (if x64_object_read_only(program.data[id.value]) -> rodata_at else -> data_at) + data_offsets[id.value]
+            }
+            if target < 0 -> return false
+            place: code_at + offsets[index] + reloc.at
+            value: target - 4 - place
+            if !link_fits32(value) -> return false
+            link_put32(out, code_from + offsets[index] + reloc.at, value)
+        }
+    }
+    link_pad_to(out, startup_at - program_base, 0xcc)
+    startup_from: out.len()
+    out.extend(startup.text)
+    loop (k, at) in startup.rel_at {
+        rel_name: startup.rel_names[k]
+        kind: startup.rel_types[k]
+        if kind != LINK_R_PC32 && kind != LINK_R_PLT32 -> return false
+        target := link_direct_startup_address(startup, rel_name, startup_at, bss_at)
+        if rel_name == "__jet_bind_eh" -> target = eh_start
+        if rel_name == "main" -> target = main_at
+        if target < 0 -> target = link_direct_import(c, view, names, looked, import_at, rel_name)
+        if target < 0 -> return false
+        value: target + startup.rel_addends[k] - (startup_at + at)
+        if !link_fits32(value) -> return false
+        link_put32(out, startup_from + at, value)
+    }
+    link_pad_to(out, rw_start - program_base, 0)
+    if data_live {
+        link_pad_to(out, data_at - program_base, 0)
+        data_from: out.len()
+        out.extend(data)
+        loop (index, object) in program.data {
+            if !placed[index] -> next
+            loop reloc in object.relocs {
+                row: reloc.target.value
+                section: if x64_object_read_only(program.data[row]) -> rodata_at else -> data_at
+                link_put64(out, data_from + data_offsets[index] + reloc.offset, section + data_offsets[row] + reloc.addend)
+            }
+        }
+    }
+    if has_rw -> link_pad_to(out, file_end - program_base, 0)
+    // The tail, as link_bind_sections writes it without debug sections or
+    // the image's symbols.
+    headers := link_bind_image_headers(c, view)
+    extents := [[Int]]{}
+    loop _ in 0..<LINK_CLASSES -> extents.push([Int]{0, 0})
+    if rodata_live -> extents[LINK_RODATA] = [Int]{rodata_at, rodata_end}
+    extents[LINK_EH] = [Int]{eh_start, eh_start + eh_size}
+    extents[LINK_TEXT] = [Int]{code_at, text_end}
+    if data_live -> extents[LINK_DATA] = [Int]{data_at, file_end}
+    if has_rw -> extents[LINK_BSS] = [Int]{file_end, mem_end}
+    class_headers: link_bind_class_headers(headers, extents, rw_start, 0, c.base)
+    text_header: class_headers[LINK_TEXT]
+    symbol_names := [U8]{}
+    locals := [U8]{}
+    loop (index, function) in functions {
+        if function.id.value == -1 || function.name == "" -> next
+        link_image_symbol(locals, symbol_names, 1, function.name, 2, text_header, code_at + offsets[index], function.code.len())
+    }
+    globals := [U8]{}
+    link_image_symbol(globals, symbol_names, 1, "main", 0x12, text_header, main_at, functions[main_row].code.len())
+    loop (k, def_name) in startup.def_names {
+        section: startup.def_sections[k]
+        if section != 1 && section != 3 -> return false
+        header: if section == 1 -> text_header else -> class_headers[LINK_BSS]
+        if header < 0 -> next
+        link_image_symbol(globals, symbol_names, 1, def_name, if section == 1 -> 0x12 else -> 0x11, header, link_direct_startup_address(startup, def_name, startup_at, bss_at), 0)
+    }
+    link_bind_symbols(c, out, origin, view, headers, locals, globals, symbol_names, false, elf)
+    exe.tail = out
+    exe.patch_at.push(0)
+    exe.patch_bytes.push(elf)
+    true
+}
+
+// The address of the startup's definition `name`, its `.text` at `text_at`
+// and its `.bss` at `bss_at`; -1 when it defines no `name`.
+link_direct_startup_address: fn(startup: LinkSynth, name: String, text_at: Int, bss_at: Int) -> Int Never! {
+    loop (k, defined) in startup.def_names {
+        if defined != name -> next
+        section: startup.def_sections[k]
+        if section == 1 -> return text_at + startup.def_values[k]
+        if section == 3 -> return bss_at + startup.def_values[k]
+        return -1
+    }
+    -1
+}
+
+// The image's address of import `symbol` by its export index, looked up once
+// per name (`looked`, `import_at` by its id in `names`); -1 when the image
+// does not export it or it names `main` or a binding symbol, which the bind
+// resolves otherwise.
+link_direct_import: fn(c: LinkContext, view: LinkImageView, names: &NameTable, looked: &[Bool], import_at: &[Int], symbol: String) -> Int Never! {
+    id: name_index(name_intern(names, symbol))
+    loop looked.len() <= id {
+        looked.push(false)
+        import_at.push(-1)
+    }
+    if !looked[id] {
+        looked[id] = true
+        if symbol != "main" && !symbol.starts_with("__jet_bind") {
+            k: link_image_export(c, view, symbol)
+            if k >= 0 -> import_at[id] = link_s64(c.bufs, 1, view.symtab_at + 24 * k + 8)
+        }
+    }
+    import_at[id]
+}

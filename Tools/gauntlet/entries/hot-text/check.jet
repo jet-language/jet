@@ -1,0 +1,24 @@
+// What a hot-text case produced (PortBars.jet runs this in the case directory
+// with the file holding the program's output): the output with the case
+// directory as <case>, then under `== <name>` each of the list the case
+// writes, the stand-in C compiler's log and the stand-in tracer's log (or
+// `missing`).
+use {
+    files: core.files
+    process: core.process
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
+    print(printed.replace("{here}/", "<case>/").trim_end())
+    loop name in ["hot.list", "cc.log", "trace.log"] {
+        print("== {name}")
+        print((files.read(name) ?? "missing").trim_end())
+    }
+}

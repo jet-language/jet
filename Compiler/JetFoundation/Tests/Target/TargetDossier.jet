@@ -1,0 +1,13 @@
+use jet_foundation.[AuditPolicy, jet_target_machine_dossier_json, jet_target_machine_hosted, jet_target_machine_wasm_no_os]
+
+#Test("a target dossier exists only under the dossier lens and frames the machine identity and tiers") {
+    hosted: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
+    dossier: jet_target_machine_dossier_json(hosted) ?? ""
+    assert(dossier.starts_with(`{"name":"hosted","triple":"x86_64-unknown-linux-gnu","environment":"hosted","provider_identity":"target-providers-v1:`))
+    assert(dossier.ends_with(`,"programmers":[],"execution":{"aot":true,"dev":true},"audit":{"build_artifact":true,"dossier_lens":true}}`))
+    no_os: jet_target_machine_dossier_json(jet_target_machine_wasm_no_os("0.0.1")) ?? ""
+    assert(no_os.ends_with(`,"execution":{"aot":true,"dev":false},"audit":{"build_artifact":true,"dossier_lens":true}}`))
+    hidden := jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
+    hidden.audit = AuditPolicy{build_artifact: true, dossier_lens: false}
+    assert(jet_target_machine_dossier_json(hidden) == None)
+}

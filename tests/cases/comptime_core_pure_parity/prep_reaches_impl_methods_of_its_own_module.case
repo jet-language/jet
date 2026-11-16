@@ -1,0 +1,12 @@
+# A prep item that reaches an impl method of its own module: the method is
+# listed on the nominal and on its impl block, one owner, so the comptime
+# closure must not call it ambiguous (E0003).
+fixture: prep_reaches_impl_methods_of_its_own_module/input
+step: jet run run.jet
+exit: 0
+stdout: = "42\n"
+step: jet build run.jet
+exit: 0
+step aot0: built
+exit: 0
+stdout: = "42\n"

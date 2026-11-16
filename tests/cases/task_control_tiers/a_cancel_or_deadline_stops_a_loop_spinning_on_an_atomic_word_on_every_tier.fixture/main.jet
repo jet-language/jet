@@ -1,0 +1,80 @@
+use time: core.time
+
+// A close that shows the cancelled task's cleanup ran.
+Marker: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+// Waits for a gate that never opens, reading only its word. A 64-bit
+// atomic load is one mov that makes no call and delivers no stop, so only
+// the check each iteration starts with can stop the loop.
+wait_open: fn(gate: Atomic<I64>, started: Atomic<I64>) -> Int {
+    started.store(1)
+    loop gate.load() == 0 {
+
+    }
+    0
+}
+
+seven: fn() -> Int { 7 }
+
+failure_label: fn(error: TaskFailure) -> String {
+    if error == {
+        .Cancelled -> {
+            return "cancelled"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Panicked(_) -> {
+            return "panicked"
+        }
+    }
+}
+
+run: fn() {
+    // The race returns its winner although the loser only spins on the
+    // word: the loser stops at its next iteration.
+    raced_gate: Atomic<I64>.new(0)
+    raced_started: Atomic<I64>.new(0)
+    print(task.race {wait_open(raced_gate, raced_started), seven()} ?? panic("race failed"))
+
+    // The waiters share the owner's words, so they run in a group the words
+    // outlive.
+    gate: Atomic<I64>.new(0)
+    started: Atomic<I64>.new(0)
+    timed_started: Atomic<I64>.new(0)
+    task.group waiters {
+        waiter: task {
+            marker := Marker{name: "the waiter's marker"}
+            defer close(marker)
+            wait_open(gate, started)
+        }
+        tries := 0
+        loop started.load() == 0 && tries < 2000 {
+            time.sleep(1ms)
+            tries += 1
+        }
+        // No pause: a plain cancel stops the spin, and its cleanup runs.
+        waiter.cancel()
+        if waiter.join() == {
+            .Ok(_) -> { print("the waiter finished") }
+            .Err(error) -> print("the waiter: {failure_label(error)}")
+        }
+
+        // A deadline passes while the task only spins: its next iteration
+        // stops it with the deadline failure.
+        timed: task {
+            task.timeout(20ms)
+            wait_open(gate, timed_started)
+        }
+        if timed.join() == {
+            .Ok(_) -> { print("the timed waiter finished") }
+            .Err(error) -> print("the timed waiter: {failure_label(error)}")
+        }
+    }
+}

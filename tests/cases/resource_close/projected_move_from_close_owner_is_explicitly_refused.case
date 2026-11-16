@@ -1,0 +1,13 @@
+# tests/resource_close.rs::projected_move_from_close_owner_is_explicitly_refused at tests/resource_close.rs:551; hand-port
+fixture: projected_move_from_close_owner_is_explicitly_refused.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet --json
+exit: 1 # tests/resource_close.rs:568 is rejected
+json: stdout doc $.reports[?code="E0222"] #>= 1 # tests/resource_close.rs:568 reports E0222
+step: jet check main.jet
+exit: 1 # tests/resource_close.rs:568 is rejected
+stderr: ~ "ClosePair" # tests/resource_close.rs:568 rendered diagnostic text
+stderr: ~ "own Close implementation" # tests/resource_close.rs:568 rendered diagnostic text
+stderr: ~ "held.first" # tests/resource_close.rs:568 rendered diagnostic text

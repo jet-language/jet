@@ -1,0 +1,18 @@
+# tests/observe.rs::structured_log_json_fields at tests/observe.rs:18; hand-port
+# Claim: exit 0 (tests/observe.rs:35)
+# Claim: every line carries "level", "body" and "ts": (tests/observe.rs:47-53)
+# Claim: line 0 is level info with body "hello world" (tests/observe.rs:57-61)
+# Claim: line 1 is level warn with body "disk low" (tests/observe.rs:62-66)
+# Claim: line 2 is level error with body "connection lost" (tests/observe.rs:67-72)
+# Claim: line 3 is level debug with body "trace detail" (tests/observe.rs:73-77)
+# Not ported: exactly 4 stderr lines and each line starts with `{` and ends with `}` (tests/observe.rs:38,41-46): the spec has no line-count or anchored-line matcher; the per-line stderr_has checks cover the fields
+fixture: structured_log_json_fields.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run log_json.jet
+exit: 0 # tests/observe.rs:35-77 exit 0 and the per-line level/body/ts fields
+stderr: ~ "{\"level\":\"info\",\"body\":\"hello world\",\"ts\":" # tests/observe.rs:35-77 exit 0 and the per-line level/body/ts fields
+stderr: ~ "{\"level\":\"warn\",\"body\":\"disk low\",\"ts\":" # tests/observe.rs:35-77 exit 0 and the per-line level/body/ts fields
+stderr: ~ "{\"level\":\"error\",\"body\":\"connection lost\",\"ts\":" # tests/observe.rs:35-77 exit 0 and the per-line level/body/ts fields
+stderr: ~ "{\"level\":\"debug\",\"body\":\"trace detail\",\"ts\":" # tests/observe.rs:35-77 exit 0 and the per-line level/body/ts fields

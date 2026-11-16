@@ -1,0 +1,16 @@
+Buf: struct {
+    priv data: [I64]
+
+    head: fn(self) -> View<I64> { self.data[0..<2] }
+}
+
+Keep: struct {
+    v: View<I64>
+}
+
+stash: fn() -> Keep {
+    b: Buf{data: [I64]{1, 2, 3}}
+    Keep{v: b.head()}
+}
+
+run: fn() { print(stash().v[0]) }

@@ -1,0 +1,148 @@
+// Linux parent observations reproduce typed memory/open-file exhaustion
+// classification. Kernel rlimits are installed by HostSpawn. Reading the
+// started child's /proc entry is part of the Exec call that started it, not an
+// FS.Read (host-reads.md H22).
+process_execution_proc_path: fn(pid: I64, suffix: I64) -> I64 {
+    text: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, rt_static_text("/proc/"))
+    rt_text_push_number(text, pid)
+    jet_rt_string_builder_push(text, suffix)
+    jet_rt_string_builder_finish(text)
+}
+
+process_execution_memory_used: fn(pid: I64, scratch: I64) -> I64 {
+    path: process_execution_proc_path(pid, rt_static_text("/status"))
+    name: fd_c_path(path)
+    file: host_call(I64{2}, name, I64{524288}, I64{0})
+    jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
+    jet_rt_string_drop(path)
+    if (file < I64{0}) { return I64{-1} }
+    text: jet_rt_string_builder_new()
+    good := true
+    loop {
+        count: host_call(I64{0}, file, scratch, I64{8192})
+        if (count == I64{-4}) { next }
+        if (count <= I64{0}) {
+            good = count == I64{0}
+            break
+        }
+        rt_text_append(text, scratch, count)
+    }
+    spawn_close(file)
+    used := I64{-1}
+    if good {
+        prefix: rt_static_text("VmSize:")
+        at := rt_text_find(text, prefix, I64{0}, false)
+        if (at >= I64{0}) {
+            at += rt_text_len(prefix)
+            loop at < rt_text_len(text) && (rt_text_byte(wrapping(rt_text_data(text) + at)) == I64{32} || rt_text_byte(wrapping(rt_text_data(text) + at)) == I64{9}) {
+                at += I64{1}
+            }
+            value := I64{0}
+            digits := I64{0}
+            loop at < rt_text_len(text) {
+                byte: rt_text_byte(wrapping(rt_text_data(text) + at))
+                if (byte < I64{48} || byte > I64{57}) { break }
+                if (value > (I64{9223372036854775807} - (byte - I64{48})) /% I64{10}) {
+                    value = I64{9223372036854775807}
+                    break
+                }
+                value = value * I64{10} + byte - I64{48}
+                digits += I64{1}
+                at += I64{1}
+            }
+            if (digits != I64{0}) {
+                used = (if (value > I64{9007199254740991}) -> {
+                    I64{9223372036854775807}
+                } else -> {
+                    value * I64{1024}
+                })
+            }
+        }
+    }
+    jet_rt_string_drop(text)
+    used
+}
+
+process_execution_files_used: fn(pid: I64, scratch: I64) -> I64 {
+    path: process_execution_proc_path(pid, rt_static_text("/fd"))
+    name: fd_c_path(path)
+    file: host_call(I64{2}, name, I64{589824}, I64{0})
+    jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
+    jet_rt_string_drop(path)
+    if (file < I64{0}) { return I64{-1} }
+    used := I64{0}
+    loop {
+        count: host_call(I64{217}, file, scratch, I64{8192})
+        if (count == I64{-4}) { next }
+        if (count < I64{0}) {
+            used = I64{-1}
+            break
+        }
+        if (count == I64{0}) { break }
+        at := I64{0}
+        loop at < count {
+            row: wrapping(scratch + at)
+            length: rt_text_byte(wrapping(row + I64{16})).bit_or(rt_text_byte(wrapping(row + I64{17})) << I64{8})
+            if (length < I64{20} || length > count - at) {
+                used = I64{-1}
+                break
+            }
+            a: rt_text_byte(wrapping(row + I64{19}))
+            b: rt_text_byte(wrapping(row + I64{20}))
+            if !(a == I64{46} && (b == I64{0} || (b == I64{46} && rt_text_byte(wrapping(row + I64{21})) == I64{0}))) {
+                used += I64{1}
+            }
+            at += length
+        }
+        if (used < I64{0}) { break }
+    }
+    spawn_close(file)
+    used
+}
+
+process_execution_live_limit: fn(child: I64, scratch: I64) -> I64 {
+    process_spec_live_limit(fd_word(process_execution_native(child), I64{8}), fd_word(child, I64{24}), scratch)
+}
+
+// A spawned child runs on this process's address space until its execve
+// switches it to its own image, and the spawn's CLOEXEC error pipe can read
+// end-of-file before that switch. Until then the child's /proc VmSize and
+// descriptor table are this process's, not its own. kcmp(this process, pid,
+// KCMP_VM) is 0 while both share one address space; a kernel without kcmp
+// answers an error and counts as switched.
+process_spec_left_image: fn(pid: I64) -> Bool {
+    host_call5(I64{312}, jet_std_os_pid(), pid, I64{1}, I64{0}, I64{0}) != I64{0}
+}
+
+process_spec_memory_reached: fn(pid: I64, threshold: I64, scratch: I64) -> Bool {
+    used: process_execution_memory_used(pid, scratch)
+    used >= I64{0} && used >= threshold
+}
+
+process_spec_files_reached: fn(pid: I64, limit: I64, scratch: I64) -> Bool {
+    used: process_execution_files_used(pid, scratch)
+    used >= I64{0} && used >= limit
+}
+
+// For one live pid under `spec` (borrowed). A sample at a limit counts only
+// once the child has left this process's image, and is then taken again,
+// since the first one may predate the switch.
+process_spec_live_limit: fn(pid: I64, spec: I64, scratch: I64) -> I64 {
+    memory: fd_word(spec, PROCESS_SPEC_MEMORY_LIMIT)
+    if (memory != I64{0}) {
+        limit: fd_word(memory, I64{0})
+        threshold: if (limit <= I64{1048576}) -> { I64{0} } else -> { limit - I64{1048576} }
+        if (process_spec_memory_reached(pid, threshold, scratch) && process_spec_left_image(pid) && process_spec_memory_reached(pid, threshold, scratch)) {
+            return PROCESS_RESOURCE_MEMORY
+        }
+    }
+    files: fd_word(spec, PROCESS_SPEC_OPEN_FILE_LIMIT)
+    if (files != I64{0}) {
+        limit: fd_word(files, I64{0})
+        if (process_spec_files_reached(pid, limit, scratch) && process_spec_left_image(pid) && process_spec_files_reached(pid, limit, scratch)) {
+            return PROCESS_RESOURCE_OPEN_FILES
+        }
+    }
+    I64{-1}
+}

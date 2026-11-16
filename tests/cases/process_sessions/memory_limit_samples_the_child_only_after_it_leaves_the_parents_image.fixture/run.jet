@@ -1,0 +1,19 @@
+use process: core.process
+
+// The parent is larger than the children's memory limit. Until a spawned child
+// finishes its execve it still runs on the parent's address space, so a sample
+// of the child taken then must not count as the child reaching its limit.
+run: fn() {
+    ballast: "x".repeat(96 * 1024 * 1024)
+    failed := 0
+    loop _ in 0..200 {
+        if process.cmd(["sh", "-c", "exit 0"]).memory_limit(67108864).open_file_limit(64).run() == {
+            .Ok(receipt) -> {
+                if !receipt.success -> failed += 1
+            }
+            .Err(_) -> { failed += 1 }
+        }
+    }
+    print("failed: {failed}")
+    print(ballast.len() > 67108864)
+}

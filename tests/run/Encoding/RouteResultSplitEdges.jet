@@ -1,0 +1,68 @@
+// `??` and propagation straight on a fallible runtime call read its success
+// from the call's own words and build the failure only on the edge that
+// handles it: every payload shape (a word, a float, a byte list, text) and
+// every failure use (a fallback value, a leaving fallback, the ambient `err`,
+// a propagation that hands the error back) keeps its value. A handle method
+// whose builder branches around its route call (a Dyn decoded to String)
+// keeps its whole Result under both.
+header: fn(r: Reader) -> Int Err! {
+    high: r.read_u16_le()
+    low: r.read_u8()
+    Int{high} * 256 + Int{low}
+}
+
+word: fn(c: Cursor) -> String Err! {
+    taken: c.take_until(" ")
+    c.skip_ws()
+    "<{taken}>"
+}
+
+quoted: fn(tree: Dyn) -> String [FieldError]! {
+    text: tree.decode<String>()
+    "'{text}'"
+}
+
+sum_records: fn(bytes: &&[U8]) -> Int {
+    r: Reader.over(bytes)
+    total := 0
+    loop {
+        id: r.read_u32_le() ?? return total
+        size: r.read_u8() ?? return -1
+        name: r.take(Int{size}) ?? return -2
+        total += Int{id} * 1000 + name.len()
+    }
+    total
+}
+
+run: fn() {
+    r: Reader.over([U8]{1, 2, 3, 0, 0, 0, 0, 0, 0, 0xF8, 0x3F, 7})
+    print(header(r) ?? -1)
+    print(r.read_f64_le() ?? -1.0)
+    print(r.read_u16_le() ?? 99)
+    print(header(r) ?? -1)
+    if header(r) == {
+        .Ok(value) -> { print("unexpected {value}") }
+        .Err(error) -> print("short header: {error.message}")
+    }
+    print(r.read_u8() ?? 200)
+    print(
+        r.read_u8() ?? {
+            print("ambient: {err}")
+            201
+        },
+    )
+
+    print(sum_records([U8]{5, 0, 0, 0, 2, 0x61, 0x62, 9, 0, 0, 0, 1, 0x63}))
+    print(sum_records([U8]{5, 0, 0, 0}))
+    print(sum_records([U8]{5, 0, 0, 0, 3, 0x61}))
+
+    c: Cursor.over("alpha beta")
+    print(word(c) ?? "none")
+    print(word(c) ?? "none")
+    print(c.take_until(" ") ?? "rest: {err}")
+
+    print(quoted(Dyn.Text("gamma")) ?? "none")
+    print(quoted(Dyn.Int(3)) ?? "not text")
+    print(Dyn.Text("delta").decode<String>() ?? "none")
+    print(Dyn.Array([Dyn.Int(1)]).decode<String>() ?? "fallback {err.len()}")
+}

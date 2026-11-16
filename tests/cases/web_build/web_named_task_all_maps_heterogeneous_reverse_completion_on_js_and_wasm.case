@@ -1,0 +1,24 @@
+# HAND-PORT tests/web_build.rs:264-338 web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original JS source replace operations reproduced exactly; both independent source builds and exact stdout preserved; Rust named-field representation assertions retire.
+requires: tool:node
+fixture: web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet build --target web js/main.jet
+exit: 0
+file: js/.jet/build/web.manifest.json ~ "\"target\": \"web\"" # the manifest names the web target
+file: js/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: js/.jet/build/app.wasm is-file
+step: node app.js
+cwd: js/.jet/build
+exit: 0
+stdout: = web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm.stdout.expected
+step: jet build --target web wasm/main.jet
+exit: 0
+file: wasm/.jet/build/web.manifest.json ~ "\"target\": \"web\"" # the manifest names the web target
+file: wasm/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: wasm/.jet/build/app.wasm is-file
+step: node app.js
+cwd: wasm/.jet/build
+exit: 0
+stdout: = web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm.stdout.expected

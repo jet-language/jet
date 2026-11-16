@@ -1,0 +1,10 @@
+# Port of tests/pkg.rs:5554-5588; hello.jet bytes verbatim from5564.
+# PENDING-GRAMMAR(batch-four): mkdir.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: {root}/tests/cases/pkg/fixtures/sources/hi.txt hello.jet
+step: jet build --sbom hello.jet
+exit: 0
+stdout: ~ "sbom:" # original predicate
+file: .jet/build/hello.spdx is-file
+file: .jet/build/hello.spdx ^= "SPDXVersion: SPDX-2.3\n" # original predicate

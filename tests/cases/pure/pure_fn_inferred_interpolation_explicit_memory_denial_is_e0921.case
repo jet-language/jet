@@ -1,0 +1,11 @@
+# tests/pure.rs::pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921 at tests/pure.rs:112; hand-port
+# Claim: explicit allocation denial still reports E0921 (tests/pure.rs:118-122)
+# Claim: deny-only allocation produces no E3401 (tests/pure.rs:123-126)
+fixture: pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/pure.rs:118-126
+stderr: ~ "E0921" # tests/pure.rs:118-126
+stderr: !~ "E3401" # tests/pure.rs:118-126

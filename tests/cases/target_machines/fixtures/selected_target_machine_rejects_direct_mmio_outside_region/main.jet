@@ -1,0 +1,8 @@
+use core.mem as mem
+
+run: fn() {
+    #Unsafe("this address is intentionally outside the board MMIO region") {
+        p: mem.Ptr<Int>.from_addr(0x50000000)
+        mem.volatile_write(p, 7)
+    }
+}

@@ -1,0 +1,14 @@
+# The compile-time DFA, its hand-back to the VM, the required-literal check
+# and the prefix skip answer exactly as the leftmost-first VM does.
+fixture: dfa_and_literal_skips_keep_vm_answers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step default: jet run run.jet
+exit: 0
+stdout: = dfa_and_literal_skips_keep_vm_answers.out
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: == default
+stdout: == default
+stderr: == default

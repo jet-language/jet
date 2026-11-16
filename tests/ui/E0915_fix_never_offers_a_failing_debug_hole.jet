@@ -1,0 +1,11 @@
+// A user type without `Display` gets E0915, whose Fix offers the `impl`
+// (the program owns the type) and `:Debug` only when the value has a Debug form.
+Job: struct {
+    step: fn(Int) -> Int
+}
+
+run: fn() {
+    job: Job{step: fn(n: Int) -> Int { n + 1 }}
+    print("running {job}")
+    print("debug {job:Debug}")
+}

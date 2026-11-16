@@ -1,0 +1,18 @@
+# HAND-PORT tests/jetpack_update_plan.rs:10-64 combined_update_plans_both_scopes_before_one_confirmation
+# PENDING-GRAMMAR: approved batch-two/four forms, no runtime parity claim.
+fixture: combined_update_plans_both_scopes_before_one_confirmation.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+mkdir: root
+step: jetpack update --no-color --fixtures {work}/fixtures
+cwd: project
+exit: 2
+stderr: before "deps  default" "plan only; pass -y or --yes" # original predicate
+stderr: before "tools core" "plan only; pass -y or --yes" # original predicate
+stderr: ~ "1 package, 240 MB" # original predicate
+stderr: ~ "1 package, 676 MB" # original predicate
+stderr: count "plan only;" = 1 # original predicate
+file: project/.jet/lock absent
+file: home/.jet/tools/manifest.json ~ "omp@core#v1" # original predicate
+

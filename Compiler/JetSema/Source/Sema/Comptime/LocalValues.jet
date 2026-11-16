@@ -1,0 +1,442 @@
+// An immutable local `name: value` whose initializer calls code is computed
+// while compiling whenever it can be. Its first check stages the initializer
+// as a body site (sema_comptime_body_capture_local); the driver evaluates it
+// beside the other body sites, and the owner body is checked again. A value
+// that landed replaces the call, so the program holds the value and runs no
+// code for it. A site the driver could not compute (its compile-time check
+// fails, it reaches the outside world, the evaluator can't run its code, or
+// computing it stops or runs out of steps) lands a failure holding why
+// (sema_comptime_local_value_failure): the binding stays run-time code with
+// that reason and reports nothing. A local that reads a run-time value,
+// whose calls reach the outside world by their written rows, or that hands
+// a named function to a slot with a closed effect row, is never staged,
+// and neither is any local of a `jet check`, which lowers nothing.
+//
+// A local value is also computed ahead. Beside the module's comptime
+// items, the declaration pass stages some locals of the program's
+// top-level functions (sema_comptime_local_value_ahead_sources). Each is an
+// immutable, unannotated `name: value` whose initializer calls code and
+// names none of the function's parameters or locals: every name it reads
+// resolves in the module, as it does at the site, which reads no run-time
+// local and only prepared locals the function declares. The comptime run
+// computes it in the program it builds for the module's items, under a key
+// of its own (sema_comptime_local_value_ahead_key), which no body check
+// reads. When a body check stages the site, its landing takes the
+// value computed ahead instead of computing the site again
+// (sema_comptime_local_values_ahead). A computation whose own check fails,
+// or that waits for good, leaves nothing ahead, and the landing computes
+// that site as before.
+use jet_foundation.[
+    Expr,
+    Func,
+    ModuleID,
+    Span,
+    Stmt,
+    SymbolKind,
+    Type,
+    expr_span,
+    module_is_core,
+    symbol_table_key,
+    type_identity_equal,
+]
+
+// What a local's computed initializer became: the value's expression, or
+// why it stays run-time code. Neither when it was not staged or has not
+// landed yet.
+SemaComptimeLocalValue: struct {
+    value: TExpr?
+    reason: String?
+}
+
+sema_comptime_local_value: fn(
+    name: String,
+    name_span: Span,
+    expression: Expr,
+    init: TExpr,
+    fact_start: Int,
+    reference_start: Int,
+    node_start: Int,
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    scopes: SemaScopeTable,
+    context: &SemaCheckContext,
+) -> SemaComptimeLocalValue {
+    none: SemaComptimeLocalValue{value: None, reason: None}
+    if !sema_comptime_local_value_candidate(init.ty, fact_start, reference_start, node_start, program, scopes, context) {
+        return none
+    }
+    source_span: expr_span(expression)
+    staged: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), source_span, name_span) ?? {
+        sema_comptime_body_capture_local(context, environment, scopes, name, expression, init.ty, source_span, name_span)
+        return none
+    }
+    why: sema_comptime_local_value_reason(staged.value)
+    if why != None -> return SemaComptimeLocalValue{value: None, reason: why}
+    SemaComptimeLocalValue{value: sema_fact_prepared_expr(staged.value, init.ty, init.span, environment, program, context), reason: None}
+}
+
+// Whether a checked initializer of type `ty`, whose calls are the call
+// facts from `fact_start` on, whose name reads the references from
+// `reference_start` on and whose nodes are the arena rows from `node_start`
+// on, may be computed while compiling: it calls code, is not compile-time
+// code already, sits outside `#Impure`, `#Unsafe` and generic bodies, reads
+// no run-time local or parameter, holds a value a build can keep, no call's
+// written row reaches the outside world, and it holds no callback bound
+// (sema_comptime_local_value_holds_callback_bound).
+// A `jet check` (graph.check_tests) computes none: it lowers nothing, and a
+// local value reports nothing whether it lands or not, so its outcome
+// changes no diagnostic. The every-body Core check (graph.every_core_body)
+// still computes them, since the Core library it builds lowers them.
+sema_comptime_local_value_candidate: fn(
+    ty: Type,
+    fact_start: Int,
+    reference_start: Int,
+    node_start: Int,
+    program: SemaProgramTables,
+    scopes: SemaScopeTable,
+    context: SemaCheckContext,
+) -> Bool {
+    if context.call_facts.len() <= fact_start -> return false
+    if scopes.comptime_execution_depth > 0 || context.unsafe_depth > 0 || context.generic_params.len() > 0 {
+        return false
+    }
+    if sema_scope_inside_impure(scopes) || sema_comptime_local_value_unstorable(ty) -> return false
+    if sema_comptime_local_value_holds_callback_bound(context, node_start) -> return false
+    loop index in reference_start..<context.name_references.len() {
+        reference: context.name_references[index]
+        if reference.kind != Val(SymbolKind.Local) && reference.kind != Val(SymbolKind.Parameter) {
+            next
+        }
+        position: sema_scope_resolve_index(scopes, reference.symbol.name) ?? return false
+        if scopes.bindings[position].prepared == None -> return false
+    }
+    graph: program.registration_graph ?? return false
+    if graph.check_tests && !graph.every_core_body -> return false
+    calls := [SemaCallSiteFact]{}
+    loop index in fact_start..<context.call_facts.len() {
+        calls.push(context.call_facts[index].copy())
+    }
+    sema_comptime_call_facts_impurity(graph, calls, true) == None
+}
+
+// Whether the arena rows from `node_start` on hold a named function read
+// whose value type took a callback slot's closed effect row
+// (sema_function_value_type). The effect phase settles that row against the
+// function's solved row from the read's node (E0747,
+// sema_effect_record_callback_bound), and a landed value replaces the
+// initializer's nodes, so the check would never run: `c: apply(4, noisy)`
+// into `fn(Int) -[!Panic]> Int` would compute `c` and drop the denial.
+sema_comptime_local_value_holds_callback_bound: fn(context: SemaCheckContext, node_start: Int) -> Bool {
+    end: if context.arena.tree.nodes.len() < context.arena.tree.expr_types.len() -> context.arena.tree.nodes.len() else -> context.arena.tree.expr_types.len()
+    loop index in node_start..<end {
+        if context.arena.tree.nodes[index].kind == .ConstRef(_) && sema_effect_callback_row(context.arena.tree.types.types[context.arena.tree.expr_types[index].ty]) != None {
+            return true
+        }
+    }
+    false
+}
+
+// A value a build can't hand to the running program: nothing, a function, a
+// shared cell, a trait object, or a collection or option of one.
+sema_comptime_local_value_unstorable: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Fn(_, _, _, _, _, _) | .Shared(_) | .TraitObject(_) -> true
+        .List(element) -> sema_comptime_local_value_unstorable(element)
+        .Option(inner) -> sema_comptime_local_value_unstorable(inner)
+        .Map(_, _, value) -> sema_comptime_local_value_unstorable(value)
+        .Named(name) -> name == "Unit"
+        .Int | .Float | .Bool | .String | .Char | .Result(_, _) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// The key of the value computed ahead for the local whose initializer
+// spans `source_span` and whose name spans `site_span`, in the function
+// `function_key` of module `module_identity`. It is apart from the site's
+// own key (sema_comptime_body_source_key), so no body check reads it.
+sema_comptime_local_value_ahead_key: fn(module_identity: ModuleID, function_key: String, source_span: Span, site_span: Span) -> String Never! {
+    "{module_identity.id}::{sema_comptime_local_value_ahead_destination(function_key, source_span, site_span)}"
+}
+
+sema_comptime_local_value_ahead_destination: fn(function_key: String, source_span: Span, site_span: Span) -> String Never! {
+    "{function_key}{SEMA_COMPTIME_LOCAL_VALUE_AHEAD}{site_span.start}:{site_span.end}::{source_span.start}:{source_span.end}"
+}
+
+// The source that computes ahead the value of local value site `site`,
+// which the check of a function a comptime closure reached staged: the
+// site's own check, under the key of a value computed ahead, so the
+// landing of the body that holds the site builds no program for it.
+sema_comptime_local_value_ahead_site: fn(site: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {
+    source := sema_comptime_body_item_source(site)
+    source.key = sema_comptime_local_value_ahead_key(site.module_identity, site.function_key, site.span, site.site_span)
+    source.destination_key = sema_comptime_local_value_ahead_destination(site.function_key, site.span, site.site_span)
+    source.ahead = true
+    source
+}
+
+// What every destination key of a value computed ahead holds.
+SEMA_COMPTIME_LOCAL_VALUE_AHEAD: "::local-value-ahead::"
+
+// The locals of `source_module`'s top-level functions that its declaration
+// pass stages to be computed ahead: none in a `jet check` (which computes no
+// local value) or in a Core or Prelude module. A compile-time, unsafe,
+// generic or generated function, or one a marker template wrote, stages
+// none. Only the function's own blocks, loop bodies, switch arms and `if`
+// branches are read; a local that a policy, `#Impure` or `#Unsafe` block, or a
+// lambda holds is not staged.
+sema_comptime_local_value_ahead_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
+    sources := [SemaComptimeItemSource]{}
+    if graph.check_tests && !graph.every_core_body -> return sources
+    if module_is_core(source_module.module_identity) || sema_core_prelude_module(source_module.package_identity, source_module.module_identity, source_module.module_name) {
+        return sources
+    }
+    loop function in source_module.functions {
+        if function.declaration.is_comptime || function.declaration.is_unsafe || function.declaration.compiler_generated || function.declaration.definition_module != "" || function.declaration.type_params.len() > 0 {
+            next
+        }
+        function_key: symbol_table_key(graph.symbols, function.symbol.id)
+        sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function.declaration, function.declaration.body)
+    }
+    sources
+}
+
+// Whether `function` may bind `name`: a parameter or a local of the blocks
+// sema_comptime_local_value_ahead_stmts reads is named so, or a local
+// destructures its value.
+sema_comptime_local_value_ahead_binds: fn(function: Func, name: String) -> Bool Never! {
+    loop parameter in function.params {
+        if parameter.name == name -> return true
+    }
+    sema_comptime_local_value_ahead_declares(function.body, name)
+}
+
+sema_comptime_local_value_ahead_declares: fn(body: [Stmt], name: String) -> Bool Never! {
+    loop statement in body {
+        if statement == {
+            .Val(binding) -> {
+                if binding.pattern != None || binding.name == name -> return true
+            }
+            .While(_, inner, _, _, _) | .Loop(inner, _, _, _) | .For(_, _, _, _, inner, _, _, _, _) | .CountedLoop(_, _, _, inner, _, _, _) -> {
+                if sema_comptime_local_value_ahead_declares(inner, name) -> return true
+            }
+            .Switch(_, arms, else_body, _) -> {
+                loop arm in arms {
+                    if sema_comptime_local_value_ahead_declares(arm.body, name) -> return true
+                }
+                if else_body == .Val(inner) {
+                    if sema_comptime_local_value_ahead_declares(inner, name) -> return true
+                }
+            }
+            .Expr(value) -> {
+                if value == .If(_, then_body, _, else_body, _, _, _) {
+                    if sema_comptime_local_value_ahead_declares(then_body, name) || sema_comptime_local_value_ahead_declares(else_body, name) {
+                        return true
+                    }
+                }
+            }
+            .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) | .Defer(_, _) -> {}
+        }
+    }
+    false
+}
+
+// Stages each local of `body` (and the blocks it reads, as
+// sema_comptime_local_value_ahead_declares does) to be computed ahead.
+sema_comptime_local_value_ahead_stmts: fn(sources: &[SemaComptimeItemSource], source_module: SemaRegistrationModule, function_key: String, function: Func, body: [Stmt]) Never! {
+    loop statement in body {
+        if statement == {
+            .Val(binding) -> {
+                if binding.mutable || binding.name == "_" || binding.pattern != None || binding.ty != None || binding.is_comptime || binding.ct != None || binding.uninit || binding.arena_view || binding.string_view || binding.reactive_upgrade || binding.markers.len() > 0 || binding.meta != None {
+                    next
+                }
+                scan := SemaComptimeLocalValueAheadScan{calls: false, readable: true}
+                sema_comptime_local_value_ahead_expr(binding.init, function, scan)
+                if !scan.calls || !scan.readable -> next
+                source_span: expr_span(binding.init)
+                sources.push(
+                    SemaComptimeItemSource{
+                        module_identity: source_module.module_identity,
+                        key: sema_comptime_local_value_ahead_key(source_module.module_identity, function_key, source_span, binding.name_span),
+                        destination_key: sema_comptime_local_value_ahead_destination(function_key, source_span, binding.name_span),
+                        name: binding.name,
+                        source_file: sema_source_file_at(source_module.source_segments, source_module.source_file, source_module.source_origin, source_span),
+                        kind: SemaComptimeItemKind.BodyExpression,
+                        expression: binding.init,
+                        expected_type: None,
+                        span: source_span,
+                        dependencies: [String]{},
+                        checked_text: None,
+                        local_value: true,
+                        ahead: true,
+                    },
+                )
+            }
+            .While(_, inner, _, _, _) | .Loop(inner, _, _, _) | .For(_, _, _, _, inner, _, _, _, _) | .CountedLoop(_, _, _, inner, _, _, _) -> {
+                sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, inner)
+            }
+            .Switch(_, arms, else_body, _) -> {
+                loop arm in arms {
+                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, arm.body)
+                }
+                if else_body == .Val(inner) {
+                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, inner)
+                }
+            }
+            .Expr(value) -> {
+                if value == .If(_, then_body, _, else_body, _, _, _) {
+                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, then_body)
+                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, else_body)
+                }
+            }
+            .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) | .Defer(_, _) -> {}
+        }
+    }
+}
+
+// What sema_comptime_local_value_ahead_expr found in an initializer: whether
+// it calls code (a call or a typed literal), and whether it names nothing
+// of the function's and holds only expressions read here.
+SemaComptimeLocalValueAheadScan: struct {
+    calls: Bool
+    readable: Bool
+}
+
+sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, scan: &SemaComptimeLocalValueAheadScan) Never! {
+    if !scan.readable {
+        return
+    }
+    if expr == {
+        .Ident(name, _, _) -> {
+            if sema_comptime_local_value_ahead_binds(function, name) -> scan.readable = false
+        }
+        .Call(call, _) -> {
+            scan.calls = true
+            if sema_comptime_local_value_ahead_binds(function, call.name) -> scan.readable = false
+            loop argument in call.args {
+                sema_comptime_local_value_ahead_expr(argument.expr, function, scan)
+            }
+        }
+        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) | .CallValue(receiver, args, _, _) -> {
+            scan.calls = true
+            sema_comptime_local_value_ahead_expr(receiver, function, scan)
+            loop argument in args {
+                sema_comptime_local_value_ahead_expr(argument.expr, function, scan)
+            }
+        }
+        .TypedLit(_, body, _, _) -> {
+            scan.calls = true
+            if body == {
+                .Fields(fields) -> {
+                    loop field in fields {
+                        sema_comptime_local_value_ahead_expr(field.value, function, scan)
+                    }
+                }
+                .Elements(elements) -> {
+                    loop element in elements {
+                        sema_comptime_local_value_ahead_expr(element, function, scan)
+                    }
+                }
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        sema_comptime_local_value_ahead_expr(entry.key, function, scan)
+                        sema_comptime_local_value_ahead_expr(entry.value, function, scan)
+                    }
+                }
+                .Value(value) -> sema_comptime_local_value_ahead_expr(value, function, scan)
+                .ByteText(_) | .Empty -> {}
+            }
+        }
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(inner, _) {
+                    sema_comptime_local_value_ahead_expr(inner, function, scan)
+                }
+            }
+        }
+        .ListLit(items, _, _) | .CompareChain(items, _, _, _, _) -> {
+            loop item in items -> sema_comptime_local_value_ahead_expr(item, function, scan)
+        }
+        .Unary(_, inner, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Copy(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) -> {
+            sema_comptime_local_value_ahead_expr(inner, function, scan)
+        }
+        .Range(left, right, _, _, _) | .Binary(_, left, right, _, _) | .Index(left, right, _, _, _) -> {
+            sema_comptime_local_value_ahead_expr(left, function, scan)
+            sema_comptime_local_value_ahead_expr(right, function, scan)
+        }
+        .MapLit(entries, _, _) -> {
+            loop entry in entries {
+                sema_comptime_local_value_ahead_expr(entry.key, function, scan)
+                sema_comptime_local_value_ahead_expr(entry.value, function, scan)
+            }
+        }
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
+            loop field in fields {
+                sema_comptime_local_value_ahead_expr(field.value, function, scan)
+            }
+        }
+        .TupleLit(fields, _, _, _) -> {
+            loop field in fields {
+                sema_comptime_local_value_ahead_expr(field.value, function, scan)
+            }
+        }
+        .EnumLit(_, _, _, args, _, _, _) -> {
+            loop argument in args {
+                if argument == {
+                    .Positional(value) -> {
+                        sema_comptime_local_value_ahead_expr(value, function, scan)
+                    }
+                    .Named(_, value) -> sema_comptime_local_value_ahead_expr(value, function, scan)
+                }
+            }
+        }
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Slice(_, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Tainted(_, _, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> {
+            scan.readable = false
+        }
+    }
+}
+
+// The values computed ahead of the local value sites of `pending` (below).
+SemaComptimeLocalValuesAhead: struct {
+    // Each as its site's own value under the site's key: a value whose type
+    // is the site's, or why the site stays run-time code.
+    values: [SemaComptimeItemValue]
+    // Whether each source of `pending` has its value in `values`.
+    covered: [Bool]
+}
+
+sema_comptime_local_values_ahead: fn(values: [SemaComptimeItemValue], pending: [SemaComptimeBodySource]) -> SemaComptimeLocalValuesAhead {
+    ahead := SemaComptimeLocalValuesAhead{values: [SemaComptimeItemValue]{}, covered: [Bool]{}}
+    computed := [Int]{}
+    loop index in 0..<values.len() {
+        if values[index].kind == SemaComptimeItemKind.BodyExpression && values[index].destination_key.contains(SEMA_COMPTIME_LOCAL_VALUE_AHEAD) {
+            computed.push(index)
+        }
+    }
+    loop source in pending {
+        ahead.covered.push(false)
+        if computed.len() == 0 || !source.local_value || source.local_binding -> next
+        key: sema_comptime_local_value_ahead_key(source.module_identity, source.function_key, source.span, source.site_span)
+        row := -1
+        loop index in computed {
+            if values[index].key == key {
+                row = index
+                break
+            }
+        }
+        if row < 0 -> next
+        runs: sema_comptime_local_value_reason(values[row].value) != None
+        if !runs && !type_identity_equal(values[row].ty, source.expected_type) -> next
+        ahead.covered[ahead.covered.len() - 1] = true
+        ahead.values.push(
+            SemaComptimeItemValue{
+                module_identity: source.module_identity,
+                key: source.key,
+                destination_key: source.destination_key,
+                kind: SemaComptimeItemKind.BodyExpression,
+                value: values[row].value,
+                ty: if runs -> source.expected_type else -> values[row].ty,
+            },
+        )
+    }
+    ahead
+}

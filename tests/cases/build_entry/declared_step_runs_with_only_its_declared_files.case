@@ -1,0 +1,19 @@
+# A `build: fn` step runs in the production executor with exactly its declared
+# inputs, outputs and argv. The child sees nothing ambient: the caller's
+# environment is cleared, and a failing step fails the build.
+fixture: fixtures/declared_step_runs_with_only_its_declared_files
+artifact: app
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+env: SECRET=leaked
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+# SECRET is in the caller's environment and never reaches the step; HOME is
+# the sandbox's fixed value (`--clearenv`), never the caller's.
+file: greet.txt = "world [] [/homeless-shelter]"
+file: announce.txt = "ok"
+write: gate.txt = "shut\n"
+step: jet build main.jet --allow=Exec,FS
+exit: nonzero
+stderr: ~ "Build action `announce` exited with status 1" # the changed input reruns the step and its failure is the build's

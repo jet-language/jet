@@ -1,0 +1,22 @@
+// Lambdas written inline at a shared field write and at a writing call on a
+// shared place, each reading another cell when called later.
+Feed: struct {
+    name: String
+    listeners: [fn() -> String]
+    on_close: fn() -> String
+}
+
+Label: struct {
+    text: String
+}
+
+run: fn() {
+    feed: Shared{Feed{name: "prices", listeners: [], on_close: fn() { "none" }}}
+    label: Shared{Label{text: "saw"}}
+    feed.listeners.push(fn() { "{label.text} prices" })
+    feed.on_close = fn() { "{label.text} close" }
+    label.text = "seen"
+    loop listener in feed.listeners -> print(listener())
+    closing: feed.on_close
+    print(closing())
+}

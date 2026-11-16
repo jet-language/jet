@@ -1,0 +1,10 @@
+use compute: core.compute
+
+run: fn() {
+    shape: [4096, 4096]
+    mapped: compute.add(compute.full(shape, 1.0), compute.full(shape, 2.0))
+    corner: compute.get(mapped, [4095, 4095])
+    checksum: compute.sum(mapped)
+    if corner != 3.0 || checksum != 50331648.0 -> panic("tensor map validation failed")
+    print("shape:{compute.shape(mapped)} numel:{compute.numel(mapped)} corner:{corner} checksum:{checksum:Fixed(0)}")
+}

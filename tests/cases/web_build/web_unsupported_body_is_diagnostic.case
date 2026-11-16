@@ -1,0 +1,10 @@
+# A web build refuses a `task.group` in sema: the browser host runs the
+# program on one thread, so the group's children have nothing to run on
+# (D-WEBTIR1: an unsupported form is a registered diagnostic before emission,
+# not a trap in the built program).
+fixture: web_unsupported_body_is_diagnostic.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 1
+json: stdout doc $.reports[?code="E-WEB-UNSUPPORTED"][?what~="cannot run a task group"] #= 1
+file: .jet/build/app.wasm absent

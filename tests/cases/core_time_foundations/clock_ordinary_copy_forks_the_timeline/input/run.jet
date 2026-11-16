@@ -1,0 +1,11 @@
+use time: core.time
+
+// A Manual clock owns its timeline: an ordinary copy is a fork that ticks
+// on its own and leaves the original where it was.
+run: fn() {
+    original: time.Clock.new(0)
+    duplicate := original.copy()
+    assert_eq(duplicate.tick(1), 1)
+    assert_eq(original.now(), 0)
+    print("forked")
+}

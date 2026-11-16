@@ -1,0 +1,29 @@
+# An ending process leaves its heap to the kernel. After 400,000 strings and a
+# 64 MiB buffer, process.exit runs every user cleanup (the deferred Close that
+# wipes a Secret, the scope guard, the exit callback) and frees nothing: the
+# buffer alive at the exit is never unmapped. With `drop`, a buffer of the same
+# size dies inside the run first, so freeing one is seen as munmap.
+requires: os-name:linux
+requires: tool:strace
+fixture: process_exit_leaves_heap_to_kernel_after_user_cleanup.fixture
+env: NO_COLOR=1
+step: jet build main.jet
+exit: 0
+step held: strace -f -qq -e trace=munmap -o {work}/exit.trace {work}/.jet/build/main
+exit: 0
+stdout: = process_exit_leaves_heap_to_kernel_after_user_cleanup.stdout.expected
+file.filter(where ~ "munmap("): exit.trace empty # only munmap lines count; strace may add exit notes
+step drop: strace -f -qq -e trace=munmap -o {work}/drop.trace {work}/.jet/build/main drop
+exit: 0
+stdout: = process_exit_leaves_heap_to_kernel_after_user_cleanup.drop.stdout.expected
+file.filter(where ~ "munmap("): drop.trace nonempty # the dropped buffer's free shows as a munmap line
+step: jet build --release main.jet
+exit: 0
+step optimized: strace -f -qq -e trace=munmap -o {work}/optimized.trace {work}/.jet/build/main
+exit: 0
+stdout: = process_exit_leaves_heap_to_kernel_after_user_cleanup.stdout.expected
+file.filter(where ~ "munmap("): optimized.trace empty # only munmap lines count; strace may add exit notes
+step optimizeddrop: strace -f -qq -e trace=munmap -o {work}/optimized-drop.trace {work}/.jet/build/main drop
+exit: 0
+stdout: = process_exit_leaves_heap_to_kernel_after_user_cleanup.drop.stdout.expected
+file.filter(where ~ "munmap("): optimized-drop.trace nonempty # the dropped buffer's free shows as a munmap line

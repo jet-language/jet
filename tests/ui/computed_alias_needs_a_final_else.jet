@@ -1,0 +1,17 @@
+// A computed alias ends its choices with `else -> Type`, so every instance
+// chooses some type.
+Store: trait {
+    count: fn(self) -> Int
+}
+
+Heap: struct {
+    items: [Int]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+    }
+}
+
+Storage<N: Int>: Store #run { if N <= 16 -> Heap }
+
+run: fn() { print(1) }

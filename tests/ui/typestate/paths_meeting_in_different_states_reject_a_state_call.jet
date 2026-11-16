@@ -1,0 +1,33 @@
+// Paths that leave `order` in different states meet before `ship`, which
+// needs `Confirmed`: the path that skips `confirm` is still `Draft`, so the
+// call is rejected. A path that returns meets no later join, so `settle` keeps
+// `Confirmed` and ships.
+Order: struct {
+    state {
+        Draft -> Confirmed
+        Confirmed
+    }
+
+    id: Int
+
+    start: fn(id: Int) -> Order.Draft { Order{id: id} }
+
+    confirm: fn(self: &&Order.Draft) -> Order.Confirmed { self }
+
+    ship: fn(self: Order.Confirmed) -> Int { self.id }
+}
+
+ship_when_paid: fn(paid: Bool) -> Int {
+    order := Order.start(1)
+    if paid -> order = order.confirm()
+    order.ship()
+}
+
+settle: fn(paid: Bool) -> Int {
+    order := Order.start(2)
+    if {
+        paid -> order = order.confirm()
+        else -> return 0
+    }
+    order.ship()
+}

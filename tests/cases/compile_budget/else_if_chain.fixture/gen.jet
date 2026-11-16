@@ -1,0 +1,19 @@
+// Writes chain<count>.jet for the branch count its first argument names:
+// one statement else-if chain of that many branches, each `n == k` storing
+// (7 * k) % 13, with an `else` storing -1. run() sums the chain over
+// 0..<count + 76, so the 76 inputs past the last branch add -1 each.
+use {
+    core.files
+    core.process.[args]
+}
+
+run: fn() {
+    given: args()
+    if given.len() != 1 -> panic("gen.jet takes one branch count")
+    count: Int.parse(given[0]) ?? panic("gen.jet takes one branch count, not `{given[0]}`")
+    links := [String]{}
+    loop k in 0..<count -> links.push("if n == {k} {{\n        out = {(7 * k) % 13}\n    }} else ")
+    chain: links.join("")
+    source: "chain: fn(n: Int) -> Int {{\n    out := 0\n    {chain}{{\n        out = -1\n    }}\n    out\n}}\n\nrun: fn() {{\n    total := 0\n    loop i in 0..<{count + 76} -> total += chain(i)\n    print(\"{{total}}\")\n}}\n"
+    files.write("chain{count}.jet", source) ?? panic("gen.jet: write chain{count}.jet: {err}")
+}

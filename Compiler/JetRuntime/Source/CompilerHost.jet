@@ -1,0 +1,349 @@
+// Compiler-private process receipt fact: bounded status history survives the
+// child owner, but is populated only by a successful wait.
+compiler_host_root := I64{0}
+
+// runtime-init: 4 when compiler_host_root
+#Export(c) jet_rt_compiler_host_init: fn() {
+    if (compiler_host_root != I64{0}) {
+        return
+    }
+    root: jet_rt_alloc(I64{1048}, I64{8})
+    thread_zero(root, I64{1048})
+    #Unsafe("runtime-init runs before any other thread exists") { compiler_host_root = root }
+}
+
+compiler_process_record_exit_status: fn(pid: I64, status: I64) {
+    root: compiler_host_root
+    sync_mutex_lock(root)
+    next_slot: rt_text_word(wrapping(root + I64{8}))
+    slot: wrapping(wrapping(root + I64{24}) + next_slot * I64{16})
+    rt_text_store(slot, pid)
+    rt_text_store(wrapping(slot + I64{8}), status)
+    rt_text_store(wrapping(root + I64{8}), (next_slot + I64{1}) % I64{64})
+    count: rt_text_word(wrapping(root + I64{16}))
+    if (count < I64{64}) { rt_text_store(wrapping(root + I64{16}), count + I64{1}) }
+    sync_mutex_unlock(root)
+}
+
+compiler_process_signal_name: fn(signal: I64) -> I64 {
+    if {
+        (signal == I64{1}) -> rt_static_text("SIGHUP")
+        (signal == I64{2}) -> rt_static_text("SIGINT")
+        (signal == I64{3}) -> rt_static_text("SIGQUIT")
+        (signal == I64{4}) -> rt_static_text("SIGILL")
+        (signal == I64{5}) -> rt_static_text("SIGTRAP")
+        (signal == I64{6}) -> rt_static_text("SIGABRT")
+        (signal == I64{7}) -> rt_static_text("SIGBUS")
+        (signal == I64{8}) -> rt_static_text("SIGFPE")
+        (signal == I64{9}) -> rt_static_text("SIGKILL")
+        (signal == I64{10}) -> rt_static_text("SIGUSR1")
+        (signal == I64{11}) -> rt_static_text("SIGSEGV")
+        (signal == I64{12}) -> rt_static_text("SIGUSR2")
+        (signal == I64{13}) -> rt_static_text("SIGPIPE")
+        (signal == I64{14}) -> rt_static_text("SIGALRM")
+        (signal == I64{15}) -> rt_static_text("SIGTERM")
+        (signal == I64{16}) -> rt_static_text("SIGSTKFLT")
+        (signal == I64{17}) -> rt_static_text("SIGCHLD")
+        (signal == I64{18}) -> rt_static_text("SIGCONT")
+        (signal == I64{19}) -> rt_static_text("SIGSTOP")
+        (signal == I64{20}) -> rt_static_text("SIGTSTP")
+        (signal == I64{21}) -> rt_static_text("SIGTTIN")
+        (signal == I64{22}) -> rt_static_text("SIGTTOU")
+        (signal == I64{23}) -> rt_static_text("SIGURG")
+        (signal == I64{24}) -> rt_static_text("SIGXCPU")
+        (signal == I64{25}) -> rt_static_text("SIGXFSZ")
+        (signal == I64{26}) -> rt_static_text("SIGVTALRM")
+        (signal == I64{27}) -> rt_static_text("SIGPROF")
+        (signal == I64{28}) -> rt_static_text("SIGWINCH")
+        (signal == I64{29}) -> rt_static_text("SIGIO")
+        (signal == I64{30}) -> rt_static_text("SIGPWR")
+        (signal == I64{31}) -> rt_static_text("SIGSYS")
+        else -> I64{0}
+    }
+}
+
+compiler_process_status_text: fn(status: I64) -> I64 {
+    text: jet_rt_string_builder_new()
+    low: status.bit_and(I64{127})
+    if (low == I64{0}) {
+        jet_rt_string_builder_push(text, rt_static_text("exit status: "))
+        rt_text_push_number(text, (status >> I64{8}).bit_and(I64{255}))
+    } else if (status == I64{65535}) {
+        jet_rt_string_builder_push(text, rt_static_text("continued (WIFCONTINUED)"))
+    } else {
+        stopped: (status.bit_and(I64{255})) == I64{127}
+        signal: if stopped -> (status >> I64{8}).bit_and(I64{255}) else -> low
+        jet_rt_string_builder_push(text, if stopped -> rt_static_text("stopped (not terminated) by signal: ") else -> rt_static_text("signal: "))
+        rt_text_push_number(text, signal)
+        name: compiler_process_signal_name(signal)
+        if (name != I64{0}) {
+            jet_rt_string_builder_push(text, rt_static_text(" ("))
+            jet_rt_string_builder_push(text, name)
+            rt_text_push_word(text, I64{41}, I64{1})
+        }
+        if (!stopped && (status.bit_and(I64{128})) != I64{0}) {
+            jet_rt_string_builder_push(text, rt_static_text(" (core dumped)"))
+        }
+    }
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) jet_process_exit_status_raw: fn(pid: I64, some: I64) -> I64 {
+    native: host_native_int(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    root: compiler_host_root
+    sync_mutex_lock(root)
+    count: rt_text_word(wrapping(root + I64{16}))
+    next_slot: rt_text_word(wrapping(root + I64{8}))
+    at := I64{0}
+    found := false
+    status := I64{0}
+    loop at < count {
+        slot: wrapping(wrapping(root + I64{24}) + ((next_slot + I64{63} - at) % I64{64}) * I64{16})
+        if (rt_text_word(slot) == native) {
+            status = rt_text_word(wrapping(slot + I64{8}))
+            found = true
+            break
+        }
+        at += I64{1}
+    }
+    sync_mutex_unlock(root)
+    if !found -> return I64{0}
+    rt_text_store(some, compiler_process_status_text(status))
+    I64{1}
+}
+
+// These match std::env::consts for this pack's Linux x86-64 OS seed; they are
+// the build target identity, not uname's machine/release or the compiler target.
+#Export(c) jet_std_os_name: fn() -> I64 { jet_rt_string_clone(rt_static_text("linux")) }
+
+#Export(c) jet_std_os_arch: fn() -> I64 { jet_rt_string_clone(rt_static_text("x86_64")) }
+
+// std::env::consts::FAMILY of the Linux build target.
+#Export(c) jet_std_os_family: fn() -> I64 { jet_rt_string_clone(rt_static_text("unix")) }
+
+// An entry of the start stack's auxiliary vector, 0 when it has none, as
+// musl's getauxval reads it: the vector follows the startup environment's
+// terminating null (HostStartup.jet host_envp, which the program's main
+// passes before anything else runs). A host that never passed its startup
+// arguments (an entryless loaded image, or a fault before main) reads the
+// kernel's copy, /proc/self/auxv. An image Image/Loader.jet runs from memory
+// carries Jet entries: 0x4a455401 the absolute path `os.executable()`
+// reports (the script `jet run` ran), 0x4a455402 a read-only mapping of the
+// whole ELF file and 0x4a455403 its size. A kernel exec carries none.
+// No libc: the fault report reads it on the alternate signal stack.
+host_getauxval: fn(kind: I64) -> I64 {
+    envp: host_envp
+    if (envp == I64{0}) { return host_getauxval_kernel(kind) }
+    // Startup lends the start stack: the null-terminated envp array, then the
+    // auxiliary vector's [type, value] pairs up to AT_NULL.
+    at := envp
+    loop {
+        if (rt_text_word(at) == I64{0}) { break }
+        at = wrapping(at + I64{8})
+    }
+    at = wrapping(at + I64{8})
+    loop {
+        entry: rt_text_word(at)
+        if (entry == I64{0}) { return I64{0} }
+        if (entry == kind) { return rt_text_word(wrapping(at + I64{8})) }
+        at = wrapping(at + I64{16})
+    }
+}
+
+// host_getauxval from /proc/self/auxv, read into a fresh page, untracked:
+// the fault report may read it on the alternate signal stack, where
+// allocating is not allowed, and only this function reads it.
+host_getauxval_kernel: fn(kind: I64) -> I64 {
+    page: alloc_map_try(I64{4096})
+    if (page == I64{0}) { return I64{0} }
+    found := I64{0}
+    // "/proc/self/auxv\0", little-endian, at the start of the fresh private page.
+    rt_text_store(page, I64{7310238724270485551})
+    rt_text_store(wrapping(page + I64{8}), I64{33346492788860524})
+    #Unsafe("page is a fresh private page: the path, then the [type, value] pairs read into it") {
+        fd: os_syscall_i64(I64{257}, I64{-100}, page, I64{524288}, I64{0}, I64{0}, I64{0})
+        if (fd >= I64{0}) {
+            length: os_syscall_i64(I64{0}, fd, wrapping(page + I64{16}), I64{4080}, I64{0}, I64{0}, I64{0})
+            _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            at := I64{16}
+            // The pair at `at` (from 16) is whole when at + 16 <= 16 + length.
+            loop at <= length {
+                entry: rt_text_word(wrapping(page + at))
+                if (entry == I64{0}) { break }
+                if (entry == kind) {
+                    found = rt_text_word(wrapping(page + wrapping(at + I64{8})))
+                    break
+                }
+                at = wrapping(at + I64{16})
+            }
+        }
+    }
+    alloc_unmap(page, I64{4096})
+    found
+}
+
+HOST_AT_EXECUTABLE: I64{1246057473}
+
+HOST_AT_IMAGE: I64{1246057474}
+
+// jet_sys_executable_raw: std::env::current_exe on Linux reads the
+// /proc/self/exe link, decoded lossily; any failure is None. The native
+// compiler locates its jet-runtime pack beside this path. A program run from
+// memory reports the path its loader gave (HOST_AT_EXECUTABLE).
+#Export(c) jet_sys_executable_raw: fn(some: I64) -> I64 {
+    loaded: host_getauxval(HOST_AT_EXECUTABLE)
+    if (loaded != I64{0}) {
+        rt_text_store(some, rt_text_lossy(loaded, host_startup_byte_length(loaded)))
+        return I64{1}
+    }
+    path: rt_static_text("/proc/self/exe")
+    scratch: jet_rt_alloc(I64{32}, I64{8})
+    capacity := I64{256}
+    loop {
+        bytes: jet_rt_alloc(capacity, I64{8})
+        count: jet_fs_readlink_raw(path, bytes, capacity, scratch)
+        if (count < I64{0}) {
+            jet_rt_free(bytes, capacity, I64{8})
+            jet_rt_free(scratch, I64{32}, I64{8})
+            return I64{0}
+        }
+        if (count < capacity) {
+            rt_text_store(some, rt_text_lossy(bytes, count))
+            jet_rt_free(bytes, capacity, I64{8})
+            jet_rt_free(scratch, I64{32}, I64{8})
+            return I64{1}
+        }
+        jet_rt_free(bytes, capacity, I64{8})
+        capacity *= I64{2}
+    }
+}
+
+// The note type of a part the build added to the executable (JetBackend
+// ELF.jet ELF64_JET_PART_NOTE), and its owner "Jet\0" as a little-endian
+// word.
+HOST_NOTE_JET_PART: I64{1246056449}
+
+HOST_NOTE_JET_OWNER: I64{7628106}
+
+// The bytes before a part's own bytes in its note's descriptor: the part's
+// name (a String), NUL-padded to eight bytes.
+host_image_part_label: fn(name: I64) -> I64 {
+    length: rt_text_len(name)
+    wrapping(length - length % I64{8} + I64{8})
+}
+
+// The note of the part `name` (a String) the build added to this
+// executable (JetBackend ELF.jet x64_executable_add_parts), or 0 when it has
+// none: a PT_NOTE whose one note has owner "Jet" and type HOST_NOTE_JET_PART
+// and whose descriptor is the part's name, NUL-padded to eight bytes, then
+// the part's bytes. The program headers are the ones the kernel mapped
+// (AT_PHDR, AT_PHNUM), and a note is read at its link-time address: a Jet
+// executable is fixed-address. No file is read.
+host_image_part: fn(name: I64) -> I64 {
+    table: host_getauxval(I64{3})
+    count: host_getauxval(I64{5})
+    length: rt_text_len(name)
+    data: rt_text_data(name)
+    label: host_image_part_label(name)
+    if (table == I64{0} || length == I64{0}) { return I64{0} }
+    mask: I64{4294967295}
+    index := I64{0}
+    // AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows
+    // of 56 bytes; a PT_NOTE row's p_vaddr and p_filesz bound its mapped
+    // read-only notes, and a note is read only inside that bound.
+    loop index < count {
+        row: wrapping(table + index * I64{56})
+        index = wrapping(index + I64{1})
+        if (rt_text_word(row).bit_and(mask) != I64{4}) { next }
+        note: rt_text_word(wrapping(row + I64{16}))
+        size: rt_text_word(wrapping(row + I64{32}))
+        if (size < wrapping(I64{16} + label)) { next }
+        head: rt_text_word(note)
+        kind: rt_text_word(wrapping(note + I64{8}))
+        descriptor: (head >> I64{32}).bit_and(mask)
+        if (head.bit_and(mask) != I64{4} || kind.bit_and(mask) != HOST_NOTE_JET_PART || (kind >> I64{32}).bit_and(mask) != HOST_NOTE_JET_OWNER) {
+            next
+        }
+        if (descriptor < label || wrapping(I64{16} + descriptor) > size) { next }
+        if (rt_text_byte(wrapping(note + wrapping(I64{16} + length))) != I64{0}) { next }
+        at := I64{0}
+        loop at < length && rt_text_byte(wrapping(note + wrapping(I64{16} + at))) == rt_text_byte(wrapping(data + at)) {
+            at = wrapping(at + I64{1})
+        }
+        if (at == length) { return note }
+    }
+    I64{0}
+}
+
+// The byte length of the part of `note` (host_image_part), named `name`.
+host_image_part_length: fn(note: I64, name: I64) -> I64 {
+    // `note` is a mapped part note host_image_part found; its first word holds
+    // the descriptor size.
+    wrapping((rt_text_word(note) >> I64{32}).bit_and(I64{4294967295}) - host_image_part_label(name))
+}
+
+// jet_sys_image_part_size_raw: the byte length of the part `name` the build
+// added to this executable (host_image_part), None when it has none.
+#Export(c) jet_sys_image_part_size_raw: fn(name: I64, some: I64) -> I64 {
+    note: host_image_part(name)
+    if (note == I64{0}) { return I64{0} }
+    rt_text_store(some, jet_int_owned_from_i64(host_image_part_length(note, name)))
+    I64{1}
+}
+
+// jet_sys_image_part_raw: at most `limit` bytes of the part `name` from its
+// byte `offset` (fewer at its end, none past it or for a limit below 1),
+// None when the executable has no such part. The bytes are lent where the
+// kernel mapped them, never copied: the route gives them a frozen List
+// header (JetIR BuildRoutes.jet IR_ROUTES_FROZEN), which no owner frees, and
+// a page is read only when a reader touches it.
+#Export(c) jet_sys_image_part_raw: fn(name: I64, offset: I64, limit: I64, data_out: I64, length_out: I64) -> I64 {
+    start: jet_int_owned_to_i64(offset)
+    wanted: jet_int_owned_to_i64(limit)
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    note: host_image_part(name)
+    if (note == I64{0}) { return I64{0} }
+    size: host_image_part_length(note, name)
+    begin := start
+    if (begin < I64{0}) { begin = I64{0} }
+    if (begin > size) { begin = size }
+    taken := I64{0}
+    if (wanted > I64{0}) {
+        taken = wrapping(size - begin)
+        if (wanted < taken) { taken = wanted }
+    }
+    bytes: wrapping(note + wrapping(I64{16} + wrapping(host_image_part_label(name) + begin)))
+    rt_text_store(data_out, bytes)
+    rt_text_store(length_out, taken)
+    I64{1}
+}
+
+// jet_sys_current_dir_raw: std::env::current_dir is getcwd(3), decoded lossily;
+// the error is the io::Error text "<message> (os error N)". The raw syscall
+// reports an unreachable directory as a non-absolute path, which getcwd(3)
+// refuses with ENOENT.
+#Export(c) jet_sys_current_dir_raw: fn(ok: I64, err: I64) -> I64 {
+    capacity := I64{512}
+    loop {
+        bytes: jet_rt_alloc(capacity, I64{8})
+        result: host_call(I64{79}, bytes, capacity, I64{0})
+        failure := I64{0}
+        if (result > I64{0}) {
+            if (rt_text_byte(bytes) == I64{47}) {
+                rt_text_store(ok, rt_text_lossy(bytes, result - I64{1}))
+                jet_rt_free(bytes, capacity, I64{8})
+                return I64{1}
+            }
+            failure = I64{2}
+        } else { failure = -result }
+        jet_rt_free(bytes, capacity, I64{8})
+        if (failure != I64{34}) {
+            text: jet_rt_string_builder_new()
+            host_errno_cause_append(text, failure)
+            rt_text_store(err, jet_rt_string_builder_finish(text))
+            return I64{0}
+        }
+        capacity *= I64{2}
+    }
+}

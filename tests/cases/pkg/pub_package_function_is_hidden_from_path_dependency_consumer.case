@@ -1,0 +1,10 @@
+# tests/pkg.rs::pub_package_function_is_hidden_from_path_dependency_consumer at tests/pkg.rs:8383; hand-port
+# Claim: cross-package call to a non-exported fn fails with E0605 (tests/pkg.rs:8412)
+# Fixture migrated: deps: { dep: ../dep } inline form replaced by dep: ./dep,
+fixture: pub_package_function_is_hidden_from_path_dependency_consumer.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check run.jet
+exit: 1 # tests/pkg.rs:8412 E0605
+stderr: ~ "E0605" # tests/pkg.rs:8412 E0605

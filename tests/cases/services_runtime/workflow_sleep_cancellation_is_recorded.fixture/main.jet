@@ -1,0 +1,55 @@
+use {
+    files: core.files
+    service: core.service
+    testing: core.testing
+    time: core.time
+}
+
+worker: fn() {}
+
+sleeping_workflow: fn(store_path: String, ready: Sender<Int>) {
+    tree := service.tree("checkout")
+    store: service.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    workflow: tree.workflow_start("checkout", 1) ?? panic("workflow")
+    ready.send(1)
+    workflow.sleep(Duration.seconds(10) ?? panic("duration")) ?? panic("sleep completed")
+}
+
+// A task's cancel is taken at its next stop poll, so a cancel sent before the
+// workflow reaches its sleep stops it there, with no sleep recorded. The
+// store's workflow log records the sleep before the wait starts; the short
+// pause after it lets the task enter the wait the cancel ends.
+sleep_recorded: fn(store_path: String) -> Bool {
+    text: files.read("{store_path}.workflows") ?? return false
+    text.contains("workflow-wait-sleep:")
+}
+
+run: fn() {
+    temp: testing.temp_dir("workflow-sleep-cancel")
+    store_path: Path.from(temp).join("workflow.log").to_string()
+    { sender: ready, receiver: started }: channel<Int>()
+    task_handle: task sleeping_workflow(store_path.copy(), ready)
+    started.receive() ?? panic("workflow did not start")
+    tries := 0
+    loop !sleep_recorded(store_path.copy()) {
+        if tries == 2000 -> panic("the workflow never recorded its sleep")
+        time.sleep(5ms)
+        tries += 1
+    }
+    time.sleep(50ms)
+    task_handle.cancel()
+    if task_handle.join() == {
+        .Err(_) -> { print("cancelled") }
+        .Ok(_) -> print("completed")
+    }
+
+    tree := service.tree("checkout")
+    store: service.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("restart")
+    print("history:{tree.workflow_history(1) ?? panic("history")}")
+}

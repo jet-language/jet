@@ -1,0 +1,16 @@
+# tests/dev_parts/routine.rs::decimal_scale_arithmetic_matches_interpreter_default_jit_and_aot at tests/dev_parts/routine.rs:2176; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: decimal_scale_arithmetic_matches_interpreter_default_jit_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run decimal_scale.jet
+exit: 0
+stdout: = decimal_scale_arithmetic_matches_interpreter_default_jit_and_aot.1.out
+stderr: empty
+step: jet build decimal_scale.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = decimal_scale_arithmetic_matches_interpreter_default_jit_and_aot.1.out
+stderr: empty

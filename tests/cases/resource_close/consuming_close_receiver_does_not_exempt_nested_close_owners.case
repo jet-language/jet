@@ -1,0 +1,12 @@
+# tests/resource_close.rs::consuming_close_receiver_does_not_exempt_nested_close_owners at tests/resource_close.rs:605; hand-port
+fixture: consuming_close_receiver_does_not_exempt_nested_close_owners.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet --json
+exit: 1 # tests/resource_close.rs:610 is rejected
+json: stdout doc $.reports[?code="E0222"] #>= 1 # tests/resource_close.rs:610 reports E0222
+step: jet check main.jet
+exit: 1 # tests/resource_close.rs:610 is rejected
+stderr: ~ "self.value.first" # tests/resource_close.rs:610 rendered diagnostic text
+stderr: ~ "ClosePair" # tests/resource_close.rs:610 rendered diagnostic text

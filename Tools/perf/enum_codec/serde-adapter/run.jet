@@ -1,0 +1,28 @@
+// The Jet twin of Tools/perf/enum_codec/serde-adapter.sh, the serde peer
+// adapter of Tools/perf/enum_codec_bench.py: builds the pinned peer once
+// (release, offline, its output on stderr) and runs it with the harness
+// options, ending with its status.
+//
+//   jet Tools/perf/enum_codec/serde-adapter/run.jet -- PROTOCOL-OPTION...
+//
+// The build goes to $ENUM_CODEC_SERDE_TARGET, else target-enumcodec in the
+// checkout. A failure to start the build ends the run with its report on
+// stderr and exit 1.
+use core.[files, process, sys, term]
+
+run: fn() -> Never Err! {
+    // The checkout: three up from enum_codec, which holds this program's directory.
+    here: files.normalize("{sys.executable()}/../..")
+    root: files.normalize("{here}/../../..")
+    target: process.env_nonempty("ENUM_CODEC_SERDE_TARGET") ?? files.join(root, "target-enumcodec")
+    bin: "{target}/release/enum_codec_serde_peer"
+    if !files.can_execute(bin) {
+        // Both of the build's streams go to stderr, keeping stdout the peer's.
+        build: process.cmd([String]{files.join(root, "Tools/agent/JetEnv.jet"), "cargo", "build", "--release", "--offline", "-q"}).cwd(files.join(here, "serde_peer")).env("CARGO_TARGET_DIR", target).stderr(.Stdout).run()
+        errors := term.stderr()
+        errors.write(build.output)
+        status: process.exit_status(build)
+        if status != 0 -> process.exit(status)
+    }
+    process.exec([bin].concat(process.args()))
+}

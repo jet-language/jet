@@ -1,0 +1,8 @@
+# A deterministic world reads and writes its own logical environment, seeded
+# from the startup environment. Its tasks see that environment, and the
+# process default never sees the world's writes or removals.
+fixture: world_environment_never_reaches_process_default.fixture
+env: JET_WORLD_ENV_START=startup
+step: jet run main.jet
+exit: 0
+stdout: = "world start: startup=startup kept=missing\nworld end: removed=true kept=world child=world startup=missing\nprocess: startup=startup kept=process only=missing\n"

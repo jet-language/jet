@@ -1,0 +1,27 @@
+# Port of tests/jetpack_package_outputs.rs:11-111; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+fixture: package_fleet_output_reaches_the_immutable_generation_and_retries_cleanly.fixture
+env: JETPACK_ROOT={work}/root
+env: PATH=/usr/bin:/bin
+mkdir: root
+step: jet os build workstation --name fleet-output --no-color --offline
+file: root/systems/generations/fleet-output/plan.json ~ "\"graph_identity\":\"" # original predicate
+capture: graph file root/systems/generations/fleet-output/plan.json doc $.graph_identity
+file: root/systems/generations/fleet-output/fleet/deploy-plan.json ~ "\"graph_identity\":\"{cap:graph}\"" # original predicate
+file: root/systems/generations/fleet-output/fleet/deploy-edge.sh ~ "\"graph_identity\":\"{cap:graph}\"" # original predicate
+file: root/systems/generations/fleet-output/fleet/deploy-plan.json ~ "\"fleet\":\"prod\"" # original predicate
+file: root/systems/generations/fleet-output/fleet/deploy-plan.json ~ "\"host\":\"edge\"" # original predicate
+file: root/systems/generations/fleet-output/fleet/deploy-plan.json ~ "\"system\":\"workstation\"" # original predicate
+file: root/systems/generations/fleet-output/fleet/deploy-edge.sh is-file
+file: root/systems/generations/fleet-output/generation-root.json ~ "\"kind\":\"jetos.generation-root.v1\"" # original predicate
+file: root/systems/generations/fleet-output/generation-root.json ~ "\"source_proof_sha256\":\"" # original predicate
+file: root/systems/generations/fleet-output/generation-root.json ~ "\"files_proof_sha256\":\"" # original predicate
+file: root/systems/generations/fleet-output/generation-root.json ~ "\"witness\":\"" # original predicate
+capture: witness file root/systems/generations/fleet-output/generation-root.json doc $.witness
+capture: ledger-row file root/systems/generations.log after "\tfleet-output\t" # original ed77c235f tests/jetpack_package_outputs.rs:93-101 finds the first matching ledger line and checks its suffix
+cap:ledger-row: $= "\t{cap:witness}" # original predicate
+copy: root/systems/generations/fleet-output/fleet/deploy-plan.json first-deploy.json
+copy: root/systems/generations/fleet-output/plan.json first-plan.json
+step: jet os build workstation --name fleet-output --no-color --offline
+file: root/systems/generations/fleet-output/fleet/deploy-plan.json == first-deploy.json
+file: root/systems/generations/fleet-output/plan.json == first-plan.json

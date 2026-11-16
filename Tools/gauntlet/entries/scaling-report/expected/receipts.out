@@ -1,0 +1,64 @@
+# Scaling gate report (#4601)
+
+Receipt `timing.json`: 2026-11-09T10:00:00Z to 2026-11-09T11:00:00Z, mode timing, compilers rust=/opt/jet, jetc=jet:{dir}, bare=/opt/bare, 3 failures.
+
+Receipt `counters.json`: 2026-11-09T12:00:00Z to (running), mode counters, compilers rust=/opt/jet, 0 failures.
+
+Counter-only series gate deterministic work and compile outcomes; their contended wall/RSS observations are not timing samples. Timing floors and 1M projections come only from serial timing-mode series. Unmeasured timing cells remain uncovered, not wins.
+
+## Ladder outcome
+
+| Corpus | Layout | Compiler | Mode | Rungs passed (x: N or lines) | Top rung wall s | Peak RSS GB | Stopped |
+|---|---|---|---|---|---:|---:|---|
+| modules | files | rust | timing | 1000, 2000 | 2.3 | 1.00 | wall budget |
+| generics | single | jetc | timing | 8, 16 | 3.0 | 2.00 |  |
+| fan-in | files | rust | timing | none | - | - |  |
+| web | files | rust | timing | 125000 | 1.3 | 2.86 |  |
+| cli | files | rust | timing | none | - | - |  |
+| game | files | rust | counters | 7 | - | - |  |
+| modules | files | rust | counters | 1000 | - | - |  |
+| generics | single | jetc | counters | none | - | - |  |
+| fan-in | files | rust | counters | none | - | - |  |
+| cli | files | rust | counters | none | - | - |  |
+
+## Superlinear phases and counters (growth vs N log N over the measured rungs)
+
+| Corpus | Layout | Compiler | Mode | Metric | x N log N | Exponent | Dominating counter | Responsible functions (profile, phase share) |
+|---|---|---|---|---|---:|---:|---|---|
+| modules | files | rust | timing | phase.sema.bodies | 2.50 | 1.00 | counter.sema.items | Sema.jet:10 46%; check_body 21%; lower 13% |
+| modules | files | rust | timing | wall_seconds | 1.55 | -0.00 | - |  |
+| modules | files | rust | timing | counter.parse.tokens | ? | ? | - | Parse.jet:3 33% |
+
+## Floor failures at the top rung
+
+| Corpus | Layout | Compiler | Failure |
+|---|---|---|---|
+| modules | files | rust | 1200 lines/s < 5000 |
+
+## Compile failures, timeouts and incomplete ladders
+
+| Corpus | Layout | Compiler | Mode | Phase | Failure |
+|---|---|---|---|---|---|
+| modules | files | rust | timing | parse | exit 1 |
+| modules | files | rust | timing | sema.bodies | timed out after 120 s |
+| generics | single | jetc | timing | - | rung 3 cut |
+| generics | single | jetc | timing | - | incomplete checkpoint |
+| fan-in | files | rust | timing | - | incomplete checkpoint |
+| cli | files | rust | timing | - | N=500: exit 1 |
+
+## Domain corpora: phases projected to 1M lines (budget 10 s end to end)
+
+| Corpus | Layout | Compiler | Measured at lines | Phase | Measured s | Exponent | Projected s at 1M |
+|---|---|---|---:|---|---:|---:|---:|
+| web | files | rust | 125000 | **total** | 1.25 | 1.10 | 12.3 |
+| web | files | rust | 125000 | parse | 0.50 | 1.02 | 4.0 |
+| web | files | rust | 125000 | sema | 0.50 | 1.00 | 4.0 |
+| web | files | rust | 125000 | lower | 0.00 | 2.00 | 0.3 |
+
+## Timing coverage not established
+
+| Corpus | Layout | Compiler | Reason |
+|---|---|---|---|
+| game | files | rust | not in the timing sample |
+| fan-in | files | rust | timing compilation failed |
+| cli | files | rust | timing compilation failed |

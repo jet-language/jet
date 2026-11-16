@@ -1,0 +1,36 @@
+// The job of a midsize case, as facts (the harness runs it in the case
+// directory with the file holding the program's output): how much the program
+// printed, then every file in the case directory (dot entries aside) with its
+// size and digest.
+use {
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+}
+
+// The files under `directory`, relative to `root`, leaving out dot entries.
+written: fn(directory: String, root: String) -[FS]> [String] {
+    found := [String]{}
+    loop item in files.list_dir(directory) ?? panic("`{directory}` cannot be listed: {err}") {
+        path: files.join(directory, item.name)
+        if {
+            item.name.starts_with(".") -> next
+            item.is_dir -> found.extend(written(path, root))
+            else -> found.push(files.relative(path, root))
+        }
+    }
+    found
+}
+
+run: fn() {
+    printed: files.read(process.args()[0]) ?? panic("no output file: {err}")
+    print("printed: {printed.len()} bytes")
+    here: files.cwd() ?? panic("no working directory: {err}")
+    names := written(here, here)
+    names.sort()
+    print("files: {names.len()}")
+    loop name in names {
+        bytes: files.read_bytes(files.join(here, name)) ?? panic("`{name}` cannot be read: {err}")
+        print("  {name} {bytes.len()} bytes sha256 {crypto.sha256(bytes).hex()}")
+    }
+}

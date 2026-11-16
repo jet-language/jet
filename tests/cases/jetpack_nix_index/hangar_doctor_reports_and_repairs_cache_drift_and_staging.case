@@ -1,0 +1,85 @@
+# Port of tests/jetpack_nix_index.rs:412-529 and its snapshots
+# tests/fixtures/jetpack-diagnostics/hangar_doctor_{findings,repair}.stderr,
+# with <runtime-digest> filled from the explain row. The runtime object is
+# found by its explain row (nix.store-path RUNTIME_PATH is ripgrep-runtime-1.0).
+# The live runtime payload is found by name: the private CAS names a payload
+# by sha256 of its bytes ("runtime") and its mode suffix. Inode identity is
+# GNU `stat -c %d:%i`. Envelope::try_output_hash_of_in_hangar (:511) is read
+# as a later read-only doctor that reports no drift for the repaired object.
+requires: os-name:linux
+requires: tool:stat
+fixture: nix-index.fixture
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
+env: JETPACK_ROOT={work}/root
+env: JETPACK_SHARED_CAS={work}/root/hangar/cas
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: PATH=/usr/bin
+mkdir: root
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet {work}/peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nix-index-cache-nar-source
+await: file {work}/peer.port timeout 30s
+capture: port = text file {work}/peer.port
+step initial: jetpack env --env dev --prep --trust --yes --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+step: jetpack explain ripgrep-runtime-1.0@nixpkgs --json
+exit: 0
+capture: runtime stdout doc $.explain.entry.output_hash
+cap:runtime: nonempty # original: the runtime Hangar object is listed
+chmod: root/hangar/objects/{cap:runtime} 0755
+chmod: root/hangar/objects/{cap:runtime}/share 0755
+write: root/hangar/objects/{cap:runtime}/share/doctor-corruption = "drift"
+mkdir: root/hangar/stage/nix-cache-999999999-1/payload
+write: root/hangar/stage/nix-cache-999999999-1/payload/bytes = "stale"
+write: root/hangar/cas/.unreferenced = "orphan"
+file: root/hangar/cas/.locks is-dir
+step: {tool:stat} -c %d:%i root/hangar/cas/.locks
+exit: 0
+capture: locks_identity = text stdout
+file: root/hangar/cas/d92c6a81b2ff50096bcda80885427d1f59a25b5f483f7055523504925d16ab23-00000124 = "runtime"
+step: {tool:stat} -c %d:%i root/hangar/cas/d92c6a81b2ff50096bcda80885427d1f59a25b5f483f7055523504925d16ab23-00000124
+exit: 0
+capture: payload_identity = text stdout
+step read-only: jetpack hangar doctor --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 1
+stderr: = "  jetpack  remaining drift objects/{cap:runtime}: content digest differs from the object name\n  jetpack  remaining stale stage stage/nix-cache-999999999-1: abandoned staging directory\n  jetpack  remaining orphan CAS cas/.unreferenced: not referenced by any Hangar object\n  jetpack  hangar doctor: checked 3 object(s), 3 finding(s), 0 fixed, 3 remaining\n  jetpack  verification seals: 2 reused, 0 resealed, 0 pending\n"
+file: root/hangar/objects/{cap:runtime}/share/doctor-corruption exists
+file: root/hangar/stage/nix-cache-999999999-1 exists
+file: root/hangar/cas/.unreferenced exists
+file: root/hangar/cas/d92c6a81b2ff50096bcda80885427d1f59a25b5f483f7055523504925d16ab23-00000124 = "runtime"
+step: built reset {cap:port}
+exit: 0
+step repair: jetpack hangar doctor --repair --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+stderr: = "  jetpack  fixed drift objects/{cap:runtime}: repaired from native binary cache\n  jetpack  fixed stale stage stage/nix-cache-999999999-1: removed\n  jetpack  fixed orphan CAS cas/.unreferenced: removed\n  jetpack  hangar doctor: checked 3 object(s), 3 finding(s), 3 fixed, 0 remaining\n  jetpack  verification seals: 3 reused, 0 resealed, 0 pending\n"
+step: built counts {cap:port}
+exit: 0
+json: stdout doc $.runtime > 0
+file: root/hangar/stage/nix-cache-999999999-1 absent
+file: root/hangar/cas/.unreferenced absent
+file: root/hangar/objects/{cap:runtime}/share/doctor-corruption absent
+file: root/hangar/cas/d92c6a81b2ff50096bcda80885427d1f59a25b5f483f7055523504925d16ab23-00000124 = "runtime"
+file: root/hangar/cas/.locks is-dir
+step: {tool:stat} -c %d:%i root/hangar/cas/.locks
+exit: 0
+stdout: = "{cap:locks_identity}"
+step: {tool:stat} -c %d:%i root/hangar/cas/d92c6a81b2ff50096bcda80885427d1f59a25b5f483f7055523504925d16ab23-00000124
+exit: 0
+stdout: = "{cap:payload_identity}"
+step after: jetpack hangar doctor --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: any # the other findings of this doctor run are not the asserted fact
+stderr: !~ "drift objects/{cap:runtime}" # original: the repaired runtime object rehashes to its name
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0

@@ -1,0 +1,66 @@
+// A mutable module global starts from any storable value the build
+// computes: maps keyed by tuples (whose members order the keys), an exact
+// Int beyond a machine word, and a `Shared` cell. Every assignment replaces
+// the global's value for every function, the `Shared` one included. One
+// task runs, so its plain writes sit in `#Unsafe`.
+Score: struct {
+    hits: Int
+    last: String
+}
+
+marks: fn() -> [(label: String, at: Int):Int] {
+    made := [(label: String, at: Int):Int]{}
+    made[(label: "b", at: 1)] = 10
+    made[(label: "a", at: 2)] = 20
+    made[(label: "c", at: 0)] = 30
+    made[(label: "b", at: 1)] = 11
+    made
+}
+
+spots: fn() -> [(on: Bool, pos: (x: Int, y: Int)):String] {
+    made := [(on: Bool, pos: (x: Int, y: Int)):String]{}
+    made[(on: true, pos: (x: 1, y: -4))] = "gate"
+    made[(on: false, pos: (x: 7, y: 2))] = "door"
+    made[(on: true, pos: (x: 1, y: -9))] = "lift"
+    made[(on: false, pos: (x: -3, y: 5))] = "vent"
+    made
+}
+
+power: fn(base: Int, exponent: Int) -> Int {
+    result := 1
+    loop _ in 0..<exponent -> result *= base
+    result
+}
+
+with_mark: fn(table: [(label: String, at: Int):Int], key: (label: String, at: Int), value: Int) -> [(label: String, at: Int):Int] {
+    changed := table.copy()
+    changed[key] = value
+    changed
+}
+
+mark_table := marks()
+
+spot_table := spots()
+
+huge := power(2, 70)
+
+score := Shared{Score{hits: 3, last: "start"}}
+
+show: fn() {
+    loop (key, value) in mark_table -> print("{key.label} {key.at} {value}")
+    print(huge)
+    print("{score.hits} {score.last}")
+}
+
+run: fn() {
+    show()
+    loop (key, value) in spot_table -> print("{key.on} {key.pos.x} {key.pos.y} {value}")
+    print(mark_table[(label: "a", at: 2)])
+    print(spot_table[(on: true, pos: (x: 1, y: -9))])
+    #Unsafe("one task writes the globals") {
+        mark_table = with_mark(mark_table, (label: "d", at: -1), 40)
+        huge += 1
+        score = Shared{Score{hits: score.hits + 5, last: "reset"}}
+    }
+    show()
+}

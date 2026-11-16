@@ -1,0 +1,8 @@
+# tests/refutable_test_bind.rs::sema_rejects_a_non_diverging_test_bind_route at tests/refutable_test_bind.rs:50; hand-port
+fixture: sema_rejects_a_non_diverging_test_bind_route.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check refutable_test_bind.jet --json
+exit: 1 # tests/refutable_test_bind.rs:58 is rejected
+json: stdout doc $.reports[?code="E0405"] #>= 1 # tests/refutable_test_bind.rs:58 reports E0405

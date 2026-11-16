@@ -1,0 +1,16 @@
+# Substring contains/find/count/split and regex is_match/full_match/find/
+# find_all over generated texts answer as a JavaScript model does, on the
+# interpreter and AOT: the substring filter, its tail and its two-way fall
+# back, and the regex DFA table and literal routes keep every answer.
+fixture: substring_and_regex_searches_agree_with_a_reference_model.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step default: jet run run.jet
+exit: 0
+stdout: = substring_and_regex_searches_agree_with_a_reference_model.out
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: == default
+stdout: == default
+stderr: == default

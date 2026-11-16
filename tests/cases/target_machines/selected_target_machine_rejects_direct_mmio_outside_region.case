@@ -1,0 +1,9 @@
+# Port of tests/target_machines.rs::selected_target_machine_rejects_direct_mmio_outside_region.
+# 0x50000000 lies outside board.sensor_v1's `peripherals` MMIO region, so the
+# volatile write is the registered E3313 before codegen.
+fixture: fixtures/selected_target_machine_rejects_direct_mmio_outside_region
+step: jet build main.jet --target board.sensor_v1
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "E3313" # the MMIO fact failure
+stderr: ~ "Target `board.sensor_v1` has an MMIO fact failure: address 0x50000000" # names the rejected address

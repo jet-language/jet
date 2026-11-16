@@ -1,0 +1,16 @@
+# PORT tests/repl.rs:3392-3423; all original predicates, verbatim input literals.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+fixture: repl_core_data_query_plans_and_typed_joins.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_core_data_query_plans_and_typed_joins.fixture/input0.txt
+stdout: file transcript.out
+stderr: file transcript.err
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "[table, filter]" # original predicate
+stdout|stderr: ~ "[2, 3]" # original predicate
+stdout|stderr: ~ "DataJoin(left: 2, right: null)" # original predicate
+step: jet run line_count.jet
+exit: 0

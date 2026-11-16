@@ -1,0 +1,28 @@
+use {
+    process: core.process
+    term: core.term
+}
+
+// `lines N` prints N short lines with `print`; `chars N` writes N one-byte
+// strings to stdout and then one LF. A third argument `flush` flushes stdout
+// after every line or string, as stdout did before it was buffered: one write
+// per print, whatever the target.
+run: fn() {
+    args: process.args()
+    mode: args.get(0) ?? "lines"
+    count: Int.parse(args.get(1) ?? "1000000") ?? 1000000
+    each: (args.get(2) ?? "") == "flush"
+    out := term.stdout()
+    if mode == "chars" {
+        loop _ in 0..<count {
+            out.write("x") ?? panic("write")
+            if each -> out.flush() ?? panic("flush")
+        }
+        out.write_line("") ?? panic("write")
+        return
+    }
+    loop i in 0..<count {
+        print("line {i}")
+        if each -> out.flush() ?? panic("flush")
+    }
+}

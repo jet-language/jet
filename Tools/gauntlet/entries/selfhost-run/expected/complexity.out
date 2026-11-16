@@ -1,0 +1,1522 @@
+{
+  "schema": "jet.selfhost.receipt.v1",
+  "study": "#2955",
+  "status": "unresolved",
+  "generatedAt": "<time>",
+  "manifest": {
+    "path": "Tools/perf/selfhost/manifest.json",
+    "sha256": "228911abb8ebb6b7a7eaffd8e530d5bf42dc86d47993c95d2789b18211ec4d7f"
+  },
+  "runRoot": "<runRoot>",
+  "requested": {
+    "phase": "complexity",
+    "mode": null,
+    "workloads": [
+      "scan-parse",
+      "symbol-type",
+      "diagnostics-maps",
+      "dependency-invalidation",
+      "generic-comptime",
+      "concurrent-scheduling",
+      "foreign-interaction",
+      "multi-package-build"
+    ]
+  },
+  "sourceBoundary": {
+    "productionCompiler": "Source/",
+    "comparisonRole": "read-only retained Rust-hosted compiler input",
+    "portStarted": false,
+    "versionMigration": false,
+    "releaseGateAdded": false
+  },
+  "evidencePolicy": {
+    "machine": {
+      "owner": "driver and later compiler/oracle runs",
+      "records": [
+        "identity",
+        "exit",
+        "stdout",
+        "stderr",
+        "latency",
+        "peak_rss",
+        "diagnostic",
+        "invalidation",
+        "source_complexity"
+      ],
+      "initialStatus": "unavailable"
+    },
+    "model": {
+      "owner": "explicit workload contract and independent oracle",
+      "records": [
+        "expected_values",
+        "expected_failures",
+        "ownership",
+        "effects",
+        "invalidation",
+        "target",
+        "resource_limits"
+      ],
+      "initialStatus": "unrun"
+    },
+    "human": {
+      "owner": "later consented reader/repair study",
+      "records": [
+        "cold_read",
+        "repair_friction",
+        "explain",
+        "predict",
+        "modify",
+        "derive"
+      ],
+      "initialStatus": "unavailable",
+      "simulatedReadersAreNotHumanEvidence": true
+    },
+    "trust": {
+      "rust": "independent same-job counterpart; agreement is comparison evidence, never proof of Jet correctness",
+      "foreign": "native artifact and ABI are retained trust assumptions unless separately checked; matching source filenames do not prove a loaded binary",
+      "bootstrap": "equal stage binaries would establish identity only, not semantic correctness"
+    }
+  },
+  "workloads": [
+    {
+      "id": "scan-parse",
+      "title": "Source scanning and parsing",
+      "status": "specified",
+      "sourceDirectory": "Tools/perf/selfhost/workloads/scan-parse",
+      "workspace": "scan-parse",
+      "evidence": {
+        "identity": {
+          "algorithm": "sha256",
+          "aggregate": "8bfad089b9b604bec4328e556dd806ebed87bda5393ccd2c0f67b84a02cbe208",
+          "files": [
+            {
+              "path": "oracle.rs",
+              "bytes": 1400,
+              "sha256": "99095aced1a5d797f910b56c62f0a7571127f7526cdcb99743ce766bc88aa4f4"
+            },
+            {
+              "path": "package.jet",
+              "bytes": 61,
+              "sha256": "3fa135d063f358127417f71929790ef5ca4885d7ff6b92887af41ae121edee44"
+            },
+            {
+              "path": "run.jet",
+              "bytes": 1266,
+              "sha256": "e1579194c624f52b266a9cce78919015c7223aff51342e64e1c8c97188eae8e3"
+            }
+          ]
+        },
+        "sourceComplexity": {
+          "files": [
+            {
+              "path": "package.jet",
+              "bytes": 61,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "run.jet",
+              "bytes": 1266,
+              "lines": 44,
+              "comments": 0,
+              "declarations": 4,
+              "controlForms": 6
+            }
+          ],
+          "totals": {
+            "bytes": 1327,
+            "lines": 48,
+            "comments": 0,
+            "declarations": 4,
+            "controlForms": 6
+          },
+          "interpretation": "machine source-shape counts only; not a readability or repair score"
+        },
+        "machine": {
+          "status": "unavailable",
+          "records": []
+        },
+        "model": {
+          "status": "unrun",
+          "contracts": {
+            "ownership": "tokens are read during parsing; returned AST nodes own their copied classification fields",
+            "effects": [],
+            "invalidation": "source bytes or lexer rules invalidate the parse and all derived AST facts; unrelated workload inputs remain reusable",
+            "memory": "bounded by 64 tokens and 256 AST nodes for this fixture",
+            "target": "hosted native and default interpreter; web is not applicable because this is a CLI batch job"
+          },
+          "expected": [
+            {
+              "id": "valid",
+              "expected": {
+                "exit": 0,
+                "stdout": "tokens=8 lexeme_bytes=26 identifiers=4 ast_nodes=8\nparse=ok root=keyword ownership=owned\n",
+                "stderr": ""
+              }
+            }
+          ]
+        },
+        "human": {
+          "status": "unavailable",
+          "records": [],
+          "note": "No participant observation is authored by this driver."
+        },
+        "trust": {
+          "rust": "independent same-job counterpart; agreement does not prove Jet semantics",
+          "foreign": "no foreign artifact in this workload",
+          "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate"
+        },
+        "supportedModes": [
+          {
+            "mode": "check",
+            "status": "unrun"
+          },
+          {
+            "mode": "run",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-interpret",
+            "status": "unrun"
+          },
+          {
+            "mode": "build",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-release",
+            "status": "unrun"
+          }
+        ]
+      },
+      "oracle": null,
+      "jet": [],
+      "repair": null,
+      "reasoning": {
+        "status": "unrun",
+        "tasks": [
+          {
+            "id": "explain",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Explain why changing one token invalidates the AST but does not mutate the input token list.",
+            "expectedObservations": [
+              "input remains source-owned",
+              "AST result is a separate owned value",
+              "parse dependency changes"
+            ]
+          },
+          {
+            "id": "predict",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Predict the valid case's token count, lexeme byte count, identifier count, and root kind before execution.",
+            "expectedObservations": [
+              "tokens=8",
+              "lexeme_bytes=26",
+              "identifiers=4",
+              "root=keyword"
+            ]
+          },
+          {
+            "id": "modify",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Change the final identifier from right to value and state which observation changes.",
+            "expectedObservations": [
+              "only source identity and dependent AST text change",
+              "counts stay stable"
+            ]
+          },
+          {
+            "id": "derive",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Derive the invalidation edge from source bytes to parse nodes.",
+            "expectedObservations": [
+              "source -> tokens -> AST"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "symbol-type",
+      "title": "Symbol and type relations",
+      "status": "specified",
+      "sourceDirectory": "Tools/perf/selfhost/workloads/symbol-type",
+      "workspace": "symbol-type",
+      "evidence": {
+        "identity": {
+          "algorithm": "sha256",
+          "aggregate": "f5abc7453ec3dd36b85e2a567d6f9c0ab592034b999e53c087998211e87eb8eb",
+          "files": [
+            {
+              "path": "oracle.rs",
+              "bytes": 985,
+              "sha256": "8fa2eacbb43e32d7ca99e1c07af534c698e5195b781848ce88dca66090b39524"
+            },
+            {
+              "path": "package.jet",
+              "bytes": 62,
+              "sha256": "ca960588fd8db842efa37b262e9454b6bde774bb05f44f005d4696c3df066df4"
+            },
+            {
+              "path": "run.jet",
+              "bytes": 963,
+              "sha256": "e131562e91ed85de0fd409b2222aab8ac92b414e0b87c2111187441e298a0f0c"
+            }
+          ]
+        },
+        "sourceComplexity": {
+          "files": [
+            {
+              "path": "package.jet",
+              "bytes": 62,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "run.jet",
+              "bytes": 963,
+              "lines": 32,
+              "comments": 0,
+              "declarations": 4,
+              "controlForms": 7
+            }
+          ],
+          "totals": {
+            "bytes": 1025,
+            "lines": 36,
+            "comments": 0,
+            "declarations": 4,
+            "controlForms": 7
+          },
+          "interpretation": "machine source-shape counts only; not a readability or repair score"
+        },
+        "machine": {
+          "status": "unavailable",
+          "records": []
+        },
+        "model": {
+          "status": "unrun",
+          "contracts": {
+            "ownership": "the symbol relation borrows names and type labels while the relation result is an owned string",
+            "effects": [],
+            "invalidation": "a declaration name, type label, or scope edit invalidates resolution and compatibility facts; independent symbols are retained",
+            "memory": "bounded by 128 symbols and 64-byte labels per symbol",
+            "target": "hosted native and default interpreter; no foreign or web boundary"
+          },
+          "expected": [
+            {
+              "id": "valid",
+              "expected": {
+                "exit": 0,
+                "stdout": "symbols=3 resolved=Int@1 int_bindings=2\ncompatible=true ownership=borrowed effects=none\n",
+                "stderr": ""
+              }
+            }
+          ]
+        },
+        "human": {
+          "status": "unavailable",
+          "records": [],
+          "note": "No participant observation is authored by this driver."
+        },
+        "trust": {
+          "rust": "independent same-job counterpart; agreement does not prove Jet semantics",
+          "foreign": "no foreign artifact in this workload",
+          "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate"
+        },
+        "supportedModes": [
+          {
+            "mode": "check",
+            "status": "unrun"
+          },
+          {
+            "mode": "run",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-interpret",
+            "status": "unrun"
+          },
+          {
+            "mode": "build",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-release",
+            "status": "unrun"
+          }
+        ]
+      },
+      "oracle": null,
+      "jet": [],
+      "repair": null,
+      "reasoning": {
+        "status": "unrun",
+        "tasks": [
+          {
+            "id": "explain",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Explain why resolving left returns Int@1 and why the relation does not own the symbol table.",
+            "expectedObservations": [
+              "name and type are borrowed during lookup",
+              "scope 1 is selected",
+              "result text is newly owned"
+            ]
+          },
+          {
+            "id": "predict",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Predict the number of declarations and Int bindings.",
+            "expectedObservations": [
+              "symbols=3",
+              "int_bindings=2",
+              "compatible=true"
+            ]
+          },
+          {
+            "id": "modify",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Change label's type from String to Int and state the changed observation.",
+            "expectedObservations": [
+              "int_bindings becomes 3",
+              "resolution of left is unchanged"
+            ]
+          },
+          {
+            "id": "derive",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Derive the relation dependencies for resolve(left).",
+            "expectedObservations": [
+              "query name -> symbol identity -> type label and scope"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "diagnostics-maps",
+      "title": "Diagnostics and source maps",
+      "status": "specified",
+      "sourceDirectory": "Tools/perf/selfhost/workloads/diagnostics-maps",
+      "workspace": "diagnostics-maps",
+      "evidence": {
+        "identity": {
+          "algorithm": "sha256",
+          "aggregate": "4ffa66080d0cbe1bd9bbf330afc6fb079ca995964f80a8d7ffb6a1755fddc0c8",
+          "files": [
+            {
+              "path": "invalid.jet",
+              "bytes": 30,
+              "sha256": "51363f8213d2018ae2243a7ffa32a442a01096012d543f3d051bd1213bf0e4ed"
+            },
+            {
+              "path": "oracle.rs",
+              "bytes": 518,
+              "sha256": "db313def4ed5d82ef748440af6a1ed6fc586d21c61400033e08d021326f7914c"
+            },
+            {
+              "path": "repaired.jet",
+              "bytes": 30,
+              "sha256": "7016ef3545249e813ecc44cffcafcbd9d2fdd739d71e72f190c8e7906c9eb048"
+            },
+            {
+              "path": "run.jet",
+              "bytes": 788,
+              "sha256": "377a572c75586a825a1af1cd077625eb0a6c342dd78cdbf5370ba59e23cc9514"
+            }
+          ]
+        },
+        "sourceComplexity": {
+          "files": [
+            {
+              "path": "invalid.jet",
+              "bytes": 30,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 1,
+              "controlForms": 0
+            },
+            {
+              "path": "repaired.jet",
+              "bytes": 30,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 1,
+              "controlForms": 0
+            },
+            {
+              "path": "run.jet",
+              "bytes": 788,
+              "lines": 30,
+              "comments": 0,
+              "declarations": 4,
+              "controlForms": 3
+            }
+          ],
+          "totals": {
+            "bytes": 848,
+            "lines": 38,
+            "comments": 0,
+            "declarations": 6,
+            "controlForms": 3
+          },
+          "interpretation": "machine source-shape counts only; not a readability or repair score"
+        },
+        "machine": {
+          "status": "unavailable",
+          "records": []
+        },
+        "model": {
+          "status": "unrun",
+          "contracts": {
+            "ownership": "source text is borrowed by the mapper; diagnostic labels and fix edits are owned receipt values",
+            "effects": [],
+            "invalidation": "source edits invalidate offsets and all diagnostics whose spans cross the edit; the repaired source has a new identity",
+            "memory": "maximum source is 4 KiB and at most 32 diagnostics are retained",
+            "target": "hosted native, interpreter, and CLI JSON/human diagnostic renderers; web is not applicable"
+          },
+          "expected": [
+            {
+              "id": "valid-map",
+              "expected": {
+                "exit": 0,
+                "stdout": "diagnostic=E0102 line=2 col=5 span=16..21\nfix=print source_map=stable\n",
+                "stderr": ""
+              }
+            },
+            {
+              "id": "invalid-source",
+              "expected": {
+                "exit": 1,
+                "diagnostic": {
+                  "code": "E0102",
+                  "file": "invalid.jet",
+                  "line": 2,
+                  "col": 5,
+                  "span": {
+                    "start": 16,
+                    "end": 21
+                  },
+                  "fixText": "print"
+                }
+              }
+            }
+          ]
+        },
+        "human": {
+          "status": "unavailable",
+          "records": [],
+          "note": "No participant observation is authored by this driver."
+        },
+        "trust": {
+          "rust": "independent same-job counterpart; agreement does not prove Jet semantics",
+          "foreign": "no foreign artifact in this workload",
+          "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate"
+        },
+        "supportedModes": [
+          {
+            "mode": "check",
+            "status": "unrun"
+          },
+          {
+            "mode": "run",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-interpret",
+            "status": "unrun"
+          },
+          {
+            "mode": "build",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-release",
+            "status": "unrun"
+          }
+        ]
+      },
+      "oracle": null,
+      "jet": [],
+      "repair": null,
+      "reasoning": {
+        "status": "unrun",
+        "tasks": [
+          {
+            "id": "explain",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Explain how byte offset 15 maps to line 2 column 5 and why the repair is source-bound.",
+            "expectedObservations": [
+              "line one occupies bytes 0..10",
+              "four indentation bytes precede the token",
+              "fix targets the exact source span"
+            ]
+          },
+          {
+            "id": "predict",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Predict the invalid source's diagnostic code, location, and suggested replacement.",
+            "expectedObservations": [
+              "E0102",
+              "invalid.jet line 2 col 5",
+              "print"
+            ]
+          },
+          {
+            "id": "modify",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Apply the authored replacement and state the expected check result.",
+            "expectedObservations": [
+              "exit 0",
+              "no E0102 remains"
+            ]
+          },
+          {
+            "id": "derive",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Derive which identities a diagnostic receipt must bind together.",
+            "expectedObservations": [
+              "source identity",
+              "diagnostic code and span",
+              "replacement text"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dependency-invalidation",
+      "title": "Dependency invalidation",
+      "status": "specified",
+      "sourceDirectory": "Tools/perf/selfhost/workloads/dependency-invalidation",
+      "workspace": "dependency-invalidation",
+      "evidence": {
+        "identity": {
+          "algorithm": "sha256",
+          "aggregate": "ac6b6cbc2b5cb99e28dcb6b68565cbc0ed1ce1fb597452d77014bb1e3553fac0",
+          "files": [
+            {
+              "path": "oracle.rs",
+              "bytes": 894,
+              "sha256": "e309a9685bca26231730bc8c4f2203e87a8bdb8079c9fa026c2e673e9d899336"
+            },
+            {
+              "path": "package.jet",
+              "bytes": 74,
+              "sha256": "2c5093da33a29d014578eb26144f7eb22ecc1b322ad3bddad17c6d305c33a38e"
+            },
+            {
+              "path": "run.jet",
+              "bytes": 968,
+              "sha256": "894b6ae9ffb4864f7981d50bf48e9d3ff10bf8b11ba6e848854ec6aa7f48d4cd"
+            }
+          ]
+        },
+        "sourceComplexity": {
+          "files": [
+            {
+              "path": "package.jet",
+              "bytes": 74,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "run.jet",
+              "bytes": 968,
+              "lines": 34,
+              "comments": 0,
+              "declarations": 3,
+              "controlForms": 7
+            }
+          ],
+          "totals": {
+            "bytes": 1042,
+            "lines": 38,
+            "comments": 0,
+            "declarations": 3,
+            "controlForms": 7
+          },
+          "interpretation": "machine source-shape counts only; not a readability or repair score"
+        },
+        "machine": {
+          "status": "unavailable",
+          "records": []
+        },
+        "model": {
+          "status": "unrun",
+          "contracts": {
+            "ownership": "the dependency graph owns module identities and the invalidation result; cache entries are not shared across unrelated graphs",
+            "effects": [],
+            "invalidation": "editing ast invalidates ast, sema, and codegen transitively while parse and docs remain reusable",
+            "memory": "bounded by 32 modules, 128 edges, and one invalidation frontier",
+            "target": "hosted native, interpreter, and incremental build driver; web is not applicable"
+          },
+          "expected": [
+            {
+              "id": "edit-ast",
+              "expected": {
+                "exit": 0,
+                "stdout": "changed=ast invalidated=ast,sema,codegen retained=parse,docs\ncache=source+interface ownership=graph-owned\n",
+                "stderr": ""
+              }
+            }
+          ]
+        },
+        "human": {
+          "status": "unavailable",
+          "records": [],
+          "note": "No participant observation is authored by this driver."
+        },
+        "trust": {
+          "rust": "independent same-job counterpart; agreement does not prove Jet semantics",
+          "foreign": "no foreign artifact in this workload",
+          "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate"
+        },
+        "supportedModes": [
+          {
+            "mode": "check",
+            "status": "unrun"
+          },
+          {
+            "mode": "run",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-interpret",
+            "status": "unrun"
+          },
+          {
+            "mode": "build",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-release",
+            "status": "unrun"
+          }
+        ]
+      },
+      "oracle": null,
+      "jet": [],
+      "repair": null,
+      "reasoning": {
+        "status": "unrun",
+        "tasks": [
+          {
+            "id": "explain",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Explain why codegen is invalidated even though it does not name ast directly.",
+            "expectedObservations": [
+              "sema depends on ast",
+              "codegen depends on sema",
+              "closure is transitive"
+            ]
+          },
+          {
+            "id": "predict",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Predict the invalidated and retained module sets after editing ast.",
+            "expectedObservations": [
+              "ast,sema,codegen",
+              "parse,docs"
+            ]
+          },
+          {
+            "id": "modify",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Add a new independent docs2 module and state whether the invalidation frontier changes.",
+            "expectedObservations": [
+              "docs2 is retained",
+              "frontier is unchanged"
+            ]
+          },
+          {
+            "id": "derive",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Derive the cache identity relation for an incremental result.",
+            "expectedObservations": [
+              "source identity + interface identity + target",
+              "changed dependency invalidates descendants"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "generic-comptime",
+      "title": "Generic and compile-time work",
+      "status": "specified",
+      "sourceDirectory": "Tools/perf/selfhost/workloads/generic-comptime",
+      "workspace": "generic-comptime",
+      "evidence": {
+        "identity": {
+          "algorithm": "sha256",
+          "aggregate": "cfa82cf61f6bc305d88fd2a2fe0c80a2fe3faccb361c415a63f8bbf48c87a355",
+          "files": [
+            {
+              "path": "oracle.rs",
+              "bytes": 501,
+              "sha256": "4c4535b258cde9fc1561d9078e3d54d50a2db364f67aff2ca3cc0d9739686958"
+            },
+            {
+              "path": "package.jet",
+              "bytes": 67,
+              "sha256": "c1bd01686e0a563886375ced76985d19b5c81b268da194846a55e88d1ae80343"
+            },
+            {
+              "path": "run.jet",
+              "bytes": 500,
+              "sha256": "485e5de5782f9aca3718893bb0365778ca53012c9f958ac8700851f68be8a3c9"
+            }
+          ]
+        },
+        "sourceComplexity": {
+          "files": [
+            {
+              "path": "package.jet",
+              "bytes": 67,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "run.jet",
+              "bytes": 500,
+              "lines": 24,
+              "comments": 0,
+              "declarations": 5,
+              "controlForms": 2
+            }
+          ],
+          "totals": {
+            "bytes": 567,
+            "lines": 28,
+            "comments": 0,
+            "declarations": 5,
+            "controlForms": 2
+          },
+          "interpretation": "machine source-shape counts only; not a readability or repair score"
+        },
+        "machine": {
+          "status": "unavailable",
+          "records": []
+        },
+        "model": {
+          "status": "unrun",
+          "contracts": {
+            "ownership": "generic values are consumed into one typed result; the compile-time table is immutable embedded data",
+            "effects": [
+              "comptime:Pure"
+            ],
+            "invalidation": "generic arguments or compile-time function/source changes invalidate instantiations and embedded table data; runtime-only edits do not rerun unrelated instantiations",
+            "memory": "compile-time fuel limit 64 steps; table has at most 32 Int entries",
+            "target": "hosted native, interpreter, and AOT; no ambient comptime effects or foreign target"
+          },
+          "expected": [
+            {
+              "id": "pure",
+              "expected": {
+                "exit": 0,
+                "stdout": "generic_sum=42 first=17\ncomptime_value=2 fuel=7\n",
+                "stderr": ""
+              }
+            }
+          ]
+        },
+        "human": {
+          "status": "unavailable",
+          "records": [],
+          "note": "No participant observation is authored by this driver."
+        },
+        "trust": {
+          "rust": "independent same-job counterpart; agreement does not prove Jet semantics",
+          "foreign": "no foreign artifact in this workload",
+          "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate"
+        },
+        "supportedModes": [
+          {
+            "mode": "check",
+            "status": "unrun"
+          },
+          {
+            "mode": "run",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-interpret",
+            "status": "unrun"
+          },
+          {
+            "mode": "build",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-release",
+            "status": "unrun"
+          }
+        ]
+      },
+      "oracle": null,
+      "jet": [],
+      "repair": null,
+      "reasoning": {
+        "status": "unrun",
+        "tasks": [
+          {
+            "id": "explain",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Explain which value is computed before runtime and which generic relation remains typed at runtime.",
+            "expectedObservations": [
+              "comptime_value is embedded",
+              "generic_sum uses Pair<Int>",
+              "pure effect boundary"
+            ]
+          },
+          {
+            "id": "predict",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Predict generic_sum, first, and the compile-time table value at index 3.",
+            "expectedObservations": [
+              "42",
+              "17",
+              "2"
+            ]
+          },
+          {
+            "id": "modify",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Change the pair's right value from 25 to 26 and state the result change.",
+            "expectedObservations": [
+              "generic_sum becomes 43",
+              "comptime_value remains 2"
+            ]
+          },
+          {
+            "id": "derive",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Derive the invalidation edge for the embedded table.",
+            "expectedObservations": [
+              "make_table source -> comptime evaluation -> embedded table"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "concurrent-scheduling",
+      "title": "Concurrent scheduling",
+      "status": "specified",
+      "sourceDirectory": "Tools/perf/selfhost/workloads/concurrent-scheduling",
+      "workspace": "concurrent-scheduling",
+      "evidence": {
+        "identity": {
+          "algorithm": "sha256",
+          "aggregate": "74584ab2cbaf71d2d7c56388a8f47494ba5696d6452501a5536de4097096287a",
+          "files": [
+            {
+              "path": "oracle.rs",
+              "bytes": 358,
+              "sha256": "d7f175180f5f548b7c66b271a9935e99e6548b001178b336a6584fe3a3dab1b6"
+            },
+            {
+              "path": "package.jet",
+              "bytes": 72,
+              "sha256": "e4f459b4b053053f470f668e533cc079d07b187203f0a99049faae5c15cd6508"
+            },
+            {
+              "path": "run.jet",
+              "bytes": 311,
+              "sha256": "803e6639f572aade0afa473ebf912b2677605043d16ff19d160041cb7863a677"
+            }
+          ]
+        },
+        "sourceComplexity": {
+          "files": [
+            {
+              "path": "package.jet",
+              "bytes": 72,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "run.jet",
+              "bytes": 311,
+              "lines": 12,
+              "comments": 0,
+              "declarations": 2,
+              "controlForms": 4
+            }
+          ],
+          "totals": {
+            "bytes": 383,
+            "lines": 16,
+            "comments": 0,
+            "declarations": 2,
+            "controlForms": 4
+          },
+          "interpretation": "machine source-shape counts only; not a readability or repair score"
+        },
+        "machine": {
+          "status": "unavailable",
+          "records": []
+        },
+        "model": {
+          "status": "unrun",
+          "contracts": {
+            "ownership": "each task owns its join slot; joined values are moved into a result list before sorting",
+            "effects": [
+              "Task"
+            ],
+            "invalidation": "scheduler and task-body changes invalidate the concurrent result; deterministic input and join contract make completion order irrelevant",
+            "memory": "at most two live tasks and two Int result values",
+            "target": "hosted native and interpreter with task support; embedded and web are not applicable"
+          },
+          "expected": [
+            {
+              "id": "joined",
+              "expected": {
+                "exit": 0,
+                "stdout": "results=10,14 order=sorted\n",
+                "stderr": ""
+              }
+            }
+          ]
+        },
+        "human": {
+          "status": "unavailable",
+          "records": [],
+          "note": "No participant observation is authored by this driver."
+        },
+        "trust": {
+          "rust": "independent same-job counterpart; agreement does not prove Jet semantics",
+          "foreign": "no foreign artifact in this workload",
+          "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate"
+        },
+        "supportedModes": [
+          {
+            "mode": "check",
+            "status": "unrun"
+          },
+          {
+            "mode": "run",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-interpret",
+            "status": "unrun"
+          },
+          {
+            "mode": "build",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-release",
+            "status": "unrun"
+          }
+        ]
+      },
+      "oracle": null,
+      "jet": [],
+      "repair": null,
+      "reasoning": {
+        "status": "unrun",
+        "tasks": [
+          {
+            "id": "explain",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Explain why sorting after join preserves the observation while allowing either completion order.",
+            "expectedObservations": [
+              "join waits for each task",
+              "values are owned before sorting",
+              "completion order is not observable"
+            ]
+          },
+          {
+            "id": "predict",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Predict the two task results and final output.",
+            "expectedObservations": [
+              "10 and 14",
+              "results=10,14 order=sorted"
+            ]
+          },
+          {
+            "id": "modify",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Change the second task input from 7 to 8 and state the changed output.",
+            "expectedObservations": [
+              "second result becomes 16",
+              "sorted output becomes results=10,16 order=sorted"
+            ]
+          },
+          {
+            "id": "derive",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Derive the ownership chain from task creation to the printed result.",
+            "expectedObservations": [
+              "task handle -> join result -> owned list -> sorted output"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "foreign-interaction",
+      "title": "Foreign interaction",
+      "status": "specified",
+      "sourceDirectory": "Tools/perf/selfhost/workloads/foreign-interaction",
+      "workspace": "foreign-interaction",
+      "evidence": {
+        "identity": {
+          "algorithm": "sha256",
+          "aggregate": "8f38e927c8c2338f6d968f7a053b5805bdb83642aa8ad7ea8f403ecefc5904c9",
+          "files": [
+            {
+              "path": ".jet/bindings/c/foreign.hash",
+              "bytes": 64,
+              "sha256": "8ffc0605b0490945dd07773923494762907b457780b5d657e19c3b35a313c296"
+            },
+            {
+              "path": ".jet/bindings/c/foreign.jet",
+              "bytes": 932,
+              "sha256": "a7d261bbc7931766b81335d984c75aa7e320153f6bad26f3566bd4a6d3519aef"
+            },
+            {
+              "path": "include/foreign.h",
+              "bytes": 104,
+              "sha256": "97dd91a69ba41bcabc5ef7694b16bacc373738d84d111665f0efe49ce0d51d9e"
+            },
+            {
+              "path": "native/build.sh",
+              "bytes": 228,
+              "sha256": "109371d58f0b76a00fb9631c70289be85880aee6cf81276859f691a981740b80"
+            },
+            {
+              "path": "native/foreign.c",
+              "bytes": 241,
+              "sha256": "33730687b4cac91d71fa85b6468fad837fd5af9be684516e02d80ee6889ca3c4"
+            },
+            {
+              "path": "oracle.rs",
+              "bytes": 267,
+              "sha256": "e8eab3f13220153951a75ab9b79874981eb9cd1c1be1bc669bf862a02c22b48f"
+            },
+            {
+              "path": "package.jet",
+              "bytes": 149,
+              "sha256": "1f2dcec39646eaea858fce0ecf61434459e6e0ae3f7b15129a658376f2e7a8b9"
+            },
+            {
+              "path": "run.jet",
+              "bytes": 192,
+              "sha256": "c5d55cc9c2ec0097d423161938486ee00b516662ec7083c07cce5dd9fc5dc27a"
+            }
+          ]
+        },
+        "sourceComplexity": {
+          "files": [
+            {
+              "path": ".jet/bindings/c/foreign.jet",
+              "bytes": 932,
+              "lines": 6,
+              "comments": 2,
+              "declarations": 1,
+              "controlForms": 0
+            },
+            {
+              "path": "package.jet",
+              "bytes": 149,
+              "lines": 10,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "run.jet",
+              "bytes": 192,
+              "lines": 8,
+              "comments": 0,
+              "declarations": 1,
+              "controlForms": 0
+            }
+          ],
+          "totals": {
+            "bytes": 1273,
+            "lines": 24,
+            "comments": 2,
+            "declarations": 2,
+            "controlForms": 0
+          },
+          "interpretation": "machine source-shape counts only; not a readability or repair score"
+        },
+        "machine": {
+          "status": "unavailable",
+          "records": []
+        },
+        "model": {
+          "status": "unrun",
+          "contracts": {
+            "ownership": "Jet borrows a three-byte view for one call; C retains no pointer; returned Int is owned by Jet",
+            "effects": [
+              "FFI.C(\"foreign\")"
+            ],
+            "invalidation": "header, binding descriptor, native source, compiler flags, artifact, or target changes invalidate the foreign call evidence",
+            "memory": "borrowed view length is 3; native function must not retain the pointer or write beyond count",
+            "target": "x86_64-unknown-linux-gnu hosted native only; no web/interpreter claim for this C edge"
+          },
+          "expected": [
+            {
+              "id": "sum-bytes",
+              "expected": {
+                "exit": 0,
+                "stdout": "foreign_sum=60 count=3 retention=none\n",
+                "stderr": ""
+              }
+            }
+          ]
+        },
+        "human": {
+          "status": "unavailable",
+          "records": [],
+          "note": "No participant observation is authored by this driver."
+        },
+        "trust": {
+          "rust": "independent same-job counterpart; agreement does not prove Jet semantics",
+          "foreign": "C implementation retention behavior is TRUSTED unless source, artifact, compiler flags, target, and loaded identity are checked",
+          "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate"
+        },
+        "supportedModes": [
+          {
+            "mode": "check",
+            "status": "unrun"
+          },
+          {
+            "mode": "run",
+            "status": "unrun"
+          },
+          {
+            "mode": "build",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-release",
+            "status": "unrun"
+          }
+        ]
+      },
+      "oracle": null,
+      "jet": [],
+      "repair": null,
+      "reasoning": {
+        "status": "unrun",
+        "tasks": [
+          {
+            "id": "explain",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Explain why the borrowed byte view is valid only for the call and why the native body remains a trust boundary.",
+            "expectedObservations": [
+              "call-scoped borrow",
+              "native retains nothing",
+              "descriptor does not prove arbitrary C code"
+            ]
+          },
+          {
+            "id": "predict",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Predict the sum and count for bytes 10,20,30.",
+            "expectedObservations": [
+              "foreign_sum=60",
+              "count=3",
+              "retention=none"
+            ]
+          },
+          {
+            "id": "modify",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Change the third byte to 31 and state the expected output change.",
+            "expectedObservations": [
+              "sum becomes 61",
+              "count remains 3"
+            ]
+          },
+          {
+            "id": "derive",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Derive the identity tuple required before accepting a foreign result.",
+            "expectedObservations": [
+              "header + binding + native source + artifact + toolchain + target",
+              "ABI and retention contract"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "multi-package-build",
+      "title": "Multi-package build",
+      "status": "specified",
+      "sourceDirectory": "Tools/perf/selfhost/workloads/multi-package-build",
+      "workspace": "multi-package-build",
+      "evidence": {
+        "identity": {
+          "algorithm": "sha256",
+          "aggregate": "45cb80fa1940778d6585d87ac90c8e3743c79e9321dcb595df316c255435ce90",
+          "files": [
+            {
+              "path": "oracle.rs",
+              "bytes": 298,
+              "sha256": "9534b46c4d7fa7a4da8a90b3f31a3a2d85e67590bde7469e2ed5b988cd839d62"
+            },
+            {
+              "path": "package.jet",
+              "bytes": 121,
+              "sha256": "8c622f547e1956c68ac7d332adee0b790e32da68ba0da14eaaa2037c8ea5c18a"
+            },
+            {
+              "path": "parser/package.jet",
+              "bytes": 48,
+              "sha256": "71058f33e74a182659d24eb069f5fc09da805540b898db58ae82f85dfe688dae"
+            },
+            {
+              "path": "parser/parser.jet",
+              "bytes": 31,
+              "sha256": "f8715b1732e329adcd0e8c066f5a0af6b4586a9de64d38d17fb9a4ac3ce5a040"
+            },
+            {
+              "path": "run.jet",
+              "bytes": 169,
+              "sha256": "b3bccbfe426437a3f894b20bd3f1c63164eb117e0d76f47bf6e304a93407c6d8"
+            },
+            {
+              "path": "typer/package.jet",
+              "bytes": 47,
+              "sha256": "9c046a10ec02c8738da4edbf5bf4ce17a9dbc00fd61cbd1fcd29c4811829ea7f"
+            },
+            {
+              "path": "typer/typer.jet",
+              "bytes": 37,
+              "sha256": "9e6cf0228aab2001fed0a8ed63c304f4e9a3523a2f8e40426029db48abc60943"
+            }
+          ]
+        },
+        "sourceComplexity": {
+          "files": [
+            {
+              "path": "package.jet",
+              "bytes": 121,
+              "lines": 8,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "parser/package.jet",
+              "bytes": 48,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "parser/parser.jet",
+              "bytes": 31,
+              "lines": 2,
+              "comments": 0,
+              "declarations": 1,
+              "controlForms": 0
+            },
+            {
+              "path": "run.jet",
+              "bytes": 169,
+              "lines": 10,
+              "comments": 0,
+              "declarations": 1,
+              "controlForms": 0
+            },
+            {
+              "path": "typer/package.jet",
+              "bytes": 47,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "typer/typer.jet",
+              "bytes": 37,
+              "lines": 2,
+              "comments": 0,
+              "declarations": 1,
+              "controlForms": 0
+            }
+          ],
+          "totals": {
+            "bytes": 453,
+            "lines": 30,
+            "comments": 0,
+            "declarations": 3,
+            "controlForms": 0
+          },
+          "interpretation": "machine source-shape counts only; not a readability or repair score"
+        },
+        "machine": {
+          "status": "unavailable",
+          "records": []
+        },
+        "model": {
+          "status": "unrun",
+          "contracts": {
+            "ownership": "the root owns package graph resolution while each dependency owns its exported function and interface",
+            "effects": [],
+            "invalidation": "parser source invalidates parser and root; typer source invalidates typer and root; an unrelated package remains reusable",
+            "memory": "bounded by three package nodes and one artifact per package plus root",
+            "target": "hosted native and interpreter package builds; target-specific foreign packages are excluded"
+          },
+          "expected": [
+            {
+              "id": "workspace",
+              "expected": {
+                "exit": 0,
+                "stdout": "packages=2 parser=3 typer=Int\nbuild=single-graph artifacts=3\n",
+                "stderr": ""
+              }
+            }
+          ]
+        },
+        "human": {
+          "status": "unavailable",
+          "records": [],
+          "note": "No participant observation is authored by this driver."
+        },
+        "trust": {
+          "rust": "independent same-job counterpart; agreement does not prove Jet semantics",
+          "foreign": "no foreign artifact in this workload",
+          "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate"
+        },
+        "supportedModes": [
+          {
+            "mode": "check",
+            "status": "unrun"
+          },
+          {
+            "mode": "run",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-interpret",
+            "status": "unrun"
+          },
+          {
+            "mode": "build",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-release",
+            "status": "unrun"
+          }
+        ]
+      },
+      "oracle": null,
+      "jet": [],
+      "repair": null,
+      "reasoning": {
+        "status": "unrun",
+        "tasks": [
+          {
+            "id": "explain",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Explain why the root artifact depends on both package interfaces but package ownership remains separate.",
+            "expectedObservations": [
+              "root consumes exported interfaces",
+              "each package owns its source",
+              "one graph coordinates artifacts"
+            ]
+          },
+          {
+            "id": "predict",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Predict package count, parser result, and typer result.",
+            "expectedObservations": [
+              "packages=2",
+              "parser=3",
+              "typer=Int"
+            ]
+          },
+          {
+            "id": "modify",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Change parser's returned token count from 3 to 4 and state which output changes.",
+            "expectedObservations": [
+              "parser=4",
+              "typer=Int remains",
+              "root artifact is rebuilt"
+            ]
+          },
+          {
+            "id": "derive",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Derive the invalidation relation after changing only typer/types.jet.",
+            "expectedObservations": [
+              "types -> root",
+              "parser is retained",
+              "root artifact identity changes"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "specified": 8
+  },
+  "goNoGo": {
+    "decision": "unresolved",
+    "portfolio": "unresolved",
+    "readiness": false,
+    "portApproval": "not-addressed",
+    "owner": "#217",
+    "portOwner": "#218",
+    "reason": "At least one workload, supported mode, oracle, repair, or reasoning obligation remains unrun, unavailable, or failed.",
+    "retainedBoundary": "The Rust same-job oracles and foreign artifacts remain explicit trust boundaries."
+  }
+}

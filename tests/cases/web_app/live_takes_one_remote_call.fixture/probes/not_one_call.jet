@@ -1,0 +1,37 @@
+use app
+
+TaskID: struct {
+    value: Int
+}
+
+Hook: struct {
+    run: fn() -> Int
+}
+
+Crew: struct {
+    #App.Public lookup: fn(self, id: TaskID) -> Int app.CallError! { Ok(id.value) }
+
+    #App.Public hooked: fn(self, hook: Hook) -> Int app.CallError! { Ok(hook.run()) }
+
+    #App.Public status: fn(self) -> String { "up" }
+
+    count: fn(self, id: TaskID) -> Int app.CallError! { Ok(id.value) }
+}
+
+local_count: fn(id: Int) -> Int app.CallError! { Ok(id) }
+
+probe: fn(crew: app.Remote<Crew>, held: Crew) {
+    _: app.live(fn(id: Int) { crew.lookup(TaskID{value: id}) })
+    _: app.live(fn() {
+        id: TaskID{value: 1}
+        crew.lookup(id)
+    })
+    _: app.live(fn() { local_count(1) })
+    _: app.live(fn() { held.lookup(TaskID{value: 1}) })
+    _: app.live(fn() { crew.count(TaskID{value: 1}) })
+    _: app.live(fn() { crew.hooked(Hook{run: fn() -> Int { 1 }}) })
+    _: app.live(fn() { crew.status() })
+    _: app.live(fn() { crew.lookup(TaskID{value: 1}) }, 1)
+}
+
+run: fn() { probe(app.remote(Crew{}), Crew{}) }

@@ -1,0 +1,15 @@
+// A webhook with no signature rule: `signature:` has no default.
+use {
+    app
+    web: core.web
+}
+
+Hooks: struct {
+    #App.Webhook(path: "/hooks/:project", key: "signing_key") on_event: fn(self, project: String, event: String) -> Int {
+        project.len() + event.len()
+    }
+
+    #App.SigningKey signing_key: fn(self, project: String) -> String? { Val(project.copy()) }
+}
+
+run: fn() { _: web.app().mount(Hooks{}) }

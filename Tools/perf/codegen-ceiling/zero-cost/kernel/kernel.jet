@@ -1,0 +1,145 @@
+// The kernel spelling's one kernel file (Tools/perf/CodegenCeiling.jet's
+// zero-cost pair): the owners main.jet does its memory work through. Each
+// method is `#Inline(Always)` and calls core.mem's primitives, so at O1 and
+// O2 a call of one must cost what direct/main.jet's spelling in place does.
+use mem: core.mem
+
+// `count` I64 words of heap storage, taken at `claim` and released once, at
+// close.
+Words: struct {
+    priv base: mem.Ptr<I64>
+    priv count: Int
+
+    #Inline(Always) claim: fn(count: Int) -> Words? Never! {
+        #Unsafe("the block is used only through this owner, which releases it once, at close") {
+            bytes: mem.alloc_raw(count * 8, 8) ?? return None
+            Val(Words{base: bytes.cast<I64>(), count: count})
+        }
+    }
+
+    #Inline(Always) len: fn(self) -> Int Never! { self.count }
+
+    #Inline(Always) get: fn(self, at: Int) -> I64 Never! {
+        if at < 0 || at >= self.count -> panic("word {at} is outside {self.count}")
+        #Unsafe("`at` is one of the owner's live words") { self.base.offset(at).* }
+    }
+
+    #Inline(Always) set: fn(&self, at: Int, value: I64) Never! {
+        if at < 0 || at >= self.count -> panic("word {at} is outside {self.count}")
+        #Unsafe("`at` is one of the owner's live words") {
+            mem.volatile_write(self.base.offset(at), value)
+        }
+    }
+
+    // The words as a View that lives no longer than the owner.
+    #Inline(Always) view: fn(self) -> View<I64> Never! from self {
+        #Unsafe("the owner keeps its `count` words alive while the View lives") {
+            mem.window(self, self.base, self.count)
+        }
+    }
+
+    // Every word becomes `value`.
+    #Inline(Always) set_all: fn(&self, value: I64) Never! {
+        #Unsafe("the owner's words are live I64s, which own nothing") {
+            mem.fill<I64>(self.base, value, self.count)
+        }
+    }
+
+    // The first words, as many as both owners hold, become `from`'s.
+    #Inline(Always) copy_from: fn(&self, from: Words) Never! {
+        count: if from.count < self.count -> from.count else -> self.count
+        #Unsafe("both owners hold at least `count` live I64s") {
+            mem.copy<I64>(self.base, from.base, count)
+        }
+    }
+
+    // Whether both owners hold the same words.
+    #Inline(Always) same: fn(self, other: Words) -> Bool Never! {
+        if self.count != other.count -> return false
+        #Unsafe("both owners hold `count` live I64s") {
+            loop at in 0..<self.count {
+                if self.base.offset(at).* != other.base.offset(at).* -> return false
+            }
+        }
+        true
+    }
+
+    // The owner holds twice as many words, its own first: a fresh block
+    // takes them and the old block goes. False, with the words as they were,
+    // when the heap refuses.
+    #Inline(Always) grow: fn(&self) -> Bool Never! {
+        count: self.count * 2
+        #Unsafe("the fresh block takes the owner's words, and the old block is released once, here") {
+            bytes: mem.alloc_raw(count * 8, 8) ?? return false
+            fresh: bytes.cast<I64>()
+            mem.copy<I64>(fresh, self.base, self.count)
+            old: self.base.cast<U8>()
+            mem.free_raw(old)
+            self.base = fresh
+            self.count = count
+        }
+        true
+    }
+
+    impl Close {
+        close: fn(&&self) {
+            #Unsafe("`base` came from `alloc_raw` at `claim` or `grow`, and the owner is spent here") {
+                bytes: self.base.cast<U8>()
+                mem.free_raw(bytes)
+            }
+        }
+    }
+}
+
+// One atomic word.
+Ticks: struct {
+    priv word: Atomic<I64>
+
+    #Inline(Always) start: fn() -> Ticks Never! { Ticks{word: 0} }
+
+    // Adds `step`; the word as it was.
+    #Inline(Always) bump: fn(self, step: I64) -> I64 Never! { self.word.add(step) }
+
+    #Inline(Always) seen: fn(self) -> I64 Never! { self.word.load() }
+
+    // The word becomes `next` if it still holds `seen`; whether it did.
+    #Inline(Always) trade: fn(self, seen: I64, next: I64) -> Bool Never! {
+        self.word.compare_exchange(seen, next)
+    }
+
+    #Inline(Always) reset: fn(self) Never! { self.word.store(0) }
+}
+
+// A mapping of fresh private pages, read and written as I64 words, unmapped
+// once, at close.
+Pages: struct {
+    priv region: mem.Region
+    priv base: mem.Ptr<I64>
+    priv count: Int
+
+    #Inline(Always) map: fn(bytes: Int) -> Pages? Never! {
+        region: mem.Region.reserve(bytes) ?? return None
+        #Unsafe("the region's pages stay mapped, private and writable until the owner closes it") {
+            base: mem.from_addr<I64>(region.address())
+            Val(Pages{region: region, base: base, count: bytes /% 8})
+        }
+    }
+
+    #Inline(Always) len: fn(self) -> Int Never! { self.count }
+
+    #Inline(Always) set: fn(&self, at: Int, value: I64) Never! {
+        if at < 0 || at >= self.count -> panic("word {at} is outside {self.count}")
+        #Unsafe("`at` is one of the mapping's words") {
+            mem.volatile_write(self.base.offset(at), value)
+        }
+    }
+
+    #Inline(Always) get: fn(self, at: Int) -> I64 Never! {
+        if at < 0 || at >= self.count -> panic("word {at} is outside {self.count}")
+        #Unsafe("`at` is one of the mapping's words") { self.base.offset(at).* }
+    }
+
+    impl Close {
+        close: fn(&&self) { close(self.region) }
+    }
+}

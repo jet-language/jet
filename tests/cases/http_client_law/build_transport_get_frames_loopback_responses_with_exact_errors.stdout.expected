@@ -1,0 +1,24 @@
+redirect: 4 [Location: http://must-not-resolve.invalid/][Content-Length: 6][locked][302]
+request: GET /pkg/a.tar?v=1 HTTP/1.1\x13\x10Host: fixture.test:8080\x13\x10Accept-Encoding: identity\x13\x10Connection: close\x13\x10\x13\x10
+missing: 3 [Content-Length: 3][raw][404]
+hints: 3 [Content-Length: 3][raw][200]
+chunked: 3 [Transfer-Encoding: gzip, Chunked][\x255\x0abc][200]
+bounded: 3 body 513 status 200
+malformed: 3 [Content-Length: +x][][200]
+eof: 3 [Server: eof][all of it][200]
+http10: 2 [until-eof][200]
+head-eof: error unexpected EOF in HTTP response head
+no-status: error HTTP response status is missing
+head-bound: error HTTP response head exceeds transport byte bound
+short: error unexpected EOF in HTTP response body
+chunk-digit: error invalid digit found in string
+chunk-empty: error cannot parse integer from empty string
+chunk-large: error number too large to fit in target type
+chunk-eof: error unexpected EOF in HTTP response chunk
+chunk-framing: error invalid HTTP response chunk framing
+chunk-crlf: error failed to fill whole buffer
+deadline: error deadline exceeded while waiting in tcp read
+port: error out of range integral type conversion attempted
+timeout: error out of range integral type conversion attempted
+none: error no resolved addresses
+carrier: error invalid resolved address carrier

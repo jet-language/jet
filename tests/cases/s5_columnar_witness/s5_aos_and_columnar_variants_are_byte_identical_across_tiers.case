@@ -1,0 +1,22 @@
+# tests/s5_columnar_witness.rs::s5_aos_and_columnar_variants_are_byte_identical_across_tiers at tests/s5_columnar_witness.rs:26; hand-port
+# aos.jet, columnar.jet and manifest.json moved here from tests/s5_columnar_witness/ (only the deleted .rs used them). Each
+# variant sits in its own package directory: siblings of one directory form one package, and both declare `Particle`.
+# Each variant prints the original's EXPECTED on the default run, the forced interpreter and the AOT build.
+fixture: s5_aos_and_columnar_variants_are_byte_identical_across_tiers.fixture
+env: NO_COLOR=1
+step: jet run aos/aos.jet
+exit: 0
+stdout: = "599.9999999999977\n"
+step: jet build aos/aos.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "599.9999999999977\n"
+step: jet run columnar/columnar.jet
+exit: 0
+stdout: = "599.9999999999977\n"
+step: jet build columnar/columnar.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "599.9999999999977\n"

@@ -1,0 +1,339 @@
+// The wire between the compiler and the comptime child (JetRuntime
+// ComptimeServe.jet): frames of eight little-endian words, the first the
+// frame's kind, and the seccomp program that refuses a comptime run's
+// effects. The child serves; the compiler reads and writes its memory.
+
+// Compiler -> child commands.
+X64_COMPTIME_CALL: 1
+
+X64_COMPTIME_READ: 2
+
+X64_COMPTIME_WRITE: 3
+
+X64_COMPTIME_ALLOC: 4
+
+X64_COMPTIME_TEXT: 5
+
+X64_COMPTIME_INT: 6
+
+X64_COMPTIME_RETURN: 7
+
+X64_COMPTIME_EXIT: 8
+
+X64_COMPTIME_FILTER: 9
+
+X64_COMPTIME_MAP: 10
+
+X64_COMPTIME_PROTECT: 11
+
+X64_COMPTIME_ADMIT: 12
+
+// Child -> compiler replies.
+X64_COMPTIME_HELLO: 0
+
+X64_COMPTIME_DONE: 1
+
+X64_COMPTIME_HOST: 2
+
+X64_COMPTIME_STOP: 3
+
+X64_COMPTIME_REFUSED: 4
+
+X64_COMPTIME_FRAME_BYTES: 64
+
+// Host route kinds (JetIR ir_host_route): a compiler value's method or
+// field, a comptime input; a call of a runtime export the image lacks,
+// whose one operand is the String of the symbol (JetEval IR/Native.jet);
+// a comptime constant holding a compiler value, whose one operand is the
+// String of its key; a compile-time literal that is a compiler value,
+// whose one operand is the String of its key in the built module
+// (IRModule.host_literals); and a `debug` trace line, whose one operand is
+// the String the compiler prints while compiling.
+X64_COMPTIME_HOST_METHOD: 1
+
+X64_COMPTIME_HOST_FIELD: 2
+
+X64_COMPTIME_HOST_INPUT: 3
+
+X64_COMPTIME_HOST_MISSING: 4
+
+X64_COMPTIME_HOST_CONSTANT: 5
+
+X64_COMPTIME_HOST_LITERAL: 6
+
+X64_COMPTIME_HOST_TRACE: 7
+
+// Stop kinds (JetRuntime Trap.jet's trap_stop calls): a message
+// (data, length), a shift (count, count unsigned, bits), a list bound
+// (length, index), a require stop (kind, message, left, right), a reached
+// `#Todo` (file, line, expected type).
+X64_COMPTIME_STOP_MESSAGE: 1
+
+X64_COMPTIME_STOP_SHIFT: 2
+
+X64_COMPTIME_STOP_LIST_BOUNDS: 3
+
+X64_COMPTIME_STOP_REQUIRE: 4
+
+X64_COMPTIME_STOP_TODO: 5
+
+// The descriptors the child serves on.
+X64_COMPTIME_COMMAND_FD: 3
+
+X64_COMPTIME_REPLY_FD: 4
+
+// One frame: `kind` and up to seven operands.
+x64_comptime_frame: fn(kind: Int, operands: [Int]) -> [U8] Never! {
+    bytes := [U8]{}
+    x64_comptime_put_word(bytes, kind)
+    loop index in 0..<7 {
+        x64_comptime_put_word(bytes, if index < operands.len() -> operands[index] else -> 0)
+    }
+    bytes
+}
+
+x64_comptime_put_word: fn(bytes: &[U8], value: Int) Never! {
+    bits := if value < 0 -> value + 18446744073709551616 else -> value
+    loop _ in 0..<8 {
+        bytes.push(U8{bits.bit_and(255)})
+        bits = bits >> 8
+    }
+}
+
+// The signed word of the eight bytes at `at`.
+x64_comptime_word: fn(bytes: [U8], at: Int) -> Int Never! {
+    value := 0
+    index := 7
+    loop index >= 0 {
+        value = value * 256 + Int{bytes[at + index]}
+        index -= 1
+    }
+    if value >= 9223372036854775808 -> value - 18446744073709551616 else -> value
+}
+
+// The unsigned little-endian value of `width` bytes at `at`.
+x64_comptime_unsigned: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
+    value := 0
+    index := width - 1
+    loop index >= 0 {
+        value = value * 256 + Int{bytes[at + index]}
+        index -= 1
+    }
+    value
+}
+
+// The system calls a comptime run makes freely: memory and its fences, threads
+// and their waits, its own identity, and the exits. Reading the command descriptor,
+// writing the reply descriptor and standard error (and, for a run that is
+// not compile-time evaluation, standard output) are checked by descriptor;
+// every other call traps to the refusal handler.
+X64_COMPTIME_ALLOWED: [Int]{9, 10, 11, 12, 14, 15, 16, 24, 25, 28, 39, 56, 60, 131, 158, 186, 200, 202, 218, 231, 234, 273, 324, 334, 435}
+
+// The file system calls an admitted `#Impure` block makes natively (the
+// child's ADMIT, JetEval Native.jet jet_eval_native_admit): the reads and
+// writes of files, links and directories Core's FS.Read and FS.Write leaves
+// make. Sema has checked the block's authority before the code runs; the
+// filter admits only what the child's refusal handler reissues with the
+// spawn's cookie as its sixth argument, which none of these calls reads.
+X64_COMPTIME_FILE_CALLS: [Int]{0, 1, 2, 3, 4, 5, 6, 8, 17, 18, 21, 74, 75, 77, 82, 83, 84, 86, 87, 88, 89, 90, 91, 192, 217, 257, 258, 262, 263, 264, 265, 266, 267, 268, 269, 280, 316, 332, 439}
+
+// The file calls whose first argument is a descriptor: only a descriptor
+// past the five the child starts with (standard input, output and error,
+// the command and reply descriptors), so one the block opened.
+X64_COMPTIME_FILE_FD_CALLS: [Int]{0, 1, 3, 5, 8, 17, 18, 74, 75, 77, 91, 217}
+
+X64_COMPTIME_FIRST_OPENED_FD: 5
+
+X64_COMPTIME_SIGRETURN: 15
+
+// One classic BPF instruction and its symbolic jump targets (-1: next).
+X64ComptimeBpf: struct {
+    code: Int
+    k: Int
+    jt: Int
+    jf: Int
+}
+
+X64_BPF_LD_W_ABS: 32
+
+X64_BPF_JEQ_K: 21
+
+X64_BPF_JGE_K: 53
+
+X64_BPF_RET_K: 6
+
+X64_SECCOMP_RET_ALLOW: 2147418112
+
+X64_SECCOMP_RET_TRAP: 196608
+
+// SECCOMP_RET_ERRNO with errno 4095: a reissued call the filter doesn't
+// admit returns -4095, which no admitted call returns.
+X64_SECCOMP_RET_UNADMITTED: 331775
+
+X64_SECCOMP_RET_KILL_PROCESS: 2147483648
+
+X64_AUDIT_ARCH_X86_64: 3221225534
+
+// The seccomp program of a comptime child; `stdout` admits writes to
+// standard output (a fn-build or fn-dev invocation, whose output is its own),
+// and a call whose sixth argument is `cookie` (nonzero) is admitted when it
+// is a file call (x64_comptime_admit_block).
+x64_comptime_filter: fn(stdout: Bool, cookie: Int) -> [U8] Never! {
+    program := [X64ComptimeBpf]{
+        X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 4, jt: -1, jf: -1},
+        X64ComptimeBpf{code: X64_BPF_JEQ_K, k: X64_AUDIT_ARCH_X86_64, jt: 3, jf: 2},
+        X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_KILL_PROCESS, jt: -1, jf: -1},
+    }
+    x64_comptime_admit_block(program, cookie)
+    fds := [Int]{X64_COMPTIME_REPLY_FD, 2}
+    if stdout -> fds.push(1)
+    x64_comptime_refusal_block(program, fds)
+    x64_comptime_bpf_bytes(program)
+}
+
+// The cookie check: a call carrying `cookie` in its sixth argument (both
+// halves) is the refusal handler's reissue of a call the filter trapped
+// inside an admitted `#Impure` block. A file call is allowed unless it names
+// a descriptor the child started with; any other reissue returns -4095, and
+// the handler refuses it as it refused the call. A call without the cookie
+// goes on to the refusal block. rt_sigreturn goes there first: the handler
+// returns through its restorer with the reissue's cookie still in r9, and the
+// restorer's rt_sigreturn is no reissue. Classic BPF jumps only forward, so
+// the descriptor check ends in its own -4095 return.
+x64_comptime_admit_block: fn(program: &[X64ComptimeBpf], cookie: Int) Never! {
+    start: program.len()
+    calls: X64_COMPTIME_FILE_CALLS
+    unadmitted: start + 7 + calls.len()
+    fd_check: unadmitted + 1
+    fd_refused: fd_check + 2
+    allow: fd_refused + 1
+    rest: allow + 1
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 0, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: X64_COMPTIME_SIGRETURN, jt: rest, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 56, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: cookie.bit_and(4294967295), jt: -1, jf: rest})
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 60, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: (cookie >> 32).bit_and(4294967295), jt: -1, jf: rest})
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 0, jt: -1, jf: -1})
+    loop number in calls {
+        program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: number, jt: if X64_COMPTIME_FILE_FD_CALLS.contains(number) -> fd_check else -> allow, jf: -1})
+    }
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_UNADMITTED, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 16, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JGE_K, k: X64_COMPTIME_FIRST_OPENED_FD, jt: allow, jf: fd_refused})
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_UNADMITTED, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_ALLOW, jt: -1, jf: -1})
+    if program.len() != rest {
+        panic("comptime seccomp layout: the cookie check ends at {rest}, the program has {program.len()} instructions")
+    }
+}
+
+// The refusal block: the calls a comptime run makes freely, the descriptor
+// checks of read and write (`fds`: the descriptors write admits), and a trap
+// for every other call.
+x64_comptime_refusal_block: fn(program: &[X64ComptimeBpf], fds: [Int]) Never! {
+    // Labels are instruction indices, fixed by this layout; classic BPF
+    // jumps only forward, so each check ends in its own trap.
+    start: program.len()
+    allowed: X64_COMPTIME_ALLOWED
+    trap: start + 4 + allowed.len()
+    read_check: trap + 1
+    write_check: read_check + 3
+    allow: write_check + 1 + fds.len() + 1
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 0, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: 0, jt: read_check, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: 1, jt: write_check, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: 20, jt: write_check, jf: -1})
+    loop number in allowed {
+        program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: number, jt: allow, jf: -1})
+    }
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
+    // read: only the command descriptor.
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 16, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: X64_COMPTIME_COMMAND_FD, jt: allow, jf: read_check + 2})
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
+    // write, writev: the reply descriptor, standard error and, admitted,
+    // standard output.
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 16, jt: -1, jf: -1})
+    loop (index, fd) in fds {
+        program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: fd, jt: allow, jf: write_check + 2 + index})
+    }
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_ALLOW, jt: -1, jf: -1})
+    if program.len() != allow + 1 {
+        panic("comptime seccomp layout: allow is {allow}, the program has {program.len()} instructions")
+    }
+}
+
+// Encodes `program`: a jump target becomes its offset past the next
+// instruction.
+x64_comptime_bpf_bytes: fn(program: [X64ComptimeBpf]) -> [U8] Never! {
+    bytes := [U8]{}
+    loop (at, row) in program {
+        jt: if row.jt < 0 -> 0 else -> row.jt - at - 1
+        jf: if row.jf < 0 -> 0 else -> row.jf - at - 1
+        if jt < 0 || jt > 255 || jf < 0 || jf > 255 {
+            panic("comptime seccomp jump out of range at {at}")
+        }
+        bytes.push(U8{row.code.bit_and(255)})
+        bytes.push(U8{(row.code >> 8).bit_and(255)})
+        bytes.push(U8{jt})
+        bytes.push(U8{jf})
+        loop shift in 0..<4 -> bytes.push(U8{(row.k >> (8 * shift)).bit_and(255)})
+    }
+    bytes
+}
+
+#Test("the comptime seccomp program encodes, every jump forward and in range, with and without standard output") {
+    modes: [Bool]{false, true}
+    loop (index, stdout) in modes {
+        // The header (3), the cookie check (12 + its file calls) and the
+        // refusal block (11 + its free calls + the write descriptors).
+        expected: 26 + X64_COMPTIME_FILE_CALLS.len() + X64_COMPTIME_ALLOWED.len() + 2 + index
+        assert_eq(x64_comptime_filter(stdout, 81985529216486895).len(), 8 * expected)
+    }
+}
+
+// The action `program` (a filter's bytes) takes on system call `number` with
+// first argument `first` and sixth argument `sixth`.
+x64_comptime_bpf_run: fn(program: [U8], number: Int, first: Int, sixth: Int) -> Int Never! {
+    data := [U8]{}
+    // seccomp_data: the call's number and architecture (32 bits each), its
+    // instruction pointer, then its six arguments.
+    header: [Int]{number, X64_AUDIT_ARCH_X86_64}
+    loop word in header {
+        loop shift in 0..<4 -> data.push(U8{(word >> (8 * shift)).bit_and(255)})
+    }
+    x64_comptime_put_word(data, 0)
+    x64_comptime_put_word(data, first)
+    loop _ in 0..<4 -> x64_comptime_put_word(data, 0)
+    x64_comptime_put_word(data, sixth)
+    accumulator := 0
+    at := 0
+    loop at * 8 < program.len() {
+        code: x64_comptime_unsigned(program, at * 8, 2)
+        k: x64_comptime_unsigned(program, at * 8 + 4, 4)
+        if code == X64_BPF_RET_K -> return k
+        if code == X64_BPF_LD_W_ABS {
+            accumulator = x64_comptime_unsigned(data, k, 4)
+            at += 1
+            next
+        }
+        taken: if code == X64_BPF_JEQ_K -> accumulator == k else -> accumulator >= k
+        step: if taken -> (Int{program[at * 8 + 2]}) else -> (Int{program[at * 8 + 3]})
+        at += 1 + step
+    }
+    panic("the comptime seccomp program runs off its end")
+}
+
+#Test("the comptime seccomp program admits a reissued file call and the handler's rt_sigreturn, which carries the reissue's cookie") {
+    cookie: 81985529216486895
+    program: x64_comptime_filter(false, cookie)
+    assert_eq(x64_comptime_bpf_run(program, X64_COMPTIME_SIGRETURN, 0, cookie), X64_SECCOMP_RET_ALLOW)
+    assert_eq(x64_comptime_bpf_run(program, X64_COMPTIME_SIGRETURN, 0, 0), X64_SECCOMP_RET_ALLOW)
+    assert_eq(x64_comptime_bpf_run(program, 2, 0, cookie), X64_SECCOMP_RET_ALLOW)
+    assert_eq(x64_comptime_bpf_run(program, 2, 0, 0), X64_SECCOMP_RET_TRAP)
+    assert_eq(x64_comptime_bpf_run(program, 0, 6, cookie), X64_SECCOMP_RET_ALLOW)
+    assert_eq(x64_comptime_bpf_run(program, 0, 3, cookie), X64_SECCOMP_RET_UNADMITTED)
+    assert_eq(x64_comptime_bpf_run(program, 41, 0, cookie), X64_SECCOMP_RET_UNADMITTED)
+}

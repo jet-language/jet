@@ -1,0 +1,8 @@
+# Port of cli_parts/commands.rs::fortran_bind_launders_foreign_compiler_failure_as_e3208.
+requires: tool:gfortran
+fixture: fixtures/bind-fortran
+step: jet inspect bind fortran {work}/broken.f90 --pkg broken
+exit: nonzero
+stderr: = bind-fortran.stderr
+stderr: !~ broken.f90: # original predicate
+stderr: !~ "    7 |" # original predicate

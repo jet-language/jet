@@ -1,0 +1,161 @@
+// A recursive edge whose type is already a heap box (a payload enum, an
+// Option) holds that box's pointer directly: a node of a recursive enum is
+// one allocation, not its box plus a wrapper around the edge. A million
+// chain links must cost under 80 bytes each in resident memory (one 64-byte
+// block apiece; a wrapper per edge would add 32). The churn scenarios copy
+// nested edges, write through a copy's edges and drop everything each
+// round: the checksums catch a box freed while a copy still reads it, and a
+// flat peak resident set catches one that outlives its last owner.
+package: {
+    name: "recursive_enum_edges_are_one_allocation"
+    authority: { allow: [FS.Read, IO] }
+}
+
+use files: core.files
+
+// Grows more than this (kB) over the measured rounds: a leak.
+GROWTH_KB: 8192
+
+// Links in one chain, and chains built: a million links in all, each chain
+// shallow enough for its recursive drop.
+CHAIN_DEPTH: 1000
+
+CHAINS: 1000
+
+Chain: enum {
+    End
+    Link(next: Chain)
+}
+
+Expr: enum {
+    Num(value: Int)
+    Neg(inner: Expr)
+    Add(left: Expr, right: Expr)
+    Maybe(inner: Expr?)
+}
+
+// A struct reaching itself through an Option edge and an enum edge.
+Scope: struct {
+    name: String
+    parent: Scope?
+    body: Body
+}
+
+Body: enum {
+    Empty
+    Nested(scope: Scope)
+}
+
+status_kb: fn(field: String) -> Int {
+    status: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with(field) -> next
+        loop part in line.slice(field.len(), line.len()).trim().split(" ") {
+            if part.len() > 0 -> return Int.parse(part.copy()) ?? panic("{field} field")
+        }
+    }
+    panic("no {field} line")
+}
+
+chain: fn(depth: Int) -> Chain {
+    link := Chain.End
+    loop _ in 0..<depth -> link = Chain.Link{next: link.move()}
+    link
+}
+
+chain_depth: fn(link: Chain) -> Int {
+    n := 0
+    cursor := link
+    loop cursor == .Link(next) {
+        n += 1
+        cursor = next
+    }
+    n
+}
+
+one_allocation_per_link: fn() {
+    warm: chain(CHAIN_DEPTH)
+    before: status_kb("VmRSS:")
+    chains := [Chain]{}
+    loop _ in 0..<CHAINS { chains.push(chain(CHAIN_DEPTH)) }
+    grown: status_kb("VmRSS:") - before
+    links := 0
+    loop link in chains -> links += chain_depth(link)
+    if links != CHAINS * CHAIN_DEPTH -> panic("built {links} links")
+    per_link: grown * 1024 /% links
+    if per_link >= 80 -> panic("a chain link costs {per_link} bytes: its edge is wrapped")
+    print("chain links: {links}, one allocation each, warm chain {chain_depth(warm)}")
+}
+
+eval: fn(expr: Expr) -> Int {
+    if expr == {
+        .Num(value) -> value
+        .Neg(inner) -> 0 - eval(inner)
+        .Add(left, right) -> eval(left) + eval(right)
+        .Maybe(inner) -> if inner == .Val(present) -> eval(present) else -> 7
+    }
+}
+
+// Rewrites the left operand of an Add in place through a write window.
+rewrite_left: fn(expr: &Expr, value: Int) {
+    if &expr == .Add(left, _) -> left = Expr.Num{value: value}
+}
+
+expressions: fn(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        leaf: Expr.Maybe{inner: Val(Expr.Neg{inner: Expr.Num{value: i % 13}})}
+        a: Expr.Add{left: Expr.Num{value: i % 7}, right: Expr.Add{left: leaf, right: Expr.Maybe{inner: None}}}
+        b := a.copy()
+        rewrite_left(b, 100)
+        c := b.copy()
+        rewrite_left(c, 1000)
+        if eval(a) != i % 7 - i % 13 + 7 {
+            panic("a write through a copy's edge showed in the original")
+        }
+        if eval(b) != 100 - i % 13 + 7 || eval(c) != 1000 - i % 13 + 7 {
+            panic("a rewritten copy lost its edge")
+        }
+        total += eval(a) + eval(b) + eval(c)
+    }
+    total
+}
+
+scope_depth: fn(scope: Scope) -> Int {
+    up: if scope.parent == .Val(parent) -> scope_depth(parent) else -> 0
+    down: if scope.body == .Nested(inner) -> scope_depth(inner) else -> 0
+    1 + up + down + scope.name.len()
+}
+
+detach: fn(scope: &Scope) { scope.parent = None }
+
+scopes: fn(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        root: Scope{name: "r{i}", parent: None, body: Body.Empty}
+        child: Scope{name: "c", parent: Val(root.copy()), body: Body.Nested{scope: Scope{name: "n{i}", parent: None, body: Body.Empty}}}
+        other := child.copy()
+        detach(other)
+        other.body = Body.Empty
+        if scope_depth(child) != scope_depth(root) + 2 + scope_depth(Scope{name: "n{i}", parent: None, body: Body.Empty}) {
+            panic("a write through a copy's edge showed in the original")
+        }
+        total += scope_depth(child) + scope_depth(other)
+    }
+    total
+}
+
+measure: fn(name: String, scenario: fn(Int, Int) -> Int, warm: Int) {
+    first: scenario(0, warm)
+    before: status_kb("VmHWM:")
+    second: scenario(warm, 9 * warm)
+    grown: status_kb("VmHWM:") - before
+    if grown > GROWTH_KB -> panic("{name}: peak RSS grew {grown} kB over {8 * warm} rounds")
+    print("{name}: flat, checksum {first + second}")
+}
+
+run: fn() {
+    one_allocation_per_link()
+    measure("expression edges copied and rewritten", expressions, 50000)
+    measure("scope edges through an Option and an enum", scopes, 50000)
+}

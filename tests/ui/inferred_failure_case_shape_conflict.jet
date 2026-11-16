@@ -1,0 +1,12 @@
+// Every `Err(.Bad(…))` in `check_age` adds to the one type `CheckAgeError`.
+// A creation with another payload count, a label or no payload is reported
+// once where it is written, and checking it against the first adds nothing.
+check_age: fn(raw: String, age: Int) -> Int {
+    if raw == "" -> return Err(.Bad(raw.copy()))
+    if age < 0 -> return Err(.Bad(age, raw.copy()))
+    if age > 200 -> return Err(.Bad{text: raw.copy()})
+    if age > 300 -> return Err(.Bad)
+    age
+}
+
+run: fn() { print(check_age("a", 1) ?? 0) }

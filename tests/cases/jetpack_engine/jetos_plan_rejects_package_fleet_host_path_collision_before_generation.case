@@ -1,0 +1,14 @@
+# HAND-PORT tests/jetpack_engine.rs:9822-9858 jetos_plan_rejects_package_fleet_host_path_collision_before_generation
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: jetos_plan_rejects_package_fleet_host_path_collision_before_generation.fixture
+env: NO_COLOR=1
+mkdir: project
+mkdir: project/jet-root
+step: jet os plan workstation --json --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/project/jet-root
+exit: 2
+stderr: ~ "outputs.green.hosts.edge" # original contains predicate
+stderr: ~ "collides with Fleet host" # original contains predicate
+file: project/jet-root/systems absent
+

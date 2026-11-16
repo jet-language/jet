@@ -1,0 +1,14 @@
+# Port of tests/prove.rs:48-106; every original predicate, original fixture bytes.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: prove_projects_compatible_canonical_budget_identity_without_measuring.fixture
+step: jet budget check --json
+exit: 0
+capture: report_id = text stdout.split("\"report_id\":\"", 1).split("\"", 0)
+capture: report_count = entries .jet/perf/reports
+step: jet prove src/run.jet --json
+exit: 0
+stdout: ~ "\"producer\":\"jet-budget\"" # original predicate
+stdout: ~ "\"budgetId\":\"package:public-api\"" # original predicate
+stdout: ~ "\"reportId\":\"{cap:report_id}\"" # original predicate
+stdout: ~ "\"deterministicBudget\":{\"failed\":0,\"met\":1,\"selected\":1" # original predicate
+entries: .jet/perf/reports = {cap:report_count} # original predicate: prove does not measure/write reports

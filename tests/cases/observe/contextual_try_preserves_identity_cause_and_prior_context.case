@@ -1,0 +1,19 @@
+# tests/observe.rs::contextual_try_preserves_identity_cause_and_prior_context at tests/observe.rs:675; hand-port
+# Claim: exit 1 (tests/observe.rs:710)
+# Claim: stdout is empty (tests/observe.rs:711)
+# Claim: stderr starts with Error [E_STORE], type IOError, cause disk offline (tests/observe.rs:712-715)
+# Claim: context frames loading store, opening store and running store (tests/observe.rs:716-730)
+# Claim: conversion history `conversion: IOError -> Err` (tests/observe.rs:731-734)
+# Not ported: source order of the three context frames (tests/observe.rs:716-730): the spec has no ordering matcher; observed output lists them loading, opening, running
+fixture: contextual_try_preserves_identity_cause_and_prior_context.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run contextual_try_preserves_error.jet
+exit: 1 # tests/observe.rs:681-734
+stdout: = "" # tests/observe.rs:681-734
+stderr: ~ "Error [E_STORE]: store unavailable (type: IOError)\n  cause: disk offline\n" # tests/observe.rs:681-734
+stderr: ~ ": loading store" # tests/observe.rs:681-734
+stderr: ~ ": opening store" # tests/observe.rs:681-734
+stderr: ~ ": running store" # tests/observe.rs:681-734
+stderr: ~ "conversion: IOError -> Err\n" # tests/observe.rs:681-734

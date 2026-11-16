@@ -1,0 +1,22 @@
+# An error report colors its header word and its carets red and nothing else:
+# the gutter, the source line, the caret padding and the Why/Fix text keep
+# their bytes. With colors off (`--color=never`) and in JSON output the report
+# carries no ANSI byte, and its carets keep the same width.
+fixture: fixtures/bad
+step colored: jet check {work}/bad.jet --color=always
+unset: NO_COLOR
+exit: 1
+stderr: ~ "\u001b[31mError\u001b[0m [jet.UnknownFunction]: Nothing named `pirnt` exists here\n" # the header word is red, the rest of the line plain
+stderr: ~ "\n    |\n  2 |     pirnt(\"hi\")\n    |     \u001b[31m^^^^^\u001b[0m\n" # only the carets are red: gutter, source and padding stay plain
+stderr: ~ " \u001b[1mFix:\u001b[0m Did you mean `print`?\n" # the label is bold and the Fix text keeps its bytes
+step plain: jet check {work}/bad.jet --color=never
+unset: NO_COLOR
+exit: 1
+stderr: !~ "\u001b" # colors off writes no ANSI byte
+stderr: ~ "\n    |\n  2 |     pirnt(\"hi\")\n    |     ^^^^^\n Why: " # the same caret width as the colored report
+step json: jet check {work}/bad.jet --json --color=always
+unset: NO_COLOR
+exit: 1
+stdout: !~ "\u001b" # JSON never carries color, even with --color=always
+stdout: ~ "\"code\":\"E0102\"" # the report is the JSON one
+stderr: !~ "\u001b" # nothing colored leaks to stderr either

@@ -1,0 +1,88 @@
+// Assemble with the Compiler source unit. A native build and the Core
+// library's check drop their compile state on a detached task
+// (JetDriverCompileRequest.release_state_aside, Pipeline.jet
+// jet_driver_release_aside): the compile stopped before lowering returns
+// the same result and lowering inputs as one that drops it in place, for a
+// Program compile and for a Check compile. A compile of fewer than
+// JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS checked functions drops it in
+// place even so; `steps` extra functions put the fixture past that bound.
+use {
+    jet_driver.[
+        JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCoreSource,
+        JetDriverLoweringInputsResult,
+        jet_driver_lowering_inputs,
+    ]
+    jet_cli.[jet_cli_driver_request]
+    jet_sema.[SchemaSnapshot]
+}
+
+release_aside_front: fn(aside: Bool, steps: Int, mode: JetDriverCompileMode) -> JetDriverLoweringInputsResult {
+    source := "Shape: enum {{\n    Circle(radius: Int)\n    Square(side: Int)\n}}\narea: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(radius) -> radius * radius * 3\n        .Square(side) -> side * side\n    }}\n}}\nlabel: fn(shape: Shape) -> String {{ \"area {{area(shape)}}\" }}\nrun: fn() {{\n    print(label(.Circle(radius: 2)))\n    print(label(.Square(side: 3)))\n}}\n"
+    loop step in 0..<steps -> source = "{source}step{step}: fn(x: Int) -> Int {{ x + {step} }}\n"
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/release-aside",
+                identity: "release-aside-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/release-aside/main.jet", relative_path: "main.jet", identity: "release-aside-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "release-aside-root",
+        entry_path: "/release-aside/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), mode)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request.release_state_aside = aside
+    jet_driver_lowering_inputs(request, None)
+}
+
+// One line per fact the native route reads from the front end.
+release_aside_rows: fn(front: JetDriverLoweringInputsResult) -> [String] {
+    rows := [String]{"complete {front.compile.complete} internal {front.compile.internal_problem:Debug} held {front.compile.held != None}"}
+    loop diagnostic in front.compile.diagnostics -> rows.push("{diagnostic.code} {diagnostic.what}")
+    if front.inputs == .Val(checked) {
+        rows.push("entry {checked.entry_key:Debug} modules {checked.modules.len()} effects {front.compile.entry_effects:Debug}")
+        loop function in checked.functions {
+            rows.push("{function.key} {function.effects.solved:Debug} body {function.body.len()}")
+        }
+    } else { rows.push("no lowering inputs") }
+    rows
+}
+
+#Test("release_state_aside") {
+    loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Program, JetDriverCompileMode.Check}) {
+        loop steps in ([Int]{0, JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS}) {
+            in_place: release_aside_rows(release_aside_front(false, steps, mode))
+            // Several compiles in a row, each releasing its state on its own
+            // task while the next one runs, past the bound.
+            loop _ in 0..<3 {
+                assert_eq(release_aside_rows(release_aside_front(true, steps, mode)), in_place)
+            }
+            if in_place.len() <= 4 + steps || in_place[0] != "complete true internal None held false" {
+                panic("the fixture did not compile: {in_place:Debug}")
+            }
+        }
+    }
+}
+
+// The lowering inputs' modules hold only what lowering reads: the call, name
+// and copy facts only sema's whole-program passes read are freed before the
+// IR build, while the functions that made them still lower.
+#Test("the lowering inputs hold no sema-only module facts") {
+    front: release_aside_front(false, 0, JetDriverCompileMode.Program)
+    if front.inputs == .Val(checked) {
+        if checked.modules.len() == 0 || checked.functions.len() == 0 {
+            panic("the fixture checked no modules")
+        }
+        loop graph_module in checked.modules {
+            assert_eq("{graph_module.module_name}: {graph_module.call_facts.len()} {graph_module.name_references.len()} {graph_module.copy_events.len()} {graph_module.comptime_requests.len()} {graph_module.failure_facts.len()}", "{graph_module.module_name}: 0 0 0 0 0")
+        }
+    } else { panic("the fixture did not compile") }
+}

@@ -1,0 +1,28 @@
+// Writes the build-system axis project (jet_build_system_project's
+// Project.jet) into OUT_DIR, its flake pinning this repository's nixpkgs; the
+// twin of generate.mjs.
+//
+// Usage: jet Tools/gauntlet/axes/build-system/generate OUT_DIR
+package: {
+    name: "build_system_generate"
+    version: "0.0.1"
+    deps: {
+        jet_build_system_project: ../project,
+        // The project's own dependency: a path dependency outside the root's package is declared by the root.
+        jet_midsize_units: ../../../../perf/build-time/units,
+    }
+}
+
+use {
+    jet_build_system_project.[write_project]
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+run: fn() Err! {
+    out: process.args().get(0) ?? process.fail(64, "usage: jet Tools/gauntlet/axes/build-system/generate OUT_DIR")
+    // This program is Tools/gauntlet/axes/build-system/generate/run.jet.
+    repo: files.absolute(files.join(files.dirname(sys.executable()), "../../../../.."))
+    write_project(out, repo)
+}

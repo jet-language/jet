@@ -1,0 +1,14 @@
+# tests/notebook.rs::headless_protocol_interrupt_stdin_debug_perf_and_clients
+# Verbatim original cell sources and exact public predicates; runtime UNRUN.
+fixture: headless_protocol_interrupt_stdin_debug_perf_and_clients.fixture
+env: NO_COLOR=1
+step: jet notebook document.jetnb --protocol
+stdin: commands.stdin
+exit: 0
+stdout: ~ "\"status\":\"ok\"" # exact original contains
+stdout: ~ "interrupt_requested" # exact original contains
+stdout: ~ "stdin_queued=1" # exact original contains
+stdout: ~ "debug_attached" # exact original contains
+stdout: ~ "perf_attached" # exact original contains
+json: stdout ndjson $[13].body ~ "\"debug\":true" # original ed77c235f tests/notebook.rs:409 debug_attached() true; public bridge crates/jet-repl/src/Notebook/kernel.rs:1109,1122 serializes that Bool in state, protocol.rs:114-123,265 preserves body
+json: stdout ndjson $[13].body ~ "\"perf\":true" # original ed77c235f tests/notebook.rs:409 perf_attached() true; public bridge crates/jet-repl/src/Notebook/kernel.rs:1109,1123 serializes that Bool in state, protocol.rs:114-123,265 preserves body

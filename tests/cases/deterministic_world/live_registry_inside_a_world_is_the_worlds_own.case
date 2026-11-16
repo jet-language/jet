@@ -1,0 +1,14 @@
+# Inside testing.world, the app/core.web live registry is the world's own:
+# - it starts empty, so the process's binding is not counted in the world;
+# - the world's binding and pushed value live in the world's registry;
+# - after the world the process registry still holds only its own binding.
+fixture: live_registry_inside_a_world_is_the_worlds_own.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = live_registry_inside_a_world_is_the_worlds_own.out
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = live_registry_inside_a_world_is_the_worlds_own.out

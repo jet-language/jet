@@ -1,0 +1,27 @@
+# A component whose core module uses multi-value functions (direct, through
+# a table and from another multi-value function) and multi-value blocks, ifs
+# and loops loads, and every export answers correctly on both hosted tiers.
+fixture: plugin_multi_value_functions_and_blocks_return_correct_results_on_all_hosted_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: ~ "divmod 3002 -3002" # default
+stdout: ~ "indirect 3002 5017" # default
+stdout: ~ "chain 2003" # default
+stdout: ~ "swapped 43" # default
+stdout: ~ "pick 51 62" # default
+stdout: ~ "early 15 3" # default
+stdout: ~ "sum 55 1 0" # default
+stdout: ~ "mixed 84 -16" # default
+step: jet run --release main.jet
+exit: 0
+stdout: ~ "divmod 3002 -3002" # release
+stdout: ~ "indirect 3002 5017" # release
+stdout: ~ "chain 2003" # release
+stdout: ~ "swapped 43" # release
+stdout: ~ "pick 51 62" # release
+stdout: ~ "early 15 3" # release
+stdout: ~ "sum 55 1 0" # release
+stdout: ~ "mixed 84 -16" # release

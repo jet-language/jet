@@ -1,0 +1,51 @@
+// core-conformance: core.crypto.vault.guard_errors
+// Guard expectations observed from the seed SecretsCrypto name validator and
+// both JetVaultKey.from_bytes implementations; no repository state is needed.
+use {
+    crypto: core.crypto
+    vault: core.crypto.vault
+}
+
+run: fn() -[Secret, IO]> {
+    if vault.current<crypto.SigningKey>("") == {
+        .Err(.InvalidName) -> print("current:InvalidName")
+        .Val(_) | .None | .Err(_) -> panic("current must reject an invalid name")
+    }
+    if vault.versions<crypto.SigningKey>("../release") == {
+        .Err(.InvalidName) -> print("versions:InvalidName")
+        .Ok(_) | .Err(_) -> panic("versions must reject an invalid name")
+    }
+    if vault.prepare_generate<crypto.SigningKey>("") == {
+        .Err(.InvalidName) -> print("generate:InvalidName")
+        .Ok(_) | .Err(_) -> panic("generate must reject an invalid name")
+    }
+    if vault.prepare_rotate<crypto.SigningKey>("") == {
+        .Err(.InvalidName) -> print("rotate:InvalidName")
+        .Ok(_) | .Err(_) -> panic("rotate must reject an invalid name")
+    }
+    seed := [U8]{}
+    loop _ in 0..<32 -> seed.push(U8{0})
+    key: crypto.SigningKey.from_bytes(seed) ?? panic("fixed signing seed")
+    if vault.prepare_store<crypto.SigningKey>("", key) == {
+        .Err(.InvalidName) -> print("store:InvalidName")
+        .Ok(_) | .Err(_) -> panic("store must reject an invalid name")
+    }
+    #Unsafe("vault key import: fixed guard vectors that never hold key material") {
+        if vault.prepare_import_signing("", ([U8]{})) == {
+            .Err(.InvalidName) -> print("signing-name:InvalidName")
+            .Ok(_) | .Err(_) -> panic("signing name validation must precede encoding validation")
+        }
+        if vault.prepare_import_x25519("", ([U8]{})) == {
+            .Err(.InvalidName) -> print("x25519-name:InvalidName")
+            .Ok(_) | .Err(_) -> panic("X25519 name validation must precede encoding validation")
+        }
+        if vault.prepare_import_signing("release", ([U8]{})) == {
+            .Err(.InvalidEncoding) -> print("signing-bytes:InvalidEncoding")
+            .Ok(_) | .Err(_) -> panic("signing import must require exactly 32 bytes")
+        }
+        if vault.prepare_import_x25519("release", ([U8]{})) == {
+            .Err(.InvalidEncoding) -> print("x25519-bytes:InvalidEncoding")
+            .Ok(_) | .Err(_) -> panic("X25519 import must require exactly 32 bytes")
+        }
+    }
+}

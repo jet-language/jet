@@ -1,0 +1,20 @@
+// A host leaf that only Core calls is a `priv` binding of its jet.runtime
+// module, so a user package that calls one gets the ordinary private-item
+// error, not a Core-only gate: the stdin line, the raw text bytes, the
+// unmapped process exit and the shared-memory constructor.
+use {
+    encoding: jet.runtime.encoding
+    process: jet.runtime.process
+    sys: jet.runtime.sys
+    term: jet.runtime.term
+}
+
+run: fn() -[IO, Env, Exec.Exit]> {
+    line: term.stdin_line() ?? return
+    print(line ?? "")
+    print(encoding.string_byte("a", 0))
+    print(encoding.bytes_into_text([97]))
+    token: sys.shared_create(8) ?? return
+    print(token)
+    process.exit(3)
+}

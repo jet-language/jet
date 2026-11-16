@@ -1,0 +1,479 @@
+#!/usr/bin/env jet
+// The counted language surface. Each kind's active count
+// is derived from its canonical rows, never pinned by hand:
+//   keywords       the active rows of the lexer keyword table
+//                  (Compiler/JetLexer/Data/Lexer/Keywords.jet; retired rows
+//                  stay reserved but are not counted)
+//   lexical forms  the rows of LEXICAL_LEDGER (Compiler/JetFoundation/Data/
+//                  Syntax/Spellings.jet), each a sigil or written form
+//   markers        the `impl Marker` declarations of Compiler/Prelude/Markers.jet
+//   facts          the `impl Fact` declarations of Compiler/Prelude/Facts.jet
+//   CLI commands   the top-level rows of JET_CLI_COMMANDS
+//                  (Compiler/JetFoundation/Source/Registry/CLICommands.jet)
+// Tools/agent/surface_budget.tsv holds each kind's ceiling as append-only
+// rows `kind<TAB>ceiling<TAB>why`; a kind's last row is its ceiling. Only an
+// owner decision raises a ceiling, and the row that raises it says in words
+// what the owner allowed; the decision itself stays on Tower, so a row names
+// no decision ID. Retirement lowers a count, and the ceiling follows it down:
+// a lower row says what was retired. Every count must equal its ceiling, so a
+// new keyword, form, marker, fact or command fails until a row raises the
+// ceiling, and a retirement fails until the ceiling is lowered to match.
+// Public Core functions (top-level, non-`priv` functions under Core, by
+// directory) are reported and compared, and never gated.
+// Usage: jet Tools/agent/SurfaceBudget.jet [--check | --report | --ballot <before-root>]
+//   --check   every count equals its ceiling and every ceiling row is lawful
+//             (the default)
+//   --report  the counts beside their ceilings, and the public Core
+//             functions per module
+//   --ballot  a ballot's before/after: the counts and the public Core
+//             functions per module of the checkout at <before-root> beside
+//             this one's, with each change
+// Run it from the repository root; every path is relative to it.
+use {
+    files: core.files
+    process: core.process
+}
+
+LEDGER: "Tools/agent/surface_budget.tsv"
+
+CORE_ROOT: "Core"
+
+CORE_SKIP: [String]{".jet", ".git", "target", "Tests", "Fixtures", "fixtures"}
+
+USAGE: "usage: jet Tools/agent/SurfaceBudget.jet [--check | --report | --ballot <before-root>]"
+
+// One counted kind of language surface.
+SurfaceKind: enum {
+    Keyword
+    LexicalForm
+    Marker
+    Fact
+    Command
+}
+
+SURFACE_KINDS: [SurfaceKind]{.Keyword, .LexicalForm, .Marker, .Fact, .Command}
+
+#Error
+SurfaceBudgetError: struct {
+    message: String
+}
+
+budget_fail: fn(message: String) -> SurfaceBudgetError Never! {
+    SurfaceBudgetError{message: "surface budget: {message}"}
+}
+
+// The kind's name in the ledger and the reports.
+kind_name: fn(kind: SurfaceKind) -> String Never! {
+    if kind == {
+        .Keyword -> "keywords"
+        .LexicalForm -> "lexical-forms"
+        .Marker -> "markers"
+        .Fact -> "facts"
+        .Command -> "cli-commands"
+    }
+}
+
+// The canonical source the kind is counted from.
+kind_source: fn(kind: SurfaceKind) -> String Never! {
+    if kind == {
+        .Keyword -> "Compiler/JetLexer/Data/Lexer/Keywords.jet"
+        .LexicalForm -> "Compiler/JetFoundation/Data/Syntax/Spellings.jet"
+        .Marker -> "Compiler/Prelude/Markers.jet"
+        .Fact -> "Compiler/Prelude/Facts.jet"
+        .Command -> "Compiler/JetFoundation/Source/Registry/CLICommands.jet"
+    }
+}
+
+// The lines of the top-level block `<name>: …` in `text`, from its opening
+// line to the first line that is `}` or `} }` at the margin.
+block_lines: fn(text: String, name: String) -> [String] Never! {
+    out := [String]{}
+    inside := false
+    loop line in text.lines() {
+        if !inside {
+            if line.starts_with("{name}: ") -> inside = true
+            next
+        }
+        if line == "}}" || line == "}} }}" -> return out
+        out.push(line)
+    }
+    out
+}
+
+// The kind's active count in its source `text`.
+count_kind: fn(kind: SurfaceKind, text: String) -> Int Never! {
+    count := 0
+    if kind == {
+        .Keyword -> {
+            loop line in block_lines(text, "LEXER_KEYWORDS") {
+                if line.trim().starts_with("{{constant:") && line.contains("retired: false") {
+                    count += 1
+                }
+            }
+        }
+        .LexicalForm -> {
+            loop line in block_lines(text, "LEXICAL_LEDGER") {
+                if line.trim().starts_with("{{ spelling:") -> count += 1
+            }
+        }
+        .Marker -> {
+            loop line in text.lines() {
+                if line.trim().starts_with("impl Marker") -> count += 1
+            }
+        }
+        .Fact -> {
+            loop line in text.lines() {
+                if line.trim().starts_with("impl Fact") -> count += 1
+            }
+        }
+        .Command -> {
+            loop line in block_lines(text, "JET_CLI_COMMANDS") {
+                if line.starts_with("        name: \"") -> count += 1
+            }
+        }
+    }
+    count
+}
+
+// `path` under the checkout `root` ("" for this one).
+rooted: fn(root: String, path: String) -> String Never! {
+    if root == "" -> path else -> "{root}/{path}"
+}
+
+// Each kind's count in the checkout at `root`, in SURFACE_KINDS order.
+surface_counts: fn(root: String) -[FS]> [Int] SurfaceBudgetError! {
+    counts := [Int]{}
+    loop kind in SURFACE_KINDS {
+        path: rooted(root, kind_source(kind))
+        text: files.read(path) ?? return Err(budget_fail("could not read {path}: {err}"))
+        counts.push(count_kind(kind, text))
+    }
+    Ok(counts)
+}
+
+// Whether `text` names a decision ID as Tower spells one: `D-` at the start
+// of a word, then capitals, digits and dashes ending in a digit (`D-ABC1`).
+names_decision: fn(text: String) -> Bool Never! {
+    bytes: text.bytes()
+    loop at in 0..<bytes.len() {
+        if bytes[at] != 68 || at + 2 >= bytes.len() || bytes[at + 1] != 45 -> next
+        if at > 0 && word_byte(bytes[at - 1]) -> next
+        last := 0
+        loop index in at + 2..<bytes.len() {
+            n: bytes[index]
+            if !((n >= 65 && n <= 90) || (n >= 48 && n <= 57) || n == 45) -> break
+            last = n
+        }
+        if last >= 48 && last <= 57 -> return true
+    }
+    false
+}
+
+// Whether the byte `n` is an ASCII letter, digit or `_`.
+word_byte: fn(n: U8) -> Bool Never! {
+    (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95
+}
+
+// One ceiling row of the ledger.
+CeilingRow: struct {
+    line: Int
+    kind: String
+    ceiling: Int
+    why: String
+}
+
+// The ledger's rows (`#` lines and blank lines are comments), and a problem
+// for each row that is not `kind<TAB>ceiling<TAB>why`.
+ceiling_rows: fn(text: String, problems: &[String]) -> [CeilingRow] Never! {
+    rows := [CeilingRow]{}
+    number := 0
+    loop line in text.lines() {
+        number += 1
+        if line.trim() == "" || line.starts_with("#") -> next
+        cells: line.split("\t").to_list()
+        if cells.len() != 3 {
+            problems.push("{LEDGER}:{number}: expected `kind<TAB>ceiling<TAB>why`")
+            next
+        }
+        ceiling: Int.parse(cells[1]) ?? {
+            problems.push("{LEDGER}:{number}: the ceiling `{cells[1]}` is not a number")
+            next
+        }
+        rows.push(CeilingRow{line: number, kind: cells[0].trim(), ceiling: ceiling, why: cells[2].trim()})
+    }
+    rows
+}
+
+// The problems of the ledger `ledger` against the counts `counts` (in
+// SURFACE_KINDS order); none when every count equals its kind's ceiling and
+// every row is lawful.
+budget_problems: fn(counts: [Int], ledger: String) -> [String] Never! {
+    problems := [String]{}
+    rows: ceiling_rows(ledger, problems)
+    names: loop kind in SURFACE_KINDS -> kind_name(kind)
+    loop row in rows {
+        if !names.contains(row.kind) {
+            problems.push("{LEDGER}:{row.line}: `{row.kind}` is no counted kind ({names.join(", ")})")
+        }
+        if names_decision(row.why) {
+            problems.push("{LEDGER}:{row.line}: the why `{row.why}` names a decision ID; say in words what the owner allowed or what was retired, and keep the ID on Tower")
+        }
+    }
+    loop (index, kind) in SURFACE_KINDS {
+        name: kind_name(kind)
+        ceiling := Int?{None}
+        loop row in rows {
+            if row.kind != name -> next
+            // A kind's first row raises its ceiling from nothing.
+            previous: ceiling ?? -1
+            if row.ceiling == previous {
+                problems.push("{LEDGER}:{row.line}: {name} repeats its ceiling {previous}")
+            }
+            if row.ceiling > previous && row.why == "" {
+                problems.push("{LEDGER}:{row.line}: raising the {name} ceiling to {row.ceiling} must say what the owner allowed")
+            }
+            if row.ceiling < previous && row.why == "" {
+                problems.push("{LEDGER}:{row.line}: lowering the {name} ceiling to {row.ceiling} must say what was retired")
+            }
+            ceiling = Val(row.ceiling)
+        }
+        count: counts[index]
+        limit: ceiling ?? {
+            problems.push("{name}: {LEDGER} has no ceiling row; its first row says what the owner allowed")
+            next
+        }
+        if count > limit {
+            problems.push("{name}: {count} counted in {kind_source(kind)}, over the ceiling {limit}: a new one needs an owner decision; once it is ratified, append `{name}<TAB>{count}<TAB><what the owner allowed>` to {LEDGER}")
+        }
+        if count < limit {
+            problems.push("{name}: {count} counted in {kind_source(kind)}, under the ceiling {limit}: a retirement lowers the ceiling; append `{name}<TAB>{count}<TAB><what was retired>` to {LEDGER}")
+        }
+    }
+    problems
+}
+
+// The module of the Core source `path` (relative to `core`): its directory
+// under Core, or "Core" for a file at the top.
+core_module: fn(core: String, path: String) -> String Never! {
+    relative: path.removeprefix("{core}/")
+    cut: relative.rfind("/")
+    if cut < 0 -> "Core" else -> String.from_bytes_lossy(relative.bytes()[0..<cut])
+}
+
+// The number of public top-level functions `text` declares: margin lines
+// `name: fn` or `pub name: fn`, never `priv`.
+public_functions: fn(text: String) -> Int Never! {
+    count := 0
+    loop line in text.lines() {
+        declaration: line.removeprefix("pub ")
+        bytes: declaration.bytes()
+        first: if bytes.len() == 0 -> 0 else -> (Int{bytes[0]})
+        if first < 97 || first > 122 -> next
+        colon: declaration.find(": fn")
+        if colon < 0 -> next
+        name: String.from_bytes_lossy(bytes[0..<colon])
+        plain := true
+        loop byte in name.bytes() {
+            code: Int{byte}
+            if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95) {
+                plain = false
+            }
+        }
+        rest: String.from_bytes_lossy(bytes[colon + 4..<bytes.len()])
+        if plain && (rest.starts_with("(") || rest.starts_with(" ") || rest == "") -> count += 1
+    }
+    count
+}
+
+// The public Core functions per module of the checkout at `root`.
+core_functions: fn(root: String) -[FS]> [String:Int] SurfaceBudgetError! {
+    core: rooted(root, CORE_ROOT)
+    modules := [String:Int]{}
+    loop entry in files.walk_files(core, skip: CORE_SKIP) {
+        found: entry ?? return Err(budget_fail("could not walk {core}: {err}"))
+        if !found.path.ends_with(".jet") -> next
+        text: files.read(found.path) ?? return Err(budget_fail("could not read {found.path}: {err}"))
+        owner: core_module(core, found.path)
+        modules[owner] = (modules.get(owner) ?? 0) + public_functions(text)
+    }
+    Ok(modules)
+}
+
+// A signed change: `+2`, `-1` or `0`.
+delta: fn(before: Int, after: Int) -> String Never! {
+    if after > before -> "+{after - before}" else -> "{after - before}"
+}
+
+// The counts and ceilings, then the public Core functions per module.
+report_text: fn(counts: [Int], ledger: String, modules: [String:Int]) -> String Never! {
+    problems := [String]{}
+    rows: ceiling_rows(ledger, problems)
+    out := "language surface (counted; a ceiling rises only by owner decision):\n"
+    loop (index, kind) in SURFACE_KINDS {
+        name: kind_name(kind)
+        limit := "none"
+        loop row in rows {
+            if row.kind == name -> limit = "{row.ceiling}"
+        }
+        out = "{out}  {name}: {counts[index]} (ceiling {limit})\n"
+    }
+    out = "{out}\npublic Core functions by module (reported, never gated):\n"
+    names := modules.keys().to_list()
+    names.sort()
+    total := 0
+    loop name in names {
+        count: modules.get(name) ?? 0
+        total += count
+        out = "{out}  {name}: {count}\n"
+    }
+    "{out}  total: {total}\n"
+}
+
+// A ballot's before/after: each count and each module's public Core
+// functions in the checkout before beside after, with the change.
+ballot_text: fn(before_root: String, before: [Int], after: [Int], before_modules: [String:Int], after_modules: [String:Int]) -> String Never! {
+    out := "surface ballot: {before_root} (before) -> this checkout (after)\n\nlanguage surface:\n"
+    loop (index, kind) in SURFACE_KINDS {
+        out = "{out}  {kind_name(kind)}: {before[index]} -> {after[index]} ({delta(before[index], after[index])})\n"
+    }
+    out = "{out}\npublic Core functions by module (reported, never gated):\n"
+    names := before_modules.keys().to_list()
+    loop name in after_modules.keys() {
+        if !names.contains(name) -> names.push(name)
+    }
+    names.sort()
+    before_total := 0
+    after_total := 0
+    loop name in names {
+        was: before_modules.get(name) ?? 0
+        now: after_modules.get(name) ?? 0
+        before_total += was
+        after_total += now
+        if was != now -> out = "{out}  {name}: {was} -> {now} ({delta(was, now)})\n"
+    }
+    "{out}  total: {before_total} -> {after_total} ({delta(before_total, after_total)})\n"
+}
+
+read_text: fn(path: String) -[FS]> String SurfaceBudgetError! {
+    text: files.read(path) ?? return Err(budget_fail("could not read {path}: {err}"))
+    Ok(text)
+}
+
+surface_budget_main: fn(args: [String]) -[FS]> String SurfaceBudgetError! {
+    mode: if args.len() == 0 -> "--check" else -> args[0]
+    counts: surface_counts("") ?? return Err(err)
+    ledger: read_text(LEDGER) ?? return Err(err)
+    if args.len() == 0 || (mode == "--check" && args.len() == 1) {
+        problems: budget_problems(counts, ledger)
+        if problems.len() > 0 {
+            return Err(budget_fail("{problems.len()} problem(s):\n{problems.join("\n")}"))
+        }
+        return Ok("surface budget: every count equals its ceiling")
+    }
+    if mode == "--report" && args.len() == 1 {
+        return Ok(report_text(counts, ledger, core_functions("") ?? return Err(err)))
+    }
+    if mode == "--ballot" && args.len() == 2 {
+        before: surface_counts(args[1]) ?? return Err(err)
+        before_modules: core_functions(args[1]) ?? return Err(err)
+        return Ok(ballot_text(args[1], before, counts, before_modules, core_functions("") ?? return Err(err)))
+    }
+    Err(budget_fail(USAGE))
+}
+
+run: fn() { print(surface_budget_main(process.args()) ?? process.fail(1, err.message)) }
+
+// The ledger a fixture checks: every kind at the given ceiling.
+fixture_ledger: fn(ceilings: [Int]) -> String Never! {
+    out := "# kind\tceiling\twhy\n"
+    loop (index, kind) in SURFACE_KINDS {
+        out = "{out}{kind_name(kind)}\t{ceilings[index]}\tthe surface when the budget began\n"
+    }
+    out
+}
+
+#Test("each kind is counted from its canonical rows") {
+    keywords: "LexerKeyword: struct {{\n    retired: Bool\n}}\n\nLEXER_KEYWORDS: [LexerKeyword]{{\n    {{constant: \"KW_FN\", kind: \"KwFn\", tag: \"K_FN\", retired: false}},\n    {{constant: \"KW_COPY\", kind: \"KwCopy\", tag: \"K_COPY\", retired: true}},\n    {{constant: \"KW_IF\", kind: \"KwIf\", tag: \"K_IF\", retired: false}},\n}}\n"
+    // The retired row stays reserved but is not counted.
+    assert_eq(count_kind(.Keyword, keywords), 2)
+    forms: "LEXICAL_LEDGER: [LexicalEntry]{{\n    {{ spelling: \":\", meaning: \"binding\" }},\n    {{ spelling: \"#\", meaning: \"marker\" }},\n}}\nOTHER: [LexicalEntry]{{\n    {{ spelling: \"x\", meaning: \"y\" }},\n}}\n"
+    assert_eq(count_kind(.LexicalForm, forms), 2)
+    // A comment that mentions `impl Marker` is no declaration.
+    markers: "// each marker has an `impl Marker {{ … }}` block\nPolicy: struct {{\n    impl Marker {{\n        inherits: true\n    }}\n}}\nInline: struct {{\n    impl Marker {{}}\n}}\n"
+    assert_eq(count_kind(.Marker, markers), 2)
+    assert_eq(count_kind(.Fact, "Flow: struct {{\n    impl Fact {{}}\n}}\n"), 1)
+    commands: "JET_CLI_COMMANDS: #run {{ [JetCLICommandSpec]{{\n    {{\n        name: \"registry\",\n        actions: [JetCLIActionSpec]{{\n            {{name: \"publish\", handler: \"Publish\"}},\n        }},\n    }},\n    {{\n        name: \"build\",\n        actions: [JetCLIActionSpec]{{}},\n    }},\n}} }}\n"
+    // A nested action is no top-level command.
+    assert_eq(count_kind(.Command, commands), 2)
+}
+
+#Test("a why that names a decision ID is a problem; words are not") {
+    assert(names_decision("D-NEW-MARKER1"))
+    assert(names_decision("ratified as D-ABC1=A"))
+    assert(names_decision("(D-X2)"))
+    assert(!names_decision("`#Deadline(limit)`, the one way to bound waiting"))
+    assert(!names_decision("D-day"))
+    assert(!names_decision("AD-HOC1"))
+    assert(!names_decision("D-"))
+}
+
+#Test("a count at its ceiling passes, and an unauthorized +1 fails until a row raises it") {
+    ledger: fixture_ledger([Int]{25, 74, 77, 52, 50})
+    assert_eq(budget_problems([Int]{25, 74, 77, 52, 50}, ledger), [String]{})
+    // One more marker with no raise fails, naming the kind and what to do.
+    over: budget_problems([Int]{25, 74, 78, 52, 50}, ledger)
+    assert_eq(over.len(), 1)
+    assert(over[0].starts_with("markers: 78 counted in Compiler/Prelude/Markers.jet, over the ceiling 77: a new one needs an owner decision"))
+    // A raise must say what the owner allowed, in words.
+    silent: budget_problems([Int]{25, 74, 78, 52, 50}, "{ledger}markers\t78\t\n")
+    assert_eq(silent.len(), 1)
+    assert(silent[0].contains("raising the markers ceiling to 78 must say what the owner allowed"))
+    // A raise that cites a decision ID instead fails: the ID stays on Tower.
+    cited: budget_problems([Int]{25, 74, 78, 52, 50}, "{ledger}markers\t78\tD-NEW-MARKER1\n")
+    assert_eq(cited.len(), 1)
+    assert(cited[0].contains("the why `D-NEW-MARKER1` names a decision ID"))
+    // A raise that says what was allowed passes.
+    assert_eq(budget_problems([Int]{25, 74, 78, 52, 50}, "{ledger}markers\t78\t`#Deadline(limit)`, the one way to bound waiting\n"), [String]{})
+}
+
+#Test("a retirement lowers the count, and the ceiling must follow it down with a reason") {
+    ledger: fixture_ledger([Int]{25, 74, 77, 52, 50})
+    // A retired keyword lowers the count; the stale ceiling fails.
+    under: budget_problems([Int]{24, 74, 77, 52, 50}, ledger)
+    assert_eq(under.len(), 1)
+    assert(under[0].starts_with("keywords: 24 counted in Compiler/JetLexer/Data/Lexer/Keywords.jet, under the ceiling 25: a retirement lowers the ceiling"))
+    // A lower row says what was retired.
+    assert_eq(budget_problems([Int]{24, 74, 77, 52, 50}, "{ledger}keywords\t24\tretired `module`\n"), [String]{})
+    assert_eq(budget_problems([Int]{24, 74, 77, 52, 50}, "{ledger}keywords\t24\t\n").len(), 1)
+    // Raising back over a lowered ceiling is a raise again.
+    assert_eq(budget_problems([Int]{25, 74, 77, 52, 50}, "{ledger}keywords\t24\tretired `module`\nkeywords\t25\t\n").len(), 1)
+}
+
+#Test("a malformed ledger, an unknown kind and a missing ceiling are each named") {
+    problems: budget_problems([Int]{1, 1, 1, 1, 1}, "keywords\t1\tstart\nkeywords\tone\tstart\nsigils\t3\tstart\n")
+    assert(problems.contains("{LEDGER}:2: the ceiling `one` is not a number"))
+    assert(problems.contains("{LEDGER}:3: `sigils` is no counted kind (keywords, lexical-forms, markers, facts, cli-commands)"))
+    assert(problems.contains("markers: {LEDGER} has no ceiling row; its first row says what the owner allowed"))
+}
+
+#Test("public Core functions are reported by module and compared in a ballot, never gated") {
+    assert_eq(public_functions("use x\nread: fn(path: String) -> String {{ path }}\npub write: fn() {{}}\npriv helper: fn() {{}}\nType: struct {{\n    method: fn(self) {{}}\n}}\nNAME: \"fn\"\nfunctional: \"x\"\n"), 2)
+    assert_eq(core_module("Core", "Core/Http/Client.jet"), "Http")
+    assert_eq(core_module("Core", "Core/Data/Arrow/Table.jet"), "Data/Arrow")
+    assert_eq(core_module("old/Core", "old/Core/Top.jet"), "Core")
+    before := [String:Int]{}
+    before["Http"] = 10
+    before["Text"] = 4
+    after := [String:Int]{}
+    after["Http"] = 12
+    after["Text"] = 4
+    after["Wasm"] = 3
+    ballot: ballot_text("../old", [Int]{25, 74, 77, 52, 50}, [Int]{25, 74, 78, 52, 50}, before, after)
+    assert(ballot.contains("  markers: 77 -> 78 (+1)\n"))
+    assert(ballot.contains("  keywords: 25 -> 25 (0)\n"))
+    assert(ballot.contains("  Http: 10 -> 12 (+2)\n  Wasm: 0 -> 3 (+3)\n  total: 14 -> 19 (+5)\n"))
+    // An unchanged module is left out of the ballot.
+    assert(!ballot.contains("Text:"))
+    // Core growth never reaches the budget check: it reads only the counts.
+    assert_eq(budget_problems([Int]{25, 74, 77, 52, 50}, fixture_ledger([Int]{25, 74, 77, 52, 50})), [String]{})
+}

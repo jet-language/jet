@@ -1,0 +1,25 @@
+# HAND-PORT tests/jetpack_engine.rs:130-185 hangar_migration_round_trips_without_consuming_legacy_state
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: hangar_migration_round_trips_without_consuming_legacy_state.fixture
+mkdir: data
+mkdir: legacy
+step: jet hangar path --no-color
+unset: JETPACK_ROOT
+unset: LOCALAPPDATA
+env: XDG_STATE_HOME={work}/legacy
+env: XDG_DATA_HOME={work}/data
+exit: 0
+file: data/jet/hangar/migration-marker = hangar_migration_round_trips_without_consuming_legacy_state.marker.expected
+file: legacy/jet/hangar/migration-marker = hangar_migration_round_trips_without_consuming_legacy_state.marker.expected
+file: data/jet/.hangar-migration.partial absent
+remove: data/jet/hangar
+step: jet hangar path --no-color
+unset: JETPACK_ROOT
+unset: LOCALAPPDATA
+env: XDG_STATE_HOME={work}/legacy
+env: XDG_DATA_HOME={work}/data
+exit: 0
+file: data/jet/hangar/migration-marker = hangar_migration_round_trips_without_consuming_legacy_state.marker.expected
+file: legacy/jet/hangar/migration-marker = hangar_migration_round_trips_without_consuming_legacy_state.marker.expected
+file: data/jet/.hangar-migration.partial absent
+

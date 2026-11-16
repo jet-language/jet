@@ -1,0 +1,28 @@
+# `#Overflow(.Stop | .Wrapping | .Saturating)` is the fixed-width overflow
+# mode of one function, method or block body (D-FIXED-WRAP1, D-WRAP-SCOPE1).
+# Arithmetic and narrowing `T{x}` conversions inside it follow the mode, and a
+# `wrapping(…)` word around a conversion wins over it. A module declaration
+# refuses the marker (E0355), a mode outside the menu is E0930, and the
+# formatter keeps the `#Overflow` spelling on a block.
+fixture: overflow_marker_scopes_function_method_and_block_bodies.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step run: jet run main.jet
+exit: 0
+stdout: = "4\n255\n244\n44\n255\n44\n"
+stderr: empty
+step module: jet check module/main.jet
+exit: 1
+stderr: ~ "`#Overflow` cannot attach at the Module site" # no module rung
+stderr: ~ "jet-lang.dev/e/E0355" # the site code
+step mode: jet check mode/main.jet
+exit: 1
+stderr: ~ "`#Overflow` has no `OverflowMode` called `Checked`" # `.Stop` is the menu's spelling
+stderr: ~ "jet-lang.dev/e/E0930" # the marker-signature code
+step fmt: jet fmt fmt/run.jet
+exit: 0
+file: fmt/run.jet ~ "#Overflow(.Wrapping) {" # the block keeps its marker
+file: fmt/run.jet !~ "#Policy" # never rewritten to the older spelling
+step fmt-check: jet fmt --check fmt/run.jet
+exit: 0

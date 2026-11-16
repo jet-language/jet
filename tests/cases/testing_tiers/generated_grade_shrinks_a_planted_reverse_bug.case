@@ -1,0 +1,52 @@
+# D-CLAIM1=C: `jet test --grade=generated --iterations=N` runs each property test on N generated cases from a printed, replayable seed. A planted bug that breaks `reverse_list(reverse_list(xs)) == xs` only for lists of length 3 is found and shrunk to a three-element input. The budget is exact (seed 424242 first fails on case 11), defaults to 1000, and JET_FUZZ_ITERATIONS sets the same budget; the seed is `--seed`, else the caller's JET_PROP_SEED, else the fixed 0. `iterations` or `seed` without `grade`, another grade and a zero budget are refused.
+fixture: generated_grade_shrinks_a_planted_reverse_bug.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step generated: jet test --grade=generated --iterations=1000 --seed=424242 reverse.jet
+exit: nonzero # the planted bug fails the property
+stdout: ~ "reverse_twice_is_identity: FAIL" # the property is the failing claim
+stderr: ~ "property failed on case 11 of 1000 (seed 424242; replay with JET_PROP_SEED=424242)" # the run's budget is the given iterations, from the given seed
+stderr: ~ "minimized_inputs: xs = [0, 0, 0]" # the failure shrinks to a list of length 3
+
+step under_budget: jet test --grade=generated --iterations=10 --seed=424242 reverse.jet
+exit: 0 # ten cases stop before the first failing one
+stdout: ~ "reverse_twice_is_identity: pass" # the budget bounds the cases run
+
+step at_budget: jet test --grade=generated --iterations=11 --seed=424242 reverse.jet
+exit: nonzero # the eleventh case is the first failing one
+stderr: ~ "property failed on case 11 of 11 (seed 424242;" # the budget is exact
+
+step default: jet test --grade=generated reverse.jet
+exit: nonzero # the grade without iterations or seed
+stderr: ~ "property failed on case 1 of 1000 (seed 0; replay with JET_PROP_SEED=0)" # runs the grade's default 1000 cases from the fixed seed 0
+stderr: ~ "minimized_inputs: xs = [0, 0, 0]" # every seed shrinks to the same input
+
+step inherited_seed: jet test --grade=generated reverse.jet
+env: JET_PROP_SEED=424242
+exit: nonzero # the caller's JET_PROP_SEED replays a printed seed
+stderr: ~ "property failed on case 11 of 1000 (seed 424242;" # in place of the fixed 0
+
+step env_budget: jet test reverse.jet
+env: JET_PROP_SEED=424242
+env: JET_FUZZ_ITERATIONS=11
+exit: nonzero # JET_FUZZ_ITERATIONS sets the same budget without the flags
+stderr: ~ "property failed on case 11 of 11 (seed 424242;" # the documented environment control
+
+step zero_budget: jet test reverse.jet
+env: JET_FUZZ_ITERATIONS=0
+exit: nonzero # a budget of no cases would pass vacuously, so it is refused
+stderr: ~ "JET_FUZZ_ITERATIONS must be a whole number from 1 to 9223372036854775807" # the failure names the accepted budgets
+
+step ungraded: jet test --iterations=5 reverse.jet
+exit: nonzero # iterations alone is refused before anything builds
+stderr: ~ "`iterations` (flag) steers the generated grade, and this run has no `grade`" # names the missing grade
+stderr: ~ "Add `--grade=generated`, or drop `--iterations`" # and the fix
+
+step ungraded_seed: jet test --seed=3 reverse.jet
+exit: nonzero # so is a seed alone
+stderr: ~ "`seed` (flag) steers the generated grade, and this run has no `grade`" # names the missing grade
+
+step bad_grade: jet test --grade=fast reverse.jet
+exit: nonzero # generated is the one grade
+stderr: ~ "`--grade` needs `generated`, not `fast`" # the refusal names the accepted grade

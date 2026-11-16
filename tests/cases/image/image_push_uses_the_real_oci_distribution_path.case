@@ -1,0 +1,22 @@
+# Port of tests/image.rs:410-464, real TCP helper138-209 and project helper43-66.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four) await/capture/JSON filters.
+# One shared20s deadline +accept(deadline:0s)/5ms retries preserve the original partial-count FAIL.
+fixture: image_push_uses_the_real_oci_distribution_path.fixture
+mkdir: .jet/build
+copy: app.native .jet/build/app
+when os unix: chmod: .jet/build/app 0755
+spawn peer: jet run peer/main.jet
+limit: time=40
+await: file registry.port timeout 20s
+capture: port = text file registry.port
+step: jetpack image server --push http://127.0.0.1:{cap:port}/demo/server:1
+env: NO_COLOR=1
+exit: 0
+stderr: ~ "published" # original successful publication predicate
+wait: peer
+exit: 0
+json: stdout doc $ #= 7
+json: stdout doc $[?method="HEAD"] #= 2
+json: stdout doc $[?method="POST"] #= 2
+json: stdout doc $[?method="PUT"][?path^="/test-upload"] #= 2
+json: stdout doc $[?method="PUT"][?path~="/manifests/1"][0].body_has_schema_version = true

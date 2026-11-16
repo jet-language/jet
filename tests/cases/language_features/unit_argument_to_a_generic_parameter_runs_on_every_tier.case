@@ -1,0 +1,19 @@
+# A Unit value passed to a generic parameter (`finish(^done)` at T = Unit)
+# is an ordinary argument on every tier. The IR builder used to refuse it as
+# an internal compiler error ("Unit call argument"), which core.jobs.queue
+# also reached through queue_finish.
+fixture: unit_argument_to_a_generic_parameter_runs_on_every_tier.fixture
+step: jet run unit_argument.jet
+exit: 0
+stdout: = "unit through a generic: ok\nstep error: negative\n"
+stderr: empty
+step: jet build unit_argument.jet
+exit: 0
+step default: built
+exit: 0
+stdout: = "unit through a generic: ok\nstep error: negative\n"
+step: jet build --release unit_argument.jet
+exit: 0
+step release: built
+exit: 0
+stdout: = "unit through a generic: ok\nstep error: negative\n"

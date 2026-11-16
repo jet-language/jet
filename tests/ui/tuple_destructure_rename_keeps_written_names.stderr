@@ -1,0 +1,35 @@
+Error [jet.DestructureShapeMismatch]: `left` isn't a member of (part0: Int, part1: Int)
+  --> tests/ui/tuple_destructure_rename_keeps_written_names.jet:6:6
+    |
+  6 |     (left, right): pair()
+    |      ^^^^
+ Why: A tuple destructure binds each member by its name, never by position
+ Fix: Name the members, `(part0, part1): …`, or rename them: `{ part0: left, part1: right }: …`
+More: jet-lang.dev/e/E0313
+
+Error [jet.DestructureShapeMismatch]: `_0` isn't a member of (part0: Int, part1: Int)
+  --> tests/ui/tuple_destructure_rename_keeps_written_names.jet:8:7
+    |
+  8 |     { _0: first, _1: second }: pair()
+    |       ^^
+ Why: A tuple destructure binds each member by its name, never by position
+ Fix: Name the members, `(part0, part1): …`, or rename them: `{ part0: first, part1: second }: …`
+More: jet-lang.dev/e/E0313
+
+Error [jet.DestructureShapeMismatch]: `_0` isn't a member of (part0: Int, part1: Int)
+  --> tests/ui/tuple_destructure_rename_keeps_written_names.jet:10:7
+    |
+ 10 |     { _0: value, _1: value }: pair()
+    |       ^^
+ Why: A tuple destructure binds each member by its name, never by position
+ Fix: Name the members, `(part0, part1): …`, or rename them: `{ part0: value, part1: part1 }: …`
+More: jet-lang.dev/e/E0313
+
+Error [jet.NameAlreadyTaken]: The name `value` is already taken here
+  --> tests/ui/tuple_destructure_rename_keeps_written_names.jet:10:22
+    |
+ 10 |     { _0: value, _1: value }: pair()
+    |                      ^^^^^
+ Why: Inside one function, each name refers to exactly one thing
+ Fix: Pick a different name, or assign to the existing one with `value = ...`
+More: jet-lang.dev/e/E0118

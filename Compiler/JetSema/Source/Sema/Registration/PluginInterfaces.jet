@@ -1,0 +1,238 @@
+// Plugin interfaces are immutable semantic facts. The driver reads each
+// literal artifact's Component (jet_driver_plugin_facts); callers pass its
+// complete typed exports here.
+use jet_foundation.[
+    AccessConvention,
+    BinOp,
+    ComponentExportFact,
+    Dimension,
+    Expr,
+    InternalTag,
+    Item,
+    Type,
+    TypeParam,
+    UnitRatio,
+    UnitScaleProvenance,
+    ViewProvenance,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    ViewSourceProjection,
+    access_sigil,
+    dimension_base,
+    dimension_divide,
+    dimension_identity,
+    dimension_multiply,
+    measure_expression,
+    sha256_hex_bytes,
+    type_name,
+]
+
+// `unsupported` is the first Component type the export uses that has no Jet
+// spelling ("" when every type has one); a call to it reports that type.
+// `result_order` lists a tuple result's members in Component order.
+SemaPluginInterfaceExport: struct {
+    name: String
+    signature: String
+    params: [SemaPluginExportParam]
+    return_type: Type?
+    result_order: [String]
+    unsupported: String
+}
+
+SemaPluginExportParam: struct {
+    convention: AccessConvention
+    ty: Type
+}
+
+SemaPluginInterface: struct {
+    artifact: String
+    identity: String
+    digest: String
+    exports: [SemaPluginInterfaceExport]
+}
+
+SemaPluginArtifactAlias: struct {
+    artifact: String
+    identity: String
+}
+
+SemaPluginInterfaceFacts: struct {
+    interfaces: [SemaPluginInterface]
+    artifacts: [SemaPluginArtifactAlias]
+    digest: String
+}
+
+sema_plugin_put_export: fn(exports: &[SemaPluginInterfaceExport], export: SemaPluginInterfaceExport) Never! {
+    loop index in 0..<exports.len() {
+        if exports[index].name == export.name {
+            exports[index] = export
+            return
+        }
+    }
+    exports.push(export.copy())
+}
+
+sema_plugin_export_after: fn(left: SemaPluginInterfaceExport, right: SemaPluginInterfaceExport) -> Bool Never! {
+    left.name > right.name
+}
+
+sema_plugin_sort_exports: fn(exports: &[SemaPluginInterfaceExport]) Never! {
+    loop index in 1..<exports.len() {
+        item := exports[index]
+        cursor := index
+        loop cursor > 0 && sema_plugin_export_after(exports[cursor - 1], item) {
+            exports[cursor] = exports[cursor - 1]
+            cursor -= 1
+        }
+        exports[cursor] = item
+    }
+}
+
+sema_plugin_interface_after: fn(left: SemaPluginInterface, right: SemaPluginInterface) -> Bool Never! {
+    left.identity > right.identity
+}
+
+sema_plugin_sort_interfaces: fn(interfaces: &[SemaPluginInterface]) Never! {
+    loop index in 1..<interfaces.len() {
+        item := interfaces[index]
+        cursor := index
+        loop cursor > 0 && sema_plugin_interface_after(interfaces[cursor - 1], item) {
+            interfaces[cursor] = interfaces[cursor - 1]
+            cursor -= 1
+        }
+        interfaces[cursor] = item
+    }
+}
+
+sema_plugin_put_interface: fn(interfaces: &[SemaPluginInterface], interface: SemaPluginInterface) Never! {
+    loop index in 0..<interfaces.len() {
+        if interfaces[index].identity == interface.identity {
+            interfaces[index] = interface
+            return
+        }
+    }
+    interfaces.push(interface.copy())
+}
+
+sema_plugin_normalize_artifact: fn(raw: String) -> String? {
+    bytes := raw.trim().bytes()
+    loop bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{47}) -> _ := bytes.pop()
+    if bytes.len() == 0 -> return None
+    start := 0
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{47}) -> start = index + 1
+    }
+    name: String.from_bytes(bytes.slice(start, bytes.len())) ?? return None
+    name_bytes := name.bytes()
+    dot := -1
+    loop index in 0..<name_bytes.len() {
+        if name_bytes[index] == (U8{46}) -> dot = index
+    }
+    stem: if dot > 0 -> String.from_bytes(name_bytes.slice(0, dot)) ?? name else -> name
+    if stem == "" -> return None
+    Val(stem)
+}
+
+// Each literal artifact path keeps its own interface: two artifacts that share
+// a file name are different Components.
+sema_plugin_put_alias: fn(aliases: &[SemaPluginArtifactAlias], artifact: String, identity: String) Never! {
+    loop alias in aliases {
+        if alias.artifact == artifact {
+            return
+        }
+    }
+    aliases.push(SemaPluginArtifactAlias{artifact: artifact, identity: identity})
+}
+
+sema_plugin_identity: fn(artifact: String, digest: String) -> String Never! {
+    bytes := artifact.bytes()
+    output := ""
+    index := 0
+    loop index < bytes.len() {
+        first: Int{bytes[index]}
+        width: if {
+            first < 128 -> 1
+            first < 224 -> 2
+            first < 240 -> 3
+            else -> 4
+        }
+        if {
+            width == 1 && ((first >= 48 && first <= 57) || (first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> {
+                output = "{output}{String.from_bytes([bytes[index]]) ?? "_"}"
+            }
+            else -> { output = "{output}_" }
+        }
+        index += width
+    }
+    "PluginInterface__{output}__{digest}"
+}
+
+sema_plugin_unit_ratio: fn(value: UnitRatio) -> String Never! {
+    if value.denominator == 1 -> return "{value.numerator}"
+    return "{value.numerator}/{value.denominator}"
+}
+
+sema_plugin_sha256: fn(text: String) -> String Never! { sha256_hex_bytes(text.bytes()) }
+
+sema_plugin_interface_by_artifact: fn(facts: SemaPluginInterfaceFacts, artifact: String) -> SemaPluginInterface? {
+    found: loop alias in facts.artifacts {
+        if alias.artifact == artifact {
+            break alias.identity
+        }
+    } ?? return None
+    loop interface in facts.interfaces {
+        if interface.identity == found -> return Val(interface)
+    }
+    None
+}
+
+sema_plugin_interface_by_identity: fn(facts: SemaPluginInterfaceFacts, identity: String) -> SemaPluginInterface? {
+    loop interface in facts.interfaces {
+        if interface.identity == identity -> return Val(interface)
+    }
+    None
+}
+
+// One plugin artifact the driver read: `artifact` the literal path a
+// `.load("…")` call names, `exports` its Component's function exports
+// (JetPlugin jet_plugin_component_exports).
+SemaPluginComponent: struct {
+    artifact: String
+    exports: [ComponentExportFact]
+}
+
+// The interfaces of the project's plugins, read from their Components. An
+// interface is named by its artifact's stem (`mathkit` for `…/mathkit.wasm`)
+// and its identity pins the exports' signatures, so a changed Component is a
+// different type.
+sema_plugin_interface_facts: fn(components: [SemaPluginComponent]) -> SemaPluginInterfaceFacts Never! {
+    interfaces := [SemaPluginInterface]{}
+    aliases := [SemaPluginArtifactAlias]{}
+    digests := ""
+    loop component in components {
+        stem: sema_plugin_normalize_artifact(component.artifact) ?? next
+        exports := [SemaPluginInterfaceExport]{}
+        loop fact in component.exports {
+            sema_plugin_put_export(exports, sema_plugin_component_export(fact))
+        }
+        sema_plugin_sort_exports(exports)
+        signatures: (loop export in exports -> export.signature).join("\n")
+        digest: sema_plugin_sha256(signatures)
+        identity: sema_plugin_identity(stem, digest)
+        sema_plugin_put_interface(interfaces, SemaPluginInterface{artifact: stem, identity: identity, digest: digest, exports: exports})
+        sema_plugin_put_alias(aliases, component.artifact, identity)
+        digests = "{digests}{identity}\n"
+    }
+    sema_plugin_sort_interfaces(interfaces)
+    SemaPluginInterfaceFacts{interfaces: interfaces, artifacts: aliases, digest: sema_plugin_sha256(digests)}
+}
+
+// A Component export as a plugin method: each parameter is read, and the
+// signature spells the export as `name: fn(a: T, …) R`.
+sema_plugin_component_export: fn(fact: ComponentExportFact) -> SemaPluginInterfaceExport Never! {
+    params: loop parameter in fact.params -> SemaPluginExportParam{convention: AccessConvention.Read, ty: parameter.ty}
+    labels: loop parameter in fact.params -> "{parameter.name}: {type_name(parameter.ty)}"
+    result: if fact.result == .Val(ty) -> " {type_name(ty)}" else -> ""
+    SemaPluginInterfaceExport{name: fact.name, signature: "{fact.name}: fn({labels.join(", ")}){result}", params: params, return_type: fact.result, result_order: fact.result_order, unsupported: fact.unsupported}
+}

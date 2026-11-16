@@ -1,0 +1,33 @@
+// Member order is part of a record's type and decides how records compare.
+
+earlier: fn(a: (year: Int, month: Int), b: (year: Int, month: Int)) -> Bool { a < b }
+
+note: fn(label: String, value: Int) -> Int {
+    print(label)
+    value
+}
+
+made: fn() -> (year: Int, month: Int) { (month: note("month", 3), year: note("year", 2024)) }
+
+run: fn() {
+    // The first written member decides first.
+    print((year: 2024, month: 3) < (year: 2023, month: 11))
+    print((month: 3, year: 2024) < (month: 11, year: 2023))
+
+    // Swapping the operands gives the mirrored answer.
+    older: (year: 2023, month: 11)
+    newer: (year: 2024, month: 3)
+    print("{older < newer} {newer > older}")
+
+    // A record in another order converts to the expected type by name.
+    print(earlier((month: 3, year: 2024), (month: 11, year: 2023)))
+
+    // An untyped list takes its order from the first entry.
+    dates := [(year: 2024, month: 3), (month: 11, year: 2023)]
+    dates.sort()
+    print("{dates[0].year}-{dates[0].month} {dates[1].year}-{dates[1].month}")
+
+    // The members run in written order, then take the expected type's order.
+    date: made()
+    print("{date.year}-{date.month}")
+}

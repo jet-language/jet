@@ -1,0 +1,15 @@
+use {
+    app
+    web: core.web
+}
+
+Crew: struct {
+    #App.Public whoever: fn(self) -> String { owner_name() }
+}
+
+owner_name: fn() -> String {
+    who: app.caller()
+    "owner {who}"
+}
+
+run: fn() { _: web.app().mount(Crew{}) }

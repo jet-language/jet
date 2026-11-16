@@ -1,0 +1,171 @@
+// Package-building helpers shared by the scaling corpora (Corpora.jet) and
+// the domain corpora (Domains.jet), Tower #4601; the twin of package.mjs.
+use {
+    crypto: core.crypto
+    files: core.files
+    rx: core.regex
+}
+
+MODULUS: 1000003
+
+M: MODULUS
+
+// Writes the package into a new directory and returns its entry; the twin
+// of generate.mjs's writeFiles. IO errors propagate as they are.
+write_files: fn(package: [String:String], directory: String) -[FS, Env]> String Err! {
+    files.create_dir_all(directory)
+    // Refuse to leave stale module files when regenerating a smaller workload.
+    taken: package.keys().map(fn(name) { files.join(directory, name) }).find(fn(path) { files.exists(path) })
+    if taken == .Val(path) -> return Err("Output already exists: {path}")
+    loop (name, text) in package {
+        path: files.join(directory, name)
+        files.create_dir_all(files.dirname(path))
+        files.write(path, text)
+    }
+    Ok(files.absolute(files.join(directory, "main.jet")))
+}
+
+// JavaScript's `\W` is ASCII-only, hence the spelled-out class.
+manifest: fn(name: String) -> String {
+    safe: (rx.compile("[^A-Za-z0-9_]") ?? panic("the name pattern compiles: {err}")).replace(name, "_")
+    "name: \"{safe}\"\nversion: \"0.1.0\"\nedition: \"2026\"\noutputs: {{ app: .Executable{{ entry: run }} }}\n"
+}
+
+// How a draw maps the 32-bit stream onto a range: scaled as the float
+// `next / 2^32` (package.mjs), or by remainder (mixed.mjs).
+Draw: enum {
+    Scaled
+    Remainder
+}
+
+// mulberry32: the stream depends only on the seed. The state and every step
+// are 32-bit words, as JavaScript's `>>> 0` and `Math.imul` keep them.
+Seeded: struct {
+    state: U32
+    draw: Draw
+}
+
+impl Seeded {
+    next: fn(&self) -> Int {
+        self.state = wrapping(self.state + U32{1831565813})
+        t := self.state
+        t = wrapping(t.bit_xor(t >> 15) * t.bit_or(U32{1}))
+        t = t.bit_xor(wrapping(t + wrapping(t.bit_xor(t >> 7) * t.bit_or(U32{61}))))
+        Int{t.bit_xor(t >> 14)}
+    }
+
+    int: fn(&self, lo: Int, hi: Int) -> Int {
+        span: hi - lo + 1
+        if self.draw == {
+            .Scaled -> lo + ((self.next() * span) >> 32)
+            .Remainder -> lo + self.next() % span
+        }
+    }
+
+    // copy: the picked word is the caller's own
+    pick: fn(&self, list: [String]) -> String { list[self.int(0, list.len() - 1)].copy() }
+}
+
+seeded: fn(seed: Int, draw: Draw) -> Seeded { Seeded{state: wrapping(U32{seed}), draw: draw} }
+
+// A file's lines. A leading U+FEFF is the file's encoding mark, not line
+// text, and goes; is_code_line keeps Unicode White_Space trimming, which
+// leaves U+FEFF in a line's text.
+lines: fn(text: String) -> [String] { text.removeprefix("﻿").split("\n").to_list() }
+
+is_code_line: fn(line: String) -> Bool {
+    text: line.trim()
+    text.len() > 0 && !text.starts_with("//")
+}
+
+code_of: fn(list: [String]) -> Int { list.filter(fn(line) { is_code_line(line) }).len() }
+
+code_lines: fn(files: [String:String]) -> Int {
+    files.keys().filter(fn(name) { !name.ends_with("package.jet") }).map(fn(name) { code_of(lines(files[name])) }).to_list().sum()
+}
+
+// One digest over the whole package: each file's name and bytes, by name.
+source_digest: fn(files: [String:String]) -> String {
+    // copy: the names are sorted apart from the map
+    names := files.keys().map(fn(name) { name.copy() }).to_list()
+    names.sort()
+    data := [U8]{}
+    loop name in names {
+        data.extend(name.bytes())
+        data.push(U8{0})
+        data.extend(files[name].bytes())
+        data.push(U8{0})
+    }
+    crypto.sha256(data).hex()
+}
+
+// Consumers: `entries` are functions `(seed: Int) -> Int`. They are called
+// from group functions of at most GROUP calls each (a tree, so no consumer
+// function grows with N), written to `calls_<prefix>_<k>.jet` files of at
+// most FILE_GROUPS groups; `run` calls the roots.
+GROUP: 32
+
+FILE_GROUPS: 24
+
+consumer_tree: fn(files: &[String:String], entries: [String], prefix: String) -> [String] {
+    // copy: the level is rebuilt each round
+    level := entries.copy()
+    depth := 0
+    loop level.len() > GROUP {
+        next_level := [String]{}
+        groups := [[String]]{}
+        loop group in 0..<(level.len() + GROUP - 1) /% GROUP {
+            name: "{prefix}_l{depth}_g{group}"
+            body := [String]{"{name}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
+            loop index in group * GROUP..<min(level.len(), (group + 1) * GROUP) {
+                body.push("    acc = (acc * 31 + {level[index]}(acc + {index - group * GROUP + 1})) % {M}")
+            }
+            body.extend(["    acc", "}}", ""])
+            groups.push(body)
+            next_level.push(name)
+        }
+        loop chunk in 0..<(groups.len() + FILE_GROUPS - 1) /% FILE_GROUPS {
+            text := [String]{}
+            loop index in chunk * FILE_GROUPS..<min(groups.len(), (chunk + 1) * FILE_GROUPS) {
+                text.extend(groups[index])
+            }
+            files["calls/{prefix}_l{depth}_{chunk}.jet"] = text.join("\n")
+        }
+        level = next_level
+        depth += 1
+    }
+    level
+}
+
+// The entry file: `run` folds every root into one checksum line, after any
+// declarations the shape already placed in main.jet.
+finish: fn(name: String, files: &[String:String], roots: [String]) {
+    body := [String]{"run: fn() {{", "    checksum := 0"}
+    loop (index, root) in roots {
+        body.push("    checksum = (checksum * 31 + {root}({index + 1})) % {M}")
+    }
+    body.extend(["    print(\"{name} checksum {{checksum}}\")", "}}", ""])
+    before: if files.get("main.jet") == .Val(text) -> "{text}\n" else -> ""
+    files["main.jet"] = "{before}{body.join("\n")}"
+    files["package.jet"] = manifest(name)
+}
+
+// Split `items` (lists of lines) into files of about `per_file` code lines.
+pack: fn(files: &[String:String], prefix: String, items: [[String]], per_file: Int{600}) {
+    current := [String]{}
+    size := 0
+    index := 0
+    loop item in items {
+        // copy: the item's lines join the file being filled
+        current.extend(item.copy())
+        current.push("")
+        size += item.len()
+        if size >= per_file {
+            files["{prefix}_{index}.jet"] = current.join("\n")
+            index += 1
+            current = [String]{}
+            size = 0
+        }
+    }
+    if current.len() > 0 -> files["{prefix}_{index}.jet"] = current.join("\n")
+}

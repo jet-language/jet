@@ -1,0 +1,62 @@
+// The type a computed alias chooses keeps its identity: a `Storage<2>` is an
+// `Inline<2>` and a `Storage<100>` is a `Heap`, so each passes where its
+// chosen type is wanted. `Storage<SMALL>` reads a constant as `Storage<4>`
+// would, a condition may compare with a constant (`LIMIT`), and `else if`
+// picks a middle choice.
+Store: trait {
+    count: fn(self) -> Int
+}
+
+Inline: struct<N: Int> {
+    items: [Int#N]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+    }
+}
+
+Pair: struct {
+    first: Int
+    second: Int
+
+    impl Store {
+        count: fn(self) -> Int { 2 }
+    }
+}
+
+Heap: struct {
+    items: [Int]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+    }
+}
+
+SMALL: 4
+
+LIMIT: 16
+
+Storage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }
+
+Sized<N: Int>: Store #run { if N == 2 -> Pair else if N <= LIMIT -> Inline<N> else -> Heap }
+
+fixed: fn(store: Inline<2>) -> Int { store.count() }
+
+counted: fn(store: Inline<4>) -> Int { store.count() }
+
+growable: fn(store: Heap) -> Int { store.count() }
+
+paired: fn(store: Pair) -> Int { store.first + store.second }
+
+run: fn() {
+    small: Storage<2>{items: [Int#2]{1, 2}}
+    big: Storage<100>{items: [1, 2, 3]}
+    four: Storage<SMALL>{items: [Int#4]{1, 2, 3, 4}}
+    pair: Sized<2>{first: 3, second: 4}
+    middle: Sized<3>{items: [Int#3]{1, 2, 3}}
+    print(fixed(small))
+    print(growable(big))
+    print(counted(four))
+    print(paired(pair))
+    print(middle.count())
+}

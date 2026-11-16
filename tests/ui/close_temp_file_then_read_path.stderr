@@ -1,0 +1,13 @@
+Error [jet.UseAfterMove]: `owner` was consumed by `close`, so it can't be used here
+  --> tests/ui/close_temp_file_then_read_path.jet:7:17
+    |
+  7 |     print(owner.path)
+    |                 ^^^^
+  --> tests/ui/close_temp_file_then_read_path.jet:6:11
+    |
+  6 |     close(owner)
+    |           ^^^^^ `owner` moved to `close` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `owner` after the move, or give `close` a copy with `owner.copy()` where it moved.
+ Note: acquire a new `TempFile` resource; closed resources cannot be copied or reused
+More: jet-lang.dev/e/E0121

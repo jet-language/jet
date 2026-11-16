@@ -1,0 +1,16 @@
+#!/bin/sh
+host=unknown
+generation=unknown
+for arg in "$@"; do
+  case "$arg" in
+    *jetos.host=*) host="${arg#*jetos.host=}"; host="${host%% *}" ;;
+  esac
+  case "$arg" in
+    *jetos.generation=*) generation="${arg#*jetos.generation=}"; generation="${generation%% *}" ;;
+  esac
+done
+case " $* " in
+  *'jetos.mode=desktop-verify'*) echo "jetos proof: display manager command gdm"; echo "jetos proof: desktop session command gnome-session"; echo "jetos proof: terminal fallback ready"; echo "JETOS_GUEST_PROOF: {\"state\":\"guest-passed\",\"host\":\"$host\",\"generation\":\"$generation\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"desktop-launchers-run\"]}" ;;
+  *' -boot c '*) echo "JETOS_GUEST_PROOF: {\"state\":\"guest-passed\",\"host\":\"$host\",\"generation\":\"$generation\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\"]}" ;;
+esac
+exit 0

@@ -1,0 +1,8 @@
+# tests/determinism.rs::pure_fn_ambient_random_still_e3403 at tests/determinism.rs:395; hand-port
+fixture: pure_fn_ambient_random_still_e3403.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet --json
+exit: 1 # tests/determinism.rs:406 is rejected
+json: stdout doc $.reports[?code="E3403"] #>= 1 # tests/determinism.rs:406 reports E3403

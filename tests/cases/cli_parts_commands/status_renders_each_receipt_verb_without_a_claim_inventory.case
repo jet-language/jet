@@ -1,0 +1,51 @@
+# Port of tests/cli_parts/commands.rs:54-92; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# PENDING-SEAM(receipt-store): pure Compiler ReceiptStore lookup/codec does not publish records.
+refused: receipt-store
+fixture: fixtures/status_custom
+step: jet status run.jet --json
+exit: 0
+stdout: ~ "\"claim\":\"custom-api\"" # original predicate
+stdout: ~ "\"claim\":\"custom-test\"" # original predicate
+stdout: ~ "\"action\":\"jet custom-api run.jet\"" # original predicate
+stdout: ~ "\"action\":\"jet custom-test run.jet\"" # original predicate
+# Original ReceiptStore injection and EVERY assertion:
+# #[test]
+# fn status_renders_each_receipt_verb_without_a_claim_inventory() {
+#     let dir = isolated_cwd("status_receipt_verbs");
+#     let source = dir.join("run.jet");
+#     fs::write(&source, "fn run() { print(\"status\") }\n").unwrap();
+#     let store = jet::ReceiptStore::ReceiptStore::new(dir.join(".jet/receipts"));
+#     for verb in ["custom-api", "custom-test"] {
+#         // The test process's cwd is the checkout, so the recorded argv names
+#         // the target absolutely; the receipt identity resolves argv against cwd.
+#         let argv = vec![verb.to_string(), source.to_string_lossy().into_owned()];
+#         store
+#             .record(verb, &argv, std::slice::from_ref(&source), 0, b"ok", b"")
+#             .unwrap();
+#     }
+# 
+#     let output = Command::new(jet())
+#         .args(["status", "run.jet", "--json"])
+#         .current_dir(&dir)
+#         .env("NO_COLOR", "1")
+#         .output()
+#         .unwrap();
+#     assert_eq!(
+#         output.status.code(),
+#         Some(0),
+#         "{}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let json = String::from_utf8(output.stdout).unwrap();
+#     assert!(json.contains("\"claim\":\"custom-api\""), "{json}");
+#     assert!(json.contains("\"claim\":\"custom-test\""), "{json}");
+#     assert!(
+#         json.contains("\"action\":\"jet custom-api run.jet\""),
+#         "{json}"
+#     );
+#     assert!(
+#         json.contains("\"action\":\"jet custom-test run.jet\""),
+#         "{json}"
+#     );
+# }

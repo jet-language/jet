@@ -1,0 +1,12 @@
+# tests/pkg.rs::toolchain_only_lock_keeps_declared_path_unlocked at tests/pkg.rs:3403; hand-port
+# Claim: toolchain-only lock leaves path dep unlocked (tests/pkg.rs:3403)
+# Claim: locked fetch rejects missing dep with E1217 (tests/pkg.rs:3403)
+fixture: toolchain_only_lock_keeps_declared_path_unlocked.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check run.jet
+exit: 0 # tests/pkg.rs:3403 ordinary compile ok
+step: jet fetch --locked
+exit: 1 # tests/pkg.rs:3403 locked fetch E1217
+stderr: ~ "E1217" # tests/pkg.rs:3403 locked fetch E1217

@@ -1,0 +1,200 @@
+// The runtime's C census (#6693): which members of the C platform archives
+// (musl's libc.a, libgcc.a, libgcc_eh.a, or any other) a static link of the
+// Jet runtime object pulls in, and the reference that pulls each one. It
+// resolves the way `ld -static` does over one archive group: the objects'
+// strong undefined references pull the first archive member that defines
+// them, repeated until nothing changes. Weak references pull nothing.
+//
+//   jet Tools/agent/RuntimeCCensus.jet [options] <object>... -- <archive>...
+//
+//   --start          also reference musl's `__libc_start_main`, as a program
+//                    the linker starts through libc does (StaticLink.jet
+//                    link_startup); without it the census is the owned
+//                    startup's (link_owned_startup), which references none.
+//   --root=a,b       also reference these names (a pack's extra roots).
+//   --provided=a,b   treat these names as defined outside the archives, as a
+//                    Jet port of them would be.
+//   --expect-none    exit 1 when any archive member is pulled in.
+//
+// The unresolved names it prints include those the linker itself defines
+// (StaticLink.jet link_linker_names, such as `_GLOBAL_OFFSET_TABLE_`).
+//
+// Example, over a built runtime (JetCli's .jet/build/jet-runtime) and the
+// musl sysroot and pack `jet env fetch-toolchain --json` names:
+//   jet Tools/agent/RuntimeCCensus.jet R/jet_runtime_jet.o -- \
+//       S/usr/lib/libc.a P/lib/clang/21/lib/x86_64-unknown-linux-musl/libclang_rt.builtins.a
+//
+// The Jet twin of runtime-c-census.mjs (gauntlet tool entry runtime-c-census).
+use {
+    binary: core.encoding.binary
+    collections: core.collections
+    files: core.files
+    process: core.process
+    text: core.text
+}
+
+ELF_MAGIC: 0x7f454c46
+
+// One object's global symbols: what it defines and what it references
+// strongly. `name` is how the census prints it.
+Symbols: struct {
+    name: String
+    defines: [String]
+    references: [String]
+}
+
+// The names defined so far and every reference wanted, with what made it, in
+// the order they were first wanted.
+Census: struct {
+    defined: Set<String>
+    wanted: Set<String>
+    wants: [(from: String, name: String)]
+}
+
+// Wants `name` for `from` unless it is defined or already wanted.
+want: fn(census: &Census, name: String, from: String) {
+    if census.defined.has(name) || census.wanted.has(name) {
+        return
+    }
+    census.wanted.add(name.copy())
+    census.wants.push((name: name.copy(), from: from.copy()))
+}
+
+elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
+    // The magic and EI_CLASS ELFCLASS64.
+    if bytes.len() < 64 || (binary.unpack(">IB", bytes.slice(0, 5)) ?? []) != [ELF_MAGIC, 2] {
+        process.fail(1, "{name}: not an ELF64 object")
+    }
+    // The little-endian fields `format` reads from the `size` bytes at `at`.
+    fields: fn(at: Int, format: String, size: Int) -> [Int] { binary.unpack(format, bytes.slice(at, at + size)) ?? process.fail(1, "an ELF64 object ends inside the {size} bytes at {at}") }
+    // e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum
+    header: fields(0x28, "<QIHHHHH", 22)
+    symbols := Symbols{name: name.copy(), defines: [], references: []}
+    loop index in 0..<header[6] {
+        // sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_addralign, sh_entsize
+        table: fields(header[0] + index * header[5], "<IIQQQQIIQQ", 64)
+        // sh_type 2, a symbol table
+        if table[1] != 2 -> next
+        strings: fields(header[0] + table[6] * header[5], "<IIQQQQIIQQ", 64)[4]
+        // Every entry after the first that starts inside the table.
+        at := table[4] + table[9]
+        loop at < table[4] + table[5] {
+            // st_name, st_info, st_other, st_shndx; the binding is st_info's high nibble
+            symbol: fields(at, "<IBBH", 8)
+            at += table[9]
+            bind: symbol[1] >> 4
+            // STB_LOCAL
+            if symbol[0] == 0 || bind == 0 -> next
+            start: strings + symbol[0]
+            end := start
+            loop bytes[end] != 0 -> end += 1
+            symbol_name: text.decode_latin1(bytes.slice(start, end))
+            // SHN_UNDEF, STB_WEAK
+            if {
+                symbol[3] != 0 -> symbols.defines.push(symbol_name)
+                bind != 2 -> symbols.references.push(symbol_name)
+            }
+        }
+    }
+    symbols
+}
+
+// The ELF members of a System V / GNU ar archive, long names resolved. The
+// long-name table (`//`) is read, and every member that is not ELF, the
+// symbol tables (`/`, `/SYM64/`) among them, is passed over. Names and sizes
+// are read as the original reads them: latin1, the size as parseInt does,
+// and a size that is not a number ends the archive.
+archive_members: fn(bytes: [U8], label: String) -> [Symbols] {
+    if !bytes.starts_with("!<arch>\n".bytes()) -> process.fail(1, "{label}: not an ar archive")
+    members := [Symbols]{}
+    long_names := [U8]{}
+    at := 8
+    loop at + 60 <= bytes.len() {
+        raw: text.decode_latin1(bytes.slice(at, at + 16)).trim_end()
+        size: text.leading_int(text.decode_latin1(bytes.slice(at + 48, at + 58))) ?? break
+        body: collections.slice_clamped(bytes, at + 60, at + 60 + size)
+        // `%%`, like JavaScript's remainder, takes the sign of the size.
+        at += 60 + size + size %% 2
+        if raw == "//" {
+            long_names = body.copy()
+            next
+        }
+        name := raw
+        // A long name is `/N`, N its offset in the long-name table, and runs
+        // to the newline after it (without one, to the table's last byte).
+        if (Regex{"^/[0-9]+$"}).is_match(raw) {
+            start: raw.removeprefix("/").to_int() ?? 0
+            newline: collections.slice_clamped(long_names, start, long_names.len()).index_of(U8{10})
+            name = text.decode_latin1(collections.slice_clamped(long_names, start, if newline == .Val(offset) -> start + offset else -> -1))
+        }
+        if binary.unpack_u32be(body, 0) == Val(ELF_MAGIC) {
+            members.push(elf_symbols(body, "{label}({name.removesuffix("/")})"))
+        }
+    }
+    members
+}
+
+// The names the `flag=a,b` options list.
+listed: fn(options: [String], flag: String) -> [String] {
+    options.filter(fn(option) { option.starts_with("{flag}=") }).map(fn(option) { option.removeprefix("{flag}=") }).join(",").split(",").filter(fn(name) { name != "" }).to_list()
+}
+
+run: fn() {
+    args: process.args()
+    split: args.index_of("--") ?? process.fail(1, "usage: RuntimeCCensus.jet [--start] [--root=a,b] [--provided=a,b] [--expect-none] <object>... -- <archive>...")
+    options: args.slice(0, split).filter(fn(arg) { arg.starts_with("--") })
+    objects: args.slice(0, split).filter(fn(arg) { !arg.starts_with("--") })
+    loop option in options {
+        if !["--start", "--expect-none"].contains(option) && !option.starts_with("--root=") && !option.starts_with("--provided=") {
+            process.fail(1, "unknown option {option}")
+        }
+    }
+    if objects.len() == 0 -> process.fail(1, "no object to census")
+
+    census := Census{defined: Set.from(listed(options, "--provided")), wanted: Set.from([String]{}), wants: []}
+    found: loop path in objects -> elf_symbols(files.read_bytes(path), files.basename(path))
+    loop object in found {
+        loop name in object.defines -> census.defined.add(name)
+    }
+    loop object in found {
+        loop name in object.references -> want(census, name, object.name)
+    }
+    if options.contains("--start") -> want(census, "__libc_start_main", "<startup>")
+    loop name in listed(options, "--root") -> want(census, name, "<root>")
+    outside := census.wants.map(fn(item) { item.name })
+    outside.sort()
+
+    members := [Symbols]{}
+    loop path in args.slice(split + 1, args.len()) {
+        members.extend(archive_members(files.read_bytes(path), files.basename(path)))
+    }
+    index := [String:Int]{}
+    loop at in 0..<members.len() {
+        loop name in members[at].defines {
+            if !index.has_key(name) -> index[name] = at
+        }
+    }
+    // Each want is resolved once, in the order wanted, so the wants a pulled
+    // member adds come after it. A pulled member's names are all defined, so
+    // no member is pulled twice.
+    pulled := [String]{}
+    at := 0
+    loop at < census.wants.len() {
+        item: census.wants[at]
+        at += 1
+        if census.defined.has(item.name) -> next
+        member: members[index.get(item.name) ?? next]
+        pulled.push("  {member.name} <- {item.from} ({item.name})")
+        loop name in member.defines -> census.defined.add(name.copy())
+        loop name in member.references -> want(census, name, member.name)
+    }
+    unresolved := census.wants.filter(fn(item) { !census.defined.has(item.name) }).map(fn(item) { item.name })
+    unresolved.sort()
+
+    print("objects: {objects.map(fn(path) { files.basename(path) }).join(" ")}")
+    print("references outside the objects ({outside.len()}): {outside.join(" ")}")
+    print("archive members pulled in ({pulled.len()}):")
+    loop row in pulled -> print(row)
+    print("unresolved ({unresolved.len()}): {unresolved.join(" ")}")
+    if options.contains("--expect-none") && pulled.len() > 0 -> process.exit(1)
+}

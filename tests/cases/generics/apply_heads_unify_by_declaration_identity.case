@@ -1,0 +1,20 @@
+# A generic call compares Apply heads by the declaration they name, not by
+# how a file spells them (sema_type_resolve_declared_with_generics, which
+# sema_infer_callable runs over every parameter and argument). A codec-bound
+# `shelf.Box<Event>` decoded from raw JSON in one file and passed back to a
+# generic function of that module unifies; a local `Box<Event>` with the same
+# name and arity is a different declaration, so `T` finds no binding.
+fixture: apply_heads_unify_by_declaration_identity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+cwd: {work}/same
+exit: 0
+stdout: = "cache:2.0\n"
+step: jet check main.jet
+cwd: {work}/other
+exit: 1
+stderr: ~ "Error [jet.UninferableTypeArgument]: Can't figure out what `T` should be here" # a same-name local Box is another declaration, so T has no binding
+stderr: ~ "main.jet:14:18" # the refusal points at the generic call's argument
+stderr: ~ "jet-lang.dev/e/E0904" # the refusal code is E0904

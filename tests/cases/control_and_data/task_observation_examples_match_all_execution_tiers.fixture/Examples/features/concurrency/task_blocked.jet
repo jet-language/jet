@@ -1,0 +1,19 @@
+// A detached child blocked on a full channel when run returns is cancelled
+// at its send, and the process exits 0 with no report.
+package: {
+    name: "task_blocked"
+    authority: { allow: [Time.Wait] }
+}
+
+use tasks: core.tasks
+
+run: fn() {
+    (sender, receiver): channel<Int>(1)
+    sender.send(1)
+    blocked: task &&sender {
+        sender.send(2)
+        receiver.close()
+    }
+    blocked.detach()
+    tasks.yield_now()
+}

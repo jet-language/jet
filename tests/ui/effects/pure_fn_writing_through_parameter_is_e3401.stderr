@@ -1,0 +1,21 @@
+Error [jet.ImpureCallInPureContext]: `write` writes a cell through `c`
+  --> tests/ui/effects/pure_fn_writing_through_parameter_is_e3401.jet:8:5
+    |
+  8 |     c.value += 1
+    |     ^^^^^^^
+ Why: `c` may hold a module cell, and a write to it outlives the call so a later read sees it, but `write` declares `-[]>`
+ Fix: Take the cell as a `&` parameter so the caller lends it for writing, return the new value instead, or drop the `-[]>` bound from `write` so its effects are inferred
+ Denial: pure
+ Call chain: write
+More: jet-lang.dev/e/E3401
+
+Error [jet.ImpureCallInPureContext]: `relay` reaches a write of a cell through `c`
+  --> tests/ui/effects/pure_fn_writing_through_parameter_is_e3401.jet:13:5
+    |
+ 13 |     c.value += 1
+    |     ^^^^^^^
+ Why: relay → write_back writes a cell through `c`, which outlives the call — the whole call chain must be pure inside `relay`
+ Fix: Move the write out of `write_back`, or drop the `-[]>` bound from `relay` so its effects are inferred
+ Denial: pure
+ Call chain: relay → write_back
+More: jet-lang.dev/e/E3401

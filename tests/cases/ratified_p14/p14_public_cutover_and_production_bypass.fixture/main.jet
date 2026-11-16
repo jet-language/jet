@@ -1,0 +1,39 @@
+// The P14 public surface in one consumer: an open user dimension and a derived
+// family beside the prelude SI families, a `distinct Int(1..6)` refinement that
+// proves an index, and an inline `Int(0..100)` in field, parameter and result
+// positions with its fallible conversion.
+#UnitFamily(Information, dimension, base: token) { token }
+
+#UnitFamily(Throughput, dimension: Information / Time, base: token_per_second) { token_per_second }
+
+Die: distinct Int(1..6)
+
+Gauge: struct {
+    level: Int(0..100)
+}
+
+rate_of: fn(r: TokenPerSecond) { print(r) }
+
+speed_of: fn(v: MeterPerSecond) { print(v) }
+
+pick: fn(faces: [String#7], roll: Die) -[!Panic]> String { faces[roll].copy() }
+
+half: fn(p: Int(0..100)) -> Int { p /% 2 }
+
+roll_of: fn(raw: Int) -> Die { Die.from_int(raw) }
+
+checked: fn(raw: Int) -> Int(0..100) { Int(0..100).from_int(raw) }
+
+run: fn() {
+    rate_of(12token / 3s)
+    speed_of(12meter / 2s)
+    print(Meter{2kilometer})
+    faces: [String#7]{"none", "one", "two", "three", "four", "five", "six"}
+    print(pick(faces, Die.from_int(6)))
+    print(pick(faces, roll_of(9) ?? Die.from_int(2)))
+    g: Gauge{level: 40}
+    print(half(g.level))
+    fallback: Int(0..100).from_int(1)
+    print(checked(50) ?? fallback)
+    print(checked(500) ?? fallback)
+}

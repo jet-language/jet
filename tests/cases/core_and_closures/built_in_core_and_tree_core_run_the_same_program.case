@@ -1,0 +1,27 @@
+# Claim: a program compiled against the Core built into jet runs as it does against the toolchain tree's Core, at O0, O1 and O2.
+# The program instantiates Core's generic sort with a user type, passes it a user closure, and the closure's failure reaches the caller's row through the Core body.
+# The `tree` steps read Core from the toolchain tree; the `built_in` steps run without one, so jet takes the Core sources built into it and binds the program's Core calls to the Core library it carries.
+fixture: built_in_core_and_tree_core_run_the_same_program/input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step tree_o0: jet run -O0 run.jet
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+step built_in_o0: jet run -O0 run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+step tree_o1: jet run -O1 run.jet
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+step built_in_o1: jet run -O1 run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+step tree_o2: jet run -O2 run.jet
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+step built_in_o2: jet run -O2 run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"

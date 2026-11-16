@@ -1,0 +1,82 @@
+// The interfaces of the entry package's plugins, read from the plugins
+// themselves on every compile: each literal artifact a `.load("…")` call
+// names is read from the entry's package root, where the program loads it
+// (JetPlugin Link.jet), and its Component's function exports become that
+// artifact's interface (jet_plugin_component_exports). Sema cannot read
+// files, so the exports cross here and sema builds the typed facts
+// (sema_plugin_interface_facts). An artifact that cannot be read or decoded
+// has no interface, so calls through its handle don't resolve.
+use {
+    plugin_facts_files: core.files
+    jet_foundation.[ASTTables, ExprNode, Program, ast_expr, ast_visit_body]
+    jet_plugin.[jet_plugin_component_exports]
+    jet_sema.[SemaPluginComponent, SemaPluginInterfaceFacts, SemaRegistrationModuleInput, sema_plugin_interface_facts]
+}
+
+jet_driver_plugin_facts: fn(request: JetDriverCompileRequest, inputs: [SemaRegistrationModuleInput], package_identity: String) -[FS]> SemaPluginInterfaceFacts {
+    root: jet_driver_entry_root_path(request.authorized_sources)
+    artifacts := [String]{}
+    loop input in inputs {
+        if input.package_identity == package_identity {
+            jet_driver_plugin_artifacts(artifacts, input.program)
+        }
+    }
+    artifacts.sort()
+    components := [SemaPluginComponent]{}
+    loop artifact in artifacts {
+        path: if root == "" || artifact.starts_with("/") -> artifact else -> plugin_facts_files.join(root, artifact)
+        bytes: plugin_facts_files.read_bytes(path) ?? next
+        if jet_plugin_component_exports(bytes) == {
+            .Ok(exports) -> {
+                components.push(SemaPluginComponent{artifact: artifact.copy(), exports: exports})
+            }
+            .Err(_) -> next
+        }
+    }
+    sema_plugin_interface_facts(components)
+}
+
+// The literal artifacts of every `.load("…")` call in the file, once each.
+jet_driver_plugin_artifacts: fn(artifacts: &[String], program: Program) {
+    loop item in program.items {
+        if item == .Func(function) {
+            ast_visit_body(program.tables, function.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
+        }
+        if item == .Test(test) {
+            ast_visit_body(program.tables, test.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
+        }
+        if item == .Impl(block) {
+            loop method in block.methods {
+                ast_visit_body(program.tables, method.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
+            }
+        }
+        if item == .Struct(record) {
+            loop method in record.methods {
+                ast_visit_body(program.tables, method.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
+            }
+        }
+        if item == .Enum(choice) {
+            loop method in choice.methods {
+                ast_visit_body(program.tables, method.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
+            }
+        }
+    }
+    ast_visit_body(program.tables, program.script_body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
+}
+
+jet_driver_note_plugin_artifact: fn(tables: ASTTables, artifacts: &[String], expression: ExprNode) {
+    if ast_expr(tables, expression) == .MethodCall(_, method, _, _, _, args, _) {
+        if method != "load" || args.len() == 0 {
+            return
+        }
+        if ast_expr(tables, args[0].expr) == .Str(parts, _, _) {
+            text := ""
+            loop part in parts {
+                if part == .Lit(value) -> text = "{text}{value}" else {
+                    return
+                }
+            }
+            if text != "" && !artifacts.contains(text) -> artifacts.push(text)
+        }
+    }
+}

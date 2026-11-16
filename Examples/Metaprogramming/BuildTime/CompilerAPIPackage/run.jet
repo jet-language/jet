@@ -1,0 +1,42 @@
+// Tower #2390: the non-Jetpack witness reads the
+// compiler's package model during compile time. Runtime code only prints the
+// resulting constants; it never receives a filesystem capability.
+use compiler: core.compiler
+
+MANIFEST: #run { compiler.manifest() ?? panic("manifest view failed") }
+
+PACKAGE: #run { compiler.package() ?? panic("package view failed") }
+
+LOCK: #run { compiler.lock() ?? panic("lock view failed") }
+
+PROFILES: #run { compiler.profiles() ?? panic("profile view failed") }
+
+MANIFEST_OUTPUTS: #run MANIFEST.outputs().len()
+
+PACKAGE_OUTPUTS: #run PACKAGE.outputs().len()
+
+LOCK_VERSION: #run LOCK.version()
+
+LOCK_PACKAGES: #run LOCK.packages().len()
+
+PROFILE_COUNT: #run PROFILES.profiles().len()
+
+PACKAGE_NAME: #run #package.name
+
+PACKAGE_VERSION: #run #package.version
+
+build: fn(b: Build) {
+    if MANIFEST_OUTPUTS != 0 -> panic("manifest view must stay uncomposed")
+    if PACKAGE_OUTPUTS != 1 -> panic("package view must include Config output")
+    if LOCK_PACKAGES != 1 -> panic("lock view lost its package")
+    if PROFILE_COUNT != 2 -> panic("profile view lost its profiles")
+    app: b.add_executable("compiler_api_package", ["run.jet"], [])
+    b.default(app)
+}
+
+run: fn() {
+    print("identity: {PACKAGE_NAME}@{PACKAGE_VERSION}")
+    print("outputs: {MANIFEST_OUTPUTS}->{PACKAGE_OUTPUTS}")
+    print("lock: v{LOCK_VERSION} ({LOCK_PACKAGES})")
+    print("profiles: {PROFILE_COUNT}")
+}

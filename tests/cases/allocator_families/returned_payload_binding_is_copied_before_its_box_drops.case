@@ -1,0 +1,12 @@
+# A plain-data struct bound out of an Option or Result box (`if found ==
+# .Val(facts) -> return facts`) is returned as a copy made before the
+# return's drops free that box. The checked heap poisons a freed block, so
+# a value read after the drop prints `true` for every field.
+fixture: returned_payload_binding_is_copied_before_its_box_drops.fixture
+env: NO_COLOR=1
+step: jet run --checked-alloc main.jet
+exit: 0
+stdout: = "arrow: false true false true\nblock: false true false true\nbound: false true false true\nresult: false true false true\nmatched: false true false true\n"
+step: jet run main.jet
+exit: 0
+stdout: = "arrow: false true false true\nblock: false true false true\nbound: false true false true\nresult: false true false true\nmatched: false true false true\n"

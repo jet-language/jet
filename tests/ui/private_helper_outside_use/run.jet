@@ -1,0 +1,14 @@
+// A package-private helper is refused outside its package with the same
+// diagnostic whether a user package or Core declares it: `pad` is a
+// top-level `priv` item of the `dep` package, `csv_row` one of Core's CSV
+// module.
+use {
+    dep
+    csv: core.encoding.csv
+}
+
+run: fn() {
+    print(dep.pad("hi"))
+    row: csv.csv_row(1, ["a"])
+    print(row.line)
+}

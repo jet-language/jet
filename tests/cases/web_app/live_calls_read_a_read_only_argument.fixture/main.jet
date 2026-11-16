@@ -1,0 +1,53 @@
+use {
+    app
+    core.reactive.loadable.[Loadable]
+}
+
+#Error
+CountError: enum {
+    NoProject
+}
+
+count: fn(project: String) -[DB.Read]> Int CountError! {
+    if project == "" -> return Err(CountError.NoProject)
+    project.len()
+}
+
+shown: fn(state: Loadable<Int, CountError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(reason) -> if reason == {
+            .NoProject -> "failed: no project"
+        }
+        .Idle | .Loading -> "pending"
+    }
+}
+
+// `project` is a read-only parameter in each function: binding, pushing and
+// invalidating for it leave it with its caller.
+bind: fn(project: String) -> app.Live<Int, CountError> { app.live(count, project) }
+
+bind_polled: fn(project: String) -> app.Live<Int, CountError> { app.subscribe(count, project) }
+
+pin: fn(project: String, value: Int) {
+    app.push(count, project, value: value)
+    print("pushed for {project}")
+}
+
+refresh: fn(project: String) {
+    app.invalidate(count, project)
+    print("invalidated {project}")
+}
+
+run: fn() {
+    project: "crewboard"
+    shown_count: bind(project)
+    print("bound {shown(app.state(shown_count))}")
+    polled: bind_polled(project)
+    print("subscribed {shown(app.state(polled))}")
+    pin(project, 42)
+    print("after push {shown(app.state(shown_count))}")
+    refresh(project)
+    print("after invalidate {shown(app.state(shown_count))}")
+    print("caller still holds {project}")
+}

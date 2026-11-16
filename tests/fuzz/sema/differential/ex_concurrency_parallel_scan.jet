@@ -1,0 +1,60 @@
+// 34 — Parallel file scan.
+// Short path: `para_map`. Expert channel+spawn+join → ParallelScanExpert.jet.
+package: {
+    name: "parallel_scan"
+    authority: { allow: [Env, Exec.Args, FS, IO, Mem.Alloc] }
+}
+
+use {
+    fs: core.files
+    process: core.process
+    env: core.sys
+}
+
+count_lines: fn(text: String) -> Int { text.lines().len() }
+
+// Each file is named by its base name, so the output does not depend on
+// where the fixtures live.
+scan_one: fn(file_path: String) -> String {
+    name: fs.basename(file_path)
+    text: fs.read(file_path) ?? return "{name}: unreadable"
+    lines: count_lines(text)
+    return "{name}: {lines} lines, {text.len()} chars"
+}
+
+// The fixtures live in a fresh directory of this run, so the none, basic and
+// full runs that start at once never write or read each other's files.
+default_paths: fn(dir: String) -> [String] {
+    a: Path.from(dir).join("jet_parallel_scan_a.txt").to_string()
+    b: Path.from(dir).join("jet_parallel_scan_b.txt").to_string()
+    _: fs.write(a, "one\ntwo\n")
+    _: fs.write(b, "alpha\nbeta\ngamma\n")
+    return [a, b]
+}
+
+paths_from_args: fn() -> [String] { process.args() }
+
+gather_paths: fn(dir: String) -> [String] {
+    from_args: paths_from_args()
+    if from_args.len() > 0 -> return from_args
+    if (env.get("INTERACTIVE") ?? "") == "1" {
+        print("(interactive paths omitted in short-path demo — pass files on the CLI)")
+    }
+    return default_paths(dir)
+}
+
+run: fn() {
+    scratch: fs.temp_dir("jet-parallel-scan") ?? panic("temp dir")
+    paths: gather_paths(scratch.path)
+    if paths.len() == 0 {
+        print("no files to scan")
+        return
+    }
+    print("scanning {paths.len()} files...")
+    print("")
+    parallel := paths.para_map(fn(path: String) { scan_one(path) ?? "{path}: unreadable" })
+    parallel.sort()
+    loop line in parallel -> print(line)
+    print("")
+    print("done — {paths.len()} files scanned in parallel")
+}

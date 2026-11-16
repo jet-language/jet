@@ -1,0 +1,8 @@
+Error [jet.UpwardCoreLayerReference]: `core.collections.set` in Core layer `data` names `core.files` of the higher layer `system`
+  --> <corelib>/Core/Collections/Set.jet:3:31
+    |
+  3 | use upward_layer_probe_files: core.files
+    |                               ^^^^^^^^^^
+ Why: Core's `layers:` table in `Core/package.jet` orders Core's modules lowest first, and a module names only modules of its own layer or a lower one, so a program that reaches a low layer never loads a higher one
+ Fix: Move the code that names `core.files` up to layer `system`, or move what it names down to layer `data` or lower
+More: jet-lang.dev/e/E1012

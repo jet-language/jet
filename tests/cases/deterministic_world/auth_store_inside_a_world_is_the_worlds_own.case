@@ -1,0 +1,15 @@
+# Inside testing.world, core.auth's session store is the world's own:
+# - it starts empty, so a user registered by the process is free in the world;
+# - it keeps the world's own registrations for the world's lifetime;
+# - it never reaches the process store, so the world's user stays free after
+#   the world while the process's own user stays taken.
+fixture: auth_store_inside_a_world_is_the_worlds_own.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = auth_store_inside_a_world_is_the_worlds_own.out
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = auth_store_inside_a_world_is_the_worlds_own.out

@@ -1,0 +1,30 @@
+// D-META-EFFECT1: the comptime interpreter reads the shared Core effect fact.
+// `core.math` calls have an empty effect set; ambient modules remain gated.
+// The results are constant-folded into the binary — no runtime math involved.
+use math: core.math
+
+SQRT4: #run math.sqrt(Float{4.0})
+
+POW2: #run { Float{2.0}.pow(Float{8.0}) }
+
+FLOORED: #run math.floor(Float{3.7})
+
+CEILED: #run math.ceil(Float{2.1})
+
+MAXI: #run max(10, 20)
+
+COMPLEX_SQUARE: #run { (3 + 4i) * (3 + 4i) }
+
+// The magnitude of 3 + 4i: `math.abs` is the Int form, so the Float
+// magnitude comes from `math.hypot` over the two parts.
+COMPLEX_ABS: #run math.hypot(Float{3.0}, Float{4.0})
+
+run: fn() {
+    print(SQRT4)
+    print(POW2)
+    print(FLOORED)
+    print(CEILED)
+    print(MAXI)
+    print(COMPLEX_SQUARE)
+    print(COMPLEX_ABS)
+}

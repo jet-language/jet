@@ -1,0 +1,11 @@
+# Port of tests/source_import.rs:385-411; original sources and every predicate retained.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: source_import_rejects_unknown_language_and_does_not_follow_symlinks.fixture
+mkdir: python/app
+step: jet import ruby python/app
+exit: 2
+file: jet absent
+when os unix: symlink: /etc python/app/outside
+when os unix: step: jet import py python/app
+when os unix: exit: 0
+when os unix: entries: jet/app ext = "jet" = 1 # original predicate

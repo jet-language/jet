@@ -1,0 +1,16 @@
+# Port of build_entry.rs::body_edit_reevaluates_the_constants_that_read_it.
+# PENDING-GRAMMAR: filtered/projected JSON, count/prefix/relational operations.
+fixture: fixtures/comptime-reuse
+env: JET_STORE_DIR={work}/store
+step first: jet check lib.jet
+stderr: !~ size must stay 4 # Original first-check diagnostic absence.
+step: jet check lib.jet
+stderr: == first
+copy: body-edit.txt lib.jet
+step warm: jet check lib.jet
+exit: nonzero
+stderr: ~ size must stay 4 # Original changed-constant diagnostic assertion.
+step: jet check lib.jet
+env: JET_STORE_DIR={work}/fresh-store
+exit: nonzero
+stderr: == warm

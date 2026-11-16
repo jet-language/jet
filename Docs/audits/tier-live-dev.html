@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="The live tier: swap by default, keep the pinned world — canonical Jet proposal rendering.">
+<title>The live tier: swap by default, keep the pinned world — Jet proposal</title>
+<style>
+:root {
+  --bg: #071019;
+  --surface-1: #0b1621;
+  --surface-2: #101d29;
+  --surface-3: #152534;
+  --border: #294050;
+  --border-soft: #1c3140;
+  --text: #f0f6f8;
+  --text-2: #c1ced4;
+  --muted: #93a5ae;
+  --amber: #f4b860;
+  --amber-soft: #332817;
+  --cyan: #6dd7e8;
+  --cyan-soft: #102c34;
+  --green: #70d69a;
+  --green-soft: #112c21;
+  --red: #ff8585;
+  --red-soft: #381d22;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 12px;
+  --measure: 78ch;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-padding-top: 5.25rem; }
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(109,215,232,.025) 1px, transparent 1px),
+    linear-gradient(rgba(109,215,232,.018) 1px, transparent 1px),
+    var(--bg);
+  background-size: 32px 32px;
+  color: var(--text);
+  font: 15px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--cyan); text-underline-offset: .2em; }
+a:hover { color: var(--text); }
+:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+.skip-link {
+  position: fixed; z-index: 100; top: .75rem; left: .75rem;
+  transform: translateY(-180%); padding: .65rem .9rem;
+  border: 1px solid var(--cyan); border-radius: 6px;
+  background: var(--surface-1); color: var(--text); font: 700 .8rem var(--mono);
+}
+.skip-link:focus { transform: translateY(0); }
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(7,16,25,.96); backdrop-filter: blur(12px);
+}
+.topbar-inner {
+  display: flex; align-items: center; gap: 1rem; max-width: 1260px; margin: 0 auto;
+  padding: .7rem 1.5rem;
+}
+.nav-mark { flex: none; color: var(--amber); font: 800 .74rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.topbar a { color: var(--text-2); font: 650 .72rem var(--mono); text-decoration: none; }
+.topbar a:hover { color: var(--text); }
+.back-link { white-space: nowrap; }
+.top-links { display: flex; min-width: 0; margin-left: auto; gap: .15rem; overflow-x: auto; scrollbar-width: thin; }
+.top-links a { flex: none; padding: .38rem .55rem; border-radius: 5px; }
+.top-links a:hover { background: var(--surface-2); }
+.page {
+  position: relative; max-width: 1260px; margin: 0 auto;
+  padding: 3.6rem 1.5rem 5.5rem 1.5rem;
+}
+.page::before {
+  position: absolute; top: 3.6rem; bottom: 5.5rem; left: .65rem; width: 2px;
+  background: linear-gradient(var(--amber), rgba(244,184,96,.12)); content: "";
+}
+.layout { display: grid; grid-template-columns: 205px minmax(0,1fr); gap: 2.5rem; align-items: start; }
+.toc {
+  position: sticky; top: 4.5rem; max-height: calc(100vh - 5.5rem); overflow: auto;
+  padding: .8rem .75rem .9rem; border: 1px solid var(--border-soft); border-radius: 9px;
+  background: rgba(11,22,33,.88);
+}
+.toc-label { margin: 0 0 .55rem; color: var(--amber); font: 750 .66rem/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.toc a { display: block; padding: .28rem .4rem; border-left: 2px solid transparent; color: var(--text-2); font-size: .78rem; line-height: 1.35; text-decoration: none; }
+.toc a.level-3 { padding-left: .9rem; color: var(--muted); font-size: .72rem; }
+.toc a:hover { border-left-color: var(--cyan); background: var(--surface-2); color: var(--text); }
+main { min-width: 0; }
+.hero-card {
+  margin-bottom: 3.5rem; padding: 2rem 2.1rem 1.7rem;
+  border: 1px solid var(--border); border-top: 3px solid var(--amber); border-radius: 14px;
+  background: linear-gradient(135deg, rgba(244,184,96,.08), var(--surface-1) 40%, var(--surface-2));
+  box-shadow: 0 24px 60px rgba(0,0,0,.18);
+}
+.eyebrow, .trace-label, .kicker { color: var(--amber); font: 700 .72rem/1.3 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+.eyebrow { margin: 0 0 .9rem; }
+.eyebrow::before { content: "PROPOSAL / "; color: var(--muted); }
+h1, h2, h3, h4, p { margin-top: 0; }
+h1 { max-width: 18ch; margin-bottom: 1rem; font-size: clamp(2.55rem, 6.2vw, 5.35rem); font-weight: 760; letter-spacing: -.055em; line-height: .98; }
+h2 { margin: 4.2rem 0 .7rem; font-size: clamp(1.7rem, 3.6vw, 2.7rem); letter-spacing: -.035em; line-height: 1.08; scroll-margin-top: 5.6rem; }
+h3 { margin: 2.25rem 0 .6rem; font-size: clamp(1.15rem, 2.3vw, 1.55rem); line-height: 1.25; scroll-margin-top: 5.6rem; }
+.hero-title-note { max-width: var(--measure); margin: 0 0 1.25rem; color: var(--text-2); font-size: 1rem; }
+.status-copy { margin: 0; padding: 1rem 1.1rem; border-left: 3px solid var(--amber); background: linear-gradient(90deg, var(--amber-soft), transparent 82%); color: var(--text-2); }
+.meta-row { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 1.35rem; }
+.meta-label { display: block; margin-bottom: .5rem; color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.pills { display: flex; flex-wrap: wrap; gap: .45rem; }
+.pill { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-3); color: var(--text-2); font: 700 .67rem/1.25 var(--mono); }
+.pill .pill-rec { color: var(--green); }
+.score-line { margin: 1.15rem 0 0; color: var(--text-2); font-size: .83rem; }
+.score-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; margin-top: .7rem; }
+.score-tile { min-height: 130px; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.score-value { display: block; color: var(--text); font: 780 clamp(1.8rem,4vw,2.9rem)/1 var(--mono); letter-spacing: -.05em; }
+.score-name { display: block; margin-top: .55rem; color: var(--amber); font: 750 .68rem/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.score-detail { margin: .45rem 0 0; color: var(--muted); font-size: .74rem; line-height: 1.45; }
+.slate-strip { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.5rem 0 0; padding-top: 1.05rem; border-top: 1px solid var(--border-soft); }
+.slate-strip a { padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); font: 700 .68rem var(--mono); text-decoration: none; }
+.markdown { max-width: var(--measure); }
+.markdown p { margin-bottom: 1.05rem; color: var(--text-2); }
+.markdown strong { color: var(--text); }
+.markdown blockquote { margin: 1.2rem 0; padding: 1rem 1.15rem; border-left: 3px solid var(--cyan); background: linear-gradient(90deg, var(--cyan-soft), transparent 90%); color: var(--text); }
+.markdown blockquote p { margin: 0; color: var(--text); }
+.markdown code, .table-wrap code { color: #f6c978; font-family: var(--mono); font-size: .88em; }
+.table-wrap { width: 100%; margin: 1.15rem 0 1.45rem; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+caption { padding: .8rem 1rem; color: var(--muted); text-align: left; font: .7rem var(--mono); }
+th { padding: .75rem .85rem; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .065em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+td { padding: .78rem .85rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { color: var(--text); font: 700 .77rem/1.5 var(--mono); }
+.option-table { border-collapse: separate; border-spacing: 0; }
+.option-table thead th { background: rgba(16,29,41,.8); }
+.option-table tbody { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; padding: .8rem; }
+.option-table tbody tr { display: block; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); overflow: hidden; }
+.option-table tbody tr.recommended-row { border-color: #3c8a5e; background: linear-gradient(150deg, var(--green-soft), var(--surface-2)); }
+.option-table tbody td { display: block; border: 0; padding: .75rem .8rem .1rem; }
+.option-table tbody td + td { padding-top: .12rem; padding-bottom: .75rem; }
+.option-table tbody td:first-child { color: var(--amber); font-size: .74rem; }
+.option-table tbody td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row td:first-child::after { content: ""; }
+.option-table tbody tr.recommended-row:not(.has-recommended-text) td:first-child::after { content: "  RECOMMENDED"; color: var(--green); font: 750 .58rem var(--mono); letter-spacing: .06em; }
+.rung-table tbody { position: relative; display: grid; gap: .72rem; padding: .9rem 1rem .9rem 2.3rem; }
+.rung-table tbody::before { position: absolute; top: 1.25rem; bottom: 1.25rem; left: 1.05rem; width: 2px; background: linear-gradient(var(--cyan), rgba(109,215,232,.2)); content: ""; }
+.rung-table tbody tr { position: relative; display: grid; grid-template-columns: minmax(3.5rem,.28fr) minmax(7rem,.65fr) minmax(12rem,1.2fr) minmax(14rem,2fr); border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); }
+.rung-table tbody tr::before { position: absolute; top: 1.05rem; left: -1.72rem; width: .72rem; height: .72rem; border: 2px solid var(--cyan); border-radius: 50%; background: var(--bg); content: ""; }
+.rung-table tbody td { border: 0; padding: .75rem .65rem; }
+.rung-table tbody td:first-child { color: var(--amber); }
+.code-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.code-card + .code-card { margin-top: .7rem; }
+.code-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .58rem .75rem; border-bottom: 1px solid var(--border-soft); color: var(--muted); font: 750 .64rem var(--mono); letter-spacing: .075em; text-transform: uppercase; }
+.code-context { padding: .65rem .8rem .15rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); font-size: .78rem; }
+.badge { display: inline-flex; align-items: center; padding: .25rem .45rem; border: 1px solid currentColor; border-radius: 5px; font: 800 .61rem/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+.badge.real { color: var(--cyan); background: var(--cyan-soft); }
+.badge.illustrative { color: var(--amber); background: var(--amber-soft); }
+pre { margin: 0; padding: 1rem; overflow-x: auto; background: #08131c; color: #dcebf0; font: .78rem/1.58 var(--mono); tab-size: 4; }
+.comparison { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .9rem; margin: 1.15rem 0 1.45rem; }
+.compare-side { min-width: 0; padding: .7rem; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-1); }
+.compare-side.real { border-top: 3px solid var(--cyan); }
+.compare-side.illustrative { border-top: 3px solid var(--amber); }
+.compare-title { display: flex; align-items: center; justify-content: space-between; gap: .65rem; min-height: 2.1rem; margin: 0 0 .55rem; color: var(--text-2); font: 700 .72rem/1.35 var(--mono); }
+.compare-side .code-card { border-color: var(--border-soft); }
+.compare-side .code-context { display: none; }
+.mode-note { margin: 1.1rem 0 .6rem; color: var(--text-2); font-size: .88rem; }
+.callout { margin: 1.1rem 0; padding: 1rem 1.1rem; border-left: 3px solid var(--cyan); border-radius: 8px; background: linear-gradient(90deg,var(--cyan-soft),transparent 90%); }
+.ballot-index { margin-top: 3.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
+.ballot-index h2 { margin-top: 0; }
+.ballot-index-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .7rem; margin: 1rem 0 0; padding: 0; list-style: none; counter-reset: ballot; }
+.ballot-index-item { min-width: 0; padding: .8rem .9rem; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-1); counter-increment: ballot; }
+.ballot-index-item::before { content: counter(ballot, decimal-leading-zero); display: block; margin-bottom: .35rem; color: var(--muted); font: 750 .62rem var(--mono); }
+.ballot-index-item a { font: 750 .76rem var(--mono); }
+.ballot-index-rec { display: block; margin-top: .3rem; color: var(--text-2); font-size: .76rem; }
+.ballot-index-owner { display: block; margin-top: .4rem; color: var(--muted); font: .67rem var(--mono); }
+footer { margin-top: 4rem; padding-top: 1.15rem; border-top: 1px solid var(--border); color: var(--muted); font: .72rem/1.6 var(--mono); }
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 1fr; }
+  .toc { position: relative; top: 0; max-height: none; display: flex; flex-wrap: wrap; gap: .25rem .45rem; align-items: baseline; }
+  .toc-label { width: 100%; }
+  .toc a { padding: .25rem .4rem; }
+  .toc a.level-3 { padding-left: .4rem; }
+  .toc a.level-3::before { content: "· "; color: var(--amber); }
+}
+@media (max-width: 820px) {
+  .score-grid, .option-table tbody { grid-template-columns: 1fr; }
+  .rung-table tbody tr { grid-template-columns: 1fr 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: 1 / -1; }
+  .comparison { grid-template-columns: 1fr; }
+  .ballot-index-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .topbar-inner { padding-inline: .8rem; }
+  .nav-mark { display: none; }
+  .top-links { margin-left: 0; }
+  .page { padding: 2.8rem .9rem 4rem 1.3rem; }
+  .page::before { top: 2.8rem; bottom: 4rem; left: .62rem; }
+  .hero-card { padding: 1.4rem 1.15rem 1.25rem; }
+  h1 { max-width: 12ch; }
+  .rung-table tbody { padding-left: 1.8rem; }
+  .rung-table tbody::before { left: .75rem; }
+  .rung-table tbody tr::before { left: -1.3rem; }
+  .rung-table tbody tr { grid-template-columns: 1fr; }
+  .rung-table tbody td:nth-child(3), .rung-table tbody td:nth-child(4) { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+
+.badge.source-verified { color: var(--green); background: var(--green-soft); }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to proposal</a>
+<header class="topbar"><div class="topbar-inner"><a class="nav-mark" href="whole-language-frame.html">JET / PROPOSALS</a><a class="back-link" href="whole-language-frame.html">← Whole-language frame</a><nav class="top-links" aria-label="Proposal pages"><a href="whole-language-frame.html">← Frame</a></nav></div></header>
+<div class="page" id="top"><div class="layout"><aside class="toc" aria-label="In-page table of contents"><p class="toc-label">On this spread</p><a class="level-2" href="#executive-summary">Executive summary</a><a class="level-2" href="#the-problem">The problem</a><a class="level-2" href="#the-proposal-on-the-page">The proposal on the page</a><a class="level-2" href="#rungs">Rungs</a><a class="level-2" href="#three-exits">Three exits</a><a class="level-2" href="#what-a-tier-is-proposed">What a tier is (proposed)</a><a class="level-2" href="#decisions">Decisions</a><a class="level-3" href="#d-live1-swap-by-default">D-LIVE1 — swap by default</a><a class="level-3" href="#d-live-persist1-pinned-state-when-its-type-changes">D-LIVE-PERSIST1 — pinned state when its type changes</a><a class="level-2" href="#what-stays">What stays</a><a class="level-2" href="#implementation-shape">Implementation shape</a><a class="level-2" href="#where-jet-loses-today">Where Jet loses today</a><a class="level-2" href="#strongest-unverified-assumption">Strongest unverified assumption</a></aside><main id="content">
+<header class="hero-card"><p class="eyebrow">slate</p><h1>The live tier: swap by default, keep the pinned world</h1><p class="hero-title-note">Canonical markdown rendered as a navigable dark-mode spread. Markdown remains the source of truth.</p><p class="status-copy">Status: proposal, 2026-09-01, revised after the review passes; element 4 of <code>whole-language-frame.md</code>. Independently adoptable; strongest with <code>shapes-one-fact.md</code>. Ballots: D-LIVE1 (recommended A), D-LIVE-PERSIST1 (A). Nothing here is implemented; transcripts marked illustrative do not run today.</p>
+<div class="meta-row"><div><span class="meta-label">Ballots and recommendations</span><div class="pills"><span class="pill">D-LIVE1 <span class="pill-rec">A</span></span><span class="pill">D-LIVE-PERSIST1 <span class="pill-rec">A</span></span></div></div></div>
+<p class="score-line">Score: mechanisms deleted 1 (the closed tier enum becomes a ledger value); capabilities kept all; capabilities gained 3 (swap by default, a per-save receipt line, migration of pinned published values).</p><div class="score-grid"><article class="score-tile"><strong class="score-value">1</strong><span class="score-name">mechanisms deleted</span><p class="score-detail">(the closed tier enum becomes a ledger value)</p></article><article class="score-tile"><strong class="score-value">all</strong><span class="score-name">capabilities kept</span><p class="score-detail">all</p></article><article class="score-tile"><strong class="score-value">3</strong><span class="score-name">capabilities gained</span><p class="score-detail">(swap by default, a per-save receipt line, migration of pinned published values)</p></article></div></header>
+<article class="markdown"><h2 id="executive-summary">Executive summary</h2><p>Jet already ratified and partly built a live tier. <code>jet dev</code> is the watch loop and can swap changed functions into the resident process (D-DEV4, D-HOTSWAP1). <code>#Persist</code> pins state across a swap, and it is the one module binding a function may write, because surviving the reload is the entire reason it exists (D-PERSIST-DEVSTATE1=A). A layout change to a pinned type triggers a clean announced restart (D-HOTSWAP1). What is missing is the default and the migration: swap is chosen by flag or auto-detection, every save prints nothing about what it kept, and a pinned value whose published type gained a field is thrown away even when the one-line <code>migration</code> that wire data already uses could carry it across.</p><p>The proposal makes swap the default, prints one line per save naming what was swapped, kept, migrated, or restarted, and migrates pinned values of <code>#PublishedSchema</code> types through the same step functions decode uses. Every other layout change keeps the ratified announced restart. <code>#Persist</code> stays. Meaning never changes: what a program does is identical under <code>jet run</code>, <code>jet build</code>, and a live session (I9). A precondition proof (a long-lived edit with callers mid-execution on every engine) lands before the default flips.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">today</th><th scope="col">proposed</th><th scope="col">ballots</th></tr></thead><tbody><tr class=""><td>swap is a flag or auto-detection</td><td>swap on save by default; one line per save</td><td>D-LIVE1</td></tr><tr class=""><td>a layout change restarts even when a migration exists</td><td>pinned published values migrate; restart otherwise</td><td>D-LIVE-PERSIST1</td></tr></tbody></table></div><h2 id="the-problem">The problem</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">today</th><th scope="col">evidence</th></tr></thead><tbody><tr class=""><td>swap is a flag or auto-detection</td><td><code>jet dev --swap</code> (<code>Source/CmdDevTools.rs:211-254,954-1006</code>; D-DEV4)</td></tr><tr class=""><td>a layout change restarts even when a migration exists</td><td>D-HOTSWAP1 (<code>syntax-decisions.md:5394-5395</code>); <code>SchemaMigration.rs</code> is consulted only by decode</td></tr><tr class=""><td>no per-save receipt</td><td>the dev loop prints program output only</td></tr><tr class=""><td>tier is a closed enum</td><td><code>Interpreter</code>, <code>Jit</code>, <code>Aot</code> (<code>Source/CmdCompile.rs:1177-1181</code>); web, REPL, notebook outside</td></tr><tr class=""><td>modes do not compose</td><td><code>jet run --interpret --release</code> → E2102</td></tr><tr class=""><td>watch identity is weak</td><td><code>PathStamp</code> is <code>{exists, mtime, len}</code> (<code>WatchService.rs:49-72</code>)</td></tr><tr class=""><td>Jet loses</td><td>Dart keeps state on reload by contract and reports what it reloaded; Erlang runs a migration callback (lane D)</td></tr></tbody></table></div><p>The audit&#39;s first draft proposed persisting unmarked module values; the rival-family review showed that only <code>#Persist</code> bindings are writable from a function (E0111 otherwise) and that migration is ratified only for <code>#PublishedSchema</code> types. The design changed to respect both.</p><h2 id="the-proposal-on-the-page">The proposal on the page</h2><div class="comparison"><div class="compare-side real"><p class="compare-title"><span>Real today (<code>examples/features/devloop/persist.jet</code> shape):</span><span class="badge real">REAL</span></p><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>#Persist counter := 0
+
+fn run() {
+    counter += 1
+    print(&quot;run {counter}&quot;)
+}</code></pre></div><div class="code-card real"><div class="code-head"><span>text</span><span class="badge real">REAL</span></div><pre><code>$ jet dev --swap app.jet     # swap by flag; `counter` survives; a layout change restarts</code></pre></div></div><div class="compare-side illustrative"><p class="compare-title"><span>Proposed (illustrative; <code>#Persist</code> stays, one marker and one block are added for the day the shape changes):</span><span class="badge illustrative">ILLUSTRATIVE</span></p><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>#[PublishedSchema, Codable]
+struct Enemy {
+    speed: Float{1.0}
+}
+
+struct World {
+    player: Point
+    enemies: [Enemy]
+}
+
+#Persist world := World{}
+
+fn chase(e: Enemy, w: World) Enemy -&gt; { return e.move_toward(w.player) }
+
+fn run() {
+    loop {
+        world.enemies = world.enemies.map((e: Enemy) -&gt; chase(e, world))
+        draw(world)
+    }
+}</code></pre></div></div></div><p>The timeline, with the edits named:</p><div class="code-block"><div class="code-card illustrative"><div class="code-head"><span>text</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>$ jet dev game.jet
+live  game.jet  watching 1 file
+# 1. edit the body of chase(), save
+saved game.jet  swapped chase  kept world
+# 2. add `health: Int{100}` to Enemy and `migration Enemy { add health: Int = 100 }`, save
+saved game.jet  swapped chase  migrated world.enemies (Enemy +health = 100)
+# 3. add `armor: Int{0}` to Enemy with no migration, save
+saved game.jet  layout changed: Enemy gained armor  restarting; to keep the world write `migration Enemy { add armor: Int = 0 }`
+# 4. rename the binding `world` to `arena`, save
+saved game.jet  `world` was renamed to `arena`: state reset</code></pre></div></div><p>Line 3 is the ratified restart with its repair named. Line 4 is the ratified identity rule (module path plus binding name) made visible. An edit that only changes a field initializer, such as <code>speed: Float{2.0}</code>, does not rewrite existing enemies: the value already exists, and the line says <code>kept world</code>; a <code>migration</code> or a restart is the explicit way to change stored values.</p><h2 id="rungs">Rungs</h2><div class="table-wrap"><table class="rung-table"><thead><tr><th scope="col">rung</th><th scope="col">who</th><th scope="col">spelling</th><th scope="col">what happens</th></tr></thead><tbody><tr class=""><td>0</td><td>beginner</td><td><code>jet dev game.jet</code></td><td>save, keep running; swap by default with one line per save (proposed)</td></tr><tr class=""><td>1</td><td>intermediate</td><td><code>#Persist world := World{}</code></td><td>the pinned world survives a swap (ratified)</td></tr><tr class=""><td>2</td><td>intermediate</td><td><code>#[PublishedSchema, Codable] struct Enemy</code> plus <code>migration Enemy { add health: Int = 100 }</code></td><td>a shape change migrates the pinned value in place (proposed)</td></tr><tr class=""><td>3</td><td>expert</td><td><code>jet dev --restart game.jet</code></td><td>fresh process on every save (ratified flag)</td></tr><tr class=""><td>4</td><td>expert</td><td><code>dev: .{ swap: false }</code> in <code>package.jet</code></td><td>the project refuses swap (proposed)</td></tr><tr class=""><td>5</td><td>expert</td><td><code>jet prove game.jet --capture</code></td><td>the session is a safe replay (element 6)</td></tr></tbody></table></div><p>Rung 0 is untouched by every rung above it.</p><h2 id="three-exits">Three exits</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">exit</th><th scope="col">spelling</th></tr></thead><tbody><tr class=""><td>see</td><td>every save prints swapped, kept, migrated, or restarting; <code>jet inspect build --live PID</code> lists the pinned values with their shapes (illustrative)</td></tr><tr class=""><td>write</td><td><code>#Persist</code> for what survives; <code>migration</code> for how a published shape moves</td></tr><tr class=""><td>refuse</td><td><code>jet dev --restart</code> for the session; <code>dev: .{ swap: false }</code> for the project</td></tr></tbody></table></div><h2 id="what-a-tier-is-proposed">What a tier is (proposed)</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">tier</th><th scope="col">which facts stay alive</th><th scope="col">receipt</th></tr></thead><tbody><tr class=""><td>comptime</td><td>none at runtime; facts fold into values</td><td>build identity</td></tr><tr class=""><td>check</td><td>none run; conflicts reported</td><td>status object</td></tr><tr class=""><td>test</td><td>claims run and produce evidence</td><td>evidence report</td></tr><tr class=""><td>dev</td><td>contracts checked, sentries on (D-MEM-SENTRY1), safe capture on (element 6), pinned values kept across swaps</td><td>replay and index</td></tr><tr class=""><td>release</td><td>no fact remains (D-FACT-LAW1) except contracts kept by policy</td><td>build receipt</td></tr><tr class=""><td>replay</td><td>boundary facts replayed from a record</td><td>the record</td></tr></tbody></table></div><p>The enum in <code>CmdCompile.rs</code> becomes a value on the ledger query, and <code>--interpret</code> becomes a choice of engine, not a mode that refuses build flags.</p><h2 id="decisions">Decisions</h2><h3 id="d-live1-swap-by-default">D-LIVE1 — swap by default</h3><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">what</th></tr></thead><tbody><tr class="recommended-row has-recommended-text"><td>A (recommended)</td><td>swap on save by default; <code>#Persist</code> values kept as ratified; layout change restarts as ratified unless D-LIVE-PERSIST1 migrates it; one line per save; <code>--restart</code> and <code>dev: .{ swap: false }</code> refuse; precondition proof before the flip</td></tr><tr class=""><td>B</td><td>swap by default; every value resets, including <code>#Persist</code>; would amend D-PERSIST-DEVSTATE1 away</td></tr><tr class=""><td>C</td><td>keep today&#39;s flag and auto-detection</td></tr></tbody></table></div><p>Amends: D-DEV4 and D-DEVMODE1 defaults; D-HOTSWAP1&#39;s default. The module mutation law (D-PERSIST-DEVSTATE1=A) and the layout-restart rule are unchanged.</p><h3 id="d-live-persist1-pinned-state-when-its-type-changes">D-LIVE-PERSIST1 — pinned state when its type changes</h3><div class="table-wrap"><table class="option-table"><thead><tr><th scope="col">option</th><th scope="col">what</th></tr></thead><tbody><tr class="recommended-row has-recommended-text"><td>A (recommended)</td><td>a pinned value of a <code>#PublishedSchema</code> type migrates in place through its migration block; any other layout change restarts as ratified, with the migration to write named; a renamed binding resets and says so</td></tr><tr class=""><td>B</td><td>keep today: announced restart on any layout change</td></tr><tr class=""><td>C</td><td>migrate any Codable pinned value; needs a second migration eligibility rule (amends D-MIGRATE1)</td></tr></tbody></table></div><p>Amends: D-MIGRATE4 (step functions run on resident values). D-HOTSWAP1&#39;s restart stays the fallback.</p><h2 id="what-stays">What stays</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">kept</th><th scope="col">why</th></tr></thead><tbody><tr class=""><td><code>#Persist</code></td><td>one module binding a function may write</td></tr><tr class=""><td><code>jet dev --restart</code></td><td>fresh process on every save</td></tr><tr class=""><td><code>jet dev --watch=off</code></td><td>the watch loop can be disabled</td></tr><tr class=""><td><code>--trace-tiers</code></td><td>reason visible for the tier</td></tr><tr class=""><td>the watch service and its replacement transactions</td><td>watch identity and replacement</td></tr><tr class=""><td>the announced restart on a layout change without a migration</td><td>ratified fallback</td></tr><tr class=""><td><code>jet run</code> and <code>jet build</code> as they are</td><td>meaning never changes</td></tr><tr class=""><td>I9</td><td>execution parity</td></tr></tbody></table></div><h2 id="implementation-shape">Implementation shape</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">phase</th><th scope="col">work</th></tr></thead><tbody><tr class=""><td>A</td><td>tier as a ledger value; <code>--interpret</code> composes with build flags; watch stamps include a content digest; the long-lived edit test with callers mid-execution on the JIT and interpreter engines</td></tr><tr class=""><td>B</td><td>resident-value migration through the <code>SchemaMigration</code> step functions for <code>#PublishedSchema</code> types; the per-save line with snapshots</td></tr><tr class=""><td>C</td><td>after D-LIVE1 and D-LIVE-PERSIST1: defaults flipped, <code>dev: .{ swap: false }</code> field, rename reset line</td></tr></tbody></table></div><h2 id="where-jet-loses-today">Where Jet loses today</h2><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">peer</th><th scope="col">what it does better</th><th scope="col">Jet today</th></tr></thead><tbody><tr class=""><td>Dart</td><td>keeps state on reload by contract and reports what it reloaded</td><td>swap, pin, and migration block are not on by default</td></tr><tr class=""><td>Erlang</td><td>names old and new code versions and runs a migration callback</td><td>swap, pin, and migration block are not on by default</td></tr><tr class=""><td>Smalltalk</td><td>saves the image</td><td>swap, pin, and migration block are not on by default</td></tr></tbody></table></div><h2 id="strongest-unverified-assumption">Strongest unverified assumption</h2><p>That the resident tier-1 image can swap a function whose callers are mid-execution without a restart in the common case. Lane D verified <code>jet dev --watch=off</code> runs and read the swap code; it did not exercise a long-lived edit. The phase A test owns that proof on every engine, and the default does not flip until it is green.</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">assumption</th><th scope="col">how it is proved</th><th scope="col">where</th></tr></thead><tbody><tr class=""><td>the resident tier-1 image can swap a function whose callers are mid-execution without a restart in the common case</td><td>the phase A long-lived edit test on every engine</td><td>card #2504</td></tr></tbody></table></div></article>
+<footer>Canonical source: docs/proposals/tier-live-dev.md; this page is a rendering.</footer>
+</main></div></div>
+</body>
+</html>

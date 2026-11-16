@@ -1,0 +1,11 @@
+# tests/marker_declarations.rs::source_rule_rejection_keeps_the_registered_cause at tests/marker_declarations.rs:640; hand-port
+# Claim: a rule rejection stops compilation (tests/marker_declarations.rs:658)
+# Claim: the rejection is the registered E0927 diagnostic (tests/marker_declarations.rs:659-664)
+# Claim: the rule surfaces only E0927 directly (tests/marker_declarations.rs:665-670)
+fixture: source_rule_rejection_keeps_the_registered_cause.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/marker_declarations.rs:658-670 expect_err; E0927 present and every diagnostic is E0927
+stderr: ~ "E0927" # tests/marker_declarations.rs:658-670 expect_err; E0927 present and every diagnostic is E0927

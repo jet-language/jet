@@ -1,0 +1,22 @@
+# tests/compiler_api.rs::compiler_cli_mirrors_each_read_only_operation_exactly at tests/compiler_api.rs:387; hand-port
+fixture: compiler_cli_mirrors_each_read_only_operation_exactly.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet inspect compiler lex main.jet
+env: NO_COLOR=1
+exit: 0 # tests/compiler_api.rs:387
+stdout: ~ "\"operation\":\"lex\"" # tests/compiler_api.rs:387
+step: jet inspect compiler parse main.jet
+env: NO_COLOR=1
+exit: 0 # tests/compiler_api.rs:387
+stdout: ~ "\"operation\":\"parse\"" # tests/compiler_api.rs:387
+step: jet inspect compiler check main.jet
+env: NO_COLOR=1
+exit: 0 # tests/compiler_api.rs:387
+stdout: ~ "\"operation\":\"check\"" # tests/compiler_api.rs:387
+step: jet inspect compiler source-map mapping.txt
+env: NO_COLOR=1
+exit: 0 # tests/compiler_api.rs:387
+stdout: ~ "\"operation\":\"source_map\"" # tests/compiler_api.rs:387
+stdout: ~ "\"generated_line\":2" # tests/compiler_api.rs:387

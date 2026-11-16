@@ -1,0 +1,27 @@
+{
+  "name": "build-system-generate",
+  "mode": "tool",
+  "description": "The gauntlet build-system axis project generator axes/build-system/generate.mjs and its Jet twin axes/build-system/generate/run.jet (over the jet_build_system_project package's Project.jet, which builds on jet_midsize_units), #5072 c8: write the medium project twice into OUT_DIR, as a Jet package (jet/: package.jet, @build.jet, run.jet, units_0..8.jet) and as a Nix flake (nix/: flake.nix and flake.lock pinning this repository's nixpkgs, src/Makefile, main.c, units.h, units_0..8.c), making the directories and overwriting a stale project while leaving other files alone; no OUT_DIR is a 64 refusal that writes nothing. Each writing case's check.jet states how much the program printed and every file in the case directory with its size and digest, so every project file matches byte for byte.",
+  "tool": {
+    "original": "Tools/gauntlet/axes/build-system/generate.mjs",
+    "jet": "Tools/gauntlet/axes/build-system/generate/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {
+        "args": ["out"],
+        "check": "check.jet",
+        "expected": "expected/out.out"
+      },
+      {
+        "args": ["stale"],
+        "check": "check.jet",
+        "expected": "expected/stale.out"
+      },
+      {
+        "args": [],
+        "exit": 64,
+        "expected": "expected/none.out"
+      }
+    ]
+  }
+}

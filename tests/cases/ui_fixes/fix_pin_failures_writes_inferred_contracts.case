@@ -1,0 +1,26 @@
+# Claim: jet fix --pin-failures writes each unannotated function's inferred failure contract into its source
+# Claim: a function that can't fail gets Never!, after its return type or before its body when it writes none
+# Claim: a function failing with the cases it creates gets the minted error type, declared #Error right after it
+# Claim: the pinned file checks, runs the same, and a second pin changes nothing
+fixture: fix_pin_failures_writes_inferred_contracts.fixture
+env: NO_COLOR=1
+step: jet run run.jet
+exit: 0
+stdout: = "hello ada\nfound 36\nfailed: NotFound(\"zed\")\nfailed: Blank\n"
+step: jet fix --pin-failures run.jet
+exit: 0
+stderr: ~ "applied" # one contract per unannotated function
+file: run.jet ~ "greet: fn(name: String) -> String Never! " # greet can't fail
+file: run.jet ~ "lookup: fn(book: [String:Int], name: String) -> Int LookupError! " # its minted cases
+file: run.jet ~ "show: fn(book: [String:Int], name: String) -> String Never! " # it handles every failure
+file: run.jet ~ "run: fn() Never! " # no return type, so the contract goes before the body
+file: run.jet ~ "\n\n#Error\nLookupError: enum " # the minted type, declared after lookup
+file: run.jet ~ "    Blank\n    NotFound(String)\n" # one case per line
+step: jet check run.jet
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = "hello ada\nfound 36\nfailed: NotFound(\"zed\")\nfailed: Blank\n"
+step: jet fix --pin-failures run.jet
+exit: 0
+stderr: ~ "no changes made" # every contract is written now

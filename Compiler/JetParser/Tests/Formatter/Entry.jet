@@ -1,0 +1,482 @@
+// Composed formatter proofs require the complete formatter SCC, not mocks.
+use {
+    jet_parser.[jet_format_library_source, jet_format_redundant_grouping, jet_format_source, jfmt_format_program_with_tokens, parse_source]
+    jet_lexer.[Token, lex]
+    jet_foundation.[AST_NODE_GENERATED, Expr, Item, Stmt, TryConvert, expr_span]
+}
+
+fmt_core_ok: fn(source: String) -> String { parser_test_format(source) }
+
+fmt_core_stable: fn(source: String) -> String {
+    formatted: fmt_core_ok(source)
+    assert(fmt_core_ok(formatted) == formatted)
+    formatted
+}
+
+#Test("trailing_transaction_comment_stays_inside_transaction_block") {
+    source: `transfer: fn(from: Shared<Account>, amount: Int) {
+    #Transact(tx) {
+        from.balance -= amount  // both land, or neither
+    }
+}
+`
+    formatted: fmt_core_stable(source)
+    comment: parser_test_find(formatted, "// both land, or neither")
+    close: parser_test_rfind(formatted, "}}")
+    assert(comment < close)
+}
+
+#Test("inner_comment_stays_before_enclosing_block_close") {
+    formatted: fmt_core_stable("run: fn() {{\n    if ready {{ launch() /* go */ }}\n}}\n")
+    assert(parser_test_find(formatted, "/* go */") < parser_test_find(formatted, "}}"))
+}
+
+#Test("inferred_braces_and_blocks_round_trip") {
+    source: `Point: struct {
+    x: Int
+    y: Int
+}
+
+make: fn() -> Point { {x: 1, y: 2} }
+
+accepts: fn(values: [String]) {}
+
+block: fn() {
+    print("block")
+}
+
+run: fn() {
+    accepts({"needle"})
+    p: make()
+    block()
+}
+`
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains("{{x: 1, y: 2}}"))
+    assert(formatted.contains("accepts({{\"needle\"}})"))
+    assert(formatted.contains("block: fn() {{"))
+}
+
+// A checked text literal keeps its type head, its quoted body and every
+// `{hole}` as written: formatting never splices a hole into the text.
+#Test("checked_text_literals_keep_head_body_and_holes") {
+    source: `run: fn() {
+    id: 42
+    q: SQL{"select * from t where id = {id}"}
+    page: HTML{"<p>{q.template()}</p>"}
+    line: Sh{"echo {id} done"}
+}
+`
+    assert(fmt_core_stable(source) == source)
+}
+
+#Test("repeated_struct_list_heads_preserve_explicit_heads") {
+    source: `Point: struct {
+    x: Int
+}
+
+run: fn() {
+    compact := [Point{x: 1}, Point{x: 2}]
+    spread := [
+        Point{x: 3},
+        Point{x: 4},
+    ]
+}
+`
+    plain: fmt_core_ok(source)
+    fragment: "compact := [Point{{x: 1}}, Point{{x: 2}}]"
+    assert(plain.contains(fragment))
+    assert(!plain.contains("compact := [Point]"))
+    simplified_result: jet_format_source(source, true)
+    assert(simplified_result.ok)
+    simplified: simplified_result.text
+    assert(simplified.contains(fragment))
+    assert(!simplified.contains("compact := [Point]"))
+    assert_eq(jet_format_source(simplified, true).text, simplified)
+}
+
+#Test("failure_formatter_keeps_prefix_and_contextual_roles") {
+    formatted: fmt_core_stable("load: fn() -> Int? IOError! {{ read()?(\n    \"loading\"\n) }}\n")
+    assert(formatted.contains("load: fn() -> Int? IOError!"))
+    assert(formatted.contains("read()?(\"loading\")"))
+    source: "load: fn() -> Int IOError! {{ read() }}\n"
+    lexed: lex(source.bytes())
+    assert(lexed.diagnostics.len() == 0)
+    program := parse_source(source.bytes()).program
+    if program.items[0] == .Func(function) {
+        updated := function
+        if updated.body[0] == .Expr(inner) {
+            updated.body[0] = Stmt.Expr{expr: Expr.Try{value: inner, span: expr_span(inner), conversion: TryConvert.NoConversion, context: None, id: AST_NODE_GENERATED}}
+        } else { panic("expected expression body") }
+        program.items[0] = Item.Func{value: updated}
+    } else { panic("expected load function") }
+    rendered: jfmt_format_program_with_tokens(program, source, [Token]{}, false)
+    assert(rendered.contains("read()"))
+    assert(!rendered.contains("read()?"))
+    assert(fmt_core_ok(rendered) == rendered)
+}
+
+// A field's markers format to themselves, so `#Redact` is written once
+// however often `jet fmt` runs.
+#Test("field_markers_format_to_themselves") {
+    loop source in
+        [
+        "Login: struct {{\n    user: String\n    #Redact password: String\n}}\n",
+        "Login: struct {{\n    #[Redact, Rename(\"pw\")] password: String\n}}\n",
+        "Login: struct {{\n    #[Rename(\"pw\"), Redact] password: String\n}}\n",
+    ] -> assert_eq(fmt_core_stable(source), source)
+}
+
+// The grouping census reports exactly the parens precedence does not need:
+// a comparison under a comparison, `&&` under `||`, a prefix operator under
+// another, a literal receiver and a pair that spans lines all stay. So do a
+// fallback left of `??`, a typed literal that would meet an `if` body, and an
+// interpolated string that would become a string pattern.
+#Test("redundant_grouping_reports_only_parens_precedence_does_not_need") {
+    source: `run: fn(a: Int, b: Int, c: Int, xs: [Int], ok: Bool, o: Int?) {
+    p: (a * b) + c
+    q: (a + b) * c
+    r: a - (b - c)
+    s: (a - b) - c
+    t: (a < b) == ok
+    u: (ok && ok) || ok
+    v: -(-a)
+    w: (xs.len())
+    x: (0..a).len()
+    y: (a
+        + b)
+    z: ((c))
+    m: (o ?? a) ?? b
+    n: "{a}" == ("{b}x")
+    if (I32{1} == b) -> print("one")
+    if (ok) { print("{(a + b)}") }
+}
+`
+    spans: jet_format_redundant_grouping(source) ?? panic("census parses its source")
+    found: (loop span in spans -> source.slice(span.start..<span.end))
+    assert_eq(found, [String]{"(a * b)", "(a - b)", "(xs.len())", "((c))", "(c)", "(ok)", "(a + b)"})
+    assert(jet_format_redundant_grouping("run: fn() {{ x: ( }}\n") == None)
+}
+
+// The `#!` launch line is no token; it prints byte for byte.
+#Test("launch_line_prints_byte_for_byte") {
+    assert_eq(fmt_core_stable("#!/usr/bin/env jet\nrun: fn() {{\n    print(1)\n}}\n"), "#!/usr/bin/env jet\nrun: fn() {{ print(1) }}\n")
+    assert_eq(fmt_core_stable("#!/usr/bin/env jet\n\n// Tool entry.\n\nrun: fn() {{\n    print(1)\n}}\n"), "#!/usr/bin/env jet\n\n// Tool entry.\n\nrun: fn() {{ print(1) }}\n")
+}
+
+// A blank line between a standalone comment and the declaration under it
+// stays, so a banner never becomes that declaration's doc comment; a comment
+// written against the declaration stays against it.
+#Test("banner_comment_keeps_its_blank_line") {
+    source: "// --- helpers ---\n\nhelper: fn() -> Int {{ 1 }}\n\n// --- entry ---\n\n// Prints the helper.\nrun: fn() {{ print(helper()) }}\n"
+    assert_eq(fmt_core_stable(source), source)
+    member: "Point: struct {{\n    // --- position ---\n\n    x: Int\n    // The height.\n    y: Int\n}}\n"
+    assert_eq(fmt_core_stable(member), member)
+}
+
+// A comment after a block's last line stays inside the block, before its `}`,
+// with any blank line before it kept: in a function body, an `if` body, a
+// lambda body and after a last line whose own body is an arrow.
+#Test("comment_after_a_block_last_line_stays_inside_the_block") {
+    source: `run: fn() {
+    print(1)
+    // last line of the body
+}
+
+two: fn() {
+    print(2)  // trailing comment
+    // and its second line
+}
+
+nested: fn() {
+    if true {
+        print(1)
+        // end of the if body
+    }
+    loop x in [1, 2] -> print(x)
+    // after an arrow loop
+
+    /* after a blank line */
+}
+
+lambda: fn() {
+    step: fn() {
+        print("x")
+        // end of the lambda
+    }
+    step()
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
+
+// A multiline argument or parameter list puts each entry one level in and its
+// closer back at the list's own indent, a text-block argument included. A
+// final `fn` lambda written on the call's line hugs the parentheses instead.
+#Test("multiline_lists_indent_their_entries_one_level") {
+    source: `show: fn(
+    text: String,
+    n: Int,
+) { print(text) }
+
+run: fn() {
+    show(
+        """
+        hello
+        """,
+        2,
+    )
+    twice(
+        fn() {
+            print("HI")
+            print("Hello")
+        },
+    )
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+    hugged: "run: fn() {{\n    twice(fn() {{\n        print(\"HI\")\n        print(\"Hello\")\n    }})\n}}\n"
+    assert_eq(fmt_core_stable(hugged), hugged)
+}
+
+// A lambda whose body is one statement on its line keeps that line, so the
+// call around it stays on one line too.
+#Test("written_lambda_statement_keeps_its_line") {
+    source: "run: fn() {{\n    store.transaction(\"x\", fn(n: &Int) {{ n += 1 }})\n    store.each(fn(n) {{ total += n }})\n}}\n"
+    assert_eq(fmt_core_stable(source), source)
+}
+
+// fmt keeps the order the author wrote: a named tuple type's fields stay in
+// source order, and a wrapped `loop … in` head gains no comma.
+#Test("fmt_keeps_tuple_field_order_and_adds_no_comma_to_a_wrapped_loop_head") {
+    tuple: "run: fn() {{\n    cases: [(path: String, replacement: String, original: String)]{{}}\n    print(cases.len())\n}}\n"
+    assert_eq(fmt_core_stable(tuple), tuple)
+    nested: "f: fn(x: (p: [Int], b: (z: Int, a: Int))) {{\n    print(x)\n    print(x)\n}}\n"
+    assert_eq(fmt_core_stable(nested), nested)
+    looped: fmt_core_stable("run: fn() {{\n    loop directory in ([String]{{\"{{package}}/src\", \"{{root}}/.jet\", \"{{package}}/.jet\", \"{{package}}/.jet/generated\"}}) {{\n        print(directory)\n    }}\n}}\n")
+    assert(!looped.contains("), {{"), "a wrapped loop head ends without a comma")
+    assert(looped.contains("loop directory in"), "the loop head is kept")
+}
+
+// Core library and compiler prelude sources spell reserved `__` names; they
+// format in the reserved lane, and a user source with the same text is E0067.
+#Test("library_sources_format_in_the_reserved_lane") {
+    source: "// A Core library source may spell reserved names.\n__probe_value: 1\n\nprobe: fn() -> Int {{ __probe_value }}\n"
+    library: jet_format_library_source(source, false)
+    assert(library.ok, "a library source formats: {library.diagnostics:Debug}")
+    assert_eq(library.text, source)
+    user: jet_format_source(source, false)
+    assert(!user.ok, "a user source may not spell a reserved name")
+    reserved := false
+    loop diagnostic in user.diagnostics {
+        if diagnostic.code == "E0067" -> reserved = true
+    }
+    assert(reserved, "the user source reports E0067")
+}
+
+// An empty struct or enum body stays `{}` on its header line; a body that
+// holds only a comment keeps the comment.
+#Test("empty_type_bodies_stay_on_the_header_line") {
+    source: "Meter: struct {{}}\n\nPer: struct<A, B> {{}}\n\nNothing: enum {{}}\n\nNoted: struct {{\n    // filled in later\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok, "the source formats: {formatted.diagnostics:Debug}")
+    assert_eq(formatted.text, source)
+    spread: jet_format_source("Meter: struct {{\n\n}}\nNothing: enum {{\n}}\n", false)
+    assert_eq(spread.text, "Meter: struct {{}}\n\nNothing: enum {{}}\n")
+}
+
+// A value table whose subject passes a typed literal keeps its table: the
+// literal's `{` inside the call is not the table's, so fmt never rewrites the
+// table as an `if` chain that evaluates the subject once per arm.
+#Test("value_table_subject_with_a_typed_literal_stays_a_table") {
+    source: `P: struct {
+    n: Int
+}
+
+h: fn(p: P) -> Int Err! { Ok(p.n) }
+
+g: fn() -> String {
+    refused: if h(P{n: 1}) == {
+        .Ok(ok) -> "accepted"
+        .Err(error) -> "no"
+    }
+    refused
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+    inline: "g: fn() -> String {{ \"{{if h(P{{n: 1}}) == {{ .Ok(ok) -> \"yes\", .Err(error) -> \"no\" }}}}\" }}\n"
+    assert(fmt_core_stable(inline).contains("if h(P{{n: 1}}) == {{ .Ok(ok) -> \"yes\", .Err(error) -> \"no\" }}"), "a table in an interpolation hole stays a table")
+}
+
+#Test("a deep one-line else-if chain formats in linear time") {
+    // Each level once rendered its whole tail twice, compact then expanded:
+    // at 48 levels the format never finished.
+    depth: 48
+    line := ""
+    loop _ in 0..<depth -> line = "{line}if {{ flag -> print(\"stop\") else -> "
+    line = "{line}if {{ flag -> print(\"stop\") else -> print(\"deep-tail\") }}"
+    loop _ in 0..<depth -> line = "{line} }}"
+    formatted: fmt_core_stable("deep: fn(flag: Bool) -[IO]> {{\n    {line}\n}}\n")
+    assert(formatted.contains("print(\"deep-tail\")"))
+    assert(!formatted.contains(line), "a chain past the line width expands")
+}
+
+#Test("a comment above a trait member stays above it") {
+    source: `Edit: trait {
+    // Sets a field from text.
+    set: fn(&self, field: String, text: String) -> Bool
+    // The current field names.
+    names: fn(self) -> [String]
+}
+`
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains("// Sets a field from text.") && formatted.contains("// The current field names."))
+    assert(parser_test_find(formatted, "// Sets a field from text.") < parser_test_find(formatted, "set: fn"))
+    assert(parser_test_find(formatted, "set: fn") < parser_test_find(formatted, "// The current field names."))
+    assert(parser_test_find(formatted, "// The current field names.") < parser_test_find(formatted, "names: fn"))
+}
+
+#Test("a marker setting written twice keeps both rows") {
+    // Sema reports the second row (E0937); fmt keeps what was written.
+    source: `Traced: struct {
+    label: String
+
+    impl Marker {
+        sites: [.Function]
+        sites: [.Method]
+    }
+}
+`
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains("sites: [.Function]\n        sites: [.Method]"), "both rows print, in written order")
+}
+
+#Test("a prepared value keeps the braces its author wrote") {
+    source: `count: fn() -> Int { 3 }
+
+BRACED: #run { count() }
+BARE: #run count()
+SUM: #run { count() + 1 }
+`
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains("BRACED: #run {{ count() }}\n"), "a braced operand stays braced")
+    assert(formatted.contains("BARE: #run count()\n"), "a bare operand stays bare")
+    assert(formatted.contains("SUM: #run {{ count() + 1 }}\n"), "a wider value keeps its braces")
+}
+
+// An empty lambda body written on one line stays `{}`: printed open, it turned
+// the literal or call holding it multi-line, and a second pass then split that.
+// The rows are the corpus's: Jetpack/Store/Tests/StoreIngestLate.jet and the
+// core.web forms and store conformance sources.
+#Test("a one-line empty lambda body stays on its line, and a second pass changes nothing") {
+    source: `run: fn() {
+    hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
+    print(api.typed_validate_field(form, "jet", .Change, fn(value) {}).valid)
+    print(api.subscribe_selector<String, String, Never>(store, fn(value) { value }, fn(value) {}).active)
+    open := fn() {
+    }
+}
+`
+    // fmt_core_stable asserts that a second pass changes nothing. The two
+    // over-width rows may wrap, but each empty body stays `{}`.
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains("    print(api.typed_validate_field(form, \"jet\", .Change, fn(value) {{}}).valid)\n"), formatted)
+    assert(formatted.contains("react: fn(path: String, stage: EnvelopeWalkStage) {{}}"), formatted)
+    assert_eq(formatted.split("fn(value) {{}}").to_list().len(), 3)
+    assert(!formatted.contains("open := fn() {{}}"), "a body written open stays open")
+}
+
+// A scalar escape formats to the character's one spelling: `\n`, `\t` and
+// `\r` for those three, lowercase `\u{…}` hex without leading zeros for any
+// other control character (C0, DEL, C1), the character itself for the rest;
+// a second pass changes nothing.
+#Test("scalar_escapes_format_to_one_spelling") {
+    source: `run: fn() {
+    a: "\u{A}\u{9}\u{D}\u{7F}\u{0}\u{85}\u{E9}\u{0041}"
+    b: '\u{0}'
+    c: '\u{9F}'
+    d: '\u{a}'
+    e: """
+        x\u{1}\u{D}y
+        """
+}
+`
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains(`a: "\n\t\r\u{7f}\u{0}\u{85}éA"`), formatted)
+    assert(formatted.contains(`b: '\u{0}'`), formatted)
+    assert(formatted.contains(`c: '\u{9f}'`), formatted)
+    assert(formatted.contains(`d: '\n'`), formatted)
+    assert(formatted.contains(`x\u{1}\ry`), formatted)
+}
+
+#Test("an empty marked block written {{}} stays on its line") {
+    source: `run: fn() {
+    #Unsafe("audit") {}
+    #Impure("reason") {}
+    #Nondeterministic("reason") {}
+    #Unsafe("kept") {
+        // a note
+        print(1)
+    }
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
+
+#Test("an empty if, else, loop or defer block stays {{}}") {
+    source: `run: fn() {
+    if ready() {}
+    if ready() {} else {}
+    loop i in 0..<3 {}
+    loop ready() {}
+    loop {}
+    defer {}
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
+
+#Test("a comment in an empty block stays inside the block") {
+    source: `run: fn() {
+    #Unsafe("audit") {
+        // a note
+    }
+    if ready() {
+        // nothing yet
+    } else {
+        // nor here
+    }
+    loop i in 0..<3 {
+        // skipped
+    }
+    defer {
+        // cleanup later
+    }
+    done()
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
+
+// `if r == .Val(n) -> A else -> B` is one pattern test, so fmt keeps it as
+// written when an arm's value is a table of its own; the table's `{` is not
+// the test's. As a table, its `else` would stand for `.None` (E0641).
+#Test("one_arm_pattern_test_keeps_its_form_beside_a_table_in_an_arm") {
+    source: `describe: fn(code: Int?, light: Light) -> String {
+    kind: if code == .Val(n) -> "code {n}" else -> if light == {
+        .Red -> "red"
+        .Green -> "green"
+    }
+    kind
+}
+
+pick: fn(found: Int?, light: Light) -> Bool {
+    chosen: if found == .Val(n) -> if light == {
+        .Red -> n > 0
+        .Green -> n < 0
+    } else -> false
+    chosen
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}

@@ -1,0 +1,13 @@
+LIMIT: 3
+
+pick: fn(k: Int) -> Int? { if k > 0 -> Val(k) else -> None }
+
+run: fn() {
+    // A constant inside `Val(...)` after `==` is compared, never bound.
+    print(pick(3) == Val(LIMIT))
+    print(pick(4) == Val(LIMIT))
+    z: 3
+    // A local is compared when it is written in parentheses.
+    print(pick(3) == Val((z)))
+    print(pick(4) == Val((z)))
+}

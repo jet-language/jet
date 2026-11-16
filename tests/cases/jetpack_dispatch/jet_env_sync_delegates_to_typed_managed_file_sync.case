@@ -1,0 +1,11 @@
+# Port of tests/jetpack_dispatch.rs:245-276. PENDING-SAME-HEAD and batch-four grammar.
+# Sources/literal predicates copied verbatim, helper templates expanded exactly.
+fixture: fixtures/jet_env_sync_delegates_to_typed_managed_file_sync
+mkdir: root
+env: JETPACK_ROOT={work}/root
+mkdir: home
+env: HOME={work}/home
+step: jet env sync --trust --yes --offline --no-color
+exit: 0
+file: config/generated.txt = jet_env_sync_delegates_to_typed_managed_file_sync.out
+file: .jet/files/state is-file

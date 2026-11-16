@@ -1,0 +1,28 @@
+// Temporary paths make directory, mode, append, and rename operations explicit.
+package: {
+    name: "files_projection"
+    authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+use {
+    files: core.files
+    testing: core.testing
+}
+
+run: fn() {
+    root := testing.temp_dir("files-projection")
+    child := Path.from(root).join("child")
+    source := child.join("source.txt")
+    destination := child.join("destination.txt")
+    files.create_dir_all(child)
+    files.write(source, "one")
+    files.append(source)
+    files.append_all(source, "two")
+    files.set_mode(source, 0o600)
+    print("directory:{files.is_dir(child)}")
+    files.rename(source, destination)
+    print("renamed:{files.exists(destination)}")
+    files.remove(destination)
+    files.remove_dir(child)
+    print("removed:{!files.is_dir(child)}")
+}

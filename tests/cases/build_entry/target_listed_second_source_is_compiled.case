@@ -1,0 +1,21 @@
+# Every source a build target lists is part of it. `app` lists
+# helper.jet beside main.jet, and main.jet's `run` calls `helper_value`, which
+# only helper.jet declares; each optimization tier builds and runs it.
+fixture: fixtures/target_listed_second_source_is_compiled
+artifact: app
+env: NO_COLOR=1
+step: jet build main.jet -O0
+exit: 0
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "helper says 42\n"
+step: jet build main.jet -O1
+exit: 0
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "helper says 42\n"
+step: jet build main.jet --release
+exit: 0
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "helper says 42\n"

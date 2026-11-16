@@ -1,0 +1,14 @@
+// `limit` stops only inside `core.math.clamp_float`, so its row holds Core's
+// `Panic`, and the `-[!Panic]>` slot refuses it. `computed` is a local that
+// could be computed while compiling: the slot's row still holds it.
+use math: core.math
+
+stop_apply: fn(x: Float, f: fn(Float) -[!Panic]> Float) -> Float { f(x) }
+
+limit: fn(value: Float) -> Float { math.clamp_float(value, Float{0.0}, Float{10.0}) }
+
+run: fn() {
+    computed: stop_apply(Float{4.0}, limit)
+    print(computed)
+    print(stop_apply(Float{12.0}, limit))
+}

@@ -1,0 +1,30 @@
+// A Map keyed by a KeyBy struct and computed while building, as a local
+// value or a module global, holds its keys in the order of their key
+// (highest level first), the same order a Map built at run time has. Nothing
+// else in the program calls `key`, so the compile-time run reaches it only
+// because the Map's keys are ordered by it.
+Tier: struct {
+    level: Int
+
+    impl KeyBy {
+        Key: Int
+
+        key: fn(self) -> Int { 0 - self.level }
+    }
+}
+
+tiers: fn() -> [Tier:String] {
+    made := [Tier:String]{}
+    made[Tier{level: 1}] = "low"
+    made[Tier{level: 3}] = "high"
+    made[Tier{level: 2}] = "middle"
+    made
+}
+
+tier_names := tiers()
+
+run: fn() {
+    local: tiers()
+    loop (tier, name) in local -> print("local {tier.level} {name}")
+    loop (tier, name) in tier_names -> print("global {tier.level} {name}")
+}

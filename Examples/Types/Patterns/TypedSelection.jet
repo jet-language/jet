@@ -1,0 +1,86 @@
+// Selecting one case from a list of enum values: a case pattern keeps or
+// drops each value, `filter_map` keeps the payloads of one case, and a
+// fallible selection propagates its first rejection. A borrowed list lends
+// its payloads, so a view of one stays a loan of that list; an owned list
+// gives them up.
+Shape: enum {
+    Circle(r: Float)
+    Rect(w: Float, h: Float)
+    Label(text: String)
+    Path(steps: [Int])
+}
+
+describe: fn(shape: Shape) -> String {
+    if shape == {
+        .Circle(r) -> "circle r={r}"
+        .Rect(w, h) -> "rect {w}x{h}"
+        .Label(text) -> "label {text}"
+        .Path(steps) -> "path {steps}"
+    }
+}
+
+radius: fn(shape: Shape) -> Float? {
+    if shape == .Circle(r) -> return Val(r)
+    None
+}
+
+circle_or_err: fn(shape: Shape) -> Float Err! {
+    if shape == {
+        .Circle(r) -> Ok(r)
+        .Rect(_, _) -> Err("not a circle: Rect")
+        .Label(_) -> Err("not a circle: Label")
+        .Path(_) -> Err("not a circle: Path")
+    }
+}
+
+all_circles: fn(shapes: [Shape]) -> [Float] Err! {
+    radii := [Float]{}
+    loop shape in shapes -> radii.push(circle_or_err(shape))
+    Ok(radii)
+}
+
+// Reads the payloads of a list the caller keeps.
+label_lengths: fn(shapes: [Shape]) -> [Int] {
+    lengths := [Int]{}
+    loop shape in shapes {
+        if shape == .Label(text) -> lengths.push(text.len())
+    }
+    lengths
+}
+
+// Views the first path's steps where they are: the view is a loan of the
+// list the caller keeps, so the `from` clause names that list.
+first_steps: fn(shapes: [Shape], none: [Int]) -> View<Int> from shapes | none {
+    loop shape in shapes {
+        if shape == .Path(steps) -> return steps[0..<steps.len()]
+    }
+    none[0..<0]
+}
+
+// Moves each label's text out of a list the caller gives up.
+take_labels: fn(shapes: &&[Shape]) -> [String] {
+    labels := [String]{}
+    loop shape in shapes.move() {
+        if shape == .Label(text) -> labels.push(text)
+    }
+    labels
+}
+
+run: fn() {
+    shapes: [Shape]{Shape.Circle{r: 1.5}, Shape.Rect{w: 2.0, h: 3.0}, Shape.Label{text: "north"}, Shape.Path{steps: [Int]{3, 1, 4}}, Shape.Circle{r: 0.5}}
+    loop shape in shapes -> print(describe(shape))
+    radii: shapes.filter_map(radius).to_list()
+    print("radii: {radii}")
+    if all_circles(shapes) == {
+        .Ok(found) -> { print("all circles: {found}") }
+        .Err(message) -> print("propagated: {message}")
+    }
+    circles: [Shape]{Shape.Circle{r: 2.0}, Shape.Circle{r: 3.0}}
+    print("all circles: {all_circles(circles) ?? [Float]{}}")
+    print("label lengths: {label_lengths(shapes)}")
+    none: [Int]{}
+    print("first steps: {first_steps(shapes, none)}")
+    print("still the caller's: {shapes.len()} shapes")
+    owned: [Shape]{Shape.Label{text: "east"}, Shape.Circle{r: 1.0}, Shape.Label{text: "west"}}
+    print("taken labels: {take_labels(owned)}")
+}

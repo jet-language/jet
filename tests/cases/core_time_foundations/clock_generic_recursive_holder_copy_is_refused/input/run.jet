@@ -1,0 +1,15 @@
+use time: core.time
+
+// A generic type that holds a Clock through a part of its own type gets no
+// fork function, so its copy has no fixed set of parts to rebuild and is
+// refused rather than left sharing.
+Node: struct<T> {
+    value: T
+    kids: [Node<T>]
+}
+
+run: fn() {
+    root: Node<time.Clock>{value: time.Clock.new(0), kids: [Node<time.Clock>]{}}
+    copied := root.copy()
+    print(copied.kids.len())
+}

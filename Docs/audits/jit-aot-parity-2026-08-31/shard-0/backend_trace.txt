@@ -1,0 +1,56 @@
+# backend attribution (c727/c730)
+# resident_jit = native Cranelift; deopt_interp = tiered deopt to tier-0
+# run_tier_broken = AOT-green but the default jet run refuses (D-VERDICT-1254-1)
+# tier_divergent = both tiers ran and the named stream(s) disagree
+# parity = pure-interpreter + default tiered + optimized AOT identity
+# only when the row has no interpreter_refused: CODE detail
+basics/bare_lambda_param	resident_jit
+basics/first_hour	resident_jit
+basics/loop_values	resident_jit
+basics/signature_shape	resident_jit
+cli/typed_entry_args	resident_jit
+collections/index_hook	aot_broken	AOT compile or run failed
+collections/max_by_tie	resident_jit
+collections/zip_strict_mismatch	expected_exit	golden expects non-zero exit
+comptime/embed	resident_jit
+concurrency/deadline_context	expected_exit	golden expects non-zero exit
+concurrency/detached_task	resident_jit
+concurrency/scoped_borrow_bands	resident_jit
+concurrency/tasks	resident_jit
+crypto/random_api_split	frontend_rejected	E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here
+effects/capability_sigils	deopt_interp
+effects/infer_receiver	resident_jit
+errors/core_error_conversion	run_tier_broken	E1803
+errors/rollback_trait	frontend_rejected	E2417: explicit failure domain ``TxnErr`` is not an Error type
+io/app_config	frontend_rejected	E2402: this implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists; E0107: nothing named `errors` exists here; E0003: this `if` needs an `else` arm
+io/db_read_footprint	frontend_rejected	E0305: pattern `Val` doesn't match [String:DBValue]; E0107: nothing named `row` exists here
+io/no_prelude	resident_jit
+io/stdin_read_all	resident_jit
+lowlevel/linalg_simd	aot_broken	AOT compile or run failed
+math/bit_not	resident_jit
+math/modulo	resident_jit
+memory/arena_regions	resident_jit
+memory/parameter_modes	resident_jit
+memory/pool_stale_id	expected_exit	golden expects non-zero exit
+memory/try_allocation	frontend_rejected	E2402: this implicit fallible call can't convert `AllocError` into `Err` — no declared conversion exists; E0107: nothing named `value` exists here; E0107: nothing named `error` exists here; E0107: nothing named `error` exists here; E0003: this `if` needs an `else` arm; E2402: this implicit fallible call can't convert `AllocError` into `Err` — no declared conversion exists; E0107: nothing named `value` exists here; E0107: nothing named `error` exists here; E0107: nothing named `error` exists here
+modules/library	aot_broken	AOT compile or run failed
+net/browser_network	resident_jit
+net/email_message	deopt_interp	interpreter_refused: E2201
+net/http_web_defaults	aot_broken	AOT compile or run failed
+parsing/reader_hot_loop	deopt_interp
+serde/codable_default	resident_jit
+serde/json_typed	resident_jit
+serde/user_derive	deopt_interp
+text/decimal_exponents	resident_jit
+text/strings	frontend_rejected	E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `?? return` can't return a value here; E0405: `??` only works on a fallible value, not String (text)
+time/time_order	deopt_interp
+tooling/compute_linalg	run_tier_broken	E1803
+tooling/data_json	frontend_rejected	E0405: `?? return` can't return a value here
+tooling/internal_project_parts	resident_jit
+tooling/statement_attributes	deopt_interp
+types/anonymous_unions	deopt_interp
+types/enum_dot	resident_jit
+types/option	resident_jit
+types/type_alias	frontend_rejected	E2417: explicit failure domain ``AppError`` is not an Error type; E0108: this `Err` holds `AppError`, but `Err` was expected; E0108: this `Ok` holds Int (a whole number), but Int !AppError was expected; E0405: the fallback is Int (a whole number), but the success value is Int !AppError
+ui/ui_motion	aot_broken	AOT compile or run failed
+web/web_wasm_int_export	resident_jit

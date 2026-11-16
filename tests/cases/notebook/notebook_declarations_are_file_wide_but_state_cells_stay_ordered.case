@@ -1,0 +1,16 @@
+# tests/notebook.rs::notebook_declarations_are_file_wide_but_state_cells_stay_ordered
+# Verbatim original cell sources and exact public predicates; runtime UNRUN.
+fixture: notebook_declarations_are_file_wide_but_state_cells_stay_ordered.fixture
+env: NO_COLOR=1
+step: jet notebook document.jetnb --protocol
+stdin: commands.stdin
+exit: 0
+json: stdout ndjson $[0].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:90-96 comptime_reader result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+json: stdout ndjson $[1].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:97-100 comptime_answer result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+json: stdout ndjson $[2].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:101-107 caller result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+json: stdout ndjson $[3].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:108-111 helper result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+json: stdout ndjson $[4].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:112-115 answer_type result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+json: stdout ndjson $[6].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:124-127 binding result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+json: stdout ndjson $[7].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:128-129 second read result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+json: stdout ndjson $[5].body ^= "status=error;" # original ed77c235f tests/notebook.rs:117-123 first read !result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps false result.ok() to this body prefix
+stdout.line(7).after_first("text="): ~ "7" # exact bundle.text_plain contains 7; never turn/count prefix

@@ -1,0 +1,15 @@
+{
+  "name": "hello-compile",
+  "mode": "tool",
+  "description": "Tools/perf/hello-compile/bench.py and its Jet twin bench/run.jet, the hello-world compile benchmark: for each toolchain (ONLY narrows them to the labels containing one of its comma items), a cold and a warm build in a fresh directory under BENCH_DIR with wall time and process-group peak memory, the binary's size as built and stripped and its best run time of five, one JSON row printed per toolchain and every row in results.json. The peer toolchains are fixed store paths a machine may not hold, so the cases run the Jet rows only, with JET a stand-in that writes a copy of `true` as the binary and refuses a build into an empty store. The check prints each row's fields from the parsed JSON with the timings, memory and sizes as N, then results.json's rows and the work directory's files. The cases cover all three Jet rows (the empty-store one failing with its log), two rows picked by two ONLY items, and an ONLY that picks nothing.",
+  "tool": {
+    "original": "Tools/perf/hello-compile/bench.py",
+    "jet": "Tools/perf/hello-compile/bench/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": [], "env": {"BENCH_DIR": "bench", "JET": "../../fake-jet", "ONLY": "Jet"}, "check": "check.jet", "expected": "expected/jet.out"},
+      {"args": [], "env": {"BENCH_DIR": "bench", "JET": "../../fake-jet", "ONLY": "Rust reference,TRUE-COLD"}, "check": "check.jet", "expected": "expected/two.out"},
+      {"args": [], "env": {"BENCH_DIR": "bench", "JET": "../../fake-jet", "ONLY": "Pascal"}, "exit": 1, "check": "check.jet", "expected": "expected/none.out"}
+    ]
+  }
+}

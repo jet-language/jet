@@ -1,0 +1,7 @@
+// Runs a process and reads only its exit code.
+use process: core.process
+
+run: fn() {
+    receipt: process.cmd([String]{"/bin/sh", "-c", "exit 3"}).run() ?? panic("the run failed: {err}")
+    print("code {receipt.code}")
+}

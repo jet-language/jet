@@ -1,0 +1,7 @@
+# Port of pin.rs::pinning_a_value_instead_of_a_place_is_e0218; source is the exact Rust raw/format literal result.
+# PENDING-GRAMMAR: JSON count/filter assertions as needed.
+fixture: fixtures/pinning_a_value_instead_of_a_place_is_e0218
+step: jet check fixture.jet --json
+exit: nonzero
+json: stdout doc $.reports #= 1
+json: stdout doc $.reports[*].code = "E0218"

@@ -1,0 +1,8 @@
+Error [jet.FixedTimingSteer]: A `Secret` value decides a branch that can't be masked (an arm returns, breaks, calls, can stop or writes memory)
+  --> tests/ui/taint/fixed_timing_tagged_struct_param_field_read_keeps_tag.jet:12:8
+    |
+ 12 |     if x.p[0] == (U64{0}) -> print("zero")
+    |        ^^^^^^^^^^^^^^^^^^
+ Why: `Secret` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
+ Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Secret)` function first
+More: jet-lang.dev/e/E0737

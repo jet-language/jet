@@ -1,0 +1,9 @@
+# Claim: a `packages:` entry whose target kind Jet does not ship is E1210, and the report names the entry's target.
+fixture: unknown_packages_target_emits_e1210.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check
+exit: 1
+stderr: ~ "E1210" # the unknown target is refused by its code
+stderr: ~ "target `spaceship`, which is not a known target" # the report names the entry and its target

@@ -1,0 +1,53 @@
+{
+  "identity": {
+    "artifact": {
+      "path": "fake-jet.txt",
+      "sha256": "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d"
+    },
+    "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "toolchain": {
+      "rustc": "rustc 1.0.0",
+      "node": "v22.0.0"
+    },
+    "host": {
+      "hostname": "fixture",
+      "cpu_affinity": "0"
+    }
+  },
+  "pair": {
+    "id": "list_fill_repeat_vs_index_loop",
+    "surface": "list fill_repeat",
+    "plain": "index loop storing pattern[i % 4]",
+    "workload": "65536-byte U8 row (a 128x128 RGBA image) tiled with a 4-byte pixel over 2048 frames with an identical checksum",
+    "surface_program": "gauntlet:performance-surface:list_fill_repeat_vs_index_loop:surface",
+    "plain_program": "gauntlet:performance-surface:list_fill_repeat_vs_index_loop:plain",
+    "evidence_key": "list_fill_repeat_vs_index_loop",
+    "evidence_file": "Tools/gauntlet/performance-surface-list-fill-repeat-evidence.json",
+    "surface_field": "surface_wall_time_ms",
+    "plain_field": "plain_wall_time_ms",
+    "surface_source": "// Real paired workload: list_fill_repeat_vs_index_loop surface spelling\nrun: fn() {\n    row := [U8]{}\n    loop i in 0..<65536 {\n        row.push(0)\n    }\n    total := 0\n    loop frame in 0..<2048 {\n        pattern: [U8]{U8.from_int(frame % 256) ?? 0, U8.from_int((frame + 1) % 256) ?? 0, U8.from_int((frame + 2) % 256) ?? 0, U8.from_int((frame + 3) % 256) ?? 0}\n        row.fill_repeat(0..<65536, pattern)\n        total = total + Int.from_u8(row[frame])\n    }\n    loop value in row {\n        total = total + Int.from_u8(value)\n    }\n    print(\"performance-surface:list_fill_repeat_vs_index_loop:{total}\")\n}",
+    "plain_source": "// Real paired workload: list_fill_repeat_vs_index_loop plain spelling\nrun: fn() {\n    row := [U8]{}\n    loop i in 0..<65536 {\n        row.push(0)\n    }\n    total := 0\n    loop frame in 0..<2048 {\n        pattern: [U8]{U8.from_int(frame % 256) ?? 0, U8.from_int((frame + 1) % 256) ?? 0, U8.from_int((frame + 2) % 256) ?? 0, U8.from_int((frame + 3) % 256) ?? 0}\n        loop i in 0..<65536 {\n            row[i] = pattern[i % 4]\n        }\n        total = total + Int.from_u8(row[frame])\n    }\n    loop value in row {\n        total = total + Int.from_u8(value)\n    }\n    print(\"performance-surface:list_fill_repeat_vs_index_loop:{total}\")\n}",
+    "input_range": "0..<65536",
+    "inputs": {
+      "frames": 2048,
+      "range": "0..<65536",
+      "expected_total": 4487168
+    },
+    "expected_output": "performance-surface:list_fill_repeat_vs_index_loop:4487168\n",
+    "measured": {
+      "surface_wall_time_ms": 3.14,
+      "plain_wall_time_ms": 55.722,
+      "ratio": 0.056351171889020495
+    },
+    "verdict": "win",
+    "verdict_reason": "Strict win on the native tier: median ratio 0.056, paired-bootstrap 95% upper bound 0.058 (100 trials, 10 warmups)."
+  },
+  "builds": {
+    "plain": {
+      "executable": null,
+      "executable_sha256": null,
+      "status": 1,
+      "stderr": "Error [E0001]: fixture\nmore\n"
+    }
+  }
+}

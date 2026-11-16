@@ -1,0 +1,158 @@
+// jet_builtins — Core's one door to the compiler.
+//
+// This module declares what the compiler itself provides to Core: its kernel
+// operations, the storage types those operations work on, and the markers
+// only the compiler can honour. A name here drops the `__` it carried in the
+// module it left.
+//
+// A Core module reaches the compiler through `use builtin: jet_builtins` and
+// a `builtin.` path, so reading Core shows each place the compiler acts. Only
+// Core sources import this module; any other program gets E1013 and reaches
+// the same operations through Core's public modules.
+//
+// A Core item the compiler names belongs here. tests/guards/core_builtins_door.jet
+// counts the compiler-known names Core still declares in other modules, and
+// that count only falls.
+//
+// An operation the host runs has no declaration here: its row in
+// Compiler/Prelude/Core.rows (`dispatcher_row … jet_builtins <name>`) and its
+// typed signature in the compiler's host signature table are the whole
+// operation. This file declares the records those operations return.
+
+// The roles a Core function fills for the compiler: `abs` on an F32
+// (AbsF32) and on an I64 (AbsI64), `pow` on a Float (PowFloat) and on an F32
+// (PowF32). Lowering runs the one Core function that fills an operation's
+// role and never names it, so the function can be private and keep any
+// name. Each role is filled exactly once (E1014 for a second filler; E1015
+// when `jet check Core` finds one unfilled). The tests/ui/core_role_* cases
+// put a probe role in after the `RoleKind: enum {` line.
+RoleKind: enum {
+    AbsF32
+    AbsI64
+    PowFloat
+    PowF32
+}
+
+// `#Builtin.Role(.X)` on a Core function makes it the one that fills role X.
+Role: struct {
+    kind: RoleKind
+
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+// The test harness's evidence and temporary-directory operations
+// (`core.testing`'s snap, golden, fixture and temp_dir): plain records of
+// physical facts, not raw-codec tuples.
+
+// `evidence_read(path)`: a snapshot, golden or fixture file's text.
+EvidenceRead: struct {
+    ok: Bool
+    text: String
+    missing: Bool
+}
+
+// `temp_facts()`: the process and thread a temporary directory is named for.
+TempFacts: struct {
+    pid: U64
+    thread: String
+}
+
+// `temp_join(name)`: a path under the temporary root. `path` is the host's
+// opaque platform encoding of it: pass it back to temp_remove and
+// temp_create unchanged, never built, sliced, decoded or edited. `text` is
+// its lossy display form.
+TempPath: struct {
+    path: [U8]
+    text: String
+}
+
+// `temp_remove(path)`: whether the old directory is gone.
+TempRemove: struct {
+    ok: Bool
+    missing: Bool
+    cause: String
+}
+
+// `temp_create(path)`: whether the new directory exists.
+TempCreate: struct {
+    ok: Bool
+    cause: String
+}
+
+// The descriptor operations core.files.sealed reads and writes files through
+// (jetc_open_directory, jetc_read, jetc_link and the rest): whole-record
+// physical facts of one system call.
+
+// What every descriptor operation but jetc_stat returns. `value` is the
+// descriptor or byte count, negative on failure with `errno` set; `bytes`
+// is what jetc_read read. `linux` is a compile-time host capability,
+// consumed once at parent open.
+JetcRaw: struct {
+    value: Int
+    errno: Int
+    bytes: [U8]
+    linux: Bool
+}
+
+// `jetc_stat(fd)`: an open descriptor's metadata, `status` negative on
+// failure with `errno` set.
+JetcStat: struct {
+    status: Int
+    errno: Int
+    dev: Int
+    ino: Int
+    len: Int
+    mtime: Int
+    mtime_ns: Int
+    nlink: Int
+    is_file: Bool
+    is_dir: Bool
+}
+
+// The advisory-lock operations core.files' lock and try_lock run on
+// (lock_open, lock_try, lock_wait, lock_close, lock_fd_identity,
+// lock_path_identity and lock_owner): plain records of the host's facts.
+// `errno` and `platform` are the host's own error numbers, which core.files
+// maps to IOError.
+
+// What lock_open and lock_try return: `value` is the descriptor or result,
+// negative on failure.
+LockCall: struct {
+    value: Int
+    errno: Int
+    platform: Int
+}
+
+// What lock_fd_identity and lock_path_identity return: the file a descriptor
+// or path names, so a replaced lock file is told apart from the held one.
+LockIdentity: struct {
+    device: Int
+    low: Int
+    high: Int
+    regular: Bool
+    reparse: Bool
+    errno: Int
+    platform: Int
+}
+
+// What lock_wait returns: whether the lock was taken before `deadline_ns`.
+LockWait: struct {
+    acquired: Bool
+    timed_out: Bool
+    errno: Int
+    platform: Int
+    deadline_ns: Int
+}
+
+// `resolve_ordered(host, port)`: core.net's name resolution. It answers
+// every address in the platform's order, or this failure: `kind` is the
+// failure class core.net maps to a NetError, and `os_code` counts only when
+// `has_os_code` is set.
+ResolveError: struct {
+    kind: Int
+    has_os_code: Bool
+    os_code: Int
+    message: String
+}

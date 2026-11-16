@@ -1,0 +1,14 @@
+# Port of tests/cli_parts/budget.rs:3-38; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original assertions authored; no runtime reference run.
+# PENDING-GRAMMAR: stdout|stderr subject
+fixture: fixtures/compiler_hostile
+remove: missing/edits/rename-route.patch
+step: jet budget check --json
+cwd: missing
+exit: 1
+stdout|stderr: ~ "E2908" # original predicate
+file: missing/.jet/perf/reports absent
+step: jet budget check --json
+cwd: typo
+exit: 1
+stdout|stderr: ~ "E2903" # original predicate

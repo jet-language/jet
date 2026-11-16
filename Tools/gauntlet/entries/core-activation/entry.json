@@ -1,0 +1,20 @@
+{
+  "name": "core-activation",
+  "mode": "tool",
+  "description": "Tools/perf/core-activation.mjs and its Jet twin core-activation/run.jet, the Core battery activation cost report: for each selected battery a control, an import and a use program, each checked, built --release, sized (bytes, sha256, `size -A` sections, `nm --defined-only` count), its generated Rust searched for Core modules, its binary run --samples times and once under the LD_PRELOAD allocation counter, then `jet run`; the rows and the import-control and use-control deltas go to --out as JSON. JET is a stand-in (fake-jet) whose builds give static stand-in binaries (source/ builds them), a shell script for the data battery so the counter measures, a failing binary for time's use arm, no build for http's use arm and no Rust for regex. Cases: every path over four batteries, the default jet, out and work under JET_STATE_ROOT, a jet that does not start, and the option refusals. The check prints the output, each report value with the timings, allocation counts, commit and dirty flag as N, then the case directory's files.",
+  "tool": {
+    "original": "Tools/perf/core-activation.mjs",
+    "jet": "Tools/perf/core-activation/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--jet", "../../../fake-jet", "--out", "out.json", "--work", "work", "--samples", "2", "--batteries", "json,data,time,http"], "env": {}, "check": "check.jet", "expected": "expected/all.out"},
+      {"args": ["--batteries", "regex", "--samples", "1"], "env": {"JET_STATE_ROOT": "state", "JET_SCRATCH_ROOT": "state"}, "check": "check.jet", "expected": "expected/defaults.out"},
+      {"args": ["--jet", "./no-jet", "--out", "out.json", "--work", "work", "--samples", "1", "--batteries", "json"], "env": {}, "check": "check.jet", "expected": "expected/no-jet.out"},
+      {"args": ["--jet", "./fake-jet", "--samples", "0"], "env": {"JET_STATE_ROOT": "state"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--samples", "1.5"], "env": {"JET_STATE_ROOT": "state"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--batteries", "json,nope"], "env": {"JET_STATE_ROOT": "state"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--level", "1"], "env": {"JET_STATE_ROOT": "state"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--samples", "2", "--jet"], "env": {"JET_STATE_ROOT": "state"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"}
+    ]
+  }
+}

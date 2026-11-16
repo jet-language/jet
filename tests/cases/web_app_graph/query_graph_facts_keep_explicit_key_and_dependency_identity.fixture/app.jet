@@ -1,0 +1,14 @@
+#Target(Web)
+
+use {
+    web: core.web
+    query: core.web.query
+}
+
+home: fn() -> WebPage {
+    first: query.watch("orders")
+    second: query.watch("orders")
+    return web.page("Orders", first.get())
+}
+
+run: fn() { web.app().route("/", home).csr().serve() }

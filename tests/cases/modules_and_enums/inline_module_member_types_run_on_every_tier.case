@@ -1,0 +1,16 @@
+# An inline module's distinct and struct member types lift out of the module: the module body,
+# a signature outside it, and a static call through the module path all reach them.
+fixture: inline_module_member_types_run_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "6\n7\n3\n"
+step: jet run --release main.jet
+exit: 0
+stdout: = "6\n7\n3\n"
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "6\n7\n3\n"

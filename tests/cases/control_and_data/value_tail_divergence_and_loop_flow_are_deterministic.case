@@ -1,0 +1,10 @@
+# HAND-PORT tests/tir_control_and_data.rs:439-506 value_tail_divergence_and_loop_flow_are_deterministic
+# PENDING-KIT; no runtime/reference proof.
+# Original divergent acceptance and first E0114 span Some finite-break failure.
+fixture: value_tail_divergence_and_loop_flow_are_deterministic.fixture
+step: jet check valid.jet
+exit: 0
+step: jet check finite.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0114"] #>= 1
+json: machine doc $.reports[?code="E0114"][0].span != null

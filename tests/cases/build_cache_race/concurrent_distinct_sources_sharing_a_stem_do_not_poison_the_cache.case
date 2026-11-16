@@ -1,0 +1,70 @@
+# Port of build_cache_race.rs:28-108. PENDING-GRAMMAR: spawn/wait.
+fixture: fixtures/same-stem
+# Original build_cache_race.rs:37-39 creates empty cache/cwd directories.
+mkdir: cache
+mkdir: cwd
+env: JET_STORE_DIR={work}/cache
+spawn run0: jet run {work}/src0/main.jet
+cwd: {work}/cwd
+spawn run1: jet run {work}/src1/main.jet
+cwd: {work}/cwd
+spawn run2: jet run {work}/src2/main.jet
+cwd: {work}/cwd
+spawn run3: jet run {work}/src3/main.jet
+cwd: {work}/cwd
+spawn run4: jet run {work}/src4/main.jet
+cwd: {work}/cwd
+spawn run5: jet run {work}/src5/main.jet
+cwd: {work}/cwd
+spawn run6: jet run {work}/src6/main.jet
+cwd: {work}/cwd
+spawn run7: jet run {work}/src7/main.jet
+cwd: {work}/cwd
+wait: run0
+exit: 0
+wait: run1
+exit: 0
+wait: run2
+exit: 0
+wait: run3
+exit: 0
+wait: run4
+exit: 0
+wait: run5
+exit: 0
+wait: run6
+exit: 0
+wait: run7
+exit: 0
+mkdir: verify0
+step: jet run {work}/src0/main.jet
+cwd: {work}/verify0
+stdout: ~ prog-0 # Original asserts marker containment, not full output equality.
+mkdir: verify1
+step: jet run {work}/src1/main.jet
+cwd: {work}/verify1
+stdout: ~ prog-1 # Original asserts marker containment, not full output equality.
+mkdir: verify2
+step: jet run {work}/src2/main.jet
+cwd: {work}/verify2
+stdout: ~ prog-2 # Original asserts marker containment, not full output equality.
+mkdir: verify3
+step: jet run {work}/src3/main.jet
+cwd: {work}/verify3
+stdout: ~ prog-3 # Original asserts marker containment, not full output equality.
+mkdir: verify4
+step: jet run {work}/src4/main.jet
+cwd: {work}/verify4
+stdout: ~ prog-4 # Original asserts marker containment, not full output equality.
+mkdir: verify5
+step: jet run {work}/src5/main.jet
+cwd: {work}/verify5
+stdout: ~ prog-5 # Original asserts marker containment, not full output equality.
+mkdir: verify6
+step: jet run {work}/src6/main.jet
+cwd: {work}/verify6
+stdout: ~ prog-6 # Original asserts marker containment, not full output equality.
+mkdir: verify7
+step: jet run {work}/src7/main.jet
+cwd: {work}/verify7
+stdout: ~ prog-7 # Original asserts marker containment, not full output equality.

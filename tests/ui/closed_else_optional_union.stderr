@@ -1,0 +1,17 @@
+Error [jet.ClosedSetElse]: This `else` stands for cases of the closed set `Int?`
+  --> tests/ui/closed_else_optional_union.jet:6:9
+    |
+  6 |         else -> 0
+    |         ^^^^^^^^^
+ Why: `Int?` is a closed set: an `else` hides which of its cases the arm handles, where naming them keeps the table checked
+ Fix: Name the cases instead: `.None ->`
+More: jet-lang.dev/e/E0641
+
+Error [jet.ClosedSetElse]: This `else` stands for cases of the closed set `Int | String`
+  --> tests/ui/closed_else_optional_union.jet:13:9
+    |
+ 13 |         else -> "text"
+    |         ^^^^^^^^^^^^^^
+ Why: `Int | String` is a closed set: an `else` would take any case added to `Int | String` later silently, instead of the compiler asking you to handle it
+ Fix: Name the cases instead: `.String ->`
+More: jet-lang.dev/e/E0641

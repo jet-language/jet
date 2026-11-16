@@ -1,0 +1,101 @@
+use {
+    app
+    db: core.db
+    core.reactive.loadable.[Loadable]
+}
+
+#Error
+CountError: enum {
+    NoBoard
+}
+
+// The open tasks on a board, as a server function a page binds with
+// app.live; RUNS counts its runs.
+RUNS: Shared{0}
+
+open_tasks: fn(board: String) -[DB.Read]> Int CountError! {
+    if board == "" -> return Err(CountError.NoBoard)
+    runs := RUNS.guard_edit()
+    runs.value += 1
+    board.len()
+}
+
+runs: fn() -> Int { RUNS.guard_read().value }
+
+count: fn(state: Loadable<Int, CountError>) -> String {
+    if state == {
+        .Loaded(value) -> "{value}"
+        .Failed(_) -> "failed"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+titles: fn(state: Loadable<[[String:db.DBValue]], db.DBError>) -> String {
+    if state == {
+        .Loaded(rows) -> {
+            out := [String]{}
+            loop row in rows -> out.push(db.row_text(row, "title") ?? "?")
+            "[{out.join(",")}]"
+        }
+        .Failed(reason) -> "failed {reason.message()}"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+insert: fn(scope: db.DBScope, title: String) {
+    owner: "alice"
+    _: scope.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}) ?? panic("insert")
+}
+
+// The registry's invalidations and stored-result changes, from live_stats.
+counts: fn() -> String {
+    stats: app.live_stats()
+    invalidations: stats.split("invalidations=").to_list()[1].split(",").to_list()[0]
+    changes: stats.split("changes=").to_list()[1].split(",").to_list()[0]
+    "invalidations={invalidations} changes={changes}"
+}
+
+run: fn() {
+    // An app.live binding runs its source on the first read and not again
+    // until it is invalidated.
+    board: app.live(open_tasks, "jet")
+    print("open tasks {count(app.state(board))} {count(app.state(board))}, runs={runs()}")
+    app.invalidate(open_tasks, "jet")
+    print("after invalidating {count(app.state(board))}, runs={runs()}")
+
+    conn: db.open_memory()
+    policy: db.policy("tasks", "owner == user") ?? panic("policy")
+    alice: conn.with_policy(policy, "alice")
+    _: db.migrate(alice, "tasks-v1", [db.SQL]{SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}}) ?? panic("migrate")
+    insert(alice, "one")
+    mine: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live")
+    print("bound {titles(app.state(mine))}, {counts()}")
+
+    // A real delta re-runs the query.
+    insert(alice, "two")
+    print("after an insert {titles(app.state(mine))}, {counts()}")
+
+    // A write that changes no row leaves the binding current.
+    missing: "missing"
+    none: alice.execute(SQL{"DELETE FROM tasks WHERE title = {missing}"}) ?? panic("delete")
+    print("a delete of {none} rows {titles(app.state(mine))}, {counts()}")
+
+    // A write that rewrites a row to what it held re-runs the query, and the
+    // stored result stays as it was.
+    same: "one"
+    rewritten: alice.execute(SQL{"UPDATE tasks SET title = {same} WHERE title = {same}"}) ?? panic("update")
+    print("a same-value update of {rewritten} row {titles(app.state(mine))}, {counts()}")
+
+    // A write inside a transaction publishes at the commit, not before.
+    tx: alice.begin() ?? panic("begin")
+    insert(alice, "three")
+    print("inside the transaction {titles(app.state(mine))}, {counts()}")
+    tx.commit() ?? panic("commit")
+    print("after the commit {titles(app.state(mine))}, {counts()}")
+
+    // A transaction whose writes changed no row publishes nothing.
+    idle: alice.begin() ?? panic("begin idle")
+    _: alice.execute(SQL{"DELETE FROM tasks WHERE title = {missing}"}) ?? panic("idle delete")
+    idle.commit() ?? panic("idle commit")
+    print("after an empty commit {titles(app.state(mine))}, {counts()}")
+}

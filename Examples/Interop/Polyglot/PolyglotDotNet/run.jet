@@ -1,0 +1,11 @@
+// Run `jet inspect bind cs Counter.cs --pkg counter`, then `jet run run.jet`.
+use counter: cs.counter
+
+// Panic is deny-only; this demo handles the fallible bridge results locally.
+run: fn() {
+    handle: counter.new(40) ?? panic("CoreCLR create failed")
+    print(counter.add(handle, 2) ?? -1)
+    print(counter.twice(2.5) ?? -1.0)
+    print(counter.explode(handle, -1) ?? -7)
+    counter.close(handle)
+}

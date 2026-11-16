@@ -1,0 +1,9 @@
+# Port of tests/target_machines.rs::no_os_core_mem_try_allocation_compiles_with_fixed_allocator.
+# Exact source of Examples/Memory/Allocation/TryAllocation.jet: core.mem's
+# Fixed allocator owns an inline buffer, so fallible allocation needs no hosted
+# heap and the no-OS build is accepted (no E3303).
+fixture: fixtures/no_os_core_mem_try_allocation_compiles_with_fixed_allocator
+step: jet build main.jet --target board.sensor_v1
+env: NO_COLOR=1
+exit: 0
+stderr: !~ "E3303" # no allocator fact failure

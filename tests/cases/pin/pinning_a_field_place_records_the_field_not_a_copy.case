@@ -1,0 +1,7 @@
+# Port of pin.rs::pinning_a_field_place_records_the_field_not_a_copy; source is the exact Rust raw/format literal result.
+# PENDING-GRAMMAR: JSON count/filter assertions as needed.
+fixture: fixtures/pinning_a_field_place_records_the_field_not_a_copy
+step: jet check fixture.jet --json
+exit: nonzero
+json: stdout doc $.reports #= 1
+json: stdout doc $.reports[*].code = "E0219"

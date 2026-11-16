@@ -1,0 +1,13 @@
+# A task is cancelled just as it enters its cleanup. Its close runs to the end, including a channel wait inside it, and the task stops at its next wait.
+fixture: a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "body\nclose worker: entered\nclose worker: finished\nworker: cancelled\n"
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "body\nclose worker: entered\nclose worker: finished\nworker: cancelled\n"

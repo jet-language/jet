@@ -1,0 +1,31 @@
+# tests/jet_env_boundary.rs::toolchain_only_run_and_dev_skip_environment_realization at tests/jet_env_boundary.rs:8; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# PENDING-SAME-HEAD; source bytes/predicates unchanged; no captures blessed.
+# env.jet is original configuration-module syntax, not an ordinary-program positive parse input.
+fixture: toolchain_only_run_and_dev_skip_environment_realization.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/jetpack-root-must-not-be-created
+step: jet run run.jet
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+exit: 0
+stdout: empty
+step: jet dev run.jet --watch=off
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+exit: 0
+stdout: empty
+step: jet run run.jet
+unset: JETPACK_ENV_HASH
+env: JETPACK_ENV=1
+env: JETPACK_ENV_DIR={work}
+exit: 0
+stdout: empty
+step: jet dev run.jet --watch=off
+unset: JETPACK_ENV_HASH
+env: JETPACK_ENV=1
+env: JETPACK_ENV_DIR={work}
+exit: 0
+stdout: empty
+file: jetpack-root-must-not-be-created absent

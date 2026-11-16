@@ -1,0 +1,192 @@
+// A console library written in plain Jet. `#CLI.Console` on a type derives
+// a command registry from the type's methods marked `#CLI.Command`: `run`
+// parses each argument into the parameter's declared type and calls the
+// method, and `help` lists every command with its parameters. Both read the
+// methods' typed ParamInfo, so no signature text is parsed. The registry
+// reads only the marked type's own methods, so importing a package that
+// declares commands adds none to it.
+Command: struct {
+    help: String
+
+    impl Marker {
+        sites: [.Method]
+
+        // A command takes at most three arguments, each one `run` parses.
+        expand: fn(self, target: Target) {
+            params: target.signature.params
+            if params.len() > 4 {
+                reject(TooManyArguments{command: target.name, count: params.len() - 1})
+            }
+            if params.len() > 1 {
+                if params[1].type.name != "String" && params[1].type.name != "Int" && params[1].type.name != "Float" && params[1].type.name != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: params[1].name, type: params[1].type.name})
+                }
+            }
+            if params.len() > 2 {
+                if params[2].type.name != "String" && params[2].type.name != "Int" && params[2].type.name != "Float" && params[2].type.name != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: params[2].name, type: params[2].type.name})
+                }
+            }
+            if params.len() > 3 {
+                if params[3].type.name != "String" && params[3].type.name != "Int" && params[3].type.name != "Float" && params[3].type.name != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: params[3].name, type: params[3].type.name})
+                }
+            }
+        }
+    }
+}
+
+Console: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            impl #{tname} {
+                // Runs the command `argv[0]` with the rest of `argv` as its
+                // arguments and returns what it printed, or why it did not run.
+                run: fn(self, argv: [String]) -> String {
+                    if argv.len() == 0 -> return self.help()
+                    command: argv[0]
+                    rest: argv[1..<argv.len()]
+                    #loop m in target.methods {
+                        #if m.marker(Command) != None {
+                            if command == m.name {
+                                if rest.len() != m.signature.params.len() - 1 {
+                                    return "{m.name}: expected {m.signature.params.len() - 1} arguments, got {rest.len()}"
+                                }
+                                #if m.signature.params.len() > 1 {
+                                    #if m.signature.params[1].type.name == "String" {
+                                        a1: rest[0]
+                                    }
+                                    #if m.signature.params[1].type.name == "Int" {
+                                        a1: cli.parse_int(rest[0]) ?? return "{m.name}: {m.signature.params[1].name} must be an Int, not `{rest[0]}`"
+                                    }
+                                    #if m.signature.params[1].type.name == "Float" {
+                                        a1: cli.parse_float(rest[0]) ?? return "{m.name}: {m.signature.params[1].name} must be a Float, not `{rest[0]}`"
+                                    }
+                                    #if m.signature.params[1].type.name == "Bool" {
+                                        a1: cli.parse_bool(rest[0]) ?? return "{m.name}: {m.signature.params[1].name} must be a Bool, not `{rest[0]}`"
+                                    }
+                                }
+                                #if m.signature.params.len() > 2 {
+                                    #if m.signature.params[2].type.name == "String" {
+                                        a2: rest[1]
+                                    }
+                                    #if m.signature.params[2].type.name == "Int" {
+                                        a2: cli.parse_int(rest[1]) ?? return "{m.name}: {m.signature.params[2].name} must be an Int, not `{rest[1]}`"
+                                    }
+                                    #if m.signature.params[2].type.name == "Float" {
+                                        a2: cli.parse_float(rest[1]) ?? return "{m.name}: {m.signature.params[2].name} must be a Float, not `{rest[1]}`"
+                                    }
+                                    #if m.signature.params[2].type.name == "Bool" {
+                                        a2: cli.parse_bool(rest[1]) ?? return "{m.name}: {m.signature.params[2].name} must be a Bool, not `{rest[1]}`"
+                                    }
+                                }
+                                #if m.signature.params.len() > 3 {
+                                    #if m.signature.params[3].type.name == "String" {
+                                        a3: rest[2]
+                                    }
+                                    #if m.signature.params[3].type.name == "Int" {
+                                        a3: cli.parse_int(rest[2]) ?? return "{m.name}: {m.signature.params[3].name} must be an Int, not `{rest[2]}`"
+                                    }
+                                    #if m.signature.params[3].type.name == "Float" {
+                                        a3: cli.parse_float(rest[2]) ?? return "{m.name}: {m.signature.params[3].name} must be a Float, not `{rest[2]}`"
+                                    }
+                                    #if m.signature.params[3].type.name == "Bool" {
+                                        a3: cli.parse_bool(rest[2]) ?? return "{m.name}: {m.signature.params[3].name} must be a Bool, not `{rest[2]}`"
+                                    }
+                                }
+                                #if m.signature.params.len() == 1 {
+                                    return "{self.#{m}()}"
+                                }
+                                #if m.signature.params.len() == 2 {
+                                    return "{self.#{m}(a1)}"
+                                }
+                                #if m.signature.params.len() == 3 {
+                                    return "{self.#{m}(a1, a2)}"
+                                }
+                                #if m.signature.params.len() == 4 {
+                                    return "{self.#{m}(a1, a2, a3)}"
+                                }
+                            }
+                        }
+                    }
+                    "unknown command `{command}`; run `help`"
+                }
+
+                // One line per command: its name, each parameter with its
+                // type, and the help text its `#CLI.Command` carries.
+                help: fn(self) -> String {
+                    lines := ["commands:"]
+                    usage := ""
+                    #loop m in target.methods {
+                        #if m.marker(Command) != None {
+                            usage = "  {m.name}"
+                            #loop p in m.signature.params {
+                                #if p.name != "self" {
+                                    usage = "{usage} <{p.name}: {p.type.name}>"
+                                }
+                            }
+                            lines.push("{usage} - {m.marker(Command)?.help ?? ""}")
+                        }
+                    }
+                    lines.join("\n")
+                }
+            }
+        }
+    }
+}
+
+parse_int: fn(text: String) -> Int? {
+    value: Int.parse(text) ?? return None
+    Val(value)
+}
+
+parse_float: fn(text: String) -> Float? {
+    value: Float.parse(text) ?? return None
+    Val(value)
+}
+
+parse_bool: fn(text: String) -> Bool? {
+    if text == "true" -> return Val(true)
+    if text == "false" -> return Val(false)
+    None
+}
+
+TooManyArguments: struct {
+    command: String
+    count: Int
+
+    impl Diagnostic {
+        what: fn(self) -> String {
+            "command `{self.command}` takes {self.count} arguments, more than a console parses"
+        }
+
+        why: fn(self) -> String { "a console command takes at most three arguments" }
+
+        fix: fn(self) -> String {
+            "pass `{self.command}` fewer arguments, or split it into smaller commands"
+        }
+    }
+}
+
+UnparsableArgument: struct {
+    command: String
+    param: String
+    type: String
+
+    impl Diagnostic {
+        what: fn(self) -> String {
+            "command `{self.command}` takes `{self.param}: {self.type}`, which a console can't parse"
+        }
+
+        why: fn(self) -> String {
+            "a console parses each argument into a String, Int, Float or Bool"
+        }
+
+        fix: fn(self) -> String {
+            "declare `{self.param}` as a String, Int, Float or Bool, and build the `{self.type}` inside `{self.command}`"
+        }
+    }
+}

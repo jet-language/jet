@@ -1,0 +1,22 @@
+// core-conformance: core.files.data.csv_reader
+use {
+    data: core.data
+    stream: core.data.stream
+    files: core.files
+    files_data: core.files.data
+}
+
+#Codable
+Record: struct {
+    value: Int
+}
+
+run: fn() {
+    input: files.open("/dev/null") ?? panic("open")
+    limits := data.DataLimits.safe()
+    reader := files_data.csv_reader<Record>(input, limits) ?? panic("reader")
+    if stream.next(reader) == {
+        .Ok(first) -> { print(first == None) }
+        .Err(error) -> panic("next: {error}")
+    }
+}

@@ -1,0 +1,14 @@
+# tests/fmt_project.rs::raw_c_imports_and_module_bindings_remain_clean_through_cli at tests/fmt_project.rs:379; hand-port
+# runtime.jet is tests/fixtures/fmt_import_c_bindings.jet (the original's include_str! source). `jet fmt`, `jet fmt` and
+# `jet fmt --check` each exit 0 and leave the declaration bytes unchanged.
+fixture: raw_c_imports_and_module_bindings_remain_clean_through_cli.fixture
+copy: runtime.jet original.bytes
+step: jet fmt runtime.jet
+exit: 0
+file: runtime.jet == original.bytes
+step: jet fmt runtime.jet
+exit: 0
+file: runtime.jet == original.bytes
+step: jet fmt --check runtime.jet
+exit: 0
+file: runtime.jet == original.bytes

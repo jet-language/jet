@@ -1,0 +1,11 @@
+# tests/generics.rs::generic_records_retain_unused_parameters_in_native_constructors at tests/generics.rs:650; hand-port
+# Source migration: `copy` is now a keyword, so the local is `copied`. The generated-Rust PhantomData subclaim retires.
+fixture: generic_records_retain_unused_parameters_in_native_constructors.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "literal\n7\n3\nconstant\n" # tests/generics.rs:721 inline: jet::compile_with_path + rustc + run compiled binary (generics.rs:692-721)

@@ -1,0 +1,14 @@
+transform: fn(xs: [Int], offset: Int) -> [Int] {
+    xs.map(fn(x) { x * 3 + offset }).filter(fn(x) { x % 2 == 0 }).map(fn(x) { x + 1 })
+}
+
+captured: fn(xs: [Int], offset: Int) -> [Int] { xs.map(fn(x) { x * 3 + offset }) }
+
+run: fn() {
+    a: transform([1, 2], 5)
+    print(a[0])
+    b: captured([1], 9223372036854775808)
+    print(b[0])
+    c: captured([9223372036854775808], 5)
+    print(c[0])
+}

@@ -1,0 +1,14 @@
+# HAND-PORT tests/codemod.rs:386-417 all_after_crash_completes_log_then_undo_restores_every_file
+# Original predicates; same-head kit verification pending.
+fixture: all_after_crash_completes_log_then_undo_restores_every_file.fixture
+env: NO_COLOR=1
+copy: Examples/a.jet before.bytes
+step: jet inspect codemod apply rename.codemod.json --yes
+env: JET_CODEMOD_CRASH_AFTER_RENAME=1
+exit: 86
+file: .jet/codemods/BatchRename.log.json absent
+step: jet inspect codemod undo .jet/codemods/BatchRename.log.json
+exit: 0
+file: Examples/a.jet == before.bytes
+file: .jet/codemods/transaction.journal absent
+

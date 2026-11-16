@@ -1,0 +1,12 @@
+# A loose script's exact `use web#0.1.0` resolves the toolchain's first-party
+# `web` battery, the last root after `.jet/inline-deps/` and the fixtures
+# override: it builds and runs with no fetch, no lock sidecar and no L0203.
+fixture: battery.fixture
+env: JET_STORE_DIR={work}/.jet-test-cache
+step: jet run --verbose orders.jet
+exit: 0
+stdout: = "/orders?limit=100\n" # the battery clamps the limit to 100
+stderr: !~ L0203 # an exact selector is pinned without a lock
+stderr: !~ E1253 # the battery resolves offline
+file: orders.jet.lock absent
+file: .jet/inline-deps absent

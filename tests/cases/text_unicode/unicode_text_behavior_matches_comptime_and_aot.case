@@ -1,0 +1,12 @@
+# tests/text_unicode.rs::unicode_text_behavior_matches_comptime_and_aot at tests/text_unicode.rs:530; hand-port (the source pins U+A7CE, U+A7CF and U+2003 where tests/text_unicode.rs:582-593 replaced the placeholders)
+# Fixture migrated: regex literals use the checked head `Regex{"…"}`; the old `.{"…"}` spelling parses as record construction.
+fixture: unicode_text_behavior_matches_comptime_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0 # tests/text_unicode.rs:594
+stdout: = unicode_text_behavior_matches_comptime_and_aot.1.out

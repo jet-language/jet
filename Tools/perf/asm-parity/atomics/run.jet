@@ -1,0 +1,35 @@
+// The memory kernel's atomic word (`Atomic<I64>`): 4096 rounds per pass on
+// one counter. Each round adds a step and reads the old value back
+// (`add`), loads the word (`load`) and exchanges the loaded value for one
+// more (`compare_exchange`). Each pass ends by storing
+// zero (`store`). `n` passes; the sum is every old value plus every exchange
+// won.
+
+#CLI
+Args: struct {
+    n: Int
+}
+
+ROUNDS: 4096
+
+run: fn(args: Args) {
+    passes: if args.n > 0 -> args.n else -> 1
+    counter: Atomic<I64>.new(0)
+    total := I64{0}
+    loop _ in 0..<passes {
+        loop round in 0..<ROUNDS {
+            // A use is the line of its atomic alone: the step and the sums
+            // are the work's, computed on the lines around it, as the
+            // reference computes them.
+            step: I64{round.bit_and(31)}
+            old: counter.add(step)
+            total = wrapping(total + old)
+            seen: counter.load()
+            next: wrapping(seen + 1)
+            won: counter.compare_exchange(seen, next)
+            if won -> total = wrapping(total + 1)
+        }
+        counter.store(0)
+    }
+    print("sum {total}")
+}

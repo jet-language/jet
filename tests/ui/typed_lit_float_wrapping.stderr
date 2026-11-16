@@ -1,0 +1,8 @@
+Error [jet.InvalidOverflowOptIn]: `wrapping` has no low bits to keep from a `Float`
+  --> tests/ui/typed_lit_float_wrapping.jet:3:20
+    |
+  3 |     _: wrapping(U8{value})
+    |                    ^^^^^
+ Why: A Float converts to a whole number exactly; the overflow words that apply to it are `checked` (None when it doesn't convert) and `saturating` (truncate and clamp)
+ Fix: Write `checked(U8{value})` or `saturating(U8{value})`
+More: jet-lang.dev/e/E1005

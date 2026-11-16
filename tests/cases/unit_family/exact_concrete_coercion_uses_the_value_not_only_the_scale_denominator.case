@@ -1,0 +1,27 @@
+# tests/unit_family.rs::exact_concrete_coercion_uses_the_value_not_only_the_scale_denominator at tests/unit_family.rs:500; hand-port
+# Claim: 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+# Claim: scale-2 Double inexact value rejected with E0127 (tests/unit_family.rs:500)
+# Claim: exact negative and identity conversions compile (tests/unit_family.rs:500)
+# Fixture migrated: takes_meter uses print(value) instead of value.raw(): .raw() is only valid on :: distinct types (E0311 on seed)
+# Not ported: generated Rust text (`Meter(match jet_unit_conversion_exact(`) contains-check: Rust lowering detail (tests/unit_family.rs:514-tests/unit_family.rs:520)
+fixture: exact_concrete_coercion_uses_the_value_not_only_the_scale_denominator.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check exact/main.jet
+exit: 0 # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+step: jet check v025/main.jet
+exit: 1 # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+stderr: ~ "E0127" # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+step: jet check vbig/main.jet
+exit: 1 # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+stderr: ~ "E0127" # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+step: jet check direct_neg/main.jet
+exit: 0 # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+step: jet check bound_neg/main.jet
+exit: 0 # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+step: jet check inexact_neg/main.jet
+exit: 1 # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+stderr: ~ "E0127" # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)
+step: jet check identity/main.jet
+exit: 0 # 3000millimeter passes to Meter parameter (tests/unit_family.rs:500)

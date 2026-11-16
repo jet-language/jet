@@ -1,0 +1,8 @@
+Error [jet.InvalidRoute]: HTTP route method `joke` needs read-only self and a concrete signature
+  --> tests/ui/http_route_mutable_self.jet:9:5
+    |
+  9 |     #Server.Get("/jokes") joke: fn(&self) -> HTTPResponse HTTPError! {
+    |     ^^^^^^^^^^^^^^^^^^^^^
+ Why: Mounted handlers retain shared state and are called on request workers
+ Fix: Write `joke: fn(self, ...)` without method type parameters; use Shared<T> for mutable shared state
+More: jet-lang.dev/e/E2805

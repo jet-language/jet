@@ -1,0 +1,13 @@
+Limbs: struct {
+    p: [U64]
+}
+
+or_limbs: fn(x: #Secret Limbs) -> U64 {
+    acc := U64{0}
+    loop i in 0..<x.p.len() -> acc = acc.bit_or(x.p[i])
+    acc
+}
+
+report: fn(x: #Secret Limbs) {
+    if x.p[0] == (U64{0}) -> print("zero")
+}

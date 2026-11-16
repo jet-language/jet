@@ -1,0 +1,15 @@
+# A reactive click counter built for the web paints into `#jet-app` on a page
+# with a document: a leaf element per node. Clicking the button runs its Jet
+# handler, and the effect's repaint shows the new count.
+requires: tool:node
+fixture: web_click_counter_dom_roundtrip.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/rt.wasm is-file
+file: .jet/build/app.wasm is-file
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = web_click_counter_dom_roundtrip.stdout.expected

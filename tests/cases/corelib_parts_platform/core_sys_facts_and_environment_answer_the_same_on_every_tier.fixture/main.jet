@@ -1,0 +1,27 @@
+// core.sys answers its platform facts and environment calls through its own
+// Jet declarations, on every tier. A program spells the facts both directly
+// and through the members derived from them (platform, machine, is_unix,
+// pathsep, linesep), and each pair must agree.
+use {
+    sys: core.sys
+    process: core.process
+}
+
+run: fn() -[Env, FS, IO]> {
+    print("name {sys.name()} arch {sys.arch()} family {sys.family()}")
+    print("platform {sys.platform()} matches {sys.platform() == "{sys.name()}-{sys.arch()}"}")
+    print("machine matches {sys.machine() == sys.arch()}")
+    print("unix {sys.is_unix()} linux {sys.is_linux()} windows {sys.is_windows()}")
+    print("pathsep {sys.pathsep()} linesep bytes {sys.linesep().len()}")
+    print("pid positive {sys.getpid() > 0} matches {sys.getpid() == process.current_pid()}")
+
+    key: "JET_SYS_FACTS_PROBE"
+    print("before {sys.get(key) ?? "unset"}")
+    sys.set(key, "value")
+    print("after set {sys.get(key) ?? "unset"} via process {process.env_get(key) ?? "unset"}")
+    print("unset removed {sys.unset(key) ?? false}")
+    print("after unset {sys.get(key) ?? "unset"}")
+    print("unset again removed {sys.unset(key) ?? false}")
+    sys.sync()
+    print("synced")
+}

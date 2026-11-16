@@ -1,0 +1,15 @@
+# tests/fmt.rs::fmt_output_for_a_classic_else_if_chain_parses_again at tests/fmt.rs:1468; hand-port
+# Claim: classic else-if chain formats without error (tests/fmt.rs:1473)
+# Claim: formatted output lexes with zero diagnostics and parses for fmt (tests/fmt.rs:1474-1477)
+# Claim: second formatting pass is byte-identical (tests/fmt.rs:1478-1482)
+# Not ported: direct jet::Lexer::lex / Parser::parse_for_fmt calls; replaced by `jet check` on the formatted file, which runs the same lex+parse through the CLI
+fixture: fmt_output_for_a_classic_else_if_chain_parses_again.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:1473 chain formats
+step: jet check run.jet
+exit: 0 # tests/fmt.rs:1474-1477 formatted output lexes+parses with no diagnostics
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:1478-1482 second pass equal

@@ -1,0 +1,152 @@
+// `#FX(Net, DB) { … }` restricts the effects a
+// block may use; a named head `#FX(grant: FS, Net) { … }` also binds a scoped
+// `Authority` handle (Rust `at_fx_stmt`). A block's entries and a cap's
+// (`#FX(FS.Read("data/")) Reader: struct { … }`) are spelled as an effect
+// row spells them: dotted paths, optionally with one scope string; sema
+// validates them against the effect vocabulary.
+use jet_foundation.[
+    CallArg,
+    Expr,
+    Marker,
+    NamedSpan,
+    Span,
+    Stmt,
+    effect_scope_argument_valid,
+    effect_scope_name,
+    expr_span,
+]
+
+parser_authority_effect_path: fn(expr: Expr) -> String? {
+    if expr == {
+        .Ident(name, _, _) -> Val(name)
+        .Field(base, member, _, _) -> {
+            prefix: parser_authority_effect_path(base) ?? return None
+            Val("{prefix}.{member}")
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+// One `#FX(…)` entry, spelled as an effect row spells it
+// (parser_expect_effect_path_name) and without an `Effect.` prefix: an
+// effect path, a path with one plain string scope (`FS.Read("data/")`,
+// `Net("api.example.com")`) or, under the `!` prefix, a bounded memory
+// denial `Mem.Alloc(above: N)` or `Mem.Stack(above: N)`. A malformed entry is
+// reported here and gives None.
+parser_authority_effect_entry: fn(state: &JetParserState, marker: Marker, expr: Expr, prefix: String) -> String? {
+    if parser_authority_effect_path(expr) == .Val(path) {
+        name: parser_authority_effect_unprefixed(path)
+        if name == "Mem.Stack" {
+            parser_add_error_code(state, "E0119", expr_span(expr), "`Mem.Stack` needs a byte ceiling", "a stack denial bounds the bytes every call path may take; it has no unbounded form", "write `Mem.Stack(above: 65536)`")
+            return None
+        }
+        return Val(name)
+    }
+    if expr == .Call(call, _) {
+        // A one-word call (`Net("api.example.com")`) has no `Effect.` prefix.
+        if call.type_args.len() == 0 {
+            return parser_authority_scoped_entry(state, call.name, call.args, expr_span(expr), prefix)
+        }
+    }
+    if expr == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) {
+        if owner_type_args.len() == 0 && type_args.len() == 0 {
+            // A method call's own span is its method name; the entry is
+            // reported over its whole written path (`Mem.Alloc`).
+            if parser_authority_effect_path(receiver) == .Val(path) {
+                return parser_authority_scoped_entry(state, parser_authority_effect_unprefixed("{path}.{method}"), args, Span{start: parser_authority_path_span(receiver).start, end: method_span.end}, prefix)
+            }
+        }
+    }
+    parser_marker_shape_error(state, marker)
+    None
+}
+
+// The entry `base(args)`: `base` with one plain string scope, or a bounded
+// memory denial when `base` is `Mem.Alloc` or `Mem.Stack`. A bad scope is
+// reported at its argument, as the row parser reports it.
+parser_authority_scoped_entry: fn(state: &JetParserState, base: String, args: [CallArg], span: Span, prefix: String) -> String? {
+    if parser_memory_bounded(base) {
+        return parser_authority_memory_denial(state, base, args, span, prefix)
+    }
+    scope := ""
+    plain := false
+    scope_span := span
+    if args.len() == 1 -> scope_span = expr_span(args[0].expr)
+    if args.len() == 1 && args[0].label == None && !args[0].spread {
+        if args[0].expr == .Str(parts, _, _) {
+            plain = true
+            loop part in parts {
+                if part == {
+                    .Lit(text) -> scope = "{scope}{text}"
+                    .Interp(_, _) | .Byte(_) -> plain = false
+                }
+            }
+        }
+    }
+    if !plain {
+        parser_add_error_code(state, "E0119", scope_span, "`{base}(…)` takes one plain string scope", "an effect argument names a folder, a host or a device as fixed text", "write `{base}(\"templates/\")`")
+        return None
+    }
+    if !effect_scope_argument_valid(scope) {
+        parser_add_error_code(state, "E0119", scope_span, "`{base}(…)` needs a non-empty scope without quotes or backslashes", "a scope is a folder, a host or a device name", "write `{base}(\"templates/\")`")
+        return None
+    }
+    Val(effect_scope_name(base, scope))
+}
+
+parser_authority_effect_unprefixed: fn(path: &&String) -> String {
+    if path.starts_with("Effect.") -> return path.slice(7, path.len())
+    path
+}
+
+// `Mem.Alloc(above: N)` or `Mem.Stack(above: N)`, a bounded memory denial, as
+// the row parser reads it: one `above:` argument, a positive integer byte
+// ceiling, and only under the `!` prefix.
+parser_authority_memory_denial: fn(state: &JetParserState, base: String, args: [CallArg], span: Span, prefix: String) -> String? {
+    labeled := false
+    if args.len() == 1 && !args[0].spread && args[0].label == .Val(label) {
+        labeled = label.name == "above"
+    }
+    if !labeled {
+        parser_add_error_code(state, "E0119", span, "`{base}(…)` takes one argument, `above: Bytes`", "the bounded memory denial has one closed argument: `above: Bytes`", "write `{base}(above: 65536)`")
+        return None
+    }
+    bytes := 0
+    if args[0].expr == .Int(value, _, _, _, _) -> bytes = value
+    if bytes <= 0 {
+        parser_add_error_code(state, "E0119", span, "`{base}(above: …)` needs a positive integer byte ceiling", "the bounded denial is checked at compile time and accepts a positive byte count", "write a positive byte count, such as `{base}(above: 65536)`")
+        return None
+    }
+    name: "{base}(above: {bytes})"
+    if prefix != "!" {
+        parser_add_error_code(state, "E0119", span, "`{name}` is only valid as a memory denial", "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound", "write `!{name}`")
+        return None
+    }
+    Val(name)
+}
+
+// The whole written path `Log.Audit`; a field's own span is its member. A
+// bound authority (`#FX(authority: Log.Audit)`) is reported over this path,
+// a bare capability over its leaf.
+parser_authority_path_span: fn(expr: Expr) -> Span {
+    if expr == .Field(base, _, span, _) {
+        return Span{start: parser_authority_path_span(base).start, end: span.end}
+    }
+    expr_span(expr)
+}
+
+parser_authority_scope_stmt: fn(state: &JetParserState, marker: Marker, args: [CallArg], body: [Stmt], span: Span) -> Stmt? {
+    caps := [NamedSpan]{}
+    loop argument in args {
+        name: parser_authority_effect_entry(state, marker, argument.expr, "") ?? return None
+        cap_span: if argument.label == None -> expr_span(argument.expr) else -> parser_authority_path_span(argument.expr)
+        caps.push(NamedSpan{name: name, span: cap_span})
+    }
+    binding := NamedSpan?{None}
+    caps_span := Span{start: marker.name_span.end, end: marker.span.end}
+    if args.len() > 0 && args[0].label == .Val(label) {
+        binding = Val(NamedSpan{name: label.name, span: label.span})
+        if caps.len() > 0 -> caps_span = Span{start: caps[0].span.start, end: marker.span.end}
+    }
+    Val(Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding, body: body, span: span})
+}

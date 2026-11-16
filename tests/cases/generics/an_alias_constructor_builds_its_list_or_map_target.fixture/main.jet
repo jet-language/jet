@@ -1,0 +1,33 @@
+// A generic alias's constructor takes its target's items: `Grid<Int>{…}`
+// lists rows as `[[Int]]{…}` does, and `Table<Int>{…}` lists entries as
+// `[String: Int]{…}` does. Bare names are items, and a bare-name key reads
+// that name's value, as under a written map head.
+Grid<T>: [[T]]
+
+Table<V>: [String:V]
+
+cells: fn(grid: Grid<Int>) -> Int {
+    count := 0
+    loop row in grid -> count += row.len()
+    count
+}
+
+run: fn() {
+    grid: Grid<Int>{[1, 2], [3]}
+    print("{grid.len()} {cells(grid)}")
+    top: [Int]{4, 5, 6}
+    bottom: [Int]{7}
+    named: Grid<Int>{top, bottom}
+    print("{named.len()} {cells(named)}")
+    single: Grid<Int>{top}
+    print("{single.len()} {cells(single)}")
+    table: Table<Int>{"a": 1, "b": 2}
+    print("{table.len()} {table["b"]}")
+    key: "c"
+    keyed: Table<Int>{key: 3}
+    print("{keyed.len()} {keyed["c"]}")
+    whole: Table<Int>{table}
+    print(whole.len())
+    empty: Table<Int>{}
+    print(empty.len())
+}

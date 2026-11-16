@@ -1,0 +1,12 @@
+Error [jet.AmbiguousRoute]: Two routes both match `GET /jokes/:id`.
+  --> tests/ui/http_route_mixed_duplicate.jet:15:9
+    |
+ 15 |     mux.get("/jokes/:id", fn(id: Int) { Ok(server.response(200, "duplicate={id}")) })
+    |         ^^^
+  --> tests/ui/http_route_mixed_duplicate.jet:7:5
+    |
+  7 |     #Server.Get("/jokes/:id") joke: fn(self, id: Int) -> HTTPResponse HTTPError! {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^ first registered here
+ Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.
+ Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).
+More: jet-lang.dev/e/E2804

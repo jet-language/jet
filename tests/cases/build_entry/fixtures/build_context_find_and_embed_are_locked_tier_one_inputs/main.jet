@@ -1,0 +1,11 @@
+build: fn(b: Build) -[FS]> {
+    files: find("assets/*.txt")
+    message: embed_file(files[0])
+    b.generate("asset") {
+        generated_asset: fn() -> String { "hello" }
+    }
+    app: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])
+    b.default(app)
+}
+
+run: fn() { print(generated_asset()) }

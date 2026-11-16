@@ -1,0 +1,215 @@
+package: {
+    name: "core.db.query"
+    version: "0.0.1"
+    edition: "2026"
+    description: "Checked SQL over typed rows and CSV files."
+    license: "MIT"
+    outputs: {
+        query: .Library{ entry: query }
+    }
+}
+
+use {
+    core: core
+    core.data.[DataLimits, Query]
+    core.db.[SQL, DBValue]
+    sql_kernel: core.db.sql
+    csv: core.encoding.csv
+    json_codec: core.encoding.json
+    encoding_stream: __core_encoding_stream
+    rt: jet.runtime.encoding
+    files: core.files
+}
+
+// `rows.query(sql)`: the rows encode to `Dyn` trees, the checked SQL binds its
+// one WHERE value after parsing, and every referenced field must exist in the
+// all-row schema. Only WHERE, ORDER BY and LIMIT select typed rows here; a
+// projection or grouping changes the row shape.
+__query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
+    trees := [Dyn]{}
+    loop row in rows -> trees.push(row.encode())
+    spec: query_sql_spec(sql) ?? return Err(query_field_error("{err}"))
+    core.db.sql.__validate_query_fields(spec, query_sql_fields(trees), "analytics query") ?? return Err(query_field_error("{err}"))
+    reshapes := spec.group_by.len() != 0 || spec.projection.len() != 1 || spec.projection[0] != sql_kernel.JetSQLSelectItem.Wildcard
+    loop item in spec.projection {
+        if item == .Aggregate(_, _, _) -> reshapes = true
+    }
+    if reshapes {
+        return Err(query_field_error("SQL projection/grouping changes the row shape; use the Dyn query result"))
+    }
+    selected := [T]{}
+    loop index in query_sql_select(trees, spec) -> selected.push(rows[index].copy())
+    Ok(core.data.query_make<T>([String]{"scan", "sql"}, false, DataLimits.safe(), fn() { Ok(selected.copy()) }))
+}
+
+// The CSV header door of `query`: every field the SQL names must be a
+// header column.
+priv query_validate_fields: fn(fields: [String], sql: SQL) [FieldError]! {
+    spec: sql_kernel.parse_sql_query(sql.text) ?? return Err(query_field_error("{err}"))
+    core.db.sql.__validate_query_fields(spec, fields, "analytics query") ?? return Err(query_field_error("{err}"))
+    Ok()
+}
+
+priv query_field_error: fn(message: String) -> [FieldError] Never! {
+    [FieldError]{FieldError{path: "", reason: message}}
+}
+
+// The checked carrier binds after parsing, so a value cannot become query
+// syntax; the kernel has one scalar WHERE slot.
+priv query_sql_spec: fn(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
+    spec := sql_kernel.parse_sql_query(sql.text) ?? return Err("{err}")
+    placeholder := false
+    if spec.filter == .Val(filter) -> placeholder = filter.value == "?"
+    if sql.values.len() == 0 {
+        if placeholder -> return Err("analytics query WHERE binding is missing")
+        return Ok(spec)
+    }
+    if !placeholder || sql.values.len() != 1 {
+        return Err("analytics query bindings do not match its WHERE value")
+    }
+    if sql.values[0] == .Blob(_) -> return Err("analytics query WHERE requires a scalar binding")
+    literal: if sql.values[0] == {
+        .Null -> "null"
+        .Int(value) -> "{value}"
+        .Float(value) -> core.db.__float_text(value)
+        .Bool(value) -> "{value}"
+        .Text(value) -> "'{value.replace("'", "''")}'"
+        .Blob(_) -> ""
+    }
+    if spec.filter == .Val(filter) {
+        spec.filter = Val((field: filter.field.copy(), operator: filter.operator.copy(), value: literal))
+    }
+    Ok(spec)
+}
+
+// The all-row schema's field names: every object key of every row, and `$`
+// for a row that is not an object.
+priv query_sql_fields: fn(trees: [Dyn]) -> [String] Never! {
+    names := [String]{}
+    loop tree in trees {
+        if tree == .Object(_) {
+            loop entry in encoding_stream.object_entries(tree) -> names.push(entry.key.copy())
+        } else { names.push("$") }
+    }
+    names
+}
+
+// A cell's comparison text: text as is, scalars in their display form, null
+// empty, and any other value as compact JSON.
+priv query_sql_cell: fn(tree: Dyn, field: String) -> String? Never! {
+    if !(tree == .Object(_)) -> return None
+    loop entry in encoding_stream.object_entries(tree) {
+        if entry.key != field -> next
+        return Val(if entry.value == {
+            .Text(text) -> text.copy()
+            .Int(number) -> "{number}"
+            .Float(number) -> core.db.__float_text(number)
+            .Bool(flag) -> "{flag}"
+            .Null -> ""
+            .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> json_codec.to_string(entry.value) ?? ""
+        })
+    }
+    None
+}
+
+// WHERE keeps rows whose cell compares true, ORDER BY sorts the kept
+// positions, and LIMIT keeps a prefix.
+priv query_sql_select: fn(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] Never! {
+    selected := [Int]{}
+    loop index in 0..<trees.len() {
+        if spec.filter == .Val(filter) {
+            cell: query_sql_cell(trees[index], filter.field) ?? next
+            if !sql_kernel.compare_sql_cell(cell, filter.operator, filter.value) -> next
+        }
+        selected.push(index)
+    }
+    if spec.order == .Val(order) {
+        keys := [String]{}
+        loop index in selected -> keys.push(query_sql_cell(trees[index], order.field) ?? "")
+        ordered := [Int]{}
+        loop position in core.data.query_merge_order(keys, true, order.descending) {
+            ordered.push(selected[position])
+        }
+        selected = ordered
+    }
+    if spec.limit == .Val(limit) {
+        kept := [Int]{}
+        loop index in selected {
+            if (checked(U64{kept.len()}) ?? U64{0}) >= limit -> break
+            kept.push(index)
+        }
+        selected = kept
+    }
+    selected
+}
+
+/// Typed CSV query with the same SQL grammar and result carrier as rows.query.
+query: fn<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldError]! {
+    text: query_text(path) ?? return Err(err)
+    physical: csv.typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
+    header: if physical.len() == 0 -> [String]{} else -> physical[0]
+    query_validate_fields(header, sql) ?? return Err(err)
+    values: csv.decode<T>(text) ?? return Err(err)
+    values.query(sql)
+}
+
+query_read_error: fn(path: String, reason: String) -> [FieldError] Never! {
+    [FieldError]{FieldError{path: "", reason: "could not read `{path}`: {reason}"}}
+}
+
+// An oversized file is refused from its reported size before any byte is read.
+query_text: fn(path: String) -[FS]> String [FieldError]! {
+    max: 536870912
+    info: files.stat(path, links: .Follow) ?? return Err(query_read_error(path, "{err}"))
+    if info.size > max {
+        return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
+    }
+    bytes: files.read_at(path, 0, max + 1) ?? return Err(query_read_error(path, "{err}"))
+    if bytes.len() > max {
+        return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
+    }
+    rt.utf8_validate(bytes) ?? return Err(query_read_error(path, err.message))
+    #Unsafe("the exact owned query bytes passed the shared strict UTF-8 validator") {
+        return Ok(rt.bytes_into_text(bytes))
+    }
+}
+
+#Codable
+priv QueryTestSale: struct {
+    item: String
+    cents: Int
+}
+
+__query_test_sales: fn() -> [QueryTestSale] Never! {
+    [QueryTestSale]{QueryTestSale{item: "tools", cents: 125}, QueryTestSale{item: "core", cents: 40}, QueryTestSale{item: "apps", cents: 80}, QueryTestSale{item: "core", cents: 90}}
+}
+
+#Test("SQL row queries bind after parsing and keep typed rows") {
+    rows: __query_test_sales()
+    selected: __query_sql<QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE cents > ? ORDER BY item", values: [DBValue]{.Int(50)}}) ?? panic("sql")
+    assert_eq(core.data.__query_plan<QueryTestSale>(selected), [String]{"scan", "sql"})
+    got: core.data.__query_collect<QueryTestSale>(selected) ?? panic("collect")
+    assert_eq(got.len(), 3)
+    assert_eq(got[0].item, "apps")
+    assert_eq(got[1].cents, 90)
+    top: core.data.__query_collect<QueryTestSale>(__query_sql<QueryTestSale>(rows, SQL{text: "SELECT * FROM sales ORDER BY cents DESC LIMIT 2", values: [DBValue]{}}) ?? panic("top")) ?? panic("top collect")
+    assert_eq(top.len(), 2)
+    assert_eq(top[0].cents, 125)
+    assert_eq(top[1].cents, 90)
+    quoted: core.data.__query_collect<QueryTestSale>(__query_sql<QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE item = ?", values: [DBValue]{.Text("it's")}}) ?? panic("quoted")) ?? panic("quoted collect")
+    assert_eq(quoted.len(), 0)
+    refusals: [String]{"SELECT * FROM sales WHERE missing = 1", "SELECT item FROM sales", "SELECT * FROM sales WHERE cents > ?"}
+    expected: [String]{"analytics query references unknown field `missing`", "SQL projection/grouping changes the row shape; use the Dyn query result", "analytics query WHERE binding is missing"}
+    loop index in 0..<refusals.len() {
+        if __query_sql<QueryTestSale>(rows, SQL{text: refusals[index], values: [DBValue]{}}) == {
+            .Ok(_) -> { panic("SQL query should be refused") }
+            .Err(errors) -> assert_eq(errors[0].reason, expected[index])
+        }
+    }
+    if query_validate_fields([String]{"item"}, SQL{text: "SELECT * FROM sales ORDER BY cents", values: [DBValue]{}}) == {
+        .Ok(_) -> { panic("an unknown header field should be refused") }
+        .Err(errors) -> {
+            assert_eq(errors[0].reason, "analytics query references unknown field `cents`")
+        }
+    }
+}

@@ -1,0 +1,155 @@
+// `jet debug <file.jet|image>`: the program's native O0 image, built by this `jet`,
+// run under Jet's own native debugger behind the `(Jet)` console of
+// Compiler/JetDebug Native.jet. It stops at the start of `run`, or with
+// `--break <file.jet>:<line>` (repeatable) at the first of those lines the
+// program reaches, then reads one command a line; the end of stdin runs the
+// program to its end, and `quit` ends it early (E2204). `--dap` serves the
+// same session to an editor over the Debug Adapter Protocol instead
+// (DebugDap.jet). The image keeps the deep checks `--deep-checks` selects,
+// as a `jet build` with the same flags does. A path that isn't a `.jet` file
+// is an image already built: it is debugged as it is, against the source its
+// line table names. An image the debugger can't read or run stops the
+// session with E2203.
+use {
+    cli_files: core.files
+    cli_process: core.process
+    cli_sys: core.sys
+    cli_term: core.term
+    jet_debug.[NATIVE_DEBUG_PROMPT, NativeBreak, NativeDebugError, NativeDebugStep, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_image]
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[DeepChecks, deep_checks_malformed, deep_checks_read, diagnostic_registry_row, foundation_byte_text]
+}
+
+jet_cli_debug: fn(jet_argv: [String], args: [String], color: Bool) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+    dap := false
+    breaks := [NativeBreak]{}
+    loop (index, flag) in jet_argv {
+        if flag == "--raw-frames" || flag.starts_with("--record") || flag.starts_with("--replay") {
+            return jet_cli_not_ported("debug {flag.before("=")}", color)
+        }
+        if flag == "--dap" -> dap = true
+        if flag != "--break" && !flag.starts_with("--break=") -> next
+        spec: if flag == "--break" && index + 1 < jet_argv.len() -> jet_argv[index + 1] else -> flag.after("--break=")
+        wanted: jet_cli_debug_break(spec) ?? return jet_cli_fail("E2102", "`--break {spec}` isn't a breakpoint jet understands", jet_cli_why("E2102"), "write the file and the line, as `--break main.jet:12`", color, JET_DRIVER_EXIT_USAGE)
+        breaks.push(wanted)
+    }
+    if dap && breaks.len() > 0 {
+        return jet_cli_fail("E2102", "`--break` sets the console's breakpoints, but `--dap` takes them from the editor", jet_cli_why("E2102"), "drop `--break`, and set the breakpoints in the editor", color, JET_DRIVER_EXIT_USAGE)
+    }
+    if args.len() < 2 -> return jet_cli_missing_target("debug", false)
+    if args.len() > 2 {
+        return jet_cli_fail("E2104", "`jet debug` takes one source file or built image, but got `{args[2]}` too", jet_cli_why("E2104"), "Run `jet debug <file.jet>`, or `jet debug <image>` for a built one.", color, JET_DRIVER_EXIT_USAGE)
+    }
+    deep_checks := DeepChecks{}
+    if deep_checks_read(jet_argv) == {
+        .Refused(argument) -> return JetCLIPlan.Refused{report: deep_checks_malformed(argument), color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
+        .Read(request) -> deep_checks = request.copy()
+    }
+    entry: args[1]
+    scratch: cli_files.temp_dir("jet-debug") ?? return jet_cli_fail("E2105", "couldn't create the debug build directory: {err}", jet_cli_why("E2105"), "check that the temporary directory is writable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+    plan: if entry.ends_with(".jet") -> jet_cli_debug_build(entry, scratch.path, deep_checks, breaks, dap, color) else -> jet_cli_debug_session(entry, "", [String]{}, scratch.path, breaks, dap, color)
+    if cli_files.remove_all(scratch.path) == {
+        .Err(_) -> {}
+        .Ok(_) -> {}
+    }
+    plan
+}
+
+// A `--break` value, `<file.jet>:<line>`: the file by its base name, as the
+// image's line table names it.
+jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
+    colon: spec.rfind(":")
+    if colon <= 0 -> return None
+    // `rfind` counts bytes, so the file and line are cut from the bytes.
+    bytes: spec.bytes()
+    line: Int.parse(foundation_byte_text(bytes, colon + 1, bytes.len())) ?? return None
+    if line < 1 -> return None
+    Val(NativeBreak{file: cli_files.basename(foundation_byte_text(bytes, 0, colon)), line: line})
+}
+
+// Build `entry` at O0 into `scratch`, then debug the image. Under `--dap`
+// the build's report goes to stderr: stdout is the protocol's.
+jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], dap: Bool, color: Bool) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+    source: cli_files.read(entry) ?? return jet_cli_fail("E2105", "couldn't read `{entry}`: {err}", jet_cli_why("E2105"), "check the path, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+    out_dir: cli_files.join(scratch, "out")
+    built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), entry, out_dir, deep_checks)).stdout(.Capture).stderr(.Capture).run() ?? return jet_cli_fail("E2105", "couldn't run the debug build: {err}", jet_cli_why("E2105"), "check that this `jet` can run, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+    code: if built.code == 0 -> JET_DRIVER_EXIT_USER_ERROR else -> built.code
+    if !built.success && dap -> return jet_cli_done("", "{built.output}{built.errors}", code)
+    if !built.success -> return jet_cli_done(built.output, built.errors, code)
+    jet_cli_debug_session(native_debug_image(entry, out_dir), entry, source.split("\n").to_list(), scratch, breaks, dap, color)
+}
+
+// Debug the built `image`, whose `run` is in the source file `entry` with
+// the text `lines`. An `entry` of "" is the source the image's line table
+// names, read if it is there.
+jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch: String, breaks: [NativeBreak], dap: Bool, color: Bool) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+    session := NativeSession.start(image, cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_unavailable(err, color)
+    source_file: if entry == "" -> session.run_source() else -> entry
+    source_lines: if entry == "" -> (cli_files.read(source_file) ?? "").split("\n").to_list() else -> lines
+    if dap {
+        jet_cli_debug_dap(session, source_file)
+        session.close()
+        return jet_cli_done("", "", JET_DRIVER_EXIT_OK)
+    }
+    plan: jet_cli_debug_console(session, cli_files.basename(source_file), source_lines, breaks, color)
+    session.close()
+    plan
+}
+
+jet_cli_debug_unavailable: fn(error: NativeDebugError, color: Bool) -> JetCLIPlan Never! {
+    report: error.diagnostic()
+    jet_cli_fail(report.code, report.what, report.why, report.fix, color, JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// Read commands until the program ends. A piped stdin's commands are echoed
+// after the prompt, so the transcript reads as the session went. With
+// `breaks` the first stop is the first of them the program reaches.
+jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], breaks: [NativeBreak], color: Bool) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+    echo: !cli_term.stdin().is_tty()
+    opened := NativeDebugStep?{None}
+    if breaks.len() > 0 {
+        opened = Val(session.run_to(breaks, file, lines) ?? return jet_cli_debug_unavailable(err, color))
+    }
+    if breaks.len() == 0 {
+        if session.open(file, lines) == {
+            .Ok(step) -> opened = step
+            .Err(failure) -> return jet_cli_debug_unavailable(failure, color)
+        }
+    }
+    if opened == None {
+        row: diagnostic_registry_row("E0101") ?? panic("E0101 is not registered")
+        return jet_cli_fail("E0101", row.what, row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    first: opened ?? panic("the session opened")
+    jet_cli_debug_write(first.text)
+    stop := first.stop
+    input := cli_term.stdin()
+    loop stop.kind == NativeStopKind.Paused {
+        jet_cli_debug_write(NATIVE_DEBUG_PROMPT)
+        // The end of stdin runs the program to its end.
+        command := "continue"
+        if input.read_line() == {
+            .Ok(read) -> { command = read ?? "continue" }
+            .Err(_) -> {}
+        }
+        command = command.trim().copy()
+        if echo -> jet_cli_debug_write("{command}\n")
+        if command == "q" || command == "quit" {
+            row: diagnostic_registry_row("E2204") ?? panic("E2204 is not registered")
+            return jet_cli_fail("E2204", row.what, row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
+        }
+        step: session.command(command, stop, file, lines) ?? return jet_cli_debug_unavailable(err, color)
+        jet_cli_debug_write(step.text)
+        stop = step.stop
+    }
+    jet_cli_done("", "", JET_DRIVER_EXIT_OK)
+}
+
+jet_cli_debug_write: fn(text: String) Never! -[IO, Time.Wait]> {
+    if text.len() == 0 {
+        return
+    }
+    out := cli_term.stdout()
+    out.write(text).drop("jet debug stdout")
+    out.flush().drop("jet debug stdout")
+}

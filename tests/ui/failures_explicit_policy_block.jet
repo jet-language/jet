@@ -1,0 +1,17 @@
+// A block `#Policy(failures: .Explicit)` asks for the mark inside the block
+// only: the call before it stays as written.
+parse: fn(text: String) -> Int {
+    if text == "" -> return Err("empty")
+    text.count_bytes()
+}
+
+work: fn(text: String) -> Int {
+    before: parse(text)
+    #Policy(failures: .Explicit) {
+        inside: parse(text)
+        marked: parse(text)?
+        return before + inside + marked
+    }
+}
+
+run: fn() { print(work("ab") ?? 0) }

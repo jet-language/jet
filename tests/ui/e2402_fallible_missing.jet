@@ -1,0 +1,16 @@
+// A `#Error` type with no text (a function field) has no route into `Err`.
+#Error
+MyError: struct {
+    retry: fn() -> Int
+}
+
+inner: fn() -> Int MyError! { Ok(1) }
+
+outer: fn() -> Int Err! {
+    x: inner()
+    return Ok(x)
+}
+
+run: fn() {
+
+}

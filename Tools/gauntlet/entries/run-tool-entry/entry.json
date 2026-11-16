@@ -1,0 +1,14 @@
+{
+  "name": "run-tool-entry",
+  "mode": "tool",
+  "description": "The tool-entry export of the gauntlet harness, Tools/gauntlet/harness/run.mjs (runToolEntry), and its Jet twin in the ToolCases module of the jet_gauntlet_kit package (Tools/gauntlet/kit/Source/ToolCases.jet), #5072 c8, each run by a driver that loads the fixture entries and runs the parity cases of each tool entry through Tools/agent/JetEnv.jet: an entry without a tool and one whose paths and cases are wrong (broken, with the SHA-256 of its entry.json and its directory); cases that pass, with env values added and turned to text, args turned to text, an expected nonzero exit, a fresh copy of the fixtures and a check that counts the output; cases that fail on an exit, on the first differing byte, on an absent expected file and on a check that refuses; and an entry without fixtures, whose runs start in an empty directory. Then an unknown command (exit 64).",
+  "tool": {
+    "original": "Tools/gauntlet/harness/drivers/run-tool-entry.mjs",
+    "jet": "Tools/gauntlet/entries/run-tool-entry/driver/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["run", "entries"], "expected": "expected/run.out"},
+      {"args": ["census"], "exit": 64, "expected": "expected/usage.out"}
+    ]
+  }
+}

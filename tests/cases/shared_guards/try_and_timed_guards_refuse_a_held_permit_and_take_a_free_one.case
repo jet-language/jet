@@ -1,0 +1,13 @@
+# Claim: Shared try_guard_read/try_guard_edit answer None while another guard holds the permit and guard_read_within/guard_edit_within answer None once their Duration passes; a free permit gives a guard that writes the cell and releases on drop, also from inside an Option; a writer that gave up does not hold back the next reader. On o0, o1 and o2; the checked heap traps a leaked or twice-dropped guard.
+# Hand-derived: the held edit refuses all four attempts and then stores 5; try_bump makes 6; the Option-held edit releases at its scope end, so the next try_bump makes 7; beside a reader, a read attempt shares (7), an edit attempt is refused or times out, and the next read still succeeds; with the cell free, the timed edit makes 17 and the timed read sees it.
+fixture: try_and_timed_guards_refuse_a_held_permit_and_take_a_free_one.fixture
+env: NO_COLOR=1
+step: jet run --checked-alloc -O0 main.jet
+exit: 0 # o0
+stdout: = try_and_timed_guards_refuse_a_held_permit_and_take_a_free_one.out # o0
+step: jet run --checked-alloc -O1 main.jet
+exit: 0 # o1
+stdout: = try_and_timed_guards_refuse_a_held_permit_and_take_a_free_one.out # o1
+step: jet run --checked-alloc -O2 main.jet
+exit: 0 # o2
+stdout: = try_and_timed_guards_refuse_a_held_permit_and_take_a_free_one.out # o2

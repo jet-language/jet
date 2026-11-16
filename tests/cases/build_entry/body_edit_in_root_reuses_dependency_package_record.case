@@ -1,0 +1,20 @@
+# Port of build_entry.rs::body_edit_in_root_reuses_dependency_package_record.
+# PENDING-GRAMMAR: filtered/projected JSON, count/prefix/relational operations.
+fixture: fixtures/sealed-dependency
+env: JET_STORE_DIR={work}/store
+step: jet check lib.jet
+exit: nonzero
+stderr: ~ E3401 # Original cold diagnostic assertion.
+step first: jet inspect explain-build lib.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="package"][?subject~="util"][*].why_ran ^= "checked+published" # Original find-first lookup has a unique match.
+copy: body-edit.txt lib.jet
+step warm: jet check lib.jet
+exit: nonzero
+step second: jet inspect explain-build lib.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="package"][?subject~="util"][*].why_ran ^= "reused" # Original find-first lookup has a unique match.
+step: jet check lib.jet
+env: JET_STORE_DIR={work}/fresh-store
+exit: nonzero
+stderr: == warm

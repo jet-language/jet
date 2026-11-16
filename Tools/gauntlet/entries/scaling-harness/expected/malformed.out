@@ -1,0 +1,38 @@
+Receipt: <case>/work/receipt.json
+small-fns[single]/bad N=1 FAILED Malformed counter line: JET_PHASE_COUNTERS oops (counter-only; time/RSS not gated)
+small-fns[single]/bad N=2 FAILED Malformed counter line: JET_PHASE_COUNTERS oops (counter-only; time/RSS not gated)
+small-fns[single]/bad N=4 FAILED Malformed counter line: JET_PHASE_COUNTERS oops (counter-only; time/RSS not gated)
+schema: "jet.scaling-gate/v3"
+mode: "counters"
+jobs: 1
+memoryMax: "20G"
+timeoutS: 1800
+stopAfterS: null
+passed: false
+target: {lines: 1000000, seconds: 10}
+compilers: [{kind: "command", label: "bad", template: "sh ../../../fake.sh malformed {n} {trace}"}]
+workDir: "<case>/work"
+buildRoot: "<case>/build"
+FAIL "small-fns[single]/bad: baseline: Malformed counter line: JET_PHASE_COUNTERS oops"
+FAIL "small-fns[single]/bad: N=2: Malformed counter line: JET_PHASE_COUNTERS oops"
+FAIL "small-fns[single]/bad: N=4: Malformed counter line: JET_PHASE_COUNTERS oops"
+== series
+shape: "small-fns"
+layout: "single"
+compiler: "bad"
+mode: "counters"
+kind: "stress"
+dimension: "small functions"
+ladder: [2, 4]
+done: true
+truncated: null
+floors: null
+projection: null
+profile: null
+profilePoint: null
+baseline: n=1 x=1 code_lines=6 source_sha256="7f8af1b0b18acb97d28b314679faec9e0401dbdc31d3d33c5703ebff76ff331b" ok=false exit=0 problems=["Malformed counter line: JET_PHASE_COUNTERS oops"] open_phases=[] timeout_phase=null dir="<case>/work/bad/small-fns-single/1" diagnostics=0 trace.parse.items=1 trace.parse.spans=1
+point: n=2 x=2 code_lines=11 source_sha256="6d8aa812b22941e6d65a60b12f0ba87497d9a6c509730d38747133faedfe6cb2" ok=false exit=0 problems=["Malformed counter line: JET_PHASE_COUNTERS oops"] open_phases=[] timeout_phase=null dir="<case>/work/bad/small-fns-single/2" diagnostics=0 trace.parse.items=2 trace.parse.spans=1
+point: n=4 x=4 code_lines=22 source_sha256="2f2f59123f2a5b5bfa7c6bab6978f2f11755740dc103cab76e7e07bd5ecf8240" ok=false exit=0 problems=["Malformed counter line: JET_PHASE_COUNTERS oops"] open_phases=[] timeout_phase=null dir="<case>/work/bad/small-fns-single/4" diagnostics=0 trace.parse.items=4 trace.parse.spans=1
+failure: {kind: "compile", text: "baseline: Malformed counter line: JET_PHASE_COUNTERS oops"}
+failure: {kind: "compile", text: "N=2: Malformed counter line: JET_PHASE_COUNTERS oops"}
+failure: {kind: "compile", text: "N=4: Malformed counter line: JET_PHASE_COUNTERS oops"}

@@ -1,0 +1,24 @@
+# The compile-time input calls publish their effects, so `jet explain
+# effects` lists them where a function makes one: `net.fetch` reaches `Net`,
+# and `embed_file` and `find` read `FS.Read`. Before, they recorded no effect
+# and a function that fetched reached `nothing`. Only `build` calls the
+# helpers, so they are prep code and the check passes.
+fixture: explain_effects_reaches_comptime_inputs/input
+env: NO_COLOR=1
+step: jet check inputs.jet
+exit: 0
+step fetch: jet explain effects inputs.jet:4
+exit: 0
+stdout: ~ "effects at inputs.jet:4, in `banner`, nearest first" # the fetching function
+stdout: ~ "reaches: Net (inputs.jet:4)" # reaches Net at the fetch
+stdout: !~ "reaches: nothing" # not nothing
+step embed: jet explain effects inputs.jet:7
+exit: 0
+stdout: ~ "effects at inputs.jet:7, in `notes`, nearest first" # the embedding function
+stdout: ~ "reaches: FS.Read (inputs.jet:7)" # reads FS.Read at the embed
+step find: jet explain effects inputs.jet:9
+exit: 0
+stdout: ~ "reaches: FS.Read (inputs.jet:9)" # find reads FS.Read too
+step json: jet explain effects --json inputs.jet:4
+exit: 0
+stdout: ~ "\"effect\":\"Net\"" # the JSON reaches carry it too

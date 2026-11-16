@@ -1,0 +1,23 @@
+// A Close value built in a call's argument list and passed to a borrowed
+// parameter is a temporary the caller owns. It closes exactly once, right
+// after the call returns and before the next statement.
+S: struct {
+    id: Int
+
+    impl Close {
+        close: fn(&&self) { print("close {self.id}") }
+    }
+}
+
+sink: fn(s: S) { print("sink {s.id}") }
+
+pair: fn(a: S, b: S) { print("pair {a.id} {b.id}") }
+
+run: fn() {
+    sink(S{id: 5})
+    print("after the first call")
+    pair(S{id: 6}, S{id: 7})
+    print("after the second call")
+    loop id in 8..<10 -> sink(S{id: id})
+    print("end of body")
+}

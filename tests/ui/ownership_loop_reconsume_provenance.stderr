@@ -1,0 +1,12 @@
+Error [jet.MoveWithoutMarker]: `consume` takes `value`, but `value` is used again later
+  --> tests/ui/ownership_loop_reconsume_provenance.jet:5:13
+    |
+  5 |     consume(value)
+    |             ^^^^^
+  --> tests/ui/ownership_loop_reconsume_provenance.jet:6:32
+    |
+  6 |     loop item in [1] { consume(value) }
+    |                                ^^^^^ `value` is used again here
+ Why: `consume` takes ownership of this argument, and a call never copies on its own, so `value` has no value after this call
+ Fix: Write `value.copy()` to pass a copy and keep `value`, or reorder so this call is the last use of `value`
+More: jet-lang.dev/e/E0209

@@ -1,0 +1,11 @@
+use app
+
+TaskDraft: struct {
+    title: String
+    assignee: String?
+}
+
+check: fn(draft: TaskDraft) -> FieldError? {
+    if draft.assignee != None -> return None
+    Val(app.field_error(at: "asignee", reason: "Pick someone in this project."))
+}

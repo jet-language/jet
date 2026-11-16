@@ -1,0 +1,249 @@
+# HAND-PORT tests/jetpack_engine.rs:1314-1547 package_generation_lifecycle_preserves_source_facts_and_history
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: package_generation_lifecycle_preserves_source_facts_and_history.fixture
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Full original setup, observations and predicates preserved: this refusal is NOT a passing replacement.
+# #[test]
+# fn package_generation_lifecycle_preserves_source_facts_and_history() {
+#     let project = Scratch::new("profile-generation-lifecycle");
+#     let root = Scratch::new("profile-generation-root");
+#     let fixtures = Scratch::new("profile-generation-fixtures");
+#     let staging = Scratch::new("profile-generation-staging");
+#     write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+#     fs::write(
+#         project.join("env.jet"),
+#         "module profile.dev { packages: [default.greet] }\nmodule env.full { packages: [] }\n",
+#     )
+#     .unwrap();
+# 
+#     let run = |args: &[&str]| {
+#         jetpack()
+#             .args(args)
+#             .current_dir(&project.path)
+#             .env("JETPACK_ROOT", &root.path)
+#             .env("JETPACK_FIXTURES", &fixtures.path)
+#             .output()
+#             .unwrap()
+#     };
+#     let built = run(["profile", "build", "dev", "--no-color", "--offline"].as_slice());
+#     assert!(
+#         built.status.success(),
+#         "build stderr: {}",
+#         String::from_utf8_lossy(&built.stderr)
+#     );
+#     let generation_dir = project.join(".jet/profiles/dev/generations/1");
+#     let metadata = fs::read_to_string(generation_dir.join("meta.json")).unwrap();
+#     assert!(metadata.contains("jet-package-generation-v1"));
+#     assert!(metadata.contains("\"raw\":\"greet@default\""));
+#     assert!(metadata.contains("\"target\":\""));
+#     assert!(metadata.contains("\"provider\":\"nix\""));
+#     assert!(metadata.contains("\"provider_facts\":{"));
+#     assert!(metadata.contains("\"root_hash\":\"sha256-"));
+#     assert!(metadata.contains("\"output_hash\":\"sha256-"));
+#     assert!(!project.join(".jet/profiles/dev/current").exists());
+# 
+#     let explained = jet()
+#         .args(["explain", "greet", "--json", "--no-color"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         explained.status.success(),
+#         "explain stderr: {}",
+#         String::from_utf8_lossy(&explained.stderr)
+#     );
+#     let explained_stdout = String::from_utf8_lossy(&explained.stdout);
+#     assert!(explained_stdout.contains("\"schema\":\"jet.report/v1\""));
+#     assert!(explained_stdout.contains("\"moment\":\"tool\""));
+#     assert!(explained_stdout.contains("\"profile_facts\":["));
+#     assert!(explained_stdout.contains("\"profile\":\"dev\""));
+#     assert!(explained_stdout.contains("\"generation\":1"));
+#     assert!(explained_stdout.contains("\"output_hash\":\"sha256-"));
+#     assert!(explained_stdout.contains("\"output_digest\":\"matches\""));
+#     for lens in [
+#         "why-depends",
+#         "what-depends",
+#         "closure",
+#         "why-live",
+#         "rebuild",
+#     ] {
+#         let explained = jet()
+#             .args(["explain", lens, "greet", "--json", "--no-color"])
+#             .current_dir(&project.path)
+#             .env("JETPACK_ROOT", &root.path)
+#             .env("JETPACK_FIXTURES", &fixtures.path)
+#             .output()
+#             .unwrap();
+#         assert!(
+#             explained.status.success(),
+#             "{lens} stderr: {}",
+#             String::from_utf8_lossy(&explained.stderr)
+#         );
+#         let stdout = String::from_utf8_lossy(&explained.stdout);
+#         assert!(stdout.contains(&format!("\"lens\":\"{lens}\"")), "{stdout}");
+#     }
+# 
+#     let hook_before_switch = jetpack::EnvHook::definition_fingerprint(&project.path, None);
+#     let switched = run(["profile", "switch", "dev", "--no-color", "--offline"].as_slice());
+#     assert!(
+#         switched.status.success(),
+#         "switch stderr: {}",
+#         String::from_utf8_lossy(&switched.stderr)
+#     );
+#     assert!(
+#         fs::read_to_string(project.join(".jet/profiles/dev/current"))
+#             .unwrap()
+#             .contains("\"generation\":1")
+#     );
+#     let hook_after_switch = jetpack::EnvHook::definition_fingerprint(&project.path, None);
+#     assert_ne!(hook_before_switch, hook_after_switch);
+# 
+#     let entered = run([
+#         "env",
+#         "--no-color",
+#         "--trust",
+#         "--offline",
+#         "--env",
+#         "full",
+#         "--",
+#         "/bin/sh",
+#         "-c",
+#         "command -v greet",
+#     ]
+#     .as_slice());
+#     assert!(
+#         entered.status.success(),
+#         "dev-shell projection stderr: {}",
+#         String::from_utf8_lossy(&entered.stderr)
+#     );
+#     assert_eq!(
+#         String::from_utf8_lossy(&entered.stdout).trim(),
+#         project
+#             .join(".jet/profiles/dev/generations/1/root/bin/greet")
+#             .to_string_lossy()
+#     );
+# 
+#     let rebuilt = run(["profile", "build", "dev", "--no-color", "--offline"].as_slice());
+#     assert!(
+#         rebuilt.status.success(),
+#         "second build stderr: {}",
+#         String::from_utf8_lossy(&rebuilt.stderr)
+#     );
+#     let history = run(["profile", "generations", "dev", "--json"].as_slice());
+#     assert!(history.status.success());
+#     let history_stdout = String::from_utf8_lossy(&history.stdout);
+#     assert!(history_stdout.contains("\"generation\":1"));
+#     assert!(history_stdout.contains("\"generation\":2"));
+# 
+#     let switched_new = run(["profile", "switch", "dev", "--no-color", "--offline"].as_slice());
+#     assert!(
+#         switched_new.status.success(),
+#         "second switch stderr: {}",
+#         String::from_utf8_lossy(&switched_new.stderr)
+#     );
+#     assert!(
+#         fs::read_to_string(project.join(".jet/profiles/dev/current"))
+#             .unwrap()
+#             .contains("\"generation\":2")
+#     );
+# 
+#     let rolled_back = run(["profile", "rollback", "dev", "--no-color"].as_slice());
+#     assert!(
+#         rolled_back.status.success(),
+#         "rollback stderr: {}",
+#         String::from_utf8_lossy(&rolled_back.stderr)
+#     );
+#     assert!(
+#         fs::read_to_string(project.join(".jet/profiles/dev/current"))
+#             .unwrap()
+#             .contains("\"generation\":1")
+#     );
+# 
+#     let switched_again = run(["profile", "switch", "dev", "--no-color", "--offline"].as_slice());
+#     assert!(
+#         switched_again.status.success(),
+#         "switch after rollback stderr: {}",
+#         String::from_utf8_lossy(&switched_again.stderr)
+#     );
+#     assert!(
+#         fs::read_to_string(project.join(".jet/profiles/dev/current"))
+#             .unwrap()
+#             .contains("\"generation\":2")
+#     );
+# 
+#     let generation_one_root = project.join(".jet/profiles/dev/generations/1/root");
+#     let generation_one_binary = generation_one_root.join("bin/greet");
+#     let generation_one_original = fs::read(&generation_one_binary).unwrap();
+#     make_writable(&generation_one_root.to_string_lossy());
+#     fs::write(&generation_one_binary, "tampered generation\n").unwrap();
+#     let failed_rollback = run(["profile", "rollback", "dev", "1", "--no-color"].as_slice());
+#     assert_eq!(failed_rollback.status.code(), Some(2));
+#     let failed_rollback_stderr = String::from_utf8_lossy(&failed_rollback.stderr);
+#     assert!(
+#         failed_rollback_stderr.contains("root hash"),
+#         "{failed_rollback_stderr}"
+#     );
+#     assert!(
+#         fs::read_to_string(project.join(".jet/profiles/dev/current"))
+#             .unwrap()
+#             .contains("\"generation\":2")
+#     );
+#     fs::write(&generation_one_binary, generation_one_original).unwrap();
+# 
+#     let roots = jetpack::Store::Roots {
+#         root: root.path.clone(),
+#         dev_mode: false,
+#     };
+#     let entry = jetpack::Store::list(&roots)
+#         .into_iter()
+#         .find(|entry| entry.name == "greet")
+#         .expect("profile build must publish greet to the Store");
+#     let store_binary = Path::new(&entry.out).join("bin/greet");
+#     let store_binary_original = fs::read(&store_binary).unwrap();
+#     let store_out_permissions = fs::metadata(&entry.out).unwrap().permissions();
+#     let store_binary_permissions = fs::metadata(&store_binary).unwrap().permissions();
+#     make_writable(&entry.out);
+#     fs::write(&store_binary, "tampered\n").unwrap();
+#     let rebuild = jet()
+#         .args(["explain", "rebuild", "greet", "--json", "--no-color"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         rebuild.status.success(),
+#         "rebuild explain stderr: {}",
+#         String::from_utf8_lossy(&rebuild.stderr)
+#     );
+#     let rebuild_stdout = String::from_utf8_lossy(&rebuild.stdout);
+#     assert!(rebuild_stdout.contains("\"decision\":\"rebuild-required\""));
+#     assert!(rebuild_stdout.contains("\"output_digest\":\"mismatch\""));
+#     assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
+#     assert!(rebuild_stdout.contains("stored output digest differs"));
+# 
+#     fs::write(&store_binary, store_binary_original).unwrap();
+#     fs::set_permissions(&entry.out, store_out_permissions).unwrap();
+#     fs::set_permissions(&store_binary, store_binary_permissions).unwrap();
+# 
+#     fs::remove_dir_all(root.join("hangar/lifecycle-db")).unwrap();
+#     let missing_root = run(["profile", "generations", "dev", "--json"].as_slice());
+#     assert_eq!(missing_root.status.code(), Some(2));
+#     let missing_root_stderr = String::from_utf8_lossy(&missing_root.stderr);
+#     assert!(
+#         missing_root_stderr.contains("profile generation lifecycle root is missing"),
+#         "{missing_root_stderr}"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack profile build dev --no-color --offline
+cwd: project
+exit: 0
+

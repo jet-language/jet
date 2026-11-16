@@ -1,0 +1,32 @@
+# Port of tests/pkg.rs:5384-5430; all3 original layouts, manifests and source bytes verbatim.
+# ORACLE-LITERAL root/src/managed.out from original5415's format expansion.
+fixture: fixtures/migration
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet run
+cwd: root
+exit: 0
+stdout: = root.out
+file: root/run.jet is-file
+file: root/main.jet absent
+stderr: ~ "notice: migrated retired entry" # original predicate
+stderr: ~ "main.jet" # original predicate
+stderr: ~ "run.jet" # original predicate
+step: jet run
+cwd: src
+exit: 0
+stdout: = src.out
+file: src/src/run.jet is-file
+file: src/src/main.jet absent
+stderr: ~ "notice: migrated retired entry" # original predicate
+stderr: ~ "main.jet" # original predicate
+stderr: ~ "run.jet" # original predicate
+step: jet run
+cwd: managed
+exit: 0
+stdout: = managed.out
+file: managed/run.jet is-file
+file: managed/.jet/main.jet absent
+stderr: ~ "notice: migrated retired entry" # original predicate
+stderr: ~ "main.jet" # original predicate
+stderr: ~ "run.jet" # original predicate

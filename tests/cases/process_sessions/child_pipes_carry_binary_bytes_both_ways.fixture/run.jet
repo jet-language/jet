@@ -1,0 +1,47 @@
+use process: core.process
+
+// Every byte value crosses a child's pipes unchanged: stdin takes bytes and
+// text, and stdout comes back through `read` and `chunks`.
+round_trip: fn() {
+    child: process.cmd([String]{"cat"}).stdin(.Stream).stdout(.Stream).spawn() ?? panic("spawn failed")
+    all := [U8]{}
+    loop value in 0..<256 { all.push(U8{value}) }
+    taken: child.stdin.write_some([U8]{U8{0}, U8{255}}) ?? panic("write failed")
+    print("write took {taken}")
+    child.stdin.write_bytes(all) ?? panic("write_all failed")
+    child.stdin.write("é\n") ?? panic("write failed")
+    child.stdin.close()
+    first: child.stdout.read_bytes(1) ?? panic("read failed")
+    print("first {first}")
+    received := [U8]{}
+    loop chunk in child.stdout.chunks(100) {
+        if chunk.len() == 0 || chunk.len() > 100 -> print("bad chunk {chunk.len()}")
+        loop byte in chunk { received.push(byte) }
+    }
+    expected := [U8]{U8{255}}
+    loop byte in all { expected.push(byte) }
+    loop byte in "é\n".bytes() { expected.push(byte) }
+    print("received {received.len()} bytes, equal: {received == expected}")
+    print("after end {child.stdout.read_bytes(8) ?? panic("read after end failed")}")
+    receipt: child.wait() ?? panic("wait failed")
+    print("exit {receipt.code}")
+}
+
+// `chunks()` reads 65536 bytes at a time by default, and a size below one
+// ends the loop before any read, as `read` refuses such a limit.
+sizes: fn() {
+    child: process.cmd([String]{"sh", "-c", "printf abc >&2"}).stderr(.Stream).spawn() ?? panic("spawn failed")
+    loop chunk in child.stderr.chunks(0) { print("size 0 yielded {chunk}") }
+    if child.stderr.read_bytes(0) == {
+        .Ok(_) -> { print("read(0) read") }
+        .Err(error) -> print("read(0) failed: {error}")
+    }
+    loop chunk in child.stderr.chunks() { print("stderr {String.from_bytes(chunk) ?? "?"}") }
+    receipt: child.wait() ?? panic("wait failed")
+    print("exit {receipt.code}")
+}
+
+run: fn() {
+    round_trip()
+    sizes()
+}

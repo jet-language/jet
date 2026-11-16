@@ -1,0 +1,12 @@
+# Port of tests/structure_liveness.rs:203-226; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# Rust-only target-libdir availability guard erased by TestLead1 ruling.
+# A web compile keeps the front end's result: checked for the browser's
+# machine, the file reports the same liveness lints as the host check. A
+# build prints no lints on any target, so the check is where they show.
+step: jet check --target=web {root}/Examples/Tooling/StructureLiveness.jet
+exit: 0
+stderr: ~ "L0101" # an unused local binding
+stderr: ~ "L0103" # an unused import
+stderr: ~ "L0104" # an unused private function
+stderr: ~ "L0105" # an unreachable package export

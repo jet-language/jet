@@ -1,0 +1,45 @@
+// A generic alias has no kind word, so its type parameters go on its name.
+// `Grid<T>` is the same type as `[[T]]` for each `T`.
+Grid<T>: [[T]]
+
+Either<T>: T | String
+
+rows: fn() -> Grid<Float> { [[1.0, 2.0], [3.0]] }
+
+total: fn(g: Grid<Float>) -> Float {
+    sum := 0.0
+    loop row in g {
+        loop x in row -> sum += x
+    }
+    sum
+}
+
+cells: fn<T>(g: Grid<T>) -> Int {
+    count := 0
+    loop row in g -> count += row.len()
+    count
+}
+
+widest: fn(plain: [[Float]]) -> Int {
+    best := 0
+    loop row in plain {
+        if row.len() > best -> best = row.len()
+    }
+    best
+}
+
+describe: fn(v: Either<Int>) -> String {
+    if v == {
+        .Int(n) -> "int {n}"
+        .String(s) -> "text {s}"
+    }
+}
+
+run: fn() {
+    g: rows()
+    print(total(g))
+    print(total([[0.5], [0.25]]))
+    print("{cells(g)} {cells([["a", "b"], ["c"], ["d"]])} {widest(g)}")
+    print(describe(3))
+    print(describe("x"))
+}

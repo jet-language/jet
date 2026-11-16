@@ -1,0 +1,74 @@
+// The Crew service. Its three marked methods are endpoints. The webhook, its
+// signing key, the job and the unmarked helper stay on the server.
+use app
+
+TaskID: struct {
+    value: Int
+}
+
+#Error
+TaskError: enum {
+    NotFound
+    Unreachable(String)
+    SignedOut
+}
+
+// A call through an `app.Remote<Crew>` can fail on the way; each failure
+// has a case.
+impl app.CallError -> TaskError {
+    if self == {
+        .Unreachable(why) -> TaskError.Unreachable(why)
+        .Invalid(errors) -> TaskError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> TaskError.SignedOut
+        .UpdateRequired -> TaskError.Unreachable("update required")
+    }
+}
+
+// What a failed call says.
+reason: fn(error: TaskError) -> String {
+    if error == {
+        .NotFound -> "not found"
+        .Unreachable(why) -> "unreachable: {why}"
+        .SignedOut -> "signed out"
+    }
+}
+
+new_task_id: fn() -> TaskID { TaskID{value: 1} }
+
+Crew: struct {
+    name: String
+
+    // A signed-in caller moves a task.
+    #App.SignedIn move_task: fn(self, id: TaskID) -> Int TaskError! {
+        if id.value < 0 -> return Err(TaskError.NotFound)
+        Ok(id.value + 1)
+    }
+
+    // Any caller looks a task up.
+    #App.Public lookup: fn(self, id: TaskID) -> Int TaskError! {
+        if id.value < 0 -> return Err(TaskError.NotFound)
+        Ok(id.value + 1)
+    }
+
+    // Any caller reads the service's status.
+    #App.Public status: fn(self) -> String { "{self.name} is up" }
+
+    // The webhook a tracker posts a project's events to, checked under the
+    // project's signing key.
+    #App.Webhook(path: "/hooks/:project", signature: app.Signature.Stripe, key: "webhook_secret") on_event: fn(self, project: String, event: String) -> Int {
+        project.len() + event.len()
+    }
+
+    // The webhook signing key.
+    #App.SigningKey webhook_secret: fn(self, project: String) -> String? { Val("secret-{project}") }
+
+    // The job that tells a task's assignee; only the server runs it, so
+    // nothing marks it.
+    tell_assignee: fn(self, id: TaskID) TaskError! {
+        if id.value < 0 -> return Err(TaskError.NotFound)
+        Ok()
+    }
+
+    // A helper of the service's own methods; nothing marks it.
+    next_id: fn(self, id: TaskID) -> TaskID { TaskID{value: id.value + 1} }
+}

@@ -1,0 +1,12 @@
+# tests/grammar.rs::parse_value_tail_stays_an_expression_statement at tests/grammar.rs:657; hand-port
+# Claim: lexing has no diagnostics (tests/grammar.rs:665)
+# Claim: parse succeeds (tests/grammar.rs:666)
+# Claim: last body statement is an expression statement Str (tests/grammar.rs:670-673)
+# Not ported: Stmt::Expr(Expr::Str) shape check (tests/grammar.rs:670-673): AST internal; observable as jet check accepting the value tail with return type String
+fixture: parse_value_tail_stays_an_expression_statement.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/grammar.rs:665-666 no diagnostics and parse succeeds
+stderr: !~ "E0" # tests/grammar.rs:665-666 no diagnostics and parse succeeds

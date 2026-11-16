@@ -1,0 +1,13 @@
+# HAND-PORT tests/jetpack_engine.rs:7425-7451 bridge_flake_twice_produces_identical_shim_stdout
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: bridge_flake_twice_produces_identical_shim_stdout.fixture
+env: NO_COLOR=1
+mkdir: project
+step first: jetpack bridge flake --no-color --fixtures {work}/fixtures
+cwd: project
+exit: 0
+step second: jetpack bridge flake --no-color --fixtures {work}/fixtures
+cwd: project
+exit: 0
+stdout: == first
+

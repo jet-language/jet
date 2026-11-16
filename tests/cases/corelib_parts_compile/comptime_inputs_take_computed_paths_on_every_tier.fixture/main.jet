@@ -1,0 +1,13 @@
+// D-EMBED-WALK1: a comptime input's path or glob is any String the comptime
+// code computes. The glob is built from a constant, and each path `find`
+// returns is embedded.
+DIR: "inputs"
+
+TEXTS: #run { loop path in find("{DIR}/*.txt") -> "{path}={embed_file(path).trim()}" }
+
+SIZES: #run { loop path in find("{DIR}/**/*.md") -> "{path}:{embed_bytes(path).len()}" }
+
+run: fn() {
+    print(TEXTS.join("|"))
+    print(SIZES.join("|"))
+}

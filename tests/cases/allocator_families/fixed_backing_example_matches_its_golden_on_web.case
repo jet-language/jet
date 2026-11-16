@@ -1,0 +1,14 @@
+# The web leg of Examples/Memory/Allocation/FixedBacking: the example's golden
+# covers O0, O1 and O2; here its web build runs under node and prints the same
+# golden. Typed allocation, reuse after reset, exhaustion as a typed AllocError
+# and close all happen inside the caller's 128-byte buffer: the same three Int
+# allocations fit before and after a reset, so nothing falls back to the heap.
+requires: tool:node
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+copy: {root}/Examples/Memory/Allocation/FixedBacking.jet main.jet
+step: jet build --target web main.jet
+exit: 0
+step: node .jet/build/app.js
+exit: 0
+stdout: = ../../../Examples/Memory/Allocation/FixedBacking.out

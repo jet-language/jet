@@ -1,0 +1,41 @@
+// `.location` places where a declaration's name is written.
+
+Point: struct {
+    x: Int
+}
+
+// The same helper reflects as a function.
+
+helper: fn() -> Int { 1 }
+
+run: fn() {
+    point_site: #run { Point.reflect().location ?? panic("no declaration") }
+    helper_site: #run { helper.reflect().location ?? panic("no declaration") }
+    print("Point {point_site.line}")
+    print("helper {helper_site.line}")
+    point_info: Point.reflect()  // ordinary code reads the same records
+    field_site: point_info.fields[0].location ?? panic("no field")
+    print("field x {field_site.line}:{field_site.column}")
+    again: helper.reflect().location ?? panic("no declaration")
+    print("helper again {again.line}")
+    // A marker body reads the type it marks.
+    print("marked {Spot{at: 0}.declared_line()}")
+    // A builtin number has no declaration.
+    print("Int {Int.reflect().location?.line ?? 0}")
+}
+
+DeclaredLine: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            line: (target.reflect().location ?? panic("no declaration")).line
+            declared_line: fn(self) -> Int Never! { #{line} }
+        }
+    }
+}
+
+#DeclaredLine
+Spot: struct {
+    at: Int
+}

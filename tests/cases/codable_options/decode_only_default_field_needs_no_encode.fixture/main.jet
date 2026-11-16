@@ -1,0 +1,35 @@
+use json: core.encoding.json
+
+// Neither type writes JSON, so neither derives `Encode`.
+#Codable(only: .Decode)
+Served: struct {
+    port: Int
+}
+
+// An absent key takes its field's default as it is; a present key decodes.
+#Codable(only: .Decode)
+Workload: struct {
+    id: String
+    servers: [Served]{[Served]{}}
+    limit: Int{8}
+}
+
+show: fn(label: String, workload: Workload) {
+    ports: workload.servers.map(fn(served) { "{served.port}" }).join(",")
+    print("{label}: {workload.id} servers=[{ports}] limit={workload.limit}")
+}
+
+run: fn() {
+    absent: "{{\"id\":\"a\"}}"
+    present: "{{\"id\":\"b\",\"servers\":[{{\"port\":80}},{{\"port\":81}}],\"limit\":2}}"
+
+    // The streaming reader.
+    show("read absent", json.decode<Workload>(absent) ?? panic("read absent"))
+    show("read present", json.decode<Workload>(present) ?? panic("read present"))
+
+    // A parsed tree.
+    absent_tree: json.parse(absent) ?? panic("parse absent")
+    show("tree absent", absent_tree.decode<Workload>() ?? panic("tree absent"))
+    present_tree: json.parse(present) ?? panic("parse present")
+    show("tree present", present_tree.decode<Workload>() ?? panic("tree present"))
+}

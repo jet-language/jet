@@ -1,0 +1,28 @@
+// `jet run file.jet -- arg1 arg2` forwards everything after `--` to the
+// program verbatim. The program reads those words through `process.args()`:
+// the user's words in order, with no program name in front.
+//
+// Run with:  jet run Examples/Systems/CLI/CLIArgs.jet -- hello world
+// Expect:    2, then hello and world on their own lines, then the mode
+//
+// The golden test runs this program with no extra words, so it prints 0. An
+// optional setting comes from the environment with a default, and the program
+// ends with an explicit exit code.
+package: {
+    name: "cli_args"
+    authority: { allow: [Env, Exec, Exec.Args, IO] }
+}
+
+use {
+    env: core.sys
+    process: core.process
+}
+
+run: fn() {
+    args: process.args()
+    print(args.len())
+    loop word in args -> print(word)
+    mode: env.get("CLI_ARGS_MODE") ?? "default"
+    print(mode)
+    process.exit(0)
+}

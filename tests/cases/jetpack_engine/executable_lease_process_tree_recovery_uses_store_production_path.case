@@ -1,0 +1,163 @@
+# HAND-PORT tests/jetpack_engine.rs:3790-3866 executable_lease_process_tree_recovery_uses_store_production_path
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: executable_lease_process_tree_recovery_uses_store_production_path.fixture
+env: NO_COLOR=1
+requires: os:unix
+refused: store-ingest
+# Exact original verified native fixture admission remains a named seam; never synthetic objects.
+# #[test]
+# fn executable_lease_process_tree_recovery_uses_store_production_path() {
+#     let root = Scratch::new("lease-process-tree-root");
+#     let fixtures = Scratch::new("lease-process-tree-fixtures");
+#     let out_dir = Scratch::new("lease-process-tree-output");
+#     let ready = root.path.join("descendant-ready");
+#     let release = root.path.join("descendant-release");
+#     write_native_jetpack_fixture(&fixtures.path, &root.path, &out_dir.path);
+# 
+#     let run = jetpack()
+#         .args([
+#             "use",
+#             "omp@releases#1.0.0",
+#             "-y",
+#             "--no-color",
+#             "--offline",
+#             "--fixtures",
+#         ])
+#         .arg(&fixtures.path)
+#         .args([
+#             "--",
+#             "/bin/sh",
+#             "-c",
+#             "printf ready > \"$LEASE_READY\"; while [ ! -f \"$LEASE_RELEASE\" ]; do /bin/sleep 0.01; done >/dev/null 2>&1 </dev/null &",
+#         ])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .env("LEASE_READY", &ready)
+#         .env("LEASE_RELEASE", &release)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         run.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&run.stderr)
+#     );
+#     assert!(ready.exists(), "descendant did not start before parent exit");
+# 
+#     let leases = root.path.join("leases");
+#     let lease = fs::read_dir(&leases)
+#         .unwrap()
+#         .next()
+#         .unwrap()
+#         .unwrap()
+#         .path();
+#     let recover_while_child_runs = jetpack()
+#         .args(["hangar", "recover", "--no-color"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         recover_while_child_runs.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&recover_while_child_runs.stderr)
+#     );
+#     assert!(lease.exists(), "live descendant lease was reclaimed early");
+# 
+#     fs::write(&release, "release").unwrap();
+#     let deadline = std::time::Instant::now() + Duration::from_secs(5);
+#     while lease.exists() {
+#         assert!(
+#             std::time::Instant::now() < deadline,
+#             "idle descendant lease was not reclaimed"
+#         );
+#         let recover_after_child_exit = jetpack()
+#             .args(["hangar", "recover", "--no-color"])
+#             .env("JETPACK_ROOT", &root.path)
+#             .output()
+#             .unwrap();
+#         assert!(
+#             recover_after_child_exit.status.success(),
+#             "stderr: {}",
+#             String::from_utf8_lossy(&recover_after_child_exit.stderr)
+#         );
+#         std::thread::sleep(Duration::from_millis(10));
+#     }
+# }
+# Exact original native helper, including real rustc artifact and verified realization:
+# pub fn write_native_jetpack_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
+#     fs::create_dir_all(fixtures).unwrap();
+#     let bin = staging_dir.join("bin");
+#     fs::create_dir_all(&bin).unwrap();
+#     let name = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
+#     let executable = bin.join(&name);
+#     let source = staging_dir
+#         .parent()
+#         .unwrap_or(staging_dir)
+#         .join("native-jetpack-fixture.rs");
+#     fs::write(
+#         &source,
+#         r#"fn main() {
+#     if std::env::args().nth(1).as_deref() == Some("--hold") {
+#         std::thread::sleep(std::time::Duration::from_secs(5));
+#     }
+#     if std::env::args().nth(1).as_deref() == Some("--help") {
+#         println!("jetpack platform fixture");
+#     }
+# }
+# "#,
+#     )
+#     .unwrap();
+#     let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+#     let output = Command::new(rustc)
+#         .args(["--edition=2021", "-C", "debuginfo=0", "-C", "opt-level=0"])
+#         .arg(&source)
+#         .arg("-o")
+#         .arg(&executable)
+#         .output()
+#         .unwrap_or_else(|error| panic!("could not compile native platform fixture: {error}"));
+#     assert!(
+#         output.status.success(),
+#         "native platform fixture compilation failed: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let artifact_name = format!("omp-native-jetpack-fixture{}", std::env::consts::EXE_SUFFIX);
+#     let artifact = fixtures.join(&artifact_name);
+#     fs::copy(&executable, &artifact).unwrap();
+#     let artifact_digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+#     let out_dir = seed_hangar_object(root, staging_dir);
+#     let json = format!(
+#         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+#         out_dir.to_string_lossy()
+#     );
+#     fs::write(fixtures.join("nixpkgs-native-jetpack.json"), &json).unwrap();
+#     fs::write(
+#         fixtures.join("jetpackage-omp.json"),
+#         format!(
+#             "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{artifact_name:?}}}"
+#         ),
+#     )
+#     .unwrap();
+#     out_dir
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+mkdir: output/bin
+step: {env:RUSTC|rustc} --edition=2021 -C debuginfo=0 -C opt-level=0 native-jetpack-fixture.rs -o output/bin/jetpack
+exit: 0
+step: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- /bin/sh -c "printf ready > \"$LEASE_READY\"; while [ ! -f \"$LEASE_RELEASE\" ]; do /bin/sleep 0.01; done >/dev/null 2>&1 </dev/null &"
+env: JETPACK_FIXTURES={work}/fixtures
+env: LEASE_READY={work}/root/descendant-ready
+env: LEASE_RELEASE={work}/root/descendant-release
+exit: 0
+file: root/descendant-ready exists
+capture: lease = first-entry root/leases
+step: jetpack hangar recover --no-color
+exit: 0
+file: {cap:lease} exists
+write: root/descendant-release release.template
+repeat while file: {cap:lease} exists timeout 5s every 10ms fail "idle descendant lease was not reclaimed"
+step: jetpack hangar recover --no-color
+exit: 0
+end repeat
+

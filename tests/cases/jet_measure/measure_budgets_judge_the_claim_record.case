@@ -1,0 +1,24 @@
+# D-CLAIM-BENCH1: `jet test --measure` evaluates each claim's `.Test(name)` BenchTime budgets against that claim's measured record in the same report frame. A `.Fail` miss fails the claim with E2907, a `.Warn` miss is only reported, a met budget passes, and `--json` prints the same record with its budget verdicts.
+fixture: budgets.fixture
+env: NO_COLOR=1
+
+step text: jet test budgets.jet --measure
+exit: nonzero # the `.Fail` budget of `tight` misses
+stdout: ~ "measure tight: ok=false" # the missed budget fails its claim's record
+stdout: ~ "budget too_tight: status=miss metric=BenchTime(P50)" # the verdict names the budget and its metric
+stdout: ~ "measure roomy: ok=true" # a met budget leaves its claim passing
+stdout: ~ "budget roomy: status=pass" # and says so
+stdout: ~ "measure advisory: ok=true" # a `.Warn` miss never fails the claim
+stdout: ~ "budget advisory: status=warn" # but is reported
+stderr: ~ "E2907" # the budget miss diagnostic
+stderr: ~ "Performance budget `too_tight` regressed" # names the missed budget
+
+step json: jet test budgets.jet --measure --json
+exit: nonzero # the same claims, the same verdicts
+stdout: ~ "\"name\":\"tight\",\"ok\":false" # one record object per claim
+stdout: ~ "\"status\":\"miss\"" # the budget verdict rides the record
+stdout: ~ "\"mean_ns\":" # the record's fields match the text line
+
+step plain: jet test budgets.jet
+exit: 0 # plain `jet test` runs each claim once and judges no budget
+stdout: !~ "measure tight" # no measurement record

@@ -1,0 +1,62 @@
+// A MappedFile keeps the bytes its file held when it was mapped. Another
+// process then writes the file and truncates it: both reach the file, never
+// the map. `kind()` says how the runtime keeps the map fixed: a clone of the
+// file, or the file itself under a read lease that the writer breaks, after
+// which the map is a copy.
+use {
+    files: core.files
+    process: core.process
+}
+
+run: fn() {
+    scratch: files.temp_dir("map-stable")
+    path: files.join(scratch.path, "table.txt")
+    files.write(path, "alpha\nbeta\n")
+
+    mapped: files.map(path)
+    first: mapped.window_len(0, 5) ?? panic("window")
+    print("map before write: {String.from_bytes(first) ?? ""}")
+    held: if mapped.kind() == {
+        .Clone -> false
+        .Held -> true
+        .Copy -> false
+    }
+    kept: if mapped.kind() == {
+        .Clone -> true
+        .Held -> true
+        .Copy -> false
+    }
+    print("cloned or held: {kept}")
+
+    wrote: process.call(process.cmd(["sh", "-c", "printf Z | dd of=\"$1\" conv=notrunc status=none", "sh", path]))
+    print("write status: {wrote}")
+    print("file now starts: {String.from_bytes(files.read_at(path, 0, 5)) ?? ""}")
+    again: mapped.window_len(0, 5) ?? panic("window")
+    print("map after write: {String.from_bytes(again) ?? ""}")
+
+    cut: process.call(process.cmd(["sh", "-c", ": > \"$1\"", "sh", path]))
+    print("truncate status: {cut}")
+    print("file length now: {files.read_bytes(path).len()}")
+    print("map length: {mapped.len()}")
+    tail: mapped.window_len(6, 4) ?? panic("window")
+    print("map tail after truncate: {String.from_bytes(tail) ?? ""}")
+
+    // A held map becomes a copy once the writer breaks its lease; a clone
+    // stays a clone.
+    settled: if mapped.kind() == {
+        .Clone -> !held
+        .Held -> false
+        .Copy -> held
+    }
+    print("kind after the writer: {settled}")
+
+    empty_path: files.join(scratch.path, "empty.txt")
+    files.write(empty_path, "")
+    empty: files.map(empty_path)
+    empty_copy: if empty.kind() == {
+        .Clone -> false
+        .Held -> false
+        .Copy -> true
+    }
+    print("empty map is a copy: {empty_copy}")
+}

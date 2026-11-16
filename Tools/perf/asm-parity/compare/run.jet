@@ -1,0 +1,60 @@
+// The memory kernel's byte compare, through the safe equality of two
+// `[U8]`: 1024 pairs whose sizes run from 1 byte to 16 KiB, weighted to the
+// small ones. Half the pairs are equal; the other half differ in one byte at
+// a drawn position. `n` passes over them; the sum counts the equal pairs.
+// Each pass first flips the first byte of one right list, so no pass repeats
+// the one before it and the compares cannot be hoisted out of the pass loop.
+
+#CLI
+Args: struct {
+    n: Int
+}
+
+PAIRS: 1024
+
+// The next state of a 31-bit linear congruential generator.
+next: fn(state: Int) -> Int { (state * 1103515245 + 12345).bit_and(2147483647) }
+
+// Byte `at` of every list: the same pattern on both sides.
+byte_at: fn(at: Int) -> U8 { U8{(at * 7 + 3).bit_and(255)} }
+
+run: fn(args: Args) {
+    passes: if args.n > 0 -> args.n else -> 1
+    // Per pair one draw picks the size (its top three bits a size class of
+    // up to 8, 16, 32, 64, 128, 512, 2048 or 16384 bytes, the size from bits
+    // 12 up) and a second whether the pair differs (its top bit) and where
+    // (the low 30 bits, scaled to the size). The generator's low bits repeat
+    // too soon to pick a class.
+    lefts := [[U8]]{}
+    rights := [[U8]]{}
+    state := 12345
+    loop _ in 0..<PAIRS {
+        state = next(state)
+        class: (state >> 28).bit_and(7)
+        bits: if class < 5 -> class + 3 else if class == 5 -> 9 else if class == 6 -> 11 else -> 14
+        size: 1 + (state >> 12).bit_and((1 << bits) - 1)
+        state = next(state)
+        left := [U8]{}
+        right := [U8]{}
+        loop at in 0..<size {
+            left.push(byte_at(at))
+            right.push(byte_at(at))
+        }
+        if state >> 30 == 1 {
+            at: (state.bit_and(1073741823) * size) >> 30
+            right[at] = byte_at(at).bit_xor(U8{1})
+        }
+        lefts.push(left)
+        rights.push(right)
+    }
+    total := 0
+    loop pass in 0..<passes {
+        flip: pass.bit_and(PAIRS - 1)
+        rights[flip][0] = rights[flip][0].bit_xor(U8{1})
+        loop i in 0..<PAIRS {
+            same: lefts[i] == rights[i]  // the compare
+            if same -> total += 1
+        }
+    }
+    print("sum {total}")
+}

@@ -1,0 +1,10 @@
+// `context.scratch` borrows the task's scratch arena: a value made in it is
+// a view into the arena, and returning it would let it outlive the borrow,
+// so it is E0631 as a view into a local arena is.
+keep: fn() -> Int {
+    s: context.scratch
+    x: s.alloc(42)
+    return x
+}
+
+run: fn() { print(keep()) }

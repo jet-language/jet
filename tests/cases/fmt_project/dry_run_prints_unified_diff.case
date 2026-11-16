@@ -1,0 +1,8 @@
+# Port of tests/fmt_project.rs::dry_run_prints_unified_diff (402-424).
+# PENDING-SAME-HEAD: original predicates, no reference snapshot or blessing.
+fixture: dry_run_prints_unified_diff.fixture
+copy: main.jet original.txt
+step: jet fmt --dry-run main.jet
+exit: 1
+stdout: ~any "---" "+++" "@@" # original predicate
+file: main.jet == original.txt

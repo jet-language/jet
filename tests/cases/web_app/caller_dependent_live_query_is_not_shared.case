@@ -1,0 +1,21 @@
+# A live query that reads app.caller() is not shared between callers: two
+# callers' bindings of one source and argument list each run the source as
+# their own caller and keep their own result. A write that meets the read set
+# costs one re-run per caller that subscribes, and a caller's second
+# subscriber shares that caller's binding. The re-runs count against the
+# server's cap of 1000 a second: 300 writes read by four callers make 1000
+# re-runs, then each binding serves its held result (capped=4). Same output
+# on o0/o1/o2.
+fixture: caller_dependent_live_query_is_not_shared.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = caller_dependent_live_query_is_not_shared.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

@@ -1,0 +1,3 @@
+load("@jet_hosts//bazel:jet_library.bzl", "jet_library")
+jet_library(name = "loadable", entry = "library.jet", output = "core", library = "loadable", deps = ["package.jet", ".jet/lock", "library.jet", "extra.jet"], loadable = True, linkopts = ["-ldl", "-lpthread", "-lm"])
+cc_binary(name = "host", srcs = ["host.c"], deps = [":loadable"])

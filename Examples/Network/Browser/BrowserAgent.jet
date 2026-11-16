@@ -1,0 +1,60 @@
+// Agent-facing browser automation cookbook.
+// One program in place of a Node and Playwright script: pin a client profile,
+// connect to the BiDi endpoint the host supplies (never a hard-coded secret),
+// open an isolated context, act through semantic locators, reach for CDP only
+// when the abilities offer it, and close everything so the redacted receipt
+// says the session cleaned up. A host browser is provisioned with
+// `jetpack browser lock` (BrowserLockedProvision.jet).
+//
+// Run against a WebDriver BiDi endpoint the host supplies:
+//   jet run Examples/Network/Browser/BrowserAgent.jet -- ws://127.0.0.1:9222/session
+// The golden runs it against tests/fixtures/BrowserBidiMock.jet, which answers
+// from BrowserAgent.bidi.json.
+package: {
+    name: "browser_agent"
+    authority: { allow: [Env, Net, Time] }
+}
+
+use browser: core.browser
+
+#CLI
+Endpoint: struct {
+    #Doc("the WebDriver BiDi session URL") url: String
+}
+
+// A profile pins the client's command contract; an unknown one is rejected.
+profile_verdict: fn(name: String) -> String {
+    _profile: browser.profile(name) ?? return "rejected"
+    "accepted"
+}
+
+run: fn(args: Endpoint) {
+    loop name in ["bidi-2024.11", "bidi-2025.5", "rolling"] {
+        print("profile {name}: {profile_verdict(name)}")
+    }
+    profile: browser.profile("bidi-2025.5")
+    timeout: browser.timeout(500)
+    session: browser.connect_profile(args.url, profile, timeout)
+    abilities: session.abilities()
+    print("abilities: BiDi {abilities.bidi()}, CDP {abilities.cdp()}, profile {abilities.profile()}")
+
+    context: session.context()
+    page: context.page()
+    page.goto("https://example.test/agent")
+    save: page.get_by_role("button", "Save")
+    save.wait(timeout)
+    save.click()
+    print("clicked {save.resolve()}")
+    page.set_cookie("session", "agent-token", "example.test")
+
+    if abilities.cdp() {
+        cdp: session.protocol("cdp")
+        print("CDP Page.enable: {cdp.send("Page.enable", "{{}}")}")
+    }
+
+    page.close()
+    context.close()
+    session.close()
+    receipt: session.receipt()
+    print("receipt cleaned: {receipt.cleaned()}, redacted: {receipt.redacted()}, isolated: {receipt.isolated()}")
+}

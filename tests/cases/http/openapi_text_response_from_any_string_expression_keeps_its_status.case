@@ -1,0 +1,11 @@
+# `server.response(status, body)` takes its body as String, so a route whose
+# text body is a field read or a method call still lists its status in
+# `web.openapi(app)`; before, the response was dropped and the document failed
+# with "checked OpenAPI route contract has no responses".
+fixture: openapi_text_response_from_any_string_expression_keeps_its_status.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run openapi_text_body.jet
+exit: 0
+stdout: = "true\ntrue\n"

@@ -1,0 +1,36 @@
+# HAND-PORT tests/codemod.rs:176-279 batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly
+# PENDING-GRAMMAR: approved batch-two/four forms.
+fixture: batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly.fixture
+env: NO_COLOR=1
+# Exact check_stderr transform from tests/codemod.rs:22-38 (lead-approved .cut).
+step: jet check {work}/tests/ui/report_type.jet
+exit: nonzero
+capture: before = text stderr.cut("\n1 problem found\n")
+write: tests/ui/report_type.stderr before.template
+copy: tests/ui/report_type.stderr before.stderr
+copy: after.jet tests/ui/report_type.jet
+step: jet check {work}/tests/ui/report_type.jet
+exit: nonzero
+capture: after = text stderr.cut("\n1 problem found\n")
+write: migrations/report_type.after.stderr after.template
+copy: before.jet tests/ui/report_type.jet
+step: jet inspect codemod migrations/batch.codemod.json --dry-run
+exit: 0
+stdout: ~ "parse-needs-base: 2 matches" # original predicate
+file: Examples/report.jet = batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly.clean-before.expected
+file: tests/ui/report_type.stderr == before.stderr
+file: .jet/codemods/ReportV2.log.json absent
+step: jet inspect codemod apply migrations/batch.codemod.json --yes
+exit: 0
+file: Examples/report.jet = batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly.clean-after.expected
+file: tests/ui/report_type.jet = batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly.fixture-after.expected
+file: tests/ui/report_type.stderr == migrations/report_type.after.stderr
+file: .jet/codemods/ReportV2.log.json ~ "\"kind\":\"rename\"" # original predicate
+file: .jet/codemods/ReportV2.log.json ~ "\"kind\":\"ast_rewrite\"" # original predicate
+file: .jet/codemods/ReportV2.log.json ~ "\"rule_id\":\"rename-report\"" # original predicate
+step: jet inspect codemod undo .jet/codemods/ReportV2.log.json
+exit: 0
+file: Examples/report.jet = batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly.clean-before.expected
+file: tests/ui/report_type.jet = batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly.fixture-before.expected
+file: tests/ui/report_type.stderr == before.stderr
+

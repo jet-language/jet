@@ -1,0 +1,17 @@
+# tests/tir_modules_and_enums.rs::enum_group_value_and_bad_child_errors_do_not_turn_leaves_into_constructors at tests/tir_modules_and_enums.rs:1458; hand-port
+fixture: enum_group_value_and_bad_child_errors_do_not_turn_leaves_into_constructors.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check c1/main.jet --json
+exit: 1 # tests/tir_modules_and_enums.rs:1472 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/tir_modules_and_enums.rs:1472 the errors are exactly E0332
+json: stdout doc $.reports[?code="E0332"] #= 1 # tests/tir_modules_and_enums.rs:1472 reports E0332
+step: jet check c2/main.jet --json
+exit: 1 # tests/tir_modules_and_enums.rs:1472 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/tir_modules_and_enums.rs:1472 the errors are exactly E0304
+json: stdout doc $.reports[?code="E0304"] #= 1 # tests/tir_modules_and_enums.rs:1472 reports E0304
+step: jet check c3/main.jet --json
+exit: 1 # tests/tir_modules_and_enums.rs:1472 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/tir_modules_and_enums.rs:1472 the errors are exactly E0102
+json: stdout doc $.reports[?code="E0102"] #= 1 # tests/tir_modules_and_enums.rs:1472 reports E0102

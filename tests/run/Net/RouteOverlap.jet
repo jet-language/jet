@@ -1,0 +1,97 @@
+// Overlapping routes pick one handler however they are registered: a router
+// answering in process, an App's handler routes and an App's marked methods
+// share one route table's matching. A static segment beats a parameter at
+// the first place they differ, a path parameter that doesn't parse as its
+// declared type is 400, and a method the address doesn't serve is 405 with
+// its Allow list. HEAD runs the GET handler: in process the answer is that
+// handler's response, and a served App sends its status and fields without
+// the body. Each App serves one connection at a time so golden output order
+// stays fixed.
+package: {
+    name: "route_overlap"
+    authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
+}
+
+use {
+    http: core.http
+    client: core.http.client
+    server: core.http.server
+    web: core.web
+    net: core.net
+}
+
+REQUESTS: [String]{
+    "GET /files/latest/raw",
+    "GET /files/notes/raw",
+    "GET /files/latest/csv",
+    "GET /jokes/top",
+    "GET /jokes/7",
+    "HEAD /jokes/7",
+    "GET /jokes/seven",
+    "POST /jokes/7",
+}
+
+Marked: struct {
+    #Server.Get("/files/:name/raw") raw_file: fn(self, name: String) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "raw name={name}"))
+    }
+
+    #Server.Get("/files/latest/:kind") latest: fn(self, kind: String) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "latest kind={kind}"))
+    }
+
+    #Server.Get("/jokes/:id") joke: fn(self, id: Int) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "joke {id}"))
+    }
+
+    #Server.Get("/jokes/top") top: fn(self) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "top jokes"))
+    }
+}
+
+answer_line: fn(surface: String, request: String, response: HTTPResponse) -> String Never! {
+    body: response.body().text(1024) ?? "unreadable body"
+    allow: response.header("Allow") ?? ""
+    shown: if allow == "" -> body else -> "{body} (Allow: {allow})"
+    "{surface}: {request} -> {response.status()} {shown}"
+}
+
+routed_by_router: fn() {
+    router: http.router()
+    router.get("/files/:name/raw", fn(name: String) { Ok(server.response(200, "raw name={name}")) })
+    router.get("/files/latest/:kind", fn(kind: String) { Ok(server.response(200, "latest kind={kind}")) })
+    router.get("/jokes/:id", fn(id: Int) { Ok(server.response(200, "joke {id}")) })
+    router.get("/jokes/top", fn() { Ok(server.response(200, "top jokes")) })
+    loop request in REQUESTS {
+        response: http.dispatch(router, http.parse("{request} HTTP/1.1\nHost: localhost")) ?? panic("dispatch {request}")
+        print(answer_line("router", request, response))
+    }
+}
+
+served: fn(surface: String, app: App) (HTTPError | NetError | TaskFailure)! {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+    addr: listener.local_addr() ?? panic("address failed")
+    count: REQUESTS.len()
+    t: task {
+        loop _ in 0..<count { app.serve_once(listener) ?? panic("serve failed") }
+    }
+    loop request in REQUESTS {
+        parts: request.split(" ").to_list()
+        response: client.request(parts[0], "http://{addr}{parts[1]}").send() ?? panic("{request} failed")
+        print(answer_line(surface, request, response))
+    }
+    t.join() ?? panic("server failed")
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    routed_by_router()
+    handlers: web.app()
+    handlers.get("/files/:name/raw", fn(name: String) { Ok(server.response(200, "raw name={name}")) })
+    handlers.get("/files/latest/:kind", fn(kind: String) { Ok(server.response(200, "latest kind={kind}")) })
+    handlers.get("/jokes/:id", fn(id: Int) { Ok(server.response(200, "joke {id}")) })
+    handlers.get("/jokes/top", fn() { Ok(server.response(200, "top jokes")) })
+    served("app", handlers)
+    marked: web.app()
+    marked.mount(Marked{})
+    served("marked", marked)
+}

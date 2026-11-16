@@ -1,0 +1,12 @@
+# Port of tests/pkg.rs:5667-5708; full ordered workflow and original bytes preserved.
+# PENDING-GRAMMAR(batch-four): mkdir.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet new myapp
+exit: 0
+copy: {root}/tests/cases/pkg/fixtures/dependency/mylib/package.jet mylib/package.jet
+copy: {root}/tests/cases/pkg/fixtures/dependency/mylib/mylib.jet mylib/mylib.jet
+step: jet add mylib --path ../mylib
+cwd: myapp
+exit: 0
+file: myapp/package.jet ~ "mylib" # original predicate

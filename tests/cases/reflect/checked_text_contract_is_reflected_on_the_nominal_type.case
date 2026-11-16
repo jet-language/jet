@@ -1,0 +1,12 @@
+# HAND-PORT tests/reflect.rs:91-161 checked_text_contract_is_reflected_on_the_nominal_type
+# PENDING-KIT; PENDING-GRAMMAR; public reflection witness, no runtime proof.
+# ORACLE-LITERAL: every expected field/bool/count from original predicates.
+# Original source copied verbatim in original/source.jet and as witness prefix; exact CheckedText base/implements/first contract/Error association/check+encode_hole predicates. No alternate contract can satisfy first-match assertions.
+fixture: checked_text_contract_is_reflected_on_the_nominal_type.fixture
+env: NO_COLOR=1
+step: jet check --json original/source.jet
+exit: 0
+json: stdout doc $.reports #= 0
+step: jet run main.jet
+exit: 0
+stdout: = checked_text_contract_is_reflected_on_the_nominal_type.stdout.expected

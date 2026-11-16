@@ -1,0 +1,33 @@
+// Package `tree` holds three deep checks: `Tree.check`, `Forest.check` (the
+// same name on another type) and `balance.rebalance` in the balance module.
+// `--bad` names the one whose input is wrong, so a run fails only when that
+// one is selected.
+balance: module
+
+#CLI
+Args: struct {
+    #Doc("the check whose input is wrong") bad: String{""}
+}
+
+Tree: struct {
+    size: Int
+
+    check: fn(self) {
+        #On(.Deep) assert(self.size == 1, "tree check failed")
+    }
+}
+
+Forest: struct {
+    count: Int
+
+    check: fn(self) {
+        #On(.Deep) assert(self.count == 1, "forest check failed")
+    }
+}
+
+run: fn(args: Args) {
+    Tree{size: if args.bad == "tree" -> 2 else -> 1}.check()
+    Forest{count: if args.bad == "forest" -> 2 else -> 1}.check()
+    balance.rebalance(if args.bad == "balance" -> 2 else -> 1)
+    print("done")
+}

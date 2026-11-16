@@ -1,0 +1,15 @@
+# `WORD`'s closure reaches the Core Regex functions, which read Regex's own
+# constants and the Prelude's. The run checks Core's and the Prelude's items
+# before the program's (JetDriver Pipeline.jet jet_driver_comptime_core_first),
+# so those constants have landed when `WORD` is checked. Its check and closure
+# run once, in the first pass. Checked in declaration order, the closure would
+# wait on them, and `WORD` would be checked again in a second pass.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "WORD: Regex{\"[a-z]+\"}\n\nrun: fn() {\n    print(WORD.find_all(\"one two\").len())\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "2\n"
+stderr: count "> comptime.check WORD (main.jet)" = 1 # checked once
+stderr: count "> comptime.closure WORD (main.jet)" = 1 # one closure, no second pass
+stderr: ~ "# comptime.programs_built = 1\n" # WORD's one program

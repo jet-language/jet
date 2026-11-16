@@ -1,0 +1,38 @@
+# `jet check` at a workspace root checks code: it never asks which runnable
+# member to pick. The members no other member depends on check, and their
+# compiles load every other member: a failing member's errors, even in a
+# file no other member imports, are reported once, inline before its E0626.
+# `jet run` still needs `-p`.
+fixture: workspace_check_covers_every_member_without_picking_an_entry.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check
+cwd: {work}/shop
+exit: 0
+stdout+stderr: !~ "ambiguous" # a check never asks which member to run
+stdout+stderr: !~ "Error" # every member checks clean
+step: jet check shop
+cwd: {work}
+exit: 0
+stdout+stderr: !~ "ambiguous" # a workspace directory argument checks the same way
+stdout+stderr: !~ "Error" # every member checks clean
+step: jet run
+cwd: {work}/shop
+exit: nonzero
+stderr: ~ "ambiguous" # running still needs one entry
+stderr: ~ "-p" # the fix names the member flag
+copy: broken/Spare.jet shop/base/Spare.jet
+copy: broken/run.jet shop/tool/run.jet
+step: jet check .
+cwd: {work}/shop
+exit: 1
+stdout+stderr: ~ "Dependency package `base` has errors" # app's check finds its dependency failing
+stdout+stderr: ~ "../base/Spare.jet:3:5" # base's error in the file no member imports is reported inline, at base's path
+stdout+stderr: count "Spare.jet:3:5" = 1 # once: base is not checked again on its own
+stdout+stderr: ~ "missing_tool_name" # tool, another root, is checked too
+stdout+stderr: !~ "ambiguous" # a check never asks which member to run
+step: jet check -p tool
+cwd: {work}/shop
+exit: 1
+stdout+stderr: ~ "missing_tool_name" # `-p` checks the named member
+stdout+stderr: !~ "Spare.jet" # and only that member

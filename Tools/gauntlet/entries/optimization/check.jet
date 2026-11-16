@@ -1,0 +1,33 @@
+// What an optimization case printed (PortBars.jet and the gauntlet harness
+// run this in the case directory with the file holding the program's
+// output): the record with each `harness_sha256` written as `<harness>`,
+// since Tools/gauntlet/harness/run.mjs changes as the gauntlet does. When the
+// program wrote its record to a file and printed `output<TAB>PATH`, that
+// line is shown with the file's name alone, then the record the file holds.
+use {
+    files: core.files
+    process: core.process
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    record := printed.copy()
+    if printed.starts_with("output\t") {
+        path: printed.trim().removeprefix("output\t")
+        print("output\t{files.basename(path)}")
+        record = files.read(path) ?? process.fail(1, "{err}")
+    }
+    loop line in record.lines() {
+        field: line.partition("\"harness_sha256\": \"")
+        if field.sep != "" {
+            print("{field.head}\"harness_sha256\": \"<harness>\"{if field.tail.ends_with(",") -> "," else -> ""}")
+            next
+        }
+        print(line)
+    }
+}

@@ -1,0 +1,30 @@
+// The code module's own `MustUse` is the marker inside that module only; the
+// file's other functions still reach the Prelude `#MustUse`.
+counters: module {
+    MustUse: struct {
+        impl Marker {
+            sites: [.Function]
+        }
+    }
+
+    #MustUse inner: fn() -> Int {
+        print("inner")
+        1
+    }
+
+    poke: fn() {
+        inner()
+        print("poked")
+    }
+}
+
+#MustUse outer: fn() -> Int {
+    print("outer")
+    2
+}
+
+run: fn() {
+    counters.poke()
+    outer()
+    print("done")
+}

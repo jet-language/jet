@@ -1,0 +1,21 @@
+# PORT tests/review.rs::review_receipts_bind_to_sides_and_do_not_infer_proof; helpers review.rs17-176 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
+fixture: review_receipts_bind_to_sides_and_do_not_infer_proof.fixture
+step: jet review {work}/base/run.jet {work}/head/run.jet --base-receipt {work}/base.jetproof --receipt {work}/head.jetproof --json
+exit: 0
+stdout: ~ "\"base_recorded\":true" # Original contains predicate.
+stdout: ~ "\"head_recorded\":true" # Original contains predicate.
+stdout: ~ "\"gained\":1" # Original contains predicate.
+stdout: ~ "\"lost\":1" # Original contains predicate.
+stdout: ~ "\"schema\":\"jet.review/v2\"" # Original contains predicate.
+stdout: ~ "\"snapshots\"" # Original contains predicate.
+stdout: ~ "\"inputs\":[{\"path\":" # Original contains predicate.
+stdout: ~ "\"entry\":\"" # Original contains predicate.
+stdout: ~ "\"digest\":\"" # Original contains predicate.
+stdout: ~ "\"claim_key\":null" # Original contains predicate.
+stdout: ~ "\"proof_receipt\":{\"path\":" # Original contains predicate.
+stdout: ~any "\"closure\":\"entry_only\"" "\"closure\":\"complete\"" # Original OR predicate.
+step: jet review {work}/base/run.jet {work}/head/run.jet --base-receipt {work}/external.jetproof --receipt {work}/external.jetproof --json
+exit: 0
+stdout: ~ "\"unproved\"" # Original contains predicate.
+stdout: ~ "not a checked universal contract" # Original contains predicate.

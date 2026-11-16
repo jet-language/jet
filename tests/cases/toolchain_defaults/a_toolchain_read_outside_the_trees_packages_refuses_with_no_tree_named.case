@@ -1,0 +1,13 @@
+# Docs/spec/reference/environment.md: with no toolchain tree named, a `toolchain:` read
+# resolves against the tree that holds the reading file, and only from that tree's own
+# packages. The work directory holds `Core/` and `Compiler/Prelude/`, so it is a tree, but the
+# program is in none of its packages, so the read refuses.
+env: NO_COLOR=1
+requires: os:unix
+fixture: toolchain-read-outside.fixture
+mkdir: Core
+mkdir: Compiler/Prelude
+step: jet check app/main.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 1
+stdout+stderr: ~ "E0945" # the refusal's code; the rest of the report names the work directory

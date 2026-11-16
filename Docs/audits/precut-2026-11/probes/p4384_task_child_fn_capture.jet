@@ -1,0 +1,17 @@
+// cards: 4384
+// claim: a task child may capture and call a function value from the caller
+// mode: run
+package {
+    name: "p4384_task_child_fn_capture"
+    authority: { allow: [IO] }
+}
+
+fn double(n: Int) -> Int { n * 2 }
+
+fn run() {
+    f :: double
+    task.group group {
+        handle :: task f(21)
+        print(^handle.join() ?? 0)
+    }
+}

@@ -1,0 +1,28 @@
+# tests/debug.rs::canvas_graph_source_id_stays_project_relative_for_relative_entries
+# Exact production WebHost Canvas requests/subclaims, original source unchanged.
+# PENDING-SAME-HEAD, runtime UNRUN. Core.net client mirrors the existing raw HTTP fixture pattern.
+fixture: canvas_graph_source_id_stays_project_relative_for_relative_entries.fixture
+env: NO_COLOR=1
+step: jet build client/run.jet
+exit: 0
+copy: client/.jet/build/run canvas-client
+spawn canvas: jet dev hello.jet --canvas --canvas-port 0
+env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
+stdout: file canvas.stdout
+stderr: file canvas.stderr
+await: file canvas.stderr ~ "Canvas: http" timeout 60s every 50ms # transport readiness bridge: Source/CmdDevTools.rs:777-783 emits the Canvas URL on configured browser launch failure; retain the ported 60s/50ms gate
+capture: url = text file.after_first("Canvas: ").line(0) canvas.stderr
+capture: revision = sha256 file hello.jet
+capture: original_source = text file hello.jet
+write: request.json canvas_graph_source_id_stays_project_relative_for_relative_entries.graph.json
+step graph: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=GET
+env: S1_PATH=/?jet_panel_graph=1
+exit: 0
+stdout: ^= "HTTP/1.1 200" # original success vs expect_err projection
+stdout: ~ "\"source_id\":\"hello.jet\"" # original contains predicate
+file: hello.jet = "{cap:original_source}"
+signal canvas: INT
+wait: canvas
+exit: any # original only asserts session/store/source predicates, not dev server shutdown status

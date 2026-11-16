@@ -1,0 +1,12 @@
+# #3078 c10 (D-VERDICT-3086-1=A): settings that do not decode stop the app
+# before admission. APP_DB_URL is missing, APP_POOL_SIZE is not an Int and
+# APP_API_KEY is a secret-named value that does not decode, so the app prints
+# every failure, hides the key's value, exits 78 and never prints the ready
+# line, because no socket was bound.
+step: jet run AppConfigReadiness.jet
+env: NO_COLOR=1
+env: APP_POOL_SIZE=lots
+env: APP_API_KEY=sk-live-123
+exit: 78
+stdout: empty
+stderr: = AppConfigReadiness.err.out

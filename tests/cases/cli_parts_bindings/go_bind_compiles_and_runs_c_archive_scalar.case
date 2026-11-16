@@ -1,0 +1,11 @@
+# Port of tests/cli_parts/bindings.rs:553-609. Sources copied verbatim.
+# ORACLE-LITERAL tests/cli_parts/bindings.rs:608 (stdout bytes 42\n).
+# PENDING-GRAMMAR: exact file-kind assertions.
+fixture: fixtures/go_scalar
+step: jet inspect bind go {work}/scalar.go --pkg scalar
+exit: 0
+file: .jet/bindings/go/scalar.jet is-file
+file: .jet/bindings/go/libjet_go_scalar.a is-file
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = forty-two.out

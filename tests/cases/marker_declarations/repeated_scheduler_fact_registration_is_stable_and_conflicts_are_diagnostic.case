@@ -1,0 +1,27 @@
+# tests/marker_declarations.rs::repeated_scheduler_fact_registration_is_stable_and_conflicts_are_diagnostic at tests/marker_declarations.rs:678; hand-port
+# Claim: distinct Scheduler and Target.Scheduler facts compile together (tests/marker_declarations.rs:813-818)
+# Claim: an exact duplicate TargetScheduler fact is rejected with E0105 (tests/marker_declarations.rs:849-861)
+# Claim: a fact with an aliased duplicate Target.Scheduler identity is rejected with E0105 (tests/marker_declarations.rs:868-871)
+# Claim: a conflicting TargetScheduler value is rejected with E0105 (tests/marker_declarations.rs:880-892)
+# Not ported: A01_SOURCE no-panic loop and Registry row/law checks (tests/marker_declarations.rs:774-806): Rust catch_unwind and Registry API, no CLI equivalent
+# Not ported: 10-attempt determinism loops (tests/marker_declarations.rs:848-861, 879-892): the CLI is a single process; repetition is not Jet-observable
+# Not ported: diagnostic what/why/fix/span equality across attempts (tests/marker_declarations.rs:840-856): only the E0105 code is checked from CLI stderr
+fixture: repeated_scheduler_fact_registration_is_stable_and_conflicts_are_diagnostic.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: distinct
+exit: 0 # tests/marker_declarations.rs:813-818 distinct identities compile
+step: jet check main.jet
+cwd: duplicate
+exit: 1 # tests/marker_declarations.rs:849-861 exact duplicate rejected with E0105
+stderr: ~ "E0105" # tests/marker_declarations.rs:849-861 exact duplicate rejected with E0105
+step: jet check main.jet
+cwd: aliased
+exit: 1 # tests/marker_declarations.rs:868-871 aliased duplicate rejected with E0105
+stderr: ~ "E0105" # tests/marker_declarations.rs:868-871 aliased duplicate rejected with E0105
+step: jet check main.jet
+cwd: conflict
+exit: 1 # tests/marker_declarations.rs:880-892 conflicting value rejected with E0105
+stderr: ~ "E0105" # tests/marker_declarations.rs:880-892 conflicting value rejected with E0105

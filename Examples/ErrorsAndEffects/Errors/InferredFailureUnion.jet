@@ -1,0 +1,57 @@
+// No function here writes a failure
+// contract. `find_person` and `parse_age` create their own error cases,
+// which form `FindPersonError` and `ParseAgeError`. `age_of` passes both up,
+// so its failures are the union `FindPersonError | ParseAgeError`, and
+// `describe` matches every case by its flat name. The compiler checks that
+// no case is missing.
+
+parse_age: fn(raw: String) -> Int {
+    if raw == "" -> return Err(.BadNumber(raw.copy()))
+    42
+}
+
+find_person: fn(book: [String:String], name: String) -> String {
+    if book.has_key(name) -> return book[name]
+    Err(.NotFound(name.copy()))
+}
+
+age_of: fn(book: [String:String], name: String) -> Int {
+    raw: find_person(book, name)
+    parse_age(raw)
+}
+
+describe: fn(book: [String:String], name: String) -> String {
+    if age_of(book, name) == {
+        .Ok(n) -> "age {n}"
+        .Err(.NotFound(who)) -> "no such person: {who}"
+        .Err(.BadNumber(_)) -> "bad age on file"
+    }
+}
+
+// A function may also fail with a plain message. `parse_level` creates its
+// own `BadNumber` case and fails with a message, so its failures are the open
+// union `Err | ParseLevelError`. The message arrives as the general `Err`
+// member.
+parse_level: fn(raw: String) -> Int {
+    if raw == "" -> return Err(.BadNumber(raw.copy()))
+    if raw == "x" -> return Err("odd input")
+    42
+}
+
+describe_level: fn(raw: String) -> String {
+    if parse_level(raw) == {
+        .Ok(n) -> "level {n}"
+        .Err(.BadNumber(_)) -> "bad number"
+        .Err(.Err(error)) -> "other: {error.message}"
+    }
+}
+
+run: fn() {
+    book: ["ada": "36", "bob": ""]
+    print(describe(book, "ada"))
+    print(describe(book, "bob"))
+    print(describe(book, "zed"))
+    print(describe_level(""))
+    print(describe_level("x"))
+    print(describe_level("7"))
+}

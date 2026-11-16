@@ -1,0 +1,15 @@
+use {
+    web: core.web
+    http: core.http
+    server: core.http.server
+    env: core.sys
+}
+
+handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { return Ok(server.response(200, "ok")) }
+
+run: fn() {
+    routes: web.app()
+    dynamic: env.get("JET_HTTP_TEST_MARKER") ?? "*"
+    pattern: "/assets/{dynamic}"
+    _: routes.get(pattern, handle)
+}

@@ -1,0 +1,12 @@
+// A planted bug: the raw read lands one Int past the only allocation.
+use core.mem
+
+run: fn() {
+    arena := mem.Arena.new()
+    #Unsafe("reads the one Int the arena allocated") {
+        cell: arena.alloc(7)
+        address: mem.address_of(cell.*)
+        past: mem.Ptr<Int>.from_addr(address + 8)
+        print(past.*)
+    }
+}

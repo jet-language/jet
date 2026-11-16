@@ -1,0 +1,22 @@
+# An `Err(...)` an arm's last line hands back (the tail of a valued `if x == { … }`
+# table) is the failure's origin, as `return Err(...)` is: the report names that
+# arm, not the origin of an earlier failure the program handled (Rust lowered
+# each tail arm as its own return, tir_to_mir_expr.rs TExprKind::Err).
+fixture: arm_tail_err_starts_its_failure_on_all_tiers.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 1
+stdout: = "handled:no setting `host`\n"
+stderr: = arm_tail_err_starts_its_failure_on_all_tiers.expected
+step: jet build main.jet
+exit: 0
+step: {work}/.jet/build/main
+exit: 1
+stdout: = "handled:no setting `host`\n"
+stderr: = arm_tail_err_starts_its_failure_on_all_tiers.expected
+step: jet build --release main.jet
+exit: 0
+step: {work}/.jet/build/main
+exit: 1
+stdout: = "handled:no setting `host`\n"
+stderr: = arm_tail_err_starts_its_failure_on_all_tiers.expected

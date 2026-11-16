@@ -1,0 +1,17 @@
+// Package effects: `Audit` is a kind of `Log`, and `Trail` a kind of
+// `Audit`, so a row naming either may do what `Log` does.
+Audit: struct {
+    impl Effect {
+        parent: Log
+    }
+}
+
+Trail: struct {
+    impl Effect {
+        parent: Audit
+    }
+}
+
+record: fn() -[Audit]> {}
+
+trace: fn() -[Trail]> {}

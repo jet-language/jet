@@ -1,0 +1,11 @@
+// Deliberately probes missing timestamp and recovery methods on Stream.
+source: fn() -> Stream<Int> {
+    yield 1
+}
+
+run: fn() {
+    timed: source().with_event_time(fn(value: Int) { value })
+    advanced: timed.watermark(5)
+    recovered: advanced.checkpoint("state")
+    print(recovered)
+}

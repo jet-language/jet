@@ -1,0 +1,23 @@
+# HAND-PORT tests/compute_extended.rs:243-258 safe_kernel_boundary_and_f32_profile_are_explicit
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# Both original included sources and required substring lists; exact default-vs-AOT bytes.
+fixture: safe_kernel_boundary_and_f32_profile_are_explicit.fixture
+env: NO_COLOR=1
+step: jet build --profile=debug compute_kernel/main.jet
+exit: 0
+step compute_kernel/aot: built
+exit: 0
+stdout: ~ "kernel:42" # original predicate
+stdout: ~ "bounds:true" # original predicate
+step compute_kernel/default: jet run compute_kernel/main.jet
+exit: 0
+stdout: == compute_kernel/aot
+step: jet build --profile=debug compute_simd/main.jet
+exit: 0
+step compute_simd/aot: built
+exit: 0
+stdout: ~ "profile=F32Strict+Reproducible" # original predicate
+stdout: ~ "tile:[19.0, 22.0, 43.0, 50.0]" # original predicate
+step compute_simd/default: jet run compute_simd/main.jet
+exit: 0
+stdout: == compute_simd/aot

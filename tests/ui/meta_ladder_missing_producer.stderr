@@ -1,0 +1,11 @@
+Error [jet.MissingProducer]: Nothing in this build makes `.jet/generated/meta_ladder_missing_producer/count.jet`, which the target `app` uses
+  --> tests/ui/meta_ladder_missing_producer.jet:6:12
+    |
+  6 |     app: b.add_executable("app", ["meta_ladder_missing_producer.jet", ".jet/generated/meta_ladder_missing_producer/count.jet"], [])
+    |            ^^^^^^^^^^^^^^
+ Why: A file under `.jet/generated/` is what this build's producers make, so one that none of them makes is stale or was never made, and nothing checks it
+ Fix: Restore the `b.generate`, `meta.add` or step output that made `.jet/generated/meta_ladder_missing_producer/count.jet`, or remove it from the target `app`
+More: jet-lang.dev/e/E3515
+
+1 problem found
+run `jet explain E3515` to learn more

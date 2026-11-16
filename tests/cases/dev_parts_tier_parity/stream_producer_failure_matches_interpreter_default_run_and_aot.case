@@ -1,0 +1,21 @@
+# tests/dev_parts/tier_parity.rs::stream_producer_failure_matches_interpreter_default_run_and_aot at tests/dev_parts/tier_parity.rs:174; hand-port (the fixture is named in the case work instead of a pid-named temp file)
+fixture: stream_producer_failure_matches_interpreter_default_run_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check jet_stream_failure.jet
+exit: 0
+step jit: jet run jet_stream_failure.jet
+stdin: null
+limit: time=30
+exit: 70
+stdout: = stream_producer_failure_matches_interpreter_default_run_and_aot.1.out
+stderr: ~ "panic: producer failure" # original predicate: stderr.contains
+step: jet build jet_stream_failure.jet
+exit: 0
+step aot: built
+limit: time=30
+exit: == jit
+stdout: == jit
+stderr: == jit

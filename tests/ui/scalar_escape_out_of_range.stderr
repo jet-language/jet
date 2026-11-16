@@ -1,0 +1,17 @@
+Error [jet.StrayCharacter]: `\u{D800}` is a surrogate, not a Unicode scalar
+  --> tests/ui/scalar_escape_out_of_range.jet:2:13
+    |
+  2 |     print("a\u{D800}b\u{110000}c")
+    |             ^^^^^^^^
+ Why: `\u{H}` names one Unicode scalar by one to six hexadecimal digits, up to 10FFFF and not a surrogate (D800-DFFF)
+ Fix: Write the scalar's hexadecimal value in braces, for example `\u{e9}`
+More: jet-lang.dev/e/E0001
+
+Error [jet.StrayCharacter]: `\u{110000}` is past 10FFFF, the last Unicode scalar
+  --> tests/ui/scalar_escape_out_of_range.jet:2:22
+    |
+  2 |     print("a\u{D800}b\u{110000}c")
+    |                      ^^^^^^^^^^
+ Why: `\u{H}` names one Unicode scalar by one to six hexadecimal digits, up to 10FFFF and not a surrogate (D800-DFFF)
+ Fix: Write the scalar's hexadecimal value in braces, for example `\u{e9}`
+More: jet-lang.dev/e/E0001

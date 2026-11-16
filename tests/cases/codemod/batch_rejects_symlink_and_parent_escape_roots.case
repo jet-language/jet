@@ -1,0 +1,16 @@
+# HAND-PORT tests/codemod.rs:420-439 batch_rejects_symlink_and_parent_escape_roots
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: batch_rejects_symlink_and_parent_escape_roots.fixture
+env: NO_COLOR=1
+requires: os:unix
+mkdir: project/Examples
+symlink: {work}/outside.jet project/Examples/link.jet
+copy: bad0.json project/bad.codemod.json
+step: jet inspect codemod bad.codemod.json --dry-run
+cwd: project
+exit: nonzero
+copy: bad1.json project/bad.codemod.json
+step: jet inspect codemod bad.codemod.json --dry-run
+cwd: project
+exit: nonzero
+

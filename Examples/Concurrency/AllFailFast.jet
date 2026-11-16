@@ -1,0 +1,38 @@
+// `task.all` fails fast: when one task panics, its siblings are cancelled and
+// `run` panics with that reason, so the process exits non-zero (AllFailFast.err.out).
+package: {
+    name: "all_failfast"
+    authority: { allow: [IO, Mem.Alloc, Time] }
+}
+
+use time: core.time
+
+slow_one: fn() -> Int {
+    time.sleep(200ms)
+    return 1
+}
+
+// `boom` panics outright: the `.Panicked(reason)` arm below gets a reason
+// naming `boom` and its message. `slow_one` is still sleeping when `boom`
+// fails; fail-fast does not wait for its 1. The `.Ok(_)`, `.DeadlineBlown`
+// and `.Cancelled` arms are routes this run does not take; the result table
+// must still cover them.
+boom: fn() -> Int {
+    panic("task failed")
+    return 0
+}
+
+run: fn() {
+    task.group g {
+        if task.all {slow_one(), boom()} == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { panic(reason) }
+                    .DeadlineBlown -> { panic("deadline") }
+                    .Cancelled -> { panic("cancelled") }
+                }
+            }
+            .Ok(_) -> { print("unexpected success") }
+        }
+    }
+}

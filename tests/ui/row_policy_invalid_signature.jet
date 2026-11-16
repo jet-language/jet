@@ -1,0 +1,29 @@
+// A row policy takes the row its table holds. This one takes a project, so
+// the members table can't ask it about a member.
+use db: core.db
+
+#Codable
+Project: struct {
+    id: Int
+    created_by: String
+}
+
+#Codable
+Member: struct {
+    project: Int
+    account: String
+}
+
+project_policy: fn(row: Project, op: db.Op, who: db.Who, _store: db.Store) -[DB.Read]> Bool db.DBError! {
+    if who == {
+        .Account(account) -> Ok(op == db.Op.Read || row.created_by == account)
+        .System -> Ok(true)
+        .Anonymous -> Ok(false)
+    }
+}
+
+run: fn() {
+    store: db.open_memory()
+    members: store.table("members", key: fn(row: Member) { row.account })
+    _: members.guard(project_policy)
+}

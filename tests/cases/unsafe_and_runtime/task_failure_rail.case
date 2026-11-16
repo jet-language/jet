@@ -1,0 +1,15 @@
+# Port of tests/tir_unsafe_and_runtime.rs::task_failure_rail (997-1090); sources copied verbatim from original Rust literals/templates.
+# PENDING-SAME-HEAD; no runtime or snapshot receipt claimed.
+# Original assert_tiers_agree_with_application_policy preserves stdout/exit and byte-equal stderr across all3, without replacing stderr equality with empty.
+fixture: fixtures/task_failure_rail
+step default: jet run main.jet
+exit: 0
+stdout: = "panic:boom (spawn site 0): boom\npanic:boom (spawn site 1): boom\ndeadline\ncancelled\n"
+step: jet build main.jet --profile=debug
+step aot: built
+exit: == default
+stdout: == default
+stderr: == default
+exit: == default
+stdout: == default
+stderr: == default

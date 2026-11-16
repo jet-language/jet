@@ -1,0 +1,13 @@
+use logic
+
+total: fn(text: String) -> Int logic.AppError! {
+    n: logic.parse(text)
+    Ok(n + 1)
+}
+
+run: fn() {
+    print(total("abc") ?? -1)
+    each: fn(text: String) -> Int logic.AppError! { Ok(logic.parse(text) * 2) }
+    print(each("ab") ?? -1)
+    if total("") == .Err(e) -> print(e.display())
+}

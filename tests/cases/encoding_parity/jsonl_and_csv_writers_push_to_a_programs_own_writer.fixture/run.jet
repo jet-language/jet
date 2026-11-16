@@ -1,0 +1,68 @@
+// jsonl.writer and csv.writer take any Prelude `Writer`, not only a
+// FileWriter. `Tap` keeps what reaches it and prints it at each flush: a
+// flush writes the LF or CRLF the last record still holds first, so a
+// flushed sink ends on a whole record. `Full` fails every write, and its
+// IOError reaches the writer's EncodingError as the cause, keeping its kind
+// and OS code.
+use {
+    csv: core.encoding.csv
+    jsonl: core.encoding.jsonl
+}
+
+Tap: struct {
+    name: String
+    held: [U8]
+
+    impl Writer {
+        write_bytes: fn(&self, bytes: [U8]) IOError! {
+            loop byte in bytes -> self.held.push(byte)
+        }
+
+        flush: fn(&self) IOError! {
+            text: String.from_bytes(self.held) ?? "?"
+            print("{self.name} flush {text.replace("\r", "\\r").replace("\n", "\\n")}")
+            self.held.clear()
+        }
+    }
+}
+
+Full: struct {
+    device: String
+    flushes: Int
+
+    impl Writer {
+        write_bytes: fn(&self, bytes: [U8]) IOError! {
+            Err(IOError.Other(IOContext{operation: .Write, resource: Val(self.device.copy()), os_code: Val(28), cause: Val("no space left")}))
+        }
+
+        flush: fn(&self) IOError! { self.flushes += 1 }
+    }
+}
+
+run: fn() EncodingError! {
+    lines := Tap{name: "jsonl", held: [U8]{}}
+    log := jsonl.writer(lines) ?? return
+    log.write(Dyn.Text("alpha")) ?? return
+    log.flush() ?? return
+    log.write(Dyn.Int(2)) ?? return
+    log.write(Dyn.Null) ?? return
+    log.finish() ?? return
+    table := Tap{name: "csv", held: [U8]{}}
+    rows := csv.writer(table) ?? return
+    rows.write(["a", "b,c"]) ?? return
+    rows.flush() ?? return
+    rows.write(["=1", "d"]) ?? return
+    rows.finish() ?? return
+    disk := Full{device: "disk", flushes: 0}
+    broken := csv.writer(disk) ?? return
+    if broken.write(["x"]) == {
+        .Ok(_) -> { print("wrote to a full sink") }
+        .Err(error) -> {
+            print("io {error.kind == .IO}")
+            if error.cause() == {
+                .Val(cause) -> { print("cause {cause.kind} {cause.os_code ?? 0} {cause.message}") }
+                None -> print("no cause")
+            }
+        }
+    }
+}

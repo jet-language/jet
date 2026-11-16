@@ -1,0 +1,10 @@
+# Port of Compiler/JetBackend/Tests/test-native-test-contract.mjs `same-process`:
+# the package's Output.Check runs in the test batch's process after its tests,
+# so it reads the `#Persist` state both test bodies wrote.
+fixture: output_check_observes_the_joined_batch_state.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet test --serial --color=never case.jet
+exit: 0
+stdout: = "first: pass\nsecond: pass\n2 passed, 0 failed, 0 skipped\n"
+file: events.txt = "first\nsecond\ncheck\n"

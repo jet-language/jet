@@ -1,0 +1,16 @@
+# Port of tests/prove.rs:318-387; every original predicate, original fixture bytes.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: run_recorded_alias_time_receipt_replays_without_execution.fixture
+step: jet run main.jet --record=causal -- recorded-arg
+exit: 0
+capture: epoch stdout.filter(^= "recorded-") after "recorded-" # original ed77c235f tests/prove.rs:343-347 strips this prefix from the first matching line
+cap:epoch: is-i64 # original parse::<i64>().is_ok()
+stdout.filter(= "recorded-arg"): lines >= 1 # original lines().any equality
+file: .jet/replays/causal.jetproof-replay is-file
+write: debug.stdin debug-input.template
+step: jet debug main.jet --replay=causal
+stdin: debug.stdin
+exit: 0
+stdout: ~ "epoch = {cap:epoch} because act" # original predicate
+stdout: ~ "last change:" # original predicate
+stdout: !~ "recorded-{cap:epoch}" # original predicate: replay never re-executes program

@@ -1,0 +1,22 @@
+# tests/nbody_witness.rs::nbody_default_and_scalar_witnesses_have_identical_observable_output at tests/nbody_witness.rs:29; hand-port
+# standard.jet and scalar.jet moved here from tests/nbody_witness/ (only the deleted .rs used them). Each witness sits in
+# its own package directory: siblings of one directory form one package, and both declare `energy`.
+# Each witness prints the original's EXPECTED on the default run, the forced interpreter and the AOT build.
+fixture: nbody_default_and_scalar_witnesses_have_identical_observable_output.fixture
+env: NO_COLOR=1
+step: jet run standard/standard.jet
+exit: 0
+stdout: = "-0.169075164\n"
+step: jet build standard/standard.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "-0.169075164\n"
+step: jet run scalar/scalar.jet
+exit: 0
+stdout: = "-0.169075164\n"
+step: jet build scalar/scalar.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "-0.169075164\n"

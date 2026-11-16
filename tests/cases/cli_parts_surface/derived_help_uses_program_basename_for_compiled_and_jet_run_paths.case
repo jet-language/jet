@@ -1,0 +1,16 @@
+# Port of tests/cli_parts/surface.rs:394-450; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/typed
+step: jet build typed.jet
+env: NO_COLOR=1
+exit: 0
+step: built --help
+exit: 0
+capture: compiled = text stdout.line(0)
+step: jet run typed.jet -- --help
+env: NO_COLOR=1
+exit: 0
+capture: run = text stdout.line(0)
+write: names.txt typed-names.template
+file: names.txt = shape_cli_help_program_names.txt

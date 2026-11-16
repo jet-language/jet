@@ -1,0 +1,21 @@
+# tests/checked_text.rs::html_composition_matches_aot_jit_interpreter_and_web at tests/checked_text.rs:242; hand-port
+fixture: html_composition_matches_aot_jit_interpreter_and_web.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step run: jet run run.jet
+exit: 0
+stdout: = html_composition_matches_aot_jit_interpreter_and_web.1.out
+step build: jet build run.jet
+exit: 0
+step aot: built
+exit: == run
+stdout: == run
+stderr: == run
+step: jet build --target web run.jet
+exit: 0 # compile_web_with_path().expect
+step web: node app.js
+cwd: .jet/build
+exit: 0 # assert_web_artifacts_run: node succeeds
+stdout: = html_composition_matches_aot_jit_interpreter_and_web.1.out

@@ -1,0 +1,24 @@
+// asin, acos, atan and atan2 divided by pi, correctly rounded: angles in
+// half-turns, with the same bits on every tier and exact angles exact.
+use math: core.math
+
+run: fn() {
+    print(math.asin_pi(Float{1.0}))
+    print(math.asin_pi(Float{-0.5}))
+    print(math.acos_pi(Float{-1.0}))
+    print(math.acos_pi(Float{0.5}))
+    print(math.atan_pi(Float{1.0}))
+    print(math.atan_pi(math.INFINITY))
+    print(math.is_nan(math.acos_pi(Float{2.0})))
+
+    // atan2_pi(y, x) is the angle of the point (x, y), in [-1, 1].
+    print(math.atan2_pi(Float{1.0}, Float{1.0}))
+    print(math.atan2_pi(Float{1.0}, Float{-1.0}))
+    print(math.atan2_pi(Float{-1.0}, Float{-1.0}))
+    print(math.atan2_pi(Float{0.0}, Float{-1.0}))
+    print(math.atan2_pi(Float{-0.0}, Float{-1.0}))
+
+    // atan2(y, x) / pi rounds twice and can land one bit off.
+    print(math.atan2_pi(Float{1.0}, Float{8.0}))
+    print(math.atan2(Float{1.0}, Float{8.0}) / math.PI)
+}

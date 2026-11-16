@@ -1,0 +1,272 @@
+// Native Unicode kernels over the one E4 {ptr,len,cap} UTF-8 text carrier.
+// Pinned mapping/property tables are generated in UnicodeTables.jet.
+// Reuses the stream/trim/scalar-offset policies of the prior Jet
+// Core/Text/Runtime/KernelUnicodeString.jet port, with fixed-word storage
+// and L3a's audited byte helpers instead of Core lists or exact Int indexing.
+
+// Every generated lookup (UnicodeTables.jet, UnicodeText<n>.jet,
+// UnicodeNormalizeTables.jet) answers a scalar below 128 from its dense ASCII
+// block and searches a table of sorted, disjoint [lo, hi, value] records in
+// immortal text for the rest: lo and hi of `key_digits` digits, then the
+// value of `value_digits`. A digit holds six bits, low digit first: digit d
+// is the byte 35 + d below 57 and 36 + d from 57 (Tools/agent/UnicodeTables.jet
+// table_digits), so a four-digit field read as a little-endian word orders
+// as its value does.
+unicode_table_field: fn(address: I64, digits: I64) -> I64 Never! {
+    value := I64{0}
+    scale := I64{1}
+    at := I64{0}
+    loop at < digits {
+        byte: rt_text_byte(wrapping(address + at))
+        digit: if (byte < I64{92}) -> wrapping(byte - I64{35}) else -> wrapping(byte - I64{36})
+        value = wrapping(value + wrapping(digit * scale))
+        scale = wrapping(scale * I64{64})
+        at = wrapping(at + I64{1})
+    }
+    value
+}
+
+// The `digits`-digit value of scalar `cp` (below 128) in a dense ASCII block.
+unicode_table_dense: fn(ascii: I64, cp: I64, digits: I64) -> I64 Never! {
+    unicode_table_field(wrapping(rt_text_data(ascii) + wrapping(cp * digits)), digits)
+}
+
+// `key` (0 to 2^24 - 1) as its four digit bytes, low digit first, in one
+// little-endian word.
+unicode_table_code: fn(key: I64) -> I64 Never! {
+    code := I64{0}
+    rest := key
+    scale := I64{1}
+    at := I64{0}
+    loop at < (I64{4}) {
+        digit: rest.bit_and(I64{63})
+        byte: if (digit < I64{57}) -> wrapping(digit + I64{35}) else -> wrapping(digit + I64{36})
+        code = wrapping(code + wrapping(byte * scale))
+        scale = wrapping(scale * I64{256})
+        rest = rest >> I64{6}
+        at = wrapping(at + I64{1})
+    }
+    code
+}
+
+// The index of the record of `table` (`count` records) whose [lo, hi] holds
+// `key`, or -1 when none does. Four-digit keys compare as words: one load
+// reads a record's lo and hi.
+unicode_table_find: fn(table: I64, count: I64, key_digits: I64, value_digits: I64, key: I64) -> I64 Never! {
+    if (key < I64{0}) { return I64{-1} }
+    data: rt_text_data(table)
+    stride: wrapping(wrapping(key_digits * I64{2}) + value_digits)
+    low := I64{0}
+    high := count
+    if (key_digits == I64{4}) {
+        if (key >= I64{16777216}) { return I64{-1} }
+        code: unicode_table_code(key)
+        loop low < high {
+            middle: wrapping(low + high) >> I64{1}
+            word: rt_text_word(wrapping(data + wrapping(middle * stride)))
+            if (code < word.bit_and(I64{4294967295})) { high = middle } else {
+                if (code <= (word >> I64{32})) { return middle }
+                low = wrapping(middle + I64{1})
+            }
+        }
+        return I64{-1}
+    }
+    loop low < high {
+        middle: wrapping(low + high) >> I64{1}
+        record: wrapping(data + wrapping(middle * stride))
+        if (key < unicode_table_field(record, key_digits)) { high = middle } else {
+            if (key <= unicode_table_field(wrapping(record + key_digits), key_digits)) {
+                return middle
+            }
+            low = wrapping(middle + I64{1})
+        }
+    }
+    I64{-1}
+}
+
+// The value of the record of `table` holding `key`, or `missing`.
+unicode_table_value: fn(table: I64, count: I64, key_digits: I64, value_digits: I64, key: I64, missing: I64) -> I64 Never! {
+    index: unicode_table_find(table, count, key_digits, value_digits, key)
+    if (index < I64{0}) { return missing }
+    stride: wrapping(wrapping(key_digits * I64{2}) + value_digits)
+    unicode_table_field(wrapping(rt_text_data(table) + wrapping(index * stride) + wrapping(key_digits * I64{2})), value_digits)
+}
+
+// A scalar's mapping from a table of scalar records (four-digit fields): a
+// value below 8388608 is the scalar delta plus 4194304, any other is 8388608
+// plus the index of an eleven-digit full mapping in `pool`. A scalar outside
+// every record maps to itself.
+unicode_table_mapping: fn(table: I64, count: I64, pool: I64, cp: I64) -> I64 Never! {
+    value: unicode_table_value(table, count, I64{4}, I64{4}, cp, I64{-1})
+    if (value < I64{0}) { return cp }
+    if (value < I64{8388608}) { return wrapping(cp + wrapping(value - I64{4194304})) }
+    unicode_table_field(wrapping(rt_text_data(pool) + wrapping(wrapping(value - I64{8388608}) * I64{11})), I64{11})
+}
+
+// Emit every scalar of a full mapping into the caller's one text builder.
+// The generator validates <=3 nonzero scalar lanes. Unmapped NUL occupies
+// the first lane and is still emitted; zero only terminates later lanes.
+unicode_append_mapping: fn(builder: I64, mapping: I64) {
+    rt_text_push_scalar(builder, mapping.bit_and(I64{2097151}))
+    second: (mapping >> I64{21}).bit_and(I64{2097151})
+    if (second != I64{0}) { rt_text_push_scalar(builder, second) }
+    third: (mapping >> I64{42}).bit_and(I64{2097151})
+    if (third != I64{0}) { rt_text_push_scalar(builder, third) }
+}
+
+// Nearest non-Case_Ignorable successor, exactly like Rust Final_Sigma.
+// The predecessor's cased status is maintained by the streaming caller.
+// No scalar vector, suffix copy, or per-scalar allocation is necessary.
+unicode_final_sigma_after: fn(data: I64, length: I64, start: I64) -> Bool {
+    at := start
+    loop at < length {
+        address: wrapping(data + at)
+        cp: rt_text_decode(address)
+        if !unicode_is_case_ignorable(cp) -> return !unicode_is_cased(cp)
+        at = wrapping(at + rt_text_width(address))
+    }
+    true
+}
+
+// Lowercase scalars [start, length) into builder. Final_Sigma's predecessor
+// state starts uncased at start, exactly like lowering that suffix alone; the
+// successor search still reads to length (the suffix's own end).
+unicode_lower_append: fn(builder: I64, data: I64, start: I64, length: I64) {
+    at := start
+    before_cased := false
+    loop at < length {
+        address: wrapping(data + at)
+        cp: rt_text_decode(address)
+        next_at: wrapping(at + rt_text_width(address))
+        if (cp == I64{931} && before_cased && unicode_final_sigma_after(data, length, next_at)) {
+            rt_text_push_scalar(builder, I64{962})
+        } else { unicode_append_mapping(builder, unicode_lower_mapping(cp)) }
+        // Cased and Case_Ignorable overlap: ignorable takes priority in the
+        // Rust context search, so it must not replace predecessor state.
+        if !unicode_is_case_ignorable(cp) -> before_cased = unicode_is_cased(cp)
+        at = next_at
+    }
+}
+
+// The A-Z bytes among eight ASCII bytes, each as its 0x80 bit: a byte b
+// below 0x80 sets it in b + 0x3F once b >= 0x41 ('A') and in b + 0x25 once
+// b >= 0x5B (past 'Z'); neither sum carries into the next byte.
+unicode_ascii_upper_bits: fn(word: I64) -> I64 {
+    wrapping(word + I64{4557430888798830399}).bit_and(wrapping(word + I64{2676586395008836901}).bit_not()).bit_and(I64{-9187201950435737472})
+}
+
+unicode_ascii_upper: fn(byte: I64) -> Bool { byte >= I64{65} && byte <= I64{90} }
+
+// The lowercase of an ASCII text: A-Z gain 32, every other byte stays (the
+// Unicode mapping of an ASCII scalar is exactly that). A text without A-Z is
+// its own lowercase and is shared, not copied. -1 when a byte is not ASCII.
+unicode_ascii_lower: fn(value: I64, data: I64, length: I64) -> I64 {
+    words: wrapping(length - length.bit_and(I64{7}))
+    upper := false
+    at := I64{0}
+    loop at < words {
+        word: rt_text_word(wrapping(data + at))
+        if (word.bit_and(I64{-9187201950435737472}) != I64{0}) { return I64{-1} }
+        if (unicode_ascii_upper_bits(word) != I64{0}) { upper = true }
+        at = wrapping(at + I64{8})
+    }
+    loop at < length {
+        byte: rt_text_byte(wrapping(data + at))
+        if (byte >= I64{128}) { return I64{-1} }
+        if unicode_ascii_upper(byte) -> upper = true
+        at = wrapping(at + I64{1})
+    }
+    if !upper -> return jet_rt_string_clone(value)
+    lowered: rt_text_with_length(length, length)
+    if (lowered == I64{0}) { return I64{0} }
+    target: rt_text_data(lowered)
+    at = I64{0}
+    loop at < words {
+        word: rt_text_word(wrapping(data + at))
+        rt_text_store(wrapping(target + at), word.bit_or((unicode_ascii_upper_bits(word) >> I64{2}).bit_and(I64{2314885530818453536})))
+        at = wrapping(at + I64{8})
+    }
+    loop at < length {
+        byte: rt_text_byte(wrapping(data + at))
+        rt_text_put(wrapping(target + at), if unicode_ascii_upper(byte) -> byte + I64{32} else -> byte)
+        at = wrapping(at + I64{1})
+    }
+    lowered
+}
+
+#Export(c) jet_unicode_lower: fn(value: I64) -> I64 {
+    length: rt_text_len(value)
+    data: rt_text_data(value)
+    ascii: unicode_ascii_lower(value, data, length)
+    if (ascii != I64{-1}) { return ascii }
+    builder: rt_text_builder_with_capacity(length)
+    unicode_lower_append(builder, data, I64{0}, length)
+    jet_rt_string_builder_finish(builder)
+}
+
+#Export(c) jet_unicode_upper: fn(value: I64) -> I64 {
+    data: rt_text_data(value)
+    length: rt_text_len(value)
+    builder: rt_text_builder_with_capacity(length)
+    at := I64{0}
+    loop at < length {
+        address: wrapping(data + at)
+        unicode_append_mapping(builder, unicode_upper_mapping(rt_text_decode(address)))
+        at = wrapping(at + rt_text_width(address))
+    }
+    jet_rt_string_builder_finish(builder)
+}
+
+#Export(c) jet_unicode_trim: fn(value: I64) -> I64 {
+    // Same pinned predicate as trim_view; inspect only leading/trailing bytes.
+    rt_text_trim(value)
+}
+
+unicode_scalar_offset: fn(value: I64, byte: I64) -> I64 {
+    data: rt_text_data(value)
+    at := I64{0}
+    count := I64{0}
+    loop at < byte {
+        at = wrapping(at + rt_text_width(wrapping(data + at)))
+        count = wrapping(count + I64{1})
+    }
+    count
+}
+
+// Inline Int carrier: |v| < 2^62 by construction. Linux x86-64 user-space
+// addresses (including five-level paging) have fewer than 62 address bits;
+// a scalar index/count cannot exceed the byte extent of a live text buffer.
+unicode_index: fn(value: I64, needle: I64, some: I64, last: Bool) -> I64 {
+    byte: rt_text_find(value, needle, I64{0}, last)
+    if (byte < I64{0}) { return I64{0} }
+    index: unicode_scalar_offset(value, byte)
+    // `some` is the caller's writable aligned Option<Int> payload slot, written
+    // only on success.
+    rt_text_store(some, index)
+    I64{1}
+}
+
+// Inline Int carrier: |v| < 2^62 by construction (bounded by live text bytes).
+#Export(c) jet_unicode_index_of: fn(value: I64, needle: I64, some: I64) -> I64 {
+    unicode_index(value, needle, some, false)
+}
+
+// Inline Int carrier: |v| < 2^62 by construction (bounded by live text bytes).
+#Export(c) jet_unicode_last_index_of: fn(value: I64, needle: I64, some: I64) -> I64 {
+    unicode_index(value, needle, some, true)
+}
+
+// Inline Int carrier: |v| < 2^62 by construction (bounded by live text bytes).
+#Export(c) jet_unicode_count: fn(value: I64, needle: I64) -> I64 {
+    size: rt_text_len(needle)
+    if (size == I64{0}) { return I64{0} }
+    from := I64{0}
+    count := I64{0}
+    loop {
+        at: rt_text_find(value, needle, from, false)
+        if (at < I64{0}) { break }
+        count = wrapping(count + I64{1})
+        from = wrapping(at + size)
+    }
+    count
+}

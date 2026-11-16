@@ -1,0 +1,22 @@
+// Shell-style line and field work on a String, by the `lines()` rule (LF ends
+// a line, one CR before it is dropped, a final LF adds no empty line):
+// `trim_newlines()` drops trailing LFs as `$(…)` does, `first_lines(n)` and
+// `last_lines(n)` are `head -n`/`tail -n`, `has_line_prefix(p)` and
+// `has_line(pattern)` are `grep -q`, and `tsv_records()` splits each line on
+// every tab. A quoted `has_line` pattern is checked when the program compiles.
+run: fn() {
+    output: "main\nfeature/a\nrelease\n\n"
+    print("[{output.trim_newlines()}]")
+    log: "boot\nload\r\nserve\nstop\n"
+    print(log.first_lines(2).join("|"))
+    print(log.last_lines(2).join("|"))
+    print(log.first_lines(9).len())
+    print(log.last_lines(0).len())
+    print(log.has_line_prefix("ser"))
+    print(log.has_line_prefix("erve"))
+    print(output.has_line("^(feature|hotfix)/"))
+    print(output.has_line("^hotfix/"))
+    print(log.has_line("^l.*d$"))
+    table: "name\tsize\nCore\t12\nTools\t\n"
+    loop record in table.tsv_records() -> print("{record.len()}: {record.join(",")}")
+}

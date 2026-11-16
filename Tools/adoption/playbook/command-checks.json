@@ -1,0 +1,85 @@
+{
+  "schema": "jet.adoption.playbook-checks/v1",
+  "version": "1.0.0",
+  "tier_neutral": true,
+  "representative_project": "fixtures/clean-project",
+  "required_sections": [
+    "prerequisites",
+    "inventory",
+    "pilot",
+    "build-import",
+    "test",
+    "rollout",
+    "rollback",
+    "ownership",
+    "known-non-goals"
+  ],
+  "commands": [
+    {
+      "id": "version-banner",
+      "phase": "prerequisites",
+      "argv": ["jet", "--version"],
+      "cwd": "fixtures/clean-project",
+      "expected_exit": 0,
+      "requires_clean_copy": true,
+      "network": "denied",
+      "captures": ["stdout", "stderr", "exit_code"]
+    },
+    {
+      "id": "front-end-check",
+      "phase": "pilot",
+      "argv": ["jet", "check", "run.jet"],
+      "cwd": "fixtures/clean-project",
+      "expected_exit": 0,
+      "requires_clean_copy": true,
+      "network": "denied",
+      "captures": ["stdout", "stderr", "exit_code"]
+    },
+    {
+      "id": "small-build-with-sbom",
+      "phase": "build-import",
+      "argv": ["jet", "build", "--small", "--sbom", "run.jet"],
+      "cwd": "fixtures/clean-project",
+      "expected_exit": 0,
+      "requires_clean_copy": true,
+      "network": "denied",
+      "captures": ["stdout", "stderr", "exit_code", "build/run.spdx"]
+    },
+    {
+      "id": "behavior-run",
+      "phase": "test",
+      "argv": ["jet", "run", "run.jet"],
+      "cwd": "fixtures/clean-project",
+      "expected_exit": 0,
+      "requires_clean_copy": true,
+      "network": "denied",
+      "captures": ["stdout", "stderr", "exit_code"]
+    }
+  ],
+  "operator_checks": [
+    {
+      "id": "bounded-rollout",
+      "phase": "rollout",
+      "action": "promote one pilot slice only after its receipt matches the source baseline",
+      "evidence": ["approval", "pilot receipt", "monitoring checkpoint"]
+    },
+    {
+      "id": "source-rollback",
+      "phase": "rollback",
+      "action": "restore the recorded source revision, rerun front-end and behavior checks, then retain the failed receipt",
+      "evidence": ["restore revision", "front-end receipt", "behavior receipt", "incident owner"]
+    },
+    {
+      "id": "ownership-record",
+      "phase": "ownership",
+      "action": "name one accountable owner for source, generated Jet, dependencies, release, and incidents",
+      "evidence": ["owner record"]
+    },
+    {
+      "id": "non-goal-record",
+      "phase": "known-non-goals",
+      "action": "list unsupported constructs and excluded claims before the pilot starts",
+      "evidence": ["loss report", "non-goal list"]
+    }
+  ]
+}

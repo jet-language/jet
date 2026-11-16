@@ -1,0 +1,16 @@
+# Claim: jet fmt never changes template text: the blank lines between a marker template's lines,
+# a braced `#loop` body written over several lines and one written on one line all survive
+# formatting, and a second pass is stable
+# Claim: the formatted file runs, so the template keeps its meaning
+fixture: marker_template_keeps_blank_lines_and_braced_loops/input
+step: jet fmt run.jet
+exit: 0
+file: run.jet = marker_template_keeps_blank_lines_and_braced_loops/formatted.out
+step: jet fmt run.jet
+exit: 0
+file: run.jet = marker_template_keeps_blank_lines_and_braced_loops/formatted.out
+step: jet fmt --check run.jet
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = "4 x,y\n"

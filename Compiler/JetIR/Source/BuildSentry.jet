@@ -1,0 +1,574 @@
+use jet_foundation.[TUnsafeGate, Type]
+
+// ---------------------------------------------------------------------------
+// The memory sentry (JetRuntime Sentry.jet) under a program or test image
+// (IRProgram.sentries). An `#Unsafe` block enters a sentry gate naming its
+// file, line and audit text, saved in a stack area the block's exits restore
+// (ir_tx_leave_scopes). A function that takes raw addresses opens a sentry
+// stack frame, and each `*x` / `mem.address_of(place)` registers the
+// storage it names in it, so a pointer that outlives the frame faults. A
+// raw read or a volatile access is checked against the gate in force (a
+// caller's, inside an `#Unsafe` function) and stops the run on a fault;
+// outside an enabled gate the check passes.
+//
+// A dev build keeps the sentry at every optimization level. A release
+// build keeps it only when it is hardened (`policy.harden` or the
+// `hardened` profile, IRChecks.harden); an ordinary release build emits no
+// sentry call and turns the runtime's allocator sentry off at its start
+// (ir_sentry_release_link).
+
+// Whether a program or test image built under `checks` keeps the sentry.
+ir_checks_sentries: fn(checks: IRChecks) -> Bool Never! { !checks.release || checks.harden }
+
+// The first step of an image without the sentry: the runtime's allocators
+// stop registering, quarantining and poisoning storage for it
+// (jet_rt_sentry_set_release).
+ir_sentry_release_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
+    if p.sentries {
+        return
+    }
+    on: ir_word_const(m, b, 1)
+    _: ir_runtime(m, b, "jet_rt_sentry_set_release", [Int]{on}, -1)
+}
+
+// `#Unsafe("audit") { body }`: the body runs under its gate.
+ir_unsafe_scope: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, gate: TUnsafeGate, body: [Int]) Never! {
+    if !p.sentries {
+        ir_stmts(m, p, b, body)
+        return
+    }
+    save: ir_sentry_save(m, b)
+    file: ir_static_text(m, b, gate.file)
+    reason: ir_static_text(m, b, gate.reason)
+    enabled: ir_word_const(m, b, if gate.enabled -> 1 else -> 0)
+    fenced: ir_word_const(m, b, if gate.fenced -> 1 else -> 0)
+    line: ir_word_const(m, b, gate.line)
+    _: ir_runtime(m, b, "jet_rt_sentry_scope_enter", [Int]{save, enabled, fenced, file[0], file[1], line, reason[0], reason[1]}, -1)
+    ir_sentry_body(m, p, b, save, body, true)
+}
+
+// `#Policy(sentries: …) { body }`: the body runs with the gate's checks on
+// or off.
+ir_sentry_policy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, enabled: Bool, body: [Int]) Never! {
+    if !p.sentries {
+        ir_stmts(m, p, b, body)
+        return
+    }
+    save: ir_sentry_save(m, b)
+    flag: ir_word_const(m, b, if enabled -> 1 else -> 0)
+    _: ir_runtime(m, b, "jet_rt_sentry_policy_enter", [Int]{save, flag}, -1)
+    ir_sentry_body(m, p, b, save, body, false)
+}
+
+// The stack save area of the gate a scope replaces: seven words.
+ir_sentry_save: fn(m: &IRModule, b: &IRBuilder) -> Int Never! {
+    pointer_row: ir_pointer_row(m)
+    save: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, save, 56, 8, -1, b.line)
+    save
+}
+
+// A gate's body as its own scope: its bindings drop before the replaced
+// gate comes back, and an early exit restores it (IRTxFrame.sentry). `gate`:
+// the scope is an `#Unsafe` block's, not a `#Policy` one's.
+ir_sentry_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, save: Int, body: [Int], gate: Bool) Never! {
+    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: -1, sentry: save, gate: gate})
+    ir_scope_open(b)
+    ir_stmts(m, p, b, body)
+    if ir_failed(b) {
+        return
+    }
+    ir_scope_close(m, b)
+    _: b.transactions.pop()
+    _: ir_runtime(m, b, "jet_rt_sentry_scope_leave", [Int]{save}, -1)
+}
+
+// On entry to a function that takes raw addresses: its sentry stack frame,
+// left by every return and stop edge (IRTxFrame.sentry_frame).
+ir_sentry_frame: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
+    if !p.sentries || b.row < 0 {
+        return
+    }
+    if !ir_nodes_take_raw_addresses(p.functions[b.row].tree.nodes) {
+        return
+    }
+    word_row: ir_word_row(m)
+    frame: ir_runtime(m, b, "jet_rt_sentry_frame_enter", [Int]{}, word_row)
+    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: 0, shield: false, deadline: -1, sentry_frame: frame})
+}
+
+ir_nodes_take_raw_addresses: fn(nodes: [BodyNode]) -> Bool Never! {
+    loop node in nodes {
+        if node.kind == .RawOf(_) || node.kind == .RawAddressOf(_) -> return true
+    }
+    false
+}
+
+// The storage of row `row` at `address` (a local's, a place's) joins the
+// current sentry stack frame until it leaves.
+ir_sentry_register: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, address: Int, row: Int) Never! {
+    if !p.sentries {
+        return
+    }
+    bytes: m.types[row].size
+    size: ir_word_const(m, b, bytes)
+    _: ir_runtime(m, b, "jet_rt_sentry_register_stack_allocation", [Int]{address, size}, -1)
+}
+
+// The address a raw access of row `row` at `pointer` uses: the sentry
+// checks it first and stops on a fault, reporting `operation` ("": a plain
+// `read`) at the access's `span`.
+ir_sentry_access: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pointer: Int, row: Int, operation: String, span: Span) -> Int Never! {
+    if !p.sentries || m.types[row].kind == .Unit -> return pointer
+    bytes: m.types[row].size
+    alignment: m.types[row].align
+    size: ir_word_const(m, b, bytes)
+    align: ir_word_const(m, b, alignment)
+    site: ir_sentry_site(m, p, b, span)
+    pointer_row: ir_pointer_row(m)
+    if operation == "" {
+        return ir_runtime(m, b, "jet_rt_sentry_read", [Int]{pointer, size, align, site}, pointer_row)
+    }
+    name: ir_static_text(m, b, operation)
+    ir_runtime(m, b, "jet_rt_sentry_access", [Int]{pointer, size, align, name[0], name[1], site}, pointer_row)
+}
+
+// The word address of a raw access of `bytes` bytes (a word above zero) at
+// `pointer`, aligned as row `row`: the sentry checks the whole range first
+// and stops on a fault, reporting `operation` at the access's `span`.
+ir_sentry_range: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pointer: Int, bytes: Int, row: Int, operation: String, span: Span) -> Int Never! {
+    word_row: ir_word_row(m)
+    address: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Copy, address, pointer, -1, -1, b.line)
+    if !p.sentries -> return address
+    alignment: m.types[row].align
+    align: ir_word_const(m, b, alignment)
+    name: ir_static_text(m, b, operation)
+    site: ir_sentry_site(m, p, b, span)
+    ir_runtime(m, b, "jet_rt_sentry_access", [Int]{address, bytes, align, name[0], name[1], site}, word_row)
+}
+
+// A sentry route's access site: the 1-based line of `span` in the building
+// function's source in the low 32 bits and its column in the high 32. It is
+// 0, and the report names the gate's line, when the access is not lexically
+// inside an `#Unsafe` block of this function (the gate in force is a
+// caller's, maybe in another file) or the span is not in a checked source.
+ir_sentry_site: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, span: Span) -> Int Never! {
+    gated := false
+    loop frame in b.transactions {
+        if frame.gate -> gated = true
+    }
+    line: if gated -> (ir_source_line_of(p, b.f.source_file, span.start) ?? 0) else -> 0
+    column: if gated -> (ir_source_column(p, b.f.source_file, span.start) ?? 0) else -> 0
+    packed: if line < 1 || line > 4294967295 || column < 1 || column > 2147483647 -> 0 else -> line + column * 4294967296
+    ir_word_const(m, b, packed)
+}
+
+// `core.mem.volatile_read<T>(pointer)` / `core.mem.volatile_write<T>(pointer,
+// value)`: one load or store of T at the pointer, checked under the
+// operation's own name. The written value moves into the pointee.
+ir_core_volatile: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    writes: member == "volatile_write"
+    arity: if writes -> 2 else -> 1
+    if type_args.len() != 1 || args.len() != arity {
+        return ir_fail_slot(b, span, "core.mem.{member} without its checked element type and arguments")
+    }
+    element_ty: type_args[0].copy()
+    row: ir_value_type(m, p, element_ty) ?? return ir_type_fail(b, span, element_ty)
+    pointer: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || pointer < 0 -> return -1
+    if !writes {
+        address: ir_sentry_access(m, p, b, pointer, row, member, span)
+        return ir_load_at(m, b, address, 0, row)
+    }
+    value := ir_expr(m, p, b, args[1])
+    if ir_failed(b) -> return -1
+    address: ir_sentry_access(m, p, b, pointer, row, member, span)
+    drops: m.types[row].drop != ""
+    if value >= 0 && drops && !b.fresh[value] -> value = ir_clone(m, b, value, row)
+    ir_store_at(m, p, b, address, 0, value)
+    return -1
+}
+
+// `core.mem.copy<T>(to, from, count)` / `core.mem.fill<T>(to, value,
+// count)`: the `count` Ts at `to` become the `count` at `from`, as one move
+// of their bytes, so the two ranges may overlap (jet_rt_mem_move), or copies
+// of `value`. Nothing runs on the Ts a copy duplicates or either overwrites.
+// A count of zero or less touches nothing. Under the sentry each whole range
+// is checked first under the operation's name, so a range that runs past
+// live storage stops before any byte moves.
+ir_core_mem_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    if type_args.len() != 1 || args.len() != 3 {
+        return ir_fail_slot(b, span, "core.mem.{member} without its checked element type and arguments")
+    }
+    element_ty: type_args[0].copy()
+    row: ir_value_type(m, p, element_ty) ?? return ir_type_fail(b, span, element_ty)
+    target: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || target < 0 -> return -1
+    second: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || second < 0 -> return -1
+    counted: ir_expr(m, p, b, args[2])
+    if ir_failed(b) || counted < 0 -> return -1
+    count: ir_native_index(m, b, counted, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, counted)
+    stride: ir_list_stride(m, row)
+    copies: member == "copy"
+    if stride > 0 {
+        zero: ir_word_const(m, b, 0)
+        any: ir_bool_op(m, b, IROp.Lt, zero, count)
+        ir_open_if(b.f, any, b.line)
+        width: ir_word_const(m, b, stride)
+        total: ir_word_op(m, b, IROp.Mul, count, width)
+        to: ir_sentry_range(m, p, b, target, total, row, member, span)
+        if copies {
+            from: ir_sentry_range(m, p, b, second, total, row, member, span)
+            _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{to, from, total}, -1)
+        } else { ir_core_mem_fill(m, p, b, to, second, row, count, total) }
+        ir_end(b.f, b.line)
+    }
+    if !copies -> ir_release(m, b, second)
+    return -1
+}
+
+// `core.mem.list_append<T>(values, from, count)`: the List at the
+// written place `values`, made its own first (ir_make_unique), grows by the
+// `count` Ts at `from`, moved in as one move of their bytes
+// (jet_rt_mem_move). A full buffer grows to twice its capacity, or to the
+// new length when that is more, and its elements move before the old one
+// goes, so `from` may name the List's own elements. Nothing runs on the Ts
+// the move duplicates. The answer is false, and the List as it was, when
+// `count` is negative, the new length's bytes overflow, or the growth is
+// refused; a count of zero appends nothing. Under the sentry the range at
+// `from` is checked first under the operation's name.
+ir_core_list_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    member: "list_append"
+    if type_args.len() != 1 || args.len() != 3 {
+        return ir_fail_slot(b, span, "core.mem.{member} without its checked element type and arguments")
+    }
+    row: ir_value_type(m, p, type_args[0]) ?? return ir_type_fail(b, span, type_args[0])
+    backs := [IRWriteBack]{}
+    list: ir_place_address(m, p, b, args[0], backs, span)
+    if ir_failed(b) || list < 0 -> return -1
+    pointer: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || pointer < 0 -> return -1
+    counted: ir_expr(m, p, b, args[2])
+    if ir_failed(b) || counted < 0 -> return -1
+    count: ir_native_index(m, b, counted, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, counted)
+    stride: ir_list_stride(m, row)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    appended: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, appended, 0, -1, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    whole: ir_bool_op(m, b, IROp.Le, zero, count)
+    ir_open_if(b.f, whole, b.line)
+    // The most elements whose bytes a word counts.
+    limit: ir_word_const(m, b, if stride > 0 -> 9223372036854775807 /% stride else -> 9223372036854775807)
+    length: ir_load_word(m, b, list, 0)
+    room: ir_word_op(m, b, IROp.Sub, limit, length)
+    fits: ir_bool_op(m, b, IROp.Le, count, room)
+    ir_open_if(b.f, fits, b.line)
+    ir_emit(b.f, IROp.Const, appended, 1, -1, -1, b.line)
+    any: ir_bool_op(m, b, IROp.Lt, zero, count)
+    ir_open_if(b.f, any, b.line)
+    ir_make_unique(m, p, b, list)
+    total: ir_word_op(m, b, IROp.Add, length, count)
+    if stride > 0 {
+        width: ir_word_const(m, b, stride)
+        added: ir_word_op(m, b, IROp.Mul, count, width)
+        from: ir_sentry_range(m, p, b, pointer, added, row, member, span)
+        kept: ir_word_op(m, b, IROp.Mul, length, width)
+        capacity: ir_load_word(m, b, list, 8)
+        full: ir_bool_op(m, b, IROp.Lt, capacity, total)
+        ir_open_if(b.f, full, b.line)
+        grown: ir_word_op(m, b, IROp.Add, capacity, capacity)
+        short: ir_bool_op(m, b, IROp.Lt, grown, total)
+        ir_open_if(b.f, short, b.line)
+        ir_emit(b.f, IROp.Copy, grown, total, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        over: ir_bool_op(m, b, IROp.Lt, limit, grown)
+        ir_open_if(b.f, over, b.line)
+        ir_emit(b.f, IROp.Copy, grown, total, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
+        data: ir_list_grow_buffer(m, b, list, grown_bytes, true)
+        made: ir_bool_op(m, b, IROp.Ne, data, zero)
+        ir_open_if(b.f, made, b.line)
+        old_data: ir_load_word(m, b, list, 16)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, old_data, kept}, -1)
+        grown_end: ir_word_op(m, b, IROp.Add, data, kept)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{grown_end, from, added}, -1)
+        ir_release_moved_buffer(m, b, old_data, data, capacity, stride)
+        ir_emit(b.f, IROp.Store, -1, list, 16, data, b.line)
+        ir_emit(b.f, IROp.Store, -1, list, 8, grown, b.line)
+        ir_emit(b.f, IROp.Store, -1, list, 0, total, b.line)
+        ir_else(b.f, b.line)
+        ir_emit(b.f, IROp.Const, appended, 0, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_else(b.f, b.line)
+        elements: ir_load_word(m, b, list, 16)
+        tail: ir_word_op(m, b, IROp.Add, elements, kept)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{tail, from, added}, -1)
+        ir_emit(b.f, IROp.Store, -1, list, 0, total, b.line)
+        ir_end(b.f, b.line)
+    } else { ir_emit(b.f, IROp.Store, -1, list, 0, total, b.line) }
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_write_backs(m, p, b, backs, span)
+    ir_release(m, b, list)
+    appended
+}
+
+// `core.mem.list_copy<T>(to, values, start, count)`: the `count` Ts
+// at `to` become `values[start..<start + count]`, as one move of their bytes
+// (jet_rt_mem_move), so the two may overlap. Nothing runs on the Ts the copy
+// duplicates or overwrites. A range that is not inside the List stops the
+// run as a List slice's does (jet_rt_slice_end); a count of zero copies
+// nothing. Under the sentry the range at `to` is checked first under the
+// operation's name.
+ir_core_list_copy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    member: "list_copy"
+    if type_args.len() != 1 || args.len() != 4 {
+        return ir_fail_slot(b, span, "core.mem.{member} without its checked element type and arguments")
+    }
+    row: ir_value_type(m, p, type_args[0]) ?? return ir_type_fail(b, span, type_args[0])
+    target: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || target < 0 -> return -1
+    list: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || list < 0 -> return -1
+    first: ir_expr(m, p, b, args[2])
+    if ir_failed(b) || first < 0 -> return -1
+    start: ir_native_index(m, b, first, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, first)
+    counted: ir_expr(m, p, b, args[3])
+    if ir_failed(b) || counted < 0 -> return -1
+    count: ir_native_index(m, b, counted, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, counted)
+    finish: ir_word_op(m, b, IROp.Add, start, count)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    exclusive: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, exclusive, 1, -1, -1, b.line)
+    stop_args := [Int]{start, finish, exclusive, ir_list_length(m, b, list)}
+    loop value in ir_location(m, b, b.line) -> stop_args.push(value)
+    word_row: ir_word_row(m)
+    _: ir_runtime(m, b, "jet_rt_slice_end", stop_args, word_row)
+    stride: ir_list_stride(m, row)
+    if stride > 0 {
+        zero: ir_word_const(m, b, 0)
+        any: ir_bool_op(m, b, IROp.Lt, zero, count)
+        ir_open_if(b.f, any, b.line)
+        width: ir_word_const(m, b, stride)
+        total: ir_word_op(m, b, IROp.Mul, count, width)
+        to: ir_sentry_range(m, p, b, target, total, row, member, span)
+        data: ir_list_data(m, b, list)
+        from: ir_element_address(m, b, data, start, stride)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{to, from, total}, -1)
+        ir_end(b.f, b.line)
+    }
+    ir_release(m, b, list)
+    return -1
+}
+
+// A fill's stores at the word address `to`: plain data (no drop, nothing
+// ir_copy_needs) as one runtime fill of the value's bytes (JetRuntime
+// RawWords.jet jet_rt_mem_fill, or for a lone byte value jet_rt_mem_fill_bytes
+// with the byte in its word), any other value as a copy of it stored in each
+// place.
+ir_core_mem_fill: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, to: Int, value: Int, row: Int, count: Int, total: Int) Never! {
+    stride: ir_list_stride(m, row)
+    if !ir_copy_needs(m, p, row) && m.types[row].drop == "" {
+        // An aggregate's slot is its storage already; any other value is
+        // stored raw into a frame cell, which takes no ownership of it.
+        aggregate: ir_kind_of(m, b, value) == .Aggregate
+        if stride == 1 && !aggregate {
+            _: ir_runtime(m, b, "jet_rt_mem_fill_bytes", [Int]{to, value, total}, -1)
+            return
+        }
+        source: if aggregate -> ir_address_at(m, b, value, 0) else -> ir_out_slot(m, b, (stride + 7) /% 8)
+        if !aggregate -> ir_emit(b.f, IROp.Store, -1, source, 0, value, b.line)
+        width: ir_word_const(m, b, stride)
+        _: ir_runtime(m, b, "jet_rt_mem_fill", [Int]{to, source, width, total}, -1)
+        return
+    }
+    index: ir_count_open(m, b, count)
+    place: ir_element_address(m, b, to, index, stride)
+    item: ir_clone(m, b, value, row)
+    ir_store_at(m, p, b, place, 0, item)
+    ir_count_close(m, b, index)
+}
+
+// `core.mem.alloc_raw(size, align)`: `size` heap bytes at an `align`
+// boundary as a `mem.Ptr<U8>?`, whose None is the null word. An align up to
+// 8 takes a jet_rt_alloc_try block of exactly `size` bytes at align 8, so it
+// rides the runtime's cached small-block path with the runtime's header
+// alone: the header's count word, 24 bytes before the payload, which a raw
+// block never shares, holds `size` tagged odd (`size << 1 | 1`) for
+// ir_core_free_raw. A larger align puts the bytes `head` (ir_core_raw_head)
+// into a block of `size + head` bytes at `align`; the head is a multiple of
+// `align`, so the payload keeps it, and its last three words hold 0 (an even
+// tag), `size` and `align`. A size not above zero, an align that is not a
+// power of two, or a refused block is None. Under the sentry the bytes are a
+// live heap allocation until their release.
+ir_core_alloc_raw: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 2 {
+        return ir_fail_slot(b, span, "core.mem.alloc_raw without its checked arguments")
+    }
+    byte_ty: Type.IntN{signed: false, bits: 8}
+    pointer_ty: Type.Apply{name: "Ptr", args: [Type]{byte_ty}}
+    result_ty: Type.Option{inner: pointer_ty}
+    row: ir_value_type(m, p, result_ty) ?? return ir_type_fail(b, span, result_ty)
+    sized: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || sized < 0 -> return -1
+    aligned: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || aligned < 0 -> return -1
+    size: ir_native_index(m, b, sized, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, sized)
+    align: ir_native_index(m, b, aligned, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, aligned)
+    word_row: ir_word_row(m)
+    start: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Const, start, 0, -1, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    one: ir_word_const(m, b, 1)
+    // A power of two is above zero and shares no bit with one less.
+    below: ir_word_op(m, b, IROp.Sub, align, one)
+    common: ir_word_op(m, b, IROp.BitAnd, align, below)
+    single: ir_bool_op(m, b, IROp.Eq, common, zero)
+    positive: ir_bool_op(m, b, IROp.Lt, zero, align)
+    some: ir_bool_op(m, b, IROp.Lt, zero, size)
+    ir_open_if(b.f, some, b.line)
+    ir_open_if(b.f, positive, b.line)
+    ir_open_if(b.f, single, b.line)
+    eight: ir_word_const(m, b, 8)
+    near: ir_bool_op(m, b, IROp.Le, align, eight)
+    ir_open_if(b.f, near, b.line)
+    block: ir_runtime(m, b, "jet_rt_alloc_try", [Int]{size, eight}, word_row)
+    held: ir_bool_op(m, b, IROp.Ne, block, zero)
+    ir_open_if(b.f, held, b.line)
+    ir_emit(b.f, IROp.Copy, start, block, -1, -1, b.line)
+    doubled: ir_word_op(m, b, IROp.Shl, size, one)
+    tagged: ir_word_op(m, b, IROp.BitOr, doubled, one)
+    count_room: ir_word_const(m, b, 24)
+    count: ir_word_op(m, b, IROp.Sub, block, count_room)
+    ir_emit(b.f, IROp.Store, -1, count, 0, tagged, b.line)
+    ir_end(b.f, b.line)
+    ir_else(b.f, b.line)
+    head: ir_core_raw_head(m, b, align)
+    total: ir_word_op(m, b, IROp.Add, size, head)
+    base: ir_runtime(m, b, "jet_rt_alloc_try", [Int]{total, align}, word_row)
+    granted: ir_bool_op(m, b, IROp.Ne, base, zero)
+    ir_open_if(b.f, granted, b.line)
+    payload: ir_word_op(m, b, IROp.Add, base, head)
+    ir_emit(b.f, IROp.Copy, start, payload, -1, -1, b.line)
+    room: ir_word_const(m, b, 24)
+    header: ir_word_op(m, b, IROp.Sub, payload, room)
+    ir_emit(b.f, IROp.Store, -1, header, 0, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, header, 8, size, b.line)
+    ir_emit(b.f, IROp.Store, -1, header, 16, align, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    if p.sentries {
+        live: ir_bool_op(m, b, IROp.Ne, start, zero)
+        ir_open_if(b.f, live, b.line)
+        _: ir_runtime(m, b, "jet_rt_sentry_register_allocation", [Int]{start, size}, -1)
+        ir_end(b.f, b.line)
+    }
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    result: ir_temp(m, b, row)
+    ir_emit(b.f, IROp.Copy, result, start, -1, -1, b.line)
+    result
+}
+
+// `core.mem.free_raw(pointer)`: releases ir_core_alloc_raw's block by the
+// word 24 bytes before `pointer`: an odd tag is the size of an align-8
+// block, whose count word gets back its first owner (1) before the release;
+// an even one is a head block's, whose size and align follow it. Under the
+// sentry the pointer must start live storage first, so a second release is
+// R0802 and a pointer from anywhere else R0801, and the bytes are then
+// quarantined, so a read through a kept copy of the pointer is R0802.
+ir_core_free_raw: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 1 {
+        return ir_fail_slot(b, span, "core.mem.free_raw without its checked argument")
+    }
+    byte_ty: Type.IntN{signed: false, bits: 8}
+    byte_row: ir_value_type(m, p, byte_ty) ?? return ir_type_fail(b, span, byte_ty)
+    pointer: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || pointer < 0 -> return -1
+    one: ir_word_const(m, b, 1)
+    start: ir_sentry_range(m, p, b, pointer, one, byte_row, "free_raw", span)
+    room: ir_word_const(m, b, 24)
+    header: ir_word_op(m, b, IROp.Sub, start, room)
+    marked: ir_load_word(m, b, header, 0)
+    odd: ir_word_op(m, b, IROp.BitAnd, marked, one)
+    zero: ir_word_const(m, b, 0)
+    tagged: ir_bool_op(m, b, IROp.Ne, odd, zero)
+    ir_open_if(b.f, tagged, b.line)
+    exact: ir_word_op(m, b, IROp.Shr, marked, one)
+    ir_emit(b.f, IROp.Store, -1, header, 0, one, b.line)
+    if p.sentries -> _: ir_runtime(m, b, "jet_rt_sentry_quarantine", [Int]{start, exact}, -1)
+    eight: ir_word_const(m, b, 8)
+    _: ir_runtime(m, b, "jet_rt_free", [Int]{start, exact, eight}, -1)
+    ir_else(b.f, b.line)
+    size: ir_load_word(m, b, header, 8)
+    align: ir_load_word(m, b, header, 16)
+    if p.sentries -> _: ir_runtime(m, b, "jet_rt_sentry_quarantine", [Int]{start, size}, -1)
+    head: ir_core_raw_head(m, b, align)
+    base: ir_word_op(m, b, IROp.Sub, start, head)
+    total: ir_word_op(m, b, IROp.Add, size, head)
+    _: ir_runtime(m, b, "jet_rt_free", [Int]{base, total, align}, -1)
+    ir_end(b.f, b.line)
+    return -1
+}
+
+// `core.mem.mapped(address, bytes)` (`fresh`) and `unmapping(address,
+// bytes)`: under the sentry, the whole 4 KiB pages over `bytes` at
+// `address` become a live heap allocation (jet_rt_sentry_register_allocation)
+// or leave the live storage without a write (jet_rt_sentry_unmap). An image
+// without the sentry only evaluates the arguments.
+ir_core_mapping: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, fresh: Bool, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 2 {
+        return ir_fail_slot(b, span, "core.mem.mapped or unmapping without its checked arguments")
+    }
+    if !p.sentries {
+        loop arg in args {
+            value: ir_expr(m, p, b, arg)
+            if ir_failed(b) -> return -1
+            if value >= 0 -> ir_release(m, b, value)
+        }
+        return -1
+    }
+    words: ir_core_native_words(m, p, b, args, span)
+    if ir_failed(b) -> return -1
+    below: ir_word_const(m, b, 4095)
+    mask: ir_word_const(m, b, -4096)
+    over: ir_word_op(m, b, IROp.Add, words[1], below)
+    pages: ir_word_op(m, b, IROp.BitAnd, over, mask)
+    symbol: if fresh -> "jet_rt_sentry_register_allocation" else -> "jet_rt_sentry_unmap"
+    _: ir_runtime(m, b, symbol, [Int]{words[0], pages}, -1)
+    return -1
+}
+
+// The bytes ahead of a raw heap allocation's payload at an align above 8:
+// its alignment, and at least 32, so the tag, size and align words sit inside
+// the head, clear of the runtime's header, and the payload keeps the
+// alignment.
+ir_core_raw_head: fn(m: &IRModule, b: &IRBuilder, align: Int) -> Int Never! {
+    word_row: ir_word_row(m)
+    head: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Copy, head, align, -1, -1, b.line)
+    least: ir_word_const(m, b, 32)
+    small: ir_bool_op(m, b, IROp.Lt, align, least)
+    ir_open_if(b.f, small, b.line)
+    ir_emit(b.f, IROp.Copy, head, least, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    head
+}

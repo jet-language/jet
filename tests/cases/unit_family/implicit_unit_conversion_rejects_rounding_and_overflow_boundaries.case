@@ -1,0 +1,17 @@
+# tests/unit_family.rs::implicit_unit_conversion_rejects_rounding_and_overflow_boundaries at tests/unit_family.rs:1065; hand-port
+# Claim: 1meter + 1thirdish rejected E0127 (tests/unit_family.rs:1065)
+# Claim: 1giant + 1meter (400-nines scale) rejected E0127 (tests/unit_family.rs:1065)
+# Claim: Meter.from_giant(1giant) rejected E0127 (tests/unit_family.rs:1065)
+fixture: implicit_unit_conversion_rejects_rounding_and_overflow_boundaries.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check thirdish/main.jet
+exit: 1 # 1meter + 1thirdish rejected E0127 (tests/unit_family.rs:1065)
+stderr: ~ "E0127" # 1meter + 1thirdish rejected E0127 (tests/unit_family.rs:1065)
+step: jet check giant/main.jet
+exit: 1 # 1meter + 1thirdish rejected E0127 (tests/unit_family.rs:1065)
+stderr: ~ "E0127" # 1meter + 1thirdish rejected E0127 (tests/unit_family.rs:1065)
+step: jet check explicit/main.jet
+exit: 1 # 1meter + 1thirdish rejected E0127 (tests/unit_family.rs:1065)
+stderr: ~ "E0127" # 1meter + 1thirdish rejected E0127 (tests/unit_family.rs:1065)

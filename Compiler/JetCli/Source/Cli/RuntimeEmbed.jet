@@ -1,0 +1,101 @@
+// `jet self devtools embed <image> <runtime-dir> <out> <identity>`: the
+// compiler build's `core-embed` step. It writes the executable `image` to
+// `out` with each runtime file of `runtime-dir` (JET_CLI_RUNTIME_PART_FILES)
+// added as its JET_CLI_RUNTIME_PART_PREFIX part and, last, its identity as
+// its JET_CLI_IDENTITY_PART part, in one pass (JetBackend ELF.jet
+// x64_executable_add_parts), and writes that identity to `identity`. The
+// runtime must be the one `image` lowered: its IDENTITY names that jet. The
+// compiler build runs it with the jet-bare it just linked, over the runtime
+// that jet-bare built, so the jet it ships carries its own runtime, Core
+// library and identity, and reads no file for any of them. A jet's identity
+// is `jet@<JET_VERSION>#<digest>`, the digest the sha256 of the jet's bytes
+// with its identity part's bytes zeroed (the sha256 of the file for a jet
+// without one, such as jet-bare); Tools/release Release.jet identity_digest
+// checks it the same way. The Core library's facts must agree with its
+// export list row for row (JetIR BuildCore.jet ir_core_facts_disagree): a
+// jet whose Core facts describe other code than its Core image is refused.
+// `JET_TRACE_FILE` traces it as `runtime.embed`
+// (Request.jet jet_cli_trace_sink), so the build's `core-embed` step shows it
+// in the build's trace (BuildExecute.jet jet_cli_build_step_traces).
+use {
+    embed_crypto: core.crypto
+    embed_files: core.files
+    embed_time: core.time
+    jet_backend.[x64_executable_add_parts]
+    jet_ir.[ir_core_facts_disagree]
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    jet_pkg_model.[JET_VERSION]
+}
+
+JET_CLI_EMBED_USAGE: "usage: jet self devtools embed <image> <runtime-dir> <out> <identity>\n"
+
+// An executable the build writes is runnable by everyone and writable by
+// its owner.
+JET_CLI_EMBED_IMAGE_MODE: 493
+
+jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
+    operands := args.len() == 4
+    loop arg in args -> operands = operands && arg != "" && !arg.starts_with("-")
+    if !operands {
+        return JetDriverVerbOutput{stdout: "", stderr: JET_CLI_EMBED_USAGE, exit_code: JET_DRIVER_EXIT_USAGE}
+    }
+    image_file: args[0]
+    runtime_dir: args[1]
+    out: args[2]
+    identity_file: args[3]
+    watch: embed_time.start()
+    trace_sink: jet_cli_trace_sink()
+    if trace_sink == .Val(sink) -> sink.begin("runtime.embed", "", -1, -1)
+    image: embed_files.read_bytes(image_file) ?? return jet_cli_maintenance_error("E2105", "couldn't read the executable `{image_file}`: {jet_cli_io_error_text(err)}", None, color, json)
+    lowered_by: "jet@{JET_VERSION}#{jet_cli_image_digest(image)}"
+    names := [String]{}
+    payloads := [[U8]]{}
+    core_exports := ""
+    core_facts := ""
+    loop name in JET_CLI_RUNTIME_PART_FILES {
+        path: "{runtime_dir}/{name}"
+        payload: embed_files.read_bytes(path) ?? return jet_cli_maintenance_error("E2105", "couldn't read the runtime file `{path}`: {jet_cli_io_error_text(err)}", None, color, json)
+        // The runtime must be the one `image` built: its IDENTITY names the
+        // jet-bare that lowered it.
+        if name == JET_CLI_IDENTITY_FILE {
+            packer: String.from_bytes(payload) ?? return jet_cli_maintenance_error("E2105", "the runtime identity `{path}` is not UTF-8", None, color, json)
+            if packer.trim() != lowered_by {
+                return jet_cli_maintenance_error("E2105", "the runtime in `{runtime_dir}` was built by `{packer.trim()}`, not by `{image_file}` (`{lowered_by}`)", Val("build the runtime with the jet it is embedded in"), color, json)
+            }
+        }
+        if name == JET_CLI_CORE_EXPORTS_FILE {
+            core_exports = String.from_bytes(payload) ?? return jet_cli_maintenance_error("E2105", "the Core export list `{path}` is not UTF-8", None, color, json)
+        }
+        if name == JET_CLI_CORE_FACTS_FILE {
+            core_facts = String.from_bytes(payload) ?? return jet_cli_maintenance_error("E2105", "the Core facts `{path}` are not UTF-8", None, color, json)
+        }
+        names.push("{JET_CLI_RUNTIME_PART_PREFIX}{name}")
+        payloads.push(payload)
+    }
+    disagree: ir_core_facts_disagree(core_facts, core_exports)
+    if disagree.len() > 0 {
+        return jet_cli_maintenance_error("E2105", "the Core facts in `{runtime_dir}` disagree with its Core export list in {disagree.len()} row(s); the first: {disagree[0]}", Val("build the runtime again: one Core library build writes both"), color, json)
+    }
+    // The identity part is the file's last bytes: zeros while the digest is
+    // taken, then the identity it names.
+    prefix: "jet@{JET_VERSION}#"
+    placeholder := [U8]{}
+    loop _ in 0..<prefix.len() + 64 -> placeholder.push(U8{0})
+    names.push(JET_CLI_IDENTITY_PART)
+    payloads.push(placeholder)
+    shipped := x64_executable_add_parts(image, names, payloads) ?? return jet_cli_maintenance_error("E2105", "couldn't add the runtime and the identity to `{image_file}`: {err}", None, color, json)
+    identity: "{prefix}{jet_cli_image_digest(shipped)}"
+    stamp: identity.bytes()
+    start: shipped.len() - stamp.len()
+    loop (k, byte) in stamp -> shipped[start + k] = byte
+    embed_files.write_bytes(out, shipped) ?? return jet_cli_maintenance_error("E2105", "couldn't write the executable `{out}`: {jet_cli_io_error_text(err)}", None, color, json)
+    embed_files.set_mode(out, JET_CLI_EMBED_IMAGE_MODE) ?? return jet_cli_maintenance_error("E2105", "couldn't make `{out}` executable: {jet_cli_io_error_text(err)}", None, color, json)
+    embed_files.write(identity_file, "{identity}\n") ?? return jet_cli_maintenance_error("E2105", "couldn't write the identity `{identity_file}`: {jet_cli_io_error_text(err)}", None, color, json)
+    if trace_sink == .Val(sink) -> sink.end("runtime.embed", shipped.len())
+    JetDriverVerbOutput{stdout: "embed: {out}: {JET_CLI_RUNTIME_PART_FILES.len()} runtime parts from {runtime_dir}, identity {identity}, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The sha256 of an executable's bytes, as a jet's identity names it. Core's
+// digest runs on the host's SHA extensions where they exist, and the build's
+// `core-embed` step digests two executables of hundreds of megabytes.
+jet_cli_image_digest: fn(bytes: [U8]) -> String Never! { embed_crypto.sha256(bytes).hex() }

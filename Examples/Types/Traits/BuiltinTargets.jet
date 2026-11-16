@@ -1,0 +1,37 @@
+// A trait this module declares can be implemented for built-in types.
+// The orphan rule needs the module to own the trait or the type, and here it
+// owns the trait, so `impl Int.Named` is legal. A trait you don't own still
+// needs a wrapper type.
+Named: trait {
+    name: fn(self) -> String
+}
+
+impl Int.Named {
+    name: fn(self) -> String { "int {self}" }
+}
+
+impl Float.Named {
+    name: fn(self) -> String { "float {self}" }
+}
+
+impl String.Named {
+    name: fn(self) -> String { "string {self}" }
+}
+
+impl Bool.Named {
+    name: fn(self) -> String { "bool {self}" }
+}
+
+// A generic bound accepts the built-in types that implement the trait.
+show: fn<T: Named>(value: T) -> String { value.name() }
+
+run: fn() {
+    print(7.name())
+    // A bare `2.5` is an exact Decimal; `Float{2.5}` is a Float.
+    ratio: Float{2.5}
+    print(ratio.name())
+    print("hi".name())
+    print(true.name())
+    print(show(7))
+    print(show("generic"))
+}

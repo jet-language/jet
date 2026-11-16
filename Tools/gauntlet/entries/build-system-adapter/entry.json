@@ -1,0 +1,18 @@
+{
+  "name": "build-system-adapter",
+  "mode": "tool",
+  "description": "The contract and adapter exports of the gauntlet's build_system axis harness Tools/gauntlet/harness/build-system.mjs and their Jet twin, the BuildSystem module of the jet_gauntlet_kit package (Tools/gauntlet/kit/Source/BuildSystem.jet), #5072 c8, each run by a driver that prints one export's result: the contract issues of the manifest's cell, of a cell wrong in every field (a peer not required, a command that is not a list, an unbounded and a loose target, no samples) and of a missing cell; and the axis report the adapter projects from the receipt fixtures/fake-harness.mjs leaves in place of the harness's: a passing receipt (complete, a win, ready to publish, every cell's wall time per peer), a failing one (its failure and each cell that did not win are blockers, a cell without its Nix summary and the missing cells leave the report incomplete and unmeasured) and none at all (the harness's exit code blocks).",
+  "tool": {
+    "original": "Tools/gauntlet/harness/drivers/build-system-adapter.mjs",
+    "jet": "Tools/gauntlet/entries/build-system-adapter/driver/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["contract", "contract.json"], "check": "check.jet", "expected": "expected/contract.out"},
+      {"args": ["contract", "wrong.json"], "check": "check.jet", "expected": "expected/contract-wrong.out"},
+      {"args": ["contract", "missing.json"], "check": "check.jet", "expected": "expected/contract-missing.out"},
+      {"args": ["adapt", "axis.json", "./jet-bin"], "env": {"FAKE_RECEIPT": "passed.json"}, "check": "check.jet", "expected": "expected/adapt-passed.out"},
+      {"args": ["adapt", "axis.json", "./jet-bin"], "env": {"FAKE_RECEIPT": "failed.json", "FAKE_EXIT": "1"}, "check": "check.jet", "expected": "expected/adapt-failed.out"},
+      {"args": ["adapt", "axis.json", "./jet-bin"], "env": {"FAKE_EXIT": "3"}, "check": "check.jet", "expected": "expected/adapt-none.out"}
+    ]
+  }
+}

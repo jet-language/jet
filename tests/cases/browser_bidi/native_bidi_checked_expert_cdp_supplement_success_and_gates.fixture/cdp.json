@@ -1,0 +1,24 @@
+{
+ "max": 8,
+ "stop": "session.end",
+ "replies": {
+  "session.status": "{\"ready\":true,\"message\":\"ready\"}",
+  "session.new": "{\"sessionId\":\"cdp-ok\",\"capabilities\":{\"browserName\":\"mock\",\"goog:cdp\":true}}",
+  "goog:cdp.sendCommand": "{\"result\":{\"cacheDisabled\":true}}",
+  "session.end": "{}"
+ },
+ "require": {
+  "session.new": [
+   "\"capabilities\":{\"alwaysMatch\":{}}"
+  ],
+  "goog:cdp.sendCommand": [
+   "\"method\":\"Network.setCacheDisabled\"",
+   "\"params\":{\"cacheDisabled\":true}"
+  ]
+ },
+ "forbid": {
+  "goog:cdp.sendCommand": [
+   "CDP_SUCCESS_SECRET"
+  ]
+ }
+}

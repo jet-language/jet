@@ -1,0 +1,44 @@
+Error [jet.UnknownFunction]: `Store` has no method `execute`
+  --> tests/ui/fix_points_to_the_real_api.jet:5:10
+    |
+  5 |     conn.execute("CREATE TABLE t (x INTEGER)")
+    |          ^^^^^^^
+ Why: `Store` is a protected Core type with a closed method surface
+ Fix: `execute` is on `DBScope`, which `.with_policy(…)` returns: write `.with_policy(…).execute(…)`
+More: jet-lang.dev/e/E0102
+
+Error [jet.UnknownName]: Nothing named `True` exists here
+  --> tests/ui/fix_points_to_the_real_api.jet:6:11
+    |
+  6 |     flag: True
+    |           ^^^^
+ Why: A name must be declared before it's used
+ Fix: Jet writes this Bool value as `true`: replace `True` with `true`
+More: jet-lang.dev/e/E0107
+
+Error [jet.UnknownName]: Nothing named `BigInt` exists here
+  --> tests/ui/fix_points_to_the_real_api.jet:8:12
+    |
+  8 |     count: BigInt.parse("12")
+    |            ^^^^^^
+ Why: A name must be declared before it's used
+ Fix: Jet's `Int` is exact at any size: replace `BigInt` with `Int`, as in `Int.parse(text)`
+More: jet-lang.dev/e/E0107
+
+Error [jet.UnknownName]: Nothing named `null` exists here
+  --> tests/ui/fix_points_to_the_real_api.jet:10:14
+    |
+ 10 |     nothing: null
+    |              ^^^^
+ Why: A name must be declared before it's used
+ Fix: Jet writes no value as `None`: replace `null` with `None`
+More: jet-lang.dev/e/E0107
+
+Error [jet.UnknownFunction]: Nothing named `println` exists here
+  --> tests/ui/fix_points_to_the_real_api.jet:12:5
+    |
+ 12 |     println("hi")
+    |     ^^^^^^^
+ Why: Only functions that have been defined (or built in, like `print` / `panic`) can be called
+ Fix: Did you mean `print`?
+More: jet-lang.dev/e/E0102

@@ -1,0 +1,38 @@
+# `jet inspect` reports a call into Core the way it reports a call into a user
+# function with the same declaration: the same resolved effects, the callee
+# named by its dotted path (`core.files.exists`, `parity.user_exists`), and a
+# provenance path that starts at the caller, steps into that callee and holds
+# the call's span first.
+fixture: core_and_user_calls_with_one_declaration_report_the_same_effects.fixture
+env: NO_COLOR=1
+step: jet inspect semindex parity.jet --json
+exit: 0
+json: stdout doc $.semindex.effects[?function="core_caller"][0].inferred = ["FS.Read","Panic"]
+json: stdout doc $.semindex.effects[?function="user_caller"][0].inferred = ["FS.Read","Panic"]
+json: stdout doc $.semindex.effects[?function="core_caller"][0].callees = ["core.files.exists"]
+json: stdout doc $.semindex.effects[?function="user_caller"][0].callees = ["parity.user_exists"]
+json: stdout doc $.semindex.effects[?function="user_exists"][0].callees = ["core.files.exists"]
+json: stdout doc $.semindex.effects[?function="core_caller"][0].provenance[?effect="FS.Read"][0].call_path = ["core_caller","core.files.exists"]
+json: stdout doc $.semindex.effects[?function="user_exists"][0].provenance[?effect="FS.Read"][0].call_path = ["user_exists","core.files.exists"]
+json: stdout doc $.semindex.effects[?function="user_caller"][0].provenance[?effect="FS.Read"][0].call_path = ["user_caller","parity.user_exists","core.files.exists"]
+json: stdout doc $.semindex.effects[?function="core_caller"][0].provenance[?effect="FS.Read"][0].spans #= 1
+json: stdout doc $.semindex.effects[?function="user_caller"][0].provenance[?effect="FS.Read"][0].spans #= 2
+json: stdout doc $.semindex.effects[?function="parity.core_caller"] #= 1
+step expand: jet inspect expand --facts effects parity.jet
+exit: 0
+stdout: ~ "  core_caller: resolved=[FS.Read, Panic]\n" # the Core call's resolved row
+stdout: ~ "  user_caller: resolved=[FS.Read, Panic]\n" # the user call's row is the same
+stdout: ~ "  parity.core_caller: resolved=[FS.Read, Panic]\n" # the qualified row is dotted
+step rights: jet inspect rights parity.jet --json
+exit: 0
+json: stdout doc $.callables[?name="core_caller"][0].callable = "parity.core_caller"
+json: stdout doc $.callables[?name="core_caller"][0].effects.callees = ["core.files.exists"]
+json: stdout doc $.callables[?name="user_caller"][0].effects.callees = ["parity.user_exists"]
+json: stdout doc $.callables[?name="core_caller"][0].inferred_effects = ["FS.Read","Panic"]
+json: stdout doc $.callables[?name="user_caller"][0].inferred_effects = ["FS.Read","Panic"]
+step explain: jet explain effects parity.jet:6
+exit: 0
+stdout: ~ "reaches: FS.Read via core.files.exists (parity.jet:6)" # the Core call is named by its dotted path
+step explainuser: jet explain effects parity.jet:8
+exit: 0
+stdout: ~ "reaches: FS.Read via parity.user_exists (parity.jet:8)" # the user call reads the same way

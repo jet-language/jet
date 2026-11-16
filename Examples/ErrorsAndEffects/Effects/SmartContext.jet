@@ -1,0 +1,23 @@
+// Smart Context — `#Context(field: value) { … }`.
+// Expert tier: `#Context(allocator: a)` takes a `core.mem` allocator for the
+// block. An Arena, `context.scratch` (the task's scratch arena) or a value
+// whose type implements `mem.Allocator` serves the values the block's code
+// makes (Examples/Memory/Allocation/ContextAllocator.jet); an Arena block's
+// end rewinds it. A Bump, Pool or Fixed isn't used by allocation: allocate
+// from it directly by calling it. `arena.alloc(v)` allocates from `arena`
+// in any block.
+use core.mem
+
+run: fn() {
+    // Arena declared before the block; it outlives the context scope.
+    arena: mem.Arena.new()
+    #Context(allocator: arena) {
+        // An explicit `arena.alloc(v)` allocates from `arena`.
+        x: arena.alloc(10)
+        print(x)
+    }
+    // The arena stays usable after the block.
+    y: arena.alloc(20)
+    print(y)
+    close(arena)
+}

@@ -1,0 +1,23 @@
+// The target machine owns WASI providers; this manifest only selects the
+// machine and the hosted runtime ceiling through `targets:`.
+name: "embedded_wasi"
+version: "0.1.0"
+edition: "2026"
+targets: {
+    machine: {
+        profile: "web.wasi_server"
+    }
+}
+runtime: "hosted"
+authority: {
+    allow: [IO, Mem.Alloc, Time.Wait],
+}
+build: {
+    release: Build{
+        optimize: O2
+    },
+    debug: Build{
+        optimize: O0,
+        debug_info: true
+    },
+}

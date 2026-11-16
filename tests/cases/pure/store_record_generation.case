@@ -1,0 +1,13 @@
+# tests/pure.rs::store_record_generation at tests/pure.rs:709; hand-port
+# Claim: recording a generation yields at least generation 1 and the list is non-empty (tests/pure.rs:713-717)
+# Fixture migrated: profile commands are not in the seed jet binary; the Rust Store API maps to jet profile, which the seed rejects
+# Not ported: jet::Store::record_generation Rust API (tests/pure.rs:712): replaced by jet profile build, which records a generation
+fixture: store_record_generation.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet profile build dev --no-color --offline
+exit: 0 # tests/pure.rs:712
+step: jet profile generations dev --json
+exit: 0 # tests/pure.rs:713-717
+stdout: ~ "\"generation\":1" # tests/pure.rs:713-717

@@ -1,0 +1,54 @@
+// `#run { … }` is the explicit shared-preparation block.
+// Its body runs while building and emits no runtime code. A value that
+// outlives the block is prepared explicitly with `name: #run value`, so
+// the runtime code reads a finished literal. A failed check stops the build,
+// not the program.
+WIDTH: #run 12
+
+HEIGHT: #run 5
+
+area: fn(width: Int, height: Int) -> Int { width * height }
+
+run: fn() {
+    cells: #run area(WIDTH, HEIGHT)
+    #run {
+        if cells > 100 -> panic("the grid is too large")
+    }
+    print("cells: {cells}")
+    // `prep` is no longer a keyword: a value named `prep` is an ordinary
+    // name, even right before a block.
+    prep: cells > 50
+    if prep -> print("large grid")
+    comptime_block_lesson()
+    prep_local_value_lesson()
+}
+
+LIMIT: #run 1000
+
+BASE: #run 10
+
+comptime_block_lesson: fn() {
+    // `#run { … }` runs in the comptime interpreter and
+    // emits no runtime Rust (I3). A value that outlives it is prepared
+    // explicitly with `name: #run value`.
+    ratio: #run { LIMIT /% BASE }
+    // Build-time assertion: verify constants are valid before compiling.
+    #run {
+        if ratio < 1 -> panic("limit must be >= base")
+    }
+    // The check ran at build time and produced no runtime code; `ratio` is a
+    // runtime literal.
+    print("limit: {LIMIT}")
+    print("base: {BASE}")
+    print("ratio: {ratio}")
+}
+
+// `name: #run value` inside a function body is a build-time value:
+// the block runs while building, and every later read of `lanes` is the
+// prepared value, so the program emits no call to `calculate_lanes`.
+calculate_lanes: fn() -> Int { 8 }
+
+prep_local_value_lesson: fn() {
+    lanes: #run { calculate_lanes() + 0 }
+    print(lanes)
+}

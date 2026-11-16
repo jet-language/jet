@@ -1,0 +1,30 @@
+// `reflect.of(x)` reflects a nested value all the way down: a struct field's
+// `Value` lists that struct's own fields, so `.fields()[i].value()` walks
+// each level with typed names and values.
+use reflect: core.reflect
+
+Inner: struct {
+    depth: Int
+}
+
+Middle: struct {
+    inner: Inner
+    tag: String
+}
+
+Outer: struct {
+    middle: Middle
+    count: Int
+}
+
+run: fn() {
+    outer: Outer{middle: Middle{inner: Inner{depth: 3}, tag: "m"}, count: 2}
+    top: reflect.of(outer)
+    middle: top.fields()[0].value()
+    inner: middle.fields()[0].value()
+    depth: inner.fields()[0].value()
+    print("{top.type_name()} has {top.fields().len()} fields")
+    print("{middle.type_name()} has {middle.fields().len()} fields, tag {middle.fields()[1].value().display()}")
+    print("{inner.type_name()} has {inner.fields()[0].name()}")
+    print("{depth.type_name()} {depth.display()} with {depth.fields().len()} fields")
+}

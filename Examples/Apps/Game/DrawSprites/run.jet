@@ -1,0 +1,62 @@
+package: {
+    name: "draw_sprites"
+    authority: {
+    allow: [Env, FS, IO, Net, Time]
+    }
+}
+
+use {
+    files: core.files
+    ui: core.ui
+    core.color.[Color]
+}
+
+// Lines, circles and triangles beside sprites blitted from two PNG textures:
+// a 4-bit palette image with transparency, stored Adam7-interlaced, and an
+// RGBA image whose alpha falls off radially. Core decodes both PNGs; drawing
+// clips to the window and to each texture and blends src-over. The program
+// saves its headless window's screen as a PAM image and the golden pins its
+// SHA-256 on every tier.
+sprites_root: fn() -> String {
+    candidates: [String]{"Examples/Apps/Game/DrawSprites", "."}
+    loop candidate in candidates {
+        if files.exists("{candidate}/Assets/Sprites.atlas") -> return candidate
+    }
+    "."
+}
+
+run: fn() {
+    root: sprites_root()
+    sprites: ui.load_texture_atlas("{root}/Assets/Sprites.atlas")
+    glow: ui.load_texture_atlas("{root}/Assets/Glow.atlas")
+    window: ui.headless(width: 96, height: 64, script: [[ui.UIEvent]]{[ui.UIEvent]{}}) ?? panic("a 96x64 window")
+    loop frame in window.frames() {
+        if frame.index > 0 -> break
+        frame.clear_background(Color{r: 16, g: 18, b: 28, a: 255})
+        frame.draw_triangle(4, 60, 48, 4, 92, 60, Color{r: 40, g: 90, b: 160, a: 255})
+        // The other winding fills the same way; this one is half transparent.
+        frame.draw_triangle(92, 4, 4, 4, 48, 40, Color{r: 220, g: 120, b: 40, a: 128})
+        frame.draw_circle(70, 40, 14, Color{r: 250, g: 220, b: 90, a: 200})
+        frame.draw_circle(-2, 30, 9, Color{r: 120, g: 230, b: 140, a: 255})
+        frame.draw_line(0, 0, 95, 63, Color{r: 255, g: 255, b: 255, a: 255})
+        frame.draw_line(95, 2, 10, 50, Color{r: 255, g: 60, b: 90, a: 160})
+        frame.draw_line(30, -5, 34, 70, Color{r: 90, g: 255, b: 255, a: 255})
+        frame.draw_sprite(sprites, "ship", 8, 8)
+        frame.draw_sprite(sprites, "ship", 90, 58)
+        frame.draw_sprite(sprites, "gem", -3, 20)
+        // "wide" reaches past the texture's edge; only the texture's part draws.
+        frame.draw_sprite(sprites, "wide", 40, 30)
+        frame.draw_sprite(glow, "halo", 50, 10)
+        frame.draw_sprite(glow, "halo", 60, 16)
+        frame.draw_sprite(sprites, "missing", 0, 0)
+    }
+    save_pam(window.load_image_from_screen(), "Frame.pam")
+    print("sprites=96x64 frame=presented atlases={sprites.name()},{glow.name()}")
+}
+
+// An image as a PAM file (P7, RGB_ALPHA).
+save_pam: fn(image: ui.Image, path: String) {
+    bytes := "P7\nWIDTH {image.width()}\nHEIGHT {image.height()}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".bytes()
+    bytes.extend(image.pixels())
+    files.write_bytes(path, bytes) ?? panic("write {path}: {err}")
+}

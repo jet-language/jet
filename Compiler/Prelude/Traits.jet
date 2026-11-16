@@ -1,0 +1,306 @@
+// The protocol traits the compiler owns, declared here and nowhere else.
+//
+// Each trait is an ordinary Jet declaration: its methods and its associated
+// types. Tools/agent/OwnedTraitRows.jet renders the file
+// into OWNED_TRAITS (Compiler/JetFoundation/Source/Registry/OwnedTraitRows.jet),
+// the one table the parser, sema and the CLI read; `--check` keeps it
+// current. A trait or a fact written anywhere else is a second list.
+//
+// The columns are facts about the trait itself, each `false` or empty unless
+// written:
+//
+//   local             the orphan rule counts the trait as declared by every program
+//   bare_bound        a generic bound may name it bare, with no declaring module
+//   raw_return        its impl methods return their declared type as written,
+//                     never through the implicit failure carrier
+//   any_receiver      the impl may take `self` with any access
+//   operators         the source operators its one method implements; the
+//                     result is free when the method returns an associated type
+//   commutative       `#Commutative` on a typed impl also answers the swapped
+//                     operands (`2 * v` from `v * 2`)
+//   codec             the one method is a hand codec (`encode` or `decode`)
+//   conversion        the one static method makes `Self` from the `Source`
+//                     its impl names (`impl Celsius.From(Float)`)
+//   derived           the compiler derives it from the type; an impl adds no
+//                     method the compiler reads
+//   checked_text      the contract of `CheckedText: trait` in core/prelude.jet
+//   auto_derive       `#Name` on a struct or enum derives it structurally, and
+//                     `!Name` or `#Name: false` refuses it
+//   auto_derive_family a marker that derives it with the family's other traits
+//   bundle            `#Name` on a distinct type re-exposes it from the base
+//   through_elements  a list, map, option or union has it when its elements do
+//   requires          the traits every type with this one also has
+//   shares            the trait whose impl on the same type binds the
+//                     associated types these methods use
+//
+// `Literal: module` holds the literal capabilities, named `Literal.Int` and
+// `Literal.Float`; each one's `from_literal` parameter is the literal's source,
+// and an impl writes it `#run fn`.
+//
+// A method written with a body is a default: an impl that leaves it out gets
+// the body as its own method, which calls the impl's other methods. A default
+// never calls a method that has a default itself, so no pair of defaults can
+// call each other forever.
+
+// `a + b`.
+Add: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"+"}
+    commutative: Bool{true}
+    Rhs: type
+    Output: type
+    add: fn(self, rhs: Rhs) -> Output Never!
+}
+
+// `a - b`.
+Sub: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"-"}
+    Rhs: type
+    Output: type
+    sub: fn(self, rhs: Rhs) -> Output Never!
+}
+
+// `a * b`.
+Mul: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"*"}
+    commutative: Bool{true}
+    Rhs: type
+    Output: type
+    mul: fn(self, rhs: Rhs) -> Output Never!
+}
+
+// `a / b`.
+Div: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"/"}
+    Rhs: type
+    Output: type
+    div: fn(self, rhs: Rhs) -> Output Never!
+}
+
+// `a == b` and `a != b`.
+Equatable: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"== !="}
+    auto_derive: Bool{true}
+    Rhs: type
+    equal: fn(self, rhs: Rhs) -> Bool Never!
+}
+
+// `a <=> b` and the orderings `<`, `>`, `<=`, `>=`.
+Comparable: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"<=> < > <= >="}
+    auto_derive: Bool{true}
+    bundle: Bool{true}
+    Rhs: type
+    compare: fn(self, rhs: Rhs) -> Ordering Never!
+}
+
+// The one value that decides `==`, ordering, Map lookup and Set membership.
+KeyBy: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    requires: String{"Equatable Comparable"}
+    Key: type
+    key: fn(self) -> Key Never!
+}
+
+// The value as its dynamic encoding tree.
+Encode: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    codec: Bool{true}
+    auto_derive_family: String{"Codable"}
+    through_elements: Bool{true}
+    encode: fn(self) -> Dyn Never!
+}
+
+// A value read back from its dynamic encoding tree.
+Decode: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    codec: Bool{true}
+    auto_derive_family: String{"Codable"}
+    through_elements: Bool{true}
+    decode: fn(tree: Dyn) -> Self [FieldError]!
+}
+
+// `Target{value}` and `Target.from(value)`: a `Target` made from a `Source`.
+// The impl names its source after the trait, `impl Celsius.From(Float)`, and
+// a type takes one impl per source.
+From: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    conversion: Bool{true}
+    Source: type
+    from: fn(value: Source) -> Self Err!
+}
+
+Literal: module {
+    // A nominal type written as an integer literal, built while compiling.
+    Int: trait {
+        from_literal: fn(value: Int) -> Self Never!
+    }
+
+    // A nominal type written as a float literal, built from its digits.
+    Float: trait {
+        from_literal: fn(value: String) -> Self Never!
+    }
+}
+
+// A `distinct String` type whose text is checked (core/prelude.jet).
+CheckedText: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    checked_text: Bool{true}
+}
+
+// The value inside `{}` interpolation, derived from the type.
+Printable: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    derived: Bool{true}
+    auto_derive: Bool{true}
+    bundle: Bool{true}
+}
+
+// The value in a wire format, derived from the type.
+Serialize: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    derived: Bool{true}
+    through_elements: Bool{true}
+}
+
+// The value as a view, derived from the type.
+Renderable: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    derived: Bool{true}
+}
+
+// User-facing text for `{}` interpolation.
+Display: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    through_elements: Bool{true}
+    display: fn(self) -> String Never!
+}
+
+// Developer-facing text for `{value:Debug}` interpolation.
+Debug: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    through_elements: Bool{true}
+    any_receiver: Bool{true}
+    auto_derive: Bool{true}
+    debug: fn(self) -> String Never!
+}
+
+// Consuming, infallible cleanup.
+Close: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    close: fn(&&self) Never!
+}
+
+// Arithmetic with a zero and a one; a `#Numeric` distinct type has it.
+Numeric: trait {
+    local: Bool{true}
+    requires: String{"Add Sub Mul Comparable"}
+    bare_bound: Bool{true}
+    bundle: Bool{true}
+    zero: fn() -> Self Never!
+    one: fn() -> Self Never!
+}
+
+// The typed-SQL driver contract of `core.db`. A driver is a handle to shared
+// connection state, so its calls read the value they're made on.
+Driver: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    query: fn(self, sql: SQL) -> [[String:DBValue]] DBError!
+    query_one: fn(self, sql: SQL) -> [String:DBValue]? DBError!
+    execute: fn(self, sql: SQL) -> Int DBError!
+    begin: fn(self) -> DBTransaction DBError!
+}
+
+// A byte source: core.files's FileReader, and any type the streaming codecs
+// of core.encoding read from. `read_bytes` hands out at most `limit` bytes,
+// an empty list at the end of the input; `read_into` appends at most `limit`
+// bytes to `buffer` and answers how many, 0 at the end of the input.
+Reader: trait {
+    bare_bound: Bool{true}
+    read_bytes: fn(&self, limit: Int) -> [U8] IOError!
+    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!
+}
+
+// A byte sink: core.files's FileWriter, the screen, and any type the
+// streaming codecs of core.encoding write to. `write_bytes` writes all of
+// `bytes`; `flush` pushes what the sink holds on to its destination. `write`
+// and `write_line` take text, and by default write its bytes through
+// `write_bytes`.
+Writer: trait {
+    bare_bound: Bool{true}
+    write_bytes: fn(&self, bytes: [U8]) IOError!
+    flush: fn(&self) IOError!
+    write: fn(&self, text: String) IOError! {
+        self.write_bytes(text.bytes())
+    }
+    write_line: fn(&self, text: String) IOError! {
+        self.write_bytes("{text}\n".bytes())
+    }
+}
+
+// A value a transaction restores on rollback.
+Rollback: trait {
+    Snapshot: type
+    snapshot: fn(self) -> Snapshot Never!
+    restore: fn(&self, snap: Snapshot) Never!
+}
+
+// A cursor: `loop x in cursor`.
+Iterator: trait {
+    Item: type
+    next: fn(&self) -> Item? Never!
+}
+
+// Zero-copy `loop x in value`.
+Iterable: trait {
+    raw_return: Bool{true}
+    Iter: type
+    iter: fn(&&self) -> Iter Never!
+}
+
+// `value[key]`.
+Index: trait {
+    Key: type
+    Value: type
+    get: fn(self, k: Key) -> Value? Never!
+}
+
+// `value[key] = v`, with the key and value types of the type's `Index`.
+IndexMut: trait {
+    shares: String{"Index"}
+    set: fn(&self, k: Key, v: Value) Never!
+}

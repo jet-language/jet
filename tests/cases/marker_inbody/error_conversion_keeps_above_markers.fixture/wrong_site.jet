@@ -1,0 +1,18 @@
+// A marker an impl does not take is refused above an error conversion, as it
+// is above any impl.
+#Error
+FileErr: enum {
+    NotFound(String)
+}
+
+#Error
+AppErr: enum {
+    File(FileErr)
+}
+
+#Deprecated("old")
+impl AppErr.From(FileErr) {
+    from: fn(error: FileErr) -> AppErr { AppErr.File(error) }
+}
+
+run: fn() { print(1) }

@@ -1,0 +1,848 @@
+// The one build-option
+// table. By one naming rule a row is the field of a `package.jet` build profile
+// (`build: { fast: Build{ inline: off } }`), the flag `--inline=off` (`_`
+// is `-` in a flag), the `build: fn` method `b.inline(.Off)` and the pin
+// `b.pin(.inline, .Off)`; a value's method spelling is its PascalCase form.
+// One order holds: the command's stock value, then the selected profile, then
+// `build: fn`, then the flag, each later layer replacing the earlier. A pin makes
+// a flag with another value an error (E2113) that names the pin.
+
+// How a row's value is written. A Choice value is a word (`inline: off`,
+// `--inline=off`, `b.inline(.Off)`); a Level value is a word that is also
+// its own flag (`optimize: O2`, `-O2`, `b.optimize(.O2)`), and its row has no
+// `--name` flag; a Bool value is `true` or `false`
+// everywhere (`debug_info: false`, `--debug-info=false`,
+// `b.debug_info(false)`), and its bare flag (`--small`) is `true`;
+// `debug_info` also takes the word `split` as a profile field and a flag. A Text
+// value is a string (`output_dir: "dist"`, `--output-dir=dist`,
+// `b.output_dir("dist")`). A List value is strings (`libs: ["z"]`,
+// `b.libs(["z"])`), one flag per item (`--libs=z --libs=bz2`); it is kept as
+// one value, its items joined by newlines (build_options_list). A Duration
+// value is a positive Time literal written the same way everywhere
+// (`action_timeout: 10min`, `--action-timeout=10min`,
+// `b.action_timeout(10min)`), whole milliseconds or more.
+BuildOptionKind: enum {
+    Choice
+    Level
+    Bool
+    Text
+    List
+    Duration
+}
+
+BuildOptionRow: struct {
+    name: String
+    kind: BuildOptionKind
+    // The value spellings, as the profile field and the flag write them.
+    values: [String]
+    // The stock value of `jet build`, and of `jet run`, `jet dev` and `jet test`.
+    stock_build: String
+    stock_run: String
+    // The values that remove a runtime memory-safety check. Each is a
+    // `check_removal` gate (GateKind.CheckRemoval) the owning policy can refuse
+    // (E3415), and it applies only to code the built package wrote.
+    removes_check: [String]
+    help: String
+}
+
+JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
+    // The native backend's level (AGENTS.md I9). `jet build` is O2;
+    // `jet run`, `jet dev` and `jet test` are O0.
+    {name: "optimize", kind: BuildOptionKind.Level, values: [String]{"O0", "O1", "O2"}, stock_build: "O2", stock_run: "O0", removes_check: [String]{}, help: "How hard to optimize: O0, O1 or O2"},
+    // A failed list bounds check: fatal stops the program (the stock), report
+    // writes the failure to stderr and goes on with the access unchecked, off
+    // drops the check.
+    {name: "bounds", kind: BuildOptionKind.Choice, values: [String]{"fatal", "report", "off"}, stock_build: "fatal", stock_run: "fatal", removes_check: [String]{"report", "off"}, help: "What a failed bounds check does: fatal, report or off"},
+    // false leaves the DWARF sections (.debug_*) out of the image; .eh_frame
+    // stays, and a crash report then names addresses, not functions and lines.
+    // split (the stock `release` profile's) has `jet build` write the DWARF,
+    // the symbol table and the section headers to the side file
+    // `<image>.debug` and to the package's symbol store
+    // `.jet/symbols/.build-id/`, both found by the image's GNU build id; the
+    // other commands keep it in the image as with true. `build: fn` writes
+    // true or false only (build_option_method_values).
+    {name: "debug_info", kind: BuildOptionKind.Bool, values: [String]{"true", "false", "split"}, stock_build: "true", stock_run: "true", removes_check: [String]{}, help: "Whether the image carries DWARF debug info: true, false or split"},
+    // true keeps the optimizer's inlining to the O1 limits at any level, so
+    // inlining grows the code no more than `optimize: O1` does.
+    {name: "small", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Favor a smaller binary by keeping inlining to the O1 limits: true or false"},
+    // Which callees the optimizer inlines (O1 and O2; O0 inlines none): auto
+    // picks them by size and takes every `#Inline(Always)` one past the size
+    // limits, always_marked takes only the `#Inline(Always)` ones, past the
+    // size limits, and off inlines nothing.
+    {name: "inline", kind: BuildOptionKind.Choice, values: [String]{"auto", "always_marked", "off"}, stock_build: "auto", stock_run: "auto", removes_check: [String]{}, help: "Which calls the optimizer inlines: auto, always_marked or off"},
+    // What a native fault report prints after its first line (JetRuntime
+    // Fault.jet): full the Jet frames (function and file:line), brief only the
+    // faulting frame, off none. Naming a frame needs the image's debug info, so
+    // `backtrace: full` written with `debug_info: false` is refused (E2104).
+    {name: "backtrace", kind: BuildOptionKind.Choice, values: [String]{"full", "brief", "off"}, stock_build: "full", stock_run: "full", removes_check: [String]{}, help: "What a fault report shows of the stack: full, brief or off"},
+    // remove builds only the functions the entry reaches (the stock); keep
+    // also builds every other non-generic function of the built package, so the
+    // image carries each one (a debugger or a profiler can name it).
+    {name: "dead_code", kind: BuildOptionKind.Choice, values: [String]{"remove", "keep"}, stock_build: "remove", stock_run: "remove", removes_check: [String]{}, help: "Whether the image keeps the package's unreached functions: remove or keep"},
+    // true links the checked heap (JetRuntime Alloc.jet, checked mode): every
+    // heap block carries guards and its allocating call chain, and a double,
+    // foreign or wrong-layout free, a write past the end or a write after free
+    // stops the program with a report naming the call sites. false (the stock)
+    // links none of it and the program reads nothing at start for it. A web
+    // build has no checked heap, so true with `os: web` is refused (E2104).
+    {name: "checked_alloc", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Build with the checked memory allocator, which stops at a bad free or a write after free: true or false"},
+    // on writes each source `build: fn` generates (`b.generate`) to its
+    // `.jet/generated/<package>/<name>.jet` path under the package root for
+    // inspection; off (the stock) writes none.
+    {name: "write_generated", kind: BuildOptionKind.Choice, values: [String]{"off", "on"}, stock_build: "off", stock_run: "off", removes_check: [String]{}, help: "Whether fn build's generated sources are written to .jet/generated/: off or on"},
+    // Where `jet build` writes its executables: a directory under the package
+    // root, or an absolute one; "" (the stock) is `.jet/build`. A run builds
+    // its image in memory and writes none.
+    {name: "output_dir", kind: BuildOptionKind.Text, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "The directory jet build writes its executables to (\"\" is .jet/build)"},
+    // More C libraries the native link resolves foreign symbols against, each
+    // a static archive found as an undeclared `#Link` library is (pkg-config,
+    // then the C compiler's search path; ForeignLink.jet).
+    {name: "libs", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "More C libraries the native link resolves foreign symbols against"},
+    // More native link inputs, each `-L<dir>` (a directory `libs` and `-l`
+    // are found in first), `-l<name>` (a library, as in `libs`) or the path
+    // of a static `.a` archive. The native linker takes no flags and reads
+    // archives only, so any other word is refused (E2104). A non-empty value
+    // is a `link_override` gate the owning policy can
+    // refuse (E3415).
+    {name: "link_args", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "More native link inputs: -L<dir>, -l<name> or a .a archive path"},
+    // The operating system the image runs on: the key of each TARGET_OS_ALL
+    // OS, in that order. The native backend writes Linux x86-64 ELF images,
+    // and `jet build` also writes web builds (`--target web`), so every other
+    // value is refused (E2104).
+    {name: "os", kind: BuildOptionKind.Choice, values: [String]{"linux", "macos", "windows", "web", "wasm", "freestanding"}, stock_build: "linux", stock_run: "linux", removes_check: [String]{}, help: "The operating system the image runs on: linux, macos, windows, web, wasm or freestanding"},
+    // The oldest OS version the image runs on (a Mach-O image's minimum
+    // version). A Linux ELF image has no versioned ABI floor, so a non-empty
+    // value is refused (E2104).
+    {name: "min_os", kind: BuildOptionKind.Text, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "The oldest OS version the image runs on (\"\" is none)"},
+    // How long one build step (`b.run`) may run before it is stopped and the
+    // build fails; a step's own `.timeout(...)` replaces it for that step.
+    {name: "action_timeout", kind: BuildOptionKind.Duration, values: [String]{}, stock_build: "30s", stock_run: "30s", removes_check: [String]{}, help: "How long one build step may run, such as 10min"},
+} }
+
+// The runtime exports of the checked heap (JetRuntime Alloc.jet): its link
+// entry, which the entry of a `checked_alloc` build calls, and its start-up
+// hook, which turns checked mode on. A runtime build every program shares
+// (the prelinked native image, the web runtime partition) leaves both out,
+// so only a program built with `checked_alloc` runs checked.
+CHECKED_ALLOC_RUNTIME_EXPORTS: #run { [String]{"jet_rt_alloc_check_link", "jet_rt_alloc_check_init"} }
+
+// The Jai build options Jet refuses, each with the law that leaves nothing for
+// it to switch. A profile field, flag or `build: fn` call of one of these names
+// is refused with `law` instead of being an unknown name.
+BuildOptionRefusal: struct {
+    name: String
+    law: String
+}
+
+JET_BUILD_OPTION_REFUSALS: #run { [BuildOptionRefusal]{
+    {name: "null", law: "Jet has no null check to switch: a reference is never null, and a raw pointer's validity is the obligation of the `#Unsafe` code that uses it"},
+    {name: "casts", law: "Jet has no unchecked conversion to switch: a conversion is total or returns an Optional"},
+} }
+
+build_option_refusal: fn(name: String) -> BuildOptionRefusal? {
+    loop refusal in JET_BUILD_OPTION_REFUSALS {
+        if refusal.name == name -> return Val(refusal.copy())
+    }
+    None
+}
+
+// The refused option a jet flag (`--null` or `--null=off`) names.
+build_option_flag_refusal: fn(argument: String) -> BuildOptionRefusal? {
+    head: argument.split("=").to_list()[0]
+    loop refusal in JET_BUILD_OPTION_REFUSALS {
+        if build_option_flag(refusal.name) == head -> return Val(refusal.copy())
+    }
+    None
+}
+
+// The layer a value came from, in setting order.
+BuildOptionLayer: enum {
+    Stock
+    Profile
+    Code
+    Flag
+}
+
+// One written value of a row. `written` is its spelling (`-O2`,
+// `b.optimize(.O2)`, `optimize: O2`) and `site` the phrase placing it
+// (`at build.jet:3`, "in profile `fast` of package.jet"); both are "" at the
+// stock layer and for a flag. `pinned` marks a `b.pin` call.
+BuildOptionChoice: struct {
+    name: String
+    value: String
+    layer: BuildOptionLayer
+    written: String
+    site: String
+    pinned: Bool
+}
+
+// One `--set name=value` contribution to a declared package setting, the
+// value as written: the command-line writer of `#build.settings.<name>`.
+BuildSettingOverride: struct {
+    name: String
+    value: String
+}
+
+// The options one command compiles under. `profile` is the selected profile
+// (`release`, a declared name), "" when none is; `written` keeps every
+// non-stock value in layer order, so a `build: fn` layer can still go under the
+// flags; `values` is the resolved value of each row, in table order.
+// `settings` are the `--set` writers in argv order; `gates` the audited gates
+// `--gate name=allow` opens for the compile, in argv order. `observe` is
+// `jet run --observe`: the program links the runtime's observation start and
+// runs with JET_OBSERVE=1. `log` is the `--log` level filter of `jet run` and
+// `jet dev`, checked (log_filter_bad_pair); "" when none is given. `locked`
+// is `jet build --locked`: the build refuses a dependency whose effect row
+// the project lock doesn't cover, and writes no lock; it shapes no image, so
+// no cache key names it (build_options_key). `deep_checks` is the
+// `--deep-checks` request (DeepChecks), off unless a flag selects one.
+// `explain_partition` is `jet build --explain-partition`: a web build also
+// prints which partition, JS or Wasm, each function went to and why; it
+// shapes no image either.
+// `target_machine` is the declared machine without an OS that `jet build
+// --target=<machine>` names: the program is checked for that machine, and no
+// image is written for it yet; "" builds for the host.
+BuildOptions: struct {
+    command: String
+    profile: String
+    written: [BuildOptionChoice]
+    values: [BuildOptionChoice]
+    settings: [BuildSettingOverride]{[BuildSettingOverride]{}}
+    gates: [PolicyKey]{[PolicyKey]{}}
+    observe: Bool{false}
+    log: String{""}
+    locked: Bool{false}
+    deep_checks: DeepChecks{DeepChecks{}}
+    explain_partition: Bool{false}
+    target_machine: String{""}
+}
+
+// The deep checks one compile keeps (`--deep-checks` of run, dev, test, build,
+// debug and repl). `all` is a bare `--deep-checks`: every deep check of the program
+// and its Jet libraries. `scopes` are the `--deep-checks=<scope>` values, in
+// argv order without repeats; each keeps the deep checks of the declarations
+// it names (deep_checks_selects), and each must name one that holds a deep
+// check, even beside a bare flag (deep_checks_unselected). Neither is the
+// default in every profile: every deep check is off.
+DeepChecks: struct {
+    all: Bool{false}
+    scopes: [String]{[String]{}}
+}
+
+DEEP_CHECKS_FLAG: "--deep-checks"
+
+// What argv asks of the deep checks, or the flag it refuses (E2119).
+DeepChecksRead: enum {
+    Read(request: DeepChecks)
+    Refused(argument: String)
+}
+
+// The deep-check request of `argv`, up to `--`: each bare `--deep-checks`
+// selects every deep check and each `--deep-checks=<scope>` adds its scope.
+// An empty or malformed scope is refused (deep_checks_malformed).
+deep_checks_read: fn(argv: [String]) -> DeepChecksRead Never! {
+    request := DeepChecks{}
+    prefix: "{DEEP_CHECKS_FLAG}="
+    loop argument in argv {
+        if argument == "--" -> break
+        if argument == DEEP_CHECKS_FLAG {
+            request.all = true
+            next
+        }
+        if !argument.starts_with(prefix) -> next
+        scope: argument.slice(prefix.len()..<argument.len())
+        if !deep_checks_scope_valid(scope) {
+            return DeepChecksRead.Refused{argument: argument.copy()}  // copy: the refusal outlives argv.
+        }
+        if !request.scopes.contains(scope) -> request.scopes.push(scope.copy())  // copy: the request owns its scopes.
+    }
+    DeepChecksRead.Read{request: request}
+}
+
+// A scope is a package name, alone or then `::` and the names of a module,
+// type or function under it joined by `.` (`tree`, `tree::run`,
+// `tree::balance.Tree.fix`). A package name is ASCII letters, digits, `_`
+// and `-`; each name after `::` is letters, digits and `_`.
+deep_checks_scope_valid: fn(scope: String) -> Bool Never! {
+    if scope.split_once("::") == .Val(parts) {
+        if !deep_checks_name_valid(parts.before, true) -> return false
+        loop name in parts.after.split(".") {
+            if !deep_checks_name_valid(name, false) -> return false
+        }
+        return true
+    }
+    deep_checks_name_valid(scope, true)
+}
+
+// One name of a scope: ASCII letters, digits and `_`, and `-` in a package
+// name (`dashed`).
+deep_checks_name_valid: fn(name: String, dashed: Bool) -> Bool Never! {
+    bytes: name.bytes()
+    if bytes.len() == 0 -> return false
+    loop byte in bytes {
+        n: Int{byte}
+        letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+        digit: n >= 48 && n <= 57
+        if !letter && !digit && n != 95 && !(dashed && n == 45) -> return false
+    }
+    true
+}
+
+// Is the deep-check request off: no flag selects anything.
+deep_checks_off: fn(request: DeepChecks) -> Bool Never! {
+    !request.all && request.scopes.len() == 0
+}
+
+// The request's identity in a cache key: "" when off, else `all` then the
+// scopes in sorted order, so one selection written in any order has one key.
+deep_checks_key: fn(request: DeepChecks) -> String Never! {
+    if deep_checks_off(request) -> return ""
+    words := [String]{}
+    loop scope in request.scopes -> words.push(scope.copy())  // copy: sorted for the key; the request keeps argv order.
+    words.sort()
+    if request.all -> words.insert(0, "all")
+    words.join(",")
+}
+
+// The flags that write the request again, as deep_checks_read reads them.
+deep_checks_flags: fn(request: DeepChecks) -> [String] Never! {
+    words := [String]{}
+    if request.all -> words.push(DEEP_CHECKS_FLAG)
+    loop scope in request.scopes -> words.push("{DEEP_CHECKS_FLAG}={scope}")
+    words
+}
+
+// Does `scope` select the declaration at `path` (`<package>::<names>`): the
+// path itself, or one under it, at `::` under a package and at `.` under a
+// name (`tree` selects `tree::run` and `tree::balance.Tree.fix`;
+// `tree::balance` selects the latter).
+deep_checks_selects: fn(scope: String, path: String) -> Bool Never! {
+    if path == scope -> return true
+    separator: if scope.contains("::") -> "." else -> "::"
+    path.starts_with("{scope}{separator}")
+}
+
+// A scope that keeps no deep check. `selected` are the declarations it
+// names, none of which holds one; empty when it names no declaration.
+DeepChecksUnselected: struct {
+    scope: String
+    selected: [String]
+}
+
+// Every scope of `request` that keeps no deep check, in argv order, given the
+// path of each declaration (`paths`) and of each that holds a deep check
+// (`holders`). A bare flag beside a scope excuses none.
+deep_checks_unselected: fn(request: DeepChecks, paths: [String], holders: [String]) -> [DeepChecksUnselected] Never! {
+    found := [DeepChecksUnselected]{}
+    loop scope in request.scopes {
+        kept := false
+        loop path in holders {
+            if deep_checks_selects(scope, path) -> kept = true
+        }
+        if kept -> next
+        selected := [String]{}
+        loop path in paths {
+            if deep_checks_selects(scope, path) && !selected.contains(path) {
+                selected.push(path.copy())  // copy: the report owns its paths.
+            }
+        }
+        found.push(DeepChecksUnselected{scope: scope.copy(), selected: selected})  // copy: the report outlives the request.
+    }
+    found
+}
+
+// How many declarations a report names before `and N more`.
+DEEP_CHECKS_SHOWN: 3
+
+// The E2119 refusal of a malformed `--deep-checks=<scope>` flag
+// (deep_checks_read).
+deep_checks_malformed: fn(argument: String) -> Diagnostic Never! {
+    deep_checks_report("E2119", argument, "", "", "")
+}
+
+// The report of one scope that keeps no deep check: E2120 when it names no
+// declaration, E2121 when the declarations it names hold none. The fix offers
+// the scopes that do keep a deep check, ready to copy.
+deep_checks_unselected_report: fn(row: DeepChecksUnselected, holders: [String]) -> Diagnostic Never! {
+    held: if holders.len() == 0 -> "no declaration of this program holds one" else -> deep_checks_names(holders, "{DEEP_CHECKS_FLAG}=")
+    if row.selected.len() == 0 -> return deep_checks_report("E2120", "", row.scope, "", held)
+    deep_checks_report("E2121", "", row.scope, deep_checks_names(row.selected, ""), held)
+}
+
+// The first DEEP_CHECKS_SHOWN of `paths`, each after `prefix` in backticks,
+// then `and N more`.
+deep_checks_names: fn(paths: [String], prefix: String) -> String Never! {
+    shown := [String]{}
+    loop path in paths {
+        if shown.len() == DEEP_CHECKS_SHOWN -> break
+        shown.push("`{prefix}{path}`")
+    }
+    more: paths.len() - shown.len()
+    if more > 0 -> return "{shown.join(", ")} and {more} more"
+    shown.join(", ")
+}
+
+// One deep-check scope report, worded by its registry row with the holes
+// filled.
+deep_checks_report: fn(code: String, argument: String, scope: String, selected: String, holders: String) -> Diagnostic Never! {
+    row: diagnostic_registry_row(code) ?? panic("{code} is not registered")
+    what: deep_checks_text(row.what, argument, scope, selected, holders)
+    why: deep_checks_text(row.why, argument, scope, selected, holders)
+    fix: deep_checks_text(row.fix, argument, scope, selected, holders)
+    diagnostic_from_registry(code, None, what, why, fix)
+}
+
+deep_checks_text: fn(text: String, argument: String, scope: String, selected: String, holders: String) -> String Never! {
+    text.replace("{{argument}}", argument).replace("{{scope}}", scope).replace("{{selected}}", selected).replace("{{holders}}", holders)
+}
+
+// The first pair of a core.log level filter (the package's `log:` field,
+// `--log`, JET_LOG) that is not `level` or `module=level`, trimmed; None
+// when every pair is. A level is debug, info, warn, error, critical or
+// fatal; a module is identifier segments joined by `.`; empty pairs are
+// skipped.
+log_filter_bad_pair: fn(text: String) -> String? {
+    loop raw in text.split(",") {
+        pair: raw.trim()
+        if pair == "" -> next
+        parts: pair.split("=").to_list()
+        valid: if parts.len() == 1 -> log_filter_level(pair) else -> parts.len() == 2 && log_filter_module(parts[0].trim()) && log_filter_level(parts[1].trim())
+        if !valid -> return Val(pair)
+    }
+    None
+}
+
+// The fix line of every report of a bad level filter pair.
+LOG_FILTER_FIX: "write `level` or `module=level`, where level is debug, info, warn, error, critical or fatal"
+
+log_filter_level: fn(name: String) -> Bool Never! {
+    name == "debug" || name == "info" || name == "warn" || name == "error" || name == "critical" || name == "fatal"
+}
+
+log_filter_module: fn(path: String) -> Bool Never! {
+    if path == "" -> return false
+    loop segment in path.split(".") {
+        bytes: segment.bytes()
+        if bytes.len() == 0 -> return false
+        loop (index, byte) in bytes {
+            n: Int{byte}
+            letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
+            digit: n >= 48 && n <= 57
+            if !letter && !(digit && index > 0) -> return false
+        }
+    }
+    true
+}
+
+BuildOptionsResolved: enum {
+    Resolved(options: BuildOptions, notes: [String])
+    Refused(code: String, what: String, fix: String)
+}
+
+// `notes` are the stderr lines naming each value a flag replaced.
+
+build_option_row: fn(name: String) -> BuildOptionRow? {
+    loop row in JET_BUILD_OPTIONS {
+        if row.name == name -> return Val(row.copy())
+    }
+    None
+}
+
+build_option_flag: fn(name: String) -> String Never! { "--{name.replace("_", "-")}" }
+
+// The row a jet flag names: `--bounds` or `--bounds=off` the `bounds` row,
+// a level flag (`-O2`) its Level row.
+build_option_flag_row: fn(argument: String) -> BuildOptionRow? {
+    head: argument.split("=").to_list()[0]
+    loop row in JET_BUILD_OPTIONS {
+        named := row.kind != BuildOptionKind.Level && build_option_flag(row.name) == head
+        if row.kind == BuildOptionKind.Level {
+            loop value in row.values {
+                if build_option_level_flag(value) == argument -> named = true
+            }
+        }
+        if named -> return Val(row.copy())
+    }
+    None
+}
+
+// The flag of a Level row's value: `-O2` for `O2`.
+build_option_level_flag: fn(value: String) -> String Never! { "-{value}" }
+
+// The value a level flag (`-O2`) names; None for any other word, which
+// includes a level past the last value.
+build_option_level_of_flag: fn(word: String) -> String? Never! {
+    loop row in JET_BUILD_OPTIONS {
+        if row.kind != BuildOptionKind.Level -> next
+        loop value in row.values {
+            if build_option_level_flag(value) == word -> return Val(value.copy())
+        }
+    }
+    None
+}
+
+// A Level row's flags, as a fix names them: `-O0, -O1 or -O2`.
+build_option_level_flags_text: fn(row: BuildOptionRow) -> String Never! {
+    build_option_join(loop value in row.values -> build_option_level_flag(value))
+}
+
+// A value as a `build: fn` argument: `min_size` -> `.MinSize` for a Choice
+// row, `O2` -> `.O2` for a Level row, `false` as it is for a Bool row,
+// `"dist"` for a Text row and `["z", "bz2"]` for a List row.
+build_option_argument: fn(row: BuildOptionRow, value: String) -> String {
+    if row.kind == {
+        .Bool | .Duration -> value.copy()
+        .Text -> "\"{value}\""
+        .List -> {
+            items := [String]{}
+            loop item in build_option_items(value) -> items.push("\"{item}\"")
+            "[{items.join(", ")}]"
+        }
+        .Choice | .Level -> ".{sema_casing_pascal_words(value)}"
+    }
+}
+
+// The row value a `build: fn` argument `.Variant` spells, if any.
+build_option_value_of_variant: fn(row: BuildOptionRow, variant: String) -> String? {
+    if row.kind != BuildOptionKind.Choice && row.kind != BuildOptionKind.Level -> return None
+    spelled: ".{variant}"
+    loop value in row.values {
+        if build_option_argument(row, value) == spelled -> return Val(value)
+    }
+    None
+}
+
+// Whether `value` is a value of `row`: one of its spellings for a Choice,
+// Level or Bool row, any one-line text for a Text row, and items none of
+// which is empty for a List row.
+build_option_accepts: fn(row: BuildOptionRow, value: String) -> Bool Never! {
+    if row.kind == {
+        .Choice | .Level | .Bool -> row.values.contains(value)
+        .Text -> !value.contains("\n")
+        .List -> !build_option_items(value).contains("")
+        .Duration -> build_option_duration_ms(value) != None
+    }
+}
+
+// The milliseconds a Duration value (`10min`, `30s`, `1_500ms`) spells: a
+// whole number and one Time unit, ns through h. A value that is not
+// written so, or that comes to less than one millisecond, has none.
+build_option_duration_ms: fn(value: String) -> Int? Never! {
+    // Longer suffixes first, so `ms` is not read as `s`.
+    units: [(suffix: String, ns: Int)]{(suffix: "ns", ns: 1), (suffix: "us", ns: 1000), (suffix: "ms", ns: 1000000), (suffix: "min", ns: 60000000000), (suffix: "s", ns: 1000000000), (suffix: "h", ns: 3600000000000)}
+    loop unit in units {
+        if !value.ends_with(unit.suffix) -> next
+        digits: value.removesuffix(unit.suffix).replace("_", "")
+        if digits == "" || digits.len() > 12 -> return None
+        loop character in digits.chars() {
+            if character < '0' || character > '9' -> return None
+        }
+        count: Int.parse(digits) ?? return None
+        // At most 12 digits, so no unit's product overflows.
+        ms: if unit.ns >= 1000000 -> count * unit.ns.div_euclid(1000000) else -> count.div_euclid(1000000.div_euclid(unit.ns))
+        if ms <= 0 -> return None
+        return Val(ms)
+    }
+    None
+}
+
+// The items of a List value (build_option_accepts): "" is no item.
+build_option_items: fn(value: String) -> [String] Never! {
+    if value == "" -> return [String]{}
+    value.split("\n").to_list()
+}
+
+// The List value of `items`.
+build_option_list_value: fn(items: [String]) -> String Never! { items.join("\n") }
+
+// `fatal, report or off`
+build_option_values_text: fn(row: BuildOptionRow) -> String Never! { build_option_join(row.values) }
+
+// What a value of `row` is, as a fix names it: `one of fatal, report or
+// off`, `one of -O0, -O1 or -O2`, `a path or other text`, `one item per flag`.
+build_option_value_hint: fn(row: BuildOptionRow) -> String Never! {
+    if row.kind == {
+        .Choice | .Bool -> "one of {build_option_values_text(row)}"
+        .Level -> "one of {build_option_level_flags_text(row)}"
+        .Text -> "a path or other text"
+        .List -> "one item per flag"
+        .Duration -> "a positive duration such as 10min, 90s or 500ms"
+    }
+}
+
+// What a `package.jet` profile field of `row` holds, as a fix names it.
+build_option_profile_hint: fn(row: BuildOptionRow) -> String Never! {
+    if row.kind == {
+        .Choice | .Level | .Bool -> "one of {build_option_values_text(row)}"
+        .Text -> "a string"
+        .List -> "a list of strings, none empty"
+        .Duration -> "a positive Time literal such as 10min"
+    }
+}
+
+// `one of .Fatal, .Report or .Off`: the values as `build: fn` writes them; for
+// a Text or List row, the shape of its argument.
+build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
+    if row.kind == BuildOptionKind.Text -> return "a string literal"
+    if row.kind == BuildOptionKind.List -> return "a list literal of strings"
+    if row.kind == BuildOptionKind.Duration -> return "a positive Time literal such as `10min`"
+    words := [String]{}
+    loop value in build_option_method_values(row) -> words.push(build_option_argument(row, value))
+    "one of {build_option_join(words)}"
+}
+
+// The values `build: fn` writes for a Choice or Bool row: a Bool row's are
+// its Bool literals, since `debug_info`'s `split` is a profile field's and a
+// flag's value only.
+build_option_method_values: fn(row: BuildOptionRow) -> [String] Never! {
+    if row.kind != BuildOptionKind.Bool -> return row.values.copy()
+    out := [String]{}
+    loop value in row.values {
+        if value == "true" || value == "false" -> out.push(value.copy())
+    }
+    out
+}
+
+build_option_join: fn(words: [String]) -> String Never! {
+    out := ""
+    loop i in 0..<words.len() {
+        joint := ", "
+        if i == 0 -> joint = ""
+        if i > 0 && i == words.len() - 1 -> joint = " or "
+        out = "{out}{joint}{words[i]}"
+    }
+    out
+}
+
+// The rows that only place a product, not shape its bytes, so no cache key
+// names them.
+JET_BUILD_OPTIONS_UNKEYED: [String]{"output_dir", "action_timeout"}
+
+// The profile a compile selects when no `--profile` names one: every compile
+// request starts at it (JetDriverCompileRequest), and every record that names
+// the selected profile names it then.
+JET_BUILD_DEFAULT_PROFILE: "dev"
+
+// The options' identity in a cache key: the profile, then each resolved row
+// that shapes the image, then each `--set` setting value, then `observe`,
+// `log` and the deep checks a flag selects.
+build_options_key: fn(options: BuildOptions) -> String Never! {
+    out := if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
+    loop choice in options.values {
+        if !JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) {
+            out = "{out};{choice.name}={choice.value}"
+        }
+    }
+    loop setting in options.settings -> out = "{out};set.{setting.name}={setting.value}"
+    if options.observe -> out = "{out};observe"
+    if options.log != "" -> out = "{out};log={options.log}"
+    deep: deep_checks_key(options.deep_checks)
+    if deep != "" -> out = "{out};deep={deep}"
+    out
+}
+
+// The stock options of `command`: no profile, no flag.
+build_options_stock: fn(command: String) -> BuildOptions Never! {
+    if build_options_resolve(command, "", [BuildOptionChoice]{}) == {
+        .Resolved(options, _) -> return options
+        .Refused(_, what, _) -> panic("the stock build options refused: {what}")
+    }
+}
+
+// The resolved value of row `name`.
+build_options_value: fn(options: BuildOptions, name: String) -> String Never! {
+    loop choice in options.values {
+        if choice.name == name -> return choice.value
+    }
+    panic("build option `{name}` is not a row of JET_BUILD_OPTIONS")
+}
+
+// The items of List row `name`'s resolved value.
+build_options_list: fn(options: BuildOptions, name: String) -> [String] Never! {
+    build_option_items(build_options_value(options, name))
+}
+
+// The resolved `link_args`, when there are any: the `link_override` gate
+// of the package being built.
+build_options_link_override: fn(options: BuildOptions) -> BuildOptionChoice? Never! {
+    loop choice in options.values {
+        if choice.name == "link_args" && choice.value != "" -> return Val(choice.copy())
+    }
+    None
+}
+
+// Whether `choice`'s value removes a runtime check (its row's `removes_check`).
+build_option_removes_check: fn(choice: BuildOptionChoice) -> Bool Never! {
+    row: build_option_row(choice.name) ?? return false
+    row.removes_check.contains(choice.value)
+}
+
+// The resolved values that remove a runtime check, in table order.
+build_options_check_removals: fn(options: BuildOptions) -> [BuildOptionChoice] Never! {
+    out := [BuildOptionChoice]{}
+    loop choice in options.values {
+        if build_option_removes_check(choice) -> out.push(choice.copy())
+    }
+    out
+}
+
+// The stderr receipt of one check removal (build_options_check_removals), the
+// `check_removal` gate `jet inspect gates` lists for the same choice.
+build_option_check_removal_note: fn(choice: BuildOptionChoice) -> String Never! {
+    place: if choice.site == "" -> "`{choice.written}`" else -> "`{choice.written}` {choice.site}"
+    "note: {place} removes {choice.name} checks from this package's code (check_removal gate)"
+}
+
+// The jet flags of `argv` that name a row, as Flag-layer choices, or the
+// refusal of a value outside its row. A level flag (`-O2`) is its value.
+build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
+    flags := [BuildOptionChoice]{}
+    loop argument in argv {
+        if argument == "--" -> break
+        row := build_option_flag_row(argument) ?? next
+        level: row.kind == BuildOptionKind.Level
+        flag: if level -> build_option_level_flags_text(row) else -> build_option_flag(row.name)
+        bare: argument == flag && row.kind == BuildOptionKind.Bool
+        if !level && !bare && !argument.starts_with("{flag}=") {
+            return BuildOptionsResolved.Refused{code: "E2104", what: "`{flag}` needs a value", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
+        }
+        value: if {
+            level -> argument.slice(1..<argument.len())
+            bare -> "true"
+            else -> argument.slice(flag.len() + 1..<argument.len())
+        }
+        if !build_option_accepts(row, value) || (row.kind == BuildOptionKind.List && value == "") {
+            return BuildOptionsResolved.Refused{code: "E2104", what: "`{argument}` isn't a value of `{row.name}`", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
+        }
+        // Each flag of a List row is one more item.
+        if row.kind == BuildOptionKind.List {
+            merged := false
+            loop at in 0..<flags.len() {
+                if flags[at].name != row.name -> next
+                earlier: flags[at].copy()
+                flags[at] = BuildOptionChoice{name: earlier.name, value: "{earlier.value}\n{value}", layer: earlier.layer, written: "{earlier.written} {argument}", site: "", pinned: false}
+                merged = true
+            }
+            if merged -> next
+        }
+        loop earlier in flags {
+            if earlier.name == row.name && earlier.value != value {
+                return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: if level -> "pass one of {flag}" else -> "pass `{flag}` once"}
+            }
+        }
+        flags.push(BuildOptionChoice{name: row.name.move(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
+    }
+    BuildOptionsResolved.Resolved{options: BuildOptions{command: "", profile: "", written: flags, values: [BuildOptionChoice]{}}, notes: [String]{}}
+}
+
+// Resolve `written` (layer order: profile, then code, then flags) over the
+// stock values of `command`. A flag that replaces a profile or code value
+// leaves a note; a flag against a pin with another value is E2113.
+build_options_resolve: fn(command: String, profile: String, written: [BuildOptionChoice]) -> BuildOptionsResolved Never! {
+    values := [BuildOptionChoice]{}
+    notes := [String]{}
+    loop row in JET_BUILD_OPTIONS {
+        stock: if command == "build" -> row.stock_build else -> row.stock_run
+        current := BuildOptionChoice{name: row.name, value: stock, layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false}
+        loop choice in written {
+            if choice.name != row.name -> next
+            if choice.layer == BuildOptionLayer.Flag {
+                if current.pinned && current.value != choice.value {
+                    return BuildOptionsResolved.Refused{code: "E2113", what: "`{row.name}` is pinned to `{current.value}` {current.site}, so `{choice.written}` can't change it", fix: "remove the flag, or remove the pin {current.site}"}
+                }
+                if current.layer == BuildOptionLayer.Profile || current.layer == BuildOptionLayer.Code {
+                    if current.value != choice.value {
+                        notes.push("note: {choice.written} replaces {current.written} {current.site} for this run")
+                    }
+                }
+            }
+            current = choice.copy()
+        }
+        values.push(current)
+    }
+    // A full backtrace names frames from the DWARF that `debug_info: false`
+    // leaves out; the stock `full` degrades to addresses, a written one is
+    // refused.
+    backtrace: values[build_option_index("backtrace")].copy()
+    debug_info: values[build_option_index("debug_info")].copy()
+    if backtrace.layer != BuildOptionLayer.Stock && backtrace.value == "full" && debug_info.value == "false" {
+        backtrace_place: if backtrace.site == "" -> "`{backtrace.written}`" else -> "`{backtrace.written}` {backtrace.site}"
+        debug_place: if debug_info.site == "" -> "`{debug_info.written}`" else -> "`{debug_info.written}` {debug_info.site}"
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{backtrace_place} needs debug info, which {debug_place} leaves out", fix: "write `backtrace: brief` or `backtrace: off`, or drop `debug_info: false`"}
+    }
+    // The native backend writes Linux x86-64 ELF images (JetBackend Image/);
+    // `jet build` also writes a web build (JetWeb), which only it writes.
+    os: values[build_option_index("os")].copy()
+    if os.value == "web" && command != "build" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(os)} asks for a web build, and `jet {command}` runs Linux x86-64 ELF images only", fix: "drop it, or use `jet build`"}
+    }
+    if os.value != "linux" && os.value != "web" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(os)} asks for a {os.value} image, and the native backend writes Linux x86-64 ELF images only", fix: "drop it, or write `os: linux`"}
+    }
+    // The web runtime partition holds no checked heap
+    // (CHECKED_ALLOC_RUNTIME_EXPORTS).
+    checked_alloc: values[build_option_index("checked_alloc")].copy()
+    if os.value == "web" && checked_alloc.value == "true" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(checked_alloc)} asks for the checked allocator, and a web build has none", fix: "drop it, or build for Linux"}
+    }
+    min_os: values[build_option_index("min_os")].copy()
+    if min_os.value != "" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(min_os)} sets a minimum OS version, and a Linux ELF image has none to set: its ABI has no versioned floor", fix: "drop it"}
+    }
+    // Only `jet build` writes an executable for output_dir to place.
+    output_dir: values[build_option_index("output_dir")].copy()
+    if command != "build" && output_dir.value != "" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(output_dir)} places the executables `jet build` writes, and `jet {command}` writes none", fix: "drop it, or use `jet build`"}
+    }
+    // The native linker takes no flags and reads `ar` archives only.
+    link_args: values[build_option_index("link_args")].copy()
+    loop word in build_option_items(link_args.value) {
+        if (word.starts_with("-L") || word.starts_with("-l")) && word.len() > 2 -> next
+        if !word.starts_with("-") && word.ends_with(".a") -> next
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(link_args)} passes `{word}`, and the native linker takes only `-L<dir>`, `-l<name>` and `.a` archive paths", fix: "drop `{word}`, or name the library or archive it links"}
+    }
+    BuildOptionsResolved.Resolved{options: BuildOptions{command: command, profile: profile, written: written, values: values}, notes: notes}
+}
+
+// Where `choice` was written, as a report quotes it: "`--os=web`" or
+// "`os: web` in profile `p` of package.jet".
+build_option_place: fn(choice: BuildOptionChoice) -> String Never! {
+    if choice.site == "" -> return "`{choice.written}`"
+    "`{choice.written}` {choice.site}"
+}
+
+// The position of row `name` in JET_BUILD_OPTIONS.
+build_option_index: fn(name: String) -> Int Never! {
+    loop at in 0..<JET_BUILD_OPTIONS.len() {
+        if JET_BUILD_OPTIONS[at].name == name -> return at
+    }
+    panic("build option `{name}` is not a row of JET_BUILD_OPTIONS")
+}
+
+// `options` with the `build: fn` layer `code` placed between its profile
+// values and its flags, resolved again.
+build_options_with_code: fn(options: BuildOptions, code: [BuildOptionChoice]) -> BuildOptionsResolved Never! {
+    written := [BuildOptionChoice]{}
+    loop choice in options.written {
+        if choice.layer == BuildOptionLayer.Profile -> written.push(choice.copy())
+    }
+    loop choice in code -> written.push(choice.copy())
+    loop choice in options.written {
+        if choice.layer == BuildOptionLayer.Flag -> written.push(choice.copy())
+    }
+    build_options_resolve(options.command, options.profile, written)
+}
+
+/// Whether a command may reuse work an earlier run saved instead of doing it
+/// live. The reuse covers `jet run`'s kept programs, `jet build`'s stored
+/// executables, core.build action records, the foreign C archive,
+/// provisioning and Rust bridge caches, `jet check` receipts and `jet test`'s
+/// stored results. It is off: every run compiles, checks and tests live, and
+/// reads and writes none of those stores. The reuse code stays in place, but
+/// no flag, variable or setting reaches it until a ballot ratifies how a run
+/// opts in.
+BUILD_REUSE_SAVED_WORK: false
+
+#Test("no command reuses work an earlier run saved") {
+    assert(!BUILD_REUSE_SAVED_WORK)
+}

@@ -1,0 +1,16 @@
+# tests/dev_parts/routine.rs::tracked_origin_fact_matches_aot_in_default_dev at tests/dev_parts/routine.rs:6336; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: tracked_origin_fact_matches_aot_in_default_dev.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build origin_fact.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = tracked_origin_fact_matches_aot_in_default_dev.1.out
+stderr: empty
+step dev: jet run origin_fact.jet
+exit: == aot
+stdout: == aot
+stderr: == aot

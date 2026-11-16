@@ -1,0 +1,17 @@
+# PORT tests/repl.rs:2112-2137; all original predicates, verbatim input literals.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+fixture: repl_allow_fs_still_rejects_paths_outside_project_root.fixture
+mkdir: project
+write: path.txt = "{work}/outside.txt"
+capture: escaped = text file.replace("\\", "\\\\") path.txt
+write: input.in repl_allow_fs_still_rejects_paths_outside_project_root.fixture/input.template
+step: jet repl --project {work}/project --allow=FS
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: {work}/input.in
+exit: any # original status unasserted
+stdout|stderr: ~ "E1803" # original predicate
+stdout|stderr: ~ "FS.Write" # original predicate
+stdout|stderr: ~ "{cap:escaped}" # original predicate
+file: outside.txt absent

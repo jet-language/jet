@@ -1,0 +1,19 @@
+# An optional function slot `(fn(Int) -> String)?` takes a written closure,
+# an untyped closure typed from the slot, a function and a bound method
+# (`fmt.render`), as a call argument and as a struct field; `None` still
+# fills it as absent. Before, a closure there was E0112 (its own `fn(Int)
+# -[]> String` did not fit the optional) and the method read was E0302.
+fixture: optional_fn_slot_accepts_closure_and_method.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "c1\n#2\nm3\nnone\nu5\nh6\nd7\nquiet\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "c1\n#2\nm3\nnone\nu5\nh6\nd7\nquiet\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "c1\n#2\nm3\nnone\nu5\nh6\nd7\nquiet\n"

@@ -1,0 +1,295 @@
+use {
+    jet_foundation.[CompilerThreads, Item, ModuleID, NameTable, Span, UnitFamilyDef, UnitFamilyMember, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, name_intern, name_table]
+    jet_parser.[parse_generated_source]
+}
+
+// `inject_units_prelude`: the only catalog is the ordinary Prelude source
+// SEMA_PRELUDE_UNITS_SOURCE (Registration/PreludeUnits.jet). This stage changes
+// AST items only; it never adds a physical/loaded module. The catalog is
+// parsed (exact scales included) and its dimensions resolved here, and
+// SEMA_UNITS_CATALOG (PreludeRows.jet) is what this returns, written by
+// Compiler/Toolchain/PreludeRows, so neither a compile nor the compiler's
+// build parses or scans the catalog text; a text that does not parse stops
+// that tool.
+sema_units_catalog_read: fn() -> [UnitFamilyDef] {
+    parsed: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
+    if parsed.diagnostics.len() > 0 {
+        panic("Prelude/Units.jet does not parse: {parsed.diagnostics[0].what}")
+    }
+    families := [UnitFamilyDef]{}
+    loop item in parsed.program.items {
+        if item == .UnitFamily(family) -> families.push(family)
+    }
+    sema_units_resolve_standard(families)
+    families
+}
+
+// The names `items` declares (`occupied`) and the unit families it declares
+// itself (`local_families`); each item is read in place.
+sema_units_local_names: fn(items: [Item], occupied: &[String:Bool], local_families: &[String:Bool]) Never! {
+    loop item in items {
+        if item == {
+            .UnitFamily(family) -> {
+                local_families[family.family] = true
+                loop named in sema_registration_unit_family_type_names(family) {
+                    occupied[named.name] = true
+                }
+            }
+            .Distinct(definition) -> { occupied[definition.name] = true }
+            .Struct(definition) -> { occupied[definition.name] = true }
+            .Enum(definition) -> { occupied[definition.name] = true }
+            .TypeAlias(definition) -> occupied[definition.name] = true
+            .Func(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+// What each module's unit scan reads, built once per graph from the catalog:
+// `wanted` interns the names a source mention scan looks up
+// (sema_units_source_mentions), every catalog family name and member type
+// name; `members` interns every catalog member name, and `member_lengths`
+// holds their distinct byte lengths, shortest first, so a scan keeps only the
+// suffixes a member name prefixes; and `type_names[family][member]` is each
+// catalog member's type name (sema_registration_unit_type_name).
+SemaUnitsCatalogNames: struct {
+    wanted: NameTable
+    members: NameTable
+    member_lengths: [Int]
+    type_names: [[String]]
+}
+
+sema_units_catalog_names: fn(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames Never! {
+    wanted := name_table()
+    members_named := name_table()
+    member_lengths := [Int]{}
+    type_names := [[String]]{}
+    loop family in catalog {
+        _ := name_intern(wanted, family.family)
+        members := [String]{}
+        loop member in family.members {
+            type_name: sema_registration_unit_type_name(member.name)
+            _ := name_intern(wanted, type_name)
+            _ := name_intern(members_named, member.name)
+            length: member.name.bytes().len()
+            if length > 0 && !member_lengths.contains(length) -> member_lengths.push(length)
+            members.push(type_name)
+        }
+        type_names.push(members)
+    }
+    member_lengths.sort()
+    SemaUnitsCatalogNames{wanted: wanted.move(), members: members_named.move(), member_lengths: member_lengths.move(), type_names: type_names.move()}
+}
+
+// Whether `mentions` names any catalog family or member, the test
+// sema_units_inject starts its selection with: without one it adds nothing.
+sema_units_mentioned: fn(catalog: [UnitFamilyDef], names: SemaUnitsCatalogNames, mentions: SemaUnitSourceMentions) -> Bool Never! {
+    loop (index, family) in catalog {
+        if sema_units_identifier(mentions, family.family) -> return true
+        loop (member_index, member) in family.members {
+            if sema_units_member(mentions, member.name, names.type_names[index][member_index]) {
+                return true
+            }
+        }
+    }
+    false
+}
+
+// A compiler thread is admitted for at least this many bytes of module
+// source to scan for unit mentions.
+SEMA_UNITS_SCAN_MIN_BYTES_PER_THREAD: 262144
+
+// Whether input `index` takes the catalog families: every source module
+// (the compiler-owned effect module `skipped` is none) that keeps its prelude.
+sema_units_scanned: fn(inputs: [SemaRegistrationModuleInput], index: Int, skipped: ModuleID) -> Bool Never! {
+    !inputs[index].program.no_prelude && inputs[index].module_identity != skipped
+}
+
+// The unit mentions of every input sema_units_scanned marks, by input, and an
+// empty row for the others. An input that holds its mentions already
+// (`units_mentions`) gives them up; the rest are scanned. A scan reads
+// nothing but its input's source, so the inputs move into the threads'
+// shared state, up to `threads` compiler threads scan the sources in place,
+// claimed largest first, and the inputs move back in order. Each row lands
+// at its input, so the rows are the same for any thread count.
+sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: ModuleID, names: SemaUnitsCatalogNames, threads: CompilerThreads) -> [SemaUnitSourceMentions] {
+    rows := [SemaUnitSourceMentions]{}
+    jobs := [Int]{}
+    weights := [Int]{}
+    work := 0
+    loop index in 0..<inputs.len() {
+        rows.push(SemaUnitSourceMentions{identifiers: [String:Span]{}, unqualified: [String:Bool]{}, suffixes: [SemaUnitSuffixMention]{}})
+        if !sema_units_scanned(inputs, index, skipped) -> next
+        if sema_units_held(inputs[index].units_mentions.move()) == .Val(held) {
+            rows[index] = held.move()
+            next
+        }
+        bytes: inputs[index].source.count_bytes()
+        jobs.push(index)
+        weights.push(bytes)
+        work += bytes
+    }
+    workers: compiler_threads_admit(threads, jobs.len(), work, SEMA_UNITS_SCAN_MIN_BYTES_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop index in jobs -> rows[index] = sema_units_source_mentions(inputs[index].source, names)
+        return rows
+    }
+    order := [Int]{}
+    loop rank in compiler_threads_heaviest_first(weights) -> order.push(jobs[rank])
+    // copy: the names are catalog-sized and every scanning thread reads them.
+    shared_state: Shared{SemaUnitsScanShared{inputs: [SemaRegistrationModuleInput]{}, names: [SemaUnitsCatalogNames]{names.copy()}, order: order.move()}}
+    sema_units_scan_fill(shared_state, inputs)
+    queue: Shared{SemaUnitsScanQueue{next: 0}}
+    sema_units_scanners(shared_state, queue, 0, workers, rows)
+    sema_units_scan_take(shared_state, inputs)
+    rows
+}
+
+// The mentions an input held (`units_mentions`), taken out of it.
+sema_units_held: fn(held: &&SemaUnitSourceMentions?) -> SemaUnitSourceMentions? Never! {
+    held.move()
+}
+
+// What every scanning thread reads: the inputs (moved in and back out; each
+// source is read in place), the catalog names (the one row of its list) and
+// the input index claimed at each rank.
+SemaUnitsScanShared: struct {
+    inputs: [SemaRegistrationModuleInput]
+    names: [SemaUnitsCatalogNames]
+    order: [Int]
+}
+
+// The next unclaimed rank.
+SemaUnitsScanQueue: struct {
+    next: Int
+}
+
+// One input's mentions, scanned by one thread.
+SemaUnitsScanned: struct {
+    module_index: Int
+    mentions: SemaUnitSourceMentions
+}
+
+sema_units_scan_fill: fn(shared_state: Shared<SemaUnitsScanShared>, inputs: &[SemaRegistrationModuleInput]) {
+    permit: shared_state.guard_edit()
+    compiler_transfer_rows<SemaRegistrationModuleInput>(permit.value.inputs, inputs)
+}
+
+sema_units_scan_take: fn(shared_state: Shared<SemaUnitsScanShared>, inputs: &[SemaRegistrationModuleInput]) {
+    permit: shared_state.guard_edit()
+    compiler_transfer_rows<SemaRegistrationModuleInput>(inputs, permit.value.inputs)
+}
+
+// Runs scanning threads `from..<workers`, one task each, and moves every row
+// a thread returned into its input's slot of `rows`.
+sema_units_scanners: fn(shared_state: Shared<SemaUnitsScanShared>, queue: Shared<SemaUnitsScanQueue>, from: Int, workers: Int, rows: &[SemaUnitSourceMentions]) {
+    if from >= workers {
+        return
+    }
+    task.group sema_units_scan_threads {
+        head: task sema_units_scan_claimed(shared_state, queue)
+        sema_units_scanners(shared_state, queue, from + 1, workers, rows)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := claimed.pop() ?? break
+            rows[done.module_index] = done.mentions.move()
+        }
+    }
+}
+
+// One thread: scans the inputs it claims.
+sema_units_scan_claimed: fn(shared_state: Shared<SemaUnitsScanShared>, queue: Shared<SemaUnitsScanQueue>) -> [SemaUnitsScanned] {
+    inputs: shared_state.guard_read()
+    claimed := [SemaUnitsScanned]{}
+    loop {
+        rank: sema_units_scan_claim(queue)
+        if rank >= inputs.value.order.len() -> break
+        module_index: inputs.value.order[rank]
+        // Passed straight through: a local binding of a guarded row would copy it.
+        mentions := sema_units_source_mentions(inputs.value.inputs[module_index].source, inputs.value.names[0])
+        claimed.push(SemaUnitsScanned{module_index: module_index, mentions: mentions.move()})
+    }
+    claimed
+}
+
+sema_units_scan_claim: fn(queue: Shared<SemaUnitsScanQueue>) -> Int {
+    permit: queue.guard_edit()
+    rank: permit.value.next
+    permit.value.next = rank + 1
+    rank
+}
+
+// `mentions` is the input's sema_units_scan_mentions row.
+sema_units_inject: fn(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef], names: SemaUnitsCatalogNames, mentions: SemaUnitSourceMentions) Never! {
+    if input.program.no_prelude {
+        return
+    }
+    occupied := [String:Bool]{}
+    local_families := [String:Bool]{}
+    sema_units_local_names(input.program.items, occupied, local_families)
+    rows := [String:Int]{}
+    selected := [String:Bool]{}
+    queue := [Int]{}
+    loop (index, family) in catalog {
+        rows[family.family] = index
+        used := sema_units_identifier(mentions, family.family)
+        if !used {
+            loop (member_index, member) in family.members {
+                if sema_units_member(mentions, member.name, names.type_names[index][member_index]) {
+                    used = true
+                    break
+                }
+            }
+        }
+        if used {
+            selected[family.family] = true
+            queue.push(index)
+        }
+    }
+    // Transitive dimension dependencies, visiting each selected family once.
+    at := 0
+    loop at < queue.len() {
+        family: catalog[queue[at]]
+        at += 1
+        if family.dimension == .Val(claim) {
+            if claim == .Derived(expression) {
+                dependencies := [String]{}
+                sema_units_dimension_dependencies(expression, dependencies)
+                loop dependency in dependencies {
+                    if selected.get(dependency) != None -> next
+                    selected[dependency] = true
+                    if rows.get(dependency) == .Val(index) -> queue.push(index)
+                }
+            }
+        }
+    }
+    loop (family_index, standard) in catalog {
+        if local_families.get(standard.family) != None || selected.get(standard.family) == None {
+            next
+        }
+        family := standard
+        members := [UnitFamilyMember]{}
+        // The type name of each kept member, by its index in `members`.
+        member_types := [String]{}
+        loop (member_index, member) in family.members {
+            base: if family.base == .Val(value) -> value.name == member.name else -> false
+            type_name: names.type_names[family_index][member_index]
+            if (base || sema_units_member(mentions, member.name, type_name)) && occupied.get(type_name) == None {
+                members.push(member)
+                member_types.push(type_name.copy())
+            }
+        }
+        family.members = members
+        anchor := Span?{None}
+        loop (member_index, member) in family.members {
+            if sema_units_member_span(mentions, member.name, member_types[member_index]) == .Val(span) {
+                anchor = Val(span)
+                break
+            }
+        }
+        family_anchor: anchor ?? sema_units_identifier_span(mentions, family.family) ?? Span{start: 0, end: 0}
+        loop index in 0..<family.members.len() {
+            family.members[index].name_span = sema_units_member_span(mentions, family.members[index].name, member_types[index]) ?? family_anchor
+        }
+        input.program.items.push(Item.UnitFamily{value: family})
+    }
+}

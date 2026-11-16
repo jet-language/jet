@@ -1,0 +1,8 @@
+# tests/report.rs::compile_cascade_json_snapshot_keeps_roots_and_pruned_sites
+# Exact render_all_json(custom <e2392_root_cascade.jet> ReportPath) NDJSON snapshot is compiler-lib subclaim, preserved in e2392_root_cascade.original.json.
+# Public diagnostics nonempty predicate executable; PENDING-SAME-HEAD, runtime UNRUN.
+fixture: compile_cascade_json_snapshot_keeps_roots_and_pruned_sites.fixture
+env: NO_COLOR=1
+step: jet check e2392_root_cascade.jet --json
+exit: nonzero
+json: stdout doc $.reports #>= 1 # original !diagnostics.is_empty

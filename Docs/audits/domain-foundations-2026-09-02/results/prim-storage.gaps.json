@@ -1,0 +1,20 @@
+[
+  {
+    "id": "prim-storage-G1",
+    "tags": ["impossible"],
+    "primitive": "OS-backed memory-mapped files with mapped-byte lifetime and flush controls",
+    "evidence": "JET_STORE_DIR=... scripts/agent/jet-env jet check pkg/mmap_probe.jet -> Error [E1004]: `core.files` has no item `mmap`; alternatives enumerate read/read_bytes/read_at/write_at/fsync/write_atomic/lock/open/create/append but no mapping API.",
+    "areas": ["backend", "data"],
+    "severity": "hurts",
+    "workaround": "Use read_bytes/read_at and explicit buffering; this is not equivalent for large random-access files."
+  },
+  {
+    "id": "prim-storage-G2",
+    "tags": ["defect"],
+    "primitive": "Native AOT generation for imported fallible storage modules",
+    "evidence": "jet check pkg/build_log.jet passes, but jet build --verbose pkg/build_log.jet and pkg/main.jet both emit `internal compiler error: the generated Rust did not compile` with generated build/build_log.rs or build/main.rs; single-file pkg/storage_probe.jet builds.",
+    "areas": ["backend", "data", "cli"],
+    "severity": "blocks",
+    "workaround": "Run the modular package through jet run; no AOT workaround was found."
+  }
+]

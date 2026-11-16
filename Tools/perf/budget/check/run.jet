@@ -1,0 +1,1176 @@
+#!/usr/bin/env jet
+// SPEED-500K budget checker: reads a compiler trace (JET_TRACE_FILE) and the
+// per-phase budget table (Tools/perf/budget/budget.json, the ns/line columns
+// of SPEED-500K.md §1) and prints, per phase, its time, its ns per source
+// line, the budget of the chosen milestone column and the ratio, then the
+// root of every phase over its budget (the cards of its budget.json `owners`)
+// and the subtotal of the always-on check rows. Exits 1 when any phase is
+// over its budget, when such a phase names no owner card, or when a
+// full-unit trace (it has a `lower` span) lacks an always-on check span.
+// With --hello it is the hello size and start gate instead (see below).
+//
+//   jet Tools/perf/budget/check <trace> [--column 225K|500K|1M]
+//        [--clock auto|proc_cpu|cpu|wall] [--lines N] [--budget FILE] [--strict]
+//   jet Tools/perf/budget/check --hello [--jet PATH] [--runs N] [--doc FILE]
+//
+// --column   the milestone being claimed (default 225K).
+// --clock    proc_cpu: the process CPU time of each span (`proc_cpu_ns`, every
+//            thread; the budget's single-thread-equivalent work). cpu: the
+//            span thread's CPU time (`cpu_ns`). wall: the span's wall time.
+//            auto (default): proc_cpu when the trace carries it, else wall
+//            (traces written before the S0 change carry wall time only).
+// --lines    the per-line denominator; default the trace's `parse.user_lines`
+//            counter, else budget.json `default_lines` (the self-compile unit).
+// --budget   the budget table (default Tools/perf/budget/budget.json, from the
+//            repository root).
+// --strict   a budget row whose spans are absent from the trace fails too.
+//
+// A row sums its span kinds (a span nested in another span of the same row
+// counts once) less the nested spans of its `exclude` kinds; `residual` (P15)
+// is what the top-level spans and, in wall mode, the gaps between them leave.
+//
+// Numbers follow the trace's JSON doubles: seconds and ratios print with
+// round-half-up fixed decimals, counts rounded half up with `,` grouping.
+// JavaScript number text and JSON reads come from Tools/perf/kit.
+package: {
+    name: "budget_check"
+    version: "0.0.1"
+    deps: {
+        jet_perf_kit: ../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_perf_kit.[as_number, field, integral, js_number, js_string, js_trim, map_key, number_from_text, present, text_of, texts, to_fixed, truthy]
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    stats: core.math.stats
+    sys: core.sys
+    term: core.term
+    time: core.time
+}
+
+DEFAULT_BUDGET: "Tools/perf/budget/budget.json"
+
+ZERO: Float{0.0}
+
+HALF: Float{0.5}
+
+ONE: Float{1.0}
+
+THOUSAND: Float{1000.0}
+
+MILLION: Float{1000000.0}
+
+BILLION: Float{1000000000.0}
+
+USAGE: "usage: jet Tools/perf/budget/check <trace> [--column 225K|500K|1M] [--clock auto|proc_cpu|cpu|wall] [--lines N] [--budget FILE] [--strict]"
+
+#Error
+CheckError: struct {
+    lines: [String]
+    code: Int
+}
+
+usage: fn(message: String) -> CheckError Never! {
+    lines := [String]{}
+    if message != "" -> lines.push("check: {message}")
+    lines.push(USAGE)
+    CheckError{lines: lines, code: 64}
+}
+
+Options: struct {
+    column: String
+    clock: String
+    lines: Float
+    lines_given: Bool
+    budget: String
+    strict: Bool
+    trace: String
+    trace_given: Bool
+}
+
+// ---- JavaScript number text -------------------------------------------------
+
+finite: fn(value: Float) -> Bool Never! { math.is_finite(value) }
+
+fixed: fn(value: Float, digits: Int) -> String Never! {
+    if !finite(value) -> return "-"
+    to_fixed(value, digits)
+}
+
+// Math.round(value).toLocaleString("en-US"): half up, `,` thousands groups,
+// a negative value that rounds to zero prints -0.
+grouped: fn(value: Float) -> String Never! {
+    if !finite(value) -> return "-"
+    floor: math.floor(value)
+    rounded: if value - floor >= HALF -> floor + ONE else -> floor
+    negative: value < ZERO || math.to_bits(value) == math.to_bits(-ZERO)
+    whole: integral(rounded)
+    magnitude: if whole < 0 -> -whole else -> whole
+    digits: "{magnitude}".bytes()
+    out := ""
+    loop index in 0..<digits.len() {
+        if index > 0 && (digits.len() - index) % 3 == 0 -> out = "{out},"
+        out = "{out}{String.from_bytes_lossy(digits[index..<index + 1])}"
+    }
+    if negative && (whole < 0 || whole == 0) -> return "-{out}"
+    out
+}
+
+number_field: fn(value: Dyn, key: String) -> Float? Never! { as_number(field(Val(value), key)) }
+
+// A JSON value's field as a number; NaN when absent or not a number
+// (JavaScript arithmetic on `undefined`).
+number_or_nan: fn(value: Dyn, key: String) -> Float Never! { number_field(value, key) ?? math.NAN }
+
+// ---- Arguments --------------------------------------------------------------
+
+parse_args: fn(args: [String]) -> Options CheckError! {
+    options := Options{column: "225K", clock: "auto", lines: ZERO, lines_given: false, budget: DEFAULT_BUDGET, strict: false, trace: "", trace_given: false}
+    index := 0
+    loop index < args.len() {
+        arg: args[index]
+        takes: arg.starts_with("--column") || arg.starts_with("--clock") || arg.starts_with("--lines") || arg.starts_with("--budget")
+        if takes {
+            value := ""
+            equals: arg.find("=")
+            if equals >= 0 {
+                value = String.from_bytes_lossy(arg.bytes()[equals + 1..<arg.bytes().len()])
+            } else {
+                index += 1
+                if index >= args.len() -> return Err(usage("{arg} needs a value"))
+                value = args[index]
+            }
+            if {
+                arg.starts_with("--column") -> options.column = value
+                arg.starts_with("--clock") -> options.clock = value
+                arg.starts_with("--lines") -> {
+                    options.lines = number_from_text(value)
+                    options.lines_given = true
+                }
+                else -> options.budget = value
+            }
+        } else if arg == "--strict" { options.strict = true } else if arg.starts_with("--") {
+            return Err(usage("unknown option {arg}"))
+        } else if !options.trace_given {
+            options.trace = arg
+            options.trace_given = true
+        } else { return Err(usage("unexpected argument {arg}")) }
+        index += 1
+    }
+    if !options.trace_given -> return Err(usage("no trace given"))
+    if options.clock != "auto" && options.clock != "proc_cpu" && options.clock != "cpu" && options.clock != "wall" {
+        return Err(usage("unknown clock {options.clock}"))
+    }
+    if options.lines_given && !(options.lines > ZERO) {
+        return Err(usage("--lines must be a positive number"))
+    }
+    Ok(options)
+}
+
+// ---- Trace ------------------------------------------------------------------
+
+Span: struct {
+    kind: String
+    kind_is_text: Bool
+    label: String
+    label_is_text: Bool
+    label_sort: String
+    start: Float
+    end: Float
+    closed: Bool
+    args: Dyn
+    ancestors: [Int]
+}
+
+Counter: struct {
+    name: String
+    value: Float
+}
+
+Trace: struct {
+    spans: [Span]
+    counters: [Counter]
+    last_ts: Float
+}
+
+// One event per line; the array may be unterminated and its last line half
+// written by a running compiler.
+read_events: fn(text: String) -> [Dyn] Never! {
+    events := [Dyn]{}
+    loop raw in text.split("\n") {
+        trimmed: js_trim(raw)
+        line: if trimmed.ends_with(",") -> String.from_bytes_lossy(trimmed.bytes()[0..<trimmed.bytes().len() - 1]) else -> trimmed
+        if line == "" || line == "[" || line == "]" -> next
+        if json.parse(line) == .Ok(event) -> events.push(event)
+    }
+    events
+}
+
+counter_index: fn(counters: [Counter], name: String) -> Int Never! {
+    loop index in 0..<counters.len() {
+        if counters[index].name == name -> return index
+    }
+    -1
+}
+
+counter_value: fn(trace: Trace, name: String) -> Float? Never! {
+    at: counter_index(trace.counters, "s:{name}")
+    if at < 0 -> return None
+    Val(trace.counters[at].value)
+}
+
+stack_index: fn(keys: [String], key: String) -> Int Never! {
+    loop index in 0..<keys.len() {
+        if keys[index] == key -> return index
+    }
+    -1
+}
+
+// Spans with their ancestors (indices of the spans open around them on their
+// thread), and the counter events summed by name.
+collect: fn(events: [Dyn]) -> Trace Never! {
+    spans := [Span]{}
+    stack_keys := [String]{}
+    stacks := [[Int]]{}
+    counters := [Counter]{}
+    last_ts := ZERO
+    loop position in 0..<events.len() {
+        event: events[position]
+        ts: number_field(event, "ts")
+        if ts == .Val(time) {
+            if time > last_ts || math.is_nan(last_ts) -> last_ts = time
+        }
+        phase: text_of(field(event, "ph")) ?? ""
+        if phase == "B" || phase == "E" {
+            key: map_key(field(event, "tid"), position)
+            at := stack_index(stack_keys, key)
+            if at < 0 {
+                stack_keys.push(key)
+                stacks.push([Int]{})
+                at = stacks.len() - 1
+            }
+            if phase == "B" {
+                category: field(event, "cat")
+                kind_value: if present(category) -> category else -> field(event, "name")
+                kind_text: text_of(kind_value)
+                name_value: field(event, "name")
+                name_text: text_of(name_value)
+                label_sort: if present(name_value) -> js_string(name_value) else -> ""
+                spans.push(
+                    Span{
+                        kind: js_string(kind_value),
+                        kind_is_text: kind_text != None,
+                        label: js_string(name_value),
+                        label_is_text: name_text != None,
+                        label_sort: label_sort,
+                        start: ts ?? math.NAN,
+                        end: math.NAN,
+                        closed: false,
+                        args: Dyn.Null,
+                        ancestors: stacks[at],
+                    },
+                )
+                stacks[at].push(spans.len() - 1)
+            } else {
+                if stacks[at].len() == 0 -> next
+                index: stacks[at][stacks[at].len() - 1]
+                _ := stacks[at].pop()
+                spans[index].end = ts ?? math.NAN
+                spans[index].closed = true
+                spans[index].args = field(event, "args") ?? Dyn.Null
+            }
+        } else if phase == "C" {
+            name_value: field(event, "name")
+            if (text_of(name_value) ?? "") == "memory" && text_of(name_value) != None -> next
+            args: field(event, "args") ?? Dyn.Null
+            counted: number_field(args, "value")
+            if counted == None -> next
+            value: counted
+            key: map_key(name_value, position)
+            at: counter_index(counters, key)
+            if at < 0 -> counters.push(Counter{name: key, value: ZERO + value}) else {
+                counters[at].value = counters[at].value + value
+            }
+        }
+    }
+    loop index in 0..<spans.len() {
+        if !spans[index].closed -> spans[index].end = last_ts
+    }
+    Trace{spans: spans, counters: counters, last_ts: last_ts}
+}
+
+clock_field: fn(clock: String) -> String Never! {
+    if {
+        clock == "proc_cpu" -> "proc_cpu_ns"
+        clock == "cpu" -> "cpu_ns"
+        else -> ""
+    }
+}
+
+// A span's time in ns on `clock`; wall time when the span lacks that clock.
+span_ns: fn(span: Span, clock: String, notes: &[String]) -> Float Never! {
+    name: clock_field(clock)
+    if name != "" {
+        if number_field(span.args, name) == .Val(value) -> return value
+        note: "{span.kind}: no {name}, wall time used"
+        if !notes.contains(note) -> notes.push(note)
+    }
+    (span.end - span.start) * THOUSAND
+}
+
+Measure: struct {
+    ns: Float
+    count: Int
+}
+
+any_in: fn(indices: [Int], set: [Bool]) -> Bool Never! {
+    loop index in indices {
+        if set[index] -> return true
+    }
+    false
+}
+
+measure_row: fn(kinds: [String], excluded: [String], spans: [Span], clock: String, notes: &[String]) -> Measure Never! {
+    included := [Bool]{}
+    loop span in spans -> included.push(span.kind_is_text && kinds.contains(span.kind))
+    ns := ZERO
+    count := 0
+    loop index in 0..<spans.len() {
+        if !included[index] || any_in(spans[index].ancestors, included) -> next
+        ns += span_ns(spans[index], clock, notes)
+        count += 1
+    }
+    removed := [Bool]{}
+    loop span in spans {
+        removed.push(span.kind_is_text && excluded.contains(span.kind) && any_in(span.ancestors, included))
+    }
+    loop index in 0..<spans.len() {
+        if !removed[index] || any_in(spans[index].ancestors, removed) -> next
+        ns -= span_ns(spans[index], clock, notes)
+    }
+    Measure{ns: ns, count: count}
+}
+
+// ---- Report -----------------------------------------------------------------
+
+// String.length: UTF-16 code units.
+utf16_len: fn(text: String) -> Int Never! {
+    count := 0
+    loop byte in text.bytes() {
+        code: Int{byte}
+        if code < 128 || code >= 192 -> count += 1
+        if code >= 240 -> count += 1
+    }
+    count
+}
+
+pad: fn(text: String, width: Int, end: Bool) -> String Never! {
+    fill: ""
+    gap := width - utf16_len(text)
+    spaces := fill
+    loop gap > 0 {
+        spaces = "{spaces} "
+        gap -= 1
+    }
+    if end -> "{text}{spaces}" else -> "{spaces}{text}"
+}
+
+align: fn(cells: [String], widths: [Int]) -> String Never! {
+    words := [String]{}
+    loop column in 0..<cells.len() -> words.push(pad(cells[column], widths[column], column <= 1))
+    words.join("  ")
+}
+
+table: fn(header: [String], rows: [[String]]) -> String Never! {
+    widths := [Int]{}
+    loop column in 0..<header.len() {
+        width := utf16_len(header[column])
+        loop row in rows {
+            if utf16_len(row[column]) > width -> width = utf16_len(row[column])
+        }
+        widths.push(width)
+    }
+    lines := [String]{align(header, widths)}
+    dashes := [String]{}
+    loop width in widths -> dashes.push(pad("", width, true).replace(" ", "-"))
+    lines.push(dashes.join("  "))
+    loop row in rows -> lines.push(align(row, widths))
+    lines.join("\n")
+}
+
+Measured: struct {
+    row: Dyn
+    ns: Float
+    present: Bool
+}
+
+LabelEntry: struct {
+    label: String
+    sort: String
+    count: Int
+    ns: Float
+    items: Float
+}
+
+detail: fn(spans: [Span], kind: String, clock: String, notes: &[String]) -> [LabelEntry] Never! {
+    entries := [LabelEntry]{}
+    loop span in spans {
+        if !span.kind_is_text || span.kind != kind -> next
+        same: span.label_is_text && span.label == span.kind
+        label: if same -> "" else -> span.label
+        sort: if same -> "" else -> span.label_sort
+        at := -1
+        loop index in 0..<entries.len() {
+            if entries[index].label == label -> at = index
+        }
+        if at < 0 {
+            entries.push(LabelEntry{label: label, sort: sort, count: 0, ns: ZERO, items: ZERO})
+            at = entries.len() - 1
+        }
+        entries[at].count += 1
+        entries[at].ns = entries[at].ns + span_ns(span, clock, notes)
+        entries[at].items = entries[at].items + (number_field(span.args, "items") ?? ZERO)
+    }
+    entries
+}
+
+CensusItem: struct {
+    name: String
+    kind: String
+    labelled: Bool
+}
+
+Outcome: struct {
+    out: [String]
+    err: [String]
+    code: Int
+}
+
+report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! {
+    columns: texts(field(budget, "columns"))
+    if !columns.contains(options.column) {
+        failure: usage("unknown column {options.column} (budget.json has {columns.join(", ")})")
+        return Outcome{out: [String]{}, err: failure.lines, code: failure.code}
+    }
+    trace: collect(read_events(trace_text))
+    spans: trace.spans
+    if spans.len() == 0 {
+        return Outcome{out: [String]{}, err: [String]{"check: {options.trace} has no spans"}, code: 65}
+    }
+    clock := options.clock
+    if clock == "auto" {
+        clock = "wall"
+        loop span in spans {
+            if number_field(span.args, "proc_cpu_ns") != None {
+                clock = "proc_cpu"
+                break
+            }
+        }
+    }
+    lines := options.lines
+    lines_source := "--lines"
+    lines_counter: js_string(field(budget, "lines_counter"))
+    lines_counter_is_text: text_of(field(budget, "lines_counter")) != None
+    if !options.lines_given && lines_counter_is_text && counter_value(trace, lines_counter) != None {
+        lines = counter_value(trace, lines_counter) ?? math.NAN
+        lines_source = "trace counter {lines_counter}"
+    } else if !options.lines_given {
+        lines = number_or_nan(budget, "default_lines")
+        lines_source = "budget.json default_lines (the trace has no line counter)"
+    }
+
+    notes := [String]{}
+    column: options.column
+    measured := [Measured]{}
+    accounted := ZERO
+    rows := [Dyn]{}
+    if field(budget, "rows") == .Val(inner) {
+        if inner == .Array(items) -> rows = items
+    }
+    loop row in rows {
+        if truthy(field(row, "residual")) -> next
+        result: measure_row(texts(field(row, "spans")), texts(field(row, "exclude")), spans, clock, notes)
+        accounted += result.ns
+        measured.push(Measured{row: row, ns: result.ns, present: result.count > 0})
+    }
+    // Residual: the top-level spans (and, on the wall clock, the gaps between
+    // them up to the last event) less every measured row.
+    loop row in rows {
+        if !truthy(field(row, "residual")) -> next
+        total := ZERO
+        if clock == "wall" -> total = trace.last_ts * THOUSAND else {
+            loop span in spans {
+                if span.ancestors.len() == 0 -> total += span_ns(span, clock, notes)
+            }
+            note: "{js_string(field(row, "id"))}: on the {clock} clock the gaps between top-level spans are not measured"
+            if !notes.contains(note) -> notes.push(note)
+        }
+        measured.push(Measured{row: row, ns: total - accounted, present: true})
+        break
+    }
+
+    failed := false
+    budget_sum := ZERO
+    total_ns := ZERO
+    cells := [[String]]{}
+    loop entry in measured {
+        limit: number_or_nan(field(entry.row, "budget") ?? Dyn.Null, column)
+        budget_sum += limit
+        if entry.present -> total_ns += entry.ns
+        per_line: entry.ns / lines
+        status := ""
+        ratio := "-"
+        if !entry.present {
+            status = "absent"
+            if options.strict -> failed = true
+        } else {
+            ratio = if limit > ZERO -> "{fixed(per_line / limit, 1)}x" else if per_line > ZERO -> "inf" else -> "0.0x"
+            over: per_line > limit
+            status = if over -> "OVER" else -> "ok"
+            if over -> failed = true
+        }
+        cells.push(
+            [String]{
+                js_string(field(entry.row, "id")),
+                js_string(field(entry.row, "phase")),
+                if entry.present -> fixed(entry.ns / BILLION, 2) else -> "-",
+                if entry.present -> grouped(per_line) else -> "-",
+                grouped(limit),
+                ratio,
+                status,
+            },
+        )
+    }
+    ratio_total: total_ns / lines / budget_sum
+    total_over: total_ns / lines > budget_sum
+    cells.push([String]{"total", "work sum", fixed(total_ns / BILLION, 2), grouped(total_ns / lines), grouped(budget_sum), "{fixed(ratio_total, 1)}x", if total_over -> "OVER" else -> "ok"})
+    if total_over -> failed = true
+
+    out := [String]{}
+    out.push("trace:   {options.trace}")
+    out.push("clock:   {clock}{if clock == "wall" -> " (the trace has no CPU clocks)" else -> ""}")
+    out.push("lines:   {grouped(lines)} ({lines_source})")
+    cpu_budget: number_or_nan(field(budget, "cpu_budget") ?? Dyn.Null, column)
+    work_sum: number_or_nan(field(budget, "work_sum_stated") ?? Dyn.Null, column)
+    out.push("column:  {column} (CPU budget {grouped(cpu_budget)} ns/line at 16 threads; plan's stated work sum {grouped(work_sum)})")
+    if trace.last_ts > ZERO {
+        seconds: trace.last_ts / MILLION
+        out.push("wall:    {fixed(seconds, 1)} s to the last event = {grouped(lines / seconds)} lines/s")
+    }
+    out.push("")
+    out.push(table([String]{"row", "phase", "seconds", "ns/line", "budget", "ratio", "status"}, cells))
+
+    // #5479 c2: a phase over its budget names its root, the cards of its
+    // budget.json `owners` (the work that brings it inside); a phase over
+    // budget with no owner card fails.
+    roots := [String]{}
+    unowned := false
+    loop at in 0..<measured.len() {
+        if cells[at][6] != "OVER" -> next
+        owners: texts(field(measured[at].row, "owners"))
+        if owners.len() == 0 -> unowned = true
+        roots.push("  {cells[at][0]} {cells[at][1]}: {if owners.len() > 0 -> owners.join(", ") else -> "no owner card"}")
+    }
+    if roots.len() > 0 {
+        out.push("")
+        out.push("roots of the phases over budget (budget.json owners):")
+        loop root in roots -> out.push(root)
+    }
+
+    // D-SPEED-CHECKS1=A: the always-on checks (budget.json `always_on` rows)
+    // stay in every default build, each run once, and a missed milestone
+    // ships its measured number. Print their subtotal. A full-unit trace (the
+    // compile reached code generation: it has a `lower` span) must carry every
+    // always-on span, or a check left the build.
+    missing_check := false
+    always_ids := [String]{}
+    always_ns := ZERO
+    always_budget := ZERO
+    missing := [String]{}
+    full_unit: has_span(spans, "lower")
+    loop entry in measured {
+        if field(entry.row, "always_on") == .Val(always) {
+            id: js_string(field(entry.row, "id"))
+            always_ids.push(id.copy())
+            if entry.present -> always_ns += entry.ns
+            always_budget += number_or_nan(field(entry.row, "budget") ?? Dyn.Null, column)
+            loop kind in texts(field(always, "spans")) {
+                if !has_span(spans, kind) {
+                    missing.push("{id} {kind} ({js_string(field(always, "check"))})")
+                }
+            }
+        }
+    }
+    if always_ids.len() > 0 {
+        share: Float{100.0} * always_budget / budget_sum
+        out.push("")
+        out.push("always-on checks ({always_ids.join(", ")}): {grouped(always_ns / lines)} ns/line, budget {grouped(always_budget)} ({fixed(share, 1)}% of the {column} work sum)")
+        if missing.len() > 0 && full_unit {
+            out.push("missing always-on spans in a full-unit trace: {missing.join("; ")}")
+            missing_check = true
+        }
+    }
+
+    // Work counters per natural unit (budgets at the 1M column only).
+    unit_rows := [[String]]{}
+    loop entry in measured {
+        units := [Dyn]{}
+        if field(entry.row, "units") == .Val(inner) {
+            if inner == .Array(items) -> units = items
+        }
+        loop unit in units {
+            counter_name: field(unit, "counter")
+            counter_at: if text_of(counter_name) == .Val(name) -> counter_index(trace.counters, "s:{name}") else -> -1
+            has_value: counter_at >= 0
+            value: if has_value -> trace.counters[counter_at].value else -> math.NAN
+            limit_value: number_field(field(unit, "budget") ?? Dyn.Null, column)
+            per_unit: if has_value && value != ZERO && !math.is_nan(value) && entry.present -> entry.ns / value else -> math.NAN
+            status := "-"
+            if !has_value -> status = "no counter" else if entry.present && limit_value != None {
+                over: per_unit > limit_value
+                status = if over -> "OVER" else -> "ok"
+                if over -> failed = true
+            }
+            unit_rows.push(
+                [String]{
+                    js_string(field(entry.row, "id")),
+                    js_string(counter_name),
+                    if has_value -> grouped(value) else -> "-",
+                    if per_unit >= THOUSAND -> grouped(per_unit) else -> fixed(per_unit, 1),
+                    "ns/{js_string(field(unit, "unit"))}",
+                    if limit_value == .Val(limit) -> grouped(limit) else -> "-",
+                    status,
+                },
+            )
+        }
+    }
+    out.push("")
+    out.push(table([String]{"row", "counter", "count", "ns/unit", "unit", "budget", "status"}, unit_rows))
+
+    // The four measurements the plan names as unmeasured until S0.
+    census := [[String]]{}
+    census_items: [CensusItem]{
+        CensusItem{name: "D10b marker groups", kind: "load.marker_groups.relex", labelled: false},
+        CensusItem{name: "D10b marker groups", kind: "load.marker_groups.reparse", labelled: false},
+        CensusItem{name: "D12 comptime build", kind: "comptime.build", labelled: true},
+    }
+    loop item in census_items {
+        entries := detail(spans, item.kind, clock, notes)
+        if entries.len() == 0 {
+            census.push([String]{item.name, item.kind, "-", "-", "-", "not in trace"})
+            next
+        }
+        if item.labelled {
+            entries.sort_by(fn(left: LabelEntry, right: LabelEntry) { "{left.sort},[object Object]" <=> "{right.sort},[object Object]" })
+            loop entry in entries {
+                census.push([String]{item.name, js_trim("{item.kind} {entry.label}"), "{entry.count}", fixed(entry.ns / BILLION, 3), grouped(entry.ns / lines), grouped(entry.items)})
+            }
+        } else {
+            count := 0
+            ns := ZERO
+            items := ZERO
+            loop entry in entries {
+                count += entry.count
+                ns += entry.ns
+                items += entry.items
+            }
+            census.push([String]{item.name, item.kind, "{count}", fixed(ns / BILLION, 3), grouped(ns / lines), grouped(items)})
+        }
+    }
+    out.push("")
+    out.push(table([String]{"census", "span", "spans", "seconds", "ns/line", "items"}, census))
+
+    if notes.len() > 0 {
+        out.push("")
+        sorted := notes
+        sorted.sort()
+        loop note in sorted -> out.push("note: {note}")
+    }
+    out.push("")
+    reasons := [String]{}
+    if failed -> reasons.push("over the {column} budget")
+    if unowned -> reasons.push("a phase over budget names no owner card")
+    if missing_check -> reasons.push("an always-on check did not run")
+    out.push(if reasons.len() > 0 -> "FAIL: {reasons.join("; ")}" else -> "PASS: within the {column} budget")
+    Outcome{out: out, err: [String]{}, code: if reasons.len() > 0 -> 1 else -> 0}
+}
+
+has_span: fn(spans: [Span], kind: String) -> Bool Never! {
+    loop span in spans {
+        if span.kind_is_text && span.kind == kind -> return true
+    }
+    false
+}
+
+// readFileSync's failure as node reports it (the path as given).
+read_failure: fn(path: String, error: IOError) -> CheckError Never! {
+    if files.is_dir(path) {
+        return CheckError{lines: [String]{"EISDIR: illegal operation on a directory, read"}, code: 1}
+    }
+    reason: if error == .NotFound(_) -> "ENOENT: no such file or directory" else if error == .PermissionDenied(_) -> "EACCES: permission denied" else -> "{error}"
+    CheckError{lines: [String]{"{reason}, open '{path}'"}, code: 1}
+}
+
+read_text: fn(path: String) -> String CheckError! {
+    if files.is_dir(path) {
+        return Err(CheckError{lines: [String]{"EISDIR: illegal operation on a directory, read"}, code: 1})
+    }
+    files.read(path) ?? return Err(read_failure(path, err))
+}
+
+check: fn(args: [String]) -> Outcome CheckError! {
+    options: parse_args(args) ?? return Err(err)
+    budget_path: if options.budget == DEFAULT_BUDGET -> files.absolute(DEFAULT_BUDGET) ?? DEFAULT_BUDGET else -> options.budget
+    budget_text: read_text(budget_path) ?? return Err(err)
+    budget: json.parse(budget_text) ?? return Err(CheckError{lines: [String]{"{budget_path}: invalid JSON: {err}"}, code: 1})
+    columns: texts(field(budget, "columns"))
+    if !columns.contains(options.column) {
+        return Err(usage("unknown column {options.column} (budget.json has {columns.join(", ")})"))
+    }
+    trace_text: read_text(options.trace) ?? return Err(err)
+    Ok(report(options, budget, trace_text))
+}
+
+// ---- Hello size and start gate ------------------------------------------------
+//
+// Builds Examples/Basics/Hello.jet with `jet build --small`, the smallest-size
+// profile, runs the executable --runs times (default 50) and fails when its
+// size or its median start time (spawn to exit) is over its limit. The limits
+// are read from the `| Measure | Limit |` table of the binary-size doc
+// (--doc, default Docs/spec/reference/binary-size.md), their only copy.
+//
+// --jet   the jet that builds hello (default $JET, else `jet` on PATH).
+// --runs  how many runs the median is over (default 50).
+// --doc   the doc holding the limit table.
+
+DEFAULT_SIZE_DOC: "Docs/spec/reference/binary-size.md"
+
+HELLO_SOURCE: "Examples/Basics/Hello.jet"
+
+HELLO_EXECUTABLE: "Hello"
+
+HELLO_RUNS: 50
+
+GATE_HEADER: "| Measure | Limit |"
+
+HELLO_USAGE: "usage: jet Tools/perf/budget/check --hello [--jet PATH] [--runs N] [--doc FILE]"
+
+OUTPUT_LIMIT: 16777216
+
+HelloOptions: struct {
+    jet: String
+    runs: Int
+    doc: String
+}
+
+// One row of the limit table: `value` is bytes for a size, ns for a time.
+GateLimit: struct {
+    measure: String
+    text: String
+    value: Float
+    time: Bool
+}
+
+GateLimits: struct {
+    size: GateLimit
+    start: GateLimit
+}
+
+// Hello's file size and its start times in ns, sorted.
+HelloMeasure: struct {
+    bytes: Int
+    starts: [Int]
+}
+
+gate_error: fn(message: String) -> CheckError Never! {
+    CheckError{lines: [String]{"check: {message}"}, code: 1}
+}
+
+hello_usage: fn(message: String) -> CheckError Never! {
+    CheckError{lines: [String]{"check: {message}", HELLO_USAGE}, code: 64}
+}
+
+parse_hello_args: fn(args: [String]) -> HelloOptions CheckError! {
+    options := HelloOptions{jet: sys.get("JET") ?? "jet", runs: HELLO_RUNS, doc: DEFAULT_SIZE_DOC}
+    index := 1
+    loop index < args.len() {
+        arg: args[index]
+        if arg != "--jet" && arg != "--runs" && arg != "--doc" {
+            return Err(hello_usage("unknown argument {arg}"))
+        }
+        index += 1
+        if index >= args.len() -> return Err(hello_usage("{arg} needs a value"))
+        value: args[index]
+        if {
+            arg == "--jet" -> options.jet = value
+            arg == "--doc" -> options.doc = value
+            else -> {
+                runs: Int.parse(value) ?? 0
+                if runs < 1 -> return Err(hello_usage("--runs must be a positive whole number"))
+                options.runs = runs
+            }
+        }
+        index += 1
+    }
+    Ok(options)
+}
+
+// A limit's text, `<number> <unit>`, in bytes (B, KB, MB; a KB is 1,024
+// bytes) or ns (ns, us, ms, s); None when it is not one.
+parse_limit: fn(measure: String, text: String) -> GateLimit? Never! {
+    space: text.find(" ")
+    if space <= 0 -> return None
+    number: number_from_text(text.slice(0, space).replace(",", ""))
+    if !finite(number) || !(number > ZERO) -> return None
+    unit: text.slice(space + 1, text.len()).trim()
+    scale := ZERO
+    if {
+        unit == "B" || unit == "bytes" -> scale = ONE
+        unit == "KB" -> scale = Float{1024.0}
+        unit == "MB" -> scale = Float{1048576.0}
+        unit == "ns" -> scale = ONE
+        unit == "us" -> scale = THOUSAND
+        unit == "ms" -> scale = MILLION
+        unit == "s" -> scale = BILLION
+        else -> return None
+    }
+    is_time: unit == "ns" || unit == "us" || unit == "ms" || unit == "s"
+    Val(GateLimit{measure: measure, text: text, value: number * scale, time: is_time})
+}
+
+// The size limit and the start limit of the doc's `| Measure | Limit |`
+// table: exactly one row in bytes and one in time.
+gate_limits: fn(doc: String, path: String) -> GateLimits CheckError! {
+    sizes := [GateLimit]{}
+    starts := [GateLimit]{}
+    inside := false
+    loop raw in doc.split("\n") {
+        line: raw.trim()
+        if !inside {
+            inside = line == GATE_HEADER
+            next
+        }
+        if !line.starts_with("|") -> break
+        cells := [String]{}
+        loop cell in line.split("|") -> cells.push(cell.trim())
+        if cells.len() != 4 {
+            return Err(gate_error("{path}: the limit table row `{line}` is not `| measure | limit |`"))
+        }
+        if cells[2].replace("-", "").replace(":", "") == "" -> next
+        limit: parse_limit(cells[1], cells[2]) ?? return Err(gate_error("{path}: `{cells[2]}` is not a size (B, KB, MB) or a time (ns, us, ms, s)"))
+        if limit.time -> starts.push(limit) else -> sizes.push(limit)
+    }
+    if !inside -> return Err(gate_error("{path} has no `{GATE_HEADER}` limit table"))
+    if sizes.len() != 1 || starts.len() != 1 {
+        return Err(gate_error("{path}: the limit table needs one size row and one time row"))
+    }
+    Ok(GateLimits{size: sizes[0], start: starts[0]})
+}
+
+measure_hello: fn(options: HelloOptions) -> HelloMeasure CheckError! {
+    folder: files.mkdtemp("budget-hello") ?? return Err(gate_error("cannot make a build folder: {err}"))
+    measured: measure_hello_in(options, folder)
+    files.remove_all(folder).drop("a leftover temporary build folder is harmless")
+    measured
+}
+
+measure_hello_in: fn(options: HelloOptions, folder: String) -> HelloMeasure CheckError! {
+    build: process.cmd([String]{options.jet, "build", "--small", "--output-dir={folder}", HELLO_SOURCE}).output_limit(OUTPUT_LIMIT).run() ?? return Err(gate_error("cannot run {options.jet}: {err}"))
+    if !build.success {
+        return Err(gate_error("`{options.jet} build --small {HELLO_SOURCE}` exited {build.code}: {build.errors.trim().last_lines(6).join(" | ")}"))
+    }
+    executable: files.join(folder, HELLO_EXECUTABLE)
+    stat: files.stat(executable) ?? return Err(gate_error("the build wrote no {executable}: {err}"))
+    starts := [Int]{}
+    loop starts.len() < options.runs {
+        started: time.instant()
+        receipt: process.cmd([String]{executable}).output_limit(OUTPUT_LIMIT).run() ?? return Err(gate_error("cannot run {executable}: {err}"))
+        ns: started.elapsed().ns
+        if !receipt.success {
+            return Err(gate_error("{executable} exited {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"))
+        }
+        starts.push(ns)
+    }
+    starts.sort()
+    Ok(HelloMeasure{bytes: stat.size, starts: starts})
+}
+
+ms: fn(ns: Float) -> String Never! { "{fixed(ns / MILLION, 3)} ms" }
+
+// The gate's receipt: each measure against its limit, the row the card logs,
+// and PASS, or FAIL (exit 1) when either is over.
+hello_verdict: fn(limits: GateLimits, measured: HelloMeasure, doc: String) -> Outcome Never! {
+    bytes: Float{measured.bytes}
+    median: stats.median(measured.starts.map(fn(ns) { Float.from_int(ns) })) ?? ZERO
+    runs: measured.starts.len()
+    size_over: bytes > limits.size.value
+    start_over: median > limits.start.value
+    rows: [[String]]{
+        [String]{limits.size.measure, "{grouped(bytes)} B", "{limits.size.text} ({grouped(limits.size.value)} B)", if size_over -> "OVER" else -> "ok"},
+        [String]{limits.start.measure, "{ms(median)} (median of {runs} runs)", limits.start.text, if start_over -> "OVER" else -> "ok"},
+    }
+    out := [String]{
+        "hello:   {HELLO_SOURCE}, jet build --small",
+        "limits:  {doc}",
+        "",
+        table([String]{"measure", "value", "limit", "verdict"}, rows),
+        "",
+        "start range: {ms(Float{measured.starts[0]})} to {ms(Float{measured.starts[runs - 1]})}",
+        "card row: hello size {grouped(bytes)} B, start {ms(median)} (median of {runs} runs)",
+    }
+    if size_over || start_over {
+        out.push("FAIL: hello is over its limit")
+        return Outcome{out: out, err: [String]{}, code: 1}
+    }
+    out.push("PASS: hello is within its size and start limits")
+    Outcome{out: out, err: [String]{}, code: 0}
+}
+
+hello: fn(args: [String]) -> Outcome CheckError! {
+    options: parse_hello_args(args) ?? return Err(err)
+    doc: read_text(options.doc) ?? return Err(err)
+    limits: gate_limits(doc, options.doc) ?? return Err(err)
+    measured: measure_hello(options) ?? return Err(err)
+    Ok(hello_verdict(limits, measured, options.doc))
+}
+
+run: fn() {
+    args: process.args()
+    hello_gate: args.len() > 0 && args[0] == "--hello"
+    outcome: if hello_gate -> hello(args) ?? process.fail(err.code, err.lines.join("\n")) else -> check(args) ?? process.fail(err.code, err.lines.join("\n"))
+    loop line in outcome.out -> print(line)
+    loop line in outcome.err -> term.eprint(line)
+    if outcome.code != 0 -> process.exit(outcome.code)
+}
+
+// ---- Tests (the node checker's suite) ----------------------------------------
+
+test_options: fn(args: [String]) -> Options Never! { parse_args(args) ?? panic("bad test options") }
+
+test_budget: fn() -> Dyn Never! {
+    text: files.read(DEFAULT_BUDGET) ?? panic("cannot read {DEFAULT_BUDGET}")
+    json.parse(text) ?? panic("budget.json is not JSON")
+}
+
+// A trace in the native host's shape: `[`, one event per line.
+test_trace: fn(events: [String]) -> String Never! {
+    lines := [String]{"["}
+    loop event in events -> lines.push("{event},")
+    "{lines.join("\n")}\n"
+}
+
+test_span: fn(kind: String, start: Int, end: Int, proc_cpu_ns: Int, label: String) -> [String] Never! {
+    [String]{
+        "{{\"pid\":1,\"tid\":1,\"name\":\"{label}\",\"cat\":\"{kind}\",\"ph\":\"B\",\"ts\":{start}}}",
+        "{{\"pid\":1,\"tid\":1,\"name\":\"{label}\",\"cat\":\"{kind}\",\"ph\":\"E\",\"ts\":{end},\"args\":{{\"items\":1,\"cpu_ns\":{proc_cpu_ns},\"proc_cpu_ns\":{proc_cpu_ns},\"majflt\":0}}}}",
+    }
+}
+
+test_counter: fn(name: String, value: Int) -> String Never! {
+    "{{\"pid\":1,\"tid\":1,\"name\":\"{name}\",\"ph\":\"C\",\"ts\":0,\"args\":{{\"value\":{value}}}}}"
+}
+
+test_event: fn(kind: String, phase: String, ts: Int, proc_cpu_ns: Int) -> String Never! {
+    if phase == "B" {
+        return "{{\"pid\":1,\"tid\":1,\"name\":\"{kind}\",\"cat\":\"{kind}\",\"ph\":\"B\",\"ts\":{ts}}}"
+    }
+    "{{\"pid\":1,\"tid\":1,\"name\":\"{kind}\",\"cat\":\"{kind}\",\"ph\":\"E\",\"ts\":{ts},\"args\":{{\"proc_cpu_ns\":{proc_cpu_ns}}}}}"
+}
+
+// The cells of the report row starting `id`, split on runs of 2+ spaces.
+test_row: fn(out: [String], id: String) -> [String] Never! {
+    loop line in out.join("\n").split("\n") {
+        if !line.starts_with("{id} ") -> next
+        cells := [String]{}
+        loop cell in line.trim().split("  ") {
+            if cell.trim() != "" -> cells.push(cell.trim())
+        }
+        return cells
+    }
+    panic("no {id} row")
+}
+
+tail: fn(cells: [String], from: Int, to: Int) -> String Never! {
+    words := [String]{}
+    loop index in from..<to -> words.push(cells[index])
+    words.join("|")
+}
+
+#Test("process CPU per line, nested phases subtracted from their parent") {
+    events := [String]{test_counter("parse.user_lines", 1000), test_counter("parse.tokens", 9000)}
+    loop event in test_span("sources", 0, 1000, 1000000, "sources") -> events.push(event)
+    events.push(test_event("load", "B", 1000, 0))
+    loop event in test_span("parse", 1000, 5000, 3000000, "selfhost.jet") -> events.push(event)
+    loop event in test_span("load.marker_groups.relex", 5000, 6000, 1000000, "a.jet") {
+        events.push(event)
+    }
+    events.push(test_event("load", "E", 10000, 9000000))
+    events.push(test_event("sema.finalize", "B", 20000, 0))
+    loop event in test_span("sema.bodies", 20000, 21000, 50000000, "sema.bodies") {
+        events.push(event)
+    }
+    loop event in test_span("sema.effects", 22000, 23000, 30000000, "sema.effects") {
+        events.push(event)
+    }
+    events.push(test_event("sema.finalize", "E", 30000, 200000000))
+    loop event in test_span("ir.opt", 30000, 40000, 200000000, "ir.opt") -> events.push(event)
+    loop event in test_span("ir.x64", 40000, 50000, 10000000, "ir.x64") -> events.push(event)
+    loop event in test_span("ir.object", 50000, 60000, 13000000, "ir.object") -> events.push(event)
+    outcome: report(test_options([String]{"t", "--column", "1M"}), test_budget(), test_trace(events))
+    assert_eq(outcome.code, 1)
+    text: outcome.out.join("\n")
+    assert(text.contains("clock:   proc_cpu"))
+    assert(text.contains("lines:   1,000 (trace counter parse.user_lines)"))
+    assert_eq(tail(test_row(outcome.out, "P1+P2"), 3, 7), "10,000|400|25.0x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P6"), 3, 7), "120,000|100|1200.0x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P5a+P5b"), 3, 7), "50,000|3,300|15.2x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P5c"), 3, 7), "30,000|300|100.0x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P9"), 3, 7), "200,000|1,750|114.3x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P10"), 3, 7), "10,000|1,750|5.7x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P11"), 3, 7), "13,000|1,750|7.4x|OVER")
+    assert_eq(test_row(outcome.out, "P3")[6], "absent")
+    // Each phase over budget names its owner cards; an absent one names none.
+    assert(text.contains("roots of the phases over budget (budget.json owners):\n  P1+P2 read + lex + intern + parse: #5479 c12, #6328 c22, #5910 c6, #5479 c7\n"))
+    assert(text.contains("\n  P5a+P5b sema bodies + ownership (one pass; P5b is not traced apart): #5479 c16, #5479 c6, #5479 c7\n"))
+    assert(!text.contains("\n  P3 collect"))
+    assert(text.ends_with("FAIL: over the 1M budget"))
+}
+
+#Test("a phase over budget with no owner card fails and says so") {
+    budget: json.parse("{{\"columns\":[\"1M\"],\"rows\":[{{\"id\":\"P3\",\"phase\":\"register\",\"spans\":[\"register\"],\"budget\":{{\"1M\":1}}}},{{\"id\":\"P8\",\"phase\":\"IR build\",\"owners\":[\"#5479 c8\"],\"spans\":[\"ir.build\"],\"budget\":{{\"1M\":1}}}}]}}") ?? panic("test budget")
+    events := [String]{}
+    loop event in test_span("register", 0, 1000, 2000000, "register") -> events.push(event)
+    loop event in test_span("ir.build", 1000, 2000, 2000000, "ir.build") -> events.push(event)
+    outcome: report(test_options([String]{"t", "--column", "1M", "--lines", "1000"}), budget, test_trace(events))
+    assert_eq(outcome.code, 1)
+    text: outcome.out.join("\n")
+    assert(text.contains("\n  P3 register: no owner card\n  P8 IR build: #5479 c8\n"))
+    assert(text.contains("FAIL: over the 1M budget; a phase over budget names no owner card"))
+}
+
+#Test("a trace within budget passes; absent rows fail only with --strict") {
+    events := [String]{test_counter("parse.user_lines", 1000000)}
+    loop event in test_span("register", 0, 1000, 100000000, "register") -> events.push(event)
+    relaxed: report(test_options([String]{"t", "--column", "225K"}), test_budget(), test_trace(events))
+    assert_eq(relaxed.code, 0)
+    assert_eq(tail(test_row(relaxed.out, "P3"), 3, 7), "100|1,800|0.1x|ok")
+    assert(relaxed.out.join("\n").contains("PASS: within the 225K budget"))
+    strict: report(test_options([String]{"t", "--column", "225K", "--strict"}), test_budget(), test_trace(events))
+    assert_eq(strict.code, 1)
+}
+
+#Test("a wall-only trace is measured on the wall clock per --lines") {
+    events: [String]{
+        "{{\"pid\":1,\"tid\":1,\"name\":\"register\",\"cat\":\"register\",\"ph\":\"B\",\"ts\":0}}",
+        "{{\"pid\":1,\"tid\":1,\"name\":\"register\",\"cat\":\"register\",\"ph\":\"E\",\"ts\":2000000,\"args\":{{\"items\":3}}}}",
+    }
+    outcome: report(test_options([String]{"t", "--lines", "1000"}), test_budget(), test_trace(events))
+    assert_eq(outcome.code, 1)
+    assert(outcome.out.join("\n").contains("clock:   wall"))
+    assert_eq(tail(test_row(outcome.out, "P3"), 2, 7), "2.00|2,000,000|1,800|1111.1x|OVER")
+    assert_eq(tail(test_row(outcome.out, "P15"), 3, 7), "0|800|0.0x|ok")
+}
+
+test_always_on_trace: fn(kinds: [String]) -> String Never! {
+    events := [String]{test_counter("parse.user_lines", 1000000)}
+    loop index in 0..<kinds.len() {
+        loop event in test_span(kinds[index], index * 1000, index * 1000 + 500, 1000000, kinds[index]) {
+            events.push(event)
+        }
+    }
+    test_trace(events)
+}
+
+#Test("always-on checks: subtotal printed; a full-unit trace without one fails") {
+    options: test_options([String]{"t", "--column", "225K"})
+    full: report(options, test_budget(), test_always_on_trace([String]{"sema.bodies", "sema.effects", "sema.failure", "lower", "ir.lint", "ir.object"}))
+    assert_eq(full.code, 0)
+    // Each always-on row ran 1 ms over 1,000,000 lines.
+    assert(full.out.join("\n").contains("always-on checks (P5a+P5b, P5c, P5d, P9, P11): 5 ns/line, budget 29,200 (53.7% of the 225K work sum)"))
+    assert(full.out.join("\n").contains("PASS: within the 225K budget"))
+    no_lint: report(options, test_budget(), test_always_on_trace([String]{"sema.bodies", "sema.effects", "sema.failure", "lower", "ir.object"}))
+    assert_eq(no_lint.code, 1)
+    assert(no_lint.out.join("\n").contains("missing always-on spans in a full-unit trace: P9 ir.lint (IR consistency check"))
+    assert(no_lint.out.join("\n").contains("FAIL: an always-on check did not run"))
+    // A trace that stopped before code generation (no `lower`) is not a full unit.
+    check_only: report(options, test_budget(), test_always_on_trace([String]{"sema.bodies", "sema.effects", "sema.failure"}))
+    assert_eq(check_only.code, 0)
+}
+
+#Test("usage errors exit 64") {
+    if parse_args([String]{}) == .Ok(_) -> panic("no trace must be a usage error")
+    outcome: report(test_options([String]{"t", "--column", "2M"}), test_budget(), test_trace([String]{}))
+    assert_eq(outcome.code, 64)
+}
+
+#Test("numbers print as JavaScript prints them") {
+    assert_eq(fixed(Float.parse("0.125") ?? math.NAN, 2), "0.13")
+    assert_eq(fixed(Float.parse("2.5") ?? math.NAN, 0), "3")
+    assert_eq(fixed(Float.parse("-0.004") ?? math.NAN, 2), "-0.00")
+    assert_eq(fixed(Float.parse("1.005") ?? math.NAN, 2), "1.00")
+    assert_eq(grouped(Float.parse("1234567.5") ?? math.NAN), "1,234,568")
+    assert_eq(grouped(Float.parse("-0.3") ?? math.NAN), "-0")
+    assert_eq(grouped(Float.parse("-2.5") ?? math.NAN), "-2")
+    assert_eq(js_number(Float.parse("1e21") ?? math.NAN), "1e+21")
+    assert_eq(js_number(Float.parse("0.0000001") ?? math.NAN), "1e-7")
+    assert_eq(js_number(Float.parse("123.5") ?? math.NAN), "123.5")
+    assert_eq(js_number(number_from_text(" 0x10 ")), "16")
+    assert(math.is_nan(number_from_text("12abc")))
+    assert_eq(js_number(number_from_text("")), "0")
+    assert_eq(js_number(number_from_text(".5e1")), "5")
+}
+
+TEST_LIMITS: "| Measure | Limit |\n|---|---:|\n| Hello binary size | 150 KB |\n| Hello start time | 4 ms |\n"
+
+#Test("the hello gate reads its limits from the binary-size doc's table") {
+    doc: files.read(DEFAULT_SIZE_DOC) ?? panic("cannot read {DEFAULT_SIZE_DOC}")
+    limits: gate_limits(doc, DEFAULT_SIZE_DOC) ?? panic(err.lines.join(" "))
+    assert(!limits.size.time && limits.size.value > ZERO)
+    assert(limits.start.time && limits.start.value > ZERO)
+    parsed: gate_limits("intro\n\n{TEST_LIMITS}\nafter\n", "t.md") ?? panic(err.lines.join(" "))
+    assert_eq(js_number(parsed.size.value), "153600")
+    assert_eq(js_number(parsed.start.value), "4000000")
+    assert_eq(parsed.start.measure, "Hello start time")
+    if gate_limits("no table\n", "t.md") == .Ok(_) -> panic("a doc without the table must fail")
+    if gate_limits("| Measure | Limit |\n|---|---|\n| Hello binary size | 150 parsecs |\n| Hello start time | 4 ms |\n", "t.md") == .Ok(_) {
+        panic("an unknown unit must fail")
+    }
+    if gate_limits("| Measure | Limit |\n| a | 1 KB |\n| b | 2 KB |\n| c | 4 ms |\n", "t.md") == .Ok(_) {
+        panic("two size rows must fail")
+    }
+}
+
+#Test("the hello gate passes within both limits, fails over either, and prints the card row") {
+    limits: gate_limits(TEST_LIMITS, "t.md") ?? panic(err.lines.join(" "))
+    within: hello_verdict(limits, HelloMeasure{bytes: 100000, starts: [Int]{1000000, 2000000, 3000000}}, "t.md")
+    assert_eq(within.code, 0)
+    text: within.out.join("\n")
+    assert(text.contains("card row: hello size 100,000 B, start 2.000 ms (median of 3 runs)"))
+    assert(text.contains("start range: 1.000 ms to 3.000 ms"))
+    assert(text.ends_with("PASS: hello is within its size and start limits"))
+    big: hello_verdict(limits, HelloMeasure{bytes: 160000, starts: [Int]{1000000, 3000000}}, "t.md")
+    assert_eq(big.code, 1)
+    assert_eq(tail(test_row(big.out, "Hello binary size"), 1, 4), "160,000 B|150 KB (153,600 B)|OVER")
+    assert_eq(test_row(big.out, "Hello start time")[3], "ok")
+    assert(big.out.join("\n").ends_with("FAIL: hello is over its limit"))
+    slow: hello_verdict(limits, HelloMeasure{bytes: 100000, starts: [Int]{4500000}}, "t.md")
+    assert_eq(slow.code, 1)
+    assert_eq(test_row(slow.out, "Hello start time")[3], "OVER")
+}
+
+#Test("hello gate arguments") {
+    options: parse_hello_args([String]{"--hello", "--runs", "7", "--jet", "/x/jet"}) ?? panic(err.lines.join(" "))
+    assert_eq(options.runs, 7)
+    assert_eq(options.jet, "/x/jet")
+    assert_eq(options.doc, DEFAULT_SIZE_DOC)
+    if parse_hello_args([String]{"--hello", "--runs", "0"}) == .Ok(_) {
+        panic("--runs 0 must be a usage error")
+    }
+    if parse_hello_args([String]{"--hello", "--column", "1M"}) == .Ok(_) {
+        panic("a trace option must be a usage error")
+    }
+}

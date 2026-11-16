@@ -1,0 +1,11 @@
+# tests/taskgroup_params.rs::taskgroup_cannot_escape_in_a_closure: a Group captured by a lambda is one E1110 at the lambda, for a function and for a method. The original also counted a FailureDomainMismatch, a cascade of the same capture; Jet reports the one root cause.
+fixture: taskgroup_cannot_escape_in_a_closure/input
+env: NO_COLOR=1
+step: jet check o1/run.jet
+exit: nonzero # tests/taskgroup_params.rs:57 expect_err
+stderr: count "[jet.TaskOutsideGroup]" = 1 # tests/taskgroup_params.rs:262 assert_eq!
+stderr: count "Error [" = 1 # the escape is the only error, with no cascade
+step: jet check o2/run.jet
+exit: nonzero # tests/taskgroup_params.rs:57 expect_err
+stderr: count "[jet.TaskOutsideGroup]" = 1 # tests/taskgroup_params.rs:278 assert_eq!
+stderr: count "Error [" = 1 # the escape is the only error, with no cascade

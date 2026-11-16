@@ -1,0 +1,30 @@
+# A reached `#Todo` in a web build is the shared E3011 stop: the page prints
+# byte for byte what `jet run` prints and exits 70, whichever partition
+# marker the entry's module carries.
+requires: tool:node
+fixture: web_todo_runs_through_shared_stop_on_js_and_wasm.fixture
+env: NO_COLOR=1
+step native_js: jet run tests/fixtures/web_todo_js.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3011]: `#Todo at web_todo_js.jet:3 — expected Int`\n" # the report's head; the page's report is compared whole below
+step: jet build --target web tests/fixtures/web_todo_js.jet
+exit: 0
+file: tests/fixtures/.jet/build/app.wasm is-file
+step: node app.js
+cwd: tests/fixtures/.jet/build
+exit: 70
+stdout: empty
+stderr: == native_js
+step native_wasm: jet run tests/fixtures/web_todo_wasm.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3011]: `#Todo at web_todo_wasm.jet:3 — expected Int`\n" # the report's head; the page's report is compared whole below
+step: jet build --target web tests/fixtures/web_todo_wasm.jet
+exit: 0
+file: tests/fixtures/.jet/build/app.wasm is-file
+step: node app.js
+cwd: tests/fixtures/.jet/build
+exit: 70
+stdout: empty
+stderr: == native_wasm

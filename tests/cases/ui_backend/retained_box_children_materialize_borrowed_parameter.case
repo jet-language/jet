@@ -1,0 +1,14 @@
+# tests/ui_backend.rs::retained_box_children_materialize_borrowed_parameter at tests/ui_backend.rs:236; hand-port
+# Fixture source bytes unchanged; package.jet stands in for the harness's TIR_TEST_PACKAGE. The
+# original compiled the program ahead of time (build_and_run): reusing the source list passes the
+# retained children through the borrowed parameter twice. The case builds and runs the executable.
+fixture: retained_box_children_materialize_borrowed_parameter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0 # assert_eq!(code, 0, "retained UI box children failed: {stderr}")
+stdout: = "ok\n"

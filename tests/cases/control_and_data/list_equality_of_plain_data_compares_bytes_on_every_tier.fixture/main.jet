@@ -1,0 +1,58 @@
+// Lists of plain data are equal exactly when their elements are, at every
+// length around the 8-byte word and the 64-byte step: one differing element
+// anywhere, or one more element, makes them unequal. Floats compare by
+// value: -0.0 equals 0.0 and NaN equals nothing.
+
+bytes: fn(count: Int, flip: Int) -> [U8] {
+    out := [U8]{}
+    loop i in 0..<count {
+        value: (i * 37 + 11).bit_and(255)
+        out.push(U8{if i == flip -> value.bit_xor(1) else -> value})
+    }
+    out
+}
+
+words: fn(count: Int, flip: Int) -> [I32] {
+    out := [I32]{}
+    loop i in 0..<count -> out.push(I32{if i == flip -> -i else -> i * 1000})
+    out
+}
+
+mark: fn(same: Bool) -> String { if same -> "=" else -> "x" }
+
+run: fn() {
+    sizes: [Int]{0, 1, 7, 8, 9, 63, 64, 65, 127, 128, 200}
+    loop n in sizes {
+        a := bytes(n, -1)
+        same := bytes(n, -1)
+        first := bytes(n, 0)
+        last := bytes(n, n - 1)
+        longer := bytes(n + 1, -1)
+        print("{n} {mark(a == same)} {mark(a == first)} {mark(a == last)} {mark(a == longer)}")
+    }
+    widths: [Int]{3, 16, 17, 40}
+    loop n in widths {
+        a := words(n, -1)
+        b := words(n, n - 1)
+        print("I32 {n} {mark(a == words(n, -1))} {mark(a == b)}")
+    }
+    flags := [Bool]{}
+    other := [Bool]{}
+    loop i in 0..<70 {
+        flags.push(i % 3 == 0)
+        other.push(i % 3 == 0)
+    }
+    print("Bool {mark(flags == other)}")
+    other[69] = !other[69]
+    print("Bool {mark(flags == other)}")
+    zero := [Float]{}
+    zero.push(0.0)
+    negative := [Float]{}
+    negative.push(-0.0)
+    print("F64 {mark(zero == negative)}")
+    nan := [Float]{}
+    nan.push(0.0 / 0.0)
+    again := [Float]{}
+    again.push(0.0 / 0.0)
+    print("F64 {mark(nan == again)}")
+}

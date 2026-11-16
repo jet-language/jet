@@ -1,0 +1,15 @@
+// A union never counts as a function slot: where `Int | fn() -> Int` is
+// expected, a method read without parentheses is a forgotten call, and the
+// error suggests the call. (A function type is no union member, E0363.)
+Crew: struct {
+    n: Int
+
+    total: fn(self) -> Int { self.n }
+}
+
+show: fn(value: Int | fn() -> Int) { print("shown") }
+
+run: fn() {
+    crew: Crew{n: 3}
+    show(crew.total)
+}

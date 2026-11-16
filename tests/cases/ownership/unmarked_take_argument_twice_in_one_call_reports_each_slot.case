@@ -1,0 +1,13 @@
+# tests/ownership.rs::unmarked_take_argument_twice_in_one_call_reports_each_slot at tests/ownership.rs:2617; hand-port
+# Claim: jet check exits 1 for both(t, t) with unmarked takes (tests/ownership.rs:626-627)
+# Claim: each of the two take slots is reported E0209 with the text "more than once" (tests/ownership.rs:628-632)
+# Fixture migrated: none: source is the verbatim Rust raw string
+# Not ported: the exact byte-span pair assertion (tests/ownership.rs:629-631) is not observable from the CLI text; checked by the message text instead
+fixture: unmarked_take_argument_twice_in_one_call_reports_each_slot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/ownership.rs:626-632
+stderr: ~ "E0209" # tests/ownership.rs:626-632
+stderr: ~ "more than once" # tests/ownership.rs:626-632

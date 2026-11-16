@@ -1,0 +1,12 @@
+# A package is one namespace: a marker one of its files declares is named
+# bare in another, as its functions and types are. `other.jet` marks `greeting`
+# with `#Traced`, which `main.jet` declares.
+fixture: a_package_file_uses_its_siblings_marker_bare.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build main.jet
+exit: 0
+stderr: !~ "E0927" # the sibling's marker is known
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "written by hand\n"

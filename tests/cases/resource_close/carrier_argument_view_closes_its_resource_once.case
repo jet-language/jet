@@ -1,0 +1,10 @@
+# Claim: a Val or Ok carrier built from a borrowed resource for a read argument is a view; the resource closes exactly once, at its owner's scope end, on the release AOT and default jet run tiers
+fixture: carrier_argument_view_closes_its_resource_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --release run.jet
+exit: 0 # release AOT
+stdout: = "val 5\nok 5\nafter wrap\nclose owned\n" # release AOT
+step: jet run run.jet
+exit: 0 # default jet run
+stdout: = "val 5\nok 5\nafter wrap\nclose owned\n" # default jet run

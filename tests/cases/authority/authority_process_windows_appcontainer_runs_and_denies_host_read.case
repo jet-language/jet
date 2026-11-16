@@ -1,0 +1,13 @@
+# Claim: windows-appcontainer runs a sandboxed command (sandboxed) and denies a host file read (blocked)
+# Fixture migrated: two separate package dirs ok/ and hostile/ (each with its own package.jet, same authority block as TIR_PACKAGE); the hostile read targets the host's C:\Windows\win.ini instead of a temp-dir marker
+requires: os:windows
+fixture: authority_process_windows_appcontainer_runs_and_denies_host_read.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run ok/main.jet
+exit: 0 # native backend success
+stdout: = "sandboxed\n" # native backend success
+step: jet run hostile/main.jet
+exit: 0 # native backend host-read denied
+stdout: = "blocked\n" # native backend host-read denied

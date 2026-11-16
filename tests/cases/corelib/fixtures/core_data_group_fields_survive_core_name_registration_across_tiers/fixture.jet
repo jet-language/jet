@@ -1,0 +1,15 @@
+use data: core.data
+
+Ticket: struct {
+    region: String
+    amount: Float
+}
+
+run: fn() {
+    rows: [Ticket]{Ticket{region: "West", amount: 2.5}}
+    groups: data.query(rows)
+        .group_by(fn(sale) { sale.region })
+        .sum(fn(sale) { sale.amount })
+        .collect() ?? panic("group")
+    print("{groups[0].key}:{groups[0].value}")
+}

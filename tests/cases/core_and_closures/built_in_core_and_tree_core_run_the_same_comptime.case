@@ -1,0 +1,21 @@
+# Claim: Core functions a `#run` reaches give the same value against the Core built into jet as against the toolchain tree's Core, at O0, O1 and O2.
+# `#run view()` runs Core's generic sort with a user closure whose failure crosses the Core body, Core's tally and a String method while compiling; the program prints that value, then what `view()` gives at run time.
+# The `tree` step reads Core from the toolchain tree; the `built_in` steps run without one, so jet takes the Core sources built into it.
+fixture: built_in_core_and_tree_core_run_the_same_comptime/input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step tree_o0: jet run -O0 run.jet
+exit: 0
+stdout: = "abc after cab|ezd after ez, E_POINT:negative z|core|3|2\nabc after cab|ezd after ez, E_POINT:negative z|core|3|2\n"
+step built_in_o0: jet run -O0 run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab|ezd after ez, E_POINT:negative z|core|3|2\nabc after cab|ezd after ez, E_POINT:negative z|core|3|2\n"
+step built_in_o1: jet run -O1 run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab|ezd after ez, E_POINT:negative z|core|3|2\nabc after cab|ezd after ez, E_POINT:negative z|core|3|2\n"
+step built_in_o2: jet run -O2 run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab|ezd after ez, E_POINT:negative z|core|3|2\nabc after cab|ezd after ez, E_POINT:negative z|core|3|2\n"

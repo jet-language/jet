@@ -1,0 +1,106 @@
+use {
+    db: core.db
+    app
+    ws: core.net.ws
+    server: core.http.server
+    web: core.web
+    time: core.time
+}
+
+// The server side of one caller's connection: it binds that caller's live
+// query under the caller's own policy scope and watches it.
+watch_mine: fn(req: HTTPRequest, scope: db.DBScope, query: db.SQL) -> HTTPResponse HTTPError! {
+    sock: ws.upgrade(req) ?? panic("upgrade")
+    mine: scope.live(query) ?? panic("live")
+    app.watch(sock, mine)
+    converse(sock)
+}
+
+// A WebSocket route that reads no live query.
+chat: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    sock: ws.upgrade(req) ?? panic("upgrade")
+    converse(sock)
+}
+
+// Says "ready", answers each text with "done", and ends when the client
+// closes; any live event the hub sends reaches the client before "done".
+converse: fn(sock: WsConn) -> HTTPResponse HTTPError! {
+    sock.send_text("ready") ?? panic("ready")
+    loop {
+        message: sock.recv() ?? break
+        if message.is_close() -> break
+        if message.is_text() -> sock.send_text("done") ?? break
+    }
+    Ok(server.response(500, "unused"))
+}
+
+// Every text the client receives up to `until`, in order.
+texts_until: fn(client: WsConn, until: String) -> String {
+    out := [String]{}
+    loop {
+        message: client.recv() ?? panic("client recv")
+        if message.is_text() {
+            text: message.text() ?? panic("text")
+            done: text == until
+            out.push(text)
+            if done -> return out.join(" ")
+        }
+    }
+}
+
+add_task: fn(scope: db.DBScope, title: String) {
+    owner: "alice"
+    _: scope.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}) ?? panic("insert task")
+}
+
+add_note: fn(scope: db.DBScope, body: String) {
+    owner: "bob"
+    _: scope.execute(SQL{"INSERT INTO notes (owner, body) VALUES ({owner}, {body})"}) ?? panic("insert note")
+}
+
+run: fn() {
+    conn: db.open_memory()
+    tasks: db.policy("tasks", "owner == user") ?? panic("tasks policy")
+    notes: db.policy("notes", "owner == user") ?? panic("notes policy")
+    alice: conn.with_policy(tasks, "alice")
+    bob: conn.with_policy(notes, "bob")
+    _: db.migrate(alice, "tasks-v1", [db.SQL]{SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}}) ?? panic("migrate tasks")
+    _: db.migrate(bob, "notes-v1", [db.SQL]{SQL{"CREATE TABLE notes (owner TEXT, body TEXT)"}}) ?? panic("migrate notes")
+    alice_live: alice.live(SQL{"SELECT title FROM tasks"}) ?? panic("alice live")
+    bob_live: bob.live(SQL{"SELECT body FROM notes"}) ?? panic("bob live")
+    print("bindings alice={alice_live.id} bob={bob_live.id}")
+    add_task(alice, "before")
+
+    mux: web.app()
+    mux.get("/live/alice", fn(req: HTTPRequest) { watch_mine(req, alice, SQL{"SELECT title FROM tasks"}) })
+    mux.get("/live/bob", fn(req: HTTPRequest) { watch_mine(req, bob, SQL{"SELECT body FROM notes"}) })
+    mux.get("/chat", fn(req: HTTPRequest) { chat(req) })
+    listening: mux.bind("127.0.0.1:0") ?? panic("bind")
+    addr: listening.local_addr() ?? panic("address")
+    serving: task { listening.serve() ?? panic("serve") }
+    time.sleep(20ms)
+
+    chat_client: ws.connect("ws://{addr}/chat") ?? panic("connect chat")
+    print("chat joined: {texts_until(chat_client, "ready")}")
+    alice_client: ws.connect("ws://{addr}/live/alice") ?? panic("connect alice")
+    print("alice watched: {texts_until(alice_client, "ready")}")
+    bob_client: ws.connect("ws://{addr}/live/bob") ?? panic("connect bob")
+    print("bob watched: {texts_until(bob_client, "ready")}")
+
+    add_task(alice, "salary")
+    add_note(bob, "diagnosis")
+
+    chat_client.send_text("bye") ?? panic("chat bye")
+    print("chat received: {texts_until(chat_client, "done")}")
+    alice_client.send_text("bye") ?? panic("alice bye")
+    print("alice received: {texts_until(alice_client, "done")}")
+    bob_client.send_text("bye") ?? panic("bob bye")
+    print("bob received: {texts_until(bob_client, "done")}")
+
+    chat_client.close(1000, "") ?? panic("close chat")
+    alice_client.close(1000, "") ?? panic("close alice")
+    bob_client.close(1000, "") ?? panic("close bob")
+    grace: 100ms
+    listening.shutdown(grace) ?? panic("shutdown")
+    _: serving.join() ?? panic("server join")
+}

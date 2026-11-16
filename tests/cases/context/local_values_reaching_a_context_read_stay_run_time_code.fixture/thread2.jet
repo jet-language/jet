@@ -1,0 +1,14 @@
+which: fn() -> Int { context.thread }
+
+inner: fn() -> Int {
+    here: which()
+    here
+}
+
+run: fn() {
+    worker: task inner()
+    if worker.join() == {
+        .Ok(value) -> { print("task local {value}") }
+        .Err(_) -> { print("failed") }
+    }
+}

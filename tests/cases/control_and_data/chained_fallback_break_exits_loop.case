@@ -1,0 +1,10 @@
+# A `break` at any depth of a `??` chain is a loop exit: `a ?? b ?? break`,
+# a block fallback at the end of a longer chain, a block fallback whose value
+# is its own `?? break` chain, `break(outer)` nested in a chain, and a chain
+# inside a value `if` arm. The statements after each loop stay reachable and
+# their locals resolve.
+fixture: chained_fallback_break_exits_loop.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "one 0\none 1\none 2\nafter 1\ntwo 0\ntwo 1\ntwo 2\nstop 3\ndone 2\nthree 0\nthree 1\nthree 2\nmiss 3\nlater 3\nfour 0\nfour 1\nfour 2\nlast 4\nfive 0\nfive 1\nfive 2\nfin 5\n"

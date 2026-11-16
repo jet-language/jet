@@ -1,0 +1,70 @@
+# A map literal whose computed keys collide stops, naming the key and both
+# entries, on the debug, release and default tiers and in `#run`; a value
+# replaced by an assignment after the literal is unaffected.
+fixture: map_literal_computed_duplicate_key_stops_on_every_tier.fixture
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+step: jet run --profile=debug text_keys.jet
+env: JET_STORE_DIR={work}/cache-text-debug
+env: JETPACK_ROOT={work}/jetpack-text-debug
+normalize: replace "{work}/" ""
+exit: 70
+stdout: empty
+stderr: = map_literal_computed_duplicate_key_stops_on_every_tier.text.expected
+step: jet run --release text_keys.jet
+env: JET_STORE_DIR={work}/cache-text-release
+env: JETPACK_ROOT={work}/jetpack-text-release
+normalize: replace "{work}/" ""
+exit: 70
+stdout: empty
+stderr: = map_literal_computed_duplicate_key_stops_on_every_tier.text.expected
+step: jet run text_keys.jet
+env: JET_STORE_DIR={work}/cache-text-default
+env: JETPACK_ROOT={work}/jetpack-text-default
+normalize: replace "{work}/" ""
+exit: 70
+stdout: empty
+stderr: = map_literal_computed_duplicate_key_stops_on_every_tier.text.expected
+step: jet run --profile=debug enum_keys.jet
+env: JET_STORE_DIR={work}/cache-enum-debug
+env: JETPACK_ROOT={work}/jetpack-enum-debug
+normalize: replace "{work}/" ""
+exit: 70
+stdout: empty
+stderr: = map_literal_computed_duplicate_key_stops_on_every_tier.enum.expected
+step: jet run --release enum_keys.jet
+env: JET_STORE_DIR={work}/cache-enum-release
+env: JETPACK_ROOT={work}/jetpack-enum-release
+normalize: replace "{work}/" ""
+exit: 70
+stdout: empty
+stderr: = map_literal_computed_duplicate_key_stops_on_every_tier.enum.expected
+step: jet run enum_keys.jet
+env: JET_STORE_DIR={work}/cache-enum-default
+env: JETPACK_ROOT={work}/jetpack-enum-default
+normalize: replace "{work}/" ""
+exit: 70
+stdout: empty
+stderr: = map_literal_computed_duplicate_key_stops_on_every_tier.enum.expected
+step: jet run comptime_keys.jet
+env: JET_STORE_DIR={work}/cache-comptime
+env: JETPACK_ROOT={work}/jetpack-comptime
+normalize: replace "{work}/" ""
+exit: 1
+stdout: empty
+stderr: = map_literal_computed_duplicate_key_stops_on_every_tier.comptime.expected
+step: jet run --profile=debug replaced.jet
+env: JET_STORE_DIR={work}/cache-replaced-debug
+env: JETPACK_ROOT={work}/jetpack-replaced-debug
+exit: 0
+stdout: = "99 10 2\n"
+step: jet run --release replaced.jet
+env: JET_STORE_DIR={work}/cache-replaced-release
+env: JETPACK_ROOT={work}/jetpack-replaced-release
+exit: 0
+stdout: = "99 10 2\n"
+step: jet run replaced.jet
+env: JET_STORE_DIR={work}/cache-replaced-default
+env: JETPACK_ROOT={work}/jetpack-replaced-default
+exit: 0
+stdout: = "99 10 2\n"

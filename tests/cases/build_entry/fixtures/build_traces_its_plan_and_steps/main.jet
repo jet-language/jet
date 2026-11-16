@@ -1,0 +1,14 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run a declared step") {
+        shell: b.probe("shell", "find_program", "sh")
+        mirror: b.run("mirror", b.found(shell), ["Exec", "FS"])
+        mirror.arg("-c")
+        mirror.arg("read -r word < in.txt; printf '%s' \"$word\" > mirror.txt")
+        mirror.reads("in.txt")
+        mirror.writes("mirror.txt")
+        app: b.add_executable("app", ["main.jet"], [mirror])
+        b.default(app)
+    }
+}
+
+run: fn() {}

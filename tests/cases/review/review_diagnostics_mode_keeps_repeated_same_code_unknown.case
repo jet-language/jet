@@ -1,0 +1,8 @@
+# PORT tests/review.rs::review_diagnostics_mode_keeps_repeated_same_code_unknown
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: review_diagnostics_mode_keeps_repeated_same_code_unknown.fixture
+step: jet review {work}/base/run.jet {work}/head/run.jet --diagnostics --json
+exit: 0
+stdout: ~ "\"status\":\"unknown\"" # Original contains predicate.
+stdout: ~ "same-code occurrence has a different location" # Original contains predicate.
+stdout: !~ "\"status\":\"resolved\"" # Original negative predicate.

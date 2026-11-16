@@ -1,0 +1,23 @@
+// A generic module with a value parameter, beside a generic struct whose
+// field holds the same value. Both take the module pricing as R.
+module pricing {
+    fn total(text: String) -> Int { text.len() }
+}
+
+module billing<R>(extra: Int) {
+    fn bill(text: String) -> Int { R.total(text) + extra }
+}
+
+module priced :: billing<pricing>(100)
+
+struct Billing<R> {
+    extra: Int
+
+    fn bill(self, text: String) -> Int { R.total(text) + self.extra }
+}
+
+fn run() {
+    print(priced.bill("abc"))
+    b :: Billing<pricing>{extra: 200}
+    print(b.bill("abc"))
+}

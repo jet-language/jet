@@ -1,0 +1,11 @@
+use {
+    web: core.web
+    http_server: core.http.server
+}
+
+run: fn() HTTPError! {
+    mux: web.app()
+    mux.get("/", fn(req: HTTPRequest) { Ok(http_server.response(200, "hello")) })
+    server: mux.bind("127.0.0.1:18080", deadline: 2s)
+    server.serve()
+}

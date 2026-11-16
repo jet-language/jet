@@ -1,0 +1,337 @@
+[
+  {
+    "name": "hello",
+    "what": "startup, print, exit: the size floor (#6328), and the gauntlet cli.hello cell",
+    "gauntlet": ["cli.hello"],
+    "jet": "hello",
+    "args": [],
+    "expect": "hello\n"
+  },
+  {
+    "name": "collatz",
+    "what": "integer loop with data-dependent branches",
+    "gauntlet": [],
+    "jet": "collatz",
+    "args": ["3000000"],
+    "expect": "steps 428343355\n"
+  },
+  {
+    "name": "fib",
+    "what": "calls: naive doubly recursive Fibonacci",
+    "gauntlet": [],
+    "jet": "fib",
+    "args": ["40"],
+    "expect": "fib 102334155\n"
+  },
+  {
+    "name": "isum",
+    "what": "list fill and bounds-checked index reads",
+    "gauntlet": [],
+    "jet": "isum",
+    "args": ["10000000"],
+    "expect": "sum 333333233333340\n"
+  },
+  {
+    "name": "memcopy",
+    "what": "the memory kernel's byte copy and move (mem.copy<U8>), 1 byte to 16 KiB, overlapping either way",
+    "gauntlet": [],
+    "jet": "memcopy",
+    "args": ["2000"],
+    "expect": "sum 1823603788\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_mem_move"], "source": "run.jet", "use": "mem.copy<U8>(" },
+      "ref": { "routines": ["dispatch", "move_avx2", "move_sse2"], "source": "ref.S", "use": "call [rsp]", "data": 8 }
+    }
+  },
+  {
+    "name": "memfill",
+    "what": "the memory kernel's byte fill (mem.fill<U8>), 1 byte to 16 KiB at any alignment",
+    "gauntlet": [],
+    "jet": "memfill",
+    "args": ["4000"],
+    "expect": "sum 4189960000\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_mem_fill_bytes"], "source": "run.jet", "use": "mem.fill<U8>(" },
+      "ref": { "routines": ["dispatch", "fill_avx2", "fill_sse2"], "source": "ref.S", "use": "call [rsp]", "data": 8 }
+    }
+  },
+  {
+    "name": "rawword",
+    "what": "the memory kernel's raw word access: a pointer's offset, its read through `.*` and its write through mem.volatile_write",
+    "gauntlet": [],
+    "jet": "rawword",
+    "args": ["20000"],
+    "expect": "sum 4960021516\n",
+    "kernel": {
+      "jet": { "routines": [], "source": "run.jet", "use": "words.offset(" },
+      "ref": { "routines": [], "source": "ref.S", "use": "# the raw" }
+    }
+  },
+  {
+    "name": "atomics",
+    "what": "the memory kernel's atomic word: an Atomic<I64>'s add, load, compare_exchange and store",
+    "gauntlet": [],
+    "jet": "atomics",
+    "args": ["20000"],
+    "expect": "sum 2760663040000\n",
+    "kernel": {
+      "jet": { "routines": [], "source": "run.jet", "use": "counter." },
+      "ref": { "routines": [], "source": "ref.S", "use": "# the atomic" }
+    }
+  },
+  {
+    "name": "mapping",
+    "what": "the memory kernel's page mapping: mem.Region.reserve of 64 KiB and the region's close",
+    "gauntlet": [],
+    "jet": "mapping",
+    "args": ["100000"],
+    "expect": "sum 6553600000\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_mem_region_reserve", "jet_rt_mem_region_release", "unit_alloc_reservation_map", "unit_alloc_page_set"], "source": "run.jet", "use": "// the mapping" },
+      "ref": { "routines": [], "source": "ref.S", "use": "# the mapping" }
+    }
+  },
+  {
+    "name": "compare",
+    "what": "the memory kernel's byte compare: the safe equality of two [U8], 1 byte to 16 KiB",
+    "gauntlet": [],
+    "jet": "compare",
+    "args": ["4000"],
+    "expect": "sum 1088319\n",
+    "kernel": {
+      "jet": { "routines": [], "source": "run.jet", "use": "// the compare" },
+      "ref": { "routines": ["dispatch", "equal_avx2", "equal_sse2"], "source": "ref.S", "use": "# the compare", "data": 8 }
+    }
+  },
+  {
+    "name": "allocfree",
+    "what": "the memory kernel's heap: mem.alloc_raw and mem.free_raw of 1 byte to 1 KiB over 256 slots",
+    "gauntlet": [],
+    "jet": "allocfree",
+    "args": ["4000"],
+    "expect": "sum 2072832000\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_alloc_try", "unit_alloc_try", "unit_alloc_try_validated", "unit_alloc_try_reserved", "unit_alloc_reserve", "unit_alloc_class", "unit_alloc_head", "jet_rt_free", "unit_alloc_free_validated", "unit_alloc_untrack"], "source": "run.jet", "use": "// the heap" },
+      "ref": { "routines": ["alloc", "free"], "source": "ref.S", "use": "# the heap" }
+    }
+  },
+  {
+    "name": "resize",
+    "what": "the memory kernel's resize: mem.list_append of 1 to 64 bytes over 256 byte lists, grown in place or moved",
+    "gauntlet": [],
+    "jet": "resize",
+    "args": ["8000"],
+    "expect": "sum 16993628314\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_mem_move", "jet_rt_alloc_try", "unit_alloc_try", "unit_alloc_try_validated", "unit_alloc_try_reserved", "unit_alloc_reserve", "unit_alloc_class", "unit_alloc_head", "jet_rt_free_8", "jet_rt_block_inherit_zero"], "source": "run.jet", "use": "// the resize" },
+      "ref": { "routines": ["grow", "alloc", "free", "copy"], "source": "ref.S", "use": "# the resize" }
+    }
+  },
+  {
+    "name": "sieve",
+    "what": "the gauntlet numerics.int-kernel cell",
+    "gauntlet": ["numerics.int-kernel"],
+    "jet": "../../gauntlet/entries/sieve/jet",
+    "args": ["10000000"],
+    "expect": "count 664579\nlargest 9999991\n"
+  },
+  {
+    "name": "wordfreq",
+    "what": "the gauntlet text.kernel cell: whitespace split, exact token counts, top 20",
+    "gauntlet": ["text.kernel"],
+    "jet": "../../gauntlet/entries/wordfreq/jet",
+    "fixture": { "script": "../../gauntlet/entries/wordfreq/fixtures/gen.py", "out": "input.txt" },
+    "args": ["input.txt"],
+    "expect_file": "../../gauntlet/entries/wordfreq/expected.out"
+  },
+  {
+    "name": "nbody",
+    "what": "the gauntlet numerics.float-kernel cell: five bodies, symplectic Euler, energy before and after",
+    "gauntlet": ["numerics.float-kernel"],
+    "jet": "../../gauntlet/entries/nbody/jet",
+    "args": ["50000"],
+    "expect_file": "../../gauntlet/entries/nbody/expected.out"
+  },
+  {
+    "name": "bulkrename",
+    "what": "the gauntlet files.script cell: list a directory, rename the IMG_<n>.jpeg files in number order",
+    "gauntlet": ["files.script"],
+    "jet": "../../gauntlet/entries/bulkrename/jet",
+    "fixture": { "script": "../../gauntlet/entries/bulkrename/fixtures/gen.py", "out": "photos", "fresh": true },
+    "args": ["photos"],
+    "expect_file": "../../gauntlet/entries/bulkrename/expected.out"
+  },
+  {
+    "name": "taskfile",
+    "what": "the gauntlet cli.app and formats.json-app cells: a JSON task store, one process per add/done/list step",
+    "gauntlet": ["cli.app", "formats.json-app"],
+    "jet": "../../gauntlet/entries/taskfile-cli/jet",
+    "steps": [["add", "write gauntlet report"], ["add", "close cards"], ["done", "1"], ["add", "ship it"], ["done", "9"], ["list"]],
+    "expect_file": "../../gauntlet/entries/taskfile-cli/expected.out"
+  },
+  {
+    "name": "tensormap",
+    "what": "the gauntlet numerics.tensor-map cell: two 4096 x 4096 double tensors, their sum, its corner and checksum",
+    "gauntlet": ["numerics.tensor-map"],
+    "jet": "../../gauntlet/entries/tensor-map-4k/jet",
+    "args": [],
+    "expect_file": "../../gauntlet/entries/tensor-map-4k/expected.out"
+  },
+  {
+    "name": "fft",
+    "what": "the gauntlet numerics.fft cell: the 4096-point transform of an impulse, checked to 1e-9",
+    "gauntlet": ["numerics.fft"],
+    "jet": "../../gauntlet/entries/fft-4096/jet",
+    "args": [],
+    "expect_file": "../../gauntlet/entries/fft-4096/expected.out"
+  },
+  {
+    "name": "binparse",
+    "what": "the gauntlet formats.binary-kernel cell: 300000 little-endian records, a sum over every seventh id and FNV-1a over the names",
+    "gauntlet": ["formats.binary-kernel"],
+    "jet": "../../gauntlet/entries/binparse/jet",
+    "fixture": { "script": "../../gauntlet/entries/binparse/fixtures/gen.py", "out": "input.bin" },
+    "args": ["input.bin"],
+    "expect_file": "../../gauntlet/entries/binparse/expected.out"
+  },
+  {
+    "name": "regexlogscan",
+    "what": "the gauntlet text.regex-kernel cell: 500000 combined-log rows, those with a 5xx status and an /api/ path counted per client, top 5",
+    "gauntlet": ["text.regex-kernel"],
+    "jet": "../../gauntlet/entries/regex-logscan/jet",
+    "fixture": { "script": "../../gauntlet/entries/regex-logscan/fixtures/gen.py", "out": "access.log" },
+    "args": ["access.log"],
+    "expect_file": "../../gauntlet/entries/regex-logscan/expected.out"
+  },
+  {
+    "name": "regexfindall",
+    "what": "the gauntlet text.regex-find-all-large cell: non-overlapping matches of the literal regex `struct` in a 4 MiB corpus",
+    "gauntlet": ["text.regex-find-all-large"],
+    "jet": "../../gauntlet/entries/regex-find-all-4mb/jet",
+    "fixture": { "script": "../../gauntlet/entries/regex-find-all-4mb/fixtures/gen.py", "out": "corpus.txt" },
+    "args": ["corpus.txt"],
+    "expect_file": "../../gauntlet/entries/regex-find-all-4mb/expected.out"
+  },
+  {
+    "name": "sensorring",
+    "what": "the gauntlet embedded.kernel cell: 12000 ticks of a sensor-ring firmware core (ADC sample, CRC-16 frame, 16-slot ring, fixed-point controller, MMIO trace checksums)",
+    "gauntlet": ["embedded.kernel"],
+    "jet": "../../gauntlet/entries/embedded-sensor-ring/jet",
+    "args": ["12000"],
+    "expect_file": "../../gauntlet/entries/embedded-sensor-ring/expected.out"
+  },
+  {
+    "name": "csvtransform",
+    "what": "the gauntlet formats.csv-cli cell: 200000 RFC-4180 sales rows, the positive amounts counted and summed per region",
+    "gauntlet": ["formats.csv-cli"],
+    "jet": "../../gauntlet/entries/csvtransform/jet",
+    "fixture": { "script": "../../gauntlet/entries/csvtransform/fixtures/gen.py", "out": "sales.csv" },
+    "args": ["sales.csv"],
+    "expect_file": "../../gauntlet/entries/csvtransform/expected.out"
+  },
+  {
+    "name": "logreport",
+    "what": "the gauntlet text.report-cli cell: an application log's lines, RFC 3339 stamps parsed, levels counted, the 3 components with the most ERROR lines ranked, first and last stamps and the span printed",
+    "gauntlet": ["text.report-cli"],
+    "jet": "../../gauntlet/entries/logreport/jet",
+    "fixture": { "script": "../../gauntlet/entries/logreport/fixtures/gen.py", "out": "app.log" },
+    "args": ["app.log"],
+    "expect_file": "../../gauntlet/entries/logreport/expected.out"
+  },
+  {
+    "name": "embeddeddata",
+    "what": "the gauntlet embedded.data cell: an EDB1 telemetry file of 1000000 12-byte frames, every byte summed, the valid frames counted per channel with sample, energy, load and tick aggregates",
+    "gauntlet": ["embedded.data"],
+    "jet": "../../gauntlet/entries/embedded-data/jet",
+    "fixture": { "script": "../../gauntlet/entries/embedded-data/fixtures/gen.py", "out": "telemetry.bin" },
+    "args": ["telemetry.bin"],
+    "expect_file": "../../gauntlet/entries/embedded-data/expected.out"
+  },
+  {
+    "name": "w11fetch",
+    "what": "ScriptBench w11: fetch http://127.0.0.1:18411/item/<i> for 100 ids, at most 32 at a time, from the fixture server that answers after 20 ms, and count the 200s with a nonempty body",
+    "gauntlet": [],
+    "scriptbench": ["w11"],
+    "jet": "../scriptbench/w11-fetch",
+    "server": { "script": "../scriptbench/server.js", "port": 18411, "delay_ms": 20 },
+    "args": [],
+    "expect_file": "../scriptbench/w11-fetch/expected.out"
+  },
+  {
+    "name": "textscript",
+    "what": "the gauntlet text.script cell: a notes file's lines trimmed, the blank ones dropped, the rest sorted and printed after their count",
+    "gauntlet": ["text.script"],
+    "jet": "../../gauntlet/entries/text-script/jet",
+    "fixture": { "script": "../../gauntlet/entries/text-script/fixtures/gen.py", "out": "notes.txt" },
+    "args": ["notes.txt"],
+    "expect_file": "../../gauntlet/entries/text-script/expected.out"
+  },
+  {
+    "name": "datasummary",
+    "what": "the gauntlet numerics.script and numerics.notebook cells: 50000 CSV measurements grouped, each group's count, mean, lower median, p95 and population sd to two decimals, then the overall count and mean",
+    "gauntlet": ["numerics.script", "numerics.notebook"],
+    "jet": "../../gauntlet/entries/datasummary/jet",
+    "fixture": { "script": "../../gauntlet/entries/datasummary/fixtures/gen.py", "out": "measurements.csv" },
+    "args": ["measurements.csv"],
+    "expect_file": "../../gauntlet/entries/datasummary/expected.out"
+  },
+  {
+    "name": "tzreport",
+    "what": "the gauntlet time.script and time.notebook cells: RFC 3339 meetings with offsets put in UTC, ordered by instant, each with its weekday and the minutes since the one before, then the span and count",
+    "gauntlet": ["time.script", "time.notebook"],
+    "jet": "../../gauntlet/entries/tzreport/jet",
+    "fixture": { "script": "tzreport/fixture.py", "out": "meetings.txt" },
+    "args": ["meetings.txt"],
+    "expect_file": "../../gauntlet/entries/tzreport/expected.out"
+  },
+  {
+    "name": "gameframe",
+    "what": "the gauntlet games.frame cell: 1200 frames of a 320x200 premultiplied RGBA8 scene (clear, opaque tiles, translucent sprites and HUD bar, 5x7 bitmap text) and their counts",
+    "gauntlet": ["games.frame"],
+    "jet": "../../gauntlet/entries/game-frame/jet",
+    "args": [],
+    "expect_file": "../../gauntlet/entries/game-frame/expected.out"
+  },
+  {
+    "name": "procpipe",
+    "what": "the gauntlet files.orchestration cell: four child processes (a captured python3, python3 piped into sort, a python3 sleep killed after 300ms, a python3 exit 3) and one transcript line each",
+    "gauntlet": ["files.orchestration"],
+    "jet": "../../gauntlet/entries/procpipe/jet",
+    "args": [],
+    "expect_file": "../../gauntlet/entries/procpipe/expected.out"
+  },
+  {
+    "name": "parallelgrep",
+    "what": "the gauntlet concurrency.app cell: 200000 .txt files in 200 directories walked, each read and its needle occurrences counted, the matching paths sorted, then matched/scanned and the total",
+    "gauntlet": ["concurrency.app"],
+    "jet": "../../gauntlet/entries/parallel-grep/jet",
+    "fixture": { "script": "../../gauntlet/entries/parallel-grep/fixtures/gen.py", "out": "files" },
+    "args": ["files", "needle-7f"],
+    "expect_file": "../../gauntlet/entries/parallel-grep/expected.out"
+  },
+  {
+    "name": "httpclient",
+    "what": "the gauntlet netserv.client cell: four HTTP GETs of a JSON item service (the listing, two items and a 404), decoded and printed with the listing's count and total quantity",
+    "gauntlet": ["netserv.client"],
+    "jet": "../../gauntlet/entries/http-client/jet",
+    "server": { "script": "httpclient/peer.mjs", "port": 18400, "delay_ms": 0 },
+    "args": ["http://127.0.0.1:18400"],
+    "expect_file": "../../gauntlet/entries/http-client/expected.out"
+  },
+  {
+    "name": "concurrencyservice",
+    "what": "the gauntlet concurrency.service cell: a line TCP service whose batch command fans 1..N out to four workers (1ms of work each) and answers their squares' sum; measured by the gauntlet's service replay",
+    "gauntlet": ["concurrency.service"],
+    "jet": "../../gauntlet/entries/concurrency-service/jet",
+    "service": true,
+    "args": ["18080"]
+  },
+  {
+    "name": "httpservice",
+    "what": "the gauntlet netserv.service cell: a JSON key-value HTTP/1.1 service (GET /health, PUT and GET /kv/<key>, GET /shutdown); measured by the gauntlet's service replay",
+    "gauntlet": ["netserv.service"],
+    "jet": "../../gauntlet/entries/http-service/jet",
+    "service": true,
+    "args": ["18080"]
+  }
+]

@@ -1,0 +1,12 @@
+# `b.host(gen)` builds `gen` for this machine and runs it as a step; the step's
+# output is the source `show` compiles, so the one graph runs gen, then the
+# step, then show.
+fixture: fixtures/run_steps_run_a_host_tool
+artifact: show
+requires: tool:bwrap
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: show.jet ~ "print" # gen wrote the program show compiles
+file: .jet/build/host/gen exists # the host copy of gen, never installed
+step: built
+stdout: = "42\n"

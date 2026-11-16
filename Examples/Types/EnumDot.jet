@@ -1,0 +1,43 @@
+// 151 — leading-dot enum variant `.Variant`.
+// When the enum type is known from context, `.Variant` is a shorthand for
+// `Type.Variant`, in value position and in patterns alike. The formatter
+// always writes the dot form in patterns.
+Direction: enum {
+    North
+    South
+    East
+    West
+}
+
+Shape: enum {
+    Circle(Float)
+    Square(Float)
+    Empty
+}
+
+area: fn(s: Shape) -> Float {
+    return if s == {
+        .Circle(r) -> 3.14159 * r * r
+        .Square(w) -> w * w
+        .Empty -> 0.0
+    }
+}
+
+label: fn(d: Direction) -> String {
+    return if d == {
+        .North -> "north"
+        .South -> "south"
+        .East -> "east"
+        .West -> "west"
+    }
+}
+
+run: fn() {
+    d: Direction.North
+    print(label(d))
+    print(label(.South))
+    s: Shape.Circle(3.0)
+    print(area(s))
+    print(area(.Square(4.0)))
+    print(area(.Empty))
+}

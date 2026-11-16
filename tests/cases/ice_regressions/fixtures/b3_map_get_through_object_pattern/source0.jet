@@ -1,0 +1,9 @@
+use json: core.encoding.json
+
+run: fn() {
+    data: json.parse("{{\"a\":1}}") ?? panic("bad")
+    if data == .Object(root) {
+        entry: root.get(0) ?? panic("empty")
+        print(json.to_string(entry.value) ?? panic("json"))
+    }
+}

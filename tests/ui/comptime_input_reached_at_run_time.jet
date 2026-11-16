@@ -1,0 +1,9 @@
+// A comptime input is answered while compiling, so the running program can't
+// reach one through a helper. A helper only `build` calls is prep code.
+greeting: fn() -> String { embed_file("greeting.txt") }
+
+manifest: fn() -> [String] { find("assets/*.png") }
+
+build: fn(b: Build) { print(manifest().len()) }
+
+run: fn() { print(greeting()) }

@@ -1,0 +1,31 @@
+// A format selector's number may be any Int expression computed at run
+// time, not only a literal. A negative number acts as zero, and the number
+// runs after the value.
+
+note: fn(log: &[String], label: String, n: Int) -> Int {
+    log.push(label.copy())  // copy: the caller keeps its label.
+    n
+}
+
+run: fn() {
+    names: ["a", "jet", "compiler"]
+    width := 0
+    loop name in names {
+        if name.len() > width -> width = name.len()
+    }
+    loop name in names -> print("[{name:Pad(width)}] [{name:PadLeft(width + 2, ".")}]")
+    pi: Float{3.14159}
+    total: Float{1234.567}
+    loop digits in 0..<4 -> print("{pi:Fixed(digits)} {total:Grouped(digits)}")
+    half: width /% 2
+    share: Float{0.125}
+    large: Float{12345.678}
+    print("{255:Hex(half)} {share:Percent(half - 3)} {large:Sci(half - 2)} {7:Fixed(half - 3)}")
+    shift: -2
+    rate: Float{2.75}
+    print("[{"x":Pad(shift)}] [{rate:Fixed(shift)}] [{255:Hex(shift)}]")
+    log := [String]{}
+    text: "[{note(log, "value", 42):PadLeft(note(log, "width", 5))}]"
+    print("{text} {log.join(", ")}")
+    print("{pi:Fixed(2)}")
+}

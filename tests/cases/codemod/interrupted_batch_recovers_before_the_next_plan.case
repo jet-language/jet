@@ -1,0 +1,18 @@
+# HAND-PORT tests/codemod.rs:333-384 interrupted_batch_recovers_before_the_next_plan
+# Original predicates; same-head kit verification pending.
+fixture: interrupted_batch_recovers_before_the_next_plan.fixture
+env: NO_COLOR=1
+copy: Examples/a.jet before-a.bytes
+copy: Examples/b.jet before-b.bytes
+step: jet inspect codemod apply rename.codemod.json --yes
+env: JET_CODEMOD_CRASH_AFTER_RENAME=1
+exit: 86
+file: .jet/codemods/transaction.journal exists
+file: Examples/a.jet != before-a.bytes
+file: Examples/b.jet == before-b.bytes
+step: jet inspect codemod rename.codemod.json --dry-run
+exit: 0
+file: Examples/a.jet == before-a.bytes
+file: Examples/b.jet == before-b.bytes
+file: .jet/codemods/transaction.journal absent
+

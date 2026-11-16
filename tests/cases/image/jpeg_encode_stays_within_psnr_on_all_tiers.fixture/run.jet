@@ -1,0 +1,44 @@
+// A decoded JPEG and a gray ramp encode to JPEG and decode back within a
+// PSNR of 35 dB (a mean squared error of at most 20), the same bytes on
+// every tier.
+use {
+    files: core.files
+    image: core.image
+}
+
+ramp: fn() -> image.Image {
+    pixels := [U8]{}
+    loop y in 0..<11 {
+        loop x in 0..<19 {
+            level: (x * 12 + y * 4) % 256
+            loop value in ([Int]{level, level, level, 255}) -> pixels.push(U8{value})
+        }
+    }
+    image.Image{width: 19, height: 11, pixels: pixels}
+}
+
+round_trip: fn(name: String, original: image.Image, limits: image.Limits) {
+    bytes: image.encode(original, .JPEG, limits) ?? panic("encode {name}")
+    files.write_bytes(name, bytes) ?? panic("write {name}")
+    written: files.read_bytes(name) ?? panic("read {name}")
+    info: image.inspect(written, limits) ?? panic("inspect {name}")
+    back: image.decode(written, limits) ?? panic("decode {name}")
+    error := 0
+    hash := 0
+    loop index in 0..<back.pixels.len() {
+        hash = (hash * 31 + Int{back.pixels[index]}) % 1000000007
+        if index % 4 != 3 {
+            difference: Int{back.pixels[index]} - Int{original.pixels[index]}
+            error += difference * difference
+        }
+    }
+    within: error <= 20 * back.width * back.height * 3
+    print("{name} {info.format:Debug} {info.color:Debug} {back.width}x{back.height} within 35 dB: {within} pixels {hash}")
+}
+
+run: fn() {
+    limits: image.Limits{max_input_bytes: 100000, max_pixels: 100000, max_output_bytes: 400000}
+    photo: files.read_bytes("photo.jpg") ?? panic("read photo.jpg")
+    round_trip("photo.jpg.jpg", image.decode(photo, limits) ?? panic("decode photo.jpg"), limits)
+    round_trip("ramp.jpg", ramp(), limits)
+}

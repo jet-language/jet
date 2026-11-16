@@ -1,0 +1,289 @@
+// A format keeps meaning: jfmt_format_source_in compares the program of the
+// source and of its formatted text without positions (Structure.jet).
+use {
+    jet_parser.[jet_format_source, jfmt_structure, jfmt_structure_change, parse_source]
+    jet_foundation.[Diagnostic]
+}
+
+STRUCTURE_WRITTEN: "pick: fn(n: Int) -> String {{\n  if {{ n == 1 -> \"one\" else -> \"many\" }}\n}}\n"
+
+STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 -> \"one\"\n        else -> \"many\"\n    }}\n}}\n"
+
+#Test("positions and node ids are not structure") {
+    written: parse_source(STRUCTURE_WRITTEN.bytes()).program
+    laid_out: parse_source(STRUCTURE_LAID_OUT.bytes()).program
+    assert_eq(jfmt_structure(written), jfmt_structure(laid_out))
+    assert_eq(jfmt_structure_change(written, laid_out, [Diagnostic]{}) ?? "same", "same")
+    formatted: jet_format_source(STRUCTURE_WRITTEN, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+}
+
+#Test("a changed program names the innermost node that differs") {
+    written: parse_source(STRUCTURE_WRITTEN.bytes()).program
+    changed: parse_source(STRUCTURE_WRITTEN.replace("n == 1", "n == 2").bytes()).program
+    change: jfmt_structure_change(written, changed, [Diagnostic]{}) ?? ""
+    assert(change.starts_with("the first difference is in `Int`: `"))
+    assert(change.contains("1"))
+    assert(change.contains("` became `2"))
+}
+
+#Test("a formatted text that does not parse is a structure change") {
+    written: parse_source(STRUCTURE_WRITTEN.bytes()).program
+    broken: parse_source("pick: fn(n: Int) -> String {{\n".bytes())
+    assert(broken.diagnostics.len() > 0)
+    change: jfmt_structure_change(written, broken.program, broken.diagnostics) ?? ""
+    assert(change.starts_with("the formatted text does not parse ("))
+}
+
+#Test("a debug trace's offsets and an else arm's layout are not structure") {
+    written: parse_source("pick: fn(c: Color) -> Int {{\n  debug(c)\n  if c == {{ .Red -> 1 else -> 2 }}\n}}\n".bytes()).program
+    laid_out: parse_source("\npick: fn(c: Color) -> Int {{\n    debug(c)\n    if c == {{\n        .Red -> 1\n        else -> 2\n    }}\n}}\n".bytes()).program
+    assert(written.debug_sites.len() == 1)
+    assert_eq(jfmt_structure(written), jfmt_structure(laid_out))
+}
+
+#Test("a loop's arrow body and a variant pattern's added dot are not structure") {
+    arrow: parse_source("walk: fn(xs: [Shape], first: Shape) -> Int {{\n    loop x in xs -> print(x)\n    if first == {{\n        Circle(r) -> r\n        else -> 0\n    }}\n}}\n".bytes()).program
+    braced: parse_source("walk: fn(xs: [Shape], first: Shape) -> Int {{\n    loop x in xs {{\n        print(x)\n    }}\n    if first == {{\n        .Circle(r) -> r\n        else -> 0\n    }}\n}}\n".bytes()).program
+    assert_eq(jfmt_structure(arrow), jfmt_structure(braced))
+}
+
+#Test("the dot of None and Val stays as written") {
+    source: "pick: fn(x: Int?) -> Int {{\n    if x == {{\n        None -> 0\n        Val(n) -> n\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert(formatted.text.contains("        None -> 0\n"))
+    assert(formatted.text.contains("        Val(n) -> n\n"))
+    dotted: parse_source(source.replace("None ->", ".None ->").bytes()).program
+    assert(jfmt_structure(dotted) != jfmt_structure(parse_source(source.bytes()).program))
+}
+
+#Test("a bare Ok or Err pattern takes its dot") {
+    source: "show: fn(result: Int String!) {{\n    if result == {{\n        Ok(n) -> {{ print(n) }}\n        Err(e) -> {{ print(e) }}\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert(formatted.text.contains(".Ok(n) -> "))
+    assert(formatted.text.contains(".Err(e) -> "))
+}
+
+// `Inst.Compare{…}` is the `.Compare{…}` pattern under its enum's name, in
+// an arm head, an or-pattern and a nested slot; the format keeps the name.
+#Test("a qualified case pattern parses as its leading-dot form and keeps its name") {
+    qualified: "kind: fn(inst: Inst) -> String {{\n    if inst == {{\n        Inst.Compare{{left: 0, ..}} -> \"zero\"\n        Inst.Compare{{left, ..}} && left > 9 -> \"big\"\n        Inst.Wrap{{inner: Step.Go{{target}}, label: name}} -> name\n        Inst.Jump{{target}} | Inst.Wrap{{inner: Step.Go(target), ..}} -> \"jump\"\n        Inst.Jump(target) -> \"jump\"\n        .Halt -> \"halt\"\n    }}\n}}\n"
+    structure_kept(qualified, "        Inst.Compare{{left: 0, ..}} -> \"zero\"\n")
+    structure_kept(qualified, "        Inst.Wrap{{inner: Step.Go{{target}}, label: name}} -> name\n")
+    structure_kept(qualified, "        Inst.Jump{{target}} | Inst.Wrap{{inner: Step.Go(target), ..}} -> \"jump\"\n")
+    structure_kept(qualified, "        Inst.Jump(target) -> \"jump\"\n")
+    written: parse_source(qualified.bytes())
+    assert_eq(written.diagnostics.len(), 0)
+    dotted: parse_source(qualified.replace("Inst.", ".").replace("Step.", ".").bytes())
+    assert_eq(dotted.diagnostics.len(), 0)
+    // The qualified spelling keeps its dotless bit; past the name and that
+    // bit the two trees are the same.
+    assert_eq(jfmt_structure(written.program).replace("\"Inst.", "\"").replace("\"Step.", "\"").replace("leading_dot: false", "leading_dot: "), jfmt_structure(dotted.program))
+}
+
+// In a lambda's last place, `loop … -> value` collects a list, so a braced
+// loop body there must keep its braces.
+#Test("a braced method-call loop body keeps its braces") {
+    source: "run: fn() {{\n    serving: task {{\n        loop _ in 0..<9 {{\n            server.serve(a, b)\n        }}\n    }}\n    serving.join()\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(!formatted.text.contains("->"))
+}
+
+#Test("a braced explicit drop loop body takes the arrow except on a callable's last line") {
+    statement: jet_format_source("run: fn() {{\n    loop v in values {{ value().drop(\"checked\") }}\n    done()\n}}\n", false)
+    assert(statement.ok)
+    assert(statement.text.contains("loop v in values -> value().drop(\"checked\")\n"))
+    tail: jet_format_source("run: fn() {{\n    each: fn() {{\n        loop v in values {{ value().drop(\"checked\") }}\n    }}\n    each()\n}}\n", false)
+    assert(tail.ok)
+    assert_eq(tail.structure_change ?? "none", "none")
+    assert(tail.text.contains("loop v in values {{ value().drop(\"checked\") }}"))
+}
+
+#Test("a bracketed single import keeps its brackets") {
+    source: "use geo.[Point]\n\nrun: fn() {{\n    print(Point)\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert(formatted.text.contains("use geo.[Point]\n"))
+    assert_eq(formatted.structure_change ?? "none", "none")
+}
+
+// A `return` right after an arm's `->` makes the parser read the table as
+// statements; braced, the block's last table would read as a value.
+#Test("a statement table keeps a long return arm on its arrow line") {
+    long_call: "measure_every_shape_in_the_drawing(shape, drawing, scale, offset_x, offset_y)"
+    source: "area: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(r) -> return {long_call}\n        .Square(side) -> return side * side\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains(".Circle(r) -> return {long_call}\n"))
+}
+
+#Test("an else-if arm after a braced arm keeps its braces") {
+    source: "walk: fn(xs: [Int]) {{\n    loop x in xs {{\n        if x > 2 {{\n            print(x)\n            next\n        }} else if x > 1 {{\n            next\n        }} else if x > 0 {{\n            print(0)\n        }}\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("}} else if x > 1 {{ next }} else if x > 0 {{ print(0) }}\n"))
+}
+
+#Test("a braced if that ends a callable body with a value stays a statement") {
+    source: "pick: fn(c: Bool) -> Int {{\n    if c {{\n        make(1)\n    }} else {{\n        make(2)\n    }}\n}}\n\nrun: fn(c: Bool) {{\n    each: fn(c: Bool) {{\n        if c {{\n            print(\"a\")\n        }} else {{\n            print(\"b\")\n        }}\n    }}\n    each(c)\n    if c {{\n        print(\"x\")\n    }} else {{\n        print(\"y\")\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(!formatted.text.contains("if c -> make(1)"))
+    assert(!formatted.text.contains("if c -> print(\"a\")"))
+    // The last line of a body without a value is no value: arrows as before.
+    assert(formatted.text.contains("    if c -> print(\"x\") else -> print(\"y\")\n"))
+}
+
+#Test("a guarded value table arm keeps the table") {
+    formatted: jet_format_source("pick: fn(op: Op, form: Form) -> Int {{\n    if op == {{\n        .Init(_) && form == .Counted -> 1\n        .Init(_) | .Other -> 0\n    }}\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("    if op == {{\n        .Init(_) && form == .Counted -> 1\n"))
+}
+
+#Test("a statement table guard prints its own test in full") {
+    formatted: jet_format_source("pick: fn(ops: [Op], form: Form) -> Int {{\n    loop op in ops {{\n        if op == {{\n            .Init(_) && form == .Counted -> return 1\n            .Init(_) | .Other -> {{}}\n        }}\n    }}\n    0\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains(".Init(_) && form == .Counted -> return 1\n"))
+}
+
+#Test("a value table in an else arm stays a table") {
+    formatted: jet_format_source("pick: fn(c: Bool, r: Int?) -> Int {{\n    if c -> 0 else -> if r == {{\n        .Val(n) -> n\n        .None -> 1\n    }}\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("else -> if r == {{"))
+}
+
+#Test("a named payload in an if condition keeps its parentheses") {
+    formatted: jet_format_source("check: fn(r: Reply) -> Bool {{\n    if r != .Value(value: .Unit) -> return false\n    true\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("    if r != .Value(value: .Unit) -> return false\n"))
+}
+
+#Test("a table arm block that ends in a statement has no empty value line") {
+    formatted: jet_format_source("run: fn(r: Reply) -> Bool {{\n    a: if r == {{\n        .Value(v) -> v\n        .Failure(_) -> {{ return false }}\n    }}\n    a\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(!formatted.text.contains("return false\n\n"))
+}
+
+#Test("an arrow if in an interpolation hole stays unbraced") {
+    formatted: jet_format_source("label: fn(a: Int?) -> String {{\n    \"{{key(if a == None -> \"n\" else -> \"v\", 1)}}\"\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("{{key(if a == None -> \"n\" else -> \"v\", 1)}}\""))
+}
+
+#Test("a bare regex body keeps its escaped backslash, a headed one its raw one") {
+    formatted: jet_format_source("run: fn() {{\n    print(find({{\"\\\\d+\"}}, \"a1\"))\n    digits: Regex{{\"\\d+\"}}\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("find({{\"\\\\d+\"}}, \"a1\")"))
+    assert(formatted.text.contains("digits: Regex{{\"\\d+\"}}\n"))
+}
+
+#Test("an optional optional keeps its Option spelling") {
+    formatted: jet_format_source("nested: fn(x: Int) -> Option<Int?> {{\n    None\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("nested: fn(x: Int) -> Option<Int?> "))
+}
+
+#Test("a named payload written with parentheses keeps its own line layout") {
+    formatted: jet_format_source("run: fn(found: V) {{\n    v: [V]{{.Text(value: \"a\"), found}}\n    if v.len() > 0 {{\n        print(v)\n    }}\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("    v: [V]{{.Text{{value: \"a\"}}, found}}\n"))
+}
+
+#Test("a long arrow loop body that opens with a parenthesis keeps the arrow") {
+    formatted: jet_format_source("run: fn(values: [Text], count: Int) {{\n    loop values.len() > count -> (values.pop()).drop(\"discard the canonical duplicate value from this list\")\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("loop values.len() > count -> (values.pop()).drop("))
+}
+
+#Test("grouping parentheses are not structure, quoted text is") {
+    written: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    (a) * (b + 1)\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program
+    bare: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    a * (b + 1)\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program
+    assert_eq(jfmt_structure(written), jfmt_structure(bare))
+    regrouped: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    a * b + 1\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program
+    assert(jfmt_structure(written) != jfmt_structure(regrouped))
+    quoted: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    a * (b + 1)\n}}\nlabel: fn() -> String {{ \"a\" }}\n".bytes()).program
+    assert(jfmt_structure(bare) != jfmt_structure(quoted))
+}
+
+#Test("a plain string page of HTML keeps its spelling") {
+    formatted: jet_format_source("#[Target(Web), HTML(\"dashboard.html\")]\nrun: fn() {{\n    print(\"hi\")\n}}\n", false)
+    assert(formatted.ok)
+    assert(formatted.text.starts_with("#[Target(Web), HTML(\"dashboard.html\")]\n"))
+    typed: jet_format_source("#[Target(Web), HTML(Path{{\"dashboard.html\"}})]\nrun: fn() {{\n    print(\"hi\")\n}}\n", false)
+    assert(typed.text.starts_with("#[Target(Web), HTML(Path{{\"dashboard.html\"}})]\n"))
+}
+
+#Test("a module binding keeps its markers") {
+    formatted: jet_format_source("ring: module<T>(capacity: Int, label: String) {{\n#Meta(category: label)\nSIZE: #run capacity\n}}\nrun: fn() {{}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("    #Meta(category: label) SIZE: #run capacity\n"))
+}
+
+// The format of `source` keeps its program and contains `kept`.
+structure_kept: fn(source: String, kept: String) {
+    formatted: jet_format_source(source, false)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.ok)
+    assert(formatted.text.contains(kept), "`{kept}` is not in:\n{formatted.text}")
+}
+
+#Test("a named payload that opens a statement keeps its parentheses") {
+    structure_kept("ready: fn(x: Int) -> State {{\n    if x > 0 -> return .Missing(fact: \"a\")\n    .Ready(value: x)\n}}\n", "    .Ready(value: x)\n")
+    structure_kept("ready: fn(x: Int) -> State {{ .Ready(value: x) }}\n", "{{ .Ready(value: x) }}")
+    structure_kept("ready: fn(x: Int) -> State {{\n    s: .Ready(value: x)\n    s\n}}\n", "s: .Ready{{value: x}}\n")
+}
+
+#Test("a value's bare try mark stays") {
+    structure_kept("pick: fn<T>(x: T?) -> T? {{\n    inner: keep(x?)\n    inner\n}}\n", "inner: keep(x?)\n")
+}
+
+#Test("a written Shared.new call stays a call, a cell stays a cell") {
+    structure_kept("cell: fn(items: [Int]) -> Shared<[Int]> {{\n    Shared.new(items.move())\n}}\n", "Shared.new(items.move())")
+    structure_kept("cell: fn(items: [Int]) -> Shared<[Int]> {{\n    Shared{{items}}\n}}\n", "Shared{{items}}")
+}
+
+#Test("a bracketed variadic element type keeps its parentheses") {
+    structure_kept("rows: fn(parts: ...([Int])) -> Int {{\n    parts.len()\n}}\n", "parts: ...([Int])")
+}
+
+#Test("a fenced statement keeps its fence in a one-line body") {
+    structure_kept("run: fn() {{\n    print(<:3..0:>)\n}}\n", "<:")
+}
+
+#Test("file rules head the file in their written order and spelling") {
+    structure_kept("#Target(Web)\nuse web: core.web\nhandlers: module {{\n    init: fn() {{}}\n}}\n", "#Target(Web)\n\nuse web: core.web\n")
+    structure_kept("#Target(JS)\nuse time: core.time\n\nrun: fn() {{}}\n", "#Target(JS)\n\nuse time: core.time\n")
+    structure_kept("#HTML(Path{{\"index.html\"}})\nuse ui: core.ui\n#[Target(Web), Target(JS)]\n\nrender: fn() {{}}\n", "#[HTML(Path{{\"index.html\"}}), Target(Web), Target(JS)]\n")
+    structure_kept("use lang: core.compiler.lang\n\n#Target(lang.Target.Web)\nhelper: fn() {{}}\n", "#Target(lang.Target.Web)\n")
+}
+
+#Test("a persisted binding keeps its comptime value") {
+    structure_kept("#Persist SEEDED: #run {{ 20 + 1 }}\n", "#Persist SEEDED: #run {{ 20 + 1 }}\n")
+}
+
+#Test("a property test keeps its Pre lines") {
+    structure_kept("#Pre(n > 0, \"a positive number\")\n#Test halving: fn(n: Int) {{\n    assert(n > 0)\n}}\n", "#Pre(n > 0, \"a positive number\")\n#Test halving: fn(n: Int) {{\n")
+}
+
+#Test("a module member keeps its package privacy") {
+    structure_kept("text: module {{\n    priv(package) width: fn() -> Int {{ 8 }}\n\n    priv pad: fn() -> Int {{ 1 }}\n}}\n", "    priv(package) width: fn() -> Int {{ 8 }}\n")
+}

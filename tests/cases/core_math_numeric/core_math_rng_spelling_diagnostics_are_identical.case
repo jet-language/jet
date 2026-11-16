@@ -1,0 +1,20 @@
+# tests/core_math_numeric.rs::core_math_rng_spelling_diagnostics_are_identical at tests/core_math_numeric.rs:239; hand-port
+# The original compared (code, what, why, fix) of every error across the three spellings; the first rendered line
+# (`Error [code]: what`) carries code and what and must match across spellings.
+fixture: core_math_rng_spelling_diagnostics_are_identical.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check s0/main.jet
+exit: nonzero
+stderr: ~ "RNG" # original: an error names RNG
+capture: head0 = text stderr.line(0)
+step: jet check s1/main.jet
+exit: nonzero
+stderr: ~ "RNG" # original: an error names RNG
+capture: head1 = text stderr.line(0)
+cap:head1: = "{cap:head0}"
+step: jet check s2/main.jet
+exit: nonzero
+stderr: ~ "RNG" # original: an error names RNG
+capture: head2 = text stderr.line(0)
+cap:head2: = "{cap:head0}"

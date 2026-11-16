@@ -1,0 +1,24 @@
+{
+  "name": "jetc-profile",
+  "mode": "tool",
+  "description": "Tools/perf/jetc-profile/profile.mjs and its Jet twin jetc-profile/profile/run.jet, the Jet-named reports from the perf script output of a jetc process. The fixtures hold a perf script of seven samples and a source map over a stand-in checkout: Rust hash suffixes and +0x offsets (only lowercase ones go), each jetc_<crate> as its Jet module, `__jet_` names decoded (byte escapes, a UTF-8 é, $ and [generated] names) or kept flat when a source file declares them, bare names placed by the one file that declares them or by their prefix, declaration locations with `(current source)` for a file changed since the map, recursion counted once per sample, `(inlined)` in any case, a `;` in a frame, CRLF lines, a header with no blank line before it, and [unknown] and bare-address roots. The cases cover analyze (all five reports), analyze without the map, with an older map schema and with no samples; needs-dwarf for a summary that needs DWARF, one that does not, one without the field and a missing file; render of folded stacks (XML escapes, unreadable lines and zero counts skipped, a label cut inside a surrogate pair) and of none; and the usage refusals.",
+  "tool": {
+    "original": "Tools/perf/jetc-profile/profile.mjs",
+    "jet": "Tools/perf/jetc-profile/profile/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["analyze", "perf.script", "map.json", "repo", "out", "fp"], "check": "check.jet", "expected": "expected/analyze.out"},
+      {"args": ["analyze", "perf.script", "missing.json", "repo", "out", "dwarf,16384"], "check": "check.jet", "expected": "expected/no-map.out"},
+      {"args": ["analyze", "perf.script", "old-map.json", "repo", "out", "fp"], "exit": 1, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["analyze", "idle.script", "map.json", "repo", "out", "fp"], "exit": 1, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["needs-dwarf", "dwarf.json"], "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["needs-dwarf", "fp.json"], "exit": 1, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["needs-dwarf", "map.json"], "exit": 1, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["needs-dwarf", "missing.json"], "exit": 1, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["render", "stacks.folded", "drawn.svg"], "check": "check.jet", "expected": "expected/render.out"},
+      {"args": ["render", "zero.folded", "drawn.svg"], "exit": 1, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": [], "exit": 2, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["analyze", "perf.script", "map.json"], "exit": 2, "check": "check.jet", "expected": "expected/empty.out"}
+    ]
+  }
+}

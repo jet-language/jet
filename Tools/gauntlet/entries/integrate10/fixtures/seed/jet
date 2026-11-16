@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# A stand-in for the seed's jet in the integrate10 fixture: it lists and runs the ratchets, and runs the test
+# lines that rerun on the dev export (`"$JET" VERB ROW...`).
+case "$1" in
+  Tools/agent/Land.jet)
+    [ "$2" = ratchets ] || exit 9
+    echo "listing the ratchets" >&2
+    [ -n "${STANDIN_NO_RATCHETS:-}" ] && exit 0
+    printf '%s\n' Tools/agent/CoreSourceRows.jet Tools/agent/UnsafeRatchet.jet ;;
+  Tools/agent/CoreSourceRows.jet)
+    [ "$2" = --check ] || exit 9
+    echo "CoreSourceRows: in sync ($JET_COMPILER_IDENTITY, root $JET_TOOLCHAIN_ROOT)" ;;
+  Tools/agent/UnsafeRatchet.jet)
+    [ "$2" = --check ] || exit 9
+    if [ -n "${STANDIN_RATCHET_FAIL:-}" ]; then
+      for n in $(seq 1 34); do echo "unsafe ratchet: row $n drifted"; done
+      echo "error: 34 rows drifted" >&2; exit 1
+    fi
+    echo "UnsafeRatchet: in sync" ;;
+  fails) shift; for row in "$@"; do echo "FAIL $row (3ms)"; done; echo "seed: done in 2 s"; exit 1 ;;
+  regresses) shift; for row in "$@"; do echo "FAIL $row (2 s)"; done; exit 1 ;;
+  newfail) echo "seed: passes"; exit 0 ;;
+  broken) echo "seed: failed to start"; exit 1 ;;
+  *) exit 9 ;;
+esac

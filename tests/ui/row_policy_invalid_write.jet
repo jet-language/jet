@@ -1,0 +1,28 @@
+// A row policy may read the store but not write it: the table asks its
+// policy about every read and write, and a judgement can't change the rows
+// it judges. This one notes each judgement in an audit table.
+use db: core.db
+
+#Codable
+Member: struct {
+    project: Int
+    account: String
+}
+
+#Codable
+Audit: struct {
+    id: Int
+    note: String
+}
+
+audited_policy: fn(row: Member, op: db.Op, who: db.Who, store: db.Store) -[DB.Read, DB.Write]> Bool db.DBError! {
+    audit: store.table("audit", key: fn(entry: Audit) { entry.id })
+    _: audit.add(Audit{id: row.project, note: row.account}) ?? return Err(err)
+    Ok(op == db.Op.Read || who == db.Who.System)
+}
+
+run: fn() {
+    store: db.open_memory()
+    members: store.table("members", key: fn(row: Member) { row.account })
+    _: members.guard(audited_policy)
+}

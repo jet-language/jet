@@ -1,0 +1,19 @@
+# `jet inspect choices` lists each method a route marker makes an endpoint,
+# under the marker as written, and the context fields each function's own
+# body reads, in the order it first reads them. An unmarked method has no
+# exposure row, and a program with neither says none for both kinds.
+fixture: inspect_choices_shows_endpoints_and_context_reads.fixture
+env: NO_COLOR=1
+step app: jet inspect choices app.jet
+exit: 0
+stdout: ~ ' in order: endpoint under `#Server.Get("/orders/:id")`' # the marked method and its marker
+stdout: !~ " in total: endpoint" # an unmarked method is no endpoint
+stdout: ~ " in tick: reads `deadline`, `thread`" # the fields its body reads, in order
+step plain: jet inspect choices plain.jet
+exit: 0
+stdout: ~ "exposure: none" # no route marker, no endpoint
+stdout: ~ "context: none" # no context read
+step json: jet inspect choices app.jet --json
+exit: 0
+json: stdout doc $.kinds[5] = "exposure"
+json: stdout doc $.kinds[6] = "context"

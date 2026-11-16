@@ -1,0 +1,51 @@
+// A failure whose type has text reaches the default `Err` without a declared
+// conversion: a typed `#Error` failure and the error type minted from an
+// unannotated function's own `Err(.Case(…))` cases both leave a written
+// `Err!` contract and the entry `run`, and the report names the conversion.
+#Error
+StoreError: enum {
+    Locked(String)
+}
+
+impl StoreError.Display {
+    display: fn(self) -> String {
+        if self == {
+            .Locked(name) -> "store {name} is locked"
+        }
+    }
+}
+
+open_store: fn(name: String) -> Int StoreError! { Err(StoreError.Locked(name)) }
+
+// `find` writes no contract, so its cases mint `FindError`.
+find: fn(key: String) -> Int {
+    if key == "" -> return Err(.Empty)
+    if key == "gone" -> return Err(.NotFound(key))
+    key.len()
+}
+
+// A written `Err!` contract takes both failures as they are.
+lookup: fn(store: String, key: String) -> Int Err! {
+    if store != "" {
+        opened: open_store(store)
+        return opened
+    }
+    find(key)
+}
+
+report: fn(store: String, key: String) {
+    if lookup(store, key) == {
+        .Ok(value) -> { print("found {value}") }
+        .Err(error) -> print("lookup failed: {error.message}")
+    }
+}
+
+run: fn() {
+    report("", "abc")
+    report("main", "abc")
+    report("", "")
+    report("", "gone")
+    // Unhandled here, the minted failure leaves `run` itself.
+    value: find("gone")
+    print(value)
+}

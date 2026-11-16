@@ -1,0 +1,27 @@
+
+use {
+    process: core.process
+    tasks: core.tasks
+    time: core.time
+}
+
+run: fn() {
+    (ready_tx, ready_rx): channel<Int>()
+    worker: task {
+        child: process.cmd(["{work}/cancel-tree.sh"]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn failed")
+        ready_tx.send(1) ?? panic("ready")
+        child.wait() ?? panic("cancelled wait returned")
+    }
+    _ready: ready_rx.receive() ?? panic("ready failed")
+    time.sleep(100ms)
+    worker.cancel()
+    if worker.join() == {
+        .Err(error) -> {
+            if error == {
+                .Cancelled -> { print("cancelled") }
+                else -> { print("wrong cancellation") }
+            }
+        }
+        .Ok(_) -> { print("completed") }
+    }
+}

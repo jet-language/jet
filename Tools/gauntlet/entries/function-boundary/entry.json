@@ -1,0 +1,18 @@
+{
+  "name": "function-boundary",
+  "mode": "tool",
+  "description": "Tools/perf/function-boundary/run.sh and its Jet twin run/run.jet, the function-boundary cell runner: builds each cell's C, Rust and Jet (one build per level) programs not built yet, checks each binary's output against the cell's expected.out, and times it pinned to one CPU, printing median, fastest and slowest milliseconds with Jet/Rust and Jet/C ratios. The fixture output directories hold stand-in binaries (links to one script printing the list cells' expected value and one printing a wrong value), so no case compiles; FB_MEM_GATE_GB=0 opens the memory gate. The check masks the millisecond and ratio columns, which differ run to run, and lists the files each run leaves. The cases cover four timed rows with both ratios (an empty level skipped), a timed C and Jet row around a wrong Rust one (no Jet/Rust ratio), a cell the manifest lacks, a cell whose C and Rust builds reach the dev environment's refusal of a scratch root on /tmp and whose Jet build fails into its log, every manifest cell by default (no levels), the output directory from JET_SCRATCH_ROOT, an unknown option and an option without its value.",
+  "tool": {
+    "original": "Tools/perf/function-boundary/run.sh",
+    "jet": "Tools/perf/function-boundary/run/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--runs", "3", "--cpu", "0", "--out", "full", "--levels", "O1,,O2", "list-fresh"], "env": {"FB_MEM_GATE_GB": "0", "XDG_CONFIG_HOME": "no-config"}, "check": "check.jet", "expected": "expected/timed.out"},
+      {"args": ["--runs", "1", "--cpu", "0", "--out", "part", "--levels", "O1", "--jet", "false", "list-reuse", "nope", "destructure-move"], "env": {"FB_MEM_GATE_GB": "0", "XDG_CONFIG_HOME": "no-config", "JET_SCRATCH_ROOT": "/tmp/function-boundary-refused"}, "check": "check.jet", "expected": "expected/mixed.out"},
+      {"args": ["--runs", "1", "--cpu", "0", "--out", "all", "--levels", ""], "env": {"FB_MEM_GATE_GB": "0", "XDG_CONFIG_HOME": "no-config"}, "check": "check.jet", "expected": "expected/all.out"},
+      {"args": ["--cpu", "0", "--levels", "", "multi-return"], "env": {"FB_MEM_GATE_GB": "0", "XDG_CONFIG_HOME": "no-config", "JET_SCRATCH_ROOT": "scratch"}, "check": "check.jet", "expected": "expected/scratch.out"},
+      {"args": ["--runs", "1", "-x"], "env": {"FB_MEM_GATE_GB": "0", "XDG_CONFIG_HOME": "no-config"}, "exit": 64, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--cpu", "0", "--runs"], "env": {"FB_MEM_GATE_GB": "0", "XDG_CONFIG_HOME": "no-config"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"}
+    ]
+  }
+}

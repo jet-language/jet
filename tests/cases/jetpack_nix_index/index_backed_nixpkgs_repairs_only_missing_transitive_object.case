@@ -1,0 +1,98 @@
+# Port of tests/jetpack_nix_index.rs:314-410. The Hangar entry is read through
+# `jetpack explain --json`: producer_record is provider.native_document and the
+# envelope is entry.output_hash and entry.receipt. The runtime object is found
+# by its explain row (nix.store-path RUNTIME_PATH is ripgrep-runtime-1.0).
+# Not ported: the in-process Store::verify_cache_entry calls at :354 (a forged
+# re-checksummed producer is not trusted) and :409 (the repaired entry is
+# trusted). No jetpack verb takes a forged entry; the tampered-lock and repair
+# steps below check the same authority through the product.
+requires: os-name:linux
+fixture: nix-index.fixture
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
+env: JETPACK_ROOT={work}/root
+env: JETPACK_SHARED_CAS={work}/root/hangar/cas
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: PATH=/usr/bin
+mkdir: root
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet {work}/peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nix-index-cache-nar-source
+await: file {work}/peer.port timeout 30s
+capture: port = text file {work}/peer.port
+step initial: jetpack env --env dev --prep --trust --yes --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+step original: jetpack explain ripgrep@jetpack --json
+exit: 0
+copy: .jet/lock lock.original
+step: jetpack explain ripgrep-runtime-1.0@nixpkgs --json
+exit: 0
+capture: runtime stdout doc $.explain.entry.output_hash
+cap:runtime: nonempty # original: the runtime Hangar object is listed
+# make_directories_writable + remove_dir_all: move the object out of the Hangar.
+chmod: root/hangar/objects/{cap:runtime} 0755
+rename: root/hangar/objects/{cap:runtime} runtime-removed
+file: root/hangar/objects/{cap:runtime} absent
+step: built reset {cap:port}
+exit: 0
+step: built offline {cap:port}
+exit: 0
+step offline: jetpack env --env dev --prep --trust --yes --no-color --offline
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 1
+stderr: ~ "E1350" # original: the offline replay fails closed
+stderr: ~ "ripgrep@jetpack" # original: the offline error names the affected locked package
+step: built counts {cap:port}
+exit: 0
+json: stdout doc $.info = 0
+json: stdout doc $.runtime = 0
+step: built reset {cap:port}
+exit: 0
+step: built online {cap:port}
+exit: 0
+capture: authority_field file .jet/lock after "nix-index-authority = " trim # original: the locked package has a nix_closure index_authority
+capture: authority = text cap:authority_field.replace("\"", "")
+cap:authority: nonempty # original: the locked package has a nix_closure index_authority
+capture: tampered = text file.replace("{cap:authority}", "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd") .jet/lock
+cap:tampered: !~ "{cap:authority}" # guard: the recorded index authority is replaced
+write: .jet/lock = "{cap:tampered}"
+step rejected: jetpack env --env dev --prep --trust --yes --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 1
+stderr: ~ "E1350" # original: a forged index authority fails closed
+step: built counts {cap:port}
+exit: 0
+json: stdout doc $.info = 0
+json: stdout doc $.root = 0
+json: stdout doc $.lib = 0
+json: stdout doc $.runtime = 0
+file: root/hangar/objects/{cap:runtime} absent
+step: jetpack explain ripgrep@jetpack --json
+exit: 0
+json: stdout doc $.explain.provider.native_document == original
+copy: lock.original .jet/lock
+step repaired: jetpack env --env dev --prep --trust --yes --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+step: built counts {cap:port}
+exit: 0
+json: stdout doc $.root = 0
+json: stdout doc $.lib = 0
+json: stdout doc $.runtime = 2
+json: stdout doc $.info = 1
+step: jetpack explain ripgrep@jetpack --json
+exit: 0
+json: stdout doc $.explain.provider.native_document == original
+json: stdout doc $.explain.entry.output_hash == original
+json: stdout doc $.explain.entry.receipt == original
+file: .jet/lock == lock.original
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0

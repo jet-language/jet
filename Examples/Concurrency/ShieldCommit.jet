@@ -1,0 +1,29 @@
+// Cancellation is deferred inside `#Shield`. The race cancels
+// the losing task while it sleeps, but the shield lets the critical section
+// finish and print "committed" before cancellation lands at the block exit.
+package: {
+    name: "shield_commit"
+    authority: { allow: [IO, Mem.Alloc, Time] }
+}
+
+use time: core.time
+
+shielded_commit: fn() -> Int {
+    #Shield {
+        time.sleep(20ms)
+        print("committed")
+    }
+    print("after shield")
+    return 1
+}
+
+fast_seven: fn() -> Int { 7 }
+
+run: fn() {
+    // The group joins the shielded loser before the scope closes; that join is
+    // the lesson here, so this is not a redundant one-child wrapper.
+    task.group g {
+        winner: task.race {shielded_commit(), fast_seven()} ?? panic("race failed")
+        print(winner)
+    }
+}

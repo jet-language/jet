@@ -1,0 +1,24 @@
+# A function writing a plain module `:=` is E0111 on o0, o1 and o2
+#; the same state in a `Shared` holder, or a raw
+# write inside `#Unsafe`, runs.
+fixture: module_write_from_fn_is_e0111.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 1
+stderr: ~ "[jet.ImmutableAssignment]" # the plain module write from `bump` is refused (o0)
+stderr: ~ "`hits` is module state, so a function can't change it directly" # the What names the written binding
+step: jet run -O1 main.jet
+exit: 1
+stderr: ~ "[jet.ImmutableAssignment]" # the same refusal at o1
+step: jet run -O2 main.jet
+exit: 1
+stderr: ~ "[jet.ImmutableAssignment]" # the same refusal at o2
+step: jet run -O0 ok.jet
+exit: 0
+stdout: = module_write_from_fn_is_e0111.out
+step: jet run -O1 ok.jet
+exit: 0
+stdout: = module_write_from_fn_is_e0111.out
+step: jet run -O2 ok.jet
+exit: 0
+stdout: = module_write_from_fn_is_e0111.out

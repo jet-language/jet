@@ -1,0 +1,90 @@
+// Runs one registered migration plan over files.
+// Usage: jet run Compiler/Migrations/Migrate.jet -- <plan> [--write] [--list FILE] [--source-list FILE] PATH...
+// Each PATH, and each line of a `--list` file, names a file the plan reads by
+// its kind: a `.jet` or `.template` source, a `.md` file, or any other text,
+// such as an expected output. Each line of a `--source-list` file names a file
+// read as a Jet source whatever its name, such as a formatter's expected
+// output. Without `--write` the files are only read. The run prints
+// `EDIT <path> <count>` for each file the plan changes, `SKIP <site>: <reason>`
+// for each site it leaves alone, and a closing `TOTAL` line.
+use {
+    files: core.files
+    process: core.process
+}
+
+// A registered plan: its name on the command line and the toolchain it moves
+// code to.
+MigrationPlan: struct {
+    name: String
+    toolchain: String
+}
+
+migration_plans: fn() -> [MigrationPlan] {
+    [MigrationPlan]{
+        MigrationPlan{name: "lambda-shape1", toolchain: "a0.0.45"},
+        MigrationPlan{name: "codable-options1", toolchain: "a0.0.45"},
+    }
+}
+
+migration_rewrite: fn(plan: String, path: String, text: String, source: Bool) -> MigrationOutcome {
+    if plan == "lambda-shape1" -> return lambda_shape1_file(path, text, source)
+    if plan == "codable-options1" -> return codable_options1_file(path, text)
+    panic("no migration plan named {plan}")
+}
+
+migration_listing: fn(path: String, into: &[String]) {
+    listing: files.read(path) ?? panic("cannot read {path}: {err}")
+    loop line in listing.split("\n") {
+        if line != "" -> into.push(line.copy())
+    }
+}
+
+run: fn() {
+    args: process.args()
+    names := [String]{}
+    loop known in migration_plans() -> names.push(known.name.copy())
+    if args.len() == 0 || !names.contains(args[0]) {
+        panic("usage: Migrate.jet -- <plan> [--write] [--list FILE] [--source-list FILE] PATH...; plans: {names.join(", ")}")
+    }
+    plan: args[0]
+    write := false
+    paths := [String]{}
+    sources := [String]{}
+    index := 1
+    loop index < args.len() {
+        arg: args[index]
+        if {
+            arg == "--write" -> write = true
+            arg == "--list" && index + 1 < args.len() -> {
+                migration_listing(args[index + 1], paths)
+                index += 1
+            }
+            arg == "--source-list" && index + 1 < args.len() -> {
+                migration_listing(args[index + 1], sources)
+                index += 1
+            }
+            else -> paths.push(arg.copy())
+        }
+        index += 1
+    }
+    // A file named in both lists is read once, as a source.
+    loop source in sources {
+        if !paths.contains(source) -> paths.push(source.copy())
+    }
+    total := 0
+    changed := 0
+    loop path in paths {
+        text: files.read(path) ?? {
+            print("UNREADABLE {path}")
+            next
+        }
+        outcome: migration_rewrite(plan, path, text, sources.contains(path))
+        loop line in outcome.skipped -> print("SKIP {line}")
+        if outcome.rewritten == 0 -> next
+        total += outcome.rewritten
+        changed += 1
+        print("EDIT {path} {outcome.rewritten}")
+        if write -> files.write(path, outcome.text) ?? panic("cannot write {path}: {err}")
+    }
+    print("TOTAL {total} sites in {changed} files")
+}

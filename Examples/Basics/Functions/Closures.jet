@@ -1,0 +1,55 @@
+// Lambdas and eager list methods.
+// `map`, `filter`, `reduce` and `sort_by` call their lambda at once for every
+// element, before they return. `map` and `filter` return new lists and leave
+// the immutable `nums` binding and its list unchanged; `reduce` returns one
+// value; `sort_by` reorders the `:=` list `words` in place. Call `.lazy()` on
+// a collection pipeline when evaluation must wait.
+run: fn() {
+    nums: [1, 2, 3, 4, 5]
+    squares: nums.map(fn(n: Int) { n * n })
+    big: squares.filter(fn(n) { n > 5 })
+    print(big)
+    total: nums.reduce(0, fn(acc: Int, n: Int) { acc + n })
+    print(total)
+    words := ["pear", "apple", "fig"]
+    words.sort_by(fn(w: String) { w.len() })
+    print(words)
+    local_lambda_calls_lesson()
+}
+
+// A lambda bound to a local name is called directly, like a function.
+// A valueless lambda call is a plain statement; a value lambda call is its
+// value. `add` writes the `:=` local `total` it captures, so each call changes
+// `total` itself; `show_base` only reads `base`. The same binding can be
+// passed on to a function-typed parameter.
+each_of: fn(action: fn(Int), a: Int, b: Int) {
+    action(a)
+    action(b)
+}
+
+local_lambda_calls_lesson: fn() {
+    greet: fn() { print("hello") }
+    greet()
+
+    square: fn(n: Int) -> Int { n * n }
+    print("square {square(7)}")
+
+    base: 5
+    show_base: fn() { print("base {base}") }
+    show_base()
+
+    total := 0
+    add: fn(n: Int) {
+        total += n
+    }
+    add(2)
+    add(3)
+    print("total {total}")
+
+    report: fn(n: Int) { print("item {n}") }
+    each_of(report, 1, 2)
+
+    tick: fn() { print("tick") }
+    tick()
+    tick()
+}

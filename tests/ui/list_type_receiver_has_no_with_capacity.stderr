@@ -1,0 +1,8 @@
+Error [jet.UnknownMethod]: `[String]` has no `with_capacity`
+  --> tests/ui/list_type_receiver_has_no_with_capacity.jet:3:21
+    |
+  3 |     names: [String].with_capacity(4)
+    |                     ^^^^^^^^^^^^^
+ Why: `[String]` before `.` is a list type, and a list type has no static methods; list statics belong to `List`
+ Fix: Write `List.try_with_capacity(n) ?? …` where `[String]` is the expected type, for an empty list with room for n items, or `[String]{…}` for a list of values
+More: jet-lang.dev/e/E0311

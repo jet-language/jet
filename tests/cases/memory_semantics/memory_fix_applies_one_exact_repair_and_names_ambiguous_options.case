@@ -1,0 +1,20 @@
+# Port of tests/memory_semantics.rs:448-488; existing CLI snapshots plus ORACLE-LITERAL file bytes lines465/484.
+# main.txt is intentionally non-Jet input to the text repair command; copied to main.jet only in scratch.
+fixture: fixtures/fix
+env: NO_COLOR=1
+env: JET_MEMORY_LEDGER={work}/.jet/memory/ledger-v1.jsonl
+copy: main.txt main.jet
+copy: exact.txt .jet/memory/ledger-v1.jsonl
+step: jet fix memory
+exit: 0
+stdout: = ../../cli/memory_fix_exact.txt
+file: main.jet = owned.out
+copy: main.txt main.jet
+copy: ambiguous.txt .jet/memory/ledger-v1.jsonl
+step: jet fix memory
+exit: 0
+stdout: = ../../cli/memory_fix_ambiguous.txt
+stdout: ~ "options: main.jet:0..6 observed" # original predicate
+stdout: ~ "  - owned" # original predicate
+stdout: ~ "  - #Policy(gc) borrow" # original predicate
+file: main.jet = borrow.out

@@ -1,0 +1,10 @@
+# Port of tests/image.rs:308-328, write_project43-66 verbatim.
+# Runtime verification PENDING-SAME-HEAD.
+fixture: built-app.fixture
+env: NO_COLOR=1
+step: jetpack image server
+exit: 0
+stderr: ~ "built image `server`" # original predicate
+file: .jet/images/server/oci-layout is-file
+file: .jet/images/server/index.json is-file
+file: .jet/images/server/index.json ~ application/vnd.oci.image.manifest.v1+json # original predicate

@@ -1,0 +1,95 @@
+// The one reader of the expressions a debugger is given: a watch, a
+// breakpoint condition, a logpoint's message, an `evaluate` request. The
+// compiler's parser reads each as one Jet expression; nothing here has a
+// grammar of its own.
+use {
+    jet_foundation.[ASTTables, DIAGNOSTIC_ERROR, ExprNode, ast_expr, ast_stmt]
+    jet_parser.[parse_source]
+}
+
+// The most UTF-8 bytes one debugger expression may have.
+DEBUG_EXPRESSION_MAX_BYTES: 16384
+
+// One debugger expression the parser read: the AST tables of its parse and
+// its root node.
+DebugExpression: struct {
+    tables: ASTTables
+    root: ExprNode
+}
+
+// `text` read by the compiler's parser as one Jet expression.
+debug_parse_expression: fn(text: String) -> DebugExpression DebugEvaluationError! {
+    if text.trim() == "" -> return Err(debug_evaluation_error("the expression is empty"))
+    if text.bytes().len() > DEBUG_EXPRESSION_MAX_BYTES {
+        return Err(debug_evaluation_error("the expression is longer than {DEBUG_EXPRESSION_MAX_BYTES} bytes"))
+    }
+    parsed: parse_source("debug_expression: fn() {{\n{text}\n}}\n".bytes())
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            return Err(debug_evaluation_error("`{text}` is not a Jet expression: {diagnostic.what}"))
+        }
+    }
+    if parsed.program.items.len() == 1 && parsed.program.items[0] == .Func(function) && function.body.len() == 1 && ast_stmt(parsed.program.tables, function.body[0]) == .Expr(expr) {
+        return Ok(DebugExpression{tables: parsed.program.tables, root: expr})
+    }
+    Err(debug_evaluation_error("`{text}` is not one Jet expression"))
+}
+
+// A logpoint's message, read as the Jet string literal it would be between
+// double quotes: its `{expr}` parts interpolate.
+debug_parse_message: fn(message: String) -> DebugExpression DebugEvaluationError! {
+    debug_parse_expression("\"{message.replace("\"", "\\\"")}\"")
+}
+
+// Whether `expr` names a place: a local, a named field of a place, or a
+// place indexed by an integer literal.
+debug_is_place: fn(tables: ASTTables, expr: ExprNode) -> Bool Never! {
+    if ast_expr(tables, expr) == .Ident(_, _, _) -> return true
+    if ast_expr(tables, expr) == .Field(base, member, _, _) {
+        first: member.bytes()
+        return first.len() > 0 && (Int{first[0]} < 48 || Int{first[0]} > 57) && debug_is_place(tables, base)
+    }
+    if ast_expr(tables, expr) == .Index(base, index, _, _, _) && ast_expr(tables, index) == .Int(position, _, _, _, _) {
+        return position >= 0 && debug_is_place(tables, base)
+    }
+    false
+}
+
+// Whether the debugger expression `text`, read by the compiler's parser,
+// names a local by its name alone.
+debug_is_local_name: fn(text: String) -> Bool Never! {
+    expr: debug_parse_expression(text) ?? return false
+    ast_expr(expr.tables, expr.root) == .Ident(_, _, _)
+}
+
+debug_expression_test_place: fn(text: String) -> Bool Never! {
+    expr: debug_parse_expression(text) ?? return false
+    debug_is_place(expr.tables, expr.root)
+}
+
+#Test("A debugger place is read by the compiler's parser") {
+    places: [String]{"account.items[12].name", " a ", "a._b[0][7]", "_a"}
+    loop text in places -> assert(debug_expression_test_place(text))
+    refused: [String]{"", "a[]", "a.", "a.1", "a[1", "a[x]", "a()", "a + 1", "a b", "1"}
+    loop text in refused -> assert(!debug_expression_test_place(text))
+    assert(debug_is_local_name(" a "))
+    assert(!debug_is_local_name("a.b"))
+    assert(!debug_is_local_name("a b"))
+}
+
+debug_expression_test_refusal: fn(text: String) -> String Never! {
+    if debug_parse_expression(text) == {
+        .Ok(_) -> {
+            panic("expected `{text}` to be refused")
+        }
+        .Err(error) -> error.message
+    }
+}
+
+#Test("A debugger expression the parser refuses says why") {
+    assert(debug_expression_test_refusal("i ==").starts_with("`i ==` is not a Jet expression: "))
+    assert_eq(debug_expression_test_refusal("   "), "the expression is empty")
+    assert_eq(debug_expression_test_refusal("i\n}}\nother: fn() {{\ni"), "`i\n}}\nother: fn() {{\ni` is not one Jet expression")
+    message: debug_parse_message("i is {{i}}") ?? panic(err.message)
+    assert(ast_expr(message.tables, message.root) == .Str(_, _, _))
+}

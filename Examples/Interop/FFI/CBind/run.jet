@@ -1,0 +1,18 @@
+// Binding a C header end to end (S59 / E2-M14).
+//
+// `Include/c.h` declares two real libc functions; the file is named after
+// the `c` library so the canonical `c.c` link key stays declaration-driven.
+// `use libc: "Include/c.h"` binds it: the compiler runs the C-header binder
+// when `.jet/bindings/c/c.jet` is missing or its `.hash` no longer matches the
+// header, and `jet inspect bind Include/c.h` refreshes the same cache by hand.
+// The symbols then resolve like any namespaced module call. At the edge,
+// `String` marshals to a C `char*` and the scalar `Int`s cross by value — no
+// `unsafe` in this file.
+use libc: "Include/c.h"
+
+run: fn() {
+    // `char*` -> String parameter: strlen counts the bytes before the NUL.
+    print(libc.strlen("hello, jet"))
+    // Pure-scalar in/out: abs of a negative Int.
+    print(libc.abs(-7))
+}

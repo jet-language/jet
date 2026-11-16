@@ -1,0 +1,7 @@
+# Original tests/semindex.rs:1320-1344; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_rename_sites_keep_definition_identity_in_json.fixture
+step: jet inspect semindex rename_anchor_identity.jet --json
+json: stdout doc $.semindex.references[?name="helper"][0].target.span == $.semindex.definitions[?leaf_name="helper"][0].span
+json: stdout doc $.semindex.references[?name="helper"][0].target.semantic_identity == $.semindex.definitions[?leaf_name="helper"][0].identity
+stdout: ~ "\"semantic_identity\":" # original predicate

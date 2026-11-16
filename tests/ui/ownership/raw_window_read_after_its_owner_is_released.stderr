@@ -1,0 +1,17 @@
+Error [jet.OwnerMovedWhileViewed]: `cells` cannot be moved while `ints` is still looking into it
+  --> tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet:19:17
+    |
+ 19 |         release(cells)
+    |                 ^^^^^
+ Why: `ints` is a live read view into `cells`; changing or moving the owner could invalidate that view
+ Fix: Finish using `ints` before changing `cells`, narrow the view's scope, or make an owned copy
+More: jet-lang.dev/e/E0212
+
+Error [jet.SingleUseDropped]: `cells` still owes `consume`
+  --> tests/ui/ownership/raw_window_read_after_its_owner_is_released.jet:15:5
+    |
+ 15 |     cells := Cells{a: 11, b: 22}
+    |     ^^^^^
+ Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
+ Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(cells) }` to discard it deliberately
+More: jet-lang.dev/e/E0140

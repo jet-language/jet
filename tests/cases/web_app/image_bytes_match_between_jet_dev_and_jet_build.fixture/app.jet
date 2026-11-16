@@ -1,0 +1,21 @@
+// One PNG and one JPEG, with JPEG and PNG variants at two widths.
+package: {
+    name: "image_dev_build"
+    authority: { allow: [Env, Net, FS.Read, Time] }
+}
+
+use {
+    web: core.web
+    core.image.[ImageFormat]
+}
+
+home: fn() -> WebPage {
+    web.page("Gallery", "{web.image("Images/tile.png", alt: "tile")}{web.image("Images/photo.jpg", alt: "photo")}")
+}
+
+run: fn() {
+    web.app()
+        .images(formats: [ImageFormat]{.JPEG, .PNG}, widths: [Int]{160, 320})
+        .route("/", home)
+        .serve()
+}

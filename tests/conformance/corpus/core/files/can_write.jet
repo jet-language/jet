@@ -1,0 +1,8 @@
+// core-conformance: core.files.can_write
+use api: core.files
+
+run: fn() {
+    scratch: api.temp_dir("can-write") ?? panic("temp dir: {err}")
+    print(api.can_write(scratch.path))
+    print(!api.can_write(api.join(scratch.path, "missing")))
+}

@@ -1,0 +1,24 @@
+// The characters each one-liner of the table takes, as typed: per row the
+// Jet, Perl and awk commands of `oneliners.tsv` (a header line, then name,
+// input, jet, perl and awk, tab-separated), then the column totals.
+run: fn() {
+    jet_total := 0
+    perl_total := 0
+    awk_total := 0
+    header := true
+    loop line in input {
+        if header {
+            header = false
+            next
+        }
+        cells: line.split("\t").to_list()
+        jet: cells[2].len()
+        perl: cells[3].len()
+        awk: cells[4].len()
+        jet_total += jet
+        perl_total += perl
+        awk_total += awk
+        print("{cells[0]}: jet {jet}, perl {perl}, awk {awk}")
+    }
+    print("total: jet {jet_total}, perl {perl_total}, awk {awk_total}")
+}

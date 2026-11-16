@@ -1,0 +1,18 @@
+{
+  "name": "run-performance-surface",
+  "mode": "tool",
+  "description": "The paired surface/plain measurement of the gauntlet, Tools/gauntlet/harness/performance-surface.mjs, and its Jet twin, the PerformanceSurface module of the jet_gauntlet_kit package (Tools/gauntlet/kit/Source/PerformanceSurface.jet), #5072 c8, each run by a driver: measurements with stand-in builds and runs of the compound and list-fill pairs (wins, losses, ties, inconclusive bootstraps), builds that fail with and without stderr, missing compiler identity, a compiler artifact gone or changed, manifests held and stale, timed-out, signalled, wrong-output, contaminated and failed samples, each receipt shown by its status, verdict, preflight issues and SHA-256 and its validation; receipts changed to lack confidence, overlap, name stale sources, forge ratios, statistics and verdicts, drop samples, rows, context and the sampling contract, break arm identity and the schema; every performance-surface pair of the canonical measurement manifest with its evidence receipt (checked against the original, as the manifest moves with the gauntlet); and the command line's help, unknown arguments and unknown pairs. The twin identifies the compiler artifact by SHA-256 alone, so its receipts carry no artifact_md5, and the original driver leaves that field out of the receipt it hashes.",
+  "tool": {
+    "original": "Tools/gauntlet/harness/drivers/run-performance-surface.mjs",
+    "jet": "Tools/gauntlet/entries/run-performance-surface/driver/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["measure", "measure"], "expected": "expected/measure.out"},
+      {"args": ["manifest"], "check": "check.jet", "expected": "expected/manifest.out"},
+      {"args": ["main", "--help"], "expected": "expected/help.out"},
+      {"args": ["main", "--bogus=1"], "exit": 1, "expected": "expected/bogus.out"},
+      {"args": ["main", "--pair", "nosuch"], "exit": 1, "expected": "expected/nopair.out"},
+      {"args": ["census"], "exit": 64, "expected": "expected/usage.out"}
+    ]
+  }
+}

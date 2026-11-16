@@ -1,0 +1,137 @@
+// Typestate: order-of-events safety, checked at compile time.
+//
+// A type lists its states and moves once, in its `state { }` list. A
+// function's types name the states it needs and the state it returns:
+//
+//   Reservation: struct {
+//       state {
+//           Pending -> Confirmed
+//           Confirmed -> CheckedIn
+//           CheckedIn
+//       }
+//   }
+//
+//   book: fn(...) -> Reservation.Pending                           -- starts in `Pending`
+//   pay: fn(self: &&Reservation.Pending) -> Reservation.Confirmed  -- a move, listed as an arrow
+//   room_key: fn(self: Reservation.CheckedIn)                      -- valid only in `CheckedIn`
+//
+// Calling an operation in the wrong state is the compile error E0150 (see the ui
+// snapshot `typestate_wrong_state` for the rejected case: `check_in` on a still
+// `Pending` reservation). The states are compile-time facts, threaded through the
+// function by the checker and **erased in codegen** — a typestate program generates
+// the exact same Rust as the untagged version, at zero runtime cost.
+Reservation: struct {
+    state {
+        Pending -> Confirmed
+        Confirmed -> CheckedIn
+        CheckedIn
+    }
+
+    guest: String
+
+    // A fresh booking starts life in `Pending`.
+    book: fn(guest: String) -> Reservation.Pending { {guest: guest.copy()} }
+
+    pay: fn(self: &&Reservation.Pending) -> Reservation.Confirmed {
+        // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
+        // value (`&&self` — a move), matching the ratified mechanism: a fn takes the old
+        // state and returns the next. Calling `pay` on anything but a pending
+        // reservation would be E0150.
+        print("payment received for {self.guest}")
+        return self
+    }
+
+    check_in: fn(self: &&Reservation.Confirmed) -> Reservation.CheckedIn {
+        // Checking in advances `Confirmed -> CheckedIn`.
+        print("{self.guest} checked in")
+        return self
+    }
+
+    // A plain guarded read: only legal once checked in. No state change.
+    room_key: fn(self: Reservation.CheckedIn) -> String { "key for {self.guest}" }
+}
+
+// Terminal outcomes are ordinary states. Success, failure, and cancellation
+// stop the workflow, and read-only reporting remains legal in each terminal state.
+Workflow: struct {
+    state {
+        Pending -> Success, Failure, Cancelled
+        Success
+        Failure
+        Cancelled
+        Orphan
+    }
+
+    begin: fn() -> Workflow.Pending { Workflow{} }
+
+    succeed: fn(self: &&Workflow.Pending) -> Workflow.Success { self }
+
+    fail: fn(self: &&Workflow.Pending) -> Workflow.Failure { self }
+
+    cancel: fn(self: &&Workflow.Pending) -> Workflow.Cancelled { self }
+
+    success_report: fn(self: Workflow.Success) -> String { "success" }
+
+    failure_report: fn(self: Workflow.Failure) -> String { "failure" }
+
+    cancel_report: fn(self: Workflow.Cancelled) -> String { "cancelled" }
+}
+
+// Self-loops and reopen edges keep their source state nonterminal.
+Session: struct {
+    state {
+        Open -> Closed
+        Closed -> Reopened
+        Reopened
+    }
+
+    open: fn() -> Session.Open { Session{} }
+
+    heartbeat: fn(self: &&Session.Open) -> Session.Open { self }
+
+    close: fn(self: &&Session.Open) -> Session.Closed { self }
+
+    reopen: fn(self: &&Session.Closed) -> Session.Reopened { self }
+
+    audit: fn(self: Session.Reopened) -> String { "reopened" }
+}
+
+// No entry means no initial state and no reachability warning.
+Unseeded: struct {
+    state {
+        Raw -> Done
+        Done
+    }
+
+    finish: fn(self: &&Unseeded.Raw) -> Unseeded.Done { self }
+}
+
+run_terminal_outcomes: fn() {
+    success := Workflow.begin()
+    success = success.succeed()
+    print(success.success_report())
+
+    failure := Workflow.begin()
+    failure = failure.fail()
+    print(failure.failure_report())
+
+    cancelled := Workflow.begin()
+    cancelled = cancelled.cancel()
+    print(cancelled.cancel_report())
+
+    session := Session.open()
+    session = session.heartbeat()
+    session = session.close()
+    session = session.reopen()
+    print(session.audit())
+}
+
+run: fn() {
+    // The correct lifecycle: book -> pay -> check_in -> use. `:=` so `r` can be
+    // rebound as it advances through its states.
+    r := Reservation.book("Ada")  // r: Pending
+    r = r.pay()  // r: Confirmed
+    r = r.check_in()  // r: CheckedIn
+    print(r.room_key())  // valid: r is CheckedIn
+    run_terminal_outcomes()
+}

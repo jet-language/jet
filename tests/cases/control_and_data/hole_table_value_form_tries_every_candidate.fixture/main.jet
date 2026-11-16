@@ -1,0 +1,77 @@
+// The same hole table read as a value and as statements gives the same
+// answer: each arm fills the header with its own candidate, and the header
+// runs again for each candidate tried.
+label: fn(n: Int) -> String {
+    if n % _ == 0 {
+        15 -> "FizzBuzz"
+        3 -> "Fizz"
+        5 -> "Buzz"
+        else -> "{n}"
+    }
+}
+
+label_bound: fn(n: Int) -> String {
+    word: if n % _ == 0 {
+        15 -> "FizzBuzz"
+        3 -> "Fizz"
+        5 -> "Buzz"
+        else -> "{n}"
+    }
+    word
+}
+
+label_statements: fn(n: Int) -> String {
+    word := "{n}"
+    if n % _ == 0 {
+        15 -> word = "FizzBuzz"
+        3 -> word = "Fizz"
+        5 -> word = "Buzz"
+    }
+    word
+}
+
+Light: enum {
+    Red
+    Amber
+    Green
+}
+
+wait_secs: fn(light: Light) -> Int {
+    seconds: if light == {
+        .Red -> 30
+        .Amber -> 5
+        .Green -> 0
+    }
+    print("  wait {seconds}")
+    seconds
+}
+
+first_longer: fn(limit: Int) -> String {
+    if wait_secs(_) > limit {
+        .Green -> "green"
+        .Amber -> "amber"
+        .Red -> "red"
+        else -> "none"
+    }
+}
+
+// A plain table over a call still reads its subject once.
+next_light: fn() -> Light {
+    print("  read")
+    Light.Amber
+}
+
+plain: fn() -> Int {
+    if next_light() == {
+        .Red -> 1
+        .Amber -> 2
+        .Green -> 3
+    }
+}
+
+run: fn() {
+    loop n in [9, 10, 15, 7] { print("{label(n)} {label_bound(n)} {label_statements(n)}") }
+    print(first_longer(10))
+    print(first_longer(2))
+    print(plain())
+}

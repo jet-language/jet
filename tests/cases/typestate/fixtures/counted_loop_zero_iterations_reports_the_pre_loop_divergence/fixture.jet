@@ -1,0 +1,33 @@
+Order: struct {
+    state {
+        Draft -> Confirmed, Cancelled
+        Confirmed -> Closed
+        Cancelled -> Closed
+        Closed
+    }
+
+    id: Int
+
+    start: fn(id: Int) -[]> Order.Draft { return Order{id: id} }
+
+    confirm: fn(self: &&Order.Draft) -[]> Order.Confirmed { return self }
+
+    cancel: fn(self: &&Order.Draft) -[]> Order.Cancelled { return self }
+
+    close: fn(self: &&Order.Confirmed) -[]> Order.Closed { return self }
+
+    archive: fn(self: &&Order.Cancelled) -[]> Order.Closed { return self }
+
+    ship: fn(self: Order.Confirmed) -[]> Int { return self.id }
+}
+
+decide: fn(n: Int) {
+    order := Order.start(1)
+    loop _ in 0..<n {
+        fresh := Order.start(2)
+        order = fresh.confirm()
+    }
+    print(order.ship())
+}
+
+run: fn() { decide(1) }

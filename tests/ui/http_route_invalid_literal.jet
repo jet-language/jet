@@ -1,0 +1,14 @@
+use {
+    http: core.http
+    server: core.http.server
+}
+
+handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
+
+run: fn() {
+    router: http.router()
+    id: "42"
+    router.get("/users/{id}", handle)
+    doubled: #run "/teams/{{name}}"
+    router.get(doubled, handle)
+}

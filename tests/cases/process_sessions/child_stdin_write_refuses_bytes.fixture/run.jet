@@ -1,0 +1,7 @@
+use process: core.process
+
+// Bytes go to a child's stdin through `write_bytes`; `write` takes text.
+run: fn() {
+    child: process.cmd([String]{"cat"}).stdin(.Stream).spawn() ?? panic("spawn failed")
+    child.stdin.write("pipe\n".bytes()) ?? panic("write failed")
+}

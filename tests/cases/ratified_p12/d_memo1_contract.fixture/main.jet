@@ -1,0 +1,40 @@
+// D-MEMO1=A: one marker above a pure function keeps one store for that
+// function and answers repeat calls from it.
+#Memo fib: fn(n: Int) -[]> Int {
+    if n < 2 -> return n
+    return fib(n - 1) + fib(n - 2)
+}
+
+#Memo square: fn(value: Int) -[]> Int { return value * value }
+
+#Memo(bound: none) cube: fn(value: Int) -[]> Int { return value * value * value }
+
+run: fn() {
+    // Recursion: each fib(k) is computed once; the inner repeats are hits.
+    print("fib(30) = {fib(30)}")
+    f: fib.cache()
+    print("fib: hits={f.hits} misses={f.misses} size={f.size} bound={f.bound}")
+    print("fib(30) again = {fib(30)}")
+    g: fib.cache()
+    print("fib: hits={g.hits} misses={g.misses} size={g.size} bound={g.bound}")
+
+    // The default store keeps 128 entries and evicts the least recently used.
+    first: square(7)
+    second: square(7)
+    loop i in 0..<129 -> square(i).drop("fills the store past its bound")
+    evicted: square(0)
+    s: square.cache()
+    print("square: {first} {second} {evicted}")
+    print("square: hits={s.hits} misses={s.misses} size={s.size} bound={s.bound}")
+
+    // `bound: none` keeps every entry.
+    loop i in 0..<300 -> cube(i).drop("fills the unbounded store")
+    again: cube(3)
+    c: cube.cache()
+    print("cube: {again}")
+    print("cube: hits={c.hits} misses={c.misses} size={c.size} bound={c.bound}")
+
+    // Each function has its own store: square's calls never touch fib's.
+    h: fib.cache()
+    print("fib after the other stores: hits={h.hits} misses={h.misses} size={h.size}")
+}

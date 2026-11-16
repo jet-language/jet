@@ -1,0 +1,818 @@
+// HTTP-facing adapter for the typed browser devtools host. It syncs the
+// session's devtools projection into one BrowserHost and renders the in-app
+// and workbench pages, the state, reconnect and release JSON, and action
+// effects from that one state; it reads no clock, file or socket.
+use jet_foundation.[foundation_json_integer, foundation_json_parse, foundation_json_quote]
+
+BROWSER_PAGE_SCHEMA: "jet.devtools.browser.v1"
+// Facts render in three intent groups: build and source, data and requests,
+// then runtime and interface (browser_web_intent_group).
+BROWSER_WEB_INTENT_GROUPS: Int{3}
+
+BrowserTools: struct {
+    source: Bool
+    source_reason: String?
+    rebuild: Bool
+    rebuild_reason: String?
+}
+BrowserDevtoolsFrame: struct {
+    placement: BrowserPlacement
+    route: String
+    protocol: String
+    session_id: String
+    source_id: String?
+    build_id: String?
+    revision: String
+    world_id: String?
+    sequence: Int?
+    cursor: BrowserReconnectCursor?
+    state: BrowserSessionState
+    status: DevtoolsStatusFact
+    tools: BrowserTools
+    receipts: [JetDevtoolsCommandReceipt]
+    selection: BrowserSelection?
+    panels: [BrowserPanelView]
+    elements: [BrowserHTMLElement]
+}
+// One ancestor step from a panel to its selected node.
+BrowserWebCrumb: struct { id: String, label: String }
+
+BrowserWebState: struct {
+    host: BrowserHost
+    source_id: String?
+    build_id: String?
+    revision: String
+    world_id: String?
+    status: DevtoolsStatusFact
+    tools: BrowserTools
+    receipts: [JetDevtoolsCommandReceipt]
+
+    new: fn(session_id: String) -> BrowserWebState {
+        BrowserWebState{
+            host: BrowserHost.new(session_id), source_id: None, build_id: None, revision: "", world_id: None, status: browser_web_starting_status(),
+            tools: BrowserTools{source: false, source_reason: None, rebuild: false, rebuild_reason: None}, receipts: [JetDevtoolsCommandReceipt]{},
+        }
+    }
+    frame: fn(self, placement: BrowserPlacement) -> BrowserDevtoolsFrame {
+        model: self.host.view_model(placement)
+        BrowserDevtoolsFrame{
+            placement: model.placement, route: model.route, protocol: model.protocol, session_id: model.session_id,
+            source_id: self.source_id, build_id: self.build_id, revision: self.revision, world_id: self.world_id,
+            sequence: model.sequence, cursor: model.cursor, state: browser_web_session_state(self.status.state), status: self.status,
+            tools: self.tools, receipts: self.receipts, selection: model.selection, panels: model.panels, elements: model.elements,
+        }
+    }
+    // A projection from another session, or one that resets, starts a new host.
+    sync: fn(&self, projection: DevtoolsProjection, canonical_panels: [JetDevtoolsPanelProjection]) Err! {
+        if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return Err("devtools projection protocol does not match jet.devtools.v1")
+        if projection.session_id != self.host.session_id || projection.reset -> self.host = BrowserHost.new(projection.session_id)
+        self.source_id = browser_web_bounded_optional(projection.source_id, MAX_BROWSER_TEXT)
+        self.build_id = browser_web_bounded_optional(projection.build_id, MAX_BROWSER_TEXT)
+        self.revision = browser_web_bounded_text(projection.revision, "", MAX_BROWSER_TEXT)
+        self.world_id = browser_web_bounded_optional(projection.world_id, MAX_BROWSER_TEXT)
+        self.status = browser_web_normalize_status(projection.status)
+        self.tools.rebuild = projection.command_capabilities.project_rebuild
+        self.tools.rebuild_reason = browser_web_bounded_optional(projection.command_capabilities.project_rebuild_reason, MAX_BROWSER_TEXT)
+        self.receipts = projection.command_receipts
+        sequence: projection.sequence
+        apply := true
+        if self.host.sequence == .Val(current) -> apply = sequence > current
+        if apply {
+            panels: loop panel in canonical_panels -> browser_web_panel_fact(panel)
+            revision := self.host.revision ?? 0
+            stated: Int.parse(projection.revision) ?? sequence
+            if stated > revision -> revision = stated
+            event: BrowserHostEvent.new(self.host.session_id, revision, sequence, projection.observed_at, panels)
+            self.host.apply_event(event) ?? return Err("browser projection rejected event: {err}")
+        }
+        if projection.selection == .Val(selection) {
+            if self.host.panel(selection.panel_id) != None {
+                node_id := String?{None}
+                if selection.item_key != "" && self.host.node_exists(selection.panel_id, Val(selection.item_key)) -> node_id = Val(selection.item_key)
+                self.host.select(selection.panel_id, node_id) ?? return Err("{err}")
+                return Ok()
+            }
+        }
+        self.host.clear_selection()
+        Ok()
+    }
+}
+// The session's current projection under every browser grant; Canvas alone
+// provides the source tools.
+browser_web_sync_session: fn(state: &BrowserWebState, session: ResidentDevSession) Err! {
+    projection: session.devtools_events_since(state.host.sequence)
+    panels: session.devtools_panels(.BrowserInApp, JetDevtoolsPanelCapability.all()) ?? return Err("browser panel catalog rejected projection: {err}")
+    state.tools.source = session.canvas_port() != 0
+    state.tools.source_reason = if state.tools.source -> None else -> Val(SOURCE_TOOLS_OFF_REASON)
+    state.sync(projection, panels)
+}
+browser_web_starting_status: fn() -> DevtoolsStatusFact {
+    DevtoolsStatusFact{state: .Starting, diagnostic_code: None, diagnostic: None, accepted_revision: None, last_good_revision: None, run_target: None, run_output: None, test_state: None}
+}
+browser_web_normalize_status: fn(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
+    DevtoolsStatusFact{
+        state: status.state,
+        diagnostic_code: browser_web_bounded_optional(status.diagnostic_code, MAX_BROWSER_TEXT),
+        diagnostic: browser_web_bounded_optional(status.diagnostic, MAX_BROWSER_VALUE),
+        accepted_revision: browser_web_bounded_optional(status.accepted_revision, MAX_BROWSER_TEXT),
+        last_good_revision: browser_web_bounded_optional(status.last_good_revision, MAX_BROWSER_TEXT),
+        run_target: browser_web_bounded_optional(status.run_target, MAX_BROWSER_TEXT),
+        run_output: browser_web_bounded_optional(status.run_output, MAX_BROWSER_VALUE),
+        test_state: browser_web_bounded_optional(status.test_state, MAX_BROWSER_TEXT),
+    }
+}
+browser_web_session_state: fn(state: JetDevtoolsLifecycleState) -> BrowserSessionState {
+    if state == {
+        .Starting | .Ready -> BrowserSessionState.Idle
+        .Building -> BrowserSessionState.Building
+        .Error -> BrowserSessionState.BuildFailed
+        .Unavailable | .Stopped -> BrowserSessionState.RuntimeFailure
+    }
+}
+// One panel row per catalog projection: each retained event becomes a tree
+// node with its source, kind, entity, fields and payload.
+browser_web_panel_fact: fn(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact {
+    descriptor: panel.availability.descriptor
+    status := "available"
+    if panel.availability.is_available() {
+        if panel.events.len() > 0 -> status = panel.events[panel.events.len() - 1].kind()
+    } else {
+        reasons: loop reason in panel.availability.unavailable_reasons() -> reason.as_str()
+        status = "unavailable:{reasons.join(",")}"
+    }
+    shown: browser_web_bounded_text(status, "unavailable", MAX_BROWSER_TEXT)
+    nodes := [BrowserNode]{}
+    loop event in panel.events {
+        prefix: "event:{event.sequence()}"
+        payload: event.payload_json() ?? "(absent)"
+        children := [BrowserNode]{}
+        children.push(BrowserNode.new("{prefix}:source", .Text, "source").with_value(browser_web_bounded_value(event.source())))
+        children.push(BrowserNode.new("{prefix}:kind", .Text, "kind").with_value(browser_web_bounded_value(event.kind())))
+        children.push(BrowserNode.new("{prefix}:entity", .Text, "entity").with_value(browser_web_bounded_value(event.entity())))
+        children.push(BrowserNode.new("{prefix}:fields", .Text, "fields").with_value(browser_web_bounded_value(event.fields_json())))
+        children.push(BrowserNode.new("{prefix}:payload", .Text, "payload").with_value(browser_web_bounded_value(payload)))
+        label: browser_web_bounded_text(event.entity(), event.kind(), MAX_BROWSER_TEXT)
+        nodes.push(BrowserNode.new(prefix, .Tree, label).with_status(browser_web_bounded_text(event.kind(), "event", MAX_BROWSER_TEXT)).with_children(children))
+    }
+    if nodes.len() == 0 -> nodes.push(BrowserNode.new("availability", .Status, "availability").with_status(shown))
+    BrowserPanelFact.new(descriptor.id.as_str(), descriptor.title, 0, shown, nodes).with_cursor(panel.cursor)
+}
+browser_web_bounded_optional: fn(value: String?, limit: Int) -> String? {
+    text: value ?? return None
+    bounded: browser_web_bounded_text(text, "", limit)
+    if bounded == "" -> return None
+    Val(bounded)
+}
+// Control characters become spaces; the text stops at a character boundary
+// within `limit` bytes. Empty text shows `fallback`.
+browser_web_bounded_text: fn(value: String, fallback: String, limit: Int) -> String {
+    source: if value == "" -> fallback else -> value
+    pieces := [String]{}
+    used := 0
+    loop character in source.chars() {
+        text: if browser_web_is_control("{character}") -> " " else -> "{character}"
+        width: text.bytes().len()
+        if used + width > limit -> break
+        used += width
+        pieces.push(text)
+    }
+    if used == 0 -> return "{fallback}"
+    pieces.join("")
+}
+browser_web_bounded_value: fn(value: String) -> String { browser_web_bounded_text(value, "(none)", MAX_BROWSER_VALUE) }
+// One character's UTF-8 text is a C0 or C1 control.
+browser_web_is_control: fn(text: String) -> Bool {
+    bytes: text.bytes()
+    if bytes.len() == 1 -> return bytes[0] < 32 || bytes[0] == 127
+    bytes.len() == 2 && bytes[0] == 194 && bytes[1] < 160
+}
+
+browser_web_view_json: fn(state: BrowserWebState, placement: BrowserPlacement) -> String { browser_web_frame_json(state.frame(placement)) }
+browser_web_release_json: fn(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProjection]) -> String {
+    rows: loop panel in panels -> browser_web_release_panel_json(panel)
+    "{{\"protocol\":{foundation_json_quote(projection.protocol)},\"kind\":\"devtools.release\",\"session_id\":{foundation_json_quote(projection.session_id)},\"source_id\":{browser_web_maybe(projection.source_id)},\"build_id\":{browser_web_maybe(projection.build_id)},\"revision\":{foundation_json_quote(projection.revision)},\"lifecycle\":{foundation_json_quote(projection.status.state.as_str())},\"read_only\":true,\"payloads_redacted\":true,\"panels\":[{rows.join(",")}]}}"
+}
+browser_web_release_panel_json: fn(panel: JetDevtoolsPanelProjection) -> String {
+    descriptor: panel.availability.descriptor
+    capabilities: loop capability in descriptor.required_capabilities -> foundation_json_quote(capability.as_str())
+    "{{\"id\":{foundation_json_quote(descriptor.id.as_str())},\"title\":{foundation_json_quote(descriptor.title)},\"available\":{browser_web_flag(panel.availability.is_available())},\"capabilities\":[{capabilities.join(",")}]}}"
+}
+browser_web_frame_json: fn(frame: BrowserDevtoolsFrame) -> String {
+    cursor := Int?{None}
+    if frame.cursor == .Val(at) -> cursor = Val(at.sequence)
+    tools: "{{\"source\":{{\"available\":{browser_web_flag(frame.tools.source)},\"reason\":{browser_web_maybe(frame.tools.source_reason)}}},\"rebuild\":{{\"available\":{browser_web_flag(frame.tools.rebuild)},\"reason\":{browser_web_maybe(frame.tools.rebuild_reason)}}}}}"
+    receipts: loop receipt in frame.receipts -> "{{\"sequence\":{receipt.sequence},\"request_id\":{foundation_json_quote(receipt.request_id)},\"kind\":{foundation_json_quote(receipt.kind)},\"status\":{foundation_json_quote(receipt.status)},\"error\":{browser_web_maybe(receipt.error)}}}"
+    selection := "null"
+    if frame.selection == .Val(selected) -> selection = "{{\"panel_id\":{foundation_json_quote(selected.panel_id)},\"node_id\":{browser_web_maybe(selected.node_id)}}}"
+    panels: loop panel in frame.panels -> "{{\"panel_id\":{foundation_json_quote(panel.panel_id)},\"title\":{foundation_json_quote(panel.title)},\"freshness_ms\":{panel.freshness_ms},\"status\":{foundation_json_quote(panel.status)},\"cursor\":{browser_web_maybe_int(panel.cursor)},\"open\":{browser_web_flag(panel.open)},\"dock\":{foundation_json_quote(panel.dock.as_str())},\"nodes\":[{browser_web_nodes_json(panel.nodes)}]}}"
+    elements: loop element in frame.elements -> "{{\"id\":{foundation_json_quote(element.id)},\"kind\":{foundation_json_quote(element.kind)},\"panel_id\":{browser_web_maybe(element.panel_id)},\"node_id\":{browser_web_maybe(element.node_id)},\"label\":{foundation_json_quote(element.label)},\"value\":{browser_web_maybe(element.value)},\"status\":{browser_web_maybe(element.status)}}}"
+    identity: "\"session_id\":{foundation_json_quote(frame.session_id)},\"source_id\":{browser_web_maybe(frame.source_id)},\"build_id\":{browser_web_maybe(frame.build_id)},\"revision\":{foundation_json_quote(frame.revision)},\"world_id\":{browser_web_maybe(frame.world_id)}"
+    "{{\"schema\":{foundation_json_quote(BROWSER_PAGE_SCHEMA)},\"protocol\":{foundation_json_quote(frame.protocol)},\"placement\":{foundation_json_quote(frame.placement.as_str())},\"route\":{foundation_json_quote(frame.route)},{identity},\"sequence\":{browser_web_maybe_int(frame.sequence)},\"cursor\":{browser_web_maybe_int(cursor)},\"state\":{foundation_json_quote(frame.state.as_str())},\"status\":{browser_web_status_json(frame.status)},\"tools\":{tools},\"receipts\":[{receipts.join(",")}],\"selection\":{selection},\"panels\":[{panels.join(",")}],\"elements\":[{elements.join(",")}]}}"
+}
+browser_web_status_json: fn(status: DevtoolsStatusFact) -> String {
+    "{{\"state\":{foundation_json_quote(status.state.as_str())},\"diagnostic_code\":{browser_web_maybe(status.diagnostic_code)},\"diagnostic\":{browser_web_maybe(status.diagnostic)},\"accepted_revision\":{browser_web_maybe(status.accepted_revision)},\"last_good_revision\":{browser_web_maybe(status.last_good_revision)},\"run_target\":{browser_web_maybe(status.run_target)},\"run_output\":{browser_web_maybe(status.run_output)},\"test_state\":{browser_web_maybe(status.test_state)}}}"
+}
+browser_web_nodes_json: fn(nodes: [BrowserNode]) -> String {
+    rows: loop node in nodes -> "{{\"id\":{foundation_json_quote(node.id)},\"kind\":{foundation_json_quote(node.kind.as_str())},\"label\":{foundation_json_quote(node.label)},\"value\":{browser_web_maybe(node.value)},\"status\":{browser_web_maybe(node.status)},\"children\":[{browser_web_nodes_json(node.children)}]}}"
+    rows.join(",")
+}
+browser_web_event_json: fn(event: BrowserHostEvent) -> String {
+    panels: loop panel in event.panels -> "{{\"panel_id\":{foundation_json_quote(panel.panel_id)},\"title\":{foundation_json_quote(panel.title)},\"freshness_ms\":{panel.freshness_ms},\"status\":{foundation_json_quote(panel.status)},\"cursor\":{browser_web_maybe_int(panel.cursor)},\"nodes\":[{browser_web_nodes_json(panel.nodes)}]}}"
+    "{{\"protocol\":{foundation_json_quote(event.protocol)},\"session_id\":{foundation_json_quote(event.session_id)},\"revision\":{event.revision},\"sequence\":{event.sequence},\"observed_at_ms\":{event.observed_at_ms},\"panels\":[{panels.join(",")}]}}"
+}
+// The retained host events after the `after` sequence, with the workbench
+// view. A truncated replay sends no events and is not complete.
+browser_web_reconnect_json: fn(state: BrowserWebState, after: Int?, reset: Bool, truncation: Bool) -> String Err! {
+    events := [String]{}
+    if !truncation {
+        cursor := BrowserReconnectCursor?{None}
+        if after == .Val(at) -> cursor = Val(BrowserReconnectCursor{sequence: at})
+        replay: state.host.resume_from(cursor) ?? return Err("{err}")
+        loop event in replay.events -> events.push(browser_web_event_json(event))
+    }
+    view: browser_web_view_json(state, BrowserPlacement.Workbench)
+    Ok("{{\"schema\":{foundation_json_quote(BROWSER_PAGE_SCHEMA)},\"protocol\":{foundation_json_quote(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{foundation_json_quote(state.host.session_id)},\"from\":{browser_web_maybe_int(after)},\"cursor\":{browser_web_maybe_int(state.host.sequence)},\"reset\":{browser_web_flag(reset)},\"truncation\":{browser_web_flag(truncation)},\"complete\":{browser_web_flag(!truncation)},\"events\":[{events.join(",")}],\"view\":{view}}}")
+}
+browser_web_maybe: fn(value: String?) -> String {
+    text: value ?? return "null"
+    foundation_json_quote(text)
+}
+browser_web_maybe_int: fn(value: Int?) -> String {
+    number: value ?? return "null"
+    "{number}"
+}
+browser_web_flag: fn(value: Bool) -> String { if value -> "true" else -> "false" }
+
+PAGE_CSS: ```
+:root{color-scheme:dark;--bg:#0F1013;--raised:#17191D;--raised-2:#1D2026;--well:#0A0B0D;--line:#30343C;--ink:#F6F5F2;--dim:#9B9EA8;--red:#E8232A;--ok:#56C271;--amber:#E3A43B;--sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+button,select,textarea{font:inherit;color:inherit}button{background:none;border:0;padding:0;cursor:pointer;text-align:left}
+:focus-visible{outline:2px solid var(--red);outline-offset:3px}textarea:focus-visible{outline:1px solid var(--dim);outline-offset:0}
+code,pre,textarea,.mono{font:12px/1.55 var(--mono)}
+main{height:100%;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:11px 18px;border-bottom:1px solid var(--line);flex:none}
+.embedded .bar{display:none}
+.mark{display:grid;place-items:center;flex:none;width:40px;height:40px;border:1px solid var(--ok);border-radius:13px;background:var(--well);box-shadow:0 0 14px #56c27144}
+.mark svg{display:block;width:32px;height:20px}
+[data-state=building] .mark{border-color:var(--amber);border-style:dashed;box-shadow:0 0 14px #e3a43b55}
+[data-state=error] .mark,[data-state=unavailable] .mark,[data-state=stopped] .mark{border-color:var(--red);border-style:double;box-shadow:0 0 14px #e8232a66}
+[data-state=starting] .mark,[data-state=reconnecting] .mark{border-color:var(--dim);border-style:dotted;box-shadow:0 0 14px #9b9ea844}
+.state{display:inline-flex;align-items:center;gap:8px;font-weight:600}
+.status-mark{display:inline-block;width:10px;height:10px;border:2px solid var(--ok);border-radius:3px;flex:none}
+[data-state=building] .status-mark{border-color:var(--amber);border-style:dashed}
+[data-state=error] .status-mark,[data-state=unavailable] .status-mark,[data-state=stopped] .status-mark{border-color:var(--red);border-radius:2px}
+[data-state=starting] .status-mark,[data-state=reconnecting] .status-mark{border-color:var(--dim);border-style:dotted}
+.grow{flex:1}
+.note{color:var(--dim);font-size:12px}.note:empty{display:none}
+.link{color:var(--ink);text-decoration:none;border:1px solid var(--line);border-radius:9px;padding:6px 11px;font-size:12px}.link:hover{background:var(--raised)}
+.link[hidden]{display:none}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border:1px solid var(--line);border-radius:9px;background:var(--raised);font-size:12px;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--raised-2)}.btn.primary{border-color:var(--red)}.btn[disabled]{opacity:.45;cursor:default}
+.btn.quiet{background:none;border-color:transparent;color:var(--dim)}.btn.quiet:hover{color:var(--ink);background:var(--raised)}
+.attention{flex:none;padding:16px 18px 14px;border-bottom:1px solid var(--line)}
+.attention h2{margin:0;display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;line-height:1.3;flex-wrap:wrap}
+.attention h2 small{font-weight:400;color:var(--dim);font-size:11px}
+.attention .diag{margin:11px 0 0;padding:11px 13px;background:var(--well);border:1px solid var(--line);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:34vh;overflow:auto}
+main:has(.source:not([hidden])) .attention .diag{max-height:88px}
+.acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:11px}.acts:empty{display:none}
+.why{flex:1 1 100%;color:var(--dim);font-size:12px}
+.receipt{color:var(--dim);font-size:12px}.receipt:empty{display:none}.receipt[data-status=failed]{color:var(--red)}.receipt[data-status=completed]{color:var(--ok)}
+.source{flex:none;display:flex;flex-direction:column;border-bottom:1px solid var(--line);max-height:min(62vh,540px)}
+.source[hidden]{display:none}
+.source header{display:flex;align-items:center;gap:8px;padding:9px 18px;flex-wrap:wrap}
+.source select{background:var(--raised);border:1px solid var(--line);border-radius:8px;padding:5px 8px;color:var(--ink);max-width:60%;font-family:var(--mono);font-size:12px}
+.source .rev{color:var(--dim);font-size:11px;font-family:var(--mono)}
+.source textarea{flex:1 1 auto;min-height:130px;margin:0 18px;padding:11px 13px;background:var(--well);color:var(--ink);border:1px solid var(--line);border-radius:10px;resize:vertical;tab-size:4;white-space:pre;overflow:auto}
+.source textarea[data-dirty=true]{border-color:var(--amber)}
+.source footer{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 18px}
+.source .out{margin:0 18px 11px;padding:11px 13px;background:var(--well);border:1px solid var(--line);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:26vh;overflow:auto}
+.source .out[hidden]{display:none}.source .out[data-ok=true]{border-color:var(--ok)}.source .out[data-ok=false]{border-color:var(--red)}
+.result{color:var(--dim);font-size:12px;min-width:0;overflow-wrap:anywhere}.result:empty{display:none}.result[data-tone=bad]{color:var(--red)}.result[data-tone=good]{color:var(--ok)}
+.body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
+[data-placement=workbench] .body{grid-template-columns:minmax(0,1fr) minmax(300px,.78fr)}
+.facts,.inspector{min-height:0;overflow:auto}
+.facts{padding:9px 0 28px}
+.selected{margin:8px 18px 14px;padding:12px 14px;background:var(--raised);border:1px solid var(--line);border-radius:12px}
+.selected .eyebrow{margin-bottom:5px;color:var(--dim);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.crumbs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:var(--dim)}.crumbs button{color:var(--dim)}.crumbs button:hover{color:var(--ink)}
+.selected h3{margin:5px 0 7px;font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:0;font-size:12px;color:var(--dim)}.kv dt,.kv dd{margin:0}.kv dd{color:var(--ink);font-family:var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.group{margin:0 18px 8px;border:1px solid var(--line);border-radius:12px;background:rgba(23,25,29,.6);overflow:hidden}
+.group>summary{display:flex;align-items:center;gap:10px;min-height:46px;padding:10px 13px;cursor:pointer;list-style:none}
+.group>summary::-webkit-details-marker{display:none}
+.group>summary::before{content:"";width:0;height:0;border:4px solid transparent;border-left:5px solid var(--dim);flex:none;transform-origin:2px 50%}
+.group[open]>summary::before{transform:rotate(90deg)}
+.group>summary:hover{background:var(--raised)}
+.group[data-active=true]>summary{border-bottom:1px solid var(--line)}
+.group-label{font-size:13px;font-weight:600}.group-meta{margin-left:auto;color:var(--dim);font-size:11px;white-space:nowrap}
+.group-body{padding:5px 5px 8px}
+.panel{margin:0 2px}.panel+ .panel{border-top:1px solid rgba(48,52,60,.6)}
+.panel>header{display:flex;align-items:center;gap:8px;padding-right:7px}
+.panel h2{margin:0;flex:1;min-width:0;font:inherit}
+.toggle{display:flex;align-items:center;gap:8px;width:100%;padding:8px;border-radius:8px;font-weight:500}.toggle:hover{background:var(--raised)}
+.chev{width:0;height:0;border:4px solid transparent;border-left:5px solid var(--dim);flex:none}
+.panel[data-open=true] .chev{transform:rotate(90deg)}
+.panel small{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
+.nodes{list-style:none;margin:0 0 5px;padding:0 0 0 14px}
+.node{display:flex;align-items:baseline;gap:8px;width:100%;padding:6px 8px;border-radius:8px;min-width:0}.node:hover{background:var(--raised)}
+li[data-selected=true]>.node{background:var(--raised);box-shadow:inset 2px 0 0 var(--red)}
+.node .lbl{overflow-wrap:anywhere;min-width:0;font-family:var(--mono);font-size:12px}.node b{font-weight:500;color:var(--dim);font-size:11px;margin-left:auto;white-space:nowrap}
+.fold{margin:11px 18px}.fold>summary{list-style:none;cursor:pointer;color:var(--dim);font-size:12px;padding:7px 0}.fold>summary::-webkit-details-marker{display:none}.fold>summary:hover{color:var(--ink)}
+.fold .u{display:flex;gap:8px;padding:4px 0;font-size:12px}.fold .u small{color:var(--dim)}
+.group-body .fold{margin:6px 10px;padding-left:12px;border-left:1px solid var(--line)}
+.group-body .u{flex-wrap:wrap;column-gap:10px}
+.inspector{border-left:1px solid var(--line);padding:17px 18px}
+.inspector h3{margin:6px 0 9px;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.value{display:block;margin:7px 0;padding:9px 11px;background:var(--well);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+.empty{padding:32px 18px;color:var(--dim);text-align:center;font-size:12px}
+@media(max-width:900px){[data-placement=workbench] .body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}.inspector{border-left:0;border-top:1px solid var(--line);max-height:40vh}}
+@media(max-width:560px){.bar,.attention,.source header,.source footer{padding-left:14px;padding-right:14px}.selected,.group,.fold{margin-left:14px;margin-right:14px}.group>summary{padding-left:11px;padding-right:11px}.group-meta{font-size:10px}}
+@media(prefers-reduced-motion:no-preference){.chev,.group>summary::before{transition:transform .12s}.selected,.source{animation:in .18s ease}@keyframes in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}}
+```
+PAGE_JS: ```
+const session=new URL(location.href).searchParams.get('session')||'';const params=new URL(location.href).searchParams;const q=(p)=>p+'?session='+encodeURIComponent(session);const key='jet-devtools:'+S.placement;const DRAFT='jet-devtools:draft';const OPEN='jet-devtools:source';const $=(s)=>document.querySelector(s);const note=$('.note');const embedded=window.parent!==window;$('main').classList.toggle('embedded',embedded);document.querySelectorAll('a[data-route]').forEach((a)=>{a.href=q(a.dataset.route);a.hidden=embedded});
+const store={get(k){try{return JSON.parse(sessionStorage.getItem(k)||'null')}catch(_){return null}},set(k,v){try{if(v==null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,JSON.stringify(v))}catch(_){}}};
+const intentKey='jet-devtools:intents:'+S.placement;const restoreIntentGroups=()=>{const saved=store.get(intentKey)||{};document.querySelectorAll('details[data-intent]').forEach((group)=>{if(group.dataset.active!=='true'&&Object.prototype.hasOwnProperty.call(saved,group.dataset.intent))group.open=!!saved[group.dataset.intent];group.addEventListener('toggle',()=>{const next=store.get(intentKey)||{};next[group.dataset.intent]=group.open;store.set(intentKey,next)})})};restoreIntentGroups();
+const focusKey=()=>document.activeElement&&document.activeElement.dataset.focus||null;const scrollers=()=>[...document.querySelectorAll('[data-scroll]')];
+const reload=(focus)=>{store.set(key,{focus,scroll:scrollers().map((e)=>e.scrollTop)});location.reload()};
+{const m=store.get(key);if(m){store.set(key,null);scrollers().forEach((e,i)=>{if(m.scroll[i]!=null)e.scrollTop=m.scroll[i]});const f=[...document.querySelectorAll('[data-focus]')].find((e)=>e.dataset.focus===m.focus);if(f)f.focus({preventScroll:true})}}
+const fail=(r)=>r.text().then((t)=>{throw new Error(t||('HTTP '+r.status))});
+const post=(path,body)=>fetch(q(path),{method:'POST',cache:'no-store',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+const send=(path,body,focus)=>post(path,body).then((r)=>r.ok?r.json():fail(r)).then(()=>reload(focus)).catch((e)=>{note.textContent=String(e.message||e)});
+document.addEventListener('click',(ev)=>{const el=ev.target.closest('[data-select],[data-layout],[data-clear],[data-tool],[data-refresh]');if(!el)return;if(el.dataset.select)send('/__jet_devtools/selection',{selection:{panel_id:el.dataset.panel,item_key:el.dataset.node}},el.dataset.focus);else if(el.dataset.layout)send('/__jet_devtools/action',{action:el.dataset.layout==='open'?'open_panel':'close_panel',placement:S.placement,panel_id:el.dataset.panel},el.dataset.focus);else if(el.dataset.clear)send('/__jet_devtools/selection',{selection:null},null);else if(el.dataset.refresh)reload(focusKey());else if(el.dataset.tool==='source')openSource(el.dataset.file||null);else if(el.dataset.tool==='rebuild')rebuild(el)});
+/* Rebuild: one canonical host_to_runtime command; the receipt the host publishes is the only progress shown. */
+const receiptEl=$('.receipt');const rebuildResult=$('.acts .result');
+function rebuild(button){button.disabled=true;rebuildResult.dataset.tone='';rebuildResult.textContent='Requesting rebuild…';const id='rebuild-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);post('/__jet_devtools',{protocol:'jet.devtools.v1',session_id:S.session_id,started_at_ms:Date.now(),direction:'host_to_runtime',commands:[{kind:'ProjectRebuild',payload:{session_id:S.session_id,request_id:id,expected_revision:S.revision}}]}).then((r)=>{if(!r.ok)return fail(r);rebuildResult.textContent='';return live(true)}).catch((e)=>{rebuildResult.dataset.tone='bad';rebuildResult.textContent=String(e.message||e)}).finally(()=>{button.disabled=false})}
+const receiptText={queued:'Rebuild queued',building:'Rebuilding…',completed:'Rebuild finished',failed:'Rebuild failed'};
+function renderReceipt(list){const r=(list||[]).filter((x)=>x.kind==='ProjectRebuild').pop();if(!receiptEl)return;if(!r){receiptEl.textContent='';receiptEl.removeAttribute('data-status');return}receiptEl.dataset.status=r.status;receiptEl.textContent=(receiptText[r.status]||r.status)+(r.error?': '+r.error:'')}
+renderReceipt(S.receipts);
+/* Source tool */
+const src={box:$('.source'),file:$('.source select'),rev:$('.source .rev'),text:$('.source textarea'),out:$('.source .out'),result:$('.source .result'),apply:$('[data-src=apply]'),check:$('[data-src=check]'),discard:$('[data-src=discard]'),files:[],source_id:null,revision:null,base:'',loading:false};
+const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);const dirty=()=>!!src.box&&!src.box.hidden&&src.text.value!==src.base;
+function say(el,tone,text){el.dataset.tone=tone||'';el.textContent=text||''}
+function showOut(ok,text){src.out.hidden=!text;src.out.dataset.ok=String(ok);src.out.textContent=text||''}
+function fileFromDiagnostic(){const m=/-->\s*([^\s:]+\.jet)/.exec(S.status.diagnostic||'');return m?m[1]:null}
+function pickFile(wanted){if(!src.files.length)return null;const norm=(p)=>String(p||'').replace(/^\.\//,'');if(wanted){const w=norm(wanted);const hit=src.files.find((f)=>norm(f)===w)||src.files.find((f)=>w.endsWith('/'+norm(f))||norm(f).endsWith('/'+w)||norm(f).split('/').pop()===w.split('/').pop());if(hit)return hit}return src.files.includes(src.entry)?src.entry:src.files[0]}
+function openSource(file){if(!src.box)return;src.box.hidden=false;const draft=store.get(DRAFT);const want=file||(draft&&draft.source_id)||fileFromDiagnostic()||null;loadProject().then(()=>loadFile(pickFile(want),draft)).catch((e)=>say(src.result,'bad',String(e.message||e)))}
+function loadProject(){return fetch(q('/__jet_canvas/project'),{cache:'no-store'}).then((r)=>r.ok?r.json():fail(r)).then((j)=>{const c=j.canvas||{};src.entry=String(c.entry||'').replace(/^\.\//,'');src.revisions={};src.files=(c.files||[]).filter((f)=>f.kind==='source').map((f)=>{const p=String(f.path).replace(/^\.\//,'');src.revisions[p]=f.revision;return p});src.file.innerHTML='';src.files.forEach((p)=>{const o=document.createElement('option');o.value=p;o.textContent=p;src.file.appendChild(o)});if(src.source_id)src.file.value=src.source_id})}
+function loadFile(id,draft){if(!id)throw new Error('This project has no Jet source files to edit.');src.loading=true;src.file.value=id;return fetch(q('/__jet_canvas/source?source_id='+encodeURIComponent(id)),{cache:'no-store'}).then((r)=>r.ok?r.text():fail(r)).then((text)=>{src.source_id=id;src.revision=src.revisions[id]||null;src.base=text;src.rev.textContent=src.revision?src.revision.slice(0,15):'';showOut(true,'');say(src.result,'','');if(draft&&draft.source_id===id&&draft.text!==text){src.text.value=draft.text;if(draft.revision!==src.revision)say(src.result,'','The file changed on disk since this draft started; Apply checks against the current file.')}else{src.text.value=text;if(draft&&draft.source_id===id)store.set(DRAFT,null)}markDirty();store.set(OPEN,{source_id:id});if(draft&&draft.sel&&draft.source_id===id){try{src.text.setSelectionRange(draft.sel[0],draft.sel[1]);src.text.scrollTop=draft.scroll||0}catch(_){}}}).finally(()=>{src.loading=false})}
+function markDirty(){const d=dirty();src.text.dataset.dirty=String(d);src.apply.disabled=!d;src.discard.hidden=!d;if(d)store.set(DRAFT,{source_id:src.source_id,revision:src.revision,text:src.text.value,sel:[src.text.selectionStart,src.text.selectionEnd],scroll:src.text.scrollTop});else if(!src.loading)store.set(DRAFT,null)}
+function readCanvas(r){return r.text().then((t)=>{let j=null;try{j=JSON.parse(t)}catch(_){}if(!j)throw new Error(t||('HTTP '+r.status));return j.canvas||j})}
+function diagText(c){const lines=[];if(c.message)lines.push(c.message);(c.diagnostics||[]).forEach((d)=>{if(typeof d==='string'){lines.push(d);return}const where=d.file?(d.file+(d.line?':'+d.line+(d.col?':'+d.col:''):'')):'';lines.push([d.code?'['+d.code+']':'',d.what||d.message||'',where?'— '+where:''].filter(Boolean).join(' '));if(d.fix)lines.push('  fix: '+d.fix)});return lines.join('\n')}
+function conflict(c){src.revisions={};return loadProject().then(()=>{src.revision=src.revisions[src.source_id]||c.current_revision||src.revision;src.rev.textContent=src.revision?src.revision.slice(0,15):'';say(src.result,'bad',(c.message||'The file changed on disk.')+' Your draft is kept; Check or Apply again runs against the current file, or Discard reloads it.')})}
+if(src.box){src.text.addEventListener('input',markDirty);src.text.addEventListener('select',markDirty);src.text.addEventListener('scroll',()=>{if(dirty())markDirty()});
+src.file.addEventListener('change',()=>{if(dirty()){src.file.value=src.source_id;say(src.result,'','Apply or discard the current draft before switching files.');return}loadFile(src.file.value,null).catch((e)=>say(src.result,'bad',String(e.message||e)))});
+src.discard.addEventListener('click',()=>{store.set(DRAFT,null);loadFile(src.source_id,null).catch((e)=>say(src.result,'bad',String(e.message||e)))});
+$('[data-src=close]').addEventListener('click',()=>{if(dirty()&&!confirm('Close the source tool and keep the draft for later?'))return;src.box.hidden=true;store.set(OPEN,null);const u=new URL(location.href);u.searchParams.delete('tool');u.searchParams.delete('file');history.replaceState(null,'',u)});
+src.check.addEventListener('click',()=>{src.check.disabled=true;say(src.result,'','Checking…');showOut(true,'');post('/__jet_canvas/command',{action_id:'canvas.command:check',source_id:src.source_id,revision:src.revision,source_text:src.text.value}).then((r)=>readCanvas(r).then((c)=>{if(c.ok===false&&c.kind==='conflict')return conflict(c);if(c.ok===false)throw new Error(c.message||'check refused');if(c.success){say(src.result,'good','No errors — Apply writes this exact text, formatted.')}else{say(src.result,'bad','Check found errors; nothing was written.');showOut(false,c.stderr||diagText(c))}})).catch((e)=>say(src.result,'bad',String(e.message||e))).finally(()=>{src.check.disabled=false})});
+src.apply.addEventListener('click',()=>{src.apply.disabled=true;say(src.result,'','Applying…');showOut(true,'');post('/__jet_canvas/transaction',{schema_version:1,op:'replace_source',source_id:src.source_id,revision:src.revision,source:src.text.value}).then((r)=>readCanvas(r).then((c)=>{if(c.ok===false&&c.kind==='conflict')return conflict(c);if(c.ok===false){say(src.result,'bad','Not applied'+(c.message?': '+c.message:'.'));if((c.diagnostics||[]).length)showOut(false,diagText(c));return}src.base=c.source_text!=null?c.source_text:src.text.value;src.text.value=src.base;src.revision=c.revision||src.revision;src.revisions[src.source_id]=src.revision;src.rev.textContent=src.revision?src.revision.slice(0,15):'';store.set(DRAFT,null);markDirty();say(src.result,'good',c.changed===false?'No change to write.':'Applied — the host is rebuilding from this revision.')})).catch((e)=>say(src.result,'bad',String(e.message||e))).finally(()=>{markDirty()})});
+const open=store.get(OPEN);const draft=store.get(DRAFT);if(params.get('tool')==='source'||open||draft)openSource(params.get('file')||(open&&open.source_id)||null)}
+/* Live: reload when shared facts move, unless a draft is in progress; then only the receipt updates and a refresh chip appears. */
+const refresh=$('[data-refresh]');
+function live(once){return fetch(q('/__jet_devtools/state'),{cache:'no-store'}).then((r)=>r.json()).then((n)=>{const moved=n.sequence!==S.sequence||n.state!==S.state||n.status.state!==S.status.state||!same(n.selection,S.selection)||!same(n.receipts,S.receipts)||!same(n.tools,S.tools);if(!moved)return;if(dirty()||document.activeElement===src.text){renderReceipt(n.receipts);if(refresh)refresh.hidden=false;return}reload(focusKey())}).catch(()=>{}).finally(()=>{if(!once)setTimeout(live,1000)})}
+setTimeout(live,1000);
+const sel=S.selection&&S.panels.find((p)=>p.panel_id===S.selection.panel_id);if(sel&&!sel.open){const once='jet-devtools:reveal:'+S.placement+':'+sel.panel_id;let done=false;try{done=sessionStorage.getItem(once)===String(S.sequence);sessionStorage.setItem(once,String(S.sequence))}catch(_){}if(!done)send('/__jet_devtools/action',{action:'open_panel',placement:S.placement,panel_id:sel.panel_id},focusKey())}
+addEventListener('keydown',(ev)=>{if(ev.key==='Escape'&&document.activeElement===src.text){src.text.blur();ev.preventDefault();return}if(!embedded)return;const alt=ev.altKey&&!ev.ctrlKey&&!ev.metaKey&&ev.key.toLowerCase()==='j';if(ev.key==='Escape'||alt){ev.preventDefault();parent.postMessage({jet:'devtools',key:ev.key,altKey:ev.altKey},location.origin)}});
+```
+
+// The intent group of a panel; panels outside the first two groups join the last.
+browser_web_intent_group: fn(panel_id: String) -> Int {
+    if panel_id == {
+        "build" | "gates" | "structure" | "tests" | "jobs" -> 0
+        "routes" | "queries" | "mutations" | "forms" | "table" | "store" | "database" -> 1
+        else -> 2
+    }
+}
+browser_web_intent_label: fn(index: Int) -> String {
+    if index == {
+        0 -> "Build & source"
+        1 -> "Data & requests"
+        else -> "Runtime & interface"
+    }
+}
+browser_web_panel_available: fn(panel: BrowserPanelView) -> Bool { !panel.status.starts_with("unavailable") }
+browser_web_unavailable_reason_text: fn(status: String) -> String {
+    rest := status
+    if rest.starts_with("unavailable:") -> rest = status.slice(12, status.len())
+    reasons: loop reason in rest.split(",").to_list() -> browser_web_reason_text(reason)
+    reasons.join(", ")
+}
+browser_web_reason_text: fn(reason: String) -> String {
+    if reason == {
+        "unsupported-host" | "host-kind" -> "not offered by this host"
+        "missing-capability" -> "needs a grant this session does not hold"
+        else -> reason
+    }
+}
+// The `.jet` file a diagnostic's first `-->` location names.
+browser_web_diagnostic_file: fn(diagnostic: String) -> String? {
+    parts: diagnostic.split_once("-->") ?? return None
+    pieces := [String]{}
+    loop character in parts.after.trim().chars() {
+        text: "{character}"
+        if text == " " || text == "\n" || text == "\t" || text == "\r" || text == ":" -> break
+        pieces.push(text)
+    }
+    file: pieces.join("")
+    if file.ends_with(".jet") -> return Val(file)
+    None
+}
+browser_web_render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
+    frame: state.frame(placement)
+    state_json: browser_web_frame_json(frame)
+    workbench: placement == .Workbench
+    any_open := false
+    any_available := false
+    loop panel in frame.panels {
+        if !browser_web_panel_available(panel) -> next
+        any_available = true
+        if panel.open -> any_open = true
+    }
+    state_word: frame.status.state.as_str()
+    title_suffix: if workbench -> " workbench" else -> ""
+    html := [String]{}
+    html.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'\"><title>Jet devtools{title_suffix}</title><style>")
+    html.push(PAGE_CSS)
+    html.push("</style></head><body><main data-schema=\"{BROWSER_PAGE_SCHEMA}\" data-placement=\"{placement.as_str()}\" data-session-id=\"{browser_web_html_escape(frame.session_id)}\" data-state=\"{state_word}\"><header class=\"bar\"><span class=\"mark\"></span><strong>Jet devtools</strong><span class=\"state\"><i class=\"status-mark\" aria-hidden=\"true\"></i>{state_word}</span><span class=\"grow\"></span><span class=\"note\" role=\"status\"></span>")
+    if !workbench -> html.push("<a class=\"link\" data-route=\"/__jet_devtools/workbench\">Workbench</a>")
+    html.push("</header>")
+    browser_web_render_attention(html, frame)
+    browser_web_render_source_tool(html, frame)
+    html.push("<div class=\"body\"><section class=\"facts\" data-scroll aria-label=\"Facts\">")
+    if !workbench -> browser_web_render_selected(html, frame)
+    loop index in 0..<BROWSER_WEB_INTENT_GROUPS -> browser_web_render_group(html, frame, index, workbench, any_open)
+    if frame.panels.len() == 0 {
+        html.push("<p class=\"empty\">Waiting for the first devtools fact.</p>")
+    } else if !any_available {
+        html.push("<p class=\"empty\">No live panels are available on this host.</p>")
+    }
+    html.push("</section>")
+    if workbench -> browser_web_render_inspector(html, frame)
+    html.push("</div><script>const S=JSON.parse(\"{browser_web_js_string(state_json)}\");")
+    html.push(PAGE_JS)
+    html.push("</script></main></body></html>")
+    html.join("")
+}
+browser_web_render_group: fn(html: &[String], frame: BrowserDevtoolsFrame, index: Int, workbench: Bool, any_open: Bool) {
+    member_count := 0
+    available_count := 0
+    open_count := 0
+    selected_here := false
+    loop panel in frame.panels {
+        if browser_web_intent_group(panel.panel_id) != index -> next
+        member_count += 1
+        if !browser_web_panel_available(panel) -> next
+        available_count += 1
+        if panel.open -> open_count += 1
+    }
+    if member_count == 0 -> return
+    if frame.selection == .Val(selected) -> selected_here = browser_web_intent_group(selected.panel_id) == index && browser_web_find_panel(frame.panels, selected.panel_id) != None
+    failing: frame.status.state == .Building || frame.status.state == .Error
+    forced: selected_here || open_count > 0 || (!workbench && index == 0 && failing)
+    initially_open: forced || (workbench && index == 0 && !any_open && frame.selection == None)
+    active: if forced -> " data-active=\"true\"" else -> ""
+    open_attribute: if initially_open -> " open" else -> ""
+    meta := "{available_count} available"
+    if selected_here {
+        meta = "Selected"
+    } else if open_count > 0 {
+        suffix: if available_count == 1 -> "" else -> "s"
+        meta = "{open_count} open · {available_count} panel{suffix}"
+    }
+    html.push("<details class=\"group\" data-intent=\"{index}\"{active}{open_attribute}><summary data-focus=\"intent:{index}\"><span class=\"group-label\">{browser_web_html_escape(browser_web_intent_label(index))}</span><span class=\"group-meta\">{meta}</span></summary><div class=\"group-body\">")
+    loop panel in frame.panels {
+        if browser_web_intent_group(panel.panel_id) == index && browser_web_panel_available(panel) -> browser_web_render_panel(html, panel, frame.selection)
+    }
+    unavailable_count: member_count - available_count
+    if unavailable_count > 0 {
+        html.push("<details class=\"fold\"><summary>{unavailable_count} not available here</summary>")
+        loop panel in frame.panels {
+            if browser_web_intent_group(panel.panel_id) != index || browser_web_panel_available(panel) -> next
+            html.push("<div class=\"u\"><span>{browser_web_html_escape(panel.title)}</span><small>{browser_web_html_escape(browser_web_unavailable_reason_text(panel.status))}</small></div>")
+        }
+        html.push("</details>")
+    }
+    html.push("</div></details>")
+}
+browser_web_render_attention: fn(html: &[String], frame: BrowserDevtoolsFrame) {
+    status: frame.status
+    failing_file := String?{None}
+    if status.diagnostic == .Val(diagnostic) -> failing_file = browser_web_diagnostic_file(diagnostic)
+    heading: if status.state == {
+        .Starting -> "Starting"
+        .Building -> "Building"
+        .Ready -> "Ready"
+        .Error -> "Build failed"
+        .Unavailable -> "Runtime unavailable"
+        .Stopped -> "Stopped"
+    }
+    html.push("<section class=\"attention\" aria-label=\"Attention\"><h2><i class=\"status-mark\" aria-hidden=\"true\"></i>{heading}")
+    if status.diagnostic_code == .Val(code) -> html.push("<small class=\"mono\">{browser_web_html_escape(code)}</small>")
+    if failing_file == .Val(file) -> html.push("<small class=\"mono\">{browser_web_html_escape(file)}</small>")
+    if status.test_state == .Val(tests) -> html.push("<small>tests {browser_web_html_escape(tests)}</small>")
+    html.push("</h2>")
+    // Verbatim diagnostic (I4), escaped for HTML.
+    if status.diagnostic == .Val(diagnostic) -> html.push("<pre class=\"diag\">{browser_web_html_escape(diagnostic)}</pre>")
+    html.push("<div class=\"acts\">")
+    if frame.tools.source {
+        if status.state == .Error {
+            file_attribute := ""
+            if failing_file == .Val(file) -> file_attribute = " data-file=\"{browser_web_html_escape(file)}\""
+            html.push("<button class=\"btn primary\" type=\"button\" data-tool=\"source\" data-focus=\"tool:source\"{file_attribute}>Fix in source</button>")
+        } else {
+            html.push("<button class=\"btn\" type=\"button\" data-tool=\"source\" data-focus=\"tool:source\">Source</button>")
+        }
+    }
+    if frame.tools.rebuild -> html.push("<button class=\"btn\" type=\"button\" data-tool=\"rebuild\" data-focus=\"tool:rebuild\">Rebuild</button>")
+    html.push("<span class=\"receipt\" role=\"status\"></span><span class=\"result\" role=\"status\"></span>")
+    reasons := [String]{}
+    if frame.tools.source_reason == .Val(reason) -> reasons.push("{reason}")
+    if !frame.tools.rebuild {
+        if frame.tools.rebuild_reason == .Val(reason) -> reasons.push("{reason}")
+    }
+    if reasons.len() > 0 {
+        why: reasons.join(" ")
+        html.push("<span class=\"why\">{browser_web_html_escape(why)}</span>")
+    }
+    html.push("</div></section>")
+}
+browser_web_render_source_tool: fn(html: &[String], frame: BrowserDevtoolsFrame) {
+    if !frame.tools.source -> return
+    html.push("<section class=\"source\" aria-label=\"Source\" hidden><header><select aria-label=\"Source file\"></select><span class=\"rev\"></span><span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-refresh hidden>Facts changed — refresh</button><button class=\"btn quiet\" type=\"button\" data-src=\"close\">Close</button></header><textarea spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" aria-label=\"Source text\" data-focus=\"tool:source-text\"></textarea><footer><button class=\"btn\" type=\"button\" data-src=\"check\">Check</button><button class=\"btn primary\" type=\"button\" data-src=\"apply\" disabled>Apply</button><button class=\"btn quiet\" type=\"button\" data-src=\"discard\" hidden>Discard draft</button><span class=\"result\" role=\"status\"></span></footer><pre class=\"out\" hidden></pre></section>")
+}
+browser_web_render_panel: fn(html: &[String], panel: BrowserPanelView, selection: BrowserSelection?) {
+    node_id := String?{None}
+    if selection == .Val(selected) {
+        if selected.panel_id == panel.panel_id -> node_id = selected.node_id
+    }
+    open: if panel.open -> "true" else -> "false"
+    layout: if panel.open -> "close" else -> "open"
+    id: browser_web_html_escape(panel.panel_id)
+    html.push("<article class=\"panel\" data-panel-id=\"{id}\" data-open=\"{open}\"><header><h2><button class=\"toggle\" data-layout=\"{layout}\" data-panel=\"{id}\" data-focus=\"toggle:{id}\" aria-expanded=\"{open}\"><span class=\"chev\"></span>{browser_web_html_escape(panel.title)}</button></h2><small>{browser_web_html_escape(panel.status)}</small></header>")
+    if panel.open {
+        html.push("<ul class=\"nodes\">")
+        browser_web_render_nodes(html, panel.panel_id, panel.nodes, node_id, false)
+        html.push("</ul>")
+    }
+    html.push("</article>")
+}
+browser_web_render_selected: fn(html: &[String], frame: BrowserDevtoolsFrame) {
+    selection: frame.selection ?? return
+    panel: browser_web_find_panel(frame.panels, selection.panel_id) ?? return
+    html.push("<section class=\"selected\" aria-label=\"Selected\"><div class=\"eyebrow\">Selected fact</div>")
+    if !browser_web_render_focus(html, panel, selection.node_id) -> html.push("<h3>{browser_web_html_escape(panel.title)}</h3>")
+    html.push("</section>")
+}
+browser_web_render_inspector: fn(html: &[String], frame: BrowserDevtoolsFrame) {
+    html.push("<aside class=\"inspector\" data-scroll aria-label=\"Inspector\">")
+    if frame.selection == .Val(selection) {
+        if browser_web_find_panel(frame.panels, selection.panel_id) == .Val(panel) {
+            if !browser_web_render_focus(html, panel, selection.node_id) {
+                html.push("<h3>{browser_web_html_escape(panel.title)}</h3><dl class=\"kv\"><dt>status</dt><dd>{browser_web_html_escape(panel.status)}</dd><dt>facts</dt><dd>{panel.nodes.len()}</dd></dl>")
+            }
+        } else {
+            html.push("<p class=\"empty\">Selected panel is not in the current catalog.</p>")
+        }
+    } else {
+        html.push("<p class=\"empty\">Select a fact to inspect it.</p>")
+    }
+    html.push("</aside>")
+}
+browser_web_find_panel: fn(panels: [BrowserPanelView], panel_id: String) -> BrowserPanelView? {
+    loop panel in panels {
+        if panel.panel_id == panel_id -> return Val(panel)
+    }
+    None
+}
+// The crumbs to the selected node, then its detail; false when no node is
+// selected or the panel no longer holds it.
+browser_web_render_focus: fn(html: &[String], panel: BrowserPanelView, node_id: String?) -> Bool {
+    id: node_id ?? ""
+    path := [BrowserWebCrumb]{}
+    found: id != "" && browser_web_crumbs(panel.nodes, id, path)
+    browser_web_render_crumbs(html, panel, path)
+    found && browser_web_render_found(html, panel.panel_id, panel.nodes, id)
+}
+browser_web_crumbs: fn(nodes: [BrowserNode], node_id: String, path: &[BrowserWebCrumb]) -> Bool {
+    loop node in nodes {
+        path.push(BrowserWebCrumb{id: "{node.id}", label: "{node.label}"})
+        if node.id == node_id || browser_web_crumbs(node.children, node_id, path) -> return true
+        _: path.pop()
+    }
+    false
+}
+browser_web_render_crumbs: fn(html: &[String], panel: BrowserPanelView, path: [BrowserWebCrumb]) {
+    panel_id: browser_web_html_escape(panel.panel_id)
+    html.push("<div class=\"crumbs\"><span>{browser_web_html_escape(panel.title)}</span>")
+    if path.len() > 1 {
+        loop index in 0..<(path.len() - 1) -> html.push("<span>›</span><button data-select=\"1\" data-panel=\"{panel_id}\" data-node=\"{browser_web_html_escape(path[index].id)}\">{browser_web_html_escape(path[index].label)}</button>")
+    }
+    html.push("<span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-clear=\"1\" data-focus=\"clear\">Clear</button></div>")
+}
+browser_web_render_found: fn(html: &[String], panel_id: String, nodes: [BrowserNode], node_id: String) -> Bool {
+    loop node in nodes {
+        if node.id == node_id {
+            browser_web_render_node_detail(html, panel_id, node)
+            return true
+        }
+        if browser_web_render_found(html, panel_id, node.children, node_id) -> return true
+    }
+    false
+}
+// A node's leaf children render as a key/value list, the rest as a node list.
+browser_web_render_node_detail: fn(html: &[String], panel_id: String, node: BrowserNode) {
+    status := ""
+    if node.status == .Val(text) -> status = " <small class=\"mono\">{browser_web_html_escape(text)}</small>"
+    html.push("<h3>{browser_web_html_escape(node.label)}{status}</h3>")
+    if node.value == .Val(value) -> html.push("<code class=\"value\">{browser_web_html_escape(value)}</code>")
+    leaves := 0
+    loop child in node.children {
+        if browser_web_is_leaf(child) -> leaves += 1
+    }
+    if leaves > 0 {
+        html.push("<dl class=\"kv\">")
+        loop child in node.children {
+            if !browser_web_is_leaf(child) -> next
+            value: child.value ?? ""
+            html.push("<dt>{browser_web_html_escape(child.label)}</dt><dd>{browser_web_html_escape(value)}</dd>")
+        }
+        html.push("</dl>")
+    }
+    if leaves < node.children.len() {
+        html.push("<ul class=\"nodes\">")
+        browser_web_render_nodes(html, panel_id, node.children, None, true)
+        html.push("</ul>")
+    }
+}
+browser_web_is_leaf: fn(node: BrowserNode) -> Bool { node.children.len() == 0 && node.value != None }
+browser_web_render_nodes: fn(html: &[String], panel_id: String, nodes: [BrowserNode], selected: String?, skip_leaves: Bool) {
+    panel: browser_web_html_escape(panel_id)
+    loop node in nodes {
+        if skip_leaves && browser_web_is_leaf(node) -> next
+        is_selected := false
+        if selected == .Val(selected_id) -> is_selected = selected_id == node.id
+        marked: if is_selected || browser_web_contains_node(node.children, selected) -> "true" else -> "false"
+        pressed: if is_selected -> "true" else -> "false"
+        id: browser_web_html_escape(node.id)
+        status := ""
+        if node.status == .Val(text) -> status = "<b>{browser_web_html_escape(text)}</b>"
+        html.push("<li data-selected=\"{marked}\"><button class=\"node\" data-select=\"1\" data-panel=\"{panel}\" data-node=\"{id}\" data-focus=\"node:{panel}:{id}\" aria-pressed=\"{pressed}\"><span class=\"lbl\">{browser_web_html_escape(node.label)}</span>{status}</button></li>")
+    }
+}
+browser_web_contains_node: fn(nodes: [BrowserNode], node_id: String?) -> Bool {
+    id: node_id ?? return false
+    loop node in nodes {
+        if node.id == id || browser_web_contains_node(node.children, node_id) -> return true
+    }
+    false
+}
+
+// A selection body: `{"selection": null}` clears, an object names a panel
+// and, optionally, an item.
+browser_web_parse_selection: fn(payload: [U8]) -> DevtoolsSelectionFact? Err! {
+    object: browser_web_body_object(payload, "browser selection")
+    value: recording_lookup(object, "selection") ?? return Err("browser selection body must include selection")
+    if value == .Null -> return Ok(None)
+    selection: recording_object_fields(value) ?? return Err("browser selection must be an object or null")
+    panel_id: browser_web_string(selection, "panel_id", "browser selection")
+    item_key := ""
+    if recording_lookup(selection, "item_key") == .Val(key) {
+        if !(key == .Null) -> item_key = recording_text(key) ?? return Err("browser selection item_key must be a string")
+    }
+    Ok(Val(DevtoolsSelectionFact{panel_id: panel_id, item_key: item_key}))
+}
+browser_web_parse_action: fn(payload: [U8], default_placement: BrowserPlacement) -> BrowserHostAction Err! {
+    object: browser_web_body_object(payload, "browser action")
+    name: if recording_lookup(object, "action") != None -> browser_web_string(object, "action", "browser action") else -> browser_web_string(object, "op", "browser action")
+    placement := default_placement
+    if recording_lookup(object, "placement") == .Val(value) -> placement = browser_web_placement(value)
+    if name == {
+        "open" | "open_panel" -> Ok(BrowserHostAction.OpenPanel{placement: placement, panel_id: browser_web_string(object, "panel_id", "browser action")})
+        "close" | "close_panel" -> Ok(BrowserHostAction.ClosePanel{placement: placement, panel_id: browser_web_string(object, "panel_id", "browser action")})
+        "dock" | "dock_panel" -> Ok(BrowserHostAction.DockPanel{placement: placement, panel_id: browser_web_string(object, "panel_id", "browser action"), dock: browser_web_dock(browser_web_string(object, "dock", "browser action"))})
+        "navigate_source" | "navigate" -> Ok(BrowserHostAction.NavigateSource{placement: placement, panel_id: browser_web_string(object, "panel_id", "browser action"), node_id: browser_web_string(object, "node_id", "browser action"), grant: browser_web_source_grant(object)})
+        "invoke_action" | "invoke" -> Ok(BrowserHostAction.InvokeAction{placement: placement, panel_id: browser_web_string(object, "panel_id", "browser action"), node_id: browser_web_string(object, "node_id", "browser action"), action_id: browser_web_string(object, "action_id", "browser action"), grant: browser_web_action_grant(object)})
+        else -> Err("unknown browser action `{name}`")
+    }
+}
+browser_web_source_grant: fn(object: [(key: String, value: Dyn)]) -> BrowserSourceGrant Err! {
+    grant: browser_web_nested(object, "grant")
+    source: browser_web_nested(grant, "source")
+    function := String?{None}
+    if recording_lookup(source, "function") == .Val(value) -> function = recording_text(value)
+    column := 0
+    if recording_lookup(source, "column") == .Val(value) -> column = foundation_json_integer(value) ?? 0
+    if column < 0 -> column = 0
+    location: BrowserSourceLocation{source_id: browser_web_string(source, "source_id", "browser action"), line: browser_web_count(source, "line"), column: column, function: function}
+    Ok(BrowserSourceGrant{session_id: browser_web_string(grant, "session_id", "browser action"), revision: browser_web_count(grant, "revision"), panel_id: browser_web_string(grant, "panel_id", "browser action"), node_id: browser_web_string(grant, "node_id", "browser action"), source: location})
+}
+browser_web_action_grant: fn(object: [(key: String, value: Dyn)]) -> BrowserActionGrant Err! {
+    grant: browser_web_nested(object, "grant")
+    Ok(BrowserActionGrant{session_id: browser_web_string(grant, "session_id", "browser action"), revision: browser_web_count(grant, "revision"), panel_id: browser_web_string(grant, "panel_id", "browser action"), node_id: browser_web_string(grant, "node_id", "browser action"), action_id: browser_web_string(grant, "action_id", "browser action")})
+}
+browser_web_body_object: fn(payload: [U8], what: String) -> [(key: String, value: Dyn)] Err! {
+    if payload.len() > MAX_REQUEST_BODY_BYTES -> return Err("{what} body is not valid bounded JSON")
+    text: String.from_bytes(payload) ?? return Err("{what} body must be UTF-8 JSON")
+    root: foundation_json_parse(text) ?? return Err("{what} body is not valid bounded JSON")
+    fields: recording_object_fields(root) ?? return Err("{what} body must be an object")
+    Ok(fields)
+}
+browser_web_nested: fn(object: [(key: String, value: Dyn)], key: String) -> [(key: String, value: Dyn)] Err! {
+    value: recording_lookup(object, key) ?? return Err("browser action is missing `{key}`")
+    fields: recording_object_fields(value) ?? return Err("browser action `{key}` must be an object")
+    Ok(fields)
+}
+browser_web_string: fn(object: [(key: String, value: Dyn)], key: String, what: String) -> String Err! {
+    value: recording_lookup(object, key) ?? return Err("{what} is missing `{key}`")
+    text: recording_text(value) ?? return Err("{what} `{key}` must be a string")
+    if text == "" -> return Err("{what} `{key}` must not be empty")
+    Ok(text)
+}
+browser_web_count: fn(object: [(key: String, value: Dyn)], key: String) -> Int Err! {
+    value: recording_lookup(object, key) ?? return Err("browser action is missing `{key}`")
+    number: foundation_json_integer(value) ?? return Err("browser action `{key}` must be a non-negative integer")
+    if number < 0 -> return Err("browser action `{key}` must be a non-negative integer")
+    Ok(number)
+}
+browser_web_placement: fn(value: Dyn) -> BrowserPlacement Err! {
+    text: recording_text(value) ?? return Err("browser action placement must be a string")
+    if text == {
+        "in-app" | "in_app" -> Ok(BrowserPlacement.InApp)
+        "workbench" -> Ok(BrowserPlacement.Workbench)
+        else -> Err("unknown browser placement `{text}`")
+    }
+}
+// The browser docks a panel left, right, bottom or floating; it has no top dock.
+browser_web_dock: fn(value: String) -> DevtoolsDock Err! {
+    if value == {
+        "left" -> Ok(DevtoolsDock.Left)
+        "right" -> Ok(DevtoolsDock.Right)
+        "bottom" -> Ok(DevtoolsDock.Bottom)
+        "floating" -> Ok(DevtoolsDock.Floating)
+        else -> Err("unknown browser dock `{value}`")
+    }
+}
+
+browser_web_effect_json: fn(outcome: BrowserHostEffect) -> String {
+    body: if outcome == {
+        .PanelOpened(placement, panel_id) -> "{{\"kind\":\"panel-opened\",\"placement\":{foundation_json_quote(placement.as_str())},\"panel_id\":{foundation_json_quote(panel_id)}}}"
+        .PanelClosed(placement, panel_id) -> "{{\"kind\":\"panel-closed\",\"placement\":{foundation_json_quote(placement.as_str())},\"panel_id\":{foundation_json_quote(panel_id)}}}"
+        .PanelDocked(placement, panel_id, dock) -> "{{\"kind\":\"panel-docked\",\"placement\":{foundation_json_quote(placement.as_str())},\"panel_id\":{foundation_json_quote(panel_id)},\"dock\":{foundation_json_quote(dock.as_str())}}}"
+        .SourceNavigated(placement, panel_id, node_id, source) -> "{{\"kind\":\"source-navigated\",\"placement\":{foundation_json_quote(placement.as_str())},\"panel_id\":{foundation_json_quote(panel_id)},\"node_id\":{foundation_json_quote(node_id)},\"source\":{{\"source_id\":{foundation_json_quote(source.source_id)},\"line\":{source.line},\"column\":{source.column},\"function\":{browser_web_maybe(source.function)}}}}}"
+        .ActionInvoked(placement, panel_id, node_id, action_id) -> "{{\"kind\":\"action-invoked\",\"placement\":{foundation_json_quote(placement.as_str())},\"panel_id\":{foundation_json_quote(panel_id)},\"node_id\":{foundation_json_quote(node_id)},\"action_id\":{foundation_json_quote(action_id)}}}"
+    }
+    "{{\"schema\":{foundation_json_quote(BROWSER_PAGE_SCHEMA)},\"effect\":{body}}}"
+}
+browser_web_dispatch: fn(state: &BrowserWebState, action: BrowserHostAction) -> String BrowserHostError! {
+    outcome: state.host.dispatch(action)
+    Ok(browser_web_effect_json(outcome))
+}
+browser_web_html_escape: fn(value: String) -> String {
+    pieces := [String]{}
+    loop character in value.chars() {
+        text: "{character}"
+        pieces.push(if text == {
+            "&" -> "&amp;"
+            "<" -> "&lt;"
+            ">" -> "&gt;"
+            "\"" -> "&quot;"
+            "'" -> "&#39;"
+            else -> if browser_web_is_control(text) -> " " else -> text
+        })
+    }
+    pieces.join("")
+}
+// Text safe inside a double-quoted script literal within an HTML script element.
+browser_web_js_string: fn(value: String) -> String {
+    pieces := [String]{}
+    loop character in value.chars() {
+        text: "{character}"
+        bytes: text.bytes()
+        pieces.push(if text == {
+            "\\" -> "\\\\"
+            "\"" -> "\\\""
+            "\n" -> "\\n"
+            "\r" -> "\\r"
+            "\t" -> "\\t"
+            "<" -> "\\u003c"
+            ">" -> "\\u003e"
+            "&" -> "\\u0026"
+            else -> browser_web_js_scalar(text, bytes)
+        })
+    }
+    pieces.join("")
+}
+// U+2028, U+2029 and the remaining controls as `\u` escapes.
+browser_web_js_scalar: fn(text: String, bytes: [U8]) -> String {
+    if bytes.len() == 3 && bytes[0] == 226 && bytes[1] == 128 && bytes[2] == 168 -> return "\\u2028"
+    if bytes.len() == 3 && bytes[0] == 226 && bytes[1] == 128 && bytes[2] == 169 -> return "\\u2029"
+    if !browser_web_is_control(text) -> return "{text}"
+    "\\u00{browser_web_hex_byte(Int{bytes[bytes.len() - 1]})}"
+}
+browser_web_hex_byte: fn(value: Int) -> String {
+    digits: "0123456789abcdef"
+    high: value /% 16
+    low: value - high * 16
+    "{digits.slice(high, high + 1)}{digits.slice(low, low + 1)}"
+}

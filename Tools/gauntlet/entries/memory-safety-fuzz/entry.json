@@ -1,0 +1,17 @@
+{
+  "name": "memory-safety-fuzz",
+  "mode": "tool",
+  "description": "The memory_safety_fuzz axis adapter of the gauntlet, Tools/gauntlet/harness/memory-safety-fuzz.mjs, and its Jet twin, the MemorySafetyFuzz module of the jet_gauntlet_kit package (Tools/gauntlet/kit/Source/MemorySafetyFuzz.jet), #5072 c8, each run by a driver that runs the adapter on one axis in the case directory (runner files copied from it, a tool available when a file of its name is there, commands run as declared) and prints the report: a runner that compiles and prints the oracle line (complete, ready to publish); runners that print a wrong answer, report an AddressSanitizer fault (twice, at other addresses and lines, deduplicated into one receipt), crash with an address and a line number in their stderr, fail to compile, warn in their compile output, modify the shared input and exit non-zero with no output (findings, each a Tower receipt); runners with a missing tool, a tool whose probe fails and a file that cannot be staged beside one that completes (incomplete, blocked); and the error of a corpus too small for its records and of an axis with no runners.",
+  "tool": {
+    "original": "Tools/gauntlet/harness/drivers/memory-safety-fuzz.mjs",
+    "jet": "Tools/gauntlet/entries/memory-safety-fuzz/driver/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["axis-complete.json", "./jet-bin"], "check": "check.jet", "expected": "expected/complete.out"},
+      {"args": ["axis-findings.json", "./jet-bin"], "check": "check.jet", "expected": "expected/findings.out"},
+      {"args": ["axis-blocked.json", "./jet-bin"], "check": "check.jet", "expected": "expected/blocked.out"},
+      {"args": ["axis-bad-corpus.json", "./jet-bin"], "exit": 1, "check": "check.jet", "expected": "expected/bad-corpus.out"},
+      {"args": ["axis-no-runners.json", "./jet-bin"], "exit": 1, "check": "check.jet", "expected": "expected/no-runners.out"}
+    ]
+  }
+}

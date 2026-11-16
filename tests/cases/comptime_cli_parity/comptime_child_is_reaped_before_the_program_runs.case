@@ -1,0 +1,17 @@
+# A compile that runs compile-time code reaps its comptime child before
+# `jet run` starts the program: the program's `wait()` gets its own forked
+# child's status (0), not the comptime child's 125, on every tier.
+fixture: comptime_child_is_reaped_before_the_program_runs.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 run.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = comptime_child_is_reaped_before_the_program_runs.1.out
+step o1: jet run -O1 run.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = comptime_child_is_reaped_before_the_program_runs.1.out
+step o2: jet run -O2 run.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = comptime_child_is_reaped_before_the_program_runs.1.out

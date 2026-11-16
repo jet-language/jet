@@ -1,0 +1,40 @@
+// A struct member holding an `Int?` moves out of its holder: the holder stops
+// owning it, so the taken value's Shared is its only owner and the cell is
+// freed where the taken value ends, before the holder's scope end.
+Node: struct {
+    label: String
+}
+
+Limits: struct {
+    rows: [Int]
+    cap: Int?
+    node: Shared<Node>
+}
+
+Holder: struct {
+    limits: Limits
+    name: String
+}
+
+make: fn(n: Int) -> Holder {
+    Holder{limits: Limits{rows: [Int]{n, n + 1}, cap: Val(n), node: Shared{Node{label: "node {n}"}}}, name: "holder {n}"}
+}
+
+consume: fn(limits: Limits) -> Int { limits.rows.len() + (limits.cap ?? 0) }
+
+take_limits: fn(n: Int) -> Int {
+    h: make(n)
+    taken: h.limits.move()
+    owners: taken.node.strong_count()
+    weak: taken.node.downgrade()
+    used: consume(taken.move())
+    freed: weak.upgrade() == .None
+    print("owners {owners} freed {freed} used {used} {h.name}")
+    owners
+}
+
+run: fn() {
+    total := 0
+    loop i in 0..<3 -> total += take_limits(i)
+    print("total {total}")
+}

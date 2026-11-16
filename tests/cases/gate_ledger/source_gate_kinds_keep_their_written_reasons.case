@@ -1,0 +1,18 @@
+# Port of tests/gate_ledger.rs:339-377; PENDING-GRAMMAR: JSON array filters.
+fixture: fixtures/source-gates
+step: jet inspect gates --json source-gates.jet
+exit: 0
+stdout: ~ "\"kind\":\"dependency_grant\"" # original predicate
+stdout: ~ "\"kind\":\"taint_scrub\"" # original predicate
+stdout: ~ "\"kind\":\"duty_drop\"" # original predicate
+stdout: ~ "\"kind\":\"precision_demotion\"" # original predicate
+stdout: ~ "\"subject\":\"approx\"" # original predicate
+stdout: ~ "\"subject\":\"wrapping\"" # original predicate
+stdout: ~ "\"subject\":\"from_meter_rounded\"" # original predicate
+# The original rfind entry-prefix check associates each subject with its own kind.
+json: stdout doc $.gates.entries[?subject="approx"].kind = "precision_demotion"
+json: stdout doc $.gates.entries[?subject="wrapping"].kind = "precision_demotion"
+json: stdout doc $.gates.entries[?subject="from_meter_rounded"].kind = "precision_demotion"
+stdout: ~ "intentional result discard" # original predicate
+stdout: ~ "#Scrub(Input)" # original predicate
+stdout: ~ "source-gates.jet:" # original predicate

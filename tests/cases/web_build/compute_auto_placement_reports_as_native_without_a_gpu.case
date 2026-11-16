@@ -1,0 +1,19 @@
+# `.Auto` placement means one thing on the web and the native host: with no
+# GPU under node, the web page selects the CPU oracle, prints the same
+# placement report and refuses an explicit WebGPU request with the same
+# `Device` error, byte for byte what `jet run` prints.
+requires: tool:node
+fixture: compute_auto_placement_reports_as_native_without_a_gpu.fixture
+env: NO_COLOR=1
+step native: jet run main.jet
+exit: 0
+stdout: ~ "Placement(requested=Auto, selected=CPU, backend=cpu-oracle" # the native host's Auto choice
+stdout: ~ "webgpu: Device\n" # no GPU: the explicit request is a Device error
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: == native
+stderr: empty

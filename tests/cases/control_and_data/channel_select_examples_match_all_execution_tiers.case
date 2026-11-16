@@ -1,0 +1,46 @@
+# HAND-PORT tests/tir_control_and_data.rs:953-971 channel_select_examples_match_all_execution_tiers
+# PENDING-GRAMMAR: approved batch-two/four forms, no runtime parity claim.
+fixture: channel_select_examples_match_all_execution_tiers.fixture
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+step: jet run --release Examples/features/concurrency/select_channel.jet
+env: JET_STORE_DIR={work}/cache-0-release
+env: JETPACK_ROOT={work}/jetpack-0-release
+exit: 0
+stdout: = channel_select_examples_match_all_execution_tiers.oracle0.expected
+step: jet run Examples/features/concurrency/select_channel.jet
+env: JET_STORE_DIR={work}/cache-0-default
+env: JETPACK_ROOT={work}/jetpack-0-default
+exit: 0
+stdout: = channel_select_examples_match_all_execution_tiers.oracle0.expected
+step: jet run --release Examples/features/concurrency/select_generic.jet
+env: JET_STORE_DIR={work}/cache-1-release
+env: JETPACK_ROOT={work}/jetpack-1-release
+exit: 0
+stdout: = channel_select_examples_match_all_execution_tiers.oracle1.expected
+step: jet run Examples/features/concurrency/select_generic.jet
+env: JET_STORE_DIR={work}/cache-1-default
+env: JETPACK_ROOT={work}/jetpack-1-default
+exit: 0
+stdout: = channel_select_examples_match_all_execution_tiers.oracle1.expected
+step: jet run --release Examples/features/concurrency/channel_builtin_1560.jet
+env: JET_STORE_DIR={work}/cache-2-release
+env: JETPACK_ROOT={work}/jetpack-2-release
+exit: 0
+stdout: = channel_select_examples_match_all_execution_tiers.oracle2.expected
+step: jet run Examples/features/concurrency/channel_builtin_1560.jet
+env: JET_STORE_DIR={work}/cache-2-default
+env: JETPACK_ROOT={work}/jetpack-2-default
+exit: 0
+stdout: = channel_select_examples_match_all_execution_tiers.oracle2.expected
+step: jet run --release Examples/features/concurrency/task_runtime_audit.jet
+env: JET_STORE_DIR={work}/cache-3-release
+env: JETPACK_ROOT={work}/jetpack-3-release
+exit: 0
+stdout: = channel_select_examples_match_all_execution_tiers.oracle3.expected
+step: jet run Examples/features/concurrency/task_runtime_audit.jet
+env: JET_STORE_DIR={work}/cache-3-default
+env: JETPACK_ROOT={work}/jetpack-3-default
+exit: 0
+stdout: = channel_select_examples_match_all_execution_tiers.oracle3.expected
+

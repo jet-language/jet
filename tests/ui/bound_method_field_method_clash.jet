@@ -1,0 +1,17 @@
+// Where a function type is expected, a read naming both a field and a
+// method of one name is refused naming both, with a closure for each.
+Crew: struct {
+    name: String
+    tell: fn(Int)
+
+    tell: fn(self, id: Int) { print("{self.name} hears about task {id}") }
+}
+
+each: fn(ids: [Int], visit: fn(Int)) {
+    loop id in ids -> visit(id)
+}
+
+run: fn() {
+    crew: Crew{name: "Ada", tell: fn(id) { print("field {id}") }}
+    each([1, 2], crew.tell)
+}

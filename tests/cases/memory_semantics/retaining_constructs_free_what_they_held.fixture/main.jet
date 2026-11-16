@@ -1,0 +1,107 @@
+// Every construct that holds memory on a program's behalf frees it when its
+// last owner ends: a Shared cycle closed by Weak back-edges, a channel dropped
+// with values still queued, a generator the consumer breaks off, a joined
+// task's result and a bounded memo table. Each scenario runs `warm` rounds,
+// reads the peak resident set (VmHWM), runs 8 * `warm` more rounds and reads
+// it again: memory the construct kept alive grows the peak with the round
+// count. The checksums catch a value freed while an owner still reads it.
+package: {
+    name: "retaining_constructs_free_what_they_held"
+    authority: { allow: [FS.Read, IO, Mem.Alloc, Mem.Rc, Time.Wait] }
+}
+
+use files: core.files
+
+// Grows more than this (kB) over the measured rounds: a leak.
+GROWTH_KB: 8192
+
+peak_kb: fn() -> Int {
+    status: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with("VmHWM:") -> next
+        loop field in line.slice(6, line.len()).trim().split(" ") {
+            if field.len() > 0 -> return Int.parse(field.copy()) ?? panic("VmHWM field")
+        }
+    }
+    panic("no VmHWM line")
+}
+
+measure: fn(name: String, scenario: fn(Int, Int) -> Int, warm: Int) {
+    first: scenario(0, warm)
+    before: peak_kb()
+    second: scenario(warm, 9 * warm)
+    grown: peak_kb() - before
+    if grown > GROWTH_KB -> panic("{name}: peak RSS grew {grown} kB over {8 * warm} rounds")
+    print("{name}: flat, checksum {first + second}")
+}
+
+Node: struct {
+    label: String
+    peer: Shared.Weak<Node>?
+}
+
+weak_cycle: fn(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        a := Shared{Node{label: "a {i}", peer: None}}
+        b := Shared{Node{label: "b {i}", peer: None}}
+        wa := a.downgrade()
+        wb := b.downgrade()
+        a.peer = Val(wb.copy())
+        b.peer = Val(wa.copy())
+        total += a.strong_count() + b.strong_count() + i % 7
+    }
+    total
+}
+
+channel_left_full: fn(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        { sender: tx, receiver: rx }: channel<String>(capacity: 4)
+        loop k in 0..<4 -> tx.send("value {i} {k}")
+        total += (rx.try_receive() ?? "").len()
+    }
+    total
+}
+
+words: fn(seed: Int) -> Stream<String> {
+    held: "held {seed}"
+    yield "first {seed}"
+    yield held
+}
+
+generator_broken_off: fn(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        loop word in words(i) {
+            total += word.len()
+            break
+        }
+    }
+    total
+}
+
+task_results: fn(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        handle: task { [String]{"one {i}", "two {i}"} }
+        total += (handle.join() ?? [String]{}).len()
+    }
+    total
+}
+
+#Memo label: fn(n: Int) -[]> String { "label {n}" }
+
+memo_bounded: fn(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to -> total += label(i).len()
+    total
+}
+
+run: fn() {
+    measure("shared cycle with weak back-edges", weak_cycle, 100000)
+    measure("channel dropped with queued values", channel_left_full, 100000)
+    measure("generator broken off", generator_broken_off, 50000)
+    measure("joined task result", task_results, 20000)
+    measure("bounded memo table", memo_bounded, 100000)
+}

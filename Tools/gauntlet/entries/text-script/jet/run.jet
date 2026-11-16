@@ -1,0 +1,15 @@
+use core.files
+
+#CLI
+Args: struct {
+    input: String
+}
+
+run: fn(args: Args) {
+    cleaned := (files.read(args.input) ?? panic("read failed"))
+        .lines()
+        .map(fn(line) { line.trim() })
+        .filter(fn(line) { line != "" })
+    cleaned.sort()
+    print("lines {cleaned.len()}\n{cleaned.join("\n")}")
+}

@@ -1,0 +1,9 @@
+# Port of tests/build_entry.rs:1930-1954; original sources verbatim, canonical machine diagnostics.
+# PENDING-SAME-HEAD; source acceptance != complete direct-driver nominal proof.
+fixture: fixtures/malformed_generated_body_is_a_jet_diagnostic_before_codegen
+step: jet build main.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0003"] #>= 1
+json: machine doc $.reports[*].code != "ICE"
+file: .jet/generated/main/broken.jet absent
+file: .jet/lock absent

@@ -1,0 +1,16 @@
+// `#Guard.Unsafe` and `#Guard.MustUse` are the dependency's own markers: the
+// functions are neither unsafe nor must-use, so `run` calls both plainly.
+use guard
+
+#Guard.Unsafe risky: fn() { print("risky ran") }
+
+#Guard.MustUse counted: fn() -> Int {
+    print("counted ran")
+    1
+}
+
+run: fn() {
+    risky()
+    counted()
+    print("done")
+}

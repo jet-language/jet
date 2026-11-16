@@ -1,0 +1,10 @@
+# tests/marker_groups_modules.rs::imported_group_replay_preserves_loader_synthesized_module_imports at tests/marker_groups_modules.rs:263; hand-port
+# Claim: a module-qualified helper (module helper) plus an imported group applied to work() runs and prints helper.value() = 7 (tests/marker_groups_modules.rs:264-272)
+# Not ported: main.imports alias 'helper' and is_inline assertions (tests/marker_groups_modules.rs:270-272) read Rust AST tables
+fixture: imported_group_replay_preserves_loader_synthesized_module_imports.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/marker_groups_modules.rs:264-272 program runs and prints 7
+stdout: = "7\n" # tests/marker_groups_modules.rs:264-272 program runs and prints 7

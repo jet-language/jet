@@ -1,0 +1,14 @@
+# tests/run_tier_diagnostics.rs::programmable_build_check_matches_aot_interpreter_dev_and_web at tests/run_tier_diagnostics.rs:341; hand-port
+# Claim: a build hook that calls b.error(span, 'ORG01', ...) on each program type yields exactly one ORG01 diagnostic (tests/run_tier_diagnostics.rs:372-376)
+# Claim: dev run (dev_run) rejects the same source with the same diagnostic shape (tests/run_tier_diagnostics.rs:378-381)
+# Claim: web checking rejects the same source with the same shape (tests/run_tier_diagnostics.rs:382-394)
+# Fixture migrated: fn build(b: BuildContext) -> BuildPlan { ... return b.plan() } -> fn build(b: Build) { loop info in b.program.types() { b.error(info.span, "ORG01", ...) } }, since BuildContext is a protected Core type with a closed method surface (E0102 on error and plan) and .program needs a declared Build receiver (E0302); the plan return is dropped
+# Not ported: Structured diagnostic shape equality across AOT/dev/web has no CLI counterpart; only the presence of ORG01 is checked
+fixture: programmable_build_check_matches_aot_interpreter_dev_and_web.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 1 # tests/run_tier_diagnostics.rs:372-376 build-hook ORG01 diagnostic, one entry
+stderr: ~ "ORG01" # tests/run_tier_diagnostics.rs:372-376 build-hook ORG01 diagnostic, one entry
+stderr: ~ "entity must define archive" # tests/run_tier_diagnostics.rs:372-376 build-hook ORG01 diagnostic, one entry

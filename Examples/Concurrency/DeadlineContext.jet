@@ -1,0 +1,23 @@
+package: {
+    name: "deadline_context"
+    authority: { allow: [IO, Time, Time.Wait] }
+}
+
+use time: core.time
+
+run: fn() {
+    #Deadline(20ms) {
+        slow: task {
+            time.sleep(10ms)
+            print("finished fast")
+        }
+        slow.join() ?? panic("fast task failed")
+    }
+    #Deadline(20ms) {
+        slow: task {
+            time.sleep(40ms)
+            print("finished slow")
+        }
+        slow.join() ?? panic("slow task failed")
+    }
+}

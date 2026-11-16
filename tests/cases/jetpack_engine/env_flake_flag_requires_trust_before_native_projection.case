@@ -1,0 +1,19 @@
+# HAND-PORT tests/jetpack_engine.rs:6092-6111 env_flake_flag_requires_trust_before_native_projection
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: env_flake_flag_requires_trust_before_native_projection.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack env --no-color --flake
+cwd: project
+env: HOME={work}/home
+env: PATH=/usr/bin:/bin
+exit: nonzero
+stderr: ~ "E1255" # original contains predicate
+stderr: ~ "--trust" # original contains predicate
+stderr: !~ "E1256" # original negative contains predicate
+

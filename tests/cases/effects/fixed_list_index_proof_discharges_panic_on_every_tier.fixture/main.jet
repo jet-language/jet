@@ -1,0 +1,11 @@
+// The Die interval proves `faces[roll.raw() - 1]`
+// stays inside the six faces, so the read can't stop and `-[!Panic]>` holds.
+Die: distinct Int(1..6)
+
+pick: fn(faces: [String#6], roll: Die) -[!Panic]> String { faces[roll.raw() - 1].copy() }
+
+run: fn() {
+    faces: [String#6]{"one", "two", "three", "four", "five", "six"}
+    print(pick(faces, Die.from_int(1)))
+    print(pick(faces, Die.from_int(6)))
+}

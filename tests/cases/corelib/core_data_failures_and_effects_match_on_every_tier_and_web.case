@@ -1,0 +1,25 @@
+# core.data reports each failure as a typed DataError: empty, non-finite and
+# overflowing statistics, an out-of-range argument, undecodable CSV and JSON,
+# an unknown or switched-off bridge (Env, FS) and a provider-owned format. A
+# file loader reads at its snapshot (FS): a missing file is IO, a written one
+# decodes. The same lines print at O0, O1 and O2 and under node on web.
+fixture: core_data_failures_and_effects_match_on_every_tier_and_web.fixture
+env: NO_COLOR=1
+env: JET_DATA_R_BRIDGE=0
+step default: jet run main.jet
+exit: 0
+stdout: = core_data_failures_and_effects_match_on_every_tier_and_web.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default
+step: jet build --target web main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: == default

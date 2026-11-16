@@ -1,0 +1,15 @@
+// core-conformance: core.http.server.static_file_range
+use {
+    client: core.http.client
+    server: core.http.server
+}
+
+run: fn() {
+    request: client.request("GET", "http://127.0.0.1/")
+    print(
+        if server.static_file_range(request, "/__jet_conformance_missing_static_file__", "text/plain") == {
+            .Ok(ok) -> false
+            .Err(error) -> true
+        },
+    )
+}

@@ -1,0 +1,13 @@
+# tests/ownership.rs::shared_guard_long_scope_has_lock_order_lint at tests/ownership.rs:509; hand-port
+# Claim: jet check of a long guard scope exits 0 (tests/ownership.rs:524)
+# Claim: the output carries lint L0206 whose fix text contains "stable order" (tests/ownership.rs:525-533)
+# Fixture migrated: none: source is the verbatim Rust raw string
+# Not ported: the Rust output.lints struct access is replaced by the CLI stderr text of the lint
+fixture: shared_guard_long_scope_has_lock_order_lint.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/ownership.rs:524-533
+stderr: ~ "L0206" # tests/ownership.rs:524-533
+stderr: ~ "stable order" # tests/ownership.rs:524-533

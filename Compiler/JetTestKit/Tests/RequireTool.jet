@@ -1,0 +1,17 @@
+// A host tool missing from PATH is the skip that kit_require_tool reports
+// (testing.skip), with the tool named, never a failure. The lookup is checked
+// here directly, because the skip itself would mark this claim skipped.
+#Test("a host tool that is not on PATH gives the skip reason that names it") {
+    if kit_find_tool("jet-testkit-absent-host-tool") == {
+        .Found(path) -> { panic("`jet-testkit-absent-host-tool` is on PATH at {path}") }
+        .Missing(reason) -> {
+            assert_eq(reason, "host tool `jet-testkit-absent-host-tool` is not on PATH")
+        }
+    }
+}
+
+// A tool on PATH is found, and the claim goes on.
+#Test("a host tool on PATH is found by its absolute path") {
+    shell: kit_require_tool("sh") ?? return
+    assert(shell.starts_with("/") && shell.ends_with("/sh"), "sh resolved to {shell}")
+}

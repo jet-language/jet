@@ -1,0 +1,10 @@
+// The package allows Net and trusts by default; the organization policy
+// denies Net, and that denial is the outer rung.
+use net: core.net
+
+port_is_free: fn() -> Bool {
+    _: net.tcp_listen("127.0.0.1:0") ?? return false
+    true
+}
+
+run: fn() { print(port_is_free()) }

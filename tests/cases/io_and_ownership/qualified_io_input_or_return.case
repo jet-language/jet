@@ -1,0 +1,16 @@
+# tests/tir_io_and_ownership.rs::qualified_io_input_or_return at tests/tir_io_and_ownership.rs:76; hand-port
+# run.jet is the original source with the current receiver mark: `&out.push(line)` (E0224 requires the mark on a writing receiver).
+fixture: qualified_io_input_or_return.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build run.jet
+exit: 0
+step lines: built
+stdin: qualified_io_input_or_return.stdin
+exit: 0
+stdout: = "> > > count=2\nalpha\nbeta\ndone\n" # tests/tir_io_and_ownership.rs:105 two lines then a blank line
+step eof: built
+stdin: null
+exit: 0
+stdout: = "> count=0\ndone\n" # tests/tir_io_and_ownership.rs:109 immediate EOF breaks with no input

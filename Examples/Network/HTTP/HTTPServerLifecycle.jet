@@ -1,0 +1,25 @@
+// One bound Server owns bounded serve and graceful shutdown.
+package: {
+    name: "http_server_lifecycle"
+    authority: { allow: [FS.Read, IO, Net, Time] }
+}
+
+use {
+    web: core.web
+    http_server: core.http.server
+    time: core.time
+}
+
+run: fn() (HTTPError | RangeError | TaskFailure)! {
+    mux: web.app()
+    mux.get("/", fn(_req: HTTPRequest) { Ok(http_server.response(200, "ok")) })
+    server: mux.bind("127.0.0.1:0") ?? panic("bind")
+    addr: server.local_addr() ?? panic("address")
+    print(addr.starts_with("127.0.0.1:"))
+    serving: task { server.serve() ?? panic("serve") }
+    time.sleep(20ms)
+    grace: 100ms
+    report: server.shutdown(grace) ?? panic("shutdown")
+    print(report.cancelled)
+    serving.join() ?? panic("server")
+}

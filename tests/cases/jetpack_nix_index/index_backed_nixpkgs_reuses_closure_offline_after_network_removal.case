@@ -1,0 +1,41 @@
+# Port of tests/jetpack_nix_index.rs:284-312. `built reset` and `built offline`
+# are server.reset_counts() and server.stop_network(); `built counts` reports
+# object_request_count (narinfo + NAR requests) per object and the
+# /nix-cache-info count as "info".
+requires: os-name:linux
+fixture: nix-index.fixture
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
+env: JETPACK_ROOT={work}/root
+env: JETPACK_SHARED_CAS={work}/root/hangar/cas
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: PATH=/usr/bin
+mkdir: root
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet {work}/peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nix-index-cache-nar-source
+await: file {work}/peer.port timeout 30s
+capture: port = text file {work}/peer.port
+step initial: jetpack env --env dev --prep --trust --yes --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+step: built reset {cap:port}
+exit: 0
+step: built offline {cap:port}
+exit: 0
+step offline: jetpack env --env dev --prep --trust --yes --no-color --offline
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+step: built counts {cap:port}
+exit: 0
+json: stdout doc $.info = 0
+json: stdout doc $.root = 0
+json: stdout doc $.lib = 0
+json: stdout doc $.runtime = 0
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0

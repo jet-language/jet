@@ -1,0 +1,650 @@
+// The jet.devtools.v1 observation protocol every devserver host shares: one
+// typed event record, one bounded envelope and its wire serializer. Hosts
+// marshal facts into these values; they define no second envelope, event
+// vocabulary or time-cursor rule. Typed event bodies are jet_foundation's.
+use jet_foundation.[foundation_json_quote, JetDevtoolsEventBody, JetDevtoolsFormState, JetDevtoolsFunctionIdentity, JetDevtoolsGameLaunchPhase, JetDevtoolsMutationLifecycle, JetDevtoolsQueryState, JetDevtoolsSourceSpan, JetDevtoolsTraceKind]
+
+JET_DEVTOOLS_PROTOCOL: String{"jet.devtools.v1"}
+JET_DEVTOOLS_VERSION: Int{1}
+// Policy limits, not host hints: a host marshals the same envelope but never
+// widens them.
+JET_DEVTOOLS_MAX_EVENTS: Int{256}
+JET_DEVTOOLS_MAX_HISTORY: Int{256}
+JET_DEVTOOLS_MAX_TEXT_BYTES: Int{16384}
+JET_DEVTOOLS_MAX_ENVELOPE_BYTES: Int{1048576}
+JET_DEVTOOLS_MAX_LAUNCH_PHASES: Int{256}
+
+// `Stopped` is an intentional shutdown; `Unavailable` means no observation
+// source exists.
+impl JetDevtoolsLifecycleState {
+    as_str: fn(self) -> String Never! {
+        if self == {
+            .Starting -> "starting"
+            .Building -> "building"
+            .Ready -> "ready"
+            .Error -> "error"
+            .Unavailable -> "unavailable"
+            .Stopped -> "stopped"
+        }
+    }
+}
+
+// Freshness is a fact on the canonical envelope, not a host-local heuristic.
+JetDevtoolsFreshnessFact: struct {
+    state: JetDevtoolsFreshnessState
+    observed_at_ms: Int
+
+    fresh: fn(observed_at_ms: Int) -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact{state: JetDevtoolsFreshnessState.Fresh, observed_at_ms: observed_at_ms} }
+    stale: fn(observed_at_ms: Int) -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact{state: JetDevtoolsFreshnessState.Stale, observed_at_ms: observed_at_ms} }
+    unknown: fn(observed_at_ms: Int) -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact{state: JetDevtoolsFreshnessState.Unknown, observed_at_ms: observed_at_ms} }
+}
+
+// Privacy travels with the envelope so a reconnecting host cannot widen the
+// observation surface.
+JetDevtoolsPrivacy: struct {
+    loopback_only: Bool
+    payload_free_by_default: Bool
+    published_payloads: Bool
+
+    development: fn() -> JetDevtoolsPrivacy Never! { JetDevtoolsPrivacy{loopback_only: true, payload_free_by_default: true, published_payloads: false} }
+}
+
+// An absent component means the producer has not published that fact.
+JetDevtoolsSourceIdentityFact: struct {
+    source_id: String?
+    build_id: String?
+    revision: String?
+    world_id: String?
+
+    new: fn(&&source_id: String?, &&build_id: String?, &&revision: String?, &&world_id: String?) -> JetDevtoolsSourceIdentityFact Never! {
+        JetDevtoolsSourceIdentityFact{source_id: source_id.move(), build_id: build_id.move(), revision: revision.move(), world_id: world_id.move()}
+    }
+    validate: fn(self) Err! {
+        if self.source_id == .Val(value) -> devtools_validate_text(value, "source_id")
+        if self.build_id == .Val(value) -> devtools_validate_text(value, "build_id")
+        if self.revision == .Val(value) -> devtools_validate_text(value, "revision")
+        if self.world_id == .Val(value) -> devtools_validate_text(value, "world_id")
+        Ok()
+    }
+    // Only the published components, in wire order.
+    json: fn(self) -> String Err! {
+        self.validate()
+        parts := [String]{}
+        if self.source_id == .Val(value) -> parts.push("\"source_id\":{foundation_json_quote(value)}")
+        if self.build_id == .Val(value) -> parts.push("\"build_id\":{foundation_json_quote(value)}")
+        if self.revision == .Val(value) -> parts.push("\"revision\":{foundation_json_quote(value)}")
+        if self.world_id == .Val(value) -> parts.push("\"world_id\":{foundation_json_quote(value)}")
+        Ok("{{{parts.join(",")}}}")
+    }
+}
+
+// A published value, rendered once. A value the policy rejects carries its
+// problem, and publishing it fails.
+JetDevtoolsValue: struct {
+    json: String
+    problem: String?
+
+    text: fn(value: String) -> JetDevtoolsValue Never! {
+        if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return JetDevtoolsValue{json: "null", problem: Val("jet.devtools.v1 payload text exceeds the Prelude limit")}
+        JetDevtoolsValue{json: foundation_json_quote(value), problem: None}
+    }
+    validate: fn(self) Err! {
+        if self.problem == .Val(problem) -> return Err("{problem}")
+        Ok()
+    }
+}
+
+JetDevtoolsField: struct {
+    key: String
+    value: JetDevtoolsValue
+
+    new: fn(&&key: String, &&value: JetDevtoolsValue) -> JetDevtoolsField Never! { JetDevtoolsField{key: key.move(), value: value.move()} }
+}
+
+// Values are absent unless an observation site publishes them explicitly;
+// event bodies stay typed and payload-free.
+JetDevtoolsPayload: struct {
+    fields: [JetDevtoolsField]
+
+    new: fn(&&fields: [JetDevtoolsField]) -> JetDevtoolsPayload Never! { JetDevtoolsPayload{fields: fields.move()} }
+    one: fn(&&key: String, &&value: JetDevtoolsValue) -> JetDevtoolsPayload Never! { JetDevtoolsPayload{fields: [JetDevtoolsField]{JetDevtoolsField.new(key, value)}} }
+    validate: fn(self) Err! {
+        if self.fields.len() > JET_DEVTOOLS_MAX_HISTORY -> return Err("jet.devtools.v1 payload has too many fields")
+        seen := [String:Bool]{}
+        loop (index, field) in self.fields {
+            if field.key == "" -> return Err("jet.devtools.v1 payload field {index} has an empty key")
+            if field.key.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 payload field key exceeds the Prelude limit")
+            field.value.validate()
+            if seen.has_key(field.key) -> return Err("jet.devtools.v1 payload contains duplicate field `{field.key}`")
+            seen["{field.key}"] = true
+        }
+        Ok()
+    }
+    // `{"fields":{...}}` with the keys in byte order.
+    json: fn(self) -> String Err! {
+        self.validate()
+        rendered := [String:String]{}
+        keys := [String]{}
+        loop field in self.fields {
+            rendered["{field.key}"] = "{field.value.json}"
+            keys.push("{field.key}")
+        }
+        keys.sort_by(fn(left: String, right: String) { left <=> right })
+        parts := [String]{}
+        loop key in keys -> parts.push("{foundation_json_quote(key)}:{rendered.get(key) ?? "null"}")
+        Ok("{{\"fields\":{{{parts.join(",")}}}}}")
+    }
+}
+
+// One canonical event record. The wire shape is flat so every host projects
+// the same kind/entity/fields/payload record, while in-process consumers keep
+// the typed body. The envelope assigns the sequence; zero means unassigned.
+JetDevtoolsEvent: struct {
+    assigned_sequence: Int
+    timestamp_ms: Int
+    event_source: String
+    event_kind: String
+    event_entity: String
+    fields: String
+    payload: String?
+    body: JetDevtoolsEventBody?
+
+    try_new: fn(timestamp_ms: Int, &&source: String, &&body: JetDevtoolsEventBody) -> JetDevtoolsEvent Err! {
+        fields: devtools_body_fields(body)
+        event := JetDevtoolsEvent.from_parts(timestamp_ms, source, devtools_body_family(body), devtools_body_entity(body), fields)
+        event.body = Val(body.move())
+        Ok(event)
+    }
+    // A typed event rebuilt from its flat wire projection.
+    from_wire: fn(sequence: Int, timestamp_ms: Int, &&source: String, &&body: JetDevtoolsEventBody, &&fields_json: String, &&payload_json: String?) -> JetDevtoolsEvent Err! {
+        if sequence <= 0 -> return Err("jet.devtools.v1 event sequence must be positive")
+        event := JetDevtoolsEvent.try_new(timestamp_ms, source, body)
+        devtools_validate_json_object(fields_json, "fields")
+        if payload_json == .Val(payload) -> devtools_validate_json_object(payload, "payload")
+        event.fields = fields_json.move()
+        event.payload = payload_json.move()
+        event.assigned_sequence = sequence
+        Ok(event)
+    }
+    // A host-marshalled event; `fields_json` must be one JSON object.
+    from_parts: fn(timestamp_ms: Int, &&source: String, &&kind: String, &&entity: String, &&fields_json: String) -> JetDevtoolsEvent Err! {
+        JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, source, kind, entity, fields_json, None)
+    }
+    // Game and package adapters attach their already-typed payload object
+    // here; protocol and version stay outside it.
+    from_parts_with_payload: fn(timestamp_ms: Int, &&source: String, &&kind: String, &&entity: String, &&fields_json: String, &&payload_json: String?) -> JetDevtoolsEvent Err! {
+        devtools_validate_text(source, "source")
+        devtools_validate_text(kind, "kind")
+        devtools_validate_text(entity, "entity")
+        devtools_validate_json_object(fields_json, "fields")
+        if payload_json == .Val(payload) -> devtools_validate_json_object(payload, "payload")
+        Ok(JetDevtoolsEvent{assigned_sequence: 0, timestamp_ms: timestamp_ms, event_source: source.move(), event_kind: kind.move(), event_entity: entity.move(), fields: fields_json.move(), payload: payload_json.move(), body: None})
+    }
+    // The only path that attaches values to an event.
+    publish: fn(&&self, payload: JetDevtoolsPayload) -> JetDevtoolsEvent Err! {
+        rendered: payload.json()
+        published := self.move()
+        published.payload = Val(rendered)
+        Ok(published)
+    }
+    sequence: fn(self) -> Int Never! { self.assigned_sequence }
+    source: fn(self) -> String Never! { "{self.event_source}" }
+    kind: fn(self) -> String Never! { "{self.event_kind}" }
+    entity: fn(self) -> String Never! { "{self.event_entity}" }
+    fields_json: fn(self) -> String Never! { "{self.fields}" }
+    payload_json: fn(self) -> String? Never! {
+        if self.payload == .Val(payload) -> return Val("{payload}")
+        None
+    }
+    json: fn(self) -> String Err! {
+        if self.assigned_sequence <= 0 -> return Err("jet.devtools.v1 event has no assigned sequence")
+        devtools_validate_text(self.event_source, "source")
+        devtools_validate_text(self.event_kind, "kind")
+        devtools_validate_text(self.event_entity, "entity")
+        devtools_validate_json_object(self.fields, "fields")
+        payload := "null"
+        if self.payload == .Val(published) {
+            devtools_validate_json_object(published, "payload")
+            payload = "{published}"
+        }
+        Ok("{{\"sequence\":{self.assigned_sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":{foundation_json_quote(self.event_source)},\"kind\":{foundation_json_quote(self.event_kind)},\"entity\":{foundation_json_quote(self.event_entity)},\"fields\":{self.fields},\"payload\":{payload}}}")
+    }
+}
+
+JetDevtoolsSelection: struct {
+    panel_id: String
+    item_key: String?
+
+    new: fn(&&panel_id: String, &&item_key: String?) -> JetDevtoolsSelection Never! { JetDevtoolsSelection{panel_id: panel_id.move(), item_key: item_key.move()} }
+    json: fn(self) -> String Err! {
+        devtools_validate_text(self.panel_id, "selection.panel_id")
+        item_key := "null"
+        if self.item_key == .Val(key) {
+            devtools_validate_text(key, "selection.item_key")
+            item_key = foundation_json_quote(key)
+        }
+        Ok("{{\"panel_id\":{foundation_json_quote(self.panel_id)},\"item_key\":{item_key}}}")
+    }
+}
+
+// The selected panel and item, and the event sequence a host selected (an
+// event sequence, not a wall-clock time).
+JetDevtoolsViewState: struct {
+    selection: JetDevtoolsSelection?
+    cursor: Int?
+
+    new: fn(&&selection: JetDevtoolsSelection?, cursor: Int?) -> JetDevtoolsViewState Never! { JetDevtoolsViewState{selection: selection.move(), cursor: cursor} }
+    set_selection: fn(&self, &&selection: JetDevtoolsSelection?) Never! { self.selection = selection.move() }
+    set_cursor: fn(&self, cursor: Int?) Never! { self.cursor = cursor }
+}
+
+// The bounded event ring and the metadata every host reconnects against. It
+// keeps the newest JET_DEVTOOLS_MAX_EVENTS events and marks itself truncated
+// when it drops one.
+JetDevtoolsEnvelope: struct {
+    session_id: String
+    started_at_ms: Int
+    view: JetDevtoolsViewState
+    lifecycle: JetDevtoolsLifecycleState
+    freshness: JetDevtoolsFreshnessFact
+    privacy: JetDevtoolsPrivacy
+    source_identity: JetDevtoolsSourceIdentityFact?
+    reset: Bool
+    truncated: Bool
+    event_list: [JetDevtoolsEvent]
+    next_sequence: Int
+
+    new: fn(&&session_id: String, started_at_ms: Int) -> JetDevtoolsEnvelope Never! {
+        JetDevtoolsEnvelope{
+            session_id: session_id.move(), started_at_ms: started_at_ms, view: JetDevtoolsViewState.new(None, None),
+            lifecycle: JetDevtoolsLifecycleState.Starting, freshness: JetDevtoolsFreshnessFact.unknown(0), privacy: JetDevtoolsPrivacy.development(),
+            source_identity: None, reset: false, truncated: false, event_list: [JetDevtoolsEvent]{}, next_sequence: 1,
+        }
+    }
+    // Appends one event and returns the sequence it assigned.
+    push: fn(&self, &&event: JetDevtoolsEvent) -> Int Never! {
+        sequence: self.next_sequence
+        self.next_sequence = sequence + 1
+        stamped := event.move()
+        stamped.assigned_sequence = sequence
+        if stamped.payload != None -> self.privacy.published_payloads = true
+        if self.event_list.len() >= JET_DEVTOOLS_MAX_EVENTS {
+            self.event_list.remove(0, .Slot).drop("the oldest event leaves the bounded ring")
+            self.truncated = true
+        }
+        self.event_list.push(stamped)
+        self.view.set_cursor(Val(sequence))
+        sequence
+    }
+    events: fn(self) -> [JetDevtoolsEvent] Never! { self.event_list }
+    // The retained events after `cursor`, oldest first; every event when no
+    // cursor is given.
+    events_since: fn(self, cursor: Int?) -> [JetDevtoolsEvent] Never! {
+        after: cursor ?? return self.event_list
+        first := self.event_list.len()
+        loop (index, event) in self.event_list {
+            if event.assigned_sequence > after {
+                first = index
+                break
+            }
+        }
+        loop index in first..<self.event_list.len() -> self.event_list[index]
+    }
+    oldest_sequence: fn(self) -> Int? Never! {
+        if self.event_list.len() == 0 -> return None
+        Val(self.event_list[0].assigned_sequence)
+    }
+    latest_sequence: fn(self) -> Int? Never! {
+        if self.event_list.len() == 0 -> return None
+        Val(self.event_list[self.event_list.len() - 1].assigned_sequence)
+    }
+    event_count: fn(self) -> Int Never! { self.event_list.len() }
+    selection: fn(self) -> JetDevtoolsSelection? Never! { self.view.selection }
+    cursor: fn(self) -> Int? Never! { self.view.cursor }
+    set_selection: fn(&self, &&selection: JetDevtoolsSelection?) Never! { self.view.set_selection(selection) }
+    set_cursor: fn(&self, cursor: Int?) Never! { self.view.set_cursor(cursor) }
+    set_lifecycle: fn(&self, lifecycle: JetDevtoolsLifecycleState) Never! { self.lifecycle = lifecycle }
+    set_freshness: fn(&self, freshness: JetDevtoolsFreshnessFact) Never! { self.freshness = freshness }
+    set_source_identity: fn(&self, &&identity: JetDevtoolsSourceIdentityFact?) Err! {
+        if identity == .Val(fact) -> fact.validate()
+        self.source_identity = identity.move()
+        Ok()
+    }
+    // Metadata is written only once it differs from a fresh envelope's.
+    has_metadata: fn(self) -> Bool Never! {
+        self.lifecycle != JetDevtoolsLifecycleState.Starting || self.freshness.state != JetDevtoolsFreshnessState.Unknown || self.freshness.observed_at_ms != 0 || self.privacy.published_payloads || self.source_identity != None || self.reset || self.truncated
+    }
+    serialize: fn(self) -> String Err! {
+        devtools_validate_text(self.session_id, "session_id")
+        events := [String]{}
+        loop event in self.event_list -> events.push(event.json())
+        selection := "null"
+        if self.view.selection == .Val(chosen) -> selection = chosen.json()
+        cursor := "null"
+        if self.view.cursor == .Val(at) -> cursor = "{at}"
+        out := "{{\"protocol\":{foundation_json_quote(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{foundation_json_quote(self.session_id)},\"started_at_ms\":{self.started_at_ms},\"events\":[{events.join(",")}],\"selection\":{selection},\"cursor\":{cursor}"
+        if self.has_metadata() {
+            identity := "null"
+            if self.source_identity == .Val(fact) -> identity = fact.json()
+            freshness: "{{\"state\":\"{self.freshness.state.as_str()}\",\"observed_at_ms\":{self.freshness.observed_at_ms}}}"
+            privacy: "{{\"loopback_only\":{self.privacy.loopback_only},\"payload_free_by_default\":{self.privacy.payload_free_by_default},\"published_payloads\":{self.privacy.published_payloads}}}"
+            out = "{out},\"lifecycle\":\"{self.lifecycle.as_str()}\",\"freshness\":{freshness},\"privacy\":{privacy},\"reset\":{self.reset},\"truncated\":{self.truncated},\"source_identity\":{identity}"
+        }
+        out = "{out}}}"
+        if out.bytes().len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES -> return Err("jet.devtools.v1 envelope exceeds the Prelude byte limit")
+        Ok(out)
+    }
+}
+
+devtools_body_family: fn(body: JetDevtoolsEventBody) -> String Never! {
+    if body == {
+        .Build(_, _, _, _, _) -> "Build"
+        .Route(_, _, _, _) -> "Route"
+        .Query(_, _, _) -> "Query"
+        .Mutation(_, _, _) -> "Mutation"
+        .Form(_, _, _, _) -> "Form"
+        .Table(_, _, _, _) -> "Table"
+        .Store(_, _, _, _) -> "Store"
+        .Trace(_, _, _, _, _) -> "Trace"
+        .Cost(_, _, _, _) -> "Cost"
+        .Gate(_, _, _) -> "Gate"
+        .Structure(_, _, _) -> "Structure"
+        .Test(_, _, _, _) -> "Test"
+        .Job(_, _, _, _) -> "Job"
+        .Frame(_, _, _) -> "Frame"
+        .GameFrameSample(_, _, _, _, _, _, _, _, _, _, _) -> "GameFrameSample"
+        .GameDrawEvent(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> "GameDrawEvent"
+        .GameLaunchProfile(_, _, _, _) -> "GameLaunchProfile"
+        .GameSwap(_, _, _, _, _, _, _, _) -> "GameSwap"
+        .Request(_, _, _, _) -> "Request"
+        .Response(_, _, _) -> "Response"
+    }
+}
+
+devtools_body_entity: fn(body: JetDevtoolsEventBody) -> String Never! {
+    if body == {
+        .Build(_, _, _, _, _) -> "build"
+        .Route(path, _, _, _) -> "{path}"
+        .Query(name, _, _) -> "{name}"
+        .Mutation(name, _, _) -> "{name}"
+        .Form(name, _, _, _) -> "{name}"
+        .Table(name, _, _, _) -> "{name}"
+        .Store(name, _, _, _) -> "{name}"
+        .Trace(name, _, _, _, _) -> "{name}"
+        .Cost(name, _, _, _) -> "{name}"
+        .Gate(name, _, _) -> "{name}"
+        .Structure(name, _, _) -> "{name}"
+        .Test(name, _, _, _) -> "{name}"
+        .Job(name, _, _, _) -> "{name}"
+        .Frame(name, _, _) -> "{name}"
+        .GameFrameSample(_, _, scene, _, _, _, _, _, _, _, _) -> "{scene}"
+        .GameDrawEvent(_, _, scene, _, _, _, _, _, _, _, _, _, _, _, _, _) -> "{scene}"
+        .GameLaunchProfile(target, _, _, _) -> "{target}"
+        .GameSwap(_, path, _, _, _, _, _, _) -> "{path}"
+        .Request(id, _, _, _) -> "{id}"
+        .Response(id, _, _) -> "{id}"
+    }
+}
+
+// The canonical `fields` object of a typed body.
+devtools_body_fields: fn(body: JetDevtoolsEventBody) -> String Err! {
+    parts := [String]{}
+    if body == {
+        .Build(status, tier, diagnostics, kept, reset) -> {
+            if diagnostics.len() > JET_DEVTOOLS_MAX_HISTORY -> return Err("jet.devtools.v1 build has too many diagnostics")
+            parts.push(devtools_text_field("status", status))
+            parts.push(devtools_text_field("tier", tier))
+            rendered := [String]{}
+            loop diagnostic in diagnostics -> rendered.push(devtools_text_json(diagnostic))
+            parts.push("\"diagnostics\":[{rendered.join(",")}]")
+            parts.push("\"kept\":{kept}")
+            parts.push("\"reset\":{reset}")
+        }
+        .Route(path, matched, render_mode, reason) -> {
+            parts.push(devtools_text_field("path", path))
+            parts.push("\"matched\":{matched}")
+            parts.push(devtools_text_field("render_mode", render_mode))
+            parts.push(devtools_text_field("reason", reason))
+        }
+        .Query(name, state, footprint) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("state", devtools_query_state_wire(state)))
+            parts.push("\"footprint\":{footprint}")
+        }
+        .Mutation(name, lifecycle, rollback) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("lifecycle", devtools_mutation_lifecycle_wire(lifecycle)))
+            parts.push("\"rollback\":{rollback}")
+        }
+        .Form(name, field, state, validation) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("field", field))
+            parts.push(devtools_text_field("state", devtools_form_state_wire(state)))
+            parts.push(devtools_text_field("validation", validation))
+        }
+        .Table(name, viewport, sort, filter) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push("\"viewport\":{viewport}")
+            parts.push(devtools_text_field("sort", sort))
+            parts.push(devtools_text_field("filter", filter))
+        }
+        .Store(name, transaction, diff, cursor) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("transaction", transaction))
+            parts.push(devtools_text_field("diff", diff))
+            parts.push("\"cursor\":{cursor}")
+        }
+        .Trace(name, kind, request, duration_ms, status) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("kind", devtools_trace_kind_wire(kind)))
+            parts.push(devtools_text_field("request", request))
+            parts.push("\"duration_ms\":{duration_ms}")
+            parts.push(devtools_text_field("status", status))
+        }
+        .Cost(name, rule, bytes, allocations) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("rule", rule))
+            parts.push("\"bytes\":{bytes}")
+            parts.push("\"allocations\":{allocations}")
+        }
+        .Gate(name, status, detail) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("status", status))
+            parts.push(devtools_text_field("detail", detail))
+        }
+        .Structure(name, kind, status) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("kind", kind))
+            parts.push(devtools_text_field("status", status))
+        }
+        .Test(name, status, duration_ms, diagnostics) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("status", status))
+            parts.push("\"duration_ms\":{duration_ms}")
+            parts.push(devtools_text_field("diagnostics", diagnostics))
+        }
+        .Job(name, status, duration_ms, diagnostics) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("status", status))
+            parts.push("\"duration_ms\":{duration_ms}")
+            parts.push(devtools_text_field("diagnostics", diagnostics))
+        }
+        .Frame(name, status, duration_ms) -> {
+            parts.push(devtools_text_field("name", name))
+            parts.push(devtools_text_field("status", status))
+            parts.push("\"duration_ms\":{duration_ms}")
+        }
+        .GameFrameSample(sequence, frame_id, scene, frame_index, build, revision, trace_id, start_ns, cpu_ns, gpu_ns, responsible_function) -> {
+            parts.push("\"sequence\":{sequence}")
+            parts.push("\"frame_id\":{frame_id}")
+            parts.push(devtools_text_field("scene", scene))
+            parts.push("\"frame_index\":{frame_index}")
+            parts.push(devtools_text_field("build", build))
+            parts.push(devtools_text_field("revision", revision))
+            parts.push(devtools_text_field("trace_id", trace_id))
+            parts.push("\"start_ns\":{start_ns}")
+            parts.push("\"cpu_ns\":{cpu_ns}")
+            gpu := "null"
+            if gpu_ns == .Val(value) -> gpu = "{value}"
+            parts.push("\"gpu_ns\":{gpu}")
+            responsible := "null"
+            if responsible_function == .Val(function) -> responsible = devtools_function_json(function)
+            parts.push("\"responsible_function\":{responsible}")
+        }
+        .GameDrawEvent(sequence, frame_id, scene, frame_index, build, revision, trace_id, event_index, event_id, function, phase, domain, start_ns, duration_ns, object_id, resource_id) -> {
+            parts.push("\"sequence\":{sequence}")
+            parts.push("\"frame_id\":{frame_id}")
+            parts.push(devtools_text_field("scene", scene))
+            parts.push("\"frame_index\":{frame_index}")
+            parts.push(devtools_text_field("build", build))
+            parts.push(devtools_text_field("revision", revision))
+            parts.push(devtools_text_field("trace_id", trace_id))
+            parts.push("\"event_index\":{event_index}")
+            parts.push("\"event_id\":{event_id}")
+            parts.push("\"function\":{devtools_function_json(function)}")
+            parts.push(devtools_text_field("phase", phase))
+            parts.push(devtools_text_field("domain", domain))
+            parts.push("\"start_ns\":{start_ns}")
+            parts.push("\"duration_ns\":{duration_ns}")
+            parts.push(devtools_optional_text_field("object_id", object_id))
+            parts.push(devtools_optional_text_field("resource_id", resource_id))
+        }
+        .GameLaunchProfile(target, run_mode, headless_compatible, phases) -> {
+            if phases.len() > JET_DEVTOOLS_MAX_LAUNCH_PHASES -> return Err("jet.devtools.v1 game launch profile exceeds phase limit")
+            parts.push(devtools_text_field("target", target))
+            parts.push(devtools_text_field("run_mode", run_mode))
+            parts.push("\"headless_compatible\":{headless_compatible}")
+            rendered := [String]{}
+            loop phase in phases -> rendered.push(devtools_launch_phase_json(phase))
+            parts.push("\"phases\":[{rendered.join(",")}]")
+        }
+        .GameSwap(sequence, path, kind, status, old_schema_id, new_schema_id, migration, reason) -> {
+            parts.push("\"sequence\":{sequence}")
+            parts.push(devtools_text_field("path", path))
+            parts.push(devtools_text_field("kind", kind))
+            parts.push(devtools_text_field("status", status))
+            parts.push(devtools_optional_text_field("old_schema_id", old_schema_id))
+            parts.push(devtools_optional_text_field("new_schema_id", new_schema_id))
+            parts.push(devtools_text_field("migration", migration))
+            parts.push(devtools_text_field("reason", reason))
+        }
+        .Request(id, method, path, status) -> {
+            parts.push(devtools_text_field("id", id))
+            parts.push(devtools_text_field("method", method))
+            parts.push(devtools_text_field("path", path))
+            parts.push("\"status\":{status}")
+        }
+        .Response(id, status, bytes) -> {
+            parts.push(devtools_text_field("id", id))
+            parts.push("\"status\":{status}")
+            parts.push("\"bytes\":{bytes}")
+        }
+    }
+    Ok("{{{parts.join(",")}}}")
+}
+
+devtools_query_state_wire: fn(state: JetDevtoolsQueryState) -> String Never! {
+    if state == {
+        .Fetching -> "fetching"
+        .Fresh -> "fresh"
+        .Stale -> "stale"
+        .Invalidated -> "invalidated"
+    }
+}
+
+devtools_mutation_lifecycle_wire: fn(lifecycle: JetDevtoolsMutationLifecycle) -> String Never! {
+    if lifecycle == {
+        .Started -> "started"
+        .Committed -> "committed"
+        .Failed -> "failed"
+        .RolledBack -> "rolled_back"
+    }
+}
+
+devtools_form_state_wire: fn(state: JetDevtoolsFormState) -> String Never! {
+    if state == {
+        .Pristine -> "pristine"
+        .Dirty -> "dirty"
+        .Valid -> "valid"
+        .Invalid -> "invalid"
+    }
+}
+
+devtools_trace_kind_wire: fn(kind: JetDevtoolsTraceKind) -> String Never! {
+    if kind == {
+        .Request -> "request"
+        .Render -> "render"
+        .Job -> "job"
+        .Reload -> "reload"
+        .Frame -> "frame"
+    }
+}
+
+devtools_source_span_json: fn(span: JetDevtoolsSourceSpan) -> String Err! {
+    if span.start_line == 0 || span.start_column == 0 || span.end_line == 0 || span.end_column == 0 -> return Err("jet.devtools.v1 source span starts or ends at zero")
+    if span.end_line < span.start_line || (span.end_line == span.start_line && span.end_column < span.start_column) -> return Err("jet.devtools.v1 source span ends before it starts")
+    Ok("{{{devtools_text_field("source_id", span.source_id)},{devtools_text_field("file", span.file)},\"start_line\":{span.start_line},\"start_column\":{span.start_column},\"end_line\":{span.end_line},\"end_column\":{span.end_column}}}")
+}
+
+devtools_function_json: fn(function: JetDevtoolsFunctionIdentity) -> String Err! {
+    Ok("{{{devtools_text_field("function_id", function.function_id)},{devtools_text_field("name", function.name)},\"source\":{devtools_source_span_json(function.source)}}}")
+}
+
+devtools_launch_phase_json: fn(phase: JetDevtoolsGameLaunchPhase) -> String Err! {
+    Ok("{{{devtools_text_field("phase", phase.phase)},{devtools_text_field("status", phase.status)},{devtools_text_field("detail", phase.detail)}}}")
+}
+
+devtools_text_field: fn(key: String, value: String) -> String Err! {
+    Ok("\"{key}\":{devtools_text_json(value)}")
+}
+
+devtools_optional_text_field: fn(key: String, value: String?) -> String Err! {
+    if value == .Val(text) -> return Ok("\"{key}\":{devtools_text_json(text)}")
+    Ok("\"{key}\":null")
+}
+
+devtools_text_json: fn(value: String) -> String Err! {
+    devtools_validate_text(value, "text")
+    Ok(foundation_json_quote(value))
+}
+
+devtools_validate_text: fn(value: String, field: String) Err! {
+    if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 {field} exceeds the Prelude text limit")
+    Ok()
+}
+
+// A framing check, not a second JSON parser: adapters own typed payload
+// construction, and this boundary keeps malformed fragments and control bytes
+// out of the envelope.
+devtools_validate_json_object: fn(value: String, field: String) Err! {
+    trimmed: value.trim()
+    bytes: trimmed.bytes()
+    if bytes.len() > JET_DEVTOOLS_MAX_TEXT_BYTES || !trimmed.starts_with("{{") || !trimmed.ends_with("}}") -> return Err("jet.devtools.v1 {field} must be a bounded JSON object")
+    depth := 0
+    in_string := false
+    escaped := false
+    loop byte in bytes {
+        code: Int{byte}
+        if code < 32 || code == 127 -> return Err("jet.devtools.v1 {field} contains a control character")
+        if in_string {
+            if escaped {
+                escaped = false
+            } else if code == 92 {
+                escaped = true
+            } else if code == 34 {
+                in_string = false
+            }
+            next
+        }
+        if code == 34 {
+            in_string = true
+        } else if code == 123 {
+            depth += 1
+        } else if code == 125 {
+            if depth == 0 -> return Err("jet.devtools.v1 {field} has unbalanced braces")
+            depth -= 1
+        }
+    }
+    if in_string || escaped || depth != 0 -> return Err("jet.devtools.v1 {field} has unbalanced JSON")
+    Ok()
+}

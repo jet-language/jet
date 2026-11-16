@@ -1,0 +1,16 @@
+# tests/dev_parts/routine.rs::post_contract_success_and_failure_match_on_all_tiers at tests/dev_parts/routine.rs:1831; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag; the JavaScript/Wasm half drove jet::compile_web_with_path and rustc wasm32 over generated Rust, which leaves with the Rust backend)
+fixture: post_contract_success_and_failure_match_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run post_contract_success_failure.jet
+exit: 0
+stdout: = post_contract_success_and_failure_match_on_all_tiers.1.out
+stderr: empty
+step: jet build post_contract_success_failure.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = post_contract_success_and_failure_match_on_all_tiers.1.out
+stderr: empty

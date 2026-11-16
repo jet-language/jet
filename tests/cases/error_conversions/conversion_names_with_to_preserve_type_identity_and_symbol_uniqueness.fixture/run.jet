@@ -1,0 +1,31 @@
+#Error
+SourceErr: struct {
+    message: String
+}
+
+#Error
+TargetErr: struct {
+    message: String
+}
+
+impl TargetErr.From(SourceErr) {
+    from: fn(error: SourceErr) -> TargetErr { return TargetErr{message: "converted from source"} }
+}
+
+impl Err.From(TargetErr) {
+    from: fn(error: TargetErr) -> Err { return Err("converted from target") }
+}
+
+read: fn() -> Int SourceErr! { return Err(SourceErr{message: "source failure"}) }
+
+middle: fn() -> Int TargetErr! {
+    value: read()
+    return Ok(value)
+}
+
+outer: fn() -> Int {
+    value: middle()
+    return Ok(value)
+}
+
+run: fn() { print(outer()) }

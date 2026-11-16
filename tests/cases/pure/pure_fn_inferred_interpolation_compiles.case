@@ -1,0 +1,9 @@
+# tests/pure.rs::pure_fn_inferred_interpolation_compiles at tests/pure.rs:56; hand-port
+# Claim: string interpolation remains legal through a `-[]>` caller (tests/pure.rs:59)
+fixture: pure_fn_inferred_interpolation_compiles.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/pure.rs:59 assert is_ok
+stderr: !~ "Error [" # tests/pure.rs:59 assert is_ok

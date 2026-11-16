@@ -1,0 +1,11 @@
+Feed: struct {
+    name: String
+    listeners: [fn() -> Int]
+}
+
+run: fn() {
+    feed: Shared{Feed{name: "feed", listeners: []}}
+    handle: feed.copy()
+    feed.listeners.push(fn() { handle.strong_count() })
+    print(feed.name)
+}

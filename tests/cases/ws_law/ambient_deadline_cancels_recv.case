@@ -1,0 +1,11 @@
+# tests/ws_law.rs::ambient_deadline_cancels_recv at tests/ws_law.rs:993; hand-port
+# Claim: under the thread-local TEST_DEADLINE_EXCEEDED deadline, jet_ws_recv returns WsError::Cancelled (tests/ws_law.rs:992-1020)
+# Not ported: the ambient deadline (TEST_DEADLINE_EXCEEDED) is a Rust thread-local and cannot be set from Jet source; core.net.ws declares Cancelled (Core/net/ws.jet:10) but recv is not declared there. The fixture is the echo program and does not set a deadline, so the expected Cancelled line is not reproduced
+fixture: ambient_deadline_cancels_recv.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/ws_law.rs:1000-1019 recv under ambient deadline returns Cancelled
+stdout: ~ "Cancelled" # tests/ws_law.rs:1000-1019 recv under ambient deadline returns Cancelled
+stderr: !~ "E2104" # tests/ws_law.rs:1000-1019 recv under ambient deadline returns Cancelled

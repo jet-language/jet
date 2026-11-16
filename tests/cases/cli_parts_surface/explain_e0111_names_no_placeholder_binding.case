@@ -1,0 +1,9 @@
+# `jet explain E0111` describes the change refused without naming a
+# placeholder binding: a reader never sees the literal `x` as if it were
+# their name. The emitted E0111 names the real binding (tests/ui/assign_to_val).
+step: jet explain E0111
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "This name was made with `:`, so it can't change" # the meaning names no binding
+stdout: ~ "Declare the name with `:=` instead of `:`" # the fix names no binding
+stdout: !~ "`x`" # no placeholder name

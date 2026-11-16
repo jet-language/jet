@@ -1,0 +1,19 @@
+# A sensitive capture records the stdin a test read, and its replay serves
+# it back with no terminal attached: the failing index the typed line made
+# at capture is the one replay sees.
+fixture: prove_sensitive_io_capture_replays_the_recorded_stdin.fixture
+requires: os:unix
+env: JET_STORE_DIR={work}/store
+step: jet prove main.jet --capture-sensitive
+pty: true
+stdin: prove_sensitive_io_consent_and_line.stdin
+exit: 70
+stdout: ~ "may disclose: the text the program reads from stdin" # the disclosure names the recorded stdin
+stdout: ~ "position 13 doesn't exist" # the typed line picks an index past the one-item list
+capture: artifact = text stdout.after_first("REPLAY   captured ").line(0).trim
+file: {cap:artifact} ~ "\"roots\":[\"IO\",\"Time\"]" # the header names the recorded IO root
+file: {cap:artifact} ~ "\"chunk_index\":0,\"stream_id\":1" # the line is one IOChunk of the stream its IORead frame opened
+step: jet prove main.jet --replay {cap:artifact}
+exit: 70
+stdout+stderr: ~ "position 13 doesn't exist" # replay serves the recorded line, not the empty stdin
+stdout+stderr: ~ "REPLAY   reproduced" # the replay consumed every record and matched the exit

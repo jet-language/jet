@@ -1,0 +1,8 @@
+# Port of tests/env_hook.rs::env_test_runs_hooks_checks_and_command_in_a_clean_child.
+# ORACLE-LITERAL file: tests/env_hook.rs:805-806 (exact 7 bytes, no newline).
+fixture: env_test_runs_hooks_checks_and_command_in_a_clean_child.fixture
+env: PATH=/usr/bin:/bin
+env: JET_PARENT_SENTINEL=must-not-leak
+step: jetpack env --trust --no-color test -- /bin/sh -c 'test -z "$JET_PARENT_SENTINEL" && test -f .clean-marker'
+exit: 0
+file: .clean-marker = entered.out

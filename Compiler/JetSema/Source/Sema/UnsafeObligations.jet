@@ -1,0 +1,1220 @@
+// Read-only unsafe inspection, adapted from origin/port/compiler.
+// The current integration passes module rows rather than a Rust ProgramBundle.
+use jet_foundation.[Diagnostic, MARKER_UNSAFE, Span, Expr, Call, CallArg, Field, Func, ImplDef, Item, Program, Stmt, Type, GateSet, PolicyDeclaration, EffectivePolicy, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_gate_forbidding, policy_scope_name, policy_value_display]
+
+SemaGateModule: struct {
+    source: String
+    program: Program
+    // Outer package/organization declarations, supplied by the package owner.
+    declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    // A path relative to the owning package; None for compiler/private sources.
+    policy_path: String?{None}
+    unsafe_paths: [String]?{None}
+    // `policy.memory`: the package-relative kernel files, the only ones whose
+    // gates may hold a raw memory operation (E3113). None: no kernel rule (a
+    // single program, Core, compiler-private sources); empty: no kernel file.
+    memory_kernel: [String]?{None}
+    expert: Bool?{None}
+    // The owning package's loader identity ("" for none); the mapping-keeper
+    // rule reads it (sema_unsafe_mapping_keepers).
+    package_identity: String{""}
+    // A composed runtime unit's sources (sema_unsafe_unit_map): the kernel
+    // rule reads each operation's own source path, not the unit's.
+    unit: SemaUnitMap?{None}
+}
+
+// One source of a composed unit: its path as its `// [unit source: PATH]`
+// mark names it, the byte offset where its first line starts, and that
+// line's number in the unit.
+SemaUnitSource: struct {
+    path: String
+    start: Int
+    line: Int
+}
+
+SemaUnitMap: struct {
+    sources: [SemaUnitSource]
+    // The byte offset each unit line starts at.
+    line_starts: [Int]
+}
+
+UnsafeInspection: struct {
+    gates: [UnsafeGateInspection]
+    diagnostics: [UnsafeDiagnostic]
+}
+
+UnsafeDiagnostic: struct {
+    source: String
+    diagnostic: Diagnostic
+}
+
+UnsafeGateInspection: struct {
+    source: String
+    span: Span
+    reason: String?
+    mode: String
+    provenance: [String]
+    operations: [UnsafeOperationInspection]
+    // The gate's raw memory operations that carry no obligation (a
+    // `core.mem` call, pointer stepping); the kernel rule reads them with
+    // `operations`.
+    memory_operations: [SemaUnsafeOperation]{[SemaUnsafeOperation]{}}
+}
+
+UnsafeOperationInspection: struct {
+    kind: String
+    span: Span
+    required: [String]
+    asserted: [String]
+    discharged: Bool
+    // The names the operation's address is computed from (sema_unsafe_address_roots).
+    address: [String]{[String]{}}
+}
+
+SemaUnsafeOperation: struct {
+    kind: String
+    span: Span
+    required: [String]
+    // The names the operation's address is computed from: locals and
+    // parameters, and `self.field` for a field of the receiver. Empty for an
+    // operation that takes no address (`alloc_raw`, `mem.address_of`).
+    address: [String]{[String]{}}
+}
+
+// How a raw memory operation is written: a method on any receiver
+// (`pointer.offset(1)`, `mem.alloc_raw(…)`), a `core.mem` call only
+// (`mem.copy(…)`), or a direct call of one of the runtime's raw intrinsics
+// (JetBackend Source/OS/Linux.jet).
+SEMA_RAW_METHOD: "method"
+
+SEMA_RAW_MEM: "mem"
+
+SEMA_RAW_CALL: "call"
+
+// One raw memory operation: the name it is written with (every name it
+// starts when `prefix`), its form, the kind an operation of it reports (the
+// written name when empty), the obligations its gate proves, and for a
+// call, how many leading arguments are addresses. A system call row counts
+// only when its first argument is one of `syscalls`: a number or an
+// `OS_SYS_` constant of the memory family.
+SemaRawOperation: struct {
+    name: String
+    form: String
+    prefix: Bool
+    kind: String
+    required: [String]
+    pointers: Int
+    syscalls: [String]
+}
+
+// Every raw memory operation sema reads: the obligation pass discharges the
+// rows with obligations, and the memory kernel rule (E3113) refuses each row
+// outside a package's kernel files. Docs/spec/safety.md's ratchet spots the
+// same families in text.
+SEMA_UNSAFE_RAW_OPERATIONS: [SemaRawOperation]{
+    {name: "volatile_read", form: SEMA_RAW_METHOD, prefix: false, kind: "volatile_read", required: [String]{"valid_ptr", "aligned"}, pointers: 0, syscalls: [String]{}},
+    {name: "volatile_write", form: SEMA_RAW_METHOD, prefix: false, kind: "volatile_write", required: [String]{"valid_ptr", "aligned", "no_alias"}, pointers: 0, syscalls: [String]{}},
+    {name: "cast_ptr", form: SEMA_RAW_METHOD, prefix: false, kind: "pointer_cast", required: [String]{"valid_ptr", "aligned"}, pointers: 0, syscalls: [String]{}},
+    {name: "alloc_raw", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "free_raw", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    // The memory sentry's account of an OS mapping: only the kernel's mapping
+    // primitives keep it (SEMA_MAPPING_KEEPERS).
+    {name: "mapped", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "unmapping", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "offset", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "byte_offset", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "copy", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "fill", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "list_append", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "list_copy", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "window", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "address_of", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    // Raw reads and writes, byte copies and moves, atomic words.
+    {name: "os_load_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_store_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_copy", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 2, syscalls: [String]{}},
+    {name: "os_move_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 2, syscalls: [String]{}},
+    {name: "os_fill_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_cas_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_swap_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_fetch_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    // A call of a native code address.
+    {name: "os_call", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    // Mappings: the wrappers, their untracked forms, and a raw system call of
+    // the memory family (mmap 9, mprotect 10, munmap 11, mremap 25, madvise
+    // 28, memfd_create 319).
+    {name: "os_map", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "os_map_with", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_unmap", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_map_untracked_i64", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "os_unmap_untracked_i64", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "os_remap_untracked_i64", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "os_protect", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_syscall", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{"9", "10", "11", "25", "28", "319", "OS_SYS_MPROTECT", "OS_SYS_MUNMAP", "OS_SYS_MREMAP", "OS_SYS_MADVISE", "OS_SYS_MEMFD_CREATE", "OS_SYS_BRK"}},
+}
+
+// The operation of SEMA_UNSAFE_RAW_OPERATIONS the method call
+// `receiver.method(args)` performs, pushed to `out`; nothing for any other.
+sema_unsafe_method_operation: fn(method: String, receiver: Expr, args: [CallArg], span: Span, out: &[SemaUnsafeOperation]) Never! {
+    loop row in SEMA_UNSAFE_RAW_OPERATIONS {
+        if row.form == SEMA_RAW_CALL || method != row.name -> next
+        if row.form == SEMA_RAW_MEM && !sema_unsafe_mem_receiver(receiver) -> next
+        out.push(SemaUnsafeOperation{kind: if row.kind == "" -> method else -> row.kind, span: span, required: row.required, address: sema_unsafe_operation_roots(method, receiver, args)})
+        return
+    }
+}
+
+// The operation of SEMA_UNSAFE_RAW_OPERATIONS the direct call `name(args)`
+// performs, pushed to `out` with the roots of its leading address arguments;
+// nothing for any other call.
+sema_unsafe_call_operation: fn(name: String, args: [CallArg], span: Span, out: &[SemaUnsafeOperation]) Never! {
+    loop row in SEMA_UNSAFE_RAW_OPERATIONS {
+        if row.form != SEMA_RAW_CALL -> next
+        if !(if row.prefix -> name.starts_with(row.name) else -> name == row.name) -> next
+        if row.syscalls.len() > 0 && (args.len() == 0 || !row.syscalls.contains(sema_unsafe_syscall_name(args[0].expr))) {
+            next
+        }
+        roots := [String]{}
+        loop index in 0..<row.pointers {
+            if index < args.len() -> sema_unsafe_address_roots(args[index].expr, roots)
+        }
+        out.push(SemaUnsafeOperation{kind: if row.kind == "" -> name else -> row.kind, span: span, required: row.required, address: roots})
+        return
+    }
+}
+
+// A system call's number as written: a literal, `I64{n}`, or an `OS_SYS_`
+// constant; empty for any other expression.
+sema_unsafe_syscall_name: fn(expression: Expr) -> String Never! {
+    if expression == .Int(value, _, _, _, _) -> return "{value}"
+    if expression == .Ident(name, _, _) -> return name
+    if expression == .Paren(inner, _, _) -> return sema_unsafe_syscall_name(inner)
+    if expression == .TypedLit(_, .Value(inner), _, _) -> return sema_unsafe_syscall_name(inner)
+    ""
+}
+
+sema_unsafe_inspect: fn(modules: [SemaGateModule], gates: GateSet) -> UnsafeInspection Never! {
+    result := UnsafeInspection{gates: [], diagnostics: []}
+    loop row in modules {
+        declarations := row.declarations
+        loop declaration in row.program.policy_declarations -> declarations.push(declaration.copy())
+        loop item in row.program.items {
+            sema_unsafe_visit_item(item, row.source, declarations, row.program, gates, result)
+        }
+    }
+    sema_unsafe_package_surface(modules, result)
+    result.gates = loop fresh_item in result.gates -> fresh_item
+    result.gates.sort_by(fn(a: UnsafeGateInspection, b: UnsafeGateInspection) { (a.source <=> b.source).then(a.span.start <=> b.span.start).then(a.span.end <=> b.span.end) })
+    result
+}
+
+sema_unsafe_diagnostic: fn(result: &UnsafeInspection, source: String, code: String, span: Span?, what: String, why: String, fix: String) Never! {
+    result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error_optional(code, span, what, why, fix)})
+}
+
+sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspection) Never! {
+    loop row in modules {
+        sema_unsafe_mapping_keepers(row, result)
+        path: row.policy_path ?? next
+        if row.unsafe_paths == .Val(allowed) {
+            if !sema_unsafe_path_within(path, allowed) {
+                loop gate in result.gates {
+                    if gate.source != row.source -> next
+                    sema_unsafe_diagnostic(result, row.source, "E2960", Val(gate.span), "Package policy `policy.unsafe` rejects `#Unsafe` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.unsafe` in `package.jet`.")
+                }
+            }
+        }
+        if row.memory_kernel == .Val(kernel) {
+            if row.unit == .Val(unit) -> sema_unsafe_unit_kernel(row, unit, path, kernel, result) else {
+                within: sema_unsafe_path_within(path, kernel)
+                if within {
+                    loop item in row.program.items {
+                        sema_unsafe_kernel_item(item, row.program, row.source, result)
+                    }
+                }
+                if !within {
+                    loop gate in result.gates {
+                        if gate.source != row.source -> next
+                        loop operation in gate.operations {
+                            sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span, "")
+                        }
+                        loop operation in gate.memory_operations {
+                            sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span, "")
+                        }
+                    }
+                }
+            }
+        }
+        if row.expert != (Val(false)) -> next
+        if row.program.no_prelude {
+            sema_unsafe_expert_diagnostic(result, row.source, "#NoPrelude", path, None)
+        }
+        loop item in row.program.items {
+            if sema_unsafe_expert_item(item) == .Val(found) {
+                sema_unsafe_expert_diagnostic(result, row.source, found.name, path, Val(found.span))
+            }
+        }
+    }
+}
+
+// True when `path` is one of `prefixes` or inside one of them.
+sema_unsafe_path_within: fn(path: String, prefixes: [String]) -> Bool Never! {
+    loop prefix in prefixes {
+        if path == prefix || path.starts_with("{prefix}/") -> return true
+    }
+    false
+}
+
+// A raw memory operation in a package file `policy.memory` does not name: the
+// fix names the safe type that replaces it, then the kernel field. `at` names
+// the operation's own source and line in the headline when the file is a
+// composed unit, whose location is the unit's.
+sema_unsafe_memory_refusal: fn(result: &UnsafeInspection, source: String, path: String, no_kernel: Bool, kind: String, span: Span, at: String) Never! {
+    safe: if kind == "alloc_raw" || kind == "free_raw" -> "hold the memory in a `[T]` list or an owner a kernel file hands out" else -> "read and write through a `[T]` list or a `View<T>` a kernel owner hands out"
+    field: if no_kernel -> "name the package's kernel files in `package.jet`: `policy: {{ memory: .Kernel([\"{path}\"]) }}`" else -> "add `{path}` to `policy.memory` in `package.jet`"
+    site: if at == "" -> "" else -> " at {at}"
+    result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error_optional("E3113", Val(span), "`{kind}`{site} is a raw memory operation outside the package's memory kernel", "Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place.", "Outside the kernel, {safe}; to make `{path}` a kernel file, {field}.")})
+}
+
+// The only sources outside Core that may keep the memory sentry's account of
+// an OS mapping (`mem.mapped`, `mem.unmapping`): a package's identity prefix
+// and the package-relative path of its mapping primitives, and that file's
+// checkout path, as a composed runtime unit's source marks name it (the
+// runtime unit holds the OS layer too). Core's Region keeps its own; Core
+// is never inspected.
+SEMA_MAPPING_KEEPERS: [(package: String, path: String, checkout: String)]{
+    (package: "package:11:jet_backend:", path: "Source/OS/Linux.jet", checkout: "Compiler/JetBackend/Source/OS/Linux.jet"),
+}
+
+// E3113 for each `mem.mapped` / `mem.unmapping` in `row`'s gates that does
+// not stand in one of SEMA_MAPPING_KEEPERS, whether or not its file is a
+// kernel file: a mapping the sentry counts live must be one a mapping
+// primitive just made, so every other mapping goes through those
+// primitives.
+sema_unsafe_mapping_keepers: fn(row: SemaGateModule, result: &UnsafeInspection) Never! {
+    loop keeper in SEMA_MAPPING_KEEPERS {
+        if row.package_identity.starts_with(keeper.package) && row.policy_path == (Val(keeper.path)) {
+            return
+        }
+    }
+    starts: if row.unit == .Val(unit) -> (loop source in unit.sources -> source.start) else -> [Int]{}
+    loop gate in result.gates {
+        if gate.source != row.source -> next
+        loop operation in gate.memory_operations {
+            if operation.kind != "mapped" && operation.kind != "unmapping" -> next
+            if row.unit == .Val(unit) && sema_unsafe_last_at(starts, operation.span.start) == .Val(index) {
+                kept := false
+                loop keeper in SEMA_MAPPING_KEEPERS {
+                    if unit.sources[index].path == keeper.checkout -> kept = true
+                }
+                if kept -> next
+            }
+            result.diagnostics.push(UnsafeDiagnostic{source: row.source, diagnostic: sema_error_optional("E3113", Val(operation.span), "`{operation.kind}` keeps the memory sentry's account of a mapping outside the kernel's mapping primitives", "Only a mapping primitive knows the pages it just mapped or is about to unmap, so only it may tell the sentry they are live or gone.", "Map and unmap through the kernel's primitives (`Region.reserve`, or JetBackend's `os_map`, `os_map_with` and `os_unmap`) instead.")})
+        }
+    }
+}
+
+// The `// [unit source: PATH]` line a composed runtime unit
+// (Toolchain/RuntimePack.jet compose_unit, Tools/agent/LaneCheck.jet
+// assemble_runtime) writes before each source it holds. The composer keeps
+// every line of a source, a dropped import as an empty line, so a source's
+// line numbers count from the line after its mark.
+SEMA_UNSAFE_UNIT_SOURCE_MARK: "// [unit source: "
+
+// True for the runtime's own packages (SEMA_GUEST_RUNTIME_PACKAGES), the
+// only ones whose unit marks name sources.
+sema_unsafe_runtime_package: fn(package_identity: String) -> Bool Never! {
+    loop prefix in SEMA_GUEST_RUNTIME_PACKAGES {
+        if package_identity.starts_with(prefix) -> return true
+    }
+    false
+}
+
+// The unit map of a runtime package file whose `text` carries unit source
+// marks; None for any other file, so no other package's comment can rename
+// where its operations stand.
+sema_unsafe_unit_map: fn(package_identity: String, text: String) -> SemaUnitMap? Never! {
+    if !sema_unsafe_runtime_package(package_identity) || !text.contains(SEMA_UNSAFE_UNIT_SOURCE_MARK) {
+        return None
+    }
+    unit := SemaUnitMap{sources: [SemaUnitSource]{}, line_starts: [Int]{}}
+    offset := 0
+    loop line in text.split("\n") {
+        unit.line_starts.push(offset)
+        offset += line.count_bytes() + 1
+        if line.starts_with(SEMA_UNSAFE_UNIT_SOURCE_MARK) && line.ends_with("]") {
+            unit.sources.push(SemaUnitSource{path: line.removeprefix(SEMA_UNSAFE_UNIT_SOURCE_MARK).removesuffix("]"), start: offset, line: unit.line_starts.len() + 1})
+        }
+    }
+    Val(unit)
+}
+
+// The index of the last entry of `starts` at or before `offset`; None before
+// the first.
+sema_unsafe_last_at: fn(starts: [Int], offset: Int) -> Int? Never! {
+    low := 0
+    high := starts.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if starts[middle] <= offset -> low = middle + 1 else -> high = middle
+    }
+    if low == 0 -> return None
+    Val(low - 1)
+}
+
+// A composed unit holds many sources: each raw operation answers to the
+// source it stands in, and a refusal names that source and its line. Each
+// item of a kernel source answers the kernel address rule (E3114).
+sema_unsafe_unit_kernel: fn(row: SemaGateModule, unit: SemaUnitMap, path: String, kernel: [String], result: &UnsafeInspection) Never! {
+    starts: loop source in unit.sources -> source.start
+    loop gate in result.gates {
+        if gate.source != row.source -> next
+        loop operation in gate.operations {
+            sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
+        }
+        loop operation in gate.memory_operations {
+            sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
+        }
+    }
+    loop item in row.program.items {
+        index: sema_unsafe_last_at(starts, sema_compiler_index_item_span(item).start) ?? next
+        if sema_unsafe_path_within(unit.sources[index].path, kernel) {
+            sema_unsafe_kernel_item(item, row.program, row.source, result)
+        }
+    }
+}
+
+// E3113 for a raw operation of a composed unit whose own source is no kernel
+// file, naming that source and line; one in the unit's import header answers
+// to the unit's own `path`.
+sema_unsafe_unit_refusal: fn(result: &UnsafeInspection, source: String, unit: SemaUnitMap, starts: [Int], path: String, kernel: [String], kind: String, span: Span) Never! {
+    index: sema_unsafe_last_at(starts, span.start) ?? -1
+    if index < 0 {
+        sema_unsafe_memory_refusal(result, source, path, kernel.len() == 0, kind, span, "")
+        return
+    }
+    owner: unit.sources[index]
+    if sema_unsafe_path_within(owner.path, kernel) {
+        return
+    }
+    line: (sema_unsafe_last_at(unit.line_starts, span.start) ?? 0) + 2 - owner.line
+    sema_unsafe_memory_refusal(result, source, owner.path, kernel.len() == 0, kind, span, "{owner.path}:{line}")
+}
+
+// A kernel file hands out owners and views, never raw addresses. Code outside
+// the kernel files reaches a kernel file's public function and a kernel
+// record's public field without a gate, so neither may carry an `Int`, 64-bit
+// integer or pointer of the caller's choosing to a raw memory operation's
+// address (E3114). An `#Unsafe` function is exempt: each caller vouches for
+// it in its own gate.
+sema_unsafe_kernel_item: fn(item: Item, program: Program, source: String, result: &UnsafeInspection) Never! {
+    if item == {
+        .Func(function) -> { sema_unsafe_kernel_function(function, "", [Field]{}, source, result) }
+        .Struct(definition) -> {
+            loop function in definition.methods {
+                sema_unsafe_kernel_function(function, definition.name, definition.fields, source, result)
+            }
+            loop implementation in definition.trait_impls {
+                loop function in implementation.methods {
+                    sema_unsafe_kernel_function(function, definition.name, definition.fields, source, result)
+                }
+            }
+        }
+        .Enum(definition) -> {
+            loop function in definition.methods {
+                sema_unsafe_kernel_function(function, definition.name, [Field]{}, source, result)
+            }
+            loop implementation in definition.trait_impls {
+                loop function in implementation.methods {
+                    sema_unsafe_kernel_function(function, definition.name, [Field]{}, source, result)
+                }
+            }
+        }
+        .Impl(implementation) -> {
+            sema_unsafe_kernel_impl(implementation, program, source, result)
+        }
+        .CodeModule(row) -> {
+            if row.body == .Val(items) {
+                loop child in items -> sema_unsafe_kernel_item(child, program, source, result)
+            }
+        }
+        .Test(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
+}
+
+// An `impl` block's methods see the fields of the record it extends.
+sema_unsafe_kernel_impl: fn(implementation: ImplDef, program: Program, source: String, result: &UnsafeInspection) Never! {
+    loop item in program.items {
+        if item == .Struct(definition) {
+            if definition.name == implementation.type_name {
+                loop function in implementation.methods {
+                    sema_unsafe_kernel_function(function, definition.name, definition.fields, source, result)
+                }
+                return
+            }
+        }
+    }
+    loop function in implementation.methods {
+        sema_unsafe_kernel_function(function, implementation.type_name, [Field]{}, source, result)
+    }
+}
+
+// The caller-chosen addresses `function` can reach: its address parameters
+// when it is public and not `#Unsafe`, and the public address fields of the
+// record `owner` it belongs to, read as `self.field`. Each local computed
+// from one joins them; a raw operation inside the function whose address
+// comes from one is refused, once per origin.
+sema_unsafe_kernel_function: fn(function: Func, owner: String, fields: [Field], source: String, result: &UnsafeInspection) Never! {
+    names := [String]{}
+    if function.is_pub && !function.is_unsafe {
+        loop param in function.params {
+            if sema_unsafe_address_type(param.ty) -> names.push(param.name)
+        }
+    }
+    loop field in fields {
+        if field.is_pub && sema_unsafe_address_type(field.ty) -> names.push("self.{field.name}")
+    }
+    if names.len() == 0 {
+        return
+    }
+    // origins[i]: the index in `names` of the parameter or field names[i] comes from.
+    origins := [Int]{}
+    loop index in 0..<names.len() -> origins.push(index)
+    loop {
+        known: names.len()
+        sema_unsafe_address_locals(function.body, names, origins)
+        if names.len() == known -> break
+    }
+    reported := [Int]{}
+    loop gate in result.gates {
+        if gate.source != source -> next
+        loop operation in gate.operations {
+            sema_unsafe_kernel_address(function, owner, operation.kind, operation.span, operation.address, names, origins, reported, source, result)
+        }
+        loop operation in gate.memory_operations {
+            sema_unsafe_kernel_address(function, owner, operation.kind, operation.span, operation.address, names, origins, reported, source, result)
+        }
+    }
+}
+
+// An `Int`, 64-bit integer or pointer: a type that can carry an address.
+sema_unsafe_address_type: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int -> true
+        .IntN(_, bits) -> bits == 64
+        .Apply(name, _) -> name == "Ptr" || name.ends_with(".Ptr")
+        .Option(inner) -> sema_unsafe_address_type(inner)
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// Add each local of `body` whose value is computed from one of `names`,
+// with the origin it came from.
+sema_unsafe_address_locals: fn(body: [Stmt], names: &[String], origins: &[Int]) Never! {
+    loop statement in body {
+        if statement == .Val(binding) {
+            sema_unsafe_address_local(binding.name, binding.init, names, origins)
+        }
+        if statement == .Assign(.Local(name, _), _, _, value) {
+            sema_unsafe_address_local(name, value, names, origins)
+        }
+        if statement == .Unsafe(_, _, nested, _) {
+            sema_unsafe_address_locals(nested, names, origins)
+        }
+        loop nested in sema_unsafe_nested_bodies(statement) {
+            sema_unsafe_address_locals(nested, names, origins)
+        }
+    }
+}
+
+sema_unsafe_address_local: fn(name: String, value: Expr, names: &[String], origins: &[Int]) Never! {
+    if name == "" || names.contains(name) {
+        return
+    }
+    roots := [String]{}
+    sema_unsafe_address_roots(value, roots)
+    loop index in 0..<names.len() {
+        if !roots.contains(names[index]) -> next
+        names.push(name.copy())
+        origins.push(origins[index])
+        return
+    }
+}
+
+// Refuse a raw operation inside `function` whose address comes from one of
+// `names`; each origin is reported once.
+sema_unsafe_kernel_address: fn(function: Func, owner: String, kind: String, span: Span, address: [String], names: [String], origins: [Int], reported: &[Int], source: String, result: &UnsafeInspection) Never! {
+    if span.start < function.span.start || span.end > function.span.end {
+        return
+    }
+    loop index in 0..<names.len() {
+        if !address.contains(names[index]) || reported.contains(origins[index]) -> next
+        reported.push(origins[index])
+        origin: names[origins[index]]
+        if origin.starts_with("self.") {
+            field: origin.slice(5, origin.len())
+            sema_unsafe_diagnostic(result, source, "E3114", Val(span), "`{owner}.{field}` carries a caller-chosen address to `{kind}`", "Code outside the kernel files sets the public field `{field}` without a gate, so the address `{kind}` uses would skip the kernel's audit.", "Make `{field}` a `priv` field, so only the kernel files set it.")
+            next
+        }
+        prefix: if owner == "" -> "" else -> "{owner}."
+        sema_unsafe_diagnostic(result, source, "E3114", Val(span), "`{prefix}{function.name}` carries the caller-chosen address `{origin}` to `{kind}`", "Code outside the kernel files calls `{prefix}{function.name}` without a gate, so the address `{kind}` uses would skip the kernel's audit.", "Take an owner or a `View<T>` in place of `{origin}`, or mark `{prefix}{function.name}` `#Unsafe(\"…\")` so each caller vouches for the address.")
+    }
+}
+
+// The names an address expression is computed from: each local or
+// parameter, and `self.field` for a field of the receiver. An index moves
+// within what its base names (`p.offset(i)`, `list[i]`), so only the base
+// counts; `*x` and `mem.address_of(x)` take the address of a place the
+// function owns, so they name nothing.
+sema_unsafe_address_roots: fn(expression: Expr, out: &[String]) Never! {
+    if expression == {
+        .Ident(name, _, _) -> {
+            if !out.contains(name) -> out.push(name.copy())
+        }
+        .Field(base, member, _, _) -> {
+            if base == .Ident(name, _, _) {
+                if name == "self" {
+                    receiver_field: "self.{member}"
+                    if !out.contains(receiver_field) -> out.push(receiver_field)
+                    return
+                }
+            }
+            sema_unsafe_address_roots(base, out)
+        }
+        .PtrFromAddr(_, _, _, addr, _, _) -> { sema_unsafe_address_roots(addr, out) }
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            if method == "offset" || method == "byte_offset" {
+                sema_unsafe_pointer_roots(receiver, args, out)
+                return
+            }
+            if method == "address_of" && sema_unsafe_mem_receiver(receiver) {
+                return
+            }
+            sema_unsafe_address_roots(receiver, out)
+            loop argument in args -> sema_unsafe_address_roots(argument.expr, out)
+        }
+        .Call(call, _) -> {
+            loop argument in call.args -> sema_unsafe_address_roots(argument.expr, out)
+        }
+        .CallValue(callee, args, _, _) -> {
+            sema_unsafe_address_roots(callee, out)
+            loop argument in args -> sema_unsafe_address_roots(argument.expr, out)
+        }
+        .Binary(_, left, right, _, _) -> {
+            sema_unsafe_address_roots(left, out)
+            sema_unsafe_address_roots(right, out)
+        }
+        .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) | .Deref(base, _, _) | .Unary(_, base, _, _) | .Copy(base, _, _) | .Place(base, _, _, _) | .OptField(base, _, _, _, _, _) | .Paren(base, _, _) | .Spread(base, _, _) | .Tainted(base, _, _, _) | .Present(base, _, _) | .Ok(base, _, _) | .Err(base, _, _) | .Try(base, _, _, _, _) -> {
+            sema_unsafe_address_roots(base, out)
+        }
+        .If(_, _, then_value, _, else_value, _, _) -> {
+            sema_unsafe_address_roots(then_value, out)
+            sema_unsafe_address_roots(else_value, out)
+        }
+        .OrFallback(value, fallback, _, _, _) -> {
+            sema_unsafe_address_roots(value, out)
+            if fallback == .Value(fallback_value) -> sema_unsafe_address_roots(fallback_value, out)
+        }
+        .Pipe(head, steps, _, _) -> {
+            sema_unsafe_address_roots(head, out)
+            loop step in steps -> sema_unsafe_address_roots(step.value, out)
+        }
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
+            loop field in fields -> sema_unsafe_address_roots(field.value, out)
+        }
+        .TupleLit(fields, _, _, _) -> {
+            loop field in fields -> sema_unsafe_address_roots(field.value, out)
+        }
+        .ListLit(values, _, _) -> {
+            loop value in values -> sema_unsafe_address_roots(value, out)
+        }
+        .TypedLit(_, body, _, _) -> {
+            if body == {
+                .Fields(fields) -> {
+                    loop field in fields -> sema_unsafe_address_roots(field.value, out)
+                }
+                .Elements(values) -> {
+                    loop value in values -> sema_unsafe_address_roots(value, out)
+                }
+                .Value(value) -> sema_unsafe_address_roots(value, out)
+                .Entries(_) | .ByteText(_) | .Empty -> {}
+            }
+        }
+        .EnumLit(_, _, _, args, _, _, _) -> {
+            loop argument in args {
+                if argument == {
+                    .Positional(value) | .Named(_, value) -> sema_unsafe_address_roots(value, out)
+                }
+            }
+        }
+        .RawOf(_, _, _) | .Str(_, _, _) | .Range(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .MapLit(_, _, _) | .PatternTest(_, _, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Lambda(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+}
+
+// `mem.op(pointer, …)` takes its pointer first; `pointer.op(…)` is its receiver.
+sema_unsafe_pointer_roots: fn(receiver: Expr, args: [CallArg], out: &[String]) Never! {
+    if sema_unsafe_mem_receiver(receiver) {
+        if args.len() > 0 -> sema_unsafe_address_roots(args[0].expr, out)
+        return
+    }
+    sema_unsafe_address_roots(receiver, out)
+}
+
+sema_unsafe_mem_receiver: fn(receiver: Expr) -> Bool Never! {
+    if receiver == .Ident(alias, _, _) -> return alias == "mem"
+    false
+}
+
+// The address roots of a raw operation's pointer operand: `copy(to, from,
+// count)` has two, `fill(to, value, count)` and `list_copy(to, values,
+// start, count)` one, `list_append(values, from, count)` reads its pointer
+// after the List, and `window` takes its pointer before its count. The
+// sentry's mapping account (`mapped`, `unmapping`) reads and writes no
+// memory, so it has none.
+sema_unsafe_operation_roots: fn(method: String, receiver: Expr, args: [CallArg]) -> [String] Never! {
+    roots := [String]{}
+    pointers: if method == {
+        "alloc_raw" | "address_of" | "mapped" | "unmapping" -> 0
+        "copy" -> 2
+        "fill" | "list_copy" -> 1
+        "window" -> args.len() - 1
+        "list_append" -> {
+            if args.len() > 1 -> sema_unsafe_address_roots(args[1].expr, roots)
+            return roots
+        }
+        else -> {
+            sema_unsafe_pointer_roots(receiver, args, roots)
+            return roots
+        }
+    }
+    loop index in 0..<pointers {
+        if index < args.len() -> sema_unsafe_address_roots(args[index].expr, roots)
+    }
+    roots
+}
+
+sema_unsafe_expert_diagnostic: fn(result: &UnsafeInspection, source: String, subject: String, path: String, span: Span?) Never! {
+    sema_unsafe_diagnostic(result, source, "E2960", span, "Package policy `policy.expert` rejects `{subject}` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.expert` in `package.jet`.")
+}
+
+sema_unsafe_expert_function: fn(function: Func) -> (name: String, span: Span)? Never! {
+    if function.is_replayable {
+        return Val((name: "#Replayable", span: function.replayable_span ?? function.name_span))
+    }
+    sema_unsafe_expert_body(function.body)
+}
+
+sema_unsafe_expert_item: fn(item: Item) -> (name: String, span: Span)? Never! {
+    if item == {
+        .Func(function) -> return sema_unsafe_expert_function(function)
+        .Struct(definition) -> {
+            loop function in definition.methods {
+                if sema_unsafe_expert_function(function) == .Val(found) -> return Val(found)
+            }
+            loop implementation in definition.trait_impls {
+                loop function in implementation.methods {
+                    if sema_unsafe_expert_function(function) == .Val(found) -> return Val(found)
+                }
+            }
+        }
+        .Enum(definition) -> {
+            loop function in definition.methods {
+                if sema_unsafe_expert_function(function) == .Val(found) -> return Val(found)
+            }
+            loop implementation in definition.trait_impls {
+                loop function in implementation.methods {
+                    if sema_unsafe_expert_function(function) == .Val(found) -> return Val(found)
+                }
+            }
+        }
+        .Impl(implementation) -> {
+            loop function in implementation.methods {
+                if sema_unsafe_expert_function(function) == .Val(found) -> return Val(found)
+            }
+        }
+        .Test(test) -> return sema_unsafe_expert_body(test.body)
+        .CodeModule(row) -> {
+            if row.body == .Val(items) {
+                loop child in items {
+                    if sema_unsafe_expert_item(child) == .Val(found) -> return Val(found)
+                }
+            }
+        }
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
+    None
+}
+
+sema_unsafe_expert_body: fn(body: [Stmt]) -> (name: String, span: Span)? Never! {
+    loop statement in body {
+        if statement == {
+            .Impure(_, _, _, span) -> return Val((name: "#Impure", span: span))
+            .Shield(_, span) -> return Val((name: "#Shield", span: span))
+            .Region(_, _, _, span) -> return Val((name: "#Region", span: span))
+            .AuthorityScope(_, _, _, _, span) -> return Val((name: "#FX", span: span))
+            .ContextBlock(_, _, span) -> return Val((name: "#Context", span: span))
+            .Transact(_, _, _, _, span) -> return Val((name: "#Transact", span: span))
+            .Live(_, span) -> return Val((name: "#Live", span: span))
+            .AssumeDet(_, _, _, span) -> return Val((name: "assume_deterministic", span: span))
+            .Val(binding) -> {
+                if binding.uninit -> return Val((name: "uninit", span: binding.name_span))
+            }
+            .Expr(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Reactive(_, _) | .Switched(_, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) | .Defer(_, _) -> {}
+        }
+        loop nested in sema_unsafe_nested_bodies(statement) {
+            if sema_unsafe_expert_body(nested) == .Val(found) -> return Val(found)
+        }
+    }
+    None
+}
+
+sema_unsafe_visit_item: fn(item: Item, source: String, declarations: [PolicyDeclaration], program: Program, gates: GateSet, result: &UnsafeInspection) Never! {
+    if item == {
+        .Func(function) -> {
+            sema_unsafe_visit_function(function, source, declarations, program, gates, result)
+        }
+        .Struct(definition) -> {
+            loop function in definition.methods {
+                sema_unsafe_visit_function(function, source, declarations, program, gates, result)
+            }
+            loop implementation in definition.trait_impls {
+                loop function in implementation.methods {
+                    sema_unsafe_visit_function(function, source, declarations, program, gates, result)
+                }
+            }
+        }
+        .Enum(definition) -> {
+            loop function in definition.methods {
+                sema_unsafe_visit_function(function, source, declarations, program, gates, result)
+            }
+            loop implementation in definition.trait_impls {
+                loop function in implementation.methods {
+                    sema_unsafe_visit_function(function, source, declarations, program, gates, result)
+                }
+            }
+        }
+        .Impl(implementation) -> {
+            loop function in implementation.methods {
+                sema_unsafe_visit_function(function, source, declarations, program, gates, result)
+            }
+        }
+        .Test(test) -> { sema_unsafe_plain_body(test.body, source, declarations, gates, result) }
+        .CodeModule(row) -> {
+            if row.body == .Val(items) {
+                loop child in items {
+                    sema_unsafe_visit_item(child, source, declarations, program, gates, result)
+                }
+            }
+        }
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
+}
+
+sema_unsafe_visit_function: fn(function: Func, source: String, declarations: [PolicyDeclaration], program: Program, gates: GateSet, result: &UnsafeInspection) Never! {
+    if !function.is_unsafe {
+        sema_unsafe_plain_body(function.body, source, declarations, gates, result)
+        return
+    }
+    source_has_reason := false
+    loop application in program.rule_facts {
+        if application.target == (Val(function.span)) && application.marker.name == MARKER_UNSAFE && application.marker.args.len() > 0 {
+            source_has_reason = true
+        }
+    }
+    sema_unsafe_visit_gate(function.span, function.unsafe_span ?? function.span, true, function.unsafe_reason, source_has_reason, function.body, source, declarations, gates, result)
+}
+
+// A body outside any `#Unsafe`: its nested gates, then each obligation
+// assertion outside them, which has no meaning there. One walk finds both;
+// the assertions are reported after the gates, in walk order.
+sema_unsafe_plain_body: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
+    outside := [Span]{}
+    sema_unsafe_plain_walk(body, source, declarations, gates, result, outside)
+    loop span in outside {
+        sema_unsafe_diagnostic(result, source, "E3108", Val(span), "unsafe obligations can only be asserted inside `#Unsafe`", "the assertion discharges one tracked low-level operation and has no ambient meaning", "move it immediately after an operation inside the audited gate")
+    }
+}
+
+sema_unsafe_plain_walk: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection, outside: &[Span]) Never! {
+    loop statement in body {
+        if statement == .Unsafe(audit, audit_expr, nested, span) {
+            sema_unsafe_visit_gate(span, span, false, audit, audit_expr != None, nested, source, declarations, gates, result)
+            next
+        }
+        if sema_unsafe_assertion_span(statement) == .Val(span) -> outside.push(span)
+        loop nested in sema_unsafe_nested_bodies(statement) {
+            sema_unsafe_plain_walk(nested, source, declarations, gates, result, outside)
+        }
+    }
+}
+
+sema_unsafe_nested_gates: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
+    loop statement in body {
+        if statement == .Unsafe(audit, audit_expr, nested, span) {
+            sema_unsafe_visit_gate(span, span, false, audit, audit_expr != None, nested, source, declarations, gates, result)
+        } else {
+            loop nested in sema_unsafe_nested_bodies(statement) {
+                sema_unsafe_nested_gates(nested, source, declarations, gates, result)
+            }
+        }
+    }
+}
+
+sema_unsafe_visit_gate: fn(target: Span, span: Span, is_function: Bool, reason: String?, source_has_reason: Bool, body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
+    outer := [PolicyDeclaration]{}
+    site := [PolicyDeclaration]{}
+    loop declaration in declarations {
+        if declaration.key != PolicyKey.Unsafe -> next
+        if declaration.scope == PolicyScope.Organization || declaration.scope == PolicyScope.Package || declaration.scope == PolicyScope.Module {
+            outer.push(declaration.copy())
+        }
+        if declaration.target == (Val(target)) -> site.push(declaration.copy())
+    }
+    outer_policy: if policy_resolve_with_gates(PolicyKey.Unsafe, outer, gates) == {
+        .Ok(policy) -> policy
+        .Err(_) -> EffectivePolicy?{None}
+    }
+    chain := outer
+    loop declaration in site -> chain.push(declaration)
+    effective := if policy_resolve_with_gates(PolicyKey.Unsafe, chain, gates) == {
+        .Ok(policy) -> policy
+        .Err(_) -> {
+            // An allowed `--gate unsafe=allow` cannot widen an owning `.Forbid`.
+            forbidding: policy_gate_forbidding(PolicyKey.Unsafe, chain)
+            if policy_gate_allows(gates, PolicyKey.Unsafe) && forbidding == .Val(policy) {
+                result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_gate_denied(PolicyKey.Unsafe, "{source}:{span.start}..{span.end}", Val(span), policy.source)})
+            } else {
+                sema_unsafe_diagnostic(result, source, "E0355", Val(span), "audited gate denied by effective policy", "an organization or package policy can refuse an audited escape, including its invocation gate", "remove `--gate unsafe=allow` or change the owning policy")
+            }
+            None
+        }
+    }
+    value := effective.map(fn(policy) { policy.value }) ?? policy_default_gate_value(PolicyKey.Unsafe)
+    if value == PolicyValue.PerSite {
+        sema_unsafe_diagnostic(result, source, "E3106", Val(span), "this unsafe gate must choose an obligation mode", "the effective `.PerSite` policy requires every gate to select `.Track` or `.Skip`", "add `obligations: .Track` (or `.Skip` when organization policy permits it)")
+        value = PolicyValue.Track
+    }
+    skip := false
+    loop declaration in site {
+        if declaration.value == PolicyValue.Skip -> skip = true
+    }
+    if skip && outer_policy.map(fn(policy) { policy.value }) != Val(PolicyValue.PerSite) {
+        sema_unsafe_diagnostic(result, source, "E3106", Val(span), "this unsafe gate cannot skip obligations", "`.Skip` is site control for an effective `.PerSite` package policy; it is not ambient authorization", "set package policy to `.PerSite`, or remove `.Skip`")
+        value = PolicyValue.Track
+    }
+    if value == PolicyValue.Forbid {
+        sema_unsafe_diagnostic(result, source, "E3105", Val(span), "organization or package policy forbids unsafe code", "a lexical `#Unsafe` gate cannot widen the effective safety floor", "remove the low-level operation or change the outer policy through its owner")
+    } else if reason == .None && !source_has_reason && value != PolicyValue.Relaxed {
+        if is_function {
+            sema_unsafe_diagnostic(result, source, "E3112", Val(span), "an `#Unsafe` function needs a reason", "every unsafe function records why callers can rely on its unchecked contract", "write `#Unsafe(\"why this is safe\") name: fn …`")
+        } else {
+            sema_unsafe_diagnostic(result, source, "E3112", Val(span), "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`")
+        }
+    }
+    provenance := [String]{}
+    if effective == .Val(policy) {
+        loop declaration in policy.provenance {
+            provenance.push("{policy_scope_name(declaration.scope)}:{declaration.source}:{declaration.span.start}..{declaration.span.end}={policy_value_display(declaration.value)}")
+        }
+    }
+    gate := UnsafeGateInspection{source: source, span: span, reason: reason, mode: sema_unsafe_mode(value), provenance: provenance, operations: []}
+    sema_unsafe_scan_sequence(body, value == PolicyValue.Obligations || value == PolicyValue.Track, gate, source, result.diagnostics)
+    result.gates.push(gate)
+    sema_unsafe_nested_gates(body, source, declarations, gates, result)
+}
+
+sema_unsafe_mode: fn(value: PolicyValue) -> String Never! {
+    if value == {
+        .Obligations | .Track -> "Obligations"
+        .Relaxed -> "Relaxed"
+        .PerSite -> "PerSite"
+        .Forbid -> "Forbid"
+        .Enabled | .Limit(_) | .Default | .GateOnly | .Skip | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> "GateOnly"
+    }
+}
+
+sema_unsafe_assertion: fn(statement: Stmt) -> (names: [String], span: Span)? Never! {
+    // copy: `value` is a payload of read parameter `statement`, which keeps the original; the Val carrier owns this one
+    expression: (if statement == .Expr(value) -> Val(value.copy()) else -> Expr?{None}) ?? return None
+    call: (if expression == .Call(value, _) -> Val(value) else -> Call?{None}) ?? return None
+    if call.name != "__jet_unsafe_assert" -> return None
+    names := [String]{}
+    loop argument in call.args {
+        if argument.expr == .Ident(name, _, _) -> names.push(name)
+    }
+    Val((names: names, span: call.name_span))
+}
+
+// Whether `statement` is an obligation assertion (`assert valid_ptr,
+// aligned`). The obligation pass checks it; it has no runtime form.
+sema_unsafe_is_assertion: fn(statement: Stmt) -> Bool Never! {
+    sema_unsafe_assertion_span(statement) != None
+}
+
+// The span of an obligation assertion's call, None for any other statement.
+sema_unsafe_assertion_span: fn(statement: Stmt) -> Span? Never! {
+    if statement == .Expr(expression) {
+        if expression == .Call(call, _) {
+            if call.name == "__jet_unsafe_assert" -> return Val(call.name_span)
+        }
+    }
+    None
+}
+
+sema_unsafe_scan_sequence: fn(body: [Stmt], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {
+    pending := [SemaUnsafeOperation]{}
+    loop statement in body {
+        if sema_unsafe_assertion(statement) == .Val(assertion) {
+            if !sema_unsafe_any_obligation(pending) {
+                diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3108", assertion.span, "this unsafe assertion has no preceding operation", "typed obligations attach only to the immediately preceding low-level operation statement", "move the assertion directly after the operation it proves")})
+                next
+            }
+            asserted := [String]{}
+            loop name in assertion.names {
+                if name == "valid_ptr" || name == "aligned" || name == "no_alias" {
+                    if !asserted.contains(name) -> asserted.push(name)
+                } else {
+                    diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3108", assertion.span, "`{name}` is not an unsafe obligation", "unsafe proofs use the closed typed set `valid_ptr`, `aligned`, and `no_alias`", "fix the obligation name")})
+                }
+            }
+            asserted.sort()
+            sema_unsafe_discharge(pending, asserted, track, gate, source, diagnostics)
+            pending = []
+            next
+        }
+        sema_unsafe_discharge(pending, [String]{}, track, gate, source, diagnostics)
+        pending = []
+        if statement == .Unsafe(_, _, _, _) -> next
+        sema_unsafe_shallow_operations(statement, pending)
+        loop nested in sema_unsafe_nested_bodies(statement) {
+            sema_unsafe_scan_sequence(nested, track, gate, source, diagnostics)
+        }
+    }
+    sema_unsafe_discharge(pending, [String]{}, track, gate, source, diagnostics)
+}
+
+// True when some pending operation owes a typed proof; a raw memory call with
+// no obligation leaves an assertion after it unattached (E3108).
+sema_unsafe_any_obligation: fn(pending: [SemaUnsafeOperation]) -> Bool Never! {
+    loop operation in pending {
+        if operation.required.len() > 0 -> return true
+    }
+    false
+}
+
+sema_unsafe_discharge: fn(operations: &&[SemaUnsafeOperation], asserted: [String], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {
+    loop operation in operations.move() {
+        if operation.required.len() == 0 {
+            gate.memory_operations.push(operation)
+            next
+        }
+        missing := [String]{}
+        loop name in operation.required {
+            if !asserted.contains(name) -> missing.push(name.copy())
+        }
+        discharged: !track || missing.len() == 0
+        if !discharged {
+            diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3107", operation.span, "`{operation.kind}` is missing unsafe obligations: {missing.join(", ")}", "the effective `.Obligations` policy requires a typed proof immediately after each low-level operation", "add `assert {operation.required.join(", ")}` immediately after this operation")})
+        }
+        gate.operations.push(UnsafeOperationInspection{kind: operation.kind, span: operation.span, required: operation.required, asserted: asserted, discharged: discharged, address: operation.address})
+    }
+}
+
+sema_unsafe_shallow_operations: fn(statement: Stmt, out: &[SemaUnsafeOperation]) Never! {
+    if statement == {
+        .Expr(expression) | .DeferClose(expression, _) | .Return(.Val(expression), _) -> {
+            sema_unsafe_expr_operations(expression, out)
+        }
+        .Val(binding) -> { sema_unsafe_expr_operations(binding.init, out) }
+        .Assign(target, _, _, value) -> {
+            if target == {
+                .Index(base, index, _, _) -> {
+                    sema_unsafe_expr_operations(base, out)
+                    sema_unsafe_expr_operations(index, out)
+                }
+                .Field(base, _, _) -> { sema_unsafe_expr_operations(base, out) }
+                .Local(_, _) -> {}
+            }
+            sema_unsafe_expr_operations(value, out)
+        }
+        .While(cond, _, _, _, _) | .ComptimeIf(cond, _, _, _, _, _) -> {
+            sema_unsafe_expr_operations(cond, out)
+        }
+        .CountedLoop(init, cond, step, _, _, _, _) -> {
+            sema_unsafe_expr_operations(init.init, out)
+            sema_unsafe_expr_operations(cond, out)
+            if step == .Val(value) -> sema_unsafe_shallow_operations(value, out)
+        }
+        .For(_, _, _, kind, _, _, _, _, _) -> {
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    sema_unsafe_expr_operations(start, out)
+                    sema_unsafe_expr_operations(end, out)
+                    if step == .Val(value) -> sema_unsafe_expr_operations(value, out)
+                }
+                .In(collection, step) -> {
+                    sema_unsafe_expr_operations(collection, out)
+                    if step == .Val(value) -> sema_unsafe_expr_operations(value, out)
+                }
+            }
+        }
+        .Switch(subject, _, _, _) | .ComptimeSwitch(subject, _, _, _) -> {
+            sema_unsafe_expr_operations(subject, out)
+        }
+        .ContextBlock(fields, _, _) -> {
+            loop field in fields -> sema_unsafe_expr_operations(field.value, out)
+        }
+        .ScopeMember(_, _, args, _, _, _, _, _) -> {
+            loop argument in args -> sema_unsafe_expr_operations(argument, out)
+        }
+        .Yield(value, _) -> sema_unsafe_expr_operations(value, out)
+        .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) -> {}
+    }
+}
+
+sema_unsafe_expr_operations: fn(expression: Expr, out: &[SemaUnsafeOperation]) Never! {
+    if expression == {
+        .PtrFromAddr(_, _, _, addr, span, _) -> {
+            roots := [String]{}
+            sema_unsafe_address_roots(addr, roots)
+            out.push(SemaUnsafeOperation{kind: "pointer_from_address", span: span, required: ["valid_ptr", "aligned"], address: roots})
+            sema_unsafe_expr_operations(addr, out)
+        }
+        .Deref(inner, span, _) -> {
+            roots := [String]{}
+            sema_unsafe_address_roots(inner, roots)
+            out.push(SemaUnsafeOperation{kind: "dereference", span: span, required: ["valid_ptr", "aligned"], address: roots})
+            sema_unsafe_expr_operations(inner, out)
+        }
+        .RawOf(inner, span, _) -> {
+            out.push(SemaUnsafeOperation{kind: "raw_pointer", span: span, required: ["no_alias"]})
+            sema_unsafe_expr_operations(inner, out)
+        }
+        .MethodCall(receiver, method, span, _, _, args, _) -> {
+            sema_unsafe_method_operation(method, receiver, args, span, out)
+            sema_unsafe_expr_operations(receiver, out)
+            loop argument in args -> sema_unsafe_expr_operations(argument.expr, out)
+        }
+        .Call(call, _) -> {
+            sema_unsafe_call_operation(call.name, call.args, call.name_span, out)
+            loop argument in call.args -> sema_unsafe_expr_operations(argument.expr, out)
+        }
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(value, _) -> sema_unsafe_expr_operations(value, out)
+            }
+        }
+        .Binary(_, left, right, _, _) | .Index(left, right, _, _, _) | .Range(left, right, _, _, _) -> {
+            sema_unsafe_expr_operations(left, out)
+            sema_unsafe_expr_operations(right, out)
+        }
+        .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> {
+            loop operand in operands -> sema_unsafe_expr_operations(operand, out)
+        }
+        .Slice(base, start, end, range, _, _) -> {
+            sema_unsafe_expr_operations(base, out)
+            if range == .Val(value) -> sema_unsafe_expr_operations(value, out) else {
+                sema_unsafe_expr_operations(start, out)
+                sema_unsafe_expr_operations(end, out)
+            }
+        }
+        .Unary(_, inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Paren(inner, _, _) | .Spread(inner, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) -> {
+            sema_unsafe_expr_operations(inner, out)
+        }
+        .Pipe(head, steps, _, _) -> {
+            sema_unsafe_expr_operations(head, out)
+            loop step in steps -> sema_unsafe_expr_operations(step.value, out)
+        }
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
+            loop field in fields -> sema_unsafe_expr_operations(field.value, out)
+        }
+        .TypedLit(_, body, _, _) -> {
+            if body == {
+                .Fields(fields) -> {
+                    loop field in fields -> sema_unsafe_expr_operations(field.value, out)
+                }
+                .Elements(values) -> {
+                    loop value in values -> sema_unsafe_expr_operations(value, out)
+                }
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        sema_unsafe_expr_operations(entry.key, out)
+                        sema_unsafe_expr_operations(entry.value, out)
+                    }
+                }
+                .Value(value) -> sema_unsafe_expr_operations(value, out)
+                .ByteText(_) | .Empty -> {}
+            }
+        }
+        .EnumLit(_, _, _, args, _, _, _) -> {
+            loop argument in args {
+                if argument == {
+                    .Positional(value) | .Named(_, value) -> {
+                        sema_unsafe_expr_operations(value, out)
+                    }
+                }
+            }
+        }
+        .MapLit(entries, _, _) -> {
+            loop entry in entries {
+                sema_unsafe_expr_operations(entry.key, out)
+                sema_unsafe_expr_operations(entry.value, out)
+            }
+        }
+        .TupleLit(fields, _, _, _) -> {
+            loop field in fields -> sema_unsafe_expr_operations(field.value, out)
+        }
+        .CallValue(callee, args, _, _) -> {
+            sema_unsafe_expr_operations(callee, out)
+            loop argument in args -> sema_unsafe_expr_operations(argument.expr, out)
+        }
+        .Try(inner, _, _, note, _) -> {
+            sema_unsafe_expr_operations(inner, out)
+            if note == .Val(value) -> sema_unsafe_expr_operations(value, out)
+        }
+        .PatternTest(subject, _, _, _) -> { sema_unsafe_expr_operations(subject, out) }
+        .OrFallback(value, fallback, _, _, _) -> {
+            sema_unsafe_expr_operations(value, out)
+            if fallback == {
+                .Value(fallback_value) | .Return(.Val(fallback_value), _) -> {
+                    sema_unsafe_expr_operations(fallback_value, out)
+                }
+                .Block(body, block_value, _) -> {
+                    loop statement in body -> sema_unsafe_shallow_operations(statement, out)
+                    if block_value == .Val(nested_value) {
+                        sema_unsafe_expr_operations(nested_value, out)
+                    }
+                }
+                .Panic(_, args) -> {
+                    loop argument in args -> sema_unsafe_expr_operations(argument.expr, out)
+                }
+                .Return(_, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
+            }
+        }
+        .If(cond, _, then_value, _, else_value, _, _) -> {
+            sema_unsafe_expr_operations(cond, out)
+            sema_unsafe_expr_operations(then_value, out)
+            sema_unsafe_expr_operations(else_value, out)
+        }
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Lambda(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+}
+
+// Rust nested_bodies deliberately excludes Unsafe: nested gates own their proofs.
+sema_unsafe_nested_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
+    if statement == {
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [body]
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            out := [[Stmt]]{}
+            loop arm in arms -> out.push(arm.body)
+            if else_body == .Val(body) -> out.push(body.copy())
+            out
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            out := [[Stmt]]{then_body}
+            if else_body == .Val(body) -> out.push(body.copy())
+            out
+        }
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Yield(_, _) | .DeferClose(_, _) -> []
+    }
+}

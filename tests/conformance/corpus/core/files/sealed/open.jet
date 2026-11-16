@@ -1,0 +1,35 @@
+// core-conformance: core.files.sealed.open
+use {
+    crypto: core.crypto
+    fs: core.files
+    api: core.files.sealed
+}
+
+// The read-borrowed identity stays with the caller; success has no payload.
+checked_open: fn(identity: crypto.X25519SecretKey, source: Path, destination: Path) crypto.FileCryptoError! -[FS]> {
+    return api.open(identity, source, destination)
+}
+
+run: fn() {
+    source_text: "/tmp/jet_core_files_sealed_open_source"
+    sealed_text: "/tmp/jet_core_files_sealed_open_sealed"
+    opened_text: "/tmp/jet_core_files_sealed_open_output"
+    if fs.exists(source_text) -> fs.remove(source_text) ?? panic("cleanup")
+    if fs.exists(sealed_text) -> fs.remove(sealed_text) ?? panic("cleanup")
+    if fs.exists(opened_text) -> fs.remove(opened_text) ?? panic("cleanup")
+    source: Path.from(source_text)
+    sealed: Path.from(sealed_text)
+    opened: Path.from(opened_text)
+    source.write_atomic([U8]{0x61, 0x62, 0x63}) ?? panic("source")
+    recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    api.seal([recipient.public_key()], source, sealed) ?? panic("seal")
+    print(
+        if checked_open(recipient, sealed, opened) == {
+            .Ok(ok) -> true
+            .Err(error) -> false
+        },
+    )
+    if fs.exists(source_text) -> fs.remove(source_text) ?? panic("cleanup")
+    if fs.exists(sealed_text) -> fs.remove(sealed_text) ?? panic("cleanup")
+    if fs.exists(opened_text) -> fs.remove(opened_text) ?? panic("cleanup")
+}

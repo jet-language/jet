@@ -1,0 +1,11 @@
+// Standard output is buffered when it goes to a pipe or a file: bytes leave
+// when the buffer fills or the program ends. Flush when another process must
+// see a line before this one goes on.
+use term: core.term
+
+run: fn() {
+    print("ready")
+    out := term.stdout()
+    out.flush() ?? panic("flush stdout")
+    print("done")
+}

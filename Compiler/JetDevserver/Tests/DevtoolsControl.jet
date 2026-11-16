@@ -1,0 +1,72 @@
+control_test_explain: fn(session_id: String, request_id: String) -> JetDevtoolsCommand {
+    request: JetDevtoolsDatabaseExplainRequest.new("{session_id}", "{request_id}", "users.by_id", 1000, 10) ?? panic("explain request")
+    JetDevtoolsCommand.DatabaseExplain{request: request}
+}
+
+control_test_pause: fn(session_id: String, request_id: String) -> JetDevtoolsCommand {
+    request: JetDevtoolsGameControlRequest.new("{session_id}", "{request_id}", .Pause) ?? panic("pause request")
+    JetDevtoolsCommand.GameControl{request: request}
+}
+
+#Test("requests reject empty, control and out-of-limit fields") {
+    assert(JetDevtoolsDatabaseExplainRequest.new("", "r1", "users.by_id", 1000, 10) == .Err(_))
+    assert(JetDevtoolsDatabaseExplainRequest.new("s1", "r\n1", "users.by_id", 1000, 10) == .Err(_))
+    assert(JetDevtoolsDatabaseExplainRequest.new("s1", "r1", "users.by_id", 0, 10) == .Err(_))
+    assert(JetDevtoolsDatabaseExplainRequest.new("s1", "r1", "users.by_id", 1000, JET_DEVTOOLS_MAX_COMMAND_ROWS + 1) == .Err(_))
+    assert(JetDevtoolsGameControlRequest.new("s1", "r1", .Play) == .Err(_))
+    assert(JetDevtoolsGameControlRequest.new("s1", "r1", .Pause) == .Ok(_))
+    assert(JetDevtoolsGameControlKind.parse("frame_advance") == .Ok(.FrameAdvance))
+    assert(JetDevtoolsGameControlKind.parse("eval") == .Err(_))
+}
+
+#Test("game control spans need both ordered bounds") {
+    request := JetDevtoolsGameControlRequest.new("s1", "r1", .Pause) ?? panic("pause request")
+    request.source_span_start = Val(4)
+    assert(request.validate() == .Err(_))
+    request.source_span_end = Val(4)
+    assert(request.validate() == .Err(_))
+    request.source_span_end = Val(9)
+    assert(request.validate() == .Ok(_))
+}
+
+#Test("the queue keeps FIFO order and polls database commands in place") {
+    queue := JetDevtoolsCommandQueue.new("s1")
+    queue.enqueue(control_test_pause("s1", "g1")) ?? panic("enqueue pause")
+    queue.enqueue(control_test_explain("s1", "d1")) ?? panic("enqueue explain")
+    assert(queue.enqueue(control_test_pause("s2", "g2")) == .Err(_))
+    assert_eq(queue.command_count(), 2)
+    explain: queue.poll_database_explain() ?? panic("database command")
+    assert_eq(explain.request_id, "d1")
+    first: queue.poll() ?? panic("game command")
+    assert_eq(first.request_id(), "g1")
+    assert(queue.poll() == None)
+    queue.requeue_front(control_test_pause("s1", "g1")) ?? panic("requeue")
+    assert_eq(queue.command_count(), 1)
+}
+
+#Test("receipts are sequenced and updated in place") {
+    queue := JetDevtoolsCommandQueue.new("s1")
+    queue.enqueue(control_test_pause("s1", "g1")) ?? panic("enqueue pause")
+    queue.record_receipt(control_test_explain("s1", "d1"), "waiting", None) ?? panic("receipt")
+    queue.update_receipt("g1", "completed", None) ?? panic("update")
+    assert(queue.update_receipt("missing", "completed", None) == .Err(_))
+    receipts: queue.receipts()
+    assert_eq(receipts.len(), 2)
+    assert_eq(receipts[0].sequence, 1)
+    assert_eq(receipts[0].status, "completed")
+    assert_eq(receipts[1].sequence, 2)
+    assert_eq(receipts[1].render_json(), `{"sequence":2,"session_id":"s1","request_id":"d1","kind":"DatabaseExplain","status":"waiting","error":null}`)
+    queue.clear()
+    assert_eq(queue.receipts().len(), 0)
+}
+
+#Test("the command envelope serializes host to runtime") {
+    envelope := JetDevtoolsCommandEnvelope.new("s1", 5)
+    envelope.enqueue_command(control_test_explain("s1", "d1")) ?? panic("enqueue")
+    assert(envelope.enqueue_command(control_test_explain("s2", "d2")) == .Err(_))
+    text: envelope.serialize() ?? panic("serialize")
+    assert_eq(text, `{"protocol":"jet.devtools.v1","session_id":"s1","started_at_ms":5,"direction":"host_to_runtime","commands":[{"kind":"DatabaseExplain","payload":{"session_id":"s1","request_id":"d1","statement_identity":"users.by_id","timeout_ms":1000,"max_rows":10}}]}`)
+    decoded: JetDevtoolsDecodedEnvelope.Commands{envelope: envelope}
+    assert_eq(decoded.session_id(), "s1")
+    assert(decoded.validate() == .Ok(_))
+}

@@ -1,0 +1,188 @@
+// The web dev host `jet dev` runs for a browser program: one listener on
+// 127.0.0.1 serves the generated output root with the live-reload script, the
+// dev status the page polls and the session's devtools frames, and the
+// terminal shows the same status line the page does.
+//
+// Design: one mechanism. The listener is a core.web App (web_host_app) whose
+// GET and POST catch-alls answer through web_host_answer, and all host state
+// is one Shared<WebHostState> that a handler reads with guard_read and notes
+// into with guard_edit. web_host_serve runs the listener's serve in a
+// task.group beside the dev clock: every LIVE_RELOAD_POLL_MS the tick
+// (web_host_tick) is the one writer of the resident session. It applies the
+// client leases, devtools envelopes, selections and browser-trace rows the
+// handlers queued, syncs the browser devtools view from the session,
+// refreshes the recording, command and asset frames the handlers hand out,
+// and draws the terminal. A handler runs with the server's Net and
+// FS.Read only, so it never reads the clock, writes a file or prints; the
+// tick does. There are no threads, locks or atomics, and a publication
+// (web_host_publish) holds the state's edit guard, so no static read sees a
+// half-swapped output root.
+use {
+    jet_foundation.[JetReleaseDevtoolsDeployment, JetReleaseDevtoolsNetwork, JetReleaseDevtoolsPolicy, foundation_json_quote]
+}
+
+// `jet dev` scans these application ports when none is given.
+APPLICATION_PORT_FIRST: 8080
+APPLICATION_PORT_LAST: 8089
+LIVE_RELOAD_POLL_MS: 40
+// 64 MiB: one static answer, the live-reload script included.
+MAX_STATIC_RESPONSE_BYTES: 67108864
+// The most client notes, envelopes or trace rows one tick takes in.
+WEB_HOST_MAX_QUEUED: 256
+WEB_HOST_BIND: "127.0.0.1"
+WEB_HOST_TEXT: "text/plain; charset=utf-8"
+WEB_HOST_JSON: "application/json; charset=utf-8"
+SOURCE_TOOLS_OFF_REASON: "This host runs without Canvas, so source is read and edited elsewhere."
+
+#Error
+WebHostError: struct { message: String }
+
+// The status line's state word and the words after it.
+WebHostWords: struct { word: String, rest: String }
+
+// A frame the tick prepared for a handler to hand out: 200 with the frame,
+// or 500 with why it couldn't be made.
+WebHostFrame: struct { status: Int, body: String }
+
+// What the status line and the page's status poll report. Revisions count
+// builds: `version` is the last published one, `candidate` the one a build
+// in flight or a failed build would publish.
+WebHostFacts: struct {
+    file: String
+    port: Int
+    state: String
+    code: String
+    diagnostic: String
+    last_build_ms: Int
+    candidate: Int?
+    version: Int
+    published: Bool
+    clients: Int
+    reconnecting: Bool
+
+    next_candidate: fn(self) -> Int Never! {
+        if self.published -> self.version + 1 else -> self.version
+    }
+    accepted: fn(self) -> Int? Never! {
+        if self.published -> Val(self.version) else -> None
+    }
+    diagnostic_revision: fn(self) -> Int? Never! {
+        if self.state == "error" -> self.candidate else -> None
+    }
+    building: fn(&self) Never! {
+        self.state = "building"
+        self.code = ""
+        self.diagnostic = ""
+        self.candidate = Val(self.next_candidate())
+    }
+    // A good build; a rebuild publishes the next version.
+    ready: fn(&self, build_ms: Int, rebuild: Bool) Never! {
+        if rebuild -> self.version += 1
+        self.published = true
+        self.state = "ready"
+        self.code = ""
+        self.diagnostic = ""
+        self.last_build_ms = build_ms
+        self.candidate = None
+    }
+    // A failed build keeps the candidate it was building.
+    failed: fn(&self, code: String, diagnostic: String) Never! {
+        self.state = "error"
+        self.code = "{code}"
+        self.diagnostic = "{diagnostic}"
+        if self.candidate == None -> self.candidate = Val(self.next_candidate())
+    }
+    words: fn(self) -> WebHostWords Never! {
+        if self.reconnecting -> return WebHostWords{word: "reconnecting", rest: "waiting for connection"}
+        header_words(self.state, self.file, self.code, self.port, self.clients, self.last_build_ms)
+    }
+    // The dev status the page polls; a reconnect shows over the kept facts.
+    json: fn(self) -> String Never! {
+        words: self.words()
+        message: "{words.word} · {words.rest}"
+        accepted: web_host_int_json(self.accepted())
+        "{{\"version\":{self.version},\"state\":{foundation_json_quote(words.word)},\"message\":{foundation_json_quote(message)},\"file\":{foundation_json_quote(self.file)},\"code\":{foundation_json_quote(self.code)},\"diagnostic\":{foundation_json_quote(self.diagnostic)},\"clients\":{self.clients},\"last_build_ms\":{self.last_build_ms},\"candidate\":{web_host_int_json(self.candidate)},\"diagnostic_revision\":{web_host_int_json(self.diagnostic_revision())},\"accepted_revision\":{accepted},\"last_good_revision\":{accepted}}}"
+    }
+}
+
+// The facts before the first build: version 1, nothing published yet.
+web_host_facts: fn(file: String, port: Int) -> WebHostFacts Never! {
+    WebHostFacts{
+        file: "{file}", port: port, state: "ready", code: "", diagnostic: "", last_build_ms: 0, candidate: None,
+        version: 1, published: false, clients: 0, reconnecting: false,
+    }
+}
+
+web_host_int_json: fn(value: Int?) -> String Never! {
+    if value == .Val(number) -> "{number}" else -> "null"
+}
+
+// Building names the watched file, an error its code, ready the address and
+// the last build's time.
+header_words: fn(state: String, file: String, code: String, port: Int, clients: Int, last_build_ms: Int) -> WebHostWords Never! {
+    plural: if clients == 1 -> "" else -> "s"
+    if state == "building" -> return WebHostWords{word: "building", rest: "{file} · {clients} client{plural}"}
+    if state == "error" -> return WebHostWords{word: "error", rest: "{code} · {clients} client{plural}"}
+    built: if last_build_ms > 0 -> " · built {format_build_time(last_build_ms)}" else -> ""
+    WebHostWords{word: "ready", rest: "localhost:{port} · {clients} client{plural}{built}"}
+}
+
+// Seconds with one decimal, rounded half up.
+format_build_time: fn(ms: Int) -> String Never! {
+    tenths: (ms + 50) /% 100
+    "{tenths /% 10}.{tenths % 10}s"
+}
+
+// The development policy: no release inspect endpoint.
+web_host_development_policy: fn() -> JetReleaseDevtoolsPolicy Never! {
+    JetReleaseDevtoolsPolicy{
+        inspect: None, endpoint: .Absent, authentication: .BearerToken, authority: .LoopbackOrAllowlist, publication: .SiteGated,
+        local_rail: true, panel_code: true, stream_code: true,
+        deployment: JetReleaseDevtoolsDeployment{enabled: false, token: None, allowlist: [JetReleaseDevtoolsNetwork]{}},
+    }
+}
+
+// One host: the status facts, the resident session the tick owns, the
+// handlers' inbox and the frames the tick prepared for them.
+WebHostState: struct {
+    facts: WebHostFacts
+    session: ResidentDevSession
+    session_id: String
+    root: String
+    secret: String
+    policy: JetReleaseDevtoolsPolicy
+    color: Bool
+    // stderr is a terminal and the status block redraws in place.
+    pinned: Bool
+    verbose: Bool
+    trace_enabled: Bool
+    // The browser-trace relay of the current build, at most one.
+    relays: [BrowserTraceRelay]
+    // The relay's nonce, "" when none is open.
+    nonce: String
+    // The handlers' inbox, which the tick empties.
+    noted: [String]
+    dropped: [String]
+    beacons: [[U8]]
+    envelopes: [JetDevtoolsDecodedEnvelope]
+    // Selection bodies the handlers checked, which the tick applies to the
+    // session.
+    selections: [String]
+    // The browser devtools view: the tick syncs it from the session, and the
+    // page, state, reconnect and action routes answer from it.
+    browser: BrowserWebState
+    requests: [String]
+    // Take-once frames the tick refills.
+    commands: WebHostFrame?
+    assets: String?
+    recording: String
+    // Ticks the recording is refreshed for after a page asked for it.
+    recording_ticks: Int
+    // Finished terminal lines the next tick writes.
+    log: [String]
+    dirty: Bool
+    block_lines: Int
+    stopped: String?
+
+    is_release: fn(self) -> Bool Never! { self.policy.inspect != None }
+}

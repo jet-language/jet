@@ -1,0 +1,26 @@
+// Generic lowered function boxes have one aligned reference-count word at
+// byte 0, their entry at 8, and their release helper at 16. Shared read guards
+// may clone the same function value concurrently: the header is not protected
+// by an exclusive Shared lock. Every retain and retirement uses this CAS seam.
+// The caller owns a live reference throughout retain; unref consumes exactly
+// one reference and its true result alone authorizes release of the box.
+// Sync.jet's atomic words perform the access: the caller's owned reference
+// keeps the aligned header live, and the locked compare-exchange publishes one
+// more owner on retain, and on unref gives release ordering and the last
+// owner's acquire before its release helper runs.
+#Export(c) jet_rt_native_closure_retain: fn(boxed: I64) {
+    loop {
+        count: sync_load(boxed)
+        if (count == I64{9223372036854775807}) { jet_rt_panic_overflow() }
+        if (sync_cas(boxed, count, count + I64{1}) == count) {
+            return
+        }
+    }
+}
+
+#Export(c) jet_rt_native_closure_unref: fn(boxed: I64) -> Bool {
+    loop {
+        count: sync_load(boxed)
+        if (sync_cas(boxed, count, count - I64{1}) == count) { return count == I64{1} }
+    }
+}

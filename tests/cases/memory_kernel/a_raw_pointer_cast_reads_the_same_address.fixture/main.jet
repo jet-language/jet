@@ -1,0 +1,14 @@
+use core.mem
+
+run: fn() {
+    cell := 258
+    address: mem.address_of(cell)
+    #Unsafe("each cast names the live local cell, at an alignment its type allows") {
+        whole: mem.Ptr<Int>.from_addr(address)
+        bytes: whole.cast<U8>()
+        print(bytes.*)
+        print(bytes.offset(1).*)
+        back: bytes.cast<Int>()
+        print(back.* + 1)
+    }
+}

@@ -1,0 +1,17 @@
+Error [jet.FixedTimingSteer]: A `Secret` value decides what an indirect call runs (the value it calls has no known body to check)
+  --> tests/ui/taint/fixed_timing_local_function_value_is_not_a_same_named_scrubber.jet:7:17
+    |
+  7 |     set: memcmp(k)
+    |                 ^
+ Why: `Secret` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
+ Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Secret)` function first
+More: jet-lang.dev/e/E0737
+
+Error [jet.FixedTimingSteer]: A `Secret` value decides a branch that can't be masked (an arm returns, breaks, calls, can stop or writes memory)
+  --> tests/ui/taint/fixed_timing_local_function_value_is_not_a_same_named_scrubber.jet:8:8
+    |
+  8 |     if set -> print("set")
+    |        ^^^
+ Why: `Secret` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
+ Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Secret)` function first
+More: jet-lang.dev/e/E0737

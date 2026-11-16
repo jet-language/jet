@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jai vs Jet syntax briefing — 2026-09-16</title>
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --paper: #fffcf7;
+    --ink: #1c1915;
+    --muted: #5c564c;
+    --line: #ddd6c8;
+    --accent: #6b3f12;
+    --settled: #215c3a;
+    --settled-bg: #e7f4eb;
+    --parked: #8a4b12;
+    --parked-bg: #fbeeda;
+    --fact: #1d4d78;
+    --fact-bg: #e7f0f8;
+    --infer: #6a3d6e;
+    --infer-bg: #f6eaf6;
+    --rec: #3d4a1f;
+    --rec-bg: #eef3dc;
+    --code: #f1ebe1;
+    --mono: "Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif;
+    --sans: "Source Sans 3", "IBM Plex Sans", "Segoe UI", sans-serif;
+    --codefont: "IBM Plex Mono", "Source Code Pro", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161410;
+      --paper: #1e1b16;
+      --ink: #f3eee4;
+      --muted: #b7afa2;
+      --line: #3a342b;
+      --accent: #e0b27a;
+      --settled: #9dd4b0;
+      --settled-bg: #1c3326;
+      --parked: #f0c08a;
+      --parked-bg: #3a2a16;
+      --fact: #9ec4e8;
+      --fact-bg: #1b2c3c;
+      --infer: #d9b0dc;
+      --infer-bg: #332436;
+      --rec: #d5e39a;
+      --rec-bg: #2b3218;
+      --code: #2a261f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 17px/1.55 var(--sans);
+  }
+  .wrap {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 52rem);
+    gap: 2rem;
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 6rem;
+  }
+  nav {
+    position: sticky;
+    top: 1rem;
+    align-self: start;
+    max-height: calc(100vh - 2rem);
+    overflow: auto;
+    font-size: 13.5px;
+    line-height: 1.35;
+    border-right: 1px solid var(--line);
+    padding-right: 1rem;
+  }
+  nav a { color: var(--muted); text-decoration: none; display: block; padding: .18rem 0; }
+  nav a:hover { color: var(--accent); }
+  nav .l2 { padding-left: .8rem; }
+  nav strong { display: block; color: var(--ink); margin: .7rem 0 .25rem; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+  main { background: var(--paper); padding: 2rem 2.1rem 3rem; border: 1px solid var(--line); border-radius: 10px; }
+  h1 { font: 800 2rem/1.15 var(--sans); margin: 0 0 .4rem; letter-spacing: -.02em; }
+  h2 { font: 750 1.45rem/1.2 var(--sans); margin: 2.4rem 0 .7rem; padding-top: .4rem; border-top: 1px solid var(--line); }
+  h3 { font: 700 1.15rem/1.25 var(--sans); margin: 1.7rem 0 .5rem; }
+  h4 { font: 650 1rem/1.25 var(--sans); margin: 1.2rem 0 .4rem; }
+  p, li { max-width: 46rem; }
+  .lede { font-size: 1.05rem; color: var(--muted); }
+  code, pre { font-family: var(--codefont); }
+  code { font-size: .9em; background: var(--code); padding: .05em .28em; border-radius: 4px; }
+  pre {
+    background: var(--code);
+    padding: 1rem 1.1rem;
+    overflow: auto;
+    border-radius: 8px;
+    font-size: 13.5px;
+    line-height: 1.45;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; margin: .8rem 0 1.2rem; }
+  th, td { border: 1px solid var(--line); padding: .45rem .55rem; vertical-align: top; text-align: left; }
+  th { background: var(--code); }
+  blockquote {
+    margin: 1rem 0;
+    padding: .2rem 0 .2rem 1rem;
+    border-left: 3px solid var(--accent);
+    color: var(--ink);
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0 1.4rem; }
+  .chip {
+    display: inline-block;
+    padding: .18rem .55rem;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 650;
+  }
+  .settled { background: var(--settled-bg); color: var(--settled); }
+  .parked { background: var(--parked-bg); color: var(--parked); }
+  .fact { background: var(--fact-bg); color: var(--fact); }
+  .infer { background: var(--infer-bg); color: var(--infer); }
+  .rec { background: var(--rec-bg); color: var(--rec); }
+  .box {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: .8rem 1rem;
+    margin: .8rem 0 1.1rem;
+  }
+  .box.settled { background: var(--settled-bg); border-color: transparent; }
+  .box.parked { background: var(--parked-bg); border-color: transparent; }
+  .box.fact { background: var(--fact-bg); border-color: transparent; }
+  .box.infer { background: var(--infer-bg); border-color: transparent; }
+  .box.rec { background: var(--rec-bg); border-color: transparent; }
+  .box h4 { margin-top: 0; }
+  .q { border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem; margin: 1rem 0; }
+  .q .rec-line { font-weight: 650; color: var(--rec); }
+  ol.opts { padding-left: 1.2rem; }
+  ol.opts li { margin: .35rem 0; }
+  .meta { color: var(--muted); font-size: 14px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  @media (max-width: 960px) {
+    .wrap { grid-template-columns: 1fr; }
+    nav { position: static; max-height: none; border: 0; padding: 0 0 1rem; }
+    .pair { grid-template-columns: 1fr; }
+    main { padding: 1.2rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <strong>Frame</strong>
+  <a href="#status">Status</a>
+  <a href="#settled">Settled decisions</a>
+  <a href="#how">How to read this</a>
+  <strong>Languages</strong>
+  <a href="#jai">What Jai is</a>
+  <a href="#jet">What Jet is</a>
+  <a href="#side">Side-by-side syntax</a>
+  <strong>Three surfaces</strong>
+  <a href="#surfaces">The fork</a>
+  <a class="l2" href="#arrow">1. Return type / <code>-&gt;</code></a>
+  <a class="l2" href="#braces">2. Mandatory braces</a>
+  <a class="l2" href="#colon">3. <code>::</code> declarations</a>
+  <strong>Rest of Jai</strong>
+  <a href="#rest">Consider / skip map</a>
+  <a class="l2" href="#c1">Comptime power</a>
+  <a class="l2" href="#c2">Context vs effects</a>
+  <a class="l2" href="#c3">Data-oriented types</a>
+  <a class="l2" href="#c4">Closures</a>
+  <a class="l2" href="#c5">Compiler and build</a>
+  <a class="l2" href="#c6">Leftover gadgets</a>
+  <a href="#imply">Implication for the three</a>
+  <strong>Comptime deep dive</strong>
+  <a href="#blow">Blow’s argument</a>
+  <a href="#caveat">2026 caveat</a>
+  <a href="#jetlaw">Jet’s opposing law</a>
+  <a href="#ladder">Power ladder</a>
+  <a href="#score">Domain score</a>
+  <a href="#strong">Strongest / weakest</a>
+  <a href="#controlled">Controlled AST</a>
+  <strong>Close</strong>
+  <a href="#pending">Pending questions</a>
+  <a href="#inventory">Fact inventory</a>
+  <a href="#gaps">Evidence gaps</a>
+  <a href="#sources">Sources</a>
+</nav>
+<main>
+<p class="meta">Interview briefing · 16 Sep 2026 · not a Tower ballot · no syntax change authorized</p>
+<h1 id="status">Jai vs Jet syntax — interview briefing</h1>
+<p class="lede">A reading copy of the grilling session so far: latest public Jai facts, current Jet law, architectural tradeoffs, and the questions still waiting for answers. Keep/change votes on <code>-&gt;</code>, braces, and <code>::</code> remain parked until you say the map is enough.</p>
+
+<div class="chips">
+  <span class="chip settled">Interview in progress</span>
+  <span class="chip parked">Three surfaces parked</span>
+  <span class="chip fact">Jai still closed-beta</span>
+  <span class="chip rec">Next: answer pending comptime questions</span>
+</div>
+
+<div class="box parked">
+  <h4>Paused here on purpose</h4>
+  <p>You asked to read first, then continue. This file is the whole map as of this pause. After you read it, we resume the interview at the pending comptime questions. Nothing in here is a keep/change vote.</p>
+</div>
+
+<h2 id="settled">Settled session frame</h2>
+<p>These are your answers so far. They shape what this document is for.</p>
+<table>
+  <tr><th>Decision</th><th>Your call</th></tr>
+  <tr><td>When this grill is done</td><td>Accurate Jai model <em>and</em> a keep/change call on the three surfaces. No Tower ballot or implementation in this session.</td></tr>
+  <tr><td>Scope</td><td>Full Jai language comparison, not only the three spellings.</td></tr>
+  <tr><td>Bar for changing Jet</td><td>Reopen for a strictly better single mechanism, <em>or</em> for a non-negligible aesthetic improvement. No dual spelling.</td></tr>
+  <tr><td>Everything else in Jai</td><td>Consider/skip list. Keep/change votes stay on the three named surfaces.</td></tr>
+  <tr><td>Cutover cost</td><td>Syntax is still greenfield. One canonical rewrite of examples/tests/snapshots is acceptable if the bar is met.</td></tr>
+  <tr><td>Jai source of truth</td><td>Discuss the mechanisms <em>and</em> the latest surfaces/syntax, from whatever public evidence exists. Glyphs may still move.</td></tr>
+  <tr><td>Discussion spine</td><td>Walk remaining Jai clusters before returning to the three. Order by what could drive later decisions.</td></tr>
+  <tr><td>Domain lens</td><td>Jai is trying to be an excellent game language. Jet must be excellent across all required domains. Score each cluster on its own; no blanket domain veto.</td></tr>
+  <tr><td>Comptime law while comparing</td><td>Leaning toward a split: keep no-AST-macros, but can consider controlled AST mods if justified. You wanted Jonathan Blow’s case for why full control is acceptable (that case is in this file).</td></tr>
+  <tr><td>After the cluster walk</td><td>Deepen comptime (cluster 1). That is where we paused.</td></tr>
+  <tr><td><code>-&gt;</code> / braces / <code>::</code></td><td><strong>Parked.</strong> Learn and compare first; decide after the map.</td></tr>
+</table>
+
+<h2 id="how">How to read this</h2>
+<ul>
+  <li><span class="chip fact">Fact</span> — pinned to a source, a Jet decision id, or current Jet code/examples.</li>
+  <li><span class="chip infer">Inference</span> — a coupling or judgment built from facts. Marked when it is not in a source.</li>
+  <li><span class="chip parked">Parked</span> — a keep/change call you have not made yet.</li>
+  <li><span class="chip rec">Recommendation</span> — the interviewer’s suggested answer when a question is still open. Not your decision.</li>
+</ul>
+<div class="box fact">
+  <p><strong>Epistemic bound.</strong> Jai is still closed-beta. There is no public official spec or compiler. Blow (Wookash, 2026-01-24) is still changing basic features and still plans a syntax rewrite. Community tutorials lag (stale <code>&lt;&lt;</code> deref vs <code>.star</code>). Steal arguments, not 2026 glyphs. Jet facts are from checkout <code>fdfb2b4960522f87ab5436b3e8720fcd59956c22</code> on 2026-09-16.</p>
+</div>
+
+<h2 id="jai">What Jai actually is</h2>
+<p>Jai’s bet is not “nice procedure syntax.” It is: <strong>the compile-time program is the same language as the runtime program</strong>, sharing functions, data, and memory. The compiler is a bytecode interpreter plus an AST/message loop. User code can <code>#run</code>, inspect/modify AST, <code>#insert</code> code, and bake specialized copies.</p>
+<p>Blow’s 2026 demo of that model: a compile-time plugin rewrote only real pointer-derefs across roughly 300k LOC, comments and formatting intact, when <code>&lt;&lt;</code> deref became <code>.star</code> and <code>&lt;&lt;</code> stayed left shift.</p>
+<p>The three spellings you named are <em>consequences</em> of “everything interesting is a constant value.”</p>
+<pre>square :: (x: float) -> float { return x * x; }
+PI     :: 3.14159
+Vec2   :: struct { x, y: float; }
+lam    :: (a, b) => a + b</pre>
+<table>
+  <tr><th>Glyph</th><th>Current documented meaning (beta 0.2.024 / wiki 2026)</th></tr>
+  <tr><td><code>::</code></td><td>Immutable <strong>compile-time constant</strong>. Numbers, types, structs, procedures.</td></tr>
+  <tr><td><code>:=</code></td><td>Inferred mutable <strong>runtime</strong> variable.</td></tr>
+  <tr><td><code>=</code></td><td>Assign an existing variable. Typed forms: <code>name: Type : value</code> and <code>name: Type = value</code>.</td></tr>
+  <tr><td><code>-&gt;</code></td><td><strong>Return type(s)</strong> — comma-separated registers, not a tuple object. May omit <code>-&gt;</code> or write <code>-&gt; void</code>.</td></tr>
+  <tr><td><code>{ }</code></td><td>Ordinary procedure/macro <strong>body</strong>. Documented one-liners still brace.</td></tr>
+  <tr><td><code>=&gt;</code></td><td>Separate expression lambda. <strong>No closures / capture blocks.</strong></td></tr>
+  <tr><td><code>#run</code></td><td>Execute at compile time; bind the result as a constant. Bytecode of the same language.</td></tr>
+  <tr><td><code>$T</code></td><td>Compile-time specialization: a distinct baked copy per call site, no runtime dispatch.</td></tr>
+</table>
+<p>There is no <code>fn</code> keyword. A procedure <em>is</em> a constant whose type is <code>(int, int) -&gt; int</code>. You can take its address, store it, <code>#run</code> it, or specialize it. <code>::</code> is not a function keyword; it is the one declaration form.</p>
+<p>Control <code>if</code> / <code>while</code> / <code>for</code> may be a <strong>bare statement</strong> (wiki). So “braces on every one-liner” is <strong>stricter than Jai</strong>, closer to Go, and only matches Jai for ordinary proc bodies.</p>
+<p>Blow in 2015 called <code>-&gt;</code> “superfluous” and floated removing it. It is still there. Treat current glyphs as unstable; the model is stable.</p>
+<p>Other latest public facts:</p>
+<ul>
+  <li>Ship plan is not a promise: <em>Order of the Sinking Star</em> first, then engine source and a binary compiler a small number of months later, compiler source eventually.</li>
+  <li>Macros operate on parsed, <strong>not-yet-type-checked</strong> trees. Easy strongly typed, debuggable Lisp-style rewrites remain a major unresolved semantic question (2024–2026 blocker, with cross-compilation and DLL/context).</li>
+  <li>Compiler is out-of-order / multi-pass. No forward declarations. User-level context-entry order was described as nondeterministic.</li>
+  <li>SOA as a language feature was <strong>removed</strong> and replaced by generalized <code>#insert</code>. Constructors/destructors, <code>#must</code>, and the C backend are gone.</li>
+  <li>A syntax rewrite is still official plan and may change operators or precedence.</li>
+</ul>
+
+<h2 id="jet">What Jet actually is</h2>
+<p>Jet already stole Jai’s <em>binding</em> glyphs, then <strong>deliberately did not</strong> steal Jai’s procedure form.</p>
+<pre>fn greet(who: String) String -&gt; "hello, {who}"
+fn twice(n: Int) Int -&gt; { adjusted :: n + 1; adjusted * 2 }
+fn _report(value: Int) { print("report {value}") }
+fn load(path: String) String -[IO]&gt; { ... }
+
+double_fn :: double                  // function value via ::
+apply_twice((x: Int) -&gt; (x + 1), 5)  // lambda: -&gt; is the body
+if n == 0 -&gt; return 7                // same arrow</pre>
+<p>Ratified late August 2026, cards #2144 / <code>D-SIG-SHAPE1=B</code> / <code>D-CALLABLE-ONE1=A</code>:</p>
+<ul>
+  <li>Return facts sit <strong>bare after params</strong>.</li>
+  <li><code>-&gt;</code> is the <strong>one body marker</strong> in the whole language (functions, lambdas, if, loop, match arms, <code>impl A -&gt; B</code>).</li>
+  <li>Effect ceiling <strong>replaces</strong> that arrow: <code>-[IO]&gt;</code>. Pure / open-row: <code>-[]&gt;</code> / <code>-[..E]&gt;</code>.</li>
+  <li><code>::</code> was retired as a function-body marker so it means only “immutable bind.”</li>
+  <li>Uniformity was defined as <strong>two body forms everywhere</strong>: <code>-&gt;</code> for one expression, <code>{ }</code> for many — not as “always braces.”</li>
+  <li>Named functions already coerce to values (<code>double_fn :: double</code>). <code>name :: fn(...)</code> is <strong>not</strong> legal; <code>fn</code> is an item/type keyword, not a value constructor. Inference from parser: unhandled <code>fn</code> in value position is E0003.</li>
+  <li><code>const</code> is retired. Comptime demand is <code>@name :: expr</code>. <code>@ { … }</code> is the documented Jai <code>#run</code> analog for <em>values</em>.</li>
+  <li><strong><code>D-METAMUTATE1=A</code> rejects Jai-style AST mutation, message loop, and user macros.</strong> Power is additive generated modules, read-only <code>core.compiler</code>, and a stdlib DSL whitelist.</li>
+</ul>
+<p>Philosophy ranked priorities (from <code>docs/spec/philosophy.md</code>):</p>
+<ol>
+  <li>Memory and type safety; safe by default, explicit audited unsafe escape.</li>
+  <li>Beginner experience: useful defaults, little ceremony, errors that explain what / why / how.</li>
+  <li>Runtime performance; no hidden runtime overhead for convenient syntax.</li>
+  <li>One mechanism: one semantic path per operation.</li>
+  <li>Implementation simplicity and compile speed, subordinate to the earlier priorities.</li>
+</ol>
+<p>Cross-cutting guards: <strong>I7</strong> owner-controlled surface (every user-typable keyword/sigil lives in Syntax.rs); <strong>I8 / S14</strong> one canonical spelling, no aliases; greenfield cutover of retired spellings is ordinary error, not dual form.</p>
+<p>Owner reading-first slate, as used in this grill: <strong>reason, then read, then write.</strong></p>
+
+<h2 id="side">Side-by-side syntax</h2>
+<div class="pair">
+<pre># Jai (documented)
+add :: (a: int, b: int) -&gt; int {
+    return a + b;
+}
+
+greet :: () {
+    print("hi");
+}
+
+lam :: (a, b) =&gt; a + b
+
+double_ptr : (int) -&gt; int = add   # procedure as value
+</pre>
+<pre># Jet (current, compiling examples)
+fn add(a: Int, b: Int) Int -&gt; {
+    a + b
+}
+
+fn greet() { print("hi") }
+
+lam :: (a: Int, b: Int) -&gt; a + b
+
+double_fn :: add
+f: fn(Int, Int) Int
+</pre>
+</div>
+<table>
+  <tr><th></th><th>Jai</th><th>Jet</th></tr>
+  <tr><td>Named function</td><td><code>name :: (params) -&gt; T { body }</code></td><td><code>fn name(params) T -&gt; body</code></td></tr>
+  <tr><td>Unit / no return</td><td>omit <code>-&gt;</code> or <code>-&gt; void</code>, still braces</td><td><code>fn name() { ... }</code> — no body arrow</td></tr>
+  <tr><td>One-line function</td><td>documented examples still use <code>{ }</code></td><td><code>fn f(n: Int) Int -&gt; n * 2</code></td></tr>
+  <tr><td>Return type position</td><td>after <code>-&gt;</code></td><td>bare, after params, <em>before</em> <code>-&gt;</code></td></tr>
+  <tr><td>What <code>-&gt;</code> means</td><td>type of the procedure value</td><td>body of the callable / control</td></tr>
+  <tr><td>Effects</td><td>implicit <code>context</code></td><td>fused arrow <code>-[IO]&gt;</code></td></tr>
+  <tr><td>Function type</td><td><code>(int, int) -&gt; int</code></td><td><code>fn(Int, Int) Int</code> (no <code>-&gt;</code> between <code>)</code> and result)</td></tr>
+  <tr><td>Lambda</td><td><code>(a,b) =&gt; a+b</code>, no capture</td><td><code>(x: Int) -&gt; x + 1</code></td></tr>
+  <tr><td>Control one-liners</td><td>bare statement allowed</td><td><code>if cond -&gt; stmt</code> / <code>loop x in xs -&gt; stmt</code></td></tr>
+  <tr><td>Immutable bind</td><td><code>name :: expr</code> (compile-time constant, including procs)</td><td><code>name :: expr</code> (immutable bind; not a function-body marker)</td></tr>
+  <tr><td>Mutable bind</td><td><code>name := expr</code></td><td><code>name := expr</code></td></tr>
+  <tr><td>Entry</td><td>no Jet-style <code>fn run</code></td><td><code>fn run()</code> is the program entry</td></tr>
+  <tr><td>Methods / traits</td><td>avoided by philosophy</td><td>methods, <code>impl</code>, traits</td></tr>
+</table>
+<p>Real Jet examples used in this grill:</p>
+<ul>
+  <li><code>examples/features/basics/body_rules.jet</code> — value functions, tail expressions, unit functions, if/loop arrows.</li>
+  <li><code>examples/features/basics/callbacks.jet</code> — <code>fn(Int) Int</code> types, <code>double_fn :: double</code>, lambdas.</li>
+  <li><code>examples/features/functions/named_function_value.jet</code> — passing a named fn and a lambda as values.</li>
+</ul>
+
+<h2 id="surfaces">The three surfaces, with the architecture attached</h2>
+<p>These are not three independent cosmetics. They are one fork:</p>
+<pre>Jai:  name :: (params) -&gt; Type { body }
+      └ bind ┘ └ type of the value ┘ └ body ┘
+
+Jet:  fn name(params) Type -&gt; body
+      └ item ┘        └ facts ┘ └ body / effects ┘</pre>
+
+<h3 id="arrow">1. Return type after <code>-&gt;</code></h3>
+<p><strong>Jai/Rust:</strong> <code>-&gt;</code> is a type arrow. Body is braces (or <code>=&gt;</code> for lambdas).<br>
+<strong>Jet:</strong> <code>-&gt;</code> is a body arrow. Type is already written. Effects fuse into the same glyph.</p>
+<table>
+  <tr><th></th><th>After <code>-&gt;</code> (Jai/Rust)</th><th>Before <code>-&gt;</code> (current Jet)</th></tr>
+  <tr><td><strong>Strategic</strong></td><td>Signature reads name → args → result. Matches math <code>A → B</code> and Rust/TS.</td><td>One meaning for <code>-&gt;</code> everywhere. Card #2144’s explicit goal: stop <code>-&gt;</code> meaning type in a signature and value in an arm.</td></tr>
+  <tr><td><strong>Operational</strong></td><td>Need a <em>different</em> body introducer (<code>{ }</code>, or revive <code>=&gt;</code>, which Jet just retired). Effect row currently <em>is</em> the body arrow (<code>-[IO]&gt;</code>). Function types are <code>fn(Int) Int</code>, not <code>fn(Int) -&gt; Int</code> — a third site.</td><td>Parser, fmt, 600+ examples already migrated. Old <code>-&gt; T</code> is a teaching error (E0003). Parser still recognizes old <code>-&gt; T</code> / <code>::</code> / <code>=</code> only for recovery.</td></tr>
+  <tr><td><strong>Tactical</strong></td><td>Familiar paste from Rust. Ambiguous if <code>-&gt;</code> also opens if-bodies: <code>fn f() -&gt; Int -&gt; 1</code> is unreadable.</td><td><code>fn f() Int -&gt; 1</code> is regular with <code>if cond -&gt; 1</code>. Cost: looks “backwards” to Rust readers.</td></tr>
+  <tr><td><strong>Beginner</strong></td><td>“Arrow means returns.”</td><td>“Arrow means here’s the body.” One lesson, used in if/match/lambda too.</td></tr>
+  <tr><td><strong>Aesthetic</strong></td><td>Non-negligible for Rust/TS people. Your change bar allows this if it is a real win.</td><td>Non-negligible once you see if/match using the same arrow.</td></tr>
+</table>
+<div class="box infer">
+  <p><strong>Coupling.</strong> You cannot put the return type after <code>-&gt;</code> <em>and</em> keep <code>-&gt;</code> as the body marker without splitting the glyph. That is a new mechanism or a reversal of the unified-arrow law, not a reskin.</p>
+  <p><strong>Blow’s own doubt:</strong> he considered dropping <code>-&gt;</code> entirely. Copying it as “Jai-correct” copies a glyph he has not committed to.</p>
+</div>
+<p>Failure contracts in Jet sit in the same post-parameter zone as success types: <code>?Success !NamedError</code>, <code>fn save(path: String) !IOError</code> with no body arrow and no written unit.</p>
+
+<h3 id="braces">2. Mandatory <code>{ }</code> even on one-liners</h3>
+<p>Documented Jai: braces on ordinary <strong>procedures</strong>; <strong>not</strong> on if/for/while; <strong>not</strong> on <code>=&gt;</code> lambdas.<br>
+Your original proposal is Go-like for control flow, Jai-like for procs, and <strong>stricter than both</strong> if applied to Jet if/loop/lambda.</p>
+<table>
+  <tr><th></th><th>Always <code>{ }</code></th><th>Current Jet <code>-&gt; expr</code> / <code>{ block }</code></th></tr>
+  <tr><td><strong>Strategic</strong></td><td>One body form. Layout and copy-paste cannot lie.</td><td>Two forms, one rule: one expression vs many. That <em>is</em> the ratified uniformity. Philosophy: friction vs commonality.</td></tr>
+  <tr><td><strong>Operational</strong></td><td>Parser/fmt/snapshots simpler if <code>{ }</code> is the only body. Becomes <strong>required</strong> if <code>-&gt;</code> is reclaimed for types.</td><td>Current grammar already unambiguous (no C dangling-else). <code>if cond -&gt; stmt</code> is not “optional braces”; <code>-&gt;</code> is the body.</td></tr>
+  <tr><td><strong>Tactical</strong></td><td><code>fn f() Int { 1 }</code> or <code>fn f() -&gt; Int { 1 }</code>. Extra two tokens on the common helper.</td><td><code>fn f() Int -&gt; 1</code> and <code>if n == 0 -&gt; return 7</code>.</td></tr>
+  <tr><td><strong>Safety</strong></td><td>Strong in C/JS, where braces are optional. Weak in Jet, where bodies are introduced, not inferred from indent/next-stmt.</td><td>Braces group multiple statements or scoped effects; they do not themselves determine a return value. Final expression is the value; <code>return</code> is early exit.</td></tr>
+  <tr><td><strong>Jai fidelity</strong></td><td>Overshoots Jai on control. Matches Jai on procs.</td><td>Closer to Jai control than Go is.</td></tr>
+</table>
+<div class="box infer">
+  <p><strong>Coupling.</strong> If the arrow stays the body marker, mandatory braces <em>delete</em> the one-expression form and fight the “same two forms everywhere” law. If the arrow becomes a type marker, braces (or a revived <code>=&gt;</code>) <em>must</em> take the body.</p>
+  <p><span class="chip infer">Inference:</span> brace requirement for ordinary Jai procedure bodies is strongly supported by current docs, but no public compiler negative test proving brace omission is rejected was found.</p>
+</div>
+<p>Jet brace rules by construct:</p>
+<table>
+  <tr><th>Construct</th><th>Rule</th><th>Braceless body?</th></tr>
+  <tr><td>Value-returning <code>fn</code></td><td><code>-&gt; expr</code> or <code>-&gt; { ... }</code>. Braced value body still has the arrow.</td><td>Yes, via the one-expression form.</td></tr>
+  <tr><td>Unit / plain-fallible <code>fn</code></td><td>Bare braces. Unit-fallible omits body arrow and written unit.</td><td>No ordinary braceless form.</td></tr>
+  <tr><td><code>if</code> / <code>else</code></td><td><code>if cond -&gt; stmt</code>; value arms <code>-&gt; expr</code>; scoped <code>-&gt; { ... }</code>.</td><td>Yes.</td></tr>
+  <tr><td><code>loop</code></td><td>Header may use <code>-&gt; statement</code> (value discarded) or value form.</td><td>Yes.</td></tr>
+  <tr><td><code>for</code> / <code>while</code></td><td>Not Jet keywords. Foreign-word diagnostics only.</td><td>No valid body.</td></tr>
+  <tr><td>Lambda</td><td><code>(params) -&gt; expr</code> or <code>(params) -&gt; { ... }</code>.</td><td>Yes.</td></tr>
+</table>
+
+<h3 id="colon">3. <code>myFunc :: fn(...)</code> vs <code>fn myFunc(...)</code></h3>
+<p>This is the one that actually touches Jai’s architecture. The spelling is the small part.</p>
+<p><strong>What Jai buys with “a procedure is a constant”:</strong></p>
+<ul>
+  <li>One declaration form: values, types, procs.</li>
+  <li>Out-of-order compile: a name is a constant in a pool, not a sequential item.</li>
+  <li>The same proc value is callable at runtime, <code>#run</code> at compile time, specialized with <code>$T</code>, passed as a pointer, or <code>#insert</code>ed.</li>
+  <li>No <code>fn</code> keyword to teach; the cost is “why does a function look like <code>PI :: 3</code>?”</li>
+</ul>
+<p><strong>What Jet already has:</strong></p>
+<ul>
+  <li><code>::</code> / <code>:=</code> / <code>=</code> (Jai’s trio, minus Jai’s <code>: Type :</code> / <code>: Type =</code>; Jet forbids <code>name: Type ::</code> — types belong on values, signatures, and fields).</li>
+  <li>Function <em>values</em>: <code>double_fn :: double</code>. Named fns coerce when referenced without a call if parameters have plain read access.</li>
+  <li>Lambdas already bind like Jai: <code>f :: (x: Int) -&gt; x + 1</code>.</li>
+  <li>Named <code>fn greet(...)</code> is a <strong>second declaration form</strong> (an item). That is the real inconsistency.</li>
+  <li>Historical Jet used <code>::</code> as a <em>function body</em> marker; it was removed so <code>::</code> could stay “bind only.” Putting functions on the right-hand side of <code>::</code> <strong>restores</strong> that one meaning, which is aligned.</li>
+</ul>
+<p><strong>What Jet has rejected that Jai’s <code>::</code> is for:</strong> AST mutation / macros / compiler message loop (<code>D-METAMUTATE1=A</code>). That is the mechanism that made the 300k-LOC <code>.star</code> rewrite a user-space plugin rather than a compiler patch.</p>
+<table>
+  <tr><th></th><th>Jai <code>name :: (params) -&gt; T { }</code></th><th>Hybrid <code>name :: fn(params) T -&gt; body</code></th><th>Current <code>fn name(params) T -&gt; body</code></th></tr>
+  <tr><td><strong>Strategic</strong></td><td>Max declaration uniformity. Beginners don’t see “function”; they see a constant. Fights Jet beginner priority unless <code>fn</code> stays as the value constructor.</td><td>Keeps <code>fn</code> as “this is a callable,” unifies named functions with <code>::</code>. Closest to existing lambdas.</td><td>Beginner-obvious. Second declaration form. Values are a coercion from items.</td></tr>
+  <tr><td><strong>Operational</strong></td><td>Need a story for <code>pub</code>, methods, traits, impl, <code>fn run</code> entry, function types. Jai mostly avoids member functions.</td><td>Same story, but <code>fn</code> still exists as constructor <em>and</em> type, like Rust’s <code>fn</code>.</td><td>Status quo. Item grammar, then coerce to value. Two paths in sema (item vs lambda).</td></tr>
+  <tr><td><strong>Architectural gain</strong></td><td>Real iff compile-time can <em>use</em> proc values the way Jai does (<code>#run</code>, <code>$T</code> bake, AST). Without that, you paid a beginner/parser bill for a uniformity slogan.</td><td>Same: gain is “one value path,” not “looks like Jai.”</td><td>Two paths, but you already pass <code>double</code> and lambdas through <code>fn(Int) Int</code>.</td></tr>
+  <tr><td><strong>I8</strong></td><td>One declaration mechanism. Two body mechanisms (<code>{ }</code> vs <code>=&gt;</code>).</td><td>One bind mechanism. <code>fn</code> is the callable constructor, not a second bind.</td><td>One named-item mechanism. Bind is only for values.</td></tr>
+</table>
+<div class="box infer">
+  <p><strong>Important.</strong> Jet cannot get Jai’s <em>payoff</em> from <code>::</code> without reopening <code>D-METAMUTATE1</code> <em>or</em> building an equally powerful non-mutating comptime (run the same functions at compile time, specialize, generate modules). Uniform spelling without that is aesthetics plus a simpler mental model — real, but not the Jai architecture.</p>
+  <p><span class="chip infer">Inference:</span> the <code>::</code> token itself is not the architectural cause of compile-time metaprogramming. The coupling is procedure/type/code values being inspectable, executable, specialized, and inserted during compilation.</p>
+</div>
+
+<h2 id="rest">Rest of Jai — consider/skip analysis (not a vote)</h2>
+<p>Working rule for this walk: latest Jai glyphs where we have them; mechanisms underneath even when glyphs will move; every cluster scored as a game-local win vs a tax on Jet’s all-domain job.</p>
+<p>Jai’s excellence function is roughly: one (or a few) systems programmers, a game/engine, data-oriented, frame-budget honest, compile-time baking, implicit allocator/log context, no OOP tax. Jet’s is: memory-safe default, beginners first, <strong>every</strong> required domain, enterprise audit, one meaning across AOT/JIT/interpreter. Copying a game-local optimum as <em>language law</em> can foreclose a domain.</p>
+<p>You asked to score each cluster on its own, so the tables below do that. No blanket veto.</p>
+
+<table>
+  <tr><th>Mechanism</th><th>Latest public fact</th><th>Jet analog</th><th>Coupled to the three?</th><th>Analysis</th></tr>
+  <tr><td>Same-language <code>#run</code></td><td>Core; Blow would call it a different language without it</td><td><code>@ { }</code>, <code>@name ::</code>, implicit fold</td><td>Yes — needs procs as values</td><td>The real architectural steal. Independent of <code>-&gt;</code> position.</td></tr>
+  <tr><td>AST mutate / message loop</td><td>2026 still the unresolved macro question; blocker</td><td><strong>Rejected</strong> <code>D-METAMUTATE1=A</code>; <code>core.compiler</code> is read-only</td><td>Yes — this is why procs/types/code are data</td><td>Do not smuggle this in via <code>::</code> spelling. Reopen only as its own decision.</td></tr>
+  <tr><td><code>$T</code> bake / no vtable</td><td>Each call site gets a typed copy</td><td>Jet generics / monomorph (e.g. <code>fn id&lt;T&gt;(x: ^T) T -&gt; x</code>)</td><td>Weakly — wants proc/type values</td><td>Compare generics/monomorph, don’t copy <code>$</code>.</td></tr>
+  <tr><td>Implicit context</td><td>Allocator/log stack; DLL-context still a blocker</td><td>Explicit <code>-[IO]&gt;</code> effect rows</td><td>No</td><td>Opposite philosophies: Jai implicit, Jet declared.</td></tr>
+  <tr><td><code>using</code></td><td>Semantics already changed in-Jai</td><td>Jet <code>use</code></td><td>No</td><td>Skip as moving target.</td></tr>
+  <tr><td>SOA</td><td><strong>Removed</strong>; replaced by <code>#insert</code></td><td>—</td><td>No</td><td>Lesson: don’t bake SOA into the language.</td></tr>
+  <tr><td>Multiple register returns</td><td>Not tuples, on purpose; <code>#must</code> removed</td><td>Jet Result / <code>!Error</code>, tuples not the Jai model</td><td>Weak</td><td>Separate from <code>-&gt;</code> <em>position</em>; it is what <code>-&gt;</code> <em>contains</em>.</td></tr>
+  <tr><td>No closures</td><td><code>=&gt;</code> lambdas don’t capture</td><td>Jet lambdas are first-class values; capture law not fully pinned in the fact brief</td><td>No</td><td>Jai choice is anti-hidden-alloc (perf).</td></tr>
+  <tr><td>No methods / no RAII / no inheritance</td><td>Procedural data + procs</td><td>Jet has methods, traits, <code>defer</code></td><td>Yes for <code>::</code> cutover</td><td>A Jai proc-as-const cutover must still explain <code>self</code> methods.</td></tr>
+  <tr><td>Out-of-order / no headers</td><td>Multi-pass job system</td><td>Jet modules + BuildPlan graph; not Jai’s compiler</td><td>Weak</td><td>Compiler architecture, not surface.</td></tr>
+  <tr><td>Syntax rewrite still planned</td><td>Operators/precedence may move</td><td>—</td><td>Yes</td><td>Steal <strong>arguments</strong>, not 2026 glyphs.</td></tr>
+</table>
+
+<h3 id="c1">Cluster 1 — What compile time is allowed to do</h3>
+<p>This is the root. <code>::</code>, <code>#run</code>, <code>$T</code>, macros, and “procs are constants” all hang off it. Deep dive is below; summary here.</p>
+<p><strong>Jai.</strong> Compile-time is the same language. <code>#run</code> executes ordinary procedures in the compiler’s bytecode interpreter. Macros operate on parsed, not-yet-type-checked trees. <code>$T</code> bakes a fresh typed procedure per call site. A user plugin can rewrite 300k LOC. Blow: remove arbitrary compile-time execution and it is a different language. Open hole: easy, typed, debuggable Lisp-style rewrites.</p>
+<p><strong>Jet.</strong> <code>S26</code>: comptime is <strong>value-only</strong>. It must not create, parameterize, or select a type, and must not affect dispatch. Type-check first, then a fuel-limited interpreter. Pure Jet is comptime-callable with no annotation. Rejected in that decision: token/AST/attribute macros, custom syntax, comptime types, const generics in v1. <code>D-METAMUTATE1=A</code>: no Jai AST mutation. Power is generated modules, read-only <code>core.compiler</code>, stdlib DSL whitelist. <code>@name ::</code> / <code>@ { }</code> is the <code>#run</code> <em>analog</em>, not the <code>#run</code> <em>power</em>.</p>
+<table>
+  <tr><th>Lens</th><th>Jai</th><th>Jet</th></tr>
+  <tr><td><strong>Games</strong></td><td>Bake animation tables, generate SOA layouts, rewrite APIs in-tree, specialize render paths per type. This is the product.</td><td>Fold values and emit generated modules. Cannot mint a type or rewrite the AST of the game. Asset pipelines want the Jai power; Jet says do it as codegen <em>beside</em> the program, not inside it.</td></tr>
+  <tr><td><strong>Web / GUI / AI / enterprise</strong></td><td>Unchecked AST macros are a supply-chain and diagnostic disaster. Blow still has not closed typed macros.</td><td>Type-checked-first comptime is the all-domain win: agents can repair it, I4 diagnostics exist, I3 sema owns checks.</td></tr>
+  <tr><td><strong>Embedded</strong></td><td><code>#run</code> can emit register maps. Also can explode compile nondeterminism (context-entry order).</td><td>Value comptime + generated overlays fit firmware tables without a second language.</td></tr>
+</table>
+<div class="box infer">
+  <p><code>name :: fn(...)</code> only <em>pays</em> if a procedure value is a compile-time object you can run, specialize, or insert. Under <code>S26</code> + <code>D-METAMUTATE1</code>, a named function is already a runtime value you can bind. Uniform spelling is then mostly a mental-model/aesthetic win, not Jai’s architecture. Reopening comptime-types / AST macros <em>would</em> make the Jai declaration form load-bearing. That is a strategic language change, not a syntax tweak.</p>
+</div>
+
+<h3 id="c2">Cluster 2 — Implicit ambient state: <code>context</code> vs <code>-[IO]&gt;</code></h3>
+<p><strong>Jai.</strong> Every procedure gets a hidden <code>context</code>: allocator, temp allocator, logger, assertion handler, format config, plus <code>#add_context</code> fields. <code>push_context</code> scopes a replacement. <code>#no_context</code> opts out. This is how you don’t pass an allocator through every engine call. DLL/context interaction is still a <strong>release blocker</strong>.</p>
+<p><strong>Jet.</strong> Effects are <strong>declared</strong> on the callable: <code>fn load(...) String -[IO]&gt;</code>. Package <code>effects: { allow, deny }</code> is auditable. Beginner default is implicit fallibility, but the <em>capability</em> is in the signature, not a thread-local struct. No hidden allocator parameter.</p>
+<table>
+  <tr><th>Lens</th><th>Jai context</th><th>Jet effects</th></tr>
+  <tr><td><strong>Games</strong></td><td>Correct default. Frame bump allocator in context, swap per mode, don’t infect every signature.</td><td>Explicit <code>-[Mem]&gt;</code> on hot functions is ceremony in an engine. Experts can want a scoped default allocator — that is an <em>allocator API</em> question, not a reason to hide IO/net.</td></tr>
+  <tr><td><strong>Web</strong></td><td>Request isolation vs a process-global context is a footgun. Hidden allocator/log across awaits/threads is how you leak and confuse.</td><td>Signature-level effects are the audit story.</td></tr>
+  <tr><td><strong>Embedded</strong></td><td>One global allocator in context can be fine. Also hides “this ISR must not allocate.”</td><td>Effects + runtime <code>alloc</code> vs <code>hosted</code> already exist as a Jet axis.</td></tr>
+  <tr><td><strong>Enterprise</strong></td><td>Hidden control fails auditability.</td><td>Declared effects are the point.</td></tr>
+</table>
+<p><strong>Architectural consequence.</strong> Jai hides the common ambient (allocator) because games pass it everywhere. Jet reveals effects because “everywhere” is a different set per domain. Copying context as language law <strong>forecloses</strong> the web/enterprise story. Copying it as an <strong>opt-in allocator parameter convention</strong> (expert) is compatible with Jet if it does not become a second hidden-capability mechanism beside effects (I8).</p>
+<p>Does not drive <code>-&gt;</code> position. Weakly drives whether function types must mention context/effects (<code>fn(Int) Int</code> vs <code>fn(Int) Int -[IO]&gt;</code> — Jet already did this).</p>
+
+<h3 id="c3">Cluster 3 — Data-oriented types: no methods, <code>using</code>, SOA, <code>$T/interface</code></h3>
+<p><strong>Jai latest.</strong> SOA <strong>removed</strong>, replaced by generalized <code>#insert</code>. <code>using</code> semantics <strong>changed</strong>. Constructors/destructors/RAII/inheritance/member functions are avoided by philosophy. Polymorphism: <code>$T</code> bake, plus <code>$T/interface Object</code> structural, plus <code>using #as</code> as a trait-ish pattern. <code>#this</code> is the enclosing type/proc. Data is structs + procedures.</p>
+<p><strong>Jet.</strong> Methods, traits, <code>impl</code>, generics. <code>defer</code> exists. This is how web, GUI, stdlib, and beginner <code>.</code> completion work.</p>
+<table>
+  <tr><th>Lens</th><th>Jai</th><th>Jet</th></tr>
+  <tr><td><strong>Games</strong></td><td>Methods + vtables + ctors are cache and lifetime lies. Bake and data layout win. Dropping SOA as a <em>language</em> feature is a lesson: it was too special-case even for Blow.</td><td>Games still need data-oriented <em>libraries</em> (SoA types, packed components). They do not need “no methods in the language.”</td></tr>
+  <tr><td><strong>Everything else</strong></td><td>No methods / no traits is a tax on stdlib and on every domain that thinks in capabilities (Reader, Shape, Connection).</td><td>Traits + methods are the all-domain tool.</td></tr>
+</table>
+<p><strong>Architectural consequence for <code>fn name</code> vs <code>name ::</code>.</strong> Jai can say “a procedure is just a constant” because there is no method slot. Jet has <code>self</code> methods, <code>impl</code>, <code>pub fn</code>, <code>fn run</code> as the entry. A <code>::</code> cutover has to explain <strong>items that are not values</strong> (trait requirements, entry, impl bodies) or become two declaration forms again. That is the operational trap: you steal Jai’s uniformity slogan and immediately reintroduce a second form for methods.</p>
+<p><strong>Skip as language law:</strong> no-methods, no-traits, bake-in SOA.<br>
+<strong>Consider as libraries:</strong> SoA collections, explicit layouts.<br>
+<strong>Consider as comparison only:</strong> <code>$T/interface</code> vs traits — Jet already has the named-capability side.</p>
+
+<h3 id="c4">Cluster 4 — Closures and hidden allocation</h3>
+<p><strong>Jai.</strong> <code>=&gt;</code> lambdas are expression-bodied and <strong>do not capture</strong>. Closures considered, not current. Rationale: a capture is a hidden allocation and a lifetime, which is poison in a frame loop.</p>
+<p><strong>Jet.</strong> Lambdas are <code>(x: Int) -&gt; expr</code> and are passed as <code>fn(Int) Int</code>. They are how callbacks, GUI, streams, and <code>apply_twice</code> work. Capture law was not fully pinned in the fact brief; the surface assumes first-class function values.</p>
+<table>
+  <tr><th>Lens</th><th>No closures</th><th>Closures / function values</th></tr>
+  <tr><td><strong>Games</strong></td><td>Honest. Pass a struct + proc, or <code>#code</code> to insert.</td><td>Hidden capture in a hot loop is a perf bug. Jet priority 3 agrees — but as a lint/API issue, not a language ban.</td></tr>
+  <tr><td><strong>Web/GUI/AI/CLI</strong></td><td>Unusable. Event handlers, iterators, <code>map</code>, tool callbacks.</td><td>Required for “excellent at everything.”</td></tr>
+</table>
+<p><strong>Architectural consequence.</strong> Banning closures to copy Jai would foreclose GUI/web. Allowing them does <strong>not</strong> require Jai <code>=&gt;</code> vs Jet <code>-&gt;</code>. It does mean “functions are values” is already Jet law, which is the <em>value</em> half of Jai’s <code>::</code> story without the <em>declaration</em> half.</p>
+
+<h3 id="c5">Cluster 5 — Compiler and build</h3>
+<p><strong>Jai.</strong> Multi-pass job system, no forward declarations, no preprocessor, no Makefiles: the meta-program <em>is</em> the build. Modules are not C headers. Syntax rewrite still planned via a metaprogram. Pipeline described as AST → internal bytecode → x64/LLVM. <code>#run</code> executes that bytecode at compile time.</p>
+<p><strong>Jet.</strong> <code>package.jet</code> + BuildPlan graph, two lenses (JIT <code>jet run</code> / <code>jet dev</code> vs AOT <code>jet build</code>) with <strong>I9: one meaning</strong>. Read-only compiler APIs. Build plugins emit the same graph. No “build script in Jet that mutates the AST of the program being built.” Legacy CMake/Make/Gradle/npm/cargo are Tier-2 wrappers with declared inputs, outputs, and caps.</p>
+<table>
+  <tr><th>Lens</th><th>Jai</th><th>Jet</th></tr>
+  <tr><td><strong>Games</strong></td><td>One repo, one language, iterate by <code>#run</code>ing the build.</td><td>Two lenses already target “Python-like iterate, Rust-like ship,” without making the compiler user-writable.</td></tr>
+  <tr><td><strong>All-domain</strong></td><td>A user-space compiler is an ecosystem-split: every team writes a dialect.</td><td>One compiler, stable graph, agent-repairable. Required for enterprise and for I9.</td></tr>
+</table>
+<p>Does not require <code>-&gt;</code> after the type. Weakly supports “names are constants in a pool” (<code>::</code>), which Jet already has for <em>values</em>. Items (<code>fn</code>, <code>struct</code>, <code>trait</code>) are a second namespace of declarations — normal for a language with a type system that isn’t “everything is a <code>: type :</code> constant.”</p>
+
+<h3 id="c6">Cluster 6 — Leftover syntax gadgets (not architectural drivers)</h3>
+<table>
+  <tr><th>Gadget</th><th>Latest Jai</th><th>Jet</th><th>Drive the three?</th></tr>
+  <tr><td>Multiple returns as registers, not tuples</td><td>Intentional; <code>#must</code> removed</td><td>Result / <code>!Error</code></td><td>Independent of <code>-&gt;</code> position</td></tr>
+  <tr><td><code>for</code> + <code>for_expansion</code></td><td>Iterator protocol via <code>#insert</code></td><td><code>loop x in …</code>; <code>for</code>/<code>while</code> are foreign diagnostics</td><td>No</td></tr>
+  <tr><td>Brace-less <code>if</code>/<code>for</code></td><td>Allowed</td><td><code>if cond -&gt; stmt</code></td><td>Yes, <em>against</em> copying Jai as “mandatory braces”</td></tr>
+  <tr><td><code>.star</code> instead of <code>&lt;&lt;</code> deref</td><td>2026, migrated by AST plugin</td><td>Different pointer story (<code>^T</code>)</td><td>Steal the lesson, not <code>.star</code></td></tr>
+  <tr><td><code>using</code></td><td>Changed in-language already</td><td><code>use</code></td><td>Skip</td></tr>
+  <tr><td>No RAII / no dtors</td><td>Philosophy</td><td><code>defer</code></td><td>Keep Jet <code>defer</code>; don’t copy “no cleanup”</td></tr>
+</table>
+
+<h2 id="imply">What the walk implies for the three surfaces (still not a vote)</h2>
+<ol>
+  <li><strong><code>-&gt;</code> as return type</strong> is Jai’s <em>type-of-a-value</em> glyph. Jet’s <code>-&gt;</code> is <em>body-of-a-control</em>. That fork is about whether a procedure is primarily a <strong>typed constant</strong> or a <strong>callable item with a body</strong>. Under current Jet comptime law, the item view is the honest one. Under Jai comptime law, the value view is the honest one. Domain lens: the value view is a game-compiler convenience; the item+body view is how every other domain already reads <code>if</code> / <code>fn</code> / <code>lambda</code>.</li>
+  <li><strong>Mandatory braces is not Jai.</strong> Jai requires them on documented procs and rejects them as a universal rule. The honest Jai steal is “proc body is a block because <code>-&gt;</code> was used for types.” The honest Jet steal from Go is “kill optional-brace C,” which Jet already killed via a mandatory body marker.</li>
+  <li><strong><code>name :: …</code></strong> is the only surface that could be a <em>mechanism</em> win: one declaration form. The mechanism win is real in Jai because types, procs, and <code>#run</code> results are the same kind of constant. In Jet, types are not <code>::</code> values, comptime cannot mint types, methods are not values, <code>fn run</code> is an entry. Unifying <em>named function values</em> with <code>::</code> (already works: <code>double_fn :: double</code>) is a small consistency cleanup. Making <strong>the declaration</strong> <code>greet :: fn(...)</code> is a medium cutover. Making it Jai <code>greet :: (params) -&gt; T { }</code> is a large cutover that also relocates <code>-&gt;</code> and fights methods/traits/entry.</li>
+</ol>
+
+<h3>Strategic / operational / tactical, collapsed</h3>
+<p><strong>Strategic.</strong> Jai optimizes for a systems programmer who will live in compile-time execution and wants zero declaration forms. Jet’s ranked priorities are safety, then beginners, then runtime perf, then one mechanism. “Look like Jai” can win on aesthetics (your bar allows that if non-negligible); it does not automatically win on beginner ceremony or on one-mechanism if it <em>splits</em> <code>-&gt;</code>. The deep Jai idea Jet has not adopted is <strong>user-space compiler as same language</strong> — and Jet has an explicit rejection of the mutation half. Jai can make game-local hidden control and compile-time mutation <em>the language</em>. Jet cannot if “excellent at everything” is real. The steal is: data-oriented libraries, value comptime, optional explicit allocators, bake-via-generated-modules — not implicit context, not AST macros, not no-closures, not no-methods.</p>
+<p><strong>Operational.</strong> A greenfield cutover is allowed. The expensive object is not <code>fn</code> vs <code>::</code>. It is the <strong>arrow/effect/body system</strong> (functions, lambdas, if, loop, match, <code>-[E]&gt;</code>, function types, fmt, snapshots). <code>name :: fn(...)</code> is a smaller cutover: items become bindings; <code>-&gt;</code> can stay. Mandatory braces are small if <code>-&gt;</code> stays, large if braces become the only body because <code>-&gt;</code> moved. Any Jai mechanism that becomes language law must still be judged per cluster, including the worst required domain. Games can still be excellent via batteries — engine/SoA/allocator <em>libraries</em>, not syntax.</p>
+<p><strong>Tactical.</strong> Parser already has a migration path <em>from</em> Jai/Rust <code>-&gt; Type</code>. Diagnostics teach the Jet order. Reversing that is a one-cutover <code>jet fmt</code>, same as 21 Aug 2026 — technically routine, semantically a reversal of a measured unification. Latest Jai glyphs are a moving target. Mechanism comparison is the durable work; glyph matching is the fragile work.</p>
+
+<h2 id="blow">Blow’s actual argument (not the meme)</h2>
+<p>Community Philosophy wiki (modified 2026-07-10, presented as an attempt to represent Jon), plus the 2025 LambdaConf keynote and the 2026 Wookash interview.</p>
+<p>The load-bearing quote:</p>
+<blockquote>
+  There are many features I can get rid of and it would still be the same programming language. If I got rid of full arbitrary compile time execution, it wouldn't be the same programming language. … My approach is say 'why are you doing that? Let's do everything at compile time. And by everything, I mean everything.'
+</blockquote>
+<p>“Full” is aimed at <code>constexpr</code> / Rust <code>const</code> / D CTFE <em>subsets</em>. He refuses a second, weaker language that runs at compile time. The compile-time program is ordinary Jai: loops, allocators, procedures, file/network, even “run the game while compiling.” <code>#run</code> is bytecode interpretation of that same language.</p>
+<p>Related slogan, same philosophy document: it is the programmer’s computer; the language should not arbitrarily prevent legitimate operations merely because they might be misused.</p>
+<p><strong>Why he thinks that is acceptable — five claims:</strong></p>
+<ol>
+  <li><strong>The power already exists, just in the wrong place.</strong> Make, CMake, Python codegen, Visual Studio, custom IDL compilers already execute arbitrary programs. Pretending the <em>language</em> is pure shoves the real build into untyped scripts nobody can debug as Jai. “Your program should be a mathematical object that is self defining.” The compiler alone should be enough.</li>
+  <li><strong>Metaprogramming is only hard because it is a different language.</strong> “We are bringing the meta as close as to what you regularly do as possible. So it's just normal stuff that you are used to thinking about.” A serializer generator should be a <code>for</code> loop over struct fields, not a template language.</li>
+  <li><strong>Safety should be programmable policy, not a mandatory ideology.</strong> He does not argue “bugs are good.” He argues the language designer does not know your engine’s actual invariants. Write compile-time checks for <em>your</em> rules (every message has an ID, every asset exists, this pointer type only lives in this scope). Rust-style “the language protects you” is, in his view, why Braid/Witness would have failed if they were 10% harder.</li>
+  <li><strong>Explicit control, nothing behind your back.</strong> RAII, ctors, borrow checking, GC, implicit casts: hidden control flow. Compile-time execution is <em>visible</em> (<code>#run</code>) and therefore more honest than a magic feature for each baking need.</li>
+  <li><strong>Games are the hard case, and they are on a knife edge.</strong> “Both the Braid and the Witness, if they were 10% harder to make, the projects would have failed.” A language that adds friction to data layout, baking, and iteration kills the product. Arbitrary comptime is how you keep the <em>user’s</em> program simple by making the <em>compiler</em> do the repetitive work. He will put complexity in the compiler to buy programmer ergonomics.</li>
+</ol>
+<p><strong>What “understand the program” means.</strong> Not that the compiler infers intent. User code can ask the compiler structured questions: what fields, what types, what declarations, then generate or fail the build. Code is data. That is closer to Lisp than to <code>#define</code>.</p>
+<p><strong>Temperance, in the same philosophy document:</strong> keep compile-time execution conservative; it is slower than machine code; don’t use features for their own sake. So even the Jai-shaped view is not “macros everywhere.”</p>
+
+<h2 id="caveat">The 2026 caveat — Blow does not currently bless the thing people think he blessed</h2>
+<p>Wookash, 2026-01-24, State of Jai:</p>
+<ul>
+  <li>Current macros operate on <strong>parsed, not-yet-type-checked</strong> trees.</li>
+  <li>Easy, <strong>strongly typed, debuggable</strong> Lisp-style rewrites are “the one major unresolved semantic question.”</li>
+  <li>He questions shipping before that is solved.</li>
+  <li>The <code>.star</code> migration worked because a <em>compile-time plugin</em> could distinguish real deref nodes from <code>&lt;&lt;</code> shifts across 300k LOC.</li>
+</ul>
+<p>So his public position is <strong>not</strong> “untyped AST soup is fine.” It is:</p>
+<blockquote>Full power is required <strong>and</strong> it must become as typed and debuggable as ordinary code — and that second half is unfinished.</blockquote>
+<p>That is the honest Jonathan. Using 2015–2021 demos as “Jai says mutate anything” skips the part he is stuck on.</p>
+<p>Pre-public-beta blockers named in the 2024-09-16 Compiler Q&amp;A: macro system, cross-compilation semantics/robustness, and DLL/context interaction.</p>
+
+<h2 id="jetlaw">Jet’s opposing law (why it is not just cowardice)</h2>
+<table>
+  <tr><th>Jet law</th><th>What it actually forbids</th><th>Why it exists</th></tr>
+  <tr><td><strong>S26</strong></td><td>Comptime may not create, parameterize, or select a type, or affect dispatch. No AST/token/attribute macros, no custom syntax, no comptime types, no const generics in v1. Type-check <strong>first</strong>, then a fuel-limited interpreter.</td><td>I3: sema owns checks. If comptime mints types or rewrites trees, a second checker appears. I2: rustc must never become a user diagnostic.</td></tr>
+  <tr><td><strong>S57 / <code>@</code></strong></td><td>One mark, on the <strong>name</strong>. <code>@ { }</code> is the <code>#run</code> analog for <em>values</em>.</td><td>Stage is visible at every use. No silent splice.</td></tr>
+  <tr><td><strong>D-CTEFFECT1</strong></td><td>Tier 0 pure; Tier 1 hash-locked embed/fetch; Tier 2 <code>#Impure</code> + <code>--gate</code>.</td><td>Reproducible builds. Directly rejects “compile-time may talk to the network because Make already does.” Make does — and that is why CI is a dumpster. Jet put a lockfile on it.</td></tr>
+  <tr><td><strong>D-LAYOUT-FACTS1</strong></td><td><code>T.@layout</code>, <code>T.@name</code>, <code>T.@fields</code> only.</td><td>Read-only reflection. Not a general AST API.</td></tr>
+  <tr><td><strong>D-META-CODE1</strong></td><td><code>derive T.Trait { ... }</code> and <code>b.generate(name) { ... }</code> are <strong>typed item templates</strong>. No source strings, no re-lex of generated text.</td><td>Generation without a stringly macro language.</td></tr>
+  <tr><td><strong>D-METAMUTATE1=A</strong></td><td>No Jai message loop / user AST mutation / user macros.</td><td>Mutation of the tree you are looking at breaks I4 (diagnostic snapshots of <em>user</em> source) and beginner repair.</td></tr>
+  <tr><td><strong>I9</strong></td><td>Interpreter and compiled runtime agree bit-for-bit on comptime-foldable values.</td><td>“Run the game during compile” is a different program unless you prove equivalence.</td></tr>
+</table>
+<p>Jet already accepted Blow’s <em>small</em> claim: ordinary pure code should run at compile time with no <code>constexpr</code> subset. Pure Jet is comptime-callable with no annotation. The fight is types, dispatch, and mutation.</p>
+<p>Jet I1 is a product claim: the default program is memory-safe. Blow rejects that kind of paternalism for memory reasons. Those are different clusters from comptime.</p>
+
+<h2 id="ladder">Power ladder (this is the actual design tree)</h2>
+<pre>0  Implicit fold of pure values                         Jet default
+1  Explicit #run / @ of ordinary fns → values
+2  Gated comptime I/O (hash-locked)
+3  Read-only program facts (T.@fields)
+4  Additive typed generation (derive / generate / #insert of NEW items)
+5  Comptime-created types / $T bake that changes dispatch
+6  In-place rewrite of existing user AST (the .star plugin)
+7  Untyped macros (Jai today)
+8  Typed, debuggable Lisp macros (Jai goal, unsolved)</pre>
+<p>Jet today: <strong>0–4</strong>, with 4 narrower than Jai <code>#insert</code>.<br>
+Jai today: <strong>0–7</strong>, with 8 unfinished.<br>
+Your lean (“split, but controlled AST if justified”): <strong>hold 7 dead, pressure 5, maybe a constrained 6</strong>.</p>
+<p>This is the question still waiting for a precise call (see pending questions).</p>
+
+<h2 id="score">Domain score for the comptime cluster only</h2>
+<p><strong>Games.</strong> Blow is right that baking, serializers, SOA-via-<code>#insert</code>, and “change an operator across 300k LOC” are miserable as external tools. Level 5 (<code>$T</code> bake, comptime types) is the game-shaped win. Level 6 is how <em>language evolution</em> happened in his compiler, which is a different job than what a game team does every week.</p>
+<p><strong>Web / backend / enterprise.</strong> Level 7 is a supply-chain and diagnostic hole (macros before types). Level 2 unrestricted (compile-time network, “works on my machine”) is how you get non-reproducible deploys. Jet’s lockfile is the all-domain win. Level 4 (typed <code>derive</code> / generate a module of JSON codecs) is the web-shaped analog of Jai serializers <strong>without</strong> mutating the handler the user wrote.</p>
+<p><strong>Embedded.</strong> Firmware register maps want level 4–5 (generate tables, maybe mint a packed type). They do not want compile-time network or in-place rewrite of the ISR.</p>
+<p><strong>Beginners / agents.</strong> Levels 0–3 are teachable: “this name is computed now.” Level 4 is teachable if the generated file is real source you can click. Level 6 means the bytes on disk are no longer the program — I4 snapshots lie unless the compiler shows the post-rewrite tree as the source of truth (a second source of truth — I8 fight).</p>
+<p><strong>Perf.</strong> <code>$T</code> bake is a <em>runtime</em> win (no vtable). Untyped macros are a <em>compile-time</em> cost and a reasoning cost. Jet priority 3 cares about the first; priority 2 and 5 care about the second.</p>
+
+<h2 id="strong">Where Blow is strongest against Jet, and where he is weakest</h2>
+<p><strong>Strongest.</strong> “Don’t make a crippled second language.” Jet’s <code>derive</code>/<code>generate</code> templates plus a closed <code>T.@fields</code> set <em>is</em> a second, smaller language. Every new bake need becomes a new built-in or a new stdlib DSL (<code>#SQL</code>, <code>#HTML</code> whitelist). That is the Makefile problem one layer up: the language team becomes the bottleneck instead of CMake. Blow’s “if it can be user-level, why is it in the compiler?” cuts here.</p>
+<p><strong>Weakest, including by his own 2026 standard.</strong> Untyped, in-place mutation of the tree the user is reading. He has not made that as thinkable as ordinary code. Jet’s type-check-first + additive generation is closer to the <em>goal</em> he stated than the <em>implementation</em> he has. Also: “Make already runs arbitrary code” is an argument for <em>capability</em>, not for <em>ungated</em> capability. Jet already granted the capability and put a hash on it. That is not paternalistic memory-safety; that is “the build is a mathematical object” — which is <em>his</em> slogan.</p>
+<p><strong>Category error to avoid.</strong> “Full control is acceptable because the programmer is an adult” is a <em>user</em> claim. Jet’s I1 is a <em>product</em> claim: the default program is memory-safe. You can agree with Blow on comptime-as-same-language and still reject him on hidden aliasing and use-after-free. Those are different clusters. Mixing them makes comptime look like a safety fight when it is a <em>who-is-the-compiler</em> fight.</p>
+
+<h2 id="controlled">Controlled AST that could be justified in Jet terms</h2>
+<p>If “controlled” has to survive I3, I4, I8, I9:</p>
+<ul>
+  <li><strong>After</strong> typecheck, never before (opposite of current Jai macros).</li>
+  <li><strong>Additive</strong>: insert new items/modules; do not rewrite the function the user is looking at.</li>
+  <li><strong>Typed holes</strong>, not strings (<code>D-META-CODE1</code> already).</li>
+  <li><strong>The generated artifact is inspectable</strong> (a real module, not a phantom tree).</li>
+  <li><strong>Same diagnostics</strong> as if the user wrote it.</li>
+  <li><strong>Effects on the same tier ladder</strong> as <code>@</code> I/O.</li>
+  <li><strong>No new user-typable syntax</strong> (I7).</li>
+</ul>
+<p>That is essentially “pressuring level 4–5, still forbidding 6–7.”</p>
+<p>The <code>.star</code> example <strong>fails</strong> that test: it rewrote existing user nodes in place. Jet’s equivalent is <code>jet fmt</code> + teaching diagnostics for a language cutover — a <strong>tool</strong>, not a user-level macro. Justifying user-level 6 means arguing that libraries, not the language team, need to rewrite call sites. That is a real argument (API migrations). It is also how you get ecosystem dialects. Score it separately; don’t smuggle it in as “Jonathan said full control.”</p>
+<p><strong>Consequence for the three surfaces (still parked):</strong></p>
+<ul>
+  <li><code>name :: proc</code> only becomes <em>architecture</em> at level 5+: a procedure value is something compile time can specialize, insert, or type-from. At Jet’s 0–4, <code>double_fn :: double</code> already is the value story; <code>fn greet</code> vs <code>greet :: fn</code> is declaration cosmetics plus one sema path.</li>
+  <li><code>-&gt;</code> as a type arrow is the glyph of “this value has a type,” which is how Jai thinks of procedures. Jet’s body-arrow is how you think of items. Comptime law picks which worldview is honest.</li>
+  <li>Mandatory braces are almost unrelated to comptime except: if <code>#insert</code> emits statements, a single body form is easier for generators. Weak coupling. Don’t let codegen aesthetics drive the user-facing one-liner tax.</li>
+</ul>
+
+<h2 id="pending">Pending questions (answer these when you are ready)</h2>
+<p>The ask tool failed twice on this round (<code>undefined is not an object (evaluating 'e.includes')</code>), so these were never put to you in the interactive form. They are the frontier that comptime unblocked. Recommended answers are marked; they are not your decisions.</p>
+
+<div class="q">
+  <h3>1. Power ladder</h3>
+  <p>For this grill, how far up the comptime ladder is Jet allowed to be pressured?</p>
+  <ol class="opts">
+    <li>Hold Jet 0–4; do not pressure S26. Keep type-check-first value comptime, reflection, and typed generate/derive. No comptime-minted types, no user AST rewrite. <code>::</code> stays mostly cosmetic.</li>
+    <li><strong class="rec-line">Recommended.</strong> Pressure level 5 (comptime types / bake); keep 6–7 forbidden. Allow comptime to mint/select types and bake copies (<code>$T</code>-like) so serializers, packed layouts, and firmware tables are user-level. Still no in-place rewrite of existing user functions. Matches your split lean.</li>
+    <li>Pressure 5 plus a constrained post-check level 6. Also allow rewriting existing call sites / nodes after typecheck, inspectable, same diagnostics — API migrations as user code, not only <code>jet fmt</code>.</li>
+    <li>Leave 7–8 on the table as the full Jai steal. Treat untyped-or-typed macros that rewrite the tree you are reading as in-scope, including Jai-today. Fights I3/I4 unless those invariants move.</li>
+  </ol>
+</div>
+
+<div class="q">
+  <h3>2. Blow’s Make argument</h3>
+  <p>Blow: Make already runs arbitrary code, so the compiler should too. Jet already runs code at compile time and hash-locks I/O. What do we do with his argument?</p>
+  <ol class="opts">
+    <li><strong class="rec-line">Recommended.</strong> Accept “builds are already arbitrary” only with Jet’s effect tiers. Capability yes; ungated side effects no. Jet’s hash-lock / <code>#Impure</code> already is “the program is a mathematical object.”</li>
+    <li>Accept it fully: compile-time is an ordinary program. <code>#run</code> may do anything Make may do, including network/GUI/game-during-compile, because otherwise you re-create the Makefile split.</li>
+    <li>Reject it: those tools should stay outside the language. The compiler evaluates pure values. All other build work stays in <code>package.jet</code> / plugins / external tools.</li>
+    <li>Need more on Jet’s current comptime I/O and lockfile before this call.</li>
+  </ol>
+</div>
+
+<div class="q">
+  <h3>3. The <code>.star</code> test</h3>
+  <p>Blow’s 2026 demo rewrote deref nodes in place across 300k LOC. What kind of capability is that for Jet?</p>
+  <ol class="opts">
+    <li><strong class="rec-line">Recommended.</strong> In-place rewrite of existing user code is a compiler/fmt job, not a language feature. Language cutovers are fmt + diagnostics + one greenfield rewrite. Users generate new modules; they do not rewrite neighbors’ functions.</li>
+    <li>User-level in-place rewrite is justified if it is typed and inspectable. A typed, after-check, reviewable rewrite API is justified for API migrations and data-layout shifts. It is how you avoid five external tools.</li>
+    <li>The <code>.star</code> rewrite is evidence mutation is load-bearing. If the plugin cannot distinguish <code>&lt;&lt;</code> deref from <code>&lt;&lt;</code> shift inside user trees, codegen from the outside is strictly weaker. Mutation is required.</li>
+    <li>Park until we see whether level 5 + additive generate covers the bake/serializer cases without mutation.</li>
+  </ol>
+</div>
+
+<div class="box parked">
+  <p>After these three, the interview recomputes the frontier. Likely next: return to <code>-&gt;</code> / braces / <code>::</code> as consequences of whatever comptime law you just set — still no keep/change until you say the map is enough — or deepen context vs effects, or deepen how Jet items collide with <code>::</code>.</p>
+</div>
+
+<h2 id="inventory">Fact inventory</h2>
+<h3>Jet spellings (current / ratified)</h3>
+<table>
+  <tr><th>Spelling</th><th>Role</th><th>Status</th></tr>
+  <tr><td><code>fn</code></td><td>Only current function-definition keyword (S1)</td><td>Current</td></tr>
+  <tr><td><code>-&gt;</code></td><td>Unified callable/control body arrow</td><td>Current; <code>:&gt;</code> and <code>=&gt;</code> have no alias</td></tr>
+  <tr><td><code>-[Effects]&gt;</code></td><td>Fused explicit effect ceiling</td><td>Current</td></tr>
+  <tr><td><code>::</code></td><td>Immutable binding only</td><td>Current; retired as function-body marker</td></tr>
+  <tr><td><code>:=</code></td><td>Mutable binding</td><td>Current</td></tr>
+  <tr><td><code>=</code></td><td>Reassignment / slot-filling (extern); not a function-body marker</td><td>Current in those slots</td></tr>
+  <tr><td><code>{ }</code></td><td>Block delimiters; do not themselves determine a return value</td><td>Current</td></tr>
+  <tr><td><code>return</code></td><td>Explicit early exit; not the ordinary tail-value spelling</td><td>Current (card #447 exemption)</td></tr>
+  <tr><td><code>const</code></td><td>Retired module-binding keyword; lexer keeps it for teaching diagnostics</td><td>Not current</td></tr>
+  <tr><td><code>@name :: expr</code></td><td>Compile-time-demand / marked binding</td><td>Current; <code>comptime</code> keyword retired</td></tr>
+  <tr><td><code>proc</code> / <code>procedure</code></td><td>Not in Syntax authority</td><td>No current declaration</td></tr>
+</table>
+<h4>Ratified function-shape decisions</h4>
+<table>
+  <tr><th>Id</th><th>Card</th><th>Date</th><th>Law</th></tr>
+  <tr><td><code>D-SIG-SHAPE1=B</code></td><td>#2125</td><td>2026-08-20</td><td>Return type sits bare after parameter list; <code>-&gt;</code> is the one body arrow.</td></tr>
+  <tr><td><code>D-ARROW-RESPELL1=A</code></td><td>#2144</td><td>2026-08-21</td><td>Canonical arrow is <code>-&gt;</code> everywhere; <code>:&gt;</code> and <code>=&gt;</code> are teaching diagnostics.</td></tr>
+  <tr><td><code>D-CALLABLE-ONE1=A</code></td><td>#2144</td><td>2026-08-21</td><td>One callable shape; plain arrow exactly for non-unit success result or a lambda; unit/plain-fallible keep bare braces.</td></tr>
+  <tr><td><code>D-ONELINE-BODY1=B</code></td><td>#1453/#1454</td><td>2026-08-13</td><td>Function one-liners use <code>-&gt;</code> after a non-unit return type; function-body <code>=</code> retires.</td></tr>
+  <tr><td><code>D-BODY-LAST1=B</code></td><td>#2124</td><td>2026-08-20</td><td>Block trailing expression yields value; <code>return</code> is early exit.</td></tr>
+  <tr><td><code>D-TAIL-RETURN1=A</code></td><td>#2180</td><td>2026-08-25</td><td>Expected type flows to sole final expression; it is not rewritten to source <code>return</code>.</td></tr>
+  <tr><td><code>D-FAILURE-FOUNDATION1=A</code></td><td>#2172/#2182</td><td>2026-08-26</td><td>Failure contracts use prefix roles.</td></tr>
+</table>
+<h4>Prior Jai-related Jet decisions (not function syntax)</h4>
+<ul>
+  <li><code>D-SHIFT1</code> — Jai <code>shift</code> idiom lands as a core cursor surface, not an operator.</li>
+  <li><code>S57 / D-ONCE-AT1</code> — <code>@ { … }</code> is the Jai <code>#run</code> analog.</li>
+  <li><code>D-METAMUTATE1=A</code> — Jai-style AST mutation/message loop/user macros rejected.</li>
+  <li>No source quote was found naming a Jai-style <code>name :: fn(...)</code> verdict. Mapping that form to a Jet rejection is inference.</li>
+</ul>
+
+<h3>Jai sources used</h3>
+<table>
+  <tr><th>Source</th><th>Date</th><th>What we took</th></tr>
+  <tr><td>Jonathan Blow, Wookash Podcast <a href="https://www.youtube.com/watch?v=1blhmslxkWg">1blhmslxkWg</a></td><td>2026-01-24</td><td>Ship plan not a promise; features still changing; <code>.star</code> rewrite of ~300k LOC; macros on untyped trees; typed Lisp macros unsolved. State of Jai ~1:10:40. Auto captions.</td></tr>
+  <tr><td>Clip of that interview <a href="https://www.youtube.com/watch?v=0nwZ2jdFrMg">0nwZ2jdFrMg</a></td><td>2026-09-15</td><td>Compact of the syntax-migration / AST rewrite discussion.</td></tr>
+  <tr><td>LambdaConf 2025 updated keynote <a href="https://www.youtube.com/watch?v=IdpD5QIVOKQ">IdpD5QIVOKQ</a></td><td>2025-07-09</td><td>Compile-time lets code understand programs; meta-program is the same language; typed program-data messages.</td></tr>
+  <tr><td>Compiler Q&amp;A <a href="https://www.youtube.com/watch?v=LPdMNsL5MgI">LPdMNsL5MgI</a></td><td>2024-09-16</td><td>Blockers: macros, cross-compilation, DLL/context. Out-of-order compile. Syntax rewrite still planned.</td></tr>
+  <tr><td>Ivo Balbaert, <em>The Way to Jai</em> <a href="https://github.com/Ivo-Balbaert/The_Way_to_Jai">github.com/Ivo-Balbaert/The_Way_to_Jai</a></td><td>beta 0.2.024, 2025-12-31; repo updated 2026-09-15</td><td>Canonical procedure form, <code>::</code>/<code>:=</code>/<code>=</code>, lambdas, <code>$T</code>, compiler pipeline. Chapters 5, 17, 22 used. Some deref examples still show old <code>&lt;&lt;</code>.</td></tr>
+  <tr><td>Jai Community Library wiki (Getting-Started, Overview, Metaprogramming, Philosophy, Advanced)</td><td>repo updated 2026-09-13; Philosophy page modified 2026-07-10</td><td>Braces on procs; brace-less control; SOA→<code>#insert</code>; context; philosophy quotes.</td></tr>
+  <tr><td>Smári McCarthy, “Four Years of Jai” <a href="https://smarimccarthy.is/posts/2024-12-02-four-years-of-jai/">smarimccarthy.is</a></td><td>2024-12-02</td><td>Firsthand closed-beta user report. Not official. Notes docs drift and moving syntax.</td></tr>
+</table>
+
+<h2 id="gaps">Evidence gaps</h2>
+<ul>
+  <li>No public official Jai compiler, final language specification, or dated official changelog.</li>
+  <li>No direct current compiler test proving brace-less ordinary Jai procedure syntax is rejected.</li>
+  <li>YouTube evidence is auto-generated captions; syntax examples in talks are not always transcribed.</li>
+  <li>Community wiki revision dates are often unavailable; tutorials conflict with the 2026 <code>.star</code> migration.</li>
+  <li>No Jet source quote naming a verdict on Jai-style <code>name :: fn(...)</code>.</li>
+  <li>D-ARROW-CONTROL1 prose says function types use the callable arrow, while S47/spec/parser spell <code>fn(T1, T2) R</code> with no bare <code>-&gt;</code> between <code>)</code> and <code>R</code>. Concrete grammar wins; owner clarification may be needed later.</li>
+  <li>D-TRAILBLOCK2 retires ordinary trailing <code>{}</code> after a call, but parser code still has a D-UI-CLOSURE1 path. Do not generalize either path.</li>
+  <li>Decision index still has a stale <code>D-VERDICT-1231-1</code> saying the only module immutable keyword is <code>comptime</code>, while later S57 text and Syntax.rs say <code>const</code> and <code>comptime</code> are retired. Newer operative sections were used.</li>
+  <li><code>docs/spec/vocabulary.md</code> has no function terminology.</li>
+</ul>
+
+<h2 id="sources">Sources (compact)</h2>
+<p>Jet: <code>docs/spec/philosophy.md</code>, <code>docs/spec/syntax-decisions.md</code> (S26, S57, D-SIG-SHAPE1=B, D-CALLABLE-ONE1=A, D-ARROW-RESPELL1=A, D-BIND1, D-METAMUTATE1=A, D-CTEFFECT1, D-META-CODE1, D-LAYOUT-FACTS1), <code>docs/spec/architecture.md</code>, <code>crates/jet-foundation/src/Syntax.rs</code> and <code>Syntax/core_surface.rs</code>, <code>crates/jet-parser/src/Parser/Items/functions_params.rs</code>, examples cited above. Checkout <code>fdfb2b4960522f87ab5436b3e8720fcd59956c22</code>, Tower meta_rev 56730 at capture.</p>
+<p>Jai: Blow Wookash 2026-01-24; LambdaConf 2025; Compiler Q&amp;A 2024-09-16; <em>The Way to Jai</em> ch. 5/17/22; Jai Community wiki Getting-Started / Overview / Metaprogramming / Philosophy-of-Jai / Advanced; Smári McCarthy 2024-12-02.</p>
+<p class="meta">This file is a reading copy of an in-progress interview. It does not reopen syntax, create a Tower card, or implement anything.</p>
+</main>
+</div>
+</body>
+</html>

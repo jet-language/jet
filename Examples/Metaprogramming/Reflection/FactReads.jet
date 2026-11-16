@@ -1,0 +1,86 @@
+// Every compiler-held plane uses one typed `@` read.
+#Numeric
+Severity: distinct Int(0..10)
+
+#UnitFamily(Length, dimension) { meter }
+
+Audited: tag { deny: [Net] }
+
+PlaneFacts: struct {
+    approximate: F32
+    shape: [Int#4]
+    classified: #Audited Int
+    callable: fn(Int, *, label: Bool) -> Int
+}
+
+Order: struct {
+    state { Draft, Confirmed }
+
+    id: Int
+}
+
+send_report: fn() {}
+
+sendability_for: fn(cell: Cell<Int>) -> Bool {
+    known: #run cell.reflect().sendability.known
+    return known
+}
+
+RANGE: #run Severity.reflect().range
+
+EFFECTS: #run send_report.reflect().effects
+
+STATES: #run Order.reflect().states
+
+DIMENSION: #run Meter.reflect().dimension
+
+MEASURE: #run PlaneFacts.reflect().measure
+
+EXACTNESS: #run PlaneFacts.reflect().exactness
+
+CLASSIFICATION: #run PlaneFacts.reflect().classification
+
+OBLIGATION: #run PlaneFacts.reflect().obligation
+
+PACKAGE_NAME: #run #package.name
+
+PACKAGE_VERSION: #run #package.version
+
+OS: #run #build.target.os
+
+PROFILE: #run #build.profile
+
+SENDABILITY: #run Severity.reflect().sendability
+
+MOVEDNESS: #run Severity.reflect().movedness
+
+ATTRIBUTION: #run report.reflect().attribution
+
+ORIGIN: #run Severity.reflect().origin
+
+VIEW_PROVENANCE: #run send_report.reflect().view_provenance
+
+UNIT_SCALE: #run Meter.reflect().unit_scale_provenance
+
+MATURITY: #run send_report.reflect().maturity
+
+run: fn() {
+    print(RANGE.start)
+    print(EFFECTS.values.len())
+    print(STATES[0].name)
+    print(DIMENSION.axes.len())
+    print(MEASURE.kind == "length")
+    print(EXACTNESS.kind == .Approximate)
+    print(CLASSIFICATION.name)
+    print(OBLIGATION.param_contract[0].zone == .Either)
+    print(PACKAGE_NAME)
+    print(PACKAGE_VERSION)
+    print(PROFILE == "dev" || PROFILE == "release")
+    print(SENDABILITY.known)
+    print(MOVEDNESS.known)
+    print(ATTRIBUTION.source)
+    print(ORIGIN.tracked)
+    print(VIEW_PROVENANCE.mutable)
+    cell: Cell.new(1)
+    print(sendability_for(cell))
+}

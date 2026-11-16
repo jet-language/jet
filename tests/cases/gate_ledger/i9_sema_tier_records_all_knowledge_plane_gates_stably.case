@@ -1,0 +1,28 @@
+# Port of tests/gate_ledger.rs:560-581 including assert_knowledge_ledger():173-225.
+# PENDING-GRAMMAR: count and before (TestW3b batch two).
+fixture: fixtures/knowledge
+step first: jet inspect gates --json tier.jet
+exit: 0
+stdout: ^= "{\"schema\":\"jet.status/v1\"" # original predicate
+stdout: ~ "\"gates\":{\"entries\":[" # original predicate
+stdout: ~ "\"subject\":\"approx\"" # original predicate
+stdout: ~ "\"subject\":\"wrapping\"" # original predicate
+stdout: ~ "\"subject\":\"from_half_rounded\"" # original predicate
+stdout: ~ "\"subject\":\".raw\"" # original predicate
+stdout: ~ "\"subject\":\"Pending -> Confirmed\"" # original predicate
+stdout: ~ "\"subject\":\"#Scrub(Input)\"" # original predicate
+stdout: count "\"kind\":\"state_transition\"" = 1 # the state list declares one move; an entry is no longer a transition
+stdout: count "\"kind\":\"taint_scrub\"" = 1 # original predicate
+stdout: count "\"kind\":\"precision_demotion\"" = 5 # original predicate
+stdout: before "\"kind\":\"taint_scrub\"" "\"kind\":\"state_transition\"" # original predicate
+stdout: before "\"kind\":\"state_transition\"" "\"kind\":\"precision_demotion\"" # original predicate
+stdout: ~ "\"span\":{\"start\":" # original predicate
+stdout: ~ "\"reason\":\"Pending -> Confirmed\"" # original predicate
+stdout: ~ "tier.jet:" # original predicate
+step: jet inspect gates --json tier.jet
+exit: 0
+stdout: == first
+step: jet inspect gates --kind state_transition tier.jet
+exit: 0
+stdout: ~ "state_transition: 1" # the one move the state list declares
+stdout: ~ "Pending -> Confirmed" # original predicate, in the state list spelling

@@ -1,0 +1,46 @@
+# tests/dev_parts/routine.rs::fixed_width_and_plain_int_remainder_zero_traps_across_tiers at tests/dev_parts/routine.rs:4462; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: fixed_width_and_plain_int_remainder_zero_traps_across_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check fixed_width.jet
+cwd: fixed_width
+exit: 0
+step dev_fixed_width: jet run fixed_width.jet
+cwd: fixed_width
+exit: 70
+stderr: ~ "Stop [E3010]" # original predicate: stderr.contains
+stderr: ~ "divided by zero" # original predicate: stderr.contains
+stderr: !~ "E0953" # original predicate: no comptime voice
+stderr: !~ "comptime" # original predicate: no comptime voice
+step: jet build fixed_width.jet
+cwd: fixed_width
+exit: 0
+step aot_fixed_width: built
+cwd: fixed_width
+exit: 70
+stderr: ~ "Stop [E3010]" # original predicate: stderr.contains
+stderr: ~ "divided by zero" # original predicate: stderr.contains
+stderr: !~ "panicked at" # original predicate: no raw Rust panic
+stderr: !~ "E0953" # original predicate: no comptime voice
+step: jet check plain_int.jet
+cwd: plain_int
+exit: 0
+step dev_plain_int: jet run plain_int.jet
+cwd: plain_int
+exit: 70
+stderr: ~ "Stop [E3010]" # original predicate: stderr.contains
+stderr: ~ "divided by zero" # original predicate: stderr.contains
+stderr: !~ "E0953" # original predicate: no comptime voice
+stderr: !~ "comptime" # original predicate: no comptime voice
+step: jet build plain_int.jet
+cwd: plain_int
+exit: 0
+step aot_plain_int: built
+cwd: plain_int
+exit: 70
+stderr: ~ "Stop [E3010]" # original predicate: stderr.contains
+stderr: ~ "divided by zero" # original predicate: stderr.contains
+stderr: !~ "panicked at" # original predicate: no raw Rust panic
+stderr: !~ "E0953" # original predicate: no comptime voice

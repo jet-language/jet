@@ -1,0 +1,8 @@
+Error [jet.ValueNotSendable]: `spawn_with` moves its `T` into a task, and here `T` is `Cell<Int>`, which isn't sendable
+  --> tests/ui/concurrency_boundaries/generic_task_spawn_rejects_a_thread_confined_argument.jet:8:39
+    |
+  8 | share: fn(cell: &&Cell<Int>) -> Int { spawn_with(cell) }
+    |                                       ^^^^^^^^^^
+ Why: `Cell` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
+ Fix: Call `spawn_with` with plain owned data, or share state through `Shared<T>`
+More: jet-lang.dev/e/E1102

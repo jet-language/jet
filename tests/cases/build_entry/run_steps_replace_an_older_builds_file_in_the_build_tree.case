@@ -1,0 +1,14 @@
+# A step output in a package's build tree (`.jet/build/` of the root, or of a
+# folder with its own package.jet) replaces the file an older build left
+# there, though no receipt lists it, as a step's output replaces a target's
+# image an older build put at the same path.
+fixture: run_steps_replace_an_older_builds_file_in_the_build_tree.fixture
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+write: .jet/build/notes.txt = "older build\n"
+write: tool/.jet/build/notes.txt = "older build\n"
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: .jet/build/notes.txt = "made"
+file: tool/.jet/build/notes.txt = "made"

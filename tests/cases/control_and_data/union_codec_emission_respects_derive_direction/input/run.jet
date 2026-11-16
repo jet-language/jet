@@ -1,0 +1,31 @@
+use json: core.encoding.json
+
+WriteOnly: struct {
+    marker: Int
+
+    impl Encode {
+        encode: fn(self) -> Dyn { return Dyn.Text("write") }
+    }
+}
+
+#Codable(only: .Encode)
+Output: struct {
+    value: Int | WriteOnly
+}
+
+#Codable(only: .Decode)
+ReadOnly: struct {
+    marker: Int
+}
+
+#Codable(only: .Decode)
+Input: struct {
+    value: Int | ReadOnly
+}
+
+run: fn() {
+    output: Output{value: WriteOnly{marker: 1}}
+    print(json.to_string(output))
+    _: json.decode<Input>("{{\"value\":7}}") ?? panic("input")
+    print("ok")
+}

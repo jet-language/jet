@@ -1,0 +1,64 @@
+// A marker's `expand` body runs at every site its `sites` names. Its
+// `target` is the record a derive reads for that site: a TypeInfo for a
+// struct or an enum, a FieldInfo for a field or a variant, a MethodInfo, a
+// FunctionInfo, and a ModuleInfo for a module. `target.marker(T)` reads the
+// marker `T` written there the same way at every site.
+Stamp: struct {
+    label: String
+
+    impl Marker {
+        sites: [.Type, .Variant, .Function, .Method, .Field, .Module]
+
+        expand: fn(self, target: Target) {
+            made: "stamp_{self.label}"
+            written: target.marker(Stamp)?.label ?? "none"
+            noted: target.marker(Note)?.text ?? "none"
+            seen: "{self.label} saw {target.name} stamp={written} note={noted}"
+            impl Stamps {
+                #{made}: fn() -> String { #{seen} }
+            }
+        }
+    }
+}
+
+Note: struct {
+    text: String
+
+    impl Marker {
+        sites: [.Type, .Variant, .Function, .Method, .Field, .Module]
+    }
+}
+
+Stamps: struct {}
+
+#Stamp("struct")
+Point: struct {
+    #Stamp("field") x: Int
+
+    #[Stamp("method"), Note("m")]
+    norm: fn(self) -> Int { self.x }
+}
+
+#Stamp("enum")
+Shape: enum {
+    #[Stamp("variant"), Note("v")] Dot
+    Line
+}
+
+#[Stamp("function"), Note("f")]
+helper: fn() -> Int { 1 }
+
+#[Stamp("module"), Note("mod")] inner: module {
+    value: fn() -> Int { 2 }
+}
+
+run: fn() {
+    print(Stamps.stamp_struct())
+    print(Stamps.stamp_field())
+    print(Stamps.stamp_method())
+    print(Stamps.stamp_enum())
+    print(Stamps.stamp_variant())
+    print(Stamps.stamp_function())
+    print(Stamps.stamp_module())
+    print(Point{x: 3}.norm() + helper())
+}

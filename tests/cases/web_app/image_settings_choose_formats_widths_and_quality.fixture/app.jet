@@ -1,0 +1,22 @@
+// The app's images settings: JPEG then PNG variants at two widths (written
+// out of order and once twice), JPEG at quality 60.
+package: {
+    name: "image_settings"
+    authority: { allow: [Env, Net, FS.Read, Time] }
+}
+
+use {
+    web: core.web
+    core.image.[ImageFormat]
+}
+
+home: fn() -> WebPage {
+    web.page("Gallery", "{web.image("Public/hero.png", alt: "hero")}{web.image("Public/photo.jpg", alt: "photo")}")
+}
+
+run: fn() {
+    web.app()
+        .images(formats: [ImageFormat]{.JPEG, .PNG, .JPEG}, widths: [Int]{800, 320, 320}, quality: 60)
+        .route("/", home)
+        .serve()
+}

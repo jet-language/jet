@@ -1,0 +1,13 @@
+// core-conformance: core.sys.mknod
+use os: core.sys
+
+run: fn() {
+    #Unsafe("probe device-file creation with a major number out of range") {
+        print(
+            if os.mknod("", 0o600, .Character, 4096, 0) == {
+                .Ok(ok) -> false
+                .Err(error) -> true
+            },
+        )
+    }
+}

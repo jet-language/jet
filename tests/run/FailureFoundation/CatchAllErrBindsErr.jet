@@ -1,0 +1,36 @@
+#Error
+FindError: enum {
+    Blank
+    NotFound(String)
+}
+
+level: fn(raw: String) -> Int (Err | FindError)! {
+    if raw == "" -> return Err(FindError.Blank)
+    if raw == "z" -> return Err(FindError.NotFound("z"))
+    if raw == "x" -> return Err(Err("odd input", code: "ODD"))
+    7
+}
+
+// A catch-all `.Err(e)` over an open union binds `e` as `Err`: the `Err`
+// member keeps its message and code, and any other member arrives shown.
+whole: fn(raw: String) -> String {
+    if level(raw) == {
+        .Ok(n) -> "level {n}"
+        .Err(e) -> "any: {e.message} code={e.code ?? "-"}"
+    }
+}
+
+// A statement table binds it the same way.
+report: fn(raw: String) {
+    if level(raw) == {
+        .Ok(n) -> { print("report level {n}") }
+        .Err(e) -> print("report: {e} code={e.code ?? "-"}")
+    }
+}
+
+run: fn() {
+    loop raw in ["3", "", "z", "x"] {
+        print(whole(raw))
+        report(raw)
+    }
+}

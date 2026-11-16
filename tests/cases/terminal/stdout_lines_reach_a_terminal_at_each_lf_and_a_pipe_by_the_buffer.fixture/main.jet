@@ -1,0 +1,15 @@
+use {
+    term: core.term
+    time: core.time
+}
+
+// Prints one line and writes another through `term.stdout()` in two parts,
+// then sleeps past the step's kill, so no exit drains stdout: the lines show
+// only where each LF is written at once, a terminal.
+run: fn() {
+    print("a printed line written at its LF")
+    out := term.stdout()
+    out.write("a stdout line ") ?? return
+    out.write_line("written at its LF") ?? return
+    time.sleep(5s)
+}

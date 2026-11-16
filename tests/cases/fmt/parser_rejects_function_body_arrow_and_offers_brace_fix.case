@@ -1,0 +1,13 @@
+# tests/fmt.rs::parser_rejects_function_body_arrow_and_offers_brace_fix at tests/fmt.rs:1335; hand-port
+# Claim: second arrow body is E0080 (tests/fmt.rs:1341-1346)
+# Claim: braced one-arrow body parses cleanly (tests/fmt.rs:1352-1358)
+# Not ported: diagnostic.edit.new_text == "{ 1 }" (tests/fmt.rs:1347-1350): Rust struct field, not printed by the CLI unless jet check shows the fix
+fixture: parser_rejects_function_body_arrow_and_offers_brace_fix.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check arrow/a/value.jet
+exit: 1 # tests/fmt.rs:1341-1346 E0080
+stderr: ~ "E0080" # tests/fmt.rs:1341-1346 E0080
+step: jet check arrow/b/value.jet
+exit: 0 # tests/fmt.rs:1352-1358 braced body parses

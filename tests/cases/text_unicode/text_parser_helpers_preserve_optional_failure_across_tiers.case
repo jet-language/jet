@@ -1,0 +1,21 @@
+# tests/text_unicode.rs::text_parser_helpers_preserve_optional_failure_across_tiers at tests/text_unicode.rs:842; hand-port
+fixture: text_parser_helpers_preserve_optional_failure_across_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build --release main.jet
+exit: 0
+step aot: built
+exit: 0 # tests/text_unicode.rs:860
+stdout: = text_parser_helpers_preserve_optional_failure_across_tiers.1.out
+step dev: jet run main.jet
+exit: 0 # tests/text_unicode.rs:860
+stdout: = text_parser_helpers_preserve_optional_failure_across_tiers.1.out
+step: jet build --target web main.jet
+exit: 0 # compile_web().unwrap_or_else
+step web: node --input-type=module -e "const { jet_main } = await import('./app.js'); const result = await jet_main(); if (result !== undefined) throw new Error('web entry success result must be undefined');"
+cwd: .jet/build
+exit: 0 # tests/text_unicode.rs:906
+stdout: = text_parser_helpers_preserve_optional_failure_across_tiers.1.out
+stderr: empty # tests/text_unicode.rs:912
