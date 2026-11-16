@@ -1,0 +1,103 @@
+// A route loader's boundaries in client navigation over the app's one route
+// table: its page rows and the app graph's screens. A navigation shows its
+// row's pending boundary from its preload until it settles, then the page its
+// loader's data gives, or the row's error boundary when the loader fails. A
+// path nothing matches shows the not-found boundary, and a screen's address
+// shows the screen. An aborted navigation cancels its preload: its page never
+// shows, the page it left shows again, and nothing is left to settle. Web.jet
+// beside this file is the same program built for the web.
+use {
+    app
+    web: core.web
+}
+
+#Error
+OrderError: enum {
+    Missing
+}
+
+#Codable
+Order: struct {
+    id: Int
+    item: String
+}
+
+BoardView: struct {
+    project: String
+}
+
+home: fn() -> WebPage { web.page("Home", "<h1>Home</h1>") }
+
+load_order: fn(id: Int) -> Order OrderError! {
+    if id == 0 -> return Err(.Missing)
+    Ok(Order{id: id, item: "pen"})
+}
+
+order_page: fn(id: Int, data: Order) -> WebPage {
+    web.page("Order", "<h1>Order {data.id}: {data.item}</h1>")
+}
+
+order_pending: fn() -> WebPage { web.page("Order", "<p>Loading order</p>") }
+
+order_failed: fn() -> WebPage { web.page("Order", "<p>Order failed</p>") }
+
+nowhere: fn() -> WebPage { web.page("Missing", "<h1>No page here</h1>") }
+
+board: fn(view: BoardView) -> String Never! { "board {view.project}" }
+
+site_graph: fn() -> web.App {
+    _: app.new("Shop").screen("/boards/:project", board)
+    return web.app()
+        .page("/", home)
+        .page("/orders/:id", order_page)
+        .loader(order_page, load_order, true)
+        .pending(order_pending)
+        .error(order_failed)
+        .not_found(nowhere)
+}
+
+// The body a document shows, before its route data or resume state.
+body_of: fn(document: String) -> String {
+    after: document.split("<body>").to_list()
+    if after.len() < 2 -> return document.copy()
+    after[1].split("<script").to_list()[0].split("</body>").to_list()[0]
+}
+
+report: fn(step: String, site: web.App) {
+    print("{step}: in flight `{site.navigating()}` shows {body_of(site.shown())}")
+}
+
+run: fn() {
+    site: site_graph()
+    site.navigate("/")
+    print("settle: {site.settle()}")
+    report("home", site)
+
+    site.navigate("/orders/7")
+    report("pending", site)
+    print("settle: {site.settle()}")
+    report("ready", site)
+
+    site.navigate("/orders/0")
+    print("settle: {site.settle()}")
+    report("error", site)
+
+    site.navigate("/nowhere")
+    print("settle: {site.settle()}")
+    report("not found", site)
+
+    site.navigate("/boards/p1")
+    report("screen in flight", site)
+    print("settle: {site.settle()}")
+    report("screen", site)
+
+    site.navigate("/orders/7")
+    print("settle: {site.settle()}")
+    site.navigate("/orders/9")
+    report("preload", site)
+    print("abort: {site.abort()}")
+    report("aborted", site)
+    print("settle after abort: {site.settle()}")
+    print("abort again: {site.abort()}")
+    report("after", site)
+}

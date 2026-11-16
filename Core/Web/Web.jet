@@ -216,6 +216,23 @@ priv AppUploadEndpoint: struct {
     upload: AppUpload
 }
 
+// The client's navigation over the app's page rows and the app graph's
+// screens (`App.navigate`): the path of the navigation in flight ("" when
+// none), the request that picked its row, the page row or screen it picked
+// (neither: nothing a client navigates to matches), and the reply its
+// preload loaded (None until its loader runs). `shown` is the document the
+// client shows, and `settled` the one the last settled navigation gave,
+// which an aborted navigation shows again.
+priv AppNavigation: struct {
+    path: String
+    request: HTTPRequest?
+    route: AppRoute?
+    screen: calls.AppScreen?
+    loaded: __AppReply?
+    shown: String
+    settled: String
+}
+
 priv AppState: struct {
     routes: [AppRoute]
     actions: [AppAction]
@@ -252,6 +269,8 @@ priv AppState: struct {
     // served, whose rows serving adds; in a cell of its own, since their
     // handlers can't be copied.
     services: Shared<[AppService]>
+    // The client's navigation over the page rows (`App.navigate`).
+    navigation: AppNavigation
 }
 
 // The compiler's web rules key on this marker, not on this module's name: the
@@ -623,6 +642,66 @@ App: struct {
         self.copy()
     }
 
+    // Client navigation over the page rows of the one route table and the
+    // app graph's screens: GET `path` picks the row, as it does on the
+    // server. `navigate` starts the navigation and its preload: the page
+    // row's pending boundary shows until the navigation settles, and a row
+    // whose loader preloads (`loader(handler, loader, true)`) loads its data
+    // now. A navigation still in flight is dropped.
+    navigate: fn(self, path: String) -[Net, FS.Read]> Never! {
+        app_screen_routes(self)
+        pick: http_server.mux_pick(app_table(self), web_http.__request("GET", path))
+        pattern: if pick.answer == None -> pick.routes[pick.index].pattern.copy() else -> ""
+        route: if pattern != "" -> app_route(self, pattern) else -> AppRoute?{None}
+        screen: if pattern != "" && route == None -> app_screen_at(pattern) else -> calls.AppScreen?{None}
+        call: __AppCall{request: pick.request.copy(), data: ""}
+        shown := app_navigation(self).settled
+        loaded := __AppReply?{None}
+        if route == .Val(row) {
+            if row.preload && row.loader == .Val(loader) -> loaded = Val(loader.run(call))
+            if row.pending != None {
+                shown = app_response_text(app_boundary(200, row.pending, "Loading", "", call))
+            }
+        }
+        guard := self.__state.guard_edit()
+        settled: guard.value.navigation.settled.copy()
+        guard.value.navigation = AppNavigation{path: path, request: Val(pick.request), route: route, screen: screen, loaded: loaded, shown: shown, settled: settled}
+    }
+
+    // Settles the navigation in flight as the server answers its page: the
+    // page row's loader (unless its preload already ran it), then its page,
+    // or the row's error boundary when either fails; a screen's page; the
+    // not-found boundary when nothing a client navigates to matches. Gives
+    // the status of the page that shows now, or 0 when no navigation is in
+    // flight.
+    settle: fn(self) -[Net, FS.Read]> Int Never! {
+        moving: app_navigation(self)
+        request: moving.request ?? return 0
+        answered: app_navigation_answer(self, moving, request)
+        shown: app_response_text(answered)
+        guard := self.__state.guard_edit()
+        guard.value.navigation = AppNavigation{path: "", request: None, route: None, screen: None, loaded: None, shown: shown.copy(), settled: shown}
+        answered.status
+    }
+
+    // Aborts the navigation in flight and cancels its preload: the data it
+    // loaded is dropped, its page never shows, and the page of the last
+    // settled navigation shows again. False when none is in flight.
+    abort: fn(self) -> Bool Never! {
+        guard := self.__state.guard_edit()
+        if guard.value.navigation.path == "" -> return false
+        settled: guard.value.navigation.settled.copy()
+        guard.value.navigation = AppNavigation{path: "", request: None, route: None, screen: None, loaded: None, shown: settled.copy(), settled: settled}
+        true
+    }
+
+    // The path of the navigation in flight, "" when none.
+    navigating: fn(self) -> String Never! { app_navigation(self).path }
+
+    // The document the client shows: the page of the last settled
+    // navigation, or the pending boundary of the one in flight.
+    shown: fn(self) -> String Never! { app_navigation(self).shown }
+
     facts_json: fn(self) -> String Never! { app_facts_json(self) }
 
     // Serve on 127.0.0.1 until the process stops, on the port __app_port
@@ -691,6 +770,7 @@ app: fn() -> App Never! {
             image_handler: None,
             traced: [AppTraced]{},
             services: Shared{[AppService]{}},
+            navigation: AppNavigation{path: "", request: None, route: None, screen: None, loaded: None, shown: "", settled: ""},
         }},
     }
 }
@@ -987,9 +1067,18 @@ priv app_route: fn(app: App, path: String) -> AppRoute? Never! {
 // loader's data; a failure renders the route's error boundary.
 priv app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     route: app_route(app, path) ?? return app_html(500, WebPage{title: "Route error", body: "route `{path}` is not registered on the app graph"}, "")
+    loaded: if route.loader == .Val(loader) -> Val(loader.run(__AppCall{request: request.copy(), data: ""})) else -> __AppReply?{None}
+    app_page_answer(app, route, request, loaded)
+}
+
+// A page row's answer once its loader replied `loaded` (None: the row has
+// no loader): its handler with the loader's data, or its error boundary
+// when either fails.
+priv app_page_answer: fn(app: App, route: AppRoute, request: HTTPRequest, loaded: __AppReply?) -[Net, FS.Read]> HTTPResponse Never! {
+    path: route.path
     call := __AppCall{request: request, data: ""}
-    if route.loader == .Val(loader) {
-        if loader.run(call) == {
+    if loaded == .Val(reply) {
+        if reply == {
             .JSON(text) -> call.data = text
             .Rejected(message) -> return app_boundary(400, route.error, "Route error", message, call)
             .Failed(message) -> return app_boundary(500, route.error, "Route error", message, call)
@@ -1041,6 +1130,35 @@ priv app_asset_links: fn(app: App, body: String) -[FS.Read]> String Never! {
 priv app_not_found_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     state: app_state(app)
     app_boundary(404, state.not_found, "Not found", "no web route matches `{request.path}`", __AppCall{request: request, data: ""})
+}
+
+priv app_navigation: fn(app: App) -> AppNavigation Never! {
+    guard: app.__state.guard_read()
+    guard.value.navigation.copy()
+}
+
+// The document a page answer holds.
+priv app_response_text: fn(answered: HTTPResponse) -[Net]> String Never! {
+    answered.body.text(1073741824) ?? ""
+}
+
+// The page answer a settling navigation gets (`App.settle`).
+priv app_navigation_answer: fn(app: App, moving: AppNavigation, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if moving.screen == .Val(screen) -> return app_screen_response(app, screen, request)
+    row: moving.route ?? return app_not_found_response(app, request)
+    loaded := moving.loaded
+    if loaded == None && row.loader == .Val(loader) {
+        loaded = Val(loader.run(__AppCall{request: request.copy(), data: ""}))
+    }
+    app_page_answer(app, row, request, loaded)
+}
+
+// The app graph's screen at the route pattern `path`.
+priv app_screen_at: fn(path: String) -> calls.AppScreen? Never! {
+    loop screen in calls.App.__graph().__screens() {
+        if screen.path == path -> return Val(screen.copy())
+    }
+    None
 }
 
 // Registers GET `/a/*jet_image`, which answers the app's image addresses,
