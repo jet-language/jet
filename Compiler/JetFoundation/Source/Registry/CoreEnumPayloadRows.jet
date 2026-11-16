@@ -1,33 +1,12 @@
-// Compiler-owned Core enum families with payloads. Each row is one variant
-// and its positional payload types in slot order (none for a unit variant).
-// The rows were frozen at the Rust-removal cutover from the bootstrap
-// checker's `resolve_enum_variants_cloned` tables, in their resolution order.
-// A family Core source also declares (Key, DataEvent) lists every case of
-// that declaration, in its order.
+// Compiler-owned Core enum families with payloads: no Core source declares
+// them, so these rows are their declaration. Each row is one variant and its
+// positional payload types in slot order (none for a unit variant). IOError
+// is the host IO error the runtime raises, its tags the HostEnums carrier
+// ordinals; PreparedValue is the comptime value a prepared constant holds.
+// Both stay here until Core source declares the family. A family Core source
+// declares takes its payloads from its Core.rows case list instead
+// (CORE_ENUM_CASE_PAYLOADS).
 CORE_ENUM_PAYLOAD_ROWS: [CoreEnumPayloadRow]{
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Char", payload: [Type]{Type.Char}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Enter", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Escape", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Backspace", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Tab", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Delete", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Insert", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Up", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Down", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Left", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Right", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Home", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "End", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "PageUp", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "PageDown", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Shift", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Control", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Alt", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Super", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "CapsLock", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "F", payload: [Type]{Type.Int}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Ctrl", payload: [Type]{Type.Char}},
-    CoreEnumPayloadRow{enum_name: "Key", variant: "Unknown", payload: [Type]{}},
     CoreEnumPayloadRow{enum_name: "IOError", variant: "InvalidInput", payload: [Type]{Type.Named{name: "IOContext"}}},
     CoreEnumPayloadRow{enum_name: "IOError", variant: "NotFound", payload: [Type]{Type.Named{name: "IOContext"}}},
     CoreEnumPayloadRow{enum_name: "IOError", variant: "PermissionDenied", payload: [Type]{Type.Named{name: "IOContext"}}},
@@ -39,18 +18,6 @@ CORE_ENUM_PAYLOAD_ROWS: [CoreEnumPayloadRow]{
     CoreEnumPayloadRow{enum_name: "IOError", variant: "ResourceLimit", payload: [Type]{Type.Named{name: "ProcessResourceLimit"}}},
     CoreEnumPayloadRow{enum_name: "IOError", variant: "AlreadyExists", payload: [Type]{Type.Named{name: "IOContext"}}},
     CoreEnumPayloadRow{enum_name: "IOError", variant: "Unsupported", payload: [Type]{Type.Named{name: "IOContext"}}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "Null", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "Bool", payload: [Type]{Type.Bool}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "Int", payload: [Type]{Type.Int}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "Float", payload: [Type]{Type.Float}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "Number", payload: [Type]{Type.String}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "Text", payload: [Type]{Type.String}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "Bytes", payload: [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "ArrayStart", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "ArrayEnd", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "ObjectStart", payload: [Type]{}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "Key", payload: [Type]{Type.String}},
-    CoreEnumPayloadRow{enum_name: "DataEvent", variant: "ObjectEnd", payload: [Type]{}},
     CoreEnumPayloadRow{enum_name: "PreparedValue", variant: "Int", payload: [Type]{Type.Int}},
     CoreEnumPayloadRow{enum_name: "PreparedValue", variant: "Float", payload: [Type]{Type.Float}},
     CoreEnumPayloadRow{enum_name: "PreparedValue", variant: "Bool", payload: [Type]{Type.Bool}},
@@ -64,10 +31,11 @@ CORE_ENUM_PAYLOAD_ROWS: [CoreEnumPayloadRow]{
 
 // Owning an opaque impl or a compiler enum menu does not create an export.
 // Qualified-annotation suffixes: the CORE_SOURCE_OWNED_ROWS impl types, then
-// the enum names above, each once in first-occurrence order.
-JET_CORE_OWNER_ANNOTATION_SUFFIXES: #run core_owner_annotation_suffixes(CORE_SOURCE_OWNED_ROWS, CORE_ENUM_PAYLOAD_ROWS)
+// the enum names above, then each Core enum leaf whose case list carries
+// payloads, each once in first-occurrence order.
+JET_CORE_OWNER_ANNOTATION_SUFFIXES: #run core_owner_annotation_suffixes(CORE_SOURCE_OWNED_ROWS, CORE_ENUM_PAYLOAD_ROWS, CORE_ENUM_CASE_ROWS, CORE_ENUM_CASE_PAYLOADS)
 
-core_owner_annotation_suffixes: fn(rows: [CoreSourceOwnedRow], payloads: [CoreEnumPayloadRow]) -> [String] Never! {
+core_owner_annotation_suffixes: fn(rows: [CoreSourceOwnedRow], payloads: [CoreEnumPayloadRow], cases: [CoreModuleTypeExport], case_payloads: [[[Type]]]) -> [String] Never! {
     suffixes := [String]{}
     loop row in rows {
         loop name in row.impl_types {
@@ -76,6 +44,11 @@ core_owner_annotation_suffixes: fn(rows: [CoreSourceOwnedRow], payloads: [CoreEn
     }
     loop payload in payloads {
         if !suffixes.contains(".{payload.enum_name}") -> suffixes.push(".{payload.enum_name}")
+    }
+    loop (index, leaf) in cases {
+        if case_payloads[index].len() > 0 && !suffixes.contains(".{leaf.name}") {
+            suffixes.push(".{leaf.name}")
+        }
     }
     suffixes
 }

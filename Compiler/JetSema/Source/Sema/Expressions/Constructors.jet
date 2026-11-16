@@ -953,8 +953,8 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             return sema_expression_compiler_unit_enum_literal(resolved_name, compiler_variants, variant, args, variant_span, span, expected, environment, program, diagnostics)
         }
     }
-    // A Core enum with no source declaration (`IOError`, `ProcessStreamMode`)
-    // builds its variant from the generated Core enum rows.
+    // A Core enum with no loaded declaration (`IOError`, a bare `Key`) builds
+    // its variant from the Core enum rows.
     owner_symbol: sema_expression_type_symbol(scopes, environment, program, resolved_name)
     if owner_symbol == None {
         core_variants := core_enum_payload_variants(resolved_name)
@@ -1290,8 +1290,8 @@ sema_expression_enum_constructor_signature: fn(path: SemaExpressionEnumPath, typ
     Val(SemaEnumConstructorSignature{labels: labels, params: params, result: sema_expression_field_owner_type(environment, program, owner.module_identity, declared, generic_names)})
 }
 
-// The constructor signature of a payload case of a Core enum with no source
-// declaration, from the generated Core enum rows: one unlabeled slot per row
+// The constructor signature of a payload case of a Core enum with no loaded
+// declaration, from the Core enum payload rows: one unlabeled slot per row
 // type.
 sema_expression_core_constructor_signature: fn(enum_name: String, variant: String) -> SemaEnumConstructorSignature? {
     params: core_enum_variant_payload(enum_name, variant) ?? return None
@@ -1333,7 +1333,7 @@ sema_expression_enum_constructor_taken: fn(display: String, label: String, ty: T
     sema_error("E0227", span, "`{display}` can't be used as a function value here because it takes its {slot} (`&&{type_name(ty)}`)", "`{type_name(ty)}` can't be copied out of a read parameter into the variant, so the constructor takes it, and a function type gives each parameter plain read access unless it marks a take (`fn(&&T)`)", "mark the parameter in the function type (`fn(&&{type_name(ty)})`), or build the case directly with `{direct}`")
 }
 
-// A variant of a Core enum without a source declaration: unit variants take no
+// A variant of a Core enum without a loaded declaration: unit variants take no
 // payload and payload variants take one positional value per row type.
 sema_expression_core_enum_literal: fn(enum_name: String, display_name: String, variants: [String], variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     payload_types: core_enum_variant_payload(enum_name, variant) ?? {

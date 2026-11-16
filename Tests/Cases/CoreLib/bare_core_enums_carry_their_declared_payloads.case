@@ -1,0 +1,23 @@
+# Claim: a Core enum named bare, without importing its module, has the payloads its Core declaration gives each case, read from its Core.rows case list: TUIConstraint's Float payloads and DBValue's Int, Float, String, Bool and [U8] payloads are built, bound in exhaustive matches and compared, and the bare program prints the same lines as one that imports core.tui and core.db; on o0, o1 and o2.
+# Hand-derived: each constraint's case and payload in list order, then the two comparisons, then each value's case and payload in list order.
+fixture: BareCoreEnumsCarryTheirDeclaredPayloads.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 run.jet
+exit: 0 # o0
+stdout: = bare_core_enums_carry_their_declared_payloads.out # o0
+step: jet run -O1 run.jet
+exit: 0 # o1
+stdout: = bare_core_enums_carry_their_declared_payloads.out # o1
+step: jet run -O2 run.jet
+exit: 0 # o2
+stdout: = bare_core_enums_carry_their_declared_payloads.out # o2
+step: jet run -O0 bare.jet
+exit: 0 # bare o0
+stdout: = bare_core_enums_carry_their_declared_payloads.out # bare o0
+step: jet run -O1 bare.jet
+exit: 0 # bare o1
+stdout: = bare_core_enums_carry_their_declared_payloads.out # bare o1
+step: jet run -O2 bare.jet
+exit: 0 # bare o2
+stdout: = bare_core_enums_carry_their_declared_payloads.out # bare o2

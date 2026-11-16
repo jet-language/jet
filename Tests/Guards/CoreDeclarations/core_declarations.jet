@@ -23,6 +23,8 @@ use {
         core_decl_mem_problem,
         core_decl_mem_tier_problem,
         core_decl_syntax_constants,
+        core_enum_payload_variants,
+        core_enum_variant_payload,
     ]
     corpus_manifest.[guards_enter_root]
     core_guard_files: core.files
@@ -64,6 +66,34 @@ core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] 
     assert_eq(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", EFFECT_VOCABULARY_ROOTS, "the effect vocabulary's roots"), "")
     assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", [String]{"Net", "Rand"}, "the effect vocabulary's roots").ends_with("; write `Effect:plain(Net|Rand)`"))
     assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "SideEffect", [String]{"C"}, "the cases").contains("has no `SideEffect:plain(…)` type"))
+}
+
+#Test("an enum list carries its payloads into the Core enum payload rows") {
+    guards_enter_root()
+    declared: core_guard_declared() ?? panic("Core.rows was refused: {err.message}")
+    payloads := [String]{}
+    loop entry in declared.modules {
+        if entry.name != "core.term" -> next
+        loop leaf in entry.types {
+            if leaf.name != "Key" -> next
+            loop (at, variant) in leaf.variants {
+                if leaf.payloads[at] != "" -> payloads.push("{variant}({leaf.payloads[at]})")
+            }
+        }
+    }
+    assert_eq(payloads.join("|"), "Char(Char)|F(Int)|Ctrl(Char)")
+    assert_eq((core_enum_payload_variants("Key") ?? [String]{}).len(), 23)
+    assert_eq((core_enum_variant_payload("DataEvent", "Bytes") ?? panic("DataEvent.Bytes has no payload row")).len(), 1)
+    assert_eq((core_enum_variant_payload("Key", "Enter") ?? panic("Key.Enter has no payload row")).len(), 0)
+    source: core_guard_files.read(CORE_DECLARATIONS_CORE_PATH) ?? panic("{CORE_DECLARATIONS_CORE_PATH} did not read")
+    parts: core_guard_files.read(CORE_DECLARATIONS_PARTS_PATH) ?? panic("{CORE_DECLARATIONS_PARTS_PATH} did not read")
+    qualified: source.replace("|F(Int)|", "|F(term.Int)|")
+    if core_declarations_read(qualified, parts, CORE_DECLARATIONS_SYNTAX_FILES, CORE_DECLARATIONS_RUNTIME_FILES, EFFECT_VOCABULARY_ROWS) == {
+        .Ok(_) -> { panic("a qualified payload in a Core.rows list was read") }
+        .Err(error) -> {
+            assert(error.message.contains("invalid payload of Core enum case `F(term.Int)`"))
+        }
+    }
 }
 
 #Test("a core.mem item whose declaration disagrees with its gate tier is named") {

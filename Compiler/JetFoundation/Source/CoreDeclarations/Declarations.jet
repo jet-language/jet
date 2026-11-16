@@ -24,14 +24,17 @@ CoreDeclarationFile: struct {
 }
 
 // One exported Core type: its kind (`plain` or `crypto_nominal`), its enum
-// variants, its generic arity (0 when it takes none) and the module a
-// `from(core.x)` re-export names ("" for a defining leaf). Resolving a
-// re-export copies its definition's kind, variants and arity and keeps the
-// module it names.
+// variants and each one's payload (a Core signature row type, `[U8]` in
+// `Bytes([U8])`, or "" for a unit variant or a list that carries none), its
+// generic arity (0 when it takes none) and the module a `from(core.x)`
+// re-export names ("" for a defining leaf). Resolving a re-export copies its
+// definition's kind, variants, payloads and arity and keeps the module it
+// names.
 CoreDeclarationType: struct {
     name: String
     kind: String
     variants: [String]
+    payloads: [String]
     generic_arity: Int
     from_module: String
 }
@@ -393,7 +396,8 @@ core_decl_descriptor_argument: fn(descriptor: String, head: String) -> String? N
 }
 
 // `Name`, `Name: plain`, `Name: crypto_nominal`, `Name: plain(A|B)`,
-// `Name: generic(N)` or `Name: from(core.x)`.
+// `Name: generic(N)` or `Name: from(core.x)`. A `plain(…)` case may carry
+// its one positional payload, `B(Int)`: see core_decl_payload_text.
 core_decl_type: fn(raw: String, context: String) -> CoreDeclarationType CoreDeclarationError! {
     parts: loop part in raw.split(":") -> part.trim()
     name: parts[0]
@@ -404,13 +408,24 @@ core_decl_type: fn(raw: String, context: String) -> CoreDeclarationType CoreDecl
     kind := descriptor.copy()
     arity := 0
     variants := [String]{}
+    payloads := [String]{}
     from_module := ""
     if core_decl_descriptor_argument(descriptor, "generic") == .Val(count) && core_decl_is_digits(count) && !count.starts_with("0") {
         arity = Int.parse(count) ?? 0
         kind = "plain"
     }
-    if core_decl_descriptor_argument(descriptor, "plain") == .Val(listed) && !listed.contains("(") && !listed.contains(")") {
-        variants = core_decl_core_names(listed.replace("|", ","), "Core enum `{name}` at {context}") ?? return Err(err)
+    if core_decl_descriptor_argument(descriptor, "plain") == .Val(listed) {
+        loop case_text in listed.split("|") {
+            case_parts: case_text.trim().partition("(")
+            payload: if case_parts.sep == "" -> "" else -> case_parts.tail.removesuffix(")")
+            if case_parts.sep != "" && (!case_parts.tail.ends_with(")") || !core_decl_payload_text(payload)) {
+                return Err(core_decl_fail("invalid payload of Core enum case `{case_text}` of `{name}` in {context}"))
+            }
+            if case_parts.head != "" || case_parts.sep != "" {
+                variants.push(case_parts.head)
+                payloads.push(payload)
+            }
+        }
         if variants.len() == 0 {
             return Err(core_decl_fail("Core enum export has no variants `{raw}` in {context}"))
         }
@@ -433,7 +448,23 @@ core_decl_type: fn(raw: String, context: String) -> CoreDeclarationType CoreDecl
         }
         seen.push(variant)
     }
-    Ok(CoreDeclarationType{name: name.copy(), kind: kind, variants: variants, generic_arity: arity, from_module: from_module})
+    Ok(CoreDeclarationType{name: name.copy(), kind: kind, variants: variants, payloads: payloads, generic_arity: arity, from_module: from_module})
+}
+
+// A payload a Core.rows case list carries: one unlabeled slot whose type is a
+// name, a list or an option of them (`String`, `[U8]`, `[FieldError]`,
+// `Int?`), read with core_sig_row_type. Tools/agent/CoreEnumCases.jet writes
+// no other payload, so a list whose enum declares one carries none.
+core_decl_payload_text: fn(text: String) -> Bool Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 -> return false
+    loop byte in bytes {
+        code: Int{byte}
+        if !(core_decl_lower(code) || core_decl_upper(code) || core_decl_digit(code) || code == 95 || code == 91 || code == 93 || code == 63) {
+            return false
+        }
+    }
+    true
 }
 
 core_decl_module: fn(groups: [String], number: Int, context: String) -> CoreDeclarationModule CoreDeclarationError! {
@@ -460,8 +491,8 @@ core_decl_module: fn(groups: [String], number: Int, context: String) -> CoreDecl
 }
 
 // `leaf` of module `module_name` with a `from(core.x)` reference replaced by
-// the kind, variants and arity of the type it names. Re-exports share one
-// definition instead of copying variant lists.
+// the kind, variants, payloads and arity of the type it names. Re-exports
+// share one definition instead of copying variant lists.
 core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String, leaf: CoreDeclarationType, visiting: [String]) -> CoreDeclarationType CoreDeclarationError! {
     if leaf.from_module == "" -> return Ok(leaf.copy())
     key: "{module_name}.{leaf.name}"
@@ -473,8 +504,10 @@ core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String
             if target.name != leaf.name -> next
             nested := visiting.copy()
             nested.push(key)
-            canonical: core_decl_resolve_type(modules, owner.name, target, nested) ?? return Err(err)
-            return Ok(CoreDeclarationType{name: leaf.name.copy(), kind: canonical.kind.copy(), variants: canonical.variants.copy(), generic_arity: canonical.generic_arity, from_module: leaf.from_module.copy()})
+            resolved := core_decl_resolve_type(modules, owner.name, target, nested) ?? return Err(err)
+            resolved.name = leaf.name.copy()
+            resolved.from_module = leaf.from_module.copy()
+            return Ok(resolved)
         }
         break
     }

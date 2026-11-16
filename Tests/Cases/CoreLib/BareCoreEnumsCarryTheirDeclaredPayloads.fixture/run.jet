@@ -1,0 +1,34 @@
+use {
+    core.tui.[TUIConstraint]
+    core.db.[DBValue]
+}
+
+constraint_text: fn(c: TUIConstraint) -> String {
+    if c == {
+        .Length(n) -> "length {n}"
+        .Min(n) -> "min {n}"
+        .Max(n) -> "max {n}"
+        .Percent(n) -> "percent {n}"
+        .Fill(n) -> "fill {n}"
+    }
+}
+
+value_text: fn(v: DBValue) -> String {
+    if v == {
+        .Null -> "null"
+        .Int(n) -> "int {n}"
+        .Float(x) -> "float {x}"
+        .Text(s) -> "text {s}"
+        .Bool(b) -> "bool {b}"
+        .Blob(bytes) -> "blob {bytes.len()}"
+    }
+}
+
+run: fn() {
+    constraints: [TUIConstraint]{TUIConstraint.Length(2.5), .Min(1.0), .Max(8.0), .Percent(50.0), .Fill(1.0)}
+    loop c in constraints -> print(constraint_text(c))
+    print(constraints[0] == TUIConstraint.Length(2.5))
+    print(constraints[1] == TUIConstraint.Length(1.0))
+    values: [DBValue]{.Null, DBValue.Int(7), .Float(0.5), .Text("row"), .Bool(true), .Blob([U8]{1, 2, 3})}
+    loop v in values -> print(value_text(v))
+}
