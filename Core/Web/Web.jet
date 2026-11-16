@@ -586,11 +586,14 @@ App: struct {
 
     // A server over the table on `address`; the labelled `tls:` option
     // serves HTTPS and `deadline:` bounds each connection's reads and writes.
-    // A failed bind is the caller's error to handle.
-    bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError! {
+    // A failed bind is the caller's error to handle. It reads files because
+    // it adds the app graph's screens, whose views may read files when they
+    // answer, as every handler may.
+    bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net, FS.Read]> HTTPServer HTTPError! {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
+        app_screen_routes(self)
         http_server.server_bind(address, app_table(self), tls, deadline)
     }
 
@@ -599,6 +602,7 @@ App: struct {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
+        app_screen_routes(self)
         http_server.server_serve_once(listener, app_table(self))
     }
 }
@@ -746,6 +750,7 @@ priv app_serve: fn(app: App, chosen: AppPort) Never! -[Env, IO, Net, FS.Read, Ti
     app_image_route(app)
     app_push_route(app)
     app_crawl_routes(app)
+    app_screen_routes(app)
     if !app_has_root_catch_all(table) {
         fallback: app.copy()
         http_server.route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(app_not_found_response(fallback, request)) }), "", #here)
@@ -965,6 +970,82 @@ priv app_crawl_routes: fn(app: App) Never! {
     }
 }
 
+// Registers a GET of the address of each screen of the app graph
+// (`calls.App.__screens`), in the order the graph adds them, unless the app
+// routes that path itself or did this before; `app_screen_response`
+// answers it.
+priv app_screen_routes: fn(app: App) Never! {
+    table: app_table(app)
+    taken := [String]{}
+    loop route in http_server.mux_routes(table) {
+        if route.method == "GET" -> taken.push(route.pattern.copy())
+    }
+    loop screen in calls.App.__graph().__screens() {
+        if taken.contains(screen.path) -> next
+        taken.push(screen.path.copy())
+        served: app.copy()
+        opened: screen.copy()
+        http_server.route_add(table, "GET", screen.path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_screen_response(served, opened, request)) }), "", #here)
+    }
+}
+
+// A GET of `screen`'s address: the page of what its view shows there, as
+// server HTML that ends in the page's resume state (`calls.resume.render`),
+// so the client picks the page up without running the view's reads again.
+// The state's fields are each `:name` segment's text and each `#App.Query`
+// field's query value. A screen only a signed-in caller opens is 401 to any
+// other caller. A request that carries a session acts for its account, and
+// no one keeps its page: `Cache-Control: private, no-store`. An address
+// whose texts make no state of the screen is the app's not-found page.
+priv app_screen_response: fn(app: App, screen: calls.AppScreen, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    fields := [String:String]{}
+    loop segment in screen.path.split("/") {
+        if !segment.starts_with(":") -> next
+        name: segment.removeprefix(":")
+        fields[name] = request.param(name) ?? ""
+    }
+    at: request.path.find("?")
+    if at >= 0 && screen.query.len() > 0 {
+        query: web_http.query_decode_strict(request.path.slice(at + 1, request.path.len())) ?? return app_not_found_response(app, request)
+        loop name in screen.query {
+            if web_http.query_get(query, name) == .Val(value) -> fields[name] = value
+        }
+    }
+    account: app_session_account(request)
+    if screen.signed_in && account == None {
+        refused: app_html(401, WebPage{title: "Sign in", body: "<p>This page needs a signed-in caller.</p>"}, "")
+        return refused.__with_header("cache-control", "private, no-store")
+    }
+    page: if account == .Val(signed) -> app_screen_page_as(signed, screen, fields) else -> app_screen_page(screen, fields)
+    body: page ?? return app_not_found_response(app, request)
+    answered: app_html(200, WebPage{title: calls.App.__graph().title, body: body}, "")
+    if account == None -> return answered
+    answered.__with_header("cache-control", "private, no-store")
+}
+
+// The page `screen` shows at the address whose field texts are `fields`,
+// with its resume state; None when the texts make no state of the screen.
+priv app_screen_page: fn(screen: calls.AppScreen, fields: [String:String]) -[Net, FS.Read]> String? Never! {
+    opened: Shared{false}
+    marked: opened.copy()
+    page: calls.resume.render(fn() {
+        shown: calls.App.__graph().__open(screen, fields) ?? return ""
+        held := marked.guard_edit()
+        held.value = true
+        shown
+    })
+    held: opened.guard_read()
+    if !held.value -> return None
+    Val(page)
+}
+
+// `app_screen_page`, acting for `account`.
+priv app_screen_page_as: fn(account: auth.AccountID, screen: calls.AppScreen, fields: [String:String]) -[Net, FS.Read]> String? Never! {
+    calls.callers.begin_account(account)
+    defer calls.callers.end()
+    app_screen_page(screen, fields)
+}
+
 // The origin a crawler reached the app at: the request's Host, over https
 // when the proxy in front says so (`X-Forwarded-Proto`), else http.
 priv app_crawl_origin: fn(request: HTTPRequest) -> String Never! {
@@ -1008,8 +1089,11 @@ priv CrawlTestInbox: struct {
     box: String
 }
 
+// A crawl test screen's opener: the crawl opens no screen.
+priv crawl_test_open: fn(_graph: calls.App, _fields: [String:String]) -> String? Never! { None }
+
 #Test("the sitemap lists the public pages the graph's sitemap gives, at the origin asked, and robots leave the signed-in screens") {
-    graph: calls.new("Crawl").__screen<CrawlTestGuide>("/help/:slug", "web.CrawlTestGuide", [String]{}, false).__screen<CrawlTestInbox>("/mail/:box", "web.CrawlTestInbox", [String]{}, true)
+    graph: calls.new("Crawl").__screen<CrawlTestGuide>("/help/:slug", "web.CrawlTestGuide", [String]{}, false, crawl_test_open).__screen<CrawlTestInbox>("/mail/:box", "web.CrawlTestInbox", [String]{}, true, crawl_test_open)
     _: graph.__sitemap<CrawlTestGuide>(
         "web.CrawlTestGuide",
         [String]{"slug"},
@@ -1038,6 +1122,72 @@ priv CrawlTestInbox: struct {
     assert(rules.contains("Disallow: /mail/*$\n"))
     assert(!rules.contains("/help/"))
     assert(rules.ends_with("Sitemap: https://crew.example/sitemap.xml\n"))
+}
+
+#Codable
+priv ScreenTestBoard: struct {
+    board: String
+    tab: String
+}
+
+#Codable
+priv ScreenTestInbox: struct {
+    box: String
+}
+
+// The board screen's opener, as the compiler lowers `.screen`: its view
+// shows the board and the tab the address gives.
+priv screen_test_board_open: fn(graph: calls.App, fields: [String:String]) -> String? Never! {
+    made: graph.__address_state<ScreenTestBoard>([String]{"board", "tab"}, [String?]{graph.__address_json<String>(fields, "board"), graph.__address_json<String>(fields, "tab")})
+    graph.__opened<ScreenTestBoard>(made, fn(state: ScreenTestBoard) { graph.__view_html<String>("{state.board} <{state.tab}>") })
+}
+
+// The inbox screen's opener: its view shows the box and the caller it acts
+// for.
+priv screen_test_inbox_open: fn(graph: calls.App, fields: [String:String]) -> String? Never! {
+    made: graph.__address_state<ScreenTestInbox>([String]{"box"}, [String?]{graph.__address_json<String>(fields, "box")})
+    graph.__opened<ScreenTestInbox>(made, fn(state: ScreenTestInbox) {
+        caller: calls.maybe_caller() ?? auth.AccountID.from_string("no one")
+        graph.__view_html<String>("{state.box} for {caller.raw()}")
+    })
+}
+
+#Test("a screen's address answers a GET with the page its view shows there and the page's resume state, 401 when only a signed-in caller opens it, and 404 when the address makes no state") {
+    _: calls.new("Crew").__screen<ScreenTestBoard>("/boards/:board", "web.ScreenTestBoard", [String]{"tab"}, false, screen_test_board_open).__screen<ScreenTestInbox>("/mail/:box", "web.ScreenTestInbox", [String]{}, true, screen_test_inbox_open)
+    served: app()
+    app_screen_routes(served)
+    table: app_table(served)
+    shown: http_server.__dispatch(table, web_http.server_request("GET", "/boards/b%201?tab=mine%26more", web_http.body_text(""), web_http.headers()))
+    assert_eq(shown.status, 200)
+    assert_eq(shown.header("content-type"), Val("text/html; charset=utf-8"))
+    assert_eq(shown.header("cache-control"), String?{None})
+    assert_eq(shown.text() ?? "unreadable", "<!doctype html><html><head><meta charset=\"utf-8\"><title>Crew</title></head><body><p>b 1 &lt;mine&amp;more&gt;</p><script type=\"application/json\" id=\"jet-resume\">[]</script></body></html>")
+    // No `tab`: the address makes no board.
+    missing: http_server.__dispatch(table, web_http.server_request("GET", "/boards/b1", web_http.body_text(""), web_http.headers()))
+    assert_eq(missing.status, 404)
+    refused: http_server.__dispatch(table, web_http.server_request("GET", "/mail/mine", web_http.body_text(""), web_http.headers()))
+    assert_eq(refused.status, 401)
+    assert_eq(refused.header("cache-control"), Val("private, no-store"))
+    auth.register_user("web-screen-ben", "ben's hash") ?? panic("ben registers: {err}")
+    now: core.time.now_utc().to_timestamp()
+    session: auth.password_login("web-screen-ben", "ben's hash", now * 1000, 60000) ?? panic("ben signs in: {err}")
+    fields := web_http.headers_set(web_http.headers(), "authorization", "Bearer {auth.session_id(session)}")
+    request := web_http.server_request("GET", "/mail/mine", web_http.body_text(""), fields)
+    request.__received = now
+    opened: http_server.__dispatch(table, request)
+    assert_eq(opened.status, 200)
+    assert_eq(opened.header("cache-control"), Val("private, no-store"))
+    assert((opened.text() ?? "unreadable").contains("<body><p>mine for web-screen-ben</p><script"))
+    assert_eq(calls.maybe_caller(), auth.AccountID?{None})
+    // A path the app routes itself stays its own, and a second pass adds
+    // nothing.
+    own: app()
+    http_server.route_add(app_table(own), "GET", "/boards/:board", http_server.__handler(fn(asked: HTTPRequest) { Ok(app_html(200, WebPage{title: "own", body: "own"}, "")) }), "", #here)
+    app_screen_routes(own)
+    app_screen_routes(own)
+    mine: http_server.__dispatch(app_table(own), web_http.server_request("GET", "/boards/b1?tab=x", web_http.body_text(""), web_http.headers()))
+    assert((mine.text() ?? "unreadable").contains("<title>own</title>"))
+    assert_eq(http_server.mux_routes(app_table(own)).len(), 2)
 }
 
 // The body of a device's registration: its push service (`apns`, `fcm` or

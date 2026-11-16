@@ -31,6 +31,7 @@ use {
     log_rt: jet.runtime.log
     push_wire: __core_app_push
     url: core.net.url
+    markup: core.text.html
 }
 
 SYNC_MAX_SESSION: 256
@@ -2180,11 +2181,12 @@ App: struct {
     // `query` lists its `#App.Query` fields, and `open` opens the screen at
     // an address: from the text of each of `V`'s fields there, by name, it
     // makes the state, runs `view` with it and the graph's Remotes, and gives
-    // the text of what the view shows (`__view_text`); None when the texts
-    // don't make a `V`. The screen joins the graph's route set, in the order
-    // the graph adds it, where `__url_of` finds its address, `__go` opens it,
-    // and a renderer walks it (`screens`).
-    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: &&fn(App, [String:String]) -> String? Never!) -> App Never! {
+    // the HTML of what the view shows (a tree's `__html`, else
+    // `__view_html`); None when the texts don't make a `V`. The screen joins
+    // the graph's route set, in the order the graph adds it, where
+    // `__url_of` finds its address, `__go` opens it, and a renderer walks it
+    // (`screens`).
+    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: &&fn(App, [String:String]) -[Net, FS.Read]> String? Never!) -> App Never! {
         held := APP_GRAPH.guard_edit()
         held.value.screens.push(AppScreen{path: path, state: state, query: query, signed_in: signed_in, open: Shared{AppOpen{run: open.move()}}})
         self.copy()
@@ -2261,14 +2263,17 @@ App: struct {
     }
 
     // Runs `run` with `state`, and gives its text; None for no state.
-    __opened: fn<V>(self, state: V?, run: fn(V) -> String Never!) -> String? Never! {
+    __opened: fn<V>(self, state: V?, run: fn(V) -[Net, FS.Read]> String Never!) -[Net, FS.Read]> String? Never! {
         if state == .Val(made) -> return Val(run(made))
         None
     }
 
-    // The text of what a screen's view shows: a string's own text, and any
-    // other value's JSON.
-    __view_text: fn<N: Encode>(self, shown: N) -> String Never! { App.__address_arg<N>(shown) }
+    // The HTML of what a screen's view shows when it is no node tree: its
+    // text (a string's own text, any other value's JSON), escaped, as a
+    // paragraph. A view that gives a tree shows the tree's HTML (`__html`).
+    __view_html: fn<N: Encode>(self, shown: N) -> String Never! {
+        "<p>{markup.escape(App.__address_arg<N>(shown))}</p>"
+    }
 
     // `app.go(view)` as the compiler lowers it: opens the screen whose state
     // is `V`, which `state` names, at the address of the fields `names` with
@@ -2276,7 +2281,7 @@ App: struct {
     // one (`__current`), and its view runs. The compiler refuses a state that
     // no screen of the program's graph opens, so a state with no screen here
     // is one whose graph this process has not built.
-    __go: fn<V>(state: String, names: [String], values: [String]) Never! {
+    __go: fn<V>(state: String, names: [String], values: [String]) Never! -[Net, FS.Read]> {
         fields := [String:String]{}
         loop index in 0..<names.len() -> fields[names[index].copy()] = values[index].copy()
         screen: app_screen(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before opening a screen")
@@ -2293,6 +2298,10 @@ App: struct {
         decode(App{title: app_graph_title()}, now.fields)
     }
 
+    // The graph as it stands, as a server holds it to answer its screens'
+    // addresses.
+    __graph: fn() -> App Never! { App{title: app_graph_title()} }
+
     // The screens of the graph, in the order it adds them: what a renderer
     // walks to answer each address.
     __screens: fn(self) -> [AppScreen] Never! {
@@ -2301,9 +2310,9 @@ App: struct {
     }
 
     // Opens `screen` at the address whose field texts are `fields`, by field
-    // name, as a renderer does: the text of what its view shows, or None
+    // name, as a renderer does: the HTML of what its view shows, or None
     // when the texts make no state of the screen.
-    __open: fn(self, screen: AppScreen, fields: [String:String]) -> String? Never! {
+    __open: fn(self, screen: AppScreen, fields: [String:String]) -[Net, FS.Read]> String? Never! {
         opener: screen.open.guard_read()
         opener.value.run(self.copy(), fields)
     }
@@ -2450,7 +2459,7 @@ AppScreen: struct {
 // How a screen opens at an address: from its fields' texts, the text of
 // what its view shows, or None when they make no state.
 AppOpen: struct {
-    run: fn(App, [String:String]) -> String? Never!
+    run: fn(App, [String:String]) -[Net, FS.Read]> String? Never!
 }
 
 // How the replies of one type may be kept, as `.cache<V>(policy)` sets it.
@@ -2888,14 +2897,11 @@ priv RouteTestBoard: struct {
 priv RouteTestService: struct {}
 
 // The graph test's board view, as the compiler lowers `.screen`'s `open`:
-// it makes the state from the address's texts, and greets its project
-// through the graph's Remote of the service.
-priv route_test_open: fn(graph: App, fields: [String:String]) -> String? Never! {
+// it makes the state from the address's texts, and shows its project and
+// filter.
+priv route_test_open: fn(graph: App, fields: [String:String]) -[Net, FS.Read]> String? Never! {
     made: graph.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{graph.__address_json<String>(fields, "project"), graph.__address_json<String>(fields, "q")})
-    graph.__opened<RouteTestBoard>(made, fn(state: RouteTestBoard) {
-        greeting: remote_post("app.RouteTestService", true, "greet", [String]{live_json.to_string<String>(state.project) ?? "null"}) ?? "{err}"
-        graph.__view_text<String>("{greeting}: {state.q}")
-    })
+    graph.__opened<RouteTestBoard>(made, fn(state: RouteTestBoard) { graph.__view_html<String>("{state.project} <{state.q}>") })
 }
 
 #Test("the app graph opens each screen at its state's address, with the graph's Remotes") {
@@ -2929,7 +2935,9 @@ priv route_test_open: fn(graph: App, fields: [String:String]) -> String? Never! 
     assert_eq(screens.len(), 1)
     assert_eq(screens[0].path, "/projects/:project/board")
     assert_eq(screens[0].signed_in, true)
-    assert_eq(graph.__open(screens[0], [String:String]{"project": "p1", "q": "mine"}), Val("{{\"ok\":\"hello p1\"}}: mine"))
+    assert_eq(graph.__open(screens[0], [String:String]{"project": "p1", "q": "mine"}), Val("<p>p1 &lt;mine&gt;</p>"))
+    // A view calls the graph's Remote of a service it mounts in this process.
+    assert_eq(remote_post("app.RouteTestService", true, "greet", [String]{"\"p1\""}) ?? "{err}", "{{\"ok\":\"hello p1\"}}")
     assert_eq(graph.__open(screens[0], [String:String]{"q": "mine"}), String?{None})
     // `go` makes a screen the current one.
     assert_eq(App.__current<RouteTestBoard>("app.RouteTestBoard", fn(at: App, fields: [String:String]) { at.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{at.__address_json<String>(fields, "project"), at.__address_json<String>(fields, "q")}) }) == None, true)

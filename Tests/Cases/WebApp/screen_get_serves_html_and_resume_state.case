@@ -1,0 +1,12 @@
+# A `.screen` of the app graph answers a GET of its address on a served web
+# app: the page is server HTML of what the view shows there, its text
+# escaped, ending in the page's resume state (`jet-resume`), which a view
+# that reads no live data leaves empty. The state comes from the path's
+# `:project` and the `#App.Query` field `tab`; an address without `tab`
+# makes no board and is not found. A signed-in screen is 401 to a caller
+# with no session, and no one keeps that answer.
+fixture: ScreenGetServesHTMLAndResumeState.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "/boards/p%201?tab=mine%26more: 200 cache-control=none\n<!doctype html><html><head><meta charset=\"utf-8\"><title>Crew</title></head><body><p>p 1 &lt;mine&amp;more&gt;</p><script type=\"application/json\" id=\"jet-resume\">[]</script></body></html>\n/boards/p1: 404 cache-control=none\n/inbox/mine: 401 cache-control=private, no-store\n"

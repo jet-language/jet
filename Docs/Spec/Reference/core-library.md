@@ -1771,7 +1771,7 @@ static files, CORS or request ids has no effect.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `app.bind(addr, tls:, deadline:)` | `HTTPServer HTTPError!` | Bind a listener over the app's route table. |
+| `app.bind(addr, tls:, deadline:) -[Net, FS.Read]>` | `HTTPServer HTTPError!` | Bind a listener over the app's route table and the app graph's screens. |
 | `app.serve_once(listener)` | `HTTPError!` | Serve one request for tests and small adapters. |
 | `response(status, body)` | `HTTPResponse` | Construct a text response. |
 | `json(status, body)` | `HTTPResponse` | Encode an `Encode` value as JSON response data. |
@@ -5838,8 +5838,9 @@ screen. `board` is a named function. Each of its parameters that is an
 declare with `.api<S>` (opening the screen otherwise stops the program).
 Its one other parameter is the screen's state: a struct declared outside
 Core with no type parameters, whose fields each derive `Encode` and
-`Decode`. The view can't fail, and its result derives `Encode`: it is what
-the screen shows. The state is the screen's address. Each `:name` segment
+`Decode`. The view can't fail, and its result is a `ui.Node` tree or
+derives `Encode`: it is what the screen shows. The state is the screen's
+address. Each `:name` segment
 of the path is the field `name`. A field marked `#App.Query` (`#App.Query
 q: String`) goes after `?`. Every other field must be a path segment. A
 path that is not a string literal starting with `/`, a field in neither
@@ -5849,6 +5850,20 @@ another shape, and a state that two screens register are E2820
 caller opens. A renderer walks the graph's screens in the order they were
 added, each with its path, state, query fields, `signed_in` and an opener
 that makes the state from an address's field texts and runs the view.
+
+A served `web.App` answers a GET of each screen's address, unless the
+program routes that path itself. The page is server HTML: a tree's HTML,
+or any other result's text (a string's own text, else its JSON) escaped
+into a paragraph, then the page's resume state
+(`<script type="application/json" id="jet-resume">`), the results of the
+live reads the view made, which the client picks up without running them
+again. An address whose texts make no state is the app's not-found page. A
+signed-in screen is 401 to a request with no session; a request with one
+runs the view acting for its account, and every answer to a request with a
+session, or to a signed-in screen, is `Cache-Control: private, no-store`. A
+view runs as server code, with the effects a server handler has: the
+network and reading files. So `app.bind`, which adds the screens, carries
+`FS.Read` as well as `Net`, as `serve` and `serve_once` do.
 
 `app.url_of(state)` gives the address of the screen whose state is `state`'s
 type. Each path field's value is percent-encoded into its segment, and each
