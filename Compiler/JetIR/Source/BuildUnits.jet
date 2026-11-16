@@ -2,7 +2,7 @@
 // their Float magnitude. A conversion between units of one family applies
 // the checked rational scale and offset to that magnitude, and a shown value
 // is the magnitude followed by its unit label.
-use jet_foundation.[BodyUnitRounding, Dimension, Span, Type, measure_signed_value, unit_family_type_name]
+use jet_foundation.[BodyUnitRounding, Dimension, Span, TTypeDef, Type, measure_signed_value, unit_family_type_name]
 
 // `UnitConvert`: the magnitude times `scale`, plus `offset` (each a checked
 // "numerator/denominator" ratio). The identity conversion is the value
@@ -187,4 +187,32 @@ ir_unit_family_base: fn(p: IRProgram, family: String) -> String? Never! {
         }
     }
     None
+}
+
+// The names of the unit types the unit families of `types` mint: each
+// member's type (`Meter`), and an affine member's point and delta
+// (`CelsiusPoint`, `CelsiusDelta`).
+ir_unit_minted_names: fn(types: [TTypeDef]) -> [String:Bool] Never! {
+    names := [String:Bool]{}
+    loop definition in types {
+        if definition.kind == .UnitFamily(members, _) {
+            loop member in members {
+                minted: unit_family_type_name(member)
+                names["{minted}Point"] = true
+                names["{minted}Delta"] = true
+                names[minted] = true
+            }
+        }
+    }
+    names
+}
+
+// Whether `definition` is a unit family or a unit type one mints (`minted`,
+// ir_unit_minted_names), which unit literals spell by its bare name.
+ir_unit_minted_row: fn(definition: TTypeDef, minted: [String:Bool]) -> Bool Never! {
+    if definition.kind == {
+        .UnitFamily(_, _) -> true
+        .Distinct(_, _) -> minted.get(definition.name) != None
+        .Struct(_, _) | .Enum(_, _) | .Alias(_) -> false
+    }
 }

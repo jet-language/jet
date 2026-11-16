@@ -3712,10 +3712,11 @@ ir_default_err: fn(p: IRProgram, ty: Type) -> Bool Never! {
     p.types[row].compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
 }
 
-// How a program filters one compiler-owned row: a runtime enum yields only to
-// a declared row of its key; a plain Core enum and a record also yield to a
-// program type spelling their name, and a plain Core enum to a single loaded
-// Core source that declares it.
+// How a program filters one compiler-owned row: a runtime enum or a record
+// yields only to a declared row of its key; a plain Core enum also yields to a
+// single loaded Core source that declares it. None yields to a program type of
+// its name: program code spells that type by its key, and Core's bare spelling
+// still names the row.
 IRCompilerOwnedRowClass: enum {
     RuntimeEnum
     CoreEnum
@@ -3809,29 +3810,24 @@ ir_compiler_owned_reaches: fn(targets: [[Int]], from: Int, to: Int) -> Bool Neve
 
 // The compiler-owned rows no checked module declares, in
 // IR_COMPILER_OWNED_TYPE_ROWS order, each under its bare canonical key unless a
-// row already owns it. A plain Core enum leaf also yields to a program type and
-// to a single loaded Core source declaring it; a record yields to a program
-// type spelling its leaf, which keeps that bare spelling: the builder resolves
-// names by leaf, and a bare name in the declaring module is its own declaration
-// (the module scope is searched first).
+// row already owns it. A plain Core enum leaf also yields to a single loaded
+// Core source declaring it, which then claims the bare name (ir_program_declared).
 ir_add_compiler_owned_types: fn(types: &[TTypeDef]) Never! {
     if types.len() == 0 {
         return
     }
     module_identity: types[0].module_identity.copy()
     declared := [String:Bool]{}
-    program_names := [String:Bool]{}
     core_enums := [String:Int]{}
     loop definition in types {
         declared[definition.key] = true
-        if !definition.key.starts_with("<corelib>/") -> program_names[definition.name] = true else if definition.key != definition.name && definition.kind == .Enum(_, _) {
+        if definition.key.starts_with("<corelib>/") && definition.kind == .Enum(_, _) {
             core_enums[definition.name] = (core_enums.get(definition.name) ?? 0) + 1
         }
     }
     loop row in IR_COMPILER_OWNED_TYPE_ROWS {
         name: row.definition.name
         if declared.get(name) != None -> next
-        if row.class != .RuntimeEnum && program_names.get(name) != None -> next
         if row.class == .CoreEnum && (core_enums.get(name) ?? 0) == 1 -> next
         declared[name] = true
         definition := row.definition

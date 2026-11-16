@@ -812,19 +812,26 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     ir_add_compiler_owned_types(types)
     ir_add_union_types(types, functions)
     // A type row by its key, then by its name where no key names one. A
-    // jet_builtins record (`LockIdentity`) is spelled bare by the Core
-    // signatures that name it, and no program can name it, so it claims its
-    // name before any program type of the same name. Every other name goes
-    // to its first row in declaration order, the program's ahead of Core's:
-    // a program's own unit family (`Meter`) is spelled bare too, and it
-    // shadows the Prelude's of the same name.
+    // jet_builtins record (`LockIdentity`) claims its name first: no program
+    // can name it. A bare name is otherwise a Core spelling (a Core signature
+    // or record row, a Core body checked once for every program), and program
+    // code spells its own types by their keys, so a Core declaration or a
+    // compiler-owned row claims a name before a program type of that name. A
+    // unit type a program's unit family mints (`Meter`) is the exception: unit
+    // literals spell it bare, so it claims its name ahead of the Prelude's.
     builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}::"
+    minted: ir_unit_minted_names(types)
     type_keys := [(key: String, at: Int, row: Int)]{}
     loop (index, definition) in types {
         type_keys.push((key: definition.key.copy(), at: index, row: index))
     }
     loop (index, definition) in types {
-        tier: if definition.key.starts_with(builtins) -> 1 else -> 2
+        tier: if {
+            definition.key.starts_with(builtins) -> 1
+            definition.key.starts_with(MODULE_CORE_PREFIX) || definition.key == definition.name -> 3
+            ir_unit_minted_row(definition, minted) -> 2
+            else -> 4
+        }
         type_keys.push((key: definition.name.copy(), at: tier * types.len() + index, row: index))
     }
     type_rows: ir_first_rows(type_keys)
