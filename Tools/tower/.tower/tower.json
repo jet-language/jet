@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 108950,
+    "rev": 108975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -67664,12 +67664,12 @@
         },
         {
           "n": 10,
-          "text": "The mutation score and survivor list come from the catalog and immutable result bundles, and a manual exemption, hidden skip or stale target commit fails the run. Proof: `jet test tests/guards --filter mutation_score_from_catalog`.",
+          "text": "The mutation score and survivor list come from the catalog and immutable result bundles, and a manual exemption, hidden skip or stale target commit fails the run. Proof: `jet test Tests/Guards --filter mutation_score_from_catalog`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:48.232Z"
+          "at": "2026-11-16T12:58:27.400Z"
         },
         {
           "n": 11,
@@ -67710,7 +67710,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:25:50.855Z",
-      "updated": "2026-11-16T12:58:26.123Z",
+      "updated": "2026-11-16T12:58:27.400Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -67759,12 +67759,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A census of every memory, ownership, borrow, aliasing and resource diagnostic lists, for each, safe programs it rejects today (probe files with expected output) and unsafe programs it must keep rejecting. Proof: the census is committed under Docs/audits, and each probe is a case: `jet test Compiler --profile cases --filter memory_census/`.",
+          "text": "A census of every memory, ownership, borrow, aliasing and resource diagnostic lists, for each, safe programs it rejects today (probe files with expected output) and unsafe programs it must keep rejecting. Proof: the census is committed under Docs/Audits, and each probe is a case: `jet test Compiler --profile cases --filter MemoryCensus/`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:32:15.621Z"
+          "at": "2026-11-16T12:58:28.341Z"
         },
         {
           "n": 2,
@@ -67777,21 +67777,21 @@
         },
         {
           "n": 3,
-          "text": "Every other over-strict rejection in the census is fixed in sema, or carded with a ballot if the fix needs new syntax; every unsafe probe still fails with its diagnostic. Proof: `jet test Compiler --profile cases --filter memory_census/` passes, with every safe probe accepted and every unsafe probe refused with its code.",
+          "text": "Every other over-strict rejection in the census is fixed in sema, or carded with a ballot if the fix needs new syntax; every unsafe probe still fails with its diagnostic. Proof: `jet test Compiler --profile cases --filter MemoryCensus/` passes, with every safe probe accepted and every unsafe probe refused with its code.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:32:16.548Z"
+          "at": "2026-11-16T12:58:29.288Z"
         },
         {
           "n": 5,
-          "text": "Each active error row in Compiler/Prelude/Diagnostics.jet carries a safety class (soundness: refusing it prevents a memory, type, aliasing or resource fault; or opinion: the program would run safely) and a one-line reason. A Jet tool generates a dated audit under Docs/research from those fields, and its `--check` fails when an error row lacks a class. It may land in slices by code range. Proof: `jet test tests/guards --filter diagnostic_safety_class` passes with every active error row classified.",
+          "text": "Each active error row in Compiler/Prelude/Diagnostics.jet carries a safety class (soundness: refusing it prevents a memory, type, aliasing or resource fault; or opinion: the program would run safely) and a one-line reason. A Jet tool generates a dated audit under Docs/Research from those fields, and its `--check` fails when an error row lacks a class. It may land in slices by code range. Proof: `jet test Tests/Guards --filter diagnostic_safety_class` passes with every active error row classified.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:32:17.483Z"
+          "at": "2026-11-16T12:58:30.219Z"
         },
         {
           "n": 6,
@@ -67822,12 +67822,12 @@
         },
         {
           "n": 10,
-          "text": "(S1, I1 soundness) A refill write 'self.r = next(self.r)' (next takes &&) on a &self receiver, where next can stop (panic), never closes the moved value twice. Today both the callee frame and the caller's owner close it: probe $JET_SCRATCH_ROOT/lanes/Main/prep/bal2/p/stop_refill.jet prints 'close a' twice before E3001 on -O0 and -O1 (refill-move path, Checking.jet:583-584). Rule: while a write place is empty, nothing that can stop may consume the moved value; sema rejects it or the place is refilled before any stop. The probe becomes a tests/cases case that closes once on O0/O1/O2, and the 8 repo sites of 'x.f = g(x.f)' (g takes &&) (CheckProgram.jet:5580/5581/6385/6529/7346, Host.jet:2553, Review.jet:282, Loops.jet:177) check clean or are migrated. Proof: `jet test Compiler --profile cases --filter memory/stop_refill_closes_once` on O0, O1 and O2, and `jet check` over Compiler passes at the 8 sites.",
+          "text": "(S1, I1 soundness) A refill write 'self.r = next(self.r)' (next takes &&) on a &self receiver, where next can stop (panic), never closes the moved value twice. Today both the callee frame and the caller's owner close it: probe $JET_SCRATCH_ROOT/lanes/Main/prep/bal2/p/stop_refill.jet prints 'close a' twice before E3001 on -O0 and -O1 (refill-move path, Checking.jet:583-584). Rule: while a write place is empty, nothing that can stop may consume the moved value; sema rejects it or the place is refilled before any stop. The probe becomes a Tests/Cases case that closes once on O0/O1/O2, and the 8 repo sites of 'x.f = g(x.f)' (g takes &&) (CheckProgram.jet:5580/5581/6385/6529/7346, Host.jet:2553, Review.jet:282, Loops.jet:177) check clean or are migrated. Proof: `jet test Compiler --profile cases --filter Memory/stop_refill_closes_once` on O0, O1 and O2, and `jet check` over Compiler passes at the 8 sites.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:32:20.140Z"
+          "at": "2026-11-16T12:58:31.187Z"
         },
         {
           "n": 11,
@@ -67858,30 +67858,30 @@
         },
         {
           "n": 15,
-          "text": "Definite initialization accepts a fixed array `[T#N]{ uninit }` that a counted loop fully writes before any read; today it reports E0420. The census covers each fill shape (counted loop, while with index, fill call) and each lands as a case. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea). Proof: `jet test Compiler --profile cases --filter definite_init/fixed_array_loop_fill_`, one case per fill shape.",
+          "text": "Definite initialization accepts a fixed array `[T#N]{ uninit }` that a counted loop fully writes before any read; today it reports E0420. The census covers each fill shape (counted loop, while with index, fill call) and each lands as a case. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea). Proof: `jet test Compiler --profile cases --filter DefiniteInit/fixed_array_loop_fill_`, one case per fill shape.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:32:21.185Z"
+          "at": "2026-11-16T12:58:32.172Z"
         },
         {
           "n": 16,
-          "text": "Found 2026-11-09 (G6Lead, probes $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/cycle2/a5 and s14b): writing through a Shared field of a pool element, `scene[id].material.color = c`, is refused with E0302, and an inline closure in a Shared field write or push reports E0118 naming the internal `__jet_shared_value`. Both safe programs are accepted and run with the same output on O0, O1, O2 and web; cases prove each, and no diagnostic names a compiler-internal symbol. Proof: `jet test Compiler --profile cases --filter shared/pool_element_shared_field_write` and `--filter shared/inline_closure_in_shared_field_write` on O0, O1, O2 and web.",
+          "text": "Found 2026-11-09 (G6Lead, probes $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/cycle2/a5 and s14b): writing through a Shared field of a pool element, `scene[id].material.color = c`, is refused with E0302, and an inline closure in a Shared field write or push reports E0118 naming the internal `__jet_shared_value`. Both safe programs are accepted and run with the same output on O0, O1, O2 and web; cases prove each, and no diagnostic names a compiler-internal symbol. Proof: `jet test Compiler --profile cases --filter Shared/pool_element_shared_field_write` and `--filter shared/inline_closure_in_shared_field_write` on O0, O1, O2 and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:32:22.148Z"
+          "at": "2026-11-16T12:58:33.135Z"
         },
         {
           "n": 17,
-          "text": "D-SHARED-CYCLE2=A is built. The one ownership checker accepts a Shared tree whose links are made through helper functions once its complete alias and call summaries prove the links safe, as in the ballot program (make_child, then root.kids.push(child.copy())), which prints 1 on O0, O1 and O2. There is no hidden runtime cycle test and no automatic collector. A real cycle (a node linked into its own ancestor chain) is still refused with its registered diagnostic (UI snapshot), and collection stays explicit for real loops. The census sweep of every tree shows no new rejection. Proof: `jet test Compiler --profile cases --filter shared_cycles/helper_built_tree_accepted`, and `jet test Compiler --profile ui --filter shared_cycle_ancestor_link`.",
+          "text": "D-SHARED-CYCLE2=A is built. The one ownership checker accepts a Shared tree whose links are made through helper functions once its complete alias and call summaries prove the links safe, as in the ballot program (make_child, then root.kids.push(child.copy())), which prints 1 on O0, O1 and O2. There is no hidden runtime cycle test and no automatic collector. A real cycle (a node linked into its own ancestor chain) is still refused with its registered diagnostic (UI snapshot), and collection stays explicit for real loops. The census sweep of every tree shows no new rejection. Proof: `jet test Compiler --profile cases --filter SharedCycles/helper_built_tree_accepted`, and `jet test Compiler --profile ui --filter shared_cycle_ancestor_link`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:32:23.219Z"
+          "at": "2026-11-16T12:58:34.108Z"
         },
         {
           "n": 18,
@@ -67922,7 +67922,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-16T02:10:46.964Z",
+      "updated": "2026-11-16T12:58:34.108Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -67971,21 +67971,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A blocking release guard checks out the previous release's Examples/ and a fixed corpus of 200 scripts (the ScriptBench programs plus Examples), runs `jet fix --all` and then `jet check` with the new toolchain, and fails on any error. Proof: `jet test tests/guards --filter release_upgrade_corpus`.",
+          "text": "A blocking release guard checks out the previous release's Examples/ and a fixed corpus of 200 scripts (the ScriptBench programs plus Examples), runs `jet fix --all` and then `jet check` with the new toolchain, and fails on any error. Proof: `jet test Tests/Guards --filter release_upgrade_corpus`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:10:03.991Z"
+          "at": "2026-11-16T12:58:35.050Z"
         },
         {
           "n": 2,
-          "text": "A change that makes previously accepted source fail `jet check` without registering a `jet fix` rewrite fails the guard (a planted-break test). Proof: `jet test tests/guards --filter release_upgrade_corpus_planted_break`.",
+          "text": "A change that makes previously accepted source fail `jet check` without registering a `jet fix` rewrite fails the guard (a planted-break test). Proof: `jet test Tests/Guards --filter release_upgrade_corpus_planted_break`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:10:05.005Z"
+          "at": "2026-11-16T12:58:35.997Z"
         },
         {
           "n": 3,
@@ -68007,12 +68007,12 @@
         },
         {
           "n": 5,
-          "text": "The `1.0 compatibility policy` line of `jet --version` reads from Docs/spec/release-policy.md, and the policy names the release in which the guard became blocking. Proof: `jet test Compiler --profile cases --filter cli/version_compat_policy_line`.",
+          "text": "The `1.0 compatibility policy` line of `jet --version` reads from Docs/Spec/release-policy.md, and the policy names the release in which the guard became blocking. Proof: `jet test Compiler --profile cases --filter CLI/version_compat_policy_line`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:10:07.740Z"
+          "at": "2026-11-16T12:58:36.972Z"
         },
         {
           "n": 10,
@@ -68057,8 +68057,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:41.283Z",
-      "updated": "2026-11-15T05:10:07.740Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:58:36.972Z",
+      "updatedBy": "Main",
       "goals": [
         "G7"
       ],
@@ -68085,12 +68085,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A loose script with `use py.numpy as np` and `print(np.mean([1.0, 2.0, 3.0]))` prints 2.0 under `jet run`: the first run fetches and hash-pins numpy from PyPI, and the second works with the network disabled (today E0603). Proof: `jet test Compiler --profile cases --filter ffi_python/loose_script_numpy_pins_then_offline`.",
+          "text": "A loose script with `use py.numpy as np` and `print(np.mean([1.0, 2.0, 3.0]))` prints 2.0 under `jet run`: the first run fetches and hash-pins numpy from PyPI, and the second works with the network disabled (today E0603). Proof: `jet test Compiler --profile cases --filter FFIPython/loose_script_numpy_pins_then_offline`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:09:47.483Z"
+          "at": "2026-11-16T12:58:37.927Z"
         },
         {
           "n": 2,
@@ -68103,21 +68103,21 @@
         },
         {
           "n": 3,
-          "text": "A fixture PyPI package that opens ~/.ssh/id_ed25519 at import is refused with an authority error naming FS.Read and the path unless that grant was given, while the same package under `pip install` and `python3 -c 'import fixture'` reads the file (paired test). Proof: `jet test Compiler --profile cases --filter ffi_python/pypi_package_fenced_by_grant`.",
+          "text": "A fixture PyPI package that opens ~/.ssh/id_ed25519 at import is refused with an authority error naming FS.Read and the path unless that grant was given, while the same package under `pip install` and `python3 -c 'import fixture'` reads the file (paired test). Proof: `jet test Compiler --profile cases --filter FFIPython/pypi_package_fenced_by_grant`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:09:49.318Z"
+          "at": "2026-11-16T12:58:38.902Z"
         },
         {
           "n": 4,
-          "text": "The #5949 first-run prompt lists `FFI.Py` and the Python package names when a script first uses `py.*`, and a dependency update that adds a Python package asks again (#5459 rules). Proof: `jet test Compiler --profile cases --filter ffi_python/prompt_lists_python_packages`.",
+          "text": "The #5949 first-run prompt lists `FFI.Py` and the Python package names when a script first uses `py.*`, and a dependency update that adds a Python package asks again (#5459 rules). Proof: `jet test Compiler --profile cases --filter FFIPython/prompt_lists_python_packages`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:09:50.217Z"
+          "at": "2026-11-16T12:58:39.854Z"
         },
         {
           "n": 5,
@@ -68130,12 +68130,12 @@
         },
         {
           "n": 6,
-          "text": "A manifest dependency in the D-JPK-EXTPROV1 form (`leftpad: npm@\"1.3.0\"`) fetches, pins and is called through its typed first-party stub package, and the second run works offline. Proof: `jet test Compiler --profile cases --filter jetpack/npm_extprov_stub_pins_then_offline`.",
+          "text": "A manifest dependency in the D-JPK-EXTPROV1 form (`leftpad: npm@\"1.3.0\"`) fetches, pins and is called through its typed first-party stub package, and the second run works offline. Proof: `jet test Compiler --profile cases --filter Jetpack/npm_extprov_stub_pins_then_offline`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:09:52.011Z"
+          "at": "2026-11-16T12:58:40.878Z"
         },
         {
           "n": 7,
@@ -68165,7 +68165,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:44.302Z",
-      "updated": "2026-11-16T01:11:44.118Z",
+      "updated": "2026-11-16T12:58:40.878Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -68204,21 +68204,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The canonical performance manifest lists Nix as a required peer with paired cells: config evaluation (`nix eval` against `jet check` of the build program), no-op rebuild, one-file incremental rebuild, cold build from a populated cache or substituter, and a from-scratch hermetic build of the same medium project; each cell has a harness and committed receipts. Proof: `node --test Tools/gauntlet/harness/measurement-manifest.test.mjs` passes with the Nix rows.",
+          "text": "The canonical performance manifest lists Nix as a required peer with paired cells: config evaluation (`nix eval` against `jet check` of the build program), no-op rebuild, one-file incremental rebuild, cold build from a populated cache or substituter, and a from-scratch hermetic build of the same medium project; each cell has a harness and committed receipts. Proof: `node --test Tools/Gauntlet/Harness/measurement-manifest.test.mjs` passes with the Nix rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:29:37.306Z"
+          "at": "2026-11-16T12:58:41.885Z"
         },
         {
           "n": 2,
-          "text": "Every Nix cell meets the gate (Jet/Nix below 1.00), and the evaluation, no-op and incremental cells reach Jet/Nix of at most 0.25; losses stay on cards with their cause. Proof: `node Tools/gauntlet/harness/run.mjs --entry nix-build` shows no loss.",
+          "text": "Every Nix cell meets the gate (Jet/Nix below 1.00), and the evaluation, no-op and incremental cells reach Jet/Nix of at most 0.25; losses stay on cards with their cause. Proof: `node Tools/Gauntlet/Harness/run.mjs --entry nix-build` shows no loss.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:29:38.204Z"
+          "at": "2026-11-16T12:58:42.943Z"
         },
         {
           "n": 3,
@@ -68242,8 +68242,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:50.600Z",
-      "updated": "2026-11-15T05:29:39.122Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:58:42.943Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ]
@@ -68427,12 +68427,12 @@
         },
         {
           "n": 2,
-          "text": "ScriptBench workload w13, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/perf/scriptbench/Bench.jet --data DIR --out DIR --only w13` receipt.",
+          "text": "ScriptBench workload w13, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/Perf/Scriptbench/Bench.jet --data DIR --out DIR --only w13` receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:29:40.031Z"
+          "at": "2026-11-16T12:58:43.882Z"
         }
       ],
       "refs": [
@@ -68446,8 +68446,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:09.880Z",
-      "updated": "2026-11-15T05:29:40.031Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:58:43.882Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ]
@@ -68534,21 +68534,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`json.decode<T>(text)` parses straight into typed records with no `Dyn` tree and accepts input over 16 MiB, so the 44 MB w06 file allocates no per-node Dyn value. Proof: `jet test Compiler --profile cases --filter json/typed_decode_large_input_no_dyn`.",
+          "text": "`json.decode<T>(text)` parses straight into typed records with no `Dyn` tree and accepts input over 16 MiB, so the 44 MB w06 file allocates no per-node Dyn value. Proof: `jet test Compiler --profile cases --filter JSON/typed_decode_large_input_no_dyn`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:29:40.965Z"
+          "at": "2026-11-16T12:58:44.829Z"
         },
         {
           "n": 2,
-          "text": "ScriptBench workload w06, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/perf/scriptbench/Bench.jet --data DIR --out DIR --only w06` receipt.",
+          "text": "ScriptBench workload w06, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/Perf/Scriptbench/Bench.jet --data DIR --out DIR --only w06` receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:29:41.851Z"
+          "at": "2026-11-16T12:58:45.761Z"
         },
         {
           "n": 3,
@@ -68580,8 +68580,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:12.272Z",
-      "updated": "2026-11-15T05:29:41.851Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:58:45.761Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ],
@@ -68668,12 +68668,12 @@
         },
         {
           "n": 2,
-          "text": "ScriptBench workload w05, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/perf/scriptbench/Bench.jet --data DIR --out DIR --only w05` receipt.",
+          "text": "ScriptBench workload w05, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/Perf/Scriptbench/Bench.jet --data DIR --out DIR --only w05` receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:29:42.735Z"
+          "at": "2026-11-16T12:58:46.682Z"
         }
       ],
       "refs": [
@@ -68687,8 +68687,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:14.678Z",
-      "updated": "2026-11-15T05:29:42.735Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:58:46.682Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ]
@@ -68774,30 +68774,30 @@
         },
         {
           "n": 2,
-          "text": "ScriptBench workload w07, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/perf/scriptbench/Bench.jet --data DIR --out DIR --only w07` receipt.",
+          "text": "ScriptBench workload w07, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/Perf/Scriptbench/Bench.jet --data DIR --out DIR --only w07` receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:29:43.611Z"
+          "at": "2026-11-16T12:58:47.638Z"
         },
         {
           "n": 3,
-          "text": "procpipe at O2 has Jet/{Rust, Go, Python, Node} < 1.00, per-process spawn-and-collect overhead is under 0.2 ms, and the process goldens are unchanged. Proof: `node Tools/gauntlet/harness/run.mjs --entry procpipe` and `jet test Compiler --profile golden --filter process`.",
+          "text": "procpipe at O2 has Jet/{Rust, Go, Python, Node} < 1.00, per-process spawn-and-collect overhead is under 0.2 ms, and the process goldens are unchanged. Proof: `node Tools/Gauntlet/Harness/run.mjs --entry procpipe` and `jet test Compiler --profile golden --filter Process`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:23:51.084Z"
+          "at": "2026-11-16T12:58:48.582Z"
         },
         {
           "n": 4,
-          "text": "Child-process-bound workloads cost no more than node: a paired gauntlet cell that spawns 200 short children in sequence shows Jet below node (child_process.spawnSync) and python on wall time and peak memory, live and uncached, and a second program that pipes a child output proves the gain; the fix is general (spawn, wait and pipe path, runtime baseline). Proof: `node Tools/gauntlet/harness/run.mjs --entry spawn-200-children`.",
+          "text": "Child-process-bound workloads cost no more than node: a paired gauntlet cell that spawns 200 short children in sequence shows Jet below node (child_process.spawnSync) and python on wall time and peak memory, live and uncached, and a second program that pipes a child output proves the gain; the fix is general (spawn, wait and pipe path, runtime baseline). Proof: `node Tools/Gauntlet/Harness/run.mjs --entry spawn-200-children`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:33:27.137Z"
+          "at": "2026-11-16T12:58:49.524Z"
         }
       ],
       "refs": [
@@ -68811,8 +68811,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:17.321Z",
-      "updated": "2026-11-15T05:33:27.137Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:58:49.525Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ],
@@ -68946,12 +68946,12 @@
         },
         {
           "n": 2,
-          "text": "ScriptBench workload w11, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/perf/scriptbench/Bench.jet --data DIR --out DIR --only w11` receipt.",
+          "text": "ScriptBench workload w11, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built release binary; the jet run time (compile included) is shown beside it and gated under G11 (#6953); same output on O0, O1 and O2. Proof: `jet Tools/Perf/Scriptbench/Bench.jet --data DIR --out DIR --only w11` receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:29:44.497Z"
+          "at": "2026-11-16T12:58:50.901Z"
         },
         {
           "n": 3,
@@ -69028,8 +69028,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-15T05:29:47.364Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:58:50.901Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ],
@@ -219984,6 +219984,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T12:58:50.901Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02a1ynr",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: ScriptBench workload w11, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built rel"
+    },
+    {
+      "at": "2026-11-16T12:58:49.525Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ta538w",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Child-process-bound workloads cost no more than node: a paired gauntlet cell that spawns 200 short children in sequence shows Jet below node (child_process.spawnSync) and python on wall time and peak "
+    },
+    {
+      "at": "2026-11-16T12:58:48.582Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ta538w",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: procpipe at O2 has Jet/{Rust, Go, Python, Node} < 1.00, per-process spawn-and-collect overhead is under 0.2 ms, and the process goldens are unchanged. Proof: `node Tools/gauntlet/harness/run.mjs --ent"
+    },
+    {
+      "at": "2026-11-16T12:58:47.638Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ta538w",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: ScriptBench workload w07, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built rel"
+    },
+    {
+      "at": "2026-11-16T12:58:46.682Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lkpkuc",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: ScriptBench workload w05, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built rel"
+    },
+    {
+      "at": "2026-11-16T12:58:45.761Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0hsgoa6",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: ScriptBench workload w06, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built rel"
+    },
+    {
+      "at": "2026-11-16T12:58:44.829Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0hsgoa6",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `json.decode<T>(text)` parses straight into typed records with no `Dyn` tree and accepts input over 16 MiB, so the 44 MB w06 file allocates no per-node Dyn value. Proof: `jet test Compiler --profile c"
+    },
+    {
+      "at": "2026-11-16T12:58:43.882Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0e7sc5b",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: ScriptBench workload w13, measured with the manifest method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00) with the built rel"
+    },
+    {
+      "at": "2026-11-16T12:58:42.943Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0i42rgw",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every Nix cell meets the gate (Jet/Nix below 1.00), and the evaluation, no-op and incremental cells reach Jet/Nix of at most 0.25; losses stay on cards with their cause. Proof: `node Tools/gauntlet/ha"
+    },
+    {
+      "at": "2026-11-16T12:58:41.885Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0i42rgw",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The canonical performance manifest lists Nix as a required peer with paired cells: config evaluation (`nix eval` against `jet check` of the build program), no-op rebuild, one-file incremental rebuild,"
+    },
+    {
+      "at": "2026-11-16T12:58:40.878Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A manifest dependency in the D-JPK-EXTPROV1 form (`leftpad: npm@\"1.3.0\"`) fetches, pins and is called through its typed first-party stub package, and the second run works offline. Proof: `jet test Com"
+    },
+    {
+      "at": "2026-11-16T12:58:39.854Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The #5949 first-run prompt lists `FFI.Py` and the Python package names when a script first uses `py.*`, and a dependency update that adds a Python package asks again (#5459 rules). Proof: `jet test Co"
+    },
+    {
+      "at": "2026-11-16T12:58:38.902Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A fixture PyPI package that opens ~/.ssh/id_ed25519 at import is refused with an authority error naming FS.Read and the path unless that grant was given, while the same package under `pip install` and"
+    },
+    {
+      "at": "2026-11-16T12:58:37.927Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0lyckm2",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A loose script with `use py.numpy as np` and `print(np.mean([1.0, 2.0, 3.0]))` prints 2.0 under `jet run`: the first run fetches and hash-pins numpy from PyPI, and the second works with the network di"
+    },
+    {
+      "at": "2026-11-16T12:58:36.972Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0810bga",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The `1.0 compatibility policy` line of `jet --version` reads from Docs/spec/release-policy.md, and the policy names the release in which the guard became blocking. Proof: `jet test Compiler --profile "
+    },
+    {
+      "at": "2026-11-16T12:58:35.997Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0810bga",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A change that makes previously accepted source fail `jet check` without registering a `jet fix` rewrite fails the guard (a planted-break test). Proof: `jet test tests/guards --filter release_upgrade_c"
+    },
+    {
+      "at": "2026-11-16T12:58:35.050Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0810bga",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A blocking release guard checks out the previous release's Examples/ and a fixed corpus of 200 scripts (the ScriptBench programs plus Examples), runs `jet fix --all` and then `jet check` with the new "
+    },
+    {
+      "at": "2026-11-16T12:58:34.108Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#17: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-SHARED-CYCLE2=A is built. The one ownership checker accepts a Shared tree whose links are made through helper functions once its complete alias and call summaries prove the links safe, as in the bal"
+    },
+    {
+      "at": "2026-11-16T12:58:33.135Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#16: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Found 2026-11-09 (G6Lead, probes $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/cycle2/a5 and s14b): writing through a Shared field of a pool element, `scene[id].material.color = c`, is refused with E0"
+    },
+    {
+      "at": "2026-11-16T12:58:32.172Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#15: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Definite initialization accepts a fixed array `[T#N]{ uninit }` that a counted loop fully writes before any read; today it reports E0420. The census covers each fill shape (counted loop, while with in"
+    },
+    {
+      "at": "2026-11-16T12:58:31.187Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: (S1, I1 soundness) A refill write 'self.r = next(self.r)' (next takes &&) on a &self receiver, where next can stop (panic), never closes the moved value twice. Today both the callee frame and the call"
+    },
+    {
+      "at": "2026-11-16T12:58:30.219Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Each active error row in Compiler/Prelude/Diagnostics.jet carries a safety class (soundness: refusing it prevents a memory, type, aliasing or resource fault; or opinion: the program would run safely) "
+    },
+    {
+      "at": "2026-11-16T12:58:29.288Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every other over-strict rejection in the census is fixed in sema, or carded with a ballot if the fix needs new syntax; every unsafe probe still fails with its diagnostic. Proof: `jet test Compiler --p"
+    },
+    {
+      "at": "2026-11-16T12:58:28.341Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A census of every memory, ownership, borrow, aliasing and resource diagnostic lists, for each, safe programs it rejects today (probe files with expected output) and unsafe programs it must keep reject"
+    },
+    {
+      "at": "2026-11-16T12:58:27.400Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fvnyiq",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The mutation score and survivor list come from the catalog and immutable result bundles, and a manual exemption, hidden skip or stale target commit fails the run. Proof: `jet test tests/guards --filte"
+    },
+    {
       "at": "2026-11-16T12:58:26.123Z",
       "by": "Main",
       "action": "card.criteria-edit",
@@ -223314,713 +223489,6 @@
       "action": "card.criteria-edit",
       "ref": "c0oe96sn",
       "note": "#52: D-PRIM-ANY1 review 9: E0307 has the same filestem spelling (f06); was: E0305's suggested fix for a same-named pair compiles when applied. Today it spells the file's own type as <filestem>.Point, which fails with E0119 and then an E0108 that contradicts itself (p209; D-PR"
-    },
-    {
-      "at": "2026-11-16T07:40:04.090Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#55 Two instances of one generic type in a union (Box<Int> | Box"
-    },
-    {
-      "at": "2026-11-16T07:39:58.816Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#54 A loan keeps its owner through every carrier: a view (a from"
-    },
-    {
-      "at": "2026-11-16T07:17:49.017Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0oe96sn",
-      "note": "#46: D-PRIM-ANY1 review 8: two more view cases must be checked before views become pointers; was: A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or throug"
-    },
-    {
-      "at": "2026-11-16T07:17:47.856Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#53 An arm refused with E0305 still declares its binding (with a"
-    },
-    {
-      "at": "2026-11-16T07:17:46.742Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#52 E0305's suggested fix for a same-named pair compiles when ap"
-    },
-    {
-      "at": "2026-11-16T07:17:45.258Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#51 A from view read out of a Shared field is checked against wr"
-    },
-    {
-      "at": "2026-11-16T07:17:44.192Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#50 A from view captured by a lambda keeps its loan: moving or w"
-    },
-    {
-      "at": "2026-11-16T07:17:43.098Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#49 I2: a generic function with a union parameter compiles and r"
-    },
-    {
-      "at": "2026-11-16T07:13:07.340Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing08movxh",
-      "note": "p209: 7 landed; a mux hang, a law-kit panic and a comptime ICE traced to owners"
-    },
-    {
-      "at": "2026-11-16T07:12:48.421Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07ywjvi",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-16T07:12:47.411Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07ywjvi",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-16T07:12:41.211Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07ywjvi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T07:12:40.206Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0flvd7x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T07:12:39.216Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0se7lpr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T07:12:38.237Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0se7lpr",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-16T07:12:37.247Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-16T07:11:34.280Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w7t4qu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T07:06:28.460Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07ywjvi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T07:01:52.149Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oe96sn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T06:59:58.038Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0f4o904",
-      "note": "#4 auth.AccountID is the one account identity type, as ratified"
-    },
-    {
-      "at": "2026-11-16T06:59:16.374Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0se7lpr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T06:52:19.337Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c07ywjvi",
-      "note": "#16 I8/I9 one evaluator: Jetpack's EnvModel evaluates no compile"
-    },
-    {
-      "at": "2026-11-16T06:50:35.565Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#48 A type already refused by E0363 gets no follow-up E0641 (no-"
-    },
-    {
-      "at": "2026-11-16T06:50:34.552Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#47 The same-named-member E0305 branch treats only member types,"
-    },
-    {
-      "at": "2026-11-16T06:50:33.180Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0oe96sn",
-      "note": "#46: D-PRIM-ANY1 review 7: the read form is fn(item: X), not &X (a write parameter); a converted argument's temporary and an owned path need their own rules before a pointer is safe; was: A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: &X) -> T? from item, and a method -> T? from self, called directly or through trait dispatch) car"
-    },
-    {
-      "at": "2026-11-16T06:40:13.990Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w7t4qu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T06:34:27.245Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#46 A from return is a real loan at run time: a function returni"
-    },
-    {
-      "at": "2026-11-16T06:34:25.464Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0oe96sn",
-      "note": "#41: D-PRIM-ANY1 round 6: Val(p) returned under a from clause is a lend (recover's body) and must stay legal; was: Val(s) of a read parameter never copies silently: it is refused as a bare return of the same value is (E0120), or it needs a written .copy(), since spec.md:1887 says Jet never hides a clone. Today Val"
-    },
-    {
-      "at": "2026-11-16T06:26:35.962Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oe96sn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T06:26:33.844Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#45 A from clause naming a && (owned) parameter is refused at th"
-    },
-    {
-      "at": "2026-11-16T06:26:31.187Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#44 Writing to an arm binding over a &Item parameter is refused "
-    },
-    {
-      "at": "2026-11-16T06:26:28.839Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#43 A union's named case and a qualified member may not share a "
-    },
-    {
-      "at": "2026-11-16T06:26:26.394Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0oe96sn",
-      "note": "#42: D-PRIM-ANY1 review 6 settled the open question with an IR dump: the result is a copy, not a dangling loan; was: I1 memory safety: a lent result through dynamic dispatch keeps its loan. With a trait method point: fn(self) -> Point? from self called on a [Shown] element, moving or mutating the list while the resu"
-    },
-    {
-      "at": "2026-11-16T06:17:15.378Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0flvd7x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T06:17:14.261Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gbe4aj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T06:16:48.241Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w7t4qu",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-16T06:16:47.067Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w7t4qu",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-16T06:16:45.956Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w7t4qu",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-16T06:06:23.301Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#42 I1 memory safety: a lent result through dynamic dispatch kee"
-    },
-    {
-      "at": "2026-11-16T06:05:27.678Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07ywjvi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T06:04:39.765Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07ywjvi",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-16T05:56:37.035Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c07ywjvi",
-      "note": "#15 The Body codec generator's check passes on dev: Compiler/Too"
-    },
-    {
-      "at": "2026-11-16T05:56:19.286Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing0bucgf0",
-      "note": "Cycle p207 landed: assembled-unit imports, root loop waits (proof failing), lander regenerates diagnostics"
-    },
-    {
-      "at": "2026-11-16T05:55:14.267Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vxf4u0",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-16T05:55:12.321Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0voqhky",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-16T05:55:10.526Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0reo0hk",
-      "note": "#4: Option A was dropped from the D-PRIM-ANY1 ballot in round 4 (three-alternatives rule); was: If D-PRIM-ANY1 adopts E or A: the extended member test (a .Type(x) arm read over an Any subject) has a registered diagnostic, with what/why/fix and a UI snapshot, for an arm naming a type that cannot "
-    },
-    {
-      "at": "2026-11-16T05:55:09.568Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0oe96sn",
-      "note": "#35: D-PRIM-ANY1 review 5 found a second failure of the same arm spelling (nested modules parse-fail); one criterion covers both; was: A qualified dotted member arm (.geo.Point(p)) gets a diagnostic that names what it looked for. Today it is E0107 'Nothing named  exists here' with an empty name (p204, O0/O1/O2 alike; D-PRIM-ANY1 revi"
-    },
-    {
-      "at": "2026-11-16T05:54:16.805Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0apk7x9",
-      "note": "#18 A type-key collision between two types is a registered build"
-    },
-    {
-      "at": "2026-11-16T05:54:15.554Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#41 Val(s) of a read parameter never copies silently: it is refu"
-    },
-    {
-      "at": "2026-11-16T05:54:13.917Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#40 A union with a trait member (Shown | Int) is either refused "
-    },
-    {
-      "at": "2026-11-16T05:54:12.735Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#39 I2: a trait's owner implementing it for a file-module type ("
-    },
-    {
-      "at": "2026-11-16T05:53:54.962Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gbe4aj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T05:37:45.164Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06m6abh",
-      "note": "#13 Using a priv struct from a file module outside that module g"
-    },
-    {
-      "at": "2026-11-16T05:37:43.337Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#38 A type alias names its target as a union member arm: an arm "
-    },
-    {
-      "at": "2026-11-16T05:37:41.122Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#37 A type alias of an inline-module type resolves to its target"
-    },
-    {
-      "at": "2026-11-16T05:37:38.904Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#36 I1 type safety: a union of two types with the same short nam"
-    },
-    {
-      "at": "2026-11-16T05:34:11.067Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hjzhes",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T05:34:09.942Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07ywjvi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-16T05:34:08.921Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hjzhes",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-16T05:20:09.676Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0apk7x9",
-      "note": "#17 A struct declared in an inline module prints with its declar"
-    },
-    {
-      "at": "2026-11-16T05:20:07.275Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0apk7x9",
-      "note": "#16 reflect.of on a trait value reports the user's spelling: typ"
-    },
-    {
-      "at": "2026-11-16T05:20:05.143Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#35 A qualified dotted member arm (.geo.Point(p)) gets a diagnos"
-    },
-    {
-      "at": "2026-11-16T05:20:01.591Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#34 Passing a union value (Int | geo.Point) to a trait-value par"
-    },
-    {
-      "at": "2026-11-16T05:19:59.046Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06m6abh",
-      "note": "#12 use geo.[Point] imports a type from an inline module just as"
-    },
-    {
-      "at": "2026-11-16T05:19:57.099Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06m6abh",
-      "note": "#11 A priv struct is private like a priv function: naming, build"
-    },
-    {
-      "at": "2026-11-16T05:14:28.091Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing0p9p91m",
-      "note": "Cycle p205 landed (dev 16c1bda2d9): 5 SUBs, core suite all green, 3 criteria met; p206 running"
-    },
-    {
-      "at": "2026-11-16T05:14:00.582Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w7t4qu",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-16T05:13:50.555Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hjzhes",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T05:13:47.974Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0apk7x9",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-16T05:13:46.965Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nqr80d",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-16T05:11:59.688Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c059ge5n",
-      "note": "#56 dev carries no copy of the board: Tools/tower/.tower/tower.j"
-    },
-    {
-      "at": "2026-11-16T05:01:39.698Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#33 Writing the name Any where a type goes (a type that does not"
-    },
-    {
-      "at": "2026-11-16T05:01:37.087Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#32 A Core trait in type position is a boxed trait value as spec"
-    },
-    {
-      "at": "2026-11-16T05:01:34.169Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0apk7x9",
-      "note": "#15 A value of a trait with no methods prints and interpolates a"
-    },
-    {
-      "at": "2026-11-16T04:41:40.374Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing0qtrnd9",
-      "note": "p204 landed: G9 transactions, webhook dedupe and trait-value printing met"
-    },
-    {
-      "at": "2026-11-16T04:40:53.786Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0x9xmde",
-      "note": "#6 The float suffix that D-LITCARRIER1=D ratifies is built: 2.5"
-    },
-    {
-      "at": "2026-11-16T04:40:52.748Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#31 A trait method with its own type parameter either works or g"
-    },
-    {
-      "at": "2026-11-16T04:40:51.751Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#30 impl Decimal.Shown {} (and any user trait on a Core math typ"
-    },
-    {
-      "at": "2026-11-16T04:40:50.712Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0j3st66",
-      "note": "#9: review 3: the literal is a Decimal; the defects are the no-impl ICE and the math.Decimal impl ICE; was: A float literal entering a trait value (an argument, a trait-bounded variadic part, a list item or a binding) compiles and keeps its Float type on O0, O1 and O2, whether or not Float implements the tr"
-    },
-    {
-      "at": "2026-11-16T04:40:49.608Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0oe96sn",
-      "note": "#29: Withdrawn: under D-LITCARRIER1=D a bare 2.5 is a Decimal, so taking the else arm of a table with a Float arm is the ratified behavior (Examples TypeTables.jet:21-22 teaches it; D-PRIM-ANY1 review 3, probe x4).; was [open]: A float literal passed to a generic function takes the Float arm of a type table (if T == { Float -> … else -> … }), not else. Today 2.5 silently takes the else arm on O0, O1 and O2, a wrong answer wi"
-    },
-    {
-      "at": "2026-11-16T04:40:18.836Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hjzhes",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T04:40:17.783Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0miof6j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T04:40:16.785Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0apk7x9",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-16T04:40:15.616Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0voqhky",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-16T04:40:14.492Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y7zq8s",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-16T04:23:04.439Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oe96sn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T04:23:03.474Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0j3st66",
-      "note": "#9: AnyBallot round 2: f5 adds the variadic entry form with a wrong E0904; was: A float literal entering a trait value (an argument, a list item or a binding) compiles and keeps its Float type on O0, O1 and O2, whether or not Float implements the trait: with the impl it boxes, an"
-    },
-    {
-      "at": "2026-11-16T04:23:02.415Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0c4k3fw",
-      "note": "#17 Type identity and dispatch across a loaded library: a value "
-    },
-    {
-      "at": "2026-11-16T04:23:01.403Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0reo0hk",
-      "note": "#4 If D-PRIM-ANY1 adopts E or A: the extended member test (a .T"
-    },
-    {
-      "at": "2026-11-16T04:17:52.924Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ssy5wy",
-      "note": "#24 A body loaded from precompiled Core costs at most a tenth of"
-    },
-    {
-      "at": "2026-11-16T04:17:49.929Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nqr80d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T04:09:07.276Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing0i5xk1w",
-      "note": "p203 landed: golden clean on all tiers, precompiled Core c20 met"
-    },
-    {
-      "at": "2026-11-16T04:08:41.381Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0miof6j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T04:08:40.146Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0apk7x9",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-16T04:08:38.808Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ssy5wy",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-16T04:05:04.230Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0apk7x9",
-      "note": "#14: Any does not exist and the ballot may keep it out; the erased-value half covers every trait value; was: Builtin types are Type values: counts[Int] = 1 works as user types do (today E0107 'Nothing named Int'; found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes"
-    },
-    {
-      "at": "2026-11-16T04:01:36.942Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#29 A float literal passed to a generic function takes the Float"
-    },
-    {
-      "at": "2026-11-16T04:01:34.824Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0j3st66",
-      "note": "#9: second review: the root is a float literal entering any trait value, not a missing impl; was: A Float passed where a trait it does not implement is expected (as an argument or a list item, with or without default methods) gets E0905 from sema, as String and Int already do; today it is an inter"
-    },
-    {
-      "at": "2026-11-16T03:51:39.272Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c07k91t6",
-      "note": "#4 Tools/tower becomes Tools/Tower in its own step: the board d"
-    },
-    {
-      "at": "2026-11-16T03:49:55.987Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T03:49:54.911Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing045fkvf",
-      "note": "p202 landed: taint-walk revert, Core interface step, c1 met"
     }
   ],
   "nextNum": 368,
