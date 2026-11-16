@@ -288,7 +288,7 @@ jet_cli_transaction_commit_locked: fn(project: JetCLIRootedDirectory, journal: J
 jet_cli_commit_source_changes: fn(root: String, changes: [JetCLISourceChange], log_name: String, log: [U8]) -[FS, Env, Exec, Time]> String JetCLIReadError! {
     project: JetCLIRootedDirectory.open(root, [String]{}, false)
     journal: project.descendant([String]{".jet", "codemods"}, true)
-    _lock: journal.transaction_lock()
+    lock: journal.transaction_lock()
     jet_cli_transaction_recover(project, journal)
     jet_cli_transaction_commit_locked(project, journal, changes, log_name, log)
 }
@@ -418,7 +418,7 @@ jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: [
     }
     project: JetCLIRootedDirectory.open(root, [String]{}, false)
     journal: project.descendant([String]{".jet", "codemods"}, true)
-    _lock: journal.transaction_lock()
+    lock: journal.transaction_lock()
     jet_cli_transaction_recover(project, journal)
     filename: jet_cli_file_name(path)
     dot: filename.rfind(".")
@@ -460,7 +460,7 @@ jet_cli_undo_source_changes: fn(root: String, log_name: String) -[FS, Env, Exec,
     }
     project: JetCLIRootedDirectory.open(root, [String]{}, false)
     journal: project.descendant([String]{".jet", "codemods"}, false)
-    _lock: journal.transaction_lock()
+    lock: journal.transaction_lock()
     jet_cli_transaction_recover(project, journal)
     log_id: journal.transaction_stat(log_name).id
     bytes: journal.read(log_name, JET_CLI_TRANSACTION_MAX_BYTES)

@@ -311,20 +311,12 @@ kit_ui_actual: fn(call: KitUICall, run: KitRun) -> String {
     kit_ui_rendered_only(if call.streams == "rendered-both" -> "{run.stdout}{run.stderr}" else -> run.stderr)
 }
 
-// Whether a lint fixture's check compiled and emitted a lint. A tidy lint is
-// an error to `jet check`, so a check that fails on lints alone (each report
-// links an `L` code, none an `E` code) still compiled.
-kit_ui_lint_compiled: fn(code: Int, actual: String) -> Bool {
-    if code == 0 -> return actual.split("\n").any(fn(line) { line.starts_with("Warning [") })
-    actual.contains("jet-lang.dev/e/L") && !actual.contains("jet-lang.dev/e/E")
-}
-
 kit_ui_snapshot: fn(entry: KitEntry, call: KitUICall, result: KitRun, actual: String, ctx: KitCtx) -> KitVerdict {
     if kit_exec_process_failure(result) == .Val(failure) -> return failure
     if call.exit == "nonzero" && result.code == 0 {
         return kit_expect_verdict("FAIL", "directive requires nonzero exit")
     }
-    if call.streams == "lint" && !kit_ui_lint_compiled(result.code, actual) {
+    if call.streams == "lint" && (result.code != 0 || !actual.split("\n").any(fn(line) { line.starts_with("Warning [") })) {
         return kit_expect_verdict("FAIL", "lint fixture must compile and emit a lint")
     }
     if (call.streams == "rendered" || call.streams == "rendered-both") && result.code != 0 && kit_expect_diagnostics(actual) == 0 {

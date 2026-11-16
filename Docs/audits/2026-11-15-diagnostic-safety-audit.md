@@ -161,8 +161,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0512 | DeferPropagatesFailure | Compiler/JetSema/Source/Sema/Statements.jet:8071 | handle the failure inside the body |
 | E0515 | DeepCheckLeavesItsBody | Compiler/JetSema/Source/Sema/Statements.jet:8029 | take the exit out of the `#On(.Deep)` body |
 | E0516 | DeepCheckPropagatesFailure | Compiler/JetSema/Source/Sema/Statements.jet:8066 | handle the failure inside the body |
-| E0517 | DeepCheckChangesState | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3303 | change a copy the body makes itself |
-| E0603 | UseTargetNotFound | Compiler/JetCli/Source/Cli/Inspect.jet:1731 | no opt-in imports a file that is not there |
+| E0517 | DeepCheckChangesState | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3299 | change a copy the body makes itself |
+| E0603 | UseTargetNotFound | Compiler/JetCli/Source/Cli/Inspect.jet:1733 | no opt-in imports a file that is not there |
 | E0604 | UseCycle | Compiler/JetDriver/Source/Driver/Loader.jet:2875 | move the shared names into a module both import |
 | E0605 | PrivateItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:455 | reach the item through its module's public declarations |
 | E0606 | AmbiguousModule | Compiler/JetCli/Source/Cli/Project.jet:113 | the full module path names one module |
@@ -319,7 +319,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0988 | LoopLabelAsValue | Compiler/JetSema/Source/Sema/Expressions.jet:4920 | a loop name is not a value |
 | E0989 | CompileTimeIfNotConstant | Compiler/JetSema/Source/Sema/Registration/Derives.jet:1327 | a run-time condition uses a plain `if` |
 | E0992 | DispatchMissingComparison | Compiler/JetParser/Source/Formatter/Formatter.jet:1901 | value dispatch writes the comparison before the brace |
-| E0995 | MissingWorkspaceModule | Compiler/JetCli/Source/Cli/Entry.jet:964 | `workspace.jet` declares one `workspace` module |
+| E0995 | MissingWorkspaceModule | Compiler/JetCli/Source/Cli/Entry.jet:965 | `workspace.jet` declares one `workspace` module |
 | E0996 | InvalidMembersList | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:451 | `members:` evaluates to `[String]` |
 | E0997 | MembersDirectoryNotFound | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:617 | the directory exists relative to `workspace.jet` |
 | E0998 | InvalidOverlayPolicy | Jetpack/CLI/Source/Commands/ExplainCommand.jet:85 | the overlay policy is written in its declared form |
@@ -349,7 +349,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1108 | ColumnarMethodNotSupported | Compiler/JetSema/Source/Sema/Calls/Collections.jet:247 | indexing and a loop, or a struct without `#Layout(columnar)` |
 | E1110 | TaskOutsideGroup | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:336 | tasks start in the innermost `task.group` or a `Group` parameter |
 | E1112 | EmptyTaskCombinator | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:891 | the combinator gets at least one branch |
-| E1113 | FrozenValueWrite | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:7287 | write a copy, not the frozen value |
+| E1113 | FrozenValueWrite | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:7283 | write a copy, not the frozen value |
 | E1114 | FreezeNotSnapshotable | Compiler/JetSema/Source/Sema/Calls/Direct.jet:2146 | `freeze` takes owned, cloneable values |
 | E1116 | UnknownSharedMethod | Compiler/JetSema/Source/Sema/Calls/Methods.jet:69 | a shared value is read and written like a value |
 | E1117 | MixedTaskBranches | Compiler/JetParser/Source/Parser/Expressions.jet:1728 | the branches are all named or all positional |
@@ -386,7 +386,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1220 | DependencyAuthorityExceeded | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:581 | the effect is added to the dependency's grant line |
 | E1221 | InvalidAuthorityBlock | Compiler/JetDriver/Source/Driver/Loader.jet:309 | `authority:` is written in its one block form |
 | E1222 | InvalidProgramAllocator | Compiler/JetDriver/Source/Driver/Loader.jet:810 | `mem.Heap` or a counting allocator over it with a valid cap |
-| E1224 | PackageFileOperationFailed | Compiler/JetCli/Source/Cli/Host.jet:3281 | the file is readable and writable |
+| E1224 | PackageFileOperationFailed | Compiler/JetCli/Source/Cli/Host.jet:3280 | the file is readable and writable |
 | E1227 | EngineProtocolMismatch | Compiler/JetCli/Source/Cli/InspectB.jet:711 | `jet` and its engines come from one toolchain |
 | E1228 | MissingEngine | Compiler/JetCli/Source/Cli/InspectB.jet:692 | install the engine with the toolchain |
 | E1230 | AmbiguousWorkspaceMember | Jetpack/CLI/Source/Output/RefErrorReport.jet:20 | a longer path or an `@source` names one member |
@@ -398,7 +398,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1236 | UnlockedBuildFetch | Jetpack/Recipe/Source/Build/RecipeDiagnostics.jet:26 | the fetch is hash-pinned and credential-free, or the source is vendored |
 | E1237 | BuildWriteEscapes | Jetpack/Recipe/Source/Build/RecipeDiagnostics.jet:108 | build steps write under their own output root |
 | E1238 | InvalidBuildRecipe | Jetpack/Recipe/Source/Build/RecipeValidate.jet:176 | recipes use declared tools, inputs and effects |
-| E1239 | DuplicateWorkspaceModule | Compiler/JetCli/Source/Cli/Entry.jet:960 | one file declares `workspace: module` |
+| E1239 | DuplicateWorkspaceModule | Compiler/JetCli/Source/Cli/Entry.jet:961 | one file declares `workspace: module` |
 | E1240 | MissingRustToolchain | Jetpack/Recipe/Source/Toolchain/BuildToolchain.jet:113 | a pinned Rust toolchain is realized into the hangar |
 | E1242 | UnknownFleetSystem | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:34 | hosts name a captured system |
 | E1244 | UnknownFleetField | Jetpack/EnvModel/Source/ModuleEval/ModuleEval.jet:234 | a captured fleet states its `hosts` |
@@ -475,7 +475,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1349 | NixpkgsAttrNotIndexed | Jetpack/Nix/Source/Index/IndexWire.jet:65 | an attr the index covers |
 | E1350 | NixCacheAdmissionFailed | Jetpack/Provider/Source/Core/Realized.jet:156 | a closure that passes its checks |
 | E1351 | NixExecutionUnavailable | Jetpack/Store/Source/Shell/NixProjection.jet:232 | the host supports the isolated projection |
-| E1355 | OutsideProjectEnvironment | Compiler/JetCli/Source/Cli/EnvBoundary.jet:74 | the command runs inside `jetpack env` |
+| E1355 | OutsideProjectEnvironment | Compiler/JetCli/Source/Cli/EnvBoundary.jet:75 | the command runs inside `jetpack env` |
 | E1358 | InvalidRef | Jetpack/CLI/Source/Output/RefErrorReport.jet:8 | the ref is written `package@source` or as a local path |
 | E1361 | DuplicateInlinePackage | Compiler/JetDriver/Source/Driver/Loader.jet:3836 | one `package:` block per file |
 | E1362 | MalformedInlinePackage | Compiler/JetDriver/Source/Driver/Loader.jet:3832 | the block is balanced |
@@ -489,11 +489,11 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2001 | EditionTooNew | Compiler/JetDriver/Source/Driver/Loader.jet:1722 | build with a Jet that knows the edition |
 | E2002 | DeprecatedPastWindow | Compiler/JetSema/Source/Sema/Edition.jet:182 | the item's replacement is used |
 | E2101 | UnknownCommand | Compiler/JetCli/Source/Cli/Front.jet:887 | the command is spelled under its area |
-| E2102 | UnknownFlag | Compiler/JetCli/Source/Cli/Bindings.jet:15 | the flag is spelled as Jet defines it |
+| E2102 | UnknownFlag | Compiler/JetCli/Source/Cli/Bindings.jet:17 | the flag is spelled as Jet defines it |
 | E2103 | UnreadableCommandSchema | Compiler/JetCli/Source/Cli/ProgramCompletions.jet:173 | the program is a readable executable with metadata |
 | E2104 | InvalidCommandInput | Compiler/JetSema/Source/Sema/Calls/Checking.jet:878 | the input is fixed |
 | E2105 | DriverOperationFailed | Compiler/JetCli/Source/Cli/AuditCopies.jet:72 | the operation's cause is fixed |
-| E2106 | UnknownSyntaxToken | Compiler/JetCli/Source/Cli/SyntaxExplain.jet:53 | registered syntax is used |
+| E2106 | UnknownSyntaxToken | Compiler/JetCli/Source/Cli/SyntaxExplain.jet:55 | registered syntax is used |
 | E2110 | GcFailed | Compiler/JetCli/Source/Cli/GcReport.jet:318 | the workload or trace path is fixed |
 | E2112 | InvalidMemoryLedger | Compiler/JetCli/Source/Cli/AuditMemory.jet:195 | the ledger is recorded by exercised runs |
 | E2114 | CrashReportWithoutBuild | Compiler/JetCli/Source/Cli/Crash.jet:39 | the report keeps its build line |
@@ -508,11 +508,11 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2204 | DebugSessionQuit | Compiler/JetCli/Source/Cli/Debug.jet:138 | let the program run to its end |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:326 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:326 | the string's owner lives as long as the view, or the string is copied |
-| E2389 | UnprovenEntryResolution | Compiler/JetCli/Source/Cli/Inspect.jet:2033 | the entry resolves |
-| E2390 | UnprovenModuleGraph | Compiler/JetCli/Source/Cli/Inspect.jet:2034 | the module graph resolves |
-| E2391 | UnprovenCoreClosure | Compiler/JetCli/Source/Cli/Inspect.jet:2035 | the Core closure resolves |
-| E2392 | UnprovenTierLowering | Compiler/JetCli/Source/Cli/Inspect.jet:2036 | every applicable tier lowers |
-| E2393 | ImportWithoutProject | Compiler/JetCli/Source/Cli/Entry.jet:1528 | the file sits in a package or workspace |
+| E2389 | UnprovenEntryResolution | Compiler/JetCli/Source/Cli/Inspect.jet:2035 | the entry resolves |
+| E2390 | UnprovenModuleGraph | Compiler/JetCli/Source/Cli/Inspect.jet:2036 | the module graph resolves |
+| E2391 | UnprovenCoreClosure | Compiler/JetCli/Source/Cli/Inspect.jet:2037 | the Core closure resolves |
+| E2392 | UnprovenTierLowering | Compiler/JetCli/Source/Cli/Inspect.jet:2038 | every applicable tier lowers |
+| E2393 | ImportWithoutProject | Compiler/JetCli/Source/Cli/Entry.jet:1529 | the file sits in a package or workspace |
 | E2401 | InvalidDelegationTarget | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3774 | the field implements the trait |
 | E2402 | MissingErrorConversion | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1158 | declare the conversion |
 | E2404 | ErrorNotPropagatable | Compiler/JetSema/Source/Sema/Statements.jet:9320 | the contract gains a route for the failure |
@@ -597,7 +597,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:971 | the `#Todo` is written |
 | E3012 | StackOverflow | Compiler/JetCli/Source/Cli/Crash.jet:119 | the recursion is bounded |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:1012 | the entry handles the failure |
-| E3016 | OutputCheckNotRun | Compiler/JetCli/Source/Cli/Host.jet:2740 | the fatal trap is fixed |
+| E3016 | OutputCheckNotRun | Compiler/JetCli/Source/Cli/Host.jet:2739 | the fatal trap is fixed |
 | E3105 | UnsafeForbiddenByPolicy | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:906 | the policy owner changes the outer policy |
 | E3106 | InvalidUnsafeObligationMode | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:894 | a permitted obligation mode |
 | E3107 | MissingUnsafeObligation | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:1017 | the obligations are stated |
@@ -610,7 +610,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3205 | OverlayBindingConflict | Compiler/JetDriver/Source/Driver/ForeignProviders.jet:1362 | the overlay keeps a compatible signature |
 | E3206 | ReservedBindgenSegment | Compiler/JetParser/Source/Parser/Declarations/Foreign.jet:102 | declare overlays as `#Import c.<lib>: module` |
 | E3207 | BindgenOutsideGenerated | Compiler/JetDriver/Source/Driver/ForeignProviders.jet:381 | use `#Import c.<lib>: module` |
-| E3208 | BindingGenerationFailed | Compiler/JetCli/Source/Cli/Bindings.jet:106 | the header is fixed |
+| E3208 | BindingGenerationFailed | Compiler/JetCli/Source/Cli/Bindings.jet:108 | the header is fixed |
 | E3209 | CLibraryNotLinked | Jetpack/Integrations/Source/Foreign/C/LinkResolution.jet:64 | put the library on the link search path |
 | E3210 | CLibraryProvisionFailed | Jetpack/Integrations/Source/Foreign/C/LinkResolution.jet:69 | provision the library |
 | E3211 | InteriorNulByte | Compiler/JetSema/Source/Sema/Calls/Checking.jet:811 | pass bytes with an explicit length |
@@ -654,17 +654,17 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:355 | one build entry per package |
 | E3521 | BuildFactConflict | Compiler/JetDriver/Source/Driver/BuildFactChain.jet:241 | one writer per layer |
 | E3530 | ReservedBuildRuleCode | Compiler/JetEval/Source/BuildServices.jet:117 | a code outside the compiler's shape |
-| E3540 | DuplicateCommandOverride | Compiler/JetCli/Source/Cli/Entry.jet:855 | one override per command |
+| E3540 | DuplicateCommandOverride | Compiler/JetCli/Source/Cli/Entry.jet:856 | one override per command |
 | E3611 | CorruptProofArtifact | Compiler/JetCli/Source/Cli/ProveReport.jet:1857 | produce the artifact again |
 | E3614 | UnsafeProofArtifactPath | Compiler/JetCli/Source/Cli/ProveReport.jet:1853 | a plain path |
-| E3620 | ReplaySchemaMismatch | Compiler/JetCli/Source/Cli/ProveReplay.jet:1544 | capture with a matching `jet prove` |
-| E3621 | ReplayIdentityMismatch | Compiler/JetCli/Source/Cli/ProveReplay.jet:1446 | capture again for this target |
-| E3622 | CorruptReplay | Compiler/JetCli/Source/Cli/ProveReplay.jet:1434 | capture again |
-| E3623 | ReplayDiverged | Compiler/JetCli/Source/Cli/ProveReplay.jet:1302 | capture again |
+| E3620 | ReplaySchemaMismatch | Compiler/JetCli/Source/Cli/ProveReplay.jet:1545 | capture with a matching `jet prove` |
+| E3621 | ReplayIdentityMismatch | Compiler/JetCli/Source/Cli/ProveReplay.jet:1447 | capture again for this target |
+| E3622 | CorruptReplay | Compiler/JetCli/Source/Cli/ProveReplay.jet:1435 | capture again |
+| E3623 | ReplayDiverged | Compiler/JetCli/Source/Cli/ProveReplay.jet:1303 | capture again |
 | E3624 | ReplayTargetNotUnique | Compiler/JetCli/Source/Cli/Prove.jet:71 | select one runnable target |
-| E3625 | UnmodeledReplayOperation | Compiler/JetCli/Source/Cli/ProveReplay.jet:1420 | keep the operation off the captured path |
-| E3628 | ReplayTooLarge | Compiler/JetCli/Source/Cli/ProveReplay.jet:1174 | capture a smaller run |
-| E3629 | ReplayFinalizeFailed | Compiler/JetCli/Source/Cli/ProveReplay.jet:1060 | the destination is fixed |
+| E3625 | UnmodeledReplayOperation | Compiler/JetCli/Source/Cli/ProveReplay.jet:1421 | keep the operation off the captured path |
+| E3628 | ReplayTooLarge | Compiler/JetCli/Source/Cli/ProveReplay.jet:1175 | capture a smaller run |
+| E3629 | ReplayFinalizeFailed | Compiler/JetCli/Source/Cli/ProveReplay.jet:1061 | the destination is fixed |
 | E4201 | TlsHandshakeFailed | Jetpack/Foundation/Source/Net/FetchError.jet:18 | an HTTPS server at the URL |
 | E4202 | UntrustedCertificate | Jetpack/Foundation/Source/Net/FetchError.jet:19 | a certificate valid for the host |
 | E4203 | MissingCertificateRoots | Jetpack/Foundation/Source/Net/FetchError.jet:20 | install the system certificate bundle |

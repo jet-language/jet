@@ -18,7 +18,6 @@ use {
         DIAGNOSTIC_LINT,
         TextEdit,
         diagnostic_from_registry,
-        diagnostic_is_tidy,
         diagnostic_source_column,
         diagnostic_source_line,
         diagnostic_source_position,
@@ -402,12 +401,7 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
     // the binding `report_file` owns its own.
     report_file := file.copy()
     if diagnostic.origin == .Val(origin) -> report_file = jet_cli_report_file(base, origin.path)
-    // A tidy error's kind is its severity (diagnostic_is_tidy).
-    severity: if {
-        diagnostic.severity != DIAGNOSTIC_LINT -> "error"
-        diagnostic_is_tidy(diagnostic) -> "tidy"
-        else -> "warning"
-    }
+    severity: if diagnostic.severity == DIAGNOSTIC_LINT -> "warning" else -> "error"
     out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"severity\":{jet_cli_json_string(severity)},\"code\":{jet_cli_json_string(diagnostic.code)},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)}"
     if diagnostic.applicability == .Val(applicability) {
         grade: if applicability == {
