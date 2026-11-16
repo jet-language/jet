@@ -1256,7 +1256,8 @@ priv DB_MEMORY_OPENED: Shared{0}
 
 // A database file whose outbox keeps jobs is named to app.jobs as it opens,
 // so a serving server takes from it the jobs no server holds, such as those
-// a server that stopped left.
+// a server that stopped left. Each database file is named to app.push as it
+// opens, so the devices accounts register for pushes are kept in it.
 priv db_open: fn(path: String, failure: String) -> Store Never! {
     driver := __driver_open(path) ?? panic(failure)
     store := path.copy()
@@ -1268,6 +1269,7 @@ priv db_open: fn(path: String, failure: String) -> Store Never! {
     jobs: path != ":memory:" && table_exists(driver, "__jet_jobs")
     state: Shared{DBState{driver: driver.move(), path: path.copy(), store: store.copy(), written: [String]{}, ended: Condition.new()}}
     if jobs -> app.jobs.store(db_outbox(state, store))
+    if path != ":memory:" -> app.push.store(db_push_devices(state, store))
     Store{state: state}
 }
 
@@ -1563,6 +1565,62 @@ priv db_marks: fn(count: Int) -> String Never! {
     marks.join(", ")
 }
 
+// The store's push devices (app.PushDevices): the table `__jet_push_devices`,
+// a row for each device an account registered, found by its service and
+// token. Each statement runs in the call this task runs, if any.
+priv db_push_devices: fn(state: Shared<DBState>, store: String) -> app.PushDevices Never! {
+    app.PushDevices{
+        store: store.copy(),
+        add: fn(device: app.PushDevice) { db_push_add(state, device) },
+        of: fn(account: String) { db_push_of(state, account) },
+        forget: fn(service: String, token: String) { db_push_forget(state, service, token) },
+    }
+}
+
+// Registers `device` in place of the row of its service and token; false
+// when the store couldn't.
+priv db_push_add: fn(state: Shared<DBState>, device: app.PushDevice) -> Bool Never! {
+    guard := state.guard_edit()
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return false
+    if db_join(guard.value, state, call) == .Err(_) -> return false
+    _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS __jet_push_devices (service TEXT NOT NULL, token TEXT NOT NULL, account TEXT NOT NULL, key TEXT NOT NULL, auth TEXT NOT NULL, PRIMARY KEY (service, token))", [DBValue]{}) ?? return false
+    _: __driver_execute(guard.value.driver, "CREATE INDEX IF NOT EXISTS __jet_push_devices_account ON __jet_push_devices (account)", [DBValue]{}) ?? return false
+    values: [DBValue]{.Text(device.service.copy()), .Text(device.token.copy()), .Text(device.account.copy()), .Text(device.key.copy()), .Text(device.auth.copy())}
+    __driver_execute(guard.value.driver, "INSERT OR REPLACE INTO __jet_push_devices (service, token, account, key, auth) VALUES (?, ?, ?, ?, ?)", values) == .Ok(_)
+}
+
+// The devices `account` registered, in the order they registered; None
+// when the store couldn't read them.
+priv db_push_of: fn(state: Shared<DBState>, account: String) -> [app.PushDevice]? Never! {
+    found := [app.PushDevice]{}
+    guard := state.guard_edit()
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return None
+    if db_join(guard.value, state, call) == .Err(_) -> return None
+    if !table_exists(guard.value.driver, "__jet_push_devices") -> return Val(found)
+    rows: __driver_query(guard.value.driver, "SELECT service, token, key, auth FROM __jet_push_devices WHERE account = ? ORDER BY rowid", [DBValue]{.Text(account.copy())}) ?? return None
+    loop row in rows {
+        service: row_text(row, "service") ?? next
+        token: row_text(row, "token") ?? next
+        key: row_text(row, "key") ?? next
+        auth: row_text(row, "auth") ?? next
+        found.push(app.PushDevice{account: account.copy(), service: service, token: token, key: key, auth: auth})
+    }
+    Val(found)
+}
+
+// Forgets the device of `service` and `token`; false when the store
+// couldn't.
+priv db_push_forget: fn(state: Shared<DBState>, service: String, token: String) -> Bool Never! {
+    guard := state.guard_edit()
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return false
+    if db_join(guard.value, state, call) == .Err(_) -> return false
+    if !table_exists(guard.value.driver, "__jet_push_devices") -> return true
+    __driver_execute(guard.value.driver, "DELETE FROM __jet_push_devices WHERE service = ? AND token = ?", [DBValue]{.Text(service.copy()), .Text(token.copy())}) == .Ok(_)
+}
+
 #Codable
 priv CallCount: struct {
     id: Int
@@ -1683,6 +1741,44 @@ priv call_schedule: fn(counts: Table<Int, CallCount>, schedule: String, due: Int
     // Each schedule keeps its own latest run.
     assert(!call_schedule(counts, "s.sweep", 600, 6, true))
     assert_eq(call_count(counts), 6)
+}
+
+// The services and tokens of the devices `account` registered in `devices`.
+priv db_push_test_of: fn(devices: app.PushDevices, account: String) -> String {
+    found: devices.of(account) ?? panic("the devices read")
+    listed := [String]{}
+    loop device in found -> listed.push("{device.service} {device.token}")
+    listed.join(", ")
+}
+
+#Test("a store keeps one push device per service and token, for the account that registered it last") {
+    store: open_memory()
+    devices: db_push_devices(store.state, "db.Test push devices")
+    assert_eq(db_push_test_of(devices, "acct_ann"), "")
+    assert(devices.forget("apns", "a1"))
+    assert(devices.add(app.PushDevice{account: "acct_ann", service: "apns", token: "a1", key: "", auth: ""}))
+    assert(devices.add(app.PushDevice{account: "acct_ann", service: "fcm", token: "f1", key: "", auth: ""}))
+    assert(devices.add(app.PushDevice{account: "acct_ann", service: "web", token: "https://push.example.net/1", key: "BKey", auth: "secret"}))
+    assert_eq(db_push_test_of(devices, "acct_ann"), "apns a1, fcm f1, web https://push.example.net/1")
+    // The same token on the same service moves to the account that registers it.
+    assert(devices.add(app.PushDevice{account: "acct_bo", service: "fcm", token: "f1", key: "", auth: ""}))
+    // Another service's token of the same text is another device.
+    assert(devices.add(app.PushDevice{account: "acct_bo", service: "apns", token: "f1", key: "", auth: ""}))
+    assert_eq(db_push_test_of(devices, "acct_ann"), "apns a1, web https://push.example.net/1")
+    assert_eq(db_push_test_of(devices, "acct_bo"), "fcm f1, apns f1")
+    web: devices.of("acct_ann") ?? panic("the devices read")
+    assert_eq("{web[1].key} {web[1].auth}", "BKey secret")
+    assert(devices.forget("apns", "a1"))
+    assert_eq(db_push_test_of(devices, "acct_ann"), "web https://push.example.net/1")
+    // The registry registers in the first store named that takes a device.
+    app.push.store(db_push_devices(store.state, "db.Test push devices"))
+    assert(app.push.register(app.PushDevice{account: "acct_cy", service: "apns", token: "c1", key: "", auth: ""}))
+    assert_eq(db_push_test_of(devices, "acct_cy"), "apns c1")
+    assert_eq(app.push.devices("acct_cy").len(), 1)
+    app.push.forget("apns", "c1")
+    assert_eq(app.push.devices("acct_cy").len(), 0)
+    assert(store.close())
+    assert(devices.of("acct_ann") == None)
 }
 
 // How many jobs the store's outbox keeps, and each one's runs and last error.
