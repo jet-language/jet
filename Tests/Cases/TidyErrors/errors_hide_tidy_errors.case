@@ -1,0 +1,23 @@
+# Claim: like a warning, a tidy error is reported only once the errors are
+# fixed. `jet check`, `jet check --json` and `jet build` of a program with an
+# error list only the error; the same program with the error fixed fails on
+# its tidy error.
+fixture: ErrorsHideTidyErrors.fixture
+env: NO_COLOR=1
+step: jet check broken/main.jet
+exit: 1
+stderr: ~ "1 problem found" # only the error is counted
+stderr: ~ "missing_name" # the error is listed
+stderr: !~ "[jet.UnusedLocalBinding]" # the tidy error waits for the fix
+step: jet build broken/main.jet
+exit: 1
+stderr: ~ "missing_name" # build lists the error
+stderr: !~ "[jet.UnusedLocalBinding]" # build hides the tidy error too
+step: jet check --json broken/main.jet
+exit: 1
+stdout: ~ "\"ok\":false" # the JSON check fails on the error
+stdout: !~ "\"code\":\"L0101\"" # and lists only the error
+step: jet check tidy/main.jet
+exit: 1
+stderr: ~ "Error [jet.UnusedLocalBinding]" # with no error the tidy error fails the check
+stderr: ~ "1 problem found" # the tidy error is counted

@@ -1,0 +1,34 @@
+// A binding whose value acts when it goes is used by being held: a value
+// whose close runs at scope exit, a child process whose tree ends with its
+// last handle, and the handle a scope head names. A `.skip` reason's
+// interpolation reads the names it shows. The truly unused binding beside
+// them still fails.
+use process: core.process
+
+Ticket: struct {
+    label: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.label}") }
+    }
+}
+
+start: fn() {
+    child: process.cmd([String]{"true"}).spawn() ?? panic("true did not start")
+    print("started")
+}
+
+run: fn() {
+    ticket: Ticket{label: "held"}
+    unused: 5
+    #FX(authority: IO) { print("granted") }
+    #Transact(tx) { print("reversible") }
+    start()
+}
+
+#Test("a skip reason reads its names") {
+    values: [1, 2]
+    .skip("length {values.len()}") {
+        assert(false)
+    }
+}

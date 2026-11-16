@@ -1,10 +1,12 @@
 # Port of tests/diagnostic_gate.rs::warnings_never_choose_execution_exit_code (104-161).
 # PENDING-GRAMMAR and PENDING-SAME-HEAD: no runtime snapshot.
-# Visibility follows the ratified rule: run, dev, and build keep the advisory
-# lints L0103/L0202 off stderr, `--verbose` shows them, and `--json` reports
-# exactly what the human output shows. Warnings never choose the exit code.
-# The l0103 fixture imports core.text under two aliases where the Rust source
-# used core.http.client and fetched example.com; the case needs no network.
+# Visibility follows the ratified rule: run and dev keep the advisory lint
+# L0202 and the tidy error L0103 off stderr, `--verbose` shows them, and
+# `--json` reports exactly what the human output shows. Neither chooses a run's
+# exit code; `jet build` lists the tidy error and fails, and builds over the
+# advisory lint. The l0103 fixture imports core.text under two aliases where
+# the Rust source used core.http.client and fetched example.com; the case
+# needs no network.
 fixture: Warnings.fixture
 env: NO_COLOR=1
 step: jet run main.jet
@@ -32,19 +34,15 @@ step: jet run --verbose main.jet
 cwd: l0103
 env: JET_STORE_DIR={work}/cache/l0103/verbose/build
 exit: 0
-stderr: ~ "Warning [jet.UnusedImport]" # #3420: --verbose shows advisories
-stderr: !~ "Error [jet.UnusedImport]" # original predicate
+stderr: ~ "Error [jet.UnusedImport]" # --verbose shows the tidy error
+stderr: !~ "Warning [jet.UnusedImport]" # a tidy error is no warning
 stdout: = l0103.out
 step: jet build main.jet
 cwd: l0103
 env: JET_STORE_DIR={work}/cache/l0103/build/build
-exit: 0
-stderr: !~ "Warning [jet.UnusedImport]" # jet build presents errors only today
-stderr: !~ "Error [jet.UnusedImport]" # original predicate
-step: {work}/l0103/.jet/build/main
-cwd: l0103
-exit: 0
-stdout: = l0103.out
+exit: 1
+stderr: ~ "Error [jet.UnusedImport]" # jet build lists the tidy error and fails
+stderr: !~ "Warning [jet.UnusedImport]" # a tidy error is no warning
 step: jet run main.jet
 cwd: l0202
 env: JET_STORE_DIR={work}/cache/l0202/default/build
@@ -95,7 +93,7 @@ cwd: l0103
 env: JET_STORE_DIR={work}/cache/json-verbose/build
 exit: 0
 stdout: = l0103.out
-stderr: ~ "\"severity\":\"warning\"" # #3420: --json --verbose reports the advisory
+stderr: ~ "\"severity\":\"tidy\"" # --json --verbose reports the tidy error
 stderr: ~ "\"code\":\"L0103\"" # #3420: --json --verbose reports the advisory
 stderr: !~ "\"severity\":\"error\"" # original predicate
 step: jet run --quiet main.jet

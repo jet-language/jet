@@ -15,7 +15,7 @@ waiter: fn(tx: Sender<Int>, rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
 
 run: fn() {
     { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
-    loop i in 0..<TASKS {
+    loop _ in 0..<TASKS {
         parked: task waiter(tx, rx)
         parked.detach()
     }

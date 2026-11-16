@@ -1,6 +1,6 @@
 use {
     event: core.event
-    tasks: core.tasks
+    _tasks: core.tasks
 }
 
 LocalState: enum {
@@ -23,13 +23,13 @@ run: fn() {
         released: release_rx.receive() ?? panic("release")
     })
     first: ev.emit_async(1)
-    started_first: started_rx.receive() ?? panic("started")
+    _started_first: started_rx.receive() ?? panic("started")
     second: ev.emit_async(2)
     third: ev.emit_async(3)
     print("queued={ev.queued_count()} running={ev.running_count()} blocked={ev.blocked_count()}")
     ev.close()
     release_tx.send(1)
-    started_second: started_rx.receive() ?? panic("second started")
+    _started_second: started_rx.receive() ?? panic("second started")
     release_tx.send(2)
     first_report: first.join() ?? panic("first join")
     second_report: second.join() ?? panic("second join")

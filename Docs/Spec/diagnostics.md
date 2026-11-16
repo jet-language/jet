@@ -92,17 +92,28 @@ code.
 ## Human rendering
 
 The fixed headings are `Error [jet.Name]:` and `Warning [jet.Name]:`, naming
-the diagnostic type. A report with a span includes its source location and
+the diagnostic type; a tidy error (a lint on the `.Tidy` tier) heads
+`Error [jet.Name]:` too. A report with a span includes its source location and
 underline; a report without a span omits that block. Every report keeps `Why:`,
 `Fix:`, and `More: jet-lang.dev/e/<CODE>` in that order, with optional detail
 before `More:`; a diagnostic whose code is its type path has no `More:` line,
 and `jet explain web.BadPath` prints its impl's literals with their holes.
 Runtime reports keep their code in the heading. Multiple diagnostics are
-separated by one blank line. Lints do not block compilation by default;
-`#Allow(jet.Name, "why")` silences one lint or library warning inside its
-target, and a package may deny a named lint through its lint policy, but a
-diagnostic code is never a policy value. JSON and LSP `code` stays the
-registered code.
+separated by one blank line. A lint on the `.Error` tier does not block
+compilation by default. A tidy error never stops `jet run`, `jet dev` or
+`jet test`, which show it only under `--verbose`; `jet check` and `jet build`
+list every tidy error of the checked package and fail. Like a warning, a tidy
+error is reported only once the errors are fixed: a check or build with errors
+lists only its errors. A dependency's lints are not reported. A binding whose
+value acts when it goes (a resource, a guard, a child process, a temporary
+directory, a task handle, the handle a scope head names) is used by being
+held, so it is no unused local (L0101); nor is a binding read only in a call
+that fails to check or in a `.skip` reason. `#Allow(jet.Name, "why")` silences
+one lint, tidy error or library warning inside its target, and a package may
+deny a named lint through its lint policy, but a diagnostic code is never a
+policy value. JSON and LSP `code` stays the registered code; a
+`jet.report/v3` `severity` is `error`, `warning` or, for a tidy error, `tidy`,
+and LSP reports a tidy error at Error severity.
 
 Every human report renders from its row through
 `Compiler/JetFoundation/Source/Diagnostics/Render.jet`: `diagnostic_render`,

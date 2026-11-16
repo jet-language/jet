@@ -25,7 +25,7 @@ waiter: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
 round: fn() -> Int {
     { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
     parked := [Task<Int>]{}
-    loop i in 0..<TASKS -> parked.push(task waiter(rx))
+    loop _ in 0..<TASKS -> parked.push(task waiter(rx))
     time.sleep(50ms)
     loop i in 0..<parked.len() -> parked[i].cancel()
     cancelled := 0
@@ -57,7 +57,7 @@ BOUND_KB: 160 * 1024
 settled_kb: fn(base: Int) -[FS, Time.Wait]> Int {
     time.sleep(100ms)
     size := census("/proc/self/status", "VmSize:")
-    loop tries in 0..<50 {
+    loop _ in 0..<50 {
         if base >= 0 && size - base <= BOUND_KB -> return size
         time.sleep(100ms)
         next: census("/proc/self/status", "VmSize:")

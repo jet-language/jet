@@ -3,11 +3,11 @@
 fixture: CheckAndBuildShowAdvisoriesWhileExecutionCanRequestThem.fixture
 env: NO_COLOR=1
 step: jet check main.jet
-exit: 0
-stdout+stderr: ~ "[jet.UnusedLocalBinding]" # original predicate
+exit: 1
+stdout+stderr: ~ "Error [jet.UnusedLocalBinding]" # a tidy error fails jet check
 step: jet build --profile=debug main.jet
-exit: 0
-stdout+stderr: ~ "[jet.UnusedLocalBinding]" # original predicate
+exit: 1
+stdout+stderr: ~ "Error [jet.UnusedLocalBinding]" # a tidy error fails jet build
 step: jet run main.jet
 exit: 0
 stdout: = check_and_build_show_advisories_while_execution_can_request_them.stdout.expected

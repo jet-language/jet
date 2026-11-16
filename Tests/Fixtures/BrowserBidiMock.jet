@@ -204,7 +204,7 @@ Peer: struct {
 receive: fn(peer: &Peer) {
     chunk: if peer.stream.read_bytes(65536, deadline: remaining(peer.started)) == {
         .Ok(got) -> got
-        .Err(failure) -> {
+        .Err(_) -> {
             _: remaining(peer.started)
             [U8]{}
         }
@@ -301,7 +301,7 @@ pending: fn(peer: &Peer, ms: Int) -> Bool {
     if peer.ended -> return false
     readable: if net.tcp_ready(peer.stream, NetReadyInterest.Read, ms) == {
         .Ok(ready) -> net.ready_readable(ready)
-        .Err(failure) -> false
+        .Err(_) -> false
     }
     if readable -> receive(peer)
     peer.buffer.len() > 0

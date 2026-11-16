@@ -4,8 +4,8 @@
 fixture: PropagatedFailureIsNeverAnUnusedLocal.fixture
 env: NO_COLOR=1
 step: jet check main.jet
-exit: 0
-stderr: ~ "Local binding `spare` is never read" # a real unused local still warns
+exit: 1 # the unused local is a tidy error
+stderr: ~ "Local binding `spare` is never read" # a real unused local is still reported
 stderr: ~ "main.jet:23:5" # the user binding is the only report
 stderr: !~ "main.jet:12:" # no report for the propagation in load_one
 stderr: !~ "main.jet:17:" # no report for the first propagation in load_two

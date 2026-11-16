@@ -563,7 +563,8 @@ sema_coverage_missing_arms_edit: fn(patterns: [String], span: Span, environment:
 
 // `note_pattern_coverage`: an arm head that an earlier full arm, or an ancestor
 // group arm already covers is unreachable — E0365 over an anonymous union
-// subject, L0301 otherwise.
+// subject, L0301 otherwise. The alternatives of one or-pattern arm are not
+// earlier arms: `.Values(n, _) | .Values(_, n)` is one reachable arm.
 sema_coverage_check_unreachable_arms: fn(conditions: [TExpr], multi_head: Bool, diagnostics: &[Diagnostic]) {
     table: sema_coverage_table(conditions) ?? return
     union_subject: sema_pattern_unwrap_tags(table.subject.ty) == .Union(_)
@@ -582,6 +583,7 @@ sema_coverage_check_unreachable_arms: fn(conditions: [TExpr], multi_head: Bool, 
             heads.push(name)
             full_heads.push(false)
         }
+        arm_covered := [String]{}
         loop (index, variant) in heads {
             already := false
             loop earlier in covered {
@@ -595,9 +597,10 @@ sema_coverage_check_unreachable_arms: fn(conditions: [TExpr], multi_head: Bool, 
                     span: sema_coverage_shape_span(shape)
                     diagnostics.push(if union_subject -> sema_error("E0365", span, what, why, fix) else -> sema_lint("L0301", span, what, why, fix))
                 }
-                full_heads[index] -> covered.push(variant)
+                full_heads[index] -> arm_covered.push(variant)
             }
         }
+        covered.extend(arm_covered.move())
     }
 }
 

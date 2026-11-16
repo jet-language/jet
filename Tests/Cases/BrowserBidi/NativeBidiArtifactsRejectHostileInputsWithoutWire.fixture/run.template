@@ -8,27 +8,27 @@ run: fn() {
     context: session.context() ?? panic("context")
     page: context.page() ?? panic("page")
 
-    loop attempt in [1] {
+    loop _ in [1] {
         session.allow_downloads("") ?? next
         print("unexpected empty folder")
     }
-    loop attempt in [1] {
+    loop _ in [1] {
         page.set_cookie("", "v", "example.test") ?? next
         print("unexpected empty cookie")
     }
-    loop attempt in [1] {
+    loop _ in [1] {
         value: page.cookie("") ?? next
         print("unexpected empty cookie name {value}")
     }
-    loop attempt in [1] {
+    loop _ in [1] {
         value: page.storage_get("memory", "k") ?? next
         print("unexpected storage kind {value}")
     }
-    loop attempt in [1] {
+    loop _ in [1] {
         page.storage_set("local", "", "v") ?? next
         print("unexpected empty key")
     }
-    loop attempt in [1] {
+    loop _ in [1] {
         page.get_by_css("input").set_files("") ?? next
         print("unexpected empty path")
     }
