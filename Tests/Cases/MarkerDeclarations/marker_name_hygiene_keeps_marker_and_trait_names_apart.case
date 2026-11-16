@@ -1,0 +1,29 @@
+# No marker shares a name with a trait. A trait named like a built-in marker
+# and a marker named like a built-in trait are each E0106 (JetSema
+# MarkerModules.jet), and the Prelude registry holds its own markers to the
+# same law: JetFoundation Tests/Registry/OwnedTraits.jet fails on a Prelude
+# marker spelled as a trait it does not apply. `#Job` is the scheduled-job
+# marker and `#Task` is no marker. `#Discriminant` is no marker either; the
+# case key of a coded enum is `#Codable(tag: …)`.
+fixture: MarkerNameHygieneKeepsMarkerAndTraitNamesApart.fixture
+env: NO_COLOR=1
+step job: jet run job.jet -- nightly
+exit: 0
+stdout: = "nightly report\n"
+step job_trait: jet check job_trait.jet
+exit: 1
+stderr: ~ "[jet.BuiltinRedefined]: The trait name `Job` is the marker `#Job`" # a trait can't take a marker's name
+stderr: ~ "jet-lang.dev/e/E0106" # the registered code
+step iterable_marker: jet check iterable_marker.jet
+exit: 1
+stderr: ~ "[jet.BuiltinRedefined]: The marker name `Iterable` is the built-in trait `Iterable`" # a marker can't take a trait's name
+stderr: ~ "jet-lang.dev/e/E0106" # the registered code
+step task: jet check task.jet
+exit: 1
+stderr: ~ "`#Task` isn't a known applied rule" # the scheduled job is #Job
+step discriminant: jet check discriminant.jet
+exit: 1
+stderr: ~ "`#Discriminant` isn't a known applied rule" # not Jet syntax
+step codable_tag: jet run codable_tag.jet
+exit: 0
+stdout: = "{\"kind\":\"Circle\",\"radius\":2}\n"
