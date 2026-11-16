@@ -7651,8 +7651,11 @@ sema_comptime_module_sources: fn(program: SemaProgramTables, module_index: Int) 
 // a pass of small items, as a body pass of local values, still has its
 // closures' functions checked ahead. The result has one row per source. The
 // calling thread, which waits for the checking threads, builds the run's
-// function memory plan meanwhile when `memory_plan` has none yet, or after
-// the checks when it makes them itself.
+// function memory plan meanwhile when `memory_plan` has none yet. When it
+// makes the checks itself it leaves the plan to the run, which builds it
+// for its first function check (JetDriver jet_driver_comptime_memory_plan,
+// jet_driver_comptime_function_closure); a run whose items call no function
+// never builds it.
 sema_comptime_precheck_items: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads, seed: Bool, memory_plan: &[SemaFunctionMemoryPlan]) -> [SemaComptimeItemCheck?] {
     checks := [SemaComptimeItemCheck?]{}
     loop _ in 0..<sources.len() -> checks.push(None)
@@ -7930,16 +7933,13 @@ sema_comptime_precheck_thread_probe: fn(environment: SemaScopeEnvironment, sourc
 // check a thread returned into `done`. The calling thread, left waiting for
 // them, builds the function memory plan if `memory_plan` has none yet, its
 // walk on as many threads as `threads` admits. When one claimer is admitted,
-// the calling thread is that claimer and builds the plan after its checks.
+// the calling thread is that claimer and builds no plan.
 sema_comptime_precheck_claimers: fn(shared_state: Shared<SemaPrecheckShared>, plan: Shared<SemaPrecheckPlan>, threads: CompilerThreads, from: Int, workers: Int, done: &[SemaPrecheckDone], memory_plan: &[SemaFunctionMemoryPlan]) {
     if workers <= 1 {
         claimed := sema_comptime_precheck_claimed(shared_state, plan)
         loop claimed.len() > 0 {
             row := claimed.pop() ?? break
             done.push(row)
-        }
-        if memory_plan.len() == 0 {
-            sema_comptime_precheck_memory_plan(shared_state, threads, memory_plan)
         }
         return
     }
