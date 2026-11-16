@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108509,
+    "rev": 108516,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95903,12 +95903,12 @@
         },
         {
           "n": 7,
-          "text": "A trait value passed where another trait it implements is expected compiles, with the inner key kept and no box inside a box, or is refused by sema with a registered diagnostic, on O0, O1 and O2. Today: an internal compiler error, exit 101, 'checked incomplete without a report' (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, q2_trait_to_trait). Proof: a cases row on each tier.",
+          "text": "A trait value passed where another trait it implements is expected compiles, with the inner key kept and no box inside a box, or is refused by sema with a registered diagnostic, on O0, O1 and O2. Today: an internal compiler error, exit 101, 'checked incomplete without a report' (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, q2_trait_to_trait). Proof: a cases row on each tier. Under B or C, where no Core Any exists, a trait value passed where another trait is expected is refused by sema with a registered diagnostic, also when the user writes impl lib.Shown.Back or every program implementer of Shown implements Back (m43, m46): Back never dispatches on a library value's inner key, so a library trait's user cannot add a method to its values (D-PRIM-ANY1 b8; review 11, probes fm/m43 and fm/m46).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T03:24:27.030Z"
+          "at": "2026-11-16T08:51:58.253Z"
         },
         {
           "n": 8,
@@ -95937,7 +95937,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-16T04:40:50.712Z",
+      "updated": "2026-11-16T08:51:58.253Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -102489,12 +102489,12 @@
         },
         {
           "n": 3,
-          "text": "Under the ratified D-PRIM-ANY1 option: member arms over an Any accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reaches else. A trait or Any value holding a view of a local, returned from its function, fails with the provenance diagnostic. Proof: cases rows plus a UI snapshot for the escape (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g6, q1). The same spelling holds over union and trait-value subjects. It separates two instances of one generic: over Box<Int> | Box<String>, the arms are .Box<Int>(b) and .Box<String>(b) (qualified: .geo.Box<Int>(b)). The bare .Box(b) is E0305 'names more than one member' and offers both arms, and a table of both arms needs no else (review 9 probes f01-f01d). Over a union with one instance of a generic, Int \\| Box<Int>, the bare .Box(b) names that instance, whether Box is local or imported; today both are E0305 'doesn't belong' (v05; k04 in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes/fm). Over a trait value a generic arm always spells its arguments. In an arm, .Name< opens type arguments; as an expression it would be a direction-changing chain, E0333 (t04).",
+          "text": "Under the ratified D-PRIM-ANY1 option: member arms over an Any accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reaches else. A trait or Any value holding a view of a local, returned from its function, fails with the provenance diagnostic. Proof: cases rows plus a UI snapshot for the escape (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g6, q1). The same spelling holds over union and trait-value subjects. It separates two instances of one generic: over Box<Int> | Box<String>, the arms are .Box<Int>(b) and .Box<String>(b) (qualified: .geo.Box<Int>(b)). The bare .Box(b) is E0305 'names more than one member' and offers both arms, and a table of both arms needs no else (review 9 probes f01-f01d). Over a union with one instance of a generic, Int \\| Box<Int>, the bare .Box(b) names that instance, whether Box is local or imported when no other member has that leaf; today both are E0305 'doesn't belong' (v05; k04 in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes/fm). Over a trait value a generic arm always spells its arguments. In an arm, .Name< opens type arguments; as an expression it would be a direction-changing chain, E0333 (t04).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T08:07:58.823Z"
+          "at": "2026-11-16T08:52:00.364Z"
         },
         {
           "n": 4,
@@ -102507,12 +102507,12 @@
         },
         {
           "n": 5,
-          "text": "If D-PRIM-ANY1 adopts C: a bare arm over a union or a trait value names the type its name names in type position. Over a union only, a name that names no type there names the union's one member with that leaf. Every member has an arm, so a package's own Point is .Point(p) beside geo2.Point. Where Point names a type in scope, .Point(p) names it throughout the file; where it names none, each union's arm names its own member (k01). o7's fallback still works, and v03, whose arm binds geo.Point today, becomes E0305. The E0641 exemption for same-leaf members (Sema/Coverage.jet's same-name skip) is removed, so an else over a later-added member is E0641 (a04b). E0307's fix names each member's arm (f06, with #6839 c52). Proof: cases rows for o7, k01, the package's own member's arm and the generic arms; UI snapshots for v03 (E0305), a04b (E0641) and f05; probes are in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes, lanes/AnyReview10/probes/fm and lanes/AnyBallot/probes/fm.",
+          "text": "If D-PRIM-ANY1 adopts C: a bare arm over a union or a trait value names the type its name names in type position. Over a union only, a name that names no type there names the union's one member with that leaf. Every member has an arm, so a package's own Point is .Point(p) beside geo2.Point. Where Point names a type in scope, .Point(p) names it throughout the file; where it names none, each union's arm names its own member (k01). o7's fallback still works, and v03, whose arm binds geo.Point today, becomes E0305. The E0641 exemption for same-leaf members (Sema/Coverage.jet's same-name skip) is removed, so an else over a later-added member is E0641 (a04b). E0307's fix names each member's arm (f06, with #6839 c52). Proof: cases rows for o7, k01, the package's own member's arm and the generic arms; UI snapshots for v03 (E0305), a04b (E0641) and f05; probes are in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes, lanes/AnyReview10/probes/fm and lanes/AnyBallot/probes/fm. Over boxes.Box<Int> | kit.Box (both imported, no Box in scope) the bare .Box(b) is E0305 naming .boxes.Box<Int>(b) and .kit.Box(b); today it binds kit.Box, and E0641 offers .M_Box_Int_ (D-PRIM-ANY1 review 11, probes fm/m31 and fm/m31b). Proof: a UI snapshot of the E0305.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T08:07:59.796Z"
+          "at": "2026-11-16T08:52:20.009Z"
         }
       ],
       "refs": [],
@@ -102524,7 +102524,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T23:01:38.012Z",
-      "updated": "2026-11-16T08:07:59.796Z",
+      "updated": "2026-11-16T08:52:20.009Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -103332,12 +103332,12 @@
         },
         {
           "n": 55,
-          "text": "Two instances of one generic type in a union (Box<Int> | Box<String>) have defined arms, and no diagnostic suggests or accepts the compiler's internal names. Today the bare .Box(b) arm is E0305 with the wrong text ('doesn't belong') (f01); the else is E0641 (f01b); and E0641's fix suggests .M_Box_Int_ | .M_Box_String_, which compile and bind (f01c, f01d), although the internal identity tag is refused elsewhere (a08). Internal names are never user spellings (p209; D-PRIM-ANY1 review 9, probes f01-f01d in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes). Proof: UI snapshots of the corrected E0305 and E0641 text, and a case showing a mangled-name arm is refused.",
+          "text": "Two instances of one generic type in a union (Box<Int> | Box<String>) have defined arms, and no diagnostic suggests or accepts the compiler's internal names. Today the bare .Box(b) arm is E0305 with the wrong text ('doesn't belong') (f01); the else is E0641 (f01b); and E0641's fix suggests .M_Box_Int_ | .M_Box_String_, which compile and bind (f01c, f01d), although the internal identity tag is refused elsewhere (a08). Internal names are never user spellings (p209; D-PRIM-ANY1 review 9, probes f01-f01d in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes). Proof: UI snapshots of the corrected E0305 and E0641 text, and a case showing a mangled-name arm is refused. The same holds with one instance: E0641 over Int | Box<Int> offers .M_Box_Int_ (m33), and .M_Box_Int_(x) binds boxes.Box<Int> beside kit.Box (m31b) (D-PRIM-ANY1 review 11).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T07:40:04.089Z"
+          "at": "2026-11-16T08:52:21.042Z"
         },
         {
           "n": 56,
@@ -103356,6 +103356,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T08:07:55.581Z"
+        },
+        {
+          "n": 58,
+          "text": "A user trait implemented for a library trait type (impl lib8.Shown.Back {}) is refused with E0301 at the impl, as impl Shape {} is (spec.md:924-925), since a trait names no type to implement it for; or it works. Today it is accepted and inert: a Shown value has no point() (E0311, m44), and a Shown value at a T: Back bound gets E0904 'No trait named Back is in scope for the bound on T', naming a declared trait (m47) (p210, O0/O1/O2 alike; D-PRIM-ANY1 review 11, probes fm/m44, fm/m44b, fm/m47). Proof: a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T08:52:22.012Z"
         }
       ],
       "refs": [],
@@ -103366,9 +103375,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T08:24:49.467Z",
+      "updated": "2026-11-16T08:52:22.012Z",
       "updatedBy": "Main",
-      "criteriaLastN": 57
+      "criteriaLastN": 58
     },
     {
       "id": "c0c3gh6u",
@@ -220521,6 +220530,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T08:52:22.012Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#58 A user trait implemented for a library trait type (impl lib8"
+    },
+    {
+      "at": "2026-11-16T08:52:21.042Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#55: D-PRIM-ANY1 review 11 (D4): repair of a truncated append; was: Two instances of one generic type in a union (Box<Int> | Box<String>) have defined arms, and no diagnostic suggests or accepts the compiler's internal names. Today the bare .Box(b) arm is E0305 with t"
+    },
+    {
+      "at": "2026-11-16T08:52:20.009Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0reo0hk",
+      "note": "#5: D-PRIM-ANY1 review 11 (D3): repair of a truncated append; was: If D-PRIM-ANY1 adopts C: a bare arm over a union or a trait value names the type its name names in type position. Over a union only, a name that names no type there names the union's one member with t"
+    },
+    {
+      "at": "2026-11-16T08:52:01.420Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#55: D-PRIM-ANY1 review 11 (D4); was: Two instances of one generic type in a union (Box<Int> | Box<String>) have defined arms, and no diagnostic suggests or accepts the compiler's internal names. Today the bare .Box(b) arm is E0305 with t"
+    },
+    {
+      "at": "2026-11-16T08:52:00.364Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0reo0hk",
+      "note": "#3: D-PRIM-ANY1 review 11 (D3b); was: Under the ratified D-PRIM-ANY1 option: member arms over an Any accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reach"
+    },
+    {
+      "at": "2026-11-16T08:51:59.304Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0reo0hk",
+      "note": "#5: D-PRIM-ANY1 review 11 (D3); was: If D-PRIM-ANY1 adopts C: a bare arm over a union or a trait value names the type its name names in type position. Over a union only, a name that names no type there names the union's one member with t"
+    },
+    {
+      "at": "2026-11-16T08:51:58.253Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0j3st66",
+      "note": "#7: D-PRIM-ANY1 review 11 (D2); was: A trait value passed where another trait it implements is expected compiles, with the inner key kept and no box inside a box, or is refused by sema with a registered diagnostic, on O0, O1 and O2. Toda"
+    },
     {
       "at": "2026-11-16T08:50:24.914Z",
       "by": "Main",
