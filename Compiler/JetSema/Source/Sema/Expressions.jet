@@ -6360,7 +6360,11 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         }
     }
     geometry_present: sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
-    if source_operator && sema_expr_operator_trait(op) != None {
+    // Equality on a secret-bearing crypto value takes no operator hook, the
+    // type's derived Equatable included: the comparability rule refuses it
+    // (E0312), since ordinary equality could leak the secret through timing.
+    hooks: !(equality && sema_call_reflection_secret_bearing(lhs.ty))
+    if source_operator && sema_expr_operator_trait(op) != None && hooks {
         before: diagnostics.len()
         value: sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, program, scopes, state, tail_store, context, diagnostics, line)
         if value != None || diagnostics.len() != before -> return value
@@ -6418,7 +6422,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     if bound_operator != None {
         return sema_expr_expected(bound_operator ?? lhs, expected, environment, program, diagnostics)
     }
-    if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
+    if hooks && (sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty)) {
         before: diagnostics.len()
         operator_value := sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, program, scopes, state, tail_store, context, diagnostics, line)
         // A hook that recurses through its own operator (E0361) has no

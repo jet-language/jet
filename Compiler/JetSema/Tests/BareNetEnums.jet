@@ -1,0 +1,17 @@
+// core.net's NetError and NetDNSError have case lists in Core.rows, so a
+// program names them bare, without loading core.net, as it names any other
+// Core enum leaf.
+#Test("net_error_and_its_dns_cause_are_named_bare") {
+    source: `wrap_dns: fn(error: NetDNSError) -> NetError Never! { NetError.DNS(error) }
+
+run: fn() {
+    _: wrap_dns(NetDNSError.NotFound("example.test"))
+    _: wrap_dns(NetDNSError.Failure("resolver unavailable"))
+}
+`
+    errors := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        if diagnostic.code.starts_with("E") -> errors.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    assert_eq(errors.join("; "), "")
+}
