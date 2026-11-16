@@ -5309,8 +5309,10 @@ and runs them. (S43, D-CASING1)
 
 A top-level `#Test name: fn(p: T, ...) { ... }` is a property test. Each
 parameter type must be generatable: `Int`, a sized integer, an inline range,
-`Float`, `Float32`, `Bool`, `Char`, `String`, or a list, fixed list, or
-optional of a generatable type; any other type reports E0613. `jet test` runs
+`Float`, `Float32`, `Bool`, `Char`, `String`, a list, fixed list, or
+optional of a generatable type, or a non-generic, unvalidated struct whose
+stored fields are all generatable and which does not hold itself; any other type reports E0613,
+whose reason names the field that has no generator. `jet test` runs
 the body on 200 generated cases, each behind the same unwind boundary as a
 claim; the generated grade, `jet test --grade=generated`, runs each property
 on `--iterations=<n>` cases instead (1000 when unset) from the base seed
@@ -5337,6 +5339,20 @@ law: `precondition`, `partitions` (each parameter as `name: Type`),
 body calls), `sink` (a runtime stop of the body), `shrink_rule`, `seed` and
 `rejected`.
 (D-TEST1)
+
+A `#Test name: fn(a: Self, ...) { ... }` inside a trait body is a law of the
+trait: a property every implementation must keep, such as Equatable's
+`reflexive` (`assert(a == a)`) and `symmetric`, and Comparable's
+`agrees_with_equal` and `reverses`. A law with no parameter is a parse error.
+`jet test` runs every law against every impl of its trait written in the
+package under test (a derived impl is not run), as a property test named
+`Trait.law for Type` on generated values of the implementing type, so a broken
+impl fails the run with the law's name and the shrunk inputs. An impl whose
+type is not generatable, or whose operator compares with another type, lists
+each law as a skipped test named `Trait.law for Type, not checked: <reason>`.
+`#Waive(law, "reason")` written above an impl skips that one law for it,
+listed as `Trait.law for Type, waived: <reason>`; the reason is required.
+(D-CORE-LAWS1)
 
 For an explicit file, `jet test <file.jet>` builds one generated AOT harness for
 that file. Each claim runs behind a process-local unwind boundary, and the

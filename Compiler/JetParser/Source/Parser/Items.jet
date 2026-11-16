@@ -48,6 +48,7 @@ use {
         STATE_ARROW_LABEL,
         StructDef,
         TagDef,
+        TestDef,
         TextEdit,
         TraitConstDecl,
         TraitDef,
@@ -2703,6 +2704,7 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
     assoc_types := [NamedSpan]{}
     constants := [TraitConstDecl]{}
     inside := [Marker]{}
+    laws := [TestDef]{}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
@@ -2751,8 +2753,19 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
             }
             // Markers before a requirement attach to it, as they do to any
             // method; sema judges them against the applied-rule vocabulary.
+            // `#Test name: fn(a: Self, …) { … }` is a law, its `#Pre` lines
+            // above it.
             parser_current_kind(state) == TOKEN_KW_FN || parser_current_kind(state) == TOKEN_HASH -> {
                 method_modifiers := parser_parse_item_modifiers(state, false)
+                if parser_test_ahead(state) {
+                    law_start: parser_current(state).span
+                    if parser_parse_test(state, method_modifiers.markers) == .Test(law) {
+                        if law.fn_keyword_span == None || law.params.len() == 0 {
+                            parser_add_error(state, law_start, "a law takes the values it checks as parameters", "a `#Test` in a trait body is a law: `jet test` runs it on generated values of every type that implements the trait", "write `#Test name: fn(a: Self) {{ … }}`")
+                        } else { laws.push(law) }
+                    }
+                    next
+                }
                 if parser_current_kind(state) != TOKEN_KW_FN {
                     parser_add_error_here(state, "expected a trait method, associated type or trait constant", "trait bodies declare callable requirements, associated types and compile-time constants", "write `name: fn(...)`, `type Name` or `name: Type`")
                     parser_recover_statement(state)
@@ -2779,7 +2792,7 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
         scoped.scope = "trait"
         cap = Val(scoped)
     }
-    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: trait_name, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods, markers: markers, cap: cap}
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: trait_name, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods, markers: markers, cap: cap, laws: laws}
 }
 
 // The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list

@@ -1,0 +1,219 @@
+// A trait's laws (`#Test name: fn(a: Self, …) { … }` in its body) become
+// property tests under `jet test`: each written impl of the trait in the
+// package under test gets one test per law, `Trait.law for Type`, with
+// `Self` that type. A Core trait's laws come from Traits.jet (OWNED_TRAITS);
+// any other trait's are its declaration's own text. An impl the compiler
+// derives is checked through its fields' types, not here. A law the impl
+// waives (`#Waive(law, "reason")`), or one whose values can't be generated,
+// is listed as a skipped test that says why.
+use {
+    jet_foundation.[Func, Item, MARKER_WAIVE, Marker, Span, TestDef, TraitImplBlock, Type, checked_test_artifact_key, foundation_byte_text, module_is_core, module_text, owned_trait, symbol_intern, type_name]
+    jet_parser.[parse_generated_source]
+}
+
+// One written impl of a trait, in its module's coordinates: `at` is its
+// trait name and `end` the impl's last byte.
+SemaTraitLawImpl: struct {
+    type_name: String
+    trait_name: String
+    at: Span
+    end: Int
+    markers: [Marker]
+    rhs: Type?
+}
+
+// One law as written, `#Test name: fn(…) { … }`.
+SemaTraitLaw: struct {
+    name: String
+    source: String
+}
+
+sema_trait_laws_add: fn(graph: &SemaRegistrationGraph) Never! {
+    declared := [String:[SemaTraitLaw]]{}
+    loop row in graph.modules {
+        bytes := [U8]{}
+        loop item in row.program.items {
+            if item == .Trait(definition) {
+                if definition.laws.len() == 0 || declared.get(definition.name) != None -> next
+                if bytes.len() == 0 -> bytes = row.source.bytes()
+                laws := [SemaTraitLaw]{}
+                loop law in definition.laws {
+                    if law.span.start < 0 || law.span.end > bytes.len() -> next
+                    source: String.from_bytes(bytes.slice(law.span.start, law.span.end)) ?? next
+                    laws.push(SemaTraitLaw{name: law.name ?? "", source: source})
+                }
+                declared["{definition.name}"] = laws
+            }
+        }
+    }
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].package_identity != graph.package_identity || module_is_core(graph.modules[module_index].module_identity) {
+            next
+        }
+        tests := [TestDef]{}
+        loop written in sema_trait_law_impls(graph.modules[module_index].program.items) {
+            laws: sema_trait_laws_of(written.trait_name, declared)
+            loop (index, law) in laws {
+                // Each law parses as its own unit, numbered from a byte of
+                // the impl past the one its trait defaults take.
+                offset: written.at.start + 2 + index
+                if offset >= written.end -> break
+                tests.push(sema_trait_law_test(graph, module_index, written, law, offset))
+            }
+        }
+        if tests.len() == 0 -> next
+        identity: module_text(graph.module_table, graph.modules[module_index].module_identity)
+        loop test in tests {
+            _ := symbol_intern(graph.symbols, checked_test_artifact_key(identity, test))
+            graph.modules[module_index].program.items.push(Item.Test{value: test})
+        }
+    }
+}
+
+// The laws of the trait `trait_name` names: its declaration's in the graph,
+// else the Core trait's.
+sema_trait_laws_of: fn(trait_name: String, declared: [String:[SemaTraitLaw]]) -> [SemaTraitLaw] Never! {
+    name: sema_trait_law_leaf(trait_name)
+    if declared.get(name) == .Val(laws) -> return laws
+    owned: owned_trait(name) ?? return [SemaTraitLaw]{}
+    loop law in owned.laws -> SemaTraitLaw{name: law.name, source: law.source}
+}
+
+// `name` without the module path a qualified trait name writes.
+sema_trait_law_leaf: fn(name: String) -> String Never! {
+    foundation_byte_text(name.bytes(), name.rfind(".") + 1, name.count_bytes())
+}
+
+// The impls `items` write themselves, top-level or in a type's body.
+sema_trait_law_impls: fn(items: [Item]) -> [SemaTraitLawImpl] Never! {
+    found := [SemaTraitLawImpl]{}
+    loop item in items {
+        if item == {
+            .Impl(definition) -> {
+                trait_name: definition.trait_name ?? next
+                if definition.is_generated_serde || !sema_trait_law_written(definition.methods) {
+                    next
+                }
+                found.push(SemaTraitLawImpl{type_name: definition.type_name, trait_name: trait_name, at: definition.trait_span ?? definition.type_span, end: definition.span.end, markers: definition.markers, rhs: definition.operator_rhs})
+            }
+            .Struct(definition) -> {
+                sema_trait_law_blocks(definition.name, definition.trait_impls, found)
+            }
+            .Enum(definition) -> {
+                sema_trait_law_blocks(definition.name, definition.trait_impls, found)
+            }
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    found
+}
+
+// A top-level impl is written unless the compiler made every method it has.
+sema_trait_law_written: fn(methods: [Func]) -> Bool Never! {
+    loop method in methods {
+        if !method.compiler_generated -> return true
+    }
+    methods.len() == 0
+}
+
+sema_trait_law_blocks: fn(type_name: String, blocks: [TraitImplBlock], found: &[SemaTraitLawImpl]) Never! {
+    loop block in blocks {
+        if block.compiler_generated -> next
+        span: block.span ?? next
+        found.push(SemaTraitLawImpl{type_name: type_name, trait_name: block.trait_name, at: block.trait_span, end: span.end, markers: block.markers, rhs: block.operator_rhs})
+    }
+}
+
+// The test of `law` for the impl `written` in the module row
+// `module_index`, parsed from `offset`: the property itself, or a skipped
+// test whose name says why the law is not checked.
+sema_trait_law_test: fn(graph: SemaRegistrationGraph, module_index: Int, written: SemaTraitLawImpl, law: SemaTraitLaw, offset: Int) -> TestDef Never! {
+    name: "{sema_trait_law_leaf(written.trait_name)}.{law.name} for {written.type_name}"
+    if sema_trait_law_waiver(written.markers, law.name) == .Val(reason) {
+        return sema_trait_law_skipped(offset, "{name}, waived: {reason}")
+    }
+    if written.rhs == .Val(rhs) {
+        if rhs != (Type.Named{name: written.type_name}) {
+            return sema_trait_law_skipped(offset, "{name}, not checked: the impl compares with `{type_name(rhs)}`")
+        }
+    }
+    test := sema_trait_law_parse(offset, sema_trait_law_self(law.source, written.type_name), law.name)
+    loop parameter in test.params {
+        seen := [String]{}
+        reason: sema_property_param_ungeneratable(graph, module_index, parameter.ty, seen) ?? next
+        return sema_trait_law_skipped(offset, "{name}, not checked: {reason}")
+    }
+    test.name = Val(name)
+    test
+}
+
+// The reason `#Waive(law, "reason")` among `markers` gives for `law`.
+sema_trait_law_waiver: fn(markers: [Marker], law: String) -> String? Never! {
+    loop marker in markers {
+        if marker.name != MARKER_WAIVE || marker.negated || marker.args.len() < 2 -> next
+        waived := false
+        if marker.args[0] == .Expr(named) {
+            if named == .Ident(name, _, _) -> waived = name == law
+        }
+        if !waived -> next
+        reason := ""
+        if marker.args[1] == .Expr(text) {
+            if text == .Str(parts, _, _) {
+                loop part in parts {
+                    if part == .Lit(literal) -> reason = "{reason}{literal}"
+                }
+            }
+        }
+        return Val(reason)
+    }
+    None
+}
+
+// A test named `name` that runs no case: the runner lists it as skipped.
+sema_trait_law_skipped: fn(offset: Int, name: String) -> TestDef Never! {
+    test := sema_trait_law_parse(offset, "#Test \"law\" {{\n    .skip {{}}\n}}\n", "law")
+    test.name = Val(name)
+    test
+}
+
+// The one test `source` declares, parsed as if it began at byte `offset`.
+sema_trait_law_parse: fn(offset: Int, source: String, law: String) -> TestDef Never! {
+    bytes := [U8]{}
+    loop _ in 0..<offset -> bytes.push(32)
+    loop byte in source.bytes() -> bytes.push(byte)
+    parsed: parse_generated_source(bytes)
+    if parsed.diagnostics.len() > 0 || parsed.program.items.len() != 1 {
+        panic("the law `{law}` does not parse")
+    }
+    program := parsed.program.move()
+    item: program.items.pop() ?? panic("the law `{law}` lost its test")
+    if item.move() == .Test(test) -> return test
+    panic("the law `{law}` is not a test")
+}
+
+// `source` with each whole word `Self` spelled `type_name`.
+sema_trait_law_self: fn(source: String, type_name: String) -> String Never! {
+    bytes: source.bytes()
+    out := [U8]{}
+    replacement: type_name.bytes()
+    index := 0
+    loop index < bytes.len() {
+        if index + 4 <= bytes.len() && bytes[index] == (U8{83}) && bytes[index + 1] == (U8{101}) && bytes[index + 2] == (U8{108}) && bytes[index + 3] == (U8{102}) {
+            before: index > 0 && sema_trait_law_name_byte(bytes[index - 1])
+            after: index + 4 < bytes.len() && sema_trait_law_name_byte(bytes[index + 4])
+            if !before && !after {
+                loop byte in replacement -> out.push(byte)
+                index += 4
+                next
+            }
+        }
+        out.push(bytes[index])
+        index += 1
+    }
+    String.from_bytes(out) ?? source
+}
+
+// An ASCII letter, digit or `_`.
+sema_trait_law_name_byte: fn(byte: U8) -> Bool Never! {
+    (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95})
+}

@@ -130,6 +130,7 @@ use {
         sema_registration_prepare_graph,
         sema_graph_modules_take_checked_facts,
         sema_registration_settle_modules,
+        sema_trait_laws_add,
         sema_unsafe_path_within,
         SEMA_PRELUDE_ERROR_SOURCE_PATH,
         sema_cli_command_record,
@@ -5650,7 +5651,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     register_lookups: sema_registration_lookup_counts(registration_graph)
     jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounts{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0})
     if kg.enabled -> registration_graph.keep_going = true
-    if request.mode == JetDriverCompileMode.Test -> registration_graph.test_mode = true
+    // Under `jet test` each law of a trait a type of the package implements
+    // is a test of that type (TraitLaws.jet).
+    if request.mode == JetDriverCompileMode.Test {
+        registration_graph.test_mode = true
+        sema_trait_laws_add(registration_graph)
+    }
     registration_graph.plugin_facts = plugin_facts
     if request.mode == JetDriverCompileMode.Check -> registration_graph.check_tests = true
     if request.mode == JetDriverCompileMode.Program -> registration_graph.check_root_tests = true

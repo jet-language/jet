@@ -37,6 +37,7 @@ use {
         sema_graph_trail_init,
         sema_graph_trail_undo,
         sema_registration_prepare_graph,
+        sema_trait_laws_add,
         SemaGraphModuleResult,
         SemaOutputIntent,
     ]
@@ -328,7 +329,10 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     )
     if input.retain_projection -> registration.retain_programs = true
     registration.plugin_facts = plugin_facts
-    if input.request.mode == JetDriverCompileMode.Test -> registration.test_mode = true
+    if input.request.mode == JetDriverCompileMode.Test {
+        registration.test_mode = true
+        sema_trait_laws_add(registration)
+    }
     if input.request.mode == JetDriverCompileMode.Check -> registration.check_tests = true
     if input.request.mode == JetDriverCompileMode.Program -> registration.check_root_tests = true
     output_intent: if input.request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> input.request.output_intent

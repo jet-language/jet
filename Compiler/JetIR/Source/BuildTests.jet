@@ -34,7 +34,7 @@
 //   happen (JetRuntime TestContracts.jet).
 use {
     jet_foundation.[BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, SymbolTable, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set, symbol_none]
-    jet_sema.[SemaCheckedForeignFunction]
+    jet_sema.[SemaCheckedForeignFunction, sema_type_def_instance_type]
 }
 
 // One test the harness runs: its checked function `key`, the identity `id`
@@ -391,7 +391,8 @@ ir_test_property_reject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int,
 
 // A value of the property parameter type `ty` drawn from the context `ctx`
 // (JetRuntime TestProperty.jet): fresh where its type owns storage. An
-// integer stays within ±2^62.
+// integer stays within ±2^62; a struct is its stored fields, each drawn in
+// turn.
 ir_test_generate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, ty: Type, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     word_row: ir_word_row(m)
@@ -457,6 +458,25 @@ ir_test_generate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, ty: Ty
         ir_end(b.f, b.line)
         b.fresh[result] = true
         return result
+    }
+    if ir_nominal_name(untagged) == .Val(nominal) {
+        definition: ir_type_def(p, nominal) ?? return ir_fail_slot(b, span, "a property input of {ir_type_name(ty)}")
+        if p.types[definition].kind == .Struct(fields, _) && m.types[row].kind == .Aggregate {
+            args: ir_type_args(untagged)
+            storage: ir_fresh_temp(m, b, row)
+            ir_emit(b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+            loop field in fields {
+                if field.computed -> next
+                member: ir_member_of_row(m, p, row, field.name) ?? return ir_fail_slot(b, span, "a property input of {ir_type_name(ty)}")
+                if member.boxed {
+                    return ir_fail_slot(b, span, "a property input of {ir_type_name(ty)}, which holds itself")
+                }
+                value: ir_test_generate(m, p, b, ctx, sema_type_def_instance_type(p.types[definition], args, field.ty), span)
+                if ir_failed(b) || value < 0 -> return -1
+                ir_member_write(m, p, b, storage, member, value, -1)
+            }
+            return storage
+        }
     }
     ir_fail_slot(b, span, "a property input of {ir_type_name(ty)}")
 }

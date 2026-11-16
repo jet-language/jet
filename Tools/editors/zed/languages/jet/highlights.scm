@@ -99,7 +99,7 @@
 ] @type.builtin
 
 ; builtin: assert assert_eq channel check freeze input join print
-; marker.rule: ABI Allow Arg As Bindgen CLI Close Codable Commutative Comparable Context ContextKey Deadline Debug Deprecated DevPanel Doc Equatable Error FFI FX HTML Impure Inline Interrupt Job Kernel Layout Live Local MaxDepth Memo Meta MustUse NoPrelude Nondeterministic Numeric Off On Overflow Patchable Persist Policy Post Pre Printable Reactive Receipt Redact Region Rename Replayable Root SQL Scalar Scrub Shared Shield SingleUse Specified State Static Target Test Through Todo Track Transact Undo UnitFamily Unsafe
+; marker.rule: ABI Allow Arg As Bindgen CLI Close Codable Commutative Comparable Context ContextKey Deadline Debug Deprecated DevPanel Doc Equatable Error FFI FX HTML Impure Inline Interrupt Job Kernel Layout Live Local MaxDepth Memo Meta MustUse NoPrelude Nondeterministic Numeric Off On Overflow Patchable Persist Policy Post Pre Printable Reactive Receipt Redact Region Rename Replayable Root SQL Scalar Scrub Shared Shield SingleUse Specified State Static Target Test Through Todo Track Transact Undo UnitFamily Unsafe Waive
 ; take: &&
 ; sigil: # $ & ... : := :> <:
 ; operator: ! != % %% %%= %= && * *= + += - -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> <> == > >= >> >>= ? ?. ?? | |> ||

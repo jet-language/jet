@@ -3850,7 +3850,7 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
     if program.registration_graph == .Val(graph) {
         if graph.modules[module_index].program.items[item_index] == .Test(test) {
             if sema_check_module_tests(graph, module_index) && test.name != None && !sema_check_unusable_body(graph, sema_check_test_key(module_text(graph.module_table, graph.modules[module_index].module_identity), test.span)) {
-                loop diagnostic in sema_property_param_diagnostics(test) {
+                loop diagnostic in sema_property_param_diagnostics(graph, module_index, test) {
                     module_result.diagnostics.push(diagnostic)
                 }
                 checked_test: sema_check_test_function(test, environment, program, scopes, host_hooks)

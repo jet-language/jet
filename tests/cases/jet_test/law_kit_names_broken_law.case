@@ -1,0 +1,18 @@
+# A Core trait's laws (`#Test name: fn(a: Self, …)` in its body) run under `jet test` for every impl of it the package writes, on generated values of the implementing type. An impl that breaks one fails the run, named `Trait.law for Type`, with the shrunk inputs; a lawful impl passes; a type the runner can't generate is listed as not checked, with the reason; and `#Waive(law, "reason")` on the impl lists that law as waived.
+fixture: law_kit_names_broken_law.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step broken: jet test --show-default main.jet
+exit: nonzero # the slip breaks a law
+stdout: ~ "Equatable.reflexive for Price: FAIL" # the failure names the trait, the law and the type
+stderr: ~ "minimized_inputs: a = " # the law's input, shrunk
+stdout: ~ "Equatable.symmetric for Price: pass" # a law the slip keeps passes
+stdout: ~ "Equatable.reflexive for Tag: pass" # a lawful impl passes
+stdout: ~ "Equatable.reflexive for Ledger, not checked: `Ledger.entries`" # an ungeneratable type says why
+stdout: ~ "a price keeps its parts: pass" # the package's own tests still run
+
+step waived: jet test --show-default waived.jet
+exit: 0 # the waived law is not run
+stdout: ~ "Equatable.reflexive for Price, waived: the fixture keeps the slip to show the waiver: skip" # listed with its reason
+stdout: ~ "Equatable.symmetric for Price: pass" # the other law still runs
