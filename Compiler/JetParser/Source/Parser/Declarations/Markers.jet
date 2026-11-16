@@ -149,6 +149,7 @@ parser_parse_marker_setting: fn(state: &JetParserState, declaration: &MarkerDecl
     key: parser_value(state, name_token)
     if key == "group" {
         group: parser_parse_marker_group_entries(state, true)
+        parser_finish_data_member(state)
         if declaration.group != None {
             parser_add_error_code(state, "E0937", name_token.span, "the `impl Marker` block gives `group` twice", "a marker has one group", "remove one `group: …`")
             return
@@ -158,7 +159,7 @@ parser_parse_marker_setting: fn(state: &JetParserState, declaration: &MarkerDecl
     }
     parsed: parser_parse_expression(state, 1, 0)
     span: parser_cover(name_token.span, parser_lookahead(state, -1).span)
-    parser_finish_statement(state)
+    parser_finish_data_member(state)
     fact: "${key}"
     if key != "companion" {
         constants.push(ImplConstValue{name: key, name_span: name_token.span, value: parsed.expr, span: span})
@@ -358,7 +359,7 @@ parser_parse_fact_impl: fn(state: &JetParserState, value: &StructDef) {
         name_token: parser_bump(state)
         parser_bump(state)
         parsed: parser_parse_expression(state, 1, 0)
-        parser_finish_statement(state)
+        parser_finish_data_member(state)
         params.push(MarkerDeclParam{name: parser_value(state, name_token), name_span: name_token.span, ty: None, value: Val(parsed.expr), variadic: false})
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the `impl Fact` body")
