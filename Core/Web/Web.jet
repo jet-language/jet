@@ -2846,6 +2846,23 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
     assert_eq("{held.value[1].service} {held.value[1].token} {held.value[1].key} {held.value[1].auth}", "web https://push.example.net/1 BKey secret")
 }
 
+#Test("a push to a device whose push service is not set up is skipped, and kept with its service, account and reason") {
+    devices: calls.PushDevices{
+        store: "web.Test unsent pushes",
+        add: fn(_: calls.PushDevice) { false },
+        of: fn(account: String) {
+            if account != "acct_unset" -> return Val([calls.PushDevice]{})
+            Val([calls.PushDevice]{calls.PushDevice{account: "acct_unset", service: "fcm", token: "f-1", key: "", auth: ""}})
+        },
+        forget: fn(_: String, _: String) { true },
+    }
+    calls.push.store(devices)
+    calls.__notify(auth.AccountID.from_string("acct_unset"), "Due today", "Ship v2", "{{\"TaskView\":{{\"id\":7}}}}")
+    notes: calls.push.outcomes()
+    assert(notes.len() > 0)
+    assert_eq(notes[notes.len() - 1], "skipped fcm acct_unset: no FCM settings")
+}
+
 // The status a registration of `body` at `/__jet/push/devices` answers.
 priv app_push_test_status: fn(body: String) -[Net]> Int Never! {
     request: web_http.server_request("POST", C_APP_PUSH_DEVICES, web_http.body_text(body), web_http.headers())

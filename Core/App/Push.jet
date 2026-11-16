@@ -1,11 +1,12 @@
-// Private Core source part: the wire forms of a push notification. A push
-// goes to APNs, to FCM or to a browser's push service (Web Push), as one
-// HTTP POST each. A Web Push payload is encrypted to the browser's
-// subscription (RFC 8291, the aes128gcm content coding of RFC 8188), and the
-// application server proves who sends it with a VAPID token (RFC 8292). APNs
-// takes an ES256 provider token, and FCM an OAuth 2.0 access token that a
-// service account's RS256 assertion buys (RFC 7523). Each push carries a
-// collapse key, so a repeated run replaces the push it sent before.
+// Private Core source part: the wire forms of a push notification, and
+// the senders that send them. A push goes to APNs, to FCM or to a
+// browser's push service (Web Push), as one HTTP POST each. A Web Push
+// payload is encrypted to the browser's subscription (RFC 8291, the
+// aes128gcm content coding of RFC 8188), and the application server proves
+// who sends it with a VAPID token (RFC 8292). APNs takes an ES256 provider
+// token over HTTP/2, and FCM an OAuth 2.0 access token that a service
+// account's RS256 assertion buys (RFC 7523). Each push carries a collapse
+// key, so a repeated run replaces the push it sent before.
 use {
     core
     bn: __core_crypto_bignum
@@ -20,6 +21,10 @@ use {
     pk: __core_crypto_pk
     pkparse: __core_crypto_pkparse
     base64: core.encoding.base64
+    http: core.http
+    client: core.http.client
+    h2: __core_http_h2
+    net: core.net
 }
 
 /// The record size of an encrypted push: one record holds the whole
@@ -339,6 +344,249 @@ push_origin: fn(url: String) -> String? Never! {
     origin
 }
 
+/// The push services a server sends through. A service left None sends
+/// nothing: a push to one of its devices is skipped.
+PushSettings: struct {
+    apns: PushAPNs?
+    fcm: PushFCM?
+    web: PushWeb?
+}
+
+/// APNs's token-based authentication: the APNs `origin`
+/// (`https://api.push.apple.com`, `https://api.sandbox.push.apple.com`, or
+/// an `http` origin a local fake answers over h2c), the team's ID, the
+/// signing key's ID and the path of its `.p8` file, and the app's bundle
+/// ID, which is each push's `apns-topic`.
+PushAPNs: struct {
+    origin: String
+    team_id: String
+    key_id: String
+    key_path: String
+    topic: String
+}
+
+/// FCM's HTTP v1 API: the FCM `origin` (`https://fcm.googleapis.com` or a
+/// local fake), the Firebase project's ID, and the service account's email,
+/// token URI and the path of its private key (PEM).
+PushFCM: struct {
+    origin: String
+    project: String
+    client_email: String
+    token_uri: String
+    key_path: String
+}
+
+/// Web Push: the VAPID `contact` (a `mailto:` or `https:` URI) and the path
+/// of the application server's P-256 private key (PEM), whose public key
+/// browsers subscribe with.
+PushWeb: struct {
+    contact: String
+    key_path: String
+}
+
+/// What one push to one device came to: `reason` is "" once its service
+/// took the push, and `gone` says the service no longer knows the device.
+PushOutcome: struct {
+    reason: String
+    gone: Bool
+}
+
+/// How long one push's request may take, its connection included.
+PUSH_SEND_MS: 10000
+
+/// How long an APNs provider token is reused: APNs refuses one older than
+/// an hour and a new one more often than every 20 minutes.
+PUSH_APNS_TOKEN_SECONDS: 3000
+
+/// How long before an FCM access token expires it is renewed.
+PUSH_FCM_RENEW_SECONDS: 300
+
+// The services set up to send, each with its key as read once, and the
+// bearer token APNs and FCM were last sent with, renewed from the Unix
+// second `*_until`.
+priv PushSenders: struct {
+    apns: PushAPNs?
+    #Redact apns_key: [U8]
+    #Redact apns_token: String
+    apns_until: Int
+    fcm: PushFCM?
+    #Redact fcm_key: String
+    #Redact fcm_token: String
+    fcm_until: Int
+    web: PushWeb?
+    web_key: PushKeyPair?
+}
+
+priv PUSH_SENDERS: Shared{PushSenders{apns: None, apns_key: [U8]{}, apns_token: "", apns_until: 0, fcm: None, fcm_key: "", fcm_token: "", fcm_until: 0, web: None, web_key: None}}
+
+// What an FCM token exchange answers.
+#Codable
+priv PushFCMGrant: struct {
+    access_token: String
+    expires_in: Int
+}
+
+/// Sets up the services `settings` names, reading each one's key, in place
+/// of the services set up before. Fails, keeping those, when a key can't be
+/// read or is not the kind its service takes.
+push_configure: fn(settings: PushSettings) PushError! -[FS.Read, Net]> {
+    rng := push_rng() ?? return Err(err)
+    senders := PushSenders{apns: None, apns_key: [U8]{}, apns_token: "", apns_until: 0, fcm: None, fcm_key: "", fcm_token: "", fcm_until: 0, web: None, web_key: None}
+    if settings.apns == .Val(apns) {
+        text: core.files.read(apns.key_path) ?? return Err(push_fail("the APNs key {apns.key_path} can't be read: {err}"))
+        senders.apns_key = push_ec_private(text, rng) ?? return Err(push_fail("the APNs key {apns.key_path}: {err.reason}"))
+        senders.apns = Val(apns.copy())
+    }
+    if settings.fcm == .Val(fcm) {
+        text: core.files.read(fcm.key_path) ?? return Err(push_fail("the FCM key {fcm.key_path} can't be read: {err}"))
+        _: push_fcm_token_request(fcm.client_email, fcm.token_uri, 0, text, rng) ?? return Err(push_fail("the FCM key {fcm.key_path}: {err.reason}"))
+        senders.fcm_key = text
+        senders.fcm = Val(fcm.copy())
+    }
+    if settings.web == .Val(web) {
+        text: core.files.read(web.key_path) ?? return Err(push_fail("the Web Push key {web.key_path} can't be read: {err}"))
+        private: push_ec_private(text, rng) ?? return Err(push_fail("the Web Push key {web.key_path}: {err.reason}"))
+        senders.web_key = Val(push_key_pair(private, rng) ?? return Err(push_fail("the Web Push key {web.key_path}: {err.reason}")))
+        senders.web = Val(web.copy())
+    }
+    held := PUSH_SENDERS.guard_edit()
+    held.value = senders
+    Ok()
+}
+
+/// Whether the push service `service` (`apns`, `fcm` or `web`) is set up.
+push_configured: fn(service: String) -> Bool Never! {
+    held: PUSH_SENDERS.guard_read()
+    if service == "apns" -> return held.value.apns != None
+    if service == "fcm" -> return held.value.fcm != None
+    if service == "web" -> return held.value.web != None
+    false
+}
+
+/// The name of the push service `service` for a reason.
+push_service_label: fn(service: String) -> String Never! {
+    if service == "apns" -> return "APNs"
+    if service == "fcm" -> return "FCM"
+    if service == "web" -> return "Web Push"
+    service.copy()
+}
+
+/// A key no other push has: 24 random bytes, base64url, as long as a
+/// collapse key.
+push_fresh_key: fn() -> String PushError! {
+    rng := push_rng() ?? return Err(err)
+    bytes := cipher.zero_bytes(24)
+    if !rng.fill(bytes) -> return Err(push_fail("the system entropy source failed"))
+    Ok(base64.encode_url(bytes))
+}
+
+/// Sends one push of `title` and `body`, keyed `key`, whose tap opens
+/// `open`, to the device `token` of the set-up push service `service`; a
+/// Web Push device's token is its subscription's endpoint, with its `p256dh`
+/// key and `auth` secret base64url. `now` (Unix seconds) dates the tokens.
+push_deliver: fn(service: String, token: String, p256dh: String, auth: String, key: String, title: String, body: String, open: String, now: Int) -[Net, Time.Wait]> PushOutcome Never! {
+    rng := push_rng() ?? return push_failed(err.reason)
+    if service == "apns" -> return push_deliver_apns(token, key, title, body, open, now, rng)
+    if service == "fcm" -> return push_deliver_fcm(token, key, title, body, open, now, rng)
+    if service == "web" {
+        return push_deliver_web(token, p256dh, auth, key, title, body, open, now, rng)
+    }
+    push_failed("there is no push service `{service}`")
+}
+
+// The Unix second it is now.
+push_now: fn() -> Int Never! {
+    // core.net.tls's host clock, so a push needs Net alone.
+    sample: core.net.tls.__host_wall_sample()
+    if sample.before_epoch -> 0 else -> sample.seconds
+}
+
+priv push_failed: fn(reason: String) -> PushOutcome Never! {
+    PushOutcome{reason: reason, gone: false}
+}
+
+// A copy of the services set up, so no request is sent under their lock.
+priv push_senders: fn() -> PushSenders Never! {
+    held: PUSH_SENDERS.guard_read()
+    held.value.copy()
+}
+
+priv push_deliver_apns: fn<R: RNG>(token: String, key: String, title: String, body: String, open: String, now: Int, rng: &R) -[Net, Time.Wait]> PushOutcome Never! {
+    senders: push_senders()
+    apns: senders.apns ?? return push_failed("no APNs settings")
+    bearer := senders.apns_token.copy()
+    if bearer == "" || now >= senders.apns_until {
+        bearer = push_apns_token(apns.team_id, apns.key_id, now, senders.apns_key, rng) ?? return push_failed(err.reason)
+        held := PUSH_SENDERS.guard_edit()
+        held.value.apns_token = bearer.copy()
+        held.value.apns_until = now + PUSH_APNS_TOKEN_SECONDS
+    }
+    request: push_apns_request(apns.origin, token, apns.topic, bearer, key, title, body, open)
+    fields := [http.Header]{}
+    loop header in request.headers {
+        fields.push(http.Header{name: header.name.copy(), value: header.value.copy()})
+    }
+    response: client.__h2_request("POST", request.url, fields, request.body, PUSH_SEND_MS) ?? return push_failed("APNs: {err}")
+    if response.status == 200 -> return PushOutcome{reason: "", gone: false}
+    answer: response.text() ?? ""
+    if answer.contains("ExpiredProviderToken") {
+        held := PUSH_SENDERS.guard_edit()
+        held.value.apns_token = ""
+    }
+    gone: response.status == 410 || answer.contains("BadDeviceToken") || answer.contains("Unregistered")
+    PushOutcome{reason: "APNs answered {response.status} {answer}", gone: gone}
+}
+
+priv push_deliver_fcm: fn<R: RNG>(token: String, key: String, title: String, body: String, open: String, now: Int, rng: &R) -[Net, Time.Wait]> PushOutcome Never! {
+    senders: push_senders()
+    fcm: senders.fcm ?? return push_failed("no FCM settings")
+    bearer := senders.fcm_token.copy()
+    if bearer == "" || now >= senders.fcm_until {
+        exchange: push_fcm_token_request(fcm.client_email, fcm.token_uri, now, senders.fcm_key, rng) ?? return push_failed(err.reason)
+        granted: push_post(exchange) ?? return push_failed("the FCM token exchange: {err}")
+        if granted.status != 200 {
+            return push_failed("the FCM token exchange answered {granted.status} {granted.text() ?? ""}")
+        }
+        grant: granted.json<PushFCMGrant>() ?? return push_failed("the FCM token exchange's answer: {err}")
+        bearer = grant.access_token.copy()
+        held := PUSH_SENDERS.guard_edit()
+        held.value.fcm_token = bearer.copy()
+        held.value.fcm_until = now + grant.expires_in - PUSH_FCM_RENEW_SECONDS
+    }
+    request: push_fcm_request(fcm.origin, fcm.project, bearer, token, key, title, body, open)
+    response: push_post(request) ?? return push_failed("FCM: {err}")
+    if response.status == 200 -> return PushOutcome{reason: "", gone: false}
+    answer: response.text() ?? ""
+    if response.status == 401 {
+        held := PUSH_SENDERS.guard_edit()
+        held.value.fcm_token = ""
+    }
+    PushOutcome{reason: "FCM answered {response.status} {answer}", gone: response.status == 404}
+}
+
+priv push_deliver_web: fn<R: RNG>(endpoint: String, p256dh: String, auth: String, key: String, title: String, body: String, open: String, now: Int, rng: &R) -[Net, Time.Wait]> PushOutcome Never! {
+    senders: push_senders()
+    web: senders.web ?? return push_failed("no Web Push settings")
+    sender: senders.web_key ?? return push_failed("no Web Push settings")
+    public: base64.decode_url(p256dh) ?? return push_failed("the subscription's key is no base64url")
+    secret: base64.decode_url(auth) ?? return push_failed("the subscription's auth secret is no base64url")
+    to: PushSubscription{endpoint: endpoint.copy(), public: public, auth_secret: secret}
+    request: push_web_request(to, sender, web.contact, now, key, title, body, open, rng) ?? return push_failed(err.reason)
+    response: push_post(request) ?? return push_failed("Web Push: {err}")
+    if response.status >= 200 && response.status < 300 {
+        return PushOutcome{reason: "", gone: false}
+    }
+    answer: response.text() ?? ""
+    PushOutcome{reason: "Web Push answered {response.status} {answer}", gone: response.status == 404 || response.status == 410}
+}
+
+// Sends `request` over HTTP/1.1.
+priv push_post: fn(request: PushRequest) -[Net, Time.Wait]> http.HTTPResponse http.HTTPError! {
+    out := http.__request("POST", request.url).timeout(PUSH_SEND_MS)
+    loop header in request.headers -> out = out.__with_header(header.name, header.value)
+    out.__with_body_value(http.body_bytes(request.body.copy())).send()
+}
+
 priv push_fail: fn(reason: String) -> PushError Never! { PushError{reason: reason} }
 
 // P-256.
@@ -636,4 +884,182 @@ priv push_test_fcm_key: fn() -> String Never! {
     assert_eq(push_origin("https://push.example.net"), .Val("https://push.example.net"))
     assert_eq(push_origin("ftp://push.example.net/x"), None)
     assert_eq(push_origin("https:///x"), None)
+}
+
+// A fake push service over HTTP/1.1 for the test below: answers one
+// request on each connection `listener` takes, the next with the next of
+// `statuses` and `bodies`, and gives each request whole.
+priv push_test_serve: fn(listener: net.TCPListener, statuses: [Int], bodies: [String]) -[Net, Time.Wait]> [String] Never! {
+    deadline: Duration{ns: 10000000000}
+    seen := [String]{}
+    loop index in 0..<statuses.len() {
+        stream := net.tcp_accept(listener) ?? panic("accept: {err}")
+        input := [U8]{}
+        buffer := [U8]{}
+        head := -1
+        length := 0
+        loop head < 0 || input.len() < head + length {
+            buffer.clear()
+            read: stream.read_into(buffer, 8192, deadline: deadline) ?? panic("read: {err}")
+            if read == 0 -> panic("the client closed before its request ended")
+            input.extend(buffer.copy())
+            if head < 0 {
+                head = push_test_head_end(input)
+                if head >= 0 {
+                    length = push_test_content_length(String.from_bytes(cipher.bytes_of(input, 0, head)) ?? "")
+                }
+            }
+        }
+        // A Web Push body is sealed bytes, so only a text body is kept.
+        head_text: String.from_bytes(cipher.bytes_of(input, 0, head)) ?? ""
+        seen.push("{head_text}{String.from_bytes(cipher.bytes_of(input, head, input.len() - head)) ?? ""}")
+        reply: "HTTP/1.1 {statuses[index]} X\r\ncontent-type: application/json\r\ncontent-length: {bodies[index].len()}\r\nconnection: close\r\n\r\n{bodies[index]}".bytes()
+        sent := 0
+        loop sent < reply.len() {
+            sent += stream.write_some(reply.slice(sent, reply.len()), deadline: deadline) ?? panic("write: {err}")
+        }
+    }
+    seen
+}
+
+// Where the head of the request `input` ends, past its blank line; -1
+// while it goes on.
+priv push_test_head_end: fn(input: [U8]) -> Int Never! {
+    loop at in 0..<input.len() - 3 {
+        if input[at] == (U8{13}) && input[at + 1] == (U8{10}) && input[at + 2] == (U8{13}) && input[at + 3] == (U8{10}) {
+            return at + 4
+        }
+    }
+    -1
+}
+
+priv push_test_content_length: fn(head: String) -> Int Never! {
+    loop line in head.split("\r\n") {
+        if !line.to_lower().starts_with("content-length:") -> next
+        length := 0
+        loop byte in line.bytes() {
+            if byte >= (U8{48}) && byte <= (U8{57}) -> length = length * 10 + Int{byte} - 48
+        }
+        return length
+    }
+    0
+}
+
+// A fake APNs over h2c for the test below: on each connection `listener`
+// takes, reads one request until it ends and answers the next of
+// `statuses` with the body `{"reason":"Unregistered"}` unless 200. Gives
+// each request's header fields as `name: value` lines, then its body.
+priv push_test_h2_serve: fn(listener: net.TCPListener, statuses: [Int]) -[Net, Time.Wait]> [String] Never! {
+    deadline: Duration{ns: 10000000000}
+    seen := [String]{}
+    loop status in statuses {
+        stream := net.tcp_accept(listener) ?? panic("accept: {err}")
+        input := [U8]{}
+        buffer := [U8]{}
+        decoder := h2.hpack_decoder(h2.H2_TABLE_SIZE)
+        request := ""
+        body := [U8]{}
+        at := h2.H2_PREFACE.bytes().len()
+        ended := false
+        loop !ended {
+            buffer.clear()
+            read: stream.read_into(buffer, 8192, deadline: deadline) ?? panic("read: {err}")
+            if read == 0 -> panic("the client closed before its request ended")
+            input.extend(buffer.copy())
+            loop !ended && at + 9 <= input.len() {
+                size: Int{input[at]} * 65536 + Int{input[at + 1]} * 256 + Int{input[at + 2]}
+                if at + 9 + size > input.len() -> break
+                kind: Int{input[at + 3]}
+                flags: Int{input[at + 4]}
+                payload: input.slice(at + 9, at + 9 + size)
+                at += 9 + size
+                if kind == h2.H2_HEADERS {
+                    fields: h2.hpack_decode(decoder, payload) ?? panic("the request's header block")
+                    loop field in fields -> request += "{field.name}: {field.value}\n"
+                } else if kind == h2.H2_DATA { body.extend(payload) }
+                ended = (kind == h2.H2_HEADERS || kind == h2.H2_DATA) && flags.bit_and(h2.H2_END_STREAM) != 0
+            }
+        }
+        answer: if status == 200 -> "" else -> "{{\"reason\":\"Unregistered\"}}"
+        reply := [U8]{}
+        h2.h2_frame(reply, h2.H2_SETTINGS, 0, 0, [U8]{})
+        head: [h2.H2Header]{h2.H2Header{name: ":status", value: "{status}"}}
+        h2.h2_frame(reply, h2.H2_HEADERS, h2.H2_END_HEADERS, 1, h2.hpack_encode(head))
+        h2.h2_frame(reply, h2.H2_DATA, h2.H2_END_STREAM, 1, answer.bytes())
+        sent := 0
+        loop sent < reply.len() {
+            sent += stream.write_some(reply.slice(sent, reply.len()), deadline: deadline) ?? panic("write: {err}")
+        }
+        seen.push("{request}{String.from_bytes(body) ?? ""}")
+    }
+    seen
+}
+
+priv push_test_has: fn(seen: String, part: String) Never! {
+    if !seen.contains(part) -> panic("`{part}` is not in:\n{seen}")
+}
+
+#Test("A push goes through the service its device has, and a device the service no longer knows comes back gone") {
+    dir: core.files.temp_dir("jet-push-") ?? panic("temp dir: {err}")
+    core.files.write("{dir.path}/apns.p8", push_test_apns_key()) ?? panic("write: {err}")
+    core.files.write("{dir.path}/fcm.pem", push_test_fcm_key()) ?? panic("write: {err}")
+    web_only: PushSettings{apns: None, fcm: None, web: Val(PushWeb{contact: "mailto:push@example.com", key_path: "{dir.path}/apns.p8"})}
+    push_configure(web_only) ?? panic("configure: {err}")
+    assert(push_configured("web"))
+    assert(!push_configured("apns"))
+    assert(!push_configured("fcm"))
+    unreadable: if push_configure(PushSettings{apns: None, fcm: Val(PushFCM{origin: "", project: "", client_email: "", token_uri: "", key_path: "{dir.path}/missing.pem"}), web: None}) == {
+        .Ok(_) -> ""
+        .Err(e) -> e.reason
+    }
+    assert(unreadable.starts_with("the FCM key {dir.path}/missing.pem can't be read"))
+    assert(push_configured("web"))
+    apns_listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
+    apns_port: (net.listener_local_socket_addr(apns_listener) ?? panic("address: {err}")).port
+    fcm_listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
+    fcm_port: (net.listener_local_socket_addr(fcm_listener) ?? panic("address: {err}")).port
+    web_listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
+    web_port: (net.listener_local_socket_addr(web_listener) ?? panic("address: {err}")).port
+    all: PushSettings{
+        apns: Val(PushAPNs{origin: "http://127.0.0.1:{apns_port}", team_id: "TEAM123456", key_id: "KEY1234567", key_path: "{dir.path}/apns.p8", topic: "com.example.crew"}),
+        fcm: Val(PushFCM{origin: "http://127.0.0.1:{fcm_port}", project: "crew-test", client_email: "push@crew-test.iam.gserviceaccount.com", token_uri: "http://127.0.0.1:{fcm_port}/token", key_path: "{dir.path}/fcm.pem"}),
+        web: Val(PushWeb{contact: "mailto:push@example.com", key_path: "{dir.path}/apns.p8"}),
+    }
+    push_configure(all) ?? panic("configure: {err}")
+    apns_server: task { push_test_h2_serve(apns_listener, [Int]{200, 410}) }
+    grant: "{{\"access_token\":\"ya29.test\",\"expires_in\":3600,\"token_type\":\"Bearer\"}}"
+    fcm_server: task {
+        push_test_serve(fcm_listener, [Int]{200, 404, 200}, [String]{grant, "{{\"error\":{{\"status\":\"NOT_FOUND\"}}}}", "{{\"name\":\"m-1\"}}"})
+    }
+    web_server: task { push_test_serve(web_listener, [Int]{201, 410}, [String]{"", ""}) }
+    now: push_now()
+    open: "{{\"TaskView\":{{\"id\":7}}}}"
+    sent: push_deliver("apns", "d-1", "", "", "k1", "Due today", "Ship v2", open, now)
+    assert_eq(sent, PushOutcome{reason: "", gone: false})
+    gone: push_deliver("apns", "d-1", "", "", "k1", "Due today", "Ship v2", open, now)
+    assert_eq(gone, PushOutcome{reason: "APNs answered 410 {{\"reason\":\"Unregistered\"}}", gone: true})
+    rng := push_test_rng()
+    ua: push_key_pair(push_b64("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"), rng) ?? panic("the subscription's key")
+    endpoint: "http://127.0.0.1:{web_port}/push/1"
+    assert_eq(push_deliver("web", endpoint, base64.encode_url(ua.public), "BTBZMqHH6r4Tts7J_aSIgg", "k1", "Due today", "Ship v2", open, now), PushOutcome{reason: "", gone: false})
+    assert_eq(push_deliver("web", endpoint, base64.encode_url(ua.public), "BTBZMqHH6r4Tts7J_aSIgg", "k1", "Due today", "Ship v2", open, now), PushOutcome{reason: "Web Push answered 410 ", gone: true})
+    assert_eq(push_deliver("fcm", "f-1", "", "", "k1", "Due today", "Ship v2", open, now), PushOutcome{reason: "FCM answered 404 {{\"error\":{{\"status\":\"NOT_FOUND\"}}}}", gone: true})
+    // The access token is kept: the second push makes no exchange.
+    assert_eq(push_deliver("fcm", "f-1", "", "", "k1", "Due today", "Ship v2", open, now), PushOutcome{reason: "", gone: false})
+    apns_seen: apns_server.join() ?? panic("the APNs fake failed")
+    push_test_has(apns_seen[0], ":path: /3/device/d-1\n")
+    push_test_has(apns_seen[0], "apns-topic: com.example.crew\n")
+    push_test_has(apns_seen[0], "apns-collapse-id: k1\n")
+    push_test_has(apns_seen[0], "authorization: bearer ")
+    fcm_seen: fcm_server.join() ?? panic("the FCM fake failed")
+    assert(fcm_seen[0].starts_with("POST /token HTTP/1.1\r\n"))
+    push_test_has(fcm_seen[0], "assertion=")
+    assert(fcm_seen[1].starts_with("POST /v1/projects/crew-test/messages:send HTTP/1.1\r\n"))
+    push_test_has(fcm_seen[1], "Bearer ya29.test")
+    push_test_has(fcm_seen[2], "Bearer ya29.test")
+    web_seen: web_server.join() ?? panic("the Web Push fake failed")
+    push_test_has(web_seen[0], "POST /push/1 HTTP/1.1\r\n")
+    push_test_has(web_seen[0], "aes128gcm")
+    push_test_has(web_seen[0], "k1")
+    core.files.remove_all(dir.path).drop("the test's key files go")
 }

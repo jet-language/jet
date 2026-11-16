@@ -27,6 +27,8 @@ use {
     rt: jet.runtime.time
     rt_web: jet.runtime.web
     world_rt: jet.runtime.testing
+    log_rt: jet.runtime.log
+    push_wire: __core_app_push
 }
 
 SYNC_MAX_SESSION: 256
@@ -1132,6 +1134,96 @@ priv(package) push: module {
             held: devices.guard_read()
             _: held.value.forget(service.copy(), token.copy())
         }
+    }
+
+    // Sets up the push services `settings` names, in place of the ones set
+    // up before.
+    configure: fn(settings: push_wire.PushSettings) push_wire.PushError! -[FS.Read, Net]> {
+        push_wire.push_configure(settings)
+    }
+
+    // The last pushes skipped or failed, oldest first: `skipped <service>
+    // <account>: <reason>` or `failed …`.
+    outcomes: fn() -> [String] Never! {
+        held: PUSH_NOTES.guard_read()
+        held.value.last.copy()
+    }
+}
+
+// The pushes skipped and failed since the process started, and the last
+// C_PUSH_NOTES_KEPT of them.
+priv PushNotes: struct {
+    skipped: Int
+    failed: Int
+    last: [String]
+}
+
+priv PUSH_NOTES: Shared{PushNotes{skipped: 0, failed: 0, last: [String]{}}}
+
+priv C_PUSH_NOTES_KEPT: 32
+
+// A push to each device the account `to` registered, as the compiler lowers
+// `app.notify(to:, title:, body:, open:)`: `open` is the wire form of the
+// state a tap opens. Inside a job, a webhook's call or a scheduled run, each
+// push's key is made from the run's key, `to` and `open`, so a run that
+// runs again replaces the pushes it sent; outside one, each push has a
+// fresh key. A device whose push service is not set up is skipped. A push
+// its service refuses is dropped, and when the service says the device is
+// gone, the device is forgotten. Each skip and failure is counted
+// (`jet.push.skipped`, `jet.push.failed`) and kept with its service,
+// account and reason (`push.outcomes`): the published signature declares
+// only Net, so no log record can carry them.
+__notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) Never! -[Net]> {
+    account: to.raw()
+    devices: push.devices(account)
+    if devices.len() == 0 {
+        return
+    }
+    run: push_run_key()
+    key: if run != "" -> push_wire.push_collapse_key(run, account, open_route) else -> {
+        push_wire.push_fresh_key() ?? {
+            loop device in devices -> push_note(false, device.service, account, err.reason)
+            return
+        }
+    }
+    now: push_wire.push_now()
+    loop device in devices {
+        if !push_wire.push_configured(device.service) {
+            push_note(true, device.service, account, "no {push_wire.push_service_label(device.service)} settings")
+            next
+        }
+        outcome: push_wire.push_deliver(device.service, device.token, device.key, device.auth, key, title, body, open_route, now)
+        if outcome.reason == "" -> next
+        if outcome.gone {
+            push.forget(device.service, device.token)
+            push_note(false, device.service, account, "{outcome.reason}; the device is forgotten")
+        } else { push_note(false, device.service, account, outcome.reason) }
+    }
+}
+
+// The key of the run this task is in: its delivery's ID for a job or a
+// webhook's call, `<schedule>@<due>` for a scheduled run, and "" outside
+// a run.
+priv push_run_key: fn() -> String Never! {
+    call: transactions.current() ?? return ""
+    if transactions.delivery(call) == .Val(delivery) -> return delivery.id.copy()
+    if transactions.tick(call) == .Val(tick) -> return "{tick.schedule}@{tick.due}"
+    ""
+}
+
+// Counts a skipped (`skipped`) or failed push to a device of `service` of
+// `account`, and keeps why.
+priv push_note: fn(skipped: Bool, service: String, account: String, reason: String) Never! {
+    kind: if skipped -> "skipped" else -> "failed"
+    held := PUSH_NOTES.guard_edit()
+    if held.value.last.len() == C_PUSH_NOTES_KEPT -> _: held.value.last.remove(0, .Slot)
+    held.value.last.push("{kind} {service} {account}: {reason}")
+    if skipped {
+        held.value.skipped += 1
+        log_rt.metric_publish("jet.push.skipped", held.value.skipped)
+    } else {
+        held.value.failed += 1
+        log_rt.metric_publish("jet.push.failed", held.value.failed)
     }
 }
 
