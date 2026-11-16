@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110208,
+    "rev": 110223,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74980,8 +74980,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-16T13:17:12.599Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-16T13:31:58.308Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -99988,7 +99988,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c1 waits on #6812 (server rendering of app.App screens): today a screen has no server HTML answer, only its APP_ROUTES route, so there is no page for head tags or noindex. c2 (sitemap and robots) does not need rendering and is in progress (Speed-3-3)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -100017,7 +100023,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:56.474Z",
-      "updated": "2026-11-16T13:05:31.136Z",
+      "updated": "2026-11-16T13:24:21.411Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -101831,8 +101837,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T23:01:38.012Z",
-      "updated": "2026-11-16T13:15:14.654Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-16T13:30:05.898Z",
+      "updatedBy": "Main",
       "criteriaLastN": 5
     },
     {
@@ -106230,7 +106236,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:09.432Z",
-      "updated": "2026-11-16T13:12:52.486Z",
+      "updated": "2026-11-16T13:31:53.235Z",
       "updatedBy": "owner",
       "criteriaLastN": 9
     },
@@ -119633,8 +119639,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T12:27:38.913Z",
-      "updated": "2026-11-16T13:19:37.436Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-16T13:26:16.010Z",
+      "updatedBy": "owner",
       "criteriaLastN": 1
     },
     {
@@ -119668,8 +119674,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T13:20:56.548Z",
-      "updated": "2026-11-16T13:21:05.066Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-16T13:30:33.420Z",
+      "updatedBy": "owner"
     }
   ],
   "decisions": [
@@ -209949,38 +209955,35 @@
       "id": "D-GUARD-LINT1",
       "cardId": "c06he0ee",
       "group": "language",
-      "title": "Branching on an enum: one test stays free, and two or more tests of one value must name every case",
-      "situation": "An enum is a type with a fixed list of cases, such as a shape that is a circle, a square, a line or a dot. A program can check one case and act only on it, which is normal logic and stays free. When it checks the same value against two or more cases, it is choosing among them, and today an else at the end quietly takes any case added later. This vote picks the form that makes such a choice name every case, and the spelling for the rest that still stops the build when a case is added.",
-      "gist": "When code checks one enum value against two or more cases, how must it name every case, including the rest?",
-      "lesson": "One test of one case, such as doing something only for a circle, stays free. Two or more tests of one value choose among the enum's cases. Jet already has a table, if shape == { ... }, that must name every case. The missing piece is a short, safe way to write the rest. It must still stop the build when someone adds a case, so no case slips into an else unnoticed.",
+      "title": "Branching on an enum: type else freely, and the build names the cases it covers",
+      "situation": "An enum is a type with a fixed list of cases, such as a shape that is a circle, a square, a line or a dot. Code that tests one value against several cases often ends in else for the rest. When someone later adds a case, that else quietly takes it, and the program gives a wrong answer with no error. This vote picks how Jet catches that with the least friction for the common cases. We recommend letting people type else, and having jet fix write out the cases it covers before a build.",
+      "gist": "When code tests one enum value against several cases, how do we catch a case added later, with the least writing?",
+      "lesson": "An enum has a fixed list of cases. The bug to prevent: code that tests a few cases and ends in else quietly takes any case added later. One test of one case stays free. The options differ in how much the writer must type to keep later cases from slipping into else.",
       "explainer": "Words used here, shown on the one program this ballot uses throughout.\n\n```jet\nShape: enum {                  // an enum: a type with a fixed list of cases\n    Circle(radius: Int)        // a case that carries a value, its radius\n    Square(side: Int)          // a case that carries its side length\n    Line                       // a case that carries nothing\n    Dot\n}\n```\n\nA case test asks whether a value is one case. shape == .Circle(r) is true for a circle, and r is then its radius.\n\nA chain is if ... else if ... else, with one case test per branch. Its final else takes every case not tested above, including cases added later.\n\nA table names the value once and gives one arm per case, as in if shape == { .Circle(r) -> 3 * r * r ... }. The arrow -> gives the arm's result, and | joins cases in one arm. A table over an enum must name every case, so an else arm there is refused.\n\nThe rest means the cases that code does not handle one by one, such as Line and Dot in area.",
-      "story": "Ana writes area(shape) as a chain: a circle, then a square, then else for the rest. Months later Ben adds a Triangle case. Today Ana's code runs and returns 0 for every triangle, and no one is told.\n\nUnder A and B, Ana's chain is refused when she writes it, and jet fix turns it into a table. When Ben adds Triangle, every table that does not name it stops the build, and he decides each one. Under A, Ana can name the rest with a case set such as Flat, declared beside the cases. Under C, Ana keeps her chain, but its last branch must name the line and the dot instead of saying else.",
+      "story": "Ana writes area(shape) as a chain: a circle, then a square, then else for the rest. Under A, jet run and jet test accept it as she iterates. Before shipping, jet build says else stands for .Line | .Dot, and jet fix writes them. Months later Ben adds Triangle, and the build stops at Ana's code until he decides what a triangle's area is. A key handler that should treat every other key, now or later, the same writes _ and is never stopped.",
       "inWild": "OCaml: warning 4, off by default, flags a fragile match, one whose wildcard would silently take constructors added later. A polymorphic variant type can be named, type flat = [ `Line | `Dot ], and the pattern #flat matches any of its members.\n\nSwift: a switch over an enum must be exhaustive. For an enum that may grow, @unknown default runs for unknown cases, and the compiler warns when a known case is not named.\n\nRust: a match must be exhaustive, and the wildcard _ takes the rest silently. The opt-in Clippy lint wildcard_enum_match_arm flags that wildcard.\n\nKotlin and Java: a when or switch over an enum or sealed type must be exhaustive, and else or default may take the rest.\n\nThese outside facts were not re-checked for this ballot.",
       "detail": "What Jet does today. Every example here ran with the gate-p66 jet on dev 03d5f7b309. The v4 probes hold the exact programs this ballot shows, with their outputs.\n\nThe table form of area checks clean and runs (t1). Add Triangle to Shape, and it stops with E0307: This `if` doesn't cover every case — missing: Triangle. The fix line says: Add an arm for: Triangle (t2).\n\nThe chain form of area, ending in else, gets two warnings, L0302 and L0507, and runs (t3). With Triangle added, it still runs and returns 0 for a triangle (t4).\n\nArea can also be written as separate ifs, one after another, that each return:\n\n```jet\narea: fn(shape: Shape) -> Int {\n    if shape == .Circle(r) -> return 3 * r * r   // one test; return leaves area\n    if shape == .Square(s) -> return s * s\n    0                                            // the rest: every other case gives 0\n}\n```\n\nThat form gets no finding at all. With Triangle added, it checks clean and returns 0 for a triangle (t5, and v3 probe r1). The same holds when the ifs assign to a result instead of returning (v3 probe r4).\n\nTwo more escapes. A second test hidden in an else block, else { if shape == .Square(s) ... }, gets no L0302. A table with a plain true-or-false arm, such as verbose == true, may keep an else over an enum, and that else takes Dot silently. A guarded arm, .Circle(r) && r > 10, does not count as covering Circle, and that part is already right: E0307 names Circle.\n\nThe rule every option shares. It applies when code tests one value, a name or a field path, against two or more cases. The tests may sit in one chain, one table, or separate ifs in a row in one block. Those ifs have nothing between them and no body that changes the value. Such code must name every case, and else cannot stand for the rest.\n\nAn else whose whole body is another if on the same value counts as part of the chain. When separate ifs each leave (return, next, break or panic), the rest is the code after them. When they fall through, the rest is doing nothing. Either way, a case added later stops the build. A true-or-false arm may sit among the tests, but it covers no case.\n\nWhat stays free. One test is free whatever its pattern, with or without an else, so if shape == .Line | .Dot { … } else { … } is free. So are tests with other code between them, and ifs whose body changes the value (a state machine stepping state). So is a test through a helper such as shape.is_round(). The rule covers every closed set: an enum, an optional, a result and a union.\n\nL0302 retires under every option, since Jet has no warnings.\n\nHow big the change is. A rough scan of dev finds 35 chains with two or more tests of one value. A rerun on 03d5f7b309 finds 11 of them ending in else, where the first count said 13. It also finds 5 if { } tables that test one value twice or more, all ending in else, so 16 sites have an else to replace.\n\nSeparate ifs are the commonest form. Scans of one-line ifs alone find 130 groups whose bodies leave and 33 that fall through, over two or more cases. The scans are v3/exitscan.awk and v3/sepscan.awk. They skip block bodies, so these counts are lower bounds. The scans read text, not types, so the chain and table counts are upper bounds.\n\nSome rests are long under every option. Two chains ending in else test the compiler's Type, which has 24 cases, so each else stands for 22. Expr has 51 cases. And ir_builtin in BuildRoutes.jet tests 13 of TBuiltinOp's 214 cases before handing the rest to ir_builtin_on.\n\nWhich syntax is new. Options B and C add no syntax: every line of their programs runs today (t1, t6 and t7). They add only the new error E0644. Option A adds the case set line, Flat: .Line | .Dot, and the pattern .Flat. Today that line is a parse error (t8).\n\nWhy A's case set is written with dots. Name: .A | .B reuses the colon that declares a name and the dotted or-pattern a table arm already writes. So | keeps its meaning, one case or another.\n\nThe undotted Name: A | B already means a union type wherever a Name: line sits today. In a struct body it is a field of type Line | Dot, and at file scope it is a union alias (v3 probes r2 and r2a). No option adds a glyph, and the range .. and the spread ... are not used.",
       "options": [
         {
           "key": "A",
-          "name": "A table whenever one value is tested twice or more, and named case sets for the rest",
-          "gist": "Two or more tests of one value must be a table that names every case; an enum may declare case sets, and .Flat names the rest.",
-          "detail": "Two or more tests of one value, in a chain, a table or separate ifs in a row, are the new error E0644. Its fix, applied by jet fix, writes the table. The cases an else stood for, or the code after ifs that return, become one arm joined by |. Code made of statements gets an arm that does nothing, -> (), for the cases it skips.\n\nAn enum may declare a case set beside its cases: Flat: .Line | .Dot. It gives a name to a group of the enum's own cases. In a pattern, .Flat matches any member and binds nothing, like a variant group. A set lists cases, groups or other sets of its own enum, by dotted name. A set is neither a type nor a value.\n\nNo set can mean all cases but some, so a new case joins a set only when someone writes it in. Adding a case stops every table that names neither it nor a set holding it. Beginner path: write the chain or the ifs, then take E0644's fix. Expert path: declare the sets the code keeps naming, such as Scalar or Place, and use them in tables and single tests.",
-          "technical": "Sema counts case tests per chain, per if { } table and per group of consecutive single-test ifs in a block, keyed on the tested place. A body that writes the place ends the group. It reports E0644 jet.EnumTestsNeedTable with a SourceEdit that writes the table. That edit reuses E0641's case-list writer. E0641 loses its exemption for a table with a true-or-false arm, once the table has two or more case tests.\n\nThe parser accepts Name: .member | .member inside an enum body. Sema resolves a set like a variant group in pattern tests and exhaustiveness. A set used as a value is E0332, as a group is; as a type it is an unknown type. An unknown member is a new error. The language server shows a set's members on hover.\n\nL0302 becomes a Retired row naming this choice. Its five fixtures become E0644 snapshots, and the spec's branching section and D-IFGUARD1 text are updated. The 40 chains and tables and at least 163 groups of separate ifs become tables.",
-          "code": "// Option A. Lines marked NEW are syntax or rules that A adds.\n// Every other line runs today (v4 probe t1); the Flat line is a parse error today (t8).\nShape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n\n    // NEW: a case set. This line declares the name Flat for \"a Line or a Dot\".\n    // The dots are the ones a table arm writes (.Line), so the line reads as\n    // \"these cases\", never as the union type Line | Dot.\n    Flat: .Line | .Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == {                  // a table: test shape once, then one arm per case\n        .Circle(r) -> 3 * r * r    // a circle with radius r; -> gives this arm's result\n        .Square(s) -> s * s        // a square with side s\n        .Flat -> 0                 // NEW: .Flat matches any case in Flat, a Line or a Dot\n    }                              // the table must name every case; else is refused\n}\n\n// NEW: written as a chain or as separate ifs, area is error E0644.\n// jet fix writes the table, listing the rest as .Line | .Dot -> 0;\n// the writer may then shorten that arm to .Flat -> 0.\n// For code made of statements, the fix gives skipped cases an arm that does nothing:\n//     .Line | .Dot -> ()          // () means \"nothing\": a Line or a Dot changes nothing\n\n// Someone adds Triangle(base: Int, height: Int) to Shape later. area stops, as today:\n//     Error [jet.NonExhaustiveDispatch]: This `if` doesn't cover every case — missing: Triangle\n//      Fix: Add an arm for: Triangle\n// They add a .Triangle arm, or write Triangle into Flat,\n// which also decides it for every other table that names .Flat."
+          "name": "Type else; the build names the cases",
+          "detail": "One test of one case stays free. Two or more tests of one enum value may be a chain of ifs or a table, as today. Their rest may be typed as else. jet run, jet dev and jet test accept it, so trying code costs nothing.\n\njet check and jet build report such an else as a tidy error (D-NO-WARNINGS1), naming the cases it stands for. jet fix replaces it with them, such as .Line | .Dot. From then on a case added to the enum stops the build at every place that does not name it. A rest meant to take every other case, now or later, is written _ and is never stopped; a key handler is the usual example.",
+          "technical": "Today E0641 already refuses an else over an enum in a table, everywhere, and its fix writes the cases. A moves E0641 to the tidy tier, so run, dev and test accept the else, and applies it to a chain of ifs over one value too. Sema recognises the chain by the same subject test it uses for tables, so both forms get one rule (I8).\n\n_ is a new table arm meaning every remaining case, including later ones; it is not a binding, and no Jet code uses _ as an arm today. Non-enum subjects (Int, String) keep else unchanged, since their cases cannot be listed.",
+          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\n// Ana types this; jet run and jet test accept it:\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0\n    }\n}\n// jet build: tidy error, else stands for .Line | .Dot.\n// jet fix writes:   .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n\non_key: fn(key: Key) {\n    if key == {\n        .Enter -> submit()\n        .Escape -> close()\n        _ -> type_into(key)  // every other key, now or later\n    }\n}"
         },
         {
           "key": "B",
-          "name": "A table whenever one value is tested twice or more, and the rest listed case by case",
-          "gist": "Two or more tests of one value must be a table that names every case; the rest is always a list such as .Line | .Dot.",
-          "detail": "The rule and E0644 are A's. The rest is always written out as cases joined by |, which E0644's fix and E0641's fix write for you. Nothing new is declared in an enum.\n\nA long rest has two shorter spellings today. A variant group nests cases in the enum, as Flat { Line, Dot }, and .Flat names them all; values are then written Shape.Flat.Dot. A classifier function holds one table that maps the big enum to a small one, and other code branches on the small one.\n\nBeginner path: A's. Expert path: group the enum, or write a classifier.",
-          "technical": "A's sema rule, E0644 with its fix, the E0641 change and the L0302 retirement, with no parser change. The 40 chains and tables and at least 163 groups of separate ifs become tables. Those with a rest list every case it stood for, 22 for a chain over Type and about 200 for ir_builtin over TBuiltinOp, or move to a group or a classifier.",
-          "code": "// Option B. No new syntax: every line below runs today (v4 probe t1).\n// B adds only the rule marked NEW.\nShape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == {                  // a table: test shape once, then one arm per case\n        .Circle(r) -> 3 * r * r    // a circle with radius r; -> gives this arm's result\n        .Square(s) -> s * s        // a square with side s\n        .Line | .Dot -> 0          // the rest, listed case by case; | joins cases\n    }                              // the table must name every case; else is refused\n}\n\n// NEW: written as a chain or as separate ifs, area is error E0644,\n// and jet fix writes the table above.\n// For code made of statements, the fix gives skipped cases an arm that does nothing:\n//     .Line | .Dot -> ()          // () means \"nothing\": a Line or a Dot changes nothing\n\n// Someone adds Triangle(base: Int, height: Int) to Shape later. area stops, as today:\n//     Error [jet.NonExhaustiveDispatch]: This `if` doesn't cover every case — missing: Triangle\n//      Fix: Add an arm for: Triangle\n// They add a .Triangle arm, or add .Triangle to the .Line | .Dot list."
+          "name": "Tables and case sets",
+          "detail": "Two or more tests of one value must be a table, and a chain is an error with a fix that writes the table. The rest is listed case by case, or named by a case set the enum declares, such as Flat.",
+          "technical": "A new enum member form for sets, a new error for chains, and E0307 for missed cases.",
+          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n    Flat: .Line | .Dot  // a named case set\n}\narea: fn(shape: Shape) -> Int {  // a chain here is an error\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Flat -> 0\n    }\n}"
         },
         {
           "key": "C",
-          "name": "Chains stay, and every chain or table on one value must name every case",
-          "gist": "A chain or a table may hold the tests; either must name every case, so a chain's last branch lists the rest.",
-          "detail": "A chain with two or more tests of one value stays legal, and it is checked like a table. A final plain else in it is the error E0644. Its fix replaces the else with a branch that names the remaining cases. A chain of statements that misses a case gets an empty branch naming it.\n\nTables keep today's rules, and E0641 loses its exemption for a true-or-false arm, as in A. Adding a case stops every chain and table that does not name it.\n\nBeginner path: keep writing chains, and take E0644's fix for the last branch. Expert path: as in B.",
-          "technical": "Sema runs the table's exhaustiveness check over a chain's case tests, and over a group of single-test ifs, keyed on the tested place. It reports E0644 jet.ChainElseOverClosedSet with a fix that writes the remaining cases. L0302 retires as in A.\n\nThe 16 sites that end in else get a last branch naming their cases. Chains and ifs that fall through get an empty branch for the cases they skip. Each of the 130 or more groups of ifs that leave gets a last test naming the rest, around the code that followed it.",
-          "code": "// Option C. No new syntax: every line below runs today (v4 probe t6).\n// C adds only the rules marked NEW.\nShape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    result := 0                            // the answer, 0 until a branch sets it\n    if shape == .Circle(r) {               // a chain: one case test per branch\n        result = 3 * r * r                 // a circle with radius r\n    } else if shape == .Square(s) {        // a square with side s\n        result = s * s\n    } else if shape == .Line | .Dot {      // the rest, named; | joins cases\n        result = 0\n    }                                      // NEW: a plain else here is error E0644\n    result\n}\n\n// Someone adds Triangle(base: Int, height: Int) to Shape later.\n// NEW: area stops the build with a missing-case error naming Triangle,\n// as a table's E0307 does today. They add a branch for Triangle.\n// Today, without C, this chain still runs and returns 0 for a triangle (t10)."
+          "name": "Name every case by hand",
+          "detail": "Chains and tables stay; any chain or table testing two or more cases of one value must name every case, and else is an error everywhere, run and test included.",
+          "technical": "E0307's rule extends to chains and to else; no tidy tier, no _ arm.",
+          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == .Circle(r) -> return 3 * r * r\n    if shape == .Square(s) -> return s * s\n    if shape == .Line | .Dot -> return 0  // every case named by hand\n    0\n}"
         }
       ],
       "comparisons": [
@@ -210003,38 +210006,28 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A gives two or more tests of one enum value one form, the table, and a short, named spelling for the rest. Adding a case stops every such table until it names the case or puts it in a set.",
+        "why": "Typing stays as short as today, and the bug is still caught before anything ships.",
         "gains": [
-          "A new case stops every table that has not placed it",
-          "One form for tests of one value, the table, with order and guards kept",
-          "A long rest gets a short name that says what it means",
-          "A single test stays free, with or without an else"
+          "Zero extra writing while trying code.",
+          "Every new case is decided before a build."
         ],
         "losses": [
           {
-            "loss": "Writing a new case into a set decides it for every table that names the set.",
-            "mitigation": "The set sits beside the cases, so the new case and its sets change in one reviewed edit."
-          },
-          {
-            "loss": "A two-branch chain that read well must become a table.",
-            "mitigation": "E0644's fix writes the table, and a single test with an else stays a plain if."
-          },
-          {
-            "loss": "Separate ifs on one value, at least 163 sites, become tables with long rests.",
-            "mitigation": "E0644's fix writes the list, even ir_builtin's 200-case rest, and a set names it once. Every option pays this list; free ifs would keep the bug."
+            "loss": "A tidy error before build until jet fix runs.",
+            "mitigation": "jet fix writes the cases in one step, and run, dev and test never stop for it."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B spells a long rest as a list of every other case. Over an enum of fifty cases, writers will reach for a true-or-false helper, which no rule can see."
+            "reason": "B forces chains into tables and adds a declaration form."
           },
           {
             "key": "C",
-            "reason": "C keeps two spellings for the same tests. A reader must scan every branch of a chain to learn that it tests one value, and long rests stay lists, as in B."
+            "reason": "C charges every multi-case test from the first run."
           }
         ],
-        "tradeoff": "Every test of one enum value against two or more cases names its cases, at the cost of a set's members deciding for every table that names the set."
+        "tradeoff": "A shipped table lists its cases, in exchange for catching every case added later."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -210045,12 +210038,12 @@
       },
       "checkInstructions": "The probes are in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-GUARD-LINT1. They ran with the gate-p66 jet on dev 03d5f7b309, each as jet check main.jet and jet run main.jet in its folder.\n\nThe v4 probes hold the exact programs this ballot shows, with outputs in v4/results.txt. JET=<jet> bash v4/run.sh reruns them all.\nt1: the table form of area runs and prints 12, 9, 0 and 0.\nt2: with Triangle added, the table stops with E0307, missing: Triangle.\nt3 and t4: the chain form gets L0302 and L0507 and runs; with Triangle added it prints 0.\nt5: separate ifs that return, with Triangle added, check clean and print 9 then 0.\n\nt6: option C's chain, whose last branch names .Line | .Dot, runs today.\nt10: with Triangle added, that chain runs and prints 0.\nt7: a table of statements with a -> () arm runs.\nt8: option A's Flat: .Line | .Dot line is a parse error today (E0003).\nt9: an enum written on one line, cases separated by commas, runs.\n\nThe v2 probes, with outputs in v2/results.txt:\np1: one test, one test with else, a chain with else, and a test hidden in an else block. Only the chain gets L0302.\np2: a table with a guarded arm, an or-pattern rest and a -> () arm runs.\np3: a guarded arm alone does not cover Circle (E0307).\np4: a true-or-false arm lets a table over Shape keep else, and Dot takes it.\n\np5 and p10: a table missing Dot or Triangle stops with E0307.\np6: a variant group arm, .Flat, covers its members.\np7: Flat: Line | Dot in an enum body is a parse error today.\np8: a one-off .Line | .Dot test is accepted; a two-test if { } table gets L0302.\n\np9: else in a table over Shape is E0641, whose fix writes .Line | .Dot.\np11: with Triangle added, the chain checks clean and prints 0.\np12: the first ballot's chain probe.\n\nThe fresh review's probes are in v3, with outputs beside each folder. r1: two one-test ifs that return, then 0, with Triangle added, check clean and print 9 then 0. r4: the same with result := 0 and two ifs that fall through, also clean, 9 then 0.\n\nr2: Flat<T>: Line | Dot at file scope is a union alias of two structs and runs. r2a: Flat: Line | Dot in a struct body is a field of type Line | Dot, refused only for its casing (E0357). r3: Flat: .Line | .Dot in an enum body is a parse error today, so the dotted spelling is free.\n\nThe site counts come from chainscan.awk at the top, v2/tablescan.awk, and v3/exitscan.awk and v3/sepscan.awk. Run each over the .jet files of dev 03d5f7b309, outside tests; v3/exitscan-03d5.txt and v3/sepscan-03d5.txt list the 130 and 33 groups. Type has 24 cases, in Compiler/JetFoundation/Source/Types/Types.jet; Expr has 51 and TBuiltinOp 214.",
       "surface": {
-        "gist": "When code checks one enum value against two or more cases, how must it name every case, including the rest?",
-        "lesson": "One test of one case stays free. Two or more tests of one value choose among its cases, so they must name every case. The vote is on the form and on a safe way to write the rest. Adding a case must still stop every such test that has not handled it.",
+        "gist": "When code tests one enum value against several cases, how do we catch a case added later, with the least writing?",
+        "lesson": "An enum has a fixed list of cases. The bug to prevent: code that tests a few cases and ends in else quietly takes any case added later. One test of one case stays free. The options differ in how much the writer must type to keep later cases from slipping into else.",
         "trio": {
           "current": {
-            "note": "How Jet writes this today. The table names every case, so a new case stops it. A chain's else silently takes it.",
-            "code": "// How Jet writes this today. Every line runs on today's compiler.\nShape: enum {                      // an enum: a type with a fixed list of cases\n    Circle(radius: Int)            // a case that carries a value, its radius\n    Square(side: Int)              // a case that carries its side length\n    Line                           // a case that carries nothing\n    Dot                            // another case that carries nothing\n}\n\narea: fn(shape: Shape) -> Int {    // a function from a Shape to an Int\n    if shape == {                  // a table: test shape once, then one arm per case\n        .Circle(r) -> 3 * r * r    // a circle with radius r; -> gives this arm's result\n        .Square(s) -> s * s        // a square with side s\n        .Line | .Dot -> 0          // | joins cases: a Line or a Dot gives 0\n    }                              // the table must name every case; else is refused\n}\n\n// The same area as a chain, which Jet also accepts today, with two warnings:\n//     result := 0\n//     if shape == .Circle(r) {          // a chain: one case test per branch\n//         result = 3 * r * r\n//     } else if shape == .Square(s) {\n//         result = s * s\n//     } else {                          // else: every case not tested above\n//         result = 0\n//     }\n//     result\n\n// Someone adds Triangle(base: Int, height: Int) to Shape later:\n//   the table stops: This `if` doesn't cover every case — missing: Triangle (E0307)\n//   the chain still runs, and area returns 0 for every triangle"
+            "note": "Today a table refuses else (E0641), but a chain's last line silently gives a later Triangle 0.",
+            "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == .Circle(r) -> return 3 * r * r\n    if shape == .Square(s) -> return s * s\n    0  // the rest: a Triangle added later silently gets 0\n}"
           },
           "wild": {
             "lang": "OCaml",
@@ -210061,86 +210054,111 @@
         "options": [
           {
             "key": "A",
-            "name": "Table plus case sets",
-            "gist": "Two or more tests of one value must be a table; an enum may name case sets such as Flat.",
+            "name": "Type else; the build names the cases",
+            "gist": "else works while trying code; jet fix writes the cases before a build; _ keeps a rest open on purpose.",
             "gains": [
-              "A new case stops every table that misses it",
-              "A long rest gets a short, meaningful name"
+              "No extra typing while writing or testing.",
+              "A new case stops every place that has not decided it.",
+              "Chains and tables both stay."
             ],
             "losses": [
-              "Adding a case to a set decides it for its tables",
-              "A short chain or early-return ifs must become a table"
+              "A tidy error before build until jet fix runs."
             ],
             "proposed": {
-              "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n    Flat: .Line | .Dot         // NEW: names \"a Line or a Dot\"; dots as in an arm\n}\narea: fn(shape: Shape) -> Int {    // NEW: as a chain, this is error E0644\n    if shape == {                  // a table, as today\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Flat -> 0                 // NEW: .Flat matches a Line or a Dot\n    }\n}   // add Triangle later: E0307 names it until an arm or Flat does"
+              "code": "// Ana types this; jet run and jet test accept it:\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0\n    }\n}\n// jet build: tidy error, else stands for .Line | .Dot.\n// jet fix writes:   .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here."
             }
           },
           {
             "key": "B",
-            "name": "Table plus listed cases",
-            "gist": "Two or more tests of one value must be a table; the rest is written out case by case.",
+            "name": "Tables and case sets",
+            "gist": "Chains become tables; the rest is listed or named by a declared set.",
             "gains": [
-              "A new case stops every table that misses it",
-              "Nothing new to declare"
+              "A new case stops every table that misses it."
             ],
             "losses": [
-              "The rest of a big enum is a long list",
-              "A short chain must become a table"
+              "Chains must be rewritten as tables.",
+              "Sets are a new declaration to learn."
             ],
             "proposed": {
-              "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\narea: fn(shape: Shape) -> Int {    // NEW: as a chain, this is error E0644\n    if shape == {                  // a table, as today\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Line | .Dot -> 0          // the rest, listed; | joins cases\n    }\n}   // add Triangle later: E0307 names it until an arm does"
+              "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n    Flat: .Line | .Dot  // a named case set\n}\narea: fn(shape: Shape) -> Int {  // a chain here is an error\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Flat -> 0\n    }\n}"
             }
           },
           {
             "key": "C",
-            "name": "Checked chains",
-            "gist": "Chains stay; any chain or table on one value must name every case.",
+            "name": "Name every case by hand",
+            "gist": "Every multi-case test names every case, even while trying code.",
             "gains": [
-              "A new case stops every chain and table",
-              "Existing chains keep their shape"
+              "Nothing new to learn."
             ],
             "losses": [
-              "Two spellings for the same tests",
-              "The rest of a big enum is a long list"
+              "Friction on every multi-case test, from the first run."
             ],
             "proposed": {
-              "code": "Shape: enum { Circle(radius: Int), Square(side: Int), Line, Dot }\narea: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) {               // a chain, as today\n        result = 3 * r * r\n    } else if shape == .Square(s) {\n        result = s * s\n    } else if shape == .Line | .Dot {      // names the rest; runs today\n        result = 0\n    }                                      // NEW: a plain else here is E0644\n    result\n}   // NEW: add Triangle later: the chain stops until a branch names it"
+              "code": "area: fn(shape: Shape) -> Int {\n    if shape == .Circle(r) -> return 3 * r * r\n    if shape == .Square(s) -> return s * s\n    if shape == .Line | .Dot -> return 0  // every case named by hand\n    0\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One form for two or more tests of one value, and a short, named rest. Adding a case still stops the build.",
+          "why": "Typing stays as short as today, and the bug is still caught before anything ships.",
           "gains": [
-            "A new case stops every table that misses it",
-            "A single test stays free"
+            "Zero extra writing while trying code.",
+            "Every new case is decided before a build."
           ],
           "losses": [
             {
-              "loss": "Adding a case to a set decides it for the set's tables.",
-              "mitigation": "The set sits beside the cases, so the case and its sets change in one reviewed edit."
-            },
-            {
-              "loss": "A short chain or early-return ifs on one value must become a table.",
-              "mitigation": "The error's fix writes the table, and one test with an else stays a plain if."
+              "loss": "A tidy error before build until jet fix runs.",
+              "mitigation": "jet fix writes the cases in one step, and run, dev and test never stop for it."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Long lists push writers to true-or-false helpers that no rule can check."
+              "reason": "B forces chains into tables and adds a declaration form."
             },
             {
               "key": "C",
-              "reason": "Two spellings for the same tests, and long rests stay lists."
+              "reason": "C charges every multi-case test from the first run."
             }
           ],
-          "tradeoff": "Every multi-case test names its cases; a set's members decide for the tables that name it."
+          "tradeoff": "A shipped table lists its cases, in exchange for catching every case added later."
         }
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-13T06:10:18.821Z"
+      "created": "2026-11-13T06:10:18.821Z",
+      "designAway": [
+        {
+          "loss": "Naming every case is friction on common code.",
+          "attempts": [
+            "Require names when writing: rejected, it charges every test from the first run.",
+            "Accept else while trying code, and have jet fix write the names before a build: kept."
+          ],
+          "result": "No extra typing; one fix command before shipping."
+        },
+        {
+          "loss": "Some rests really mean every other case, now or later.",
+          "attempts": [
+            "Make every else closed: rejected, a key handler would list hundreds of keys.",
+            "Spell the open rest _, so the writer's intent is visible: kept."
+          ],
+          "result": "Open rests stay one character."
+        },
+        {
+          "loss": "Forcing chains into tables is churn.",
+          "attempts": [
+            "Apply one rule to chains and tables alike: kept."
+          ],
+          "result": "Both forms stay; neither escapes the check."
+        },
+        {
+          "loss": "Long rests make long lists.",
+          "attempts": [
+            "Case sets: deferred to B, since _ covers the long open rests and jet fix writes closed ones."
+          ],
+          "result": "A closed long rest is a written list, made by jet fix."
+        }
+      ]
     },
     {
       "id": "D-INSPECT-TARGET1",
@@ -213216,33 +213234,33 @@
       "id": "D-PRIM-ANY1",
       "cardId": "c0reo0hk",
       "group": "types",
-      "title": "Should Jet add Any, a type every value converts to, so one list can hold values of unrelated types?",
-      "situation": "A debug inspector keeps 14, \"hi\" and a Point in one list, prints each item, then wants the Point back. A Jet list holds one type, so mixing needs a fixed set of types or a trait each type opts into. Jet's settled rules have no Any, a type every value fits, and no way to take a trait value back by type.",
-      "gist": "Should Jet add Any, a type every value fits, or let a trait value be tested for its stored type?",
-      "lesson": "Jet has one tool per mixing job. Generic code handles a type the caller picks. A named enum handles a known set and checks every case. A trait handles an open set: each type opts in with one line. reflect.of shows a value but gives nothing back. Any, or a type arm over a trait value, would take a value back.",
+      "title": "How code takes one type back out of a list of mixed values",
+      "situation": "Some lists must hold values of different types chosen by other code. Log fields are the common case: log.info(\"saved\", 14, \"notes.txt\", 120ms) carries an Int, a text and a Duration. Jet keeps such values in a list of a trait the types opt into, and printing each one works today. But the log writer wants one type back, to print a Duration as milliseconds, and Jet has no way to ask a trait value for its type. The vote decides how that question is written. We recommend a type arm: if field == .Duration(d) means \"if this field is a Duration, call it d\".",
+      "gist": "A list holds values of different types. How does code ask \"is this a Duration?\" and get it back?",
+      "lesson": "A Jet list holds one type. To mix types, the types opt into a shared trait, such as Field below. Printing each value already works. What Jet cannot do today is ask one item \"are you a Duration?\" and use it as a Duration. The options differ in how that question is written and when a wrong question is caught.",
       "explainer": "A Jet list holds one element type, so to mix 14, \"hi\" and a Point that type must fit all three. It can be a fixed set of types, a trait each stored type opts into, or Any under option E. A value held as a trait is a trait value. Under E or C, the type arm .Point(p) runs only for a stored Point and binds it as p; else takes the rest. Under option B a trait method returns the Point.",
-      "story": "Lin writes a debug inspector that keeps 14, \"hi\" and Point{x: 1, y: 2} in one list. It prints every item, then the Point's x: 14, hi, Point { x: 1, y: 2 } and 1. The clip's config also holds 69.420, which Jet reads as a Decimal; Float{69.420} is a Float. The shared program leaves it out, because a Decimal cannot enter a trait value today. The options differ in the element type, in how the Point comes back, and in where a wrong value is caught.",
+      "story": "Lin writes the log writer for her team's service. Each log line carries extra fields: a user ID, a file name, how long the save took. She wants every field printed as is, except a Duration, which should print as milliseconds. Today she cannot take the Duration back out of the field list.",
       "inWild": "Java holds any object as Object and recovers a type with a pattern test that binds only where it matched. Since Java 21, a pattern switch over Object needs a default label or an unconditional pattern, while a switch over a sealed set needs neither.\n\nfor (Object item : List.of(14, \"hi\", new Point(1, 2))) {\n    System.out.println(item);\n    if (item instanceof Point p) System.out.println(p.x());\n}\n\nGo's type switch works on any interface value; each case type must implement that interface, a case may name another interface, and default is optional. Go 1.13's errors.As \"behaves like a type assertion\", and its blog warns that \"wrapping an error makes that error part of your API\". C# type patterns and Kotlin's is test and bind a type, and Kotlin's when over a sealed class needs no else.\n\nRust 1.86 lets a trait object upcast to dyn Any when its trait names Any as a supertrait; downcast_ref then returns a reference, &T, and needs a 'static type. C++'s std::any_cast<T>(&a) returns a pointer or null, while any_cast<T>(a) copies or throws. Swift's as? returns an optional. Jai stores a type-info pointer beside a value pointer; Odin stores a type ID that maps to type info.",
       "detail": "This ballot challenges a frozen wall: \"no top type\" stands among the walls in Docs/audits/whole-language-frame.md:32. Docs/audits/whole-language-audit-prompt.md:17 says such a challenge must carry worked code, the measured cost of the wall today, and a named amendment. The worked code is each option's program. Option E adds Any and needs the amendments below. Options B and C keep the wall.\n\nD-ANY-JAI1 (Docs/spec/syntax-decisions.md:751-754, card #169) has three parts. Heterogeneous varargs are trait-bounded, parts: ...Renderable. There is no top type, so general Any is rejected. Its ratified story, an inspector panel for game entities, is served by reflect.of, the read-only floor in Docs/spec/reference/core-library.md:2550-2593. D-DYNAMIC-TYPE1 (Tower card c3gdynamic, ratified 2026-06-30) also chose \"No general Any\", and rejected an Any gated to boundaries with an explicit downcast.\n\nreflect.of needs no opt-in. Probe x10 keeps reflect.of of 14, \"hi\", a Point and 69.420 in one list. It prints each type name and value on O0, O1 and O2. Over a trait value it reports the internal key, module:14:…::Shown, not the stored type (n09, n13, #6845 c16). It cannot give a value back: the floor has no runtime type registry, and get, copy and equal stay declined (core-library.md:2589-2593).\n\nE would supersede D-ANY-JAI1's no-top-type part and keep its varargs part and reflect.of. Ten more places would change. D-DYNAMIC-TYPE1's \"No general Any\" is superseded on Tower. D-UNIONTYPE1's sentence \"Does not reopen D-ANY-JAI1\" (line 765) is struck. D-TYPESWITCH1's \"no Any type (D-ANY-JAI1 stands)\" (lines 796-797) becomes \"unions, or Any for an open set\". The Dyn note's \"(D-ANY-JAI1 stands)\" (line 5355) is dropped; Dyn still holds data only.\n\nDocs/spec/spec.md:7235-7236 leaves \"Deliberately absent\", and Any gets a spec section. Typed selection (syntax-decisions.md:1166-1169) says a checked downcast of a foreign value is not Jet syntax; it gains an exception for the checked case over an Any. The frozen wall loses \"no top type\". Card #744 c10, \"D-ANY-JAI1 remains intact\", is recorded as superseded. Docs/proposals/reflection-2026-11-04.md:66 points to D-PRIM-ANY1. Examples/Types/NoAnyAlternatives.jet is rewritten to say when Any beats an enum, a generic, ?T or Dyn.\n\nAn earlier draft offered A: the same Any, entered only through a written box, Any{value}. Its merit, from Docs/research/2026-11-09-any-type.md:253-256, is that an argument not written Any{...} is refused at compile time. The review rules allow three options, so A is kept as a variant of E in its design-away record. A keeps E's law cost, makes Any the only trait whose conversion is written, against S48, and Any{...} still accepts every value.\n\nOption C keeps D-ANY-JAI1, D-DYNAMIC-TYPE1, reflect.of and the frozen wall, and amends two ratified sentences. D-TYPESWITCH1's \"Run-time dispatch over mixed values uses unions\" (line 796) becomes \"uses unions, or type arms over a trait value\". Typed selection's last clause (line 1169) gains \"or held as a trait value and selected with a type arm\". Its foreign-value clause is unchanged, since a trait value is a Jet value. Its loan rules (lines 1163-1166) apply to a type arm's binding as written.\n\nC also extends D-UNIONTYPE1's member arm, .Point(p) (lines 760-762), to a trait subject, and \"Does not reopen D-ANY-JAI1\" stays true. spec.md:945-948 on trait values gains the type arm. E0305's sema texts change (Compiler/JetSema/Source/Sema/Patterns.jet:294, :338). So does its Prelude entry (Compiler/Prelude/Diagnostics.jet:4702-4716): its safety reason, \"would read the value's bytes as that type\", and its expert path, \"none\", gain the checked arm.\n\nC also amends spec.md:641-646, landed with dev a1c3325a65. Its first sentence keeps two same-named types as two members, each value keeping the member it was built as; C keeps it, and the leaf rule below relies on it. Its second sentence makes a bare .Point arm name neither member (E0305) and lets a table keep its else without E0641; its third offers named cases. C replaces both with the next paragraph's text, so one rule names a type over a union and a trait value (Patterns.jet:152-169).\n\n\"A bare .Point arm names the member Point names in type position there; a package's own Point is .Point(p) beside geo.Point. If Point names no type there, it names the one member whose leaf is Point. A generic's one instance takes its generic's name and leaf; two instances spell their arguments, .Box<Int>(b), as do generic arms over a trait value. Any other bare arm is E0305, offering .geo.Point(p). So every member has an arm; an else in a table is E0641.\"\n\nSo spec.md:903-905's rule, an else over a union is E0641, holds with no exemption. Coverage.jet:988-991 exempts two module members of one leaf today, but not two instances of one generic (f01b); C removes it. E0307's fix at Coverage.jet:521-523 names the arm each missing member takes, in place of \"no arm can name\" (a04, a04b, a09, f05, f06). E0641's fix offers each member's arm, never the internal tags .M_Box_Int_ it offers today (f01c, f01d, m33, #6839 c55).\n\nTwo agent notes are corrected. Docs/audits/2026-10-07-owner-notes-digest.md:113 says a trait value has no downcast. Docs/research/evidence-2026-09-29/3389-typed-selection.md:100-101 says a foreign downcast helper needs its own ballot; C is not foreign, and this ballot records it anyway.\n\nC is not D-DYNAMIC-TYPE1's rejected option C. That option was a boxed Any that any value could become, with an explicit downcast at interop edges. Under option C no type exists that every value fits. A value enters a trait value only if its type opted into that trait, and an arm may name only such a type.\n\nThe wall's measured cost, counting each program's body: E's is five lines. B's open-set form is eleven (review probe x7): a three-line trait, three impl lines, one carrying a one-line override, and the five-line loop. C's is nine: a one-line empty trait, three empty impl lines and E's five lines (c1). B's named-enum form adds a five-line enum, writes .Num(14) for 14, and reads with an eight-line table (r8).\n\nJobs and today's answers on p210, the same on O0, O1 and O2. A type the caller picks uses D-TYPESWITCH1's generic type table: g1 prints 15 and hi, and a bare 2.5 takes the Decimal arm (x4). A known set uses a named enum: r8 prints the four lines, and f1 adds 2.5 as a Float payload. A single union value runs (b3, f2), but not as a generic function's parameter (a07c, #6839 c49); a union list is an internal compiler error (#6839 c26, r6).\n\nAn open set uses a user trait: x7 and b13 print every item and take the Point back. That holds for local and inline-module types (v01e). A file-module type in the user's trait passes checking, then stops ir.build with an internal compiler error, and a direct call is E0102 (v01, v01b, v01c). So B's and C's open set across files needs #6839 c39.\n\nA call with mixed arguments, such as print or format (comment #111), uses D-ANY-JAI1's trait-bounded variadic with no box: x5 prints 14, Float{69.420}, hi and the Point. reflect.of inspects a concrete value (x10), and Dyn holds loose data (d1). Typed lookup by a type parameter, the clip's get_ini_field($T), is Dyn's decode<T> or Core/Encoding/Ini.jet:125-140's typed getters under every option.\n\nD-LITCARRIER1=D (syntax-decisions.md:2107-2113) makes a bare 2.5 a Decimal and Float{2.5} a Float. A type table sends a bare 2.5 to its Decimal arm (x4). The ratified suffix 2.5f is not built; it gives E0134 (x2, #4730 c6). Float{69.420} enters a trait list and prints 69.42 (x6), and enters ...Printable varargs (x5). So the clip's 69.420, read as Jet reads it, is a Decimal.\n\nA Decimal cannot enter a trait value today. With no impl, a bare 2.5 entering a trait list stops the compiler (x3), where a Bool gets E0112 (x12); #6727 c9 asks for E0112. impl Decimal.Shown {} is E0301 although spec.md:927-929 allows it (x1, #6839 c30). impl math.Decimal.Shown {} passes checking and crashes ir.build on \"unlowered … type math.Decimal\" (x1c, #6727 c9). A Decimal at a ...Printable bound gets a wrong E0904 (x5b, x5c, #6839 c30).\n\nThese defects fall on B and C, whose programs box a Decimal into a user trait; Float{69.420} works for them today (x6). Under E an Any holding 69.420 holds a Decimal, so .Decimal(d) matches it and .Float(f) does not. Whether boxing a Decimal into Any would share x1c's crash cannot be probed, since Any does not exist.\n\nUnder E, recovery is D-UNIONTYPE1's member test, .Point(p), extended to an open set. A table over an Any needs else, because types are an open set, as D-TYPESWITCH1 already requires for type tables. An Any holding a Dyn matches .Int(n) as the type Int, never as Dyn's Int case. A generic instance such as .Pair<Int, String>(p) does not parse today (E0003, g6). A list, an optional or a function value has no arm spelling, so it reaches else; Go's type switch names those types.\n\nOption C lets a type arm test a trait value. In if item == .Point(p), item is a Shown value; the arm runs only when the stored type is Point, and binds it as p. The arm must name a type that implements Shown, and any other type is a compile error, as Go requires of its type switch cases. A table needs else, because another module may add an implementer; D-TYPESWITCH1's open-set rule already says so.\n\nOver a trait value or a union, C's arm names a type as type position names it at that spot. A local type, or one imported with use geo.[Point] after use geo, is .Point(p). A type from another module is .geo.Point(p): the path after the dot, as the impl head impl Local.types.Named writes one (spec.md:3619-3622, D-IMPLDOT1). An arm through an alias names its target, as D-TYPESWITCH1 says of type tables.\n\nOver a trait value the name resolves by scope, so a new module never changes an arm. Over a union, a name that type position does not know falls back to the one member with that leaf, as o7's arm does. A package's own Point is .Point(p) beside geo.Point; today only an else reaches it, binding nothing (a04b, f05). A name for a non-member type, or a leaf two members share with neither in scope, is E0305, naming both and .geo.Point(p) (v03, a09).\n\nSo where Point names a type, .Point(p) names it throughout the file, over a union or a trait value. Where it names none, each union's arm names that union's own Point member, as .Red names each enum's own case. Over Int | geo.Point and Int | geo2.Point, the same text binds geo.Point and geo2.Point (k01). Today E0305 offers named cases and spells a local member filestem.Point, which fails (a04c, #6839 c52). Mine(Point) | Theirs(geo2.Point) runs (f04), but changes the type and every construction site.\n\nA named case is never ambiguous: its name is the union's own, as an enum case's is. A type of its name in scope leaves its arm alone, today and under C (z02), an imported one too (a06). So does a case carrying the same-named struct, Point(Point) | Int (a05). No member may share a named case's name (E0363).\n\nThis keeps today's bare arms that work, such as o7's .Point(p) over Int | geo.Point. Letting type position alone decide over a union would refuse that arm, since only geo is in scope; hence the leaf fallback. Three kinds of program change, all at compile time with a fix. The bare arms of v03 and m31b bind today; under C both are E0305. A union whose named case shares a member's leaf (y09d) becomes E0363. No working arm changes meaning: a04 and f03 are E0305 today.\n\nEdge cases follow. A member imported with use geo.[Point], or an alias naming it, is the same type, so it is not ambiguous. An alias named Point for another type is E0305, as v03's local Point is. A qualified arm, .geo.Point(p) or .outer.inner.Point(p), is never ambiguous; today both fail (n03b, v11, #6839 c35). A generic member such as .Box(b) needs #6833 c3, which names that spelling over an Any, a union and a trait value (v05, k04).\n\nTwo instances of one generic, Box<Int> | Box<String>, share the leaf Box. Over Int | Box<Int> the bare .Box(b) names Box<Int>; today it is E0305 \"doesn't belong\", local or imported (v05, k04). Over boxes.Box<Int> | kit.Box with no Box in scope, two members have the leaf Box, so the bare .Box(b) is E0305 naming both. Today it binds kit.Box, and boxes.Box<Int> takes only the internal tag .M_Box_Int_ (m31, m31b, #6833 c5).\n\nWith two instances, each arm is .Box<Int>(b), and the bare .Box(b) is E0305 naming both. Today that arm also says \"doesn't belong\", and E0641's fix offers the internal tags .M_Box_Int_ | .M_Box_String_, which bind (f01-f01d). C refuses them with E0305, as it refuses the identity tag (a08, #6839 c55).\n\nA named case whose name is a member type's leaf, as in Point(Int) | geo.Point, is refused with E0363, as D-ALT-CASES1 refuses Point(Int) | Point (y09b). A qualified member's name is its last segment, so this is D-ALT-CASES1 as written. Today that union is accepted and the bare .Point(n) binds the case (y09d, #6839 c43). spec.md:641-643 already calls geo.Point and map.Point two types named Point. y09b's E0363 is followed by an E0305 whose fix does not parse (z07, #6839 c47).\n\nNone of this spelling works everywhere today. With file modules, .Point(p) over Int | geo.Point runs, and an alias arm works in a type table (o7, o8i). With inline modules the bare arm is E0305 (n03a, n04), and use geo.[Point] is E0611 (n14, #4723 c12). The dotted arm .geo.Point(p) is E0107 with an empty name (n03b, o8a, #6839 c35). An alias in a union arm is E0305 (o1, o8e, #6839 c38). These are C's build criteria.\n\nA worse defect sat under the spelling rule. On p207, with file modules, geo2.Point | map2.Point was accepted as one member, and a map2.Point{name: \"harbor\"} printed as Point { x: 35184415600640, y: 2 } (o8f, o8b). Dev a1c3325a65 fixed it: on p209 the union keeps two members, and the bare .Point(p) is E0305 naming both, with a named-case fix. spec.md:641-646 now says such an arm names neither member and a table keeps its else without E0641. #6839 c36 is met.\n\nInline modules have more naming gaps. A type-table arm cannot name geo.Point (E0608, o5b). An alias of an inline-module struct is not its target: a call says \"wants geo.Point, but this is geo.Point\" (o5c), and a type-table arm through it takes else (o5). The same alias works with a file module (o7, o8i). These are #6839 c37.\n\nA stored enum whose case shares a type's name does not change the arm. Over a Shown value, .Point(p) names the type Point; a stored Item.Point(…) is an Item and takes an .Item(i) arm or else. A union behaves so today: over Item | Point, Item.Point(…) takes .Item (o6). No lint warns, since implementers change with the build and such a warning would come and go. Union clashes stay E0363, because a union is closed.\n\nA union value passed as a trait value boxes the member it holds, with that member's own key, so .Int(n) matches a boxed Int. Every member must implement the trait; otherwise the call gets E0905. Boxing the union's own identity was rejected, since every member arm would then miss. Today the call is an internal compiler error (n01, #6839 c34).\n\nAn arm may not name a trait; that is E0305, with a fix pointing to the trait's methods. Testing for a second trait needs trait-to-trait conversion, an internal compiler error today (#6727 c7). Type tables refuse a trait arm too (n11, E0119), so both forms keep one rule. Go, Swift, Java, C# and Kotlin allow such a test; C can add it later as an arm, by its own decision, since #6727 c7 refuses that conversion under B and C.\n\nA union may not hold a trait member: Shown | Int is refused at the type with E0363. E0363 already says an anonymous union holds concrete closed types, not trait objects (Compiler/Prelude/Diagnostics.jet:5866-5880). A trait written by its name slips past that check today (v04, #6839 c40). The fix is a named enum, or a Shown value with Int implementing Shown.\n\nE0363's check looks inside member types, including lists, maps, optionals, results, tuples, named cases and generic arguments (FailureLaw.jet:1540-1561). So c40's fix refuses [Shown] | Int and S(Shown) | Int too, as it already refuses a trait object or a function type there. [fn(Int) -> Int] | Int is E0363 today, then a cascade E0641 (z03, #6839 c48); [Shown] | Int is accepted (y10). The fix is a named struct holding the list, a closed member.\n\nAccepting .Shown(s) as a member arm instead would put an open set inside a closed union. Then .Point(p) over Shown | Int would have two meanings, a member or a reach into the box; today it is E0305 (w06). So an arm naming a trait has no union exception.\n\nD-TYPESWITCH1's identity rules apply to type arms. An alias is its target; a distinct type, F32 or Int? is not Int, so a stored UserID takes else (o5). The bare arm .Point -> runs the same test as .Point(_), as over a union today (o3). A Shown? subject takes no type arm, as (Int | Point)? takes none today (o4, E0305); unwrap it with Val(item) first (o4b).\n\nOnly named types implement traits (impl [Int].Shown is E0003, b6), so under C no unnameable value is ever stored; a list rides in a one-field struct (b7). A generic implementer such as Pair<Int, String> needs #6727 c6 to be stored and #6833 c3's arm spelling to be named. #6833 c3 names that spelling over an Any, a union and a trait value. Under E, #6727 c7 converts a trait value to Any keeping its inner key; under B and C it refuses the conversion (m43, m46).\n\nAn expert writes one generic function for a library: recover: fn<T: Shown>(item: Shown) -> T? from item, whose body is if item == .T(p) -> return Val(p), then None. The arm .T(p) names the type parameter, so each instance compares against its own type's key. The name take is reserved (E0003, n07b); recover is an ordinary name (o2). Today a type parameter in a type-table arm is E0119 (x8), and a trait method cannot take its own type parameter (x9).\n\nrecover returns a read view. The checker tracks it only while a plain local holds it: moving or changing the owner then is E0212 (w01b, w02b, y11, h01, h03, m01-m03). A value-producing if or table loses it, even with the call in a branch (h06, h08-h10). So does a lambda, struct, tuple, map, enum payload, list, defer, method value or Shared cell holding it, or a Shared owner (a01, a03b, e01-e09, h02, h05). A plain arm binding escapes too (e10, h11): the hole is the loan checker's, not C's.\n\nA case payload already leaves this way through -> Point? from item: from an enum (w01), a union (w02) or a list (v07, v07b, v07c). The loan survives generic instantiation (y04, y05), and the view cannot be written (y11b).\n\nWhat runs is not yet a pointer. At O0, a function under from item and the same function without it emit identical IR (y12). Each allocates a new 24-byte T? cell, copies the payload's bytes and retains its shared heap block; jet audit counts only the form without from as a copy. Rust's downcast_ref also returns a borrow, &T, but as a pointer with no allocation, and needs a 'static type.\n\nSo the copy is gone from direct use, not from the machine. Its address differs from the payload's on O0, O1 and O2: mem.address_of needs no audit gate (spec.md:3164-3166; z01, z01b). Through an escape its value differs too: with the owner rewritten, the held view still reads 41 (e11, h12, a03b). The ranking rests on b8, not on this: B's program copies too (b13), and a library trait's user cannot add B's method (b8, m41-m46).\n\nA checked loan needs a lowering change and a complete loan checker. The lowering makes a T? from result a pointer into the owner's payload. A value converted at the call, or read through a Shared handle, lives in a cell released right after it (z04 IR; a03b IR op 70). That cell must outlive the result, or the call is E2305, as for a temporary. A path returning a value no owner holds (z05) keeps its own cell and a caller's drop, or is refused.\n\nThe checker must keep the owner borrowed through every holder: a lambda, local, stored or returned (#6839 c50), a Shared read (c51) and every carrier (c54). So must branch joins (c56; spec.md:1963-1965, 2057-2059, 2066-2069). Moving or rewriting the owner while a holder lives is E0212. No task receives the view, also inside a Shared cell (E1102: a02; e09 passes today). Every from result and arm binding needs this: #6839 c46, after c50, c51, c54 and c56 (y12, z01b, z04, z05, a01, a03b, e01-e11, h02, h05, h06-h12).\n\nOther subjects follow the enum rules. A temporary subject's view cannot leave its statement (E2305: y06b, y06c). A && subject moves the payload out with no from (y07); a from clause naming a && parameter is accepted, then its call gets a misleading E0209 (y07b, #6839 c45). An arm over a & subject binds read-only, as an enum's does (y08, E0205 blaming item: #6839 c44). So C has no downcast_mut analogue.\n\nA copy is written, Val(p.copy()), with no from clause, and the caller owns it (w04). Today an unmarked Val(p) of a read value with no from clause also copies (n15b, v08); a bare return is E0120 and a take E0201 (v08, v08b). #6839 c41 refuses that hidden copy, since Jet never hides a clone (spec.md:1892-1895). A Val(p) under a from clause naming its owner stays a view; c41 spares it.\n\nB's trait method can lend the same way, point: fn(self) -> Point? from self (w03). On p209 the loan was not tracked through dispatch: the list moved or changed while the result lived (w03b, w03c), and the result was a copy (y01). Dev c1fca7426c, in batch p210, tracks it: w03b, w03c and y01 are E0212 on O0, O1 and O2 (#6839 c42; the copy remains c46's). B's shared program copies with self.copy() (b13). C needs no c42: a trait value's loan without dispatch is tracked (y03, y05).\n\nToday C's program fails at the arm with E0305 on O0, O1 and O2 (c1, and c3 for a table), plus a cascade E0107 on the arm's binding (#6839 c53). Its other lines compile, but a value of a trait with no methods prints as an empty line (c2, c2b, #6845 c15). The box already stores its type key at offset 0 and the payload at offset 8 (Compiler/JetIR/Source/BuildTraits.jet:332-354, :457).\n\nThe arm adds no storage and no allocation. An arm loads the 8-byte key, compares it with a constant and views the payload behind it; q1's 32-byte struct sits at offset 8 of its 40-byte box (q1 IR). The key is the first 56 bits of a SHA-256 of the type's identity, plus one (BuildTraits.jet:9-28). The key depends on that identity alone. recover's T? result allocates its own cell today, as the copy form's does (y12 IR, O0).\n\nToday a key collision panics (BuildTraits.jet:21-24). #6845 c18 makes it a registered diagnostic naming both types, as the collect-all rule requires. C needs c18, since the key is what an arm tests.\n\nA table of N type arms costs up to N compares, where a union's tag can switch. C's compiler work is the pattern checker, the IR compare, the arm spelling for qualified, imported and alias names, union-to-trait boxing, the spec and an example. It also changes E0305's texts and Prelude entry and E0307's and E0641's fixes, and removes the E0641 exemption (Coverage.jet:521-523, :988-991). A beginner writes the .Point(p) they already use for unions; an expert writes one recover<T> for a library.\n\nDeclarations are public by default, and priv is the only hiding form (spec.md:3509-3512, 3568-3569). So under C a caller can arm any public type a library stores behind its trait values. The library then cannot change that type without breaking those arms. Go's errors blog names the cost: \"wrapping an error makes that error part of your API\" (go.dev/blog/go1.13-errors). Its errors.As still \"behaves like a type assertion\", C's mechanism.\n\nTwo remedies were weighed. A signed marker, #!Debug (spec.md:953-954), opts a type out of a derivable trait. Using one to seal type arms would add a second hiding form beside priv, against spec.md:3568. Rust 1.86 asks the trait's author to opt in with an Any supertrait; that would bring back B's loss for every library trait whose author did not opt in. C keeps priv as the one hiding form.\n\nA priv type cannot be named outside its package, or outside its module when declared inside one (S18, syntax-decisions.md:2531-2538). So a type arm cannot reach it, and it takes else. From a file module a priv struct is refused today, though with E0119 where E0605 belongs (o8d, #4723 c13). Inside an inline module it leaks with no diagnostic (n12, n12b, #4723 c11). print and reflect.of already show a library's concrete type and name (n05), so C adds recovery, not disclosure.\n\nB checks at compile time that a type opted in: a String with no impl is E0905 (b9e). Taking a type back needs a trait method per type, as point() does in x7. That bites only for values a library hands over already boxed as its own trait: the user cannot add a method there, and .Point(p) is E0305 (b8). For the user's own trait, a method gives back any type (b13). B's matching gain is control: a library decides which types callers take back.\n\nThe library trait's user has no other route. A free type table sees only the trait, so a library Point takes else (m41). Adding a method to the library trait from outside is E0003, and a second impl of it is E0902 (m42, m45). A trait of the user's, implemented for the library's Point, would reach it only through a conversion that keeps the key. That conversion is an internal compiler error today (m43, m46), and #6727 c7 refuses it under B and C.\n\nOne constraint holds for every option and is stated once. A stored type the reader did not plan for reaches else under E and C, and has no method under B. Probe r7 stores a Point3 and prints found a Point: false on O0-O2. Full compile-time checking of recovery comes only from a closed set: a table over the named enum that forgets .At is E0307 (b12).\n\nWhat Any would gain is real. Under E no stored type needs an impl line, so the clip's Table(string, Any) works with no declarations. A list, an optional or a closure goes in without a wrapper struct, though taking one back needs an arm spelling (#6833 c3). Comment #4 calls this the case where sum types are clumsy. B and C pay one impl line per stored type.\n\nPrerequisites differ by option. Trait-value printing, #6845 c13, is met (x7, r9), so print(item) works for every option. Every trait value carries a key, so every option needs #6845 c18. E needs generic trait values (#6727 c6) and trait-to-trait conversion (#6727 c7). B's and C's open set across files needs #6839 c39, and c6 only if a generic type opts in. A bare Decimal needs #6727 c9 and #6839 c30 under B and C.\n\nC also needs the type arm and its spelling rules (#6833 c3 and c5, #6839 c35, c37, c38, c43, c47, c52 and c55, #4723 c12-c13). It needs union-to-trait boxing (#6839 c34), a trait member refused in a union with one report (#6839 c40, c48) and no hidden copy in Val (#6839 c41). Its view must keep its loan through every holder (#6839 c50, c51, c54, c56). It needs private types enforced (#4723 c11) and empty-trait printing (#6845 c15).\n\nToday every option allocates per stored value. A conversion to a trait value allocates a heap box and copies the payload, read arguments included: a 32-byte struct allocates 40 bytes and copies 32 (q1). A union argument allocates 24 bytes (b3 IR), and a named-enum list allocates per element (b4 IR). A union or enum has a known size and can be stored inline, while a trait value or an Any needs a box or a bounded inline buffer.\n\nOdin's any is a data pointer and a type ID, and a literal passed to it lives in the caller's stack frame. A written box, A's variant, would show the allocation that E hides. Inline storage for small values is G11 work for every trait value, proved by a paired cell. O1 and O2 IR could not be read, because jet emit refuses both with E2102.\n\nClosed-world dispatch is today's implementation, not law: BuildTraits.jet stops on an unknown key at jet_rt_unreachable. D-LIB-DYNTRUST1=A ratifies loadable .jetlib libraries, pinned to one compiler identity, with a checked export table (Docs/spec/reference/library-reuse-and-linking.md:116-139). An Any from a loaded library (E) and a type arm on a loaded trait value (C) need type identity shared across libraries. A trait value (B) needs the same dispatch. This is #3102 c17.\n\nDefects found on the way are filed apart from this ballot. Trait-to-trait conversion and a closure in a trait list are internal compiler errors (#6727 c7, c8). The Decimal defects are #6727 c9 and #6839 c30, and 2.5f is #4730 c6. Reviews 4-11 filed #4723 c11-c13, #6839 c34-c58, #6845 c16-c18 and #3102 c17. The empty-trait print is #6845 c15, [Printable]{14} is #6839 c32, and x9 is #6839 c31.\n\nIf E wins, #6833 c3 carries three build duties: generic arguments in member arms, unnameable types reaching else, and the provenance diagnostic for a view of a local escaping through Any. If C wins, it carries the first and third for trait values and unions, and #6833 c5 carries the arm spelling rules above. Today a read trait value returned as-is is E0120 (l1). #6833 c4 holds E's diagnostic snapshot for the extended member test. C's refusals are snapshotted under #6839 c35, c38 and c40.\n\nIf B or C wins, E0119 on the name Any should point to an enum, a trait or reflect.of. Today fn(value: Any) says only \"There's no type called Any\" (x11, #6839 c33). E0350, which once named D-DYNAMIC-TYPE1, is retired (Compiler/Prelude/Diagnostics.jet:5563). The adversarial review is Docs/audits/any-type-info-pointer-2026-11-15.md, from mining run any-NXt-20261115. Recall audits 1 and 2 failed and the run was re-mined after each; audits 3-11 passed, audit 11 (seed 14666) matching 125 concepts with no miss.",
       "options": [
         {
           "key": "E",
           "name": "Any with implicit conversion",
-          "code": "Point: struct {\n    x: Int\n    y: Int\n}\n\nrun: fn() {\n    items: [Any]{14, \"hi\", Point{x: 1, y: 2}}\n    loop item in items {\n        print(item)\n        if item == .Point(p) -> print(p.x)\n    }\n}",
+          "code": "write_fields: fn(fields: [Any]) {  // no opt-in lines needed\n    loop f in fields {\n        if f == {\n            .Duration(d) -> print(\"took {d.ns / 1000000} ms\")\n            else -> print(f)\n        }\n    }\n}",
           "detail": "Any is a Core trait every type implements, so a value converts to it implicitly, as to every trait. print shows the concrete value, and the type arm .Point(p) tests the stored type and binds it. The intended output is 14, hi, Point { x: 1, y: 2 } and 1. Today this stops at the first item with E0112, because no type is called Any (probe e1). It also needs #6727 c6 and c7.",
           "technical": "Sema adds the Core trait and records each type the program converts to Any. The dispatch switch must cover those types, every implementer of a trait value converted to Any, and every generic instance converted inside generic code. Converting a trait value keeps its inner key; ir_trait_box already returns a trait value unchanged. The pattern checker extends D-UNIONTYPE1's member test to an Any subject and requires else. Build duties sit on #6833 c3."
         },
         {
           "key": "B",
           "name": "No Any: fixed lists, and trait methods to take a type back",
-          "code": "Point: struct {\n    x: Int\n    y: Int\n}\n\n// Open set: each stored type opts into a user trait.\nShown: trait {\n    point: fn(self) -> Point? { None }\n}\nimpl Int.Shown {}\nimpl String.Shown {}\nimpl Point.Shown { point: fn(self) -> Point? { self.copy() } }\n\n// Known set: a named enum lists the types, and the table must handle each one.\nItem: enum {\n    Num(Int)\n    Text(String)\n    At(Point)\n}\n\nrun: fn() {\n    items: [Shown]{14, \"hi\", Point{x: 1, y: 2}}\n    loop item in items {\n        print(item)\n        if item.point() == Val(p) -> print(p.x)\n    }\n    known: [Item]{.Num(14), .Text(\"hi\"), .At(Point{x: 1, y: 2})}\n    loop item in known {\n        if item == {\n            .Num(n) -> print(n)\n            .Text(t) -> print(t)\n            .At(p) -> {\n                print(p)\n                print(p.x)\n            }\n        }\n    }\n}",
+          "code": "Field: trait {\n    duration: fn(self) -> Duration? { None }  // one method per type taken back\n}\nimpl Duration.Field { duration: fn(self) -> Duration? { self } }\n\nwrite_fields: fn(fields: [Field]) {\n    loop f in fields {\n        if f.duration() == Val(d) -> print(\"took {d.ns / 1000000} ms\") else -> print(f)\n    }\n}",
           "detail": "No Any; D-ANY-JAI1 stands. A known set uses a named enum, the documenting form D-UNIONTYPE1 keeps, and a table that forgets a case is E0307 (probe b12). An open set uses a user trait: print(item) shows each value, and a default point() returns None except in Point's impl. The program prints the four lines twice on O0, O1 and O2 on p210 (probe b13). A union list, the other known-set form, is an internal compiler error today (#6839 c26).",
           "technical": "No compiler change. The trait value boxes as spec.md:945-946 says. A type with no impl is refused where it enters: a String gets E0905 (probe b9e). Taking a type back needs a trait method per type. For the user's own trait that works (b13); a library trait's user cannot add one, and .Point(p) over it is E0305 (b8, m41-m46). A library decides which types callers take back. A Decimal entering the trait needs #6727 c9 and #6839 c30; Float{69.420} works (x6)."
         },
         {
           "key": "C",
           "name": "No Any: type arms over a trait value",
-          "code": "Point: struct {\n    x: Int\n    y: Int\n}\n\nShown: trait {}\nimpl Int.Shown {}\nimpl String.Shown {}\nimpl Point.Shown {}\n\nrun: fn() {\n    items: [Shown]{14, \"hi\", Point{x: 1, y: 2}}\n    loop item in items {\n        print(item)\n        if item == .Point(p) -> print(p.x)\n    }\n}",
+          "code": "Field: trait {}  // the types a log line may carry\nimpl Int.Field {}\nimpl String.Field {}\nimpl Duration.Field {}\n\nwrite_fields: fn(fields: [Field]) {\n    loop f in fields {\n        if f == {\n            .Duration(d) -> print(\"took {d.ns / 1000000} ms\")  // f is a Duration: call it d\n            else -> print(f)\n        }\n    }\n}\n// .Bool(b) here is a compile error: Bool never opted into Field.",
           "detail": "No Any; D-ANY-JAI1 and D-DYNAMIC-TYPE1 stand. Each stored type opts into a trait with one empty line, and print(item) shows each value. The type arm .Point(p) tests the trait value's stored type and binds it, with else required in a table. Each arm must name a type that implements the trait; a type from another module is .geo.Point(p). The intended output is E's. Today the arm is E0305 (probe c1), and an empty trait's value prints as an empty line (c2, #6845 c15).",
           "technical": "The pattern checker accepts a type arm over a trait value when the named type implements the trait, resolving the name as type position does, and requires else in a table. IR loads the box's type key at offset 0, compares it with the arm type's key, and binds a read view, which recover<T> returns under from item. The arm adds no storage or allocation. A union passed as a trait value boxes its member (#6839 c34). An arm naming a bounded type parameter compares against each instance's key."
         }
@@ -213251,34 +213269,32 @@
       "rec": "C",
       "recommendation": {
         "rec": "C",
-        "why": "C takes back any type that opted into the trait with one checked arm, library traits included, and keeps the rule against a type every value fits. B runs today but needs a trait method per type taken back, which a library trait's user cannot add.",
+        "why": "C asks the question in one checked arm, for any trait, without adding a type every value fits.",
         "gains": [
-          "Any opted-in type comes back with one arm, library traits included, as in Go.",
-          "Arms are checked: naming a type that never opted in is a compile error.",
-          "No top type: D-ANY-JAI1, D-DYNAMIC-TYPE1 and reflect.of stand unchanged.",
-          "recover<T> returns the payload as a read view under from item, tracked today only while a plain local holds it. It is checked as Rust's downcast_ref borrow is only after #6839 c46, with c50, c51, c54 and c56. Until then it is a copy, seen by address (z01) and, through a carrier or a branch, by value (e11, h12)."
+          "The same arm form as enums: .Duration(d).",
+          "Arms are checked when compiling."
         ],
         "losses": [
           {
-            "loss": "It needs compiler work; today the arm is E0305 (c1).",
-            "mitigation": "B's program runs today (b13) and stays valid; the spelling, privacy, copy and printing fixes are filed build criteria."
+            "loss": "Needs compiler work first.",
+            "mitigation": "B's form runs today and stays valid."
           },
           {
-            "loss": "Callers can branch on a library's public types.",
-            "mitigation": "Tables require else; a library hides a type with priv, Jet's one hiding form."
+            "loss": "A caller can depend on which types a library stores.",
+            "mitigation": "A table needs else, and a private type cannot be named in an arm."
           }
         ],
         "whyNot": [
           {
             "key": "E",
-            "reason": "It reverses D-ANY-JAI1, D-DYNAMIC-TYPE1 and nine more places. Nothing refuses a wrong value where it enters an Any; the mistake reaches the reader's else. A written box, the former option A, still accepts every value."
+            "reason": "With Any, a wrong question is found only when the program runs."
           },
           {
             "key": "B",
-            "reason": "It runs today, keeps every rule, and lets a library choose which types callers take back. But a library trait's user cannot add the method that gives a type back (b8, m41-m46)."
+            "reason": "B needs a method per type, and a library's users cannot add one."
           }
         ],
-        "tradeoff": "C costs compiler work, two amended ratified sentences, one spec paragraph, one setup line per stored type, and a library's public types becoming visible to arms. In return any opted-in type comes back with one checked arm, and the no-top-type wall stands."
+        "tradeoff": "Compiler work buys checked type questions without Any."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -213289,72 +213305,72 @@
       },
       "checkInstructions": "Probes ran on the p210 batch compiler (dev 7f902dd915) at $JET_STATE_ROOT/lander3-tmp/gate-p210/tree/Compiler/JetCli/.jet/build/jet. Its identity is jet@a0.0.45#8e7e97c2b52745d37c75a7c6a78688ef33bc908c74df3d3499e197dea8dea508, in the IDENTITY file beside the binary. Set JET_COMPILER_IDENTITY to it and unset JET_TOOLCHAIN_ROOT. The tiers are flags: -O0, -O1 and jet build -O2; --optimize=basic does not exist (E2102). Every file line number cited (spec.md, core-library.md, BuildTraits.jet and the rest) is at dev 7f902dd915; Tower criteria are quoted as they stood on 2026-11-16.\n\nEvery probe this ballot cites, the eleven reviews' probes included, is in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes. Run ./run.sh NAME.jet there. It writes NAME.p210.out (jet run -O0), NAME.p210.O1.out (jet run -O1) and NAME.p210.O2.out (jet build -O2, then the binary), each ending in its exit code. MODE=emit FLAGS=--ir writes O0 IR as NAME.p210.ir.out. All three tiers matched for every probe.\n\nEvery probe also matched its p209 output (NAME.p209.out, dev a1c3325a65), except five. w03b, w03c, y01 and y02 are E0212 on p210, which carries #6839 c42's check (dev c1fca7426c); y01's IR is p209's. n05's reflect.of now names the private type Secret, not M3LibSecret. Every probe older than review 8 also matched its p207 output, with two changes. On p209 and p210, o8b, o8f and vf f are E0305 (c36, met); their p207 outputs record the old defect. y09b's E0363 now has a cascade E0305 (#6839 c47).\n\nFile-module probes are named by folder: ./run.sh o7_file_module/main.jet, o8_file_modules/NAME.jet, vf/NAME.jet or fm/NAME.jet. Their outputs sit beside the others, as o7_file_module, o8X_file_NAME, vf_NAME and fm_NAME.\n\nRe-run b13 for B; c1, c2, c2b and c3 for C; e1 for E. For C's arm spelling re-run n03a, n03b, n04, n14, o1, o7, o8a, o8b, o8e, o8f, o8h, o8i, v03, v11 and w07. For privacy re-run n05, n12b and o8d. For the forks re-run n01, n02, n11, o3, o4, o4b, o5, o6, v04, w05, w06, y10 and z03. For named cases re-run y09, y09b, y09c, y09d, z02, z07, a05 and fm a06.\n\nFor a package's own same-leaf member re-run fm a04, a04b, a04c, a09, f03, f04, f05 and f06, and fm a08 for the identity tag. For two instances of one generic re-run fm f01, f01b, f01c and f01d, and fm f02 for a nested pair.\n\nFor one instance re-run fm k04 and v05, and m33 for its E0641 fix. For a same-leaf member beside it re-run fm m31, m31b and m32. For one arm text over two unions re-run fm k01, for file-wide names fm k02 and k03, and for arm syntax t01-t04 (t03 is #6839 c57).\n\nFor a library trait's user re-run b8 and fm m41-m47; fm lib8 is the library.\n\nFor recover re-run n07b, o2, n15b, w01, w01b, w02, w02b, w04, v07, v07b, v07c, v08, v08b, y04, y05, y11, y11b and y12, with MODE=emit FLAGS=--ir for y12's IR. For the copy's address and a true loan re-run z01, z01b, z04 (with its IR), z05 and z06.\n\nFor the paths that escape the view check re-run a01 against a01b, a02, a03 and a03b (with its IR), and e01-e11 against e01b and e07b; e04 is E0212. Re-run h02-h12 (h04 and h07 omitted), which escape, against h01 and h03, which are E0212. m01-m09 move or write the owner while a plain local holds the view; each is refused.\n\nFor a union in a generic function re-run a07, a07b and a07c (#6839 c49). For other subjects re-run y06, y06b, y06c, y07, y07b and y08. For a lending trait method re-run w03-w03d, y01, y01d, y02 and y03; w03b, w03c and y01 are E0212 on p210 (dev 7f902dd915), which carries #6839 c42's check. For another file's type in a user trait re-run vf v01, v01b, v01c and v01d, and v01e.\n\nRe-run r7 and b12 for the shared fall-through and the closed set, x10 and n09 for reflect.of, and x3, x4, x6, x1, x1c and x5b for Decimal. If an option wins, re-run its program with the built feature on every tier.\n\nUnprobed edges: a comptime value as an Any, a move-only resource in an Any or a trait value, a key collision (source reading only, #6845 c18), and executing the web build. Also unprobed: O1 and O2 IR (jet emit refuses both, E2102), and key stability across builds that add a module. z06 lends a Close enum payload under from; it closes once.",
       "surface": {
-        "gist": "Should Jet add Any, a type every value fits?",
-        "lesson": "A trait value holds any type that opted into its trait. A type arm, .Point(p), runs only for a stored Point.",
+        "gist": "A list holds values of different types. How does code ask \"is this a Duration?\" and get it back?",
+        "lesson": "A Jet list holds one type. To mix types, the types opt into a shared trait, such as Field below. Printing each value already works. What Jet cannot do today is ask one item \"are you a Duration?\" and use it as a Duration. The options differ in how that question is written and when a wrong question is caught.",
         "trio": {
           "current": {
-            "note": "Jet has no Any, so this fails.",
-            "code": "items: [Any]{14, \"hi\", Point{x: 1, y: 2}}\nloop item in items {\n    print(item)\n    if item == .Point(p) -> print(p.x)\n}"
+            "note": "Printing each field works; asking for the Duration does not.",
+            "code": "Field: trait {}  // the types a log line may carry\nimpl Int.Field {}\nimpl String.Field {}\nimpl Duration.Field {}\n\nwrite_fields: fn(fields: [Field]) {\n    loop f in fields {\n        print(f)  // works today: 14, notes.txt, 120ms\n        // no way to ask: is f a Duration?\n    }\n}"
           },
           "wild": {
-            "lang": "Java",
-            "note": "Java tests a type and binds it.",
-            "code": "for (Object item : List.of(14, \"hi\", new Point(1, 2))) {\n    System.out.println(item);\n    if (item instanceof Point p) System.out.println(p.x());\n}"
+            "lang": "Go",
+            "note": "A type switch asks an interface value for its type and binds it.",
+            "code": "for _, f := range fields {\n    switch v := f.(type) {\n    case time.Duration:\n        fmt.Printf(\"took %d ms\\n\", v.Milliseconds())\n    default:\n        fmt.Println(v)\n    }\n}"
           }
         },
         "options": [
           {
             "key": "E",
-            "name": "Any",
-            "gist": "Every value converts to Any silently.",
+            "name": "Add Any",
+            "gist": "Every value fits in Any with no opt-in, and a type arm takes it back.",
             "gains": [
-              "No setup: every value fits"
+              "No opt-in lines."
             ],
             "losses": [
-              "Wrong values surface only when running",
-              "Reverses a settled rule"
+              "Asking for a type no value can have is found only when running.",
+              "Reverses the settled rule that Jet has no Any."
             ],
             "proposed": {
-              "code": "items: [Any]{14, \"hi\", Point{x: 1, y: 2}}\nloop item in items {\n    print(item)\n    if item == .Point(p) -> print(p.x)\n}"
+              "code": "write_fields: fn(fields: [Any]) {  // no opt-in lines needed\n    loop f in fields {\n        if f == {\n            .Duration(d) -> print(\"took {d.ns / 1000000} ms\")\n            else -> print(f)\n        }\n    }\n}"
             }
           },
           {
             "key": "B",
-            "name": "Trait methods",
-            "gist": "A trait method returns each type.",
+            "name": "A method per type",
+            "gist": "The trait gets one method per type code wants back.",
             "gains": [
-              "Runs today",
-              "A library picks which types callers get back"
+              "Works today with no compiler change."
             ],
             "losses": [
-              "One method per type taken back",
-              "Users can't add one to a library's trait"
+              "One method per type taken back.",
+              "Users of a library's trait cannot add one."
             ],
             "proposed": {
-              "code": "// Shown has point() -> Point?, None by default; Point's impl returns itself.\nitems: [Shown]{14, \"hi\", Point{x: 1, y: 2}}\nloop item in items {\n    print(item)\n    if item.point() == Val(p) -> print(p.x)\n}"
+              "code": "Field: trait {\n    duration: fn(self) -> Duration? { None }  // one method per type taken back\n}\nimpl Duration.Field { duration: fn(self) -> Duration? { self } }\n\nwrite_fields: fn(fields: [Field]) {\n    loop f in fields {\n        if f.duration() == Val(d) -> print(\"took {d.ns / 1000000} ms\") else -> print(f)\n    }\n}"
             }
           },
           {
             "key": "C",
             "name": "Type arms",
-            "gist": "A type arm takes any opted-in type back.",
+            "gist": "The arm .Duration(d) asks a trait value for its type and binds it.",
             "gains": [
-              "Works for library traits too"
+              "One arm takes back any opted-in type, library traits included.",
+              "A wrong arm is a compile error."
             ],
             "losses": [
-              "Needs compiler work",
-              "Callers can depend on a library's public types"
+              "Needs compiler work first."
             ],
             "proposed": {
-              "code": "// Shown: trait {}, with impl Int.Shown {} and the same for String and Point.\nitems: [Shown]{14, \"hi\", Point{x: 1, y: 2}}\nloop item in items {\n    print(item)\n    if item == .Point(p) -> print(p.x)\n}"
+              "code": "write_fields: fn(fields: [Field]) {\n    loop f in fields {\n        if f == {\n            .Duration(d) -> print(\"took {d.ns / 1000000} ms\")  // f is a Duration: call it d\n            else -> print(f)\n        }\n    }\n}\n// .Bool(b) here is a compile error: Bool never opted into Field."
             }
           }
         ],
         "recommendation": {
           "rec": "C",
-          "why": "C takes back any opted-in type with one checked arm, and adds no Any.",
+          "why": "C asks the question in one checked arm, for any trait, without adding a type every value fits.",
           "gains": [
-            "Arms are checked when compiling"
+            "The same arm form as enums: .Duration(d).",
+            "Arms are checked when compiling."
           ],
           "losses": [
             {
@@ -213362,21 +213378,21 @@
               "mitigation": "B's form runs today and stays valid."
             },
             {
-              "loss": "Callers can depend on a library's public types.",
-              "mitigation": "Tables need a catch-all; priv hides types."
+              "loss": "A caller can depend on which types a library stores.",
+              "mitigation": "A table needs else, and a private type cannot be named in an arm."
             }
           ],
           "whyNot": [
             {
               "key": "E",
-              "reason": "Wrong values surface only when running."
+              "reason": "With Any, a wrong question is found only when the program runs."
             },
             {
               "key": "B",
-              "reason": "Users can't add methods to a library's trait."
+              "reason": "B needs a method per type, and a library's users cannot add one."
             }
           ],
-          "tradeoff": "Compiler work buys checked recovery without Any."
+          "tradeoff": "Compiler work buys checked type questions without Any."
         }
       },
       "designAway": [
@@ -216316,10 +216332,10 @@
       "id": "D-APP-ID1",
       "cardId": "c0m0czk2",
       "group": "app",
-      "title": "How an app marks the type that holds a row's ID",
-      "situation": "A row ID is the text that names one row, such as one task. Apps that work offline let the phone or browser make the ID itself. It is a UUIDv7: a long random text that also records the time, so a task made on a train opens at once and keeps its link. The server must then refuse IDs a client made up. Today a crafted request with the ID \"t1\" is stored as is, because the decoder sees an ID type as just a String. Every app that syncs is exposed, and beginners can't see the gap. You decide how an app says \"this type is an ID\", so its decoder accepts only UUIDv7 text and answers anything else with 422. We recommend a Core type, app.ID, that each table's ID type wraps: TaskID: distinct app.ID.",
-      "gist": "How should an app mark a row ID type so it accepts only UUIDv7 text?",
-      "lesson": "An ID names one row. When the client makes IDs, the server must check each one as it decodes the request. A decoder is the code that turns request text into a typed value. When it refuses, the server answers 422 (bad input) and no method runs. The three options put the check in three places. A uses one Core type that each ID type wraps, B a marker on a String type, and C one generic Core type named after its row.",
+      "title": "How an app gives each row a checked ID",
+      "situation": "A row ID is the text that names one row, such as one task. Offline apps let the device make the ID itself: a UUIDv7, a random text that also records the time, so a task made on a train opens at once. The server must refuse IDs a client made up. Today a request with the ID \"t1\" is stored as is, because the decoder sees an ID type as a String. The vote decides how an app declares ID types and makes new IDs. We recommend one line per table and nothing per new row.",
+      "gist": "How should an app declare and make row IDs, so they are checked UUIDv7 text with the least code?",
+      "lesson": "An ID names one row. Offline apps make IDs on the device, so the server must refuse made-up ones like \"t1\" with 422 (bad input) before any method runs. The options differ in what an app writes for each table and each new row.",
       "explainer": "Beginner path: the app writes one line per table, TaskID: distinct app.ID, and nothing else. On the client, TaskID.from_id(app.new_id()) makes a new ID. A crafted request with \"t1\" gets 422 at the id field, and the method never runs. The ID prints as its text, travels in JSON as a plain string, and is stored as one text column.\n\nExpert path. Code can build an ID only from app.new_id() or by decoding checked text, so no TaskID ever holds \"t1\". A generic function can ask for any ID through the wrapped type. A legacy key that is not a UUIDv7 stays a plain distinct String, and an integer key stays Int. Neither option changes those.\n\nSome things stay the same under every option: the ID's text, the 422 answer, the JSON string and the SQL text column. Passing a ProjectID where a TaskID belongs is a compile error under all three.",
       "story": "Ana's TaskList app makes a task on the train and gives it a fresh ID. Later Leo writes a script that sends {\"id\":\"t1\",\"title\":\"Ship it\"} straight to the server. Today the server stores a task named t1, and the next client that makes its own t1 collides with it. Ana needs the server to refuse t1 before her code runs.",
       "inWild": "use serde::{Deserialize, Serialize};\nuse uuid::Uuid;\n\n// A newtype over a checked UUID type: bad text fails to deserialize.\n#[derive(Serialize, Deserialize)]\n#[serde(transparent)]\nstruct TaskId(Uuid);\n\n#[derive(Serialize, Deserialize)]\nstruct Task { id: TaskId, title: String }\n\nfn main() {\n    let bad: Result<Task, _> = serde_json::from_str(r#\"{\"id\":\"t1\",\"title\":\"Ship it\"}\"#);\n    println!(\"{}\", bad.is_err()); // true\n}",
@@ -216327,24 +216343,24 @@
       "options": [
         {
           "key": "A",
-          "name": "Wrap Core's app.ID",
-          "detail": "Core adds one type, app.ID. Its decoder accepts only canonical UUIDv7 text: 36 characters, lowercase, version 7, variant 10. Anything else is FieldError{path: \"id\", reason: \"expected a UUIDv7\"}, and the endpoint answers 422. An app writes TaskID: distinct app.ID. A distinct type codes as its base (D-CODABLE-DISTINCT1=A), so it gets the same check.\n\napp.new_id() returns app.ID, and TaskID.from_id(app.new_id()) makes a task's ID. It prints as its text, is a bare JSON string, and is stored as the table's one TEXT key column.",
-          "technical": "Core only: app.ID in Core/App/App.jet with Encode, Decode, Display, Equatable and Comparable, and new_id returning it. Fix the derived codec of a distinct type over a struct base (today E0311 from_id). No compiler-known name, marker or diagnostic is added.",
-          "code": "use { app; db: core.db }\n\n// Each table's ID is its own type, wrapping Core's checked app.ID.\n#Printable\nTaskID: distinct app.ID\n\n#Codable\nTask: struct {\n    id: TaskID\n    title: String\n}\n\nTaskList: struct {\n    tasks: db.Table<TaskID, Task>\n\n    #App.SignedIn\n    create: fn(self, task: Task) -[DB.Read, DB.Write]> Task db.DBError! { self.tasks.add(task) }\n\n    #App.SignedIn\n    fetch: fn(self, id: TaskID) -[DB.Read]> Task? db.DBError! { self.tasks.get(id) }\n}\n\n// On the client: make the ID where the task is made, even offline.\ntask: Task{id: TaskID.from_id(app.new_id()), title: \"Ship it\"}\n// A request with \"id\":\"t1\" gets 422 at `id`; create never runs."
+          "name": "A distinct ID with a fresh default",
+          "detail": "Core adds app.ID, whose decoder accepts only canonical UUIDv7 text and answers anything else with FieldError{path: \"id\"} and 422. Each table declares its own ID type in one line, TaskID: distinct app.ID, so a ProjectID can never be passed where a TaskID is expected. A distinct type codes as its base (D-CODABLE-DISTINCT1=A), so TaskID gets the check.\n\napp.ID has one constructor, fresh(), which makes a new UUIDv7. A distinct type gets its base's constructors, typed as itself and made through its own conversion, the same path decoding takes. So the field default id: TaskID = .fresh() means a new row needs no ID code: Task{title: \"Ship it\"}.",
+          "technical": "Core: app.ID in Core/App/App.jet with Encode, Decode, Display, Equatable, Comparable and fresh(). Language: a distinct type forwards each static constructor of its base that returns the base, through its own conversion. A base whose conversion can fail, such as a range type, forwards none.\n\nThe generated codec fills a missing id from the default, so a request without one gets a server-made ID. The request key (#6867 c2) makes a retry return the first result instead of a second row. Under the app test host, fresh() draws from the test's seeded clock and random source, so tests stay deterministic. The derived codec of a distinct type over a struct base is fixed (today E0311).",
+          "code": "use { app; db: core.db }\n\n// One line per table: its own ID type, checked as UUIDv7.\nTaskID: distinct app.ID\n\n#Codable\nTask: struct {\n    id: TaskID = .fresh()  // a new row gets a new ID\n    title: String\n}\n\nTaskList: struct {\n    tasks: db.Table<TaskID, Task>\n\n    #App.SignedIn\n    create: fn(self, task: Task) -[DB.Read, DB.Write]> Task db.DBError! { self.tasks.add(task) }\n}\n\n// On the device, even offline: nothing to write for the ID.\ntask: Task{title: \"Ship it\"}\n// A request with \"id\":\"t1\" gets 422 at `id`; create never runs."
         },
         {
           "key": "B",
-          "name": "#App.ID marker on a String",
-          "detail": "TaskID stays a distinct String, with the marker #App.ID. The derived decoder of a distinct String that carries the marker adds the UUIDv7 check, with the same FieldError and 422 as A. app.new_id() stays String, and TaskID.from_string(app.new_id()) makes an ID. Printing, JSON and SQL are as for any String. Building a TaskID in code with from_string is not checked.",
-          "technical": "Compiler rule: a new marker row #App.ID, a codec-derive branch that reads it, and a diagnostic for #App.ID on anything but a distinct String.",
-          "code": "use { app; db: core.db }\n\n// The marker tells the decoder this String must be a UUIDv7.\n#[App.ID, Printable]\nTaskID: distinct String\n\n#Codable\nTask: struct {\n    id: TaskID\n    title: String\n}\n\nTaskList: struct {\n    tasks: db.Table<TaskID, Task>\n\n    #App.SignedIn\n    create: fn(self, task: Task) -[DB.Read, DB.Write]> Task db.DBError! { self.tasks.add(task) }\n\n    #App.SignedIn\n    fetch: fn(self, id: TaskID) -[DB.Read]> Task? db.DBError! { self.tasks.get(id) }\n}\n\n// On the client:\ntask: Task{id: TaskID.from_string(app.new_id()), title: \"Ship it\"}\n// A request with \"id\":\"t1\" gets 422 at `id`.\n// TaskID.from_string(\"t1\") in code still compiles."
+          "name": "A distinct ID, made by hand",
+          "detail": "As A, without forwarded constructors: each new row writes TaskID.from_id(app.new_id()).",
+          "technical": "Core only: app.ID and app.new_id(). No language rule changes.",
+          "code": "TaskID: distinct app.ID\n\n#Codable\nTask: struct {\n    id: TaskID\n    title: String\n}\n\n// Each new row names its ID by hand.\ntask: Task{id: TaskID.from_id(app.new_id()), title: \"Ship it\"}"
         },
         {
           "key": "C",
           "name": "One generic app.ID<Row>",
-          "detail": "Core adds app.ID<Row>, one generic type named after the row it identifies. Its codec is A's. An app declares no ID type: a task's ID is app.ID<Task>. app.new_id() becomes fn<R>() -> app.ID<R>, so the row type comes from where the ID goes. Printing, JSON and SQL are as in A.",
-          "technical": "Core only: a generic struct whose parameter only names a row (this compiles today), its codec, and new_id generic over R.",
-          "code": "use { app; db: core.db }\n\n// No ID type to declare: an ID names the row type it belongs to.\n#Codable\nTask: struct {\n    id: app.ID<Task>\n    title: String\n}\n\nTaskList: struct {\n    tasks: db.Table<app.ID<Task>, Task>\n\n    #App.SignedIn\n    create: fn(self, task: Task) -[DB.Read, DB.Write]> Task db.DBError! { self.tasks.add(task) }\n\n    #App.SignedIn\n    fetch: fn(self, id: app.ID<Task>) -[DB.Read]> Task? db.DBError! { self.tasks.get(id) }\n}\n\n// On the client: new_id() takes its row type from where it goes.\ntask: Task{id: app.new_id(), title: \"Ship it\"}\n// A request with \"id\":\"t1\" gets 422 at `id`."
+          "detail": "Core adds app.ID<Row>, named after the row it identifies. Apps declare no ID type, and every signature spells app.ID<Task>. An ID that names no row, such as a device or an upload, needs a stand-in row type.",
+          "technical": "Core only: a generic struct whose parameter only names a row, its codec, and fresh().",
+          "code": "#Codable\nTask: struct {\n    id: app.ID<Task> = .fresh()\n    title: String\n}\n\nfetch: fn(self, id: app.ID<Task>) -[DB.Read]> Task? db.DBError! { self.tasks.get(id) }\n\ntask: Task{title: \"Ship it\"}"
         }
       ],
       "comparisons": [
@@ -216366,33 +216382,29 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A puts the check in one Core type instead of a compiler rule. Code can only make a valid ID, and each table keeps a named ID type (TaskID), as the proposal's examples already write. It reuses the ratified rule that a distinct type codes as its base, instead of adding a second way to code one.",
+        "rec": "A",
+        "why": "The common path, making a row, needs no ID code, and every ID is checked and typed per table.",
         "gains": [
-          "One check in one place, with no marker to forget.",
-          "No TaskID can hold \"t1\", from a request or from code.",
-          "Named ID types in every signature, and a generic function can take any ID."
+          "Zero ID code per new row.",
+          "One line per table buys type-safe, checked IDs."
         ],
         "losses": [
           {
-            "loss": "A distinct type over a struct does not derive its codec today (E0311 from_id).",
-            "mitigation": "Building A fixes it as part of the same work; it is a bug under the ratified distinct-coding rule anyway, so no user ever meets it."
-          },
-          {
-            "loss": "An app writes TaskID.from_id(app.new_id()) instead of from_string.",
-            "mitigation": "from_id is the from_<base> constructor every distinct type already gets, so there is nothing new to learn; the E0311 fix text names it."
+            "loss": "Distinct types gain a general rule: they get their base's constructors.",
+            "mitigation": "Constructors go through the type's own conversion, as decoding does, so no unchecked value can be made."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "A forgotten marker fails silently and accepts \"t1\"; the check lives in the compiler; and from_string still builds bad IDs in code."
+            "reason": "B makes every new row repeat two calls that A writes once in the field default."
           },
           {
             "key": "C",
-            "reason": "Everyone holding an ID must see its row type, IDs of things that are not rows (a device, an upload) need a stand-in row, and every signature spells app.ID<Task>."
+            "reason": "C spells app.ID<Task> in every signature and needs stand-in rows for other IDs."
           }
         ],
-        "tradeoff": "One wrapper line per table, in exchange for IDs that are valid everywhere they exist."
+        "tradeoff": "One line per table, in exchange for IDs that are checked and typed everywhere."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -216401,8 +216413,8 @@
       "reviewPasses": null,
       "checkInstructions": "A #Test in Core/App shows app.ID refusing \"t1\", \"\", an uppercase UUID and a UUIDv4, and accepting app.new_id(). The case web_app/offline_create_with_client_id posts {\"id\":\"t1\",...} and gets 422, posts a fresh ID and gets 200, then fetches that ID and gets the row. The probe distinct_over_struct.jet runs and prints its line. core-library.md describes app.ID and new_id.\n\nEvidence labels: the three probe files were run with the gate jet on today's dev and their output is quoted in detail. The proposed option programs were not run.",
       "surface": {
-        "gist": "How should an app mark its row ID types so they accept only UUIDv7 text?",
-        "lesson": "Clients make their own row IDs, so the server must refuse made-up ones like \"t1\" with 422. A wraps one checked Core type, B adds a marker to a String, and C uses one generic Core type named after the row.",
+        "gist": "How should an app declare and make row IDs, so they are checked UUIDv7 text with the least code?",
+        "lesson": "An ID names one row. Offline apps make IDs on the device, so the server must refuse made-up ones like \"t1\" with 422 (bad input) before any method runs. The options differ in what an app writes for each table and each new row.",
         "trio": {
           "current": {
             "note": "Today an ID is a plain String to the decoder, so \"t1\" is accepted.",
@@ -216417,108 +216429,120 @@
         "options": [
           {
             "key": "A",
-            "name": "Wrap Core's app.ID",
-            "gist": "TaskID: distinct app.ID; Core's type checks the text.",
+            "name": "A distinct ID with a fresh default",
+            "gist": "One line per table; a new row needs no ID code.",
             "gains": [
-              "One check, no marker to forget.",
-              "Code can't build a bad ID."
+              "Task{title: \"Ship it\"} makes a checked ID.",
+              "A ProjectID cannot pass as a TaskID.",
+              "No TaskID can hold \"t1\", from a request or from code."
             ],
             "losses": [
-              "Needs the distinct-over-struct codec fix."
+              "A general rule: distinct types get their base's constructors."
             ],
             "proposed": {
-              "code": "TaskID: distinct app.ID\ntask: Task{id: TaskID.from_id(app.new_id()), title: \"Ship it\"}\n// \"t1\" in a request -> 422"
+              "code": "TaskID: distinct app.ID  // one line per table\n\n#Codable\nTask: struct {\n    id: TaskID = .fresh()  // a new row gets a new ID\n    title: String\n}\n\n// On the device, even offline:\ntask: Task{title: \"Ship it\"}\n// A request with \"id\":\"t1\" gets 422 at `id`."
             }
           },
           {
             "key": "B",
-            "name": "#App.ID marker",
-            "gist": "A marker on a distinct String adds the check.",
+            "name": "A distinct ID, made by hand",
+            "gist": "As A, but each new row writes its ID.",
             "gains": [
-              "Keeps today's String spelling."
+              "No language rule changes."
             ],
             "losses": [
-              "A missing marker silently accepts \"t1\".",
-              "from_string still builds bad IDs."
+              "Every new row writes TaskID.from_id(app.new_id())."
             ],
             "proposed": {
-              "code": "#App.ID\nTaskID: distinct String\ntask: Task{id: TaskID.from_string(app.new_id()), title: \"Ship it\"}"
+              "code": "TaskID: distinct app.ID\n\n#Codable\nTask: struct {\n    id: TaskID\n    title: String\n}\n\n// Each new row names its ID by hand.\ntask: Task{id: TaskID.from_id(app.new_id()), title: \"Ship it\"}"
             }
           },
           {
             "key": "C",
-            "name": "Generic app.ID<Row>",
-            "gist": "No ID type to declare; the ID names its row.",
+            "name": "One generic app.ID<Row>",
+            "gist": "No ID types; IDs are named after their row.",
             "gains": [
-              "Nothing to declare per table."
+              "No ID type to declare."
             ],
             "losses": [
-              "Every holder must see the row type.",
-              "Non-row IDs need a stand-in."
+              "Every signature spells app.ID<Task>.",
+              "IDs that name no row need a stand-in row."
             ],
             "proposed": {
-              "code": "Task: struct { id: app.ID<Task>, title: String }\ntask: Task{id: app.new_id(), title: \"Ship it\"}"
+              "code": "#Codable\nTask: struct {\n    id: app.ID<Task> = .fresh()\n    title: String\n}\n\nfetch: fn(self, id: app.ID<Task>) -[DB.Read]> Task? db.DBError! { self.tasks.get(id) }\n\ntask: Task{title: \"Ship it\"}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One checked Core type, named IDs per table, and no compiler rule.",
+          "why": "The common path, making a row, needs no ID code, and every ID is checked and typed per table.",
           "gains": [
-            "Valid IDs everywhere.",
-            "No marker to forget."
+            "Zero ID code per new row.",
+            "One line per table buys type-safe, checked IDs."
           ],
           "losses": [
             {
-              "loss": "Distinct over a struct needs a codec fix.",
-              "mitigation": "Fixed as part of building A; users never meet it."
-            },
-            {
-              "loss": "from_id instead of from_string.",
-              "mitigation": "The from_<base> rule every distinct type already follows."
+              "loss": "Distinct types gain a general rule: they get their base's constructors.",
+              "mitigation": "Constructors go through the type's own conversion, as decoding does, so no unchecked value can be made."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Forgetting the marker fails silently."
+              "reason": "B makes every new row repeat two calls that A writes once in the field default."
             },
             {
               "key": "C",
-              "reason": "Row types leak into every holder of an ID."
+              "reason": "C spells app.ID<Task> in every signature and needs stand-in rows for other IDs."
             }
           ],
-          "tradeoff": "One wrapper line per table for IDs that are always valid."
+          "tradeoff": "One line per table, in exchange for IDs that are checked and typed everywhere."
         }
       },
       "designAway": [
         {
-          "loss": "A distinct type over a struct does not derive its codec today.",
+          "loss": "Every new row writes TaskID.from_id(app.new_id()).",
           "attempts": [
-            "Make app.ID a distinct String with a Core-only decoder: rejected, a distinct type cannot carry its own codec under D-CODABLE-DISTINCT1=A.",
-            "Fix the derive for a struct base: kept; the rule already says a distinct type codes as its base."
+            "A Default for app.ID that makes a random ID: rejected, a default value should not be random where nobody wrote it.",
+            "A field default, id: TaskID = .fresh(), with constructors forwarded through the distinct type: kept."
           ],
-          "result": "Fixed while building A; no user-visible cost."
+          "result": "A new row writes no ID code."
         },
         {
-          "loss": "A new constructor name, from_id.",
+          "loss": "Forwarded constructors could make a value the distinct type refuses.",
           "attempts": [
-            "Make app.new_id() return the caller's ID type directly: rejected, it needs a bound no type has today.",
-            "Use the existing from_<base> rule: kept."
+            "Forward through the type's own conversion, as decoding does; a base whose conversion can fail forwards none: kept."
           ],
-          "result": "No new rule to learn."
+          "result": "No unchecked value can be made."
         },
         {
-          "loss": "Decide the ID by the id field's role in a table, with no ID type.",
+          "loss": "A request without an id would get a server-made ID, and a retry could make a second row.",
           "attempts": [
-            "Rejected: a value would decode differently by where it is stored, and an argument such as fetch(id:) is decoded before any table is involved."
+            "The request key of #6867 c2 returns the first result to a retry: kept."
+          ],
+          "result": "Gone."
+        },
+        {
+          "loss": "Random IDs would make tests nondeterministic.",
+          "attempts": [
+            "fresh() draws from the app test host's seeded clock and random source: kept."
+          ],
+          "result": "Gone."
+        },
+        {
+          "loss": "The old B, a marker on a String, fails silently when the marker is forgotten.",
+          "attempts": [
+            "Dropped: the check lives in the type, so there is nothing to forget."
           ],
           "result": "Not an option."
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-16T10:50:49.624Z"
+      "status": "ratified",
+      "created": "2026-11-16T10:50:49.624Z",
+      "outcome": "A",
+      "comment": "that is not the correct syntax for a default, default syntax should be id: TaskID{.fresh()}",
+      "ratifiedAt": "2026-11-16"
     },
     {
       "id": "D-PLACE-DEFAULT1",
@@ -216536,9 +216560,9 @@
         {
           "key": "A",
           "name": "The compiler chooses",
-          "detail": "Sema proves each allocation's lifetime. A value that lives exactly to the end of its scope, and stays on one task, goes on a scope stack of the current thread. A scope stack is a reserved address range with a bump pointer and a guard gap. Each growing value gets its own stack, as in Goose, so growth never moves a live value.\n\nA value whose order sema cannot prove uses the default heap of D-ALLOC-DEFAULT1. An allocator named by #Context (D-ALLOC-SITE1) always wins. No syntax, diagnostic or API is added; a placement report shows each value's storage and reason.",
-          "technical": "Placement is a sema fact (I3), so O0, O1, O2 and the web place every value the same way (I9). The web has no address reservation. There each growth checks capacity, and a full scope takes a new chunk instead of relocating. That keeps the no-hidden-relocation rule of D-REGION-ALLOC1=F; Goose estimates checked growth at 1.1x to 1.5x (goose-143).\n\nA recursive function's growing locals use the heap, so recursion stays unrestricted (contrast goose-048). Scope stacks are separate from the native call stack, so Mem.Stack budgets are unchanged. #6469, stack slots for small boxes that never escape, is the scalar end of the same placement ladder.",
-          "code": "count_words: fn(lines: [String]) -> Int {\n    words := [String]{}  // ends at return: on a scope stack\n    loop line in lines { words.push(line.trim()) }\n    words.len()\n}  // one step frees words and its strings"
+          "detail": "One rule decides, and a reader can apply it: a growing value goes on a scope stack unless it is stored in something that outlives it or sent to another task. A value a function returns is built on its caller's stack, so builder functions qualify too.\n\nEach growing value gets its own stack, as in Goose, so it is freed at its last use with one pointer reset, not at its scope's end. Everything the rule leaves out uses the default heap of D-ALLOC-DEFAULT1 and costs exactly what it costs today. An allocator named by #Context (D-ALLOC-SITE1) always wins. No syntax, diagnostic or API is added; `jet inspect placement` names each heap value and the rule that sent it there.",
+          "technical": "Placement is a sema fact (I3), so O0, O1, O2 and the web place every value the same way (I9). Threads reserve address ranges for their stacks. Tasks and the web use chunked stacks instead, taken from the thread's pool on a task's first stacked value. So a task that stacks nothing costs nothing, and thousands of tasks reserve no address space. A task's stacks belong to the task, so a stacked value survives a wait.\n\nGrowth already compares length with capacity on the heap path; a chunked stack reuses that check, extending in place when the value is on top. A recursive function's growing locals use the heap, so recursion stays unrestricted (contrast goose-048). Scope stacks are separate from the native call stack, so Mem.Stack budgets are unchanged. #6469, stack slots for small boxes that never escape, is the scalar end of the same placement ladder.",
+          "code": "count_words: fn(lines: [String]) -> Int {\n    words := trimmed(lines)  // built on this function's stack\n    n := words.len()         // last use: words is freed here\n    n * 2\n}\ntrimmed: fn(lines: [String]) -> [String] {\n    out := [String]{}\n    loop line in lines { out.push(line.trim()) }\n    out\n}"
         },
         {
           "key": "B",
@@ -216569,19 +216593,17 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It gives stack speed to the values that fit, keeps every program valid, and adds nothing a beginner must learn. The heap stays the answer whenever order is not proven.",
+        "rec": "A",
+        "why": "It gives stack speed to the common shapes with no new syntax, and the rest costs no more than today.",
         "gains": [
           "No new syntax and no new errors.",
-          "The fast path reaches code nobody tuned."
+          "The fast path reaches code nobody tuned.",
+          "One stated rule says which values are stacked."
         ],
         "losses": [
           {
-            "loss": "Speed depends on what the compiler can prove.",
-            "mitigation": "A placement report names each value's storage and the reason, so a slow spot is visible and fixable."
-          },
-          {
-            "loss": "A stacked value may outlive its last use until its scope ends.",
-            "mitigation": "Only values that live to their scope's end are stacked; values that die earlier use the heap."
+            "loss": "Values stored in a longer-lived container stay on the heap.",
+            "mitigation": "They pay exactly today's cost, and `jet inspect placement` names each one and the rule that sent it there."
           }
         ],
         "whyNot": [
@@ -216594,7 +216616,7 @@
             "reason": "C is fastest where it fits but rejects everyday code like maps of lists, and slows the web."
           }
         ],
-        "tradeoff": "Placement becomes a compiler decision users can see but never write. Non-nesting values keep today's heap cost."
+        "tradeoff": "Placement becomes a compiler decision users can predict and inspect but never write."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -216620,18 +216642,17 @@
           {
             "key": "A",
             "name": "The compiler chooses",
-            "gist": "The compiler stacks values it proves end in order; everything else uses the heap.",
+            "gist": "The compiler stacks every growing value that stays in its scope or is returned; the rest uses the heap at today's cost.",
             "gains": [
-              "Code stays the same; common temporaries get stack speed.",
-              "Each thread and task has its own stacks.",
-              "An allocator named in #Context still wins."
+              "Code stays the same; locals, temporaries and returned builders get stack speed.",
+              "A value is freed at its last use, not its scope's end.",
+              "Tasks that stack nothing cost nothing; an allocator named in #Context still wins."
             ],
             "losses": [
-              "Speed depends on what the compiler proves, so code shape matters.",
-              "A stacked value may outlive its last use until its scope ends."
+              "Values kept in longer-lived containers, like maps of lists, keep today's heap cost."
             ],
             "proposed": {
-              "code": "count_words: fn(lines: [String]) -> Int {\n    words := [String]{}  // ends at return: on a scope stack\n    loop line in lines { words.push(line.trim()) }\n    words.len()\n}  // one step frees words and its strings"
+              "code": "count_words: fn(lines: [String]) -> Int {\n    words := trimmed(lines)  // built on this function's stack\n    n := words.len()         // last use: words is freed here\n    n * 2\n}\ntrimmed: fn(lines: [String]) -> [String] {\n    out := [String]{}\n    loop line in lines { out.push(line.trim()) }\n    out\n}"
             }
           },
           {
@@ -216670,19 +216691,16 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "It gives stack speed to the values that fit, keeps every program valid, and adds nothing a beginner must learn. The heap stays the answer whenever order is not proven.",
+          "why": "It gives stack speed to the common shapes with no new syntax, and the rest costs no more than today.",
           "gains": [
             "No new syntax and no new errors.",
-            "The fast path reaches code nobody tuned."
+            "The fast path reaches code nobody tuned.",
+            "One stated rule says which values are stacked."
           ],
           "losses": [
             {
-              "loss": "Speed depends on what the compiler can prove.",
-              "mitigation": "A placement report names each value's storage and the reason, so a slow spot is visible and fixable."
-            },
-            {
-              "loss": "A stacked value may outlive its last use until its scope ends.",
-              "mitigation": "Only values that live to their scope's end are stacked; values that die earlier use the heap."
+              "loss": "Values stored in a longer-lived container stay on the heap.",
+              "mitigation": "They pay exactly today's cost, and `jet inspect placement` names each one and the rule that sent it there."
             }
           ],
           "whyNot": [
@@ -216695,21 +216713,56 @@
               "reason": "C is fastest where it fits but rejects everyday code like maps of lists, and slows the web."
             }
           ],
-          "tradeoff": "Placement becomes a compiler decision users can see but never write. Non-nesting values keep today's heap cost."
+          "tradeoff": "Placement becomes a compiler decision users can predict and inspect but never write."
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-16T12:28:47.195Z"
+      "status": "ratified",
+      "created": "2026-11-16T12:28:47.195Z",
+      "designAway": [
+        {
+          "loss": "Speed depends on what the compiler can prove, so code shape matters.",
+          "attempts": [
+            "State the rule as one sentence a reader can apply: kept.",
+            "Build a returned value on the caller's stack, so builder functions qualify: kept.",
+            "Stack values stored in a longer-lived container: rejected, their lifetimes do not nest, so they stay on the heap at today's cost."
+          ],
+          "result": "Locals, temporaries and returned builders are stacked; the rest costs what it costs today, and the report names each one."
+        },
+        {
+          "loss": "A stacked value may outlive its last use until its scope ends.",
+          "attempts": [
+            "Free at last use: kept. Each growing value has its own stack, so freeing is one pointer reset whenever the value is on top, which the compiler arranges."
+          ],
+          "result": "Gone."
+        },
+        {
+          "loss": "Thousands of tasks would each reserve address space for stacks.",
+          "attempts": [
+            "Reserve per task: rejected, a large task count exhausts the address space.",
+            "Chunked stacks for tasks, taken on first use: kept; growth already checks capacity, so the chunk check adds no new work."
+          ],
+          "result": "A task that stacks nothing costs nothing."
+        },
+        {
+          "loss": "A value kept across a wait would break the order on a shared thread stack.",
+          "attempts": [
+            "Stacks belong to the task, not the thread: kept."
+          ],
+          "result": "Gone."
+        }
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-11-16"
     },
     {
       "id": "D-WARM-SET1",
       "cardId": "c0ozl5j4",
       "group": "web",
-      "title": "Which reads a device loads ahead so screens work offline",
-      "situation": "A synced app keeps the results it has read on the device, so a screen still shows them offline. Today the device holds only what the person opened while online. The sync note proposes a warm set: reads the device loads ahead after first paint, on an unmetered connection. The vote decides how an app names those reads, or whether Jet has no warm set at all. We recommend a warm function in the offline entry, checked against the screens.",
-      "gist": "How should an app say which reads a device loads ahead, so screens it has not opened yet still work offline?",
-      "lesson": "Offline, a device can show only what it already holds. Today that is what the person happened to open. A warm set loads more ahead of time, but only reads whose exact key a screen later uses help.",
+      "title": "Which screens a device loads ahead so they work offline",
+      "situation": "A synced app keeps what it has read, so a screen still shows it offline. Today that covers only screens the person opened while online, so a field worker without signal cannot open a project they skipped this week. The vote decides how the device picks more screens to fetch ahead. We recommend it follow the links already in the code, with nothing to write.",
+      "gist": "When an app works offline, which screens should a device fetch ahead of time, and who decides?",
+      "lesson": "Offline, an app can show only what the device already holds. Today that is just the screens the person opened. Loading ahead means fetching, while online, the screens the person is likely to open next.",
       "explainer": "",
       "story": "Mara leads a field crew and opens Crewboard in a basement with no signal. She needs the board of a project she has not opened this week. Today it fails.",
       "inWild": "bucket_definitions:\n  user_boards:\n    parameters: SELECT id AS project_id FROM projects WHERE owner = token_parameters.user_id\n    data:\n      - SELECT * FROM tasks WHERE project_id = bucket.project_id\n# https://docs.powersync.com (sync rules)",
@@ -216717,24 +216770,24 @@
       "options": [
         {
           "key": "A",
-          "name": "A warm function in the entry",
-          "detail": "The offline entry takes a warm function. Each statement is one endpoint call with codable arguments, or a loop over one call's result whose body is one call. Anything else is a compile error naming the statement. A warm read is one-shot and holds no subscription; a mounted screen reading the same key takes it over.\n\nThe compiler compares each warm call's key (endpoint and canonical encoded arguments) with the reads screens make. A warm call no screen makes is a compile error. The build reports, per screen, which of its live reads are warm (#6868 c12).",
-          "technical": "Warming runs after first paint on an unmetered connection, or in the foreground up to 16 MiB where the platform reports no network type (sync note 5.2). A loop is one batched request in one read transaction, streamed per item, each capped at LIVE_MAX_PAYLOAD. Online re-checks every 15 minutes follow the same metering rule (5.1).",
-          "code": "screens.crewboard()\n    .offline(.Queue, warm: fn(crew: app.Remote<logic.Crew>) {\n        crew.assigned_to_me()\n        loop project in crew.my_projects() -> crew.board(project.id)\n    })"
+          "name": "Follow the links",
+          "detail": "With .offline(.Queue), the device fetches ahead the screens the person can reach by links from the screens they opened. Nothing is written. A link names its screen and arguments in code, such as kit.link(logic.BoardView{project: card.id}, ...). So the device makes exactly the read the board will make, crew.board(card.id), and every fetched result is one a screen uses.\n\nFetching runs after the first screen shows, on an unmetered connection, nearest first: one link away, then two. It stops at the offline storage budget, 64 MiB unless the entry sets another. A screen that must never load ahead says preload: false on its .screen line. A screen that must work offline says offline: true, and the build fails if one of its reads cannot be fetched ahead, naming the read.",
+          "technical": "The compiler records each kit.link and app.go target whose arguments come from loaded results, and each screen's live reads whose arguments come from its view. That graph is the preload set (#6868 c12). jet inspect preload prints it per screen with the reason for each read.\n\nReads are one-shot and hold no subscription; a mounted screen with the same key takes the result over. One screen kind is one batched request in one read transaction, each result capped at LIVE_MAX_PAYLOAD. Re-checks every 15 minutes send row versions, so an unchanged result costs one version compare. The server runs each read's policies as if the person tapped the link.",
+          "code": "crewboard: fn() -> app.App {\n    app.new(title: \"Crewboard\")\n        .screen(\"/\", projects, signed_in: true)\n        .screen(\"/projects/:project\", board, signed_in: true)\n        .offline(.Queue)\n}\n// projects shows kit.link(logic.BoardView{project: card.id}, ...),\n// so on Wi-Fi each linked board, crew.board(card.id), loads ahead."
         },
         {
           "key": "B",
-          "name": "A warm mark on screens",
-          "detail": "A screen marked .warm() is loaded ahead for every state value that loaded data links to. An example is each project in a loaded list whose rows link to the board screen. The warm set is the marked screens' reads at those states.",
-          "technical": "The compiler infers argument sources from links in screen views. A screen reached only by typed input, search or a computed state has no inferred arguments and is not warmed; the build lists it. Batching, metering and re-checks are as in A.",
-          "code": "board: screen(project: ProjectID) { ... }\n    .warm()  // warmed for each project a loaded list links to"
+          "name": "List the reads in the entry",
+          "detail": "The offline entry takes a warm function that lists reads to fetch ahead, with loops over earlier results. The compiler compares each listed read's key with the reads screens make, and a read no screen makes is a compile error.",
+          "technical": "Batching, budget, metering and re-checks are as in A. Only listed reads are fetched; the list is kept in step with the screens by hand.",
+          "code": "crewboard: fn() -> app.App {\n    app.new(title: \"Crewboard\")\n        .screen(\"/\", projects, signed_in: true)\n        .screen(\"/projects/:project\", board, signed_in: true)\n        .offline(.Queue, warm: fn(crew: app.Remote<logic.Crew>) {\n            loop project in crew.my_projects() -> crew.board(project.id)\n        })\n}"
         },
         {
           "key": "C",
-          "name": "No warm set",
-          "detail": "Offline, the device shows only results it has already read. The docs say so, and #6868 c12 becomes a report of which screens were last read and when. Apps that need more write their own preloading with ordinary calls.",
-          "technical": "Nothing is added to the offline entry, the compiler or the sync protocol. The per-screen coverage check of c12 is dropped, since there is no declared set to check against.",
-          "code": "screens.crewboard()\n    .offline(.Queue)  // unchanged; offline reach is what was seen"
+          "name": "No loading ahead",
+          "detail": "Offline, the device shows only what it already read. The docs say so. Apps that need more write their own fetching with ordinary calls.",
+          "technical": "Nothing is added to the entry, the compiler or the sync protocol. #6868 c12 becomes a report of which screens were last read and when.",
+          "code": "crewboard: fn() -> app.App {\n    app.new(title: \"Crewboard\")\n        .screen(\"/\", projects, signed_in: true)\n        .screen(\"/projects/:project\", board, signed_in: true)\n        .offline(.Queue)  // unchanged\n}"
         }
       ],
       "comparisons": [
@@ -216751,32 +216804,29 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Only A names arguments, so the compiler can check that each warm read helps a screen.",
+        "rec": "A",
+        "why": "The links already say where a person can go next, so the common case needs no code and every fetched read is used.",
         "gains": [
-          "Offline reach is written down and checked.",
-          "The per-screen coverage report has a fixed list to check against."
+          "No code for the common case.",
+          "Fetched reads always match their screens."
         ],
         "losses": [
           {
-            "loss": "A warm read helps only when its key equals a screen's key.",
-            "mitigation": "A warm call that no screen makes is a compile error, with the screen reads it was compared against."
-          },
-          {
-            "loss": "Offline search and new filters stay out of reach.",
-            "mitigation": "The device row store of ballot B2 covers them; the warm set stays the enumerated path."
+            "loss": "Screens reached only by typed text, like search, cannot load ahead.",
+            "mitigation": "Offline they show their last results, and the build report names each one."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B hides the arguments in inference and cannot warm screens reached by search or typed input."
+            "reason": "B makes every offline app write and maintain a list that A derives from code already written."
           },
           {
             "key": "C",
-            "reason": "C is honest but leaves phones unusable offline beyond the screens already opened."
+            "reason": "C leaves screens Mara never opened unusable offline."
           }
         ],
-        "tradeoff": "Apps write their offline reach as code. In return, the compiler checks it against the screens."
+        "tradeoff": "The device spends unmetered data and storage, within a budget, on screens the person may never open."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -216785,12 +216835,12 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "How should an app say which reads a device loads ahead, so screens it has not opened yet still work offline?",
-        "lesson": "Offline, a device can show only what it already holds. Today that is what the person happened to open. A warm set loads more ahead of time, but only reads whose exact key a screen later uses help.",
+        "gist": "When an app works offline, which screens should a device fetch ahead of time, and who decides?",
+        "lesson": "Offline, an app can show only what the device already holds. Today that is just the screens the person opened. Loading ahead means fetching, while online, the screens the person is likely to open next.",
         "trio": {
           "current": {
-            "note": "Offline, Crewboard shows only boards the person opened while online. Other boards fail.",
-            "code": "screens.crewboard()\n    .offline(.Queue)"
+            "note": "Offline, Crewboard shows only boards Mara opened while online. Other boards fail.",
+            "code": "crewboard: fn() -> app.App {\n    app.new(title: \"Crewboard\")\n        .screen(\"/\", projects, signed_in: true)\n        .screen(\"/projects/:project\", board, signed_in: true)\n        .offline(.Queue)  // offline: only boards opened before\n}"
           },
           "wild": {
             "lang": "PowerSync",
@@ -216801,86 +216851,126 @@
         "options": [
           {
             "key": "A",
-            "name": "A warm function in the entry",
-            "gist": "The entry lists the reads to load ahead, with loops over earlier results.",
+            "name": "Follow the links",
+            "gist": "The device fetches ahead the screens linked from what the person opened. Nothing to write.",
             "gains": [
-              "Arguments are explicit, so every board of every project can be warmed.",
-              "The compiler checks each warm read against the reads screens make."
+              "Zero code: every offline app gets it.",
+              "Each fetched read is the exact read its screen makes.",
+              "Rare needs are one argument: preload: false, offline: true."
             ],
             "losses": [
-              "A new parameter on .offline to learn.",
-              "Offline search and new filters still need a row store (ballot B2)."
+              "Screens reached only by typed text, like search, cannot load ahead."
             ],
             "proposed": {
-              "code": "screens.crewboard()\n    .offline(.Queue, warm: fn(crew: app.Remote<logic.Crew>) {\n        crew.assigned_to_me()\n        loop project in crew.my_projects() -> crew.board(project.id)\n    })"
+              "code": "crewboard: fn() -> app.App {\n    app.new(title: \"Crewboard\")\n        .screen(\"/\", projects, signed_in: true)\n        .screen(\"/projects/:project\", board, signed_in: true)\n        .offline(.Queue)\n}\n// projects shows kit.link(logic.BoardView{project: card.id}, ...),\n// so on Wi-Fi each linked board, crew.board(card.id), loads ahead."
             }
           },
           {
             "key": "B",
-            "name": "A warm mark on screens",
-            "gist": "Marked screens are loaded ahead for the states the device can link to.",
+            "name": "List the reads in the entry",
+            "gist": "The entry lists reads to fetch ahead, and the compiler checks them.",
             "gains": [
-              "The mark sits on the screen it protects.",
-              "No list of calls to keep in step with the screens."
+              "The fetched set is exactly what the code lists."
             ],
             "losses": [
-              "The compiler must infer arguments from links in loaded data.",
-              "A screen reached only by typed input or search is never warmed."
+              "Every offline app writes and maintains a list.",
+              "Search still cannot load ahead."
             ],
             "proposed": {
-              "code": "board: screen(project: ProjectID) { ... }\n    .warm()  // warmed for each project a loaded list links to"
+              "code": "crewboard: fn() -> app.App {\n    app.new(title: \"Crewboard\")\n        .screen(\"/\", projects, signed_in: true)\n        .screen(\"/projects/:project\", board, signed_in: true)\n        .offline(.Queue, warm: fn(crew: app.Remote<logic.Crew>) {\n            loop project in crew.my_projects() -> crew.board(project.id)\n        })\n}"
             }
           },
           {
             "key": "C",
-            "name": "No warm set",
-            "gist": "Offline shows only what the device has already read, and the docs say so.",
+            "name": "No loading ahead",
+            "gist": "Offline shows only what was already read.",
             "gains": [
-              "Nothing new to learn, build or check.",
-              "No background traffic."
+              "Nothing new to build or learn."
             ],
             "losses": [
-              "A phone opened offline fails on any board it has not seen.",
-              "Apps that need offline reach must write their own preloading."
+              "Mara's unopened board fails offline."
             ],
             "proposed": {
-              "code": "screens.crewboard()\n    .offline(.Queue)  // unchanged; offline reach is what was seen"
+              "code": "crewboard: fn() -> app.App {\n    app.new(title: \"Crewboard\")\n        .screen(\"/\", projects, signed_in: true)\n        .screen(\"/projects/:project\", board, signed_in: true)\n        .offline(.Queue)  // unchanged\n}"
             }
           }
         ],
         "recommendation": {
-          "why": "Only A names arguments, so the compiler can check that each warm read helps a screen.",
+          "rec": "A",
+          "why": "The links already say where a person can go next, so the common case needs no code and every fetched read is used.",
           "gains": [
-            "Offline reach is written down and checked.",
-            "The per-screen coverage report has a fixed list to check against."
+            "No code for the common case.",
+            "Fetched reads always match their screens."
           ],
           "losses": [
             {
-              "loss": "A warm read helps only when its key equals a screen's key.",
-              "mitigation": "A warm call that no screen makes is a compile error, with the screen reads it was compared against."
-            },
-            {
-              "loss": "Offline search and new filters stay out of reach.",
-              "mitigation": "The device row store of ballot B2 covers them; the warm set stays the enumerated path."
+              "loss": "Screens reached only by typed text, like search, cannot load ahead.",
+              "mitigation": "Offline they show their last results, and the build report names each one."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B hides the arguments in inference and cannot warm screens reached by search or typed input."
+              "reason": "B makes every offline app write and maintain a list that A derives from code already written."
             },
             {
               "key": "C",
-              "reason": "C is honest but leaves phones unusable offline beyond the screens already opened."
+              "reason": "C leaves screens Mara never opened unusable offline."
             }
           ],
-          "tradeoff": "Apps write their offline reach as code. In return, the compiler checks it against the screens.",
-          "rec": "A"
+          "tradeoff": "The device spends unmetered data and storage, within a budget, on screens the person may never open."
         }
       },
       "draft": false,
       "status": "open",
-      "created": "2026-11-16T13:21:03.045Z"
+      "created": "2026-11-16T13:21:03.045Z",
+      "designAway": [
+        {
+          "loss": "A listed warm read helps only if its key equals the screen's read.",
+          "attempts": [
+            "Check listed keys at compile time: kept in B, but the list still has to be written.",
+            "Derive each read from the screen the link opens: kept in A."
+          ],
+          "result": "Gone: a fetched read is the screen's own read."
+        },
+        {
+          "loss": "Inferred fetching could hide what the device loads.",
+          "attempts": [
+            "Infer only from links and screen reads already in code, and print them with jet inspect preload: kept."
+          ],
+          "result": "Gone: every fetched read traces to a line of code."
+        },
+        {
+          "loss": "Fetching every linked screen could cost data, battery and server load.",
+          "attempts": [
+            "Fetch only on unmetered connections, nearest first, within a storage budget: kept.",
+            "One batched request per screen kind, and version re-checks: kept."
+          ],
+          "result": "Bounded by the budget; an unchanged result costs one version compare."
+        },
+        {
+          "loss": "A screen deeper than one link would stay out of reach.",
+          "attempts": [
+            "Follow links from fetched screens too, nearest first, until the budget is spent: kept."
+          ],
+          "result": "Gone within the budget."
+        },
+        {
+          "loss": "Some screens should never be fetched ahead, and some must always work offline.",
+          "attempts": [
+            "preload: false and offline: true on the .screen line, beside signed_in: kept."
+          ],
+          "result": "One argument, only where needed."
+        },
+        {
+          "loss": "Search cannot be fetched ahead.",
+          "attempts": [
+            "Run search on the device over fetched rows: rejected, it would answer differently from the server.",
+            "Show the last results offline, and name each such screen in the build report: kept."
+          ],
+          "result": "Remains; nobody can know typed text ahead of time."
+        }
+      ]
     }
   ],
   "questions": [
@@ -219339,9 +219429,11 @@
       "by": "owner",
       "kind": "question",
       "text": "need to engineer the downsides away for recommended option",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-16T13:11:28.802Z"
+      "status": "answered",
+      "answer": "Redesigned; the ballot now shows each downside of A, what was tried and the result. The two listed losses are gone. First, speed no longer hinges on hidden proofs. One rule decides, and a reader can apply it: a growing value is stacked unless it is stored in something that outlives it or sent to another task. A value a function returns is built on the caller's stack, so builder functions qualify. Second, a value no longer outlives its last use. Each growing value has its own stack, so it is freed at its last use with one pointer reset. Two costs the old ballot never named are also designed away: thousands of tasks do not reserve address space (tasks take chunked stacks on first use, reusing the capacity check growth already does), and a value kept across a wait is safe (stacks belong to the task). What remains: a value kept in a longer-lived container, like a map of lists, stays on the heap at exactly today's cost, and jet inspect placement names it and the rule that sent it there. Any winner still gets the adversarial review and measurements before it is built.",
+      "created": "2026-11-16T13:11:28.802Z",
+      "answeredAt": "2026-11-16",
+      "answeredBy": "Main"
     },
     {
       "id": "q1bh9koi",
@@ -219350,9 +219442,11 @@
       "by": "owner",
       "kind": "question",
       "text": "this does not feel like a good idiomatic cohesive solution",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-16T13:12:52.486Z"
+      "status": "answered",
+      "answer": "Agreed; the old A made every new row write TaskID.from_id(app.new_id()), two Core calls for the most common thing an app does. Redesigned by frequency. Making a row is the most common, so it needs no ID code at all: the row's field says id: TaskID = .fresh(), and Task{title: \"Ship it\"} makes a checked UUIDv7 ID, offline too. Declaring a table is less common, so it costs one line: TaskID: distinct app.ID. That line buys an ID that is checked (\"t1\" gets 422 before any method runs) and typed, so a ProjectID can never pass where a TaskID is expected. The one language rule that makes it work is cohesive with how distinct types already code: a distinct type gets its base's constructors, made through its own conversion, the same path decoding takes. A base whose conversion can fail, like a range type, forwards none, so no unchecked value can be made. Downsides designed away: a request without an id gets a server-made one, and the request key from #6867 c2 stops a retry making a second row. Tests stay deterministic, because fresh() uses the test host's seeded clock and random source. The marker option, which failed silently when forgotten, is dropped. The old hand-made form is now B, and the generic app.ID<Row> is C.",
+      "created": "2026-11-16T13:12:52.486Z",
+      "answeredAt": "2026-11-16",
+      "answeredBy": "Main"
     },
     {
       "id": "q2mon6f4",
@@ -219361,9 +219455,11 @@
       "by": "owner",
       "kind": "question",
       "text": "i dont really think i understand what this is or how it works in practice with the recommended option. please make it easier to understand & give a better example",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-16T13:15:14.654Z"
+      "status": "answered",
+      "answer": "Rewritten around a real job instead of 14, \"hi\" and a Point. Plainly: sometimes one list must hold values of different types, and log fields are the everyday case. log.info(\"saved\", 14, \"notes.txt\", 120ms) carries an Int, a text and a Duration. In Jet those types opt into a shared trait (Field), and printing each field already works. The missing piece is asking one field \"are you a Duration?\" and using it as one, say to print it as milliseconds. The recommendation, C, writes that question the way Jet already matches enum cases: inside loop f in fields, the table if f == { .Duration(d) -> print(\"took {d.ns / 1000000} ms\")  else -> print(f) }. .Duration(d) means \"if f is a Duration, call it d\". It is checked when compiling: .Bool(b) is an error, because Bool never opted into Field, and the table needs else. In practice: you write the trait and one empty impl line per type once, then use ordinary arms wherever you need a type back. The other options: E adds Any (no opt-in lines, but a wrong question is found only when the program runs), and B gives the trait one method per type you want back (works today, but a library's users cannot add methods).",
+      "created": "2026-11-16T13:15:14.654Z",
+      "answeredAt": "2026-11-16",
+      "answeredBy": "Main"
     },
     {
       "id": "q3t9y6px",
@@ -219372,9 +219468,35 @@
       "by": "owner",
       "kind": "question",
       "text": "yeah this is not good enough. we want to reduce friction proportionally to frequency, so most common things are easiest with least friction and more complex cases take slightly more friction. we want to minimize friction everywhere and make code easier to reason about, but that is our trade space",
+      "status": "answered",
+      "answer": "Redesigned around friction in proportion to frequency. Most common, testing one case (if order == .Paid { ... }), stays free. Next, testing a few cases and ending in else: you type else as today, in a chain of ifs or in a table, and jet run, jet dev and jet test accept it, so trying code costs nothing. Before shipping, jet check and jet build give a tidy error saying which cases the else stands for (.Line | .Dot), and jet fix writes them in one step. From then on, a case added later stops the build at every place that has not decided it, which is the logic bug we want to prevent. Rarer, a rest that should take every other case now and later, like a key handler, is spelled _ -> and is never stopped, so the intent is visible to readers. Nothing is forced into a new shape: chains and tables both stay and get the same rule. Today a table's else is already refused everywhere (E0641), so A lowers friction there too. The old table-plus-case-sets design is now B, and naming every case by hand from the first run is C.",
+      "created": "2026-11-16T13:17:12.599Z",
+      "answeredAt": "2026-11-16",
+      "answeredBy": "Main"
+    },
+    {
+      "id": "q4bafqv3",
+      "cardId": "c0ozl5j4",
+      "decisionId": "D-WARM-SET1",
+      "by": "owner",
+      "kind": "question",
+      "text": "I dont understand the ballot and I dont think this is the best solution. solutions should be idiomatic, cohesive jet and with jet philosophy. they should minimize friction proportional to frequency of use, and all downsides must be engineered away",
+      "status": "answered",
+      "answer": "Rewritten from scratch; the old A made every offline app hand-write a list. Plainly: offline, an app shows only what the device already holds, and today that is just the screens the person opened. The new recommendation, A 'Follow the links': with .offline(.Queue) the device fetches ahead, on Wi-Fi, the screens reachable by links from what the person opened. Nothing is written, because the links are already in the code: kit.link(logic.BoardView{project: card.id}, ...) tells the compiler that each board, crew.board(card.id), is one tap away. Friction follows frequency: the common case is zero code, and the rare cases are one argument on the .screen line, preload: false (never fetch this screen ahead) or offline: true (the build fails if this screen cannot be fetched ahead, naming the read). Downsides designed away (the ballot lists each attempt): a fetched read always matches its screen, because it is the screen's own read; nothing is hidden, since jet inspect preload lists each read and the link it came from; data, battery and server cost are bounded by unmetered-only, nearest-first fetching within a 64 MiB budget, one batched request per screen kind, and version re-checks; deeper screens are reached nearest first within the budget. The one cost left: a screen reached only by typed text, like search, cannot be fetched ahead, because nobody knows the text in advance. Offline it shows its last results, and the build names it. The old warm list is now B, and C is no loading ahead.",
+      "created": "2026-11-16T13:23:36.802Z",
+      "answeredAt": "2026-11-16",
+      "answeredBy": "Main"
+    },
+    {
+      "id": "q5pe1lap",
+      "cardId": "c0ozl5j4",
+      "decisionId": "D-WARM-SET1",
+      "by": "owner",
+      "kind": "question",
+      "text": "in general that seems to be a better overall solution BUT preloading reachable pages/content based on user input is very important for responsive applications. we need a solution for that as well",
       "status": "open",
       "answer": "",
-      "created": "2026-11-16T13:17:12.599Z"
+      "created": "2026-11-16T13:30:33.420Z"
     }
   ],
   "ideas": [
@@ -220207,6 +220329,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:31:58.309Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q3t9y6px",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:31:57.382Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-GUARD-LINT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:31:53.235Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-APP-ID1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-16T13:30:33.420Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q5pe1lap",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:30:05.898Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q2mon6f4",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:30:04.956Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PRIM-ANY1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:28:49.466Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q1bh9koi",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:28:48.527Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-APP-ID1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:26:55.768Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q4bafqv3",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:26:54.741Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-WARM-SET1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:26:16.010Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PLACE-DEFAULT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-16T13:24:21.411Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gvf2dr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T13:24:14.478Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q0vif86a",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:24:13.458Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PLACE-DEFAULT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:23:36.802Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q4bafqv3",
+      "note": ""
+    },
     {
       "at": "2026-11-16T13:21:06.042Z",
       "by": "Main",
