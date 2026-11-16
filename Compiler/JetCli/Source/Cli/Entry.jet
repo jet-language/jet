@@ -904,8 +904,10 @@ jet_cli_workspace_module_head: fn(tokens: [Token], tables: TokenTables, index: I
     index + 2 < tokens.len() && tokens[index].kind == TOKEN_IDENT && tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_MODULE && token_decoded(tables, tokens[index]) == "workspace"
 }
 
-// A top-level `#Target(Web)` marker: the program builds for the browser.
+// A top-level `#Target(Web)` marker: the program builds for the browser. A
+// source that never spells `Target` holds none, and is not lexed.
 jet_cli_declares_web_target: fn(source: String) -> Bool Never! {
+    if !source.contains("Target") -> return false
     lexed: lex(source.bytes())
     tokens: jet_cli_significant_tokens(lexed.tokens)
     depth := 0
