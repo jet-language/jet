@@ -639,7 +639,8 @@ live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> T
 // after them, and the binding's first current result after the hold sends the
 // event again. A connection receives only the bindings its handler watches;
 // the handler holds `binding` because it read it for its own caller under
-// that caller's policy.
+// that caller's policy. Once the last connection watching `binding` closes,
+// its caller is present nowhere through it (__live_left_settle).
 watch: fn<T: [Encode, Decode], E: [Encode, Decode]>(socket: WsConn, binding: Live<T, E>) Never! -[Net]> {
     ws.__live_watch(socket, "live:{binding.id}")
 }
@@ -883,8 +884,10 @@ live_presence_keep: fn(id: Int, account: String, asked: [String]) -> [String] {
 
 // The accounts present at `address`, sorted, each once: those of the
 // registered bindings whose latest run asked `presence` of it, and
-// `asking`, the account of the run asking now (none when "").
+// `asking`, the account of the run asking now (none when ""). A binding
+// whose last watching connection closed is not among them (__live_left_settle).
 live_present: fn(address: String, asking: String) -> [auth.AccountID] {
+    __live_left_settle()
     names := [String]{}
     if asking != "" -> names.push(asking.copy())
     registry: live_decode(live_cell_load())
@@ -898,6 +901,27 @@ live_present: fn(address: String, asking: String) -> [auth.AccountID] {
     out := [auth.AccountID]{}
     loop name in names -> out.push(auth.AccountID.from_string(name))
     out
+}
+
+// The leave signal of the WebSocket live hub: each binding whose last
+// watching connection (`watch`) closed since the last call is present
+// nowhere (live_left). A server runs this once each upgraded connection's
+// handler returns, and every presence read runs it first, so a closed
+// session is never counted.
+__live_left_settle: fn() Never! { live_left(rt_web.live_left()) }
+
+// Ends the presence of each binding `topics` names, one hub topic
+// (`live:<id>`, `watch`'s) per line, and re-runs every binding that reads an
+// address it was present at. That binding re-runs too: a connection that
+// watches it again first receives its event, so the client reads it, and
+// the run asks again, counting its account.
+priv live_left: fn(topics: String) Never! {
+    loop topic in topics.split("\n") {
+        if !topic.starts_with("live:") -> next
+        id: Int.parse(topic.slice(5, topic.len())) ?? next
+        changed: live_presence_keep(id, "", [String]{})
+        loop address in changed -> live_invalidate("{LIVE_PRESENCE_SOURCE}{address}", None, None, 0)
+    }
 }
 
 // The binding `task` is running now, the innermost when it runs several.
@@ -2222,6 +2246,36 @@ priv presence_test_refuse: fn(account: String) {
     asked := [String]{}
     loop present in App.__presence("/tasks/7") -> asked.push(present.raw())
     assert_eq(asked.join(","), "ann")
+}
+
+// `account`'s binding of who has the task at `/tasks/8` open.
+priv presence_left_test_bind: fn(account: String) -> Live<String, AppError> {
+    as_caller(auth.AccountID.from_string(account), fn() {
+        __live_bind<String, AppError>("app.test.presence_left", [String]{account.copy()}, fn() {
+            names := [String]{}
+            loop present in App.__presence("/tasks/8") -> names.push(present.raw())
+            Ok(names.join(","))
+        })
+    })
+}
+
+#Test("a binding whose last watching connection closed is present nowhere, and every binding that read its presence re-runs") {
+    ann: presence_left_test_bind("ann")
+    ben: presence_left_test_bind("ben")
+    assert_eq(presence_test_read(ann), "ann")
+    assert_eq(presence_test_read(ben), "ann,ben")
+    assert_eq(presence_test_read(ann), "ann,ben")
+    // The hub's leave signal: ben's only connection closed. A line that
+    // names no binding is passed over.
+    live_left("chat\nlive:{ben.id}\nlive:none")
+    asked := [String]{}
+    loop present in App.__presence("/tasks/8") -> asked.push(present.raw())
+    assert_eq(asked.join(","), "ann")
+    assert_eq(presence_test_read(ann), "ann")
+    // Ben's binding re-runs on its next read, as a reconnected client reads
+    // it, and counts ben again.
+    assert_eq(presence_test_read(ben), "ann,ben")
+    assert_eq(presence_test_read(ann), "ann,ben")
 }
 
 // The key of the run this task is in: its delivery's ID for a job or a

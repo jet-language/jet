@@ -5816,9 +5816,13 @@ not counted, and an account that loses access drops out at its binding's
 next run. A run that asks counts its own account, and each change of the
 accounts present re-runs every other binding that asked, as a write
 re-runs a live query, so a viewer list stays current. Asked outside a live
-binding's run, `presence` only reads the accounts present. A connection
-that closes does not end presence: the account stays present while its
-binding is registered. The state is checked as for `url_of` (E2821).
+binding's run, `presence` only reads the accounts present. Closing a live
+connection ends that account's presence: once the last WebSocket connection
+that watches a binding (`app.watch`) closes and its handler returns, the
+binding is present nowhere, and every binding that asked of a state it was
+present at re-runs. The binding re-runs too, so a client that reconnects and
+reads it again is counted again. The state is checked as for `url_of`
+(E2821).
 
 `graph.sitemap(list)` gives the graph a sitemap. `list` is a named function
 that takes nothing and gives a list of screen states, as
