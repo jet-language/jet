@@ -58,6 +58,8 @@ use {
         sema_arithmetic_policy_facts,
         sema_compiler_index_view_map,
         sema_compiler_index_view_provenance,
+        sema_name_display_text,
+        sema_name_generated_type_paths,
         sema_name_reference_kind_text,
         sema_state_graph_facts,
     ]
@@ -2717,6 +2719,8 @@ semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectPr
     arithmetic := db.arithmetic.move()
     arithmetic = loop fresh_item in arithmetic -> fresh_item
     arithmetic.sort_by(fn(left: SemArithmetic, right: SemArithmetic) { (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end) })
+    display_paths := [String:String]{}
+    loop doc_module in modules -> sema_name_generated_type_paths(doc_module.items, display_paths)
     SemIndex{
         definitions: definitions,
         definition_facts: definition_facts,
@@ -2733,5 +2737,13 @@ semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectPr
         nodes: db.nodes,
         slot_boundaries: db.slot_boundaries,
         bypasses: db.bypasses,
+        display_paths: display_paths,
     }
+}
+
+// `text` as a tool shows it: a type lifted from an inline module or a
+// template instance reads as its ledger path, as in diagnostics and hover,
+// never as its generated name.
+semindex_display_text: fn(index: SemIndex, text: String) -> String Never! {
+    sema_name_display_text(text, index.display_paths)
 }

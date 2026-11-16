@@ -3718,7 +3718,10 @@ Automatic discovery skips a declaration whose declared name begins with `_`:
 ordinary visibility rules. The name, not the filename or scan order, controls
 discovery; `jet project parts --skipped` lists omitted declarations. Duplicate
 declared names conflict even when one is omitted from discovery
-(D-SHAPE-MODULEINTERNAL1=A).
+(D-SHAPE-MODULEINTERNAL1=A). `jet project parts` names each part by its path in
+the name ledger, the spelling hover, reflection and diagnostics use: a file is
+its module path (`one.jet` is `one`) and a declared module follows it
+(`shapes.jet`'s `geo: module` is `shapes.geo`).
 
 The reserved role namespaces are `env` (an `Env` development environment),
 `system` (a `System` JetOS host), and `image` (an OCI image or JetOS installer

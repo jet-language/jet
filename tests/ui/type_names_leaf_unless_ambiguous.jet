@@ -1,0 +1,32 @@
+// A diagnostic names a type by its leaf when that leaf is unique and by its
+// path when another type shares it: `Spot` and `Mark` are unique, while the
+// inline modules `geo` and `ui` each declare a `Point`. The generated names
+// the compiler gives those lifted types never show.
+geo: module {
+    Point: struct {
+        x: Int
+    }
+}
+
+ui: module {
+    Point: struct {
+        x: Int
+    }
+}
+
+Spot: struct {
+    x: Int
+}
+
+Mark: struct {
+    x: Int
+}
+
+use_geo: fn(point: geo.Point) -> Int { point.x }
+
+use_spot: fn(spot: Spot) -> Int { spot.x }
+
+run: fn() {
+    print(use_geo(ui.Point{x: 1}))
+    print(use_spot(Mark{x: 1}))
+}

@@ -927,6 +927,9 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
         if origin_traits.get(def.identity) == .Val(trait_name) {
             signature = "{signature}\ntrait: {trait_name}"
         }
+        // A lifted type (`M3GeoPoint`) reads as its ledger path, as the
+        // symbol names and diagnostics spell it.
+        signature = semindex_display_text(index, signature)
         docs := SemDocComment{summary: "", examples: [String]{}}
         if sources.get(def.module_path) == .Val(source) {
             docs = semindex_symbol_source_docs(source, def.def_span.start)

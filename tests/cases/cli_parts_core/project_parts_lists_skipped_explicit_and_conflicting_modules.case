@@ -10,7 +10,7 @@ stdout: !~ "app" # original predicate
 write: main.jet parts-explicit.template
 step: jet project parts --json
 exit: 0
-stdout: ~ "\"name\":\"project._bench\"" # original predicate
+stdout: ~ "\"name\":\"bench._bench\"" # the ledger path: bench.jet's `_bench`
 stdout: ~ "\"state\":\"explicit\"" # original predicate
 write: other.jet parts-conflict.template
 step: jet project parts
@@ -18,3 +18,4 @@ exit: 1
 stderr: ~ "Error [jet.AmbiguousModule]:" # original predicate
 stderr: ~ " Why:" # original predicate
 stderr: ~ " Fix:" # original predicate
+stderr: ~ "found bench._bench, other._bench" # both declarations, each by its path
