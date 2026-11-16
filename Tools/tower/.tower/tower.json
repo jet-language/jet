@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108448,
+    "rev": 108450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27298,6 +27298,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "n15 scope decided by Main (from the criterion's text: no handwritten case list in Compiler/; lists come from the Core declarations): GoalsA-1-4 removes the core_enum_variants/CORE_ENUM_ROWS catalog first (sema, menus and IR read the registered nominal; 174 Core.rows plain lists already match their source). Then it declares the 15 sourceless Core.rows leaves (BrowserError, ComputeError, DataLoaderKind, DispatchState, Dyn, EnvError, EventConfigError, FailurePolicy, HTTPOperation, HookPolicy, Overflow, PluginError, PluginLimit, TaskStatus, WebFormLifecycle) and the 14 CoreEnumPayloadRows families (IOError, IOOperation, TaskFailure, Key, DataEvent and the rest) as real Core enums, and finally deletes CoreEnumPayloadRows and every plain(A|B) list. n15 is met only after the last step."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -27506,7 +27511,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T06:16:48.241Z",
+      "updated": "2026-11-16T06:40:13.990Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -103356,12 +103361,12 @@
         },
         {
           "n": 46,
-          "text": "A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: &X) -> T? from item, and a method -> T? from self, called directly or through trait dispatch) carries a pointer into the owner's payload, with no new cell, no byte copy and no retain, on O0, O1 and O2. Today the from form and the same function without from emit identical IR at O0 (a 24-byte optional cell, a byte copy and a retain of the shared block), and jet audit counts only the one without from (p207 and p208; D-PRIM-ANY1 reviews 6 and round 6, probe y12_from_val_copy_audit.jet with its .ir.out in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes). Proof: a cases row whose emitted IR (or jet audit) shows no copy for each form, plus a paired size/speed cell against the copy form.",
+          "text": "A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or through trait dispatch) carries a pointer into the owner's payload, with no new cell, no byte copy and no retain, on O0, O1 and O2. Two cases must stay safe first: (a) an argument converted at the call (a Point passed where a union is expected) lives in a temporary cell that is released right after the call (op 16 in the IR, probe z04), so the loan must keep that temporary alive for the result's life, or the call is refused; (b) a body that returns a fresh value, or a copy of another parameter, on some path under from item (probe z05) has no owner to point into, so that path either stays a copy that jet audit reports or is refused. Today the from form and the same function without from emit identical IR at O0 (a 24-byte optional cell, a byte copy and a retain), and jet audit counts only the one without from (p207-p209; D-PRIM-ANY1 reviews 6 and 7, probes y12_from_val_copy_audit.jet with its .ir.out in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes, z01, z01b, z04 and z05 in $JET_SCRATCH_ROOT/lanes/AnyReview7/probes). Proof: a cases row whose IR or jet audit shows no copy for each form, a case or UI row for (a) and for (b), and a paired size/speed cell against the copy form.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T06:34:27.245Z"
+          "at": "2026-11-16T06:50:33.179Z"
         }
       ],
       "refs": [],
@@ -103372,7 +103377,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T06:34:27.245Z",
+      "updated": "2026-11-16T06:50:33.180Z",
       "updatedBy": "Main",
       "criteriaLastN": 46
     },
@@ -221249,6 +221254,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T06:50:33.180Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#46: D-PRIM-ANY1 review 7: the read form is fn(item: X), not &X (a write parameter); a converted argument's temporary and an owned path need their own rules before a pointer is safe; was: A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: &X) -> T? from item, and a method -> T? from self, called directly or through trait dispatch) car"
+    },
+    {
+      "at": "2026-11-16T06:40:13.990Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-16T06:34:27.245Z",
       "by": "Main",
