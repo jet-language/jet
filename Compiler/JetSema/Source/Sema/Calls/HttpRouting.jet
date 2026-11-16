@@ -25,7 +25,7 @@ use jet_foundation.[
     ast_binding,
     AST_EMPTY_CALL_ARG_FLAGS,
     ast_empty_lambda_meta,
-    core_enum_variants,
+    core_enum_cases,
     core_source_receiver_method,
     diagnostic_registry_row,
     diagnostic_with_label,
@@ -1024,7 +1024,7 @@ sema_http_route_find_json_body: fn(body: LambdaBody, request_names: [String]) ->
 // `app.get`), except `Custom`, whose token is the custom verb's first
 // argument (sema_http_route_custom_verb).
 sema_http_route_verbs: fn() -> [String] Never! {
-    variants: core_enum_variants("Method") ?? [String]{}
+    variants: core_enum_cases("Method") ?? [String]{}
     verbs := [String]{}
     loop variant in variants {
         if variant != SEMA_HTTP_ROUTE_CUSTOM_CASE -> verbs.push(variant.lower())

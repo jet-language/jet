@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
-    jet_foundation.[CORE_ENUM_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, ModuleID, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
+    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, ModuleID, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -3726,9 +3726,9 @@ IRCompilerOwnedTypeRow: struct {
 
 // Every compiler-owned row, in program order, built when the compiler itself
 // is built: each runtime enum (IR_COMPILER_OWNED_ENUMS), each plain Core enum
-// leaf (CORE_ENUM_ROWS), then `FieldError`, `Range` and the carrier, Core and
-// math records. Rows leave their module identity empty; a program fills in
-// its own.
+// leaf (CORE_ENUM_CASE_ROWS), then `FieldError`, `Range` and the carrier, Core
+// and math records. Rows leave their module identity empty; a program fills
+// in its own.
 IR_COMPILER_OWNED_TYPE_ROWS: #run ir_compiler_owned_type_rows()
 
 ir_compiler_owned_type_rows: fn() -> [IRCompilerOwnedTypeRow] Never! {
@@ -3737,7 +3737,7 @@ ir_compiler_owned_type_rows: fn() -> [IRCompilerOwnedTypeRow] Never! {
         variants: loop variant in row.variants -> ir_compiler_owned_variant(variant, ir_compiler_owned_enum_payload(row.name, variant))
         rows.push(IRCompilerOwnedTypeRow{class: .RuntimeEnum, definition: ir_compiler_owned_def(module_none(), row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
     }
-    loop core_row in CORE_ENUM_ROWS {
+    loop core_row in CORE_ENUM_CASE_ROWS {
         if core_row.kind == .Enum(names) {
             variants: loop variant in names -> ir_compiler_owned_variant(variant, IRCompilerOwnedPayload.Unit)
             rows.push(IRCompilerOwnedTypeRow{class: .CoreEnum, definition: ir_compiler_owned_def(module_none(), core_row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})

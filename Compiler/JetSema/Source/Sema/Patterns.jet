@@ -31,7 +31,7 @@ use jet_foundation.[
     core_enum_payload_variants,
     measure_literal_value,
     core_enum_variant_payload,
-    core_enum_variants,
+    core_enum_cases,
     diagnostic_with_edit,
     diagnostic_with_source_derived_suggestion,
     type_identity_equal,
@@ -202,7 +202,7 @@ sema_pattern_core_payload: fn(owner: String, variant: String) -> [Type]? {
 // the variant's payload comes from the generated Core enum rows.
 sema_pattern_core_enum_payload: fn(owner_name: String, variant: String, span: Span, diagnostics: &[Diagnostic]) -> SemaPatternPayload {
     result := SemaPatternPayload{types: [Type]{}, owner: None, payload: None, known: false, group: false, range_forbidden: false}
-    if core_enum_payload_variants(owner_name) == None && core_enum_variants(owner_name) == None {
+    if core_enum_payload_variants(owner_name) == None && core_enum_cases(owner_name) == None {
         diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{owner_name}`", "pattern tests must name a variant on the value's enum type", "check the variant spelling"))
         return result
     }

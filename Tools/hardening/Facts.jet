@@ -10,7 +10,7 @@ use {
     jet_lexer.[lex_generated]
     jet_parser.[parse_lexed_with_source, parser_line_starts]
     jet_ir.[IRRecordSchema, IR_RECORD_SCHEMAS, IR_GENERATED_RECORDS, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_handle_civil_time_route, ir_handle_precise_route, ir_handle_math_route, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
-    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, AccessConvention, CoreCallSignatureRequest, CoreCallSymbol, Type, TypeTupleField, core_call, core_call_coverage_contains, core_sig_fixed, core_enum_variants, ir_host_value_name, ir_runtime_handle_row]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, AccessConvention, CoreCallSignatureRequest, CoreCallSymbol, Type, TypeTupleField, core_call, core_call_coverage_contains, core_sig_fixed, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
     jet_eval.[jet_eval_compiler_value_method_record]
 }
 
@@ -221,7 +221,7 @@ result_class: fn(ty: Type?, core: ParsedCore) -> String Never! {
         .Named(name) -> {
             if name == "Unit" -> return "unit"
             if name == "Never" -> return "never"
-            if core.enums.get(name) != None || core_enum_variants(name) != None -> return "value"
+            if core.enums.get(name) != None || core_enum_cases(name) != None -> return "value"
             if core.records.get(name) != None -> return "value"
             if compiler_record_fields(name).len() > 0 -> return "value"
             "opaque"
