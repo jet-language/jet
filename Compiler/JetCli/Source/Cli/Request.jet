@@ -2672,8 +2672,8 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // The native `jet` implements the driver's CompilerTraceSink
 // (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives the
 // Chrome trace-event lines the Rust host's writer produces: the `[` header,
-// `process_name`, `trace.start` (`unix_ms`, `functions`, and `clock_us`, the
-// trace's clock origin, this writer only), one `B`/`E` event per
+// `process_name`, `trace.start` (`unix_ms`, `functions`, and `unix_us`, the
+// wall clock at the trace's clock origin, this writer only), one `B`/`E` event per
 // span, with `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time
 // (`cpu_ns` of its task, `proc_cpu_ns` of every thread, `majflt` major
 // faults; this writer only) on every phase close and a `memory` counter after a
@@ -2691,9 +2691,11 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // `trace.bytes` and `trace.flushes`). So a running compile can be followed
 // phase by phase, and an event costs no system call of its own. A failed
 // write stops the trace, never the
-// compile. Timestamps are microseconds of the host's monotonic clock
-// (core.time.instant, a vDSO read, never a file), the clock every process
-// on the machine shares, and stderr is written as
+// compile. Timestamps are microseconds of the monotonic clock
+// (core.time.instant, a vDSO read, never a file) from the trace's opening;
+// that clock counts from each process's own start, so the wall clock read
+// with the origin (`unix_us`) is what places one process's trace on
+// another's. stderr is written as
 // `/dev/stderr`. `%p` in FILE is this process's id, so every jet a traced
 // process starts with the same `JET_TRACE_FILE` writes its own file; a
 // package build splices its steps' files into its own
@@ -2785,6 +2787,10 @@ JetCLITraceSink: struct {
     // The monotonic clock (µs) when the trace opened: the origin of every
     // timestamp.
     start_us: Int
+    // The wall clock (µs since the Unix epoch) read with `start_us`: the
+    // origin on the clock every process on the machine shares, which places
+    // a trace spliced into this one (jet_cli_trace_splice).
+    start_unix_us: Int
     pid: Int
     functions: Bool
     phase_counters: Bool
@@ -2930,6 +2936,7 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     pid: cli_sys.pid()
     target: if human -> JET_CLI_TRACE_STDERR else -> chosen.replace("%p", "{pid}")
     start_us: jet_cli_trace_clock_us()
+    start_unix_us: cli_time.unix_ns() /% 1000
     executable: cli_sys.executable().split("/").to_list()
     process := "jet"
     if executable.len() > 0 && executable[executable.len() - 1] != "" {
@@ -2946,10 +2953,11 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     if !human {
         // The wall-clock anchor readers align the trace with: the
         // modification time the header write just set (no clock read); and
-        // the clock reading its timestamps count from, which places it on
-        // the clock of a trace it is spliced into (jet_cli_trace_splice).
+        // the wall clock at the origin its timestamps count from, which
+        // places it on the clock of a trace it is spliced into
+        // (jet_cli_trace_splice).
         unix_ms: if cli_files.stat(target) == .Ok(info) -> info.modified.to_unix_ms() else -> 0
-        started: jet_cli_trace_append(target, "{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{detail},\"clock_us\":{start_us}}}}},\n")
+        started: jet_cli_trace_append(target, "{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{detail},\"unix_us\":{start_unix_us}}}}},\n")
         if started == .Val(problem) {
             _: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: cannot write the compiler trace `{chosen}`: {problem}\n")
             return None
@@ -2964,6 +2972,7 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
         target: target,
         human: human,
         start_us: start_us,
+        start_unix_us: start_unix_us,
         pid: pid,
         functions: functions,
         phase_counters: jet_cli_control_on("phase_counters"),
@@ -2998,8 +3007,10 @@ jet_cli_trace_object: fn(sink: &&JetCLITraceSink) -> CompilerTraceSink Never! { 
 // Adds `text`, the trace file another jet process wrote (`--trace=FILE`; a
 // package build's step, BuildExecute.jet jet_cli_build_splice_traces), to
 // this file trace as one more process, named `label` and the process name the
-// file gives. Each event moves onto this trace's clock by the `clock_us` the
-// file's `trace.start` names (both are the machine's monotonic clock), and its lanes
+// file gives. Each event moves onto this trace's clock by the `unix_us` the
+// file's `trace.start` names against this trace's own (each process's
+// monotonic clock counts from its own start; the wall clock is the one they
+// share), and its lanes
 // are numbered from JET_CLI_TRACE_SPLICE_LANES times its place, so a reader
 // that pairs spans by lane (Tools/perf/jetc-trace) never pairs them with
 // another process's. The file's header, process name and `trace.start` are
@@ -3027,8 +3038,8 @@ jet_cli_trace_splice: fn(sink: JetCLITraceSink, label: String, text: String) Nev
             next
         }
         if line.starts_with("{{\"name\":\"trace.start\",") {
-            started: jet_cli_trace_field(line, "clock_us") ?? next
-            shift = Val(started.value - sink.start_us)
+            started: jet_cli_trace_field(line, "unix_us") ?? next
+            shift = Val(started.value - sink.start_unix_us)
             next
         }
         moved_by: shift ?? next
@@ -3216,7 +3227,8 @@ jet_cli_trace_micros: fn(start_us: Int) -[Time]> Int Never! {
     elapsed
 }
 
-// The trace's clock: the host's monotonic clock in µs.
+// The trace's clock: this process's monotonic clock in µs, which counts from
+// the process's start (so it orders this process's events, never another's).
 jet_cli_trace_clock_us: fn() -[Time]> Int Never! { cli_time.instant().start_ns /% 1000 }
 
 // The decimal number `bytes[from..<to]`, or -1 when it is empty or holds a

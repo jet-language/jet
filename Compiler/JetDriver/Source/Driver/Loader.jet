@@ -4079,7 +4079,9 @@ JetDriverCoreIdentifierDemand: struct {
 // whether the unit was parsed from its declaration heads, and `decoded`
 // whether that program was read from the interface instead (no text lexed).
 // `mentions` are a lazy unit's catalog unit mentions from its interface
-// rows, which its loaded module hands registration.
+// rows, which its loaded module hands registration. `dropped` are the items
+// a whole Core parse asked to keep them left out of its program, each at its
+// index `dropped_at` among the items it parsed (jet_driver_parse_core_text).
 JetDriverParsedUnit: struct {
     parsed: ParseResult
     demand: JetDriverCoreIdentifierDemand
@@ -4095,6 +4097,8 @@ JetDriverParsedUnit: struct {
     ready_regions: JetDriverCoreReady?{None}
     ready_held: JetDriverCoreReady?{None}
     mentions: SemaUnitSourceMentions?{None}
+    dropped: [Item]{[Item]{}}
+    dropped_at: [Int]{[Int]{}}
 }
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
@@ -4779,15 +4783,17 @@ jet_driver_parse_unit: fn(job: JetDriverParseJob, threads: CompilerThreads, shar
 // one, lexing nothing; else each body's interior is blanked, so its token
 // count is the heads' it lexed. The load takes the bodies it keeps from the
 // unit's ready parses (jet_driver_core_restore_bodies). Should its heads
-// hold other declarations than its rows do, it parses whole.
-jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, entry: Bool, interface: JetDriverCoreInterfaceUnit?, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
+// hold other declarations than its rows do, it parses whole. A whole parse
+// with `keep_dropped` hands back the items it leaves out
+// (jet_driver_parse_core_text).
+jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, entry: Bool, interface: JetDriverCoreInterfaceUnit?, threads: CompilerThreads, shared: NameTable, own: &NameTable, keep_dropped: Bool{false}) -> JetDriverParsedUnit {
     source: text.bytes()
     rows: interface ?? jet_driver_core_interface_none()
     lazy: !entry && jet_driver_core_interface_matches(rows, module_name, source)
     decoded: if lazy && rows.heads.len() > 0 -> jet_driver_core_heads_program(rows.heads) else -> None
     if decoded == {
         .Val(program) -> jet_driver_core_heads_unit(program, rows.move(), source)
-        None -> jet_driver_parse_core_text(text, source.move(), module_name, owned_members, rows.move(), threads, shared, own, runtime: runtime, entry: entry, lazy: lazy)
+        None -> jet_driver_parse_core_text(text, source.move(), module_name, owned_members, rows.move(), threads, shared, own, runtime: runtime, entry: entry, lazy: lazy, keep_dropped: keep_dropped)
     }
 }
 
@@ -4804,8 +4810,12 @@ jet_driver_core_heads_unit: fn(program: Program, rows: &&JetDriverCoreInterfaceU
 }
 
 // jet_driver_parse_core_source's parse of the bytes `text_bytes` of `text`,
-// from its declaration heads when `lazy`.
-jet_driver_parse_core_text: fn(text: String, text_bytes: &&[U8], module_name: String, owned_members: [String], rows: &&JetDriverCoreInterfaceUnit, threads: CompilerThreads, shared: NameTable, own: &NameTable, runtime: Bool{false}, entry: Bool{false}, lazy: Bool{false}) -> JetDriverParsedUnit {
+// from its declaration heads when `lazy`. With `keep_dropped`, the items the
+// unit leaves out of its program (a public function it doesn't own, a `#Test`
+// outside an entry) come back as `dropped`, each at its place among the
+// parsed items (`dropped_at`), so the Core interface rebuilds the whole
+// parse from them (jet_driver_core_interface_rows).
+jet_driver_parse_core_text: fn(text: String, text_bytes: &&[U8], module_name: String, owned_members: [String], rows: &&JetDriverCoreInterfaceUnit, threads: CompilerThreads, shared: NameTable, own: &NameTable, runtime: Bool{false}, entry: Bool{false}, lazy: Bool{false}, keep_dropped: Bool{false}) -> JetDriverParsedUnit {
     source := text_bytes.move()
     carrier: jet_driver_inline_package_threads(text, source, threads)
     if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
@@ -4843,7 +4853,11 @@ jet_driver_parse_core_text: fn(text: String, text_bytes: &&[U8], module_name: St
     loop declaration in parsed.program.imports -> quiet.push(declaration.span.copy())
     loop span in held.dropped -> quiet.push(span)
     next_held := 0
+    dropped := [Item]{}
+    dropped_at := [Int]{}
+    at := -1
     loop item in parsed.program.items {
+        at += 1
         // A held declaration's stub keeps its place for the declaration.
         if next_held < held.declarations.len() && item == .Func(value) && value.name_span.start == held.declarations[next_held].name_start {
             held.declarations[next_held].position = kept.len()
@@ -4851,24 +4865,28 @@ jet_driver_parse_core_text: fn(text: String, text_bytes: &&[U8], module_name: St
             kept.push(item)
             next
         }
+        left_out := false
         if item == {
             // A runtime unit keeps every item; `#Test` controls run only
             // when the unit is the entry a `jet test` runs.
             .Func(value) -> {
                 if !runtime && core_module_has_member(module_name, value.name) && !owned_members.contains(value.name) {
                     quiet.push(value.span.copy())
-                    next
+                    left_out = true
                 }
             }
             .Test(value) -> {
                 if !entry {
                     quiet.push(value.span.copy())
-                    next
+                    left_out = true
                 }
             }
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
-        kept.push(item)
+        if !left_out -> kept.push(item) else if keep_dropped {
+            dropped_at.push(at)
+            dropped.push(item)
+        }
     }
     if next_held < held.declarations.len() && !jet_driver_has_errors(parsed.diagnostics) {
         panic("{module_name}: {held.declarations.len() - next_held} held declarations left no stub")
@@ -4899,7 +4917,7 @@ jet_driver_parse_core_text: fn(text: String, text_bytes: &&[U8], module_name: St
         ready_held = Val(JetDriverCoreReady{at: rows.fragments_at, fragments: rows.held_parses.move()})
         mentions = rows.mentions.move()
     }
-    JetDriverParsedUnit{parsed: ParseResult{program: parsed.program.move(), diagnostics: diagnostics.move()}, demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move()), lazy: bodies.move(), item_ends: item_ends, holds: held.declarations.len() > 0 || held.dropped.len() > 0, from_heads: lazy, ready_regions: ready_regions.move(), ready_held: ready_held.move(), mentions: mentions.move()}
+    JetDriverParsedUnit{parsed: ParseResult{program: parsed.program.move(), diagnostics: diagnostics.move()}, demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move()), lazy: bodies.move(), item_ends: item_ends, holds: held.declarations.len() > 0 || held.dropped.len() > 0, from_heads: lazy, ready_regions: ready_regions.move(), ready_held: ready_held.move(), mentions: mentions.move(), dropped: dropped.move(), dropped_at: dropped_at.move()}
 }
 
 // `jet check --prelude`: a Compiler/Prelude source parsed as the compiler

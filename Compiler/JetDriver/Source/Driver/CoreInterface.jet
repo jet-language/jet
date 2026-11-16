@@ -10,7 +10,7 @@
 // its spellings and held declarations (JetDriverUnitWords), its identifier
 // demand, its line count. Beside them are the text's length, a
 // 64-bit FNV-1a hash of its bytes (jet_driver_core_interface_text_hash), the
-// `{`..`}` span of each function body (jet_driver_core_body_spans), the
+// `{`..`}` span of each function body (jet_driver_core_open_parse), the
 // program its declaration heads parse to, the unit's ready parses
 // (jet_driver_core_ready_write): per region of its text that holds a body,
 // what parsing that region gives, and per held declaration, what parsing
@@ -45,11 +45,13 @@ use {
         CompilerThreads,
         DebugTraceSite,
         DeclID,
+        Diagnostic,
         ElseArmSpan,
         FencedStatement,
         Func,
         Item,
         ModuleID,
+        ParseResult,
         PolicyDeclaration,
         Program,
         Span,
@@ -242,15 +244,19 @@ jet_driver_core_interface_part: fn(jobs: &&[JetDriverCoreInterfaceJob], catalog:
     units
 }
 
-// The interface rows of the Core unit `row`, parsed as a load parses it (a
-// Core job of jet_driver_parse_one, not a `jet test` entry), then parsed
-// from its declaration heads over those rows as a load reading them parses
-// it, for the program it keeps (`heads`), and, for a unit a load reads
-// lazily, its ready parses (jet_driver_core_ready_write) and its mentions of
-// the catalog units `catalog`.
+// The interface rows of the Core unit `row`: its text parsed whole holding
+// nothing (jet_driver_core_open_parse) and as a load parses it (a Core job
+// of jet_driver_parse_one, not a `jet test` entry), then parsed from its
+// declaration heads over those rows as a load reading them parses it, for
+// the program it keeps (`heads`), and, for a unit a load reads lazily, its
+// ready parses (jet_driver_core_ready_write), cut from the two whole parses,
+// and its mentions of the catalog units `catalog`. Each whole parse is made
+// once.
 jet_driver_core_interface_rows: fn(row: &&JetDriverCoreInterfaceJob, catalog: SemaUnitsCatalogNames, threads: CompilerThreads) -> JetDriverCoreInterfaceUnit {
     text: row.text
-    whole: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: false}, threads)
+    open: jet_driver_core_open_parse(text, threads)
+    loaded := name_table()
+    whole: jet_driver_parse_core_source(text, row.module_name, row.owned_members, row.runtime, false, None, threads, name_table(), loaded, keep_dropped: true)
     text_hash: jet_driver_core_interface_text_hash(text)
     whole_rows: JetDriverCoreInterfaceUnit{
         path: row.path,
@@ -260,7 +266,7 @@ jet_driver_core_interface_rows: fn(row: &&JetDriverCoreInterfaceJob, catalog: Se
         lines: whole.lines,
         demand: whole.demand.move(),
         words: whole.words.move() ?? jet_driver_unit_no_words(),
-        bodies: jet_driver_core_body_spans(text, threads),
+        bodies: open.bodies.move(),
         heads: [U8]{},
         holds: false,
     }
@@ -268,14 +274,24 @@ jet_driver_core_interface_rows: fn(row: &&JetDriverCoreInterfaceJob, catalog: Se
     parsed: jet_driver_parse_core_source(text, row.module_name, row.owned_members, row.runtime, false, Val(whole_rows), threads, name_table(), own)
     // A heads parse gives back the rows it took; one that fell back to
     // the whole text gave the same words, demand and lines, but no
-    // bodies.
+    // bodies, so its bodies come from the text parsed whole again.
     words: parsed.words.move() ?? jet_driver_unit_no_words()
     bodies := parsed.lazy.move()
-    if !parsed.from_heads -> bodies = jet_driver_core_body_spans(text, threads)
+    if !parsed.from_heads -> bodies = jet_driver_core_open_parse(text, threads).bodies
     ready := JetDriverCoreReadyWrite{regions: [JetDriverCoreFragment]{}, held: [JetDriverCoreFragment]{}, bytes: [U8]{}, used_import_names: [String]{}}
     mentions := SemaUnitSourceMentions?{None}
     if parsed.from_heads {
-        ready = jet_driver_core_ready_write(row, text, parsed.parsed.program.items, parsed.holds, bodies, words.held, threads)
+        // The whole parse held as the heads parse held, so it is the parse
+        // the regions are cut from; should the two disagree, the text
+        // parses again, held as the heads were.
+        held_parse := ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}
+        if whole.holds == parsed.holds {
+            held_parse = jet_driver_core_whole_parse(whole.parsed.move(), whole.dropped.move(), whole.dropped_at)
+        } else {
+            hold: if parsed.holds -> Val(JetDriverReachHoldRow{module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime}) else -> JetDriverReachHoldRow?{None}
+            held_parse = jet_driver_reach_parse_source(jet_driver_core_ready_source(text, threads), hold, threads).parsed
+        }
+        ready = jet_driver_core_ready_write(row, parsed.parsed.program.items, bodies, words.held, held_parse.move(), open.parsed.move())
         mentions = Val(sema_units_source_mentions(text, catalog))
     }
     heads := [U8]{}
@@ -301,6 +317,29 @@ jet_driver_core_interface_rows: fn(row: &&JetDriverCoreInterfaceJob, catalog: Se
     }
 }
 
+// The whole parse `parsed` (jet_driver_parse_core_text with `keep_dropped`)
+// with the items it left out, `dropped`, back at their places among its
+// items (`dropped_at`): the parse its lexed text gave, each item moved,
+// none parsed again.
+jet_driver_core_whole_parse: fn(parsed: &&ParseResult, dropped: &&[Item], dropped_at: [Int]) -> ParseResult {
+    whole := parsed.move()
+    // Held last first, so each pop gives the next one.
+    left_out := dropped.move()
+    left_out.reverse()
+    items := [Item]{}
+    next_dropped := 0
+    loop item in whole.program.items.move() {
+        loop next_dropped < dropped_at.len() && dropped_at[next_dropped] == items.len() {
+            items.push(left_out.pop() ?? panic("a whole Core parse lost an item it left out"))
+            next_dropped += 1
+        }
+        items.push(item)
+    }
+    loop left_out.len() > 0 { items.push(left_out.pop() ?? break) }
+    whole.program.items = items.move()
+    whole
+}
+
 // A lazy Core unit's ready parses as the build writes them: where each
 // region's and each held declaration's sits in `bytes`, and the import
 // names its whole text spells.
@@ -311,25 +350,22 @@ JetDriverCoreReadyWrite: struct {
     used_import_names: [String]
 }
 
-// The ready parses of the Core unit `row` (its text `text`), which a load
-// that parses it from its declaration heads (`heads`, held when `holds`)
-// takes in place of parsing its text again. The text, its inline package
-// carrier blanked as the load blanks it, parses whole twice: held as the
-// heads were, and holding nothing. The items of the heads cut the text
-// into regions (jet_driver_core_item_ends); each region that holds a body
-// of `bodies` gets what the held parse gives in it: its items (an item a
-// hold dropped among them) and the side-table rows whose anchors fall in
-// it (a rule with no target only when the heads cut no regions), as a
-// parse of that region alone gives them (jet_driver_core_restore_bodies).
-// Each held declaration of `held` gets what the parse holding nothing
-// gives inside its span: its one item and its block spans, else arms and
-// debug sites, as a parse of that span alone gives them
-// (jet_driver_reach_parse_held). A Core text that doesn't parse cleanly, or
-// a held declaration that isn't one item, stops the build.
-jet_driver_core_ready_write: fn(row: JetDriverCoreInterfaceJob, text: String, heads: [Item], holds: Bool, bodies: [Span], held: [JetDriverReachDeclaration], threads: CompilerThreads) -> JetDriverCoreReadyWrite {
-    hold: if holds -> Val(JetDriverReachHoldRow{module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime}) else -> JetDriverReachHoldRow?{None}
-    whole := jet_driver_reach_parse_source(jet_driver_core_ready_source(text, threads), hold, threads).parsed
-    open: jet_driver_reach_parse_source(jet_driver_core_ready_source(text, threads), None, threads).parsed
+// The ready parses of the Core unit `row`, which a load that parses it from
+// its declaration heads (`heads`) takes in place of parsing its text again.
+// They are cut from two whole parses of its text, its inline package
+// carrier blanked as the load blanks it (jet_driver_core_interface_rows):
+// `whole`, held as the heads were, and `open`, holding nothing. The items
+// of the heads cut the text into regions (jet_driver_core_item_ends); each
+// region that holds a body of `bodies` gets what the held parse gives in
+// it: its items (an item a hold dropped among them) and the side-table rows
+// whose anchors fall in it (a rule with no target only when the heads cut
+// no regions), as a parse of that region alone gives them
+// (jet_driver_core_restore_bodies). Each held declaration of `held` gets
+// what the parse holding nothing gives inside its span: its one item and
+// its block spans, else arms and debug sites, as a parse of that span alone
+// gives them (jet_driver_reach_parse_held). A Core text that doesn't parse
+// cleanly, or a held declaration that isn't one item, stops the build.
+jet_driver_core_ready_write: fn(row: JetDriverCoreInterfaceJob, heads: [Item], bodies: [Span], held: [JetDriverReachDeclaration], whole: &&ParseResult, open: &&ParseResult) -> JetDriverCoreReadyWrite {
     if jet_driver_has_errors(whole.diagnostics) || jet_driver_has_errors(open.diagnostics) {
         panic("the Core unit {row.path} does not parse cleanly whole, so its interface has no ready parses")
     }
@@ -409,7 +445,7 @@ jet_driver_core_ready_write: fn(row: JetDriverCoreInterfaceJob, text: String, he
 }
 
 // The bytes of the Core text `text` with its inline-package carrier blanked,
-// as each of jet_driver_core_ready_write's parses reads them.
+// as each whole parse the ready parses are cut from reads them.
 jet_driver_core_ready_source: fn(text: String, threads: CompilerThreads) -> [U8] {
     source := text.bytes()
     carrier: jet_driver_inline_package_threads(text, source, threads)
@@ -619,15 +655,18 @@ jet_driver_core_heads_program: fn(bytes: [U8]) -> Program? Never! {
     Val(program)
 }
 
-// The `{`..`}` span of each function body of `text` that holds statements:
-// top-level functions, the methods of structs, enums and their trait
-// blocks, `impl` methods, and trait methods' default bodies. The text is
-// parsed whole (no declaration held), its inline package carrier blanked as
-// the load blanks it.
-jet_driver_core_body_spans: fn(text: String, threads: CompilerThreads) -> [Span] {
-    source := text.bytes()
-    carrier: jet_driver_inline_package_threads(text, source, threads)
-    if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
+// A Core text parsed whole holding no declaration, its inline package
+// carrier blanked as the load blanks it: the parse, and the `{`..`}` span of
+// each of its function bodies that holds statements (`bodies`): top-level
+// functions, the methods of structs, enums and their trait blocks, `impl`
+// methods, and trait methods' default bodies.
+JetDriverCoreOpenParse: struct {
+    parsed: ParseResult
+    bodies: [Span]
+}
+
+jet_driver_core_open_parse: fn(text: String, threads: CompilerThreads) -> JetDriverCoreOpenParse {
+    source: jet_driver_core_ready_source(text, threads)
     lexed: lex_generated_threads(source, threads)
     // Each brace token's byte, in source order, and whether it opens.
     braces := [Int]{}
@@ -691,7 +730,7 @@ jet_driver_core_body_spans: fn(text: String, threads: CompilerThreads) -> [Span]
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    spans
+    JetDriverCoreOpenParse{parsed: parsed, bodies: spans}
 }
 
 // Pushes the body of the function whose name ends at `name_end` and whose

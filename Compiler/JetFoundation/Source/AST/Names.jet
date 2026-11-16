@@ -184,6 +184,78 @@ name_pool_fold: fn(shared: &NameTable, own: NameTable) Never! {
     }
 }
 
+// The compilation's NameTable (Docs/spec/compiler-data.md): every name the
+// phases share, a `Name` of it, such as a type's (TypeIDs.jet). Its first
+// ids are the spellings the compiler itself writes, one constant each below,
+// so a phase names them without the table; the loader then merges each
+// source's table into it in source-unit order (name_table_merge), so one
+// input always gets the same ids.
+name_table_compilation: fn() -> NameTable Never! {
+    table := name_table()
+    _: name_intern(table, "Unit")
+    _: name_intern(table, "Never")
+    _: name_intern(table, "Self")
+    _: name_intern(table, "T")
+    _: name_intern(table, "K")
+    _: name_intern(table, "V")
+    _: name_intern(table, "Err")
+    table
+}
+
+NAME_UNIT: Name{id: U32{1}}
+
+NAME_NEVER: Name{id: U32{2}}
+
+NAME_SELF: Name{id: U32{3}}
+
+NAME_T: Name{id: U32{4}}
+
+NAME_K: Name{id: U32{5}}
+
+NAME_V: Name{id: U32{6}}
+
+NAME_ERR: Name{id: U32{7}}
+
+// Adds every spelling of `from` that `into` lacks, in `from`'s id order,
+// and returns each `from` id's id in `into`: the remap a merged source's
+// rows are renumbered by.
+name_table_merge: fn(into: &NameTable, from: NameTable) -> [Name] Never! {
+    ids := [Name]{}
+    loop id in 0..<from.texts.len() {
+        start: name_start(from, id)
+        end: from.ends[id]
+        slot: name_slot(into, from.hashes[id], from.bytes, start, end)
+        if into.slots[slot] != 0 {
+            ids.push(Name{id: U32{into.slots[slot] - 1}})
+            next
+        }
+        ids.push(name_insert(into, slot, from.hashes[id], from.bytes, start, end, name_text(from, Name{id: U32{id}})))
+    }
+    ids
+}
+
+#Test("the compilation table's well-known names are their constants, and a merge renumbers a source's names") {
+    table := name_table_compilation()
+    assert_eq(name_text(table, NAME_NEVER), "Never")
+    assert_eq(name_text(table, NAME_SELF), "Self")
+    assert_eq(name_text(table, NAME_T), "T")
+    assert_eq(name_text(table, NAME_K), "K")
+    assert_eq(name_text(table, NAME_V), "V")
+    assert_eq(name_text(table, NAME_UNIT), "Unit")
+    assert_eq(name_text(table, NAME_ERR), "Err")
+    source := name_table()
+    point: name_intern(source, "Point")
+    unit: name_intern(source, "Unit")
+    ids: name_table_merge(table, source)
+    assert_eq(ids[name_index(unit)], NAME_UNIT)
+    assert_eq(name_text(table, ids[name_index(point)]), "Point")
+    assert_eq(ids[0], name_empty())
+    // A second source's same spelling gets the same id.
+    other := name_table()
+    again: name_intern(other, "Point")
+    assert_eq(name_table_merge(table, other)[name_index(again)], ids[name_index(point)])
+}
+
 // Loaded modules by identity (#6793, Docs/spec/compiler-data.md). The loader
 // interns each module's identity text once, as it first meets it; every later phase
 // names a module by its `ModuleID` and resolves the text only at an edge (a
