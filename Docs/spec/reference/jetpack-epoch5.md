@@ -543,3 +543,11 @@ its spelling (`network.hostName: laptop`, `.Default`). A fleet or vmtest
 host's override record (`system.web{ offset: 10, services: { … } }`) is
 computed the same way, its own fields read by name from the record's other
 fields in any order.
+
+A dev service's field values (`ports: [PORT]`) and the arguments of its
+readiness probe (`ready: tcp(port_of(PORT))`), a package generation's
+`extends:`, and the argument values of an integration import
+(`env.platform.android(api: 30 + 5)`) are computed too. A bare name in an
+integration argument (`[dev_certificate]`, `mcp: [repo_server]`) stays a
+name, and a secret input that is not a named reference is refused without
+ever being computed.

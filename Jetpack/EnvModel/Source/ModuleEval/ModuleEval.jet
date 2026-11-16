@@ -13,7 +13,6 @@ use {
         HostEntry,
         Item,
         ModuleDecl,
-        Namespace,
         Program,
         Span,
         SystemFieldValue,
@@ -246,17 +245,24 @@ envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, env
     }
 }
 
-// Plan the values written in the environment, image, system and host
-// override fields of `decl`. `names` are the source's module values.
+// Plan the values written in the integration imports and the environment,
+// dev service, package profile, image, system and host override fields of
+// `decl`. `names` are the source's module values.
 envmodel_plan_module_values: fn(plan: &EnvValueProgram, decl: ModuleDecl, globals: [String:CtValue], names: [String]) EnvModelEvalError! {
+    envmodel_plan_integration_imports(plan, decl.imports, globals)
     loop contribution in decl.contributions {
         if contribution.value == {
             .Expr(value) -> {
-                if contribution.namespace == Namespace.Env {
-                    envmodel_plan_env_contribution(plan, value, globals)
+                if contribution.namespace == {
+                    .Env -> { envmodel_plan_env_contribution(plan, value, globals) }
+                    .Profile -> envmodel_plan_package_profile_expr(plan, value, globals)
+                    .System | .Image | .Fleet | .VMTest | .Perf -> {}
                 }
             }
-            .Env(lit) -> { envmodel_plan_env_fields(plan, lit.fields, globals) }
+            .Env(lit) -> {
+                envmodel_plan_env_fields(plan, lit.fields, globals)
+                loop service in lit.services -> envmodel_plan_dev_service(plan, service, globals)
+            }
             .Image(lit) -> { envmodel_plan_image(plan, lit, globals) }
             .System(lit) -> { envmodel_plan_system(plan, lit, globals, names) }
             .Fleet(lit) -> {
@@ -273,7 +279,8 @@ envmodel_plan_module_values: fn(plan: &EnvValueProgram, decl: ModuleDecl, global
                     }
                 }
             }
-            .Profile(_) | .Perf(_) -> {}
+            .Profile(lit) -> { envmodel_plan_package_profile_fields(plan, lit.fields, globals) }
+            .Perf(_) -> {}
         }
     }
 }
@@ -286,7 +293,7 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
     systems := [SystemPlan]{}
     fleets := [FleetPlan]{}
     vmtests := [FleetPlan]{}
-    integrations: envmodel_evaluate_integration_imports(decl.imports, scope, globals)
+    integrations: envmodel_evaluate_integration_imports(decl.imports, scope)
     source_bytes: src.bytes()
     loop contribution in decl.contributions {
         source: "{decl.name}.{contribution.path}"
@@ -299,7 +306,7 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
                         envmodel_file_env_capture(capture, contribution.path, reads, [DevServicePlan]{}, environment_contributions, entries)
                     }
                     .Profile -> {
-                        package_profiles.push(envmodel_evaluate_package_profile_expr(contribution.path, value, src, scope, globals, decl.name))
+                        package_profiles.push(envmodel_evaluate_package_profile_expr(contribution.path, value, src, scope, decl.name))
                     }
                     .System | .Image | .Fleet | .VMTest | .Perf -> {
                         panic("contribution namespace/value shape mismatch")
@@ -310,14 +317,14 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
                 capture: envmodel_evaluate_env_fields(lit.fields, src, scope, globals, source)
                 services := [DevServicePlan]{}
                 loop service in lit.services {
-                    services.push(envmodel_evaluate_dev_service(service, scope, globals))
+                    services.push(envmodel_evaluate_dev_service(service, scope))
                 }
                 reads: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
                 envmodel_file_env_capture(capture, contribution.path, reads, services, environment_contributions, entries)
             }
             .Image(lit) -> { images.push(envmodel_evaluate_image(contribution.path, lit, scope)) }
             .Profile(lit) -> {
-                package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, decl.name))
+                package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, decl.name))
             }
             // Fleets and vmtests capture their hosts (E1244/E1245 here, E1242
             // at plan assembly).
