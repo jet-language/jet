@@ -103,14 +103,25 @@ PkgPackageRoots: struct {
     inline: String?
 }
 
+// A command's walks from one directory find the same roots, so the cache
+// keeps each walk's found roots (a failure is never remembered).
+pkg_find_package_roots_checked: fn(cache: &WorkspaceDeclarationCache, start: String, inline: Bool) -[FS, Env]> PkgPackageRoots ManifestError! {
+    dir: AuthorityResolver.authority_walk_root(start) ?? return Err(pkg_entry_authority_error(err))
+    key: "{dir}\n{inline}"
+    if cache.found_package_roots(key) == .Val(found) -> return Ok(found)
+    roots: pkg_walk_package_roots(cache, dir, inline) ?? return Err(err)
+    cache.keep_package_roots(key, PkgPackageRoots{manifest: roots.manifest.copy(), inline: roots.inline.copy()})
+    Ok(roots)
+}
+
 // Both walks visit the same directories, so each is opened, and its workspace
 // and manifest resolved, once. Declaration-resolved workspaces stop discovery
 // even when their filenames are not workspace.jet, and a nearer manifest or a
 // checked workspace prevents a parent stock entry from becoming authority. The
 // inline walk ends at or below the manifest walk's end; its failure is reported
 // only when the manifest walk completes without one, as if it ran second.
-pkg_find_package_roots_checked: fn(cache: &WorkspaceDeclarationCache, start: String, inline: Bool) -[FS, Env]> PkgPackageRoots ManifestError! {
-    dir := AuthorityResolver.authority_walk_root(start) ?? return Err(pkg_entry_authority_error(err))
+pkg_walk_package_roots: fn(cache: &WorkspaceDeclarationCache, root: String, inline: Bool) -[FS, Env]> PkgPackageRoots ManifestError! {
+    dir := root
     seeking_inline := inline
     inline_root := String?{None}
     inline_error := ManifestError?{None}

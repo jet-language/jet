@@ -213,6 +213,7 @@ use {
         LockFile,
         ManifestEntry,
         PackageFacts,
+        WorkspaceDeclarationCache,
         pkg_format_source,
         pkg_check_project_gate,
         pkg_manifest_diagnostic_from_row,
@@ -2433,12 +2434,14 @@ JetCLIRunStep: enum {
 // environment that lets it write a production-failure receipt, under
 // `--json` JET_RUN_JSON (an unhandled failure reports as one `jet.err/v1`
 // line, JetRuntime JourneyTLS.jet), and under `--observe` publish its run
-// (jet_cli_observe_env), else return its output.
-jet_cli_run_step: fn(step: &&JetCLIRunStep) -> JetDriverVerbOutput {
+// (jet_cli_observe_env), else return its output. The receipt's walk reuses
+// `discovery`, the command's discovery cache.
+jet_cli_run_step: fn(step: &&JetCLIRunStep, discovery: &WorkspaceDeclarationCache) -> JetDriverVerbOutput {
     if step.move() == {
         .Output(output) -> output
         .Launch(executable, file, binary, program_args, options, invocation, read_scope, verbose, color, json) -> {
-            vars := jet_cli_production_receipt_env(file, program_args)
+            vars := jet_cli_production_receipt_env(discovery, file, program_args)
+            jet_cli_discovery_counters(discovery)
             if json -> vars.push(JetCLIEnvVar{name: ENV_JET_RUN_JSON, value: "1"})
             if options.observe {
                 // copy: the observed run's fields join the receipt's.
@@ -2447,6 +2450,18 @@ jet_cli_run_step: fn(step: &&JetCLIRunStep) -> JetDriverVerbOutput {
             jet_cli_launch(executable, file, binary, program_args, options, invocation, read_scope, vars, verbose, color)
         }
     }
+}
+
+// Under `--phase-counters`, the command's discovery work as
+// `JET_PHASE_COUNTERS` stderr lines, the form of the compile's counters
+// (JetCLITraceSink.counter): the directories its walks listed and the
+// workspace declarations they lexed, each at most once per command.
+jet_cli_discovery_counters: fn(discovery: WorkspaceDeclarationCache) {
+    if !jet_cli_control_on("phase_counters") {
+        return
+    }
+    _: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "JET_PHASE_COUNTERS {{\"phase\":\"discovery\",\"listings\":{discovery.listings}}}\n")
+    _: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "JET_PHASE_COUNTERS {{\"phase\":\"discovery\",\"lexes\":{discovery.lexes}}}\n")
 }
 
 // Run the linked program `executable` of `file` with `program_args`, and
@@ -4255,7 +4270,8 @@ jet_cli_main: fn(args: [String]) {
     if (cli_sys.get(ENV_JET_ICE_SELF_TEST) ?? "") == "1" {
         jet_cli_finish(jet_cli_ice("ICE self-test triggered by JET_ICE_SELF_TEST"))
     }
-    plan: jet_cli_front(args)
+    discovery := WorkspaceDeclarationCache.new()
+    plan: jet_cli_front(args, discovery)
     recording := JetCLICheckRecording?{None}
     if jet_cli_check_receipt_begin(args, plan) == {
         .Replay(replayed) -> { jet_cli_finish(replayed) }
@@ -4265,7 +4281,7 @@ jet_cli_main: fn(args: [String]) {
     // A compile's load window opens here, so measuring it waits for nothing
     // (Request.jet jet_cli_default_threads).
     if compiles -> jet_cli_load_start()
-    done: if compiles -> jet_cli_compile_on_worker(plan, recording) else -> jet_cli_execute(plan)
+    done: if compiles -> jet_cli_compile_on_worker(plan, discovery, recording) else -> jet_cli_execute(plan)
     output: jet_cli_json_outcome(done.failure != None && jet_cli_settled_json(args), done)
     // A check that ends here (refused before its compile) is still recorded.
     if recording == .Val(claimed) {
@@ -4288,7 +4304,7 @@ jet_cli_main: fn(args: [String]) {
 // file; the worker's task traces as the trace's first lane.
 JET_CLI_COMPILE_STACK_BYTES: 201326592
 
-jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
+jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, discovery: &WorkspaceDeclarationCache, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
     trace_sink: jet_cli_trace_sink()
     steps := [JetCLIRunStep]{}
     task.group compile_stack(stack: JET_CLI_COMPILE_STACK_BYTES) {
@@ -4301,7 +4317,7 @@ jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, recording: JetCLICheckRecordin
         steps.push(step)
     }
     step := steps.pop() ?? panic("the compile thread lost its step")
-    jet_cli_run_step(step)
+    jet_cli_run_step(step, discovery)
 }
 
 // A compiling plan, on its worker (jet_cli_compile_on_worker): `jet run`
@@ -4342,8 +4358,9 @@ jet_cli_plan_compiles: fn(plan: JetCLIPlan) -> Bool Never! {
 jet_cli_locked_build_host: fn(check: [String], build: [String]) -> JetDriverVerbOutput {
     checked: jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "build --locked", check)
     if checked.exit_code != 0 -> return checked
-    plan: jet_cli_locked_plan(jet_cli_front(build))
-    if jet_cli_plan_compiles(plan) -> return jet_cli_compile_on_worker(plan)
+    discovery := WorkspaceDeclarationCache.new()
+    plan: jet_cli_locked_plan(jet_cli_front(build, discovery))
+    if jet_cli_plan_compiles(plan) -> return jet_cli_compile_on_worker(plan, discovery)
     jet_cli_execute(plan)
 }
 
@@ -4401,7 +4418,8 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         .LockedBuild(check, build) -> { output = jet_cli_locked_build_host(check, build) }
         .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) -> {
             jet_cli_write_notice(notice)
-            output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink))
+            discovery := WorkspaceDeclarationCache.new()
+            output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink), discovery)
         }
         .NativeSource(file, level, run, program_args, color) -> {
             output = jet_cli_native_source(file, level, run, program_args, color)
@@ -4670,7 +4688,8 @@ jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], 
 // Core/Web/Web.jet __app_listen), under `--json` JET_RUN_JSON, and `port`,
 // the dev server's (JET_DEV_PORT).
 jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool, json: Bool) -> JetCLIDevChild {
-    vars := jet_cli_production_receipt_env(file, program_args)
+    discovery := WorkspaceDeclarationCache.new()
+    vars := jet_cli_production_receipt_env(discovery, file, program_args)
     vars.push(JetCLIEnvVar{name: ENV_JET_DEV, value: "1"})
     if json -> vars.push(JetCLIEnvVar{name: ENV_JET_RUN_JSON, value: "1"})
     if port == .Val(number) {
