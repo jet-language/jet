@@ -5808,7 +5808,10 @@ so such a method that uses the `Browser` effect is E2824
 in to the web partition, a function the partition places in JS runs in the
 page, so one that reaches a server resource (`DB` or `Secret`) is E2823
 (`jet.BrowserCodeReachesServerResource`), at the function where the page
-first reaches it: the one whose own JS callees reach none.
+first reaches it: the one whose own JS callees reach none. A function uses an
+effect when its body or its written row holds it, or when it calls a
+function that does; a call through a closure or another open-world call
+uses none here.
 
 The app graph is the program's one client-safe description: its services,
 its screens and how it works offline. `app.new(title)` starts it, and each

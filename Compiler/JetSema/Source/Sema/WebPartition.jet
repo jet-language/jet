@@ -9,15 +9,16 @@
 // (E-WEB-TARGET-BROWSER), and a call must stay in its bucket unless it is the
 // JS-to-`#Export(wasm)` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
 // onto each FnBody (`web_bucket`) and, once the program opts in, why it was
-// chosen (`web_reason`). The same rows and edges place code at the app
-// boundary (sema_web_placement_check): JS code reaches no server resource
-// (E2823), and a method the server runs uses no `Browser` (E2824).
+// chosen (`web_reason`). The same edges place code at the app boundary
+// (sema_web_placement_check): JS code reaches no server resource (E2823), and
+// a method the server runs uses no `Browser` (E2824).
 use jet_foundation.[CompilerThreads, Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, diagnostic_registry_row, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
 // `params` holds a `#Export(wasm)` signature's parameter types, the only
-// ones checked; any other function's is empty.
+// ones checked; any other function's is empty. `declared` says which placed
+// roots (sema_web_placed_root) its written effect row holds.
 SemaWebMeta: struct {
     key: String
     name: String
@@ -29,6 +30,7 @@ SemaWebMeta: struct {
     slot: Int
     row: Int
     registration: Int
+    declared: [Bool]
 }
 
 // The struct and enum declarations of every module, the first of each name,
@@ -74,10 +76,16 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
     buckets := [WebBucket]{}
     reasons := [String]{}
     any_js := false
+    // A method the server runs, which sema_web_placement_check checks in any
+    // program.
+    any_server := false
     loop meta in metas {
         browser: sema_web_uses_browser(modules, meta)
         bucket: sema_web_bucket(meta, browser: browser)
         if bucket == .JS -> any_js = true
+        if meta.row >= 0 && (modules[meta.slot].functions[meta.row].endpoint != "" || modules[meta.slot].functions[meta.row].system_run != "") {
+            any_server = true
+        }
         buckets.push(bucket)
         if active -> reasons.push(sema_web_bucket_reason(meta, browser: browser))
     }
@@ -85,10 +93,11 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
     // caller's call edges as metas, resolved once for the closure and the
     // crossing check: callees[callee_first[at]..<callee_first[at + 1]].
     // Only a JS bucket moves another along an edge, so a program with none
-    // that doesn't opt in to the checks resolves no edge.
+    // that doesn't opt in to the checks and runs no method on the server
+    // resolves no edge.
     callee_first := [Int]{}
     callees := [Int]{}
-    if any_js || active {
+    if any_js || active || any_server {
         keys := name_table_sized(64)
         meta_of := [Int]{-1}
         loop at in 0..<metas.len() {
@@ -128,7 +137,7 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
             modules[metas[at].slot].functions[metas[at].row].web_reason = reasons[at].copy()
         }
     }
-    if any_js || active {
+    if any_js || active || any_server {
         sema_web_placement_check(modules, graph, metas, buckets, callee_first, callees, active, diagnostics)
     }
     if !active {
@@ -176,14 +185,33 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
 // The resources only the server has: code that reaches one runs there.
 SEMA_WEB_SERVER_RESOURCES: [String]{"DB", "Secret"}
 
+// The effect roots placed at the app boundary, by index: the page's
+// `Browser` first, then each of SEMA_WEB_SERVER_RESOURCES.
+sema_web_placed_root: fn(index: Int) -> String Never! {
+    if index == 0 -> return "Browser"
+    SEMA_WEB_SERVER_RESOURCES[index - 1]
+}
+
+sema_web_placed_root_count: fn() -> Int Never! { SEMA_WEB_SERVER_RESOURCES.len() + 1 }
+
 // Placement at the app boundary, over the partition's buckets and call
 // edges. Code in JS runs in the page, so in a program that opts in, a JS
 // function outside Core that reaches a server resource is E2823, reported
 // where the page first reaches it: at the function no JS callee of which
 // reaches one itself. A method the server runs (an endpoint, a job, a
 // schedule, a webhook or its signing key) can't use the `Browser` effect,
-// which only the page has: E2824, in any program.
+// which only the page has: E2824, in any program. Both read what a body
+// uses (sema_web_reach), not its solved row, which also holds every root
+// for an open-world call such as a closure parameter's.
 sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, metas: [SemaWebMeta], buckets: [WebBucket], callee_first: [Int], callees: [Int], active: Bool, diagnostics: &[Diagnostic]) Never! {
+    callers: sema_web_callers(metas.len(), callee_first, callees)
+    // What each meta's function reaches, by root: always the page's, and the
+    // server's in a program that opts in.
+    reaches := [[Bool]]{}
+    loop index in 0..<sema_web_placed_root_count() {
+        if index > 0 && !active -> break
+        reaches.push(sema_web_reach(modules, metas, callers, index))
+    }
     // The server resource each meta's function reaches when it is JS code
     // outside Core of a program that opts in; "" for any other.
     reached := [String]{}
@@ -191,9 +219,8 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         meta: metas[at]
         found := ""
         if active && meta.row >= 0 && buckets[at] == .JS && !module_is_core(graph.modules[meta.registration].module_identity) {
-            solved: modules[meta.slot].functions[meta.row].effects.solved
-            loop resource in SEMA_WEB_SERVER_RESOURCES {
-                if sema_web_has_root(solved, resource) {
+            loop (index, resource) in SEMA_WEB_SERVER_RESOURCES {
+                if reaches[index + 1][at] {
                     found = resource
                     break
                 }
@@ -210,7 +237,7 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         name: sema_app_caller_name(function)
         marker: if function.endpoint != "" -> function.endpoint else -> function.system_run
         found := [Diagnostic]{}
-        if marker != "" && sema_web_has_root(function.effects.solved, "Browser") {
+        if marker != "" && reaches[0][at] {
             entry: diagnostic_registry_row("E2824") ?? panic("E2824 must have a registry row")
             found.push(sema_error("E2824", meta.name_span, entry.what.replace("{{method}}", name).replace("{{marker}}", marker), entry.why, entry.fix.replace("{{method}}", name)))
         } else if reached[at] != "" {
@@ -229,6 +256,55 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         sema_attach_diagnostic_source_locations(found, 0, graph.modules[meta.registration].source_segments)
         loop diagnostic in found -> diagnostics.push(diagnostic)
     }
+}
+
+// Each meta's callers, the call edges `callee_first`/`callees` reversed:
+// callees[first[at]..<first[at + 1]] are the metas that call meta `at`.
+sema_web_callers: fn(count: Int, callee_first: [Int], callees: [Int]) -> SemaWebEdges Never! {
+    first := [Int]{}
+    loop _ in 0..<count + 1 -> first.push(0)
+    loop callee in callees -> first[callee + 1] = first[callee + 1] + 1
+    loop at in 0..<count -> first[at + 1] = first[at + 1] + first[at]
+    slot := [Int]{}
+    loop at in 0..<count -> slot.push(first[at])
+    callers := [Int]{}
+    loop _ in callees -> callers.push(0)
+    loop caller in 0..<count {
+        loop edge in callee_first[caller]..<callee_first[caller + 1] {
+            callee: callees[edge]
+            callers[slot[callee]] = caller
+            slot[callee] = slot[callee] + 1
+        }
+    }
+    SemaWebEdges{first: first.move(), callees: callers.move()}
+}
+
+// Which metas' functions use the placed root at `index`
+// (sema_web_placed_root): one whose own body or written row holds it, and
+// every function that calls one. An open-world call (a closure, an extern
+// with no row) uses no effect here, although the solved row holds every root
+// for one.
+sema_web_reach: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta], callers: SemaWebEdges, index: Int) -> [Bool] Never! {
+    root: sema_web_placed_root(index)
+    reached := [Bool]{}
+    pending := [Int]{}
+    loop (at, meta) in metas {
+        own: meta.declared[index] || (meta.row >= 0 && sema_web_has_root(modules[meta.slot].functions[meta.row].effects.direct, root))
+        reached.push(own)
+        if own -> pending.push(at)
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        callee: pending[cursor]
+        cursor += 1
+        loop edge in callers.first[callee]..<callers.first[callee + 1] {
+            caller: callers.callees[edge]
+            if reached[caller] -> next
+            reached[caller] = true
+            pending.push(caller)
+        }
+    }
+    reached
 }
 
 // The fewest call edges worth a compiler thread of their own in
@@ -475,7 +551,17 @@ sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, modu
         loop param in function.params -> params.push(param.ty)
     }
     ceiling: sema_web_ceiling_or(module_ceiling, file_ceiling)
-    metas.push(SemaWebMeta{key: key, name: name, name_span: function.name_span, marker: function.web_marker, ceiling: ceiling, params: params, ret: function.return_type, slot: module_index, row: row, registration: registration})
+    // Which placed roots (sema_web_placed_root) its written row holds.
+    declared := (loop _ in 0..<sema_web_placed_root_count() -> false)
+    if function.declared_effects == .Val(entries) {
+        loop entry in entries {
+            loop index in 0..<declared.len() {
+                root: sema_web_placed_root(index)
+                if entry.name == root || entry.name.starts_with("{root}.") -> declared[index] = true
+            }
+        }
+    }
+    metas.push(SemaWebMeta{key: key, name: name, name_span: function.name_span, marker: function.web_marker, ceiling: ceiling, params: params, ret: function.return_type, slot: module_index, row: row, registration: registration, declared: declared.move()})
 }
 
 sema_web_ceiling_or: fn(first: WebBucket?, second: WebBucket?) -> WebBucket? Never! {
