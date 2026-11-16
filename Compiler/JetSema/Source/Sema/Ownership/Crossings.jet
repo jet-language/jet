@@ -6,7 +6,6 @@ use jet_foundation.[
     Expr,
     Span,
     TCapture,
-    TDeclarationOwnership,
     TGenericParam,
     Type,
     core_enum_payload_variants,
@@ -117,22 +116,6 @@ sema_ownership_crossing_type_leaf: fn(name: String) -> String Never! {
     parts = name.split(".").to_list()
     if parts.len() > 1 -> return parts[parts.len() - 1]
     name.copy()
-}
-
-sema_ownership_crossing_core_builtin: fn(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    actual_name := if ty == {
-        .Named(actual) | .Apply(actual, _) -> actual
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
-    }
-    if actual_name != name -> return false
-    if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) != None {
-            return false
-        }
-        owner: sema_registration_core_builtin_owner(graph, name) ?? return false
-        return owner.ownership == TDeclarationOwnership.Owned
-    }
-    false
 }
 
 sema_ownership_crossing_intrinsic_apply: fn(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, allow_without_nominal: Bool) -> Bool Never! {
@@ -367,7 +350,7 @@ sema_ownership_crossing_type_inner: fn(ty: Type, crossing: SemaSendCrossing, clo
             sema_ownership_crossing_named_type(ty, name, crossing, strict_callable, cell_only, environment, program, context, walk)
         }
         .Apply(name, args) -> {
-            if sema_ownership_crossing_core_builtin(ty, "Task", environment, program) || sema_ownership_crossing_core_builtin(ty, "Receiver", environment, program) || sema_ownership_crossing_core_builtin(ty, "Sender", environment, program) {
+            if sema_type_is_builtin_handle(ty, "Task") || sema_type_is_builtin_handle(ty, "Receiver") || sema_type_is_builtin_handle(ty, "Sender") {
                 if cell_only -> return None
                 return sema_ownership_crossing_stored_types(args, crossing, strict_callable, cell_only, environment, program, context, walk)
             }

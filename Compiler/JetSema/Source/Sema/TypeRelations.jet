@@ -1955,6 +1955,21 @@ sema_type_graph_base_name: fn(ty: Type) -> String? {
     }
 }
 
+// Whether the checked type `ty` is the builtin handle type `name`: one of
+// `Task`, `Receiver` and `Sender` (symbol_builtin), which no module declares.
+// The spelling is its owner: sema spells every resolved source nominal
+// `module::Leaf` (sema_registration_nominal_spelling), so a program's own
+// `Task` or `Task<T>`, local, aliased or imported, is never spelled bare, and
+// a bare `Task` is the handle. This never looks `name` up in a caller's
+// scope, where a program type of that name would answer.
+sema_type_is_builtin_handle: fn(ty: Type, name: String) -> Bool Never! {
+    if ty == {
+        .Named(actual) | .Apply(actual, _) -> actual == name && symbol_builtin(SymbolKind.Type, name) != None
+        .Tagged(_, inner) -> sema_type_is_builtin_handle(inner, name)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
 // The registered nominal row `actual` names from `caller_module_identity`.
 sema_type_resolve_nominal_row: fn(graph: SemaRegistrationGraph, actual: Type, caller_module_identity: ModuleID) -> SemaRegistrationRowRef? {
     sema_type_resolve_nominal_row_at(graph, actual, sema_type_module_row(graph, caller_module_identity))

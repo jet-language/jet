@@ -23,7 +23,6 @@ use {
         TBranchClass,
         TCapture,
         TCaptureFacts,
-        TDeclarationOwnership,
         TEffectFacts,
         TEffectSpan,
         TFailureCarrier,
@@ -1102,17 +1101,6 @@ sema_taskgroup_task_payload: fn(ty: Type) -> Type? {
     }
 }
 
-// The core `Task<T>` handle, not a user type that shadows the name.
-sema_taskgroup_is_canonical_task: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None {
-            return false
-        }
-        owner: sema_registration_core_builtin_owner(graph, "Task") ?? return false
-        return owner.ownership == TDeclarationOwnership.Owned
-    } else { return false }
-}
-
 // `Task<T>.join()` and `.detach()` consume the handle.
 // join returns `T TaskFailure!` and blocks (`Time.Wait`). The element T is
 // retained even when it is itself an outcome; only the task's wait failure
@@ -1122,7 +1110,7 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     payload: sema_taskgroup_task_payload(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_taskgroup_is_canonical_task(receiver_value.ty, environment, program) {
+    if !sema_type_is_builtin_handle(receiver_value.ty, "Task") {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     // (Rust builtin `Task.detach`): a task whose spawn captured a
@@ -1162,7 +1150,7 @@ sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, met
         else -> THandleOp?{None}
     }
     operation: selected ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if sema_taskgroup_task_payload(receiver_value.ty) == None || !sema_taskgroup_is_canonical_task(receiver_value.ty, environment, program) {
+    if sema_taskgroup_task_payload(receiver_value.ty) == None || !sema_type_is_builtin_handle(receiver_value.ty, "Task") {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     params := [SemaCallParam]{}
