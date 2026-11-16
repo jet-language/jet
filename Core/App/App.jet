@@ -1655,7 +1655,7 @@ priv(package) callers: module {
 // a call that rolls back drops its jobs with its writes. Each run of a job
 // carries its key as its delivery, so a store that has run the job drops a
 // second run of it.
-CallJoin: struct {
+priv CallJoin: struct {
     // Commits (true) or rolls back (false) one store's transaction; false
     // when it couldn't do as asked.
     end: fn(Bool) -[]> Bool Never!
@@ -1669,7 +1669,7 @@ CallJoin: struct {
 // serving server takes the row (`take`) and runs the job again, as when the
 // server that ran it stopped. It also keeps the replies of calls that
 // carried a request key (`answered`).
-CallOutbox: struct {
+priv CallOutbox: struct {
     // Names the store among the open ones: the database file's path, or
     // one of its own for an in-memory database.
     store: String
@@ -1702,7 +1702,7 @@ CallOutbox: struct {
 
 // A row a server took from a store's outbox: its job's key, name and
 // encoded arguments, and the runs the job made so far, each failed.
-CallQueued: struct {
+priv CallQueued: struct {
     key: String
     name: String
     args: String
@@ -1711,14 +1711,14 @@ CallQueued: struct {
 
 // The function that decodes a job's arguments and runs it, which replies
 // `{"err":...}` when the job failed. Copies share the one function.
-CallJobCall: struct {
+priv CallJobCall: struct {
     call: fn(RemoteArgs) -> String [FieldError]!
 }
 
 // A job a call queued: its name (`<service module>.<Service>.<method>`), its
 // arguments as one encoded JSON array, the runs it gets after a first that
 // fails, and the function that runs it.
-CallJob: struct {
+priv CallJob: struct {
     name: String
     args: String
     retries: Int
@@ -1729,7 +1729,7 @@ CallJob: struct {
 // time it is delivered again, and the second (since the Unix epoch) the
 // server received it.
 #Equatable
-CallDelivery: struct {
+priv CallDelivery: struct {
     id: String
     at: Int
 }
@@ -1738,7 +1738,7 @@ CallDelivery: struct {
 // module>.<Service>.<method>`) and the second (since the Unix epoch) it was
 // due.
 #Equatable
-CallTick: struct {
+priv CallTick: struct {
     schedule: String
     due: Int
 }
@@ -1748,13 +1748,13 @@ CallTick: struct {
 // call again, and the second (since the Unix epoch) the server received it.
 // The account scopes the key, so one account's key never answers another's.
 #Equatable
-CallRequest: struct {
+priv CallRequest: struct {
     account: String
     key: String
     at: Int
 }
 
-CallRun: struct {
+priv CallRun: struct {
     task: TaskID
     id: Int
     joins: [CallJoin]
@@ -1767,12 +1767,12 @@ CallRun: struct {
     jobs: [CallJob]
 }
 
-CallRuns: struct {
+priv CallRuns: struct {
     runs: [CallRun]
     made: Int
 }
 
-CALLS: Shared{CallRuns{runs: [CallRun]{}, made: 0}}
+priv CALLS: Shared{CallRuns{runs: [CallRun]{}, made: 0}}
 
 priv(package) transactions: module {
     // The times a call runs, in all, while a busy store refuses it. Each

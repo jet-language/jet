@@ -5758,7 +5758,12 @@ store already ran is dropped there, and the job's row is deleted. A job is
 therefore run at least once, and its writes to stores happen once; other
 effects of a job method, such as a message it sends, should be safe to
 repeat. A call that used no store, and code outside a call, run the job at
-once without keeping it. A mounted service's job method takes read-only
+once without keeping it. Jobs are kept only in a core.db store's outbox:
+core.app has no public job-store slot, and the calls an outbox joins and the
+hook it joins them by are Core's own, so no app code can weaken the
+contract. Every engine core.db opens keeps it, a database file or an
+in-memory database; an in-memory database's jobs last as long as the rows
+that queued them. A mounted service's job method takes read-only
 `self`, a concrete signature and parameters whose types derive `Encode` and
 `Decode`; anything else is E2805 (`jet.InvalidRoute`) at its marker.
 

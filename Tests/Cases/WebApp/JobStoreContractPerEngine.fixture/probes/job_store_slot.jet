@@ -1,0 +1,10 @@
+// App code that tries to keep a call's jobs somewhere of its own: core.app
+// has no public job-store slot, so neither the calls a store's outbox joins
+// nor the hook it joins them by can be named.
+use app
+
+run: fn() {
+    held: app.CALLS.guard_read()
+    print("{held.value.made}")
+    print("{app.transactions.current() == None}")
+}
