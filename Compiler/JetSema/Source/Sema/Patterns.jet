@@ -186,14 +186,9 @@ sema_pattern_core_payload: fn(owner: String, variant: String) -> [Type]? {
         }
     }
     if owner == {
-        // The canonical twelve generated payload rows.
-        "DataEvent" -> core_enum_variant_payload(owner, variant)
-        "Key" -> if variant == {
-            "Char" | "Ctrl" -> Val([Type.Char])
-            "F" -> Val([Type.Int])
-            "Enter" | "Escape" | "Backspace" | "Tab" | "Delete" | "Up" | "Down" | "Left" | "Right" | "Unknown" -> Val([Type]{})
-            else -> None
-        }
+        // The canonical twelve DataEvent payloads and Key's cases are the
+        // generated payload rows.
+        "DataEvent" | "Key" -> core_enum_variant_payload(owner, variant)
         else -> None
     }
 }

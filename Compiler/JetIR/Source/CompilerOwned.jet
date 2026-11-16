@@ -397,7 +397,7 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "RemoveBy", variants: [String]{"Val", "Slot"}},
     {name: "TaskPauseMode", variants: [String]{"WaitPoints", "CheckLoops"}},
     {name: "IOError", variants: [String]{"InvalidInput", "NotFound", "PermissionDenied", "TimedOut", "Cancelled", "Closed", "Protocol", "Other", "ResourceLimit", "AlreadyExists", "Unsupported"}},
-    {name: "Key", variants: [String]{"Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Up", "Down", "Left", "Right", "F", "Ctrl", "Unknown"}},
+    {name: "Key", variants: [String]{"Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Insert", "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown", "Shift", "Control", "Alt", "Super", "CapsLock", "F", "Ctrl", "Unknown"}},
     {name: "DurationUnit", variants: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}},
     {name: "Dyn", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}},
     {name: "DataEvent", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"}},
@@ -481,14 +481,9 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         }
         return ir_compiler_owned_single(Type.Named{name: "IOContext"})
     }
-    if name == "Key" {
-        if variant == "Char" || variant == "Ctrl" -> return ir_compiler_owned_single(Type.Char)
-        if variant == "F" -> return ir_compiler_owned_single(Type.Int)
-        return IRCompilerOwnedPayload.Unit
-    }
-    // The canonical twelve DataEvent payloads are the generated Core payload
-    // rows (data_event_payload), as are a reflected PreparedValue's.
-    if name == "DataEvent" || name == "PreparedValue" {
+    // The canonical twelve DataEvent payloads and Key's cases are the Core
+    // payload rows (data_event_payload), as are a reflected PreparedValue's.
+    if name == "DataEvent" || name == "Key" || name == "PreparedValue" {
         payload: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
         if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])
         return IRCompilerOwnedPayload.Unit
