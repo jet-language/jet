@@ -1144,7 +1144,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
             if trace_sink == .Val(sink) {
                 sink.progress("counters.native.link.bytes", bound.executable.tail_at + bound.executable.tail.len(), -1)
             }
-            return JetCLINativeLinked.Image{executable: jet_cli_native_with_command(bound.executable, result.command_record)}
+            return JetCLINativeLinked.Image{executable: jet_cli_native_with_command(bound.executable.move(), result.command_record)}
         }
         // The image moved into the bind; the full link reads the pack.
         runtime_path = jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_PACK_FILE)
