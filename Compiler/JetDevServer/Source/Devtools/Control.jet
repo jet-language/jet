@@ -18,9 +18,7 @@ JetDevtoolsDatabaseExplainRequest: struct {
     statement_identity: String
     timeout_ms: Int
     max_rows: Int
-}
 
-impl JetDevtoolsDatabaseExplainRequest {
     new: fn(&&session_id: String, &&request_id: String, &&statement_identity: String, timeout_ms: Int, max_rows: Int) -> JetDevtoolsDatabaseExplainRequest Err! {
         request: JetDevtoolsDatabaseExplainRequest{session_id: session_id.move(), request_id: request_id.move(), statement_identity: statement_identity.move(), timeout_ms: timeout_ms, max_rows: max_rows}
         request.validate()
@@ -45,9 +43,7 @@ JetDevtoolsDBPlanRow: struct {
     id: String
     parent: String?
     detail: String
-}
 
-impl JetDevtoolsDBPlanRow {
     new: fn(&&id: String, &&parent: String?, &&detail: String) -> JetDevtoolsDBPlanRow Err! {
         row: JetDevtoolsDBPlanRow{id: id.move(), parent: parent.move(), detail: detail.move()}
         row.validate()
@@ -77,9 +73,7 @@ JetDevtoolsDatabaseExplainResult: struct {
     plan_rows: [JetDevtoolsDBPlanRow]
     error_code: String?
     error_message: String?
-}
 
-impl JetDevtoolsDatabaseExplainResult {
     new: fn(&&session_id: String, &&request_id: String, &&statement_identity: String, &&status: String, elapsed_ns: Int, truncated: Bool, row_count: Int, &&plan_rows: [JetDevtoolsDBPlanRow], &&error_code: String?, &&error_message: String?) -> JetDevtoolsDatabaseExplainResult Err! {
         if plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
         result: JetDevtoolsDatabaseExplainResult{
@@ -173,9 +167,7 @@ JetDevtoolsGameControlRequest: struct {
     required_authority: String?
     frame_id: Int?
     budget: Int?
-}
 
-impl JetDevtoolsGameControlRequest {
     new: fn(&&session_id: String, &&request_id: String, kind: JetDevtoolsGameControlKind) -> JetDevtoolsGameControlRequest Err! {
         request: JetDevtoolsGameControlRequest{
             session_id: session_id.move(), request_id: request_id.move(), kind: kind,
@@ -254,9 +246,7 @@ JetDevtoolsProjectRebuildRequest: struct {
     session_id: String
     request_id: String
     expected_revision: String
-}
 
-impl JetDevtoolsProjectRebuildRequest {
     new: fn(&&session_id: String, &&request_id: String, &&expected_revision: String) -> JetDevtoolsProjectRebuildRequest Err! {
         request: JetDevtoolsProjectRebuildRequest{session_id: session_id.move(), request_id: request_id.move(), expected_revision: expected_revision.move()}
         request.validate()
@@ -322,9 +312,7 @@ JetDevtoolsCommandReceipt: struct {
     kind: String
     status: String
     error: String?
-}
 
-impl JetDevtoolsCommandReceipt {
     validate: fn(self) Err! {
         devtools_control_text(self.session_id, "command receipt session_id")
         devtools_control_text(self.request_id, "command receipt request_id")
@@ -346,9 +334,7 @@ JetDevtoolsCommandQueue: struct {
     command_list: [JetDevtoolsCommand]
     receipt_list: [JetDevtoolsCommandReceipt]
     next_receipt_sequence: Int
-}
 
-impl JetDevtoolsCommandQueue {
     new: fn(&&session_id: String) -> JetDevtoolsCommandQueue Never! {
         JetDevtoolsCommandQueue{session_id: session_id.move(), command_list: [JetDevtoolsCommand]{}, receipt_list: [JetDevtoolsCommandReceipt]{}, next_receipt_sequence: 1}
     }
@@ -440,9 +426,7 @@ JetDevtoolsCommandEnvelope: struct {
     session_id: String
     started_at_ms: Int
     command_list: [JetDevtoolsCommand]
-}
 
-impl JetDevtoolsCommandEnvelope {
     new: fn(&&session_id: String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Never! {
         JetDevtoolsCommandEnvelope{session_id: session_id.move(), started_at_ms: started_at_ms, command_list: [JetDevtoolsCommand]{}}
     }
@@ -479,9 +463,7 @@ impl JetDevtoolsCommandEnvelope {
 JetDevtoolsDecodedEnvelope: enum {
     Events(envelope: JetDevtoolsEnvelope)
     Commands(envelope: JetDevtoolsCommandEnvelope)
-}
 
-impl JetDevtoolsDecodedEnvelope {
     validate: fn(self) Err! {
         if self == {
             .Events(envelope) -> { _: envelope.serialize() }

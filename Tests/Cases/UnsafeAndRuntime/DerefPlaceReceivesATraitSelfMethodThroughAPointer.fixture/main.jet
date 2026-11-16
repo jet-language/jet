@@ -4,17 +4,17 @@ use core.mem
 
 Counter: struct {
     n: Int
+
+    impl Bumps {
+        bump: fn(&self, by: Int) -> Int {
+            self.n += by
+            self.n
+        }
+    }
 }
 
 Bumps: trait {
     bump: fn(&self, by: Int) -> Int
-}
-
-impl Counter.Bumps {
-    bump: fn(&self, by: Int) -> Int {
-        self.n += by
-        self.n
-    }
 }
 
 bump_at: fn<A: Bumps>(address: Int, by: Int) -> Int {

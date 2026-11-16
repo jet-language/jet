@@ -7,32 +7,32 @@ RootErr: enum {
 #Error
 LeftErr: enum {
     One
+
+    impl From(RootErr) {
+        from: fn(error: RootErr) -> LeftErr { LeftErr.One }
+    }
 }
 
 #Error
 RightErr: enum {
     One
+
+    impl From(RootErr) {
+        from: fn(error: RootErr) -> RightErr { RightErr.One }
+    }
 }
 
 #Error
 TargetErr: enum {
     One
-}
 
-impl LeftErr.From(RootErr) {
-    from: fn(error: RootErr) -> LeftErr { LeftErr.One }
-}
+    impl From(LeftErr) {
+        from: fn(error: LeftErr) -> TargetErr { TargetErr.One }
+    }
 
-impl RightErr.From(RootErr) {
-    from: fn(error: RootErr) -> RightErr { RightErr.One }
-}
-
-impl TargetErr.From(LeftErr) {
-    from: fn(error: LeftErr) -> TargetErr { TargetErr.One }
-}
-
-impl TargetErr.From(RightErr) {
-    from: fn(error: RightErr) -> TargetErr { TargetErr.One }
+    impl From(RightErr) {
+        from: fn(error: RightErr) -> TargetErr { TargetErr.One }
+    }
 }
 
 run: fn() {}

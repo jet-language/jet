@@ -56,7 +56,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         app.get(path, fn(_req: HTTPRequest) { Ok(server.response(code, "status {code}")) })
     }
     t: task {
-        loop _ in 0..<(C_PATHS.len() + 1) { app.serve_once(listener) ?? panic("serve failed") }
+        loop _ in 0..<C_PATHS.len() + 1 { app.serve_once(listener) ?? panic("serve failed") }
     }
     loop path in C_PATHS {
         raw: fetch(addr, "GET {path} HTTP/1.1")

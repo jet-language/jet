@@ -1,5 +1,5 @@
 // Typed expression lowering helpers: string format routes, precise builtin
-// keys, and checked numeric bounds.
+// source helpers, and checked numeric bounds.
 use {
     math: core.math
     jet_foundation.[
@@ -19,14 +19,6 @@ ir_string_format_integer: fn(ty: Type) -> Bool Never! {
         .Tagged(_, inner) -> ir_string_format_integer(inner)
         .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
-}
-
-ir_precise_type_key: fn(type_name: String) -> String Never! {
-    if type_name == "Decimal" -> return "decimal"
-    if type_name == "Fraction" -> return "fraction"
-    if type_name == "Complex" -> return "complex"
-    if type_name == "Measurement" -> return "measurement"
-    panic("checked precise builtin has an unregistered numeric type")
 }
 
 ir_precise_source_helper: fn(owner: String, operation: String) -> String? Never! {

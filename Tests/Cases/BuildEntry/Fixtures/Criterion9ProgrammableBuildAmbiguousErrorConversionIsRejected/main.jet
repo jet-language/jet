@@ -1,32 +1,32 @@
 #Error
 BuildLeftError: enum {
     One
+
+    impl From(BuildError) {
+        from: fn(error: BuildError) -> BuildLeftError { return BuildLeftError.One }
+    }
 }
 
 #Error
 BuildRightError: enum {
     One
+
+    impl From(BuildError) {
+        from: fn(error: BuildError) -> BuildRightError { return BuildRightError.One }
+    }
 }
 
 #Error
 BuildTargetError: enum {
     One
-}
 
-impl BuildLeftError.From(BuildError) {
-    from: fn(error: BuildError) -> BuildLeftError { return BuildLeftError.One }
-}
+    impl From(BuildLeftError) {
+        from: fn(error: BuildLeftError) -> BuildTargetError { return BuildTargetError.One }
+    }
 
-impl BuildRightError.From(BuildError) {
-    from: fn(error: BuildError) -> BuildRightError { return BuildRightError.One }
-}
-
-impl BuildTargetError.From(BuildLeftError) {
-    from: fn(error: BuildLeftError) -> BuildTargetError { return BuildTargetError.One }
-}
-
-impl BuildTargetError.From(BuildRightError) {
-    from: fn(error: BuildRightError) -> BuildTargetError { return BuildTargetError.One }
+    impl From(BuildRightError) {
+        from: fn(error: BuildRightError) -> BuildTargetError { return BuildTargetError.One }
+    }
 }
 
 build: fn(b: Build) BuildTargetError! {

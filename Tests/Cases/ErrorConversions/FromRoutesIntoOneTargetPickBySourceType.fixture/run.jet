@@ -15,14 +15,14 @@ ParseErr: struct {
 AppErr: struct {
     code: Int
     origin: String
-}
 
-impl AppErr.From(ReadErr) {
-    from: fn(error: ReadErr) -> AppErr { AppErr{code: error.code, origin: "read"} }
-}
+    impl From(ReadErr) {
+        from: fn(error: ReadErr) -> AppErr { AppErr{code: error.code, origin: "read"} }
+    }
 
-impl AppErr.From(ParseErr) {
-    from: fn(error: ParseErr) -> AppErr { AppErr{code: error.line, origin: "parse"} }
+    impl From(ParseErr) {
+        from: fn(error: ParseErr) -> AppErr { AppErr{code: error.line, origin: "parse"} }
+    }
 }
 
 read: fn(n: Int) -> Int ReadErr! {

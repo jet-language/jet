@@ -2261,8 +2261,9 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             value.methods.push(parser_parse_type_method(state))
             next
         }
+        // A case's markers, or a nested impl's, as a struct member's are.
+        markers: if parser_current_kind(state) == TOKEN_HASH -> parser_parse_variant_markers(state) else -> [Marker]{}
         kind: parser_current_kind(state)
-        markers: if kind == TOKEN_HASH -> parser_parse_variant_markers(state) else -> [Marker]{}
         if {
             kind == TOKEN_KW_IMPL && parser_value_at(state, 1) == "Effect" && parser_kind_at(state, 2) == TOKEN_LBRACE -> {
                 parsed: parser_parse_effect_impl(state, value.name, value.effect_impl != None)

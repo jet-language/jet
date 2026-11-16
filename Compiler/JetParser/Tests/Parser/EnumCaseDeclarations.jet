@@ -54,3 +54,44 @@ Shape: enum { Circle(Float), Empty }
     assert(formatted.contains("Circle(Float)"), formatted)
     assert(!formatted.contains(".Circle") && !formatted.contains(".Empty"), formatted)
 }
+
+#Test("a marker above a nested impl in an enum body is the impl's marker") {
+    program: parser_test_program(
+        `AppErr: enum {
+    File(FileErr)
+
+    #Audited
+    impl From(FileErr) {
+        from: fn(error: FileErr) -> AppErr { AppErr.File(error) }
+    }
+}
+`,
+    )
+    program.items[0] == .Enum(definition) ?? panic("enum")
+    assert_eq(enum_case_test_names(program), "File")
+    assert_eq(definition.trait_impls.len(), 1)
+    assert_eq(definition.trait_impls[0].trait_name, "From")
+    assert_eq(definition.trait_impls[0].markers.len(), 1)
+    assert_eq(definition.trait_impls[0].markers[0].name, "Audited")
+    expected: `AppErr: enum {
+    File(FileErr)
+
+    #Audited
+    impl From(FileErr) {
+        from: fn(error: FileErr) -> AppErr { AppErr.File(error) }
+    }
+}
+`
+    assert_eq(parser_test_stable(expected), expected)
+    assert_eq(
+        parser_test_stable(
+            `AppErr: enum {
+    File(FileErr)
+    #Audited
+    impl From(FileErr) { from: fn(error: FileErr) -> AppErr { AppErr.File(error) } }
+}
+`,
+        ),
+        expected,
+    )
+}

@@ -10,13 +10,13 @@ scalar: fn(cp: Int) -> String {
         }
         cp < 65536 -> {
             raw.push(U8{Int{224} | cp >> 12})
-            raw.push(U8{Int{128} | (cp >> 6) & Int{63}})
+            raw.push(U8{Int{128} | cp >> 6 & Int{63}})
             raw.push(U8{Int{128} | cp & Int{63}})
         }
         else -> {
             raw.push(U8{Int{240} | cp >> 18})
-            raw.push(U8{Int{128} | (cp >> 12) & Int{63}})
-            raw.push(U8{Int{128} | (cp >> 6) & Int{63}})
+            raw.push(U8{Int{128} | cp >> 12 & Int{63}})
+            raw.push(U8{Int{128} | cp >> 6 & Int{63}})
             raw.push(U8{Int{128} | cp & Int{63}})
         }
     }
