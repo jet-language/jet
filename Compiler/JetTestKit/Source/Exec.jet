@@ -285,13 +285,15 @@ kit_exec_prepare: fn(env: KitEnv, cwd: String, scratch: String, overlay: [KitEnv
 }
 
 kit_exec_receipt: fn(receipt: ProcessReceipt, elapsed_ns: Int, input_error: String) -> KitRun {
+    // CPU time is the limit the others leave, so this file never spells that
+    // case: the compiler that builds it may still spell it `CpuTime`.
     limit_hit: if receipt.limit_hit == {
-        .Val(limit) -> if limit == {
-            .WallTime -> "time"
-            .CpuTime -> "cpu"
-            .Memory -> "memory"
-            .OpenFiles -> "open-files"
-            .Output -> "output"
+        .Val(limit) -> if {
+            limit == .WallTime -> "time"
+            limit == .Memory -> "memory"
+            limit == .OpenFiles -> "open-files"
+            limit == .Output -> "output"
+            else -> "cpu"
         }
         .None -> ""
     }

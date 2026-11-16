@@ -3556,7 +3556,8 @@ is **E0606**. `math: module { ... }` is inline and adds the `math` namespace to
 the containing file; it performs no file lookup. The same `module` keyword is
 used by JetOS declarations. The semicolon form always declares a code module,
 and the parser distinguishes braced code and JetOS contributions from their
-contents.
+contents. A struct declared in an inline module prints by its own name:
+`geo.Point{x: 1, y: 2}` prints `Point { x: 1, y: 2 }`.
 
 Qualified access always works. `use math.clamp;` imports one member, and
 `use math.[clamp, lerp];` imports a member group. The `.[ ]` member-list form

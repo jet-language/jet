@@ -11,6 +11,28 @@
     encoding_enum_eq(left, right)
 }
 
+// The runtime constructors of each limit, by its declaration position: the
+// IR renders a limit carried as its variant index through one of these.
+#Export(c) jet_rt_record_new_process_resource_limit_wall_time: fn() -> I64 {
+    encoding_enum_new(PROCESS_RESOURCE_WALL_TIME)
+}
+
+#Export(c) jet_rt_record_new_process_resource_limit_cpu_time: fn() -> I64 {
+    encoding_enum_new(PROCESS_RESOURCE_CPU_TIME)
+}
+
+#Export(c) jet_rt_record_new_process_resource_limit_memory: fn() -> I64 {
+    encoding_enum_new(PROCESS_RESOURCE_MEMORY)
+}
+
+#Export(c) jet_rt_record_new_process_resource_limit_open_files: fn() -> I64 {
+    encoding_enum_new(PROCESS_RESOURCE_OPEN_FILES)
+}
+
+#Export(c) jet_rt_record_new_process_resource_limit_output: fn() -> I64 {
+    encoding_enum_new(PROCESS_RESOURCE_OUTPUT)
+}
+
 #Export(c) jet_rt_handle_clone_process_stream_mode: fn(value: I64) -> I64 {
     encoding_enum_clone(value)
 }
@@ -31,8 +53,8 @@ process_resource_label: fn(target: I64, ordinal: I64, debug: Bool) {
             }
         }
         (ordinal == PROCESS_RESOURCE_CPU_TIME) -> {
-            if debug -> rt_text_push_word(target, I64{28549271803752515}, I64{7}) else {
-                // CpuTime
+            if debug -> rt_text_push_word(target, I64{28549271801647171}, I64{7}) else {
+                // CPUTime
                 rt_text_push_word(target, I64{7308613717771767875}, I64{8})  // CPU time
             }
         }

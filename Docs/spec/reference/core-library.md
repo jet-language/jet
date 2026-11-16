@@ -1299,9 +1299,9 @@ precision), and `created: DateTime?` (None where the file system keeps no
 birth time). `mode` is the permission bits (0o0..0o7777, the domain
 `set_mode` takes); the file type is `kind`. `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
-The compiler-owned `IOOperation` enum describes the operation within this
-failure context. Its annotation is available to vetted Core source, not a new
-application-visible type export; user annotations retain E0119.
+The `IOOperation` enum, declared in `Core/Builtins/Builtins.jet`, describes the
+operation within this failure context. Its annotation is available to vetted
+Core source, not to application code; user annotations retain E0119.
 
 Store-grade contracts (D-CORE-FILEERROR1, D-CORE-FILEOPEN1, D-CORE-FILESTAT1,
 D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1,
@@ -2984,6 +2984,12 @@ implementation does not silently claim a limit that the target cannot provide.
 The macOS backend refuses memory and open-file limits, Windows refuses
 open-file limits, and unsupported targets refuse the corresponding native
 CPU, memory, or open-file requests.
+
+A child or pipeline that runs out of a limit fails with
+`IOError.ResourceLimit(limit)`, and its receipt's `limit_hit` names the same
+limit. `limit` is a `ProcessResourceLimit`, declared in
+`Core/Builtins/Builtins.jet`: `.WallTime`, `.CPUTime`, `.Memory`,
+`.OpenFiles` or `.Output`.
 
 `.cpu_affinity(cpus: [Int])` runs the child only on the listed CPUs: the
 child sets its own affinity before it executes the program, so no

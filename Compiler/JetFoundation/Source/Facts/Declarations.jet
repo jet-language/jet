@@ -176,7 +176,7 @@ TField: struct {
     redact: Bool
 }
 
-// A copy of `CasePayload` in Core/Reflect/Reflect.jet, in its order (the
+// A copy of `CasePayload` in Core/Prelude/Prelude.jet, in its order (the
 // closed-list mirror ledger): edit `CasePayload`, then copy it here.
 TVariantPayload: enum {
     Unit
@@ -231,6 +231,11 @@ TTypeDef: struct {
     // A `#Specified` enum: every case states its number, and a Set of it
     // stored as bits crosses with each case as its own value.
     specified: Bool{false}
+    // The name a value of the type prints by when it is not `name`: a type
+    // lifted from an inline module or a generic-module instance is declared
+    // under a generated name (`M3GeoPoint`) and prints by its source leaf
+    // name (`Point`). "" when the type prints by `name`.
+    shown: String{""}
     kind: TTypeDefKind
 }
 

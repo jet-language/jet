@@ -2823,22 +2823,9 @@ enum_variants: fn(rows: String, cases: String, name: String) -> [String] Generat
     Ok(values)
 }
 
-// `InvalidInput` as `INVALID_INPUT`: an underscore between a lowercase and
-// an uppercase letter, then every letter uppercase.
-constant_case: fn(name: String) -> String Never! {
-    bytes: name.bytes()
-    out := [U8]{}
-    loop index in 0..<bytes.len() {
-        code: Int{bytes[index]}
-        lower: code >= 97 && code <= 122
-        if code >= 65 && code <= 90 && index > 0 {
-            previous: Int{bytes[index - 1]}
-            if previous >= 97 && previous <= 122 -> out.push(U8{95})
-        }
-        out.push(U8{if lower -> code - 32 else -> code})
-    }
-    String.from_bytes(out) ?? panic("constant name {name} is not ASCII")
-}
+// `InvalidInput` as `INVALID_INPUT` and `CPUTime` as `CPU_TIME`: the runtime
+// ABI atom, every letter uppercase.
+constant_case: fn(name: String) -> String Never! { runtime_abi_atom(name).to_upper() }
 
 // The runtime ABI atom of `name`, as Compiler/JetIR/Source/RuntimeRoutes.jet
 // runtime_abi_atom projects it for Lower: `HTTPClient` is `http_client`.
@@ -2963,9 +2950,9 @@ read_host_carriers: fn() -[FS]> String GeneratorError! {
     render_host_carriers(rows, cases)
 }
 
-HOST_CARRIER_FIXTURE: "CoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"InvalidInput\"\nCoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"ResourceLimit\"\nCoreEnumPayloadRow{{enum_name: \"IOOperation\", variant: \"Read\"\nCoreEnumPayloadRow{{enum_name: \"ProcessResourceLimit\", variant: \"CpuTime\"\n"
+HOST_CARRIER_FIXTURE: "CoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"InvalidInput\"\nCoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"ResourceLimit\"\nCoreEnumPayloadRow{{enum_name: \"IOOperation\", variant: \"Read\"\n"
 
-HOST_CARRIER_CASES_FIXTURE: "module core.process exports {{ ProcessStreamMode, TerminalMode }} types {{ ProcessStreamMode:plain(Inherit|Piped), TerminalMode:plain(Raw), TerminalModeX:plain(Cooked) }}\n"
+HOST_CARRIER_CASES_FIXTURE: "module jet_builtins exports {{ ProcessResourceLimit }} types {{ ProcessResourceLimit:plain(CPUTime) }}\nmodule core.process exports {{ ProcessStreamMode, TerminalMode }} types {{ ProcessStreamMode:plain(Inherit|Piped), TerminalMode:plain(Raw), TerminalModeX:plain(Cooked) }}\n"
 
 #Test("host carrier tags are the registry's declaration order, one declaration per helper") {
     text: render_host_carriers(HOST_CARRIER_FIXTURE, HOST_CARRIER_CASES_FIXTURE) ?? panic("carriers did not render: {err.message}")
@@ -3011,6 +2998,7 @@ HOST_CARRIER_CASES_FIXTURE: "module core.process exports {{ ProcessStreamMode, T
         .Err(error) -> assert_eq(error.message, "missing/duplicate TerminalMode enum rows")
     }
     assert_eq(constant_case("PermissionDenied"), "PERMISSION_DENIED")
+    assert_eq(constant_case("CPUTime"), "CPU_TIME")
     assert_eq(runtime_abi_atom("HTTPClient"), "http_client")
     assert_eq(runtime_abi_atom("TimedOut"), "timed_out")
 }

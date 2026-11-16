@@ -44,7 +44,6 @@ use {
         ast_empty_lambda_meta,
         core_enum_cases,
         core_enum_payload_variants,
-        core_enum_variant_labels,
         core_enum_variant_payload,
         core_module_enum_cases,
         core_module_type_leaf,
@@ -1288,12 +1287,12 @@ sema_expression_enum_constructor_signature: fn(path: SemaExpressionEnumPath, typ
 }
 
 // The constructor signature of a payload case of a Core enum with no source
-// declaration, from the generated Core enum rows.
+// declaration, from the generated Core enum rows: one unlabeled slot per row
+// type.
 sema_expression_core_constructor_signature: fn(enum_name: String, variant: String) -> SemaEnumConstructorSignature? {
     params: core_enum_variant_payload(enum_name, variant) ?? return None
     if params.len() == 0 -> return None
-    written: core_enum_variant_labels(enum_name, variant)
-    labels: if written == .Val(rows) -> rows else -> loop _ in params -> ""
+    labels: loop _ in params -> ""
     Val(SemaEnumConstructorSignature{labels: labels, params: params, result: Type.Named{name: enum_name}})
 }
 
@@ -1340,9 +1339,6 @@ sema_expression_core_enum_literal: fn(enum_name: String, display_name: String, v
     if payload_types.len() == 0 && args.len() != 0 {
         diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
         return None
-    }
-    if core_enum_variant_labels(enum_name, variant) == .Val(labels) {
-        return sema_expression_core_enum_named_literal(enum_name, display_name, variant, labels, payload_types, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     sema_expression_core_enum_positional_literal(enum_name, display_name, variant, payload_types, Type.Named{name: enum_name}, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
@@ -1448,81 +1444,6 @@ sema_expression_core_enum_positional_literal: fn(enum_name: String, display_name
 sema_expression_enum_named_positional: fn(owner: String, variant: String, labels: [String], span: Span) -> Diagnostic {
     fields: loop label in labels -> "{label}: …"
     sema_error("E0764", span, "variant `{variant}` needs named payload fields", "`{owner}.{variant}` declares labeled fields, so each value names the field it fills", "write `{owner}.{variant}{{ {fields.join(", ")} }}`")
-}
-
-// A named-payload case of a Core enum without a source declaration
-// (`PluginError.Budget{...}`), checked like a declared enum's named
-// payload (Rust `check_enum_lit`): fields keep their written order and every
-// declared field gets exactly one value.
-sema_expression_core_enum_named_literal: fn(enum_name: String, display_name: String, variant: String, labels: [String], payload_types: [Type], args: [EnumLitArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    supplied := [Bool]{}
-    loop _ in labels -> supplied.push(false)
-    named_values := [TNamedEnumArg]{}
-    failed := false
-    loop arg in args {
-        label := ""
-        payload_expr := Expr.Unit{span: span, id: AST_NODE_GENERATED}
-        if arg == {
-            .Named(name, value) -> {
-                label = name
-                payload_expr = value
-            }
-            .Positional(_) -> {
-                diagnostics.push(sema_expression_enum_named_positional(display_name, variant, labels, span))
-                return None
-            }
-        }
-        found := -1
-        loop (index, declared) in labels {
-            if declared == label {
-                found = index
-                break
-            }
-        }
-        if found < 0 {
-            diagnostics.push(sema_expression_unknown_payload_label(variant, label, labels, args, payload_expr, environment, program))
-            return None
-        }
-        if supplied[found] {
-            diagnostics.push(sema_error("E0105", expr_span(payload_expr), "variant field `{label}` is supplied more than once", "each enum payload field receives one value", "remove the duplicate field"))
-            return None
-        }
-        supplied[found] = true
-        field_ty: payload_types[found]
-        sema_copy_site_check_field(payload_expr, environment, program, scopes, tail_store, context, diagnostics)
-        diagnostic_start: diagnostics.len()
-        checked_value: sema_check_expression(payload_expr, Val(field_ty), environment, program, scopes, state, tail_store, context, diagnostics)
-        if checked_value == None {
-            sema_expression_enum_payload_replace_mismatch(display_name, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
-            failed = true
-            next
-        }
-        checked: checked_value
-        if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) {
-            return None
-        }
-        compatible: sema_expr_expected_assignable(field_ty, checked.ty, environment, program) ?? return None
-        if !compatible {
-            diagnostics.push(sema_expression_enum_payload_mismatch(display_name, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
-            failed = true
-            next
-        }
-        if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, state, tail_store, context, diagnostics) {
-            return None
-        }
-        named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
-    }
-    missing := [String]{}
-    loop (index, was_supplied) in supplied {
-        if !was_supplied -> missing.push(labels[index])
-    }
-    if missing.len() > 0 {
-        diagnostics.push(sema_expression_missing_fields("variant `{variant}`", "every payload field must appear exactly once", missing, span))
-        return None
-    }
-    if failed -> return None
-    value: sema_tree_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Named{fields: named_values}}, span)
-    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 // E0302 for a named payload label `label` that `variant` does not declare,
@@ -2529,15 +2450,7 @@ sema_expression_variant_head: fn(head: Type, environment: SemaScopeEnvironment, 
         if (Int{bytes[separator]}) != 46 -> next
         head_value: SemaExpressionVariantHead{enum_name: foundation_byte_text(bytes, 0, separator), variant: foundation_byte_text(bytes, separator + 1, bytes.len())}
         owner: sema_expression_type_symbol(scopes, environment, program, head_value.enum_name)
-        if owner == .Val(symbol) {
-            if sema_scope_declaration_enum_declares(environment, program, symbol.id, head_value.variant) {
-                return Val(head_value)
-            }
-            if sema_expression_core_export_variants(environment, program, symbol) == None -> next
-        }
-        // A compiler-owned Core enum (`PluginError`) has no declaration; its
-        // named-payload case comes from the generated Core enum payload rows.
-        if core_enum_variant_labels(head_value.enum_name, head_value.variant) != None {
+        if owner == .Val(symbol) && sema_scope_declaration_enum_declares(environment, program, symbol.id, head_value.variant) {
             return Val(head_value)
         }
     }

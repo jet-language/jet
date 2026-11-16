@@ -517,6 +517,10 @@ IRProgram: struct {
     // (ir_trait_key_table, read by ir_trait_key), found once by
     // ir_program_declared.
     trait_keys: IRTraitKeys{IRTraitKeys{keys: [String:Int]{}, held: [Int:Bool]{}}}
+    // The host target's trait implementations that declare no method (an
+    // empty trait's): no function names their owner, so ir_trait_implementers
+    // reads the owner here.
+    empty_impls: [IREmptyImpl]{[IREmptyImpl]{}}
     // The checked source files' bytes and line starts by row, and each
     // path's row: a source location reads the file in place.
     source_bytes: [[U8]]
@@ -604,6 +608,13 @@ IRImplMethod: struct {
     method: String
     trait_short: String
     owner_key: String
+}
+
+// A trait implementation that declares no method: its trait's short name
+// and its owner type.
+IREmptyImpl: struct {
+    trait_short: String
+    owner: Type
 }
 
 // The checked source files (`path` -> text) as rows of bytes and line starts:
@@ -846,15 +857,17 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     loop (key, at) in constant_rows -> constants[key] = at /% 2
     // The Display, Printable, Close and KeyBy implementations of the host
     // target, and the user Comparable ones (a derived Comparable orders
-    // structurally). Every trait implementation of the host target also names
-    // its methods' traits for ir_trait_methods, and every trait
-    // implementation's type, with the first candidate payload key of its
-    // identity, is one of `implementers` (ir_trait_key_table).
+    // structurally). Every trait implementation's type, with the first
+    // candidate payload key of its identity, is one of `implementers`
+    // (ir_trait_key_table). Every trait implementation of the host target
+    // also names its methods' traits for ir_trait_methods, and one that
+    // declares no method names its owner for ir_trait_implementers.
     impl_slots := [String:Int]{}
     impl_traits := [[String]]{}
     impl_methods := [IRImplMethod]{}
     implementers := [(identity: String, first: Int)]{}
-    loop implementation in impls {
+    empty_impls := [IREmptyImpl]{}
+    loop implementation in impls.move() {
         trait_name: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
         if trait_name == "" -> next
         identity := ir_type_identity(type_rows, types, implementation.self_type)
@@ -875,6 +888,9 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
             }
             impl_traits[slot].push(trait_short.copy())
         }
+        if implementation.methods.len() == 0 {
+            empty_impls.push(IREmptyImpl{trait_short: ir_short_name(trait_name), owner: implementation.self_type.move()})
+        }
         method: if trait_short == {
             "Display" -> "display"
             "Printable" -> "show"
@@ -886,7 +902,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         if method == "" -> next
         impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
-    IRProgram{functions: [FnBody]{}, rows: name_rows(), symbols: symbols.move(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, trait_keys: ir_trait_key_table(implementers), source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    IRProgram{functions: [FnBody]{}, rows: name_rows(), symbols: symbols.move(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, trait_keys: ir_trait_key_table(implementers), empty_impls: empty_impls, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,

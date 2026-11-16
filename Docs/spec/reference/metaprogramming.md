@@ -653,10 +653,12 @@ value its box holds: its `type_name` and `path` name the declared type whose
 payload key the box carries. The key is a hash of the type's identity; a type
 whose hash another implementer's key already holds takes its next hash, so no
 two types share a key. A build that adds a module keeps each key unless a type
-it adds held it first. A value of a builtin or
-generic implementer keeps the trait's own names. `fields()` is populated for
-a struct and is empty for a non-struct value. A struct field's `value()`
-lists that struct's own fields, so `.fields()[i].value()` walks a nested value
+it adds held it first. A value of a builtin implementer (`impl Int.Shown`)
+reflects as that builtin: its `type_name` and `path` are both `Int`, as for
+any `Int`. A value of a generic implementer keeps the trait's own names.
+`fields()` is populated for a struct and is empty for a non-struct value. A
+struct field's `value()` lists that struct's own fields, so
+`.fields()[i].value()` walks a nested value
 level by level. A generic reflection value retains the substituted field
 type, as the same example shows for `Box<Int>`.
 

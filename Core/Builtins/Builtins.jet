@@ -156,3 +156,27 @@ ResolveError: struct {
     os_code: Int
     message: String
 }
+
+// The operation an `IOContext` failed in. It stays a payload-free runtime
+// `Copy` enum, and only Core source may name it in an annotation.
+IOOperation: enum {
+    Read
+    Write
+    Flush
+    Connect
+    Accept
+    Close
+    Resolve
+    Codec
+}
+
+// The limit a process or pipeline ran out of, the payload of
+// `IOError.ResourceLimit` and a receipt's `limit_hit`. The runtime builds it
+// by its position (jet.runtime.process).
+ProcessResourceLimit: enum {
+    WallTime
+    CPUTime
+    Memory
+    OpenFiles
+    Output
+}

@@ -17,6 +17,7 @@ use jet_foundation.[
     Type,
     TypeParam,
     core_identity_in_module,
+    type_carrier_identity,
     type_name,
 ]
 
@@ -57,10 +58,10 @@ sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, envir
 
 // The names a reflected value of `ty` carries: its type name and canonical
 // path (sema_call_reflection_row_names, the text `T.reflect().path` reads), then
-// the count of the declared types an erased trait value of `ty` may hold and
-// each one's checked key (TTypeDef.key), type name and path, so the IR names
-// a trait value by the type whose payload key its box holds
-// (ir_trait_reflect_text). Any other type holds none.
+// the count of the types an erased trait value of `ty` may hold and each
+// one's payload identity, type name and path, so the IR names a trait value
+// by the type whose payload key its box holds (ir_trait_reflect_text). Any
+// other type holds none.
 sema_call_reflection_names: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, args: &[TExpr]) {
     names: sema_call_reflection_type_names(ty, environment, program)
     args.push(sema_call_reflection_text(names.type_name, span))
@@ -73,15 +74,29 @@ sema_call_reflection_names: fn(ty: Type, span: Span, environment: SemaScopeEnvir
     }
 }
 
-// Each declared type with an impl of the single trait `bounds` (an
-// `impl Owner.Trait` or an `impl` block in the type's own body), as its
-// checked key, type name and path pushed onto `args`; how many.
+// Each type with an impl of the single trait `bounds` (an `impl
+// Owner.Trait` or an `impl` block in the type's own body), as the identity
+// its payload key hashes, type name and path pushed onto `args`; how many.
+// A declared type's identity is its checked key. A builtin scalar's
+// (`impl Int.Shown`) is its carrier identity, and it reflects under its own
+// spelling (`Int`) for both names, as any value of it does.
 sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: SemaProgramTables, args: &[TExpr]) -> Int {
     graph: program.registration_graph ?? return 0
     holders: sema_call_reflection_trait_holders(graph, bounds) ?? return 0
     rows := [SemaRegistrationRowRef]{}
+    builtins := 0
     loop reference in holders.impls {
-        rows.push(sema_type_resolve_nominal_row_at(graph, graph.modules[reference.module_index].impls[reference.row].target_type, reference.module_index) ?? next)
+        target: graph.modules[reference.module_index].impls[reference.row].target_type
+        if sema_type_resolve_nominal_row_at(graph, target, reference.module_index) == .Val(row) {
+            rows.push(row)
+            next
+        }
+        if sema_type_graph_base_name(target) != None -> next
+        shown: type_name(target)
+        args.push(sema_call_reflection_text(type_carrier_identity(target), span))
+        args.push(sema_call_reflection_text(shown, span))
+        args.push(sema_call_reflection_text(shown, span))
+        builtins += 1
     }
     rows.extend(holders.nominals)
     loop row in rows {
@@ -90,7 +105,7 @@ sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: S
         args.push(sema_call_reflection_text(concrete.type_name, span))
         args.push(sema_call_reflection_text(concrete.path, span))
     }
-    rows.len()
+    builtins + rows.len()
 }
 
 // One level of the tree: the fields of `ty` (sema_call_reflection_field_args),
