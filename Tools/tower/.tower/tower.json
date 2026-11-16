@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 109500,
+    "rev": 109525,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -106632,30 +106632,30 @@
         },
         {
           "n": 3,
-          "text": "Owned, shared-borrowed and exclusive-borrowed iteration have distinct observable contracts: mutating a yielded element through ViewMut updates the original collection, replaced slots drop exactly once, and illegal overlap is refused before execution (D-ITER-BORROW1=A). Proof: `jet test Compiler --profile golden --filter collections/borrowed_iteration` on O0, O1 and O2.",
+          "text": "Owned, shared-borrowed and exclusive-borrowed iteration have distinct observable contracts: mutating a yielded element through ViewMut updates the original collection, replaced slots drop exactly once, and illegal overlap is refused before execution (D-ITER-BORROW1=A). Proof: `jet test Compiler --profile golden --filter Collections/BorrowedIteration` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:16:58.818Z"
+          "at": "2026-11-16T13:07:29.179Z"
         },
         {
           "n": 4,
-          "text": "Chunks and windows state width-zero, remainder, direction, overlap and mutability: non-overlapping mutable chunks update the source, and overlapping mutable windows are never built from ordinary references (D-ITER-SLICEPRODUCERS1=A). Proof: `jet test Compiler --profile golden --filter collections/slice_producers`.",
+          "text": "Chunks and windows state width-zero, remainder, direction, overlap and mutability: non-overlapping mutable chunks update the source, and overlapping mutable windows are never built from ordinary references (D-ITER-SLICEPRODUCERS1=A). Proof: `jet test Compiler --profile golden --filter Collections/SliceProducers`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:17:00.004Z"
+          "at": "2026-11-16T13:07:30.137Z"
         },
         {
           "n": 5,
-          "text": "Borrowed windows and chunks, and text split and lines views, allocate nothing per output where the source storage permits a view, and print their text, not handles. Proof: `jet test Compiler --profile golden --filter collections/borrowed_iteration` with its allocation count on O0, O1 and O2.",
+          "text": "Borrowed windows and chunks, and text split and lines views, allocate nothing per output where the source storage permits a view, and print their text, not handles. Proof: `jet test Compiler --profile golden --filter Collections/BorrowedIteration` with its allocation count on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:17:01.250Z"
+          "at": "2026-11-16T13:07:31.083Z"
         },
         {
           "n": 6,
@@ -106668,12 +106668,12 @@
         },
         {
           "n": 7,
-          "text": "A mapper over owned items moves each move-only item exactly once; a shared view cannot move its items; exclusive-view mutation reaches the original storage; escaping callbacks respect their loans (D-ITER-MAPOWN1=A). Proof: `jet test Compiler --profile golden --filter collections/map_owned_items` and `jet test Compiler --profile ui --filter map_move_from_shared_view`.",
+          "text": "A mapper over owned items moves each move-only item exactly once; a shared view cannot move its items; exclusive-view mutation reaches the original storage; escaping callbacks respect their loans (D-ITER-MAPOWN1=A). Proof: `jet test Compiler --profile golden --filter Collections/MapOwnedItems` and `jet test Compiler --profile ui --filter map_move_from_shared_view`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:17:03.979Z"
+          "at": "2026-11-16T13:07:32.048Z"
         },
         {
           "n": 8,
@@ -106686,57 +106686,57 @@
         },
         {
           "n": 9,
-          "text": "An explicit `[View<T>]` collect is rooted in live storage with no payload copy; temporaries cannot escape, invalidating mutation is refused, and default `to_list` keeps D-MEM-COPYSEM1 copies (D-ITER-VIEWCOLLECT1=A). Proof: `jet test Compiler --profile golden --filter collections/borrowed_collect` and `jet test Compiler --profile ui --filter view_collect_`.",
+          "text": "An explicit `[View<T>]` collect is rooted in live storage with no payload copy; temporaries cannot escape, invalidating mutation is refused, and default `to_list` keeps D-MEM-COPYSEM1 copies (D-ITER-VIEWCOLLECT1=A). Proof: `jet test Compiler --profile golden --filter Collections/BorrowedCollect` and `jet test Compiler --profile ui --filter view_collect_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:17:06.516Z"
+          "at": "2026-11-16T13:07:33.048Z"
         },
         {
           "n": 10,
-          "text": "`s.chars()` lowers as a stream without building a list only when a paired measurement cell (list against stream: wall time and allocations) shows the win (D-CHAR-SCALAR1=A). Proof: the paired cell row in the measurement manifest, and `jet test Compiler --profile golden --filter text/` on O0, O1 and O2. (was #3262 c33)",
+          "text": "`s.chars()` lowers as a stream without building a list only when a paired measurement cell (list against stream: wall time and allocations) shows the win (D-CHAR-SCALAR1=A). Proof: the paired cell row in the measurement manifest, and `jet test Compiler --profile golden --filter Text/` on O0, O1 and O2. (was #3262 c33)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:14:26.615Z"
+          "at": "2026-11-16T13:07:34.022Z"
         },
         {
           "n": 11,
-          "text": "peek never pulls twice and its first side effects are documented; a rejected conditional consume keeps the pending item (or the rejection branch's replacement); an accepted consume advances once with no copy; peeked mutation targets the buffered item, and a loan cannot outlive or overlap a cursor mutation (D-ITER-LOOKAHEAD1=A). Proof: `jet test Compiler --profile golden --filter collections/peekable` and `jet test Compiler --profile ui --filter peek_loan_across_next`. (was #3317 c10)",
+          "text": "peek never pulls twice and its first side effects are documented; a rejected conditional consume keeps the pending item (or the rejection branch's replacement); an accepted consume advances once with no copy; peeked mutation targets the buffered item, and a loan cannot outlive or overlap a cursor mutation (D-ITER-LOOKAHEAD1=A). Proof: `jet test Compiler --profile golden --filter Collections/Peekable` and `jet test Compiler --profile ui --filter peek_loan_across_next`. (was #3317 c10)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:14:27.591Z"
+          "at": "2026-11-16T13:07:34.956Z"
         },
         {
           "n": 12,
-          "text": "Fixed-width group reads keep every value of a short final group (typed partial result, or returned to the cursor), tell too few from too many without overconsuming, and state width zero, move-only values and remainder lifetime (D-ITER-EXACTGROUP1=A). Proof: `jet test Compiler --profile golden --filter collections/read_exact`. (was #3317 c14)",
+          "text": "Fixed-width group reads keep every value of a short final group (typed partial result, or returned to the cursor), tell too few from too many without overconsuming, and state width zero, move-only values and remainder lifetime (D-ITER-EXACTGROUP1=A). Proof: `jet test Compiler --profile golden --filter Collections/ReadExact`. (was #3317 c14)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:14:28.596Z"
+          "at": "2026-11-16T13:07:35.887Z"
         },
         {
           "n": 13,
-          "text": "The unread remainder reflects mixed front and back advancement without copying; a mutable projection is exclusive; `into_remainder` keeps the source lifetime; UTF-8 byte units are kept; opaque and filter sources expose no contiguous remainder (D-ITER-REMAINDER1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_remaining` and `jet test Compiler --profile ui --filter iter_remaining_`. (was #3317 c16)",
+          "text": "The unread remainder reflects mixed front and back advancement without copying; a mutable projection is exclusive; `into_remainder` keeps the source lifetime; UTF-8 byte units are kept; opaque and filter sources expose no contiguous remainder (D-ITER-REMAINDER1=A). Proof: `jet test Compiler --profile golden --filter Collections/IterRemaining` and `jet test Compiler --profile ui --filter iter_remaining_`. (was #3317 c16)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:14:29.617Z"
+          "at": "2026-11-16T13:07:36.971Z"
         },
         {
           "n": 14,
-          "text": "A copied borrowed slice iterator starts at the same position, advances independently and keeps its loan; one-shot and exclusive cursors are not copyable; shared external state stays shared; assigning from an explicit copy has clone_from meaning (D-ITER-COPY1=A). Proof: `jet test Compiler --profile golden --filter collections/iter_copy` and `jet test Compiler --profile ui --filter iter_copy_one_shot`. (was #3317 c17)",
+          "text": "A copied borrowed slice iterator starts at the same position, advances independently and keeps its loan; one-shot and exclusive cursors are not copyable; shared external state stays shared; assigning from an explicit copy has clone_from meaning (D-ITER-COPY1=A). Proof: `jet test Compiler --profile golden --filter Collections/IterCopy` and `jet test Compiler --profile ui --filter iter_copy_one_shot`. (was #3317 c17)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:14:30.569Z"
+          "at": "2026-11-16T13:07:38.148Z"
         }
       ],
       "refs": [],
@@ -106751,7 +106751,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:06.731Z",
-      "updated": "2026-11-16T13:07:27.872Z",
+      "updated": "2026-11-16T13:07:38.148Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -106785,12 +106785,12 @@
         },
         {
           "n": 2,
-          "text": "After ratification, the chosen method does one hash lookup, runs on O0, O1 and O2 from one Core body, has cases under tests/cases/corelib/ and a teaching example of the counter idiom, and core-library.md documents it; no second upsert spelling exists. Proof: `jet test Compiler --profile cases --filter corelib/map_upsert`.",
+          "text": "After ratification, the chosen method does one hash lookup, runs on O0, O1 and O2 from one Core body, has cases under Tests/Cases/CoreLib/ and a teaching example of the counter idiom, and core-library.md documents it; no second upsert spelling exists. Proof: `jet test Compiler --profile cases --filter CoreLib/map_upsert`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:07.715Z"
+          "at": "2026-11-16T13:07:39.209Z"
         }
       ],
       "refs": [],
@@ -106804,8 +106804,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:07.715Z",
-      "updated": "2026-11-15T05:47:02.826Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T13:07:39.209Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0blttm0",
@@ -106828,48 +106828,48 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`unix_ms(now())` equals the epoch milliseconds of the same instant: now and Instant share one identity. Proof: `jet test Compiler --profile cases --filter corelib/time_now_identity`.",
+          "text": "`unix_ms(now())` equals the epoch milliseconds of the same instant: now and Instant share one identity. Proof: `jet test Compiler --profile cases --filter CoreLib/time_now_identity`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:08.645Z"
+          "at": "2026-11-16T13:07:40.217Z"
         },
         {
           "n": 2,
-          "text": "Date and time format patterns have one meaning in formatting and parsing (D-TIME-FORMAT-CANONICAL1=A), driven by one pattern table. Proof: `jet test Compiler --profile golden --filter time/format_patterns` on O0, O1 and O2.",
+          "text": "Date and time format patterns have one meaning in formatting and parsing (D-TIME-FORMAT-CANONICAL1=A), driven by one pattern table. Proof: `jet test Compiler --profile golden --filter Time/FormatPatterns` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:08.645Z"
+          "at": "2026-11-16T13:07:41.186Z"
         },
         {
           "n": 3,
-          "text": "One sleep: `tasks.sleep(ms: Int)` (Core/Tasks/Tasks.jet:270, unit-less, clamps negatives) is deleted, every caller uses `time.sleep(Duration)` (D-CORE-ONE-NAME1=A), and a negative Duration behaves as core-library.md states. Proof: `git grep -n -E '^sleep: fn' -- Core` prints only Core/Time/Time.jet, and `jet test Compiler --profile cases --filter corelib/sleep_negative_duration` passes.",
+          "text": "One sleep: `tasks.sleep(ms: Int)` (Core/Tasks/Tasks.jet:270, unit-less, clamps negatives) is deleted, every caller uses `time.sleep(Duration)` (D-CORE-ONE-NAME1=A), and a negative Duration behaves as core-library.md states. Proof: `git grep -n -E '^sleep: fn' -- Core` prints only Core/Time/Time.jet, and `jet test Compiler --profile cases --filter CoreLib/sleep_negative_duration` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:08.645Z"
+          "at": "2026-11-16T13:07:42.102Z"
         },
         {
           "n": 4,
-          "text": "Time zone and calendar data: a lookup resolves a zone, a DST gap and an overlap resolve as core-library.md states, and a missing zone database is a typed error, not a crash. Proof: `jet test Compiler --profile cases --filter time/zone_data_`.",
+          "text": "Time zone and calendar data: a lookup resolves a zone, a DST gap and an overlap resolve as core-library.md states, and a missing zone database is a typed error, not a crash. Proof: `jet test Compiler --profile cases --filter Time/zone_data_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:08.645Z"
+          "at": "2026-11-16T13:07:43.019Z"
         },
         {
           "n": 5,
-          "text": "UTC leap-second parsing, formatting and ordering live in Core time (23:59:60 is accepted and labelled), and checked Civil and Period methods route through one core.time method identity on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter time/leap_seconds` and its UI snapshots.",
+          "text": "UTC leap-second parsing, formatting and ordering live in Core time (23:59:60 is accepted and labelled), and checked Civil and Period methods route through one core.time method identity on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Time/LeapSeconds` and its UI snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:14:14.772Z"
+          "at": "2026-11-16T13:07:44.005Z"
         }
       ],
       "refs": [],
@@ -106883,8 +106883,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:08.645Z",
-      "updated": "2026-11-15T03:14:14.772Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T13:07:44.005Z",
+      "updatedBy": "Main",
       "criteriaLastN": 5
     },
     {
@@ -106908,30 +106908,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A research note under Docs/research and a ballot settle the library, API and placement for mail and MIME parsing; parsing and formatting stay separate from sending and authentication. Proof: `git ls-files \"Docs/research/*mime*\"` names the note, and the decision list shows the placement ballot.",
+          "text": "A research note under Docs/Research and a ballot settle the library, API and placement for mail and MIME parsing; parsing and formatting stay separate from sending and authentication. Proof: `git ls-files \"Docs/Research/*mime*\"` names the note, and the decision list shows the placement ballot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:47:03.746Z"
+          "at": "2026-11-16T13:07:44.954Z"
         },
         {
           "n": 2,
-          "text": "Mail and MIME parsing handles hostile headers, encodings, size limits and attachment streaming, with no credential or network side effect. Proof: `jet test Compiler --profile cases --filter mime/hostile_`.",
+          "text": "Mail and MIME parsing handles hostile headers, encodings, size limits and attachment streaming, with no credential or network side effect. Proof: `jet test Compiler --profile cases --filter MIME/hostile_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:09.559Z"
+          "at": "2026-11-16T13:07:45.883Z"
         },
         {
           "n": 3,
-          "text": "One canonical quoted-string scanner parses MIME parameters: quoted `;`, escaped quotes, duplicate parameters, unterminated quotes and unknown extensions have explicit outcomes, and HTTP and web use the canonical type. Proof: `jet test Compiler --profile golden --filter net/url_mime`.",
+          "text": "One canonical quoted-string scanner parses MIME parameters: quoted `;`, escaped quotes, duplicate parameters, unterminated quotes and unknown extensions have explicit outcomes, and HTTP and web use the canonical type. Proof: `jet test Compiler --profile golden --filter Net/URLMIME`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:19:45.133Z"
+          "at": "2026-11-16T13:07:46.800Z"
         }
       ],
       "refs": [],
@@ -106945,8 +106945,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:09.559Z",
-      "updated": "2026-11-15T05:47:03.746Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T13:07:46.800Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -106970,57 +106970,57 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`progress` accepts List<T> and Iter<T>, stays lazy until consumed, and reports count and percent when the total is known, with no caller bookkeeping. Proof: `jet test Compiler --profile golden --filter io/progress` on O0, O1 and O2.",
+          "text": "`progress` accepts List<T> and Iter<T>, stays lazy until consumed, and reports count and percent when the total is known, with no caller bookkeeping. Proof: `jet test Compiler --profile golden --filter IO/Progress` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:10.450Z"
+          "at": "2026-11-16T13:07:47.815Z"
         },
         {
           "n": 2,
-          "text": "Counts follow actual source pulls through map, filter, step, dedup, chunk, window, flatten, intersperse, zip, take_while, skip_while, filter_map and try_collect, including natural end, early break, unknown total and a ParseError mid-stream. Proof: `jet test Compiler --profile cases --filter corelib/progress_counts_actual_pulls`.",
+          "text": "Counts follow actual source pulls through map, filter, step, dedup, chunk, window, flatten, intersperse, zip, take_while, skip_while, filter_map and try_collect, including natural end, early break, unknown total and a ParseError mid-stream. Proof: `jet test Compiler --profile cases --filter CoreLib/progress_counts_actual_pulls`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:10.450Z"
+          "at": "2026-11-16T13:07:48.763Z"
         },
         {
           "n": 3,
-          "text": "On a TTY progress redraws one line; off a TTY it prints one line per update; NO_COLOR strips ANSI from custom formats; description and format are explicit options rendered by the shared renderer. Proof: `jet test Compiler --profile cases --filter corelib/progress_render_`.",
+          "text": "On a TTY progress redraws one line; off a TTY it prints one line per update; NO_COLOR strips ANSI from custom formats; description and format are explicit options rendered by the shared renderer. Proof: `jet test Compiler --profile cases --filter CoreLib/progress_render_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:10.450Z"
+          "at": "2026-11-16T13:07:49.709Z"
         },
         {
           "n": 4,
-          "text": "progress_each, progress_bytes (a failed buffer is not counted) and a scoped progress_task with child tasks and unknown totals share one ProgressTask model and renderer. Proof: `jet test Compiler --profile cases --filter corelib/progress_task_`.",
+          "text": "progress_each, progress_bytes (a failed buffer is not counted) and a scoped progress_task with child tasks and unknown totals share one ProgressTask model and renderer. Proof: `jet test Compiler --profile cases --filter CoreLib/progress_task_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:10.450Z"
+          "at": "2026-11-16T13:07:50.653Z"
         },
         {
           "n": 5,
-          "text": "core-library.md and the D-COREIO1 syntax record describe the shipped adapter, with no manual-bookkeeping claim left. Proof: `git grep -n -i 'progress' -- Docs/spec/core-library.md` shows the adapter, and `jet test tests/guards --filter core_declarations` passes.",
+          "text": "core-library.md and the D-COREIO1 syntax record describe the shipped adapter, with no manual-bookkeeping claim left. Proof: `git grep -n -i 'progress' -- Docs/Spec/core-library.md` shows the adapter, and `jet test Tests/Guards --filter core_declarations` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:03:10.450Z"
+          "at": "2026-11-16T13:07:51.665Z"
         },
         {
           "n": 6,
-          "text": "Every Jet-owned human status line (CLI, compiler, runtime) goes through the one output adapter: TTY capability, TERM, NO_COLOR and `--color` select ANSI or plain, and `--json` writes only the machine schema. Proof: `jet test Compiler --profile cases --filter cli/human_output_modes`.",
+          "text": "Every Jet-owned human status line (CLI, compiler, runtime) goes through the one output adapter: TTY capability, TERM, NO_COLOR and `--color` select ANSI or plain, and `--json` writes only the machine schema. Proof: `jet test Compiler --profile cases --filter CLI/human_output_modes`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:36:13.372Z"
+          "at": "2026-11-16T13:07:52.821Z"
         }
       ],
       "refs": [],
@@ -107034,8 +107034,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:10.450Z",
-      "updated": "2026-11-15T03:36:13.372Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T13:07:52.821Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -219935,6 +219935,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:07:52.821Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05ghhdo",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every Jet-owned human status line (CLI, compiler, runtime) goes through the one output adapter: TTY capability, TERM, NO_COLOR and `--color` select ANSI or plain, and `--json` writes only the machine "
+    },
+    {
+      "at": "2026-11-16T13:07:51.665Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05ghhdo",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: core-library.md and the D-COREIO1 syntax record describe the shipped adapter, with no manual-bookkeeping claim left. Proof: `git grep -n -i 'progress' -- Docs/spec/core-library.md` shows the adapter, "
+    },
+    {
+      "at": "2026-11-16T13:07:50.653Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05ghhdo",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: progress_each, progress_bytes (a failed buffer is not counted) and a scoped progress_task with child tasks and unknown totals share one ProgressTask model and renderer. Proof: `jet test Compiler --pro"
+    },
+    {
+      "at": "2026-11-16T13:07:49.709Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05ghhdo",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: On a TTY progress redraws one line; off a TTY it prints one line per update; NO_COLOR strips ANSI from custom formats; description and format are explicit options rendered by the shared renderer. Proo"
+    },
+    {
+      "at": "2026-11-16T13:07:48.763Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05ghhdo",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Counts follow actual source pulls through map, filter, step, dedup, chunk, window, flatten, intersperse, zip, take_while, skip_while, filter_map and try_collect, including natural end, early break, un"
+    },
+    {
+      "at": "2026-11-16T13:07:47.816Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05ghhdo",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `progress` accepts List<T> and Iter<T>, stays lazy until consumed, and reports count and percent when the total is known, with no caller bookkeeping. Proof: `jet test Compiler --profile golden --filte"
+    },
+    {
+      "at": "2026-11-16T13:07:46.800Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qpy1t3",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: One canonical quoted-string scanner parses MIME parameters: quoted `;`, escaped quotes, duplicate parameters, unterminated quotes and unknown extensions have explicit outcomes, and HTTP and web use th"
+    },
+    {
+      "at": "2026-11-16T13:07:45.883Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qpy1t3",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Mail and MIME parsing handles hostile headers, encodings, size limits and attachment streaming, with no credential or network side effect. Proof: `jet test Compiler --profile cases --filter mime/hosti"
+    },
+    {
+      "at": "2026-11-16T13:07:44.954Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qpy1t3",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A research note under Docs/research and a ballot settle the library, API and placement for mail and MIME parsing; parsing and formatting stay separate from sending and authentication. Proof: `git ls-f"
+    },
+    {
+      "at": "2026-11-16T13:07:44.005Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0blttm0",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: UTC leap-second parsing, formatting and ordering live in Core time (23:59:60 is accepted and labelled), and checked Civil and Period methods route through one core.time method identity on O0, O1, O2 a"
+    },
+    {
+      "at": "2026-11-16T13:07:43.019Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0blttm0",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Time zone and calendar data: a lookup resolves a zone, a DST gap and an overlap resolve as core-library.md states, and a missing zone database is a typed error, not a crash. Proof: `jet test Compiler "
+    },
+    {
+      "at": "2026-11-16T13:07:42.102Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0blttm0",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: One sleep: `tasks.sleep(ms: Int)` (Core/Tasks/Tasks.jet:270, unit-less, clamps negatives) is deleted, every caller uses `time.sleep(Duration)` (D-CORE-ONE-NAME1=A), and a negative Duration behaves as "
+    },
+    {
+      "at": "2026-11-16T13:07:41.186Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0blttm0",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Date and time format patterns have one meaning in formatting and parsing (D-TIME-FORMAT-CANONICAL1=A), driven by one pattern table. Proof: `jet test Compiler --profile golden --filter time/format_patt"
+    },
+    {
+      "at": "2026-11-16T13:07:40.217Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0blttm0",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `unix_ms(now())` equals the epoch milliseconds of the same instant: now and Instant share one identity. Proof: `jet test Compiler --profile cases --filter corelib/time_now_identity`."
+    },
+    {
+      "at": "2026-11-16T13:07:39.209Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w8b7vb",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: After ratification, the chosen method does one hash lookup, runs on O0, O1 and O2 from one Core body, has cases under tests/cases/corelib/ and a teaching example of the counter idiom, and core-library"
+    },
+    {
+      "at": "2026-11-16T13:07:38.148Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#14: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A copied borrowed slice iterator starts at the same position, advances independently and keeps its loan; one-shot and exclusive cursors are not copyable; shared external state stays shared; assigning "
+    },
+    {
+      "at": "2026-11-16T13:07:36.971Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#13: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The unread remainder reflects mixed front and back advancement without copying; a mutable projection is exclusive; `into_remainder` keeps the source lifetime; UTF-8 byte units are kept; opaque and fil"
+    },
+    {
+      "at": "2026-11-16T13:07:35.887Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#12: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Fixed-width group reads keep every value of a short final group (typed partial result, or returned to the cursor), tell too few from too many without overconsuming, and state width zero, move-only val"
+    },
+    {
+      "at": "2026-11-16T13:07:34.956Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: peek never pulls twice and its first side effects are documented; a rejected conditional consume keeps the pending item (or the rejection branch's replacement); an accepted consume advances once with "
+    },
+    {
+      "at": "2026-11-16T13:07:34.022Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `s.chars()` lowers as a stream without building a list only when a paired measurement cell (list against stream: wall time and allocations) shows the win (D-CHAR-SCALAR1=A). Proof: the paired cell row"
+    },
+    {
+      "at": "2026-11-16T13:07:33.048Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: An explicit `[View<T>]` collect is rooted in live storage with no payload copy; temporaries cannot escape, invalidating mutation is refused, and default `to_list` keeps D-MEM-COPYSEM1 copies (D-ITER-V"
+    },
+    {
+      "at": "2026-11-16T13:07:32.048Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A mapper over owned items moves each move-only item exactly once; a shared view cannot move its items; exclusive-view mutation reaches the original storage; escaping callbacks respect their loans (D-I"
+    },
+    {
+      "at": "2026-11-16T13:07:31.083Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Borrowed windows and chunks, and text split and lines views, allocate nothing per output where the source storage permits a view, and print their text, not handles. Proof: `jet test Compiler --profile"
+    },
+    {
+      "at": "2026-11-16T13:07:30.137Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Chunks and windows state width-zero, remainder, direction, overlap and mutability: non-overlapping mutable chunks update the source, and overlapping mutable windows are never built from ordinary refer"
+    },
+    {
+      "at": "2026-11-16T13:07:29.179Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fyhb2p",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Owned, shared-borrowed and exclusive-borrowed iteration have distinct observable contracts: mutating a yielded element through ViewMut updates the original collection, replaced slots drop exactly once"
+    },
     {
       "at": "2026-11-16T13:07:27.872Z",
       "by": "Main",
