@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110233,
+    "rev": 110236,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -86082,6 +86082,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:01:32.682Z"
+        },
+        {
+          "n": 8,
+          "text": "A row policy installed with .guard(named_fn) gives sema a static guard fact, so the client can run a named policy inside a prediction and a policy that reads the clock or randomness makes its writes wait, as the D-OPTIMISTIC1 review's D8 requires. Proof: `jet test Compiler --profile cases --filter WebApp/named_guard_policy_is_a_static_fact`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T14:35:28.635Z"
         }
       ],
       "refs": [],
@@ -86094,9 +86103,9 @@
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:32.073Z",
-      "updated": "2026-11-16T14:27:32.185Z",
+      "updated": "2026-11-16T14:35:28.635Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 8
     },
     {
       "id": "c0tjjr66",
@@ -217030,6 +217039,367 @@
           "result": "Remains; nobody can know typed text ahead of time."
         }
       ]
+    },
+    {
+      "id": "D-PREDICT-JOB1",
+      "cardId": "c0manzdq",
+      "group": "app",
+      "title": "Whether a predicted write may queue a job",
+      "situation": "A predicted write updates the screen at once, before the server answers. D-OPTIMISTIC1 predicts a write only when it \"has no other effects\". Many writes also queue a job, such as telling the assignee about a task, with app.enqueue. The job runs on the server, and only after the write commits. You decide whether queuing a job stops a write from being predicted. In Crewboard, 6 of its 12 writes are predicted if it doesn't and 2 of 12 if it does. We recommend that it doesn't: the job still runs once, on the server, and only after the commit.",
+      "gist": "May a write that queues a job still update the screen at once?",
+      "lesson": "A prediction runs the write on the device's own copy of the rows and shows the result at once. The server then runs the same write, and its answer replaces the guess. A job queued with app.enqueue never runs on the device. It runs on the server after the write commits, and never runs if the write is refused. So the question is only whether the screen waits for the server.",
+      "explainer": "Beginner path: the app writes update_task once, with its app.enqueue line. Under A, the edit shows at once and the assignee is told after the server commits it. Under B, the edit shows a busy state until the server answers, unless the app moves the job into a second call.\n\nExpert path: under both options, the job runs only on the server, once, after the commit (#3709 jobs). A refused write queues nothing. jet inspect choices lists each method as predicted or waiting, with the fact that decided it.\n\nUnder both options, a method that reads the clock or randomness, calls the network or writes files is never predicted.",
+      "story": "Ana assigns a task to Leo on the train. Under A, the card shows Leo at once, and when Ana's phone reaches the server, the write commits and Leo gets his notification. If the server refuses it (Leo left the project), the card goes back and Ana sees why, and Leo is told nothing. Under B, the card spins until the phone reaches the server.",
+      "inWild": "// Zero (Rocicorp): the client mutator updates the screen; only the server\n// mutator sends mail, through an outbox table it writes in the same transaction.\nconst mutators = {\n  assign: async (tx, {id, assignee}) => {\n    await tx.mutate.task.update({id, assignee});\n    if (tx.location === 'server') {\n      await tx.mutate.outbox.insert({kind: 'assigned', task: id});\n    }\n  },\n};",
+      "detail": "Code read on dev 77f7729b72. app.enqueue is `fn(call: Int, job: &&CallJob) Never!` in Core/App/App.jet:919, and it carries no effect. A job runs after the commit and never after a rollback (Tests/Cases/WebApp/job_runs_after_commit_and_never_after_rollback.case).\n\nCrewboard (Docs/Proposals/2026-11-13-web-app-framework-shape.md) has 12 writes a client can call. create_task and update_task queue tell_assignee through after_assign (line 1543). remove_member queues the unassign job, and leave calls remove_member. move_task and set_role queue nothing. The other six read the clock or randomness, write files, or make their ID on the server, so they wait under both options.\n\nThe count is in Docs/Audits/2026-11-16-d-optimistic1-review.md, claim 13 and the second re-review. The review's D8 has the client also run named row policies. Until member_policy stops reading the clock, set_role, remove_member and leave wait too. That makes the counts 3 of 12 under A and 1 of 12 under B. The ratio between the options stays the same.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Predict it; the job waits for the commit",
+          "detail": "A write that queues a job is predicted like any other write. The device runs the method on its copy and skips the app.enqueue line. The server runs the method, commits, then runs the job once. In Crewboard, 6 of 12 writes update the screen at once: create_task, update_task, move_task, set_role, remove_member and leave.",
+          "technical": "Prediction treats app.enqueue as a compiler-known call it skips, as it skips row policies. No new syntax. jet inspect choices says \"predicted (queues tell_assignee after commit)\".",
+          "code": "// Crewboard's update_task, unchanged.\n#App.SignedIn\nupdate_task: fn(self, id: TaskID, version: Int, draft: TaskDraft) -[DB.Read, DB.Write]> Task TaskError! {\n    task: self.tasks.get(id) ?? return Err(TaskError.NotFound)\n    if task.version != version -> return Err(TaskError.Conflict(task))\n    self.check_assignee(task.project, draft)\n    saved: self.tasks.put(Task{id: task.id, project: task.project, title: draft.title.trim(), notes: draft.notes, status: task.status, assignee: draft.assignee, due: draft.due, version: task.version + 1})\n    // Skipped on the device; runs on the server after the commit.\n    self.after_assign(saved, task.assignee)\n    Ok(saved)\n}\n// The edit shows at once. Leo is told after the commit, or never if it is refused."
+        },
+        {
+          "key": "B",
+          "name": "Queuing a job makes the method wait",
+          "detail": "A write that queues a job is not predicted. The screen shows the busy state until the server answers. In Crewboard, 2 of 12 writes update the screen at once: move_task and set_role. To get an instant edit, the app moves the job into a second method that the screen calls after the reply.",
+          "technical": "Eligibility refuses a body that reaches app.enqueue. No new syntax. jet inspect choices says \"waits (queues tell_assignee)\".",
+          "code": "// The same update_task, unchanged: under B it waits for the server.\n#App.SignedIn\nupdate_task: fn(self, id: TaskID, version: Int, draft: TaskDraft) -[DB.Read, DB.Write]> Task TaskError! {\n    task: self.tasks.get(id) ?? return Err(TaskError.NotFound)\n    if task.version != version -> return Err(TaskError.Conflict(task))\n    self.check_assignee(task.project, draft)\n    saved: self.tasks.put(Task{id: task.id, project: task.project, title: draft.title.trim(), notes: draft.notes, status: task.status, assignee: draft.assignee, due: draft.due, version: task.version + 1})\n    self.after_assign(saved, task.assignee)\n    Ok(saved)\n}\n// The editor spins until the server answers.\n// For an instant edit, the app drops after_assign here and adds a method\n// the screen calls after the reply:\n#App.SignedIn\ntell_if_assigned: fn(self, id: TaskID, before: auth.AccountID?) -[DB.Read]> TaskError! { ... }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "TypeScript (Zero)",
+          "note": "The client mutator updates the screen; server-only work runs in the server mutator after the client's guess is shown. This is A's shape.",
+          "code": "if (tx.location === 'server') {\n  await tx.mutate.outbox.insert({kind: 'assigned', task: id});\n}"
+        },
+        {
+          "lang": "JavaScript (Meteor)",
+          "note": "A method stub runs on the client and skips server-only calls with isSimulation; the server sends the mail. This is A's shape.",
+          "code": "Meteor.methods({\n  assign(id, assignee) {\n    Tasks.update(id, {$set: {assignee}});\n    if (!this.isSimulation) Email.send(...);\n  },\n});"
+        },
+        {
+          "lang": "TypeScript (TanStack Query)",
+          "note": "The guess is hand-written in onMutate; whatever the server does after is invisible to it. Neither option's question arises.",
+          "code": "useMutation({\n  mutationFn: assign,\n  onMutate: async (vars) => { /* write the guess into the cache */ },\n});"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The job never runs on the device and runs on the server only after the commit, so a refused guess sends nothing and a committed one sends once. What the ballot's \"no other effects\" protects against, an outside effect before the server agrees, cannot happen. A predicts three times as many of Crewboard's writes with the same code.",
+        "gains": [
+          "Crewboard: 6 of 12 writes are instant instead of 2.",
+          "No code is moved to get an instant edit.",
+          "A refused write still tells no one."
+        ],
+        "losses": [
+          {
+            "loss": "It widens the ratified \"no other effects\" to allow one effect that is deferred until after the commit.",
+            "mitigation": "jet inspect choices names the queued job beside each predicted method; the opt-out (D-PREDICT-PIN1) keeps any method waiting."
+          },
+          {
+            "loss": "The screen shows the edit before the notification goes out, so for a moment the screen is ahead of the job.",
+            "mitigation": "That is true of every committed write too: a job always runs after the commit."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It makes 4 of Crewboard's 6 predictable writes wait. Its workaround, a second call after the reply, is more code and loses the job if the app closes between the calls."
+          }
+        ],
+        "tradeoff": "One deferred server effect allowed inside a prediction, for three times as many instant writes."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: the case WebApp/client_id_create_is_predicted (#6555 c7) creates a task with an assignee and shows the card at once. The job runs once after the commit, and a refused create queues nothing. jet inspect choices lists create_task as predicted, naming the queued job. Under B: the same case shows create_task waiting, and inspect names app.enqueue as the reason.\n\nEvidence labels: the Crewboard counts are read from the proposal's code; neither option's program was run (prediction is not built).",
+      "surface": {
+        "gist": "May a write that queues a job still update the screen at once?",
+        "lesson": "The job runs only on the server, after the write commits. A predicts the write anyway; B makes it wait for the server.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Predict it",
+            "gist": "The screen updates at once; the job runs after the commit.",
+            "gains": [
+              "Crewboard: 6 of 12 writes instant.",
+              "No code moves."
+            ],
+            "losses": [
+              "Widens \"no other effects\" by one deferred effect."
+            ],
+            "proposed": {
+              "code": "update_task(...)  // card updates at once\n// server commits, then tells the assignee"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Wait for the server",
+            "gist": "A write that queues a job shows a busy state until the reply.",
+            "gains": [
+              "Keeps the ratified wording exactly."
+            ],
+            "losses": [
+              "Crewboard: 2 of 12 writes instant.",
+              "Instant edits need the job split into a second call."
+            ],
+            "proposed": {
+              "code": "update_task(...)  // spins until the server answers"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The job can't run before the server agrees, so predicting the write risks nothing.",
+          "gains": [
+            "Three times as many instant writes.",
+            "A refused write still tells no one."
+          ],
+          "losses": [
+            {
+              "loss": "One deferred effect inside \"no other effects\".",
+              "mitigation": "Inspect names the job; the opt-out keeps a method waiting."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Slower screens, and the workaround can lose the job."
+            }
+          ],
+          "tradeoff": "One deferred server effect for three times as many instant writes."
+        },
+        "trio": {
+          "current": {
+            "note": "Nothing is predicted today. Every write waits for the server, and a screen that wants an instant edit writes its guess by hand (Core/Web/Store.jet).",
+            "code": "web.optimistic(store, \"assign\", values, fn(rows) { ... })\n// then call the server; patch_rollback on failure"
+          },
+          "wild": {
+            "lang": "TypeScript (Zero)",
+            "note": "The client mutator shows the edit; only the server mutator queues the mail.",
+            "code": "if (tx.location === 'server') {\n  await tx.mutate.outbox.insert({kind: 'assigned', task: id});\n}"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A widens the ratified \"no other effects\".",
+          "attempts": [
+            "Give app.enqueue an effect so the row shows it: rejected, the effect row would then say the method has an outside effect at the time it runs, which is false; the job runs later, on its own.",
+            "List the queued jobs in jet inspect choices beside each predicted method: kept."
+          ],
+          "result": "The widening is visible wherever the choice is explained."
+        },
+        {
+          "loss": "B's workaround (a second call after the reply) can lose the job.",
+          "attempts": [
+            "Queue the second call in the offline queue: it still runs only if the app is open when the first reply comes, or after a restart; the job could be lost if the first write commits and the device is never seen again."
+          ],
+          "result": "Not removable under B; a reason to prefer A."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-16T14:35:18.868Z"
+    },
+    {
+      "id": "D-PREDICT-PIN1",
+      "cardId": "c0manzdq",
+      "group": "app",
+      "title": "How a write method opts out of prediction, or pins it",
+      "situation": "D-OPTIMISTIC1 predicts each write the compiler can predict, so the screen updates before the server answers. It promised an opt-out per action, spelled optimistic: false on app.action(...). The web app shape has no app.action. A write is a method of a service, marked #App.SignedIn or #App.Public, and those markers already take arguments, as in #App.Public(limit: 30, per: 1min). You decide how a method says \"never predict me\" (the opt-out) and \"always predict me, and fail the build if you can't\" (the pin). Most methods write neither. We recommend one argument on the marker: predict: .Never or predict: .Always.",
+      "gist": "How does a write method say \"never predict\" or \"must be predicted\"?",
+      "lesson": "With nothing written, the compiler decides, and jet inspect choices shows the decision and why. The opt-out keeps a method waiting for the server, for example a payment or logic the app wants to keep off the device. The pin is for experts: it fails the build when a change makes the method unpredictable, so an instant screen can't silently become a slow one.",
+      "explainer": "Beginner path: write nothing. A method the compiler can predict is predicted; one it can't waits. jet inspect choices lists each with the fact that decided it, for example \"move_task: predicted\" or \"invite: waits (reads the clock)\".\n\nExpert path: the opt-out and the pin are each one argument on the access marker the method already has. A pinned method that stops qualifying fails the build with a diagnostic naming the fact, such as the line that reads the clock.\n\nUnder every option the default is the compiler's choice, and no option adds a marker to methods that don't use it.",
+      "story": "Ana's Crewboard predicts move_task, so a card moves the moment it is dropped. Later Leo adds a timestamp to move_task with time.now_utc(). Without a pin, the card quietly starts to spin. With the pin, Leo's build fails at that line and he passes the time in as an argument instead. Separately, Ana's pay method must never show a paid state before the bank agrees, so she opts it out.",
+      "inWild": "// Meteor: a method with no client stub is never predicted; one with a stub always is.\n// The opt-out is not writing a stub, and there is no pin.\nMeteor.methods({ pay(order) { /* server only */ } });",
+      "detail": "Code read on dev 77f7729b72. Marker arguments exist on the access markers: #App.Public(limit: 30, per: 1min) (Core/App/App.jet:58; Tests/Cases/WebApp/MethodRateLimitAnswers429.fixture). #App.Job(retries: 2) and #App.Webhook(path:, signature:, key:) also take arguments.\n\nThe ratified D-OPTIMISTIC1 example is app.action(\"pay\", pay, optimistic: false). The shape (Docs/Proposals/2026-11-13-web-app-framework-shape.md) has no app.action and no spelling for the opt-out. jet inspect choices (Compiler/JetCLI/Source/CLI/InspectChoices.jet) has no prediction kind yet; #6555 c3 adds it. The review is Docs/Audits/2026-11-16-d-optimistic1-review.md, claim 11 and D6.",
+      "options": [
+        {
+          "key": "A",
+          "name": "predict: .Never / .Always on the marker",
+          "detail": "The access marker takes one more argument, predict:, with two values. predict: .Never keeps the method waiting for the server. predict: .Always pins it: the build fails if the method can't be predicted, naming the fact. With no argument, the compiler decides.",
+          "technical": "One argument name, predict, on #App.SignedIn and #App.Public, typed by a two-case Core enum app.Predict { Never, Always }. One diagnostic for a pin that fails, and one for predict: on a method that can't write (a #App.Query).",
+          "code": "#App.SignedIn\nmove_task: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! { ... }\n\n// Opt-out: the screen waits for the bank.\n#App.SignedIn(predict: .Never)\npay: fn(self, order: OrderID) -[DB.Read, DB.Write]> Receipt PayError! { ... }\n\n// Pin: the build fails if the card stops moving at once.\n#App.SignedIn(predict: .Always)\nmove_task: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! { ... }\n\n// With a rate limit too:\n#App.Public(limit: 30, per: 1min, predict: .Never)\nsubscribe: fn(self, email: String) -[DB.Read, DB.Write]> SubscribeError! { ... }"
+        },
+        {
+          "key": "B",
+          "name": "optimistic: false / true on the marker",
+          "detail": "The ratified ballot's word, carried to the marker as a Bool. optimistic: false keeps the method waiting. optimistic: true pins it, with the same build failure as A. With no argument, the compiler decides.",
+          "technical": "One argument name, optimistic, on #App.SignedIn and #App.Public, typed Bool. The same two diagnostics as A.",
+          "code": "// Opt-out.\n#App.SignedIn(optimistic: false)\npay: fn(self, order: OrderID) -[DB.Read, DB.Write]> Receipt PayError! { ... }\n\n// Pin.\n#App.SignedIn(optimistic: true)\nmove_task: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! { ... }"
+        },
+        {
+          "key": "C",
+          "name": "Two markers of their own",
+          "detail": "Two new markers stack beside the access marker: #App.Wait keeps the method waiting, and #App.Predicted pins it. With neither, the compiler decides.",
+          "technical": "Two marker rows, App.Wait and App.Predicted, legal only beside #App.SignedIn or #App.Public, plus a diagnostic for both on one method and the same pin diagnostic as A.",
+          "code": "// Opt-out.\n#[App.SignedIn, App.Wait]\npay: fn(self, order: OrderID) -[DB.Read, DB.Write]> Receipt PayError! { ... }\n\n// Pin.\n#[App.SignedIn, App.Predicted]\nmove_task: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! { ... }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript (Meteor)",
+          "note": "Prediction is opt-in per method by writing a client stub; there is no pin.",
+          "code": "// predicted: a stub exists on the client\nMeteor.methods({ moveTask(id, to) { Tasks.update(id, {$set: {status: to}}); } });"
+        },
+        {
+          "lang": "TypeScript (Zero)",
+          "note": "Every mutator runs on the client; server-only work branches on tx.location. Opting out means an empty client branch; there is no pin.",
+          "code": "pay: async (tx, args) => {\n  if (tx.location !== 'server') return;\n  // server only\n}"
+        },
+        {
+          "lang": "TypeScript (TanStack Query)",
+          "note": "Prediction is hand-written per mutation in onMutate; leaving it out is the opt-out.",
+          "code": "useMutation({ mutationFn: pay }) // no onMutate: no guess"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It reads as plain words: predict never, predict always. It sits on the marker the method already has, in the argument list the marker already uses for limits, so the rare case costs one argument and the common case costs nothing.",
+        "gains": [
+          "No new marker to learn; one argument on the existing one.",
+          ".Never and .Always say what they do; neither reads as a switch.",
+          "Combines with limit: and per: in one list."
+        ],
+        "losses": [
+          {
+            "loss": "A new word, predict, where the ratified ballot said optimistic.",
+            "mitigation": "The ballot's spelling belonged to app.action, which the shape removed; inspect and the docs say \"predicted\" throughout, so the code and its explanation use one word."
+          },
+          {
+            "loss": "A small Core enum, app.Predict.",
+            "mitigation": "Its two cases are the whole surface; the marker argument is the only place it is written."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "optimistic: true reads as \"turn prediction on\", not \"fail the build if it can't be predicted\", and a Bool can't grow a third value."
+          },
+          {
+            "key": "C",
+            "reason": "Two more markers to learn for a rare case, and a method can carry both by mistake."
+          }
+        ],
+        "tradeoff": "One new argument word in exchange for an opt-out and a pin that say what they do."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "The case Web/optimistic_choose_explain_pin (#6555 c3) runs both directions. jet inspect choices lists move_task as predicted with its fact, and pay as waiting because it opts out. Pinning a method that reads the clock fails the build with the new diagnostic, whose UI snapshot names the clock read. The syntax registry gains the chosen spelling (I7).\n\nEvidence labels: the marker-argument forms #App.Public(limit:, per:) and #App.Job(retries:) exist and run on dev; the proposed spellings were not compiled.",
+      "surface": {
+        "gist": "How does a write method say \"never predict\" or \"must be predicted\"?",
+        "lesson": "By default the compiler decides and inspect explains. The opt-out keeps a method waiting; the pin fails the build if it stops being predictable.",
+        "options": [
+          {
+            "key": "A",
+            "name": "predict: .Never / .Always",
+            "gist": "One argument on the access marker.",
+            "gains": [
+              "Plain words.",
+              "No new marker."
+            ],
+            "losses": [
+              "A new word beside the ballot's optimistic."
+            ],
+            "proposed": {
+              "code": "#App.SignedIn(predict: .Never)\npay: fn(...) ...\n\n#App.SignedIn(predict: .Always)\nmove_task: fn(...) ..."
+            }
+          },
+          {
+            "key": "B",
+            "name": "optimistic: false / true",
+            "gist": "The ballot's word, as a Bool on the marker.",
+            "gains": [
+              "Keeps the ratified word."
+            ],
+            "losses": [
+              "true reads as \"on\", not \"must\"."
+            ],
+            "proposed": {
+              "code": "#App.SignedIn(optimistic: false)\npay: fn(...) ...\n\n#App.SignedIn(optimistic: true)\nmove_task: fn(...) ..."
+            }
+          },
+          {
+            "key": "C",
+            "name": "#App.Wait / #App.Predicted",
+            "gist": "Two markers of their own.",
+            "gains": [
+              "Easy to grep."
+            ],
+            "losses": [
+              "Two more markers.",
+              "Both can be written at once."
+            ],
+            "proposed": {
+              "code": "#[App.SignedIn, App.Wait]\npay: fn(...) ...\n\n#[App.SignedIn, App.Predicted]\nmove_task: fn(...) ..."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One argument on the marker a method already has, in words that say what they do.",
+          "gains": [
+            "Nothing to write in the common case.",
+            "One argument in the rare one."
+          ],
+          "losses": [
+            {
+              "loss": "predict replaces the ballot's optimistic.",
+              "mitigation": "Inspect and docs say \"predicted\" everywhere."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A Bool pin reads as a switch."
+            },
+            {
+              "key": "C",
+              "reason": "Two markers for a rare case."
+            }
+          ],
+          "tradeoff": "One new argument word for an opt-out and a pin that read plainly."
+        },
+        "trio": {
+          "current": {
+            "note": "Today nothing is predicted and there is nothing to opt out of; the ballot's spelling has no place to go.",
+            "code": "#App.SignedIn\npay: fn(self, order: OrderID) -[DB.Read, DB.Write]> Receipt PayError! { ... }"
+          },
+          "wild": {
+            "lang": "JavaScript (Meteor)",
+            "note": "Writing a client stub opts a method in; there is no pin.",
+            "code": "Meteor.methods({ moveTask(id, to) { Tasks.update(id, {$set: {status: to}}); } });"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "The ratified word optimistic is replaced.",
+          "attempts": [
+            "Keep optimistic as an enum argument (optimistic: .Never / .Always): possible, but \"optimistic: never\" reads worse than \"predict: never\", and inspect calls the choice \"predicted\".",
+            "Use predict: in code, inspect and docs alike: kept."
+          ],
+          "result": "One word for the code and its explanation."
+        },
+        {
+          "loss": "The pin needs a diagnostic.",
+          "attempts": [
+            "Report the pin as a warning: rejected, a pin that only warns is not a pin (choose, explain, pin)."
+          ],
+          "result": "One registered diagnostic with a UI snapshot (#6555 c3)."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-16T14:35:19.813Z"
     }
   ],
   "questions": [
@@ -220388,6 +220758,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T14:35:28.635Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0manzdq",
+      "note": "#8 A row policy installed with .guard(named_fn) gives sema a st"
+    },
+    {
+      "at": "2026-11-16T14:35:19.813Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PREDICT-PIN1",
+      "note": "How a write method opts out of prediction, or pins it"
+    },
+    {
+      "at": "2026-11-16T14:35:18.868Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PREDICT-JOB1",
+      "note": "Whether a predicted write may queue a job"
+    },
     {
       "at": "2026-11-16T14:30:49.195Z",
       "by": "Main",
