@@ -734,7 +734,8 @@ priv(package) callers: module {
     seen: as_caller<String>(ann, fn() {
         assert(as_system(fn() { callers.system() }))
         assert_eq(as_system(fn() { maybe_caller() }), auth.AccountID?{None})
-        assert_eq(as_caller(ben, fn() { maybe_caller() }), Val(ben))
+        nested: auth.AccountID.from_string("ben")
+        assert_eq(as_caller(nested, fn() { maybe_caller() }), Val(nested))
         spawned: task { (maybe_caller() ?? auth.AccountID.from_string("no one")).raw() }
         assert_eq(spawned.join() ?? panic("the spawned task runs"), "no one")
         assert(!callers.system())
@@ -742,7 +743,7 @@ priv(package) callers: module {
     })
     assert_eq(seen, "ann")
     assert_eq(maybe_caller(), auth.AccountID?{None})
-    as_caller(ben, fn() {
+    as_caller(ben.copy(), fn() {
         assert_eq(maybe_caller(), Val(ben))
         assert_eq(caller(), ben)
         assert(!callers.system())
