@@ -102110,6 +102110,68 @@
       "completedAt": "2026-11-13T02:19:26.352Z",
       "questions": [],
       "retiredAt": "2026-11-16T02:21:00.556Z"
+    },
+    {
+      "id": "c0qzu2ay",
+      "num": 6728,
+      "title": "Release gate: a baseline column that cannot run (E2105) is used as a baseline, so nonzero-exit cases pass falsely and the comparison is noise",
+      "body": "The a0_042 admit (c37151785b) reported 9643 gains and two 'lost' rows. LostRows found that the release/baseline column ran a compiler that can't read dev's Core (E2105 Can't read Core/Game/Raylib.jet), so every step failed. Cases that assert only exit nonzero or a !~ stream predicate then 'passed' in that column without testing anything, which made false UNEXPECTED-PASS rows and false 'lost' rows, and the thousands of FAIL->PASS gains are noise. The gate must refuse a baseline column whose compiler can't load the tree's Core (a preflight probe), name which compiler each column ran, and treat an all-failing column as an error, not a baseline.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Admit refuses to start, with a named error, when a column's compiler cannot check a one-line program against the tree's Core.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 22659ce561 (G5DevX2-admit-preflight): jet check Tools/release rc0; JET=<seed> jet test Tools/release 51 passed 0 failed, including the preflight refusal on a column that cannot check a one-line program, the REPORT compiler path/identity rows, and the broken-baseline test admit failing at preflight",
+          "at": "2026-11-13T03:50:07.774Z"
+        },
+        {
+          "n": 2,
+          "text": "REPORT.md names the compiler path and identity each column ran.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 22659ce561 (G5DevX2-admit-preflight): jet check Tools/release rc0; JET=<seed> jet test Tools/release 51 passed 0 failed, including the preflight refusal on a column that cannot check a one-line program, the REPORT compiler path/identity rows, and the broken-baseline test admit failing at preflight",
+          "at": "2026-11-13T03:50:08.865Z"
+        },
+        {
+          "n": 3,
+          "text": "A test admit with a deliberately broken baseline compiler fails at preflight, not with false gains or losses.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 22659ce561 (G5DevX2-admit-preflight): jet check Tools/release rc0; JET=<seed> jet test Tools/release 51 passed 0 failed, including the preflight refusal on a column that cannot check a one-line program, the REPORT compiler path/identity rows, and the broken-baseline test admit failing at preflight",
+          "at": "2026-11-13T03:50:09.725Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G4"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:02:55.212Z",
+      "updated": "2026-11-13T03:50:40.627Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-13T03:50:40.627Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T03:51:39.438Z"
     }
   ]
 }

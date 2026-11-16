@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108375,
+    "rev": 108378,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96055,12 +96055,12 @@
         },
         {
           "n": 9,
-          "text": "A Float passed where a trait it does not implement is expected (as an argument or a list item, with or without default methods) gets E0905 from sema, as String and Int already do; today it is an internal compiler error (found by the D-PRIM-ANY1 redesign on p201, probes b9, b9b, b9c and b9d in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes). Proof: a UI snapshot of E0905 for each form.",
+          "text": "A float literal entering a trait value (an argument, a list item or a binding) compiles and keeps its Float type on O0, O1 and O2, whether or not Float implements the trait: with the impl it boxes, and without it sema gives E0905, as String and Int do. Today any float literal entering a trait value is an internal compiler error, even with impl Float.Shown {} (r4, r4b, r4c), while a Float returned from a typed function works (r4e) (D-PRIM-ANY1 reviews on p201 and p202; probes in $JET_SCRATCH_ROOT/lanes/AnyReview2/probes and $JET_SCRATCH_ROOT/lanes/AnyBallot/probes b9-b9d). Proof: a cases row on each tier plus the E0905 UI snapshot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T03:48:29.662Z"
+          "at": "2026-11-16T04:01:34.823Z"
         }
       ],
       "refs": [],
@@ -96071,69 +96071,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-16T03:48:29.662Z",
+      "updated": "2026-11-16T04:01:34.824Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
-    },
-    {
-      "id": "c0qzu2ay",
-      "num": 6728,
-      "title": "Release gate: a baseline column that cannot run (E2105) is used as a baseline, so nonzero-exit cases pass falsely and the comparison is noise",
-      "body": "The a0_042 admit (c37151785b) reported 9643 gains and two 'lost' rows. LostRows found that the release/baseline column ran a compiler that can't read dev's Core (E2105 Can't read Core/Game/Raylib.jet), so every step failed. Cases that assert only exit nonzero or a !~ stream predicate then 'passed' in that column without testing anything, which made false UNEXPECTED-PASS rows and false 'lost' rows, and the thousands of FAIL->PASS gains are noise. The gate must refuse a baseline column whose compiler can't load the tree's Core (a preflight probe), name which compiler each column ran, and treat an all-failing column as an error, not a baseline.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Admit refuses to start, with a named error, when a column's compiler cannot check a one-line program against the tree's Core.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 22659ce561 (G5DevX2-admit-preflight): jet check Tools/release rc0; JET=<seed> jet test Tools/release 51 passed 0 failed, including the preflight refusal on a column that cannot check a one-line program, the REPORT compiler path/identity rows, and the broken-baseline test admit failing at preflight",
-          "at": "2026-11-13T03:50:07.774Z"
-        },
-        {
-          "n": 2,
-          "text": "REPORT.md names the compiler path and identity each column ran.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 22659ce561 (G5DevX2-admit-preflight): jet check Tools/release rc0; JET=<seed> jet test Tools/release 51 passed 0 failed, including the preflight refusal on a column that cannot check a one-line program, the REPORT compiler path/identity rows, and the broken-baseline test admit failing at preflight",
-          "at": "2026-11-13T03:50:08.865Z"
-        },
-        {
-          "n": 3,
-          "text": "A test admit with a deliberately broken baseline compiler fails at preflight, not with false gains or losses.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 22659ce561 (G5DevX2-admit-preflight): jet check Tools/release rc0; JET=<seed> jet test Tools/release 51 passed 0 failed, including the preflight refusal on a column that cannot check a one-line program, the REPORT compiler path/identity rows, and the broken-baseline test admit failing at preflight",
-          "at": "2026-11-13T03:50:09.725Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G4"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T15:02:55.212Z",
-      "updated": "2026-11-13T03:50:40.627Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-13T03:50:40.627Z"
     },
     {
       "id": "c06vkd04",
@@ -96652,6 +96592,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:44:52.915Z"
+        },
+        {
+          "n": 4,
+          "text": "Tools/tower becomes Tools/Tower in its own step: the board directory moves with it on master (Tools/Tower/.tower), every tower command and doc follows in one cutover, and the owner-run tower serve is restarted on the new path, so no board write is lost. Until then, the path-case guard keeps Tools/tower as a kept tree with that reason. Proof: the guard passes with PATH_CASE_KEPT_TREES empty, and `node Tools/Tower/tower.mjs state` reads the board.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T03:51:39.272Z"
         }
       ],
       "refs": [],
@@ -96662,9 +96611,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-16T01:44:53.909Z",
+      "updated": "2026-11-16T03:51:39.272Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0cnf5w8",
@@ -103329,6 +103278,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T03:48:30.593Z"
+        },
+        {
+          "n": 29,
+          "text": "A float literal passed to a generic function takes the Float arm of a type table (if T == { Float -> … else -> … }), not else. Today 2.5 silently takes the else arm on O0, O1 and O2, a wrong answer with no diagnostic (D-PRIM-ANY1 second review on p201 and p202, probe r13b in $JET_SCRATCH_ROOT/lanes/AnyReview2/probes). The literal's type must be Float wherever T is inferred from it. Proof: a cases row printing the Float arm's output on each tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T04:01:36.942Z"
         }
       ],
       "refs": [],
@@ -103339,9 +103297,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T03:48:30.594Z",
+      "updated": "2026-11-16T04:01:36.942Z",
       "updatedBy": "Main",
-      "criteriaLastN": 28
+      "criteriaLastN": 29
     },
     {
       "id": "c0c3gh6u",
@@ -221139,6 +221097,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T04:01:36.942Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#29 A float literal passed to a generic function takes the Float"
+    },
+    {
+      "at": "2026-11-16T04:01:34.824Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0j3st66",
+      "note": "#9: second review: the root is a float literal entering any trait value, not a missing impl; was: A Float passed where a trait it does not implement is expected (as an argument or a list item, with or without default methods) gets E0905 from sema, as String and Int already do; today it is an inter"
+    },
+    {
+      "at": "2026-11-16T03:51:39.272Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07k91t6",
+      "note": "#4 Tools/tower becomes Tools/Tower in its own step: the board d"
+    },
     {
       "at": "2026-11-16T03:49:55.987Z",
       "by": "Main",
