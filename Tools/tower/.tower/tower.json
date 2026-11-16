@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108492,
+    "rev": 108493,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -220978,6 +220978,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T08:01:46.420Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing08vjlhu",
+      "note": "Cycle p210: 18 landings, 8 criteria met, two stacks sent back"
+    },
+    {
       "at": "2026-11-16T08:01:19.161Z",
       "by": "Main",
       "action": "card.update",
@@ -225562,6 +225569,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing08vjlhu",
+      "title": "Cycle p210: 18 landings, 8 criteria met, two stacks sent back",
+      "body": "# Cycle p210: 18 landings, 8 criteria met, two stacks sent back\n\n**Landed on dev** (a1c3325a65 → 7f902dd915; the census was clean, and guards pass):\n\n| Commit | Change | Card |\n|---|---|---|\n| bacecdaf24 | the reflect-of-a-field refusal reports the field again | p208 regression |\n| ff884aa793 | a module value holding a named function no longer crashes the compiler | #6847 c10 |\n| 656505ab7b | served muxes no longer die at their first request (the p209 hang) | #6825 c2 |\n| a5b90f3884 | enqueued jobs keep their typed arguments | #6825 c1 |\n| 7255c5cece | jobs are redelivered once and survive a restart | #6825 n6, n7 |\n| 50466dc57b | shutdown never acknowledges unfinished jobs | #6825 n8 |\n| 6e63e77b08, 7438c88cf5 | `auth.AccountID` replaces String accounts, with its case | #6800 c4 |\n| ccf4ad95e7 | enum case lists come from a Prelude template | #3147 c5 |\n| c1fca7426c | a loan returned through trait dispatch keeps its owner | #6839 c42 (part) |\n| 9d83b463cd, afc1d48a6a | reflection, hover and JSON spell types by their ledger path | #3147 n14 |\n| cecfbab8c7 | Core.rows' enum case lists are generated from the Core sources | #3147 n15 (step 1 of 4) |\n| 835c27fd96, 10600079b0, 7d47f6c48f | comptime: diff cases all pass, no silent fallback to run time, dependency diagnostics | #6847 n1, n7, n2 |\n| 7f6c05586e, 7f902dd915 | EnvModel reads every module value from the compiler in one request | #6847 c16 (a) |\n\n**Met:** #6847 n1, n2, n7 and n10; #3147 n14; #6825 n1, n2, n3 and n4. EnvModel's parity test passes 158/158 on the gate tree; c16 stays open for its schema steps (b1-b7).\n\n**Suites against p209:** 104 rows fixed (the served-mux hang is gone, and its HTTP, web_app and TLS rows pass again) and 35 new failures. Each new failure was rerun alone on the p210 gate. Two roots explain all but five flakes:\n\n1. **The AccountID cutover (6e63e77b08): `AccountID` has no static method `from_string` (E0311)** on the built compiler. It breaks TypedTable, the Core/App and Db Table tests, four row-policy cases and the new AccountID case. The job SUBs (7255c5cece, 50466dc57b) also fail their own cases: no job is redelivered after a restart. Speed-3-2 fixes both first.\n2. **The enum template cutover (ccf4ad95e7): the code generated for enums with payload cases names bindings (`right_<Case>_value`) that don't exist (E0107).** It breaks the EnumCases example, NestedPayloadSafety, two enum cases, two pattern UI snapshots, and its own reflect golden (`Signal.Paint.Stroke`, E0119). GoalsA-1-4 fixes it and sweeps every enum with payloads.\n\nDeadlineContext, LibraryGrant and three C-interop cases passed alone; they were flakes (the C toolchain pack was busy). The TLS timing test (dudect) failed once at O2 under suite load. The law-kit failures from p209 remain until MemKernel-6-2's fix lands.\n\n**Decisions:**\n- Push notifications (#6800 c1): device registration is an internal framework route behind `native.push()`. Provider credentials are public configuration, which the proposal leaves unspecified, so they go on an owner ballot. Mail's `.mail(app.smtp(\"SMTP_URL\"))` is the model. Until then the providers build against an internal record.\n- EnvModel's schema split (#6847 c16 b1-b7) is approved. Bare names in env files stay EnvModel syntax because they are resolved, not evaluated.\n\n**Any ballot (D-PRIM-ANY1):** review 9 failed on three gaps, and round 9 fixed them. It adopted a hybrid arm rule (type position first, then the member's name), defined arms for two instances of one generic (`.Box<Int>(b)`), and stated the view's scope once: a tracked copy until #6839 c46 lands. It still recommends C. Review 10 is running. New criteria: #6839 c54 (a loan keeps its owner through every carrier) and c55 (no internal generic names in diagnostics); #6833 c5 (the hybrid rule, if C wins).\n\n**Precompiled Core:** the criteria that define it as finished (#6759 c20 and c1, #6501 c15) are all met. The remaining speed and size cuts are G11.\n\n**Next:** p211 lands the two regression fixes first, then the law-kit fix, EnvModel schema step b1, push wire formats (#6800 c1 part 1) and Core's sourceless enums (#3147 n15 step 2).\n",
+      "by": "Main",
+      "created": "2026-11-16T08:01:46.420Z",
+      "sections": []
+    },
     {
       "id": "briefing08movxh",
       "title": "p209: 7 landed; a mux hang, a law-kit panic and a comptime ICE traced to owners",
