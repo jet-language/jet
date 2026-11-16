@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108394,
+    "rev": 108399,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51288,6 +51288,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:46:11.288Z"
+        },
+        {
+          "n": 6,
+          "text": "The float suffix that D-LITCARRIER1=D ratifies is built: 2.5f is a Float literal on O0, O1 and O2; today it gives E0134 (x2, D-PRIM-ANY1 review 3 on p203, $JET_SCRATCH_ROOT/lanes/AnyReview3/probes). Proof: a golden example using 2.5f and a bare 2.5 (Decimal) side by side.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T04:40:53.786Z"
         }
       ],
       "refs": [
@@ -51305,12 +51314,12 @@
       "parentId": "c0spgl2u",
       "needsAcceptance": false,
       "created": "2026-10-07T13:09:23.321Z",
-      "updated": "2026-11-15T03:46:30.441Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T04:40:53.786Z",
+      "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0li0kor",
@@ -96029,12 +96038,12 @@
         },
         {
           "n": 9,
-          "text": "A float literal entering a trait value (an argument, a trait-bounded variadic part, a list item or a binding) compiles and keeps its Float type on O0, O1 and O2, whether or not Float implements the trait: with the impl it boxes, and without it sema gives E0905, as String and Int do. Today any float literal entering a trait value is an internal compiler error, even with impl Float.Shown {} (r4, r4b, r4c), while a Float returned from a typed function works (r4e). Also, a float literal as a ...Printable variadic argument gives a wrong E0904 'No trait named Printable is in scope' (f5, every tier, p202), while a returned Float there runs (f4). Probes: $JET_SCRATCH_ROOT/lanes/AnyReview2/probes and $JET_SCRATCH_ROOT/lanes/AnyBallot/probes (b9-b9d, f3-f5). Proof: a cases row for each entry form on each tier plus the E0905 UI snapshot.",
+          "text": "A Decimal value (a bare literal such as 2.5, which D-LITCARRIER1=D makes a Decimal) entering a trait value compiles on O0, O1 and O2: without an impl, sema gives E0112 as it does for Bool (x12), never an internal compiler error (today an ICE: x3, r4, r4b, r4c); with impl math.Decimal.Shown {}, it boxes and runs, where today checking passes and ir.build crashes with 'unlowered … type math.Decimal' (x1c). A typed Float{…} value already works (x6, r4e). Probes: $JET_SCRATCH_ROOT/lanes/AnyReview3/probes and $JET_SCRATCH_ROOT/lanes/AnyReview2/probes (D-PRIM-ANY1 reviews 2 and 3, p202 and p203). Proof: a cases row for each form on each tier plus the E0112 UI snapshot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T04:23:03.474Z"
+          "at": "2026-11-16T04:40:50.712Z"
         }
       ],
       "refs": [],
@@ -96045,7 +96054,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-16T04:23:03.474Z",
+      "updated": "2026-11-16T04:40:50.712Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -103247,13 +103256,22 @@
           "at": "2026-11-16T03:48:30.593Z"
         },
         {
-          "n": 29,
-          "text": "A float literal passed to a generic function takes the Float arm of a type table (if T == { Float -> … else -> … }), not else. Today 2.5 silently takes the else arm on O0, O1 and O2, a wrong answer with no diagnostic (D-PRIM-ANY1 second review on p201 and p202, probe r13b in $JET_SCRATCH_ROOT/lanes/AnyReview2/probes). The literal's type must be Float wherever T is inferred from it. Proof: a cases row printing the Float arm's output on each tier.",
+          "n": 30,
+          "text": "impl Decimal.Shown {} (and any user trait on a Core math type) is accepted as spec.md:920-922 allows, not refused with E0301 (x1, x1b); and a Decimal at a trait bound such as ...Printable gets the trait's own missing-impl diagnostic, not E0904 'No trait named Printable is in scope' (x5b, x5c, f3, f5). Found by the D-PRIM-ANY1 review 3 on p203; probes in $JET_SCRATCH_ROOT/lanes/AnyReview3/probes. Proof: cases rows for both on the batch compiler, with UI snapshots for the corrected diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T04:01:36.942Z"
+          "at": "2026-11-16T04:40:51.751Z"
+        },
+        {
+          "n": 31,
+          "text": "A trait method with its own type parameter either works or gets one registered refusal at its declaration; today the call site gets E0119 and the declaration a misleading \"There's no type called T\" (x9, D-PRIM-ANY1 review 3, p203, $JET_SCRATCH_ROOT/lanes/AnyReview3/probes). Proof: a UI snapshot of the declaration and the call.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T04:40:52.748Z"
         }
       ],
       "refs": [],
@@ -103264,9 +103282,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T04:23:04.439Z",
+      "updated": "2026-11-16T04:40:52.748Z",
       "updatedBy": "Main",
-      "criteriaLastN": 29
+      "criteriaLastN": 31
     },
     {
       "id": "c0c3gh6u",
@@ -221070,6 +221088,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T04:40:53.786Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x9xmde",
+      "note": "#6 The float suffix that D-LITCARRIER1=D ratifies is built: 2.5"
+    },
+    {
+      "at": "2026-11-16T04:40:52.748Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#31 A trait method with its own type parameter either works or g"
+    },
+    {
+      "at": "2026-11-16T04:40:51.751Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#30 impl Decimal.Shown {} (and any user trait on a Core math typ"
+    },
+    {
+      "at": "2026-11-16T04:40:50.712Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0j3st66",
+      "note": "#9: review 3: the literal is a Decimal; the defects are the no-impl ICE and the math.Decimal impl ICE; was: A float literal entering a trait value (an argument, a trait-bounded variadic part, a list item or a binding) compiles and keeps its Float type on O0, O1 and O2, whether or not Float implements the tr"
+    },
+    {
+      "at": "2026-11-16T04:40:49.608Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0oe96sn",
+      "note": "#29: Withdrawn: under D-LITCARRIER1=D a bare 2.5 is a Decimal, so taking the else arm of a table with a Float arm is the ratified behavior (Examples TypeTables.jet:21-22 teaches it; D-PRIM-ANY1 review 3, probe x4).; was [open]: A float literal passed to a generic function takes the Float arm of a type table (if T == { Float -> … else -> … }), not else. Today 2.5 silently takes the else arm on O0, O1 and O2, a wrong answer wi"
+    },
     {
       "at": "2026-11-16T04:40:18.836Z",
       "by": "Main",
