@@ -1,0 +1,19 @@
+ordering_policy.jet:1 fn optimistic_rank — score 0
+ordering_policy.jet:2 fn persisted_rank — score 0
+ordering_policy.jet:3 fn run — score 0
+architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):
+  consumer-agreement `run` [same-module]
+    evidence: callee-definition ordering_policy.jet:3..18
+    evidence: callee-definition ordering_policy.jet:62..76
+    evidence: caller-definition ordering_policy.jet:120..123
+    evidence: checked-call-site ordering_policy.jet:134..149
+    evidence: checked-call-site ordering_policy.jet:157..171
+    boundary: effects run: IO
+    boundary: ordering_policy.jet -> ordering_policy.jet
+    check: checked_reference_resolution=passed (the compiler semantic index resolved the definitions and call sites)
+    check: consumer_behavior=not_run (this read-only inspection does not execute user code)
+    check: cross_mode_agreement=unknown (no runtime or change-task receipt was supplied)
+    uncertainty: one checked consumer joins multiple same-result call paths; review whether their results must agree
+    uncertainty: the checked call graph proves references, not a business invariant
+    uncertainty: operator review may reject this candidate; no refactor or policy is applied
+  measurement: benchmark/change-task not measured; no advantage claim

@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { empty, openStore } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import { serve } from '../app/server.mjs';
-import { readTable, recordEntry, tablePath, writeTable } from '../../gauntlet/harness/table.mjs';
+import { readTable, recordEntry, tablePath, writeTable } from '../../Gauntlet/Harness/table.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'tower-gauntlet-'));
 // The machine's state root, holding the table, kept inside the test root.

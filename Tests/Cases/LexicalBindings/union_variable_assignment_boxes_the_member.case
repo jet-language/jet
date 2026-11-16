@@ -1,0 +1,13 @@
+# A member value assigned to a union variable, field or list element is stored
+# as that member on every tier, so a later match sees it rather than finding
+# no arm.
+fixture: UnionVariableAssignmentBoxesTheMember.fixture
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "int 3\ntext seven\ntext nine\nnine\nint 12\ntext field\nint 2\ntext four\nint 5\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "int 3\ntext seven\ntext nine\nnine\nint 12\ntext field\nint 2\ntext four\nint 5\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "int 3\ntext seven\ntext nine\nnine\nint 12\ntext field\nint 2\ntext four\nint 5\n"

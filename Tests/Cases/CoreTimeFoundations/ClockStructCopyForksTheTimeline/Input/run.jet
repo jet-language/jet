@@ -1,0 +1,18 @@
+use time: core.time
+
+// A copy of a struct that holds a Manual clock forks that clock: the copy's
+// clock ticks on its own, the original's stays put, and every other field
+// copies as it always does.
+Timer: struct {
+    label: String
+    clock: time.Clock
+}
+
+run: fn() {
+    original: Timer{label: "boil", clock: time.Clock.new(0)}
+    copied := original.copy()
+    assert_eq(copied.clock.advance(2), 2)
+    assert_eq(original.clock.now(), 0)
+    assert_eq(copied.label, "boil")
+    print("forked")
+}

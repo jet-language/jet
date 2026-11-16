@@ -1,0 +1,18 @@
+# A generic alias's constructor takes its target's items:
+# `Grid<Int>{[1, 2], [3]}` builds two rows, `Grid<Int>{top, bottom}` reads
+# bare names as rows, `Table<Int>{"a": 1, "b": 2}` builds entries, and a
+# bare-name key reads that name's value as under a written map head.
+fixture: AnAliasConstructorBuildsItsListOrMapTarget.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "2 3\n2 4\n1 3\n2 2\n1 3\n2\n0\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "2 3\n2 4\n1 3\n2 2\n1 3\n2\n0\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "2 3\n2 4\n1 3\n2 2\n1 3\n2\n0\n"

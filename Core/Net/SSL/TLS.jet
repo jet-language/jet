@@ -2733,8 +2733,8 @@ ssl_export_keying_material: fn(ssl: ssldefs.SSLContext, key_len: Int, label: [U8
 // The published test vectors of every algorithm Core's TLS and crypto
 // callers use (#6694).
 //
-// NIST CAVP vectors (public domain) are committed under tests/vectors/nist,
-// trimmed to the parameters Core's TLS enables; tests/vectors/UPSTREAM.md
+// NIST CAVP vectors (public domain) are committed under Tests/Vectors/Nist,
+// trimmed to the parameters Core's TLS enables; Tests/Vectors/UPSTREAM.md
 // names their sources. Wycheproof vectors (Apache-2.0) are not committed:
 // each test fetches the files it needs from the pinned Wycheproof commit over
 // Core's own HTTPS client, checks each against its SHA-256 pin and caches it
@@ -2742,7 +2742,7 @@ ssl_export_keying_material: fn(ssl: ssldefs.SSLContext, key_len: Int, label: [U8
 // XDG_CACHE_HOME is unset. A cached file whose digest differs is fetched
 // again; a fetched file whose digest differs fails the test.
 //
-// The tests read tests/vectors/nist relative to the working directory, so
+// The tests read Tests/Vectors/Nist relative to the working directory, so
 // they run from the repository root: `jet test Core/Net/SSL/TLS.jet`.
 // ---------------------------------------------------------------------------
 
@@ -2750,7 +2750,7 @@ ssl_export_keying_material: fn(ssl: ssldefs.SSLContext, key_len: Int, label: [U8
 VEC_WYCHEPROOF_COMMIT: "d17cc89fa5c8f4f4d378b5385ebf75da5d0926c9"
 
 /// The committed NIST CAVP files, relative to the repository root.
-VEC_NIST_DIR: "tests/vectors/nist"
+VEC_NIST_DIR: "Tests/Vectors/Nist"
 
 /// The SHA-256 of Wycheproof file `name` (testvectors_v1/<name>_test.json)
 /// at VEC_WYCHEPROOF_COMMIT; empty for a file without a pin.
@@ -2878,7 +2878,7 @@ VecRecord: struct {
     values: [String]
 }
 
-/// The paragraphs of tests/vectors/nist/`file` that hold fields.
+/// The paragraphs of Tests/Vectors/Nist/`file` that hold fields.
 vec_nist: fn(file: String) -[FS.Read]> [VecRecord] {
     path: "{VEC_NIST_DIR}/{file}"
     text: core.files.read(path) ?? panic("{path}: {err}; the vector tests run from the repository root")
@@ -3133,7 +3133,7 @@ vec_certificate_verify: fn(key: &&pk.PKContext, algorithm: Int, signature: [U8],
 
 vec_localhost_key: fn() -> pk.PKContext {
     rng := vec_rng()
-    pem_key: core.files.read_bytes("tests/fixtures/tls/localhost.key.pem") ?? panic("{err}")
+    pem_key: core.files.read_bytes("Tests/Fixtures/TLS/localhost.key.pem") ?? panic("{err}")
     pkparse.pk_parse_key(pem_key, None, rng) ?? panic("localhost.key.pem: {err}")
 }
 
@@ -4597,7 +4597,7 @@ ct_redraw_integer: fn(r: &CtRand, buf: &[U8], at: Int, len: Int, odd: Bool) {
 
 // Each primitive of the dudect tests above runs once here, so a build of this
 // test alone selects every secret-dependent primitive; the case
-// tests/cases/core_net_tls/constant_time_primitives_emit_no_secret_branch_or_index.case
+// Tests/Cases/CoreNetTLS/constant_time_primitives_emit_no_secret_branch_or_index.case
 // reads their emission log (JET_X64_EMIT_LOG) at O0, O1 and O2. The secrets
 // are ct_entry's parameters, which a build at O1 and O2 keeps where it drops
 // a test's locals.

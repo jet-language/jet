@@ -1,0 +1,25 @@
+apply_twice: fn(f: fn(Int) -> Int, x: Int) -> Int { return f(f(x)) }
+
+double: fn(x: Int) -> Int { return (x * 2) }
+
+Worker: struct {
+    step: fn(Int) -> Int
+}
+
+TextWorker: struct {
+    step: fn(String) -> Int
+}
+
+text_len: fn(text: String) -> Int { return text.len() }
+
+run: fn() {
+    double_fn: double
+    print(apply_twice(double_fn, 3))
+    print(apply_twice(fn(x: Int) { (x + 1) }, 5))
+    w: Worker{step: fn(n: Int) { (n * n) }}
+    print(w.step(4))
+    text_worker: TextWorker{step: text_len}
+    text: "read"
+    print(text_worker.step(text))
+    print(text)
+}

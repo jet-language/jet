@@ -1,0 +1,15 @@
+// A detached child blocked sending on a full channel when run returns: the
+// exit cancels it at its send, and the process exits 0 with no report.
+use tasks: core.tasks
+
+run: fn() {
+    (sender, receiver): channel<Int>(1)
+    sender.send(1)
+    blocked: task &&sender {
+        sender.send(2)
+        receiver.close()
+    }
+    blocked.detach()
+    tasks.yield_now()
+    print("leaving")
+}

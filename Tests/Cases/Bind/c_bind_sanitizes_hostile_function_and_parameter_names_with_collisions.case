@@ -1,0 +1,11 @@
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD.
+fixture: CBindSanitizesHostileFunctionAndParameterNamesWithCollisions.fixture
+step: jet inspect bind hostile.h --pkg hostile-lib -o generated.jet
+exit: 0
+file: generated.jet ~ "match_field: fn(match_field: Int)" # original result.source.contains
+file: generated.jet ~ "foo_bar: fn(value: Int)" # original result.source.contains
+file: generated.jet ~ "foo_bar_2: fn(value: Int)" # original result.source.contains
+file: generated.jet ~ "#Bindgen c.hostile_lib.__bindgen__: module" # original result.source.contains
+copy: generated.jet parse.jet
+step: jet fmt parse.jet
+exit: 0

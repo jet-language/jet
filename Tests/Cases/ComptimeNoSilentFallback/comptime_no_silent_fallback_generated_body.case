@@ -1,0 +1,15 @@
+# A root `#loop` writes one function per row of a module value, and `#run`
+# code calls the generated functions: a module value and a value in a body,
+# each computed while building. A generated body is checked before any
+# compile-time code runs it, so a generated body that doesn't check is
+# reported as its own error, and nothing runs it.
+fixture: ComptimeNoSilentFallbackGeneratedBody.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run source0/main.jet
+exit: 0
+stdout: = "7 12\n"
+step: jet build source1/main.jet
+exit: nonzero
+stderr: ~ "E0109" # the generated body's own type error
+stderr: !~ "E3010" # no compile-time code ran the generated body

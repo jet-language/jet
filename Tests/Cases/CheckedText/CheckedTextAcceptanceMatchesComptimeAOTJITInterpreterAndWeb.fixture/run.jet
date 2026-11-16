@@ -1,0 +1,50 @@
+#Error
+TextError: enum {
+    Bad
+}
+
+Pattern: distinct String
+
+impl Pattern.CheckedText {
+    Error: TextError
+
+    check: fn(text: String) TextError! -[]> {
+        if text == "hello [1]" || text == "ok" -> return Ok()
+        return Err(TextError.Bad)
+    }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> String { return "[1]" }
+}
+
+accepts: fn(text: String) -[]> Bool {
+    return if Pattern.from(text) == {
+        .Ok(_value) -> true
+        .Err(_error) -> false
+    }
+}
+
+COMPTIME_GOOD: #run accepts("ok")
+
+COMPTIME_BAD: #run accepts("")
+
+run: fn() {
+    literal: Pattern{"hello {1}"}
+    print(literal.raw())
+
+    if Pattern.from("ok") == {
+        .Ok(value) -> { print(value.raw()) }
+        .Err(_error) -> print("good rejected")
+    }
+
+    if Pattern.from("") == {
+        .Ok(_value) -> { print("bad accepted") }
+        .Err(_error) -> print("bad rejected")
+    }
+
+    runtime_good: accepts("ok")
+    runtime_bad: accepts("")
+    print("{COMPTIME_GOOD}")
+    print("{COMPTIME_BAD}")
+    print("{runtime_good}")
+    print("{runtime_bad}")
+}

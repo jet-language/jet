@@ -1,0 +1,20 @@
+// Today's typed write path: #Patchable builds a typed patch, apply writes it,
+// and diff gives the undo patch.
+#Patchable
+struct Rock {
+    size: Float{1.0}
+    hard: Bool{true}
+}
+
+fn grow(rock: &Rock) {
+    rock = rock.apply(Rock.Patch{size: Float{2.0}})
+}
+
+fn run() {
+    rock := Rock{}
+    before :: rock.copy()
+    grow(&rock)
+    print(rock.size)
+    undo :: Rock.diff(^before, rock.copy())
+    print(undo.size)
+}

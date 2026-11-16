@@ -1,0 +1,343 @@
+// LaneCommit.jet LANE MESSAGE PATCH: the ONLY way lanes put changes onto dev.
+// Lanes develop in their own export (outside the repo), never in the shared
+// worktree. To commit: make a patch of your changes (repo-relative paths with
+// a/ b/ prefixes; adds, deletes and renames are all fine), then run this.
+//
+// Batched landing: the call queues the patch under $JET_RUN_ROOT/commit-queue
+// and waits. Whoever holds the machine-wide commit lock drains every queued job
+// at once: it applies each patch that applies cleanly and touches no path
+// another job in the batch touches, runs ONE precommit over the union of
+// touched paths, and on success commits each job separately with its own
+// message. If the batch precommit fails, it reverts everything and lands the
+// jobs one at a time, so a bad patch only fails itself. Prints
+// `lane-commit: <sha> by <lane>` on success; exit codes: 2 bad patch, 3 dirty
+// path, 4 does not apply, 5 precommit failed, 6 commit failed, 7 the lander
+// was interrupted.
+//
+// The Jet twin of lane-commit.sh (gauntlet tool entry lane-commit), sharing
+// its queue format: the worktree is $LANE_COMMIT_WORKTREE, else
+// $JET_DEV_WORKTREE; the queue, lock, hold switch and path freeze are in
+// $JET_RUN_ROOT; the precommit is Main's precommit.sh, in
+// $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them. A relative
+// root names a path in the caller's directory. A drain holds SIGTERM, SIGINT
+// and SIGHUP (process.signals, the original's `trap on_signal TERM INT HUP`):
+// one stops the precommit's process group, and the drain's next step reverts
+// every applied job and ends the lander with 143.
+use {
+    files: core.files
+    process: core.process
+    roots: "Roots"
+    sys: core.sys
+    time: core.time
+}
+
+// Where the lander works and keeps its queue.
+Lander: struct {
+    worktree: String
+    queue: String
+    precommit: String
+    hold: String
+    freeze: String
+}
+
+// `line` in the worktree, its errors shown, with the caller's git index and directories unset.
+command: fn(l: Lander, line: Sh) -> ProcessSpec {
+    line.spec().cwd(l.worktree).stderr(.Inherit).env_remove("GIT_INDEX_FILE").env_remove("GIT_DIR").env_remove("GIT_WORK_TREE")
+}
+
+// Whether `line`, its errors discarded, exits 0.
+quiet: fn(l: Lander, line: Sh) -> Bool { command(l, line).stderr(.Capture).run().code == 0 }
+
+short_head: fn(l: Lander) -> String {
+    command(l, Sh{"git rev-parse --short HEAD"}).run().output.trim()
+}
+
+// Every path a patch touches, each once, in the order git lists them; a rename
+// contributes both its old and its new path. `git apply --numstat -z` gives
+// `added TAB deleted TAB path` records, a rename an empty path followed by its
+// old and new path, so dropping each record's counts leaves every path.
+NUMSTAT_COUNTS: Regex{"^[^\t]*\t[^\t]*\t"}
+
+files_of: fn(l: Lander, patch: String) -> [String] {
+    numstat: command(l, Sh{"git apply --numstat -z {patch}"}).stderr(.Capture).run().output.split(String.from_bytes([U8]{"\x00"}) ?? "").map(fn(part) { NUMSTAT_COUNTS.replace_first(part, "") }).to_list()
+    renames: files.read_or(patch, "").lines().filter(fn(line) { line.starts_with("rename from ") }).map(fn(line) { line.removeprefix("rename from ") })
+    [String]{}.union(numstat.concat(renames).filter(fn(path) { path != "" }))
+}
+
+// The path list as the job's files file holds it: one path per line.
+listed: fn(paths: [String]) -> String { paths.map(fn(path) { "{path}\n" }).join("") }
+
+// Ends job `job` with exit status `code` and output `text`.
+finish: fn(job: String, code: Int, text: String) {
+    done := files.best_effort()
+    done.remove("{job}/applied")
+    files.write("{job}/out", "{text}\n")
+    files.write("{job}/rc", "{code}\n")
+    files.touch("{job}/result")
+}
+
+revert_job: fn(l: Lander, job: String) {
+    _ := command(l, Sh{"git apply -R {"{job}/patch"}"}).run()
+    loop path in files.read("{job}/files").lines() {
+        target: "{l.worktree}/{path}"
+        if path != "" && files.exists(target) && !quiet(l, Sh{"git ls-files --error-unmatch -- {path}"}) {
+            files.remove(target)
+        }
+    }
+    done := files.best_effort()
+    done.remove("{job}/applied")
+}
+
+// The queue's job directories, sorted.
+jobs_in: fn(queue: String) -> [String] {
+    names := files.list_dir_or(queue, []).map(fn(entry) { entry.name })
+    names.sort()
+    names.filter(fn(name) { !name.starts_with(".") }).map(fn(name) { "{queue}/{name}" }).filter(fn(job) { files.is_dir(job) })
+}
+
+// A lock holder interrupted mid-batch must not leave patches applied in the
+// shared tree: revert every job still marked applied (newest first) whose
+// paths still differ from HEAD (a committed job matches HEAD).
+interrupted: fn(l: Lander) {
+    if !files.is_dir(l.worktree) {
+        return
+    }
+    queued := jobs_in(l.queue)
+    queued.reverse()
+    loop job in queued.filter(fn(job) { files.exists("{job}/applied") }) {
+        paths: files.read("{job}/files").lines()
+        _ := quiet(l, Sh{"git reset -q --"}.extend(paths.copy()))
+        if !quiet(l, Sh{"git diff --quiet HEAD --"}.extend(paths.copy())) || command(l, Sh{"git ls-files --others --exclude-standard --"}.extend(paths)).run().output != "" {
+            revert_job(l, job)
+        }
+        finish(job, 7, "lane-commit: lander interrupted; reverted, resubmit")
+    }
+}
+
+// What a drain's signal watcher and its steps share: whether TERM, INT or HUP
+// arrived, and the running precommit.
+Interrupt: struct {
+    signalled: Bool
+    pre: ProcessChild?
+}
+
+// A drain step boundary: after a held signal, revert and end with 143.
+checkpoint: fn(l: Lander, stop: Shared<Interrupt>) {
+    if !stop.guard_read().value.signalled {
+        return
+    }
+    interrupted(l)
+    process.exit(143)
+}
+
+// Once a signal has arrived, stops the running precommit with every process
+// it started (a child leads its own process group).
+halt: fn(state: &Interrupt) {
+    if state.signalled && state.pre == .Val(pre) -> pre.terminate() ?? ()
+}
+
+// Records the running precommit (None: none), and stops it when a signal came first.
+pre_running: fn(stop: Shared<Interrupt>, pre: ProcessChild?) {
+    edit: stop.guard_edit()
+    edit.value.pre = pre
+    halt(edit.value)
+}
+
+// Precommit's run over `paths`, stdout and stderr together. A held signal
+// stops it, and the step after it reverts.
+run_pre: fn(l: Lander, stop: Shared<Interrupt>, paths: [String]) -> ProcessReceipt {
+    pre: command(l, Sh{"bash {l.precommit}"}.extend(paths)).stdout(.Capture).stderr(.Stdout).spawn()
+    pre_running(stop.copy(), Val(pre.copy()))
+    receipt: pre.wait()
+    pre_running(stop.copy(), None)
+    checkpoint(l, stop)
+    receipt
+}
+
+// The precommit's last 20 lines, then the failure line.
+pre_failed: fn(pre: ProcessReceipt) -> String {
+    "{pre.output.trim_end().last_lines(20).join("\n")}\nlane-commit: precommit failed; reverted"
+}
+
+commit_job: fn(l: Lander, stop: Shared<Interrupt>, job: String) {
+    checkpoint(l, stop)
+    paths: files.read("{job}/files").lines()
+    _ := command(l, Sh{"git add -A -f --"}.extend(paths.copy())).run()
+    if command(l, Sh{"git commit -q -F {"{job}/msg"} --"}.extend(paths.copy())).run().code == 0 {
+        finish(job, 0, "lane-commit: {short_head(l)} by {files.read("{job}/lane").trim()}")
+        return
+    }
+    _ := command(l, Sh{"git reset -q --"}.extend(paths)).run()
+    revert_job(l, job)
+    finish(job, 6, "lane-commit: commit failed; reverted")
+}
+
+// Applies one job onto the current tree (with earlier batch jobs applied); its
+// paths when it applied.
+apply_job: fn(l: Lander, stop: Shared<Interrupt>, job: String) -> [String]? Err! {
+    checkpoint(l, stop)
+    paths: files_of(l, "{job}/patch")
+    files.write("{job}/files", listed(paths.copy()))
+    if paths.len() == 0 {
+        finish(job, 2, "lane-commit: patch lists no files or does not parse")
+        return None
+    }
+    loop path in paths {
+        if command(l, Sh{"git status --porcelain -- {path}"}).run().output != "" {
+            finish(job, 3, "lane-commit: {path} has uncommitted changes in the shared worktree; refusing")
+            return None
+        }
+    }
+    if !quiet(l, Sh{"git apply --check {"{job}/patch"}"}) {
+        finish(job, 4, "lane-commit: patch does not apply to HEAD {short_head(l)}; rebase your export")
+        return None
+    }
+    files.touch("{job}/applied")
+    if command(l, Sh{"git apply {"{job}/patch"}"}).run().code != 0 {
+        finish(job, 4, "lane-commit: patch failed to apply")
+        return None
+    }
+    Val(paths)
+}
+
+// Path freeze: the freeze file holds the end time (epoch seconds) on line 1,
+// the exempt lane on line 2, then one repo-relative path prefix per line. Until
+// the end time, a job from another lane that touches a frozen prefix waits in
+// the queue (it neither fails nor lands).
+frozen: fn(l: Lander, lane: String, paths: [String]) -> Bool {
+    lines: files.read_or(l.freeze, "").lines()
+    end: (lines.get(0) ?? "").to_int() ?? return false
+    if time.unix_ns() /% 1000000000 >= end || lane == (lines.get(1) ?? "") -> return false
+    lines.slice(2, lines.len()).any(fn(prefix) { prefix != "" && paths.any(fn(path) { path.starts_with(prefix) }) })
+}
+
+// Whether the hold switch keeps `lane` from landing: it exists and does not
+// list the lane.
+held: fn(l: Lander, lane: String) -> Bool {
+    text: files.read(l.hold) ?? return false
+    !text.lines().contains(lane)
+}
+
+// Whether the process `pid` names is alive (`kill -0`).
+alive: fn(pid: String) -> Bool {
+    number: pid.to_int() ?? return false
+    #Unsafe("signal 0 delivers nothing: it only asks whether a queued job's caller still runs") {
+        if sys.kill(number, 0) == .Err(_) -> return false
+    }
+    true
+}
+
+drain: fn(l: Lander, stop: Shared<Interrupt>) {
+    if !files.is_dir(l.worktree) {
+        return
+    }
+    batch := [String]{}
+    union := [String]{}
+    loop job in jobs_in(l.queue) {
+        if !files.exists("{job}/ready") || files.exists("{job}/result") -> next
+        // A job whose caller died is dropped, never landed.
+        if !alive(files.read_or("{job}/pid", "").trim()) {
+            files.remove_all(job)
+            next
+        }
+        lane: files.read("{job}/lane").trim()
+        if held(l, lane) -> next
+        peek: files_of(l, "{job}/patch")
+        files.write("{job}/files.peek", listed(peek.copy()))
+        // A job that touches a path already in the batch waits for the next round.
+        if frozen(l, lane, peek.copy()) || union.any(fn(path) { peek.contains(path) }) -> next
+        if apply_job(l, stop.copy(), job.copy()) == .Val(paths) {
+            union.extend(paths)
+            batch.push(job)
+        }
+    }
+    if batch.len() == 0 {
+        return
+    }
+    whole: run_pre(l, stop.copy(), union)
+    if whole.code == 0 {
+        loop job in batch -> commit_job(l, stop.copy(), job)
+        return
+    }
+    // Batch failed: revert all (newest first), then land each job alone so only the bad one fails.
+    loop at in 0..<batch.len() -> revert_job(l, batch[batch.len() - 1 - at])
+    if batch.len() == 1 {
+        finish(batch[0], 5, pre_failed(whole))
+        return
+    }
+    loop job in batch {
+        paths: apply_job(l, stop.copy(), job.copy()) ?? next
+        alone: run_pre(l, stop.copy(), paths)
+        if alone.code == 0 {
+            commit_job(l, stop.copy(), job)
+            next
+        }
+        revert_job(l, job.copy())
+        finish(job, 5, pre_failed(alone))
+    }
+}
+
+// One drain with TERM, INT and HUP held, as the original's trap around it: a
+// watcher marks the arrival and stops the precommit, and the drain's next
+// step reverts. Closing gives the signals their default action back.
+drain_trapped: fn(l: Lander) {
+    stop: Shared{Interrupt{signalled: false, pre: None}}
+    trap: process.signals([process.ProcessSignal]{.Term, .Int, .Hup}) ?? process.fail(1, "lane-commit: cannot take SIGTERM, SIGINT and SIGHUP")
+    arrivals: trap.receiver.copy()
+    // Copies of a shared value share its cell.
+    seen: stop.copy()
+    watcher: task {
+        _ := arrivals.receive() ?? return
+        edit: seen.guard_edit()
+        edit.value.signalled = true
+        halt(edit.value)
+    }
+    drain(l, stop.copy())
+    trap.close()
+    watcher.join() ?? ()
+    checkpoint(l, stop)
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() < 3 {
+        process.fail(1, "usage: jet Tools/Agent/Orchestrator/LaneCommit.jet LANE MESSAGE PATCH")
+    }
+    lane: args[0]
+    r: roots.roots()
+    run_dir: r["JET_RUN_ROOT"]
+    l: Lander{
+        worktree: files.absolute(process.env_nonempty("LANE_COMMIT_WORKTREE") ?? r["JET_DEV_WORKTREE"]),
+        queue: files.absolute(process.env_nonempty("LANE_COMMIT_QUEUE") ?? "{run_dir}/commit-queue"),
+        precommit: files.absolute(process.env_nonempty("LANE_COMMIT_PRECOMMIT") ?? "{r["JET_STATE_ROOT"]}/scratch/Main/precommit.sh"),
+        hold: files.absolute("{run_dir}/commit-hold"),
+        freeze: files.absolute("{run_dir}/path-freeze"),
+    }
+    lock: files.absolute(process.env_nonempty("LANE_COMMIT_LOCK") ?? "{run_dir}/commit.lock")
+    files.create_dir_all(l.queue)
+    // Hold switch: while the hold file exists, only the lanes it lists (one per line) land.
+    loop held(l, lane) -> time.sleep(20s)
+
+    job: "{l.queue}/{time.unix_ns()}-{sys.pid()}"
+    queued: files.create_dir_all(job) == .Ok(_) && files.copy(args[1], "{job}/msg") == .Ok(_) && files.copy(args[2], "{job}/patch") == .Ok(_)
+    if !queued {
+        print("lane-commit: cannot queue the job")
+        process.exit(2)
+    }
+    files.write("{job}/lane", "{lane}\n")
+    files.write("{job}/pid", "{sys.pid()}\n")
+    files.touch("{job}/ready")
+
+    loop !files.exists("{job}/result") {
+        // The lock is held until this round ends.
+        _held: files.try_lock(lock) ?? {
+            time.sleep(5s)
+            next
+        }
+        drain_trapped(l)
+    }
+    print(files.read("{job}/out").removesuffix("\n"))
+    code: files.read("{job}/rc").trim().to_int() ?? 1
+    files.remove_all(job)
+    if code != 0 -> process.exit(code)
+}

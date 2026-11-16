@@ -1,0 +1,16 @@
+// A joined task that outgrows its group's stack on the joining thread stops
+// the program with E3012, as it would on a carrier.
+DEPTH: 4000000
+
+deep: fn(n: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
+    if n == 0 -> return a + b + c + d
+    1 + deep(n - 1, b, c, d, a + n)
+}
+
+run: fn() {
+    task.group sized(stack: 16777216) {
+        direct: task deep(DEPTH, 1, 2, 3, 4)
+        reached: direct.join() ?? -1
+        print("reached {reached}")
+    }
+}

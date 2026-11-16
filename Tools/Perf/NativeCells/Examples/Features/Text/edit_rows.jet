@@ -1,0 +1,14 @@
+// Native O1 cell edit_rows (text; paired with edit_rows_rebuild): 200000
+// rows rendered into one reused `:=` String, emptied with `truncate` and
+// prefixed with `insert`, both in its own buffer.
+run: fn() {
+    line := String.with_capacity(64)
+    total := 0
+    loop i in 0..<200000 {
+        line.truncate(0)
+        line += "{i % 97},{i % 89},{i % 83}"
+        line.insert(0, "> ")
+        total += line.count_bytes()
+    }
+    print("bytes {total}")
+}

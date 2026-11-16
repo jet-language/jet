@@ -1,0 +1,9 @@
+// @all_diags
+use core.mem
+
+// A package whose manifest names no `policy.memory` has no kernel file, so a
+// raw memory operation in any of its files is refused.
+#Unsafe("the caller releases the storage with `free_raw`, exactly once")
+_grab: fn() -> mem.Ptr<U8>? { mem.alloc_raw(16, 8) }
+
+run: fn() {}

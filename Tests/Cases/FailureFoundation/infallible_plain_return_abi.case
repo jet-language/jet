@@ -1,0 +1,69 @@
+# An infallible function lowers to a plain return with no outcome wrapper:
+# the IR header names its result type (`[String]`, `Int`, or `none` for the
+# entry). A function that can fail keeps the fallible ABI, `Int ! Err`: a
+# direct `Err`, a transitive or recursive caller, a written `Err!` contract,
+# a callable parameter on the default route and a call through a trait
+# method with a plain return. Both ABIs meet in one program on every tier.
+fixture: InfalliblePlainReturnABI.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step ir_build: jet emit --ir main.jet --fn build
+exit: 0
+stdout: ~ "] params=2 result=" # a struct result returns in place, not boxed
+stdout: !~ " ! Err" # no outcome carrier in its header
+step ir_load: jet emit --ir main.jet --fn load
+exit: 0
+stdout: ~ "] params=1 result=[String]\n" # a list result returns plainly
+step ir_plain: jet emit --ir main.jet --fn plain
+exit: 0
+stdout: ~ "] params=1 result=Int\n" # a direct infallible function
+step ir_through_plain: jet emit --ir main.jet --fn through_plain
+exit: 0
+stdout: ~ "] params=1 result=Int\n" # calling only infallible functions keeps it plain
+step ir_fib: jet emit --ir main.jet --fn fib
+exit: 0
+stdout: ~ "] params=1 result=Int\n" # a recursive infallible function
+step ir_handled: jet emit --ir main.jet --fn handled
+exit: 0
+stdout: ~ "] params=1 result=Int\n" # a handled failure leaves no route
+step ir_apply_plain: jet emit --ir main.jet --fn apply_plain
+exit: 0
+stdout: ~ "] params=2 result=Int\n" # a `Never!` callable parameter cannot fail
+step ir_measure: jet emit --ir main.jet --fn measure
+exit: 0
+stdout: ~ "] params=1 result=Int\n" # a trait method written `Never!` cannot fail through dispatch
+step ir_run: jet emit --ir main.jet --fn run
+exit: 0
+stdout: ~ "] params=0 result=none\n" # the entry handles every failure
+step ir_fails: jet emit --ir main.jet --fn fails
+exit: 0
+stdout: ~ "] params=1 result=Int ! Err\n" # a direct `Err` return
+step ir_passes_up: jet emit --ir main.jet --fn passes_up
+exit: 0
+stdout: ~ "] params=1 result=Int ! Err\n" # a call that passes a failure up
+step ir_passes_up_twice: jet emit --ir main.jet --fn passes_up_twice
+exit: 0
+stdout: ~ "] params=1 result=Int ! Err\n" # a failure passed up through two callers
+step ir_countdown: jet emit --ir main.jet --fn countdown
+exit: 0
+stdout: ~ "] params=1 result=Int ! Err\n" # a recursive function with an `Err` return
+step ir_pinned: jet emit --ir main.jet --fn pinned
+exit: 0
+stdout: ~ "] params=1 result=Int ! Err\n" # a written `Err!` contract keeps the route though the body cannot fail
+step ir_apply: jet emit --ir main.jet --fn apply
+exit: 0
+stdout: ~ "] params=2 result=Int ! Err\n" # a plain `fn(Int) -> Int` parameter keeps the default route
+step ir_checked_measure: jet emit --ir main.jet --fn checked_measure
+exit: 0
+stdout: ~ "] params=1 result=Int ! Err\n" # a trait method with a plain return keeps the trait route
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "report 2\n1 2 55\n0 1 -1\n0 -1 0 0\n1 3\n9 4 -1\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "report 2\n1 2 55\n0 1 -1\n0 -1 0 0\n1 3\n9 4 -1\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "report 2\n1 2 55\n0 1 -1\n0 -1 0 0\n1 3\n9 4 -1\n"

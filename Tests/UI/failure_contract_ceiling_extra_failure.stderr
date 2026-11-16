@@ -1,0 +1,8 @@
+Error [jet.ErrorNotPropagatable]: `load` fails with `DiskError`, which can't propagate into `ParseError` here
+  --> Tests/UI/failure_contract_ceiling_extra_failure.jet:26:11
+    |
+ 26 |     size: load(path)
+    |           ^^^^
+ Why: `load` is defined at `failure_contract_ceiling_extra_failure.jet:20:1` with effective failure contract `explicit DiskError!`; the caller's `explicit ParseError!` contract has no route from `DiskError` to `ParseError`
+ Fix: Declare the caller with `DiskError` as its failure domain, or add `impl ParseError.From(DiskError) { … }`; otherwise handle `load` locally with `??`
+More: jet-lang.dev/e/E2404

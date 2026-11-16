@@ -1,0 +1,25 @@
+{
+  "name": "stream-bench",
+  "mode": "tool",
+  "description": "Tools/Perf/StreamBench.py and its Jet twin StreamBench/run.jet, Stream creation, pull and early close against Python generators: for sizes 1, 1000 and 10000 and each case one fresh Python worker and one Jet run of a generated program, printed as JSON with sorted keys. JET_STREAM_BENCH_COMMAND is a stand-in (fake-jet) that, run from the repository root, insists each generated program match sources/ byte for byte and prints what its print line names; FAKE_JET=wrong prints the wrong text and FAKE_JET=fail fails. Cases: the full run; ignored arguments; quoting in the command; the wrong output, a failing Jet run and an unclosed quote (each exit 1, no output); the Python worker; its unknown case and missing size (exit 1); the Jet worker; its bad size, unknown case and missing source (exit 1).",
+  "tool": {
+    "original": "Tools/Perf/StreamBench.py",
+    "jet": "Tools/Perf/StreamBench/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": [], "env": {"JET_STREAM_BENCH_COMMAND": "sh Tools/Gauntlet/Entries/StreamBench/Fixtures/fake-jet"}, "check": "check.jet", "expected": "Expected/all.out"},
+      {"args": ["--help", "x"], "env": {"JET_STREAM_BENCH_COMMAND": "sh Tools/Gauntlet/Entries/StreamBench/Fixtures/fake-jet"}, "check": "check.jet", "expected": "Expected/all.out"},
+      {"args": [], "env": {"JET_STREAM_BENCH_COMMAND": "'sh' \"Tools/Gauntlet/Entries/StreamBench/Fixtures/\"fake\\-jet"}, "check": "check.jet", "expected": "Expected/all.out"},
+      {"args": [], "env": {"JET_STREAM_BENCH_COMMAND": "sh Tools/Gauntlet/Entries/StreamBench/Fixtures/fake-jet", "FAKE_JET": "wrong"}, "exit": 1, "check": "check.jet", "expected": "Expected/none.out"},
+      {"args": [], "env": {"JET_STREAM_BENCH_COMMAND": "sh Tools/Gauntlet/Entries/StreamBench/Fixtures/fake-jet", "FAKE_JET": "fail"}, "exit": 1, "check": "check.jet", "expected": "Expected/none.out"},
+      {"args": [], "env": {"JET_STREAM_BENCH_COMMAND": "sh 'Tools/Gauntlet"}, "exit": 1, "check": "check.jet", "expected": "Expected/none.out"},
+      {"args": ["--python-worker", "pull", "1000"], "env": {}, "check": "check.jet", "expected": "Expected/python-worker.out"},
+      {"args": ["--python-worker", "bogus", "5"], "env": {}, "exit": 1, "check": "check.jet", "expected": "Expected/none.out"},
+      {"args": ["--python-worker", "pull"], "env": {}, "exit": 1, "check": "check.jet", "expected": "Expected/none.out"},
+      {"args": ["--jet-worker", "pull", "10", "Tools/Gauntlet/Entries/StreamBench/Fixtures/sources/pull-10.jet"], "env": {"JET_STREAM_BENCH_COMMAND": "sh Tools/Gauntlet/Entries/StreamBench/Fixtures/fake-jet"}, "check": "check.jet", "expected": "Expected/jet-worker.out"},
+      {"args": ["--jet-worker", "pull", "ten", "Tools/Gauntlet/Entries/StreamBench/Fixtures/sources/pull-10.jet"], "env": {"JET_STREAM_BENCH_COMMAND": "sh Tools/Gauntlet/Entries/StreamBench/Fixtures/fake-jet"}, "exit": 1, "check": "check.jet", "expected": "Expected/none.out"},
+      {"args": ["--jet-worker", "bogus", "10", "Tools/Gauntlet/Entries/StreamBench/Fixtures/sources/pull-10.jet"], "env": {"JET_STREAM_BENCH_COMMAND": "sh Tools/Gauntlet/Entries/StreamBench/Fixtures/fake-jet"}, "exit": 1, "check": "check.jet", "expected": "Expected/none.out"},
+      {"args": ["--jet-worker", "pull", "10"], "env": {"JET_STREAM_BENCH_COMMAND": "sh Tools/Gauntlet/Entries/StreamBench/Fixtures/fake-jet"}, "exit": 1, "check": "check.jet", "expected": "Expected/none.out"}
+    ]
+  }
+}

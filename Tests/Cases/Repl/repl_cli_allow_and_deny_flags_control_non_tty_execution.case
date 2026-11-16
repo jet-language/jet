@@ -1,0 +1,15 @@
+# PORT tests/repl.rs:2043-2086 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: ReplCLIAllowAndDenyFlagsControlNonTTYExecution.fixture
+env: NO_COLOR=1
+mkdir: project
+step: jet repl --project {work}/project --allow-fs
+stdin: ReplCLIAllowAndDenyFlagsControlNonTTYExecution.fixture/input.in
+exit: 0
+file: project/cli.txt = ReplCLIAllowAndDenyFlagsControlNonTTYExecution.fixture/yes.out
+remove: project/cli.txt
+step: jet repl --project {work}/project --allow-fs --deny-fs
+stdin: ReplCLIAllowAndDenyFlagsControlNonTTYExecution.fixture/input.in
+exit: any # Original denied process status unasserted rs2078-2084.
+stderr: ~ "E1803" # Original deny diagnostic rs2081.
+file: project/cli.txt absent

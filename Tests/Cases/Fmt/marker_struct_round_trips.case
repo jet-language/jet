@@ -1,0 +1,15 @@
+# Claim: a marker struct (fields, a default, a trailing list field, settings, a group and an
+# `expand` template) formats to one canonical layout and is stable on a second pass
+# Claim: the formatted file runs, so the layout keeps the markers' meaning
+fixture: MarkerStructRoundTrips/Input
+step: jet fmt run.jet
+exit: 0
+file: run.jet = MarkerStructRoundTrips/formatted.out
+step: jet fmt run.jet
+exit: 0
+file: run.jet = MarkerStructRoundTrips/formatted.out
+step: jet fmt --check run.jet
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = "orders 2\n"

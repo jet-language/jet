@@ -8,7 +8,7 @@ every run adds in every mode. Markdown is default, HTML only on request.
 ## Prior-art registry
 
 Every source a run mines gets a row in the Source index of
-`Docs/spec/reference/prior-art.md` before hand-in, in a section for the run:
+`Docs/Spec/Reference/prior-art.md` before hand-in, in a section for the run:
 
 ```md
 ### Subject (mined YYYY-MM-DD)
@@ -96,7 +96,7 @@ all new publications**. No automatic feature factory:
 - Use dependencies when order matters; freeze only on exact owner instruction.
 - Workers return reviewed payloads; only the orchestrator performs supported
   non-serve CLI writes, lint and readback. Never hand-edit `.tower`.
-- Publish the authorized dated Markdown synthesis under `Docs/research/` using
+- Publish the authorized dated Markdown synthesis under `Docs/Research/` using
   the shared non-serve `docs add` procedure. In report-only runs publish only
   the authorized report, without work/decision writes. No unowned “revisit later”
   action in normal Tower-enabled mode; evidence gaps get honest dispositions.

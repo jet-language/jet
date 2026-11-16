@@ -1,0 +1,15 @@
+// Adds two drafts to a Crew: one the crew accepts, and one whose assignee
+// is no member and whose second step has no title. The refused add answers
+// one field error for each, at the path of the draft's field.
+use logic
+
+add: fn(crew: logic.Crew, draft: logic.TaskDraft) -> String {
+    steps: crew.add_task(draft) ?? return logic.reason(err)
+    "added with {steps} steps"
+}
+
+run: fn() {
+    crew: logic.Crew{members: [String]{"ada", "lin"}}
+    print(add(crew, logic.TaskDraft{title: "Ship", assignee: Val("ada"), steps: [logic.Step]{{title: "Build"}}}))
+    print(add(crew, logic.TaskDraft{title: "Ship", assignee: Val("bob"), steps: [logic.Step]{{title: "Build"}, {title: ""}}}))
+}

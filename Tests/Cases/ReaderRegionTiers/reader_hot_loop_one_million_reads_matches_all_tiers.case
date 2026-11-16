@@ -1,0 +1,18 @@
+# Port of tests/reader_region_tiers.rs:9-13; existing source/golden reused verbatim.
+# tier-agreement harness 411-497: all three modes and exact output/baseline equality retained.
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+mkdir: release
+mkdir: default
+mkdir: interpret
+step release: jet run --release {root}/Tests/Run/Encoding/ReaderHotLoop.jet
+env: JET_STORE_DIR={work}/release/cache
+env: JETPACK_ROOT={work}/release/jetpack
+exit: 0
+stdout: = ../../../Tests/Run/Encoding/ReaderHotLoop.out
+step: jet run {root}/Tests/Run/Encoding/ReaderHotLoop.jet
+env: JET_STORE_DIR={work}/default/cache
+env: JETPACK_ROOT={work}/default/jetpack
+exit: 0
+stdout: = ../../../Tests/Run/Encoding/ReaderHotLoop.out
+stdout: == release

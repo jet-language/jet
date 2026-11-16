@@ -1,0 +1,33 @@
+# A `panic` in a web build leaves by its stop path to the runtime partition's
+# root, which prints the shared stop report and exits 70: the page prints
+# byte for byte what `jet run` prints, whichever partition marker the
+# entry's module carries.
+requires: tool:node
+fixture: WebE3001ContextMatchesOnJSAndWasm.fixture
+env: NO_COLOR=1
+step native_js: jet run tests/fixtures/web_e3001_js_context.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3001]: `panic: missing value`\n  --> web_e3001_js_context.jet:7 in run\n" # the report's head; the page's report is compared whole below
+stderr: ~ "7 |     print(missing() ?? panic(\"missing value\"))" # the source line under the location
+step: jet build --target web tests/fixtures/web_e3001_js_context.jet
+exit: 0
+file: tests/fixtures/.jet/build/app.wasm is-file
+step: node app.js
+cwd: tests/fixtures/.jet/build
+exit: 70
+stdout: empty
+stderr: == native_js
+step native_wasm: jet run tests/fixtures/web_e3001_wasm_context.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3001]: `panic: missing value`\n  --> web_e3001_wasm_context.jet:7 in run\n" # the report's head; the page's report is compared whole below
+stderr: ~ "7 |     print(missing() ?? panic(\"missing value\"))" # the source line under the location
+step: jet build --target web tests/fixtures/web_e3001_wasm_context.jet
+exit: 0
+file: tests/fixtures/.jet/build/app.wasm is-file
+step: node app.js
+cwd: tests/fixtures/.jet/build
+exit: 70
+stdout: empty
+stderr: == native_wasm

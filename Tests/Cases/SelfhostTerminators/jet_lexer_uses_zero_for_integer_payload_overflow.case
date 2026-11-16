@@ -1,0 +1,16 @@
+# PORT tests/selfhost_terminators.rs:552-571.
+# The fixture depends on this checkout's JetLexer and JetFoundation packages, copied into a toolchain
+# tree (Core, Compiler/Prelude and the compiler workspace). No tree is named, so the program takes the
+# Core built into jet, and JetFoundation's `toolchain:` inputs read the copied tree that holds them.
+fixture: JetLexerUsesZeroForIntegerPayloadOverflow.fixture
+copy: {root}/Core tree/Core
+copy: {root}/Compiler/Prelude tree/Compiler/Prelude
+copy: {root}/Compiler/package.jet tree/Compiler/package.jet
+copy: {root}/Compiler/JetFoundation tree/Compiler/JetFoundation
+copy: {root}/Compiler/JetLexer tree/Compiler/JetLexer
+step: jet run tree/app/main.jet
+unset: JET_TOOLCHAIN_ROOT
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+exit: 0
+stdout: = JetLexerUsesZeroForIntegerPayloadOverflow.fixture/expected.out

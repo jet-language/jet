@@ -1,0 +1,12 @@
+Error [jet.UseAfterMove]: `pair.left` was consumed by a lambda that captures it, so it can't be used here
+  --> Tests/UI/Ownership/moved_places_can_be_reinitialized_without_clearing_relatives_3.jet:12:16
+    |
+ 12 |     print(pair.left)
+    |                ^^^^
+  --> Tests/UI/Ownership/moved_places_can_be_reinitialized_without_clearing_relatives_3.jet:10:28
+    |
+ 10 |     call(fn() { print(pair.left) })
+    |                            ^^^^ `pair.left` moved to a lambda that captures it here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `pair.left` after the move, or give a lambda that captures it a copy with `pair.left.copy()` where it moved.
+More: jet-lang.dev/e/E0121

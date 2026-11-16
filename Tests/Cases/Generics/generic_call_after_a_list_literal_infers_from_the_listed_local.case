@@ -1,0 +1,20 @@
+# A local listed in a list literal and used again later is copied
+# into the list. A later generic call on it infers `T` from it: the argument
+# probe keeps the share site its use finds, so the next pass copies instead of
+# moving and the call is not E0904. Covers a `#Numeric` distinct Float with a
+# bounded and a prelude generic, a plain Float and a struct, on every
+# optimization level.
+fixture: GenericCallAfterAListLiteralInfersFromTheListedLocal.fixture
+env: NO_COLOR=1
+step: jet run -O0 run.jet
+exit: 0
+stdout: = generic_call_after_a_list_literal_infers_from_the_listed_local.out
+stderr: empty
+step: jet run -O1 run.jet
+exit: 0
+stdout: = generic_call_after_a_list_literal_infers_from_the_listed_local.out
+stderr: empty
+step: jet run -O2 run.jet
+exit: 0
+stdout: = generic_call_after_a_list_literal_infers_from_the_listed_local.out
+stderr: empty

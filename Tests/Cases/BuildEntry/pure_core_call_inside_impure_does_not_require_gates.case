@@ -1,0 +1,7 @@
+# Port of tests/build_entry.rs:3591-3604; helper 3606-3633; sources verbatim.
+# PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: Fixtures/PureCoreCallInsideImpureDoesNotRequireGates
+step: jet build main.jet  --json
+exit: nonzero
+json: machine doc $.reports[?code="PURE"] #>= 1
+json: machine doc $.reports[?code="E3411"] #= 0

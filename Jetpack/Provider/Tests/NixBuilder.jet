@@ -123,7 +123,7 @@ provider_test_native_entry: fn(verification: &StoreVerification, roots: HangarRo
     files.remove_all(source) ?? panic("source cleanup")
 }
 
-// The Rust claim reads tests/fixtures/nix-compat/native-builder-flake.nix; the
+// The Rust claim reads Tests/Fixtures/NixCompat/native-builder-flake.nix; the
 // same flake is written into a scratch project here.
 #Test("provider native repository derivation builds without nix realization") {
     if !provider_test_require_sandbox() {
@@ -134,7 +134,7 @@ provider_test_native_entry: fn(verification: &StoreVerification, roots: HangarRo
     flake: files.join(project, "native-builder-flake.nix")
     files.write(flake, PROVIDER_TEST_NATIVE_FLAKE) ?? panic("fixture flake")
     roots: provider_test_nix_roots("repository")
-    entry: provider_nix_build_repository_output(verification, roots, project, flake, "x86_64-linux", "native", "./tests/fixtures/nix-compat/native-builder-flake.nix#native", "") ?? panic("repository build: {err.message()}")
+    entry: provider_nix_build_repository_output(verification, roots, project, flake, "x86_64-linux", "native", "./Tests/Fixtures/NixCompat/native-builder-flake.nix#native", "") ?? panic("repository build: {err.message()}")
     assert_eq(entry.name, "native-repository")
     assert(entry.out.starts_with("{files.join(roots.hangar_dir(), "objects")}/"))
     producer: ProducerRecord.decode(entry.producer_record) ?? panic("producer record")
@@ -160,7 +160,7 @@ provider_test_native_entry: fn(verification: &StoreVerification, roots: HangarRo
     files.remove_all(source) ?? panic("source cleanup")
 }
 
-// Diagnostic What, Why and Fix lines are sentence case (Docs/spec/ui-case-law.md;
+// Diagnostic What, Why and Fix lines are sentence case (Docs/Spec/ui-case-law.md;
 // `diagnostic_from_registry` capitalizes the first ordinary word).
 #Test("provider native build diagnostics match substituted provider contract") {
     cases: [(error: NativeNixBuildError, code: String, what: String, fix: String)]{

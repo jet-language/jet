@@ -1,0 +1,19 @@
+// The marker's module. `greeting` is private here; the method the template
+// writes into the marker's module still calls this one.
+greeting: fn() -> String { "web" }
+
+Describe: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            impl #{tname} {
+                describe: fn(self) -> String {
+                    total: 2
+                    "{greeting()} {total}"
+                }
+            }
+        }
+    }
+}

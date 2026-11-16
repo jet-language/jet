@@ -1,0 +1,28 @@
+# A stop raised inside Core names the user's call that reached it on the web
+# as natively: the page reads the program module's location table where the
+# native image reads its own, so each web build prints its golden's report,
+# `-->` line and all, byte for byte, and exits 70.
+requires: tool:node
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+copy: {root}/Examples/Math/IntPowNegativeStop.jet IntPowNegativeStop.jet
+copy: {root}/Tests/Run/CoreMathNumeric/FloatBitsRangeStop.jet FloatBitsRangeStop.jet
+copy: {root}/Tests/Run/CoreMathNumeric/TypedAbsI64Min.jet TypedAbsI64Min.jet
+step: jet build --target web IntPowNegativeStop.jet
+exit: 0
+step: node .jet/build/app.js
+exit: 70
+stdout: = ../../../Examples/Math/IntPowNegativeStop.out
+stderr: = ../../../Examples/Math/IntPowNegativeStop.err.out
+step: jet build --target web FloatBitsRangeStop.jet
+exit: 0
+step: node .jet/build/app.js
+exit: 70
+stdout: = ../../Run/CoreMathNumeric/FloatBitsRangeStop.out
+stderr: = ../../Run/CoreMathNumeric/FloatBitsRangeStop.err.out
+step: jet build --target web TypedAbsI64Min.jet
+exit: 0
+step: node .jet/build/app.js
+exit: 70
+stdout: = ../../Run/CoreMathNumeric/TypedAbsI64Min.out
+stderr: = ../../Run/CoreMathNumeric/TypedAbsI64Min.err.out

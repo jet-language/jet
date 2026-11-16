@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
-// Every mined source needs a row here before hand-in (Docs/spec/reference/prior-art.md, Source index).
+// Every mined source needs a row here before hand-in (Docs/Spec/Reference/prior-art.md, Source index).
 export const REGISTRY = join(SCRIPTS, '..', '..', '..', '..', 'Docs', 'spec', 'reference', 'prior-art.md');
 
 export const SCHEMAS = {

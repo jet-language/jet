@@ -1,0 +1,14 @@
+# A log file sink is the process's, not the thread's. The main thread sets
+# `log.otlp_file`; a served route's handler logs inside a span on its own
+# thread, and two tasks log from theirs. Every record reaches the one file,
+# with the handler's span, and none reaches stderr.
+fixture: ALogFileSinkReceivesTheRecordsOfEveryThread.fixture
+env: NO_COLOR=1
+step o0: jet run -A -O0 main.jet
+exit: 0
+stdout: = a_log_file_sink_receives_the_records_of_every_thread.out
+stderr: empty
+step o2: jet run -A -O2 main.jet
+exit: 0
+stdout: = a_log_file_sink_receives_the_records_of_every_thread.out
+stderr: empty

@@ -36,8 +36,8 @@ no_nix_test_assets: fn(root: String) {
     }
     root: cases_test_root("no-nix-reexec")
     no_nix_test_assets(root)
-    kit_exec_write(files.join(root, "tests/cases/group/input.stdin"), "two words\n")
-    kit_exec_write(files.join(root, "tests/cases/group/expected.out"), "two words|value|argument with spaces\n")
+    kit_exec_write(files.join(root, "Tests/Cases/group/input.stdin"), "two words\n")
+    kit_exec_write(files.join(root, "Tests/Cases/group/expected.out"), "two words|value|argument with spaces\n")
     pid: process.current_pid()
     loop name in ["enabled", "disabled"] {
         relation: if name == "enabled" -> "test" else -> "! test"
@@ -129,8 +129,8 @@ no_nix_test_put: fn(bytes: &[U8], offset: Int, width: Int, value: Int) {
 #Test("env-clear drops host and kit base values before explicit case and step overlays") {
     root: cases_test_root("env-clear")
     cases_test_source(root, "cleared", "env: KEEP=case\nstep: jet -c 'set -eu; test -z \"${{HOME+x}}\"; test -z \"${{NO_COLOR+x}}\"; printf \"%s|%s|%s\" \"$KEEP\" \"$CASE_VALUE\" \"$1\"' scenario {{env:HOME|fallback}}\nenv-clear: true\nenv: CASE_VALUE=step\nstdout: = cleared.out\nstep: jet -c 'printf %s \"$NO_COLOR\"'\nstdout: = inherited.out\n")
-    kit_exec_write(files.join(root, "tests/cases/group/cleared.out"), "case|step|fallback")
-    kit_exec_write(files.join(root, "tests/cases/group/inherited.out"), "1")
+    kit_exec_write(files.join(root, "Tests/Cases/group/cleared.out"), "case|step|fallback")
+    kit_exec_write(files.join(root, "Tests/Cases/group/inherited.out"), "1")
     context: cases_test_context(root, files.join(root, "scratch"))
     assert_eq(kit_cases_run(cases_test_entry("cleared"), context)[0].verdict.status, "PASS")
     loop (i, source) in
@@ -143,7 +143,7 @@ no_nix_test_put: fn(bytes: &[U8], offset: Int, width: Int, value: Int) {
 
 #Test("spawn uses the shared cleared environment and wait retains the child policy") {
     root: cases_test_root("env-clear-spawn")
-    kit_exec_write(files.join(root, "tests/cases/group/cleared.out"), "step|fallback")
+    kit_exec_write(files.join(root, "Tests/Cases/group/cleared.out"), "step|fallback")
     cases_test_source(root, "child", "env: CASE_VALUE=case\nspawn child: jet -c 'set -eu; test -z \"${{HOME+x}}\"; test -z \"${{NO_COLOR+x}}\"; printf \"%s|%s\" \"$CASE_VALUE\" \"$1\"' scenario {{env:HOME|fallback}}\nenv-clear: true\nenv: CASE_VALUE=step\nwait: child\nstdout: = cleared.out\nstderr: empty\n")
     context: cases_test_context(root, files.join(root, "scratch"))
     assert_eq(kit_cases_run(cases_test_entry("child"), context)[0].verdict.status, "PASS")

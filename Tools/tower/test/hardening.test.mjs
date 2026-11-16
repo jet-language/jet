@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { scratchRoot } from '../../agent/roots.mjs';
+import { scratchRoot } from '../../Agent/roots.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,7 +43,7 @@ function finding(overrides = {}) {
     hardeningWrongTierMask: overrides.hardeningWrongTierMask || ['aot', 'jet_run'],
     hardeningInputPartition: overrides.hardeningInputPartition || 'minimum',
     source: overrides.source || `run: fn() { print("${seed}") }`,
-    commands: overrides.commands || ['Tools/agent/jet-env jet run repro.jet', 'Tools/agent/jet-env jet run --release repro.jet'],
+    commands: overrides.commands || ['Tools/Agent/jet-env jet run repro.jet', 'Tools/Agent/jet-env jet run --release repro.jet'],
     expectedRelation: overrides.expectedRelation || 'equal',
     actualRelation: overrides.actualRelation || 'different',
     seed,
@@ -166,7 +166,7 @@ test('unknown seam aliases converge through triage and survive archive reuse', (
     const fixture = join(b.root, 'tests', 'conformance', 'corpus', 'F-ARCHIVE.jet');
     mkdirSync(dirname(fixture), { recursive: true });
     writeFileSync(fixture, '// F-ARCHIVE permanent regression fixture\n');
-    cli(b.data, ['card', 'update', '#1', '--hardening-fixture', 'tests/conformance/corpus/F-ARCHIVE.jet', '--by', 'hardening-rig']);
+    cli(b.data, ['card', 'update', '#1', '--hardening-fixture', 'Tests/Conformance/Corpus/F-ARCHIVE.jet', '--by', 'hardening-rig']);
     cli(b.data, ['card', 'criteria', '#1', '--add', 'fixture is present', '--by', 'builder']);
     cli(b.data, ['card', 'criteria', '#1', '--meet', '1', '--evidence', 'fixture checked in', '--by', 'builder']);
     cli(b.data, ['card', 'update', '#1', '--phase', 'done', '--by', 'builder']);
@@ -228,7 +228,7 @@ test('hardening card cannot close without a fixture naming its finding and recur
     const fixture = join(b.root, 'tests', 'conformance', 'corpus', 'F-FIXTURE.jet');
     mkdirSync(dirname(fixture), { recursive: true });
     writeFileSync(fixture, '// finding F-FIXTURE\n');
-    cli(b.data, ['card', 'update', '#1', '--hardening-fixture', 'tests/conformance/corpus/F-FIXTURE.jet', '--by', 'hardening-rig']);
+    cli(b.data, ['card', 'update', '#1', '--hardening-fixture', 'Tests/Conformance/Corpus/F-FIXTURE.jet', '--by', 'hardening-rig']);
     cli(b.data, ['card', 'update', '#1', '--body', 'human triage note', '--by', 'builder']);
     const retained = JSON.parse(cli(b.data, ['card', 'show', '#1', '--json']).out);
     assert.match(retained.body, /Minimized reproducer:/);

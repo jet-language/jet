@@ -39,10 +39,10 @@ test('docs reject hardlinked documents and every available special file', (t) =>
     const hardlink = join(root, 'Docs', 'research', 'hardlink.md');
     linkSync(original, hardlink);
     for (const operation of [
-      () => docs.showDoc(dataDir, 'Docs/research/hardlink.md'),
-      () => docs.addDoc(dataDir, { path: 'Docs/research/hardlink.md', body: 'overwrite' }),
-      () => docs.updateDoc(dataDir, 'Docs/research/hardlink.md', { body: 'overwrite' }),
-      () => docs.deleteDoc(dataDir, 'Docs/research/hardlink.md'),
+      () => docs.showDoc(dataDir, 'Docs/Research/hardlink.md'),
+      () => docs.addDoc(dataDir, { path: 'Docs/Research/hardlink.md', body: 'overwrite' }),
+      () => docs.updateDoc(dataDir, 'Docs/Research/hardlink.md', { body: 'overwrite' }),
+      () => docs.deleteDoc(dataDir, 'Docs/Research/hardlink.md'),
     ]) invalid(operation);
     assert.equal(readFileSync(original, 'utf8'), 'inside secret\n');
 
@@ -54,7 +54,7 @@ test('docs reject hardlinked documents and every available special file', (t) =>
     if (spawnSync('mknod', [device, 'c', '1', '3']).status === 0) specialPaths.push(device);
     if (!specialPaths.length) return t.skip('host cannot create a FIFO or device node');
     for (const special of specialPaths) {
-      const rel = `Docs/research/${special.slice(docsRoot.length + 1)}`;
+      const rel = `Docs/Research/${special.slice(docsRoot.length + 1)}`;
       for (const operation of [
         () => docs.showDoc(dataDir, rel),
         () => docs.addDoc(dataDir, { path: rel, body: 'overwrite' }),
@@ -76,7 +76,7 @@ test('held docs directories fail closed when moved outside the project root', as
   const moved = join(outside, 'research');
   renameSync(held, moved);
   try {
-    assert.throws(() => docs.showDoc(dataDir, 'Docs/research/inside.md'), error =>
+    assert.throws(() => docs.showDoc(dataDir, 'Docs/Research/inside.md'), error =>
       ['E_INVALID', 'E_NOT_FOUND'].includes(error?.code));
   } finally {
     renameSync(moved, held);
@@ -98,7 +98,7 @@ test('held docs directories fail closed when moved outside the project root', as
   try {
     for (let i = 0; i < 500; i++) {
       try {
-        const result = docs.showDoc(dataDir, 'Docs/research/inside.md');
+        const result = docs.showDoc(dataDir, 'Docs/Research/inside.md');
         assert.notEqual(result.body, 'outside secret\n');
       } catch (error) {
         assert.ok(['E_INVALID', 'E_NOT_FOUND'].includes(error.code), error.message);
@@ -483,7 +483,7 @@ test('stored ordering fields reject hostile values and UI identity fields stay e
 test('token-host report keeps the canonical trust boundary wording', () => {
   const wording = 'Host does not authenticate a request: the no-token server trusts only a loopback socket whose Host is literal loopback and whose X-Forwarded-For is empty or literal loopback; when a token is configured, remote access is allowed only after the configured token matches.';
   for (const report of [
-    new URL('../../../Docs/audits/security-deep-scan-2026-08-03.md', import.meta.url),
-    new URL('../../../Docs/audits/security-deep-scan-2026-08-03-full-tower-control-plane.md', import.meta.url),
+    new URL('../../../Docs/Audits/security-deep-scan-2026-08-03.md', import.meta.url),
+    new URL('../../../Docs/Audits/security-deep-scan-2026-08-03-full-tower-control-plane.md', import.meta.url),
   ]) assert.match(readFileSync(report, 'utf8'), new RegExp(wording.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });

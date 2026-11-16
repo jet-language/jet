@@ -1,0 +1,54 @@
+# `mem.alloc_raw(size, align)` gives `size` fresh heap bytes at an `align`
+# boundary as a `mem.Ptr<U8>?`, None for a size not above zero or an align
+# that is not a power of two, and `cast<U>` gives the typed view;
+# `mem.free_raw(p)` takes the pointer and releases the block, on every tier.
+# The released bytes are quarantined: a read through a kept copy of the
+# pointer is a located R0802 fault, a second release of the taken binding is
+# refused before the program runs, and a second release through a copy of
+# the pointer, which the ownership check cannot see, is a located R0802 fault.
+fixture: RawHeapStorageIsTakenAndReleased.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "7 9 7 9\n0\n8 shapes\nempty refused\nodd align refused\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "7 9 7 9\n0\n8 shapes\nempty refused\nodd align refused\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "7 9 7 9\n0\n8 shapes\nempty refused\nodd align refused\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "7 9 7 9\n0\n8 shapes\nempty refused\nodd align refused\n"
+end when
+step keptnone: jet run -O0 kept.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "kept.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
+step keptfull: jet run -O2 kept.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "kept.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
+step twice: jet check twice.jet
+exit: 1
+stderr: ~ "E0121" # the first release took the binding
+stderr: ~ "twice.jet:7:26" # the report is located at the second release
+step aliasednone: jet run -O0 aliased.jet
+exit: 70
+stdout: = "released\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "aliased.jet:9:17, in #Unsafe gate" # the fault is located at the second release
+step aliasedfull: jet run -O2 aliased.jet
+exit: 70
+stdout: = "released\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "aliased.jet:9:17, in #Unsafe gate" # the fault is located at the second release

@@ -1,0 +1,19 @@
+# Inherent methods with no written failure contract are inferred like
+# top-level functions: `twice` and `next` cannot fail, so the solve proves them
+# `Int Never!` and `total`'s `Never!` contract holds; `risky` calls the
+# fallible `checked` and keeps its default route.
+fixture: InferredInfallibleMethodsMeetANeverContractOnEveryTier
+env: NO_COLOR=1
+step: jet run run.jet
+exit: 0
+stdout: = "41\n5\n0\n"
+step: jet build run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "41\n5\n0\n"
+step: jet build --release run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "41\n5\n0\n"

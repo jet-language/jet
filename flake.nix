@@ -75,7 +75,7 @@
           exec ${pkgs.stdenv.cc}/bin/cc -B${pkgs.llvmPackages.bintools}/bin/ -fuse-ld=lld "$@"
         '';
         # The dev shells' fixed variables. They are derivation attributes, not
-        # shell-hook exports, so Tools/agent/JetEnv.jet reads them from the
+        # shell-hook exports, so Tools/Agent/JetEnv.jet reads them from the
         # cached shell environment without running a shell; the hooks keep only
         # what needs a live shell. `libraries` go on the dynamic library path
         # in front of HarfBuzz (and the Vulkan loader on Linux).
@@ -100,7 +100,7 @@
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             "CARGO_TARGET_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}_LINKER" = "${jetCargoLinker}";
             # The static musl whose libc.a a program's C closure links on the host
-            # route (CC/AR named, or no jetpack engine beside jet: JetCli
+            # route (CC/AR named, or no jetpack engine beside jet: JetCLI
             # ForeignLink.jet): its find_folder search looks on LIBRARY_PATH. The C
             # compiler's own -L flags come first, so host links keep glibc.
             LIBRARY_PATH = "${pkgs.pkgsStatic.musl}/lib";
@@ -233,7 +233,7 @@
         });
 
         # Integration shell: full FFI matrix, Canvas, graphics, emulator, and
-        # OS-image work. Use `nix develop .#full` / `jet Tools/agent/JetEnv.jet full …` explicitly.
+        # OS-image work. Use `nix develop .#full` / `jet Tools/Agent/JetEnv.jet full …` explicitly.
         devShells.full = pkgs.mkShell (jetShellVariables [ ] // {
           packages = [
             pkgs.cargo
@@ -340,8 +340,8 @@
               echo "  package:  jetpack help        (JETPACK=<native jetpack>)"
               echo "  search:   rg \"pattern\" Docs Compiler Core Jetpack tests"
               echo "  LSP:      jet lsp"
-              echo "  editor:   Tools/editors/vscode/install.sh   (Cursor/VS Code)"
-              echo "            Tools/editors/zed/install.sh        (Zed dev extension)"
+              echo "  editor:   Tools/Editors/Vscode/install.sh   (Cursor/VS Code)"
+              echo "            Tools/Editors/Zed/install.sh        (Zed dev extension)"
               echo "  debug:    jet debug <file.jet>  (native lldb backend)"
             } >&2
           '';

@@ -1,0 +1,17 @@
+# Queued jobs survive a server restart in the store, and each keeps its
+# retry policy. The queue step serves the fixture's board, runs its leap-day
+# schedule once, adds, and exits once each job's first run failed. The
+# restart step serves it again: it takes both jobs' rows once no server
+# holds them. `note` (`retries: 2`) runs its second run, which writes the
+# note; `doomed` (`retries: 1`) runs its last, fails, and its row stays
+# without running again. The schedule's run is recorded in the store, so the
+# restart rebuilds the schedule without running that day again.
+fixture: JobsSurviveRestart.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step queue: jet run main.jet -- queue
+exit: 0
+stdout: = "queued; note runs: 1, doomed runs: 1, leap day runs: 1\n"
+step restart: jet run main.jet -- restart
+exit: 0
+stdout: = "note 7: after the restart\nnote runs: 1, doomed runs: 1, leap day runs: 1\n"

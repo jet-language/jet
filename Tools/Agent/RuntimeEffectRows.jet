@@ -1,0 +1,433 @@
+#!/usr/bin/env jet
+// The jet.runtime interface against the Core leaves it replaces (#6615 c4).
+//
+// Each member X of an interface module jet.runtime.M (the generated
+// Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet) replaces the
+// Core leaf core.M.__X, or the leaf `leaf_aliases` names for it: its
+// `dispatcher_row` in Compiler/Prelude/Core.rows and its CoreCallRecord in
+// Foundation's CORE_CALLS, which the compiler computes from Core.rows while it
+// builds (Compiler/JetFoundation/Source/CoreDeclarations); this tool reads the
+// built records through `jet inspect structure --core --json` (its `calls`),
+// run by $JET, else `jet` on PATH, so the jet must be built from this tree.
+// While both tables carry that leaf, the member's declared row must be the
+// effect sema gives a call of the record: its `effect_kind` unless its
+// `effect_leaf` refines that kind, and its `effect_leaf`, sorted; else no
+// effect. A leaf one table carries and the other does not is a
+// half-done cutover and a difference too; a leaf neither carries is cut over
+// (or never existed) and has nothing to compare. The report names each member
+// with its export symbol and the record's runtime symbol.
+//
+// Members that bind one runtime symbol declare one row, unless `row_splits`
+// lists the symbol with the rule that gives each member its own caller's
+// row. An unlisted split, and a listed symbol whose members agree, are
+// differences.
+//
+// Usage (from the repository root):
+//   jet Tools/Agent/RuntimeEffectRows.jet --check
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    term: core.term
+}
+
+INTERFACE: "Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet"
+
+DISPATCHER: "Compiler/Prelude/Core.rows"
+
+USAGE: "usage: jet Tools/Agent/RuntimeEffectRows.jet --check"
+
+OUTPUT_LIMIT: 268435456
+
+#Error
+RowsError: struct {
+    message: String
+}
+
+// One interface member: `module_name` is jet.runtime.M.
+InterfaceMember: struct {
+    module_name: String
+    member: String
+    effects: [String]
+    symbol: String
+}
+
+// One CoreCallRecord's effect fields.
+CoreLeaf: struct {
+    module_name: String
+    member: String
+    effect_kind: String?
+    effect_leaf: String?
+    symbol: String
+}
+
+// A member named apart from the Core leaf it replaces: `member` is
+// jet.runtime.M.X, `leaf` is `core.N __Y`.
+LeafAlias: struct {
+    member: String
+    leaf: String
+}
+
+leaf_aliases: fn() -> [LeafAlias] Never! {
+    [LeafAlias]{
+        // core.net.tls's host reads, under the engine's Net root.
+        LeafAlias{member: "jet.runtime.net.tls_entropy", leaf: "core.net.tls __host_entropy"},
+        LeafAlias{member: "jet.runtime.net.tls_read_bytes", leaf: "core.net.tls __host_read_bytes"},
+        LeafAlias{member: "jet.runtime.net.tls_open_directory", leaf: "core.net.tls __host_open_directory"},
+        LeafAlias{member: "jet.runtime.net.tls_close_directory", leaf: "core.net.tls __host_close_directory"},
+        LeafAlias{member: "jet.runtime.net.tls_prove_mode", leaf: "core.net.tls __host_prove_mode"},
+        LeafAlias{member: "jet.runtime.net.tls_prove_record", leaf: "core.net.tls __host_prove_record"},
+        LeafAlias{member: "jet.runtime.net.tls_prove_take", leaf: "core.net.tls __host_prove_take"},
+        LeafAlias{member: "jet.runtime.net.tls_wall_sample", leaf: "core.net.tls __host_wall_sample"},
+        LeafAlias{member: "jet.runtime.net.tls_env_value", leaf: "core.net.tls __host_env_value"},
+        // core.watcher's pid watch handle.
+        LeafAlias{member: "jet.runtime.watcher.process_pid", leaf: "core.watcher __process_pid"},
+        // The compute, perf and jobs leaves bound in jet.runtime.sys and db.
+        LeafAlias{member: "jet.runtime.sys.simd_lanes", leaf: "core.compute __simd_lanes"},
+        LeafAlias{member: "jet.runtime.sys.perf_bits", leaf: "core.perf __read_bits"},
+        LeafAlias{member: "jet.runtime.sys.set_perf_bits", leaf: "core.perf __write_bits"},
+        LeafAlias{member: "jet.runtime.db.job_publish_parts", leaf: "core.jobs __publish_parts"},
+        LeafAlias{member: "jet.runtime.db.job_sleep_ms", leaf: "core.jobs __sleep_ms"},
+    }
+}
+
+// A runtime symbol whose members declare different rows, and the rule that
+// gives each member its own Core caller's row.
+RowSplit: struct {
+    symbol: String
+    rule: String
+}
+
+row_splits: fn() -> [RowSplit] Never! {
+    [RowSplit]{
+        RowSplit{symbol: "jet_std_os_pid", rule: "core.files reads the pid under its FS root, core.sys.pid under Env"},
+        RowSplit{symbol: "jet_std_os_family", rule: "core.files reads the OS family as a pure platform fact, core.sys.family under Env"},
+        RowSplit{symbol: "jet_term_stdout_is_terminal", rule: "core.term's TTY probe is pure, the terminal8 state machine's declares IO"},
+        RowSplit{symbol: "jet_term_stderr_is_terminal", rule: "core.term's TTY probe is pure, the terminal8 state machine's declares IO"},
+        RowSplit{symbol: "jet_fs_temp_directory_raw", rule: "mktemp names Env for the temporary directory, the temp_* constructors FS"},
+        RowSplit{symbol: "jet_fs_temp_path_sample_raw", rule: "mktemp names Time for the name's clock sample, the temp_* constructors FS"},
+        RowSplit{symbol: "jet_time_raw_host_monotonic_ns", rule: "a fresh read declares Time, a Clock's own reading is pure (its owner holds Time)"},
+        // The TLS engine's host reads stay under its Net root, an explicit
+        // exception kept by Core/Net/SSL/Defs.jet ssl_time: a handshake needs
+        // Net alone, and the engine's certificate and session clock is not
+        // surfaced as Time.
+        RowSplit{symbol: "jet_time_raw_wall_sample", rule: "core.time reads the wall clock under Time, the TLS engine's clock is under Net"},
+        RowSplit{symbol: "jet_random_os_entropy", rule: "crypto.random and a service authority token draw under Rand, the TLS engine's draw is under Net"},
+        RowSplit{symbol: "jet_files_read_bytes_os", rule: "core.files reads under FS.Read, the TLS engine's certificate reads under Net"},
+        RowSplit{symbol: "jet_fs_directory_open", rule: "core.files opens under FS.Read, the TLS engine's CA directory under Net"},
+        RowSplit{symbol: "jet_fs_directory_close", rule: "an atomic write's parent closes under FS.Write, a Directory under FS.Read, the TLS engine's CA directory under Net"},
+    }
+}
+
+// The text of `key: "…"` in `line`, or None.
+quoted_field: fn(line: String, key: String) -> String? Never! {
+    after: line.partition("{key}: \"")
+    if after.sep == "" -> return None
+    Val(after.tail.partition("\"").head.copy())
+}
+
+// The text of `value`, or None for JSON null (or any other non-text).
+optional_text: fn(value: Dyn?) -> String? Never! {
+    if value == .Val(found) {
+        if found == .Text(content) -> return Val(content.copy())
+    }
+    None
+}
+
+// The entries of the effect row a declaration writes (`-[A, B.c]>`), sorted;
+// none when it writes no row.
+declaration_effects: fn(declaration: String) -> [String] Never! {
+    opened: declaration.partition("-[")
+    if opened.sep == "" -> return [String]{}
+    row: opened.tail.partition("]>").head
+    effects := [String]{}
+    loop entry in row.split(",") {
+        name: entry.strip()
+        if name != "" -> effects.push(name.copy())
+    }
+    effects.sort()
+    effects
+}
+
+interface_members: fn(text: String) -> [InterfaceMember] Never! {
+    members := [InterfaceMember]{}
+    loop line in text.split("\n") {
+        if !line.contains("RuntimeInterfaceRow{{module_name:") -> next
+        module_name: quoted_field(line, "module_name") ?? next
+        member: quoted_field(line, "member") ?? next
+        declaration: quoted_field(line, "declaration") ?? next
+        symbol: quoted_field(line, "symbol") ?? next
+        members.push(InterfaceMember{module_name: module_name, member: member, effects: declaration_effects(declaration), symbol: symbol})
+    }
+    members
+}
+
+// The `calls` of `jet inspect structure --core --json`'s `core` object: each
+// CORE_CALLS record's module, member, effect fields and Prelude symbol.
+core_leaves: fn(core: Dyn) -> [CoreLeaf] Never! {
+    leaves := [CoreLeaf]{}
+    calls: core.get("calls") ?? Dyn.Null
+    if calls == .Array(records) {
+        loop record in records {
+            module_name: optional_text(record.get("module")) ?? next
+            member: optional_text(record.get("member")) ?? next
+            leaves.push(
+                CoreLeaf{
+                    module_name: module_name,
+                    member: member,
+                    effect_kind: optional_text(record.get("effect_kind")),
+                    effect_leaf: optional_text(record.get("effect_leaf")),
+                    symbol: optional_text(record.get("symbol")) ?? "",
+                },
+            )
+        }
+    }
+    leaves
+}
+
+// `core.M __X` for each `dispatcher_row <kind> core.M __X | …` line.
+dispatcher_keys: fn(text: String) -> [String] Never! {
+    keys := [String]{}
+    loop line in text.split("\n") {
+        if !line.starts_with("dispatcher_row ") -> next
+        words: line.partition(" | ").head.split(" ").to_list()
+        if words.len() == 4 -> keys.push("{words[2]} {words[3]}")
+    }
+    keys
+}
+
+// The effect sema gives a call of the record (Effects/Checks.jet
+// sema_effect_record_core_row): its kind unless its leaf refines that kind,
+// and its leaf, sorted; else none.
+leaf_effects: fn(leaf: CoreLeaf) -> [String] Never! {
+    effects := [String]{}
+    leaf_name: leaf.effect_leaf ?? ""
+    if leaf.effect_kind == .Val(kind) {
+        if leaf_name == "" || (leaf_name != kind && !leaf_name.starts_with("{kind}.")) {
+            effects.push(kind.copy())
+        }
+    }
+    if leaf_name != "" -> effects.push(leaf_name.copy())
+    effects.sort()
+    effects
+}
+
+row_text: fn(effects: [String]) -> String Never! {
+    if effects.len() == 0 -> return "no effect"
+    "-[{effects.join(", ")}]>"
+}
+
+Report: struct {
+    joined: Int
+    differences: [String]
+}
+
+// Every difference between the interface and the Core leaves it replaces.
+differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [String], aliases: [LeafAlias]) -> Report Never! {
+    found := [String]{}
+    joined := 0
+    loop member in members {
+        key := "core.{member.module_name.remove_prefix("jet.runtime.")} __{member.member}"
+        loop alias in aliases {
+            if alias.member == "{member.module_name}.{member.member}" {
+                key = alias.leaf.copy()
+                break
+            }
+        }
+        parts: key.partition(" ")
+        core_module: parts.head
+        leaf_name: parts.tail
+        where: "{member.module_name}.{member.member} ({member.symbol})"
+        has_row: dispatched.contains(key)
+        matched := CoreLeaf?{None}
+        loop leaf in leaves {
+            if leaf.module_name == core_module && leaf.member == leaf_name {
+                matched = Val(leaf.copy())
+                break
+            }
+        }
+        leaf: matched ?? {
+            if has_row {
+                found.push("{where}: {core_module}.{leaf_name} has a dispatcher_row but no CoreCallRecord")
+            }
+            next
+        }
+        joined += 1
+        if !has_row {
+            found.push("{where}: {core_module}.{leaf_name} has a CoreCallRecord but no dispatcher_row")
+        }
+        expected: leaf_effects(leaf)
+        if expected.join(",") != member.effects.join(",") {
+            found.push("{where}: declares {row_text(member.effects)}, but {core_module}.{leaf_name} ({leaf.symbol}) has {row_text(expected)}")
+        }
+    }
+    Report{joined: joined, differences: found}
+}
+
+// Every runtime symbol whose members declare different rows without a listed
+// rule, and every listed symbol whose members agree or that no member binds.
+split_differences: fn(members: [InterfaceMember], splits: [RowSplit]) -> [String] Never! {
+    found := [String]{}
+    symbols := [String]{}
+    loop member in members {
+        if !symbols.contains(member.symbol) -> symbols.push(member.symbol.copy())
+    }
+    loop symbol in symbols {
+        rows := [String]{}
+        bound := [String]{}
+        loop member in members {
+            if member.symbol != symbol -> next
+            row: row_text(member.effects)
+            if !rows.contains(row) -> rows.push(row.copy())
+            bound.push("{member.module_name}.{member.member} {row}")
+        }
+        listed := false
+        loop split in splits {
+            if split.symbol == symbol {
+                listed = true
+                break
+            }
+        }
+        if rows.len() > 1 && !listed {
+            found.push("{symbol}: its members declare different rows ({bound.join(", ")}) and row_splits lists no rule for it")
+        }
+        if rows.len() < 2 && listed {
+            found.push("{symbol}: row_splits lists it, but its members declare one row ({bound.join(", ")})")
+        }
+    }
+    loop split in splits {
+        if !symbols.contains(split.symbol) {
+            found.push("{split.symbol}: row_splits lists it ({split.rule}), but no interface member binds it")
+        }
+    }
+    found
+}
+
+read_text: fn(path: String) -[FS]> String RowsError! {
+    text: files.read(path) ?? return Err(RowsError{message: "cannot read {path}: {err}"})
+    Ok(text)
+}
+
+// The compiler's Core structure (`jet inspect structure --core --json`, run by
+// $JET, else `jet` on PATH, from the Compiler/ package, since a jet built
+// before `--core` stopped resolving the inspect target refuses it where no
+// package.jet is found): its `core` object, as the build computed it.
+core_structure: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn RowsError! {
+    jet: process.env_get_or("JET", process.which("jet") ?? "jet")
+    argv: [String]{jet, "inspect", "structure", "--core", "--json"}
+    spec: process.cmd(argv).cwd("Compiler").stdin(.Inherit).stdout(.Capture).stderr(.Inherit).output_limit(OUTPUT_LIMIT)
+    ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
+    receipt: ran[0] ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
+    // `--json` prints the refusal's report on stdout.
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out {
+        return Err(RowsError{message: "command failed: {argv.join(" ")}: {receipt.output.trim()}"})
+    }
+    answer: json.parse(receipt.output) ?? return Err(RowsError{message: "{argv.join(" ")} printed no JSON: {err}"})
+    core: answer.get("core") ?? return Err(RowsError{message: "{argv.join(" ")} printed no `core` object"})
+    Ok(core)
+}
+
+runtime_effect_rows_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int RowsError! {
+    if args.len() != 1 || args[0] != "--check" {
+        term.eprint(USAGE)
+        return Ok(2)
+    }
+    members: interface_members(read_text(INTERFACE) ?? return Err(err))
+    leaves: core_leaves(core_structure() ?? return Err(err))
+    if leaves.len() == 0 {
+        return Err(RowsError{message: "`jet inspect structure --core --json` printed no Core call records"})
+    }
+    dispatched: dispatcher_keys(read_text(DISPATCHER) ?? return Err(err))
+    if members.len() == 0 -> return Err(RowsError{message: "{INTERFACE} has no interface member"})
+    report: differences(members, leaves, dispatched, leaf_aliases())
+    splits: row_splits()
+    found := report.differences.copy()
+    loop line in split_differences(members, splits) -> found.push(line.copy())
+    if found.len() == 0 {
+        print("runtime-effect-rows: ok ({members.len()} interface functions, {report.joined} joined to a Core leaf, 0 differences)")
+        print("runtime-effect-rows: {splits.len()} runtime symbols bound with different rows, each by a rule row_splits lists")
+        return Ok(0)
+    }
+    loop line in found -> term.eprint(line)
+    term.eprint("runtime-effect-rows: {found.len()} difference(s) over {members.len()} interface functions ({report.joined} joined to a Core leaf)")
+    Ok(1)
+}
+
+run: fn() {
+    code: runtime_effect_rows_main(process.args()) ?? process.fail(1, err.message)
+    if code != 0 -> process.exit(code)
+}
+
+#Test("a declaration's row entries, sorted; no row is no effect") {
+    assert_eq(declaration_effects("sleep_ns: fn(nanos: Int) -[Time.Wait]>").join("|"), "Time.Wait")
+    assert_eq(declaration_effects("f: fn() -[Time, FS.Read]> Int").join("|"), "FS.Read|Time")
+    assert_eq(declaration_effects("g: fn(x: Int) -> Int").len(), 0)
+}
+
+#Test("a member joins core.M.__X; its row must be the record's kind and leaf") {
+    members: [InterfaceMember]{
+        InterfaceMember{module_name: "jet.runtime.time", member: "sleep_ns", effects: [String]{"Time.Wait"}, symbol: "jet_std_time_sleep_duration_ns"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "task_timeout", effects: [String]{"Time.Wait"}, symbol: "jet_task_timeout_duration_ns"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "cut", effects: [String]{}, symbol: "jet_time_cut"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "half", effects: [String]{}, symbol: "jet_time_half"},
+        InterfaceMember{module_name: "jet.runtime.net", member: "dns_txt_lookup", effects: [String]{"Net", "Time.Wait"}, symbol: "jet_net_dns_txt_lookup"},
+        InterfaceMember{module_name: "jet.runtime.net", member: "dns_ptr_lookup", effects: [String]{"Time.Wait"}, symbol: "jet_net_dns_ptr_lookup"},
+    }
+    leaves: [CoreLeaf]{
+        CoreLeaf{module_name: "core.time", member: "__sleep_ns", effect_kind: Val("Time"), effect_leaf: Val("Time.Wait"), symbol: "jet_std_time_sleep_duration_ns"},
+        CoreLeaf{module_name: "core.time", member: "__task_timeout", effect_kind: Val("Time"), effect_leaf: None, symbol: "jet_task_timeout_duration_ns"},
+        CoreLeaf{module_name: "core.net", member: "__dns_txt_lookup", effect_kind: Val("Net"), effect_leaf: Val("Time.Wait"), symbol: "jet_net_dns_txt_lookup"},
+        CoreLeaf{module_name: "core.net", member: "__dns_ptr_lookup", effect_kind: Val("Net"), effect_leaf: Val("Time.Wait"), symbol: "jet_net_dns_ptr_lookup"},
+    }
+    report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half", "core.net __dns_txt_lookup", "core.net __dns_ptr_lookup"}, [LeafAlias]{})
+    assert_eq(report.joined, 4)
+    assert_eq(report.differences.join("|"), "jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): core.time.__task_timeout has a CoreCallRecord but no dispatcher_row|jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): declares -[Time.Wait]>, but core.time.__task_timeout (jet_task_timeout_duration_ns) has -[Time]>|jet.runtime.time.half (jet_time_half): core.time.__half has a dispatcher_row but no CoreCallRecord|jet.runtime.net.dns_ptr_lookup (jet_net_dns_ptr_lookup): declares -[Time.Wait]>, but core.net.__dns_ptr_lookup (jet_net_dns_ptr_lookup) has -[Net, Time.Wait]>")
+}
+
+#Test("an aliased member joins the leaf its alias names") {
+    members: [InterfaceMember]{
+        InterfaceMember{module_name: "jet.runtime.sys", member: "perf_bits", effects: [String]{"Env"}, symbol: "jet_perf_read_bits"},
+        InterfaceMember{module_name: "jet.runtime.sys", member: "simd_lanes", effects: [String]{"GPU"}, symbol: "jet_compute_simd_lanes"},
+    }
+    leaves: [CoreLeaf]{
+        CoreLeaf{module_name: "core.perf", member: "__read_bits", effect_kind: Val("Env"), effect_leaf: None, symbol: "jet_perf_read_bits"},
+        CoreLeaf{module_name: "core.compute", member: "__simd_lanes", effect_kind: None, effect_leaf: None, symbol: "jet_compute_simd_lanes"},
+    }
+    aliases: [LeafAlias]{
+        LeafAlias{member: "jet.runtime.sys.perf_bits", leaf: "core.perf __read_bits"},
+        LeafAlias{member: "jet.runtime.sys.simd_lanes", leaf: "core.compute __simd_lanes"},
+    }
+    report: differences(members, leaves, [String]{"core.perf __read_bits", "core.compute __simd_lanes"}, aliases)
+    assert_eq(report.joined, 2)
+    assert_eq(report.differences.join("|"), "jet.runtime.sys.simd_lanes (jet_compute_simd_lanes): declares -[GPU]>, but core.compute.__simd_lanes (jet_compute_simd_lanes) has no effect")
+}
+
+#Test("members of one symbol declare one row unless row_splits lists it") {
+    members: [InterfaceMember]{
+        InterfaceMember{module_name: "jet.runtime.time", member: "wall_sample", effects: [String]{"Time"}, symbol: "jet_time_raw_wall_sample"},
+        InterfaceMember{module_name: "jet.runtime.net", member: "tls_wall_sample", effects: [String]{"Net"}, symbol: "jet_time_raw_wall_sample"},
+        InterfaceMember{module_name: "jet.runtime.sys", member: "pid", effects: [String]{"Env"}, symbol: "jet_std_os_pid"},
+        InterfaceMember{module_name: "jet.runtime.files", member: "process_id_raw", effects: [String]{"FS"}, symbol: "jet_std_os_pid"},
+        InterfaceMember{module_name: "jet.runtime.sys", member: "cpu_count", effects: [String]{}, symbol: "jet_sys_cpu_count"},
+    }
+    splits: [RowSplit]{
+        RowSplit{symbol: "jet_time_raw_wall_sample", rule: "the TLS engine's clock is under Net"},
+        RowSplit{symbol: "jet_sys_cpu_count", rule: "stale"},
+        RowSplit{symbol: "jet_gone", rule: "unbound"},
+    }
+    assert_eq(split_differences(members, splits).join("|"), "jet_std_os_pid: its members declare different rows (jet.runtime.sys.pid -[Env]>, jet.runtime.files.process_id_raw -[FS]>) and row_splits lists no rule for it|jet_sys_cpu_count: row_splits lists it, but its members declare one row (jet.runtime.sys.cpu_count no effect)|jet_gone: row_splits lists it (unbound), but no interface member binds it")
+}
+
+#Test("the interface rows parse from their generated lines, the call records from the inspect JSON") {
+    interface: "    RuntimeInterfaceRow{{module_name: \"jet.runtime.time\", member: \"sleep_ns\", declaration: \"sleep_ns: fn(nanos: Int) -[Time.Wait]>\", symbol: \"jet_std_time_sleep_duration_ns\"}},"
+    parsed: interface_members(interface)
+    assert_eq(parsed.len(), 1)
+    assert_eq(parsed[0].effects.join("|"), "Time.Wait")
+    record: json.parse("{{\"calls\":[{{\"module\":\"core.time\",\"member\":\"__sleep_ns\",\"effect_kind\":\"Time\",\"effect_leaf\":\"Time.Wait\",\"symbol\":\"jet_std_time_sleep_duration_ns\"}},{{\"module\":\"core.time\",\"member\":\"__half\",\"effect_kind\":null,\"effect_leaf\":null,\"symbol\":null}}]}}") ?? panic("the call records did not parse: {err}")
+    leaf: core_leaves(record)
+    assert_eq(leaf.len(), 2)
+    assert_eq(leaf[0].symbol, "jet_std_time_sleep_duration_ns")
+    assert_eq(leaf[0].effect_leaf ?? "", "Time.Wait")
+    assert(leaf[1].effect_kind == None && leaf[1].symbol == "")
+    assert_eq(dispatcher_keys("dispatcher_row adapter core.time __sleep_ns | CoreCallRecord::new(…)").join("|"), "core.time __sleep_ns")
+}

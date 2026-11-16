@@ -1,0 +1,26 @@
+# Docs/Spec/Reference/cli.md: `jet run` compiles every run and keeps nothing under the
+# scripts directory, so a rerun reads each Core source file again. Here the edit breaks
+# `Core/Text/Text.jet`, which the program imports, so the rerun fails on it.
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+requires: os:unix
+fixture: RunCoreRow.fixture
+copy: {root}/Core tree/Core
+copy: {root}/Compiler/Prelude tree/Compiler/Prelude
+step first: jet run tree/app/words.jet
+env: JET_TOOLCHAIN_ROOT={work}/tree
+exit: 0
+stdout: = "3\n"
+file: cache/jet/scripts absent # the run kept nothing
+step rerun: jet run tree/app/words.jet
+env: JET_TOOLCHAIN_ROOT={work}/tree
+exit: 0
+stdout: = "3\n"
+file: cache/jet/scripts absent
+concat: tree/Core/Text/Text.jet tree/Core/Text/Text.jet broken.txt
+step changed: jet run tree/app/words.jet
+env: JET_TOOLCHAIN_ROOT={work}/tree
+exit: 1
+stdout: = ""
+stderr: ~ "Text.jet" # the compile reports the broken Core file; the rest names the work directory

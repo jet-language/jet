@@ -1,0 +1,25 @@
+// Two names for one instance: the same module with the same arguments is one
+// module, so `two_points.Buffer` and `same_points.Buffer` are one type.
+Point: struct {
+    x: Int
+}
+
+fixed_buffer: module<T>(capacity: Int) {
+    Buffer: struct {
+        items: [T#capacity]
+    }
+
+    echo: fn(values: [T#capacity]) -> [T#capacity] { values.copy() }
+}
+
+two_points: fixed_buffer<Point>(2)
+
+same_points: fixed_buffer<Point>(2)
+
+last_x: fn(buffer: same_points.Buffer) -> Int { buffer.items[1].x }
+
+run: fn() {
+    buffer: two_points.Buffer{items: [Point#2]{Point{x: 1}, Point{x: 2}}}
+    other: same_points.Buffer{items: two_points.echo(buffer.items)}
+    print("{other.items[1].x} {last_x(buffer)}")
+}

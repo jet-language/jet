@@ -27,7 +27,7 @@ Run a lesson from the repository root, for example `jet run Examples/Collections
 - [MapSetMethods](MapSetMethods.jet) — Every Map and Set method once, the in-place `update` forms among them (`m.update(other)`, `s.update(t)`, `s.difference_update(t)` and so on).
 - [MapsNested](MapsNested.jet)
 - [MemberSpread](MemberSpread.jet) — Member spread expands a shared prefix into field reads.
-- [OperationContract](OperationContract.jet) — Each collection operation follows its checked row in the operation contract (Docs/spec/reference/core-library.md).
+- [OperationContract](OperationContract.jet) — Each collection operation follows its checked row in the operation contract (Docs/Spec/Reference/core-library.md).
 - [PopTable](PopTable.jet) — Pop removes and returns from each collection.
 - [Queue](Queue.jet) — Queue<T> — ring-buffer double-ended queue.
 - [ReceiverMethodSurface](ReceiverMethodSurface.jet) — Map, Set, List, View and Iter receiver methods from the canonical collection table.

@@ -1,0 +1,29 @@
+// An https response body stays on its TLS connection: the response comes
+// back once its head is in, the body's first bytes read at once, and a read
+// past them that the server never answers fails with Timeout once the read
+// timeout passes.
+package: {
+    name: "live_tls_body"
+    authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }
+}
+
+use {
+    http_client: core.http.client
+}
+
+run: fn() {
+    reply: http_client.request("GET", "https://localhost:{free-port:tls}/stalled").read_timeout(500).send() ?? panic("send: {err}")
+    print("status: {reply.status}")
+    loop piece in reply.body().chunks(3) {
+        if piece == {
+            .Ok(raw) -> print("piece: {String.from_bytes(raw) ?? "?"}")
+            .Err(error) -> {
+                if error == {
+                    .Timeout(phase) -> print("stalled: Timeout during {phase}")
+                    .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> print("stalled: {error}")
+                }
+                break
+            }
+        }
+    }
+}

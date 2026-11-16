@@ -43,7 +43,7 @@ static uint64_t oracle(const char *input) {
     memcpy(&bits, &value, sizeof bits);
     return bits;
 }
-// Frozen oracle: cheap.sh Tools/agent/jet-env rustc -V reported
+// Frozen oracle: cheap.sh Tools/Agent/jet-env rustc -V reported
 // rustc 1.97.1 (8bab26f4f 2026-07-14), built from a source tarball.
 // Probe: a scratch Rust program built with rustc --edition=2021 as
 // scratch/RtG1e/float-seed-probe; float-seed-probe float-parse.seed.golden.

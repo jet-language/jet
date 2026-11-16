@@ -1,0 +1,34 @@
+# `app.live` takes one call of an `app.Remote` endpoint as a closure,
+# `app.live(fn() { crew.lookup(id) })`. The binding is keyed by the
+# service's method and the call's encoded arguments: the same call, with a
+# name or a literal, shares one binding, and another argument or another
+# method has its own. The probe writes closures that are not one such call;
+# each is E2816, naming what the closure is instead. The output is the same
+# at o0 and o2.
+fixture: LiveTakesOneRemoteCall.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = live_takes_one_remote_call.stdout.expected
+step release: jet run --release main.jet
+exit: 0
+stdout: == default
+step: jet check probes/not_one_call.jet
+exit: nonzero
+stderr: ~ "This `app.live` closure is not one call of an `app.Remote` endpoint: it takes parameters." # a closure with a parameter
+stderr: ~ "not_one_call.jet:24:17" # at that closure
+stderr: ~ "endpoint: its body is not one call." # a body of two statements
+stderr: ~ "not_one_call.jet:25:17" # at that closure
+stderr: ~ "endpoint: its body is not a method call on an `app.Remote`." # a call of a plain function
+stderr: ~ "not_one_call.jet:29:17" # at that closure
+stderr: ~ "endpoint: `held` is a `Crew`, not an `app.Remote`." # a method call on the service itself
+stderr: ~ "not_one_call.jet:30:24" # at the receiver
+stderr: ~ "endpoint: `Crew.count` is not an `#App.SignedIn` or `#App.Public` method." # an unmarked method
+stderr: ~ "not_one_call.jet:31:29" # at the method
+stderr: ~ "endpoint: parameter `hook` of `Crew.hooked` has the type" # an argument with no encoding
+stderr: ~ "not_one_call.jet:32:36" # at the argument
+stderr: ~ "endpoint: `Crew.status` can't fail, so its binding has no error of its own to carry." # a method that can't fail
+stderr: ~ "not_one_call.jet:33:29" # at the method
+stderr: ~ "endpoint: arguments follow it, but its one call gives them." # arguments after the closure
+stderr: ~ "not_one_call.jet:34:17" # at that closure
+stderr: ~ "8 problems found" # one per closure

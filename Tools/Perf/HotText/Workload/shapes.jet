@@ -1,0 +1,29 @@
+// Everyday types: a struct with methods, an enum matched on, and a loop
+// over a list of them.
+Size: struct {
+    width: Int
+    height: Int
+
+    area: fn(self) -> Int { self.width * self.height }
+}
+
+Shape: enum {
+    Square(side: Int)
+    Box(size: Size)
+    Dot
+}
+
+area: fn(shape: Shape) -> Int {
+    if shape == {
+        .Square(side) -> side * side
+        .Box(size) -> size.area()
+        .Dot -> 0
+    }
+}
+
+run: fn() {
+    shapes: [Shape.Square{side: 3}, Shape.Box{size: Size{width: 2, height: 5}}, Shape.Dot]
+    total := 0
+    loop shape in shapes -> total += area(shape)
+    print("{shapes.len()} shapes, area {total}")
+}

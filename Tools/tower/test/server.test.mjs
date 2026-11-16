@@ -185,7 +185,7 @@ test('keyless LAN access keeps Host and CSRF boundaries', async () => {
   const docsHeaderless = await fetch(url('/api/docs'));
   assert.equal(docsHeaderless.status, 200, 'read-only Docs works without Fetch Metadata');
   assert.ok((await docsHeaderless.json()).sections);
-  const retiredArchive = await post('docs/archive', { path: 'Docs/research/old.md' });
+  const retiredArchive = await post('docs/archive', { path: 'Docs/Research/old.md' });
   assert.equal(retiredArchive.status, 404, 'Docs archive route is retired');
 
   const frozen = await post('card/add', { title: 'frozen owner lane', phase: 'frozen' });

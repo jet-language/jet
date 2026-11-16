@@ -10,7 +10,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("double quoted case tokens round trip LF and U+0001 while single quoted shell argv stays supported") {
     root: cases_test_root("advanced-quoted")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     control: String.from_bytes([U8{1}]) ?? panic("control character")
     kit_exec_write(files.join(directory, "quoted.out"), "a\nb{control}")
     kit_exec_write(files.join(directory, "single.out"), "single quote\n")
@@ -24,7 +24,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("JSON filters projections string predicates and zero-selection checks execute from case text") {
     root: cases_test_root("advanced-json")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     document: "{{\"items\":[{{\"kind\":\"wanted\",\"id\":1}},{{\"kind\":\"wanted\",\"id\":2}},{{\"kind\":\"other\",\"id\":3}},{{\"id\":4}}],\"word\":\"prefix-tail\"}}\n"
     kit_exec_write(files.join(directory, "document.txt"), document)
     source: "step first: cat\nstdin: document.txt\njson: stdout doc $.items[?kind=\"wanted\"] #= 2\njson: stdout doc $.items[?kind!=\"wanted\"] #= 2\njson: stdout doc $.items[?kind~=\"wan\"] #= 2\njson: stdout doc $.items[?kind!~=\"wan\"] #= 2\njson: stdout doc $.items[?kind=\"absent\"] #= 0\njson: stdout doc $.items[?kind=\"wanted\"][*].{{id,kind}} : object # original predicate\njson: stdout doc $.items[?kind=\"wanted\"][0].{{id,kind}} = {{\"kind\":\"wanted\",\"id\":1}}\njson: stdout doc $.items #>= 3\njson: stdout doc $.items !has {{\"kind\":\"forbidden\"}}\njson: stdout doc $.word ~ \"tail\" # original predicate\njson: stdout doc $.word ^= \"prefix\" # original predicate\nstep second: cat\nstdin: document.txt\njson: stdout doc $.items == first\njson: stdout doc $.items #== first\njson: stdout doc $.items #>= 1*first\n"
@@ -38,7 +38,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("JSON has checks key presence even when values are empty and missing parents still fail") {
     root: cases_test_root("advanced-json-keys")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "keys.txt"), "{{\"parent\":{{\"empty\":[],\"text\":\"\",\"nothing\":null,\"a.b\":\"\"}},\"number\":7}}\n")
     source: "step: cat\nstdin: keys.txt\njson: stdout doc $.parent has \"empty\"\njson: stdout doc $.parent has \"text\"\njson: stdout doc $.parent has \"nothing\"\njson: stdout doc $.parent has \"a.b\"\njson: stdout doc $.parent !has \"absent\"\ncapture: number stdout doc $.number\nstep: cat\nstdin: keys.txt\njson: stdout doc $.number = {{cap:number}}\n"
     assert_eq(cases_test_advanced(root, "keys", source).verdict.status, "PASS")
@@ -51,7 +51,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("captured selectors and scalar JSON expectations are parsed after real token expansion") {
     root: cases_test_root("advanced-json-tokens")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tokens.txt"), "{{\"key\":\"chosen\",\"index\":1,\"expected\":7,\"chosen\":[3,7],\"items\":[{{\"id\":3}},{{\"id\":7}}]}}\n")
     source: "step: cat\nstdin: tokens.txt\ncapture: key stdout doc $.key\ncapture: index stdout doc $.index\ncapture: expected stdout doc $.expected\nstep: cat\nstdin: tokens.txt\njson: stdout doc $.{{cap:key}}[{{cap:index}}] = {{cap:expected}}\njson: stdout doc $.items[?id={{cap:expected}}] #= 1\ncapture: selected stdout doc $.{{cap:key}}[{{cap:index}}]\nstep: cat\nstdin: tokens.txt\njson: stdout doc $.expected = {{cap:selected}}\n"
     assert_eq(cases_test_advanced(root, "tokens", source).verdict.status, "PASS")
@@ -64,7 +64,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("JSON count relations multiply earlier selections and stderr labels are selectable") {
     root: cases_test_root("advanced-json-count")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "one.txt"), "[1]\n")
     kit_exec_write(files.join(directory, "two.txt"), "[1,2]\n")
     source: "step first: jet -c 'cat >&2'\nstdin: one.txt\nstep second: cat\nstdin: two.txt\njson: stdout doc $ #== 2*first.stderr\njson: stdout doc $ #>= 2*first.stderr\n"
@@ -76,7 +76,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("JSON != against a step label passes when the selected values differ and fails when they match") {
     root: cases_test_root("advanced-json-unequal")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "one.txt"), "{{\"id\":1}}\n")
     kit_exec_write(files.join(directory, "two.txt"), "{{\"id\":2}}\n")
     changed: "step before: cat\nstdin: one.txt\nstep: cat\nstdin: two.txt\njson: stdout doc $.id != before\n"
@@ -112,7 +112,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("capture scalar and line tails expand into argv env paths stdin and write templates") {
     root: cases_test_root("advanced-capture")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "capture.txt"), "{{\"name\":\"chosen\",\"number\":7}}\n")
     kit_exec_write(files.join(directory, "template.txt"), "{{cap:name}}={{cap:number}}/{{cap:tail}}\n")
     kit_exec_write(files.join(directory, "chosen.in"), "payload\n")
@@ -128,7 +128,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("concat preserves non-UTF8 bytes file predicates and optional missing files") {
     root: cases_test_root("advanced-concat")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     files.create_dir_all(files.join(directory, "tree")) ?? panic("concat fixture")
     files.write_bytes(files.join(directory, "tree/left"), [U8{0}, U8{255}]) ?? panic("left bytes")
     files.write_bytes(files.join(directory, "tree/right"), [U8{1}, U8{10}]) ?? panic("right bytes")
@@ -145,7 +145,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("raw binary file predicates do not decode UTF-8 before checking ELF and byte content") {
     root: cases_test_root("advanced-binary")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     files.create_dir_all(files.join(directory, "tree")) ?? panic("binary fixture")
     files.write_bytes(files.join(directory, "tree/binary"), [U8{127}, U8{69}, U8{76}, U8{70}, U8{255}, U8{0}, U8{65}, U8{10}]) ?? panic("binary bytes")
     source: "fixture: tree\nstep: printf ready\nfile: binary ^= \"\\u007fELF\" # original predicate\nfile: binary ~ ELF # original predicate\nfile: binary !~ missing # original predicate\nfile: binary ~i elf # original predicate\nfile: binary !~i absent # original predicate\nfile: binary ~any missing ELF # original predicate\nfile: binary count ELF = 1 # original predicate\nfile: binary before ELF A # original predicate\nfile: binary line ^= \"\\u007fELF\" ~ A # original predicate\nfile: binary nonempty # original predicate\n"
@@ -160,7 +160,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("stream composition OR and trims use independent subjects not accidental concatenation") {
     root: cases_test_root("advanced-streams")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "stdout.out"), "left")
     kit_exec_write(files.join(directory, "start.out"), "left ")
     kit_exec_write(files.join(directory, "end.out"), " left")
@@ -177,7 +177,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("line suffix count and line-count predicates retain their original selection semantics") {
     root: cases_test_root("advanced-lines")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "lines.txt"), "skip\nROW wanted\nmarker suffix\nababab\n")
     kit_exec_write(files.join(directory, "suffix.out"), "marker suffix\nababab\n")
     source: "step first: cat\nstdin: lines.txt\nstdout: line ^= ROW ~ wanted # original predicate\nstdout: from marker = suffix.out # original predicate\nstdout: count abab = 1 # original predicate\nstdout: lines = 4 # original predicate\nstdout: nonempty # original predicate\nstep second: cat\nstdin: lines.txt\nstdout: lines = 1*first # original predicate\n"
@@ -191,7 +191,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("path token predicates match raw output before normalization and replacements precede exact comparisons") {
     root: cases_test_root("advanced-raw")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "paths.out"), "{{work}}/leaf")
     kit_exec_write(files.join(directory, "replaced.out"), "WORK/leaf")
     source: "step: printf \"%s/leaf\" {{work}}\nstdout: ^= {{work}} # original predicate\nstdout: ~ {{work}}/leaf # original predicate\nstdout: !~ {{scratch}}/absent # original predicate\nstdout: = paths.out\nstep: printf \"%s/leaf\" {{work}}\nnormalize: replace {{work}} WORK\nstdout: = replaced.out\n"
@@ -205,7 +205,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("inventory compares bytes kinds paths sizes and modification times without process helpers") {
     root: cases_test_root("advanced-inventory")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/value"), "stable\n")
     stable: "fixture: tree\ninventory before: .\nstep: cat value\ninventory: . == before\n"
     assert_eq(cases_test_advanced(root, "stable", stable).verdict.status, "PASS")
@@ -220,7 +220,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("spawn and wait launch real concurrent children with independent bounds and receipts") {
     root: cases_test_root("advanced-spawn")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "left.out"), "left")
     kit_exec_write(files.join(directory, "right.out"), "right")
     source: "spawn left: jet -c 'touch left; while [ ! -f right ]; do sleep 0.01; done; printf left'\nlimit: time=2 memory=65536\nspawn right: jet -c 'touch right; while [ ! -f left ]; do sleep 0.01; done; printf right'\nlimit: time=2 memory=65536\nwait left\nstdout: = left.out\nstderr: empty\nwait right\nstdout: = right.out\nstderr: empty\n"
@@ -236,7 +236,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
 
 #Test("tool alternatives choose first available and external executable copies preserve mode") {
     root: cases_test_root("advanced-tools")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "selected.out"), "selected")
     source: "requires: tool:testkit-deliberately-missing-tool|printf\nstep: {{tool:testkit-deliberately-missing-tool|printf}} \"%s\" selected\nstdout: = selected.out\ncopy: {{jet}} isolated/jet\nfile: isolated/jet is-file\nstep: {{work}}/isolated/jet -c 'printf selected'\nstdout: = selected.out\nstep: printf \"%s\" {{sys:dll-suffix}}\nstdout: nonempty # original predicate\n"
     assert_eq(cases_test_advanced(root, "tools", source).verdict.status, "PASS")

@@ -1,0 +1,72 @@
+use {
+    app
+    core.reactive.loadable.[Loadable]
+    core.time
+}
+
+#Error
+BoardError: enum {
+    NoBoard
+}
+
+Board: struct {
+    tasks: Int
+    runs: Int
+}
+
+BOARD: Shared{Board{tasks: 3, runs: 0}}
+
+// The task count of one board, counting its own runs.
+open_tasks: fn(board: String) -[DB.Read]> Int BoardError! {
+    if board == "" -> return Err(BoardError.NoBoard)
+    state := BOARD.guard_edit()
+    state.value.runs += 1
+    if board == "crewboard" -> state.value.tasks else -> 0
+}
+
+runs: fn() -> Int {
+    state := BOARD.guard_edit()
+    state.value.runs
+}
+
+// One write: a new task, and the invalidation a database write makes.
+add_task: fn() {
+    state := BOARD.guard_edit()
+    state.value.tasks += 1
+    app.invalidate(open_tasks, "crewboard")
+}
+
+shown: fn(state: Loadable<Int, BoardError>) -> String {
+    if state == {
+        .Loaded(value) -> "{value}"
+        .Failed(reason) -> if reason == {
+            .NoBoard -> "failed: no board"
+        }
+        .Idle | .Loading -> "pending"
+    }
+}
+
+run: fn() {
+    board: app.live(open_tasks, "crewboard")
+    print("first read: {shown(app.state(board))}, runs {runs()}")
+    // A burst of writes between two reads costs one re-run, whoever reads.
+    loop _ in 0..<500 -> add_task()
+    last := ""
+    loop _ in 0..<3 -> last = shown(app.state(app.live(open_tasks, "crewboard")))
+    print("500 writes, then three subscribers: {last}, runs {runs()}")
+    // A write before every read: the server re-runs 1000 bindings in this
+    // second (the burst above took one), then holds the stored result.
+    before: runs()
+    loop _ in 0..<1100 {
+        add_task()
+        last = shown(app.state(board))
+    }
+    print("1100 writes, each read: {runs() - before} re-runs, last read {last}")
+    time.sleep(1100ms)
+    // The next second: the held binding re-runs once and catches up.
+    print("after the second ends: {shown(app.state(board))}, runs {runs()}")
+    print("read again: {shown(app.state(board))}, runs {runs()}")
+    // A server keeps at most 1024 bindings, evicting the oldest.
+    loop index in 0..<1100 -> app.live(open_tasks, "board{index}")
+    print(app.live_stats())
+}

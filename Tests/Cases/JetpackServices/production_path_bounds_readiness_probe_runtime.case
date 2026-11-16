@@ -1,0 +1,20 @@
+# Port of tests/jetpack_services.rs:1457-1484. PENDING-GRAMMAR(batch-four).
+requires: os-name:linux
+fixture: ProductionPathBoundsReadinessProbeRuntime.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: PATH={work}/bin:{env:PATH}
+env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+mkdir: root
+mkdir: home
+copy: {root}/Tests/Cases/JetpackServices/ServicesUpHealthLogsDownRoundtrip.fixture/bin bin
+mkdir: state
+chmod: bin/systemd-run 755
+chmod: bin/systemctl 755
+step: jetpack config trust add {work}
+step readiness: jetpack services up --no-color
+env: JETPACK_SERVICE_HEALTH_TIMEOUT_MS=200
+exit: 2
+elapsed: readiness < 3s
+stderr: ~ "E1261" # original ed77c235f tests/jetpack_services.rs:1482 contains predicate
+file: .jet/services/fixture/pid absent

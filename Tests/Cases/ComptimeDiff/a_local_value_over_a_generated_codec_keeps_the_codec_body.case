@@ -1,0 +1,13 @@
+# A local value whose initializer reaches a generated codec
+# (`show` encodes a Point through json.to_string) leaves that codec's body in
+# the built program. The pass's comptime check of `show` carries the Encode
+# demand it recorded (SemaDemandCapture), so the finalization that takes
+# `show` from that check, the landing's or the full recheck's, generates
+# Point's encode body, which the built `show` calls. Before, the reused
+# result demanded nothing and IR found Point's encode method unlowered.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"
+step: jet run main.jet
+exit: 0
+stdout: ~ '{"x":3,"y":4}' # the built `show` calls Point's generated encode body

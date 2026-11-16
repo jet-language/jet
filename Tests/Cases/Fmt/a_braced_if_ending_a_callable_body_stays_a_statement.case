@@ -1,0 +1,15 @@
+# A braced `if … else` on the last line of a lambda body keeps its braces: the
+# parser reads an arrow-form `if` there as the body's value, so arrows would
+# change the program, and `jet fmt` refuses a format that changes the syntax
+# tree. The inputs are the three sources that format refused.
+fixture: ABracedIfEndingACallableBodyStaysAStatement/Input
+step: jet fmt closures.jet reactive.jet web.jet
+exit: 0
+file: closures.jet = ABracedIfEndingACallableBodyStaysAStatement/closures.out
+file: reactive.jet = ABracedIfEndingACallableBodyStaysAStatement/reactive.out
+file: web.jet = ABracedIfEndingACallableBodyStaysAStatement/web.out
+step: jet fmt closures.jet reactive.jet web.jet
+exit: 0
+file: closures.jet = ABracedIfEndingACallableBodyStaysAStatement/closures.out
+file: reactive.jet = ABracedIfEndingACallableBodyStaysAStatement/reactive.out
+file: web.jet = ABracedIfEndingACallableBodyStaysAStatement/web.out

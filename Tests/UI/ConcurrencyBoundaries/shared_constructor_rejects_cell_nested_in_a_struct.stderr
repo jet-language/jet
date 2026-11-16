@@ -1,0 +1,8 @@
+Error [jet.ValueNotSendable]: `Holder` cannot be stored in `Shared<T>`
+  --> Tests/UI/ConcurrencyBoundaries/shared_constructor_rejects_cell_nested_in_a_struct.jet:5:39
+    |
+  5 | cross: fn(holder: Holder) { _: Shared{holder} }
+    |                                       ^^^^^^
+ Why: A Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
+ Fix: Store the value itself in `Shared<T>`, then read and write its fields directly
+More: jet-lang.dev/e/E1102

@@ -1,0 +1,14 @@
+use plugin: core.plugin
+
+run: fn() {
+    policy: Authority.from_rights(["FS.Read(\".\")"])
+    guest: plugin.load("multi.wat", policy)
+    print("divmod {guest.divmod(17, 5)} {guest.divmod(-17, 5)}")
+    print("indirect {guest.indirect(17, 5, 0)} {guest.indirect(17, 5, 1)}")
+    print("chain {guest.chain(17, 5)}")
+    print("swapped {guest.swapped(3, 4)}")
+    print("pick {guest.pick(5)} {guest.pick(-6)}")
+    print("early {guest.early(1)} {guest.early(0)}")
+    print("sum {guest.sum(10)} {guest.sum(1)} {guest.sum(0)}")
+    print("mixed {guest.mixed(21)} {guest.mixed(-4)}")
+}

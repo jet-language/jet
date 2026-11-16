@@ -1,0 +1,32 @@
+#[Target(Web), HTML(Path{"index.html"})]
+
+use {
+    battery: web
+    reactive: core.reactive
+    ui: core.ui
+}
+
+run: fn() {
+    props: battery.island_props(1, "alice")
+    backend: ui.null_backend()
+    count: reactive.signal(0)
+    ui.reactive_render(fn() {
+        n: count.get()
+        tree: ui.box(
+            [
+                ui.text("Orders island count: {n}"),
+                ui.text("Serializable props: {props}"),
+                ui.button(
+                    "Refresh",
+                    on_click: fn() {
+                        count.set(count.get() + 1)
+                    },
+                ),
+            ],
+        )
+        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 360.0, 120.0))
+    })
+    loop command in backend.commands() -> print(command)
+    count.set(count.get() + 1)
+    loop command in backend.commands() -> print(command)
+}

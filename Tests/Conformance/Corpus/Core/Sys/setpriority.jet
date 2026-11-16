@@ -1,0 +1,13 @@
+// core-conformance: core.sys.setpriority
+use os: core.sys
+
+run: fn() {
+    #Unsafe("lower the current process priority for this short-lived witness") {
+        print(
+            if os.setpriority(0, 19) == {
+                .Ok(ok) -> true
+                .Err(error) -> false
+            },
+        )
+    }
+}

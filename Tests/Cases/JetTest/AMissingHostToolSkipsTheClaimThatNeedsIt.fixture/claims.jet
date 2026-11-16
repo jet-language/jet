@@ -1,0 +1,11 @@
+use kit: "RequireTool"
+
+#Test("a host tool that is not on PATH skips the claim that needs it") {
+    _: kit.kit_require_tool("jet-testkit-absent-host-tool") ?? return
+    panic("`jet-testkit-absent-host-tool` is on PATH")
+}
+
+#Test("a host tool on PATH is found by its absolute path") {
+    shell: kit.kit_require_tool("sh") ?? return
+    assert(shell.starts_with("/") && shell.ends_with("/sh"), "sh resolved to {shell}")
+}

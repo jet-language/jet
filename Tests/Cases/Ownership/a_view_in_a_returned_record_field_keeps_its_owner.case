@@ -1,0 +1,21 @@
+# A view stored in a field of a returned record keeps the owner it points
+# into, as the same view returned bare does: a record carrying a view of a
+# local owner out of its function is refused (E2305), so no release build reads
+# the freed list. A record whose view comes from a parameter's owner leaves
+# with the caller still owning it, and runs on every tier.
+fixture: AViewInAReturnedRecordFieldKeepsItsOwner.fixture
+env: NO_COLOR=1
+step refused: jet check refused.jet
+exit: 1
+stderr: ~ "Error [jet.ViewOutlivesOwner]" # the record's view points into the local `b` (E2305)
+stderr: ~ "refused.jet:13:13" # at the field value `b.head()`
+step release: jet build refused.jet --profile=release
+exit: == refused
+step check: jet check kept.jet
+exit: 0
+step o0: jet run -O0 kept.jet
+exit: 0
+stdout: = "1\n"
+step o2: jet run -O2 kept.jet
+exit: 0
+stdout: = "1\n"

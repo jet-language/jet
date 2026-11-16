@@ -1,0 +1,36 @@
+# `h.m.move()` of a struct member that holds an `Int?` (optional_int.jet) or a
+# function value (function_value.jet) takes the member out of its holder: the
+# holder stops owning it, so the Shared the member holds has one owner, and its
+# cell is freed where the taken value ends, before the holder's scope end. The
+# dump of each take shares nothing: no Shared clone and no function value
+# retain. Output matches on o0, o1 and o2.
+fixture: AMovedMemberHoldingAnOptionalIntOrAFunctionEndsWithItsNewHolder.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet inspect decisions -O1 --opt-dump=take_limits optional_int.jet
+exit: 0
+stdout: ~ "after fn take_limits" # the dump covers the move
+stdout: !~ "jet_rt_native_shared_clone" # the moved member's Shared gains no owner
+step: jet inspect decisions -O1 --opt-dump=take_hooks function_value.jet
+exit: 0
+stdout: ~ "after fn take_hooks" # the dump covers the move
+stdout: !~ "jet_rt_native_shared_clone" # the moved member's Shared gains no owner
+stdout: !~ "jet_rt_native_closure_retain" # the moved function value gains no owner
+step: jet run -O0 optional_int.jet
+exit: 0 # o0
+stdout: = "owners 1 freed true used 2 holder 0\nowners 1 freed true used 3 holder 1\nowners 1 freed true used 4 holder 2\ntotal 3\n" # o0
+step: jet run -O1 optional_int.jet
+exit: 0 # o1
+stdout: = "owners 1 freed true used 2 holder 0\nowners 1 freed true used 3 holder 1\nowners 1 freed true used 4 holder 2\ntotal 3\n" # o1
+step: jet run -O2 optional_int.jet
+exit: 0 # o2
+stdout: = "owners 1 freed true used 2 holder 0\nowners 1 freed true used 3 holder 1\nowners 1 freed true used 4 holder 2\ntotal 3\n" # o2
+step: jet run -O0 function_value.jet
+exit: 0 # o0
+stdout: = "owners 1 freed true used 1 holder 0\nowners 1 freed true used 2 holder 1\nowners 1 freed true used 3 holder 2\ntotal 3\n" # o0
+step: jet run -O1 function_value.jet
+exit: 0 # o1
+stdout: = "owners 1 freed true used 1 holder 0\nowners 1 freed true used 2 holder 1\nowners 1 freed true used 3 holder 2\ntotal 3\n" # o1
+step: jet run -O2 function_value.jet
+exit: 0 # o2
+stdout: = "owners 1 freed true used 1 holder 0\nowners 1 freed true used 2 holder 1\nowners 1 freed true used 3 holder 2\ntotal 3\n" # o2

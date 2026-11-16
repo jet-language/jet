@@ -1,0 +1,113 @@
+// The gauntlet driver of the kit's Measure module (#5072 c7), the twin of
+// Tools/Gauntlet/Harness/Drivers/perf-measure.mjs: one command per
+// measure.mjs export, printing its result as JSON.
+//
+//   jet driver trace FILE | strict FILE IDENTITY | phases TRACE SAMPLES OFFSET
+//              | cpu SAMPLES TIMES | counters FILE | tree | run | timeout
+//              | constants
+//
+// A value that starts with `-` takes its named form (`--offset -12345.5`,
+// `--times -5,0`); TIMES is a comma-separated list.
+package: {
+    name: "perf_measure_driver"
+    version: "0.0.1"
+    deps: {
+        jet_perf_kit: ../../../../Perf/Kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_perf_kit.[KIT_ZERO, MeasureError, MeasureOptions, SAMPLE_MS, Sample, completed_from, counters_json, cpu_at, field, gnu_time, items, json_stringify, measure_host, number_from_text, parse_counters, phase_table, phase_table_json, read_failure, read_trace, run_measured, safe_integer, sample_tree, to_number]
+    json: core.encoding.json
+    process: core.process
+    time: core.time
+}
+
+QUIET: "sleep 3 </dev/null >/dev/null 2>&1"
+
+// An error's message (a JSON refusal is a SyntaxError) and exit 1.
+fail: fn(error: MeasureError) -> Never {
+    if error.syntax -> print("error: SyntaxError") else -> print("error: {error.message}")
+    process.exit(1)
+}
+
+// JSON.parse(readFileSync(file)) of a samples file, as the kit's samples.
+read_samples: fn(file: String) -> [Sample] {
+    text: files.read(file) ?? fail(read_failure(file, err))
+    value: json.parse(text) ?? fail(MeasureError{message: "{err}", syntax: true})
+    out := [Sample]{}
+    loop item in items(Val(value)) {
+        out.push(Sample{t_ns: to_number(field(item, "tNs")), cpu_ns: to_number(field(item, "cpuNs")), threads: 0, rss_bytes: 0, processes: 0})
+    }
+    out
+}
+
+#CLI
+Driver: struct {
+    #Doc("readTrace of FILE, as JSON") trace: fn(self, file: String) -[Exec, FS, IO]> {
+        events: read_trace(file, None) ?? fail(err)
+        print(json_stringify(Dyn.Array(events), 0))
+    }
+
+    #Doc("readTrace of FILE against the completed process in IDENTITY") strict: fn(self, file: String, identity: String) -[Exec, FS, IO]> {
+        text: files.read(identity) ?? fail(read_failure(identity, err))
+        process_identity: json.parse(text) ?? fail(MeasureError{message: "{err}", syntax: true})
+        completed: completed_from(safe_integer(field(Val(process_identity), "exitCode")), field(Val(process_identity), "pid"), field(Val(process_identity), "startedUnixMs"), field(Val(process_identity), "finishedUnixMs"))
+        events: read_trace(file, Val(completed)) ?? fail(err)
+        print("{events.len()} events")
+    }
+
+    #Doc("phaseTable of TRACE with the SAMPLES at OFFSET") phases: fn(self, trace: String, samples: String, offset: String) -[Exec, FS, IO]> {
+        events: read_trace(trace, None) ?? fail(err)
+        table: phase_table(events, read_samples(samples), number_from_text(offset))
+        print(json_stringify(phase_table_json(table), 2))
+    }
+
+    #Doc("cpuAt of the SAMPLES at each of the comma-separated TIMES") cpu: fn(self, samples: String, times: String) -[Exec, FS, IO]> {
+        read: read_samples(samples)
+        out := [Dyn]{}
+        loop at in times.split(",") -> out.push(Dyn.Float(cpu_at(read, number_from_text(at))))
+        print(json_stringify(Dyn.Array(out), 0))
+    }
+
+    #Doc("parseCounters of FILE") counters: fn(self, file: String) -[Exec, FS, IO]> {
+        text: files.read(file) ?? fail(read_failure(file, err))
+        counters: parse_counters(text) ?? fail(err)
+        print(json_stringify(counters_json(counters), 2))
+    }
+
+    // A shell holding two sleeps, sampled once they run.
+    #Doc("sampleTree of a shell holding two sleeps") tree: fn(self) -[Env, Exec, FS, IO, Time, Time.Wait]> {
+        child: process.cmd([String]{"sh", "-c", "{QUIET} & {QUIET} & wait"}).stdout(.Capture).stderr(.Capture).spawn() ?? fail(MeasureError{message: "{err}", syntax: false})
+        time.sleep(300ms)
+        sampled: sample_tree(child.id(), measure_host())
+        print("processes {sampled.processes} threads {sampled.threads} rss {sampled.rss_bytes > 0} cpu {sampled.cpu_ns >= KIT_ZERO}")
+        child.kill().drop("the shell's group may be gone already")
+        child.wait().drop("the shell was killed")
+    }
+
+    #Doc("runMeasured of `true` into out.txt and err.txt") run: fn(self) -[Env, Exec, FS, IO, Time, Time.Wait]> {
+        measured: run_measured([String]{"true"}, MeasureOptions{cwd: None, env: None, stdout_path: "out.txt", stderr_path: "err.txt", timeout_ms: 0}) ?? {
+            print("files {files.exists("out.txt")} {files.exists("err.txt")} {files.exists("err.txt.time")}")
+            fail(err)
+        }
+        if measured.code == .Val(code) -> print("code {code}") else -> print("code null")
+    }
+
+    // A tree past its 300 ms timeout: the whole tree is killed, so the
+    // background writer never writes late.txt.
+    #Doc("runMeasured of a tree past its 300 ms timeout") timeout: fn(self) -[Env, Exec, FS, IO, Time, Time.Wait]> {
+        measured: run_measured([String]{"sh", "-c", "(sleep 1; echo late > late.txt) & sleep 5"}, MeasureOptions{cwd: None, env: None, stdout_path: "out.txt", stderr_path: "err.txt", timeout_ms: 300}) ?? fail(err)
+        time.sleep(1500ms)
+        code: if measured.code == .Val(number) -> "{number}" else -> "null"
+        print("code {code} signal {measured.signal ?? "null"} killed {measured.killed} late {files.exists("late.txt")}")
+    }
+
+    #Doc("SAMPLE_MS, and whether the GNU time it runs under exists") constants: fn(self) -[Env, FS, IO]> {
+        gnu: gnu_time()
+        print("sample {SAMPLE_MS} ms, GNU time {gnu.ends_with("/time") && files.exists(gnu)}")
+    }
+}
+
+run: fn(_args: Driver) {}

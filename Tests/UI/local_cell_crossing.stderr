@@ -1,0 +1,35 @@
+Error [jet.ValueNotSendable]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
+  --> Tests/UI/local_cell_crossing.jet:7:18
+    |
+  7 |     worker: task {
+    |                  ^
+ Why: `Cell` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
+ Fix: Create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state
+More: jet-lang.dev/e/E1102
+
+Error [jet.ValueNotSendable]: `Cell`<Int> cannot be stored in `Shared<T>`
+  --> Tests/UI/local_cell_crossing.jet:13:47
+    |
+ 13 | cross_shared: fn(cell: Cell<Int>) { _: Shared{cell} }
+    |                                               ^^^^
+ Why: A Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
+ Fix: Store the value itself in `Shared<T>`, then read and write its fields directly
+More: jet-lang.dev/e/E1102
+
+Error [jet.ValueNotSendable]: `LocalCache` cannot be stored in `Shared<T>`
+  --> Tests/UI/local_cell_crossing.jet:19:56
+    |
+ 19 | cross_shared_nested: fn(cache: LocalCache) { _: Shared{cache} }
+    |                                                        ^^^^^
+ Why: A Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
+ Fix: Store the value itself in `Shared<T>`, then read and write its fields directly
+More: jet-lang.dev/e/E1102
+
+Error [jet.ValueNotSendable]: `cell` can't be captured by an HTTP handler because `Cell<Int>` isn't sendable
+  --> Tests/UI/local_cell_crossing.jet:24:18
+    |
+ 24 |     mux.get("/", fn(req: HTTPRequest) {
+    |                  ^^^^^^^^^^^^^^^^^^^^^^
+ Why: HTTP handlers are retained by the server and invoked on request workers, so their captured state must be owned and thread-safe
+ Fix: Capture only owned sendable values in the HTTP handler, or use `Shared<T>` for synchronized state
+More: jet-lang.dev/e/E1102

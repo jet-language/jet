@@ -1,0 +1,52 @@
+{
+  "schema": "jet.cold-agent.tasks.v1",
+  "tasks": [
+    {
+      "id": "hello",
+      "domain": "hello",
+      "mode": "batch",
+      "prompt": "Write one complete Jet source file. Its run function must print exactly Hello, Jet followed by one newline and then exit with status 0. Do not print any other bytes.",
+      "args": [],
+      "stdin": null,
+      "expected_stdout": "Hello, Jet\n"
+    },
+    {
+      "id": "cli",
+      "domain": "cli",
+      "mode": "batch",
+      "prompt": "Write one complete Jet source file. Read the first program argument with core.process and print exactly hello, Ada followed by one newline when the argument is Ada. Do not hardcode a different argument value, and do not print any other bytes.",
+      "args": ["Ada"],
+      "stdin": null,
+      "expected_stdout": "hello, Ada\n"
+    },
+    {
+      "id": "data-transform",
+      "domain": "data-transform",
+      "mode": "batch",
+      "prompt": "Write one complete Jet source file. Read the UTF-8 text file given as the first program argument. For every non-empty line, trim surrounding whitespace, convert it to lowercase, sort the resulting lines in ascending order, and print one line per result. The input has duplicate lines; preserve duplicates. Do not hardcode the fixture output and do not print any other bytes.",
+      "args": ["records.txt"],
+      "stdin": null,
+      "files": {
+        "records.txt": "  Jet  \nRust\njet\n\n"
+      },
+      "expected_stdout": "jet\njet\nrust\n"
+    },
+    {
+      "id": "http",
+      "domain": "http-service",
+      "mode": "http",
+      "prompt": "Write one complete Jet source file for a loopback HTTP service. Read the first program argument as a TCP port and listen on 127.0.0.1. GET /health returns status 200, Content-Type application/json, and body {\"status\":\"ok\"}. GET /hello/:name returns status 200 and body Hello, <name> using the route parameter. GET /shutdown returns status 200 and body {\"bye\":true}, then the service exits cleanly. Keep serving until /shutdown. Write nothing to stdout or stderr.",
+      "args": [],
+      "stdin": null,
+      "service": {
+        "port_arg": true,
+        "ready_path": "/health",
+        "probes": [
+          {"method": "GET", "path": "/health", "status": 200, "body": "{\"status\":\"ok\"}", "content_type": "application/json"},
+          {"method": "GET", "path": "/hello/Ada", "status": 200, "body": "Hello, Ada", "content_type": "text/plain"},
+          {"method": "GET", "path": "/shutdown", "status": 200, "body": "{\"bye\":true}", "content_type": "application/json"}
+        ]
+      }
+    }
+  ]
+}

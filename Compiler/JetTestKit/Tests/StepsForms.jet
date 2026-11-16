@@ -5,7 +5,7 @@ use {
 
 #Test("batch-four transforms are composable and both exact success and failure pass through real case files") {
     root: cases_test_root("forms-transforms")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     esc: kit_steps_ascii_scalar(27)
     cr: kit_steps_ascii_scalar(13)
     rows: [
@@ -57,7 +57,7 @@ use {
 
 #Test("line and numeric forms preserve Rust lines semantics and reject unequal values") {
     root: cases_test_root("forms-predicates")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     cr: kit_steps_ascii_scalar(13)
     rows: [
         ["a{cr}\nb\n", "lines = [\"a\",\"b\"]", "lines = [\"a\",\"c\"]"],
@@ -95,7 +95,7 @@ use {
 
 #Test("captured subjects numeric arithmetic stream inequality and sorted lines execute from case text") {
     root: cases_test_root("forms-captures")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "sorted.txt"), "a\nb\n")
     source: "step first: printf 'b\\\\na\\\\n'\ncapture: n = lines stdout\ncapture: text = text stdout\ncap:text: lines = {{cap:n}} # original predicate\ncap:text: sorted-lines = sorted.txt # original predicate\nstep second: printf 'b\\\\na\\\\nb\\\\na\\\\n'\nstdout: lines = 2*{{cap:n}} # original predicate\nstdout: lines = {{cap:n}}+2 # original predicate\nstdout: != first # original predicate\nstdout: in-order-of {{cap:text}} # original predicate\n"
     assert_eq(cases_test_advanced(root, "capture", source).verdict.status, "PASS")
@@ -123,7 +123,7 @@ use {
 #Test("comptime_diff parity hex frames preserve newline delimiter payloads and reject same-length inequality") {
     // All assertions use .case text.
     root: cases_test_root("forms-parity")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     folded_payload: "3\n__comptime_diff_frame(999)\n0\n"
     runtime: "\n3\n__comptime_diff_frame(999)\n0"
     first: hex.encode(folded_payload.bytes())
@@ -152,7 +152,7 @@ use {
 
 #Test("Unicode stream assertions captures and transforms retain Rust-compatible byte offsets") {
     root: cases_test_root("forms-unicode-spans")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     cr: kit_steps_ascii_scalar(13)
     kit_exec_write(files.join(directory, "input"), "é·→—😀{cr}\nβ·tail\n")
     source: "step: cat\nstdin: input\nstdout: = \"é·→—😀\\r\\nβ·tail\\n\"\nstdout: count \"·\" = 2 # original predicate\nstdout: count-lines ^= \"é\" = 1 # original predicate\nstdout.line(0).after_first(\"·\").strip_prefix(\"→\").after_last(\"—\"): = \"😀\" # original predicate\nstdout.line(0).slice(2,4): = \"·\" # original byte slice\nstdout: each-line where ~ \"·\" && chars >= 2 # Unicode scalar count\ncapture: tail stdout after \"β·\" # original predicate\ncap:tail: = \"tail\"\nstdout.replace_first(\"·\",\"—\"): = \"é—→—😀\\r\\nβ·tail\\n\" # original predicate\n"

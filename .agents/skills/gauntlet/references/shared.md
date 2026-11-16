@@ -24,11 +24,11 @@ implementation, check it in as a labeled sourced reference row. Pair it with a
 Jet expert variant authored with the same expert effort. Compare expert with
 expert, never a headline entry with an expert one. The orchestrator does not
 author corpus code. Workers do not run the harness; they type-check with
-`Tools/agent/LaneCheck.jet` only.
+`Tools/Agent/LaneCheck.jet` only.
 
 ## Environment
 
-Run everything through `Tools/agent/JetEnv.jet`. Follow `AGENTS.md` target-dir
+Run everything through `Tools/Agent/JetEnv.jet`. Follow `AGENTS.md` target-dir
 laws: never use `/tmp` targets, use the checkout's own `target/`, and respect cap
 checks. A missing competitor toolchain is an owner-visible flake change, not a
 silent skip.

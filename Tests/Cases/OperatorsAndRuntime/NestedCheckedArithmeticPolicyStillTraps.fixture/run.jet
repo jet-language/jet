@@ -1,0 +1,10 @@
+use env: core.sys
+
+run: fn() {
+    raw: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
+    value: checked(U8{raw}) ?? U8{0}
+    #Overflow(.Wrapping) {
+        print(value + U8{100})
+        #Overflow(.Stop) { print(value + U8{100}) }
+    }
+}

@@ -1,0 +1,18 @@
+// A `#run fn` runs while building. Run-time code that calls it is refused at
+// the call, so the hook never runs with the program, where its panic would
+// stop the run instead of the build. The fix computes the value with `#run`.
+Small: struct {
+    value: Int
+
+    impl Literal.Int {
+        #run from_literal: fn(value: Int) -> Small {
+            if value > 100 -> panic("too big for Small")
+            Small{value: value}
+        }
+    }
+}
+
+run: fn() {
+    small: Small.from_literal(500)
+    print(small.value)
+}

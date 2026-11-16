@@ -5,18 +5,18 @@ lexical registry, or executable examples. The source and decision record are
 authoritative; this reference replaces a generic in-skill checklist.
 
 - Before changing a keyword or sigil, confirm the owner-ratified decision in
-  `Docs/spec/syntax-decisions.md`. Register every user-typeable spelling in
+  `Docs/Spec/syntax-decisions.md`. Register every user-typeable spelling in
   the syntax registry `Compiler/JetFoundation/Data/Syntax/` under I7; do not
   add a provisional entry before its decision is ratified. The decision ID
   stays in the spec, never in the registry.
 - For grammar or parser changes, inspect the relevant grammar and parser source,
   then regenerate and check the editor grammar sections:
-  `jet self devtools grammars`, then `git diff -- Tools/editors`. Do not treat that command
+  `jet self devtools grammars`, then `git diff -- Tools/Editors`. Do not treat that command
   as runtime or tier evidence.
 - For diagnostics caused by syntax, use the canonical row in
   `Compiler/Prelude/Diagnostics.jet`, matching UI snapshot, and
-  `Docs/spec/diagnostics.md`; preserve registered code and What/Why/Fix meaning.
-- For an example, read `Docs/spec/contributing/examples.md` and
+  `Docs/Spec/diagnostics.md`; preserve registered code and What/Why/Fix meaning.
+- For an example, read `Docs/Spec/Contributing/examples.md` and
   `Examples/README.md`, exercise the exact example path after a fresh binary,
   and update only its matching golden under `Examples/`.
   Trace embedded example paths, snapshots, harness lists, and generated uses

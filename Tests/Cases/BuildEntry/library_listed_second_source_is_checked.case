@@ -1,0 +1,13 @@
+# A library target's listed sources are checked together. `parts`
+# lists helper.jet beside parts.jet, and parts.jet calls `helper_value`, which
+# only helper.jet declares, so the build of `app`, which depends on `parts`,
+# checks `parts` clean.
+fixture: Fixtures/LibraryListedSecondSourceIsChecked
+artifact: app
+env: NO_COLOR=1
+step: jet build main.jet
+exit: 0
+stderr: empty
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "built\n"

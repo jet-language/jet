@@ -66,7 +66,7 @@ the fields that the worker and artifact need:
 | Worker or artifact | Add to the brief |
 |---|---|
 | Source implementation | The last dev commit, the worker's own export under `$JET_SCRATCH_ROOT/lanes/<Worker>/`, the paths it owns, the submission contract in [`intake.md`](intake.md), applicable authority and invariants, complete consumer/caller cutover, and the exact criterion proof command with its expected observable result for the submission's `tests`. |
-| `.jet` source writer | The source file's scoped checks: `Tools/agent/JetEnv.jet jet check path/to/file.jet` and `Tools/agent/JetEnv.jet jet fmt --check path/to/file.jet`. These are source checks, not runtime, tier, snapshot, golden, or generated-artifact proof. |
+| `.jet` source writer | The source file's scoped checks: `Tools/Agent/JetEnv.jet jet check path/to/file.jet` and `Tools/Agent/JetEnv.jet jet fmt --check path/to/file.jet`. These are source checks, not runtime, tier, snapshot, golden, or generated-artifact proof. |
 | Prose or static-data writer | The user-visible audience, source-of-truth paths, link/path consumers, and the expected `DOCS ONLY` receipt. Do not require compiler commands for prose-only work. |
 | Review worker | The exact bounded artifact, acceptance criteria, authority, invariants, and evidence to inspect. A review worker reports findings and does not repair the artifact. |
 | Recovery or long wave | The last integrated state, explicit timeout, resource/liveness boundary, salvage point, and rebrief condition. Load [`resources.md`](resources.md) or [`recovery.md`](recovery.md) rather than copying their controls. |

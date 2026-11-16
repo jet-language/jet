@@ -1,0 +1,36 @@
+// An optional function slot takes a closure, a function and a bound method;
+// a plain value fills the slot as present.
+label: fn(n: Int) -> String { "#{n}" }
+
+show: fn(f: (fn(Int) -> String)?, n: Int) -> String {
+    if f == .Val(g) -> return g(n)
+    "none"
+}
+
+Fmt: struct {
+    prefix: String
+
+    render: fn(self, n: Int) -> String { "{self.prefix}{n}" }
+}
+
+Hooks: struct {
+    on_done: (fn(Int) -> String)?
+}
+
+fire: fn(hooks: Hooks, n: Int) -> String {
+    if hooks.on_done == .Val(done) -> return done(n)
+    "quiet"
+}
+
+run: fn() {
+    print(show(fn(n: Int) -> String { "c{n}" }, 1))
+    print(show(label, 2))
+    fmt: Fmt{prefix: "m"}
+    print(show(fmt.render, 3))
+    print(show(None, 4))
+    print(show(fn(n) { "u{n}" }, 5))
+    hook: Fmt{prefix: "h"}
+    print(fire(Hooks{on_done: hook.render}, 6))
+    print(fire(Hooks{on_done: fn(n) { "d{n}" }}, 7))
+    print(fire(Hooks{on_done: None}, 8))
+}

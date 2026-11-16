@@ -1,0 +1,51 @@
+// A read-only lint is a marker whose `expand` row is `-[]>`. Reading the
+// marked type needs no effect, so the lint may count its fields and warn with
+// `reject`, but it writes no code: a template under `-[]>` that adds a
+// declaration is E0775. `jet check` on this file prints the warning for
+// `Order`; the program still runs.
+WideRecord: struct {
+    name: String
+    count: Int
+
+    impl Diagnostic {
+        severity: .Warning
+
+        what: fn(self) -> String { "`{self.name}` has {self.count} fields" }
+
+        why: fn(self) -> String { "a record wider than three fields is hard to build by hand" }
+
+        fix: fn(self) -> String { "split `{self.name}` into smaller records" }
+    }
+}
+
+Narrow: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[]> {
+            count: target.fields.len()
+            if count > 3 -> reject(WideRecord{name: target.name, count: count})
+        }
+    }
+}
+
+#Narrow
+Point: struct {
+    x: Int
+    y: Int
+}
+
+#Narrow
+Order: struct {
+    id: Int
+    total: Int
+    paid: Bool
+    note: String
+}
+
+run: fn() {
+    point: Point{x: 1, y: 2}
+    order: Order{id: 7, total: 30, paid: true, note: "gift"}
+    print("point {point.x},{point.y}")
+    print("order {order.id} totals {order.total}")
+}

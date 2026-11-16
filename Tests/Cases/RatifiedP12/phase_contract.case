@@ -1,0 +1,45 @@
+# The phase contract: `#phase` is the phase of the
+# compiled copy that runs it. `#run` code reads `.Preparation`, `build: fn`
+# `.Build` and the program `.Runtime`; one helper reads `.Preparation` from a
+# `#run` binding, `.Build` from the build entry and `.Runtime` from `run`;
+# a prepared record keeps the phase it was made in. Each copy folds its own
+# phase, not the optimizer: every tier prints the same lines, and two
+# launches of the built program print them again with nothing on stderr, so
+# startup never repeats preparation.
+copy: {root}/Examples/Metaprogramming/Comptime/PhaseContract phase
+env: NO_COLOR=1
+step o0: jet run -O0 run.jet
+cwd: phase
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = phase_contract.stdout.expected
+stderr: empty
+step o1: jet run -O1 run.jet
+cwd: phase
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = phase_contract.stdout.expected
+stderr: empty
+step o2: jet run -O2 run.jet
+cwd: phase
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = phase_contract.stdout.expected
+stderr: empty
+step build: jet build run.jet
+cwd: phase
+env: JET_STORE_DIR={work}/cache/build
+exit: 0
+step first_launch: {work}/phase/.jet/build/run
+exit: 0
+stdout: = phase_contract.stdout.expected
+stderr: empty
+step second_launch: {work}/phase/.jet/build/run
+exit: 0
+stdout: = phase_contract.stdout.expected
+stderr: empty
+step fmt: jet fmt --check run.jet package.jet
+cwd: phase
+exit: 0 # the example is already in `jet fmt` form
+stdout: empty
+stderr: empty

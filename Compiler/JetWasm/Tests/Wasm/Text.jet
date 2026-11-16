@@ -121,7 +121,7 @@ text_fixture: fn(path: String) -[FS.Read, Env]> String {
 #Test("text compiler extensions decode to the same model as their binaries") {
     names: [String]{"lint_no_x", "crash", "fuel_loop", "incompatible", "malformed", "imports_random"}
     loop name in names {
-        text: text_rendered(text_fixture("tests/fixtures/compiler_extension/{name}.wat"))
+        text: text_rendered(text_fixture("Tests/Fixtures/CompilerExtension/{name}.wat"))
         binary: text_binary_rendered(extension(name))
         assert(text.contains("\ncode ") && text.contains("\nexport "), "{name}: {text}")
         assert_eq(text, binary)
@@ -131,13 +131,13 @@ text_fixture: fn(path: String) -[FS.Read, Env]> String {
 #Test("every shipped text guest converts, decodes and validates") {
     paths: [String]{
         "Examples/Modules/Packages/PluginFailure/failure_guest.wat",
-        "tests/cases/authority/plugin_call_rejects_an_overlarge_argument_list_before_guest_execution.fixture/large_args.wat",
-        "tests/cases/authority/plugin_call_rejects_an_overlarge_frame_for_a_zero_param_export.fixture/zero_param.wat",
-        "tests/cases/authority/plugin_call_rejects_linear_memory_growth_beyond_the_cap_on_all_hosted_tiers.fixture/linear_memory.wat",
-        "tests/cases/authority/plugin_call_rejects_table_growth_beyond_the_cap_on_all_hosted_tiers.fixture/table.wat",
-        "tests/cases/authority/plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers.fixture/non_terminating.wat",
-        "tests/cases/authority/plugin_failure_propagation_records_the_host_call_line_on_all_tiers.fixture/failure_guest.wat",
-        "tests/cases/authority/plugin_load_rejects_a_symlink_outside_the_granted_read_root.fixture/outside/target.wat",
+        "Tests/Cases/Authority/PluginCallRejectsAnOverlargeArgumentListBeforeGuestExecution.fixture/large_args.wat",
+        "Tests/Cases/Authority/PluginCallRejectsAnOverlargeFrameForAZeroParamExport.fixture/zero_param.wat",
+        "Tests/Cases/Authority/PluginCallRejectsLinearMemoryGrowthBeyondTheCapOnAllHostedTiers.fixture/linear_memory.wat",
+        "Tests/Cases/Authority/PluginCallRejectsTableGrowthBeyondTheCapOnAllHostedTiers.fixture/table.wat",
+        "Tests/Cases/Authority/PluginCallStopsANonTerminatingComponentOnAllHostedTiers.fixture/non_terminating.wat",
+        "Tests/Cases/Authority/PluginFailurePropagationRecordsTheHostCallLineOnAllTiers.fixture/failure_guest.wat",
+        "Tests/Cases/Authority/PluginLoadRejectsASymlinkOutsideTheGrantedReadRoot.fixture/outside/target.wat",
     }
     loop path in paths {
         rendered: text_rendered(text_fixture(path))
@@ -146,7 +146,7 @@ text_fixture: fn(path: String) -[FS.Read, Env]> String {
 }
 
 #Test("a loaded artifact may be text or binary") {
-    text: fixture("tests/fixtures/compiler_extension/lint_no_x.wat")
+    text: fixture("Tests/Fixtures/CompilerExtension/lint_no_x.wat")
     if wasm_load_component(text) == {
         .Ok(component) -> {
             assert_eq(text_component(component), text_binary_rendered(extension("lint_no_x")))

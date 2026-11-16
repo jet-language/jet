@@ -1,0 +1,14 @@
+# `#if` and a compile-time loop decide while building. One that reads a
+# parameter, known only at run time, is refused where it reads it, and never
+# turns into a run-time `if` or `loop`: `#if n > 3` is E0989, and a body
+# `#loop x in xs` (which `jet fmt` writes `#run { loop x in xs -> … }`) is
+# E0640.
+fixture: ComptimeNoSilentFallbackIfAndLoop.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check source0/main.jet --json
+exit: nonzero
+json: stdout doc $.reports has {"code":"E0989","line":2}
+step: jet check source1/main.jet --json
+exit: nonzero
+json: stdout doc $.reports has {"code":"E0640","line":4}

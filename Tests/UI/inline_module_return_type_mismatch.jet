@@ -1,0 +1,17 @@
+bank: module {
+    Account: struct {
+        priv balance: Int
+    }
+}
+
+vis2: module {
+    bank: module {
+        Account: struct {
+            priv balance: Int
+        }
+    }
+}
+
+bad: fn() -> bank.Account { return vis2.bank.Account{balance: 1} }
+
+run: fn() {}

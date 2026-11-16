@@ -1,0 +1,27 @@
+# `mem.fill<U8>(to, value, count)` stores `value` into exactly `count` bytes
+# from `to`, on every tier: at each edge of the fill's size classes (the
+# short stores, the multi-word stores, the 64-byte steps and the string store)
+# and at every offset into a 64-byte line, with the 64 bytes on either side
+# left as they were.
+fixture: ARawByteFillWritesExactlyItsRange.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "1920 fills, 0 wrong\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "1920 fills, 0 wrong\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "1920 fills, 0 wrong\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "1920 fills, 0 wrong\n"
+end when

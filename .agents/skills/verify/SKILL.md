@@ -14,10 +14,10 @@ contract. Do not run a suite merely because this skill was loaded.
 | Criterion or artifact | Conditional reference and canonical source |
 |---|---|
 | One card's observable criterion | [`references/criterion-evidence.md`](references/criterion-evidence.md); the card's named command and expected result |
-| Diagnostic, UI snapshot, or executable golden | [`references/snapshots-goldens.md`](references/snapshots-goldens.md); `Compiler/Prelude/Diagnostics.jet`, matching `tests/ui/` or `tests/ui_lint/`, `Docs/spec/diagnostics.md`, and `Examples/` |
-| Syntax, grammar, or example change | [`references/syntax.md`](references/syntax.md); `Compiler/JetFoundation/Data/Syntax/`, `Docs/spec/syntax-decisions.md`, `Docs/spec/contributing/examples.md`, and `Examples/README.md` |
-| Linked-card milestone | [`../orchestration/references/closeout.md`](../orchestration/references/closeout.md) and `Tools/agent/CloseoutGate.jet` |
-| Scratch, target, memory, or process safety | [`../orchestration/references/resources.md`](../orchestration/references/resources.md) and `Tools/agent/JetEnv.jet` |
+| Diagnostic, UI snapshot, or executable golden | [`references/snapshots-goldens.md`](references/snapshots-goldens.md); `Compiler/Prelude/Diagnostics.jet`, matching `Tests/UI/` or `Tests/UILint/`, `Docs/Spec/diagnostics.md`, and `Examples/` |
+| Syntax, grammar, or example change | [`references/syntax.md`](references/syntax.md); `Compiler/JetFoundation/Data/Syntax/`, `Docs/Spec/syntax-decisions.md`, `Docs/Spec/Contributing/examples.md`, and `Examples/README.md` |
+| Linked-card milestone | [`../orchestration/references/closeout.md`](../orchestration/references/closeout.md) and `Tools/Agent/CloseoutGate.jet` |
+| Scratch, target, memory, or process safety | [`../orchestration/references/resources.md`](../orchestration/references/resources.md) and `Tools/Agent/JetEnv.jet` |
 
 ## Non-negotiable truth
 
@@ -33,7 +33,7 @@ contract. Do not run a suite merely because this skill was loaded.
   commit-bound token, one composed targeted sweep, and one fresh-context review,
   is defined only in `../orchestration/references/closeout.md`. Do not invent a
   second cadence here.
-- An unfiltered conformance census, `Tools/agent/VerifyFull.jet`, and
+- An unfiltered conformance census, `Tools/Agent/VerifyFull.jet`, and
   `tower milestone verify` are tokened milestone operations, not card proof.
   No blanket suite substitutes for the named criterion command.
 - Technical acceptance belongs to the agents and the orchestrator. Owner

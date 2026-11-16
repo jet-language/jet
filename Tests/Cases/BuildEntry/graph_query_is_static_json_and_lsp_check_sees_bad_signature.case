@@ -1,0 +1,12 @@
+# Port of build_entry.rs::graph_query_is_static_json_and_lsp_check_sees_bad_signature.
+# PENDING-GRAMMAR: filtered/projected JSON, count/prefix/relational operations.
+fixture: Fixtures/StaticGraph
+step: jet inspect graph {work}/main.jet --json
+stdout: ~ "\"name\":\"app\"" # Original CLI graph substring assertion.
+stdout: ~ "\"name\":\"never-run\"" # Original CLI graph substring assertion.
+json: stdout doc $.build.targets[0].name = "app"
+json: stdout doc $.build.actions[0].name = "never-run"
+file: out absent
+copy: ordinary-build.txt main.jet
+step: jet check main.jet --json
+exit: 0 # An ordinary `build: fn` is not a build entry, so it checks clean (original absence assertion).

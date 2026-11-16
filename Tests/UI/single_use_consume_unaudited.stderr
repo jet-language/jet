@@ -1,0 +1,8 @@
+Error [jet.SingleUseConsumeOutsideUnsafe]: `t` still owes `consume`, and discarding it needs an audited reason
+  --> Tests/UI/single_use_consume_unaudited.jet:9:13
+    |
+  9 |     consume(t)
+    |             ^
+ Why: This value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down
+ Fix: Wrap it in an audited region: `#Unsafe("why discarding this is fine") { consume(t) }`
+More: jet-lang.dev/e/E0143

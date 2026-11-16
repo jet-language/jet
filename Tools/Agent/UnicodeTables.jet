@@ -1,0 +1,1101 @@
+#!/usr/bin/env jet
+// Generates every Unicode 17.0.0 table from the vendored UCD (card #298):
+//   Compiler/JetRuntime/Source/UnicodeTables.jet, UnicodeNormalizeTables.jet
+//     and UnicodeText<n>.jet: the runtime's static range tables (no heap, no
+//     Core indexing);
+//   Core/Text/SegmentationTables.jet and Core/Text/Runtime/Assets/*.jet: the
+//     JUCD schema-1 assets, each a generated binary file beside its Jet file
+//     (Assets/<Unit>.bin) that the Jet file embeds when the program is built,
+//     with Assets.jet and manifest.json; SegmentationTables.jet embeds the
+//     same files;
+//   the generated string-asset block of Core/Text/Runtime/KernelUnicodeString.jet.
+// Every input under Tests/Data/Unicode/Ucd is checked against
+// Tests/Data/Unicode/SHA256SUMS before it is read.
+// Usage (from the repository root):
+//   jet Tools/Agent/UnicodeTables.jet           rewrite every stale output
+//   jet Tools/Agent/UnicodeTables.jet --check   write nothing; fail naming every stale output
+use {
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+}
+
+UCD_DIR: "Tests/Data/Unicode/Ucd"
+
+SUMS_PATH: "Tests/Data/Unicode/SHA256SUMS"
+
+// The inputs, in the order the normalization header and manifest list them.
+INPUTS: [String]{
+    "UnicodeData.txt",
+    "CaseFolding.txt",
+    "SpecialCasing.txt",
+    "CompositionExclusions.txt",
+    "EastAsianWidth.txt",
+    "DerivedNormalizationProps.txt",
+    "emoji/emoji-data.txt",
+    "auxiliary/GraphemeBreakProperty.txt",
+    "auxiliary/WordBreakProperty.txt",
+    "auxiliary/SentenceBreakProperty.txt",
+    "DerivedCoreProperties.txt",
+    "PropList.txt",
+}
+
+HEADER: "// GENERATED FILE — do not hand-edit.\n// Source: Tools/Agent/UnicodeTables.jet against pinned Unicode 17.0.0 UCD.\n// Regenerate: jet Tools/Agent/UnicodeTables.jet\n// Every runtime lookup and Core text asset is emitted from this one run.\n"
+
+RUNTIME_DIR: "Compiler/JetRuntime/Source"
+
+ASSET_DIR: "Core/Text/Runtime/Assets"
+
+STRING_KERNEL: "Core/Text/Runtime/KernelUnicodeString.jet"
+
+STRING_BEGIN: "// BEGIN GENERATED STRING ASSETS"
+
+STRING_END: "// END GENERATED STRING ASSETS"
+
+// The asset symbols the string kernel declares: every asset whose symbol
+// starts with one of these.
+STRING_ASSET_PREFIXES: [String]{"UNICODE_LOWER", "UNICODE_UPPER", "UNICODE_WHITE_SPACE", "UNICODE_CASED", "UNICODE_CASE_IGNORABLE"}
+
+// General_Category tags; every other category is the last tag.
+GC_TAGS: [String]{"Cc", "Cf", "Mn", "Me", "Mc", "Zs", "Zl", "Zp", "Other"}
+
+GRAPHEME_TAGS: [String]{"Other", "CR", "LF", "Control", "Extend", "ZWJ", "Regional_Indicator", "Prepend", "SpacingMark", "L", "V", "T", "LV", "LVT"}
+
+WORD_TAGS: [String]{"Other", "CR", "LF", "Newline", "Extend", "ZWJ", "Regional_Indicator", "Format", "Katakana", "Hebrew_Letter", "ALetter", "Single_Quote", "Double_Quote", "MidNumLet", "MidLetter", "MidNum", "Numeric", "ExtendNumLet", "WSegSpace"}
+
+// SContinue appears twice; a value takes its first tag.
+SENTENCE_TAGS: [String]{"Other", "CR", "LF", "Extend", "Sep", "Format", "Sp", "Lower", "Upper", "OLetter", "Numeric", "ATerm", "SContinue", "STerm", "Close", "SContinue"}
+
+// GB9c Indic_Conjunct_Break; None is the unlisted default.
+INCB_TAGS: [String]{"None", "Linker", "Consonant", "Extend"}
+
+SCALAR_LANE: 2097152
+
+MAX_SCALAR: 1114111
+
+#Error
+TableError: struct {
+    message: String
+}
+
+fail: fn(message: String) -> TableError { TableError{message: message} }
+
+// A scalar range and its label (0 where the range carries none).
+Span: struct {
+    a: Int
+    b: Int
+    label: Int
+}
+
+// A property-file row: its scalar range and its `;` fields after the range.
+PropRow: struct {
+    a: Int
+    b: Int
+    fields: [String]
+}
+
+// A scalar's full mapping; `cps` keeps first-insertion order.
+Mapping: struct {
+    cps: [Int]
+    seqs: [Int:[Int]]
+}
+
+MapEntry: struct {
+    cp: Int
+    seq: [Int]
+}
+
+NameRow: struct {
+    cp: Int
+    name: String
+}
+
+// One table record: keys lo..=hi carry `value`.
+Leaf: struct {
+    lo: Int
+    hi: Int
+    value: Int
+}
+
+// One generated file: its repository path and its bytes.
+Output: struct {
+    path: String
+    bytes: [U8]
+}
+
+text_output: fn(path: String, text: String) -> Output { Output{path: path, bytes: text.bytes()} }
+
+Asset: struct {
+    symbol: String
+    unit: String
+    kind: Int
+    count: Int
+    stride: Int
+    bytes: Int
+    sha256: String
+    data: [U8]
+}
+
+Ucd: struct {
+    ccc: [Span]
+    canon: Mapping
+    compat: Mapping
+    lower: Mapping
+    upper: Mapping
+    title: Mapping
+    fold: Mapping
+    simple_fold: Mapping
+    names: [NameRow]
+    general_category: [Span]
+    letters: [Span]
+    numerics: [Span]
+    exclusions: [Span]
+    east_asian_width: [Span]
+    extended_pictographic: [Span]
+    emoji_presentation: [Span]
+    emoji: [Span]
+    grapheme: [Span]
+    word: [Span]
+    sentence: [Span]
+    incb: [Span]
+    alphabetic: [Span]
+    cased: [Span]
+    case_ignorable: [Span]
+    lowercase: [Span]
+    uppercase: [Span]
+    default_ignorable: [Span]
+    white_space: [Span]
+}
+
+new_mapping: fn() -> Mapping { Mapping{cps: [Int]{}, seqs: [Int:[Int]]{}} }
+
+put: fn(mapping: &Mapping, cp: Int, seq: [Int]) {
+    if !mapping.seqs.has_key(cp) -> mapping.cps.push(cp)
+    mapping.seqs[cp] = seq
+}
+
+entries: fn(mapping: Mapping) -> [MapEntry] {
+    cps := mapping.cps.copy()
+    cps.sort()
+    out := [MapEntry]{}
+    loop cp in cps -> out.push(MapEntry{cp: cp, seq: mapping.seqs.get(cp) ?? [Int]{}})
+    out
+}
+
+byte_len: fn(text: String) -> Int Never! { text.bytes().len() }
+
+hex_value: fn(text: String) -> Int TableError! {
+    if text.len() == 0 -> return Err(fail("empty hex field"))
+    value := 0
+    loop byte in text.bytes() {
+        digit: Int{byte}
+        if {
+            digit >= 48 && digit <= 57 -> value = value * 16 + digit - 48
+            digit >= 65 && digit <= 70 -> value = value * 16 + digit - 55
+            digit >= 97 && digit <= 102 -> value = value * 16 + digit - 87
+            else -> return Err(fail("bad hex field '{text}'"))
+        }
+    }
+    Ok(value)
+}
+
+// Space-separated hex scalars; empty words are skipped.
+hex_list: fn(text: String) -> [Int] TableError! {
+    out := [Int]{}
+    loop word in text.trim().split(" ") {
+        if word != "" -> out.push(hex_value(word))
+    }
+    Ok(out)
+}
+
+decimal: fn(text: String) -> Int { Int.parse(text) ?? 0 }
+
+// The rows of a UCD property file: comments stripped, blank lines and rows
+// without a `;` field skipped.
+prop_rows: fn(text: String) -> [PropRow] TableError! {
+    rows := [PropRow]{}
+    loop raw in text.split("\n") {
+        line: raw.partition("#").head.trim()
+        if line == "" -> next
+        parts: line.split(";").to_list()
+        if parts.len() < 2 -> next
+        span: parts[0].trim().partition("..")
+        a: hex_value(span.head.trim())
+        b: if span.sep == "" -> a else -> hex_value(span.tail.trim())
+        fields := [String]{}
+        loop at in 1..<parts.len() -> fields.push(parts[at].trim().copy())
+        rows.push(PropRow{a: a, b: b, fields: fields})
+    }
+    Ok(rows)
+}
+
+// The rows whose field `at` is `value`, as untagged spans in file order.
+spans_where: fn(rows: [PropRow], at: Int, value: String) -> [Span] {
+    out := [Span]{}
+    loop row in rows {
+        if row.fields.len() > at && row.fields[at] == value {
+            out.push(Span{a: row.a, b: row.b, label: 0})
+        }
+    }
+    out
+}
+
+// The index of the first tag equal to `value`, or -1.
+tag_index: fn(tags: [String], value: String) -> Int {
+    loop at in 0..<tags.len() {
+        if tags[at] == value -> return at
+    }
+    -1
+}
+
+// Rows whose field `at` names a tag, tagged with its first index.
+tagged_rows: fn(rows: [PropRow], at: Int, tags: [String]) -> [Span] {
+    out := [Span]{}
+    loop row in rows {
+        if row.fields.len() <= at -> next
+        found: tag_index(tags, row.fields[at])
+        if found >= 0 -> out.push(Span{a: row.a, b: row.b, label: found})
+    }
+    out
+}
+
+// Spans stably sorted by first scalar.
+sorted_spans: fn(spans: [Span]) -> [Span] {
+    order := [Int]{}
+    loop at in 0..<spans.len() -> order.push(at)
+    order.sort_by(fn(at: Int) { spans[at].a * SCALAR_LANE + at })
+    out := [Span]{}
+    loop at in order -> out.push(spans[at].copy())
+    out
+}
+
+// Sorted spans with adjacent same-tag spans merged.
+merge_tagged: fn(spans: [Span]) -> [Span] {
+    out := [Span]{}
+    loop span in sorted_spans(spans) {
+        n: out.len()
+        if n > 0 && out[n - 1].b + 1 == span.a && out[n - 1].label == span.label {
+            out[n - 1] = Span{a: out[n - 1].a, b: span.b, label: span.label}
+            next
+        }
+        out.push(span.copy())
+    }
+    out
+}
+
+// Sorted spans with adjacent spans merged; overlapping spans stay apart.
+merge_pairs: fn(spans: [Span]) -> [Span] {
+    out := [Span]{}
+    loop span in sorted_spans(spans) {
+        n: out.len()
+        if n > 0 && out[n - 1].b + 1 == span.a {
+            out[n - 1] = Span{a: out[n - 1].a, b: span.b, label: 0}
+            next
+        }
+        out.push(Span{a: span.a, b: span.b, label: 0})
+    }
+    out
+}
+
+with_tags: fn(spans: [Span], tags: [Int]) -> [Span] {
+    out := [Span]{}
+    loop span in spans {
+        if tags.contains(span.label) -> out.push(span.copy())
+    }
+    out
+}
+
+// --- inputs -------------------------------------------------------------------
+
+pinned_digest: fn(sums: String, name: String) -> String TableError! {
+    pinned: "ucd/{name}"
+    loop raw in sums.split("\n") {
+        fields: raw.partition("  ")
+        if fields.sep != "" && fields.tail.trim() == pinned -> return Ok(fields.head.trim().copy())
+    }
+    Err(fail("{SUMS_PATH} does not pin {pinned}"))
+}
+
+read_pinned: fn(name: String, sums: String) -[FS]> String TableError! {
+    path: "{UCD_DIR}/{name}"
+    bytes: files.read_bytes(path) ?? return Err(fail("cannot read {path}: {err}"))
+    expected: pinned_digest(sums, name)
+    actual: crypto.sha256(bytes).hex()
+    if actual != expected -> return Err(fail("{path} sha256 {actual}, SHA256SUMS pins {expected}"))
+    String.from_bytes(bytes) ?? return Err(fail("{path} is not UTF-8"))
+}
+
+parse_unicode_data: fn(text: String, ucd: &Ucd) TableError! {
+    pending := -1
+    pending_gc := ""
+    loop raw in text.split("\n") {
+        if raw == "" -> next
+        f: raw.split(";").to_list()
+        if f.len() < 14 -> next
+        cp: hex_value(f[0])
+        name: f[1].copy()
+        gc: f[2].copy()
+        first: name.ends_with(", First>")
+        last: name.ends_with(", Last>")
+        unicode_name: if name == "<control>" -> f[10].trim().copy() else -> name.copy()
+        if unicode_name != "" && !unicode_name.starts_with("<") && !first && !last {
+            ucd.names.push(NameRow{cp: cp, name: unicode_name})
+        }
+        if first {
+            pending = cp
+            pending_gc = gc.copy()
+            next
+        }
+        start: if last -> pending else -> cp
+        if last {
+            if pending < 0 || pending_gc != gc {
+                return Err(fail("malformed UnicodeData range at {raw}"))
+            }
+            pending = -1
+        }
+        ucd.general_category.push(Span{a: start, b: cp, label: gc_tag(gc)})
+        if gc.starts_with("L") -> ucd.letters.push(Span{a: start, b: cp, label: 0})
+        if gc == "Nd" || gc == "Nl" || gc == "No" {
+            ucd.numerics.push(Span{a: start, b: cp, label: 0})
+        }
+        if last -> next
+        ccc: decimal(f[3])
+        if ccc != 0 -> ucd.ccc.push(Span{a: cp, b: cp, label: ccc})
+        if f[12] != "" -> put(ucd.upper, cp, [Int]{hex_value(f[12])})
+        if f[13] != "" -> put(ucd.lower, cp, [Int]{hex_value(f[13])})
+        if f.len() > 14 && f[14] != "" -> put(ucd.title, cp, [Int]{hex_value(f[14])})
+        decomposition: f[5].trim()
+        if decomposition != "" {
+            tagged: decomposition.starts_with("<")
+            rest: if tagged -> decomposition.partition(">").tail.trim() else -> decomposition
+            cps: hex_list(rest)
+            put(ucd.compat, cp, cps.copy())
+            if !tagged -> put(ucd.canon, cp, cps)
+        }
+    }
+    if pending >= 0 -> return Err(fail("unterminated UnicodeData First/Last range"))
+    Ok()
+}
+
+gc_tag: fn(gc: String) -> Int {
+    at: tag_index(GC_TAGS, gc)
+    if at < 0 -> GC_TAGS.len() - 1 else -> at
+}
+
+// Unconditional SpecialCasing rows override the simple mappings; conditional
+// rows (Final_Sigma, tr/az/lt) are not table rows.
+parse_special_casing: fn(text: String, ucd: &Ucd) TableError! {
+    loop raw in text.split("\n") {
+        line: raw.partition("#").head.trim()
+        if line == "" -> next
+        f := [String]{}
+        loop part in line.split(";") -> f.push(part.trim().copy())
+        if f.len() < 5 || f[4] != "" -> next
+        cp: hex_value(f[0])
+        put(ucd.lower, cp, hex_list(f[1]))
+        put(ucd.title, cp, hex_list(f[2]))
+        put(ucd.upper, cp, hex_list(f[3]))
+    }
+    Ok()
+}
+
+// Status C and F define the default full fold; C and S one-scalar rows the
+// simple fold. Turkic T rows are excluded.
+parse_case_folding: fn(text: String, ucd: &Ucd) TableError! {
+    loop raw in text.split("\n") {
+        line: raw.partition("#").head.trim()
+        if line == "" -> next
+        f := [String]{}
+        loop part in line.split(";") -> f.push(part.trim().copy())
+        if f.len() < 3 -> next
+        cp: hex_value(f[0])
+        mapping: hex_list(f[2])
+        status: f[1].copy()
+        if status == "C" || status == "F" -> put(ucd.fold, cp, mapping.copy())
+        if (status == "C" || status == "S") && mapping.len() == 1 {
+            put(ucd.simple_fold, cp, mapping)
+        }
+    }
+    Ok()
+}
+
+read_ucd: fn() -[FS]> Ucd TableError! {
+    sums: files.read(SUMS_PATH) ?? return Err(fail("cannot read {SUMS_PATH}: {err}"))
+    texts := [String:String]{}
+    loop name in INPUTS -> texts[name] = read_pinned(name, sums)
+    ucd := Ucd{
+        ccc: [Span]{},
+        canon: new_mapping(),
+        compat: new_mapping(),
+        lower: new_mapping(),
+        upper: new_mapping(),
+        title: new_mapping(),
+        fold: new_mapping(),
+        simple_fold: new_mapping(),
+        names: [NameRow]{},
+        general_category: [Span]{},
+        letters: [Span]{},
+        numerics: [Span]{},
+        exclusions: [Span]{},
+        east_asian_width: [Span]{},
+        extended_pictographic: [Span]{},
+        emoji_presentation: [Span]{},
+        emoji: [Span]{},
+        grapheme: [Span]{},
+        word: [Span]{},
+        sentence: [Span]{},
+        incb: [Span]{},
+        alphabetic: [Span]{},
+        cased: [Span]{},
+        case_ignorable: [Span]{},
+        lowercase: [Span]{},
+        uppercase: [Span]{},
+        default_ignorable: [Span]{},
+        white_space: [Span]{},
+    }
+    parse_unicode_data(texts.get("UnicodeData.txt") ?? "", ucd)
+    parse_special_casing(texts.get("SpecialCasing.txt") ?? "", ucd)
+    parse_case_folding(texts.get("CaseFolding.txt") ?? "", ucd)
+    // Full_Composition_Exclusion is the complete exclusion set; it supersedes
+    // CompositionExclusions.txt, which is only verified.
+    ucd.exclusions = spans_where(prop_rows(texts.get("DerivedNormalizationProps.txt") ?? ""), 0, "Full_Composition_Exclusion")
+    // East_Asian_Width: 0 narrow (N, Na, H), 1 ambiguous (A), 2 wide (W, F).
+    loop row in prop_rows(texts.get("EastAsianWidth.txt") ?? "") {
+        width: row.fields[0].copy()
+        class: if width == "A" -> 1 else -> (if width == "W" || width == "F" -> 2 else -> 0)
+        ucd.east_asian_width.push(Span{a: row.a, b: row.b, label: class})
+    }
+    emoji: prop_rows(texts.get("emoji/emoji-data.txt") ?? "")
+    ucd.extended_pictographic = spans_where(emoji, 0, "Extended_Pictographic")
+    ucd.emoji_presentation = spans_where(emoji, 0, "Emoji_Presentation")
+    ucd.emoji = spans_where(emoji, 0, "Emoji")
+    ucd.grapheme = merge_tagged(tagged_rows(prop_rows(texts.get("auxiliary/GraphemeBreakProperty.txt") ?? ""), 0, GRAPHEME_TAGS))
+    ucd.word = merge_tagged(tagged_rows(prop_rows(texts.get("auxiliary/WordBreakProperty.txt") ?? ""), 0, WORD_TAGS))
+    ucd.sentence = merge_tagged(tagged_rows(prop_rows(texts.get("auxiliary/SentenceBreakProperty.txt") ?? ""), 0, SENTENCE_TAGS))
+    core: prop_rows(texts.get("DerivedCoreProperties.txt") ?? "")
+    incb := [PropRow]{}
+    loop row in core {
+        if row.fields.len() >= 2 && row.fields[0] == "InCB" {
+            incb.push(PropRow{a: row.a, b: row.b, fields: [String]{row.fields[1].copy()}})
+        }
+    }
+    ucd.incb = merge_tagged(tagged_rows(incb, 0, INCB_TAGS))
+    ucd.alphabetic = spans_where(core, 0, "Alphabetic")
+    ucd.cased = spans_where(core, 0, "Cased")
+    ucd.case_ignorable = spans_where(core, 0, "Case_Ignorable")
+    ucd.lowercase = spans_where(core, 0, "Lowercase")
+    ucd.uppercase = spans_where(core, 0, "Uppercase")
+    ucd.default_ignorable = spans_where(core, 0, "Default_Ignorable_Code_Point")
+    ucd.white_space = spans_where(prop_rows(texts.get("PropList.txt") ?? ""), 0, "White_Space")
+    Ok(ucd)
+}
+
+excluded: fn(exclusions: [Span], cp: Int) -> Bool {
+    loop span in exclusions {
+        if cp >= span.a && cp <= span.b -> return true
+    }
+    false
+}
+
+// Canonical pairs (first, second, composed) from two-scalar canonical
+// decompositions whose composite is not excluded, sorted by pair.
+compose_pairs: fn(ucd: Ucd) -> [Int] {
+    found := [Int]{}
+    loop cp in ucd.canon.cps {
+        seq: ucd.canon.seqs.get(cp) ?? [Int]{}
+        if seq.len() != 2 || excluded(ucd.exclusions, cp) -> next
+        found.push(seq[0])
+        found.push(seq[1])
+        found.push(cp)
+    }
+    order := [Int]{}
+    keys := [Int]{}
+    loop at in 0..<found.len() /% 3 {
+        order.push(at)
+        keys.push((found[at * 3] * SCALAR_LANE + found[at * 3 + 1]) * 65536 + at)
+    }
+    order.sort_by(fn(at: Int) { keys[at] })
+    out := [Int]{}
+    loop at in order {
+        loop field in 0..<3 -> out.push(found[at * 3 + field])
+    }
+    out
+}
+
+// --- runtime range tables --------------------------------------------------------
+
+// A runtime lookup answers a scalar below 128 from a dense ASCII block and
+// searches a table of sorted, disjoint [lo, hi, value] records for the rest,
+// both in immortal text (rt_static_text, the runtime's static storage); the
+// search is JetRuntime Unicode.jet unicode_table_find. Every field is a fixed
+// run of six-bit digits, low digit first: digit d is the byte 35 + d below 57
+// and 36 + d from 57, so the text holds no quote, backslash or brace, and a
+// four-digit field read as a little-endian word orders as its value does.
+SCALAR_DIGITS: 4
+
+// A full mapping's three 21-bit scalar lanes.
+POOL_DIGITS: 11
+
+// A mapping record's value: its scalar delta plus DELTA_BIAS below POOL_FLAG,
+// or POOL_FLAG plus the index of its full mapping in the pool text.
+DELTA_BIAS: 4194304
+
+POOL_FLAG: 8388608
+
+ASCII_SCALARS: 128
+
+table_digits: fn(out: &[U8], value: Int, width: Int) TableError! {
+    if value < 0 || value >= 1 << (6 * width) {
+        return Err(fail("table field {value} exceeds {width} digits"))
+    }
+    loop at in 0..<width {
+        digit: (value >> (6 * at)).bit_and(63)
+        out.push(U8{if digit < 57 -> 35 + digit else -> 36 + digit})
+    }
+    Ok()
+}
+
+// The fewest digits holding every value up to `max`.
+digits_for: fn(max: Int) -> Int {
+    digits := 1
+    loop max >= 1 << (6 * digits) -> digits += 1
+    digits
+}
+
+// The records of `leaves`: lo and hi of `key_digits` each, then the value
+// of `value_digits` (none for a property).
+table_text: fn(leaves: [Leaf], key_digits: Int, value_digits: Int) -> String TableError! {
+    out := [U8]{}
+    loop leaf in leaves {
+        table_digits(out, leaf.lo, key_digits)
+        table_digits(out, leaf.hi, key_digits)
+        if value_digits > 0 -> table_digits(out, leaf.value, value_digits)
+    }
+    Ok(String.from_bytes_lossy(out))
+}
+
+// The lookup line answering a scalar below 128 from the dense ASCII block of
+// `values` (one per scalar), its value followed by `test`.
+ascii_line: fn(values: [Int], test: String) -> String TableError! {
+    high := 0
+    loop value in values {
+        if value > high -> high = value
+    }
+    digits: digits_for(high)
+    out := [U8]{}
+    loop value in values -> table_digits(out, value, digits)
+    Ok("    if (cp < I64{{{ASCII_SCALARS}}}) {{ return unicode_table_dense(rt_static_text(\"{String.from_bytes_lossy(out)}\"), cp, I64{{{digits}}}){test} }}\n")
+}
+
+// The value of the leaf holding `key`, or `missing`.
+leaf_value: fn(leaves: [Leaf], key: Int, missing: Int) -> Int {
+    loop leaf in leaves {
+        if leaf.lo <= key && key <= leaf.hi -> return leaf.value
+    }
+    missing
+}
+
+// A lookup of `leaves` returning the value of the record holding cp, or
+// `missing` outside every record. Scalar keys take four digits and the
+// dense ASCII block; any other key takes the digits its largest needs.
+value_lookup: fn(signature: String, leaves: [Leaf], missing: Int, scalar_keys: Bool) -> String TableError! {
+    high := 0
+    value := 0
+    loop leaf in leaves {
+        if leaf.hi > high -> high = leaf.hi
+        if leaf.value > value -> value = leaf.value
+    }
+    key_digits: if scalar_keys -> SCALAR_DIGITS else -> digits_for(high)
+    value_digits: digits_for(value)
+    ascii := ""
+    if scalar_keys {
+        values := [Int]{}
+        loop cp in 0..<ASCII_SCALARS -> values.push(leaf_value(leaves, cp, missing))
+        ascii = ascii_line(values, "")
+    }
+    Ok("{signature}{ascii}    unicode_table_value(rt_static_text(\"{table_text(leaves, key_digits, value_digits)}\"), I64{{{leaves.len()}}}, I64{{{key_digits}}}, I64{{{value_digits}}}, cp, I64{{{missing}}})\n}}\n")
+}
+
+// A mapping's records and pool: adjacent one-scalar mappings with the same
+// delta coalesce into one record; a full mapping packs up to three 21-bit
+// scalars (low lane first) into one pool entry.
+MappingTable: struct {
+    leaves: [Leaf]
+    pool: [Int]
+}
+
+mapping_table: fn(mapping: Mapping) -> MappingTable TableError! {
+    leaves := [Leaf]{}
+    pool := [Int]{}
+    loop entry in entries(mapping) {
+        if entry.seq.len() < 1 || entry.seq.len() > 3 {
+            return Err(fail("mapping cannot fit the Jet scalar lanes: {entry.cp}"))
+        }
+        packed := 0
+        loop lane in 0..<entry.seq.len() {
+            scalar: entry.seq[lane]
+            if scalar <= 0 || scalar > MAX_SCALAR {
+                return Err(fail("mapping cannot fit the Jet scalar lanes: {entry.cp}"))
+            }
+            packed = packed.bit_or(scalar << (lane * 21))
+        }
+        if entry.seq.len() > 1 {
+            leaves.push(Leaf{lo: entry.cp, hi: entry.cp, value: POOL_FLAG + pool.len()})
+            pool.push(packed)
+            next
+        }
+        value: entry.seq[0] - entry.cp + DELTA_BIAS
+        if value < 0 || value >= POOL_FLAG {
+            return Err(fail("mapping delta exceeds the table field: {entry.cp}"))
+        }
+        n: leaves.len()
+        if n > 0 && leaves[n - 1].hi + 1 == entry.cp && leaves[n - 1].value == value {
+            leaves[n - 1] = Leaf{lo: leaves[n - 1].lo, hi: entry.cp, value: value}
+            next
+        }
+        leaves.push(Leaf{lo: entry.cp, hi: entry.cp, value: value})
+    }
+    Ok(MappingTable{leaves: leaves, pool: pool})
+}
+
+// The lookup `function` of a mapping: cp maps to itself outside every record.
+mapping_lookup: fn(function: String, mapping: Mapping) -> String TableError! {
+    table: mapping_table(mapping)
+    pool := [U8]{}
+    loop packed in table.pool -> table_digits(pool, packed, POOL_DIGITS)
+    records: table_text(table.leaves, SCALAR_DIGITS, SCALAR_DIGITS)
+    ascii := [Int]{}
+    loop cp in 0..<ASCII_SCALARS {
+        seq: mapping.seqs.get(cp) ?? [Int]{cp}
+        if seq.len() != 1 -> return Err(fail("{function}: ASCII scalar {cp} has a full mapping"))
+        ascii.push(seq[0])
+    }
+    Ok("{function}: fn(cp: I64) -> I64 Never! {{\n{ascii_line(ascii, "")}    unicode_table_mapping(rt_static_text(\"{records}\"), I64{{{table.leaves.len()}}}, rt_static_text(\"{String.from_bytes_lossy(pool)}\"), cp)\n}}\n")
+}
+
+jet_mapping: fn(name: String, mapping: Mapping) -> String TableError! {
+    Ok(mapping_lookup("unicode_{name}_mapping", mapping))
+}
+
+jet_property: fn(name: String, spans: [Span]) -> String TableError! {
+    leaves := [Leaf]{}
+    loop span in merge_pairs(spans) -> leaves.push(Leaf{lo: span.a, hi: span.b, value: 1})
+    ascii := [Int]{}
+    loop cp in 0..<ASCII_SCALARS -> ascii.push(leaf_value(leaves, cp, 0))
+    Ok("unicode_is_{name}: fn(cp: I64) -> Bool Never! {{\n{ascii_line(ascii, " != I64{{0}}")}    unicode_table_find(rt_static_text(\"{table_text(leaves, SCALAR_DIGITS, 0)}\"), I64{{{leaves.len()}}}, I64{{{SCALAR_DIGITS}}}, I64{{0}}, cp) >= I64{{0}}\n}}\n")
+}
+
+jet_tagged: fn(name: String, spans: [Span], missing: Int) -> String TableError! {
+    leaves := [Leaf]{}
+    loop span in spans {
+        if span.label != missing -> leaves.push(Leaf{lo: span.a, hi: span.b, value: span.label})
+    }
+    Ok(value_lookup("unicode_{name}: fn(cp: I64) -> I64 Never! {{\n", leaves, missing, true))
+}
+
+pascal: fn(name: String) -> String {
+    out := [U8]{}
+    upper_next := true
+    loop byte in name.bytes() {
+        code: Int{byte}
+        if code == 95 {
+            upper_next = true
+            next
+        }
+        out.push(if upper_next && code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
+        upper_next = false
+    }
+    String.from_bytes_lossy(out)
+}
+
+lower_ascii: fn(name: String) -> String {
+    out := [U8]{}
+    loop byte in name.bytes() {
+        code: Int{byte}
+        out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
+    }
+    String.from_bytes_lossy(out)
+}
+
+runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
+    tables: [String]{
+        HEADER,
+        "// Static range tables: I64 only, no allocation or Core indexing.\n",
+        "// Full mappings pack three 21-bit scalar lanes (low lane first).\n",
+        jet_mapping("lower", ucd.lower),
+        "\n",
+        jet_mapping("upper", ucd.upper),
+        "\n",
+        jet_property("white_space", ucd.white_space),
+        "\n",
+        jet_property("cased", ucd.cased),
+        "\n",
+        jet_property("case_ignorable", ucd.case_ignorable),
+    }.join("")
+    limit: byte_len(tables)
+    loop cp in ucd.canon.cps {
+        if (ucd.canon.seqs.get(cp) ?? [Int]{}).len() > 2 {
+            return Err(fail("canonical decomposition exceeds the NFC two-lane contract"))
+        }
+    }
+    header_lines := [String]{HEADER}
+    loop name in INPUTS -> header_lines.push("// SHA256 {name}: {pinned_digest(sums, name)}\n")
+    header_lines.push("// NFC canonical-only tables; static range tables, no allocation/Core indexing.\n")
+    header_lines.push("// Canonical mappings pack two 21-bit scalar lanes (low lane first).\n")
+    pairs: compose_pairs(ucd)
+    compose := [Leaf]{}
+    loop at in 0..<pairs.len() /% 3 {
+        key: (pairs[at * 3] << 21).bit_or(pairs[at * 3 + 1])
+        compose.push(Leaf{lo: key, hi: key, value: pairs[at * 3 + 2]})
+    }
+    ccc := [Leaf]{}
+    loop span in merge_tagged(ucd.ccc) -> ccc.push(Leaf{lo: span.a, hi: span.b, value: span.label})
+    normalize: [String]{
+        header_lines.join(""),
+        mapping_lookup("unicode_canonical_mapping", ucd.canon),
+        "\n",
+        value_lookup("unicode_normal_ccc: fn(cp: I64) -> I64 Never! {{\n", ccc, 0, true),
+        "\n",
+        value_lookup("unicode_normal_compose_key: fn(cp: I64) -> I64 Never! {{\n", compose, -1, false),
+        "\n",
+        "unicode_normal_compose: fn(a: I64, b: I64) -> I64 Never! {{\n    unicode_normal_compose_key((a << I64{{21}}).bit_or(b))\n}}\n",
+    }.join("")
+    // Native text-method lookups, packed in order into UnicodeText<n>.jet units
+    // each within the UnicodeTables.jet size.
+    general: merge_tagged(ucd.general_category)
+    zero_width := with_tags(general, [Int]{2, 3})
+    loop span in ucd.default_ignorable -> zero_width.push(span.copy())
+    lookups: [String]{
+        jet_mapping("title", ucd.title),
+        jet_mapping("fold", ucd.fold),
+        jet_property("lowercase", ucd.lowercase),
+        jet_property("uppercase", ucd.uppercase),
+        // General_Category Cc: jet_text_is_control.
+        jet_property("control", with_tags(general, [Int]{0})),
+        // jet_text_is_zero_width_scalar: Mn, Me or Default_Ignorable_Code_Point.
+        jet_property("zero_width", zero_width),
+        // jet_text_eaw_class == 2: East_Asian_Width W or F.
+        jet_property("east_asian_wide", with_tags(merge_tagged(ucd.east_asian_width), [Int]{2})),
+        jet_property("emoji", ucd.emoji),
+        jet_property("emoji_presentation", ucd.emoji_presentation),
+        jet_property("extended_pictographic", ucd.extended_pictographic),
+        jet_tagged("incb_class", ucd.incb, 0),
+        jet_tagged("grapheme_class", ucd.grapheme, 0),
+    }
+    text_header: [String]{
+        HEADER,
+        "// Native text-method lookups; static range tables, no allocation/Core indexing.\n",
+        "// Full mappings pack three 21-bit scalar lanes (low lane first).\n",
+    }.join("")
+    units := [String]{}
+    loop lookup in lookups {
+        n: units.len()
+        if n > 0 && byte_len(units[n - 1]) + 1 + byte_len(lookup) <= limit {
+            units[n - 1] = [String]{units[n - 1], "\n", lookup}.join("")
+            next
+        }
+        text: [String]{text_header, lookup}.join("")
+        if byte_len(text) > limit {
+            return Err(fail("text lookup exceeds existing UnicodeTables.jet size: {lookup.partition("\n").head}"))
+        }
+        units.push(text)
+    }
+    outputs := [Output]{
+        text_output("{RUNTIME_DIR}/UnicodeTables.jet", tables),
+        text_output("{RUNTIME_DIR}/UnicodeNormalizeTables.jet", normalize),
+    }
+    loop (n, unit) in units -> outputs.push(text_output("{RUNTIME_DIR}/UnicodeText{n}.jet", unit))
+    Ok(outputs)
+}
+
+// --- JUCD assets -------------------------------------------------------------------
+
+push_le: fn(out: &[U8], value: Int, width: Int) TableError! {
+    if value < 0 || value >= 1 << (8 * width) {
+        return Err(fail("asset field overflow: {value}/{width}"))
+    }
+    loop at in 0..<width -> out.push(U8{(value >> (8 * at)).bit_and(Int{255})})
+    Ok()
+}
+
+// Flat rows of `widths.len()` fields, each field little-endian at its width.
+records: fn(rows: [Int], widths: [Int]) -> [U8] TableError! {
+    out := [U8]{}
+    loop at in 0..<rows.len() -> push_le(out, rows[at], widths[at % widths.len()])
+    Ok(out)
+}
+
+// The 40-byte header (JUCD, schema:u16, reserved:u16, version 17.0.0 and a
+// reserved byte, then kind, count, stride, records offset, pool offset, pool
+// bytes, total bytes as u32), the records, then the pool.
+jucd: fn(kind: Int, count: Int, stride: Int, body: [U8], pool: [U8]) -> [U8] TableError! {
+    out := [U8]{}
+    loop byte in "JUCD".bytes() -> out.push(byte)
+    push_le(out, 1, 2)
+    push_le(out, 0, 2)
+    push_le(out, 17, 3)
+    push_le(out, 0, 1)
+    pool_offset: 40 + body.len()
+    header: [Int]{kind, count, stride, 40, pool_offset, pool.len(), pool_offset + pool.len()}
+    loop value in header -> push_le(out, value, 4)
+    loop byte in body -> out.push(byte)
+    loop byte in pool -> out.push(byte)
+    Ok(out)
+}
+
+span_rows: fn(spans: [Span], tagged: Bool) -> [Int] {
+    out := [Int]{}
+    loop span in spans {
+        out.push(span.a)
+        out.push(span.b)
+        if tagged -> out.push(span.label)
+    }
+    out
+}
+
+// The Jet file of the asset `item`: it embeds the asset's binary file beside it.
+asset_source: fn(item: Asset) -> String {
+    "{HEADER}// JUCD schema 1; little-endian; {item.count} records of {item.stride} bytes.\n// The bytes are {pascal(item.unit)}.bin beside this file, embedded when the program is built.\n{item.symbol}: #run {{ embed_bytes(\"{pascal(item.unit)}.bin\") }}\n"
+}
+
+// SegmentationTables.jet's entry for the asset named `symbol`: it embeds that
+// asset's binary file, so both read the same bytes.
+segmentation_entry: fn(assets: [Asset], symbol: String) -> String TableError! {
+    loop item in assets {
+        if item.symbol == symbol {
+            return Ok("// {item.count} JUCD records, {item.stride} bytes each.\n{symbol}: #run {{ embed_bytes(\"{ASSET_DIR.partition("Core/Text/").tail}/{pascal(item.unit)}.bin\") }}\n")
+        }
+    }
+    Err(fail("SegmentationTables.jet names {symbol}, which no asset carries"))
+}
+
+asset: fn(assets: &[Asset], symbol: String, kind: Int, rows: [Int], widths: [Int], pool: [U8]) TableError! {
+    stride := 0
+    loop width in widths -> stride += width
+    count: rows.len() /% widths.len()
+    bytes: jucd(kind, count, stride, records(rows, widths), pool)
+    size: bytes.len()
+    digest: crypto.sha256(bytes).hex()
+    assets.push(Asset{symbol: symbol, unit: lower_ascii(symbol), kind: kind, count: count, stride: stride, bytes: size, sha256: digest, data: bytes})
+    Ok()
+}
+
+// A mapping as a scalar pool and [scalar, start, length] index rows.
+mapping_asset: fn(assets: &[Asset], name: String, mapping: Mapping) TableError! {
+    pool := [Int]{}
+    index := [Int]{}
+    loop entry in entries(mapping) {
+        if entry.seq.len() == 0 -> return Err(fail("mapping extent: {entry.cp}"))
+        index.push(entry.cp)
+        index.push(pool.len())
+        index.push(entry.seq.len())
+        loop scalar in entry.seq -> pool.push(scalar)
+    }
+    asset(assets, "UNICODE_{name}_POOL", 1, pool, [Int]{3}, [U8]{})
+    asset(assets, "UNICODE_{name}_INDEX", 4, index, [Int]{3, 4, 4}, [U8]{})
+}
+
+core_assets: fn(ucd: Ucd) -> [Asset] TableError! {
+    assets := [Asset]{}
+    // Decompositions: one scalar pool and [scalar, start, length, canonical] rows.
+    pool := [Int]{}
+    index := [Int]{}
+    loop entry in entries(ucd.compat) {
+        index.push(entry.cp)
+        index.push(pool.len())
+        index.push(entry.seq.len())
+        index.push(if ucd.canon.seqs.has_key(entry.cp) -> 1 else -> 0)
+        loop scalar in entry.seq -> pool.push(scalar)
+    }
+    asset(assets, "UNICODE_DECOMP_POOL", 1, pool, [Int]{3}, [U8]{})
+    asset(assets, "UNICODE_DECOMP_INDEX", 5, index, [Int]{3, 2, 1, 1}, [U8]{})
+    asset(assets, "UNICODE_CCC", 3, span_rows(merge_tagged(ucd.ccc), true), [Int]{3, 3, 1}, [U8]{})
+    asset(assets, "UNICODE_COMPOSE_PAIRS", 6, compose_pairs(ucd), [Int]{3, 3, 3}, [U8]{})
+    mapping_asset(assets, "FOLD", ucd.fold)
+    mapping_asset(assets, "LOWER", ucd.lower)
+    mapping_asset(assets, "UPPER", ucd.upper)
+    mapping_asset(assets, "TITLE", ucd.title)
+    simple := [Int]{}
+    loop entry in entries(ucd.simple_fold) {
+        simple.push(entry.cp)
+        simple.push(entry.seq[0])
+    }
+    asset(assets, "UNICODE_SIMPLE_FOLD", 7, simple, [Int]{3, 3}, [U8]{})
+    ranges: [String]{"WHITE_SPACE", "CASED", "CASE_IGNORABLE", "LETTER", "LOWERCASE", "UPPERCASE", "NUMERIC", "ALPHABETIC", "DEFAULT_IGNORABLE", "COMPOSITION_EXCLUSIONS", "EXTENDED_PICTOGRAPHIC", "EMOJI_PRESENTATION", "EMOJI"}
+    loop name in ranges {
+        spans: if name == {
+            "WHITE_SPACE" -> merge_pairs(ucd.white_space)
+            "CASED" -> merge_pairs(ucd.cased)
+            "CASE_IGNORABLE" -> merge_pairs(ucd.case_ignorable)
+            "LETTER" -> merge_pairs(ucd.letters)
+            "LOWERCASE" -> merge_pairs(ucd.lowercase)
+            "UPPERCASE" -> merge_pairs(ucd.uppercase)
+            "NUMERIC" -> merge_pairs(ucd.numerics)
+            "ALPHABETIC" -> merge_pairs(ucd.alphabetic)
+            "DEFAULT_IGNORABLE" -> merge_pairs(ucd.default_ignorable)
+            "COMPOSITION_EXCLUSIONS" -> ucd.exclusions.copy()
+            "EXTENDED_PICTOGRAPHIC" -> ucd.extended_pictographic.copy()
+            "EMOJI_PRESENTATION" -> ucd.emoji_presentation.copy()
+            else -> ucd.emoji.copy()
+        }
+        asset(assets, "UNICODE_{name}", 2, span_rows(spans, false), [Int]{3, 3}, [U8]{})
+    }
+    tagged: [String]{"GENERAL_CATEGORY", "EAST_ASIAN_WIDTH", "GRAPHEME_BREAK", "WORD_BREAK", "SENTENCE_BREAK", "INCB"}
+    loop name in tagged {
+        spans: if name == {
+            "GENERAL_CATEGORY" -> merge_tagged(ucd.general_category)
+            "EAST_ASIAN_WIDTH" -> merge_tagged(ucd.east_asian_width)
+            "GRAPHEME_BREAK" -> ucd.grapheme.copy()
+            "WORD_BREAK" -> ucd.word.copy()
+            "SENTENCE_BREAK" -> ucd.sentence.copy()
+            else -> ucd.incb.copy()
+        }
+        asset(assets, "UNICODE_{name}", 3, span_rows(spans, true), [Int]{3, 3, 1}, [U8]{})
+    }
+    // Names: [scalar, pool offset, length] rows over one UTF-8 pool; every
+    // row decodes back to its UnicodeData name.
+    names := ucd.names.copy()
+    names.sort_by(fn(row: NameRow) { row.cp })
+    name_rows := [Int]{}
+    name_pool := [U8]{}
+    loop row in names {
+        offset: name_pool.len()
+        loop byte in row.name.bytes() -> name_pool.push(byte)
+        name_rows.push(row.cp)
+        name_rows.push(offset)
+        name_rows.push(name_pool.len() - offset)
+        decoded: String.from_bytes(name_pool[offset..<name_pool.len()]) ?? ""
+        if decoded != row.name -> return Err(fail("name pool drift: {row.cp}"))
+    }
+    asset(assets, "UNICODE_NAME_INDEX", 8, name_rows, [Int]{3, 4, 4}, name_pool)
+    Ok(assets)
+}
+
+manifest: fn(assets: [Asset], sums: String) -> String TableError! {
+    lines := [String]{"{{", "  \"schema\": 1,", "  \"unicode\": \"17.0.0\",", "  \"byteOrder\": \"little\",", "  \"inputs\": {{"}
+    loop at in 0..<INPUTS.len() {
+        comma: if at + 1 < INPUTS.len() -> "," else -> ""
+        lines.push("    \"{INPUTS[at]}\": \"{pinned_digest(sums, INPUTS[at])}\"{comma}")
+    }
+    lines.push("  }},")
+    lines.push("  \"assets\": [")
+    loop at in 0..<assets.len() {
+        item: assets[at]
+        lines.push("    {{")
+        lines.push("      \"symbol\": \"{item.symbol}\",")
+        lines.push("      \"module\": \"{item.unit}\",")
+        lines.push("      \"kind\": {item.kind},")
+        lines.push("      \"count\": {item.count},")
+        lines.push("      \"stride\": {item.stride},")
+        lines.push("      \"bytes\": {item.bytes},")
+        lines.push("      \"sha256\": \"{item.sha256}\"")
+        lines.push(if at + 1 < assets.len() -> "    }}," else -> "    }}")
+    }
+    lines.push("  ]")
+    lines.push("}}")
+    lines.push("")
+    Ok(lines.join("\n"))
+}
+
+string_kernel: fn(assets: [Asset]) -[FS]> String TableError! {
+    source: files.read(STRING_KERNEL) ?? return Err(fail("cannot read {STRING_KERNEL}: {err}"))
+    opened: source.partition(STRING_BEGIN)
+    closed: opened.tail.partition(STRING_END)
+    if opened.sep == "" || closed.sep == "" {
+        return Err(fail("{STRING_KERNEL}: string asset markers missing"))
+    }
+    lines := [String]{}
+    loop item in assets {
+        declared := false
+        loop prefix in STRING_ASSET_PREFIXES {
+            if item.symbol.starts_with(prefix) -> declared = true
+        }
+        if declared -> lines.push("    text_{item.unit}: core.text.runtime.assets.{item.unit}")
+    }
+    Ok([String]{opened.head, STRING_BEGIN, "\n", lines.join("\n"), "\n    ", STRING_END, closed.tail}.join(""))
+}
+
+generated: fn() -[FS]> [Output] TableError! {
+    sums: files.read(SUMS_PATH) ?? return Err(fail("cannot read {SUMS_PATH}: {err}"))
+    ucd: read_ucd()
+    outputs := runtime_outputs(ucd, sums)
+    assets: core_assets(ucd)
+    segmentation := [String]{}
+    loop symbol in
+        ([String]{"UNICODE_WORD_BREAK", "UNICODE_SENTENCE_BREAK", "UNICODE_EXTENDED_PICTOGRAPHIC", "UNICODE_ALPHABETIC", "UNICODE_NUMERIC"}) {
+        segmentation.push(segmentation_entry(assets, symbol))
+    }
+    outputs.push(text_output("Core/Text/SegmentationTables.jet", [String]{HEADER, "// Compiler-private data part; JUCD schema 1, Unicode 17.0.0, little-endian.\n// Each table embeds the core.text runtime asset's binary file when the program is built.\n", segmentation.join("\n")}.join("")))
+    modules := [String]{}
+    loop item in assets {
+        outputs.push(Output{path: "{ASSET_DIR}/{pascal(item.unit)}.bin", bytes: item.data.copy()})
+        outputs.push(text_output("{ASSET_DIR}/{pascal(item.unit)}.jet", asset_source(item)))
+        modules.push("{item.unit}: module")
+    }
+    outputs.push(text_output("{ASSET_DIR}/Assets.jet", "{HEADER}{modules.join("\n")}\n"))
+    outputs.push(text_output("{ASSET_DIR}/manifest.json", manifest(assets, sums)))
+    outputs.push(text_output(STRING_KERNEL, string_kernel(assets)))
+    Ok(outputs)
+}
+
+tables_main: fn(args: [String]) -[FS]> String TableError! {
+    check: args.len() == 1 && args[0] == "--check"
+    if args.len() > 1 || (args.len() == 1 && !check) {
+        return Err(fail("usage: jet Tools/Agent/UnicodeTables.jet [--check]"))
+    }
+    outputs: generated()
+    stale := [String]{}
+    loop output in outputs {
+        current: files.read_bytes(output.path) ?? [U8]{}
+        if current == output.bytes -> next
+        stale.push(output.path.copy())
+        if check -> next
+        files.write_bytes(output.path, output.bytes) ?? return Err(fail("cannot write {output.path}: {err}"))
+    }
+    if check && stale.len() > 0 {
+        return Err(fail("unicode-tables: stale (run jet Tools/Agent/UnicodeTables.jet): {stale.join(", ")}"))
+    }
+    if check -> return Ok("unicode-tables: {outputs.len()} outputs are current")
+    Ok("unicode-tables: wrote {stale.len()} of {outputs.len()} outputs")
+}
+
+run: fn() { print(tables_main(process.args()) ?? process.fail(1, err.message)) }
+
+#Test("a range table writes lo, hi and value as six-bit digits, low digit first, that avoid quotes, backslashes and braces") {
+    leaves: [Leaf]{Leaf{lo: 1, hi: 2, value: 5}, Leaf{lo: 70, hi: 70, value: 57}}
+    assert_eq(value_lookup("f: fn(cp: I64) -> I64 Never! {{\n", leaves, -1, false) ?? err.message, "f: fn(cp: I64) -> I64 Never! {{\n    unicode_table_value(rt_static_text(\"$#%#()$)$]\"), I64{{2}}, I64{{2}}, I64{{1}}, cp, I64{{-1}})\n}}\n")
+    out := [U8]{}
+    table_digits(out, 63, 1) ?? panic(err.message)
+    assert_eq(String.from_bytes_lossy(out), "c")
+}
+
+#Test("one-scalar mappings with one delta coalesce; full mappings pack three lanes into the pool") {
+    mapping := new_mapping()
+    put(mapping, 65, [Int]{97})
+    put(mapping, 66, [Int]{98})
+    put(mapping, 223, [Int]{115, 115})
+    put(mapping, 300, [Int]{300})
+    table: mapping_table(mapping) ?? panic(err.message)
+    assert_eq(table.leaves.len(), 3)
+    assert_eq(table.leaves[0].hi, 66)
+    assert_eq(table.leaves[0].value, DELTA_BIAS + 32)
+    assert_eq(table.leaves[1].value, POOL_FLAG)
+    assert_eq(table.pool, [Int]{115 + (115 << 21)})
+    assert_eq(table.leaves[2].value, DELTA_BIAS)
+}
+
+#Test("adjacent spans merge after a stable sort; overlapping spans stay apart") {
+    spans: [Span]{Span{a: 10, b: 12, label: 1}, Span{a: 3, b: 9, label: 1}, Span{a: 10, b: 20, label: 0}, Span{a: 13, b: 14, label: 2}}
+    tagged: merge_tagged(spans)
+    assert_eq(tagged.len(), 3)
+    assert_eq(tagged[0].b, 12)
+    assert_eq(tagged[1].a, 10)
+    pairs: merge_pairs(spans)
+    assert_eq(pairs.len(), 3)
+    assert_eq(pairs[0].b, 12)
+    assert_eq(pairs[2].a, 13)
+}
+
+#Test("the checked-in tables match the vendored inputs") {
+    assert_eq(tables_main([String]{"--check"}) ?? err.message, "unicode-tables: 75 outputs are current")
+}

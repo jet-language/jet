@@ -32,7 +32,7 @@ Every finding carries two separate verdicts. Keep them apart and let the owner w
 
 Elegance is a lens that serves Jet's priorities. It never overrides them. Kill or narrow any slice that weakens memory or type safety, beginner experience, or runtime performance; drops a capability; adds a parallel mechanism (I8); or breaks an invariant. State what survives the kill-check.
 
-Stable identities are part of the surface. Diagnostic codes, command names, and ratified spellings may be renumbered, regrouped, or renamed as one greenfield cutover. The proposal names every rule it amends, such as the no-renumbering rule in `Docs/spec/diagnostics.md`, and lists the migration surface instead of doing it.
+Stable identities are part of the surface. Diagnostic codes, command names, and ratified spellings may be renumbered, regrouped, or renamed as one greenfield cutover. The proposal names every rule it amends, such as the no-renumbering rule in `Docs/Spec/diagnostics.md`, and lists the migration surface instead of doing it.
 
 ## Layers
 

@@ -1,0 +1,16 @@
+// A joined task that sleeps parks on the joining thread's fiber; a carrier,
+// the first the run starts, resumes it, and its join returns its value.
+use time: core.time
+
+nap: fn() -> Int {
+    time.sleep(20ms)
+    42
+}
+
+run: fn() {
+    task.group sized(stack: 67108864) {
+        slept: task nap()
+        got: slept.join() ?? -1
+        print("slept {got}")
+    }
+}

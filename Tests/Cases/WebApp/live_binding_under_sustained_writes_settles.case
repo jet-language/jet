@@ -1,0 +1,18 @@
+# A live binding over a table that a write overtakes on every run settles: from
+# its second overtaken run in a row, reads serve its stale result for a hold
+# instead of running the source on every read, and the first read after the
+# hold runs it again, so the value catches up once the writes stop. Same
+# output on o0/o1/o2.
+fixture: LiveBindingUnderSustainedWritesSettles.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = live_binding_under_sustained_writes_settles.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

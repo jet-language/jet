@@ -1,0 +1,20 @@
+# A root `#loop` over a value the build computes (ASSETS reads files, so it
+# is not literal data) waits until the value is computed and then expands:
+# its generated functions exist, and every tier and the built binary print
+# the same sizes.
+fixture: ComptimeRootLoopWaitsOnRunValue.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "alpha 6\nbeta 5\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "alpha 6\nbeta 5\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "alpha 6\nbeta 5\n"
+step built: jet build main.jet
+exit: 0
+step image: {work}/.jet/build/main
+exit: 0
+stdout: = "alpha 6\nbeta 5\n"

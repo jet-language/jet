@@ -1,0 +1,28 @@
+# A Close duty written in the type body is one owner, like `impl T.Close`
+# (I1): `.copy()` of it is E0211, a binding moves it so the old
+# name is E0121, and each value closes once after its last use on every tier.
+fixture: InBodyCloseIsOneOwnerOnEveryTier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "moved 1\nkept 2\nclosed 2\nclosed 1\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "moved 1\nkept 2\nclosed 2\nclosed 1\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "moved 1\nkept 2\nclosed 2\nclosed 1\n"
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "moved 1\nkept 2\nclosed 2\nclosed 1\n"
+step: jet check copy.jet
+exit: nonzero
+stderr: ~ "[jet.CopyNotSupported]" # E0211: a value whose type body writes `impl Close` cannot be copied
+stderr: ~ "copy.jet:12:8" # the `.copy()` call on the in-body Close value
+step: jet check implicit.jet
+exit: nonzero
+stderr: ~ "[jet.UseAfterMove]" # E0121: binding the in-body Close value moved it
+stderr: ~ "implicit.jet:21:20" # the use of the moved name

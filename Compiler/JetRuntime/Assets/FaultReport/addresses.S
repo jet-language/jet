@@ -1,7 +1,7 @@
 # The release fault report: the report of an image built with `debug_info:
 # split`, which keeps no location table. It writes
 # report.S's first line where that names no function, the image's build id,
-# and the frames as addresses, which `jet crash` (JetCli Cli/Crash.jet)
+# and the frames as addresses, which `jet crash` (JetCLI CLI/Crash.jet)
 # names from the side debug file the id finds, in report.S's words:
 #
 #   Stop [E3012]: Stack overflow in `??` at 0x401a2c
@@ -13,7 +13,7 @@
 # `backtrace: off` ends a stop at `Stop [E3012]: Stack overflow` and writes
 # no backtrace; brief only the faulting address; full, and every stack
 # overflow (whose innermost Jet function may be a caller), the return
-# addresses of up to 64 callers too. Tools/agent/RuntimeGenerators.jet
+# addresses of up to 64 callers too. Tools/Agent/RuntimeGenerators.jet
 # assembles it into X64_FAULT_REPORT_ADDRESSES (Compiler/JetBackend/Source/
 # X64/FaultReport.jet), which the static linker writes as a split image's
 # jet_rt_fault_report (Image/StaticLink.jet link_fault_report), with

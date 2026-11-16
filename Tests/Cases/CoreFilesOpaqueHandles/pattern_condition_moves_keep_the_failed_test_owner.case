@@ -1,0 +1,19 @@
+# A test after `&&` in a pattern condition runs only where the pattern
+# matched: an owner it moves still ends its lock at its scope end where the
+# pattern failed, so every lock descriptor closes once and none leaks.
+fixture: PatternConditionMovesKeepTheFailedTestOwner.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = pattern_condition_moves_keep_the_failed_test_owner.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = pattern_condition_moves_keep_the_failed_test_owner.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = pattern_condition_moves_keep_the_failed_test_owner.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = pattern_condition_moves_keep_the_failed_test_owner.out

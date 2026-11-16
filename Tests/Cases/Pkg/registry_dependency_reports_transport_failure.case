@@ -1,0 +1,17 @@
+# PORT tests/pkg.rs::registry_dependency_reports_transport_failure:3836-3874; original helpers min_manifest/manifest_with_deps/with_store retained.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+# A registry dependency whose registry index can't be reached is the transport
+# failure RegistryUnreachable (E1235), which names the registry and how to point
+# at a mirror. The registry is an absent local repository, so no network is used.
+fixture: Fixtures/RegistryDependencyReportsTransportFailure
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_REGISTRY_URL=file://{work}/absent.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+step: jet fetch
+exit: nonzero
+stderr.after_first("Error ["): ^= "jet.RegistryUnreachable]" # the first diagnostic is the transport failure
+stderr: ~ "Couldn't reach the registry index at `file://{work}/absent.git`" # names the unreachable registry
+stderr: ~ "Why: The git operation against the registry failed (network, auth, or a stale local clone)" # the transport cause
+stderr: ~ "Fix: Check network access and credentials for `file://{work}/absent.git`, or set `JET_REGISTRY_URL` to a reachable mirror." # how to point at a mirror
+file: .jet/lock absent

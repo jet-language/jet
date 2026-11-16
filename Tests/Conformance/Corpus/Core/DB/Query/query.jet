@@ -1,0 +1,24 @@
+// core-conformance: core.db.query.query
+use {
+    db_query: core.db.query
+    files: core.files
+    testing: core.testing
+}
+
+#Codable
+Sale: struct {
+    item: String
+    qty: Int
+}
+
+run: fn() {
+    root: testing.temp_dir("csv-query")
+    path: Path.from(root).join("sales.csv")
+    files.write(path, "item,qty\npen,3\n") ?? panic("fixture")
+    query: db_query.query<Sale>(
+        path.to_string(),
+        SQL{"SELECT * FROM sales WHERE qty > 1"},
+    ) ?? panic("query")
+    result: query.collect() ?? panic("collect")
+    print(result[0].qty)
+}

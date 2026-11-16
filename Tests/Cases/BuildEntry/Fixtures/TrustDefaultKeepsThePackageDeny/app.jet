@@ -1,0 +1,9 @@
+use net: core.net
+
+// One ordinary helper, called by the running program and by `build: fn`.
+port_is_free: fn() -> Bool {
+    _: net.tcp_listen("127.0.0.1:0") ?? return false
+    true
+}
+
+run: fn() { print(port_is_free()) }

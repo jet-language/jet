@@ -17,7 +17,7 @@ use {
     re: core.regex
 }
 
-POLICY: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
+POLICY: "Compiler/JetCLI/Source/CLI/native-c-policy.tsv"
 
 // isize::MAX - 7, aligned to 8 on x86-64.
 HUGE: "9223372036854775800"
@@ -102,7 +102,7 @@ ran_of: fn(spec: ProcessSpec) -> Ran {
     }
 }
 
-// The rows of Compiler/JetCli/Source/Cli/native-c-policy.tsv: compiler flags
+// The rows of Compiler/JetCLI/Source/CLI/native-c-policy.tsv: compiler flags
 // and the NIX_HARDENING_ENABLE features they remove.
 load_policy: fn(root: String) -> Policy {
     text: files.read("{root}/{POLICY}") ?? fail("cannot read {POLICY}: {err}")
@@ -124,7 +124,7 @@ load_policy: fn(root: String) -> Policy {
 }
 
 // `$CC` (default `cc`) with `args` and the policy flags, as
-// Tools/packaging/NativeCCompiler.jet runs it.
+// Tools/Packaging/NativeCCompiler.jet runs it.
 native_cc: fn(policy: Policy, args: [String]) -> Ran {
     removed: policy.removed
     spec := process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
@@ -184,7 +184,7 @@ run: fn() {
         cc_args := [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic"}
         if tier == "native" {
             cc_args.push("-DC_ABI_ALLOC_ONLY=1")
-            cc_args.push("{root}/Compiler/JetRuntime/Tests/CAbiDriver.c")
+            cc_args.push("{root}/Compiler/JetRuntime/Tests/CABIDriver.c")
         } else { cc_args.push("{root}/Compiler/JetRuntime/Tests/EmbedHost.c") }
         loop input in inputs -> cc_args.push(input.copy())
         cc_args.extend([String]{"-lpthread", "-ldl", "-lm", "-o", "{out}/alloc-{tier}"})

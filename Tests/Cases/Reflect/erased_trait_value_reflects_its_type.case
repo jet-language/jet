@@ -1,0 +1,24 @@
+# An erased trait value's ValueInfo names its concrete type: the box's payload
+# key maps to the declared type of that key, so `reflect.of(x).path()` equals
+# that type's `T.reflect()` identity, alone, in a loop and as a struct field,
+# on every tier. The key is a hash of the type's identity alone, so a later
+# build that adds a module with one more implementer reflects the same.
+fixture: ErasedTraitValueReflectsItsType.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = erased_trait_value_reflects_its_type.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = erased_trait_value_reflects_its_type.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = erased_trait_value_reflects_its_type.out
+copy: triangle.source triangle.jet
+step: jet run -O0 main.jet
+exit: 0
+stdout: = erased_trait_value_reflects_its_type.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = erased_trait_value_reflects_its_type.out

@@ -1,8 +1,0 @@
-# tests/ownership.rs::aggregate_view_slot_composes_through_parameter_projection, migrated to the implicit-copy ownership
-# model (Compiler/JetSema/Source/Sema/Ownership/CopySites.jet): a slice is an owned [Int], so the view `pair` stores in
-# its result names no parameter source, and `first(result)` is rejected as a view that outlives its owner.
-fixture: aggregate_view_slot_composes_through_parameter_projection/input
-step: jet check run.jet
-exit: nonzero # tests/ownership.rs:5572 expect_err
-stderr: ~ "[jet.ViewOutlivesOwner]" # the registered diagnostic
-stderr: ~ "Fix: Return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`" # and its fix

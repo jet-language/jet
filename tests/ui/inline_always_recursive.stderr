@@ -1,8 +1,0 @@
-Error [jet.RecursiveInlineAlways]: `factorial` calls itself, so `#Inline(Always)` cannot expand it
-  --> tests/ui/inline_always_recursive.jet:2:1
-    |
-  2 | #Inline(Always) factorial: fn(n: Int) -> Int {
-    | ^^^^^^^^^^^^^^^
- Why: Inlining a recursive call would either loop forever at compile time or need an artificial depth cutoff, and neither is a real inline. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021).
- Fix: Drop `#Inline(Always)` (use `#Inline` as a hint), or restructure the function to be non-recursive.
-More: jet-lang.dev/e/E0917

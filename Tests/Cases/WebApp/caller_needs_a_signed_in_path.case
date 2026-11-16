@@ -1,0 +1,40 @@
+# `app.caller()` is the signed-in account, so the compiler accepts it only on
+# a path that starts at an `#App.SignedIn` method or inside a test's
+# `app.as_caller`. The fixture reaches it from a signed-in method and from a
+# test inside `as_caller`, reads `app.maybe_caller()` in a public method, and
+# checks; its test reads the caller it set. A path from a public method, a
+# webhook, a background job a signed-in method spawns, or the program's own
+# entry (a schedule) is refused at the call, naming the path.
+fixture: CallerNeedsASignedInPath.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+exit: 0
+
+step: jet test main.jet
+exit: 0
+
+step: jet check probes/public.jet
+exit: nonzero
+stderr: ~ "`app.caller()` is reached from `Crew.whoever`, which acts for no signed-in account." # the public method starts the path
+stderr: ~ "The path: Crew.whoever → owner_name → app.caller()." # through the helper
+stderr: ~ "public.jet:12:14" # at the call
+
+step: jet check probes/webhook.jet
+exit: nonzero
+stderr: ~ "`app.caller()` is reached from `Hooks.on_event`, which acts for no signed-in account." # a webhook has no signed-in caller
+stderr: ~ "The path: Hooks.on_event → app.caller()." # straight from the webhook
+stderr: ~ "webhook.jet:10:18" # at the call
+
+step: jet check probes/job.jet
+exit: nonzero
+stderr: ~ "`app.caller()` is reached from a `task` spawned in `Crew.mine`, which acts for no signed-in account." # a spawned job acts for no account
+stderr: ~ "The path: Crew.mine → task → record → app.caller()." # through the spawned task
+stderr: ~ "job.jet:16:14" # at the call
+
+step: jet check probes/schedule.jet
+exit: nonzero
+stderr: ~ "`app.caller()` is reached from `run`, which acts for no signed-in account." # the entry's scheduled tick
+stderr: ~ "The path: run → tick → app.caller()." # through the scheduled tick
+stderr: ~ "schedule.jet:14:14" # at the call
+stderr: ~ "app.maybe_caller()" # the fix names the optional form

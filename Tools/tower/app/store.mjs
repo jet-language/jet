@@ -481,7 +481,7 @@ function validateStoredString(value, label, { nullable = true, nonEmpty = false 
 
 // Board identifier namespace for captured visual evidence. Ratified decisions
 // record it verbatim, so it stays fixed; server.mjs serves these files from
-// `${DOCS_DIR}/proposals/visual-acceptance/media`.
+// `${DOCS_DIR}/Proposals/visual-acceptance/media`.
 const VISUAL_MEDIA_ROOT = 'docs/proposals/visual-acceptance/media/';
 const VISUAL_IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
 const VISUAL_VIDEO_EXT = /\.(webm|mp4)$/i;
@@ -2781,7 +2781,7 @@ export function normalizeReports(list) {
     const url = typeof r.url === 'string' ? r.url.trim() : '';
     if (!!path === !!url) fail('E_INVALID', `report ${i + 1} needs exactly one of path (a Tower doc) or url`);
     if (path && (!REPORT_PATH_RE.test(path) || path.split('/').includes('..')))
-      fail('E_INVALID', `report ${i + 1} path ${path} is not a Tower doc under Docs/audits, Docs/research, Docs/proposals or Docs/spec`);
+      fail('E_INVALID', `report ${i + 1} path ${path} is not a Tower doc under Docs/Audits, Docs/Research, Docs/Proposals or Docs/Spec`);
     if (url && !/^https:\/\/[^\s<>"]+$/.test(url)) fail('E_INVALID', `report ${i + 1} url must be an https address`);
     const key = path || url;
     if (seen.has(key)) fail('E_INVALID', `report ${key} is linked twice`);
@@ -3668,8 +3668,8 @@ function harvestRefs(text) {
 
 const BRIEF_RULES = [
   'Log advances with --by.',
-  'Code workers return CHECK OK from Tools/agent/LaneCheck.jet; prose/static-data-only workers return DOCS ONLY.',
-  'Workers never write Tower or run cargo test, generators, bless commands, cargo fmt, proof-parallel.sh, or Tools/agent/VerifyFull.jet.',
+  'Code workers return CHECK OK from Tools/Agent/LaneCheck.jet; prose/static-data-only workers return DOCS ONLY.',
+  'Workers never write Tower or run cargo test, generators, bless commands, cargo fmt, proof-parallel.sh, or Tools/Agent/VerifyFull.jet.',
   'After integration, the orchestrator runs the exact criterion proof once, records its real evidence, and marks the row met.',
   'The orchestrator closes immediately when every row is met or verified.',
   'E_CLOSE_READY blocks every further brief or claim until the closure-ready card closes, reopens, or gains a real gate.',

@@ -130,7 +130,7 @@ test('a ratified decision surfaces the owner comment IN FULL, never truncated or
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 'Pick a memory model', ...ballot() }));
-  const longComment = 'Go with A. Reasoning: B breaks second-class borrows (see Docs/spec/philosophy.md), '
+  const longComment = 'Go with A. Reasoning: B breaks second-class borrows (see Docs/Spec/philosophy.md), '
     + 'and the "quoted" edge-case with a — dash and unicode ✓ must survive verbatim.';
   st.mutate((s) => db.ratify(s, 'D-1', 'A', longComment, 'owner'));
   const p = buildBrief(st.load(), '#1');
@@ -196,27 +196,27 @@ test('refs merges the explicit refs[] field with paths harvested from body + pla
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, {
     title: 'A',
-    body: 'See Docs/spec/architecture.md for R1-R12, and Examples/Basics/Hello.jet for the golden case.',
-    plan: '1. read crates/jet-sema/src/lib.rs. 2. update Docs/spec/architecture.md (already read).',
-    refs: ['Tools/tower/AGENTS.md', 'Docs/spec/architecture.md'],
+    body: 'See Docs/Spec/architecture.md for R1-R12, and Examples/Basics/Hello.jet for the golden case.',
+    plan: '1. read crates/jet-sema/src/lib.rs. 2. update Docs/Spec/architecture.md (already read).',
+    refs: ['Tools/tower/AGENTS.md', 'Docs/Spec/architecture.md'],
   }, cfg));
   const p = buildBrief(st.load(), '#1');
   assert.deepEqual(new Set(p.refs), new Set([
     'Tools/tower/AGENTS.md',
-    'Docs/spec/architecture.md',
+    'Docs/Spec/architecture.md',
     'Examples/Basics/Hello.jet',
     'crates/jet-sema/src/lib.rs',
   ]));
   // deduped, not doubled, even though architecture.md appears 3 times total
-  assert.equal(p.refs.filter(r => r === 'Docs/spec/architecture.md').length, 1);
+  assert.equal(p.refs.filter(r => r === 'Docs/Spec/architecture.md').length, 1);
 });
 
 test('refs harvest strips trailing sentence punctuation off a path', () => {
   const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A', body: 'Read Docs/spec/diagnostics.md, then tests/ui (snapshot dir).' }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A', body: 'Read Docs/Spec/diagnostics.md, then Tests/UI (snapshot dir).' }, cfg));
   const p = buildBrief(st.load(), '#1');
-  assert.ok(p.refs.includes('Docs/spec/diagnostics.md'));
-  assert.ok(p.refs.includes('tests/ui'));
+  assert.ok(p.refs.includes('Docs/Spec/diagnostics.md'));
+  assert.ok(p.refs.includes('Tests/UI'));
   assert.ok(!p.refs.some(r => r.endsWith(',') || r.endsWith(')')));
 });
 

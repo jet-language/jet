@@ -1083,7 +1083,7 @@ function cmdNext(store, { flags }) {
 }
 
 // #457 — durability sweeper: rule-based lint over the live board, optionally
-// extended with a Docs/spec/** reference scan (--docs). Read-only; exit 1 on
+// extended with a Docs/Spec/** reference scan (--docs). Read-only; exit 1 on
 // any finding so it is CI/pre-flight friendly, 0 clean.
 function cmdLint(store, { flags }) {
   const s = store.load();

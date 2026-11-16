@@ -1,0 +1,8 @@
+Error [jet.InvalidIndexType]: `Grid` can be read with `[ ]` but not written — it has no `IndexMut` impl
+  --> Tests/UI/index_hook_ignores_user_trait_named_indexmut.jet:25:6
+    |
+ 25 |     g[1] = 9
+    |      ^^^
+ Why: Bracket assignment needs `impl Type.IndexMut { set: fn(&self, k, v) }` with the write-access marker `&`
+ Fix: Use `.set(key, value)` instead, or add `impl Grid.IndexMut`
+More: jet-lang.dev/e/E0505

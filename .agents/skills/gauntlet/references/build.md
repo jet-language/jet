@@ -5,7 +5,7 @@ Use this playbook only for Build/update mode. Read
 
 ## Matrix
 
-`Tools/gauntlet/matrix.json` names the full territory: personas × domains ×
+`Tools/Gauntlet/matrix.json` names the full territory: personas × domains ×
 task-kinds. Task-kinds include at least application, CLI, service, web,
 embedded, data/numeric, scripting, and notebook-style exploration. Personas
 span true novice through domain expert plus the unattended agent; start from
@@ -22,7 +22,7 @@ matrix, entries, or policy changes land.
 
 ## Entries
 
-Use `Tools/gauntlet/entries/<name>/`:
+Use `Tools/Gauntlet/Entries/<name>/`:
 
 - `entry.json` gives behavior, inputs, expected observable output, matrix cell
 tags, tier (`micro` | `program` | `script`), language list, authoring provenance,
@@ -39,7 +39,7 @@ services, or C for embedded work.
 
 ## Harness contract
 
-`Tools/gauntlet/harness/` measures each entry and implementation on one machine and
+`Tools/Gauntlet/Harness/` measures each entry and implementation on one machine and
 one run:
 
 - median-of-N wall time and peak RSS;
@@ -51,10 +51,10 @@ one run:
 - authoring cost.
 
 Comparisons use same-run ratios. Raw times are machine-local. A full run emits
-`Tools/gauntlet/results/<date>.json`; `--entry` and `--axis` emit
+`Tools/Gauntlet/results/<date>.json`; `--entry` and `--axis` emit
 `<date>-<entry>.json` and `<date>-axis-<axis>.json`, so they do not overwrite
 the day's full report. These files are gitignored, and
-`Tools/gauntlet/harness/status.mjs --merge` folds them into `status.json`.
+`Tools/Gauntlet/Harness/status.mjs --merge` folds them into `status.json`.
 
 The harness measures the admitted Jet compiler: `--jet-bin`, else `$JET`, else `jet`
 on PATH, run in place beside its runtime pack. Run and dev tiers execute inside the
@@ -63,10 +63,10 @@ entry's cases run with that compiler's directory first on PATH and as `$JET`, so
 `jet` an original or its twin starts is the one measured.
 
 Every run also writes the results file's `standings` section (#6834,
-`Tools/gauntlet/harness/standings.mjs`). Each comparison entry is measured
+`Tools/Gauntlet/Harness/standings.mjs`). Each comparison entry is measured
 against every peer in `matrix.json` `rails.standings` (Rust, C, Zig, Go,
 Python, Node, Bun, Vite, Lua, LuaJIT) and its hand-written asm ceiling
-(`Tools/perf/asm-parity/<cell>/ref.S`, linked by the cell's `gauntlet` list).
+(`Tools/Perf/AsmParity/<cell>/ref.S`, linked by the cell's `gauntlet` list).
 The metrics are startup, run wall, run cycles (`perf stat -e cycles:u`), peak
 RSS and size. Size is compared on one stated basis (`measurement-manifest.json`
 `standings.size_basis`): a compiled program counts as its static, stripped

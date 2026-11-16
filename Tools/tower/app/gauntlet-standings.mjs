@@ -1,5 +1,5 @@
 // What Tower's Gauntlet page and `tower gauntlet standings` show: the
-// gauntlet table (Tools/gauntlet/harness/table.mjs), the one durable record of
+// gauntlet table (Tools/Gauntlet/Harness/table.mjs), the one durable record of
 // every measurement, one row per entry and language, which the harness fills
 // in as each entry is measured. Every comparison entry gets a cell for Jet,
 // every standings peer and the asm ceiling, planned from the entries'
@@ -19,10 +19,10 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 // references. The harness loads only here, so every other tower command
 // skips it.
 async function entryPlans() {
-  const { CEILING_POLICY, loadEntries, standingsPlans } = await import('../../gauntlet/harness/run.mjs');
-  const { standingsPolicy } = await import('../../gauntlet/harness/standings.mjs');
+  const { CEILING_POLICY, loadEntries, standingsPlans } = await import('../../Gauntlet/Harness/run.mjs');
+  const { standingsPolicy } = await import('../../Gauntlet/Harness/standings.mjs');
   const read = (file) => JSON.parse(readFileSync(join(repoRoot, file), 'utf8'));
-  const policy = standingsPolicy(read('Tools/gauntlet/matrix.json'), read('Tools/gauntlet/measurement-manifest.json'));
+  const policy = standingsPolicy(read('Tools/Gauntlet/matrix.json'), read('Tools/Gauntlet/measurement-manifest.json'));
   const { loaded } = await loadEntries(join(repoRoot, 'Tools', 'gauntlet', 'entries'), null);
   return { policy, plans: await standingsPlans(loaded, policy, read(CEILING_POLICY.references), {}) };
 }
@@ -35,9 +35,9 @@ async function entryPlans() {
 // asm ceiling against the binary `jet build` writes. `jet_modes` names each
 // peer's Jet; an entry's `jet` is `jet build`'s row and `jet_run` `jet run`'s.
 export async function tableStandings(table) {
-  const { buildStandings, entryStandings, summarize } = await import('../../gauntlet/harness/standings.mjs');
-  const { tableResult, JET_RUN } = await import('../../gauntlet/harness/table.mjs');
-  const { STANDINGS_INTERPRETERS } = await import('../../gauntlet/harness/run.mjs');
+  const { buildStandings, entryStandings, summarize } = await import('../../Gauntlet/Harness/standings.mjs');
+  const { tableResult, JET_RUN } = await import('../../Gauntlet/Harness/table.mjs');
+  const { STANDINGS_INTERPRETERS } = await import('../../Gauntlet/Harness/run.mjs');
   const { policy, plans } = await entryPlans();
   const runtimes = table.runtimes ?? {};
   const modeOf = (peer) => Object.hasOwn(STANDINGS_INTERPRETERS, peer) ? 'run' : 'build';
@@ -65,7 +65,7 @@ export async function tableStandings(table) {
 // `file` (the machine's table by default). `file` is shown relative to `root`
 // when it lies inside it.
 export async function readGauntletStandings(root, file) {
-  const { readTable, tablePath } = await import('../../gauntlet/harness/table.mjs');
+  const { readTable, tablePath } = await import('../../Gauntlet/Harness/table.mjs');
   const location = file ?? tablePath();
   let table;
   try {

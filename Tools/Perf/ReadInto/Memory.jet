@@ -1,0 +1,334 @@
+#!/usr/bin/env jet
+// The memory half of the net_read_into_vs_read pair (#5976 c112), the Jet
+// twin of memory.mjs (the gauntlet entry read-into-memory pairs them). Wall
+// time is the shared harness's (`performance-surface.mjs --pair
+// net_read_into_vs_read`, into the row's evidence_file). This measures the
+// row's metrics the harness does not: allocations per read and peak live heap
+// bytes, from the runtime counting policy's own facts in a counted build of
+// each arm, plus peak RSS (the gauntlet timer's, the program's exact VmHWM) of the
+// uncounted build. Both arms build from the row's surface_source and
+// plain_source at -O2. Each metric gets its own verdict under the
+// harness's rule that only strictly below plain wins. --write replaces the
+// row's memory_evidence_file; without it the result is printed.
+//
+//   jet Tools/Perf/ReadInto/Memory.jet --artifact <jet> --gdb <gdb> [--write] [--scratch <dir>]
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    regex: core.regex
+    stats: core.math.stats
+    sys: core.sys
+    time: core.time
+}
+
+TOOL: "/Tools/Perf/ReadInto/Memory.jet"
+
+MANIFEST: "Tools/Gauntlet/measurement-manifest.json"
+
+TIMER: "Tools/Gauntlet/Harness/timer.py"
+
+PAIR: "net_read_into_vs_read"
+
+COUNTED_RUNS: 3
+
+COUNTING: "    allocator: mem.Counting.over(mem.Heap, cap: 2.gb)"
+
+// The shared harness's paired trials and bootstrap
+// (Tools/Gauntlet/Harness/performance-surface.mjs).
+TRIALS: 100
+
+BOOTSTRAP_RESAMPLES: 10000
+
+BOOTSTRAP_SEED: 2977
+
+BOOTSTRAP_LOWER_RANK: 250
+
+BOOTSTRAP_UPPER_RANK: 9750
+
+// The counting policy's own facts, read by gdb at exit_group: the program's
+// image keeps no fact export, so the script finds the allocator root through
+// jet_rt_alloc_init's first instruction (`lea <root>(%rip)`) and reads the
+// words Alloc.jet lays out there: mode144, allocations160, high-water184.
+FACTS_SCRIPT: `import gdb, re
+line = gdb.execute("x/1i jet_rt_alloc_init", to_string=True)
+found = re.search(r"lea\s+0x[0-9a-f]+\(%rip\),%\w+\s+# (0x[0-9a-f]+)", line)
+if not found:
+    raise gdb.GdbError("jet_rt_alloc_init does not start with the root lea: " + line)
+memory = gdb.selected_inferior()
+word = lambda at: int.from_bytes(bytes(memory.read_memory(at, 8)), "little", signed=True)
+root = word(int(found.group(1), 16))
+print("ALLOCATOR-FACTS mode=%d allocations=%d high_water=%d" % (word(root + 144), word(root + 160), word(root + 184)))
+`
+
+Row: struct {
+    id: String
+    surface_source: String
+    plain_source: String
+    expected_output: String
+    memory_evidence_file: String?
+}
+
+Pairs: struct {
+    pairs: [Row]
+}
+
+Manifest: struct {
+    performance_surface_pairs: Pairs
+}
+
+Sample: struct {
+    exit_code: Int
+    peak_rss_kb: Int
+}
+
+Counted: struct {
+    allocations: Int
+    reads: Int
+    allocations_per_read: Float
+    peak_live_heap_bytes: Int
+}
+
+Interval: struct {
+    lower: Float
+    upper: Float
+}
+
+Host: struct {
+    platform: String
+    release: String
+    arch: String
+    cpu_model: String?
+    cpu_count: Int
+}
+
+CountedRuns: struct {
+    surface: [Counted]
+    plain: [Counted]
+}
+
+Verdicts: struct {
+    allocations_per_read: String
+    peak_live_heap_bytes: String
+    peak_rss_kb: String
+}
+
+Evidence: struct {
+    schema: String
+    id: String
+    surface_source_sha256: String
+    plain_source_sha256: String
+    expected_output: String
+    target: String
+    artifact_sha256: String
+    host: Host
+    generated_command: String
+    counting_policy: String
+    // The per-run vectors: the evidence file keeps them, the printed summary
+    // leaves them out (None is not encoded).
+    counted_runs: CountedRuns?
+    rss_runs: Int
+    surface_allocations_per_read: Float
+    plain_allocations_per_read: Float
+    surface_peak_live_heap_bytes: Int
+    plain_peak_live_heap_bytes: Int
+    surface_peak_rss_kb: Int
+    plain_peak_rss_kb: Int
+    peak_rss_ratio: Float
+    peak_rss_ratio_lower95: Float
+    peak_rss_ratio_upper95: Float
+    surface_rss_kb: [Int]?
+    plain_rss_kb: [Int]?
+    metric_verdicts: Verdicts
+}
+
+fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "memory: {message}") }
+
+argument: fn(argv: [String], name: String, fallback: String) -> String {
+    loop at in 0..<argv.len() {
+        if argv[at] == name {
+            return if at + 1 < argv.len() -> argv[at + 1].copy() else -> fallback.copy()
+        }
+    }
+    fallback.copy()
+}
+
+run_program: fn(argv: [String], cwd: String{"."}) -> ProcessReceipt {
+    process.cmd(argv).cwd(cwd).timeout(time.duration_seconds(300)).run() ?? fail("{argv.join(" ")}: {err}")
+}
+
+pair_row: fn(repo: String) -> Row {
+    text: files.read(files.join(repo, MANIFEST)) ?? fail("{MANIFEST}: {err}")
+    manifest: json.decode<Manifest>(text) ?? fail("{MANIFEST}: {err}")
+    loop row in manifest.performance_surface_pairs.pairs {
+        if row.id == PAIR -> return row
+    }
+    fail("{PAIR} has no row in {MANIFEST}")
+}
+
+// One arm's source as main.jet in a fresh directory. A counted build adds
+// `allocator`, the counting allocator line, to the source's own package
+// block; a plain build passes "".
+build: fn(jet: String, source: String, dir: String, allocator: String) -> String {
+    files.create_dir_all(dir) ?? fail("{dir}: {err}")
+    package: regex.compile_with(`^package: \{\n`, regex.flags(false, true, false)) ?? fail("the package pattern: {err}")
+    text: if allocator == "" -> source.copy() else -> package.replace_first(source, "package: {{\n{allocator}\n")
+    if allocator != "" && text == source {
+        fail("the pair source has no `package: {{` line to take the counting allocator")
+    }
+    files.write(files.join(dir, "main.jet"), text) ?? fail("{dir}/main.jet: {err}")
+    out: files.join(dir, "out")
+    built: run_program([String]{jet, "build", "-O2", "--quiet", "--output-dir={out}", "main.jet"}, dir)
+    binary: files.join(out, "main")
+    if !built.success || !files.exists(binary) {
+        fail("build {dir} failed:\n{built.output}{built.errors}")
+    }
+    binary
+}
+
+counted_run: fn(gdb: String, binary: String, scratch: String, label: String) -> Counted {
+    err_file: files.join(scratch, "{label}.err")
+    script: files.join(scratch, "facts.py")
+    files.write(script, FACTS_SCRIPT) ?? fail("{script}: {err}")
+    result: run_program([String]{gdb, "-q", "-batch", "-ex", "set pagination off", "-ex", "catch syscall exit_group", "-ex", "run 2>{err_file}", "-x", script, binary})
+    facts: regex.match(Regex{"ALLOCATOR-FACTS mode=1 allocations=(\d+) high_water=(\d+)"}, result.output) ?? fail("no counting-policy facts from gdb:\n{result.output}{result.errors}")
+    errors: files.read(err_file) ?? fail("{err_file}: {err}")
+    reads: regex.match(Regex{"reads=(\d+)"}, errors) ?? fail("no reads= line in stderr: {errors}")
+    allocations: facts.group_int(1) ?? fail("the allocation count is out of Int range")
+    count: reads.group_int(1) ?? fail("the read count is out of Int range")
+    Counted{allocations: allocations, reads: count, allocations_per_read: Float.from_int(allocations) / Float.from_int(count), peak_live_heap_bytes: facts.group_int(2) ?? fail("the high-water mark is out of Int range")}
+}
+
+peak_rss: fn(repo: String, binary: String, expected: String) -> Int {
+    lines: run_program([String]{"python3", files.join(repo, TIMER), "--", binary}).output.trim().split("\n").to_list()
+    sample: json.decode<Sample>(lines[lines.len() - 1]) ?? fail("{binary}: the timer printed no sample: {err}")
+    if sample.exit_code != 0 -> fail("{binary} exited {sample.exit_code}")
+    printed: run_program([String]{binary}).output
+    if printed != expected -> fail("{binary} printed {json.to_string(printed) ?? "?"}")
+    sample.peak_rss_kb
+}
+
+// The shared harness's paired index bootstrap of median(surface) /
+// median(plain): a 32-bit linear congruential draw seeded with
+// BOOTSTRAP_SEED picks each resample's indices; the bounds are nearest ranks.
+paired_bootstrap: fn(surface: [Int], plain: [Int]) -> Interval {
+    state := BOOTSTRAP_SEED
+    ratios := [Float]{}
+    loop _ in 0..<BOOTSTRAP_RESAMPLES {
+        picked_surface := [Int]{}
+        picked_plain := [Int]{}
+        loop _ in 0..<surface.len() {
+            state = (state * 1664525 + 1013904223) %% 4294967296
+            selected: state * surface.len() /% 4294967296
+            picked_surface.push(surface[selected])
+            picked_plain.push(plain[selected])
+        }
+        surface_median: stats.median_high_int(picked_surface) ?? fail("no samples")
+        plain_median: stats.median_high_int(picked_plain) ?? fail("no samples")
+        ratios.push(Float.from_int(surface_median) / Float.from_int(plain_median))
+    }
+    ratios.sort()
+    Interval{lower: ratios[BOOTSTRAP_LOWER_RANK - 1], upper: ratios[BOOTSTRAP_UPPER_RANK - 1]}
+}
+
+// The harness's rule: only strictly below plain is a win. The counts are
+// exact, so they compare directly; RSS is sampled at page resolution, so it
+// is judged like wall time, on its paired runs' bootstrap interval.
+strict: fn(surface: Float, plain: Float) -> String { if surface < plain -> "win" else -> "loss" }
+
+judged: fn(ratio: Float, interval: Interval) -> String {
+    if {
+        ratio < 1.0 && interval.upper < 1.0 -> "win"
+        ratio >= 1.0 || interval.lower >= 1.0 -> "loss"
+        else -> "inconclusive"
+    }
+}
+
+cpu_model: fn() -> String? {
+    found: regex.match(Regex{"model name\s*:\s*(.*)"}, files.read("/proc/cpuinfo") ?? "") ?? return None
+    Val(found.groups[0].copy())
+}
+
+measure: fn(repo: String, argv: [String]) -> Evidence {
+    jet: files.absolute(argument(argv, "--artifact", process.env_get_or("JET", "jet"))) ?? fail("--artifact: {err}")
+    gdb: argument(argv, "--gdb", "gdb")
+    row: pair_row(repo)
+    scratch: files.join(argument(argv, "--scratch", sys.temp_dir()), "read-into-memory-{process.current_pid()}")
+    surface_plain: build(jet, row.surface_source, files.join(scratch, "surface"), "")
+    plain_plain: build(jet, row.plain_source, files.join(scratch, "plain"), "")
+    surface_counted: build(jet, row.surface_source, files.join(scratch, "surface-counted"), COUNTING)
+    plain_counted: build(jet, row.plain_source, files.join(scratch, "plain-counted"), COUNTING)
+    runs := CountedRuns{surface: [Counted]{}, plain: [Counted]{}}
+    loop index in 0..<COUNTED_RUNS {
+        runs.surface.push(counted_run(gdb, surface_counted, scratch, "surface-{index}"))
+    }
+    loop index in 0..<COUNTED_RUNS {
+        runs.plain.push(counted_run(gdb, plain_counted, scratch, "plain-{index}"))
+    }
+    surface_rss := [Int]{}
+    plain_rss := [Int]{}
+    // Alternate which arm runs first, surface first on even trials.
+    loop index in 0..<TRIALS {
+        if index %% 2 == 0 -> surface_rss.push(peak_rss(repo, surface_plain, row.expected_output))
+        plain_rss.push(peak_rss(repo, plain_plain, row.expected_output))
+        if index %% 2 == 1 -> surface_rss.push(peak_rss(repo, surface_plain, row.expected_output))
+    }
+    files.remove_all(scratch) ?? ()
+    // Each metric's upper middle value, as the shared harness takes it.
+    per_read_surface: stats.median_high(runs.surface.map(fn(sample) { sample.allocations_per_read })) ?? fail("no counted runs")
+    per_read_plain: stats.median_high(runs.plain.map(fn(sample) { sample.allocations_per_read })) ?? fail("no counted runs")
+    heap_surface: stats.median_high_int(runs.surface.map(fn(sample) { sample.peak_live_heap_bytes })) ?? fail("no counted runs")
+    heap_plain: stats.median_high_int(runs.plain.map(fn(sample) { sample.peak_live_heap_bytes })) ?? fail("no counted runs")
+    peak_surface: stats.median_high_int(surface_rss) ?? fail("no RSS samples")
+    peak_plain: stats.median_high_int(plain_rss) ?? fail("no RSS samples")
+    ratio: Float.from_int(peak_surface) / Float.from_int(peak_plain)
+    interval: paired_bootstrap(surface_rss, plain_rss)
+    artifact: files.read_bytes(jet) ?? fail("{jet}: {err}")
+    Evidence{
+        schema: "jet.gauntlet.performance-surface-memory.v1",
+        id: PAIR,
+        surface_source_sha256: crypto.sha256(row.surface_source).hex(),
+        plain_source_sha256: crypto.sha256(row.plain_source).hex(),
+        expected_output: row.expected_output.copy(),
+        target: "jet build -O2",
+        artifact_sha256: crypto.sha256(artifact).hex(),
+        host: Host{platform: sys.name(), release: sys.release(), arch: sys.arch(), cpu_model: cpu_model(), cpu_count: sys.cpu_count()},
+        generated_command: "jet Tools/Perf/ReadInto/Memory.jet --artifact <jet> --gdb <gdb> --write",
+        counting_policy: "mem.Counting.over(mem.Heap, cap: 2.gb) in each arm's package block; facts read at exit_group",
+        counted_runs: Val(runs),
+        rss_runs: TRIALS,
+        surface_allocations_per_read: per_read_surface,
+        plain_allocations_per_read: per_read_plain,
+        surface_peak_live_heap_bytes: heap_surface,
+        plain_peak_live_heap_bytes: heap_plain,
+        surface_peak_rss_kb: peak_surface,
+        plain_peak_rss_kb: peak_plain,
+        peak_rss_ratio: ratio,
+        peak_rss_ratio_lower95: interval.lower,
+        peak_rss_ratio_upper95: interval.upper,
+        surface_rss_kb: Val(surface_rss),
+        plain_rss_kb: Val(plain_rss),
+        metric_verdicts: Verdicts{
+            allocations_per_read: strict(per_read_surface, per_read_plain),
+            peak_live_heap_bytes: strict(Float.from_int(heap_surface), Float.from_int(heap_plain)),
+            peak_rss_kb: judged(ratio, interval),
+        },
+    }
+}
+
+run: fn() {
+    script: sys.executable()
+    if !script.ends_with(TOOL) -> fail("run this file from its place in the checkout ({TOOL})")
+    repo: script.removesuffix(TOOL)
+    argv: process.args()
+    result := measure(repo, argv)
+    if argv.contains("--write") {
+        path: files.join(repo, pair_row(repo).memory_evidence_file ?? fail("the {PAIR} row has no memory_evidence_file"))
+        files.write(path, "{json.to_string_pretty(result) ?? fail("the evidence: {err}")}\n") ?? fail("{path}: {err}")
+    }
+    result.counted_runs = None
+    result.surface_rss_kb = None
+    result.plain_rss_kb = None
+    print(json.to_string_pretty(result) ?? fail("the summary: {err}"))
+}

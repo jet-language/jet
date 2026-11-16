@@ -105,7 +105,7 @@ static void *new_event(void) {
     return event;
 }
 
-// Examples/Concurrency/EventLifecycle.jet and tests/run/Concurrency/CallbackOutput.jet.
+// Examples/Concurrency/EventLifecycle.jet and Tests/Run/Concurrency/CallbackOutput.jet.
 static void goldens(void) {
     void *events = new_event();
     assert(jet_event_listener_count(events) == 0);

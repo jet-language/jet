@@ -1,0 +1,14 @@
+# A bare loop with `break`, a conditional loop with `next`, a counted loop and
+# an index assignment give the same answers in `#Target(JS)` code and in
+# `#Export(wasm)` functions: the built page prints both lines for 0 to 4.
+requires: tool:node
+fixture: WebLoopsAndIndexAssignEmitOnJSAndWasm.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"target\": \"web\"" # the manifest names the web target
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_loops_and_index_assign_emit_on_js_and_wasm.stdout.expected

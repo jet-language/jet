@@ -1,0 +1,40 @@
+{
+  "schema": "jet.cold-agent.adapters.v1",
+  "required_families": [
+    "openai",
+    "anthropic",
+    "google"
+  ],
+  "adapters": [
+    {
+      "id": "openai-fake",
+      "family": "openai",
+      "transport_env": "FIXTURE_OPENAI_TRANSPORT",
+      "default_transport": "command",
+      "command": {
+        "command_env": "FIXTURE_OPENAI_COMMAND",
+        "default_argv": [
+          "sh",
+          "../../fake-model.sh",
+          "openai"
+        ],
+        "input": "prompt-argument"
+      }
+    },
+    {
+      "id": "anthropic-fake",
+      "family": "anthropic",
+      "transport_env": "FIXTURE_ANTHROPIC_TRANSPORT",
+      "default_transport": "command",
+      "api": {
+        "protocol": "openai-chat",
+        "endpoint_env": "FIXTURE_ANTHROPIC_ENDPOINT",
+        "api_key_env": "FIXTURE_ANTHROPIC_KEY",
+        "model_env": "FIXTURE_ANTHROPIC_MODEL"
+      },
+      "command": {
+        "command_env": "FIXTURE_ANTHROPIC_COMMAND"
+      }
+    }
+  ]
+}

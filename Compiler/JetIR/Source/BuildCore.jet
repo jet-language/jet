@@ -1,9 +1,9 @@
 // The Core code library (#6328 c22 S7a): every non-generic function of the
 // Prelude and of each Core package the toolchain ships, built once when the
-// runtime pack is made (JetCli CoreLibrary.jet) into an object of its own
+// runtime pack is made (JetCLI CoreLibrary.jet) into an object of its own
 // that the runtime image links beside the runtime. A Core package ships
-// unless JetCli CoreLibrary.jet JET_CLI_CORE_LOWERED lists it: the rule
-// (tests/guards/core_shipped.jet) lists each package fewer than one in a
+// unless JetCLI CoreLibrary.jet JET_CLI_CORE_LOWERED lists it: the rule
+// (Tests/Guards/core_shipped.jet) lists each package fewer than one in a
 // hundred program files name, and a program that calls one of its functions
 // lowers it itself. Each shipped function is a global symbol named after its
 // checked key (ir_core_symbol), so a program bound to the image can call it
@@ -35,7 +35,7 @@
 // exported Core function its code calls directly by that symbol, at the
 // call's own layouts, and builds no body for it (ir_core_bound); its Core
 // cells are Core's (ir_core_cells_bind). The symbols are the runtime
-// image's, or jet_core.o's in a full link (JetCli Host.jet).
+// image's, or jet_core.o's in a full link (JetCLI Host.jet).
 use {
     jet_backend.[X64DataExport]
     jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_rows_get_text, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
@@ -74,7 +74,7 @@ IRCoreExclusion: struct {
 // The reasons a Core function is not sealed, each counted apart
 // (JetSema CoreDemand.jet sema_core_bound_counters).
 IR_CORE_EXCLUSIONS: [IRCoreExclusion]{
-    // Its package is one the library leaves out (JetCli CoreLibrary.jet
+    // Its package is one the library leaves out (JetCLI CoreLibrary.jet
     // JET_CLI_CORE_LOWERED).
     IRCoreExclusion{reason: "lowered", exported: false},
     // It has type parameters or owner binders, so its code depends on the
@@ -183,7 +183,7 @@ ir_core_layout: fn(layout: IRExportLayout) -> String Never! {
 }
 
 // Builds every non-generic function outside the module `entry_module` (the
-// Core check's entry, JetCli CoreLibrary.jet: every other checked module
+// Core check's entry, JetCLI CoreLibrary.jet: every other checked module
 // is Core's or the Prelude's) and outside the Core packages `lowered` names
 // (ir_core_package), and every function they reach, on up to `threads`
 // threads; the other inputs as ir_build_program's.
@@ -319,7 +319,7 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: 
     IRCoreLibrary{program: m, failures: [IRBuildFailure]{}, errors: errors, exports: exports, data: data, rows: rows, skipped: skipped.move(), facts: unique}
 }
 
-// The Core export list (`<prefix>.exports`, JetCli CoreLibrary.jet): one
+// The Core export list (`<prefix>.exports`, JetCLI CoreLibrary.jet): one
 // `symbol<TAB>key<TAB>signature` line per row, sorted by symbol.
 ir_core_exports_text: fn(rows: [IRCoreExport]) -> String Never! {
     lines := loop row in rows -> "{row.symbol}\t{row.key}\t{row.signature}"
@@ -329,7 +329,7 @@ ir_core_exports_text: fn(rows: [IRCoreExport]) -> String Never! {
 // One line of the Core facts list: the function's key and its reason.
 ir_core_fact_line: fn(key: String, reason: String) -> String Never! { "{key}\t{reason}" }
 
-// The Core facts list (`<prefix>.facts`, JetCli CoreLibrary.jet): its
+// The Core facts list (`<prefix>.facts`, JetCLI CoreLibrary.jet): its
 // lines (ir_core_fact_line), sorted.
 ir_core_facts_text: fn(facts: [String]) -> String Never! { facts.join("\n") }
 
@@ -465,7 +465,7 @@ ir_core_function_values: fn(m: IRModule, callers: [[Int]]) -> [Bool] Never! {
 
 // The Core exports of the runtime image a program binds to (IRChecks.core):
 // the image's export list as the toolchain build wrote it
-// (ir_core_exports_text, JetCli Host.jet JET_CLI_CORE_EXPORTS_FILE).
+// (ir_core_exports_text, JetCLI Host.jet JET_CLI_CORE_EXPORTS_FILE).
 IRCoreImage: struct {
     exports: [U8]
 }

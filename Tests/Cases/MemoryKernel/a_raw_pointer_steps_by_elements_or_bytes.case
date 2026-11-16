@@ -1,0 +1,42 @@
+# `p.offset(n)` steps a raw pointer by `n` elements and `p.byte_offset(n)` by
+# `n` bytes, either way, to a pointer of the same type, on every tier. A step
+# is not checked where it is made: a read through a pointer stepped past its
+# storage is a located R0801 sentry fault.
+fixture: ARawPointerStepsByElementsOrBytes.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "30\n20\n40\n30\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "30\n20\n40\n30\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "30\n20\n40\n30\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "30\n20\n40\n30\n"
+end when
+step pastnone: jet run -O0 past.jet
+exit: 70
+stdout: = "7\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past.jet:9:15, in #Unsafe gate" # the fault is located at the stepped read
+stderr: ~ "raw `read` outside" # the gate's audit text follows
+stderr: ~ "the access starts at offset 8 of the live range 0x" # the range's addresses vary with ASLR
+stderr: ~ "(8 bytes) and runs past its end" # the one Int cell
+step pastfull: jet run -O2 past.jet
+exit: 70
+stdout: = "7\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past.jet:9:15, in #Unsafe gate" # the fault is located at the stepped read
+stderr: ~ "raw `read` outside" # the gate's audit text follows
+stderr: ~ "the access starts at offset 8 of the live range 0x" # the range's addresses vary with ASLR
+stderr: ~ "(8 bytes) and runs past its end" # the one Int cell

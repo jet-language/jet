@@ -1,0 +1,32 @@
+// A builtin type's name is a Type value wherever a Type is expected, as a
+// declared type's name is: it keys a map, fills a [Type] list, switches an
+// `if t == { … }`, and equals the Type that `Type{…}` and `type_of` give.
+Point: struct {
+    x: Int
+}
+
+kind: fn(t: Type) -> String {
+    if t == {
+        Int -> "a whole number"
+        String -> "text"
+        Point -> "a point"
+        else -> "something else"
+    }
+}
+
+run: fn() {
+    counts := [Type:Int]{}
+    counts[Int] = 1
+    counts[String] = 2
+    counts[Point] = 3
+    print(counts.get(Int) ?? 0)
+    print(counts.get(U8) ?? 0)
+    print(counts.len())
+    kinds: [Type]{Int, String, Bool, Point}
+    loop t in kinds -> print(kind(t))
+    whole: Type{Int}
+    print(whole == Int)
+    print(whole == String)
+    n := 5
+    print(type_of(n) == Int)
+}

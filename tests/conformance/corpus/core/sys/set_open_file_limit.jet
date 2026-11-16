@@ -1,9 +1,0 @@
-// core-conformance: core.sys.set_open_file_limit
-use os: core.sys
-
-run: fn() {
-    limit: os.open_file_limit() ?? panic("open_file_limit")
-    os.set_open_file_limit(limit.soft, limit.hard) ?? panic("set_open_file_limit")
-    after: os.open_file_limit() ?? panic("open_file_limit after")
-    print(after.soft == limit.soft && after.hard == limit.hard)
-}

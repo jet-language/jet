@@ -1,0 +1,24 @@
+# tasks.waitany needs at least one receiver: over an empty list it stops
+# with its precondition panic, the same E3001 report and exit 70 on O0, O1
+# and O2, after the output printed before it. The panic is raised in Core,
+# so the report's location is the user's call that reached it, not a Core line.
+fixture: WaitanyOverNoReceiversStopsWithItsPreconditionPanic.fixture
+env: NO_COLOR=1
+step O0: jet run -O0 main.jet
+exit: 70
+stdout: = waitany_over_no_receivers_stops_with_its_precondition_panic.out
+stderr: ~ "Stop [E3001]: `panic: waitany needs at least one receiver`" # the precondition's report
+stderr: ~ "--> main.jet:6 in run" # the user's call to waitany
+stderr: !~ "<corelib>" # no Core line in the report
+step O1: jet run -O1 main.jet
+exit: 70
+stdout: = waitany_over_no_receivers_stops_with_its_precondition_panic.out
+stderr: ~ "Stop [E3001]: `panic: waitany needs at least one receiver`" # the precondition's report
+stderr: ~ "--> main.jet:6 in run" # the user's call to waitany
+stderr: !~ "<corelib>" # no Core line in the report
+step O2: jet run -O2 main.jet
+exit: 70
+stdout: = waitany_over_no_receivers_stops_with_its_precondition_panic.out
+stderr: ~ "Stop [E3001]: `panic: waitany needs at least one receiver`" # the precondition's report
+stderr: ~ "--> main.jet:6 in run" # the user's call to waitany
+stderr: !~ "<corelib>" # no Core line in the report

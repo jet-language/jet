@@ -1,8 +1,0 @@
-Error [jet.FixedTimingSteer]: A `Key` value decides an early return that can't be masked (the code it skips calls, can stop, writes memory or loops on its own)
-  --> tests/ui/taint/fixed_timing_early_return_skipping_a_call_is_e0737.jet:5:12
-    |
-  5 |         if items[i] == k -> return U64{1}
-    |            ^^^^^^^^^^^^^
- Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
- Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Key)` function first
-More: jet-lang.dev/e/E0737

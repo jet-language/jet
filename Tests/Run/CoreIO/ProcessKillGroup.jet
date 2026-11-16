@@ -1,0 +1,25 @@
+// ProcessChild.kill() takes the child's whole process group: a spawned child
+// leads its own group, so a background grandchild dies with it and never
+// writes its file.
+package: {
+    name: "process_kill_group"
+    authority: { allow: [Env, Exec, FS, IO, Mem.Alloc, Time.Wait] }
+}
+
+use {
+    files: core.files
+    process: core.process
+    time: core.time
+}
+
+run: fn() -[Env, Exec, FS, IO, Time.Wait]> {
+    scratch: files.temp_dir("process-kill-group") ?? panic("no temp dir")
+    late: files.join_all([String]{scratch.path, "late.txt"})
+    child: process.cmd([String]{"sh", "-c", "(sleep 1; echo late > \"$1\") & sleep 5", "sh", late}).spawn() ?? panic("sh did not start")
+    time.sleep(300ms)
+    child.kill() ?? panic("kill failed")
+    receipt: child.wait() ?? panic("wait failed")
+    print("success: {receipt.success} signal: {receipt.signal ?? 0}")
+    time.sleep(1500ms)
+    print("grandchild wrote: {files.exists(late)}")
+}

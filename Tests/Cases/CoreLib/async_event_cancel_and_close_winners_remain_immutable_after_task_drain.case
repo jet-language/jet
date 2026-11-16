@@ -1,0 +1,13 @@
+# Port of tests/corelib_parts/runtime.rs::async_event_cancel_and_close_winners_remain_immutable_after_task_drain.
+# ORACLE-LITERAL: tests/corelib_parts/runtime.rs:640.
+# The original guest gated a single scheduler thread with a task parked on a
+# channel receive. Jet's scheduler compensates a parked task with another
+# worker, so that gate let entries dispatch before the cancel and close. The
+# guest instead holds the event's run slot with a parked handler, which keeps
+# the same payloads Queued and Pending at the decision on any thread count.
+# The handlers' started-channel sends end in `?? panic(...)`: a refused send fails
+# with SendError<Int>, which the handlers' String failure type cannot carry.
+fixture: Fixtures/AsyncEventCancelAndCloseWinnersRemainImmutableAfterTaskDrain
+step: jet build fixture.jet
+step: built
+stdout: = async_event_cancel_and_close_winners_remain_immutable_after_task_drain.out

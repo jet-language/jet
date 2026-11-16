@@ -1,0 +1,29 @@
+# An O2 build with split debug info files its side debug file in the
+# package's symbol store, `.jet/symbols/.build-id/<id[0:2]>/<id[2:]>.debug`,
+# and the image's `.gnu_debuglink` names the side file by its name beside the
+# image, which links to the store's file. LLDB, given only the image, follows
+# the link: a breakpoint by Jet file and line resolves, and resolves nowhere
+# once the store is gone. The image names no directory, so it stays the same
+# bytes wherever the package is checked out.
+requires: tool:lldb
+fixture: LldbFindsAnO2SplitDebugFileThroughTheDebugLink.fixture
+env: NO_COLOR=1
+step: jet build -O2 --debug-info=split prog.jet
+exit: 0
+file: .jet/symbols/.build-id is-dir # the side file is in the symbol store
+file: .jet/build/prog.debug is-symlink # and its name beside the image links there
+file: .jet/build/prog !~ ".debug_info" # the image holds no DWARF
+file: .jet/build/prog ~ ".gnu_debuglink" # but links its side file
+file: .jet/build/prog ~ "prog.debug" # by name
+file: .jet/build/prog !~ "{work}" # and names no directory
+step: lldb --no-lldbinit --no-use-colors -b -o "breakpoint set -f prog.jet -l 3" {work}/.jet/build/prog
+exit: 0
+stdout+stderr: ~ "at prog.jet:3" # the line table came from the store's side file
+stdout+stderr: !~ "no locations" # a breakpoint without debug info resolves nowhere
+remove: .jet/symbols
+step: lldb --no-lldbinit --no-use-colors -b -o "breakpoint set -f prog.jet -l 3" {work}/.jet/build/prog
+exit: any # only the breakpoint's resolution is the subject
+stdout+stderr: ~ "no locations" # without the store the link leads nowhere
+step: {work}/.jet/build/prog
+exit: 0
+stdout: = "332833500\n" # the image runs unchanged

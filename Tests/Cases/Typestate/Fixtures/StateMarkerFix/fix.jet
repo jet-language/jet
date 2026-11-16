@@ -1,0 +1,13 @@
+Lamp: struct {
+    state { Off, On }
+    watts: Int
+
+    #State(_ -> Off) make: fn(watts: Int) -> Lamp { Lamp{watts: watts} }
+    #State(Off -> On) turn_on: fn(&&self) -> Self { self }
+    #State(On) shine: fn(self) -> Int { self.watts }
+}
+
+run: fn() {
+    lamp: Lamp.make(60).turn_on()
+    print(lamp.shine())
+}

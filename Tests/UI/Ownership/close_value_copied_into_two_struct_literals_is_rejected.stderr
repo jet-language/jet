@@ -1,0 +1,12 @@
+Error [jet.UseAfterMove]: `res` was consumed by the struct literal, so it can't be used here
+  --> Tests/UI/Ownership/close_value_copied_into_two_struct_literals_is_rejected.jet:20:59
+    |
+ 20 |     pair: Pair{left: Holder{res: res}, right: Holder{res: res}}
+    |                                                           ^^^
+  --> Tests/UI/Ownership/close_value_copied_into_two_struct_literals_is_rejected.jet:20:34
+    |
+ 20 |     pair: Pair{left: Holder{res: res}, right: Holder{res: res}}
+    |                                  ^^^ `res` moved to the struct literal here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `res` after the move, or give the struct literal a copy with `res.copy()` where it moved.
+More: jet-lang.dev/e/E0121

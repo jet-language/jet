@@ -1,0 +1,12 @@
+# tests/floor_division.rs::jit_restores_caller_source_after_nested_return
+# Original fixtures and exact assertions; PENDING-SAME-HEAD, runtime UNRUN.
+fixture: JITRestoresCallerSourceAfterNestedReturn.fixture
+env: NO_COLOR=1
+step: jet run jit_nested_source_restore.jet
+stdin: null
+exit: 70
+stderr: ~ "Stop [E3001]" # original contains
+stderr: ~ "missing" # original contains
+stderr: ~ "jit_nested_source_restore.jet:6 in caller" # original contains; Stop frames name the function without `()`
+stderr: ~ "7 |     print(values[\"missing\"])" # original contains
+stderr: !~ "in leaf" # original contains negation

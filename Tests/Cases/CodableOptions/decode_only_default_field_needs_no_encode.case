@@ -1,0 +1,20 @@
+# A `#Codable(only: .Decode)` struct whose field has a declared default needs
+# no `Encode` for that field's type: an absent key takes the default as it is,
+# from the streaming reader and from a parsed tree alike, at every tier.
+fixture: DecodeOnlyDefaultFieldNeedsNoEncode.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = decode_only_default_field_needs_no_encode.stdout.expected
+stderr: empty
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = decode_only_default_field_needs_no_encode.stdout.expected
+stderr: empty
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = decode_only_default_field_needs_no_encode.stdout.expected
+stderr: empty

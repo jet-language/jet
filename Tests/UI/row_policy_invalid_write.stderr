@@ -1,0 +1,9 @@
+Error [jet.CallbackEffectBoundExceeded]: This callback uses the effect `DB.Write`, which the parameter doesn't allow
+  --> Tests/UI/row_policy_invalid_write.jet:27:22
+    |
+ 27 |     _: members.guard(audited_policy)
+    |                      ^^^^^^^^^^^^^^
+ Why: The parameter is `fn(…) -[DB.Read]>`, so the callback may use only those effects; `DB.Write` is outside that bound
+ Fix: Pass a callback within `-[DB.Read]>`, or add `DB.Write` to the parameter's bound
+ Denial: invocation
+More: jet-lang.dev/e/E0747

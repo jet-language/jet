@@ -1,0 +1,19 @@
+# `jet build` with no --target or --os builds for the browser only when the file
+# declares `#Target(Web)` itself. A file that never spells `Target` builds
+# natively, and so does one that spells it only in a comment and a string.
+fixture: JetBuildTakesTheWebRouteOnlyForATargetMarker.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build plain.jet
+exit: 0
+file: .jet/build/plain is-file
+file: .jet/build/app.wasm absent
+step: jet build commented.jet
+exit: 0
+file: .jet/build/commented is-file
+file: .jet/build/app.wasm absent
+step: jet build marked.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js is-file
+file: .jet/build/marked absent

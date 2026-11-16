@@ -1,0 +1,13 @@
+// `BASE` prints while building, an effect compile-time code isn't allowed
+// without a gate. The refusal is reported at `BASE`'s call, and `TOTAL`,
+// which reads `BASE`, reports nothing more (E3410).
+noisy: fn() -> Int {
+    print("hi")
+    3
+}
+
+BASE: #run noisy()
+
+TOTAL: #run { BASE + 1 }
+
+run: fn() { print(TOTAL) }

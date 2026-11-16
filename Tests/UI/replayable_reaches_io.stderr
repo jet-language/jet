@@ -1,0 +1,10 @@
+Error [jet.ReplayableReachesAmbientEffect]: `replay_turn` is `#Replayable` but reaches `IO`
+  --> Tests/UI/replayable_reaches_io.jet:5:1
+    |
+  5 | #Replayable replay_turn: fn() { record_line() }
+    | ^^^^^^^^^^^
+ Why: `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge
+ Fix: Inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function
+ Denial: replayable
+ Call chain: replay_turn
+More: jet-lang.dev/e/E0725

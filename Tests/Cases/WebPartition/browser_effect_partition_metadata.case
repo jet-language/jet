@@ -1,0 +1,9 @@
+# Claim: a function whose body uses the Browser effect (`ui.mount`) is placed in the JS partition, and the partition report says the effect placed it
+# A build needs the entry `run`; `ui.null_backend()` alone performs no Browser effect, because a declared row is an upper bound
+fixture: BrowserEffectPartitionMetadata.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target=web --explain-partition main.jet
+exit: 0
+stdout: ~ "main.dom_fn -> JS  inferred: Browser effect" # dom_fn lands in the JS bucket because of its Browser effect

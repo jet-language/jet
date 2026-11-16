@@ -1,0 +1,13 @@
+# Original tests/comptime_sequence_parity.rs:43-157; original inputs and exact public subclaims.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD.
+fixture: ReplListAndFixedListSequenceMethodsAreExact.fixture
+# LEDGER-ONLY(repl-lib): exact filtered ordered frames retained in archive; only independent !contains E0956 subclaim below.
+# The 50 REPL turns take about 21 s alone (0.4 s a turn) and more under full-kit load, so it has this timeout until the turn cost is cut.
+step: jet repl
+timeout: 180s
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: ReplListAndFixedListSequenceMethodsAreExact.fixture/input.txt
+exit: any # original library transcript did not assert process exit
+stdout: !~ "E0956" # original out.contains negative; needle does not overlap banner/prompt/turn echoes
+stderr: !~ "E0956" # same original predicate on CLI diagnostic fd

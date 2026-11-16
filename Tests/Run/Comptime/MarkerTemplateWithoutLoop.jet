@@ -1,0 +1,38 @@
+// A marker whose template has no `#loop`: every member it generates is
+// written directly in `expand`, reading only the target's name and the
+// marker's own field. Each marked type gets its own copy on every tier.
+Tagged: struct {
+    style: String{"plain"}
+
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            style: self.style
+            label: fn(self) -> String { "{style} {tname}" }
+            kind: fn() -> String { "{tname} is {style}" }
+        }
+    }
+}
+
+#Tagged
+Point: struct {
+    x: Int
+    y: Int
+}
+
+#Tagged("boxed")
+Crate: struct {
+    weight: Int
+}
+
+run: fn() {
+    point: Point{x: 1, y: 2}
+    crate: Crate{weight: 9}
+    print(point.label())
+    print(crate.label())
+    print(Point.kind())
+    print(Crate.kind())
+    print(point.x + point.y + crate.weight)
+}

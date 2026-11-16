@@ -1,0 +1,53 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <JetExecutable Condition="'$(JetExecutable)' == ''">jet</JetExecutable>
+    <JetLibraryRoot Condition="'$(JetLibraryRoot)' == ''">$(MSBuildProjectDirectory)\</JetLibraryRoot>
+    <JetLibraryEntry Condition="'$(JetLibraryEntry)' == ''">library.jet</JetLibraryEntry>
+    <JetLibraryManifest Condition="'$(JetLibraryManifest)' == ''">package.jet</JetLibraryManifest>
+    <JetLibraryLock Condition="'$(JetLibraryLock)' == ''">.jet\lock</JetLibraryLock>
+    <JetLibraryOutput Condition="'$(JetLibraryOutput)' == ''">core</JetLibraryOutput>
+    <JetLibraryName Condition="'$(JetLibraryName)' == ''">library</JetLibraryName>
+    <JetLibraryKind Condition="'$(JetLibraryKind)' == ''">static</JetLibraryKind>
+    <JetLibraryProfile Condition="'$(JetLibraryProfile)' == ''">dev</JetLibraryProfile>
+    <JetHostCompiler Condition="'$(JetHostCompiler)' == ''">unknown</JetHostCompiler>
+    <JetLibraryIntermediate Condition="'$(JetLibraryIntermediate)' == ''">$(IntermediateOutputPath)jet$(JetLibraryName)</JetLibraryIntermediate>
+    <JetLibraryStamp>$(JetLibraryIntermediate)\jet-host.stamp</JetLibraryStamp>
+    <JetLibraryReceipt>$(JetLibraryIntermediate)\jet-host.receipt</JetLibraryReceipt>
+    <JetLibraryStatic>$(JetLibraryIntermediate)\lib$(JetLibraryName).a</JetLibraryStatic>
+    <JetLibraryHeader>$(JetLibraryIntermediate)\$(JetLibraryName).h</JetLibraryHeader>
+    <JetLibraryJetlib>$(JetLibraryIntermediate)\$(JetLibraryName).jetlib</JetLibraryJetlib>
+    <JetLibraryShared>$(JetLibraryIntermediate)\lib$(JetLibraryName).dll</JetLibraryShared>
+    <JetLibraryPowerShell Condition="'$(JetLibraryPowerShell)' == ''">powershell</JetLibraryPowerShell>
+    <JetLibraryRunner Condition="'$(JetLibraryRunner)' == ''">$(MSBuildThisFileDirectory)..\jet-library.ps1</JetLibraryRunner>
+    <JetLibraryLoadableArgument Condition="'$(JetLibraryLoadable)' == 'true'">-Loadable</JetLibraryLoadableArgument>
+  </PropertyGroup>
+  <ItemGroup>
+    <_JetLibraryDeclaredInput Include="$(JetLibraryRoot)$(JetLibraryManifest)" />
+    <_JetLibraryDeclaredInput Include="$(JetLibraryRoot)$(JetLibraryLock)" />
+    <_JetLibraryDeclaredInput Include="$(JetLibraryRoot)$(JetLibraryEntry)" />
+    <_JetLibraryDeclaredInput Include="$(JetLibraryInputs)" />
+    <_JetLibraryDeclaredInput Include="$(JetLibraryRunner)" />
+    <_JetLibraryDeclaredInput Include="$(JetExecutable)" Condition="Exists('$(JetExecutable)')" />
+    <_JetLibraryDeclaredInput Include="$(JetHostCompiler)" Condition="Exists('$(JetHostCompiler)')" />
+    <_JetLibraryDeclaredInput Include="$(MSBuildThisFileFullPath)" />
+    <_JetLibraryRunnerInput Include="$(JetLibraryManifest)" />
+    <_JetLibraryRunnerInput Include="$(JetLibraryLock)" />
+    <_JetLibraryRunnerInput Include="$(JetLibraryEntry)" />
+    <_JetLibraryRunnerInput Include="$(JetLibraryInputs)" />
+    <_JetLibraryOutput Include="$(JetLibraryStamp)" />
+    <_JetLibraryOutput Include="$(JetLibraryReceipt)" />
+    <_JetLibraryOutput Include="$(JetLibraryHeader)" />
+    <_JetLibraryOutput Include="$(JetLibraryStatic)" Condition="'$(JetLibraryKind)' == 'static' Or '$(JetLibraryKind)' == 'both'" />
+    <_JetLibraryOutput Include="$(JetLibraryShared)" Condition="'$(JetLibraryKind)' == 'shared' Or '$(JetLibraryKind)' == 'both'" />
+    <_JetLibraryOutput Include="$(JetLibraryJetlib)" Condition="'$(JetLibraryLoadable)' == 'true'" />
+  </ItemGroup>
+
+  <Target Name="JetLibrary" Inputs="@(_JetLibraryDeclaredInput)" Outputs="@(_JetLibraryOutput)">
+    <MakeDir Directories="$(JetLibraryIntermediate)" />
+    <Exec Command="&quot;$(JetLibraryPowerShell)&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;$(JetLibraryRunner)&quot; -Jet &quot;$(JetExecutable)&quot; -Project &quot;$(JetLibraryRoot)&quot; -Entry &quot;$(JetLibraryEntry)&quot; -Output &quot;$(JetLibraryOutput)&quot; -Library &quot;$(JetLibraryName)&quot; -Dest &quot;$(JetLibraryIntermediate)&quot; -Kind &quot;$(JetLibraryKind)&quot; -Profile &quot;$(JetLibraryProfile)&quot; -Toolchain &quot;$(JetHostCompiler)&quot; $(JetLibraryLoadableArgument) -InputPath &quot;@(_JetLibraryRunnerInput-&gt;'%(Identity)','|')&quot;" WorkingDirectory="$(JetLibraryRoot)" />
+  </Target>
+
+  <Target Name="JetLibraryClean" AfterTargets="Clean">
+    <RemoveDir Directories="$(JetLibraryIntermediate)" />
+  </Target>
+</Project>

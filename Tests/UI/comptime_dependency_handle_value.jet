@@ -1,0 +1,9 @@
+// E1018: a compile-time value is data the build keeps, and a `Reader` is a
+// runtime handle with none, so `ct` can't carry the reader on to the later
+// `#run` sites. Reading inside one `#run` keeps only the data it returns.
+run: fn() {
+    ct: #run Reader.over([U8]{7, 9, 11})
+    ct_a: #run { ct.read_u8() ?? panic("ct a") }
+    ct_b: #run { ct.read_u8() ?? panic("ct b") }
+    print("{ct_a}|{ct_b}")
+}

@@ -1,8 +1,0 @@
-Error [jet.EffectBoundExceeded]: `uptime` uses the effect `Exec`, which a subscribed source doesn't allow
-  --> tests/ui/E0740_subscribe_source_runs_a_program.jet:11:28
-    |
- 11 |     binding: app.subscribe(uptime, "db1")
-    |                            ^^^^^^
- Why: A binding re-runs its source wherever its state is read, on a server or in a browser, so a source may only read the database (`DB.Read`), fetch over `Net` and wait on `Time`
- Fix: Keep `uptime` to `-[DB.Read, Net, Time]>`, and do the `Exec` work outside the source
-More: jet-lang.dev/e/E0740

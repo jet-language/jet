@@ -1,0 +1,6 @@
+# tests/compute_extended.rs::F32SimdMatmulKeepsVJPAndJvpOnTheCPUOracle: the original's literal expectations.
+# The f32 tile's VJP reads its f32 adjoint as the F64 oracle's profile; the JVP differentiates that read back to its f32 seed, so the tangent of an f32 tile stays in the F32 profile and adds to the tile's other tangents.
+fixture: F32SimdMatmulKeepsVJPAndJvpOnTheCPUOracle/Input
+step: jet run run.jet
+exit: 0 # tests/compute_extended.rs:161 assert_tiers_agree
+stdout: = "grad_left:[3.0]\ngrad_right:[2.0]\nvalue:[6.0]\ntangent:[5.0]\n" # tests/compute_extended.rs:161 assert_tiers_agree

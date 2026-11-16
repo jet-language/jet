@@ -1,0 +1,16 @@
+use ws: core.net.ws
+
+run: fn() {
+    cr: "\r"
+    hostiles: [String]{"ws://127.0.0.1/path{cr}\nInjected: yes", "ws://127.0.0.1{cr}\nInjected: yes/path"}
+    loop hostile in hostiles {
+        rejected: if ws.connect(hostile) == {
+            .Ok(_) -> false
+            .Err(error) -> if error == {
+                .InvalidURL -> true
+                .InvalidHandshake | .Protocol | .Timeout | .Closed | .Cancelled | .UnsupportedTarget | .MessageTooLarge(_) | .IO(_) -> false
+            }
+        }
+        assert(rejected)
+    }
+}

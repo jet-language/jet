@@ -1,0 +1,15 @@
+// Can a #Patchable type's Patch be decoded by field name from text today?
+use json :: core.encoding.json
+
+#[Patchable, Codable]
+struct Rock {
+    size: Float{1.0}
+    hard: Bool{true}
+}
+
+fn run() {
+    rock := Rock{}
+    patch :: json.decode<Rock.Patch>("{{\"size\": 2.0}}") ?? panic("decode")
+    rock = rock.apply(patch)
+    print(rock.size)
+}

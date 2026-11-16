@@ -1,0 +1,32 @@
+# A loop reads its list across the body, so lending that list to a write
+# parameter there (which can clear or refill it) is E0507, as calling a
+# changing method on it is; the row the loop holds is never read after the
+# callee changed the list. Lending another list, or the read list after the
+# loop, stays accepted and runs the same on every tier.
+fixture: ALoopRefusesLendingItsListForWriting.fixture
+env: NO_COLOR=1
+step check: jet check cleared.jet
+exit: 1
+stderr: ~ "Error [jet.CollectionChangedWhileRead]" # the lend is refused (E0507)
+stderr: ~ "lending `names` for writing to `clear_all`" # naming the lend and its callee
+step o0: jet run -O0 cleared.jet
+exit: == check
+stdout: = ""
+stderr: ~ "lending `names` for writing to `clear_all`" # the run stops at the same check
+step o1: jet run -O1 cleared.jet
+exit: == check
+stdout: = ""
+stderr: ~ "lending `names` for writing to `clear_all`" # the run stops at the same check
+step o2: jet run -O2 cleared.jet
+exit: == check
+stdout: = ""
+stderr: ~ "lending `names` for writing to `clear_all`" # the run stops at the same check
+step allowed: jet run -O0 allowed.jet
+exit: 0
+stdout: = "4|0\n"
+step: jet run -O1 allowed.jet
+exit: 0
+stdout: == allowed
+step: jet run -O2 allowed.jet
+exit: 0
+stdout: == allowed

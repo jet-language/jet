@@ -1,0 +1,24 @@
+#Target(Web)
+
+use web: core.web
+
+home: fn() -> WebPage { return web.page("H", "b") }
+
+dash: fn() -> WebPage { return web.page("D", "b") }
+
+plugins: fn(prefix: String) {}
+
+run: fn() {
+    web.app()
+        .route("/", home)
+        .ssg()
+        .route("/dash", dash)
+        .stream()
+        .island()
+        .mount("/plugins", plugins, "Net", "csrf")
+        .security("csp")
+        .cache("revalidate")
+        .split("dash")
+        .hydration_release()
+        .serve()
+}

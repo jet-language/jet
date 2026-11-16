@@ -1,0 +1,693 @@
+// Path case: every tracked folder is TitleCase, and every PascalCase word in a
+// folder or file name writes a lexicon acronym in its capitals (`Core/Net/TLS.jet`,
+// not `Tls.jet`). A name passes when its TitleCase spelling (path_case_title)
+// leaves it unchanged. That spelling is the one the tree was renamed by, and
+// it reads the acronyms from their one home, PATH_CASE_LEXICON. The only
+// folders that keep another spelling are the ones a language, a tool or the
+// test kit reads by name, each class listed below with the code or tool that
+// requires it.
+use {
+    apc_files: core.files
+    apc_process: core.process
+}
+
+PATH_CASE_LEXICON: "Compiler/JetFoundation/Data/Syntax/Acronyms.jet"
+
+// A kept name or tree and the rule that requires its spelling.
+PathCaseKept: struct {
+    pattern: String
+    why: String
+}
+
+// Folder names a tool or the test kit looks up by exact spelling, wherever
+// they sit: the folder and every name below it keep their spelling.
+PATH_CASE_TOOL_NAMES: [PathCaseKept]{
+    PathCaseKept{pattern: "node_modules", why: "Node resolves packages through `node_modules` by name"},
+    PathCaseKept{pattern: "vendor", why: "the go tool resolves vendored modules through `vendor` by name"},
+    PathCaseKept{pattern: "state", why: "the test kit plants a fixture's `state` tree as `.jet` by name, with the layout the tools read (kit_exec_copy_tree in Compiler/JetTestKit/Source/Exec.jet, Compiler/JetTestKit/Source/UI.jet)"},
+    PathCaseKept{pattern: "fixture-state", why: "the test kit plants a fixture's `fixture-state` tree as `.jet` by name, with the layout the tools read (kit_exec_copy_tree in Compiler/JetTestKit/Source/Exec.jet, Compiler/JetTestKit/Source/UI.jet)"},
+}
+
+// Folders Cargo finds beside a `Cargo.toml` by their default names.
+PATH_CASE_CARGO_NAMES: [String]{"src", "benches", "examples", "tests"}
+
+// Trees whose names below the pattern are data, not authored names. A `*`
+// segment matches any one folder.
+PATH_CASE_DATA: [PathCaseKept]{
+    PathCaseKept{pattern: "Core/Time/Tzdb", why: "IANA zone data: the folder and file names are the zone IDs a lookup matches"},
+    PathCaseKept{pattern: "Docs/Site/Dist", why: "the published site: names below it are URL paths, and every diagnostic prints jet-lang.dev/e/CODE"},
+    PathCaseKept{pattern: "Tools/Gauntlet/Entries/*/Fixtures", why: "a gauntlet fixture tree is the input a tool pair walks; both programs must report its names byte for byte"},
+    PathCaseKept{pattern: "Tests/AgentWorkloads", why: "agent workload tasks, inputs, expected outputs and baselines are frozen by hash, and the manifest and checksum files name them relative to the corpus root"},
+}
+
+// Folders that keep their own name while the names below them are checked.
+// A `*` segment matches any one folder.
+PATH_CASE_NAMED: [PathCaseKept]{
+    PathCaseKept{pattern: "Jetpack/Provider/Batteries/*", why: "a version dependency resolves a first-party battery to `Batteries/<package name>` (jet_cli_first_party_battery in Compiler/JetCLI/Source/CLI/Request.jet)"},
+}
+
+// A tool's fixed folder layout: the folder keeps its name and so do the names below it.
+PATH_CASE_TOOL_LAYOUTS: [PathCaseKept]{
+    PathCaseKept{pattern: "Tools/Editors/TreeSitter/src", why: "`tree-sitter generate` writes the parser into `src/` and the grammar's bindings read it there"},
+    PathCaseKept{pattern: "Tools/Editors/TreeSitter/test", why: "`tree-sitter test` reads its corpus from `test/corpus`"},
+    PathCaseKept{pattern: "Tools/Editors/Zed/languages", why: "Zed loads an extension's language configs and queries from `languages/` by name"},
+    PathCaseKept{pattern: "Tools/Editors/Zed/grammars", why: "Zed fetches and builds an extension's grammars into `grammars/` by name"},
+}
+
+// Trees that keep their own name as well as the names below it.
+PATH_CASE_KEPT_TREES: [PathCaseKept]{
+    PathCaseKept{pattern: "Tools/tower", why: "Tower keeps its board as `.tower` beside the app on the board branch, and the running `tower serve` watches that path; the folder moves only together with the board and a server restart"},
+}
+
+// The folder classes that keep their spelling by what the tree holds rather
+// than by where they sit.
+PathCaseClass: enum {
+    ModuleFolder
+    CargoFolder
+    CaseFixture
+    FixtureFolder
+    FixturesTree
+    TestProject
+    GoldenData
+}
+
+PathCaseClassRow: struct {
+    kind: PathCaseClass
+    why: String
+}
+
+PATH_CASE_CLASSES: [PathCaseClassRow]{
+    PathCaseClassRow{kind: .ModuleFolder, why: "a lowercase folder beside its `name.jet` holds that module's submodules, which the loader finds by the module's name (Compiler/JetDriver/Source/Driver/Loader.jet)"},
+    PathCaseClassRow{kind: .CargoFolder, why: "Cargo finds `src`, `benches`, `examples` and `tests` beside a `Cargo.toml` by their default names"},
+    PathCaseClassRow{kind: .CaseFixture, why: "the test kit copies the folder a case's `fixture:` line names as the case's work folder, and the steps name its contents by path (Compiler/JetTestKit/Source/Steps.jet)"},
+    PathCaseClassRow{kind: .FixtureFolder, why: "a `Name.fixture` folder reproduces a project as its users lay it out; its case steps, manifests and foreign build files name the paths inside it"},
+    PathCaseClassRow{kind: .FixturesTree, why: "a project two or more levels inside a `Fixtures` folder is laid out as its users lay it out; its case steps, manifests and foreign build files name these paths"},
+    PathCaseClassRow{kind: .TestProject, why: "the folders inside a test project under Tests/ (a folder holding run.jet, package.jet or workspace.jet) are its packages and data, named by its manifests and sources"},
+    PathCaseClassRow{kind: .GoldenData, why: "a Tests/Run folder with no `.jet` file at any depth is data its golden program reads by path at compile or run time"},
+}
+
+// Words the tree spells as one compound rather than one hump per word.
+PathCaseWord: struct {
+    word: String
+    spelling: String
+}
+
+PATH_CASE_DOMAIN_WORDS: [PathCaseWord]{
+    PathCaseWord{word: "corelib", spelling: "CoreLib"},
+    PathCaseWord{word: "jetos", spelling: "JetOS"},
+    PathCaseWord{word: "jetpack", spelling: "Jetpack"},
+    PathCaseWord{word: "devserver", spelling: "DevServer"},
+    PathCaseWord{word: "stdlib", spelling: "StdLib"},
+    PathCaseWord{word: "websocket", spelling: "WebSocket"},
+    PathCaseWord{word: "websockets", spelling: "WebSockets"},
+}
+
+// The acronym lexicon, keyed by each spelling in lowercase.
+PathCaseLexicon: struct {
+    acronyms: [String:String]
+    compounds: [String:String]
+    exceptions: [String:String]
+}
+
+// What the tracked tree holds, as the classes read it.
+PathCaseFacts: struct {
+    tracked: [String:Bool]
+    jet_folders: [String:Bool]
+    projects: [String:Bool]
+    modules: [String:Bool]
+    crates: [String:Bool]
+    fixture_roots: [String:Bool]
+}
+
+path_case_upper: fn(byte: U8) -> Bool Never! { Int{byte} >= 65 && Int{byte} <= 90 }
+
+path_case_lower: fn(byte: U8) -> Bool Never! { Int{byte} >= 97 && Int{byte} <= 122 }
+
+path_case_digit: fn(byte: U8) -> Bool Never! { Int{byte} >= 48 && Int{byte} <= 57 }
+
+// `_`, `-`, `.` or white space: a separator between the words of a name.
+path_case_separator: fn(byte: U8) -> Bool Never! {
+    code: Int{byte}
+    code == 95 || code == 45 || code == 46 || code == 32 || (code >= 9 && code <= 13)
+}
+
+path_case_uppers_end: fn(bytes: [U8], at: Int) -> Int {
+    end := at
+    loop end < bytes.len() && path_case_upper(bytes[end]) -> end += 1
+    end
+}
+
+path_case_lowers_end: fn(bytes: [U8], at: Int) -> Int {
+    end := at
+    loop end < bytes.len() && path_case_lower(bytes[end]) -> end += 1
+    end
+}
+
+path_case_digits_end: fn(bytes: [U8], at: Int) -> Int {
+    end := at
+    loop end < bytes.len() && path_case_digit(bytes[end]) -> end += 1
+    end
+}
+
+// The separator-free parts of a name. A single separator between two digits
+// joins them (`MuslErrno1_2_5` is one part).
+path_case_parts: fn(stem: String) -> [String] {
+    bytes: stem.bytes()
+    parts := [String]{}
+    start := 0
+    index := 0
+    loop index < bytes.len() {
+        if !path_case_separator(bytes[index]) {
+            index += 1
+            next
+        }
+        end := index
+        loop end < bytes.len() && path_case_separator(bytes[end]) -> end += 1
+        joined: end - index == 1 && index > 0 && end < bytes.len() && path_case_digit(bytes[index - 1]) && path_case_digit(bytes[end])
+        if !joined {
+            if index > start -> parts.push(policy_slice_bytes(stem, start, index))
+            start = end
+        }
+        index = end
+    }
+    if bytes.len() > start -> parts.push(policy_slice_bytes(stem, start, bytes.len()))
+    parts
+}
+
+// The end of the hump that starts at `at`, or `at` when none does. The humps,
+// tried in order: an acronym plural (`IDs`), an acronym run that stops before
+// a capitalized word (`HTTPServer` gives `HTTP`), a word (`Server`, `fixture2`),
+// a digit run with its lowercase tail (`2d`), and a `_` that joins digits.
+path_case_hump_end: fn(bytes: [U8], at: Int) -> Int {
+    count: bytes.len()
+    uppers: path_case_uppers_end(bytes, at)
+    run: uppers - at
+    if run >= 2 {
+        digits: path_case_digits_end(bytes, uppers)
+        if digits < count && (Int{bytes[digits]}) == 115 && (digits + 1 >= count || !path_case_lower(bytes[digits + 1])) -> return digits + 1
+    }
+    if run >= 1 {
+        if uppers >= count || !path_case_lower(bytes[uppers]) -> return path_case_digits_end(bytes, uppers)
+        if run >= 2 -> return uppers - 1
+        return path_case_digits_end(bytes, path_case_lowers_end(bytes, at + 1))
+    }
+    if path_case_lower(bytes[at]) -> return path_case_digits_end(bytes, path_case_lowers_end(bytes, at))
+    if path_case_digit(bytes[at]) -> return path_case_lowers_end(bytes, path_case_digits_end(bytes, at))
+    if (Int{bytes[at]}) == 95 && at + 1 < count && path_case_digit(bytes[at + 1]) -> return at + 1
+    at
+}
+
+// The words of a name: its parts split into humps. Bytes no hump takes are
+// dropped; a part with no hump at all is one word. A lowercase run right
+// after a word's digits is that number's unit or suffix (`100ms`, `65th`,
+// `4k`) and stays on the word, so a TitleCase name such as `Within100ms`
+// keeps the spelling its snake_case source `within_100ms` was given.
+path_case_words: fn(stem: String) -> [String] {
+    words := [String]{}
+    loop part in path_case_parts(stem) {
+        bytes: part.bytes()
+        found := false
+        at := 0
+        loop at < bytes.len() {
+            end: path_case_hump_end(bytes, at)
+            if end == at {
+                at += 1
+                next
+            }
+            hump: policy_slice_bytes(part, at, end)
+            if found && at > 0 && path_case_digit(bytes[at - 1]) && path_case_lower(bytes[at]) {
+                last: words.len() - 1
+                words[last] = "{words[last]}{hump}"
+            } else {
+                words.push(hump)
+            }
+            found = true
+            at = end
+        }
+        if !found -> words.push(part.copy())
+    }
+    words
+}
+
+// Whether a word is written in capitals: it has an uppercase letter and no
+// lowercase one, or it is an acronym plural (`[A-Z]{2,}[0-9]*s`).
+path_case_capitals: fn(word: String) -> Bool {
+    bytes: word.bytes()
+    upper := false
+    lower := false
+    loop byte in bytes {
+        if path_case_upper(byte) -> upper = true
+        if path_case_lower(byte) -> lower = true
+    }
+    if upper && !lower -> return true
+    uppers: path_case_uppers_end(bytes, 0)
+    uppers >= 2 && path_case_digits_end(bytes, uppers) == bytes.len() - 1 && (Int{bytes[bytes.len() - 1]}) == 115
+}
+
+// One word in TitleCase. A word already in capitals stays, a lexicon compound
+// or word exception takes its spelling, and an acronym (with trailing digits or
+// a plural `s`) takes its capitals; any other word is capitalized.
+path_case_title_word: fn(word: String, lexicon: PathCaseLexicon) -> String {
+    if word.bytes().len() > 1 && path_case_capitals(word) -> return word.copy()
+    lower: word.to_lower()
+    if lexicon.compounds.get(lower) == .Val(spelled) -> return spelled.copy()
+    if lexicon.exceptions.get(lower) == .Val(spelled) -> return spelled.copy()
+    bytes: lower.bytes()
+    letters := bytes.len()
+    loop letters > 0 && path_case_digit(bytes[letters - 1]) -> letters -= 1
+    head: policy_slice_bytes(lower, 0, letters)
+    digits: policy_slice_bytes(lower, letters, bytes.len())
+    if lexicon.acronyms.get(head) == .Val(acronym) -> return "{acronym}{digits}"
+    if letters > 2 && head.ends_with("s") {
+        if lexicon.acronyms.get(policy_slice_bytes(head, 0, letters - 1)) == .Val(acronym) -> return "{acronym}s{digits}"
+    }
+    "{policy_slice_bytes(lower, 0, 1).to_upper()}{policy_slice_bytes(lower, 1, bytes.len())}"
+}
+
+// A name stem in TitleCase with acronyms in capitals.
+path_case_title: fn(stem: String, lexicon: PathCaseLexicon) -> String {
+    out := ""
+    loop word in path_case_words(stem) {
+        lower: word.to_lower()
+        spelled := String?{None}
+        loop row in PATH_CASE_DOMAIN_WORDS {
+            if row.word == lower -> spelled = Val(row.spelling.copy())
+        }
+        out = if spelled == .Val(compound) -> "{out}{compound}" else -> "{out}{path_case_title_word(word, lexicon)}"
+    }
+    out
+}
+
+// The string literals on one line.
+path_case_quoted: fn(line: String) -> [String] {
+    pieces: line.split("\"").to_list()
+    out := [String]{}
+    loop index in 0..<pieces.len() {
+        if index % 2 == 1 && index + 1 < pieces.len() -> out.push(pieces[index].copy())
+    }
+    out
+}
+
+// The lexicon read from its home as text, so the guard needs no compiler package.
+path_case_lexicon: fn(source: String) -> PathCaseLexicon {
+    acronyms := [String:String]{}
+    compounds := [String:String]{}
+    exceptions := [String:String]{}
+    in_acronyms := false
+    loop line in source.lines() {
+        if in_acronyms {
+            if line.starts_with("}}") {
+                in_acronyms = false
+                next
+            }
+            loop word in path_case_quoted(line) -> acronyms[word.to_lower()] = word.copy()
+            next
+        }
+        if line.starts_with("ACRONYMS: [String]{{") -> in_acronyms = true
+        if line.starts_with("ACRONYM_COMPOUNDS:") {
+            words: path_case_quoted(line)
+            loop index in 0..<words.len() {
+                if index % 2 == 1 -> compounds[words[index - 1]] = words[index].copy()
+            }
+        }
+        if line.starts_with("ACRONYM_WORD_EXCEPTIONS:") {
+            loop word in path_case_quoted(line) -> exceptions[word.to_lower()] = word.copy()
+        }
+    }
+    assert(acronyms.len() > 50 && compounds.len() > 0 && exceptions.len() > 0, "read the acronym lexicon from {PATH_CASE_LEXICON}: found {acronyms.len()} acronyms, {compounds.len()} compounds and {exceptions.len()} word exceptions")
+    PathCaseLexicon{acronyms: acronyms, compounds: compounds, exceptions: exceptions}
+}
+
+// `[a-z][a-z0-9_]*`: a module name.
+path_case_snake: fn(word: String) -> Bool Never! {
+    bytes: word.bytes()
+    if bytes.len() == 0 || !path_case_lower(bytes[0]) -> return false
+    loop byte in bytes {
+        if !path_case_lower(byte) && !path_case_digit(byte) && byte != (U8{95}) -> return false
+    }
+    true
+}
+
+// A PascalCase file stem, `[A-Z][A-Za-z0-9]*` with a lowercase letter: the
+// only file names whose words are checked.
+path_case_pascal: fn(stem: String) -> Bool Never! {
+    bytes: stem.bytes()
+    if bytes.len() == 0 || !path_case_upper(bytes[0]) -> return false
+    lower := false
+    loop byte in bytes {
+        if path_case_lower(byte) {
+            lower = true
+            next
+        }
+        if !path_case_upper(byte) && !path_case_digit(byte) -> return false
+    }
+    lower
+}
+
+// What is wrong with a folder name, if anything. A `.suffix` (`Name.fixture`)
+// is a tool suffix and stays lowercase.
+path_case_folder_problem: fn(name: String, lexicon: PathCaseLexicon) -> String? {
+    stem: name.split(".").to_list()[0]
+    titled: path_case_title(stem, lexicon)
+    if titled == stem -> return None
+    Val("folder `{name}` is not TitleCase with acronyms in capitals; write `{titled}{policy_slice_bytes(name, stem.bytes().len(), name.bytes().len())}`")
+}
+
+// Whether `path` lies at or below a pattern (`*` matches one segment).
+path_case_under: fn(path: String, pattern: String) -> Bool {
+    segments: path.split("/").to_list()
+    wanted: pattern.split("/").to_list()
+    if segments.len() < wanted.len() -> return false
+    loop index in 0..<wanted.len() {
+        if wanted[index] != "*" && wanted[index] != segments[index] -> return false
+    }
+    true
+}
+
+path_case_depth: fn(path: String) -> Int { path.split("/").to_list().len() }
+
+path_case_data: fn(path: String) -> Bool {
+    loop row in PATH_CASE_DATA {
+        if path_case_under(path, row.pattern) && path_case_depth(path) > path_case_depth(row.pattern) -> return true
+    }
+    false
+}
+
+path_case_named: fn(path: String) -> Bool {
+    loop row in PATH_CASE_NAMED {
+        if path_case_under(path, row.pattern) && path_case_depth(path) == path_case_depth(row.pattern) -> return true
+    }
+    false
+}
+
+path_case_kept_tree: fn(path: String) -> Bool {
+    loop row in PATH_CASE_KEPT_TREES {
+        if path == row.pattern || path.starts_with("{row.pattern}/") -> return true
+    }
+    loop row in PATH_CASE_TOOL_LAYOUTS {
+        if path == row.pattern || path.starts_with("{row.pattern}/") -> return true
+    }
+    false
+}
+
+// Tool state (`.git`, `.agents`, `.jet`) and a folder a tool or the test kit
+// looks up by name keep their spelling, and so does everything below them.
+path_case_tool_owned: fn(segments: [String]) -> Bool {
+    loop segment in segments {
+        if segment.starts_with(".") -> return true
+        loop row in PATH_CASE_TOOL_NAMES {
+            if row.pattern == segment -> return true
+        }
+    }
+    false
+}
+
+// Whether the folder `segments` lies strictly below one of `roots` that has at
+// least `shortest` segments.
+path_case_below: fn(segments: [String], roots: [String:Bool], shortest: Int) -> Bool {
+    prefix := ""
+    loop index in 0..<segments.len() - 1 {
+        prefix = if index == 0 -> segments[0].copy() else -> "{prefix}/{segments[index]}"
+        if index + 1 >= shortest && roots.get(prefix) != None -> return true
+    }
+    false
+}
+
+path_case_fixture_folder: fn(segments: [String]) -> Bool {
+    loop index in 0..<segments.len() - 1 {
+        if segments[index].ends_with(".fixture") -> return true
+    }
+    false
+}
+
+path_case_fixtures_tree: fn(segments: [String]) -> Bool {
+    loop index in 0..<segments.len() - 1 {
+        if (segments[index] == "Fixtures" || segments[index] == "fixtures") && index + 1 < segments.len() - 1 -> return true
+    }
+    false
+}
+
+path_case_leaf: fn(path: String) -> String {
+    segments: path.split("/").to_list()
+    segments[segments.len() - 1].copy()
+}
+
+path_case_parent: fn(folder: String) -> String {
+    segments := folder.split("/").to_list()
+    _ := segments.pop()
+    segments.join("/")
+}
+
+path_case_class_keeps: fn(kind: PathCaseClass, folder: String, segments: [String], facts: PathCaseFacts) -> Bool {
+    name: segments[segments.len() - 1]
+    keeps: if kind == {
+        .ModuleFolder -> name == name.to_lower() && facts.tracked.get("{folder}.jet") != None
+        .CargoFolder -> PATH_CASE_CARGO_NAMES.contains(name) && facts.crates.get(path_case_parent(folder)) != None
+        .CaseFixture -> path_case_below(segments, facts.fixture_roots, 1)
+        .FixtureFolder -> path_case_fixture_folder(segments)
+        .FixturesTree -> path_case_fixtures_tree(segments)
+        .TestProject -> segments.len() > 1 && segments[0] == "Tests" && segments[1] != "Guards" && path_case_below(segments, facts.projects, 3)
+        .GoldenData -> folder.starts_with("Tests/Run/") && facts.jet_folders.get(folder) == None
+    }
+    keeps
+}
+
+// Whether a folder keeps its spelling, by name, by place or by class.
+path_case_kept: fn(folder: String, facts: PathCaseFacts) -> Bool {
+    segments: folder.split("/").to_list()
+    if path_case_tool_owned(segments) || path_case_data(folder) || path_case_kept_tree(folder) || path_case_named(folder) -> return true
+    loop row in PATH_CASE_CLASSES {
+        if path_case_class_keeps(row.kind, folder, segments, facts) -> return true
+    }
+    false
+}
+
+path_case_tracked: fn() -> [String] {
+    listed: apc_process.cmd([String]{"git", "-c", "core.quotePath=false", "ls-files"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git ls-files: {err}")
+    assert(listed.code == 0, "git ls-files failed: {apc_process.combined_output(listed).trim()}")
+    paths := [String]{}
+    loop line in apc_process.stdout_lines(listed) {
+        if line.len() > 0 -> paths.push(line.copy())
+    }
+    paths
+}
+
+// `path` with `.` and `..` segments resolved.
+path_case_normal: fn(path: String) -> String {
+    out := [String]{}
+    loop segment in path.split("/") {
+        if segment == "" || segment == "." -> next
+        if segment == ".." && out.len() > 0 && out[out.len() - 1] != ".." {
+            _ := out.pop()
+            next
+        }
+        out.push(segment.copy())
+    }
+    out.join("/")
+}
+
+// The folder one `git grep` line `case:fixture: value` names: a single plain
+// or quoted path, relative to the case's folder, as the kit's `fixture:` key
+// reads it (Compiler/JetTestKit/Source/Steps.jet).
+path_case_fixture_root: fn(line: String) -> String? {
+    halves: line.split(":fixture:").to_list()
+    if halves.len() != 2 -> return None
+    value := halves[1].trim().copy()
+    if value == "" || value.contains(" ") || value.contains("\t") -> return None
+    if value.starts_with("\"") && value.ends_with("\"") && value.bytes().len() >= 2 -> value = policy_slice_bytes(value, 1, value.bytes().len() - 1)
+    Val(path_case_normal("{path_case_parent(halves[0])}/{value}"))
+}
+
+path_case_fixture_roots: fn() -> [String] {
+    listed: apc_process.cmd([String]{"git", "-c", "core.quotePath=false", "grep", "-I", "-E", "-e", "^fixture:", "--", "*.case"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git grep: {err}")
+    assert(listed.code == 0, "git grep for `fixture:` lines failed: {apc_process.combined_output(listed).trim()}")
+    roots := [String]{}
+    loop line in apc_process.stdout_lines(listed) {
+        if path_case_fixture_root(line) == .Val(root) -> roots.push(root)
+    }
+    roots
+}
+
+path_case_facts: fn(tracked: [String], fixture_roots: [String]) -> PathCaseFacts {
+    paths := [String:Bool]{}
+    jet_folders := [String:Bool]{}
+    projects := [String:Bool]{}
+    modules := [String:Bool]{}
+    crates := [String:Bool]{}
+    roots := [String:Bool]{}
+    loop path in tracked {
+        paths[path] = true
+        segments: path.split("/").to_list()
+        if segments.len() < 2 -> next
+        leaf: segments[segments.len() - 1]
+        parent: path_case_parent(path)
+        if leaf == "run.jet" || leaf == "package.jet" || leaf == "workspace.jet" -> projects[parent] = true
+        if leaf == "module.jet" -> modules[parent] = true
+        if leaf == "Cargo.toml" -> crates[parent] = true
+        if !path.ends_with(".jet") -> next
+        prefix := ""
+        loop index in 0..<segments.len() - 1 {
+            prefix = if index == 0 -> segments[0].copy() else -> "{prefix}/{segments[index]}"
+            jet_folders[prefix.copy()] = true
+        }
+    }
+    loop root in fixture_roots -> roots[root] = true
+    PathCaseFacts{tracked: paths, jet_folders: jet_folders, projects: projects, modules: modules, crates: crates, fixture_roots: roots}
+}
+
+// Every tracked folder, once each, sorted.
+path_case_folders: fn(tracked: [String]) -> [String] {
+    seen := [String:Bool]{}
+    folders := [String]{}
+    loop path in tracked {
+        segments: path.split("/").to_list()
+        prefix := ""
+        loop index in 0..<segments.len() - 1 {
+            prefix = if index == 0 -> segments[0].copy() else -> "{prefix}/{segments[index]}"
+            if seen.get(prefix) != None -> next
+            seen[prefix.copy()] = true
+            folders.push(prefix.copy())
+        }
+    }
+    folders.sort()
+    folders
+}
+
+// Every tracked folder or file name that breaks the rule, sorted. A file is
+// checked only when its folder is not kept.
+path_case_findings: fn(tracked: [String], fixture_roots: [String], lexicon: PathCaseLexicon) -> [String] {
+    facts: path_case_facts(tracked, fixture_roots)
+    findings := [String]{}
+    kept := [String:Bool]{}
+    loop folder in path_case_folders(tracked) {
+        name: path_case_leaf(folder)
+        if path_case_kept(folder, facts) {
+            kept[folder] = true
+            next
+        }
+        if facts.modules.get(folder) != None {
+            // `name: module` loads `name/module.jet`, and a module name is snake_case.
+            if !path_case_snake(name) -> findings.push("{folder}: directory module `{name}` is named like its `name: module` declaration, in snake_case")
+            next
+        }
+        if path_case_folder_problem(name, lexicon) == .Val(problem) -> findings.push("{folder}: {problem}")
+    }
+    loop path in tracked {
+        segments: path.split("/").to_list()
+        if segments.len() > 1 && kept.get(path_case_parent(path)) != None -> next
+        stem: segments[segments.len() - 1].split(".").to_list()[0]
+        if !path_case_pascal(stem) -> next
+        respelled: path_case_title(stem, lexicon)
+        if respelled != stem -> findings.push("{path}: `{stem}` writes an acronym in lowercase; write `{respelled}`")
+    }
+    findings.sort()
+    findings
+}
+
+path_case_read_lexicon: fn() -> PathCaseLexicon {
+    path_case_lexicon(apc_files.read(PATH_CASE_LEXICON) ?? panic("read {PATH_CASE_LEXICON}: {err}"))
+}
+
+#Test("acronym_path_case: every tracked folder is TitleCase and every name writes acronyms in capitals") {
+    guards_enter_root()
+    findings: path_case_findings(path_case_tracked(), path_case_fixture_roots(), path_case_read_lexicon())
+    assert(findings.len() == 0, "{findings.len()} tracked names break the path case rule:\n{findings.join("\n")}")
+}
+
+#Test("acronym_path_case: TitleCase respells words and keeps acronyms, digits and plurals") {
+    guards_enter_root()
+    lexicon: path_case_read_lexicon()
+    assert_eq(path_case_title("closed_lists", lexicon), "ClosedLists")
+    assert_eq(path_case_title("Tls", lexicon), "TLS")
+    assert_eq(path_case_title("jet_cli", lexicon), "JetCLI")
+    assert_eq(path_case_title("HTTPServer", lexicon), "HTTPServer")
+    assert_eq(path_case_title("IDs", lexicon), "IDs")
+    assert_eq(path_case_title("macos_ipv6", lexicon), "MacOSIPv6")
+    assert_eq(path_case_title("wasm_bindgen", lexicon), "WasmBindgen")
+    assert_eq(path_case_title("websocket_corelib", lexicon), "WebSocketCoreLib")
+    assert_eq(path_case_title("2393R1", lexicon), "2393R1")
+    assert_eq(path_case_title("MuslErrno1_2_5", lexicon), "MuslErrno1_2_5")
+    assert_eq(path_case_title("within_100ms", lexicon), "Within100ms")
+    assert_eq(path_case_title("Within100ms", lexicon), "Within100ms")
+    assert_eq(path_case_title("FixedReturn64k", lexicon), "FixedReturn64k")
+}
+
+#Test("acronym_path_case: the rule refuses a lowercase folder and a lowered acronym, and keeps the kept classes") {
+    guards_enter_root()
+    planted: [String]{
+        "Core/Net/Tls.jet",
+        "Core/Net/TLS.jet",
+        "Tests/cases/Basic.case",
+        "Tools/Thing/node_modules/pkg/Index.js",
+        "Tools/Crate/Cargo.toml",
+        "Tools/Crate/src/main.rs",
+        "Examples/App/geo/module.jet",
+        "Docs/Site/Dist/e/E0001.html",
+        "Tests/Cases/Big.fixture/main.jet",
+        "Tests/Cases/Topic/Case/Input/o1/run.jet",
+        "Tests/Run/Topic/Program/run.jet",
+        "Tests/Run/Topic/Program/inputs/a.txt",
+        "Tests/Guards/closed_lists.jet",
+        "Tests/Guards/closed_lists/baseline.tsv",
+        "Docs/Audits/Raw/2393R1/notes.md",
+        "Jetpack/Provider/Batteries/web/package.jet",
+    }
+    findings: path_case_findings(planted, [String]{"Tests/Cases/Topic/Case/Input"}, path_case_read_lexicon())
+    assert(findings.len() == 2, "expected the lowered acronym and the lowercase folder, got:\n{findings.join("\n")}")
+    assert(findings[0].starts_with("Core/Net/Tls.jet:"), "the lowered acronym is reported: {findings[0]}")
+    assert(findings[1].starts_with("Tests/cases:"), "the lowercase folder is reported: {findings[1]}")
+    assert_eq(path_case_fixture_root("Tests/Cases/A/B.case:fixture: \"../Shared/Input\"") ?? "", "Tests/Cases/Shared/Input")
+}
+
+#Test("acronym_path_case: every kept row names a tracked path") {
+    guards_enter_root()
+    tracked: path_case_tracked()
+    facts: path_case_facts(tracked, path_case_fixture_roots())
+    folders: path_case_folders(tracked)
+    loop row in PATH_CASE_TOOL_NAMES {
+        found := false
+        loop folder in folders {
+            if folder == row.pattern || folder.ends_with("/{row.pattern}") {
+                found = true
+                break
+            }
+        }
+        assert(found, "PATH_CASE_TOOL_NAMES names no tracked folder; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_DATA {
+        assert(path_case_matches_below(tracked, row.pattern), "PATH_CASE_DATA names no tracked path below it; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_NAMED {
+        assert(path_case_matches_any(folders, row.pattern), "PATH_CASE_NAMED names no tracked folder; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_KEPT_TREES {
+        assert(path_case_matches_any(folders, row.pattern), "PATH_CASE_KEPT_TREES names no tracked folder; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_TOOL_LAYOUTS {
+        assert(path_case_matches_any(folders, row.pattern), "PATH_CASE_TOOL_LAYOUTS names no tracked folder; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_CLASSES {
+        found := false
+        loop folder in folders {
+            if path_case_class_keeps(row.kind, folder, folder.split("/").to_list(), facts) {
+                found = true
+                break
+            }
+        }
+        assert(found, "PATH_CASE_CLASSES keeps no tracked folder; delete its row: {row.why}")
+    }
+}
+
+path_case_matches_any: fn(paths: [String], pattern: String) -> Bool {
+    loop path in paths {
+        if path_case_under(path, pattern) -> return true
+    }
+    false
+}
+
+path_case_matches_below: fn(paths: [String], pattern: String) -> Bool {
+    loop path in paths {
+        if path_case_under(path, pattern) && path_case_depth(path) > path_case_depth(pattern) -> return true
+    }
+    false
+}

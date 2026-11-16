@@ -1,0 +1,15 @@
+use math: core.math
+
+// The JS caller pulls the helper's bucket to JS.
+#Target(JS)
+label: fn(a: Int, b: Int) -> Int { return math.gcd(a, b) }
+
+// The Wasm pin calls the same pure Core helper.
+#Target(Wasm)
+reduce: fn(a: Int, b: Int) -> Int { return math.gcd(a, b) * 2 }
+
+#Export(wasm)
+compute: fn(a: Int, b: Int) -> Int { return reduce(a, b) }
+
+#Target(JS)
+run: fn() { print(label(12, 18) + compute(12, 18)) }

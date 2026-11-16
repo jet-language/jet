@@ -161,7 +161,7 @@ jet_driver_comptime_input_record: fn(recorder: Shared<JetDriverComptimeInputLog>
 }
 
 // Whether `bytes` are still the bytes the compile read for `record`, a file
-// read: a rebuild's test of a comptime input it watches (JetCli `jet dev`).
+// read: a rebuild's test of a comptime input it watches (JetCLI `jet dev`).
 jet_driver_comptime_input_unchanged: fn(record: JetDriverComptimeInputRecord, bytes: [U8]) -> Bool Never! {
     comptime_inputs_crypto.sha256(bytes).hex() == record.sha256
 }
@@ -182,7 +182,7 @@ jet_driver_comptime_glob_digest: fn(inputs: JetDriverSharedBuildInputs, base_dir
 
 // The membership digest the `find` `record` names has now: the record's
 // `sha256` while the glob matches the files it matched. A rebuild's test and
-// stamp of a glob it watches (JetCli `jet dev`).
+// stamp of a glob it watches (JetCLI `jet dev`).
 jet_driver_comptime_glob_membership: fn(inputs: JetDriverSharedBuildInputs, record: JetDriverComptimeInputRecord) -[FS.Read]> String? {
     jet_driver_comptime_glob_digest(inputs, record.file.removesuffix("/{record.glob}"), record.glob)
 }

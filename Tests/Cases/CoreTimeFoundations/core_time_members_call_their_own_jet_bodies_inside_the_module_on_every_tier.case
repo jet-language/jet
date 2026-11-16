@@ -1,0 +1,19 @@
+# core.time members have one meaning, their Jet body. A member called from
+# inside its own module (time calls local_time, datetime calls new and
+# local_time, Zone.start_of_day calls from_timestamp, LocalDate.format calls
+# local_time) runs the same body an outside caller gets, so each line's
+# spellings agree, on every tier.
+fixture: CoreTimeMembersCallTheirOwnJetBodiesInsideTheModuleOnEveryTier.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = core_time_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.out
+step o1: jet run -O1 main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = core_time_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.out
+step o2: jet run -O2 main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = core_time_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.out

@@ -1,0 +1,10 @@
+# Claim: `jet run` of a small program opens the jet's own file once and keeps that one descriptor for every read of it: the part table, the Core bodies records and the runtime image the loader maps; the run prints what it always did
+requires: os-name:linux
+requires: tool:strace
+fixture: JetRunOpensItsOwnFileOnce.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step: strace -f -qq -e trace=open,openat -o {work}/run.trace {jet} run main.jet
+exit: 0
+stdout: = "hello\n"
+file.filter(where ~ "/proc/self/exe"): run.trace lines = 1 # the one open of the jet's own file; each read is a pread on that descriptor

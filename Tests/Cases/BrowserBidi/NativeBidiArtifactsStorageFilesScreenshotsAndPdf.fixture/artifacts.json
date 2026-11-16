@@ -1,0 +1,67 @@
+{
+ "max": 40,
+ "stop": "session.end",
+ "replies": {
+  "session.status": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"ready\":true,\"message\":\"ready\"}}"
+  },
+  "session.new": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"sessionId\":\"mock-session\",\"capabilities\":{\"browserName\":\"mock\",\"browserVersion\":\"1\"}}}"
+  },
+  "browser.createUserContext": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"userContext\":\"user-1\"}}"
+  },
+  "browsingContext.create": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"context\":\"page-1\"}}"
+  },
+  "browsingContext.navigate": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"url\":\"https://example.test/app\",\"navigation\":\"nav-1\"}}"
+  },
+  "storage.setCookie": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "storage.deleteCookies": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "browser.setDownloadBehavior": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "browsingContext.close": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "browser.removeUserContext": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "session.end": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "input.setFiles": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  },
+  "storage.getCookies": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"cookies\":[{\"name\":\"session\",\"value\":{\"type\":\"string\",\"value\":\"cookie-SECRET\"},\"domain\":\"example.test\",\"path\":\"/\"}],\"partitionKey\":{\"userContext\":\"user-1\"}}}"
+  },
+  "script.callFunction": {
+   "if_contains": "getItem",
+   "then": "{\"result\":{\"type\":\"string\",\"value\":\"stored-SECRET\"}}",
+   "else": "{\"result\":{\"type\":\"undefined\"}}"
+  },
+  "browsingContext.captureScreenshot": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"data\":\"iVBORw0KGgo=\"}}"
+  },
+  "browsingContext.print": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"data\":\"JVBERi0xLjQ=\"}}"
+  },
+  "browsingContext.locateNodes": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{\"nodes\":[{\"type\":\"node\",\"sharedId\":\"file-node-{n}\"}]}}"
+  },
+  "session.subscribe": {
+   "frame": "{\"type\":\"success\",\"id\":{id},\"result\":{}}"
+  }
+ },
+ "after": {
+  "session.subscribe": [
+   "{\"type\":\"event\",\"method\":\"browsingContext.downloadWillBegin\",\"params\":{\"context\":\"page-1\",\"navigation\":\"nav-dl\",\"timestamp\":1.0,\"url\":\"https://cdn.example/SECRET_REPORT.pdf\",\"download\":\"dl-1\",\"suggestedFilename\":\"SECRET_REPORT.pdf\"}}"
+  ]
+ }
+}

@@ -1,0 +1,56 @@
+use time: core.time
+
+// A type that holds a Clock through a part of its own type copies through its
+// generated fork function: every Clock in the whole value forks at every
+// depth, and the original's clocks stay put.
+Node: struct {
+    label: String
+    clock: time.Clock
+    kids: [Node]
+}
+
+Tree: enum {
+    Leaf(time.Clock)
+    Branch(label: String, kids: [Tree])
+}
+
+first_leaf_now: fn(tree: Tree) -> Int {
+    if tree == {
+        .Leaf(clock) -> clock.now()
+        .Branch(_, kids) -> first_leaf_now(kids[0])
+    }
+}
+
+run: fn() {
+    leaf: Node{label: "leaf", clock: time.Clock.new(10), kids: [Node]{}}
+    root: Node{label: "root", clock: time.Clock.new(0), kids: [Node]{leaf}}
+    copied := root.copy()
+    assert_eq(copied.clock.advance(2), 2)
+    assert_eq(copied.kids[0].clock.advance(15), 15)
+    assert_eq(root.clock.now(), 0)
+    assert_eq(root.kids[0].clock.now(), 10)
+    assert_eq(copied.kids[0].label, "leaf")
+    tree: Tree.Branch{label: "top", kids: [Tree]{Tree.Branch{label: "mid", kids: [Tree]{Tree.Leaf(time.Clock.new(5))}}}}
+    forked := tree.copy()
+    if forked == {
+        .Branch(label, kids) -> {
+            assert_eq(label, "top")
+            if kids[0] == {
+                .Branch(_, inner) -> {
+                    if inner[0] == {
+                        .Leaf(clock) -> {
+                            ticking := clock
+                            assert_eq(ticking.advance(8), 8)
+                        }
+                        .Branch(_, _) -> {}
+                    }
+                }
+                .Leaf(_) -> {}
+            }
+        }
+        .Leaf(_) -> {}
+    }
+    assert_eq(first_leaf_now(forked), 8)
+    assert_eq(first_leaf_now(tree), 5)
+    print("forked")
+}

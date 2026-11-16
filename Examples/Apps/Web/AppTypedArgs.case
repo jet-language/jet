@@ -7,7 +7,7 @@ host-port: 9000
 spawn server: built --port=9000
 stdout: file server.stdout
 stderr: file server.stderr
-poll ready: {jet} run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:9000 / - write until exit: 0 && stdout: ^= "HTTP/1.1 404" timeout 60s every 50ms # the app answers on the parsed port
+poll ready: {jet} run {root}/Tests/Cases/WebBrowser/Fixtures/http-ready.jet 127.0.0.1:9000 / - write until exit: 0 && stdout: ^= "HTTP/1.1 404" timeout 60s every 50ms # the app answers on the parsed port
 signal server: KILL
 wait: server
 exit: any # the example serves until stopped; the case kills it

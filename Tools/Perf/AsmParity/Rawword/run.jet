@@ -1,0 +1,65 @@
+// The memory kernel's raw word access (a pointer's offset, its read through
+// `.*` and its write through `mem.volatile_write`): 4096 operations over one
+// block of 8192 words, each reading the word at one index and writing it
+// plus the operation's step at another. `n` passes over them; the sum is
+// every word read.
+use mem: core.mem
+
+#CLI
+Args: struct {
+    n: Int
+}
+
+// One read at word `from` and one write at word `to` of the word read plus
+// `step`. The indexes are U32, as the reference's table holds them.
+Op: struct {
+    from: U32
+    to: U32
+    step: I64
+}
+
+OPS: 4096
+
+WORDS: 8192
+
+// The next state of a 31-bit linear congruential generator.
+next: fn(state: Int) -> Int { (state * 1103515245 + 12345).bit_and(2147483647) }
+
+// The operations: per operation one draw gives the two indexes (bits 0-12
+// and 13-25) and the step (bits 26-30).
+operations: fn() -> [Op] {
+    ops := [Op]{}
+    state := 12345
+    loop _ in 0..<OPS {
+        state = next(state)
+        ops.push(Op{from: U32{state.bit_and(WORDS - 1)}, to: U32{(state >> 13).bit_and(WORDS - 1)}, step: I64{(state >> 26).bit_and(31)}})
+    }
+    ops
+}
+
+run: fn(args: Args) {
+    passes: if args.n > 0 -> args.n else -> 1
+    ops: operations()
+    total := I64{0}
+    #Unsafe("the block holds WORDS words, every index is below WORDS, and the block is freed once after the passes") {
+        block: mem.alloc_raw(WORDS * 8, 4096) ?? panic("no memory")
+        words: block.cast<I64>()
+        mem.fill<I64>(words, I64{0}, WORDS)
+        loop _ in 0..<passes {
+            loop op in ops {
+                // A use is the line of its access alone: the indexes, the
+                // step and the sum written are the work's, computed before
+                // it, as the reference computes them.
+                from: op.from
+                to: op.to
+                step: op.step
+                value: words.offset(from).*
+                next: wrapping(value + step)
+                mem.volatile_write(words.offset(to), next)
+                total = wrapping(total + value)
+            }
+        }
+        mem.free_raw(block)
+    }
+    print("sum {total}")
+}

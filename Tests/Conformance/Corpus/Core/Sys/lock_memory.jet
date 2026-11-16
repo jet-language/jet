@@ -1,0 +1,11 @@
+// core-conformance: core.sys.lock_memory
+use os: core.sys
+
+run: fn() {
+    // Locked or refused by the locked-memory limit: both are a typed answer.
+    answered: if os.lock_memory() == {
+        .Ok(ok) -> true
+        .Err(error) -> true
+    }
+    print(answered)
+}

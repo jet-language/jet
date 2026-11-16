@@ -1,0 +1,59 @@
+// Each closure method below runs on a temporary receiver (a List or Map no
+// variable holds) a few hundred thousand times. The method only lends the
+// receiver, so it ends after the call: the resident set stays where it was.
+// A receiver kept alive past its call would add one List or Map per step,
+// tens of megabytes in all. A fold whose step is `acc + x` evaluates its
+// receiver once.
+package: {
+    name: "temporary_receivers"
+    authority: { allow: [FS, FS.Read, IO, Mem.Alloc] }
+}
+
+use files: core.files
+
+STEPS: 300000
+
+GROWTH_BOUND_KB: 8192
+
+// A /proc status field's number ("VmRSS:\t 123 kB").
+census: fn(prefix: String) -[FS]> Int {
+    text: files.read("/proc/self/status") ?? panic("read status")
+    loop line in text.lines() {
+        if line.starts_with(prefix) {
+            return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        }
+    }
+    -1
+}
+
+words: fn(form: String) -> [String] { form.split(" ").to_list().filter(fn(word) { word != "" }) }
+
+lengths: fn(form: String) -> [Int] { form.split(" ").to_list().map(fn(word) { word.len() }) }
+
+scores: fn(seed: Int) -> [String:Int] {
+    [String:Int]{"one": seed, "two": seed + 1, "three": seed + 2}
+}
+
+run: fn() {
+    // Warm the allocator's classes before the first reading.
+    total := words("build  --target x86_64 <path>").len() + lengths("a bb").len()
+    before: census("VmRSS:")
+    loop step in 0..<STEPS {
+        total += words("build  --target x86_64 <path> now").len()
+        total += lengths("build --target x86_64").len()
+        zero: [Int]{step, 0, step + 1}.any(fn(x) { x == 0 })
+        if zero -> total += 1
+        total += [Int]{step, 1, 2}.fold(0, fn(acc, x) { acc + x })
+        total += scores(step).filter(fn(name, score) { score > step }).len()
+    }
+    after: census("VmRSS:")
+    print("steps {STEPS} total {total > 0}")
+    print("resident growth under 8 MiB {before > 0 && after - before < GROWTH_BOUND_KB}")
+    folded: produce().fold(0, fn(acc, x) { acc + x })
+    print("fold {folded}")
+}
+
+produce: fn() -> [Int] {
+    print("receiver made")
+    [Int]{1, 2, 3}
+}

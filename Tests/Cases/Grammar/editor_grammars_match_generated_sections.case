@@ -1,0 +1,37 @@
+# Original tests/grammar.rs:95-123; verbatim sources and original predicates.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference-run or PASS claim.
+copy: {root}/Tests/Cases/Grammar/Support.fixture/Section.jet oracle/run.jet
+copy: {root}/Tools/Editors/Vscode/Syntaxes/jet.tmLanguage.json Tools/Editors/Vscode/Syntaxes/jet.tmLanguage.json
+step original0: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/Vscode/Syntaxes/jet.tmLanguage.json
+exit: 0
+copy: {root}/Tools/Editors/jet.tmGrammar Tools/Editors/jet.tmGrammar
+step original1: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/jet.tmGrammar
+exit: 0
+copy: {root}/Tools/Editors/TreeSitter/grammar.js Tools/Editors/TreeSitter/grammar.js
+step original2: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/TreeSitter/grammar.js
+exit: 0
+copy: {root}/Tools/Editors/Zed/languages/jet/highlights.scm Tools/Editors/Zed/languages/jet/highlights.scm
+step original3: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/Zed/languages/jet/highlights.scm
+exit: 0
+step: jet self devtools grammars
+exit: 0
+step: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/Vscode/Syntaxes/jet.tmLanguage.json
+exit: 0
+stdout: == original0
+step: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/jet.tmGrammar
+exit: 0
+stdout: == original1
+step: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/TreeSitter/grammar.js
+exit: 0
+stdout: == original2
+step: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/Zed/languages/jet/highlights.scm
+exit: 0
+stdout: == original3

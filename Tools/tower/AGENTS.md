@@ -54,7 +54,7 @@ tower docs list|show|add|update|archive|delete   # durable Docs/*.md + scratchpa
 tower lint [--json]          # durability sweeper over the live board; exit 1
                               # on any finding, 0 clean
 jet Tools/tower/Board.jet lint --docs [--docs-root DIR] [--json]
-                              # Docs/spec/** reference scan, read-only; exit 1
+                              # Docs/Spec/** reference scan, read-only; exit 1
                               # on any finding, 0 clean
 tower question list --open   # owner questions — block only affected slices
 tower message list [--all]   # open card messages, or every one with --all
@@ -100,8 +100,8 @@ Use ballots, owner verification, messages, and card closures for owner work.
 Cards may carry free-form **`tags[]`** (triage roles like `needs-triage` /
 `ready-for-agent`, wayfinder labels like `wayfinder:map`) and an optional
 **`parentId`** (child of a wayfinder map). These are orthogonal to `phase`
-— do not encode triage state in phases. See `Docs/spec/contributing/issue-tracker.md`
-and `Docs/spec/contributing/triage-labels.md` in the host repo.
+— do not encode triage state in phases. See `Docs/Spec/Contributing/issue-tracker.md`
+and `Docs/Spec/Contributing/triage-labels.md` in the host repo.
 
 LAN note: Tower is keyless on the local network. Every LAN device can read
 and change the board; do not expose the server to the public Internet.
@@ -131,7 +131,7 @@ Always pass `--by <your-agent-name>`.
   tower card claim '#12' --by me                # renewable lease vs double work
 tower card update '#12' --phase building --log "started X" --by me
 tower card update '#12' --plan "1. ... 2. ..." --by me
-tower card update '#12' --refs "Docs/spec/foo.md,Examples/bar.jet"  # explicit doc pointers (also auto-harvested from body/plan into `tower brief`)
+tower card update '#12' --refs "Docs/Spec/foo.md,Examples/bar.jet"  # explicit doc pointers (also auto-harvested from body/plan into `tower brief`)
 tower question answer <qid> --text "..." --by me
 tower message add '#12' --text "..." --by me
 tower message done <id> --by owner
@@ -202,7 +202,7 @@ run that counts old matches per file, per section and per rule. `tower redact
 and logs one `board.redact` event naming the rule table. On a board with
 nothing left to redact it writes nothing. This is the one change ratified
 text may take, because the owner ordered it and it keeps the meaning.
-`jet Tools/agent/LaneCheck.jet --personal-info` applies the same rules to every
+`jet Tools/Agent/LaneCheck.jet --personal-info` applies the same rules to every
 checked-in file, and every lane check runs it first.
 
 Flag a card `needsAcceptance` **only** when the owner must judge look-and-feel
@@ -240,7 +240,7 @@ source, then record the closeout token and check it before broad proof:
 
 ```
 tower milestone closeout <id> --commit "$(git rev-parse HEAD)" --by orchestrator
-jet Tools/agent/CloseoutGate.jet check <id>
+jet Tools/Agent/CloseoutGate.jet check <id>
 tower milestone criteria <id> --meet 1 --evidence "built" --by orchestrator
 tower milestone criteria <id> --verify 1 --evidence "reviewed" --by reviewer
 tower milestone verify <id> --evidence "milestone review complete" --by reviewer
@@ -333,7 +333,7 @@ its own function, returning `{rule, ref, msg}` findings):
 | `blocker-unpopulated` | epoch-track `planning` card with a plan but empty `blockedBy` (and no `blockedBy: none` marker) — D-TWR-OPS2 |
 
 `jet Tools/tower/Board.jet lint --docs` scans every text spec file under
-`Docs/spec/**`. It reports card and decision IDs that have no live or
+`Docs/Spec/**`. It reports card and decision IDs that have no live or
 historical Tower record (`spec-card-ref-missing`, `spec-decision-ref-missing`).
 This keeps Tower as the decision home while the spec remains its rendered
 reading surface. It reads the board read-only and needs no node.
@@ -341,7 +341,7 @@ reading surface. It reads the board read-only and needs no node.
 ```
 tower lint                 # human output: one line per finding, exit 1/0
 tower lint --json          # machine output
-jet Tools/tower/Board.jet lint --docs          # scan Docs/spec/** references
+jet Tools/tower/Board.jet lint --docs          # scan Docs/Spec/** references
 jet Tools/tower/Board.jet lint --docs --json   # the same findings as JSON
 jet Tools/tower/Board.jet lint --docs --docs-root DIR  # override the docs root (default: <project>/Docs)
 ```
@@ -415,7 +415,7 @@ tower board check                 # exit 1 (E_BOARD_STALE) when the committed
 ## Gauntlet standings (#6834)
 
 The Gauntlet page shows one run and nothing older: the newest full-matrix
-results file of `Tools/gauntlet/harness/run.mjs` (a whole run, or a
+results file of `Tools/Gauntlet/Harness/run.mjs` (a whole run, or a
 `--languages … --merge` run). Partial runs are never shown. The page names the
 run: its id, date and commit (the harness records `provenance.commit`; an older
 file says "commit not recorded"), and for a merged run the run it merged into.
@@ -456,7 +456,7 @@ every shared library including libc; web artifact; bundle; script+runtime),
 and each size bar names its basis.
 
 The page shows the gauntlet table, `$JET_STATE_ROOT/gauntlet/table.json`
-(`Tools/gauntlet/harness/table.mjs`): the one durable record of every
+(`Tools/Gauntlet/Harness/table.mjs`): the one durable record of every
 measurement, one row per entry and language. The harness writes each entry's
 rows into it as soon as that entry is measured, from a run in any worktree,
 and reuses a row whose program and toolchain are unchanged instead of
@@ -467,7 +467,7 @@ ceiling a peer beats is flagged red. Clicking a cell opens its detail against
 the Jet that judges it, on every metric, and each chart shows a bar for each
 Jet mode. The summary pills and the text table give the one judgement. The
 page refetches the table every 20 s.
-`node Tools/gauntlet/harness/table.mjs import
+`node Tools/Gauntlet/Harness/table.mjs import
 RESULTS.json` adds an earlier run report's rows. Reload the page to see new rows.
 
 ```

@@ -1,0 +1,22 @@
+# A compile-time loop whose source is a named top-level value that waits on
+# another top-level value: ASSETS loops over `names(FILES)`, and FILES loops
+# over ROWS, the shape of the compiler's built-in Core tables
+# (JetCLI CoreSources.jet). The totality pass returns each value, or a wait
+# set until the value it reads is ready, never an internal stop. The values
+# build in dependency order, and every tier prints the same sizes.
+fixture: ComptimeLoopWaitsOnNamedConstant.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "alpha.txt 6\nbeta.txt 5\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "alpha.txt 6\nbeta.txt 5\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "alpha.txt 6\nbeta.txt 5\n"
+step built: jet build main.jet
+exit: 0
+step image: {work}/.jet/build/main
+exit: 0
+stdout: = "alpha.txt 6\nbeta.txt 5\n"

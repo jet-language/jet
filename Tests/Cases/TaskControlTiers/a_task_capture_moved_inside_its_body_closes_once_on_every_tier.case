@@ -1,0 +1,20 @@
+# A `task &&name` capture hands the value to the task, so a move inside the
+# body is the task's own last use. A call that takes `&&`, a `:` binding and a
+# `:=` rebinding all check clean. The value closes exactly once wherever the
+# body leaves it, in plain and grouped tasks, the same on every tier. A value
+# the body never moves still closes once when the task drops it.
+fixture: ATaskCaptureMovedInsideItsBodyClosesOnceOnEveryTier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = a_task_capture_moved_inside_its_body_closes_once_on_every_tier.out
+stderr: empty
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = a_task_capture_moved_inside_its_body_closes_once_on_every_tier.out
+stderr: empty
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = a_task_capture_moved_inside_its_body_closes_once_on_every_tier.out
+stderr: empty

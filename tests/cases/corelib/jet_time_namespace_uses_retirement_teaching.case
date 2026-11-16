@@ -1,8 +1,0 @@
-# Port of system.rs:1124-1140; original concat source evaluated verbatim. Rust Syntax::rename_target structural assertion retires.
-# `jet.time` names no module: `jet` stays a reserved root, so the import is refused (E1002).
-# The Rust-era E0341 old-ring-spelling teaching is retired and never emitted.
-fixture: fixtures/jet_time_namespace_uses_retirement_teaching
-step: jet check fixture.jet --json
-exit: nonzero
-json: stdout doc $.reports[?code="E1002"] #>= 1 # the reserved `jet` root is refused
-json: stdout doc $.reports[?code="E0341"] #= 0 # the retired teaching code is never emitted

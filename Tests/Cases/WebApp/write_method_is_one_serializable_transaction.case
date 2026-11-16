@@ -1,0 +1,14 @@
+# A call of a mounted service's method is one serializable transaction on
+# each store it uses: it commits when the method succeeds and rolls back when
+# it fails. The fixture's board serves `move_task`, which reads a card, checks
+# the version the caller saw, waits, and writes the next version. Two
+# concurrent calls on one version give one move and one Conflict, because
+# the later call's read waits for the earlier call's commit. A method that
+# writes and then fails leaves the card as it was. A mounted method may use a
+# store at all: it is checked with no effect bound, as a route handler is.
+fixture: WriteMethodIsOneSerializableTransaction.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = write_method_is_one_serializable_transaction.stdout.expected

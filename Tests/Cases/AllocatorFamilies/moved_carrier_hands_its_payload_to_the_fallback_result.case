@@ -1,0 +1,25 @@
+# `got := held.move() ?? fallback` hands the Option's payload to `got` and
+# frees the box: the variable no longer holds it, so `got` shares no buffer
+# with it. A lent payload left the box alive to the scope end, and the
+# first write to each shared buffer copied it, which the 16 MB cap of the
+# counting program allocator refuses for a 10 MB list. Every round's list is
+# freed before the next is built (six rounds of 10 MB each fit), the None
+# branch's fallback is the result, a closing payload closes once on each
+# branch, and the checked heap stops at no bad free.
+fixture: MovedCarrierHandsItsPayloadToTheFallbackResult.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "batch: 6 of 6 rounds wrote in place\nlist: 6 of 6 rounds wrote in place\nnone: fallback 9 3\ntook 1\nfell back to 2\nclose 2\nclose 1\nheld at the end: 1250000\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "batch: 6 of 6 rounds wrote in place\nlist: 6 of 6 rounds wrote in place\nnone: fallback 9 3\ntook 1\nfell back to 2\nclose 2\nclose 1\nheld at the end: 1250000\n"
+step: jet build --checked-alloc main.jet
+exit: 0
+step: {work}/.jet/build/main
+exit: 0
+stdout: = "batch: 6 of 6 rounds wrote in place\nlist: 6 of 6 rounds wrote in place\nnone: fallback 9 3\ntook 1\nfell back to 2\nclose 2\nclose 1\nheld at the end: 1250000\n"

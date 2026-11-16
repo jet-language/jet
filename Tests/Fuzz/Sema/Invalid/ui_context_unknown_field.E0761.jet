@@ -1,0 +1,8 @@
+// `#Context` sets `allocator`, `logger`, `on_stop` and `#ContextKey`
+// constants; E0761 fires on a label naming none of them.
+use core.mem
+
+run: fn() {
+    arena: mem.Arena.new()
+    #Context(scheduler: arena) { print("should not reach") }
+}

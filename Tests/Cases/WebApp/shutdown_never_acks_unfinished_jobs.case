@@ -1,0 +1,17 @@
+# A server that shuts down waits a bounded time for the jobs that run, and
+# leaves a job unfinished then unacknowledged, so it runs again on the next
+# start. The fixture's board queues three jobs that wait 0 ms, 300 ms and a
+# minute before writing their notes. The stop step shuts the server down
+# with two seconds of grace once job 1 wrote its note and all three started:
+# the shutdown returns once job 2 wrote its note, and job 3's call never
+# commits, so its row stays. The restart step takes that row once no server
+# holds it and runs job 3, and only job 3, again.
+fixture: ShutdownNeverAcksUnfinishedJobs.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step stop: jet run main.jet -- stop
+exit: 0
+stdout: = "after the shutdown, notes: 1, 2\n"
+step restart: jet run main.jet -- restart
+exit: 0
+stdout: = "after the restart, ran: 3, notes: 1, 2, 3\n"

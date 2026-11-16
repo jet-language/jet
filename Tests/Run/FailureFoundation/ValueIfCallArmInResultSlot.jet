@@ -1,0 +1,22 @@
+// A value-if checked against the function's Result slot
+// gives its call arm the success type: `doubled(n)` is `Int Never!`, and
+// beside an `Err(…)` arm it is the `Int` a `-> Int Bad!` function returns.
+#Error
+Bad: enum {
+    Small(n: Int)
+}
+
+doubled: fn(n: Int) -> Int Never! { Ok(n * 2) }
+
+checked: fn(n: Int) -> Int Bad! { if n < 10 -> Err(Bad.Small{n: n}) else -> doubled(n) }
+
+run: fn() {
+    if checked(21) == {
+        .Ok(v) -> { print(v) }
+        .Err(e) -> { print(e) }
+    }
+    if checked(3) == {
+        .Ok(v) -> { print(v) }
+        .Err(e) -> { print(e) }
+    }
+}

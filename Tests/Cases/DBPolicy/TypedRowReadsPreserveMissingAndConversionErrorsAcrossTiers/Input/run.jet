@@ -1,0 +1,61 @@
+use db: core.db
+
+run: fn() {
+    row: [String:DBValue]{
+        "integer": DBValue.Int(42),
+        "float": DBValue.Float(1.5),
+        "text": DBValue.Text("jet"),
+        "true": DBValue.Bool(true),
+        "zero": DBValue.Int(0),
+        "one": DBValue.Int(1),
+        "two": DBValue.Int(2),
+        "null": DBValue.Null,
+        "whole-float": DBValue.Float(1.0),
+        "large-float": DBValue.Float(1e21),
+        "small-float": DBValue.Float(1e-7),
+        "blob": DBValue.Blob([U8]{1, 2}),
+    }
+    print(db.row_int(row, "integer") ?? -1)
+    print(db.row_float(row, "integer") ?? -1.0)
+    print(db.row_float(row, "float") ?? -1.0)
+    print(db.row_text(row, "text") ?? "missing")
+    print(db.row_bool(row, "true") ?? false)
+    print(db.row_bool(row, "zero") ?? true)
+    print(db.row_bool(row, "one") ?? false)
+    if db.row_value(row, "missing") == {
+        .Ok(_value) -> { print("unexpected") }
+        .Err(error) -> print(error.message())
+    }
+    if db.row_int(row, "text") == {
+        .Ok(_value) -> { print("unexpected") }
+        .Err(error) -> print(error.message())
+    }
+    if db.row_float(row, "null") == {
+        .Ok(_value) -> { print("unexpected") }
+        .Err(error) -> print(error.message())
+    }
+    if db.row_text(row, "integer") == {
+        .Ok(_value) -> { print("unexpected") }
+        .Err(error) -> print(error.message())
+    }
+    if db.row_bool(row, "two") == {
+        .Ok(_value) -> { print("unexpected") }
+        .Err(error) -> print(error.message())
+    }
+    if db.row_int(row, "whole-float") == {
+        .Ok(_value) -> { print("unexpected") }
+        .Err(error) -> print(error.message())
+    }
+    if db.row_int(row, "large-float") == {
+        .Ok(_value) -> { print("unexpected") }
+        .Err(error) -> print(error.message())
+    }
+    if db.row_int(row, "small-float") == {
+        .Ok(_value) -> { print("unexpected") }
+        .Err(error) -> print(error.message())
+    }
+    if db.row_text(row, "blob") == {
+        .Ok(_value) -> { print("unexpected") }
+        .Err(error) -> print(error.message())
+    }
+}

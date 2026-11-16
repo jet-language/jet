@@ -1,0 +1,9 @@
+Hooks: struct {
+    memcmp: fn(U8) -> Bool
+}
+
+audit: fn(k: #Secret U8, hooks: Hooks) {
+    memcmp: hooks.memcmp
+    set: memcmp(k)
+    if set -> print("set")
+}

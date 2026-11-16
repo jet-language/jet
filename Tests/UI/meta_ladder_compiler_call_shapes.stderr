@@ -1,0 +1,89 @@
+Error [jet.UnknownFunction]: `Compiler` has no method `publish`
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:9:10
+    |
+  9 |     meta.publish(
+    |          ^^^^^^^
+ Why: `Compiler` is a protected Core type with a closed method surface
+ Fix: Write `meta.add(#code { ... }, scope: "name")`, `meta.add_struct("Name", fields, scope: "name")`, `meta.find_type("Name")`, `meta.rewrite_body(f, #code { ... })`, `meta.allow_rewrite(package: "name")`, `meta.events(watch: .Functions{marked: Traced{}}, handler)` or `meta.report(finding, at: c)`
+More: jet-lang.dev/e/E0102
+
+Error [jet.UnknownArgumentLabel]: `Compiler.add` doesn't take this argument
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:19:9
+    |
+ 19 |         3,
+    |         ^
+ Why: `meta.add` takes one `Code` value or source text and the `scope:` module it joins
+ Fix: Write `meta.add(#code { ... }, scope: "name")`
+More: jet-lang.dev/e/E0764
+
+Error [jet.ArgumentCountMismatch]: `Compiler.add` expects a `Code` value or source text
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:21:10
+    |
+ 21 |     meta.add(scope: "extra")
+    |          ^^^
+ Why: `meta.add` adds the items of one `Code` value or of source text
+ Fix: Write `meta.add(#code { ... }, scope: "name")`
+More: jet-lang.dev/e/E0104
+
+Error [jet.ArgumentCountMismatch]: `Compiler.add` expects `scope:`
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:22:10
+    |
+ 22 |     meta.add(
+    |          ^^^
+ Why: The added items join the generated module `scope:` names
+ Fix: Write `meta.add(#code { ... }, scope: "name")`
+More: jet-lang.dev/e/E0104
+
+Error [jet.ArgumentCountMismatch]: `Compiler.rewrite_body` expects a function and a `Code` value
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:27:10
+    |
+ 27 |     meta.rewrite_body(helper)
+    |          ^^^^^^^^^^^^
+ Why: `meta.rewrite_body` replaces the body of one function with the statements of one `Code` value
+ Fix: Write `meta.rewrite_body(f, #code { ... })`
+More: jet-lang.dev/e/E0104
+
+Error [jet.UnknownArgumentLabel]: `Compiler.rewrite_body` doesn't take this argument
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:30:9
+    |
+ 30 |         code: #code {
+    |         ^^^^
+ Why: `meta.rewrite_body` takes a function's name and one `Code` value, both unlabeled
+ Fix: Write `meta.rewrite_body(f, #code { ... })`
+More: jet-lang.dev/e/E0764
+
+Error [jet.UnknownArgumentLabel]: `meta.rewrite_body` needs a top-level function's name
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:36:9
+    |
+ 36 |         count,
+    |         ^^^^^
+ Why: A body rewrite replaces the body of one top-level function, named directly, through its package, or by the `FunctionInfo` a `meta.events` handler hears
+ Fix: Pass a top-level function, as in `meta.rewrite_body(f, #code { ... })` or `meta.rewrite_body(tool.f, #code { ... })`
+More: jet-lang.dev/e/E0764
+
+Error [jet.UnknownArgumentLabel]: `Compiler.allow_rewrite` takes one `package:` name
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:41:10
+    |
+ 41 |     meta.allow_rewrite("greet")
+    |          ^^^^^^^^^^^^^
+ Why: `meta.allow_rewrite` names the one dependency whose functions the value may rewrite
+ Fix: Write `meta.allow_rewrite(package: "name")`
+More: jet-lang.dev/e/E0764
+
+Error [jet.UnknownArgumentLabel]: `meta.allow_rewrite` needs the package's name written out
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:43:24
+    |
+ 43 |     meta.allow_rewrite(package: name)
+    |                        ^^^^^^^
+ Why: The consent is one line a reviewer reads, so it names its package as a string literal
+ Fix: Write `meta.allow_rewrite(package: "name")`
+More: jet-lang.dev/e/E0764
+
+Error [jet.UnknownArgumentLabel]: `meta.allow_rewrite` names `orm`, which is no package of this build
+  --> Tests/UI/meta_ladder_compiler_call_shapes.jet:44:24
+    |
+ 44 |     meta.allow_rewrite(package: "orm")
+    |                        ^^^^^^^
+ Why: The consent covers one dependency this build loads, at its locked version
+ Fix: Name a package listed in `deps:`, as in `meta.allow_rewrite(package: "name")`
+More: jet-lang.dev/e/E0764

@@ -2,13 +2,13 @@
 
 This is Jet's single policy for every agent and tool. It covers authority,
 documentation, invariants, the performance gate, work state, delegation, and
-proof. Strategy lives in `Docs/spec/philosophy.md`. Plans and work state live
+proof. Strategy lives in `Docs/Spec/philosophy.md`. Plans and work state live
 only in Tower. Procedures live in skills. Current behavior is established by
 code, executable registries, and exercised tests and examples.
 
 ## Authority
 
-Read `Docs/spec/philosophy.md` for Jet's purpose and ranked design priorities.
+Read `Docs/Spec/philosophy.md` for Jet's purpose and ranked design priorities.
 Do not copy that guidance into other documents.
 
 Code is the source of truth for what Jet does. Specs explain durable contracts
@@ -43,7 +43,7 @@ assumption needs to be revisited. Raise them; do not silently absorb them.
 
 ## Documentation
 
-- **One strategy document.** `Docs/spec/philosophy.md` holds the durable vision
+- **One strategy document.** `Docs/Spec/philosophy.md` holds the durable vision
   and design priorities. It never holds schedules, feature inventories,
   progress notes, or release scope. Do not start a separate roadmap without
   owner direction.
@@ -65,9 +65,9 @@ assumption needs to be revisited. Raise them; do not silently absorb them.
   them may own a plan, goal, or live status. Historical evidence never
   establishes current behavior.
 
-`Docs/` has four document categories: `spec`, `audits`, `research`, and
-`proposals`. `Docs/README.md` is navigation only; `Docs/site` is the generated
-project website and `Docs/assets` holds images. Only the owner may delete
+`Docs/` has four document categories: `Spec`, `Audits`, `Research`, and
+`Proposals`. `Docs/README.md` is navigation only; `Docs/Site` is the generated
+project website and `Docs/Assets` holds images. Only the owner may delete
 audits or final reports; agents may move them intact. Do not create cleanup
 reports, preservation maps, archive folders, or recurring documentation
 janitors. Keep unique decision rationale where it already lives, and use Tower
@@ -81,19 +81,20 @@ and source history for work tracking and recovery.
 | `Jetpack/` | The Jet package manager |
 | `Core/` | Core library sources |
 | `Examples/` | Executable examples and golden output |
-| `tests/` | Native test corpora (cases, UI snapshots), fixtures, and compiler proofs |
+| `Tests/` | Native test corpora (cases, UI snapshots), fixtures, and compiler proofs |
 | `Docs/` | Documentation, the website, and assets |
-| `Tools/` | Contributor tooling: `agent/` (environment and gates), `ci/`, `perf/`, `gauntlet/`, `editors/`, `tower/`, and more |
+| `Tools/` | Contributor tooling: `Agent/` (environment and gates), `CI/`, `Perf/`, `Gauntlet/`, `Editors/`, `tower/`, and more |
 
-`tests/` keeps its lowercase name; every other top-level
-folder is capitalized. Keep the top level small: new tooling goes under
+Every folder is TitleCase and writes acronyms in capitals (`Tests/`,
+`Compiler/JetCLI/`). Jet module folders and data trees keep the names their
+tools require; `Tests/Guards/acronym_path_case.jet` enforces the rule. Keep the top level small: new tooling goes under
 `Tools/`, new documentation under `Docs/`. Never commit build output, scratch
 files, or one-off run artifacts.
 
 ## Tooling in other languages
 
-Repository-management tooling is Jet: the scripts under `Tools/agent/`,
-`Tools/release/` and `Tools/ci/`, which hold the landing, chain, census,
+Repository-management tooling is Jet: the scripts under `Tools/Agent/`,
+`Tools/Release/` and `Tools/CI/`, which hold the landing, chain, census,
 lane-check and release gates and generators. Everything else (editor
 extensions, the gauntlet, perf, packaging, agent-eval, peer programs, test
 and benchmark subjects) stays in the language its host needs and is out of
@@ -101,7 +102,7 @@ scope. New tooling in scope may be written first in another
 language and proven working; then its Jet twin is written, in the best Jet
 that does the job rather than a copy of the original's exact output, and
 proven to do the same job. The pair is a gauntlet entry: an entry under
-`Tools/gauntlet/entries/` with `"mode": "tool"` names the original as
+`Tools/Gauntlet/Entries/` with `"mode": "tool"` names the original as
 `tool.original` and the twin as `tool.jet`, and holds the shared fixtures and
 the parity cases with their expected output; a case's `check`, a Jet program
 in the entry, prints the facts the job leaves (the files, commits and queue
@@ -115,8 +116,8 @@ measured, reported and minimized, but a twin above the original's count still
 passes: a longer twin points to a missing Core API or syntax, which its entry
 names in `tool.token_gaps`, and clarity of reasoning outranks terseness. Then
 the repository switches to the Jet twin and keeps the original only as the
-entry's reference in the entry's directory. `Tools/gauntlet/PortBars.jet`
-judges every tool entry on all four bars. `Tools/agent/ScriptPairing.jet
+entry's reference in the entry's directory. `Tools/Gauntlet/PortBars.jet`
+judges every tool entry on all four bars. `Tools/Agent/ScriptPairing.jet
 --check`, which every lane check runs, refuses a change that adds an
 in-scope script in another language without its pair, or that switches an
 in-scope entry before it passes every bar; Nix files are not scripts. A
@@ -210,7 +211,7 @@ compile cache is off by default. Computers are fast and software is bloated,
 which is why the final comparison is always hand-optimized machine code.
 
 Every required cell needs a ceiling reference: an asm-parity cell
-(Tools/perf/asm-parity) that names its gauntlet cell and does the work with the
+(Tools/Perf/AsmParity) that names its gauntlet cell and does the work with the
 best known technique for the workload (SIMD, algorithmic, or syscall-level),
 not a naive transliteration. A cell without a reference is uncovered and fails
 the gate once hill climbing opens the ceiling stage. A better technique
@@ -397,7 +398,7 @@ Committed files carry no personal or machine information: no home paths, user
 or host names, personal emails or machine mounts. Write a placeholder instead,
 such as `$HOME`, `$USER`, `$JET_SCRATCH_ROOT` or `$JET_STATE_ROOT`; fixtures
 use the example account `user` on `devhost`. This holds for recorded evidence
-too. `Tools/agent/LaneCheck.jet` refuses a checkout that breaks it, through
+too. `Tools/Agent/LaneCheck.jet` refuses a checkout that breaks it, through
 its personal-information guard (`--personal-info`, #6564 c5).
 
 ## Adversarial design review
@@ -405,7 +406,7 @@ its personal-information guard (`--personal-info`, #6564 c5).
 This is a standing owner order. No design may be built, shipped, or described
 as better than existing solutions until an adversarial review has tried to
 break each of its claimed strengths. The review is a dated audit in
-`Docs/audits`. For every claim it:
+`Docs/Audits`. For every claim it:
 
 - names the strongest existing solutions and states their best case fairly,
   with sources, including what they do that the design does not;
@@ -469,9 +470,9 @@ idle while a submission waits (owner order, 2026-11-15):
 
 1. **One census takes everything ready.** A cycle starts with every
    submission in the inbox and checks them together in one collect-all census
-   (`Tools/agent/Land.jet census`). A submission that conflicts only in a
+   (`Tools/Agent/Land.jet census`). A submission that conflicts only in a
    generated file is applied without that file, and the generators are rerun
-   (`Tools/agent/DiagnosticRows.jet --write` and every generator the census
+   (`Tools/Agent/DiagnosticRows.jet --write` and every generator the census
    checks). Only a conflict in hand-written source goes back to its worker. A
    failing census row holds back only the submissions that cause it; the rest
    land on `dev` at once, one commit each.
@@ -492,7 +493,7 @@ idle while a submission waits (owner order, 2026-11-15):
    start the next one as soon as the slot frees. About every two hours, the
    speed gate and self-check run on the current batch compiler, inside the
    cycle. Each full suite run with no new failures may become the owner's next
-   a0.0.N release through `Tools/release/Main.jet` `admit`.
+   a0.0.N release through `Tools/Release/Main.jet` `admit`.
 
 Workers check against the current batch compiler (the seed) before they
 submit, so a cycle finds only what their touched-file checks cannot.
@@ -540,17 +541,17 @@ in one pass:
 - **Expensive launches are gated, never bypassed.** A stage0, self-hosting
   chain, release build or any other run costing more than about 15 minutes
   starts only after a clean collect-all preflight of that exact commit:
-  `jet Tools/agent/Land.jet census` (the seed's keep-going `jet check` and
+  `jet Tools/Agent/Land.jet census` (the seed's keep-going `jet check` and
   `jet build` of the compiler, the runtime pack and the self-checks of the
   CLI and of every Core body, every row of every phase in one report; the
   lander runs it through `Land.jet
-  precommit` before every compiler commit) and `jet Tools/agent/Chain.jet
+  precommit` before every compiler commit) and `jet Tools/Agent/Chain.jet
   TREE LEVEL --dry-run`, which names every stage the launch would build. Every
   row is clean or carries a written disposition naming the commit in this
   launch that fixes it. Launching to "see what fails next" is forbidden. The
   launchers enforce it: a clean census writes the snapshot's receipt
   (`Land.jet receipt`, keyed on the compiler source identity and the seed),
-  and `Tools/agent/Chain.jet TREE full` and `Tools/release/Main.jet` `admit`
+  and `Tools/Agent/Chain.jet TREE full` and `Tools/Release/Main.jet` `admit`
   and `build` refuse to start without the receipt for their tree and seed;
   `--check-gate` gives the answer without launching.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
@@ -582,7 +583,7 @@ in one pass:
 - **A tightened rule sweeps everything first.** A change that makes sema,
   a guard or a gate stricter is checked, before it lands, against every Jet
   source the rule can reach: Core, Compiler, Jetpack, Tools, Examples and every
-  tests/ tree, case fixture and template. Every hit is fixed in the same batch.
+  Tests/ tree, case fixture and template. Every hit is fixed in the same batch.
   Checking only what the compiler build or one suite touches is a serial
   discovery.
 - **A failed gate is read whole.** When a release, chain or suite fails, read
@@ -616,7 +617,7 @@ checkout-owned targets and shared artifacts.
 Rebuild with `jet build --profile dev Compiler` (the fast build) before compiler
 smoke tests. After integration, run the exact narrow proof the criteria name.
 Outside the landing cycle's full suite on each batch compiler (Delegation),
-broad suites, unfiltered censuses, and `Tools/agent/VerifyFull.jet` are
+broad suites, unfiltered censuses, and `Tools/Agent/VerifyFull.jet` are
 milestone or release operations and need the required token. A worker's
 type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
@@ -642,36 +643,36 @@ stalls every program on the machine. So:
   the guard holds the agent slice frozen or the scratch disk is over 75% full.
 - **The scratch disk never passes 75% full.** This is a hard owner limit, not a
   cleanup prompt: past it the slow drive slows the whole machine.
-  `Tools/agent/Chain.jet slot` opens no build slot above it. The orchestrator
+  `Tools/Agent/Chain.jet slot` opens no build slot above it. The orchestrator
   watches the disk at every check-in. When it passes 75%, freeing space comes
   before all other work, and the orchestrator reports the cause to the owner.
   Free space by deleting landed or superseded build output first, then
   worktrees whose work is saved, never by losing unlanded work.
 
-Agent tooling lives in the repository: `Tools/agent/Chain.jet` (the self-host
-chain and the machine build slots), `Tools/agent/Land.jet` (`serve` is the
+Agent tooling lives in the repository: `Tools/Agent/Chain.jet` (the self-host
+chain and the machine build slots), `Tools/Agent/Land.jet` (`serve` is the
 lander, `batch` its batch landing, `census` the preflight, `publish` keeps
 landed compilers for lanes; `queue` adds a land job for the lander; `land`
 lands a patch stack directly, with `--scratch-copy` on a fresh clone),
-`Tools/agent/Suite.jet` (one `jet test
-Compiler --profile` run on a compiler snapshot) and `Tools/agent/ballots/Validate.jet` (the ballot validator).
+`Tools/Agent/Suite.jet` (one `jet test
+Compiler --profile` run on a compiler snapshot) and `Tools/Agent/Ballots/Validate.jet` (the ballot validator).
 Tools find state, scratch, queues, published compilers and seeds only through
-the root variables of `Tools/agent/orchestrator/Roots.jet` (`jet
-Tools/agent/orchestrator/Roots.jet NAME...` prints them; `Tools/agent/roots.sh`
-and `Tools/agent/roots.mjs` keep the same table for the shell and node tools
+the root variables of `Tools/Agent/Orchestrator/Roots.jet` (`jet
+Tools/Agent/Orchestrator/Roots.jet NAME...` prints them; `Tools/Agent/roots.sh`
+and `Tools/Agent/roots.mjs` keep the same table for the shell and node tools
 not yet ported to Jet). Their defaults derive from `$HOME` and the XDG directories; a machine
 sets its own values in the environment or in
 `${XDG_CONFIG_HOME:-~/.config}/jet/env`. No
 committed file spells one machine's home, user, mounts or tool roots:
-`Tools/agent/LaneCheck.jet`'s personal-information guard, which every lane
+`Tools/Agent/LaneCheck.jet`'s personal-information guard, which every lane
 check runs first, refuses them, and
 `tower redact` cleans the board.
 
 There is no hosted CI until a pinned native seed release exists
-(D-SEED-DIST1). `Tools/agent/LaneCheck.jet`, the Core surface ledger check
-(`jet Tools/agent/CoreSurfaceLedger.jet --check`) and the full gate
-(`JET=<jet> jet Tools/agent/VerifyFull.jet`, which includes the Core
-source-coverage ratchet `Tools/agent/CoreCoverage.jet`) run locally with the
+(D-SEED-DIST1). `Tools/Agent/LaneCheck.jet`, the Core surface ledger check
+(`jet Tools/Agent/CoreSurfaceLedger.jet --check`) and the full gate
+(`JET=<jet> jet Tools/Agent/VerifyFull.jet`, which includes the Core
+source-coverage ratchet `Tools/Agent/CoreCoverage.jet`) run locally with the
 admitted `JET`.
 
 ## References
@@ -681,13 +682,13 @@ Read this file first, then load only what the task needs:
 | When the task involves | Read |
 |---|---|
 | Dispatch, waves, worktrees, receipts, recovery, or card closure | `.agents/skills/orchestration/SKILL.md` |
-| Compiler or language semantics | The relevant code, examples, and tests; `Docs/spec/syntax-decisions.md` for decision rationale |
-| Diagnostics or snapshots | `Compiler/Prelude/Diagnostics.jet`, the matching UI snapshots, and `Docs/spec/diagnostics.md` |
-| Examples or golden paths | `Docs/spec/contributing/examples.md` and `Examples/README.md` |
-| Tower cards, questions, tags, or board operations | `Docs/spec/contributing/issue-tracker.md`, `Docs/spec/contributing/triage-labels.md`, and `Tools/tower/skills/tower/SKILL.md` |
-| Domain vocabulary or decisions | `Docs/spec/vocabulary.md`, `Docs/spec/syntax-decisions.md`, and `Docs/spec/contributing/domain.md` |
-| Security closure | `Docs/spec/contributing/security-closure.md` |
-| Technical traps | `Docs/spec/contributing/agent-engineering.md` |
+| Compiler or language semantics | The relevant code, examples, and tests; `Docs/Spec/syntax-decisions.md` for decision rationale |
+| Diagnostics or snapshots | `Compiler/Prelude/Diagnostics.jet`, the matching UI snapshots, and `Docs/Spec/diagnostics.md` |
+| Examples or golden paths | `Docs/Spec/Contributing/examples.md` and `Examples/README.md` |
+| Tower cards, questions, tags, or board operations | `Docs/Spec/Contributing/issue-tracker.md`, `Docs/Spec/Contributing/triage-labels.md`, and `Tools/tower/skills/tower/SKILL.md` |
+| Domain vocabulary or decisions | `Docs/Spec/vocabulary.md`, `Docs/Spec/syntax-decisions.md`, and `Docs/Spec/Contributing/domain.md` |
+| Security closure | `Docs/Spec/Contributing/security-closure.md` |
+| Technical traps | `Docs/Spec/Contributing/agent-engineering.md` |
 | Audits, research, cleanup, or skill routing | `.agents/skills/JetSkillsRouter.md` |
 | Completion claims or milestone closeout | `.agents/skills/verify/SKILL.md` |
 

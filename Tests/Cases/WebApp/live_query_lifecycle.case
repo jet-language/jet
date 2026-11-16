@@ -1,0 +1,29 @@
+# A live query follows its tracked source's real deltas: an app.live binding
+# runs its source on the first read and again only once invalidated, and a
+# DBScope.live binding re-runs after an insert, keeps its stored result for a
+# write that rewrites a row to what it held, stays current for a write that
+# changes no row (alone or as a transaction's only write), and sees a write
+# inside a transaction only at its commit. The same lines print at O0, O1 and
+# O2 and under node on web, where app.state builds because a binding's source
+# reads the database, fetches and waits, nothing more.
+fixture: LiveQueryLifecycle.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = live_query_lifecycle.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default
+when tool node
+step: jet build --target web main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: == default
+end when

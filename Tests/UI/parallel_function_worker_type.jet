@@ -1,0 +1,18 @@
+bump: fn(n: Int) -> Int { n + 1 }
+
+Boxed<T>: T
+
+CallbackPayload: enum {
+    Callback(Boxed<fn(Int) -> Int>)
+}
+
+run: fn() {
+    callbacks: [fn(Int) -> Int]{bump}
+    bad_item: callbacks.para_filter(fn(callback: fn(Int) -> Int) { true })
+    bad_result: [1].para_map(fn(n: Int) { fn(x: Int) { x + n } })
+    bad_acc: [1].para_fold(fn() { fn(x: Int) { x } }, fn(callback: fn(Int) -> Int, n: Int) { callback }, fn(left: fn(Int) -> Int, right: fn(Int) -> Int) { left })
+    payloads: [CallbackPayload]{CallbackPayload.Callback(bump)}
+    bad_enum: payloads.para_map(fn(payload: CallbackPayload) { 1 })
+    stored: fn(n: Int) -> Int { n + 1 }
+    bad_capture: [1].para_map(fn(n: Int) { stored(n) })
+}

@@ -1,0 +1,40 @@
+// A struct that holds a Lock (a cleanup value) runs the Lock's release when
+// the struct itself is dropped: at its scope end, when a wrapper built in a
+// loop body ends its turn, and when a nested wrapper is dropped.
+Lock: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("release {self.name}") }
+    }
+}
+
+Holder: struct {
+    lock: Lock
+    count: Int
+}
+
+Outer: struct {
+    holder: Holder
+    label: String
+}
+
+hold: fn(name: String) -> Holder { Holder{lock: Lock{name: name}, count: 1} }
+
+scoped: fn() {
+    holder: hold("scoped")
+    print("holding {holder.lock.name} {holder.count}")
+}
+
+run: fn() {
+    scoped()
+    print("after scoped")
+    loop turn in 0..<2 {
+        holder: hold("turn {turn}")
+        print("holding {holder.lock.name}")
+    }
+    print("after the loop")
+    outer: Outer{holder: hold("nested"), label: "outer"}
+    print("holding {outer.holder.lock.name} in {outer.label}")
+    print("end of body")
+}

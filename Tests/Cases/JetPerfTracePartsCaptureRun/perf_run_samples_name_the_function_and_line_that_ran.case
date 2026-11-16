@@ -1,0 +1,21 @@
+# `jet perf run` samples the -O2 program's CPU time and names each sample's
+# Jet function and source line from the image's location table, as Linux perf
+# does on the same image: fib's lines take nearly every sample, so the
+# hottest row is fib's and the view shows fib's share.
+requires: os-name:linux
+fixture: Fixtures/Fib
+step: jet perf run -O2 fib.jet --out {work}/fib.jettrace -- 35
+exit: 0
+stdout: = "fib=9227465\n"
+json: file fib.jettrace doc $.content.profile.status = "captured"
+json: file fib.jettrace doc $.content.profile.rows[0].clock = "cpu"
+json: file fib.jettrace doc $.content.profile.rows[0].symbol.name = "fib"
+json: file fib.jettrace doc $.content.profile.rows[0].source.path = "fib.jet"
+json: file fib.jettrace doc $.content.profile.rows[0].source.start_line >= 5
+json: file fib.jettrace doc $.content.profile.rows[0].source.start_line <= 7
+json: file fib.jettrace doc $.content.profile.rows[0].sample_count >= 10
+step: jet perf view {work}/fib.jettrace
+exit: 0
+stdout: ~ "fib.jet#fib profile:cpu samples=" # fib's samples and share, first among the functions
+stdout: ~ "  line " # then its hottest lines
+stdout: !~ "fib.jet#run profile:wall" # the observation rows give way to the samples

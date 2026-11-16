@@ -10,7 +10,7 @@ use {
     net: core.net
 }
 
-CLI_TEST_IMAGE_SERVICE_E1336: #run embed_file("../../../tests/cli/image_service_projection_e1336.txt")
+CLI_TEST_IMAGE_SERVICE_E1336: #run embed_file("../../../Tests/CLI/image_service_projection_e1336.txt")
 
 cli_test_eval_error: fn(src: String, dir: String) -[FS, Env, Exec, Time.Wait]> EnvModelEvalError {
     if envmodel_evaluate_env(src, dir) == {
@@ -24,7 +24,7 @@ cli_test_eval_error: fn(src: String, dir: String) -[FS, Env, Exec, Time.Wait]> E
 // I5: the committed typed-image fixture parses, field-checks, and
 // cross-checks clean against its own `package.jet`.
 #Test("image committed oci example field checks clean") {
-    path: files.join(cli_test_repo_root(), "tests/fixtures/jetpack-typed/image.jet")
+    path: files.join(cli_test_repo_root(), "Tests/Fixtures/JetpackTyped/image.jet")
     src: files.read(path) ?? panic("read image fixture")
     plan: envmodel_evaluate_env(src, files.dirname(path)) ?? panic("the image fixture evaluates")
     assert_eq(plan.images.len(), 1)
@@ -37,7 +37,7 @@ cli_test_eval_error: fn(src: String, dir: String) -[FS, Env, Exec, Time.Wait]> E
 }
 
 #Test("image committed environment example field checks clean") {
-    path: files.join(cli_test_repo_root(), "tests/fixtures/jetpack-typed/environment_image.jet")
+    path: files.join(cli_test_repo_root(), "Tests/Fixtures/JetpackTyped/environment_image.jet")
     src: files.read(path) ?? panic("read environment image fixture")
     plan: envmodel_evaluate_env(src, files.dirname(path)) ?? panic("the environment image fixture evaluates")
     assert_eq(plan.images.len(), 1)

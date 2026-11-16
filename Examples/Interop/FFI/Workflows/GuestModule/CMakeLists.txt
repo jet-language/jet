@@ -3,7 +3,7 @@ project(jet_guest_rules LANGUAGES C CXX)
 
 # The module is a guest replacement inside this existing foreign build.  The
 # host compiler and native game remain CMake-owned; Jet only supplies rules_jet.
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../../../../Tools/foreign-build-hosts/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../../../../Tools/ForeignBuildHosts/Cmake")
 find_package(Jet REQUIRED)
 
 jet_library(rules_jet

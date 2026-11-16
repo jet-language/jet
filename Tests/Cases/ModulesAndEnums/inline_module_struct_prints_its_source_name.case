@@ -1,0 +1,14 @@
+# A struct declared in an inline module prints by its source name, never by the
+# name the compiler lifts it under: directly, interpolated, in a list, as a
+# field of another member struct, and from a nested module, on every tier.
+fixture: InlineModuleStructPrintsItsSourceName.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = inline_module_struct_prints_its_source_name.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = inline_module_struct_prints_its_source_name.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = inline_module_struct_prints_its_source_name.out

@@ -37,7 +37,7 @@ Run a lesson from the repository root, for example `jet run Examples/Apps/<Lesso
 - [ReactiveScope](UI/ReactiveScope.jet) — `#Reactive { … }` is an explicit reactive effect scope; `reactive.computed` is the canonical name for a derived value.
 - [Surface](UI/Surface.jet)
 - [TUIPolicy](UI/TUIPolicy.jet)
-- [UIA11y](UI/UIA11y.jet)
+- [UIA11y](UI/UIA11Y.jet)
 - [UIComponentKit](UI/UIComponentKit.jet)
 - [UIMotion](UI/UIMotion.jet)
 - [UINullBackend](UI/UINullBackend.jet)

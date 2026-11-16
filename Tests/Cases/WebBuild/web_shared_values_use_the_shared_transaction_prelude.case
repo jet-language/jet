@@ -1,0 +1,13 @@
+# A Shared value's edits, one outside a `#Transact` block and two inside it,
+# all land in the built page: it prints 3.
+requires: tool:node
+fixture: WebSharedValuesUseTheSharedTransactionPrelude.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"target\": \"web\"" # the manifest names the web target
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_shared_values_use_the_shared_transaction_prelude.stdout.expected
