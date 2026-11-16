@@ -425,9 +425,9 @@ sema_stream_handle_integer_width: fn(ty: Type) -> Bool Never! {
 // (Rust `check_shift_arg`): a `Reader`/`Cursor` byte-shift argument that does
 // not fit its fixed parameter is E0112 about the call; every other handle
 // argument is the plain E0108 mismatch.
-sema_stream_handle_argument_mismatch: fn(callee: String, required: Type, offered: Type, span: Span) -> Diagnostic {
+sema_stream_handle_argument_mismatch: fn(callee: String, required: Type, offered: Type, span: Span, program: SemaProgramTables) -> Diagnostic {
     shift: callee == "Reader.over" || callee == "Reader.take" || callee == "Reader.seek" || callee == "Reader.skip" || callee == "Cursor.over" || callee == "Cursor.take_until"
-    if !shift -> return sema_type_mismatch(required, offered, span)
+    if !shift -> return sema_type_mismatch(required, offered, span, program)
     sema_error("E0112", span, "`{callee}` wants {sema_type_show(required)}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))
 }
 
@@ -455,7 +455,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
             if sema_value_mismatch_index(diagnostics, value_start, value_span) == .Val(mismatch_index) {
                 probe_diagnostics := [Diagnostic]{}
                 if sema_probe_expression(checked_args[index].expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) == .Val(offered) {
-                    diagnostics[mismatch_index] = sema_stream_handle_argument_mismatch(callee, required, sema_call_resolved_type(offered.ty, environment, program), value_span)
+                    diagnostics[mismatch_index] = sema_stream_handle_argument_mismatch(callee, required, sema_call_resolved_type(offered.ty, environment, program), value_span, program)
                 }
             }
             return None
@@ -464,7 +464,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
             if checked.ty == .IntN(_, _) {
                 // U64 and the signed widths stay explicit (E0112 at the call).
                 if !sema_stream_handle_integer_width(checked.ty) {
-                    diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
+                    diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span, program))
                     return None
                 }
                 converted: sema_expr_numeric_conversion(checked, Type.Int, checked.span, sema_source_line_at(environment.source_segments, checked.span) ?? 0) ?? return None
@@ -477,7 +477,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
             compatible = true
         }
         if !compatible {
-            diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
+            diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span, program))
             return None
         }
         // A `&` argument keeps its Write borrow of the caller's place, so the

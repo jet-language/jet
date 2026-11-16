@@ -449,7 +449,7 @@ sema_pattern_slot_facts: fn(slots: [PatSlot], expected: [Type], variant: String,
                     checked: sema_check_expression(value, Val(expected[index]), env, program, writes, state, tail_store, context, diagnostics)
                     if checked == .Val(typed) {
                         if !sema_type_assignable(expected[index], typed.ty) {
-                            diagnostics.push(sema_type_mismatch(expected[index], typed.ty, typed.span))
+                            diagnostics.push(sema_type_mismatch(expected[index], typed.ty, typed.span, program))
                             complete = false
                         }
                         tree_bindings.push(TPatternBinding.Value{value: typed})
@@ -804,7 +804,7 @@ sema_pattern_struct: fn(subject_ty: Type, fields: [StructPatField], rest: Span?,
                         if checked == {
                             .Val(typed) -> {
                                 if !sema_type_assignable(resolved_ty, typed.ty) {
-                                    diagnostics.push(sema_type_mismatch(resolved_ty, typed.ty, typed.span))
+                                    diagnostics.push(sema_type_mismatch(resolved_ty, typed.ty, typed.span, program))
                                     complete = false
                                 }
                                 tree_fields.push(TPatternField.Value{field: field_name, value: typed, span: field_span})

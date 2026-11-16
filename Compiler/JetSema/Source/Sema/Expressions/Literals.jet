@@ -328,7 +328,7 @@ sema_expression_list_inference_error: fn(element: Type, expected: Type, index: I
 sema_expression_list_item_mismatch: fn(required: Type, offered: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     want: sema_expr_expected_type(required, environment, program)
     got: sema_expr_expected_type(offered, environment, program)
-    if sema_typed_text_mismatch(want, got, span) == .Val(typed_text) -> return typed_text
+    if sema_typed_text_mismatch(want, got, span, program) == .Val(typed_text) -> return typed_text
     sema_error("E0112", span, "a list item needs {sema_type_show(want)}, but this is {sema_type_show(got)}", "every list item must match the list's element type", sema_type_fix_hint(want, got))
 }
 
@@ -377,7 +377,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, env
                 if expected_element == .Val(required) {
                     compatible: sema_expr_expected_assignable(required, spread_element, environment, program) ?? return None
                     if !compatible {
-                        diagnostics.push(sema_type_mismatch(sema_expr_expected_type(required, environment, program), sema_expr_expected_type(spread_element, environment, program), spread_span))
+                        diagnostics.push(sema_type_mismatch(sema_expr_expected_type(required, environment, program), sema_expr_expected_type(spread_element, environment, program), spread_span, program))
                         return None
                     }
                 }
@@ -901,7 +901,7 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, env
         if normalized == .Tuple(items) -> expected_fields = Val(items)
     }
     if expected != None && expected_fields == None {
-        diagnostics.push(sema_type_mismatch(expected, Type.Tuple{fields: [TypeTupleField]{}}, span))
+        diagnostics.push(sema_type_mismatch(expected, Type.Tuple{fields: [TypeTupleField]{}}, span, program))
         return None
     }
     values := [TExpr]{}

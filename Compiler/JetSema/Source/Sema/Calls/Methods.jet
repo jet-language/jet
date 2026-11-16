@@ -763,7 +763,7 @@ sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallPa
         value: checked_argument ?? return None
         compatible: sema_call_host_callback_assignable(required_declared, value.ty, environment, program) ?? return None
         if !compatible {
-            diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span))
+            diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span, program))
             return None
         }
         values.push(value)
@@ -841,7 +841,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
     receiver_type: sema_call_method_receiver_candidate_type(resolved_candidate) ?? return None
     receiver_compatible: sema_call_type_assignable(receiver_type, receiver_value.ty, environment, program) ?? return None
     if !receiver_compatible {
-        diagnostics.push(sema_type_mismatch(receiver_type, receiver_value.ty, receiver_value.span))
+        diagnostics.push(sema_type_mismatch(receiver_type, receiver_value.ty, receiver_value.span, program))
         return None
     }
     host_method: sema_shared_access_host_method(receiver_value.ty, resolved_candidate.method.name)

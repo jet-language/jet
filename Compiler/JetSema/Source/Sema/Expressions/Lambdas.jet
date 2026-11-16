@@ -2163,7 +2163,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 expected_provenance = provenance
             }
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-                diagnostics.push(sema_type_mismatch(normalized, Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}, lambda.span))
+                diagnostics.push(sema_type_mismatch(normalized, Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}, lambda.span, program))
                 return None
             }
         }
@@ -2515,11 +2515,11 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 resolved_item: sema_expr_expected_type(item_type, environment, program)
                 if !type_identity_equal(resolved_item, resolved_expected) {
                     common: sema_expr_numeric_join(resolved_item, resolved_expected) ?? {
-                        diagnostics.push(sema_type_mismatch(Type.List{element: expected_item}, Type.List{element: item_type}, lambda.span))
+                        diagnostics.push(sema_type_mismatch(Type.List{element: expected_item}, Type.List{element: item_type}, lambda.span, program))
                         return None
                     }
                     if !type_identity_equal(common, resolved_expected) {
-                        diagnostics.push(sema_type_mismatch(Type.List{element: expected_item}, Type.List{element: item_type}, lambda.span))
+                        diagnostics.push(sema_type_mismatch(Type.List{element: expected_item}, Type.List{element: item_type}, lambda.span, program))
                         return None
                     }
                 }
@@ -2877,7 +2877,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             diagnostics.push(sema_failure_no_carrier(inferred_error, body_span, true))
             return None
         }
-        diagnostics.push(sema_type_mismatch(expected_ret ?? ret_ty, ret_ty, lambda.span))
+        diagnostics.push(sema_type_mismatch(expected_ret ?? ret_ty, ret_ty, lambda.span, program))
         return None
     }
     // A concrete lambda's checked body, not a same-named file function,

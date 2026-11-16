@@ -54,7 +54,7 @@ sema_call_try_dev_context_method: fn(receiver: Expr, receiver_value: TExpr, meth
         checked: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
         compatible: sema_call_type_assignable(required, checked.ty, environment, program) ?? return failed
         if !compatible {
-            diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
+            diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span, program))
             return failed
         }
         value = Val(checked)

@@ -206,7 +206,7 @@ sema_expression_present: fn(value: Expr, span: Span, expected: Type?, environmen
                 result_ty = Val(normalized)
             }
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-                diagnostics.push(sema_type_mismatch(normalized, Type.Option{inner: Type.Named{name: "Unit"}}, span))
+                diagnostics.push(sema_type_mismatch(normalized, Type.Option{inner: Type.Named{name: "Unit"}}, span, program))
                 return None
             }
         }
@@ -218,7 +218,7 @@ sema_expression_present: fn(value: Expr, span: Span, expected: Type?, environmen
     if expected_inner == .Val(inner_ty) {
         fits: sema_expr_expected_assignable(inner_ty, payload.ty, environment, program) ?? return None
         if !fits {
-            diagnostics.push(sema_type_mismatch(sema_expr_expected_type(inner_ty, environment, program), sema_expr_expected_type(payload.ty, environment, program), expr_span(value)))
+            diagnostics.push(sema_type_mismatch(sema_expr_expected_type(inner_ty, environment, program), sema_expr_expected_type(payload.ty, environment, program), expr_span(value), program))
             return None
         }
     }
@@ -431,7 +431,7 @@ sema_expression_result_payload: fn(value: Expr, success: Bool, take_field: Bool,
     if expected != None {
         fits: sema_expr_expected_assignable(required, payload.ty, environment, program) ?? return None
         if !fits {
-            diagnostics.push(sema_type_mismatch(sema_expr_expected_type(required, environment, program), sema_expr_expected_type(payload.ty, environment, program), expr_span(value)))
+            diagnostics.push(sema_type_mismatch(sema_expr_expected_type(required, environment, program), sema_expr_expected_type(payload.ty, environment, program), expr_span(value), program))
             return None
         }
     }
@@ -650,7 +650,7 @@ sema_expression_call_expected: fn(value: TExpr, expected: Type?, environment: Se
                 if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(_) {
                     return Val(value)
                 }
-                diagnostics.push(sema_type_mismatch(required, offered, value.span))
+                diagnostics.push(sema_type_mismatch(required, offered, value.span, program))
                 return None
             }
             return Val(value)

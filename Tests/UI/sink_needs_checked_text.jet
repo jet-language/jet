@@ -1,0 +1,29 @@
+// E0149: a sink typed with a checked-text type takes only that type, built from
+// a checked literal or an audited `.raw()`; its `CheckedText` impl is the sink fact.
+#Error
+TextError: enum {
+    Empty
+}
+
+Token: distinct String
+
+impl Token.CheckedText {
+    Error: TextError
+
+    check: fn(text: String) -[]> TextError! {
+        if text == "" -> return Err(TextError.Empty)
+        return Ok()
+    }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> String { return "[{value}]" }
+}
+
+send: fn(token: Token) { print("sent") }
+
+run: fn() {
+    user: "guest"
+    send(Token{"hello {user}"})
+    #Unsafe("audited: the text is a fixed literal") { send(Token.raw("audited")) }
+    text: "unchecked"
+    send(text)
+}

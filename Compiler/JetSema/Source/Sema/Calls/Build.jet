@@ -172,7 +172,7 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
         if required == .Val(ty) {
             compatible: sema_call_type_assignable(ty, value.ty, environment, program) ?? return failed
             if !compatible {
-                diagnostics.push(sema_type_mismatch(ty, value.ty, argument.span))
+                diagnostics.push(sema_type_mismatch(ty, value.ty, argument.span, program))
                 return failed
             }
         }
@@ -391,14 +391,14 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
     if !text {
         is_code: sema_call_type_assignable(Type.Named{name: "Code"}, code_value.ty, environment, program) ?? return failed
         if !is_code {
-            diagnostics.push(sema_type_mismatch(Type.Named{name: "Code"}, code_value.ty, code_arg.span))
+            diagnostics.push(sema_type_mismatch(Type.Named{name: "Code"}, code_value.ty, code_arg.span, program))
             return failed
         }
     }
     scope_value: sema_check_expression(scope_arg.expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
     scope_is_text: sema_call_type_assignable(Type.String, scope_value.ty, environment, program) ?? return failed
     if !scope_is_text {
-        diagnostics.push(sema_type_mismatch(Type.String, scope_value.ty, scope_arg.span))
+        diagnostics.push(sema_type_mismatch(Type.String, scope_value.ty, scope_arg.span, program))
         return failed
     }
     // The session reads the code, then the scope's String.
@@ -480,7 +480,7 @@ sema_call_compiler_add_struct: fn(receiver: Expr, receiver_value: TExpr, args: [
         value: sema_check_expression(ordinary[index].expr, Val(wanted[index]), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
         fits: sema_call_type_assignable(wanted[index], value.ty, environment, program) ?? return failed
         if !fits {
-            diagnostics.push(sema_type_mismatch(wanted[index], value.ty, ordinary[index].span))
+            diagnostics.push(sema_type_mismatch(wanted[index], value.ty, ordinary[index].span, program))
             return failed
         }
         params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
@@ -518,7 +518,7 @@ sema_call_compiler_find_type: fn(receiver: Expr, receiver_value: TExpr, args: [C
     value: sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
     fits: sema_call_type_assignable(Type.String, value.ty, environment, program) ?? return failed
     if !fits {
-        diagnostics.push(sema_type_mismatch(Type.String, value.ty, args[0].span))
+        diagnostics.push(sema_type_mismatch(Type.String, value.ty, args[0].span, program))
         return failed
     }
     params := [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
@@ -606,7 +606,7 @@ sema_call_compiler_rewrite_body: fn(receiver: Expr, receiver_value: TExpr, args:
     code: sema_check_expression(args[1].expr, Val(Type.Named{name: "Code"}), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
     compatible: sema_call_type_assignable(Type.Named{name: "Code"}, code.ty, environment, program) ?? return failed
     if !compatible {
-        diagnostics.push(sema_type_mismatch(Type.Named{name: "Code"}, code.ty, args[1].span))
+        diagnostics.push(sema_type_mismatch(Type.Named{name: "Code"}, code.ty, args[1].span, program))
         return failed
     }
     params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(code.ty), variadic: false})
@@ -1408,7 +1408,7 @@ sema_call_try_build_step_method: fn(receiver: Expr, receiver_value: TExpr, metho
             value: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
             compatible: sema_call_type_assignable(required, value.ty, environment, program) ?? return failed
             if !compatible {
-                diagnostics.push(sema_type_mismatch(required, value.ty, argument.span))
+                diagnostics.push(sema_type_mismatch(required, value.ty, argument.span, program))
                 return failed
             }
             values.push(value.copy())

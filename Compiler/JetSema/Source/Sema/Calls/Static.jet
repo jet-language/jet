@@ -680,7 +680,7 @@ sema_call_builtin_static_coerce: fn(value: TExpr, required: Type, span: Span, en
                 return Val(value)
             }
         }
-        diagnostics.push(sema_type_mismatch(required, value.ty, span))
+        diagnostics.push(sema_type_mismatch(required, value.ty, span, program))
         return None
     }
     if sema_call_builtin_static_accepts(required, value.ty, environment, program) {
@@ -690,7 +690,7 @@ sema_call_builtin_static_coerce: fn(value: TExpr, required: Type, span: Span, en
         line: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, diagnostics)
     }
-    diagnostics.push(sema_type_mismatch(required, value.ty, span))
+    diagnostics.push(sema_type_mismatch(required, value.ty, span, program))
     None
 }
 
@@ -736,7 +736,7 @@ sema_call_builtin_static_argument: fn(argument: CallArg, declared: Type, row: Bu
     checked: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     _ := sema_call_builtin_static_bind(declared, checked.ty, row, bindings)
     if sema_call_builtin_static_open(declared, row, bindings) {
-        diagnostics.push(sema_type_mismatch(sema_call_builtin_static_closed(declared, row, bindings), checked.ty, argument.span))
+        diagnostics.push(sema_type_mismatch(sema_call_builtin_static_closed(declared, row, bindings), checked.ty, argument.span, program))
         return None
     }
     required := sema_call_resolved_type(sema_inference_substitute_type_bindings(declared, bindings), environment, program)
