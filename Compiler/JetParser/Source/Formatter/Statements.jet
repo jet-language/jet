@@ -2171,15 +2171,18 @@ jfmt_fmt_bind_pattern: fn(f: &JetFmt, pat: BindPattern) {
             jfmt_fmt_bind_names(f, elems)
             jfmt_write(f, "]")
         }
-        .Tuple(elems, _) -> {
+        // `{min, max}` and the paren form `(min, max)` keep the delimiters
+        // they are written with.
+        .Tuple(elems, span) -> {
             renamed := false
             loop elem in elems {
                 if elem.rename != None -> renamed = true
             }
             if !renamed {
-                jfmt_write(f, "(")
+                braced: jfmt_src_valid(f, span.start, span.start + 1) && jfmt_src_text(f, span.start, span.start + 1) == "{{"
+                jfmt_write(f, if braced -> "{{" else -> "(")
                 jfmt_fmt_bind_names(f, elems)
-                jfmt_write(f, ")")
+                jfmt_write(f, if braced -> "}}" else -> ")")
                 return
             }
             // `{ member: local, … }` renames tuple members.

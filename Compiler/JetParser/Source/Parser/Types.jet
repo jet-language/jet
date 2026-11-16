@@ -524,7 +524,9 @@ parser_record_type_end_at: fn(state: &JetParserState, at: Int) -> Int? Never! {
     if parser_kind_at(state, at) != TOKEN_LBRACE -> return None
     first := at + 1
     loop parser_kind_at(state, first) == TOKEN_SEMI -> first += 1
-    if parser_kind_at(state, first) != TOKEN_IDENT || parser_kind_at(state, first + 1) != TOKEN_COLON -> return None
+    if parser_kind_at(state, first) != TOKEN_IDENT || parser_kind_at(state, first + 1) != TOKEN_COLON {
+        return None
+    }
     depth := 1
     offset := at + 1
     loop {
@@ -552,7 +554,9 @@ parser_record_type_members_typed_at: fn(state: &JetParserState, at: Int) -> Bool
         kind: parser_kind_at(state, offset)
         if kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
         if kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> depth -= 1
-        if depth == 0 && kind == TOKEN_COLON && !parser_record_member_type_starts_at(state, offset + 1) -> return false
+        if depth == 0 && kind == TOKEN_COLON && !parser_record_member_type_starts_at(state, offset + 1) {
+            return false
+        }
         offset += 1
     }
     true
