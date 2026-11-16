@@ -5513,8 +5513,13 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         }
     }
     // A root `#loop` that waits on a module value: the first pass leaves it
-    // out, and the second hands each computed value to its module.
+    // out and keeps the waits, whose values it fills in once computed
+    // (registration takes the loaded programs, so the waits can't be read
+    // from them again); the second hands each computed value to its module.
+    probe_waits := [SemaRootLoopValue]{}
     if loop_probe {
+        probe_waits = loop_values.move()
+        loop_values = [SemaRootLoopValue]{}
         loop index in 0..<registration_inputs.len() {
             registration_inputs[index].loop_values_pending = true
         }
@@ -5678,10 +5683,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // The first pass of a program whose root `#loop` waits on a module value
     // ends here, handing back the values it computed (jet_driver_compile_stages).
     if loop_probe {
-        landed := jet_driver_root_loop_waits(load)
-        sema_derive_template_loop_landed(landed, load.module_table, comptime_stage.sources, comptime_run.values)
+        sema_derive_template_loop_landed(probe_waits, load.module_table, comptime_stage.sources, comptime_run.values)
         probed := jet_driver_compile_result(load, load.diagnostics, None, false, trace)
-        probed.root_loop_values = Val(landed.move())
+        probed.root_loop_values = Val(probe_waits.move())
         return probed
     }
     // The stage's reports reach the result through finalization; a run that
