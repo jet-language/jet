@@ -1,0 +1,15 @@
+// A type a program writes bare is known when its owner says so: a host
+// value, the built-in catalog, a fact or payload enum, a data format marker,
+// a nameable runtime handle or compiler record, or a carrier the checker
+// types itself (sema_type_compiler_owned_name).
+use jet_sema.[sema_type_compiler_owned_name]
+
+#Test("each owner group makes its names writable bare") {
+    names: [String]{"TypeInfo", "CompilerReference", "SharedSnapshot", "CallingConvention", "PreparedValue", "JSON", "HVar", "WsMessage", "FactValue", "ModGrant", "Camera", "ViewMut", "FileLines", "Ptr"}
+    loop name in names { assert(sema_type_compiler_owned_name(name)) }
+}
+
+#Test("the host values no program names and names nothing owns stay unknown") {
+    names: [String]{"MarkerArgValue", "PreludeMarkerRecord", "UIPreviewContext", "TLSClientConfig", "WebMount", "FrameId", "IOOperation", "Authority"}
+    loop name in names { assert(!sema_type_compiler_owned_name(name)) }
+}

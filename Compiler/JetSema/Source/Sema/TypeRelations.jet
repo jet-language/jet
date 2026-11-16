@@ -67,6 +67,16 @@ use jet_foundation.[
     AST_NODE_GENERATED,
     comptime_walk_identifiers,
     TypeAliasDef,
+    CORE_RECORD_FIELD_ROWS,
+    CORE_RECORD_LITERAL_ROWS,
+    CoreRecordFieldRow,
+    CoreRecordLiteralRow,
+    IR_MARKER_ARG_VALUE,
+    IR_PRELUDE_MARKER_RECORD,
+    JET_TYPE_NAMES,
+    core_enum_payload_variants,
+    ir_host_value_name,
+    ir_runtime_handle_row,
 ]
 
 sema_type_arguments_have_open_shape: fn(types: [Type]) -> Bool Never! {
@@ -1062,9 +1072,7 @@ sema_type_written_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, na
     }
     // A standard or declared unit's type (`Meter`, an affine unit's `…Point`).
     if sema_registration_unit_fact_for_type(graph, Type.Named{name: name}) != None -> return false
-    if core_type_modules(name).len() > 0 || SEMA_TYPE_CORE_KNOWN_NAMES.contains(name) {
-        return false
-    }
+    if core_type_modules(name).len() > 0 || sema_type_compiler_owned_name(name) -> return false
     !sema_type_graph_declares_assoc_type(graph, name)
 }
 
@@ -1086,176 +1094,142 @@ sema_type_qualified_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, 
     sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, alias) == None
 }
 
-// The rest of Rust `core_type_known` and the `is_core_generic` heads:
-// compiler-owned Core carriers a program may write bare that no Core export row
-// carries.
-SEMA_TYPE_CORE_KNOWN_NAMES: [String]{
-    "ArithmeticOperationInfo",
-    "AssociatedTypeInfo",
-    "AttributionInfo",
-    "Build",
-    "CSV",
-    "CallableSignature",
-    "CallingConvention",
-    "Camera",
-    "CaptureInfo",
-    "CaptureMode",
-    "CaseInfo",
-    "ClassificationInfo",
+// Whether `name` is a type the compiler owns that a program may write bare
+// and no Core export row carries. Each group is read from its owner: the host
+// values of build and comptime code (ir_host_value_name) but the two no
+// program names, the built-in type catalog (JET_TYPE_NAMES), the reflection
+// fact enums (sema_fact_enum_variants), the compiler-owned payload enums
+// (CORE_ENUM_PAYLOAD_ROWS), the data format markers (sema_data_is_json_name),
+// then the runtime handles and compiler records a program may write
+// (SEMA_TYPE_NAMEABLE_HANDLES, SEMA_TYPE_NAMEABLE_RECORDS) and the carriers
+// the checker types itself (SEMA_TYPE_COMPILER_CARRIERS).
+sema_type_compiler_owned_name: fn(name: String) -> Bool {
+    if ir_host_value_name(name) {
+        return name != IR_MARKER_ARG_VALUE && name != IR_PRELUDE_MARKER_RECORD
+    }
+    if JET_TYPE_NAMES.contains(name) || sema_fact_enum_variants(name) != None || core_enum_payload_variants(name) != None {
+        return true
+    }
+    sema_data_is_json_name(name) || SEMA_TYPE_NAMEABLE_HANDLES.contains(name) || SEMA_TYPE_NAMEABLE_RECORDS.contains(name) || SEMA_TYPE_COMPILER_CARRIERS.contains(name)
+}
+
+// The runtime handles (IR_RUNTIME_HANDLES) a program may write as a type with
+// no import: the solver variables and constraints, the module grant handle,
+// the HTTP client policies, the text-width and log-span handles, the realtime
+// receipt, a closed channel's marker and the FFI callback registration. The
+// other handles are reached through their Core module's export or are the
+// runtime's own. SEMA_TYPE_NAMEABLE_HANDLES_CHECKED holds the view to
+// IR_RUNTIME_HANDLES.
+SEMA_TYPE_NAMEABLE_HANDLES: [String]{
     "Closed",
-    "ClosureInfo",
-    "Code",
-    "CommentInfo",
-    "CommentKind",
-    "Compiler",
-    "CompilerArithmeticOperation",
-    "CompilerBuildProfile",
-    "CompilerCall",
-    "CompilerChecked",
-    "CompilerDefinitionAnchor",
-    "CompilerDependency",
-    "CompilerDiagnostic",
-    "CompilerEffect",
-    "CompilerEffectProvenance",
-    "CompilerError",
-    "CompilerField",
-    "CompilerGeneratedLine",
-    "CompilerKeyValue",
-    "CompilerLexed",
-    "CompilerLock",
-    "CompilerLockedPackage",
-    "CompilerManifest",
-    "CompilerNode",
-    "CompilerOutput",
-    "CompilerOutputEntry",
-    "CompilerPackage",
-    "CompilerPackageError",
-    "CompilerPackageOutput",
-    "CompilerPackageTarget",
-    "CompilerProfile",
-    "CompilerProfileSet",
-    "CompilerReference",
-    "CompilerSourceMap",
-    "CompilerStructuralNode",
-    "CompilerSyntaxTree",
-    "CompilerToken",
-    "CompilerViewProjection",
-    "CompilerViewSource",
-    "CompilerViewSourcePath",
-    "ConstantInfo",
     "Constraint",
-    "ContributionInfo",
-    "ContributionKind",
-    "DataGroupedQuery",
-    "DeclarationKind",
-    "DefaultInfo",
-    "Dev",
-    "Device",
-    "DimensionAxis",
-    "DimensionInfo",
-    "EffectInfo",
-    "ExactnessInfo",
-    "ExactnessKind",
-    "Expired",
-    "FactInfo",
-    "FactValue",
-    "FfiCallbackEvent",
     "FfiCallbackRegistration",
-    "FieldInfo",
-    "FileLines",
-    "ForeignEvidence",
-    "ForeignInfo",
-    "FrameId",
-    "FunctionInfo",
-    "GameBackendType",
-    "GameReplayType",
-    "GameSceneType",
-    "GenericBindingInfo",
-    "HTTPClientType",
-    "HTTPCompressEncoding",
     "HTTPCookieJar",
     "HTTPProxy",
     "HTTPRedirectPolicy",
     "HTTPRetryPolicy",
     "HVar",
-    "ItemInfo",
-    "JSON",
-    "LayoutFact",
-    "LayoutField",
-    "LayoutInfo",
     "LengthVar",
     "LogSpan",
-    "MarkerArgInfo",
-    "MarkerInfo",
-    "Matrix",
-    "MeasureInfo",
-    "MethodInfo",
     "Mod",
-    "ModGrant",
-    "ModuleInfo",
-    "MovednessInfo",
-    "NominalInfo",
-    "NumericInfo",
-    "ObligationInfo",
-    "ObligationParamInfo",
-    "OriginInfo",
-    "PackageInfo",
-    "ParamAccess",
-    "ParamInfo",
-    "ParamZone",
-    "PreparedCase",
-    "PreparedField",
-    "PreparedStruct",
-    "PreparedValue",
-    "Ptr",
     "RealtimeReceipt",
-    "ReflectionKind",
-    "Screen",
-    "SendabilityInfo",
-    "SettingInfo",
-    "SharedRevisionError",
-    "SharedSnapshot",
-    "SourceSpan",
-    "StateInfo",
-    "Stream",
-    "TLSClientConfig",
-    "TLSClientConfigType",
-    "TLSClientIdentity",
-    "TLSClientIdentityType",
-    "TLSRootCertificates",
-    "TLSRootCertificatesType",
-    "TOML",
     "TextWidth",
     "TextWidthAmbiguous",
     "TextWidthControls",
-    "TraitInfo",
-    "TransitionInfo",
-    "TypeId",
-    "TypeInfo",
-    "TypeParamInfo",
-    "UIPreviewAccessibility",
-    "UIPreviewAuthority",
-    "UIPreviewContext",
-    "UIPreviewEffect",
-    "UIPreviewInputOverride",
-    "UIPreviewInputValue",
-    "UIPreviewLifecycle",
-    "UIPreviewSource",
-    "UIPreviewTheme",
-    "UIPreviewTraits",
-    "UnitScaleProvenanceInfo",
     "VVar",
+    "WsMessage",
+}
+
+SEMA_TYPE_NAMEABLE_HANDLES_CHECKED: #run sema_type_nameable_handles_checked(SEMA_TYPE_NAMEABLE_HANDLES)
+
+// The number of names in `view` (SEMA_TYPE_NAMEABLE_HANDLES), once each keys
+// a row of IR_RUNTIME_HANDLES; else the build stops naming the first stray.
+sema_type_nameable_handles_checked: fn(view: [String]) -> Int {
+    loop name in view {
+        if ir_runtime_handle_row(name) == None {
+            panic("SEMA_TYPE_NAMEABLE_HANDLES names {name}, which IR_RUNTIME_HANDLES does not hold")
+        }
+    }
+    view.len()
+}
+
+// The compiler records (CORE_RECORD_FIELD_ROWS, CORE_RECORD_LITERAL_ROWS) a
+// program may write as a type with no import: the reflection and
+// `core.compiler` query records that are no host value, a module grant, an
+// expiry and the router cache state. SEMA_TYPE_NAMEABLE_RECORDS_CHECKED holds
+// the view to the record rows.
+SEMA_TYPE_NAMEABLE_RECORDS: [String]{
+    "AttributionInfo",
+    "ClassificationInfo",
+    "CompilerArithmeticOperation",
+    "CompilerEffect",
+    "CompilerEffectProvenance",
+    "CompilerOutput",
+    "CompilerOutputEntry",
+    "ExactnessInfo",
+    "Expired",
+    "FactValue",
+    "ItemInfo",
+    "LayoutFact",
+    "LayoutField",
+    "MarkerArgInfo",
+    "MeasureInfo",
+    "ModGrant",
+    "MovednessInfo",
+    "NominalInfo",
+    "ObligationInfo",
+    "ObligationParamInfo",
+    "OriginInfo",
+    "SendabilityInfo",
+    "UnitScaleProvenanceInfo",
+    "ViewProvenanceInfo",
+    "WebRouterCacheState",
+}
+
+SEMA_TYPE_NAMEABLE_RECORDS_CHECKED: #run sema_type_nameable_records_checked(SEMA_TYPE_NAMEABLE_RECORDS, CORE_RECORD_FIELD_ROWS, CORE_RECORD_LITERAL_ROWS)
+
+// The number of names in `view` (SEMA_TYPE_NAMEABLE_RECORDS), once each owns
+// a row of `fields` or `literals`; else the build stops naming the first
+// stray.
+sema_type_nameable_records_checked: fn(view: [String], fields: [CoreRecordFieldRow], literals: [CoreRecordLiteralRow]) -> Int {
+    loop name in view {
+        if !sema_type_record_rows_own(fields, literals, name) {
+            panic("SEMA_TYPE_NAMEABLE_RECORDS names {name}, which owns no row of CORE_RECORD_FIELD_ROWS or CORE_RECORD_LITERAL_ROWS")
+        }
+    }
+    view.len()
+}
+
+sema_type_record_rows_own: fn(fields: [CoreRecordFieldRow], literals: [CoreRecordLiteralRow], name: String) -> Bool {
+    loop row in fields {
+        if row.owner == name -> return true
+    }
+    loop row in literals {
+        if row.owner == name -> return true
+    }
+    false
+}
+
+// The carriers the checker types itself, which no Core source or registry
+// row declares: the raw pointer `Ptr<T>` (`*T`), the coordinate spaces a
+// geometry point, delta or transform names (sema_call_geometry_space), the
+// compute shapes `Vec` and `Matrix`, the collection windows `View` and
+// `ViewMut`, a generator's `Stream`, the `FileLines` a file reader's
+// `lines()` yields, and the `DataGroupedQuery` a query's `group_by` yields,
+// which core.data declares without exporting.
+SEMA_TYPE_COMPILER_CARRIERS: [String]{
+    "Camera",
+    "DataGroupedQuery",
+    "Device",
+    "FileLines",
+    "Matrix",
+    "Ptr",
+    "Screen",
+    "Stream",
     "Vec",
     "View",
     "ViewMut",
-    "ViewProvenanceInfo",
-    "WebContext",
-    "WebFormTypedValidation",
-    "WebMount",
-    "WebRouterCacheState",
     "World",
-    "WsMessage",
-    "YAML",
 }
 
 // Whether any trait of the graph declares associated type `name`, which its
