@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108399,
+    "rev": 108400,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -221089,6 +221089,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T04:41:40.374Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0qtrnd9",
+      "note": "p204 landed: G9 transactions, webhook dedupe and trait-value printing met"
+    },
+    {
       "at": "2026-11-16T04:40:53.786Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -225729,6 +225736,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0qtrnd9",
+      "title": "p204 landed: G9 transactions, webhook dedupe and trait-value printing met",
+      "body": "## p204 landed (dev 686cdaaee7, 6 commits)\n\n**Criteria met:**\n- **#6445 c5:** a write method runs as one serializable transaction (the G9 root that four criteria were waiting on).\n- **#6820 c3:** a redelivered webhook runs once.\n- **#6845 c13:** a trait value prints as its concrete value.\n\n**Also landed:** the first `#Inline(Always)` SUB (#6979 c1); its proof's expected value was stale from a formatting commit, and the fix is in p205. The core-interface receipt is now committed as a dated audit.\n\n**Suite against p203:** golden 4968 / **0 fail** again, ui 2839 / 17, cases 4770 / 134, core 2419 / 2.\n\n**New failures, 3:**\n- **TLS O0 dudect:** the timing flake under load (#6748).\n- **The task-carriers case:** passes alone, so it is load-sensitive.\n- **The audit-dispositions snapshot:** my new receipt lacked its disposition table. That fix is in p205.\n\n**Any ballot:** the third fresh review failed it, and recall audit 3 passed. The review found:\n- under the ratified literal rule a bare `2.5` is a Decimal, so I withdrew #6839 c29 and refiled the real defects (#6727 c9 Decimal ICEs, #6839 c30-c31 wrong diagnostics, #4730 c6 the unbuilt `2.5f` suffix);\n- an untried option C: type arms over a trait value (`.Point3(p)` with `else`), a checked downcast without a top type.\n\nRound 3 of the redesign is underway, and it re-decides the recommendation with C included.\n\n**Running now:** the tidy census over every nested package (the first census missed them). Then p205: the c14 erased-value type, the #3147 enum case catalog, the tidy cleanup and the two fixes above.\n",
+      "by": "Main",
+      "created": "2026-11-16T04:41:40.374Z",
+      "sections": []
+    },
     {
       "id": "briefing0i5xk1w",
       "title": "p203 landed: golden clean on all tiers, precompiled Core c20 met",
