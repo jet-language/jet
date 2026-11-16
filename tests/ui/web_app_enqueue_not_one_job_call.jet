@@ -1,0 +1,11 @@
+use app
+
+Mailer: struct {
+    #App.Job send: fn(self, to: String) -> Int Never! { to.len() }
+
+    #App.SignedIn notify: fn(self) -> Int app.CallError! {
+        other: Mailer{}
+        app.enqueue(fn() { other.send("ann") })
+        Ok(1)
+    }
+}

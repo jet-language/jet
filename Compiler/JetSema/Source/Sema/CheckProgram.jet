@@ -1955,6 +1955,11 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         }
     }
     scopes.position_free = marker_position_free
+    if stand_in == None && markers_valid {
+        if program.registration_graph == .Val(graph) {
+            sema_app_server_only_endpoint_check(func, graph, module_identity, diagnostics)
+        }
+    }
     if func.return_type == .Val(declared_return) {
         resolved_return := declared_return
         resolved_return = sema_function_resolve_declared(updated, program, declared_return, module_identity, generic_params)

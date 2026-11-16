@@ -831,7 +831,7 @@ jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodFor
     positions := [Int:Int]{}
     loop index in 0..<nodes.len() -> positions[nodes[index].id] = index
     direct := [[Int]]{}
-    loop index in 0..<nodes.len() -> direct.push([Int]{})
+    loop _index in 0..<nodes.len() -> direct.push([Int]{})
     loop index in 0..<nodes.len() {
         if nodes[index].parent == .Val(parent) {
             if positions.get(parent) == .Val(owner) -> direct[owner].push(index)
@@ -1744,7 +1744,7 @@ jet_cli_codemod_v2_log: fn(batch: JetCLICodemodBatch, changes: [JetCLISourceChan
 jet_cli_codemod_run_v2: fn(batch: JetCLICodemodBatch, apply: Bool, yes: Bool, run: &JetCLICodemodRun) JetCLIReadError! {
     project: JetCLIRootedDirectory.open(batch.project, [String]{}, false)
     journal: project.descendant([String]{".jet", "codemods"}, true)
-    lock: journal.transaction_lock()
+    _lock: journal.transaction_lock()
     jet_cli_transaction_recover(project, journal)
     plan: jet_cli_codemod_plan_batch(batch, run)
     jet_cli_codemod_verify_inputs(plan.inputs)
@@ -1855,7 +1855,7 @@ jet_cli_codemod_run_v1: fn(codemod: JetCLICodemodV1, apply: Bool, run: &JetCLICo
     log: "{{\"name\":{name_json},\"inverse_from\":{to_json},\"inverse_to\":{from_json},\"semantic_ops\":[{jet_cli_fix_operation_json(operation, changes)}],\"files\":[{jet_cli_codemod_file_rows(changes, true).join(",")}]}}\n"
     project: JetCLIRootedDirectory.open(project_path, [String]{}, false)
     journal: project.descendant([String]{".jet", "codemods"}, true)
-    lock: journal.transaction_lock()
+    _lock: journal.transaction_lock()
     jet_cli_transaction_recover(project, journal)
     log_path: jet_cli_transaction_commit_locked(project, journal, changes, "{jet_cli_fix_name(codemod.name)}.log.json", log.bytes())
     jet_cli_codemod_print(run, "  log: {log_path}")
@@ -1917,7 +1917,7 @@ jet_cli_codemod_read_replay_log: fn(project: String, path: String) -[FS, Env]> S
 jet_cli_codemod_lock_and_recover: fn(project_path: String) JetCLIReadError! -[FS, Env, Time]> {
     project: JetCLIRootedDirectory.open(project_path, [String]{}, false)
     journal: project.descendant([String]{".jet", "codemods"}, true)
-    lock: journal.transaction_lock()
+    _lock: journal.transaction_lock()
     jet_cli_transaction_recover(project, journal)
 }
 
@@ -2005,7 +2005,7 @@ jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path
     jet_cli_codemod_validate_replay_aliases(project_path, path, paths, false)
     project: JetCLIRootedDirectory.open(project_path, [String]{}, false)
     journal: project.descendant([String]{".jet", "codemods"}, true)
-    lock: journal.transaction_lock()
+    _lock: journal.transaction_lock()
     jet_cli_transaction_recover(project, journal)
     changes := [JetCLISourceChange]{}
     loop row in decoded {

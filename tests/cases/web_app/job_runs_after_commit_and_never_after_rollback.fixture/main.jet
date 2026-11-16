@@ -1,0 +1,93 @@
+// A board whose `add` saves a note and queues a notice, an `#App.Job` that
+// writes a second note. The notice is kept in `add`'s transaction: an `add`
+// that is refused after it queued rolls back and queues nothing, and one that
+// commits runs the notice after the commit. The notice's first run fails, so
+// it runs again after a backoff.
+use {
+    app
+    db: core.db
+    tasks: core.tasks
+}
+
+#Codable
+Note: struct {
+    id: Int
+    text: String
+}
+
+#Error
+BoardError: enum {
+    Refused
+    Failed(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+notes_in: fn(store: db.Store) -> db.Table<Int, Note> {
+    store.table("notes", key: fn(note: Note) { note.id })
+}
+
+Board: struct {
+    store: db.Store
+    runs: Shared<Int>
+
+    // Saves note `id` and queues its notice; a note titled "fail" is refused
+    // after both, so its call rolls back.
+    #App.SignedIn add: fn(self, id: Int, title: String) -> Int BoardError! {
+        _: notes_in(self.store).put(Note{id: id, text: title}) ?? return Err(BoardError.Failed(err.message()))
+        app.enqueue(fn() { self.notify(id + 100, "added {title}") })
+        if title == "fail" -> return Err(BoardError.Refused)
+        Ok(id)
+    }
+
+    // Writes note `id`; its first run fails.
+    #App.Job(retries: 3) notify: fn(self, id: Int, text: String) -> Int BoardError! {
+        run := self.runs.guard_edit()
+        run.value += 1
+        if run.value == 1 -> return Err(BoardError.Failed("the first run fails"))
+        _: notes_in(self.store).put(Note{id: id, text: text}) ?? return Err(BoardError.Failed(err.message()))
+        Ok(run.value)
+    }
+}
+
+// What `added` gave, as text.
+shown: fn(added: Int BoardError!) -> String {
+    if added == {
+        .Ok(id) -> "{id}"
+        .Err(BoardError.Refused) -> "refused"
+        .Err(_) -> "failed"
+    }
+}
+
+// Note `id`'s text, or "none".
+note: fn(store: db.Store, id: Int) -> String {
+    if notes_in(store).get(id) == {
+        .Val(found) -> found.text
+        .None -> "none"
+        .Err(failure) -> "unreadable: {failure.message()}"
+    }
+}
+
+run: fn() {
+    store: db.open_memory()
+    runs: Shared{0}
+    board: app.remote(Board{store: store.copy(), runs: runs.copy()})
+    print("add 2: {shown(board.add(2, "fail"))}")
+    print("add 1: {shown(board.add(1, "first"))}")
+    loop _ in 0..<500 {
+        if note(store, 101) != "none" -> break
+        tasks.sleep(10)
+    }
+    ids: [Int]{1, 2, 101, 102}
+    loop id in ids -> print("note {id}: {note(store, id)}")
+    ran: runs.guard_read()
+    print("notice runs: {ran.value}")
+}

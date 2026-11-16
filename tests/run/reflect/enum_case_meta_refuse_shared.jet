@@ -1,0 +1,18 @@
+// E0112: `reflect.of(x)` captures every case payload an enum value could
+// hold, or refuses the value. A shared cell has no fixed text to show, so a
+// value of an enum with a shared payload is refused whichever case it holds.
+use reflect: core.reflect
+
+Slot: enum {
+    Empty
+    Held(Shared<Int>)
+
+    impl Display {
+        display: fn(self) -> String { "Slot" }
+    }
+}
+
+run: fn() {
+    slot: Slot.Empty
+    _: reflect.of(slot)
+}

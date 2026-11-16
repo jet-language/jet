@@ -295,7 +295,7 @@ jet_cli_record_index_fresh_sequence: fn(index: JetCLIRecordIndex, entry: &&JetCL
 
 jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entry: &&JetCLIRecordIndexEntry, supersede: Bool{false}) JetCLIReadError! -[FS, Env, Time]> {
     held: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
-    owner: held.lock("record index") ?? return Err(err)
+    _owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous: candidate.entries
     if supersede {
@@ -315,7 +315,7 @@ jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_ro
 
 jet_cli_record_index_upsert_many_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entries: &&[JetCLIRecordIndexEntry]) JetCLIReadError! -[FS, Env, Time]> {
     held: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
-    owner: held.lock("record index") ?? return Err(err)
+    _owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous: candidate.entries
     loop entry in entries.move() {

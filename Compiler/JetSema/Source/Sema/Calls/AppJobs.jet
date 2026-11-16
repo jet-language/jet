@@ -1,0 +1,251 @@
+// `app.enqueue(fn() { self.method(args) })`, written in a method of a
+// service, queues one call of the service's `#App.Job` method `method`. The
+// closure takes no parameters and its whole body is that call on `self`,
+// without type arguments, each argument in its place and of a type that is
+// Encode and Decode (E2817 otherwise). The arguments are evaluated and
+// encoded where `enqueue` is called, and the call lowers to
+// `app.__enqueue(job, [app.__live_arg(argument)...], retries, run)`: `job` is
+// the wire name `<service module>.<Service>.<method>`, `retries` the
+// marker's `retries:`, and `run` decodes the arguments and calls the method
+// on a copy of the service, replying `{"err":...}` when the method failed.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    diagnostic_registry_row,
+    Expr,
+    Func,
+    Lambda,
+    LambdaBody,
+    LambdaParam,
+    ModuleID,
+    NamedSpan,
+    OrFallback,
+    Span,
+    Stmt,
+    Type,
+    ast_binding,
+    ast_empty_lambda_meta,
+    expr_span,
+    owned_trait_codec_names,
+    module_text,
+]
+
+// The app marker of a job method.
+SEMA_APP_JOB_MARKER: "Job"
+
+// `#App.Job`'s `retries:` when unwritten.
+SEMA_APP_JOB_RETRIES: 5
+
+// The `#App.Job` method an `enqueue` closure calls on `self`, with the
+// call's arguments, each encoded, and the place of its receiver.
+SemaAppJob: struct {
+    method: Func
+    module: ModuleID
+    wire: String
+    retries: Expr
+    receiver_span: Span
+    receiver_id: Int
+    encoded: [Expr]
+}
+
+// `alias.enqueue(args)`, where `alias` names `app` and the import is
+// already recorded.
+sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if args.len() == 0 -> return sema_app_job_refused("it is given no closure", span, diagnostics)
+    if args.len() > 1 {
+        return sema_app_job_refused("arguments follow its closure, but its one call gives them", args[1].span, diagnostics)
+    }
+    if args[0].spread || args[0].label != None {
+        return sema_app_job_refused("its closure is not passed on its own", args[0].span, diagnostics)
+    }
+    job: sema_app_job_call(alias, args[0].expr, environment, program, scopes, diagnostics) ?? return sema_live_rejected()
+    graph: program.registration_graph ?? return sema_live_rejected()
+    sema_scope_enter(scopes, state, "enqueue:{span.start}")
+    body := [TStmt]{}
+    // The job runs later, on a task of its own, so it keeps a copy of the
+    // service.
+    service_name: "__jet_job_{span.start}_service"
+    service: Expr.Copy{value: Expr.Ident{name: "self", span: job.receiver_span, id: job.receiver_id}, span: job.receiver_span, id: AST_NODE_GENERATED}
+    binding: ast_binding(service_name, job.receiver_span, false, service, None)
+    statement: sema_stmt_check_binding(binding, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+        sema_single_use_leave_scope(scopes, state, diagnostics)
+        return sema_live_rejected()
+    }
+    body.push(statement)
+    run: sema_app_job_run(service_name, job.method, job.module, span, graph, environment)
+    lowered: sema_live_module_call(alias, "__enqueue", [Type]{}, [CallArg]{sema_live_arg(sema_live_string(job.wire, span), span), sema_live_arg(Expr.ListLit{elements: job.encoded, span: span, id: AST_NODE_GENERATED}, span), sema_live_arg(job.retries, span), sema_live_arg(run, span)}, span)
+    checked: sema_check_expression(lowered, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+        sema_single_use_leave_scope(scopes, state, diagnostics)
+        return sema_live_rejected()
+    }
+    result_type: checked.ty.copy()  // copy: the block's value keeps its own type
+    body.push(TStmt.ExprStmt{value: checked, span: span})
+    sema_single_use_leave_scope(scopes, state, diagnostics)
+    lowered_value: sema_tree_node(result_type, TExprKind.InlineBlock{body: body}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, environment, program, diagnostics)}
+}
+
+// The function a queued job runs: `fn(args) { a_1: args.__take<T_1>(0) …;
+// value: service.method(a_1, …) ?? return Ok(args.__reply_err<E>(err));
+// Ok(args.__ran(value)) }`. A method error that doesn't encode replies
+// `__failed`, a bare failure.
+sema_app_job_run: fn(service_name: String, method: Func, method_module: ModuleID, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) -> Expr Never! {
+    args_name: "__jet_job_{span.start}_args"
+    statements := [Stmt]{}
+    reads := [CallArg]{}
+    loop index in 1..<method.params.len() {
+        local_name: "{args_name}_{index}"
+        param: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
+        decoded: sema_app_remote_method_call(args_name, "__take", [Type]{param}, [CallArg]{sema_http_mount_arg(Expr.Int{value: index - 1, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span)}, span)
+        statements.push(Stmt.Val{binding: ast_binding(local_name, span, false, decoded, None)})
+        reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, span), span))
+    }
+    invocation: Expr.MethodCall{receiver: sema_app_remote_ident(service_name, span), method: "{method.name}", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
+    declared: sema_type_resolve_declared(graph, method.return_type ?? Type.Named{name: "Unit"}, method_module)
+    value_name: "{args_name}_value"
+    value_type: if {
+        declared == .Result(ok, failure) -> {
+            encodes: sema_type_bound_satisfied(graph, failure, "Encode", environment.module_identity) == (Val(true))
+            reply: if encodes -> "__reply_err" else -> "__failed"
+            failed: sema_app_remote_method_call(args_name, reply, [Type]{failure}, [CallArg]{sema_http_mount_arg(sema_app_remote_ident("err", span), span)}, span)
+            settled: Expr.OrFallback{value: invocation, fallback: OrFallback.Return{value: Val(Expr.Ok{value: failed, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: false, span: span, id: AST_NODE_GENERATED}
+            statements.push(Stmt.Val{binding: ast_binding(value_name, span, false, settled, None)})
+            ok
+        }
+        else -> {
+            statements.push(Stmt.Val{binding: ast_binding(value_name, span, false, invocation, None)})
+            declared
+        }
+    }
+    ran: sema_app_remote_method_call(args_name, "__ran", [Type]{value_type}, [CallArg]{sema_http_mount_arg(sema_app_remote_ident(value_name, span), span)}, span)
+    statements.push(Stmt.Expr{expr: Expr.Ok{value: ran, span: span, id: AST_NODE_GENERATED}})
+    takes: [NamedSpan]{NamedSpan{name: service_name, span: span}}
+    Expr.Lambda{lambda: Lambda{take_names: takes, params: [LambdaParam]{LambdaParam{name: args_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: statements}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
+}
+
+// An `enqueue` that is not one call of an `#App.Job` method of its service:
+// E2817, naming what it is instead.
+sema_app_job_refused: fn(found: String, at: Span, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    _: sema_app_job_not_one(found, at, diagnostics)
+    sema_live_rejected()
+}
+
+sema_app_job_not_one: fn(found: String, at: Span, diagnostics: &[Diagnostic]) -> SemaAppJob? {
+    entry: diagnostic_registry_row("E2817") ?? panic("E2817 must have a registry row")
+    diagnostics.push(sema_error("E2817", at, entry.what.replace("{{found}}", found), entry.why, entry.fix))
+    None
+}
+
+// The closure `expression` given to `enqueue`, which must take no
+// parameters and be one call, `self.method(args)` (sema_app_job_method).
+sema_app_job_call: fn(alias: String, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaAppJob? {
+    span: expr_span(expression)
+    if expression == .Lambda(lambda, _) {
+        if lambda.params.len() != 0 {
+            return sema_app_job_not_one("its closure takes parameters", span, diagnostics)
+        }
+        if lambda.body == .Expr(value) {
+            return sema_app_job_method(alias, value, span, environment, program, scopes, diagnostics)
+        }
+        if lambda.body == .Block(statements) {
+            if statements.len() == 1 {
+                if statements[0] == .Expr(value) {
+                    return sema_app_job_method(alias, value, span, environment, program, scopes, diagnostics)
+                }
+            }
+        }
+        return sema_app_job_not_one("its closure's body is not one call", span, diagnostics)
+    }
+    sema_app_job_not_one("it is given no closure", span, diagnostics)
+}
+
+// The closure's one call, which must be a method call without type
+// arguments on `self`, in a method of a service.
+sema_app_job_method: fn(alias: String, call: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaAppJob? {
+    if call == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) {
+        if owner_type_args.len() != 0 || type_args.len() != 0 {
+            return sema_app_job_not_one("its call has type arguments", method_span, diagnostics)
+        }
+        on_self := false
+        receiver_span := method_span
+        receiver_id := AST_NODE_GENERATED
+        if receiver == .Ident(written, at, id) {
+            on_self = written == "self"
+            receiver_span = at
+            receiver_id = id
+        }
+        if !on_self {
+            return sema_app_job_not_one("its call of `{method}` is not on `self`", expr_span(receiver), diagnostics)
+        }
+        index: sema_scope_resolve_index(scopes, "self") ?? return sema_app_job_not_one("it is not in a method of a service, so no `self` names one", receiver_span, diagnostics)
+        held: sema_scope_binding_type(environment, scopes, index) ?? return None
+        service: sema_call_resolved_type(held, environment, program)
+        return sema_app_job_endpoint(alias, service, method, method_span, args, receiver_span, receiver_id, environment, program, diagnostics)
+    }
+    sema_app_job_not_one("its closure's body is not a method call on `self`", span, diagnostics)
+}
+
+// `method` of the service `service`, called with `args`: it must be an
+// `#App.Job` method of the service, passed each argument in its place, and
+// each parameter type must be Encode and Decode. Each argument is encoded
+// with `alias.__live_arg`.
+sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_span: Span, args: [CallArg], receiver_span: Span, receiver_id: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaAppJob? {
+    graph: program.registration_graph ?? return None
+    row: sema_type_resolve_nominal_row(graph, service, environment.module_identity) ?? return sema_app_job_not_one("`self` is a {sema_type_show_quoted(service)}, not a service", receiver_span, diagnostics)
+    service_module: graph.modules[row.module_index].module_identity
+    service_name: graph.modules[row.module_index].nominals[row.row].symbol.name
+    definition := sema_http_route_find_struct(environment, program, service, environment.module_identity) ?? return sema_app_job_not_one("`self` is a {sema_type_show_quoted(service)}, not a service", receiver_span, diagnostics)
+    method_at := -1
+    marker_at := -1
+    loop (index, candidate) in definition.methods {
+        if candidate.name != method -> next
+        loop (at, written) in candidate.markers {
+            if sema_app_marker_is(written, SEMA_APP_JOB_MARKER, graph, service_module) {
+                method_at = index
+                marker_at = at
+                break
+            }
+        }
+        break
+    }
+    if method_at < 0 {
+        return sema_app_job_not_one("`{service_name}.{method}` is not an `#App.Job` method", method_span, diagnostics)
+    }
+    declaration := definition.methods.remove(method_at, .Slot) ?? return None
+    marker: declaration.markers.remove(marker_at, .Slot) ?? return None
+    if args.len() != declaration.params.len() - 1 {
+        diagnostics.push(sema_call_arity_diagnostic("{service_name}.{method}", declaration.params.len() - 1, args.len(), false, method_span))
+        return None
+    }
+    loop (index, argument) in args {
+        name: "{declaration.params[index + 1].name}"
+        relabeled: if {
+            argument.label == .Val(label) -> label.name != name
+            else -> false
+        }
+        if argument.spread || relabeled {
+            return sema_app_job_not_one("argument {index + 1} of `{method}` is not passed in its place", argument.span, diagnostics)
+        }
+    }
+    encoded := [Expr]{}
+    loop index in 1..<declaration.params.len() {
+        param: sema_type_resolve_declared(graph, declaration.params[index].ty, service_module)
+        missing: loop codec in owned_trait_codec_names() {
+            if sema_type_bound_satisfied(graph, param, codec, environment.module_identity) != (Val(true)) {
+                break "{codec}"
+            }
+        } ?? ""
+        argument: args[index - 1]
+        if missing != "" {
+            return sema_app_job_not_one("parameter `{declaration.params[index].name}` of `{service_name}.{method}` has the type {sema_type_show_quoted(param)}, which isn't `{missing}`", argument.span, diagnostics)
+        }
+        encoded.push(sema_live_module_call(alias, "__live_arg", [Type]{param}, [CallArg]{sema_live_arg(argument.expr.copy(), argument.span)}, argument.span))  // copy: the written call keeps its argument
+    }
+    retries := Expr.Int{value: SEMA_APP_JOB_RETRIES, span: marker.span, width: None, raw: None, id: AST_NODE_GENERATED}
+    if sema_app_marker_arg_at(marker, "retries", 0) == .Val(at) {
+        if marker.args[at] == .Expr(value) -> retries = value.copy()  // copy: the marker keeps its argument
+    }
+    Val(SemaAppJob{method: declaration, module: service_module, wire: "{module_text(graph.module_table, service_module)}.{service_name}.{method}", retries: retries, receiver_span: receiver_span, receiver_id: receiver_id, encoded: encoded})
+}

@@ -512,7 +512,7 @@ jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli
         }
         if info.is_dir {
             if !cli_files.exists("{destination.path}/{entry.name}") {
-                created: destination.create_directory(entry.name, Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create Cargo output directory: {err}"))
+                _created: destination.create_directory(entry.name, Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create Cargo output directory: {err}"))
             }
             child_source: source.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't open Cargo output directory: {err}"))
             child_destination: destination.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_sandbox_error("Cargo destination directory is not a real directory: {err}"))
@@ -664,7 +664,7 @@ jet_cli_rust_foreign_workspace: fn(source: String) -[FS, Env]> JetCLIRustForeign
     folder: if retain -> ".trace-workspaces" else -> ".workspaces"
     owner: cli_files.open_directory(source) ?? return Err(jet_cli_rust_foreign_io("couldn't hold FFI key folder: {err}"))
     if !cli_files.exists("{source}/{folder}") {
-        created: owner.create_directory(folder, Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create FFI workspace folder: {err}"))
+        _created: owner.create_directory(folder, Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create FFI workspace folder: {err}"))
     }
     workspaces: owner.open_directory(folder) ?? return Err(jet_cli_rust_foreign_io("couldn't hold FFI workspace folder: {err}"))
     entries: workspaces.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list FFI workspaces: {err}"))
@@ -705,8 +705,8 @@ JetCLIRustForeignResolved: struct {
 }
 
 jet_cli_rust_foreign_resolve: fn(plan: JetDriverRustForeignPlan, cache: String, bwrap: String, cargo: String, registry: String, private_source: cli_files.Directory, private_output: cli_files.Directory) -[FS, Env, Exec, Time.Wait]> JetCLIRustForeignResolved JetDriverRustForeignError! {
-    private_cargo_home: private_output.create_directory("cargo-home", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private Cargo home: {err}"))
-    private_home: private_output.create_directory("home", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private build home: {err}"))
+    _private_cargo_home: private_output.create_directory("cargo-home", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private Cargo home: {err}"))
+    _private_home: private_output.create_directory("home", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private build home: {err}"))
     metadata_source: private_output.create_directory("metadata-source", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private metadata source: {err}"))
     jet_cli_rust_foreign_copy_tree(private_source, metadata_source)
     metadata: jet_cli_rust_foreign_run(bwrap, cargo, private_source.path, private_output.path, registry, [String]{"metadata", "--format-version", "1", "--manifest-path", "/work/output/metadata-source/Cargo.toml"})
@@ -747,7 +747,7 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
     jet_cli_rust_foreign_publish_output(private_output, shared, target_dir)
     inputs: cli_files.open_directory(source) ?? return Err(jet_cli_rust_foreign_io("couldn't hold FFI source folder: {err}"))
     if !cli_files.is_dir("{source}/src") {
-        created: inputs.create_directory("src", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create FFI src folder: {err}"))
+        _created: inputs.create_directory("src", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create FFI src folder: {err}"))
     }
     src: inputs.open_directory("src") ?? return Err(jet_cli_rust_foreign_io("couldn't hold FFI src folder: {err}"))
     jet_cli_rust_foreign_publish(inputs, "Cargo.toml", plan.manifest.bytes(), false)
@@ -767,13 +767,13 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
 // that share a target build at once; each key still builds once, under its
 // key lock.
 jet_cli_rust_foreign_snapshot: fn(shared: cli_files.Directory, private_output: cli_files.Directory, target_dir: String) JetDriverRustForeignError! -[FS, Env]> {
-    publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
+    _publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
     jet_cli_rust_foreign_copy_tree(shared, private_output)
     Ok()
 }
 
 jet_cli_rust_foreign_publish_output: fn(private_output: cli_files.Directory, shared: cli_files.Directory, target_dir: String) JetDriverRustForeignError! -[FS, Env]> {
-    publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
+    _publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
     jet_cli_rust_foreign_move_tree(private_output, shared)
     Ok()
 }
@@ -785,7 +785,7 @@ jet_cli_rust_foreign_publish_output: fn(private_output: cli_files.Directory, sha
 // the archive whose digest it records: a crash can then lose the helper, never
 // leave a manifest naming bytes that did not reach the disk (a false E2604).
 jet_cli_rust_foreign_publish_sidecars: fn(target_dir: String, release: String, crate_name: String, archive: String, manifest: String, provenance: String) JetDriverRustForeignError! -[FS, Env]> {
-    publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
+    _publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
     released: cli_files.open_directory(release) ?? return Err(jet_cli_rust_foreign_io("couldn't hold published FFI artifacts: {err}"))
     cli_files.fsync("{release}/{archive}") ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI artifact `{archive}`: {err}"))
     jet_cli_rust_foreign_publish(released, "{crate_name}.provenance", provenance.bytes(), false)
@@ -826,7 +826,7 @@ jet_cli_rust_foreign_realize: fn(facts: JetDriverRustForeignFacts, link: JetDriv
     cli_files.create_dir_all(key.source) ?? return Err(jet_cli_rust_foreign_io("couldn't create the FFI cache folder: {err}"))
     // Native FileLock ownership releases on every error/return and process
     // death. No age-based stealing can admit two live writers to one key.
-    key_lock: cli_files.lock(cli_files.join(key.cache, "{key.plan.key}.build-lock")) ?? return Err(jet_cli_rust_foreign_io("couldn't lock the FFI cache folder: {err}"))
+    _key_lock: cli_files.lock(cli_files.join(key.cache, "{key.plan.key}.build-lock")) ?? return Err(jet_cli_rust_foreign_io("couldn't lock the FFI cache folder: {err}"))
     if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) {
         return Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, target_dir: key.target_dir, release: key.release}))
     }
@@ -850,7 +850,7 @@ jet_cli_rust_foreign_check: fn(facts: JetDriverRustForeignFacts, link: JetDriver
     registry: jet_cli_rust_foreign_registry(key.plan)
     bwrap: jet_cli_rust_foreign_sandbox(registry)
     cli_files.create_dir_all(key.source) ?? return Err(jet_cli_rust_foreign_io("couldn't create the FFI cache folder: {err}"))
-    key_lock: cli_files.lock(cli_files.join(key.cache, "{key.plan.key}.build-lock")) ?? return Err(jet_cli_rust_foreign_io("couldn't lock the FFI cache folder: {err}"))
+    _key_lock: cli_files.lock(cli_files.join(key.cache, "{key.plan.key}.build-lock")) ?? return Err(jet_cli_rust_foreign_io("couldn't lock the FFI cache folder: {err}"))
     workspace: jet_cli_rust_foreign_workspace(key.source)
     defer close(workspace)
     root: cli_files.open_directory(workspace.path) ?? return Err(jet_cli_rust_foreign_io("couldn't hold private FFI workspace: {err}"))

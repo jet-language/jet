@@ -15,3 +15,9 @@ stdout: ~ "\"selection\":\"reflect\"" # the selected lens; the document holds ev
 stdout: ~ "\"call\":\"reflect.of\"" # a row's call; each row carries one
 stdout: ~ "\"path\":\"ReflectValue.Point\"" # one retained type's identity among the example's calls
 stdout: ~ "\"name\":\"level\"" # one stored field of that type's tree
+step: jet inspect expand --facts reflect {root}/tests/run/reflect/enum_case_meta.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "reflect.of   retains enum_case_meta.Shape [Dot, Circle {value: Int}, Rect {width: Int, height: Int}]" # an enum's cases follow its type, each with its payload fields
+stdout: ~ "reflect.of   retains enum_case_meta.Scene {shape: enum_case_meta.Shape [Dot, Circle {value: Int}, Rect {width: Int, height: Int}], label: String}" # a field of enum type lists its cases too
+stdout: ~ "reflect.of   retains enum_case_meta.Wrapper [Empty, Holding {value: enum_case_meta.Shape [Dot, Circle {value: Int}, Rect {width: Int, height: Int}]}]" # a payload of enum type lists its own cases

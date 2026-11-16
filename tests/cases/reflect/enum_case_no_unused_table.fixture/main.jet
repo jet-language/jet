@@ -1,0 +1,32 @@
+// `describe` matches cases and never reflects; `held_case` reflects the value
+// and reads the one case it holds, with that case's typed payload.
+use reflect: core.reflect
+
+Shape: enum {
+    Dot
+    Circle(Int)
+    Rect(width: Int, height: Int)
+}
+
+describe: fn(shape: Shape) -> String {
+    if shape == {
+        .Dot -> "dot"
+        .Circle(radius) -> "circle {radius}"
+        .Rect(width, height) -> "rect {width}x{height}"
+    }
+}
+
+held_case: fn(shape: Shape) -> String {
+    if reflect.of(shape).case() == .Val(held) {
+        payload: (loop field in held.fields() -> "{field.name()}: {field.value().type_name()} = {field.value().display()}").join(", ")
+        return "{held.name()} ({payload})"
+    }
+    "none"
+}
+
+run: fn() {
+    print(describe(Shape.Circle(2)))
+    print(held_case(Shape.Circle(2)))
+    print(held_case(Shape.Dot))
+    print(held_case(Shape.Rect{width: 4, height: 5}))
+}

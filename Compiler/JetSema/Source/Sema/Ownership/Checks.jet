@@ -1000,8 +1000,12 @@ sema_ownership_truncate_references: fn(state: &SemaOwnershipState, count: Int) N
     }
 }
 
-// A reference a join or a deferred body admits: no row counted it yet.
+// A reference a join or a deferred body admits: no row counted it yet. As
+// with a direct read (sema_ownership_note_reference), only an open fork can
+// roll it back, so it is a use for L0101/L0102 even then: a task spawned in
+// an arm that ends in `next` still reads what it captures.
 sema_ownership_admit_reference: fn(state: &SemaOwnershipState, reference: SemaOwnershipReference) Never! {
+    if state.forks > 0 -> state.used_ids[reference.def_id.id] = true
     sema_ownership_push_reference(state, reference.copy())
     first: sema_ownership_first_row(state, reference.def_id)
     sema_ownership_mark_dirty(state, first)

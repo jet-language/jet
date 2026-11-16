@@ -1,0 +1,17 @@
+Error [jet.GoneFailureArm]: Arm `LookupError` can never match — `LookupError` can no longer reach this value
+  --> tests/ui/failure_arm_cannot_arrive.jet:21:9
+    |
+ 21 |         .Err(.LookupError(_)) -> { print("no such record") }
+    |         ^^^^^^^^^^^^^^^^^^^^^
+ Why: A failure union holds only the failure types that can still reach it, and `LookupError` is no longer one of them
+ Fix: Delete this arm
+More: jet-lang.dev/e/L0304
+
+Error [jet.PatternTypeMismatch]: Pattern `Vanished` doesn't belong to `Err | LoadError`
+  --> tests/ui/failure_arm_cannot_arrive.jet:22:14
+    |
+ 22 |         .Err(.Vanished(_)) -> { print("vanished") }
+    |              ^^^^^^^^^^^^
+ Why: Union pattern arms name one member type of the subject union
+ Fix: Use one of the subject union member types
+More: jet-lang.dev/e/E0305

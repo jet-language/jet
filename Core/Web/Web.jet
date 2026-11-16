@@ -26,7 +26,7 @@ use {
     core.prelude.[SourceLocation]
     // A mounted method's call is one transaction (`app_transacted`).
     calls: app
-    app.[Signature, make_trace_id, webhook_header, webhook_signed]
+    app.[RemoteArgs, Signature, make_trace_id, webhook_header, webhook_signed]
     log: core.log
     core.log.[LogField, TraceSpan]
     log_rt: jet.runtime.log
@@ -1307,27 +1307,6 @@ priv app_limited: fn(wait_ns: Int) -> HTTPResponse Never! {
     seconds: (wait_ns + 999999999) /% 1000000000
     refused: app_json(429, app_error_json("too many calls: retry after {seconds} s"))
     refused.__with_header("retry-after", "{seconds}")
-}
-
-// The arguments of one call of an endpoint method: the JSON array the
-// Remote posted.
-priv RemoteArgs: struct {
-    tree: Dyn
-
-    // The argument at `index`, decoded as the method's parameter type.
-    __take: fn<T: Decode>(self, index: Int) -> T [FieldError]! {
-        live_json.at<T>(self.tree, "/{index}")
-    }
-
-    // The reply of a call that failed: `{"err": error}`.
-    __reply_err: fn<E: Encode>(self, error: E) -> String Never! {
-        "{{\"err\":{live_json.to_string<E>(error) ?? "null"}}}"
-    }
-
-    // The reply of a call that gave `value`: `{"ok": value}`.
-    __reply_value: fn<R: Encode>(self, value: R) -> String Never! {
-        "{{\"ok\":{live_json.to_string<R>(value) ?? "null"}}}"
-    }
 }
 
 // A call of an endpoint method: 200 with its reply, or 422 with the field

@@ -1,0 +1,56 @@
+// `value.case()` reads the case an enum value held when `reflect.of`
+// captured it: the case's name, its path and its payload as fields, each
+// field's value a Value of its own. A unit case has no fields, a positional
+// (tuple) payload is the one field `value`, and a named payload keeps its
+// field names. A capture is a copy, so changing the original afterwards
+// leaves the capture as it was. A value of any other type holds no case.
+use reflect: core.reflect
+
+Shape: enum {
+    Dot
+    Circle(Int)
+    Rect(width: Int, height: Int)
+}
+
+Scene: struct {
+    shape: Shape
+    label: String
+}
+
+Wrapper: enum {
+    Empty
+    Holding(Shape)
+}
+
+run: fn() {
+    shapes: [Shape]{Shape.Dot, Shape.Circle(3), Shape.Rect{width: 4, height: 5}}
+    loop shape in shapes {
+        captured: reflect.of(shape)
+        if captured.case() == .Val(held) {
+            parts: (loop field in held.fields() -> "{field.name()}={field.value().display()}").join(", ")
+            print("{held.name()} at {held.path()}: [{parts}]")
+        }
+    }
+
+    scene := Scene{shape: Shape.Rect{width: 1, height: 2}, label: "start"}
+    before: reflect.of(scene)
+    scene.shape = Shape.Circle(9)
+    scene.label = "moved"
+    if before.fields()[0].value().case() == .Val(earlier) {
+        print("captured {earlier.name()} with {earlier.fields().len()} fields, label {before.fields()[1].value().display()}")
+    }
+    if reflect.of(scene).fields()[0].value().case() == .Val(now) -> print("now {now.name()}")
+
+    wrapped: reflect.of(Wrapper.Holding(Shape.Circle(7)))
+    if wrapped.case() == .Val(outer) {
+        payload: outer.fields()[0]
+        print("{outer.name()} holds {payload.name()}: {payload.value().type_name()}")
+        if payload.value().case() == .Val(inner) {
+            radius: inner.fields()[0].value().int() ?? -1
+            print("  inside {inner.name()} {radius}")
+        }
+    }
+
+    plain: if reflect.of(42).case() == .Val(_) -> "some" else -> "none"
+    print("Int case: {plain}")
+}

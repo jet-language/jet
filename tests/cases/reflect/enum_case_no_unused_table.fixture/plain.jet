@@ -1,0 +1,17 @@
+// A program that never reflects: its enum is built and matched, nothing more.
+Shape: enum {
+    Dot
+    Circle(Int)
+    Rect(width: Int, height: Int)
+}
+
+run: fn() {
+    shapes: [Shape]{Shape.Dot, Shape.Circle(2), Shape.Rect{width: 4, height: 5}}
+    loop shape in shapes {
+        if shape == {
+            .Dot -> { print("dot") }
+            .Circle(radius) -> { print("circle {radius}") }
+            .Rect(width, height) -> print("rect {width}x{height}")
+        }
+    }
+}

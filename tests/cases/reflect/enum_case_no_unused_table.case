@@ -1,0 +1,32 @@
+# `value.case()` costs nothing where nothing reflects. In the slot IR, a
+# function that only matches cases calls no reflection route and builds no
+# case record, and a program that never reflects has none anywhere in `run`.
+# Where a value is reflected, the IR builds a case record under each case's
+# tag test, so `case()` holds only the active case with its typed payload,
+# and every tier prints the same.
+fixture: enum_case_no_unused_table.fixture
+env: NO_COLOR=1
+step: jet emit --ir main.jet --fn describe
+exit: 0
+stdout: !~ "reflect" # matching reads the tag, not reflection metadata
+stdout: !~ "jet_rt_record_new" # no case record is built
+step: jet emit --ir plain.jet --fn run
+exit: 0
+stdout: !~ "reflect" # a program that never reflects calls no reflection route
+stdout: !~ "jet_rt_record_new" # and builds no case record or table
+step: jet emit --ir main.jet --fn held_case
+exit: 0
+stdout: ~ "jet_rt_record_new_jet_reflect_case" # the held case is built where a value is reflected
+stdout: ~ "jet_rt_reflect_value_set_case" # and set on the captured value
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "circle 2\nCircle (value: Int = 2)\nDot ()\nRect (width: Int = 4, height: Int = 5)\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "circle 2\nCircle (value: Int = 2)\nDot ()\nRect (width: Int = 4, height: Int = 5)\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "circle 2\nCircle (value: Int = 2)\nDot ()\nRect (width: Int = 4, height: Int = 5)\n"
+step: jet run -O0 plain.jet
+exit: 0
+stdout: = "dot\ncircle 2\nrect 4x5\n"

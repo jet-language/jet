@@ -5488,6 +5488,8 @@ tasks never read or change the process registry. The module source is
 | `as_system<R>(run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for the server itself, which no row policy limits, as a job or a schedule does. |
 | `maybe_caller() -> String?` | account | The account this task acts for: `None` for the system or no one. |
 | `caller() -> String` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
+| `enqueue(fn() { self.job(args...) })` | — | Queue one call of the service's `#App.Job` method `job`, with its arguments evaluated and encoded here; it runs after the call that queued it commits. See below. |
+| `endpoints<S>() -> [String]` | names | The methods of the service `S` that `#App.SignedIn` or `#App.Public` marks, in the order `S` declares them. A job, a webhook, a signing key and an unmarked method are server-only and never listed. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. It may read the database, fetch over `Net` and wait
@@ -5639,6 +5641,31 @@ sender stops delivering it, and the call rolls back: its method's writes are
 dropped. A run that fails rolls its record back with the rest, so a delivery
 that failed runs when it comes again. A delivery without an ID, and a webhook
 that uses no store, have nothing to record and run every time.
+
+A method marked `#App.Job` is work a call queues to run after it commits,
+such as a notice to send. `app.enqueue(fn() { self.notify(task, to) })`, in a
+method of the same service, queues one call of the job method `notify`. The
+closure takes no parameters and its whole body is that one call on `self`,
+with each argument in its place and of a type that derives `Encode` and
+`Decode`; anything else is E2817 (`jet.EnqueueNotOneJobCall`). The arguments
+are evaluated and encoded where `enqueue` is called. Inside a call, the job
+is kept in the call's transaction, as a row of the `__jet_jobs` table of the
+first store the call used: a call that rolls back queues nothing, and once
+it commits each of its jobs runs, on a task of its own, as the system
+(`as_system`), and in a call of its own, which also deletes the job's row.
+A run that fails, its method's error or a failed commit, runs again after
+half a second, then after twice the wait before, an hour at most, up to
+`#App.Job(retries: n)` more times, five unless set; a job that failed every
+run keeps its row, which records its runs and the last failure. A job is
+therefore run at least once, and a job method should be safe to run again.
+A call that used no store, and code outside a call, run the job at once
+without keeping it.
+
+A job, a webhook and a webhook's signing key are server-only: no Remote
+calls one, and `app.endpoints<S>()` lists none. A method that
+`#App.SignedIn` or `#App.Public` marks beside `#App.Job`, `#App.Webhook` or
+`#App.SigningKey` is E2819 (`jet.ServerOnlyMethodMarkedEndpoint`), at the
+endpoint marker.
 
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:

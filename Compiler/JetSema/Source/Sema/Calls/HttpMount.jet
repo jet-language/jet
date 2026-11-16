@@ -22,6 +22,7 @@ use jet_foundation.[
     SymbolKind,
     TLetTy,
     Type,
+    TypedLitBody,
     ast_binding,
     AST_EMPTY_CALL_ARG_FLAGS,
     ast_empty_lambda_meta,
@@ -96,6 +97,27 @@ sema_app_marker_is: fn(marker: Marker, name: String, graph: SemaRegistrationGrap
     declaration: resolved.declaration ?? return false
     module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return false
     graph.modules[module_index].module_name == SEMA_APP_MARKER_MODULE && declaration.name == name
+}
+
+// The app markers that keep a method on the server: a job, a webhook and a
+// webhook's signing key. None is an endpoint, so no endpoint marker may mark
+// a method one of them marks.
+SEMA_APP_SERVER_ONLY_MARKERS: [String]{SEMA_APP_JOB_MARKER, SEMA_APP_WEBHOOK_MARKER, SEMA_APP_SIGNING_KEY_MARKER}
+
+// E2819 when an endpoint marker marks `func`, a method a server-only app
+// marker also marks, both written in module `module_identity`.
+sema_app_server_only_endpoint_check: fn(func: Func, graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostics: &[Diagnostic]) {
+    loop marker in func.markers {
+        if !sema_app_endpoint_marker(marker, graph, module_identity) -> next
+        loop other in func.markers {
+            loop name in SEMA_APP_SERVER_ONLY_MARKERS {
+                if !sema_app_marker_is(other, name, graph, module_identity) -> next
+                entry: diagnostic_registry_row("E2819") ?? panic("E2819 must have a registry row")
+                diagnostics.push(sema_error("E2819", marker.span, entry.what.replace("{{method}}", func.name).replace("{{marker}}", other.name).replace("{{endpoint}}", marker.name), entry.why, entry.fix.replace("{{method}}", func.name).replace("{{endpoint}}", marker.name)))
+                return
+            }
+        }
+    }
 }
 
 // The index in `marker.args` of the written argument labeled `label`, else
@@ -225,6 +247,44 @@ sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, m
     }
     sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
     None
+}
+
+// `alias.endpoints<S>()`: the names of the methods of the service `S` that
+// an endpoint marker (`#App.SignedIn`, `#App.Public`) marks, in the order
+// `S` declares them, as a `[String]`. A job, a webhook, a signing key and an
+// unmarked method are server-only, so the list never names one.
+sema_call_app_endpoints: fn(alias: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    callee: "{alias}.endpoints"
+    if args.len() != 0 {
+        sema_data_arity_diagnostic(callee, 0, args.len(), span, diagnostics)
+        sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
+        return sema_live_rejected()
+    }
+    if type_args.len() != 1 {
+        diagnostics.push(sema_error("E0119", span, "`{callee}` expects exactly one type argument, got {type_args.len()}", "`{callee}<S>()` lists the endpoints of one service, `S`", "write `{callee}<S>()` with the service as its type argument"))
+        return sema_live_rejected()
+    }
+    graph: program.registration_graph ?? return sema_live_rejected()
+    service: sema_type_resolve_declared_with_generics(graph, type_args[0], environment.module_identity, environment.generic_params)
+    row: sema_type_resolve_nominal_row(graph, service, environment.module_identity) ?? return sema_app_endpoints_no_service(callee, service, span, diagnostics)
+    definition: sema_http_route_find_struct(environment, program, service, environment.module_identity) ?? return sema_app_endpoints_no_service(callee, service, span, diagnostics)
+    service_module: graph.modules[row.module_index].module_identity
+    names := [Expr]{}
+    loop declaration in definition.methods {
+        endpoint: loop marker in declaration.markers {
+            if sema_app_endpoint_marker(marker, graph, service_module) {
+                break true
+            }
+        } ?? false
+        if endpoint -> names.push(sema_live_string(declaration.name, span))
+    }
+    listed: Expr.TypedLit{head: Val(Type.List{element: Type.String}), body: TypedLitBody.Elements{elements: names}, span: span, id: AST_NODE_GENERATED}
+    SemaDirectSpecialCheck{handled: true, value: sema_check_expression(listed, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
+}
+
+sema_app_endpoints_no_service: fn(callee: String, service: Type, span: Span, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    diagnostics.push(sema_error("E0119", span, "{sema_type_show_quoted(service)} names no service struct, so `{callee}` has no endpoints to list", "`{callee}<S>()` lists the marked methods of the struct `S`", "name the service struct as the type argument"))
+    sema_live_rejected()
 }
 
 sema_app_remote_ident: fn(name: String, span: Span) -> Expr Never! {

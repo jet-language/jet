@@ -256,11 +256,47 @@ jet_cli_expand_reflect_names_end: fn(tree: BodyTree, args: [Int], names: Int) ->
     names + 3 + count * 3
 }
 
-// One level of the field tree a checked `reflect.of` call retains, read from
-// its arguments at `at` as sema laid it out (sema_call_reflection_field_args):
-// a field count, then each field's name and names followed by its own level.
-// The level as text and JSON, and the argument index after it.
-jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> (text: String, value: JetCLIStatusValue, next: Int) Never! {
+// One level of the tree a checked `reflect.of` call retains, read from its
+// arguments at `at` as sema laid it out (sema_call_reflection_level_args):
+// the stored fields, then the enum cases with their payload fields. The level
+// as text (`{field: Type} [Case {member: Type}]`), its fields and cases as
+// JSON, and the argument index after it.
+jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> (text: String, fields: JetCLIStatusValue, cases: JetCLIStatusValue, next: Int) Never! {
+    fields: jet_cli_expand_reflect_fields(tree, args, at)
+    count := 0
+    if fields.next < args.len() {
+        if body_node(tree, args[fields.next]).kind == .IntLit(value, _) -> count = value
+    }
+    next := fields.next + 1
+    texts := [String]{}
+    values := [JetCLIStatusValue]{}
+    loop _ in 0..<count {
+        if next + 2 >= args.len() -> break
+        name: jet_cli_expand_reflect_text(tree, args[next])
+        payload: jet_cli_expand_reflect_fields(tree, args, next + 2)
+        texts.push(if payload.text == "" -> name else -> "{name} {payload.text}")
+        values.push(
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("name", jet_cli_status_text(name)),
+                    jet_cli_status_field("path", jet_cli_status_text(jet_cli_expand_reflect_text(tree, args[next + 1]))),
+                    jet_cli_status_field("fields", payload.value),
+                },
+            ),
+        )
+        next = payload.next
+    }
+    text := fields.text
+    if texts.len() != 0 {
+        cases_text: "[{texts.join(", ")}]"
+        text = if text == "" -> cases_text else -> "{text} {cases_text}"
+    }
+    (text: text, fields: fields.value, cases: jet_cli_status_array(values), next: next)
+}
+
+// A field list of one level, read from the arguments at `at`: a count, then
+// each field's name and names followed by its own level.
+jet_cli_expand_reflect_fields: fn(tree: BodyTree, args: [Int], at: Int) -> (text: String, value: JetCLIStatusValue, next: Int) Never! {
     count := 0
     if at < args.len() {
         if body_node(tree, args[at]).kind == .IntLit(value, _) -> count = value
@@ -280,7 +316,8 @@ jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> (text:
                     jet_cli_status_field("name", jet_cli_status_text(name)),
                     jet_cli_status_field("type_name", jet_cli_status_text(jet_cli_expand_reflect_text(tree, args[next + 1]))),
                     jet_cli_status_field("path", jet_cli_status_text(path)),
-                    jet_cli_status_field("fields", nested.value),
+                    jet_cli_status_field("fields", nested.fields),
+                    jet_cli_status_field("cases", nested.cases),
                 },
             ),
         )
@@ -295,7 +332,7 @@ jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> (text:
 jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: Int, facts: &[JetCLIExpandFact]) Never! {
     node: body_node(tree, id)
     if node.kind == .CoreCall(record, args, span, _, _, _) {
-        if record.module_name == "core.reflect" && record.member == "of" && args.len() >= 4 {
+        if record.module_name == "core.reflect" && record.member == "of" && args.len() >= 5 {
             path: jet_cli_expand_reflect_text(tree, args[2])
             known := false
             loop fact in facts {
@@ -315,7 +352,8 @@ jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: In
                         jet_cli_status_field("path", jet_cli_status_text(path)),
                         jet_cli_status_field("source", jet_cli_status_text(unit.path)),
                         jet_cli_status_field("span", jet_cli_expand_span(span, Val(unit.source))),
-                        jet_cli_status_field("fields", level.value),
+                        jet_cli_status_field("fields", level.fields),
+                        jet_cli_status_field("cases", level.cases),
                     },
                 )
                 facts.push(JetCLIExpandFact{source: unit.path, offset: span.start, name: path, text: "{unit.path}:{line}:{column}   reflect.of   retains {retained}", value: value})

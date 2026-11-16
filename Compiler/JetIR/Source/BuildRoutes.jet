@@ -6250,38 +6250,50 @@ ir_route_store_err_message: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: 
 
 // `reflect.of(value, names, level)`: sema hands the checked names as text
 // after the value (sema_call_reflection_names: the type name, the path and the
-// declared types an erased trait value may hold), then the value's field tree,
-// one level as a field count followed by each field's name, its names and its
-// own level. The Value record carries the value's Display text and one Value
-// per stored field, and a struct field's Value carries its own fields the
-// same way.
+// declared types an erased trait value may hold), then the value's level: its
+// fields, as a field count followed by each field's name, its names and its
+// own level, then its cases, as a case count followed by each case's name,
+// path and payload fields, listed as a level's fields are
+// (sema_call_reflection_level_args). The Value record carries the value's
+// Display text, one Value per stored field and, for an enum, the Case it
+// holds with one Value per payload member, each made the same way.
 ir_reflect_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() < 5 -> return ir_fail_slot(b, span, "reflect.of without its checked names")
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     value_ty: ir_ty(p, b, args[0])
     value: ir_expr(m, p, b, args[0])
     if ir_failed(b) -> return -1
-    display: ir_render(m, p, b, value_ty, value, IRRender.Display, span)
-    if ir_failed(b) || display < 0 -> return -1
-    after_names: ir_reflect_names_end(p, b, args, 1)
-    if after_names < 0 {
-        return ir_fail_slot(b, span, "reflect.of names of {ir_type_name(value_ty)}")
-    }
-    level: ir_reflect_fields(m, p, b, value_ty, value, args, after_names, span)
-    if ir_failed(b) || level.fields < 0 -> return -1
-    if level.next != args.len() {
+    made: ir_reflect_value(m, p, b, value_ty, value, result_row, args, 1, span)
+    if ir_failed(b) || made.record < 0 -> return -1
+    if made.after != args.len() {
         return ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}")
     }
-    type_text: ir_reflect_name(m, p, b, value_ty, value, args, 1, 0)
-    path_text: ir_reflect_name(m, p, b, value_ty, value, args, 1, 1)
-    if ir_failed(b) -> return -1
-    result: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{type_text, path_text, display, level.fields}, result_row)
-    ir_reflect_hold(m, b, result, value_ty, value)
-    ir_release(m, b, display)
+    ir_release(m, b, value)
+    made.record
+}
+
+// The Value record of `value` (of `value_ty`, borrowed), its names the
+// arguments at `at` (sema_call_reflection_names, read by ir_reflect_name) and
+// its level after them: the new record and the index after the level.
+ir_reflect_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, record_row: Int, args: [Int], at: Int, span: Span) -> (record: Int, after: Int) Never! {
+    after_names: ir_reflect_names_end(p, b, args, at)
+    if after_names < 0 {
+        return (record: ir_fail_slot(b, span, "reflect.of names of {ir_type_name(value_ty)}"), after: at)
+    }
+    shown: ir_render(m, p, b, value_ty, value, IRRender.Display, span)
+    if ir_failed(b) || shown < 0 -> return (record: -1, after: at)
+    fields: ir_reflect_fields(m, p, b, value_ty, value, args, after_names, span)
+    if ir_failed(b) || fields.fields < 0 -> return (record: -1, after: fields.after)
+    type_text: ir_reflect_name(m, p, b, value_ty, value, args, at, 0)
+    path_text: ir_reflect_name(m, p, b, value_ty, value, args, at, 1)
+    if ir_failed(b) -> return (record: -1, after: fields.after)
+    record: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{type_text, path_text, shown, fields.fields}, record_row)
+    ir_reflect_hold(m, b, record, value_ty, value)
+    ir_release(m, b, shown)
     ir_release(m, b, type_text)
     ir_release(m, b, path_text)
-    ir_release(m, b, value)
-    result
+    after: ir_reflect_cases(m, p, b, value_ty, value, record, args, fields.after, span)
+    (record: record, after: after)
 }
 
 // The index after the names that start at `args[names]` (the type name, the
@@ -6306,51 +6318,131 @@ ir_reflect_name: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, v
     ir_expr(m, p, b, args[names + part])
 }
 
-// One level of the reflect.of field tree, read from `args` at `at`: the new
-// field list of `value` (of `value_ty`) and the index after the level.
-ir_reflect_fields: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, args: [Int], at: Int, span: Span) -> (fields: Int, next: Int) Never! {
+// The fields of one reflect.of level, read from `args` at `at`: the new
+// field list of `value` (of `value_ty`) and the index after them.
+ir_reflect_fields: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, args: [Int], at: Int, span: Span) -> (fields: Int, after: Int) Never! {
     if at >= args.len() {
-        return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), next: at)
+        return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), after: at)
     }
     count: ir_reflect_count(p, b, args[at])
     if count < 0 {
-        return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), next: at)
+        return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), after: at)
     }
     pointer_row: ir_pointer_row(m)
     capacity: ir_word_const(m, b, count)
     fields: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [Int]{capacity}, pointer_row)
-    next := at + 1
+    cursor := at + 1
     loop _ in 0..<count {
-        after_names: if next < args.len() -> ir_reflect_names_end(p, b, args, next + 1) else -> -1
-        if after_names < 0 {
-            return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), next: next)
+        if cursor >= args.len() {
+            return (fields: ir_fail_slot(b, span, "reflect.of field tree of {ir_type_name(value_ty)}"), after: cursor)
         }
-        name: ir_reflect_literal(p, b, args[next])
-        field_ty: ir_declared_field_type(m, p, value_ty, name) ?? return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), next: next)
+        name: ir_reflect_literal(p, b, args[cursor])
+        field_ty: ir_declared_field_type(m, p, value_ty, name) ?? return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), after: cursor)
         if value < 0 || ir_kind_of(m, b, value) != .Aggregate {
-            return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), next: next)
+            return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), after: cursor)
         }
-        member: ir_member_of(m, p, b, value, name) ?? return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), next: next)
+        member: ir_member_of(m, p, b, value, name) ?? return (fields: ir_fail_slot(b, span, "reflect.of field {name} of {ir_type_name(value_ty)}"), after: cursor)
         read: ir_member_read(m, b, value, member)
-        shown: ir_render(m, p, b, field_ty, read, IRRender.Display, span)
-        if ir_failed(b) || shown < 0 -> return (fields: -1, next: next)
-        field_name: ir_expr(m, p, b, args[next])
-        field_type_name: ir_reflect_name(m, p, b, field_ty, read, args, next + 1, 0)
-        field_path: ir_reflect_name(m, p, b, field_ty, read, args, next + 1, 1)
-        if ir_failed(b) -> return (fields: -1, next: next)
-        nested: ir_reflect_fields(m, p, b, field_ty, read, args, after_names, span)
-        if ir_failed(b) || nested.fields < 0 -> return (fields: -1, next: nested.next)
-        next = nested.next
-        field_value: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_value", [Int]{field_type_name, field_path, shown, nested.fields}, pointer_row)
-        ir_reflect_hold(m, b, field_value, field_ty, read)
-        field: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_field", [Int]{field_name, field_value}, pointer_row)
-        _: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_push", [Int]{fields, field}, -1)
-        ir_release(m, b, shown)
-        ir_release(m, b, field_name)
-        ir_release(m, b, field_type_name)
-        ir_release(m, b, field_path)
+        cursor = ir_reflect_field(m, p, b, fields, field_ty, read, args, cursor, span)
+        if ir_failed(b) -> return (fields: -1, after: cursor)
     }
-    (fields: fields, next: next)
+    (fields: fields, after: cursor)
+}
+
+// One field entry at `at` (its name, then the names and level of
+// its Value) for the member `read` of type `field_ty`: its Field pushed onto
+// `fields`, and the index after the entry.
+ir_reflect_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, fields: Int, field_ty: Type, read: Int, args: [Int], at: Int, span: Span) -> Int Never! {
+    pointer_row: ir_pointer_row(m)
+    field_value: ir_reflect_value(m, p, b, field_ty, read, pointer_row, args, at + 1, span)
+    if ir_failed(b) || field_value.record < 0 -> return field_value.after
+    field_name: ir_expr(m, p, b, args[at])
+    if ir_failed(b) -> return field_value.after
+    field: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_field", [Int]{field_name, field_value.record}, pointer_row)
+    _: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_push", [Int]{fields, field}, -1)
+    ir_release(m, b, field_name)
+    field_value.after
+}
+
+// The cases of one reflect.of level, read from `args` at `at`, for `value`
+// (of `value_ty`) whose Value is `record`: for an enum, a branch per case on
+// the value's tag that makes the Case it holds, its payload members read from
+// the variant, and sets it on `record`. The index after the cases.
+ir_reflect_cases: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, value: Int, record: Int, args: [Int], at: Int, span: Span) -> Int Never! {
+    if at >= args.len() {
+        ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
+        return at
+    }
+    count: ir_reflect_count(p, b, args[at])
+    if count <= 0 {
+        if count < 0 -> ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
+        return at + 1
+    }
+    // Sema lists every case of a declared enum in declaration order, which is
+    // the order of the variant indexes the tag holds.
+    declared := -1
+    enum_row := -1
+    if ir_enum_def(m, p, b.f.slot_type[value]) == .Val(found) {
+        definition: p.types[found]
+        if definition.kind == .Enum(variants, _) {
+            declared = variants.len()
+            enum_row = found
+        }
+    }
+    if ir_untag(value_ty) == .Union(_) -> declared = -1
+    if declared != count {
+        ir_fail(b, span, "reflect.of cases of {ir_type_name(value_ty)}")
+        return at + 1
+    }
+    pointer_row: ir_pointer_row(m)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    slot_ty: m.types[b.f.slot_type[value]].ty
+    discriminant: ir_enum_tag_of(m, b, value)
+    cursor := at + 1
+    loop index in 0..<count {
+        if cursor + 2 >= args.len() {
+            ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
+            return cursor
+        }
+        members: ir_variant_members(m, p, enum_row, ir_type_args(slot_ty), index) ?? {
+            ir_fail(b, span, "reflect.of case {index} of {ir_type_name(value_ty)}")
+            return cursor
+        }
+        if ir_reflect_count(p, b, args[cursor + 2]) != members.len() {
+            case_label: ir_reflect_literal(p, b, args[cursor])
+            ir_fail(b, span, "reflect.of case {case_label} of {ir_type_name(value_ty)}")
+            return cursor
+        }
+        index_slot: ir_temp_like(m, b, discriminant)
+        ir_emit(b.f, IROp.Const, index_slot, index, -1, -1, b.line)
+        test: ir_temp(m, b, bool_row)
+        ir_emit(b.f, IROp.Eq, test, discriminant, index_slot, -1, b.line)
+        ir_open_if(b.f, test, b.line)
+        capacity: ir_word_const(m, b, members.len())
+        fields: ir_runtime(m, b, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [Int]{capacity}, pointer_row)
+        entry := cursor + 3
+        loop member in members {
+            if entry >= args.len() {
+                ir_fail(b, span, "reflect.of case tree of {ir_type_name(value_ty)}")
+                return entry
+            }
+            member_ty: m.types[member.ty].ty
+            read: ir_member_read(m, b, value, member)
+            entry = ir_reflect_field(m, p, b, fields, member_ty, read, args, entry, span)
+            if ir_failed(b) -> return entry
+        }
+        case_name: ir_expr(m, p, b, args[cursor])
+        case_path: ir_expr(m, p, b, args[cursor + 1])
+        if ir_failed(b) -> return entry
+        held: ir_runtime(m, b, "jet_rt_record_new_jet_reflect_case", [Int]{case_name, case_path, fields}, pointer_row)
+        _: ir_runtime(m, b, "jet_rt_reflect_value_set_case", [Int]{record, held}, -1)
+        ir_release(m, b, case_name)
+        ir_release(m, b, case_path)
+        ir_else(b.f, b.line)
+        cursor = entry
+    }
+    loop _ in 0..<count -> ir_end(b.f, b.line)
+    cursor
 }
 
 // The Value record's typed scalar: an exact Int (a range-checked one

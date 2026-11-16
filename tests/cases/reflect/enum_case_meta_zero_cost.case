@@ -1,0 +1,25 @@
+# Enum case metadata costs nothing at run time unless the program reflects a
+# value. A count read from `T.reflect().cases` while building is a constant in
+# the slot IR: no case record, no case name and no reflection call reach the
+# program, matching on a case allocates nothing, and every tier prints the
+# same.
+fixture: enum_case_meta_zero_cost.fixture
+env: NO_COLOR=1
+step: jet emit --ir main.jet --fn run
+exit: 0
+stdout: !~ "reflect" # the catalog is read while building, not at run time
+stdout: !~ "jet_rt_record_new" # no TypeInfo or CaseInfo record is allocated
+stdout: !~ "Circle" # no case name is stored for the count
+step: jet emit --ir main.jet --fn area
+exit: 0
+stdout: !~ "reflect" # matching on a case reads the tag, no metadata
+stdout: !~ "jet_rt_alloc" # a payload read allocates nothing
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "3\n20\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "3\n20\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "3\n20\n"

@@ -36,32 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Make the pattern&#39;s shape and types match the value.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0305</code>: <code>tests/ui/fallible_arm_table_tail.stderr</code>.</p>
-<pre class="diag">Error [jet.FailureDomainNotErrorType]: Explicit failure domain `String (text)` is not an Error type
-  --&gt; tests/ui/fallible_arm_table_tail.jet:1:16
+<p>First UI snapshot mentioning <code>E0305</code>: <code>tests/ui/failure_arm_cannot_arrive.stderr</code>.</p>
+<pre class="diag">Error [jet.GoneFailureArm]: Arm `LookupError` can never match — `LookupError` can no longer reach this value
+  --&gt; tests/ui/failure_arm_cannot_arrive.jet:21:9
     |
-  1 | maybe: fn() -&gt; Int String! { .Ok(1) }
-    |                ^^^^^^^^^^^
- Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
-More: jet-lang.dev/e/E2417
+ 21 |         .Err(.LookupError(_)) -&gt; { print(&quot;no such record&quot;) }
+    |         ^^^^^^^^^^^^^^^^^^^^^
+ Why: A failure union holds only the failure types that can still reach it, and `LookupError` is no longer one of them
+ Fix: Delete this arm
+More: jet-lang.dev/e/L0304
 
-Error [jet.PatternTypeMismatch]: Pattern `Ok` doesn&#39;t match `Int`
-  --&gt; tests/ui/fallible_arm_table_tail.jet:6:9
+Error [jet.PatternTypeMismatch]: Pattern `Vanished` doesn&#39;t belong to `Err | LoadError`
+  --&gt; tests/ui/failure_arm_cannot_arrive.jet:22:14
     |
-  6 |         .Ok(_) -&gt; { print(true) }
-    |         ^^^^^^
- Why: Variant patterns only work on enum values
- Fix: Match a value with a pattern for its type
-More: jet-lang.dev/e/E0305
-
-Error [jet.PatternTypeMismatch]: Pattern `Err` doesn&#39;t match `Int`
-  --&gt; tests/ui/fallible_arm_table_tail.jet:7:9
-    |
-  7 |         .Err(_) -&gt; { print(false) }
-    |         ^^^^^^^
- Why: Variant patterns only work on enum values
- Fix: Match a value with a pattern for its type
+ 22 |         .Err(.Vanished(_)) -&gt; { print(&quot;vanished&quot;) }
+    |              ^^^^^^^^^^^^
+ Why: Union pattern arms name one member type of the subject union
+ Fix: Use one of the subject union member types
 More: jet-lang.dev/e/E0305
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

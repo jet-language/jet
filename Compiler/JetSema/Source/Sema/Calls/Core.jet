@@ -400,7 +400,7 @@ sema_call_try_source_module_call: fn(alias: String, alias_span: Span, member: St
             sema_call_core_unbuilt_note(graph.modules[module_index].module_name, member, span, environment, program, unbuilt)
         }
         if module_is_core(graph.modules[module_index].module_identity) && sema_live_member(graph.modules[module_index].module_name, member) {
-            live: sema_call_live(member, alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            live: sema_call_live(member, alias, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: live.value}
         }
         if module_is_core(graph.modules[module_index].module_identity) && sema_app_field_error_refused(graph.modules[module_index].module_name, member, args, environment, program, scopes, diagnostics) {

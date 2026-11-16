@@ -595,8 +595,22 @@ value when it is exactly an `Int` (a range-checked `Int(lo..hi)` included),
 parses `display()`. A capture is complete or refused: `reflect.of(x)` retains
 every stored field of `x`, and a stored field that can't be reflected the way
 `x` itself is (one that does not show, or one bearing a secret) refuses the
-whole call with E0112 naming the field. `jet inspect expand --facts reflect`
-lists each call with the type and field tree it retains.
+whole call with E0112 naming the field. A capture is an ordinary copy of the
+value, so a value that can't be copied (one holding a `#SingleUse` value,
+resource state or a borrowed loan) is refused with E0112 too.
+
+An enum value's `case()` returns the case it held when it was captured as a
+`Case`, and `None` for a value of any other type. `Case.name()` is the case's
+name (a grouped case's last segment), `path()` its `module.Enum.Case` path,
+the same text as `T.reflect().cases[i].path`, and `fields()` its payload as
+the `Field` list a struct value has: a lone unnamed payload is the field
+`value`, and each field's `value()` is a `Value` of its own, an enum payload
+with its own `case()`. A capture lists every case its enum could hold, so a
+payload that can't be reflected (a `Shared` cell, a secret) refuses the value
+whichever case it holds; an enum met again inside its own payload holds no
+case there. [`enum_case_meta`](../../../tests/run/reflect/enum_case_meta.jet)
+walks each kind of case. `jet inspect expand --facts reflect` lists each call
+with the type, field and case tree it retains.
 
 `info.marker(T)` on a `TypeInfo`, `FieldInfo`, `MethodInfo` or `FunctionInfo`
 (and, in a marker body, on a module's `ModuleInfo`) reads the marker

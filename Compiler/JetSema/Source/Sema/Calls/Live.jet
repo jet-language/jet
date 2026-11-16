@@ -86,13 +86,14 @@ sema_live_rejected: fn() -> SemaDirectSpecialCheck Never! {
     SemaDirectSpecialCheck{handled: true, value: None}
 }
 
-// Whether `module_name.member` is one of the live-binding calls.
+// Whether `module_name.member` is one of the live-binding calls, `enqueue`
+// (sema_call_enqueue) or `endpoints` (sema_call_app_endpoints).
 sema_live_member: fn(module_name: String, member: String) -> Bool Never! {
-    module_name == "app" && (member == "live" || member == "subscribe" || member == "push" || member == "invalidate")
+    module_name == "app" && (member == "live" || member == "subscribe" || member == "push" || member == "invalidate" || member == "enqueue" || member == "endpoints")
 }
 
 // A live-binding call through a Core module alias (`use app`).
-sema_call_try_live: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_try_live: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_live_member(module_name, member) -> return sema_live_unhandled()
     // A nested module path (`alias.leaf.member`) names another module.
     imported_module: sema_call_core_import_module(environment, program, alias) ?? return sema_live_unhandled()
@@ -101,12 +102,18 @@ sema_call_try_live: fn(module_name: String, member: String, alias: String, alias
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, context) {
         return sema_live_unhandled()
     }
-    sema_call_live(member, alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    sema_call_live(member, alias, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // `alias.member(source, args...)`, where `alias` names `app`
 // and the import is already recorded.
-sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if member == "enqueue" {
+        return sema_call_enqueue(alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    if member == "endpoints" {
+        return sema_call_app_endpoints(alias, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     callee: "{alias}.{member}"
     positional := [CallArg]{}
     every := Expr?{None}
