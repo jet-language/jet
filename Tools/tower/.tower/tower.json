@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110229,
+    "rev": 110233,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74980,7 +74980,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-16T13:55:42.582Z",
+      "updated": "2026-11-16T14:30:49.195Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -86032,11 +86032,11 @@
         {
           "n": 1,
           "text": "A dated adversarial review in Docs/Audits attacks every claimed strength of D-OPTIMISTIC1 against TanStack Query onMutate, React useOptimistic, Remix and React Router fetchers, Replicache and Zero mutators: it states each peer's best case fairly with sources, covers at least non-pure mutations, server-assigned ids and timestamps, conflicts and rollback visibility, concurrent and reordered mutations, offline queues, partial failure, and secrets or server-only effects inside the function, checks claims by code, probe, or measurement where possible, and gives each claim a verdict (holds, holds within stated limits, or fails). Every failed claim is redesigned and re-reviewed, and every gap has a card or ballot, before any implementation starts. Proof: `git ls-files \"Docs/Audits/*optimistic1*\"` names the dated review, with a verdict per claim.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:01:29.711Z"
+          "evidence": "77f7729b72 (dev): Docs/Audits/2026-11-16-d-optimistic1-review.md, the dated adversarial review against TanStack Query onMutate, React useOptimistic, Remix/React Router fetchers, Replicache and Zero; verdict: fails as written. Proof: git ls-files 'Docs/Audits/*optimistic1*' lists it.",
+          "at": "2026-11-16T14:27:32.185Z"
         },
         {
           "n": 2,
@@ -86094,7 +86094,7 @@
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:32.073Z",
-      "updated": "2026-11-16T13:01:32.682Z",
+      "updated": "2026-11-16T14:27:32.185Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -101855,8 +101855,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T23:01:38.012Z",
-      "updated": "2026-11-16T13:30:05.898Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-16T14:26:23.685Z",
+      "updatedBy": "owner",
       "criteriaLastN": 5
     },
     {
@@ -104881,6 +104881,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:28.110Z"
+        },
+        {
+          "n": 9,
+          "text": "The network handle types (TCPListener, TCPStream, UDPSocket, UnixListener, UnixStream, WsConn, WsMessage) are declared in Core with their methods (impl blocks in Core/Net and Core/Web/Ws), and the compiler's handle-op row table (from #3147 c8) shrinks to the runtime leaves those bodies call. Proof: `jet test Compiler/JetSema/Tests/CompilerOwnedTypeNames.jet` lists none of the seven as compiler-owned.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T13:55:49.961Z"
         }
       ],
       "refs": [],
@@ -104895,9 +104904,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-16T13:06:55.198Z",
+      "updated": "2026-11-16T13:55:49.961Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0lidgow",
@@ -209989,22 +209998,22 @@
       "gist": "When code tests one enum value against several cases, how do we catch a case added later, with the least writing?",
       "lesson": "An enum has a fixed list of cases. The bug to prevent: code that tests a few cases and ends in else quietly takes any case added later. One test of one case stays free. The options differ in how much the writer must type to keep later cases from slipping into else.",
       "explainer": "Words used here, shown on the one program this ballot uses throughout.\n\n```jet\nShape: enum {                  // an enum: a type with a fixed list of cases\n    Circle(radius: Int)        // a case that carries a value, its radius\n    Square(side: Int)          // a case that carries its side length\n    Line                       // a case that carries nothing\n    Dot\n}\n```\n\nA case test asks whether a value is one case. shape == .Circle(r) is true for a circle, and r is then its radius.\n\nA chain is if ... else if ... else, with one case test per branch. Its final else takes every case not tested above, including cases added later.\n\nA table names the value once and gives one arm per case, as in if shape == { .Circle(r) -> 3 * r * r ... }. The arrow -> gives the arm's result, and | joins cases in one arm. A table over an enum must name every case, so an else arm there is refused.\n\nThe rest means the cases that code does not handle one by one, such as Line and Dot in area.",
-      "story": "Ana writes area(shape) as a table: a circle, a square, then else for the rest. The editor marks the else and offers the fix, and one keystroke turns it into .Line | .Dot. Months later Ben adds Triangle, and the build stops at Ana's code until he decides what a triangle's area is. A key handler that should treat every other key, now or later, the same writes _ and is never stopped.",
+      "story": "Ana writes area(shape) as a table: a circle, a square, then else for the rest. The editor marks the else and offers the fix, and one keystroke turns it into .Line | .Dot. Months later Ben adds Triangle, and the build stops at Ana's code until he decides what a triangle's area is. A key handler that should treat every other key, now or later, the same writes .. and is never stopped.",
       "inWild": "OCaml: warning 4, off by default, flags a fragile match, one whose wildcard would silently take constructors added later. A polymorphic variant type can be named, type flat = [ `Line | `Dot ], and the pattern #flat matches any of its members.\n\nSwift: a switch over an enum must be exhaustive. For an enum that may grow, @unknown default runs for unknown cases, and the compiler warns when a known case is not named.\n\nRust: a match must be exhaustive, and the wildcard _ takes the rest silently. The opt-in Clippy lint wildcard_enum_match_arm flags that wildcard.\n\nKotlin and Java: a when or switch over an enum or sealed type must be exhaustive, and else or default may take the rest.\n\nThese outside facts were not re-checked for this ballot.",
       "detail": "What Jet does today. Every example here ran with the gate-p66 jet on dev 03d5f7b309. The v4 probes hold the exact programs this ballot shows, with their outputs.\n\nThe table form of area checks clean and runs (t1). Add Triangle to Shape, and it stops with E0307: This `if` doesn't cover every case — missing: Triangle. The fix line says: Add an arm for: Triangle (t2).\n\nThe chain form of area, ending in else, gets two warnings, L0302 and L0507, and runs (t3). With Triangle added, it still runs and returns 0 for a triangle (t4).\n\nArea can also be written as separate ifs, one after another, that each return:\n\n```jet\narea: fn(shape: Shape) -> Int {\n    if shape == .Circle(r) -> return 3 * r * r   // one test; return leaves area\n    if shape == .Square(s) -> return s * s\n    0                                            // the rest: every other case gives 0\n}\n```\n\nThat form gets no finding at all. With Triangle added, it checks clean and returns 0 for a triangle (t5, and v3 probe r1). The same holds when the ifs assign to a result instead of returning (v3 probe r4).\n\nTwo more escapes. A second test hidden in an else block, else { if shape == .Square(s) ... }, gets no L0302. A table with a plain true-or-false arm, such as verbose == true, may keep an else over an enum, and that else takes Dot silently. A guarded arm, .Circle(r) && r > 10, does not count as covering Circle, and that part is already right: E0307 names Circle.\n\nThe rule every option shares. It applies when code tests one value, a name or a field path, against two or more cases. The tests may sit in one chain, one table, or separate ifs in a row in one block. Those ifs have nothing between them and no body that changes the value. Such code must name every case, and else cannot stand for the rest.\n\nAn else whose whole body is another if on the same value counts as part of the chain. When separate ifs each leave (return, next, break or panic), the rest is the code after them. When they fall through, the rest is doing nothing. Either way, a case added later stops the build. A true-or-false arm may sit among the tests, but it covers no case.\n\nWhat stays free. One test is free whatever its pattern, with or without an else, so if shape == .Line | .Dot { … } else { … } is free. So are tests with other code between them, and ifs whose body changes the value (a state machine stepping state). So is a test through a helper such as shape.is_round(). The rule covers every closed set: an enum, an optional, a result and a union.\n\nL0302 retires under every option, since Jet has no warnings.\n\nHow big the change is. A rough scan of dev finds 35 chains with two or more tests of one value. A rerun on 03d5f7b309 finds 11 of them ending in else, where the first count said 13. It also finds 5 if { } tables that test one value twice or more, all ending in else, so 16 sites have an else to replace.\n\nSeparate ifs are the commonest form. Scans of one-line ifs alone find 130 groups whose bodies leave and 33 that fall through, over two or more cases. The scans are v3/exitscan.awk and v3/sepscan.awk. They skip block bodies, so these counts are lower bounds. The scans read text, not types, so the chain and table counts are upper bounds.\n\nSome rests are long under every option. Two chains ending in else test the compiler's Type, which has 24 cases, so each else stands for 22. Expr has 51 cases. And ir_builtin in BuildRoutes.jet tests 13 of TBuiltinOp's 214 cases before handing the rest to ir_builtin_on.\n\nWhich syntax is new. Options B and C add no syntax: every line of their programs runs today (t1, t6 and t7). They add only the new error E0644. Option A adds the case set line, Flat: .Line | .Dot, and the pattern .Flat. Today that line is a parse error (t8).\n\nWhy A's case set is written with dots. Name: .A | .B reuses the colon that declares a name and the dotted or-pattern a table arm already writes. So | keeps its meaning, one case or another.\n\nThe undotted Name: A | B already means a union type wherever a Name: line sits today. In a struct body it is a field of type Line | Dot, and at file scope it is a union alias (v3 probes r2 and r2a). No option adds a glyph, and the range .. and the spread ... are not used.",
       "options": [
         {
           "key": "A",
           "name": "An error with an instant fix",
-          "detail": "Most common first. One test of one case stays free: if order == .Paid { … }. A table naming every case stays free. Two or more tests ending in else over one of your own enums is an error, and one quick fix replaces the else with the cases it stands for. A rest meant to take every other case, now or later, is written _.\n\nPackages can add cases. An enum a package marks #Open may gain cases in a minor version; users' tables over it need a _ arm, and single tests stay free. When an update adds a case, jet update lists every _ arm that now takes it, so nothing changes silently. An unmarked package enum is closed: adding a case is a major version, and jet publish says so.\n\nEvidence: Docs/Research/2026-11-16-enum-branching-in-real-code.md. In Rust, 20% of public enums opt into non_exhaustive, and 80% stay closed.",
-          "technical": "E0641 already refuses else over an enum in a table. A extends it to a chain of ifs over one value. Sema recognises that chain by the same subject test it uses for tables (I8).\n\n_ is a table arm for every remaining case, including later ones; it is not a binding. #Open is a Core marker declared like any other (#6849). A table over another package's #Open enum without _ is an error whose fix adds the arm. Non-enum subjects keep else.",
-          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0  // error: else stands for .Line | .Dot\n    }\n}\n// jet fix (or the editor's quick fix) writes:  .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n// Every other key, now or later:  _ -> type_into(key)"
+          "detail": "Most common first. One test of one case stays free: if order == .Paid { … }. A table naming every case stays free. Two or more tests ending in else over one of your own enums is an error, and one quick fix replaces the else with the cases it stands for. A rest meant to take every other case, now or later, is written .., as .Case{field, ..} already means every other field.\n\nPackages can add cases. An enum a package marks #Open may gain cases in a minor version; users' tables over it need a .. arm, and single tests stay free. When an update adds a case, jet update lists every .. arm that now takes it, so nothing changes silently. An unmarked package enum is closed: adding a case is a major version, and jet publish says so.\n\nEvidence: Docs/Research/2026-11-16-enum-branching-in-real-code.md. In Rust, 20% of public enums opt into non_exhaustive, and 80% stay closed.",
+          "technical": "E0641 already refuses else over an enum in a table. A extends it to a chain of ifs over one value. Sema recognises that chain by the same subject test it uses for tables (I8).\n\n.. is a table arm for every remaining case, including later ones, as in .Case{field, ..}; _ keeps its one meaning, ignore a slot. #Open is a Core marker declared like any other (#6849). A table over another package's #Open enum without .. is an error whose fix adds the arm. Non-enum subjects keep else.",
+          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0  // error: else stands for .Line | .Dot\n    }\n}\n// jet fix (or the editor's quick fix) writes:  .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n// Every other key, now or later:  .. -> type_into(key)"
         },
         {
           "key": "B",
           "name": "A tidy error before build",
-          "detail": "One test of one case stays free. Two or more tests of one enum value may be a chain of ifs or a table, as today. Their rest may be typed as else. jet run, jet dev and jet test accept it, so trying code costs nothing.\n\njet check and jet build report such an else as a tidy error (D-NO-WARNINGS1), naming the cases it stands for. jet fix replaces it with them, such as .Line | .Dot. From then on a case added to the enum stops the build at every place that does not name it. A rest meant to take every other case, now or later, is written _ and is never stopped; a key handler is the usual example.",
-          "technical": "Today E0641 already refuses an else over an enum in a table, everywhere, and its fix writes the cases. A moves E0641 to the tidy tier, so run, dev and test accept the else, and applies it to a chain of ifs over one value too. Sema recognises the chain by the same subject test it uses for tables, so both forms get one rule (I8).\n\n_ is a new table arm meaning every remaining case, including later ones; it is not a binding, and no Jet code uses _ as an arm today. Non-enum subjects (Int, String) keep else unchanged, since their cases cannot be listed.",
+          "detail": "One test of one case stays free. Two or more tests of one enum value may be a chain of ifs or a table, as today. Their rest may be typed as else. jet run, jet dev and jet test accept it, so trying code costs nothing.\n\njet check and jet build report such an else as a tidy error (D-NO-WARNINGS1), naming the cases it stands for. jet fix replaces it with them, such as .Line | .Dot. From then on a case added to the enum stops the build at every place that does not name it. A rest meant to take every other case, now or later, is written .. and is never stopped; a key handler is the usual example.",
+          "technical": "Today E0641 already refuses an else over an enum in a table, everywhere, and its fix writes the cases. A moves E0641 to the tidy tier, so run, dev and test accept the else, and applies it to a chain of ifs over one value too. Sema recognises the chain by the same subject test it uses for tables, so both forms get one rule (I8).\n\n.. is a new table arm meaning every remaining case, including later ones, as .Case{field, ..} means every other field; no Jet code uses .. as an arm today. Non-enum subjects (Int, String) keep else unchanged, since their cases cannot be listed.",
           "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\n// Same rule, but jet run, jet dev and jet test accept the else;\n// jet check and jet build refuse it until jet fix writes .Line | .Dot.\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0\n    }\n}"
         },
         {
@@ -210046,8 +210055,8 @@
             "mitigation": "The editor's quick fix writes the cases in one keystroke."
           },
           {
-            "loss": "Tables over an #Open enum need a _ arm.",
-            "mitigation": "Only authors who expect growth mark #Open; jet update lists each _ that takes a new case."
+            "loss": "Tables over an #Open enum need a .. arm.",
+            "mitigation": "Only authors who expect growth mark #Open; jet update lists each .. that takes a new case."
           }
         ],
         "whyNot": [
@@ -210095,10 +210104,10 @@
             ],
             "losses": [
               "Trying code stops until the fix runs.",
-              "Tables over an #Open enum need a _ arm."
+              "Tables over an #Open enum need a .. arm."
             ],
             "proposed": {
-              "code": "area: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0  // error: else stands for .Line | .Dot\n    }\n}\n// jet fix (or the editor's quick fix) writes:  .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n// Every other key, now or later:  _ -> type_into(key)"
+              "code": "area: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0  // error: else stands for .Line | .Dot\n    }\n}\n// jet fix (or the editor's quick fix) writes:  .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n// Every other key, now or later:  .. -> type_into(key)"
             }
           },
           {
@@ -210145,8 +210154,8 @@
               "mitigation": "The editor's quick fix writes the cases in one keystroke."
             },
             {
-              "loss": "Tables over an #Open enum need a _ arm.",
-              "mitigation": "Only authors who expect growth mark #Open; jet update lists each _ that takes a new case."
+              "loss": "Tables over an #Open enum need a .. arm.",
+              "mitigation": "Only authors who expect growth mark #Open; jet update lists each .. that takes a new case."
             }
           ],
           "whyNot": [
@@ -210179,9 +210188,10 @@
           "loss": "Some rests really mean every other case, now or later.",
           "attempts": [
             "Make every else closed: rejected, a key handler would list hundreds of keys.",
-            "Spell the open rest _, so the writer's intent is visible: kept."
+            "Spell the open rest _: rejected, _ already means ignore one slot, and one glyph should keep one meaning.",
+            "Spell it .., the glyph patterns already use for the rest: kept."
           ],
-          "result": "Open rests stay one character."
+          "result": "Open rests stay two characters, in the glyph Jet already reads as the rest."
         },
         {
           "loss": "Forcing chains into tables is churn.",
@@ -210193,15 +210203,15 @@
         {
           "loss": "Long rests make long lists.",
           "attempts": [
-            "Case sets: deferred to B, since _ covers the long open rests and jet fix writes closed ones."
+            "Case sets: deferred to B, since .. covers the long open rests and jet fix writes closed ones."
           ],
           "result": "A closed long rest is a written list, made by jet fix."
         },
         {
           "loss": "Adding a case to a package's enum would break every user's tables.",
           "attempts": [
-            "Make every package enum open: rejected, users would need _ on every table; Rust keeps 80% of public enums closed.",
-            "An author opts an enum in with #Open, users' tables add _, and jet update lists each _ that takes a new case: kept."
+            "Make every package enum open: rejected, users would need .. on every table; Rust keeps 80% of public enums closed.",
+            "An author opts an enum in with #Open, users' tables add _, and jet update lists each .. that takes a new case: kept."
           ],
           "result": "Growing enums grow without breaks, and nothing changes silently."
         }
@@ -213709,8 +213719,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T23:02:23.383Z"
+      "status": "ratified",
+      "created": "2026-11-13T23:02:23.383Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-11-16"
     },
     {
       "id": "D-LIBC-OMIT1",
@@ -220376,6 +220388,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T14:30:49.195Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-GUARD-LINT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T14:27:32.185Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0manzdq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-16T14:26:23.685Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PRIM-ANY1",
+      "note": "C"
+    },
+    {
+      "at": "2026-11-16T13:55:49.961Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06r6neu",
+      "note": "#9 The network handle types (TCPListener, TCPStream, UDPSocket,"
+    },
     {
       "at": "2026-11-16T13:55:42.582Z",
       "by": "Main",
