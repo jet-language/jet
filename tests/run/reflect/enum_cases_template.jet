@@ -1,39 +1,30 @@
 // A derive and a marker template read an enum's cases from `cases`. The
-// built-in Equatable and Comparable derives match every case, a grouped one
-// and a named payload included; a user marker unrolls one arm per case and
-// reads each case's index and payload fields; and a marker on a case,
+// built-in Equatable and Comparable derives match every case, grouped ones
+// and named payloads included; a user marker unrolls one row per case and
+// reads each case's name, index and payload fields; and a marker on a case,
 // grouped or not, reads that case's CaseInfo.
-CaseIndex: struct {
+CaseRows: struct {
     impl Marker {
         sites: [.Type]
 
         expand: fn(self, target: Target) {
             tname: target.name
             impl #{tname} {
-                case_index: fn(self) -> Int {
-                    at := -1
+                case_rows: fn() -> [String] {
+                    rows := [String]{}
+                    leaf := ""
+                    index := 0
+                    fields := 0
                     #loop case in target.reflect().cases {
-                        if self == {
-                            .#{case} -> { at = case.index }
-                            else -> {}
+                        leaf = case.name
+                        index = case.index
+                        fields = 0
+                        #loop field in case.reflect().fields {
+                            fields += 1
                         }
+                        rows.push("{leaf} is case {index} with {fields} payload fields")
                     }
-                    at
-                }
-
-                payload_count: fn(self) -> Int {
-                    count := 0
-                    #loop case in target.reflect().cases {
-                        if self == {
-                            .#{case} -> {
-                                #loop field in case.reflect().fields {
-                                    count += 1
-                                }
-                            }
-                            else -> {}
-                        }
-                    }
-                    count
+                    rows
                 }
             }
         }
@@ -58,10 +49,11 @@ CaseNote: struct {
 
 Notes: struct {}
 
-#[Equatable, Comparable, CaseIndex]
+#[Equatable, Comparable, CaseRows]
 Signal: enum {
     Quit
     #CaseNote("move") Move(Int)
+    Resize(w: Int, h: Int)
     Paint {
         Fill(Int)
         #CaseNote("stroke") Stroke(width: Int, style: Int)
@@ -69,17 +61,17 @@ Signal: enum {
 }
 
 run: fn() {
-    signals: [Signal]{Signal.Quit, Signal.Move(3), Signal.Paint.Fill(7), Signal.Paint.Stroke{width: 2, style: 1}}
-    loop signal in signals {
-        print("case {signal.case_index()} with {signal.payload_count()} payload fields")
-    }
+    loop row in Signal.case_rows() -> print(row)
     print(Signal.Move(3) == Signal.Move(3))
     print(Signal.Move(3) == Signal.Move(4))
-    print(Signal.Paint.Stroke{width: 2, style: 1} == Signal.Paint.Stroke{width: 2, style: 1})
-    print(Signal.Paint.Fill(7) == Signal.Paint.Stroke{width: 2, style: 1})
+    print(Signal.Resize{w: 2, h: 1} == Signal.Resize{w: 2, h: 1})
+    print(Signal.Paint.Fill(7) == Signal.Paint.Fill(7))
+    print(Signal.Paint.Fill(7) == Signal.Paint.Fill(8))
+    print(Signal.Paint.Fill(7) == Signal.Move(7))
     print(Signal.Quit.compare(Signal.Move(1)) == .Less)
     print(Signal.Paint.Fill(9).compare(Signal.Paint.Fill(2)) == .Greater)
-    print(Signal.Paint.Stroke{width: 2, style: 1}.compare(Signal.Paint.Stroke{width: 2, style: 5}) == .Less)
+    print(Signal.Resize{w: 2, h: 1}.compare(Signal.Resize{w: 2, h: 5}) == .Less)
+    print(Signal.Resize{w: 2, h: 1}.compare(Signal.Paint.Fill(0)) == .Less)
     print(Notes.note_move())
     print(Notes.note_stroke())
 }
