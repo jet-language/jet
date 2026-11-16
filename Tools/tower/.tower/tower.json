@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108552,
+    "rev": 108553,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -106589,7 +106589,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:09.432Z",
-      "updated": "2026-11-16T10:40:39.234Z",
+      "updated": "2026-11-16T10:50:49.624Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -216881,6 +216881,214 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-16T09:17:45.663Z"
+    },
+    {
+      "id": "D-APP-ID1",
+      "cardId": "c0m0czk2",
+      "group": "app",
+      "title": "How an app marks the type that holds a row's ID",
+      "situation": "A row ID is the text that names one row, such as one task. Apps that work offline let the phone or browser make the ID itself. It is a UUIDv7: a long random text that also records the time, so a task made on a train opens at once and keeps its link. The server must then refuse IDs a client made up. Today a crafted request with the ID \"t1\" is stored as is, because the decoder sees an ID type as just a String. Every app that syncs is exposed, and beginners can't see the gap. You decide how an app says \"this type is an ID\", so its decoder accepts only UUIDv7 text and answers anything else with 422. We recommend a Core type, app.ID, that each table's ID type wraps: TaskID: distinct app.ID.",
+      "gist": "How should an app mark a row ID type so it accepts only UUIDv7 text?",
+      "lesson": "An ID names one row. When the client makes IDs, the server must check each one as it decodes the request. A decoder is the code that turns request text into a typed value. When it refuses, the server answers 422 (bad input) and no method runs. The three options put the check in three places. A uses one Core type that each ID type wraps, B a marker on a String type, and C one generic Core type named after its row.",
+      "explainer": "Beginner path: the app writes one line per table, TaskID: distinct app.ID, and nothing else. On the client, TaskID.from_id(app.new_id()) makes a new ID. A crafted request with \"t1\" gets 422 at the id field, and the method never runs. The ID prints as its text, travels in JSON as a plain string, and is stored as one text column.\n\nExpert path. Code can build an ID only from app.new_id() or by decoding checked text, so no TaskID ever holds \"t1\". A generic function can ask for any ID through the wrapped type. A legacy key that is not a UUIDv7 stays a plain distinct String, and an integer key stays Int. Neither option changes those.\n\nSome things stay the same under every option: the ID's text, the 422 answer, the JSON string and the SQL text column. Passing a ProjectID where a TaskID belongs is a compile error under all three.",
+      "story": "Ana's TaskList app makes a task on the train and gives it a fresh ID. Later Leo writes a script that sends {\"id\":\"t1\",\"title\":\"Ship it\"} straight to the server. Today the server stores a task named t1, and the next client that makes its own t1 collides with it. Ana needs the server to refuse t1 before her code runs.",
+      "inWild": "use serde::{Deserialize, Serialize};\nuse uuid::Uuid;\n\n// A newtype over a checked UUID type: bad text fails to deserialize.\n#[derive(Serialize, Deserialize)]\n#[serde(transparent)]\nstruct TaskId(Uuid);\n\n#[derive(Serialize, Deserialize)]\nstruct Task { id: TaskId, title: String }\n\nfn main() {\n    let bad: Result<Task, _> = serde_json::from_str(r#\"{\"id\":\"t1\",\"title\":\"Ship it\"}\"#);\n    println!(\"{}\", bad.is_err()); // true\n}",
+      "detail": "Code is truth, checked on today's dev with the gate jet. Each probe below is a file in $JET_SCRATCH_ROOT/lanes/Main/inbox/Speed-3-ballot-app-id/.\n\njet run gap.jet prints \"accepted id t1\". A distinct String decodes any text.\n\njet run core_id_and_row_id.jet prints \"A: t1 refused: [at `id`: expected a UUIDv7]\". A struct with a hand-written bare-text codec already refuses t1. It also prints \"A: uuid accepted, encodes {\\\"id\\\":\\\"0193a5e0-7c1a-7000-8000-000000000001\\\",\\\"title\\\":\\\"x\\\"}\", so the ID travels as a plain string. Its last line, \"C: x\", shows that a generic struct whose parameter only names a row compiles today.\n\njet run distinct_over_struct.jet fails with E0311: \"`TaskID` has no matching static method `from_id`\". A distinct type over a struct does not derive its codec yet. That is a gap in D-CODABLE-DISTINCT1=A (a distinct type codes as its base), and A must close it.\n\nThe proposal (D-WEBAPP-SHAPE1=A, Docs/proposals/2026-11-13-web-app-framework-shape.md, sections 3.2 and 4.8) writes TaskID: distinct String. It requires that an ID type's decoder accept only UUIDv7 text, with a test sending \"t1\". It never says what marks an ID type.\n\napp.new_id() -[Rand, Time]> String is in Core/App/App.jet (SUB Speed-3-c6-server). It makes the text through core.crypto.uuid.v7, and its return type follows this vote. The same SUB makes Table.add on a taken key answer Exists or Denied, by whether the caller may read the row. Card #6867 c6.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Wrap Core's app.ID",
+          "detail": "Core adds one type, app.ID. Its decoder accepts only canonical UUIDv7 text: 36 characters, lowercase, version 7, variant 10. Anything else is FieldError{path: \"id\", reason: \"expected a UUIDv7\"}, and the endpoint answers 422. An app writes TaskID: distinct app.ID. A distinct type codes as its base (D-CODABLE-DISTINCT1=A), so it gets the same check.\n\napp.new_id() returns app.ID, and TaskID.from_id(app.new_id()) makes a task's ID. It prints as its text, is a bare JSON string, and is stored as the table's one TEXT key column.",
+          "technical": "Core only: app.ID in Core/App/App.jet with Encode, Decode, Display, Equatable and Comparable, and new_id returning it. Fix the derived codec of a distinct type over a struct base (today E0311 from_id). No compiler-known name, marker or diagnostic is added.",
+          "code": "use { app; db: core.db }\n\n// Each table's ID is its own type, wrapping Core's checked app.ID.\n#Printable\nTaskID: distinct app.ID\n\n#Codable\nTask: struct {\n    id: TaskID\n    title: String\n}\n\nTaskList: struct {\n    tasks: db.Table<TaskID, Task>\n\n    #App.SignedIn\n    create: fn(self, task: Task) -[DB.Read, DB.Write]> Task db.DBError! { self.tasks.add(task) }\n\n    #App.SignedIn\n    fetch: fn(self, id: TaskID) -[DB.Read]> Task? db.DBError! { self.tasks.get(id) }\n}\n\n// On the client: make the ID where the task is made, even offline.\ntask: Task{id: TaskID.from_id(app.new_id()), title: \"Ship it\"}\n// A request with \"id\":\"t1\" gets 422 at `id`; create never runs."
+        },
+        {
+          "key": "B",
+          "name": "#App.ID marker on a String",
+          "detail": "TaskID stays a distinct String, with the marker #App.ID. The derived decoder of a distinct String that carries the marker adds the UUIDv7 check, with the same FieldError and 422 as A. app.new_id() stays String, and TaskID.from_string(app.new_id()) makes an ID. Printing, JSON and SQL are as for any String. Building a TaskID in code with from_string is not checked.",
+          "technical": "Compiler rule: a new marker row #App.ID, a codec-derive branch that reads it, and a diagnostic for #App.ID on anything but a distinct String.",
+          "code": "use { app; db: core.db }\n\n// The marker tells the decoder this String must be a UUIDv7.\n#[App.ID, Printable]\nTaskID: distinct String\n\n#Codable\nTask: struct {\n    id: TaskID\n    title: String\n}\n\nTaskList: struct {\n    tasks: db.Table<TaskID, Task>\n\n    #App.SignedIn\n    create: fn(self, task: Task) -[DB.Read, DB.Write]> Task db.DBError! { self.tasks.add(task) }\n\n    #App.SignedIn\n    fetch: fn(self, id: TaskID) -[DB.Read]> Task? db.DBError! { self.tasks.get(id) }\n}\n\n// On the client:\ntask: Task{id: TaskID.from_string(app.new_id()), title: \"Ship it\"}\n// A request with \"id\":\"t1\" gets 422 at `id`.\n// TaskID.from_string(\"t1\") in code still compiles."
+        },
+        {
+          "key": "C",
+          "name": "One generic app.ID<Row>",
+          "detail": "Core adds app.ID<Row>, one generic type named after the row it identifies. Its codec is A's. An app declares no ID type: a task's ID is app.ID<Task>. app.new_id() becomes fn<R>() -> app.ID<R>, so the row type comes from where the ID goes. Printing, JSON and SQL are as in A.",
+          "technical": "Core only: a generic struct whose parameter only names a row (this compiles today), its codec, and new_id generic over R.",
+          "code": "use { app; db: core.db }\n\n// No ID type to declare: an ID names the row type it belongs to.\n#Codable\nTask: struct {\n    id: app.ID<Task>\n    title: String\n}\n\nTaskList: struct {\n    tasks: db.Table<app.ID<Task>, Task>\n\n    #App.SignedIn\n    create: fn(self, task: Task) -[DB.Read, DB.Write]> Task db.DBError! { self.tasks.add(task) }\n\n    #App.SignedIn\n    fetch: fn(self, id: app.ID<Task>) -[DB.Read]> Task? db.DBError! { self.tasks.get(id) }\n}\n\n// On the client: new_id() takes its row type from where it goes.\ntask: Task{id: app.new_id(), title: \"Ship it\"}\n// A request with \"id\":\"t1\" gets 422 at `id`."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A newtype over the uuid crate's checked Uuid type; serde refuses bad text. This is A's shape.",
+          "code": "#[derive(Serialize, Deserialize)]\n#[serde(transparent)]\nstruct TaskId(Uuid);\n// serde_json::from_str::<TaskId>(\"\\\"t1\\\"\") is an error"
+        },
+        {
+          "lang": "Elixir (Ecto)",
+          "note": "The primary key is a field option, and a cast refuses non-UUID text. This is B's shape.",
+          "code": "@primary_key {:id, :binary_id, autogenerate: true}\nschema \"tasks\" do\n  field :title, :string\nend"
+        },
+        {
+          "lang": "Ruby on Rails",
+          "note": "The column type does the check; the model has no ID type.",
+          "code": "create_table :tasks, id: :uuid do |t|\n  t.string :title\nend"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A puts the check in one Core type instead of a compiler rule. Code can only make a valid ID, and each table keeps a named ID type (TaskID), as the proposal's examples already write. It reuses the ratified rule that a distinct type codes as its base, instead of adding a second way to code one.",
+        "gains": [
+          "One check in one place, with no marker to forget.",
+          "No TaskID can hold \"t1\", from a request or from code.",
+          "Named ID types in every signature, and a generic function can take any ID."
+        ],
+        "losses": [
+          {
+            "loss": "A distinct type over a struct does not derive its codec today (E0311 from_id).",
+            "mitigation": "Building A fixes it as part of the same work; it is a bug under the ratified distinct-coding rule anyway, so no user ever meets it."
+          },
+          {
+            "loss": "An app writes TaskID.from_id(app.new_id()) instead of from_string.",
+            "mitigation": "from_id is the from_<base> constructor every distinct type already gets, so there is nothing new to learn; the E0311 fix text names it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A forgotten marker fails silently and accepts \"t1\"; the check lives in the compiler; and from_string still builds bad IDs in code."
+          },
+          {
+            "key": "C",
+            "reason": "Everyone holding an ID must see its row type, IDs of things that are not rows (a device, an upload) need a stand-in row, and every signature spells app.ID<Task>."
+          }
+        ],
+        "tradeoff": "One wrapper line per table, in exchange for IDs that are valid everywhere they exist."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "A #Test in Core/App shows app.ID refusing \"t1\", \"\", an uppercase UUID and a UUIDv4, and accepting app.new_id(). The case web_app/offline_create_with_client_id posts {\"id\":\"t1\",...} and gets 422, posts a fresh ID and gets 200, then fetches that ID and gets the row. The probe distinct_over_struct.jet runs and prints its line. core-library.md describes app.ID and new_id.\n\nEvidence labels: the three probe files were run with the gate jet on today's dev and their output is quoted in detail. The proposed option programs were not run.",
+      "surface": {
+        "gist": "How should an app mark its row ID types so they accept only UUIDv7 text?",
+        "lesson": "Clients make their own row IDs, so the server must refuse made-up ones like \"t1\" with 422. A wraps one checked Core type, B adds a marker to a String, and C uses one generic Core type named after the row.",
+        "trio": {
+          "current": {
+            "note": "Today an ID is a plain String to the decoder, so \"t1\" is accepted.",
+            "code": "#Printable\nTaskID: distinct String\n\n#Codable\nNewTask: struct {\n    id: TaskID\n    title: String\n}\n\nrun: fn() {\n    // prints: accepted id t1\n    if json.decode<NewTask>(`{\"id\":\"t1\",\"title\":\"Ship it\"}`) == {\n        .Ok(task) -> print(\"accepted id {task.id}\")\n        .Err(why) -> print(\"refused: {why}\")\n    }\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "A newtype over a checked UUID type; bad text fails to decode.",
+            "code": "#[derive(Serialize, Deserialize)]\n#[serde(transparent)]\nstruct TaskId(Uuid);\n// \"t1\" fails to deserialize"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Wrap Core's app.ID",
+            "gist": "TaskID: distinct app.ID; Core's type checks the text.",
+            "gains": [
+              "One check, no marker to forget.",
+              "Code can't build a bad ID."
+            ],
+            "losses": [
+              "Needs the distinct-over-struct codec fix."
+            ],
+            "proposed": {
+              "code": "TaskID: distinct app.ID\ntask: Task{id: TaskID.from_id(app.new_id()), title: \"Ship it\"}\n// \"t1\" in a request -> 422"
+            }
+          },
+          {
+            "key": "B",
+            "name": "#App.ID marker",
+            "gist": "A marker on a distinct String adds the check.",
+            "gains": [
+              "Keeps today's String spelling."
+            ],
+            "losses": [
+              "A missing marker silently accepts \"t1\".",
+              "from_string still builds bad IDs."
+            ],
+            "proposed": {
+              "code": "#App.ID\nTaskID: distinct String\ntask: Task{id: TaskID.from_string(app.new_id()), title: \"Ship it\"}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Generic app.ID<Row>",
+            "gist": "No ID type to declare; the ID names its row.",
+            "gains": [
+              "Nothing to declare per table."
+            ],
+            "losses": [
+              "Every holder must see the row type.",
+              "Non-row IDs need a stand-in."
+            ],
+            "proposed": {
+              "code": "Task: struct { id: app.ID<Task>, title: String }\ntask: Task{id: app.new_id(), title: \"Ship it\"}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One checked Core type, named IDs per table, and no compiler rule.",
+          "gains": [
+            "Valid IDs everywhere.",
+            "No marker to forget."
+          ],
+          "losses": [
+            {
+              "loss": "Distinct over a struct needs a codec fix.",
+              "mitigation": "Fixed as part of building A; users never meet it."
+            },
+            {
+              "loss": "from_id instead of from_string.",
+              "mitigation": "The from_<base> rule every distinct type already follows."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Forgetting the marker fails silently."
+            },
+            {
+              "key": "C",
+              "reason": "Row types leak into every holder of an ID."
+            }
+          ],
+          "tradeoff": "One wrapper line per table for IDs that are always valid."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A distinct type over a struct does not derive its codec today.",
+          "attempts": [
+            "Make app.ID a distinct String with a Core-only decoder: rejected, a distinct type cannot carry its own codec under D-CODABLE-DISTINCT1=A.",
+            "Fix the derive for a struct base: kept; the rule already says a distinct type codes as its base."
+          ],
+          "result": "Fixed while building A; no user-visible cost."
+        },
+        {
+          "loss": "A new constructor name, from_id.",
+          "attempts": [
+            "Make app.new_id() return the caller's ID type directly: rejected, it needs a bound no type has today.",
+            "Use the existing from_<base> rule: kept."
+          ],
+          "result": "No new rule to learn."
+        },
+        {
+          "loss": "Decide the ID by the id field's role in a table, with no ID type.",
+          "attempts": [
+            "Rejected: a value would decode differently by where it is stored, and an argument such as fetch(id:) is decoded before any table is involved."
+          ],
+          "result": "Not an option."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-16T10:50:49.624Z"
     }
   ],
   "questions": [
@@ -220176,6 +220384,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T10:50:49.624Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-APP-ID1",
+      "note": "How an app marks the type that holds a row's ID"
+    },
     {
       "at": "2026-11-16T10:41:03.568Z",
       "by": "Main",
