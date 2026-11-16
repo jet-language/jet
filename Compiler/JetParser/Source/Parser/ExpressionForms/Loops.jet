@@ -404,7 +404,7 @@ parser_expression_form_parse_loop: fn(state: &JetParserState, depth: Int) -> Par
     body := [Stmt]{}
     end := start.span
     if {
-        parser_current_kind(state) == TOKEN_LBRACE -> {
+        parser_current_kind(state) == TOKEN_LBRACE && !parser_brace_record_value_at(state, 0) -> {
             block: parser_parse_callable_body(state, true)
             body = block.statements
             end = block.span

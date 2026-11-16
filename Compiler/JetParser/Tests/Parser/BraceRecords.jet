@@ -74,6 +74,29 @@ run: fn() {
     assert(!alias, "`Origin: {{x: 0, y: 0}}` binds a record value")
 }
 
+#Test("a_record_value_stands_where_a_block_may") {
+    program: parser_test_program(
+        `pick: fn(flag: Bool, key: String, rows: [Int], size: {h: Int, w: Int}?) -> {a: Int, b: Int} {
+    named: if key == {
+        "x" -> {a: 1, b: 2}
+        else -> {a: 3, b: 4}
+    }
+    guarded: if flag -> {a: 5, b: 6} else -> named
+    fallback: size ?? {h: 0, w: 0}
+    pairs: loop row in rows -> {key: row, row: row}
+    empty: make<{key: String, value: Int}>()
+    record(fallback.h)
+    {a: guarded.a, b: pairs.len() + empty.len()}
+}
+`,
+    )
+    pick: parser_test_function(program, "pick")
+    assert_eq(pick.body.len(), 7)
+    if pick.body[6] == .Expr(tail) {
+        assert(tail == .StructLit(_, _, _, _, _, _, _, _), "the last line is the record value")
+    } else { panic("the record on its own line ends the body as a value") }
+}
+
 #Test("the_formatter_keeps_brace_and_paren_record_types") {
     formatted: parser_test_stable("a: fn() -> {{x: Int, y: Int}} {{ {{x: 1, y: 2}} }}\nb: fn() -> (x: Int, y: Int) {{ (x: 1, y: 2) }}\n")
     assert(formatted.contains("a: fn() -> {{x: Int, y: Int}} {{"), formatted)

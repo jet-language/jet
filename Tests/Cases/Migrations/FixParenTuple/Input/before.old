@@ -1,0 +1,33 @@
+// Paren records become brace records; calls, payloads, markers, groupings,
+// unit and the two-name loop head keep their parens.
+Bounds: (min: Int, max: Int)
+
+Span: struct {
+    range: (start: Int, end: Int)
+}
+
+bounds: fn(xs: [Int]) -> (min: Int, max: Int) {
+    (min: xs[0], max: xs[xs.len() - 1])
+}
+
+pick: fn(flag: Bool, key: String, size: (h: Int, w: Int)?) -> (a: Int, b: Int) {
+    named: if key == {
+        "x" -> (a: 1, b: 2)
+        else -> (a: 3, b: 4)
+    }
+    guarded: if flag -> (a: 5, b: 6) else -> named
+    fallback: size ?? (h: 0, w: 0)
+    print(fallback.h)
+    (a: guarded.a, b: (named.b + 1) * 2)
+}
+
+run: fn() {
+    (min, max): bounds([3, 1, 2])
+    rows: [(name: String, n: Int)]{(name: "a", n: 1), (name: "b", n: 2)}
+    pairs: loop (i, row) in rows.enumerate() -> (at: i, name: row.name)
+    keyed: Dyn.Object([(key: String, value: Dyn)]{(key: "z", value: Dyn.Int(1))})
+    holder: Val((left: 1, right: 2))
+    print("{(x: 1, y: 2).x} {min + max} {pairs.len()} {holder ?? return}")
+    program: "pair: (x: Int, y: Int)\n"
+    print(program, keyed, Bounds{min: 0, max: 1})
+}

@@ -1,0 +1,207 @@
+// Toolchain a0.0.45: a record, the unnamed struct with named members, is
+// written in braces. A paren record type `(min: Int, max: Int)`, a paren
+// record value `(min: 1, max: 9)`, a paren record pattern
+// `(x: 0, y: _)` and a destructure `(min, max): bounds` become
+// `{min: Int, max: Int}`, `{min: 1, max: 9}`, `{x: 0, y: _}` and
+// `{min, max}: bounds`. The paren forms are not Jet from this toolchain on,
+// so the plan finds them in the lexer's tokens, never in a parse: a `(` whose
+// first member is `name:` is a record unless it opens a call's, a payload's,
+// a marker's, a module's or a callable's parenthesized list, which is to say
+// unless a name, `fn`, `module`, a closer, a string or a touching `>`, `>>`,
+// `?` or `!` stands before it. A `(` that starts a statement and holds only
+// names, then `:` or `:=` after its `)`, is a destructure. The two-name loop
+// head `loop (i, row) in rows` stays. Only the delimiters change, so every
+// column keeps its place. The Jet programs quoted in a source's strings are
+// read the same way, and so is a Markdown file's ```jet fence; a record in
+// an interpolation hole is reported instead.
+use {
+    jet_lexer.[Token, TokenTables, lex_generated, STRING_PART_INTERPOLATION, TOKEN_BANG, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_GT, TOKEN_IDENT, TOKEN_KW_FN, TOKEN_KW_MODULE, TOKEN_LBRACE, TOKEN_LPAREN, TOKEN_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SELF, TOKEN_SEMI, TOKEN_SHR, TOKEN_STRING, lexer_without_comments]
+    jet_parser.[parse_generated_source]
+}
+
+// Rewrites the paren records of one file: a Jet source (`source`, or a
+// `.jet` or `.template` path) or a Markdown file's ```jet fences. Other
+// files stay as written.
+paren_tuple1_file: fn(path: String, text: String, source: Bool) -> MigrationOutcome {
+    if source || path.ends_with(".jet") || path.ends_with(".template") {
+        return paren_tuple1_source(path, text)
+    }
+    if path.ends_with(".md") -> return paren_tuple1_markdown(path, text)
+    MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+}
+
+// Rewrites the paren records of one Jet source, unless the result parses
+// with more errors than the source: a parser that still reads paren records
+// finds none in the source, and one that refuses them finds fewer in the
+// result.
+paren_tuple1_source: fn(path: String, text: String) -> MigrationOutcome {
+    bytes: text.bytes()
+    lexed: lex_generated(bytes)
+    edits := [LambdaShapeEdit]{}
+    skipped := [String]{}
+    rewritten := paren_tuple1_scan(path, bytes, lexed.tables, lexed.tokens, false, edits, skipped)
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_RAW_STRING && token.kind != TOKEN_STRING -> next
+        if paren_tuple1_quoted(path, bytes, token, skipped) == .Val(quoted_edit) {
+            rewritten += quoted_edit.rewritten
+            edits.push(LambdaShapeEdit{start: quoted_edit.start, end: quoted_edit.end, text: quoted_edit.text})
+        }
+    }
+    if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    result: lambda_shape1_apply(bytes, edits) ?? {
+        skipped.push("{path}: overlapping edits, file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    errors: parse_generated_source(result.bytes()).diagnostics.filter(fn(d) { d.code.starts_with("E") })
+    if errors.len() > lambda_shape1_errors(text) {
+        first: errors[0]
+        at: if first.span == .Val(span) -> "{lambda_shape1_line(result.bytes(), span.start)}" else -> "?"
+        skipped.push("{path}: the rewrite does not parse ({errors.len()} errors, the first at line {at}: {first.what}), file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    MigrationOutcome{text: result, rewritten: rewritten, skipped: skipped}
+}
+
+// A Jet program quoted in a string literal without interpolation holes or
+// unread escapes, rewritten in place when the result parses cleanly and
+// declares an item, so prose that happens to hold a `(name:` stays.
+paren_tuple1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: &[String]) -> LambdaShapeQuoted? {
+    raw: lambda_shape1_text(bytes, token.span.start, token.span.end)
+    if !raw.contains("(") -> return None
+    quote: if token.kind == TOKEN_RAW_STRING -> lambda_shape1_fence(raw, 96) else -> lambda_shape1_fence(raw, 34)
+    if quote == 0 || raw.len() < quote * 2 -> return None
+    inner_raw: lambda_shape1_text(bytes, token.span.start + quote, token.span.end - quote)
+    if token.kind == TOKEN_STRING {
+        unquoted: lambda_shape1_unquote(inner_raw) ?? return None
+        if lambda_shape1_quote(unquoted) != inner_raw -> return None
+    }
+    inner: if token.kind == TOKEN_RAW_STRING -> inner_raw else -> lambda_shape1_unquote(inner_raw) ?? return None
+    outcome := paren_tuple1_source("{path}:{lambda_shape1_line(bytes, token.span.start)}", inner)
+    if outcome.rewritten == 0 -> return None
+    parsed: parse_generated_source(outcome.text.bytes())
+    if parsed.program.items.len() == 0 || parsed.diagnostics.any(fn(d) { d.code.starts_with("E") }) {
+        return None
+    }
+    skipped.extend(outcome.skipped.move())
+    count: outcome.rewritten
+    replaced: if token.kind == TOKEN_RAW_STRING -> outcome.text.move() else -> lambda_shape1_quote(outcome.text)
+    if token.kind == TOKEN_RAW_STRING && replaced.contains(lambda_shape1_text(bytes, token.span.start, token.span.start + quote)) {
+        return None
+    }
+    Val(LambdaShapeQuoted{start: token.span.start + quote, end: token.span.end - quote, text: replaced, rewritten: count})
+}
+
+// Rewrites the paren records among one token run: a file's code tokens or
+// one interpolation hole's (`hole`). Returns how many it rewrote. A hole
+// ends at its first `}`, so a record inside one stays as written and is
+// reported: bind it to a name before the string.
+paren_tuple1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Token], hole: Bool, edits: &[LambdaShapeEdit], skipped: &[String]) -> Int {
+    tokens: lexer_without_comments(raw)
+    rewritten := 0
+    loop index in 0..<tokens.len() {
+        token: tokens[index]
+        if token.literal >= 0 {
+            loop part in tables.literals[token.literal].string_parts {
+                if part.kind == STRING_PART_INTERPOLATION {
+                    rewritten += paren_tuple1_scan(path, bytes, tables, part.tokens, true, edits, skipped)
+                }
+            }
+        }
+        if token.kind != TOKEN_LPAREN || !paren_tuple1_record(tokens, index) -> next
+        close: lambda_shape1_match(tokens, index)
+        if close < 0 -> next
+        if hole {
+            skipped.push("{path}:{lambda_shape1_line(bytes, token.span.start)}: a record inside an interpolation hole stays; bind it to a name first")
+            next
+        }
+        edits.push(LambdaShapeEdit{start: token.span.start, end: token.span.start + 1, text: "{{"})
+        edits.push(LambdaShapeEdit{start: tokens[close].span.start, end: tokens[close].span.start + 1, text: "}}"})
+        rewritten += 1
+    }
+    rewritten
+}
+
+// Whether the `(` at `index` opens a paren record or a statement's
+// destructure.
+paren_tuple1_record: fn(tokens: [Token], index: Int) -> Bool {
+    if index + 2 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && tokens[index + 2].kind == TOKEN_COLON {
+        return !paren_tuple1_list_head(tokens, index)
+    }
+    if index > 0 && tokens[index - 1].kind != TOKEN_SEMI && tokens[index - 1].kind != TOKEN_LBRACE {
+        return false
+    }
+    at := index + 1
+    loop {
+        if at + 1 >= tokens.len() || tokens[at].kind != TOKEN_IDENT -> return false
+        if tokens[at + 1].kind == TOKEN_RPAREN -> break
+        if tokens[at + 1].kind != TOKEN_COMMA -> return false
+        at += 2
+    }
+    after: at + 2
+    at > index + 1 && after < tokens.len() && (tokens[after].kind == TOKEN_COLON || tokens[after].kind == TOKEN_COLON_EQ)
+}
+
+// Whether the `(` at `index` opens a call's, a payload's, a marker's or a
+// callable's parenthesized list rather than a record.
+paren_tuple1_list_head: fn(tokens: [Token], index: Int) -> Bool {
+    if index == 0 -> return false
+    before: tokens[index - 1]
+    touching: before.span.end == tokens[index].span.start
+    if {
+        before.kind == TOKEN_IDENT || before.kind == TOKEN_KW_FN || before.kind == TOKEN_KW_MODULE || before.kind == TOKEN_SELF -> true
+        before.kind == TOKEN_RPAREN || before.kind == TOKEN_RBRACKET -> true
+        before.kind == TOKEN_STRING || before.kind == TOKEN_RAW_STRING -> true
+        before.kind == TOKEN_GT || before.kind == TOKEN_SHR || before.kind == TOKEN_QUESTION || before.kind == TOKEN_BANG || before.kind == TOKEN_RBRACE -> touching
+        else -> false
+    }
+}
+
+// A Markdown file: each ```jet fence is rewritten in place. Other fences and
+// the prose stay as written.
+paren_tuple1_markdown: fn(path: String, text: String) -> MigrationOutcome {
+    bytes: text.bytes()
+    edits := [LambdaShapeEdit]{}
+    skipped := [String]{}
+    rewritten := 0
+    line_start := 0
+    line_number := 1
+    // The first byte inside the open fence, or -1 outside every fence.
+    fence_start := -1
+    fence_line := 0
+    jet_fence := false
+    loop line_start <= bytes.len() {
+        line_end := line_start
+        loop line_end < bytes.len() && bytes[line_end] != 10 -> line_end += 1
+        trimmed: lambda_shape1_text(bytes, line_start, line_end).trim()
+        if {
+            fence_start < 0 -> {
+                if trimmed.starts_with("```") {
+                    fence_start = line_end + 1
+                    fence_line = line_number
+                    jet_fence = trimmed == "```jet"
+                }
+            }
+            trimmed == "```" -> {
+                if jet_fence && line_start > fence_start {
+                    block_end: line_start - 1
+                    outcome := paren_tuple1_source("{path}:{fence_line}", lambda_shape1_text(bytes, fence_start, block_end))
+                    skipped.extend(outcome.skipped.move())
+                    if outcome.rewritten > 0 {
+                        rewritten += outcome.rewritten
+                        edits.push(LambdaShapeEdit{start: fence_start, end: block_end, text: outcome.text.move()})
+                    }
+                }
+                fence_start = -1
+            }
+            else -> {}
+        }
+        line_start = line_end + 1
+        line_number += 1
+    }
+    if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    result: lambda_shape1_apply(bytes, edits) ?? {
+        skipped.push("{path}: overlapping edits, file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    MigrationOutcome{text: result, rewritten: rewritten, skipped: skipped}
+}

@@ -504,7 +504,7 @@ parser_expression_form_value_block: fn(state: &JetParserState, depth: Int) -> Pa
 // `next` arm parses as a name, which may be a local called `next`; sema
 // reads it as the loop-control word when no such name is in scope.
 parser_expression_form_selected_value: fn(state: &JetParserState, depth: Int) -> ParserExpressionFormValueBranch {
-    if parser_current_kind(state) == TOKEN_LBRACE {
+    if parser_current_kind(state) == TOKEN_LBRACE && !parser_brace_record_value_at(state, 0) {
         return parser_expression_form_value_block(state, depth + 1)
     }
     if parser_current_kind(state) == TOKEN_RETURN || parser_current_kind(state) == TOKEN_BREAK {
