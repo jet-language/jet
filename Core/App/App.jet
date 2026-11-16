@@ -1123,13 +1123,15 @@ priv CallJobRunner: struct {
 }
 
 // A store whose outbox the process runs jobs from: the keys of the jobs it
-// runs from there, and whether core.db named the store as it opened
-// (`jobs.store`). A store it didn't name is forgotten once no job of it
-// runs.
+// runs from there, the keys of the ones a stop left (`jobs.stop`), which
+// still run but no longer hold their rows, and whether core.db named the
+// store as it opened (`jobs.store`). A store it didn't name is forgotten
+// once no job of it runs.
 priv JobStore: struct {
     store: String
     outbox: Shared<CallOutbox>
     running: [String]
+    left: [String]
     named: Bool
 }
 
@@ -1174,6 +1176,56 @@ priv(package) jobs: module {
         runtime.value.serving += 1
         jobs_tend_start(runtime.value)
     }
+
+    // A server that began serving an App that declares jobs stopped, with
+    // `wait_ms` milliseconds left. Once no server serves such an App, no
+    // tick takes rows, and the stop waits up to `wait_ms` for the jobs that
+    // run, and leaves the ones that still do (`jobs_leave`): none of them
+    // deletes its row or records a failure, and their rows are no longer
+    // held, so a serving server runs them again once their time passes.
+    stop: fn(wait_ms: Int) Never! {
+        if !jobs_unserve() -> return
+        end: rt.clock_mono_ns() + wait_ms * 1000000
+        loop jobs_busy() && rt.clock_mono_ns() < end -> tasks.sleep(10)
+        jobs_leave()
+    }
+}
+
+// One server less serves an App that declares jobs: whether none does now.
+priv jobs_unserve: fn() -> Bool Never! {
+    runtime := JOBS.guard_edit()
+    if runtime.value.serving > 0 -> runtime.value.serving -= 1
+    runtime.value.serving == 0
+}
+
+// Whether a job the process runs from a store still runs.
+priv jobs_busy: fn() -> Bool Never! {
+    runtime: JOBS.guard_read()
+    loop store in runtime.value.stores {
+        if store.running.len() > 0 -> return true
+    }
+    false
+}
+
+// Leaves each job the process runs from a store: it no longer holds its
+// row, and its run neither deletes the row nor records a failure there.
+priv jobs_leave: fn() Never! {
+    runtime := JOBS.guard_edit()
+    loop index in 0..<runtime.value.stores.len() {
+        loop key in runtime.value.stores[index].running -> runtime.value.stores[index].left.push(key.copy())
+        runtime.value.stores[index].running = [String]{}
+    }
+}
+
+// Whether a stop left the job of key `key` the process runs from `outbox`.
+priv jobs_left: fn(outbox: Shared<CallOutbox>?, key: String) -> Bool Never! {
+    kept: outbox ?? return false
+    store: jobs_store_name(kept)
+    runtime: JOBS.guard_read()
+    loop known in runtime.value.stores {
+        if known.store == store -> return known.left.contains(key)
+    }
+    false
 }
 
 // The outbox the process runs jobs from for the store `outbox` names: the
@@ -1188,7 +1240,7 @@ priv jobs_store: fn(outbox: &&CallOutbox, named: Bool) -> Shared<CallOutbox> Nev
     }
     name: outbox.store.copy()
     kept: Shared{outbox.move()}
-    runtime.value.stores.push(JobStore{store: name, outbox: kept.copy(), running: [String]{}, named: named})
+    runtime.value.stores.push(JobStore{store: name, outbox: kept.copy(), running: [String]{}, left: [String]{}, named: named})
     kept
 }
 
@@ -1288,8 +1340,8 @@ priv jobs_forget: fn(store: String) Never! {
 }
 
 // Marks the job of key `key` as running from store `store` (`running`), or
-// as no longer running; a store core.db didn't name is forgotten once no
-// job of it runs.
+// as no longer running, whether a stop left it or not; a store core.db
+// didn't name is forgotten once no job of it runs.
 priv jobs_running: fn(store: String, key: String, running: Bool) Never! {
     runtime := JOBS.guard_edit()
     loop index in 0..<runtime.value.stores.len() {
@@ -1304,7 +1356,14 @@ priv jobs_running: fn(store: String, key: String, running: Bool) Never! {
                 break
             }
         }
-        if runtime.value.stores[index].running.len() == 0 && !runtime.value.stores[index].named {
+        loop at in 0..<runtime.value.stores[index].left.len() {
+            if runtime.value.stores[index].left[at] == key {
+                _: runtime.value.stores[index].left.remove(at, .Slot)
+                break
+            }
+        }
+        done: runtime.value.stores[index].running.len() == 0 && runtime.value.stores[index].left.len() == 0
+        if done && !runtime.value.stores[index].named {
             _: runtime.value.stores.remove(index, .Slot)
         }
         return
@@ -1330,13 +1389,14 @@ priv job_start: fn(job: &&CallJob, key: &&String, outbox: &&Shared<CallOutbox>?,
 // from `outbox`. A run that fails runs again after a backoff, up to
 // `job.retries` more runs in all; each failure is recorded on the row, so a
 // server that takes it later goes on from there. After the last, the row
-// keeps the last failure, and no server takes it again.
+// keeps the last failure, and no server takes it again. A job a stop left
+// (`jobs.stop`) runs no more, and records nothing on its row.
 priv job_run: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?, runs: Int) Never! {
     failures := runs
-    loop {
+    loop !jobs_left(outbox, key) {
         failures += 1
         failure: job_attempt(job, key, outbox)
-        if failure == "" -> break
+        if failure == "" || jobs_left(outbox, key) -> break
         last: failures > job.retries
         if outbox == .Val(store) {
             kept: store.guard_read()
@@ -1352,7 +1412,8 @@ priv job_run: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?, runs: I
 // One run of `job` in a call of its own, under its key `key` as the call's
 // delivery: "" when it ran, or when another run had done it already (its
 // row is gone, or a store it uses has run it); otherwise why it failed. A
-// run a store has run already rolls back, and its row is deleted then.
+// run a store has run already rolls back, and its row is deleted then. A
+// run that a stop left before it ended rolls back, and its row stays.
 priv job_attempt: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?) -> String Never! {
     call: transactions.begin() ?? panic("a job's task runs no other call")
     if outbox == .Val(store) {
@@ -1364,15 +1425,16 @@ priv job_attempt: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?) -> 
         job_reply(held.value.call, job.args)
     })
     failed: reply.starts_with("{{\"err\":")
+    left: jobs_left(outbox, key)
     removed := 1
-    if !failed {
+    if !failed && !left {
         if outbox == .Val(store) {
             kept: store.guard_read()
             removed = kept.value.done(key)
         }
     }
     repeated: transactions.repeated(call)
-    committed: transactions.end(call, !failed && removed == 1)
+    committed: transactions.end(call, !failed && !left && removed == 1)
     if repeated {
         if outbox == .Val(store) -> return job_done(store, key)
         return ""

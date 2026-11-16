@@ -1735,8 +1735,10 @@ tell a draining server from a dead one. Then the listener closes, so the port
 is free and a new connect is refused (`local_addr()` then fails with an
 `HTTPError.IO`). Connections still
 open then count as `cancelled`, and one whose handler is still running never
-sends its response: its socket closes when the handler returns. Every caller
-of `serve` and `shutdown` receives the same
+sends its response: its socket closes when the handler returns. A web app
+that mounts `#App.Job` methods then waits what is left of that time for the
+jobs its process runs, and leaves any still running unfinished (`#App.Job`).
+Every caller of `serve` and `shutdown` receives the same
 `HTTPShutdownReport{accepted, overloaded, completed, cancelled}`; a second
 `serve` is an `HTTPError.IO`. The connection deadline bounds each
 connection's reads and writes (30 seconds by default).
@@ -5666,7 +5668,13 @@ second, the rows of its jobs whose lease has run out from each store it
 knows: one that its process used for a job, and each database file `open`
 found keeping jobs. So a job whose server stopped before deleting its row,
 as after a crash or a restart, runs again on a serving server, which goes on
-from the failures the row records. Each run of a kept job is a delivery
+from the failures the row records. Once no server of the process serves
+such an App any more, its last server to stop, after its drain, waits what
+is left of the drain budget (the `shutdown` grace, or one connection
+deadline) for the jobs the process runs, and takes no more rows. A job
+still running then is left unfinished: its call rolls back, it records no
+failure, and its row is no longer held, so it runs again on the next start
+or another serving server. Each run of a kept job is a delivery
 whose ID is the job's key: each store it uses records the key with its
 writes, as a webhook delivery's ID is recorded, so a run again of a job a
 store already ran is dropped there, and the job's row is deleted. A job is

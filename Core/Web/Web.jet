@@ -409,10 +409,13 @@ App: struct {
     // declares job `name`, run with `run` and retried `retries` times, so
     // that once a server first serves the app (`__on_serve`), the process
     // takes the job's rows no server holds from each store it knows, as a
-    // server that stopped left them, and runs them.
+    // server that stopped left them, and runs them. Once that server stops
+    // (`__on_stop`), it waits what is left of its drain for the jobs that
+    // run, and leaves the rest unfinished, to run again.
     __job: fn(self, name: String, retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
         calls.jobs.know(name, retries, run)
         http_server.__on_serve(app_table(self), fn() { calls.jobs.serve() })
+        http_server.__on_stop(app_table(self), fn(wait_ms: Int) { calls.jobs.stop(wait_ms) })
         self.copy()
     }
 
