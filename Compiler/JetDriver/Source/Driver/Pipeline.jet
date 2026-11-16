@@ -5495,6 +5495,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         jet_driver_build_facts(load, request, target_machine),
         counting,
         request.compiler_threads,
+        // The Core library's check records each Core module's derive
+        // expansion in its bodies file; a compile its host lends that
+        // file to takes the records in place of expanding.
+        derive_hooks: if request.core_seal -> None else -> sema_host_hook_access(request.eval_config.host_hooks),
+        capture_derives: request.core_seal,
     )
     output_intent: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
     output_diagnostics: sema_output_resolve(registration_graph, output_intent, request.output_address, jet_driver_entry_selection(load) != None)

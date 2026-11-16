@@ -818,8 +818,8 @@ x64_self_read_into: fn(at: Int, into: &[U8], size: Int) -> Bool {
     loader_pread(fd, mem.address_of(into[0]), size, at) == ""
 }
 
-// Names the kept form (x64_executable_keep): "JETKEEP2".
-LOADER_KEPT_MAGIC: 0x325045454b54454a
+// Names the kept form (x64_executable_keep): "JETKEEP3".
+LOADER_KEPT_MAGIC: 0x335045454b54454a
 
 // Write `exe` to `path` (a new file) in the kept form, in which JetCli
 // ScriptCache.jet keeps `jet run` programs; "" or why not. The form holds
@@ -828,10 +828,11 @@ LOADER_KEPT_MAGIC: 0x325045454b54454a
 // program part and patches, not a copy of the pack. Little-endian words:
 // the magic, image_end, tail_at, the patch count, the program part's
 // length, the image file's identity's length, its path's length, the
-// image's file offset and its length; that identity; the path; each
-// patch's offset and length, then its bytes; then the program part. Each
-// byte run is padded to a word. An executable whose image part was not
-// read from a file is kept whole (image_end 0, all program part).
+// image's file offset, its length and 1 when the program part leaves out
+// the image's symbols (image_symbols_left), else 0; that identity; the
+// path; each patch's offset and length, then its bytes; then the program
+// part. Each byte run is padded to a word. An executable whose image part
+// was not read from a file is kept whole (image_end 0, all program part).
 x64_executable_keep: fn(exe: X64Executable, path: String) -> String {
     if exe.image_end > 0 && exe.image_stamp.len() == 0 {
         // copy: the caller's executable stays whole to run.
@@ -844,7 +845,8 @@ x64_executable_keep: fn(exe: X64Executable, path: String) -> String {
     image_path: if exe.image_end > 0 -> exe.image_path.bytes() else -> [U8]{}
     stamp: if exe.image_end > 0 -> exe.image_stamp.copy() else -> [Int]{}
     image_size: if exe.image_end > 0 -> exe.image.len() + exe.image_gap else -> 0
-    words: [Int]{LOADER_KEPT_MAGIC, exe.image_end, exe.tail_at, exe.patch_at.len(), exe.tail.len(), stamp.len(), image_path.len(), exe.image_at, image_size}
+    left: if exe.image_end > 0 && exe.image_symbols_left -> 1 else -> 0
+    words: [Int]{LOADER_KEPT_MAGIC, exe.image_end, exe.tail_at, exe.patch_at.len(), exe.tail.len(), stamp.len(), image_path.len(), exe.image_at, image_size, left}
     loop value in words -> loader_kept_word(out, value)
     loop value in stamp -> loader_kept_word(out, value)
     loader_kept_run(out, image_path)
@@ -888,7 +890,8 @@ x64_executable_kept: fn(path: String) -> X64Executable? {
     path_len: loader_kept_next(reader)
     image_at: loader_kept_next(reader)
     image_size: loader_kept_next(reader)
-    if reader.failed || patches > reader.bytes.len() || stamp_len > 8 -> return None
+    left: loader_kept_next(reader)
+    if reader.failed || patches > reader.bytes.len() || stamp_len > 8 || left > 1 -> return None
     stamp := [Int]{}
     loop _ in 0..<stamp_len -> stamp.push(loader_kept_next(reader))
     image_path: String.from_bytes(loader_kept_take(reader, path_len)) ?? return None
@@ -908,7 +911,7 @@ x64_executable_kept: fn(path: String) -> X64Executable? {
     first: if image_size < OS_PAGE_SIZE -> image_size else -> OS_PAGE_SIZE
     head: loader_files.read_at(image_path, image_at, first) ?? return None
     if head.len() < 64 || !loader_same_stamp(loader_file_stamp(image_path), stamp) -> return None
-    Val(X64Executable{image: head, image_path: image_path, image_stamp: stamp, image_at: image_at, image_end: image_end, image_gap_at: head.len(), image_gap: image_size - head.len(), patch_at: patch_at, patch_bytes: patch_bytes, tail_at: tail_at, tail: tail, debug_file: [U8]{}, build_id: [U8]{}})
+    Val(X64Executable{image: head, image_path: image_path, image_stamp: stamp, image_at: image_at, image_end: image_end, image_gap_at: head.len(), image_gap: image_size - head.len(), patch_at: patch_at, patch_bytes: patch_bytes, tail_at: tail_at, tail: tail, debug_file: [U8]{}, build_id: [U8]{}, image_symbols_left: left == 1})
 }
 
 // Gives the bound executable `exe`, whose image part `image` its caller
@@ -976,21 +979,28 @@ loader_image_file_failed: fn(failure: String) -> X64ImageFile Never! {
 }
 
 // Give `exe` its whole image part when x64_image_file_read left out the
-// loaded segments: the image is read again, whole, while its file still
-// has the identity it had then; "" or why not.
+// loaded segments (loader_image_part_whole); "" or why not.
 x64_executable_complete: fn(exe: &X64Executable) -> String {
     if exe.image_gap == 0 -> return ""
-    whole := loader_image_file_whole(exe.image_path, exe.image_at, exe.image.len() + exe.image_gap)
-    if whole.failure != "" {
-        return "couldn't read the runtime image {exe.image_path}: {whole.failure}"
-    }
-    if !loader_same_stamp(whole.stamp, exe.image_stamp) {
-        return "the runtime image {exe.image_path} changed while jet ran"
-    }
+    whole := loader_image_part_whole(exe)
+    if whole.failure != "" -> return whole.failure
     exe.image = whole.bytes.move()
     exe.image_gap_at = 0
     exe.image_gap = 0
     ""
+}
+
+// The whole image part of `exe`, read again while its file still has the
+// identity it had when `exe` was bound; `failure` says why not.
+loader_image_part_whole: fn(exe: X64Executable) -> X64ImageFile {
+    whole: loader_image_file_whole(exe.image_path, exe.image_at, exe.image.len() + exe.image_gap)
+    if whole.failure != "" {
+        return loader_image_file_failed("couldn't read the runtime image {exe.image_path}: {whole.failure}")
+    }
+    if !loader_same_stamp(whole.stamp, exe.image_stamp) {
+        return loader_image_file_failed("the runtime image {exe.image_path} changed while jet ran")
+    }
+    whole
 }
 
 // Write the file of `exe` to `path` (a new file); "" or why not. An image
@@ -998,9 +1008,11 @@ x64_executable_complete: fn(exe: &X64Executable) -> String {
 // kernel, not read in, while the file still has the identity it had then.
 // The patches and the zeros after the image part go over the copy, then the
 // program part and debug tail. The file is the bytes x64_executable_bytes
-// gives. A runtime image file that would run on past the end of the program
-// part (nothing here truncates), or an image that is a part of a larger
-// file, is written from memory.
+// gives, the image's symbols put in (MemoryLink.jet link_bind_named_tail)
+// from the image part, else (a kept program's, its first page) from the
+// image file read whole. A runtime image file that would run on past the
+// end of the program part (nothing here truncates), or an image that is a
+// part of a larger file, is written from memory.
 x64_executable_write: fn(exe: X64Executable, path: String) -> String {
     if exe.image_end == 0 {
         loader_files.write_bytes(path, exe.tail) ?? return "{err}"
@@ -1013,6 +1025,20 @@ x64_executable_write: fn(exe: X64Executable, path: String) -> String {
         if complete != "" -> return complete
         loader_files.write_bytes(path, x64_executable_bytes(whole)) ?? return "{err}"
         return ""
+    }
+    named := [U8]{}
+    if exe.image_symbols_left {
+        no_symbols: "the runtime image {exe.image_path} or the program part has no symbol table"
+        if {
+            exe.image_gap > 0 && exe.image.len() <= exe.image_gap_at -> {
+                whole: loader_image_part_whole(exe)
+                if whole.failure != "" -> return whole.failure
+                named = link_bind_named_tail(exe, whole.bytes, 0, 0) ?? return no_symbols
+            }
+            else -> {
+                named = link_bind_named_tail(exe, exe.image, exe.image_gap_at, exe.image_gap) ?? return no_symbols
+            }
+        }
     }
     changed: "the runtime image {exe.image_path} changed while jet ran"
     if !loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) -> return changed
@@ -1028,6 +1054,10 @@ x64_executable_write: fn(exe: X64Executable, path: String) -> String {
     zeros := [U8]{}
     link_pad_to(zeros, exe.tail_at - exe.image_end, 0)
     if zeros.len() > 0 -> loader_files.write_at(path, exe.image_end, zeros) ?? return "{err}"
+    if exe.image_symbols_left {
+        loader_files.write_at(path, exe.tail_at, named) ?? return "{err}"
+        return ""
+    }
     if exe.tail.len() > 0 -> loader_files.write_at(path, exe.tail_at, exe.tail) ?? return "{err}"
     ""
 }

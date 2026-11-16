@@ -1,22 +1,30 @@
 #!/usr/bin/env node
-// Writes Compiler/JetCli/hot-text.list: the compiler's own functions that a
-// hello `jet run`, then `jet script.jet` of a small script and a hello
-// `jet check` and `jet build` enter, in first-entry order (the hello run's
-// first, then those each next command adds). Every run compiles its program,
-// as nothing is kept, so the hello run's functions are the ones every run
-// enters: first, they share the fewest pages. `jet build` of Compiler/JetCli
-// lays them out first (Host.jet jet_cli_hot_text, JetIR ir_x64_hot_order) and
-// its data in the order they reach it (JetBackend Object.jet), so a run
-// touches few pages of the compiler's image and a start faults in fewer.
+// Writes Compiler/JetCli/hot-text.list: the compiler's own functions that
+// the workload's runs enter (Tools/perf/hot-text/workload: a hello, a few
+// small programs that use what everyday code does, each a `jet run`, and a
+// small script run as `jet script.jet`), the functions more of those runs
+// enter first and, among as many, first entry first; then the functions a
+// hello `jet check` and `jet build` add, first entry first. Every run
+// compiles its program, as nothing is kept, so the functions every run
+// enters come first and share the fewest pages, and those most everyday
+// programs enter (number formatting, interpolation, string and list methods,
+// a struct's method, a match, a loop) come next, before what only some of
+// them reach. `jet build` of Compiler/JetCli lays them out first (Host.jet
+// jet_cli_hot_text, JetIR ir_x64_hot_order) and its data in the order they
+// reach it (JetBackend Object.jet), so a run touches few pages of the
+// compiler's image and a start faults in fewer.
 // With `--twins <checkout>`, the functions the cold compiles of the
 // scaling-corpora and optimization twins (Tools/perf/core-cold/run.jet's
 // programs) add come next, each traced as that receipt runs it: out of
 // tree, with Core from the compiler's own records.
 // Names that no longer name a function are skipped by the build (`--trace`
 // counter ir.object.hot_missing). A closure's name keeps while edits move
-// its source (JetIR ir_closure_key), so rows go stale only as functions are
-// renamed or removed, and the list misses only functions added since it was
-// traced; `--image` says when a regenerated list is due.
+// its source (JetIR ir_closure_key), and a missing name whose symbol ends in
+// a key hash hands its place to the functions of the same stem the list does
+// not name when there are no more of them than such names (JetIR
+// ir_x64_hot_order), so rows go stale mostly as functions are renamed or
+// removed and helpers' hashes change, and the list misses functions added
+// since it was traced; `--image` says when a regenerated list is due.
 //
 //   node Tools/perf/hot-text.mjs --jet <jet> [--out Compiler/JetCli/hot-text.list] [--twins <checkout>]
 //   node Tools/perf/hot-text.mjs --image <jet>
@@ -50,50 +58,8 @@ const LIST = join(ROOT, "Compiler/JetCli/hot-text.list");
 // among the cold ones, each run faults their pages in apart, and the list is
 // due to be regenerated.
 const IMAGE_MISSING_PERCENT = 3;
-const HELLO = 'run: fn() {\n    print("hello")\n}\n';
-// The script run's program is a small script as the gauntlet's are: it uses
-// the common forms, `use` rows, a struct, an enum and its match, a lambda, a
-// map and a loop; it reads a file (itself) and prints a summary.
-const SCRIPT = `use {
-    files: core.files
-    process: core.process
-}
-
-Row: struct {
-    name: String
-    count: Int
-}
-
-Kind: enum {
-    Empty
-    Words(count: Int)
-}
-
-kind: fn(line: String) -> Kind Never! {
-    words: line.split(" ").filter(fn(w) { w != "" }).to_list()
-    if words.len() == 0 -> return Kind.Empty
-    Kind.Words{count: words.len()}
-}
-
-run: fn() {
-    args: process.args()
-    path: if args.len() > 0 -> args[0] else -> "script.jet"
-    text: files.read(path) ?? ""
-    rows := [Row]{}
-    seen := [String: Int]{}
-    loop line in text.lines() {
-        if kind(line.trim()) == {
-            .Empty -> next
-            .Words(count) -> rows.push(Row{name: line.trim(), count: count})
-        }
-        seen[line.trim()] = (seen.get(line.trim()) ?? 0) + 1
-    }
-    total := 0
-    loop row in rows -> total += row.count
-    longest: rows.filter(fn(r) { r.count > 2 }).map(fn(r) { r.name })
-    print("{rows.len()} rows, {total} words, {seen.len()} distinct, {longest.len()} long")
-}
-`;
+// The workload's programs: each trace runs one in a fresh project.
+const WORKLOAD = join(ROOT, "Tools/perf/hot-text/workload");
 // The twins' files a `--twins` trace needs, copied out of the checkout as
 // Tools/perf/core-cold/run.jet copies them.
 const TWIN_COPIED = [
@@ -107,14 +73,32 @@ const TWIN_COPIED = [
 ];
 const TWIN_SCALING = "gauntlet/entries/scaling-corpora/driver/run.jet";
 const TWIN_OPTIMIZATION = "Tools/gauntlet/optimization/optimization/run.jet";
-// Each trace: its program and the argv it runs with, in a fresh project, or
-// (`dir`) in `dir` of the twins' copy, out of tree.
+// Each trace: its program (a file of WORKLOAD) and the argv it runs with, in
+// a fresh project, or (`dir`) in `dir` of the twins' copy, out of tree. The
+// `ranked` traces are the workload's runs, whose functions are listed by how
+// many of them enter each (rankedNames).
 const TRACES = [
-  { file: "hello.jet", source: HELLO, argv: ["run", "hello.jet"] },
-  { file: "script.jet", source: SCRIPT, argv: ["script.jet", "script.jet"] },
-  { file: "hello.jet", source: HELLO, argv: ["check", "hello.jet"] },
-  { file: "hello.jet", source: HELLO, argv: ["build", "hello.jet"] },
+  { file: "hello.jet", argv: ["run", "hello.jet"], ranked: true },
+  { file: "numbers.jet", argv: ["run", "numbers.jet"], ranked: true },
+  { file: "text.jet", argv: ["run", "text.jet"], ranked: true },
+  { file: "shapes.jet", argv: ["run", "shapes.jet"], ranked: true },
+  { file: "script.jet", argv: ["script.jet", "script.jet"], ranked: true },
+  { file: "hello.jet", argv: ["check", "hello.jet"] },
+  { file: "hello.jet", argv: ["build", "hello.jet"] },
 ];
+
+// The names the `ranked` traces' entries (`entries`: per trace its entered
+// names, first entry first) hold: those more traces enter first, then, among
+// as many, the one entered first in trace order first.
+function rankedNames(entries) {
+  const counts = new Map();
+  for (const names of entries) {
+    for (const name of new Set(names)) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const order = [...counts.keys()];
+  const first = new Map(order.map((name, at) => [name, at]));
+  return order.sort((a, b) => counts.get(b) - counts.get(a) || first.get(a) - first.get(b));
+}
 
 function parseArgs(argv) {
   const args = { jet: "", out: LIST, twins: "" };
@@ -202,6 +186,7 @@ function main() {
     }
     const names = [];
     const listed = new Set();
+    const ranked = [];
     for (const [index, trace] of traces.entries()) {
       // Each trace has a user cache of its own, empty, and a project of its
       // own unless it runs in the twins' copy; that one also has an empty
@@ -217,14 +202,29 @@ function main() {
       } else {
         cwd = join(work, `trace-${index}`);
         execFileSync("mkdir", ["-p", cwd]);
-        writeFileSync(join(cwd, trace.file), trace.source);
+        writeFileSync(join(cwd, trace.file), readFileSync(join(WORKLOAD, trace.file)));
       }
       const options = { cwd, env, stdio: ["ignore", "ignore", "inherit"] };
       execFileSync(tracer, [addresses, entered, "--", args.jet, ...trace.argv], options);
+      const traced = [];
       for (const line of readFileSync(entered, "utf8").split("\n")) {
         if (line === "") continue;
         const name = byAddress.get(BigInt(`0x${line}`));
-        if (name !== undefined && !listed.has(name)) {
+        if (name !== undefined) traced.push(name);
+      }
+      if (trace.ranked) {
+        ranked.push(traced);
+        // The last of the workload's runs: their functions come first.
+        if (!traces[index + 1]?.ranked) {
+          for (const name of rankedNames(ranked)) {
+            listed.add(name);
+            names.push(name);
+          }
+        }
+        continue;
+      }
+      for (const name of traced) {
+        if (!listed.has(name)) {
           listed.add(name);
           names.push(name);
         }
@@ -234,7 +234,7 @@ function main() {
     const twinRuns = args.twins ? ", then the scaling-corpora twin's cold `jet check` and run and the optimization twin's cold run" : "";
     const header = [
       "# Generated by `node Tools/perf/hot-text.mjs`; do not edit.",
-      `# The ${names.length} functions a hello \`jet run\`, then \`jet script.jet\` and a hello \`jet check\` and \`jet build\`${twinRuns} entered, first entry first (jet sha256 ${digest}).`,
+      `# The ${names.length} functions the runs of Tools/perf/hot-text/workload's programs entered, those more runs entered first, then those a hello \`jet check\` and \`jet build\`${twinRuns} added, first entry first (jet sha256 ${digest}).`,
     ];
     writeFileSync(args.out, [...header, ...names].join("\n") + "\n");
     console.log(`${args.out}: ${names.length} functions`);

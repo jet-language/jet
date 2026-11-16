@@ -26,11 +26,12 @@ AuthorityResolver: struct {
 
     // Open a directory only when it can be a project/workspace authority.
     // Upward discovery crosses unrelated parents; they are discovery space,
-    // and shared directories such as `/tmp` are never pinned.
-    open_for_authority_walk: fn(root: String) -[FS, Env]> AuthorityResolver? AuthorityError! {
+    // and shared directories such as `/tmp` are never pinned. `cache` is the
+    // discovery session's, which lists each directory once.
+    open_for_authority_walk: fn(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> AuthorityResolver? AuthorityError! {
         effective: pkg_authority_effective_root(root)
         info: pkg_authority_inspect_root(effective)
-        if pkg_authority_is_shared_directory(info) || !pkg_authority_has_candidate(effective) {
+        if pkg_authority_is_shared_directory(info) || !cache.has_candidate(effective) {
             return Ok(None)
         }
         Ok(Val(AuthorityResolver.open(effective)))

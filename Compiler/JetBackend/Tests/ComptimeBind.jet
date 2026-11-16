@@ -28,7 +28,10 @@ use {
         x64_executable_complete,
         x64_executable_header,
         x64_executable_image_head,
+        x64_executable_keep,
+        x64_executable_kept,
         x64_executable_segments,
+        x64_executable_write,
         x64_image_file_read,
         x64_image_segments,
         x64_runtime_image_defines,
@@ -117,7 +120,8 @@ comptime_bind_unchanged: fn(image: [U8], reference: LinkContext) -> Bool Never! 
 // segments (Image/Loader.jet x64_image_file_read). A batch binds to that
 // read and gives it back unchanged; the entry program binds to it and gives
 // it back too (x64_executable_image_head), keeping only the first page, and
-// its segments and symbols are those of the whole file it stands for.
+// its segments and program symbols are those of the whole file it stands
+// for, whose symbols name the image's too.
 #Test("comptime binds read the runtime image without its loaded segments and give it back") {
     path: comptime_bind_image_path()
     read: x64_image_file_read(path)
@@ -150,9 +154,46 @@ comptime_bind_unchanged: fn(image: [U8], reference: LinkContext) -> Bool Never! 
     expected: x64_image_segments(file)
     assert(plan.failure == "" && expected.failure == "" && plan.segments.len() == expected.segments.len() && plan.high == expected.high && plan.entry == expected.entry, "the entry program's segments are the whole file's")
     all: x64_comptime_symbols(file, file, 0, "", true)
-    loop name in ([String]{"main", "__jet_bind_main", "jet_rt_alloc"}) {
+    loop name in ([String]{"main", "__jet_bind_main"}) {
         found: x64_comptime_symbol_address(part, name) ?? panic("the entry program's part names no `{name}`")
         assert((x64_comptime_symbol_address(all, name) ?? -1) == found, "`{name}` has the whole file's address")
+    }
+    assert(x64_comptime_symbol_address(part, "jet_rt_alloc") == None, "the entry program's part names its program's symbols only")
+    image: comptime_bind_read(path)
+    defined: x64_comptime_symbols(image, image, 0, "", true)
+    image_alloc: x64_comptime_symbol_address(defined, "jet_rt_alloc") ?? panic("the image names no `jet_rt_alloc`")
+    assert((x64_comptime_symbol_address(all, "jet_rt_alloc") ?? -1) == image_alloc, "the whole file names the image's `jet_rt_alloc` at the image's address")
+}
+
+// A program bound at the image's base (`jet run`) holds its own symbols
+// only; the file written of it, as bound or kept and bound again
+// (Image/Loader.jet x64_executable_keep, x64_executable_kept), names the
+// image's too, at the image's addresses (MemoryLink.jet
+// link_bind_named_tail).
+#Test("a program bound at the image's base leaves the image's symbols to its written file, kept or not") {
+    path: comptime_bind_image_path()
+    read: x64_image_file_read(path)
+    assert(read.failure == "", "the image file is read: {read.failure}")
+    bound: x64_bind_runtime_image("entry", comptime_bind_object("main"), read.bytes.move(), path, read.stamp.move(), 0, read.gap_at, read.gap, true)
+    assert(bound.errors.len() == 0, "the program binds: {bound.errors.join("; ")}")
+    part: x64_comptime_symbols(x64_executable_header(bound.executable), bound.executable.tail, bound.executable.tail_at, "", true)
+    assert(x64_comptime_symbol_address(part, "jet_rt_alloc") == None, "the program part names its program's symbols only")
+    main: x64_comptime_symbol_address(part, "main") ?? panic("the program part names no `main`")
+    image: comptime_bind_read(path)
+    alloc: x64_comptime_symbol_address(x64_comptime_symbols(image, image, 0, "", true), "jet_rt_alloc") ?? panic("the image names no `jet_rt_alloc`")
+    scratch: bind_files.temp_dir("jet-bind-image-symbols") ?? panic("bind scratch")
+    written: "{scratch.path}/bound"
+    assert(x64_executable_write(bound.executable, written) == "", "the bound program is written")
+    kept: "{scratch.path}/kept"
+    assert(x64_executable_keep(bound.executable, kept) == "", "the bound program is kept")
+    again: x64_executable_kept(kept) ?? panic("the kept program binds to its image again")
+    rewritten: "{scratch.path}/rewritten"
+    assert(x64_executable_write(again, rewritten) == "", "the kept program is written")
+    loop file in ([String]{written, rewritten}) {
+        bytes: bind_files.read_bytes(file) ?? panic("{file} reads back")
+        all: x64_comptime_symbols(bytes, bytes, 0, "", true)
+        assert((x64_comptime_symbol_address(all, "jet_rt_alloc") ?? -1) == alloc, "{file} names the image's `jet_rt_alloc` at the image's address")
+        assert((x64_comptime_symbol_address(all, "main") ?? -1) == main, "{file} names the program's `main` at its address")
     }
 }
 

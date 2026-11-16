@@ -78,8 +78,11 @@ use jet_foundation.[
 // Indexes the deferred bodies of `graph` for one finalization: none unless
 // `enabled`. Called at the start of each finalization, so a later one over
 // the same graph demands afresh. Returns the Core bodies that stay checked
-// up front, each key mapped to its module, which the first body pass loads
-// (sema_core_bodies_ahead); none unless `enabled`.
+// up front and that the first body pass checks, each key mapped to its
+// module, which that pass loads (sema_core_bodies_ahead); none unless
+// `enabled`. A demand-checked derived method waits for its derive wave and
+// a generated codec impl no demand has filled for its codec wave
+// (sema_check_method_jobs), so neither is among them.
 sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) -> [String:Int] {
     graph.core_wave_rows = [String:Bool]{}
     graph.core_stand_in_wave = false
@@ -89,13 +92,16 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) -> [Str
     if enabled {
         roots: graph.core_lowering_roots ?? [String:Bool]{}
         // Every method an impl that stays checked supplies; a nominal lists
-        // its impls' methods among its own.
+        // its impls' methods among its own. False for a method of a
+        // generated codec impl no demand has filled, which waits for its
+        // codec wave.
         eager := [String:Bool]{}
         loop module_index in 0..<graph.modules.len() {
             loop implementation in graph.modules[module_index].impls {
                 if sema_core_demand_impl_deferrable(implementation) -> next
+                pending: sema_codec_impl_pending(implementation)
                 loop method in implementation.methods {
-                    eager[symbol_table_key(graph.symbols, method.symbol.id)] = true
+                    eager[symbol_table_key(graph.symbols, method.symbol.id)] = !pending
                 }
             }
         }
@@ -108,9 +114,9 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) -> [Str
 }
 
 // The deferred bodies of module `module_index`, each key mapped to the
-// module in `rows`, and those that stay checked up front in `upfront`: none
-// for a module that isn't Core source or is the entry. `roots` and `eager`
-// are the keys that stay checked up front.
+// module in `rows`, and those that stay checked up front in `upfront`
+// (sema_core_demand_index): none for a module that isn't Core source or is
+// the entry. `roots` and `eager` are the keys that stay checked up front.
 sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int, roots: [String:Bool], eager: [String:Bool], rows: &[String:Int], upfront: &[String:Int]) Never! {
     identity: graph.modules[module_index].module_identity
     if !module_is_core(identity) || identity == graph.entry_module_identity {
@@ -134,7 +140,8 @@ sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int
         loop method in nominal.methods {
             key: symbol_table_key(graph.symbols, method.symbol.id)
             if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(key) != None || roots.get(key) != None || nested.get("{method.declaration.span.start}:{method.declaration.span.end}") != None {
-                upfront[key] = module_index
+                derived: method.declaration.compiler_generated && graph.derive_method_rows.get(method.symbol.id.id) != None
+                if !derived && eager.get(key) != Val(false) -> upfront[key] = module_index
                 next
             }
             rows[key] = module_index
@@ -142,10 +149,11 @@ sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int
     }
     loop implementation in graph.modules[module_index].impls {
         deferrable: sema_core_demand_impl_deferrable(implementation)
+        pending: sema_codec_impl_pending(implementation)
         loop method in implementation.methods {
             key: symbol_table_key(graph.symbols, method.symbol.id)
             if !deferrable || method.declaration.name == "close" || roots.get(key) != None {
-                upfront[key] = module_index
+                if !pending -> upfront[key] = module_index
                 next
             }
             rows[key] = module_index

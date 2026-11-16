@@ -64,15 +64,15 @@ cli_workspace_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[IO, F
 
 // The resolver for `dir` when it is an authority-walk candidate; a missing
 // authority is not an error.
-cli_walk_resolver: fn(dir: String) -[FS, Env]> AuthorityResolver? CLIError! {
-    if AuthorityResolver.open_for_authority_walk(dir) == {
+cli_walk_resolver: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> AuthorityResolver? CLIError! {
+    if AuthorityResolver.open_for_authority_walk(cache, dir) == {
         .Ok(found) -> Ok(found)
         .Err(error) -> if error.is_missing() -> Ok(None) else -> Err(CLIError.Diagnostic(error.diagnostic()))
     }
 }
 
 cli_checked_workspace_source: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> CheckedWorkspaceSource? CLIError! {
-    resolver: cli_walk_resolver(dir) ?? return Ok(None)
+    resolver: cli_walk_resolver(cache, dir) ?? return Ok(None)
     if resolver.resolve_workspace_source(cache) == {
         .Ok(found) -> {
             source: found ?? return Ok(None)
@@ -83,8 +83,8 @@ cli_checked_workspace_source: fn(cache: &WorkspaceDeclarationCache, dir: String)
     }
 }
 
-cli_package_manifest_present: fn(dir: String) -[FS, Env]> Bool CLIError! {
-    resolver: cli_walk_resolver(dir) ?? return Ok(false)
+cli_package_manifest_present: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> Bool CLIError! {
+    resolver: cli_walk_resolver(cache, dir) ?? return Ok(false)
     if resolver.checked_manifest(".") == {
         .Ok(manifest) -> {
             resolver.revalidate_file(manifest.file)
@@ -94,8 +94,8 @@ cli_package_manifest_present: fn(dir: String) -[FS, Env]> Bool CLIError! {
     }
 }
 
-cli_env_file_present: fn(dir: String) -[FS, Env]> Bool CLIError! {
-    resolver: cli_walk_resolver(dir) ?? return Ok(false)
+cli_env_file_present: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> Bool CLIError! {
+    resolver: cli_walk_resolver(cache, dir) ?? return Ok(false)
     if resolver.checked_file(ENV_FILE) == {
         .Ok(file) -> {
             resolver.revalidate_file(file)
@@ -108,7 +108,7 @@ cli_env_file_present: fn(dir: String) -[FS, Env]> Bool CLIError! {
 cli_nearest_project_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? CLIError! {
     walk := AuthorityResolver.authority_walk_root(start)
     loop {
-        if cli_package_manifest_present(walk) || cli_env_file_present(walk) || cli_checked_workspace_source(cache, walk) != None {
+        if cli_package_manifest_present(cache, walk) || cli_env_file_present(cache, walk) || cli_checked_workspace_source(cache, walk) != None {
             return Ok(Val(walk))
         }
         walk = AuthorityResolver.authority_walk_parent(walk) ?? return Ok(None)

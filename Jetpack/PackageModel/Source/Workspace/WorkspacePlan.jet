@@ -120,19 +120,47 @@ WorkspaceDeclarationProbe: struct {
     declares_members: Bool
 }
 
-// Root discovery shares this owned cache across its workspace-source probes.
-// Each distinct source that names `workspace` is lexed once per discovery
+// Root discovery shares this owned cache across its workspace-source probes;
+// one command owns one cache, so its walks share it (the CLI's pinned
+// toolchain check and its run receipt climb the same directories). Each
+// distinct source that names `workspace` is lexed once per discovery
 // session, keyed by its text; repeated scans must use the same cache. Each
 // directory's workspace presence is resolved once per session too, keyed by
-// its canonical root, however many upward walks cross it.
+// its canonical root, however many upward walks cross it, and so is whether
+// it holds Jet source (pkg_authority_has_candidate), keyed by its path, and
+// the package roots a walk from it finds (pkg_find_package_roots_checked).
 WorkspaceDeclarationCache: struct {
     priv probes: [String:WorkspaceDeclarationProbe]
     priv presence: [String:Bool]
+    priv candidates: [String:Bool]{[String:Bool]{}}
+    priv package_roots: [String:PkgPackageRoots]{[String:PkgPackageRoots]{}}
     // Lexes actually performed by this session, excluding memo hits.
     lexes: Int{0}
+    // Directories actually listed by this session, excluding memo hits.
+    listings: Int{0}
 
     new: fn() -> WorkspaceDeclarationCache Never! {
         WorkspaceDeclarationCache{probes: [String:WorkspaceDeclarationProbe]{}, presence: [String:Bool]{}}
+    }
+
+    // Whether the directory `root` directly holds Jet source, listed once
+    // per session. A failure is never remembered.
+    has_candidate: fn(&self, root: String) -[FS, Env]> Bool AuthorityError! {
+        if self.candidates.get(root) == .Val(held) -> return Ok(held)
+        held: pkg_authority_has_candidate(root)
+        self.listings += 1
+        self.candidates[root.copy()] = held
+        Ok(held)
+    }
+
+    // The package roots a walk keyed `key` found earlier this session.
+    found_package_roots: fn(self, key: String) -> PkgPackageRoots? Never! {
+        found: self.package_roots.get(key) ?? return None
+        Val(PkgPackageRoots{manifest: found.manifest.copy(), inline: found.inline.copy()})
+    }
+
+    keep_package_roots: fn(&self, key: String, roots: PkgPackageRoots) Never! {
+        self.package_roots[key] = roots
     }
 }
 

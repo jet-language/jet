@@ -356,10 +356,10 @@ link_bind_header: fn(c: &LinkContext, exe: &X64Executable, out: &[U8], view: Lin
 
 // The debug tail, appended to `out`, the program part from file offset
 // `origin`: the image's loaded-section headers, the program's sections and
-// debug sections, then one `.symtab` holding the image's symbols (under
-// `image_symbols`) and the program's (locals first), and the section
-// headers, which `elf` names.
-link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImageView, l: LinkLayout, debug: LinkDebug, elf: &[U8], image_symbols: Bool) Never! {
+// debug sections, then one `.symtab` holding the program's symbols (locals
+// first), and the section headers, which `elf` names. The image's symbols
+// are left out (link_bind_named_tail).
+link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImageView, l: LinkLayout, debug: LinkDebug, elf: &[U8]) Never! {
     headers := link_bind_image_headers(c, view)
     extents := [[Int]]{}
     loop class in 0..<LINK_CLASSES {
@@ -378,14 +378,10 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
         out.extend(sections[group])
         headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: origin + start, size: sections[group].len(), link: 0, info: 0, align: 1, entry_size: 0})
     }
-    // The image's string table and symbols are copied as they are: its
-    // headers keep their indexes and its names their offsets. Without
-    // them the table starts with the empty name and the null symbol. The
+    // The table starts with the empty name and the null symbol. The
     // program's local and global symbols are made apart first, their names
-    // in `symbol_names` at offsets past the image's, so the image's tables,
-    // which are megabytes, are copied once, straight into `out`, after it
-    // grows once for everything this function appends.
-    names_base: if image_symbols -> view.strtab_size else -> 1
+    // in `symbol_names` past the empty name.
+    names_base: 1
     symbol_names := [U8]{}
     locals := [U8]{}
     loop obj in 0..<c.obj_name.len() {
@@ -412,7 +408,7 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
         kind: if c.live_class[c.live[s]] == LINK_TEXT -> 2 else -> 1
         link_image_symbol(globals, symbol_names, names_base, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
     }
-    link_bind_symbols(c, out, origin, view, headers, locals, globals, symbol_names, image_symbols, elf)
+    link_bind_symbols(out, origin, headers, locals, globals, symbol_names, elf)
 }
 
 // The image's headers of its loaded sections, as they are.
@@ -462,36 +458,24 @@ link_bind_class_headers: fn(headers: &[LinkSectionHeader], extents: [[Int]], got
 }
 
 // The end of the debug tail `out`, the program part from file offset
-// `origin`: `.symtab` (the image's locals under `image_symbols`, else the
-// null symbol, then the program's `locals`, the image's globals and the
-// program's `globals`) and `.strtab` (the image's names, else the empty
-// name, then `symbol_names`), then the section headers, `headers` and
-// theirs, which `elf` names.
-link_bind_symbols: fn(c: LinkContext, out: &[U8], origin: Int, view: LinkImageView, headers: &[LinkSectionHeader], locals: &&[U8], globals: &&[U8], symbol_names: &&[U8], image_symbols: Bool, elf: &[U8]) Never! {
-    names_base: if image_symbols -> view.strtab_size else -> 1
-    image_locals: if image_symbols -> 24 * view.first_global else -> 24
-    image_globals: if image_symbols -> 24 * (view.symtab_count - view.first_global) else -> 0
+// `origin`: `.symtab` (the null symbol, then the program's `locals` and
+// `globals`) and `.strtab` (the empty name, then `symbol_names`), then the
+// section headers, `headers` and theirs, which `elf` names.
+link_bind_symbols: fn(out: &[U8], origin: Int, headers: &[LinkSectionHeader], locals: &&[U8], globals: &&[U8], symbol_names: &&[U8], elf: &[U8]) Never! {
     // The padding, both tables, then the section names and headers
     // (link_write_section_headers), with room to spare for the names.
-    out.try_reserve(8 + image_locals + locals.len() + image_globals + globals.len() + names_base + symbol_names.len() + 64 * (headers.len() + 3) + 512) ?? panic("the bound executable's symbol tables: {err}")
+    out.try_reserve(8 + 24 + locals.len() + globals.len() + 1 + symbol_names.len() + 64 * (headers.len() + 3) + 512) ?? panic("the bound executable's symbol tables: {err}")
     elf64_pad(out, 8)
     symtab_at: origin + out.len()
-    if image_symbols -> out.extend(c.bufs[1][view.symtab_at..<view.symtab_at + image_locals]) else {
-        loop _ in 0..<24 -> out.push(U8{0})
-    }
-    first_global: (image_locals + locals.len()).div_euclid(24)
+    loop _ in 0..<24 -> out.push(U8{0})
+    first_global: (24 + locals.len()).div_euclid(24)
     out.extend(locals.move())
-    if image_symbols {
-        out.extend(c.bufs[1][view.symtab_at + image_locals..<view.symtab_at + image_locals + image_globals])
-    }
     out.extend(globals.move())
     symtab_size: origin + out.len() - symtab_at
     strtab_index: headers.len() + 2
     headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab_size, link: strtab_index, info: first_global, align: 8, entry_size: 24})
     strtab_at: origin + out.len()
-    if image_symbols -> out.extend(c.bufs[1][view.strtab_at..<view.strtab_at + view.strtab_size]) else {
-        out.push(U8{0})
-    }
+    out.push(U8{0})
     out.extend(symbol_names.move())
     strtab_size: origin + out.len() - strtab_at
     headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab_size, link: 0, info: 0, align: 1, entry_size: 0})
@@ -515,10 +499,12 @@ link_bind_symbols: fn(c: LinkContext, out: &[U8], origin: Int, view: LinkImageVi
 // for whoever needs the whole file. A whole executable is all `tail`
 // (image_end and tail_at 0). A kept program (Image/Loader.jet
 // x64_executable_kept) is bound to its image file again, its `image` that
-// image's first page. x64_executable_bytes puts the file together. A split
-// link's executable (x64_executable_split) also has its side debug file
-// `debug_file` and the build id `build_id` both files' notes hold; others
-// have both empty.
+// image's first page. x64_executable_bytes puts the file together. The
+// program part names the program's symbols only when `image_symbols_left`
+// (a bind at the image's program base, link_bind_named_tail). A
+// split link's executable (x64_executable_split) also has its side debug
+// file `debug_file` and the build id `build_id` both files' notes hold;
+// others have both empty.
 X64Executable: struct {
     image: [U8]
     image_path: String
@@ -533,6 +519,7 @@ X64Executable: struct {
     tail: [U8]
     debug_file: [U8]
     build_id: [U8]
+    image_symbols_left: Bool{false}
 }
 
 // The executable whose file is `bytes`.
@@ -569,13 +556,110 @@ x64_executable_bytes: fn(exe: &&X64Executable) -> [U8] Never! {
     if exe.image_gap > 0 {
         panic("x64_executable_bytes: the image part of {exe.image_path} was read without its loaded segments")
     }
-    out := exe.image[0..<exe.image_end]
-    loop (k, at) in exe.patch_at {
-        loop (j, byte) in exe.patch_bytes[k] -> out[at + j] = byte
+    whole := exe.move()
+    if whole.image_symbols_left {
+        named: link_bind_named_tail(whole, whole.image, 0, 0) ?? panic("x64_executable_bytes: the runtime image {whole.image_path} or its program part has no symbol table")
+        whole.tail = named
     }
-    link_pad_to(out, exe.tail_at, 0)
-    out.extend(exe.tail)
+    out := whole.image[0..<whole.image_end]
+    loop (k, at) in whole.patch_at {
+        loop (j, byte) in whole.patch_bytes[k] -> out[at + j] = byte
+    }
+    link_pad_to(out, whole.tail_at, 0)
+    out.extend(whole.tail)
     out
+}
+
+// The file a bind at the image's program base stands for names the image's
+// symbols as well as the program's, as a full link's does, but its program
+// part leaves them out (`image_symbols_left`, link_bind_sections): a
+// program run from memory runs the image's own pages, and the image's
+// symbols, megabytes, would be a copy of what the image's file holds.
+// Whoever writes the file (x64_executable_bytes, Image/Loader.jet
+// x64_executable_write) puts them in: the program part `exe.tail` with a
+// new `.symtab` (the image's locals, the program's, the image's globals,
+// the program's) and `.strtab` (the image's names, then the program's) at
+// its end, which the two section headers then name; the old tables stay as
+// unreferenced bytes. The image's tables are read from `image`, the image
+// file without its bytes [gap_at, gap_at + gap). None when either has no
+// symbol table.
+link_bind_named_tail: fn(exe: X64Executable, image: [U8], gap_at: Int, gap: Int) -> [U8]? Never! {
+    header := -1
+    loop (k, at) in exe.patch_at {
+        if at == 0 -> header = k
+    }
+    if header < 0 -> return None
+    tables: link_symbol_tables(image, image, 0, gap_at, gap)
+    program: link_symbol_tables(exe.patch_bytes[header], exe.tail, exe.tail_at, 0, 0)
+    if tables.len() == 0 || program.len() == 0 -> return None
+    image_globals: tables[1] + 24 * tables[3]
+    image_end: tables[1] + 24 * tables[2]
+    program_globals: program[1] + 24 * program[3]
+    program_end: program[1] + 24 * program[2]
+    // Each program name moves past the image's names, less the empty name.
+    shift: tables[6] - 1
+    tail := [U8]{}
+    tail.try_reserve(exe.tail.len() + 8 + image_end - tables[1] + program_end - program[1] + tables[6] + program[6]) ?? panic("the bound executable's symbol tables: {err}")
+    tail.extend(exe.tail)
+    elf64_pad(tail, 8)
+    symbols_at: tail.len()
+    tail.extend(image[tables[1]..<image_globals])
+    link_bind_shifted_symbols(tail, program[1] + 24, program_globals, shift)
+    tail.extend(image[image_globals..<image_end])
+    link_bind_shifted_symbols(tail, program_globals, program_end, shift)
+    names_at: tail.len()
+    tail.extend(image[tables[5]..<tables[5] + tables[6]])
+    tail.extend(exe.tail[program[5] + 1..<program[5] + program[6]])
+    link_put64(tail, program[0] + 24, exe.tail_at + symbols_at)
+    link_put64(tail, program[0] + 32, names_at - symbols_at)
+    link_put32(tail, program[0] + 44, tables[3] + program[3] - 1)
+    link_put64(tail, program[4] + 24, exe.tail_at + names_at)
+    link_put64(tail, program[4] + 32, tail.len() - names_at)
+    Val(tail)
+}
+
+// Where the `.symtab` of the ELF file whose header is `elf` and whose bytes
+// from file offset `origin` on are `bytes`, without the file's bytes
+// [gap_at, gap_at + gap), lies, as indexes of `bytes`: its section header,
+// its offset, symbol count and first global, its `.strtab`'s section
+// header, offset and size; empty when `bytes` holds no such tables.
+link_symbol_tables: fn(elf: [U8], bytes: [U8], origin: Int, gap_at: Int, gap: Int) -> [Int] Never! {
+    size: bytes.len()
+    if elf.len() < LINK_EHDR_SIZE -> return [Int]{}
+    shoff: link_image_at(link_image_i64(elf, 40) - origin, gap_at, gap)
+    shnum: link_image_u16(elf, 60)
+    if shoff < 0 || shoff + 64 * shnum > size -> return [Int]{}
+    loop k in 1..<shnum {
+        h: shoff + 64 * k
+        if link_image_u32(bytes, h + 4) != LINK_SHT_SYMTAB -> next
+        strings: link_image_u32(bytes, h + 40)
+        if strings >= shnum -> return [Int]{}
+        s: shoff + 64 * strings
+        at: link_image_at(link_image_i64(bytes, h + 24) - origin, gap_at, gap)
+        count: link_image_i64(bytes, h + 32).div_euclid(24)
+        first: link_image_u32(bytes, h + 44)
+        names_at: link_image_at(link_image_i64(bytes, s + 24) - origin, gap_at, gap)
+        names_size: link_image_i64(bytes, s + 32)
+        if at < 0 || count < 1 || at + 24 * count > size || first < 1 || first > count || names_at < 0 || names_size < 1 || names_at + names_size > size {
+            return [Int]{}
+        }
+        return [Int]{h, at, count, first, s, names_at, names_size}
+    }
+    [Int]{}
+}
+
+// Append the symbols at [from, to) of `tail` to it again, each nonzero name
+// offset `shift` further.
+link_bind_shifted_symbols: fn(tail: &[U8], from: Int, to: Int, shift: Int) Never! {
+    loop k in 0..<(to - from).div_euclid(24) {
+        at: tail.len()
+        loop j in 0..<24 {
+            byte: tail[from + 24 * k + j]
+            tail.push(byte)
+        }
+        name: link_image_u32(tail, at)
+        if name != 0 -> link_put32(tail, at, name + shift)
+    }
 }
 
 // A bound executable, else (errors not empty) why the program can't be
@@ -593,7 +677,8 @@ X64BindResult: struct {
 // offset `image_at` on, and without its bytes [gap_at, gap_at + gap)
 // (Image/Loader.jet x64_image_file_read): a static executable at the
 // image's base, in parts, whose debug tail holds `.debug_*` sections only
-// under `debug_info` (link_debug_sections).
+// under `debug_info` (link_debug_sections) and names the program's symbols
+// only, until its file is written (link_bind_named_tail).
 x64_bind_runtime_image: fn(name: String, program: &&[U8], image: &&[U8], image_path: String, image_stamp: [Int], image_at: Int, gap_at: Int, gap: Int, debug_info: Bool) -> X64BindResult Never! {
     bound := link_bind_image(name, program, image, gap_at, gap, None, debug_info)
     if bound.errors.len() == 0 {
@@ -741,7 +826,8 @@ link_bind_image: fn(name: String, program: &&[U8], image: &&[U8], gap_at: Int, g
     exe.image_gap = gap
     exe.tail_at = origin
     elf := link_bind_write(c, exe, view, layout, target)
-    link_bind_sections(c, exe.tail, origin, view, layout, debug, elf, program_base == None)
+    link_bind_sections(c, exe.tail, origin, view, layout, debug, elf)
+    exe.image_symbols_left = program_base == None
     if c.errors.len() > 0 -> return link_bind_failure(c)
     exe.patch_at.push(0)
     exe.patch_bytes.push(elf)

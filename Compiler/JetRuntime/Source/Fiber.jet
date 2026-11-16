@@ -497,7 +497,8 @@ fiber_space_give: fn(root: I64, bytes: I64) {
 // stack size (thread_stack_bytes), or the size of the SizedPool record
 // `pool` (fiber_sized_pool), charged to the fiber stacks' space
 // (fiber_space_take), halved on a failed map down to THREAD_STACK_FLOOR and
-// reserved without commitment. The guard is a
+// reserved without commitment, on 4 KiB pages as a thread's stack
+// (thread_stack_map). The guard is a
 // page-table guard marker (MADV_GUARD_INSTALL), which leaves the mapping one
 // VMA that merges with its neighbouring fiber stacks, so vm.max_map_count
 // does not bound the live fibers; a kernel without guard markers (before
@@ -522,7 +523,8 @@ fiber_new: fn(root: I64, pool: I64) -> I64 {
     }
     if (bytes != want) { fiber_space_give(root, want - bytes) }
     guard := I64{0}
-    #Unsafe("the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE") {
+    #Unsafe("the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE; madvise only changes the mapping's page size") {
+        _ := os_syscall_i64(I64{28}, mapping, bytes, I64{15}, I64{0}, I64{0}, I64{0})
         guard = os_syscall_i64(I64{28}, mapping, I64{4096}, I64{102}, I64{0}, I64{0}, I64{0})
         if (guard != I64{0}) {
             guard = os_syscall_i64(I64{10}, mapping, I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})

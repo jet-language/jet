@@ -1007,6 +1007,18 @@ ir_x64_release_pop_rest: fn(released: Shared<IRX64Released>) -> [IRX64Result] Ne
 // windows of the image keeps few pages resident. JetBackend Object.jet lays
 // `.data` out in the order this text references it. Returns how many names of
 // `hot` name no function.
+//
+// A closure's, instance's or helper's symbol ends with its key's hash
+// (ir_hashed_function), and the hash changes as the types its key spells
+// do, so the list goes stale on those first; each of them a run enters then
+// sits alone among the cold functions and costs the run a window of pages.
+// A listed name no function has therefore hands its place to an unlisted
+// function whose symbol differs from it only in that hash, in the list's
+// and the functions' order, when the list's missing names of that stem are
+// at least as many as such functions: a function's closures, or a generic
+// function's instances, renamed together. A stem shared by more functions
+// than missing names (a drop or copy helper's) says nothing of which one
+// the list meant, and its functions stay cold.
 ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
     if hot.len() == 0 -> return 0
     ranks := [String:Int]{}
@@ -1014,22 +1026,60 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
         if ranks.get(name) == None -> ranks[name.copy()] = position
     }
     count: compiled.functions.len()
-    // Per function its rank, -1 when not listed; then per rank where its
-    // functions start in the new order (a counting sort keeps function order
-    // within a rank).
+    // Per function its rank, -1 when not listed; per rank whether a
+    // function has its name.
     found := [Int]{}
-    starts := [Int]{}
-    loop _ in 0..<hot.len() + 1 -> starts.push(0)
+    named := [Bool]{}
+    loop _ in 0..<hot.len() -> named.push(false)
     loop index in 0..<count {
         listed: ranks.get(compiled.functions[index].name) ?? -1
         found.push(listed)
-        if listed >= 0 -> starts[listed + 1] = starts[listed + 1] + 1
+        if listed >= 0 -> named[listed] = true
     }
+    // The stems of the missing hashed names (side 0, at their rank) and of
+    // the unlisted hashed functions (side 1, at their index), sorted so each
+    // stem's ranks come in list order and then its functions in function
+    // order.
     missing := 0
-    loop place in 0..<hot.len() {
-        if starts[place + 1] == 0 && (ranks.get(hot[place]) ?? -1) == place -> missing += 1
-        starts[place + 1] = starts[place + 1] + starts[place]
+    stems := [(stem: String, side: Int, at: Int)]{}
+    loop (position, name) in hot {
+        if named[position] || (ranks.get(name) ?? -1) != position -> next
+        missing += 1
+        start: ir_x64_hash_start(name)
+        if start >= 0 -> stems.push((stem: name.slice(0, start), side: 0, at: position))
     }
+    if stems.len() > 0 {
+        loop index in 0..<count {
+            if found[index] >= 0 -> next
+            name: compiled.functions[index].name
+            start: ir_x64_hash_start(name)
+            if start >= 0 -> stems.push((stem: name.slice(0, start), side: 1, at: index))
+        }
+        stems.sort_by(fn(left: (stem: String, side: Int, at: Int), right: (stem: String, side: Int, at: Int)) { (left.stem <=> right.stem).then(left.side <=> right.side).then(left.at <=> right.at) })
+        first := 0
+        loop first < stems.len() {
+            functions := first
+            loop functions < stems.len() && stems[functions].stem == stems[first].stem && stems[functions].side == 0 {
+                functions += 1
+            }
+            last := functions
+            loop last < stems.len() && stems[last].stem == stems[first].stem {
+                last += 1
+            }
+            if last - functions <= functions - first {
+                loop at in functions..<last -> found[stems[at].at] = stems[first + at - functions].at
+            }
+            first = last
+        }
+    }
+    // Per rank where its functions start in the new order (a counting sort
+    // keeps function order within a rank).
+    starts := [Int]{}
+    loop _ in 0..<hot.len() + 1 -> starts.push(0)
+    loop level in found {
+        if level >= 0 -> starts[level + 1] = starts[level + 1] + 1
+    }
+    loop place in 0..<hot.len() -> starts[place + 1] = starts[place + 1] + starts[place]
     order := [Int]{}
     loop _ in 0..<count -> order.push(0)
     cold := starts[hot.len()]
@@ -1046,6 +1096,21 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
     compiler_apply_order<X64CompiledFunction>(compiled.functions, order.copy())
     compiler_apply_order<X64FunctionDebug>(compiled.debug, order)
     missing
+}
+
+// Where the key hash ends `symbol` (ir_hashed_function): the offset of its
+// last 16 bytes when they are lowercase hex digits after a `_`, else -1.
+ir_x64_hash_start: fn(symbol: String) -> Int Never! {
+    bytes: symbol.bytes()
+    start: bytes.len() - 16
+    if start < 1 || bytes[start - 1] != 95 -> return -1
+    loop at in start..<bytes.len() {
+        byte: bytes[at]
+        digit: byte >= U8{48} && byte <= U8{57}
+        letter: byte >= U8{97} && byte <= U8{102}
+        if !digit && !letter -> return -1
+    }
+    start
 }
 
 // The relocatable object of a library module (moved in, every row moved

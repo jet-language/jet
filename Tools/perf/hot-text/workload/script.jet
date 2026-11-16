@@ -1,0 +1,42 @@
+// A small script as the gauntlet's are, run as `jet script.jet script.jet`:
+// `use` rows, a struct, an enum and its match, a lambda, a map and a loop;
+// it reads a file (itself) and prints a summary.
+use {
+    files: core.files
+    process: core.process
+}
+
+Row: struct {
+    name: String
+    count: Int
+}
+
+Kind: enum {
+    Empty
+    Words(count: Int)
+}
+
+kind: fn(line: String) -> Kind Never! {
+    words: line.split(" ").filter(fn(w) { w != "" }).to_list()
+    if words.len() == 0 -> return Kind.Empty
+    Kind.Words{count: words.len()}
+}
+
+run: fn() {
+    args: process.args()
+    path: if args.len() > 0 -> args[0] else -> "script.jet"
+    text: files.read(path) ?? ""
+    rows := [Row]{}
+    seen := [String:Int]{}
+    loop line in text.lines() {
+        if kind(line.trim()) == {
+            .Empty -> { next }
+            .Words(count) -> rows.push(Row{name: line.trim(), count: count})
+        }
+        seen[line.trim()] = (seen.get(line.trim()) ?? 0) + 1
+    }
+    total := 0
+    loop row in rows -> total += row.count
+    longest: rows.filter(fn(r) { r.count > 2 }).map(fn(r) { r.name })
+    print("{rows.len()} rows, {total} words, {seen.len()} distinct, {longest.len()} long")
+}

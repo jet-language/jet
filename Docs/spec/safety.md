@@ -2519,9 +2519,9 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 525,
+      "line": 526,
       "column": 5,
-      "reason": "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE"
+      "reason": "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE; madvise only changes the mapping's page size"
     },
     {
       "package": "Compiler",
@@ -4248,9 +4248,9 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 537,
+      "line": 542,
       "column": 5,
-      "reason": "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard"
+      "reason": "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard and madvise only changes its page size"
     },
     {
       "package": "Compiler",
@@ -10974,7 +10974,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 336:9 | "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 463:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 513:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 525:5 | "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 526:5 | "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE; madvise only changes the mapping's page size" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 677:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 38:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
@@ -11221,7 +11221,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 431:5 | "rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 439:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 454:5 | "getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 537:5 | "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 542:5 | "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard and madvise only changes its page size" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 589:5 | "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 629:5 | "the startup hands these over once, before the init arrays and any other thread" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 639:5 | "the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id" |
