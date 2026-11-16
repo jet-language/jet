@@ -1,0 +1,30 @@
+# `WatchKind` is the enum core.watcher declares and exports, so a program can
+# name it as `watcher.WatchKind` as well as bare. A runtime watch event's kind,
+# the qualified spelling and the bare spelling all name that one enum, on
+# every tier.
+fixture: Fixtures/WatchKind
+env: NO_COLOR=1
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "exited true\ncreated\ntrue\n"
+step: jet run -O1 run.jet
+exit: 0
+stdout: = "exited true\ncreated\ntrue\n"
+step: jet run -O2 run.jet
+exit: 0
+stdout: = "exited true\ncreated\ntrue\n"
+step: jet build -O0 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "exited true\ncreated\ntrue\n"
+step: jet build -O1 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "exited true\ncreated\ntrue\n"
+step: jet build -O2 run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "exited true\ncreated\ntrue\n"

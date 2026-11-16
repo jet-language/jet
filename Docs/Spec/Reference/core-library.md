@@ -2361,8 +2361,9 @@ after the port was not ready.
 handling a closed event enum. See
 [`watcher.jet`](../../../Examples/Systems/Files/Watcher.jet).
 
-The checked `WatchEvent.kind` field has type `WatchKind`, with the same six
-variant names; it is distinct from the independently exported `WatchEventKind`.
+The checked `WatchEvent.kind` field has type `WatchKind`, which `core.watcher`
+also exports. It has the same six variant names as `WatchEventKind` but is a
+distinct enum.
 Event equality includes all six stored fields. Show prints domain, kind, path,
 and detail; Debug additionally prints pid and port and quotes the text fields.
 
