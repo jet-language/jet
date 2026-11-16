@@ -761,6 +761,13 @@ Report: [mine-for-jet-2026-10-16-vlang](../../Research/mine-for-jet-2026-10-16-v
 - https://github.com/vox-browser/vox
 - https://mawfig.github.io/2022/06/18/v-lang-in-2022.html
 
+### Goose and Lobster (mined 2026-10-23)
+
+Report: [mine-for-jet-2026-10-23-goose-lobster](../../Research/mine-for-jet-2026-10-23-goose-lobster.md).
+
+- https://github.com/aardappel/goose
+- https://github.com/aardappel/lobster
+
 ### Jonathan Blow on compiler error reporting (mined 2026-10-30)
 
 Report: [2026-10-30-blow-error-reporting-talk](../../Research/2026-10-30-blow-error-reporting-talk.md) (Tower #6377).
