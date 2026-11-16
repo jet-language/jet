@@ -142,6 +142,16 @@ Phase: enum {
     Runtime
 }
 
+// A reflected enum case's payload: none, one unnamed value of a type, or its
+// named fields in declaration order. It lives in the prelude because every
+// program can reach it without naming it: a reflected `CaseInfo` holds one,
+// and its layout comes from this declaration.
+CasePayload: enum {
+    Unit
+    Single(TypeId)
+    Named([FieldInfo])
+}
+
 // A finding the compiler or a package reports, and the only carrier of one.
 // An error type is a struct whose fields are the holes of its texts; its impl
 // gives each text as one string literal that reads only `self` fields, so

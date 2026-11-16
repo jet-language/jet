@@ -14,9 +14,11 @@ CORE_SOURCE_OWNED_TYPES: #run core_source_owned_types(CORE_DECLARATIONS)
 // out from that struct's declaration, so the struct's module (`module_name`)
 // loads whenever the record's owner does: `owner_module` is the Core module
 // that declares the owner, or "" for the compiler's own records (TypeInfo,
-// FieldInfo, …), which every program has. A Core enum needs no source (its
-// variants are CORE_ENUM_CASE_ROWS), and a function type holds no layout of its
-// parameters.
+// FieldInfo, …), which every program has. A Core enum of bare cases needs no
+// source (its variants are CORE_ENUM_CASE_ROWS); one whose cases carry
+// payloads (CaseInfo's CasePayload) is declared in core.prelude, which the
+// SourceLocation row below loads with every program. A function type holds no
+// layout of its parameters.
 CoreRecordSourceDemand: struct {
     owner_module: String
     type_name: String
