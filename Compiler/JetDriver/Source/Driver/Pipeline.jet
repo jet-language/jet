@@ -225,6 +225,7 @@ use {
         target_os_name,
         target_os_parse,
         source_file_id,
+        symbol_key,
         symbol_key_text,
         symbol_table_key,
         body_each_expr_child,
@@ -1026,6 +1027,11 @@ JetDriverComptimeRunIndex: struct {
     // A function check that captured one ran before its value landed
     // (jet_driver_comptime_site_waits).
     pass_sites: [Int:[String]]{[Int:[String]]{}}
+    // Constant key -> the functions its landed value names
+    // (TComptimeValue.Function, `f: double` in a folded record), which a
+    // closure whose bodies read the constant queues as it queues a function
+    // value a body names (jet_driver_comptime_precise_refs).
+    value_functions: [String:[String:Bool]]{[String:[String:Bool]]{}}
 }
 
 // A function whose visit is the same in every later closure of the run,
@@ -1069,13 +1075,61 @@ JetDriverComptimeClosureRow: struct {
     local_impurity: String?{None}
 }
 
-jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult]) -> JetDriverComptimeRunIndex Never! {
+jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult], values: [SemaComptimeItemValue]) -> JetDriverComptimeRunIndex Never! {
     index := JetDriverComptimeRunIndex{owners: [String:ModuleID]{}, ambiguous_owners: [String:Bool]{}, owners_built: false, waiting_functions: [SemaComptimeFunctionResult]{}}
     loop (row, checked) in checked_functions {
         node: jet_driver_comptime_node_id(index, checked.module_identity, checked.function_key)
         if index.checked_at[node] < 0 -> index.checked_at[node] = row
     }
+    loop value in values { jet_driver_comptime_value_functions_note(index, value.key, value.value) }
     index
+}
+
+// Notes the functions landed value `value` of constant `key` names
+// (JetDriverComptimeRunIndex.value_functions).
+jet_driver_comptime_value_functions_note: fn(index: &JetDriverComptimeRunIndex, key: String, value: TComptimeValue) Never! {
+    held := [String:Bool]{}
+    jet_driver_comptime_value_functions(value, held)
+    if held.len() > 0 -> index.value_functions[key] = held
+}
+
+// Adds each function `value` names to `held`. The items of a list and the
+// values of a map share one type, so one scalar among them makes them all
+// scalars, which name no function.
+jet_driver_comptime_value_functions: fn(value: TComptimeValue, held: &[String:Bool]) Never! {
+    if value == {
+        .Function(key) -> { held[key] = true }
+        .List(items) -> {
+            if items.len() > 0 && jet_driver_comptime_value_scalar(items[0]) {
+                return
+            }
+            loop item in items { jet_driver_comptime_value_functions(item, held) }
+        }
+        .Map(entries) -> {
+            if entries.len() > 0 && jet_driver_comptime_value_scalar(entries[0].value) {
+                return
+            }
+            loop entry in entries { jet_driver_comptime_value_functions(entry.value, held) }
+        }
+        .Struct(_, fields) -> {
+            loop field in fields { jet_driver_comptime_value_functions(field.value, held) }
+        }
+        .Enum(_, _, args) -> {
+            loop argument in args { jet_driver_comptime_value_functions(argument.value, held) }
+        }
+        .Present(inner) -> { jet_driver_comptime_value_functions(inner, held) }
+        .Failed(report) -> {
+            if report == .Told(inner) -> jet_driver_comptime_value_functions(inner, held)
+        }
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Unit -> {}
+    }
+}
+
+jet_driver_comptime_value_scalar: fn(value: TComptimeValue) -> Bool Never! {
+    if value == {
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Unit -> true
+        .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Function(_) -> false
+    }
 }
 
 // The owner maps of `graph`, which never changes during a run, filled in
@@ -1183,15 +1237,28 @@ jet_driver_comptime_wait_add: fn(dependencies: &[String], key: String) Never! {
 // `is_core_precise_source_target` roots it): it is checked and lowered with
 // the item, together with its own callees.
 jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
-    // Function values the body stores, Core source functions Sema rewrote a
-    // Core call to, and the error conversions its `?` calls are lowered with
-    // it, like its callees.
+    // Function values the body stores or reads out of a constant, Core
+    // source functions Sema rewrote a Core call to, and the error
+    // conversions its `?` calls are lowered with it, like its callees.
     named: ir_named_function_keys(tree, roots, body, graph.decls, graph.symbols)
     if named.len() > 0 {
         if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
         loop key in named {
             if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
                 refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
+            }
+        }
+    }
+    if index.value_functions.len() > 0 {
+        loop node in tree.nodes {
+            if node.kind == .ConstRef(symbol) {
+                held: index.value_functions.get(symbol_key(graph.symbols, tree.symbols, symbol)) ?? next
+                if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
+                loop (key, _) in held {
+                    if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
+                        refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
+                    }
+                }
             }
         }
     }
@@ -3011,7 +3078,7 @@ jet_driver_checked_text_reason: fn(report: TComptimeReport) -> String? {
                 if args[0].value == .String(text) -> return Val(text.copy())
             }
         }
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit -> {}
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {}
     }
     None
 }
@@ -3247,7 +3314,7 @@ jet_driver_comptime_run: fn(
     resolved_count := values.len()
     // Constants' AST values, which staged values never change, read in place.
     available := jet_driver_comptime_program_available(programs[0], values)
-    run_index := jet_driver_comptime_run_index(checked_functions)
+    run_index := jet_driver_comptime_run_index(checked_functions, values)
     // A refused module value (jet_driver_module_value_refused) does not stop
     // the run: the other items still check, so every refusal and real error
     // is reported once, and the run fails at its end. `stop_mark` is where
@@ -3563,6 +3630,7 @@ jet_driver_comptime_run: fn(
                             sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                             return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                         }
+                        jet_driver_comptime_value_functions_note(run_index, source.key, plain)
                         values.push(jet_driver_comptime_item_value(source, plain, comptime_request.expression))
                         made_progress = true
                         next

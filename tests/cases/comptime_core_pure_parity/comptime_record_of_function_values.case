@@ -1,0 +1,20 @@
+# A compile-time list of records holding named functions (`f: double`)
+# registers and is computed while building: `#run` calls through it, and
+# every tier and the built binary print the same totals and the same
+# per-function results.
+fixture: comptime_record_of_function_values.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "built 15\nrun 15\ndouble 6\nsquare 9\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "built 15\nrun 15\ndouble 6\nsquare 9\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "built 15\nrun 15\ndouble 6\nsquare 9\n"
+step built: jet build main.jet
+exit: 0
+step image: {work}/.jet/build/main
+exit: 0
+stdout: = "built 15\nrun 15\ndouble 6\nsquare 9\n"

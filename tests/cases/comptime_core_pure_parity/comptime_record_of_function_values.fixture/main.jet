@@ -1,0 +1,27 @@
+// A module value that holds named functions as values: OPS is a list of
+// records whose `f` field names a function. `#run` calls through it while
+// building, and `run` calls through the same value at run time.
+Op: struct {
+    name: String
+    f: fn(Int) -> Int
+}
+
+double: fn(n: Int) -> Int { n * 2 }
+
+square: fn(n: Int) -> Int { n * n }
+
+OPS: [Op]{Op{name: "double", f: double}, Op{name: "square", f: square}}
+
+total: fn(ops: [Op], n: Int) -> Int {
+    sum := 0
+    loop op in ops -> sum += (op.f)(n)
+    sum
+}
+
+TOTAL: #run total(OPS, 3)
+
+run: fn() {
+    print("built {TOTAL}")
+    print("run {total(OPS, 3)}")
+    loop op in OPS -> print("{op.name} {(op.f)(3)}")
+}

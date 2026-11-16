@@ -216,7 +216,7 @@ sema_comptime_reflection_located: fn(value: TComptimeValue, segments: [SemaSourc
         // A case payload's records (CasePayload's FieldInfo rows) are located as a field's are.
         .Enum(owner, variant, args) -> TComptimeValue.Enum{type_name: owner, variant: variant, args: loop arg in args -> TComptimeEnumArg{name: arg.name, value: sema_comptime_reflection_located(arg.value, segments, module_path, source)}}
         // copy: a scalar leaf of the producer's value; the caller keeps the original
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Failed(_) | .Unit -> value.copy()
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Failed(_) | .Unit | .Function(_) -> value.copy()
     }
 }
 
@@ -233,7 +233,7 @@ sema_comptime_reflection_in_file: fn(value: TComptimeValue, file: String) -> TCo
         .Present(inner) -> TComptimeValue.Present{value: sema_comptime_reflection_in_file(inner, file)}
         .Enum(owner, variant, args) -> TComptimeValue.Enum{type_name: owner, variant: variant, args: loop arg in args -> TComptimeEnumArg{name: arg.name, value: sema_comptime_reflection_in_file(arg.value, file)}}
         // copy: a scalar leaf of the producer's value; the caller keeps the original
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Failed(_) | .Unit -> value.copy()
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Failed(_) | .Unit | .Function(_) -> value.copy()
     }
 }
 
@@ -1683,7 +1683,7 @@ sema_comptime_reflection_prepared: fn(graph: SemaRegistrationGraph, caller: Int,
         .Present(inner) -> return sema_comptime_reflection_prepared(graph, caller, inner)
         .Unit -> return TComptimeValue.Enum{type_name: "PreparedValue", variant: "Unit", args: [TComptimeEnumArg]{}}
         .Bytes(bytes) -> return sema_comptime_reflection_prepared_case("List", TComptimeValue.List{values: loop byte in bytes -> sema_comptime_reflection_prepared_case("Int", TComptimeValue.Int{value: Int{byte}})})
-        .BigInt(_) | .Map(_) | .Failed(_) -> return sema_comptime_reflection_unprepared()
+        .BigInt(_) | .Map(_) | .Failed(_) | .Function(_) -> return sema_comptime_reflection_unprepared()
     }
 }
 
@@ -2667,7 +2667,7 @@ sema_comptime_reflection_trait_contracts_from_items: fn(
                                     break true
                                 }
                             } ?? false)
-                            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> false
+                            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> false
                         }
                         if matched {
                             break true

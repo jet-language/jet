@@ -75,7 +75,7 @@ jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Nev
                 return Val(BuildSessionValue.Handle{type_name: name, session: owner, id: index})
             }
         }
-        .Float(_, _) | .BigInt(_) | .Map(_) | .Failed(_) -> {}
+        .Float(_, _) | .BigInt(_) | .Map(_) | .Failed(_) | .Function(_) -> {}
     }
     None
 }
@@ -214,7 +214,7 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
         identity_value: jet_eval_build_field_present(metadata, "typed_identity") ?? return None
         identity: if identity_value == {
             .String(text) -> text
-            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {
                 return None
             }
         }
@@ -225,7 +225,7 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
         rows_value: jet_eval_build_field(details, "fields") ?? return None
         rows: if rows_value == {
             .List(values) -> values
-            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {
                 return None
             }
         }

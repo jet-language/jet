@@ -15,7 +15,7 @@ jet_cli_expand_checked_json: fn(value: TComptimeValue) -> JetCLIStatusValue Neve
     if value == {
         .Int(number) -> if number >= 0 -> jet_cli_status_int(number) else -> jet_cli_status_text("{number}")
         .Bool(flag) -> jet_cli_status_bool(flag)
-        .String(text) -> jet_cli_status_text(text)
+        .String(text) | .Function(text) -> jet_cli_status_text(text)
         .Present(inner) -> jet_cli_expand_checked_json(inner)
         .Failed(.Clean(_)) -> JetCLIStatusValue.Null
         .List(values) -> jet_cli_status_array(loop entry in values -> jet_cli_expand_checked_json(entry))
@@ -39,6 +39,7 @@ jet_cli_expand_checked_display: fn(value: TComptimeValue?) -> String Never! {
         .String(text) -> text
         .Int(number) -> "{number}"
         .Failed(.Clean(_)) -> "unknown"
+        .Function(key) -> key
         .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> jet_cli_expand_checked_show(checked)
     }
 }

@@ -125,6 +125,8 @@ sema_user_template_ct_value: fn(value: TComptimeValue) -> CtValue? Never! {
             }
         }
         .Unit -> Val(CtValue.Unit)
+        // A template value holds no function.
+        .Function(_) -> None
         .Char(code) -> {
             chars: comptime_char_text(code).chars()
             if chars.len() != 1 -> return None

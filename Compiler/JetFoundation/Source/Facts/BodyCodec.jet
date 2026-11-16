@@ -1842,12 +1842,16 @@ body_codec_put_tcomptimevalue: fn(out: &BodyCodecOut, value: TComptimeValue) Nev
             body_codec_put_tag(out, 12)
             body_codec_put_tcomptimereport(out, p0)
         }
-        .Unit -> body_codec_put_tag(out, 13)
+        .Unit -> { body_codec_put_tag(out, 13) }
+        .Function(p0) -> {
+            body_codec_put_tag(out, 14)
+            body_codec_put_string(out, p0)
+        }
     }
 }
 
 body_codec_get_tcomptimevalue: fn(bytes: [U8], input: &BodyCodecIn) -> TComptimeValue Never! {
-    position: body_codec_get_tag(bytes, input, 14, 13)
+    position: body_codec_get_tag(bytes, input, 15, 13)
     if position == {
         0 -> {
             f0: body_codec_get_int(bytes, input)
@@ -1904,6 +1908,10 @@ body_codec_get_tcomptimevalue: fn(bytes: [U8], input: &BodyCodecIn) -> TComptime
         12 -> {
             f0: body_codec_get_tcomptimereport(bytes, input)
             TComptimeValue.Failed{report: f0}
+        }
+        14 -> {
+            f0: body_codec_get_string(bytes, input)
+            TComptimeValue.Function{key: f0}
         }
         else -> TComptimeValue.Unit
     }
