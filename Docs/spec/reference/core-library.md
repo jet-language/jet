@@ -5687,7 +5687,10 @@ A job, a schedule, a webhook and a webhook's signing key are server-only: no
 Remote calls one, and `app.endpoints<S>()` lists none. A method that
 `#App.SignedIn` or `#App.Public` marks beside `#App.Job`, `#App.Every`,
 `#App.Webhook` or `#App.SigningKey` is E2819
-(`jet.ServerOnlyMethodMarkedEndpoint`), at the endpoint marker.
+(`jet.ServerOnlyMethodMarkedEndpoint`), at the endpoint marker. As no account
+calls one, each runs as the system (`db.Who.System`), which no row policy
+limits, and `jet inspect choices` lists it as a `rights` row under its
+marker.
 
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:

@@ -1426,8 +1426,11 @@ priv AppWebhook: struct {
 // body, as one transaction (`app_transacted`) that records the delivery's ID
 // (`app_webhook_delivery`): 200 with its reply, 500 when it fails, which
 // rolls it back, 422 with the field errors when the body is no JSON the
-// method takes, or 200 `{"repeated":<ID>}` when it has run already.
+// method takes, or 200 `{"repeated":<ID>}` when it has run already. Both
+// methods run as the system (`calls.callers`), as no account calls them.
 priv app_webhook_response: fn(hook: AppWebhook, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    calls.callers.begin_system()
+    defer calls.callers.end()
     unsigned: app_json(401, app_error_json("`{request.path}` takes only deliveries signed with its key"))
     values := [String]{}
     loop name in hook.params { values.push(app_json_string(request.param(name) ?? "")) }
@@ -2683,16 +2686,18 @@ priv openapi_route_json: fn(route: OpenAPIRoute) -> String Never! {
     assert(bad_route.starts_with("invalid HTTP route `/a/*rest/b`: "))
 }
 
-#Test("a webhook delivery runs only when it is signed with its key") {
+#Test("a webhook delivery runs only when it is signed with its key, as the system") {
     hook: AppWebhook{
         signature: Signature.GitHub,
         params: [String]{"project"},
         key: fn(args: RemoteArgs) {
+            assert(calls.callers.system())
             project: args.__take<String>(0) ?? return Err(err)
             if project != "jet" -> return Ok(None)
             Ok(Val("It's a Secret to Everybody"))
         },
         answer: fn(args: RemoteArgs) {
+            assert(calls.callers.system())
             project: args.__take<String>(0) ?? return Err(err)
             greeting: args.__take<String>(1) ?? return Err(err)
             Ok(args.__reply_value<String>("{project}: {greeting}"))
@@ -2707,6 +2712,7 @@ priv openapi_route_json: fn(route: OpenAPIRoute) -> String Never! {
     assert_eq(app_webhook_test_status(hook, "other", signed, body), 401)
     unparsed: "hi"
     assert_eq(app_webhook_test_status(hook, "jet", "sha256={crypto.hex_encode(crypto.hmac_sha256(secret.bytes(), unparsed.bytes()))}", unparsed), 422)
+    assert(!calls.callers.system())
 }
 
 // The status `hook` answers a delivery of `body` to `/hooks/{project}`
