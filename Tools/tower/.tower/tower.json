@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108446,
+    "rev": 108448,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -103311,12 +103311,12 @@
         },
         {
           "n": 41,
-          "text": "Val(s) of a read parameter never copies silently: it is refused as a bare return of the same value is (E0120), or it needs a written .copy(), since spec.md:1887 says Jet never hides a clone. Today Val(s) compiles and copies with no mark (p206, O0/O1/O2 alike; D-PRIM-ANY1 review 5), probes v08_val_wrap_copy.jet, v08b_val_wrap_alone.jet and n15b_owned_payload_val.jet in $JET_SCRATCH_ROOT/lanes/AnyReview5/probes. Sweep every enum or optional constructor wrapping a read value. Proof: a UI snapshot of the refusal and a cases row with the written copy.",
+          "text": "Val(s) of a read parameter never copies silently: with no from clause it is refused, as a bare return of the same value is (E0120), or it needs a written .copy(), since spec.md:1887 says Jet never hides a clone. Val(p) returned under a from clause (fn(..) -> T? from item) stays legal: it is a lend, not a copy. Today Val(s) compiles and copies with no mark (p206, O0/O1/O2 alike; D-PRIM-ANY1 review 5), probes v08_val_wrap_copy.jet, v08b_val_wrap_alone.jet and n15b_owned_payload_val.jet in $JET_SCRATCH_ROOT/lanes/AnyReview5/probes. Sweep every enum or optional constructor wrapping a read value. Proof: a UI snapshot of the refusal, a cases row with the written copy, and a cases row of Val(p) under a from clause.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T05:54:15.554Z"
+          "at": "2026-11-16T06:34:25.464Z"
         },
         {
           "n": 42,
@@ -103353,6 +103353,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T06:26:33.844Z"
+        },
+        {
+          "n": 46,
+          "text": "A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: &X) -> T? from item, and a method -> T? from self, called directly or through trait dispatch) carries a pointer into the owner's payload, with no new cell, no byte copy and no retain, on O0, O1 and O2. Today the from form and the same function without from emit identical IR at O0 (a 24-byte optional cell, a byte copy and a retain of the shared block), and jet audit counts only the one without from (p207 and p208; D-PRIM-ANY1 reviews 6 and round 6, probe y12_from_val_copy_audit.jet with its .ir.out in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes). Proof: a cases row whose emitted IR (or jet audit) shows no copy for each form, plus a paired size/speed cell against the copy form.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T06:34:27.245Z"
         }
       ],
       "refs": [],
@@ -103363,9 +103372,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T06:26:35.962Z",
+      "updated": "2026-11-16T06:34:27.245Z",
       "updatedBy": "Main",
-      "criteriaLastN": 45
+      "criteriaLastN": 46
     },
     {
       "id": "c0c3gh6u",
@@ -221240,6 +221249,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T06:34:27.245Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#46 A from return is a real loan at run time: a function returni"
+    },
+    {
+      "at": "2026-11-16T06:34:25.464Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#41: D-PRIM-ANY1 round 6: Val(p) returned under a from clause is a lend (recover's body) and must stay legal; was: Val(s) of a read parameter never copies silently: it is refused as a bare return of the same value is (E0120), or it needs a written .copy(), since spec.md:1887 says Jet never hides a clone. Today Val"
+    },
     {
       "at": "2026-11-16T06:26:35.962Z",
       "by": "Main",
