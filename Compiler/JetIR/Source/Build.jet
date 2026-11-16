@@ -820,7 +820,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     // unit type a program's unit family mints (`Meter`) is the exception: unit
     // literals spell it bare, so it claims its name ahead of the Prelude's.
     builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}::"
-    minted: ir_unit_minted_names(types)
+    families: ir_unit_family_rows(types)
     type_keys := [(key: String, at: Int, row: Int)]{}
     loop (index, definition) in types {
         type_keys.push((key: definition.key.copy(), at: index, row: index))
@@ -829,7 +829,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         tier: if {
             definition.key.starts_with(builtins) -> 1
             definition.key.starts_with(MODULE_CORE_PREFIX) || definition.key == definition.name -> 3
-            ir_unit_minted_row(definition, minted) -> 2
+            ir_unit_minted_row(definition, types, families) -> 2
             else -> 4
         }
         type_keys.push((key: definition.name.copy(), at: tier * types.len() + index, row: index))

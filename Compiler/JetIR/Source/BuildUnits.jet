@@ -189,30 +189,37 @@ ir_unit_family_base: fn(p: IRProgram, family: String) -> String? Never! {
     None
 }
 
-// The names of the unit types the unit families of `types` mint: each
-// member's type (`Meter`), and an affine member's point and delta
-// (`CelsiusPoint`, `CelsiusDelta`).
-ir_unit_minted_names: fn(types: [TTypeDef]) -> [String:Bool] Never! {
-    names := [String:Bool]{}
-    loop definition in types {
-        if definition.kind == .UnitFamily(members, _) {
-            loop member in members {
-                minted: unit_family_type_name(member)
-                names["{minted}Point"] = true
-                names["{minted}Delta"] = true
-                names[minted] = true
-            }
-        }
+// The rows of `types` that declare unit families.
+ir_unit_family_rows: fn(types: [TTypeDef]) -> [Int] Never! {
+    rows := [Int]{}
+    loop (index, definition) in types {
+        if definition.kind == .UnitFamily(_, _) -> rows.push(index)
     }
-    names
+    rows
 }
 
-// Whether `definition` is a unit family or a unit type one mints (`minted`,
-// ir_unit_minted_names), which unit literals spell by its bare name.
-ir_unit_minted_row: fn(definition: TTypeDef, minted: [String:Bool]) -> Bool Never! {
+// Whether `definition` is a unit family or a unit type that one of the
+// families mints (`families` are ir_unit_family_rows of `types`). The minted
+// types are each member's type (`Meter`) and an affine member's point and
+// delta (`CelsiusPoint`, `CelsiusDelta`). Unit literals spell them bare.
+ir_unit_minted_row: fn(definition: TTypeDef, types: [TTypeDef], families: [Int]) -> Bool Never! {
     if definition.kind == {
         .UnitFamily(_, _) -> true
-        .Distinct(_, _) -> minted.get(definition.name) != None
+        .Distinct(_, _) -> {
+            name: definition.name
+            loop row in families {
+                if types[row].kind == .UnitFamily(members, _) {
+                    loop member in members {
+                        minted: unit_family_type_name(member)
+                        if name == minted -> return true
+                        if name.len() == minted.len() + 5 && name.starts_with(minted) && (name.ends_with("Point") || name.ends_with("Delta")) {
+                            return true
+                        }
+                    }
+                }
+            }
+            false
+        }
         .Struct(_, _) | .Enum(_, _) | .Alias(_) -> false
     }
 }
