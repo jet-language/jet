@@ -138,11 +138,9 @@ sema_name_add_display_paths: fn(facts: &NameFacts, module_index: Int, module_ali
 
 // The file-level types `items` holds that a module spelled `display` lifted
 // under `scope`'s compiler-owned prefix, each keyed by its generated name
-// (`M3GeoPoint` -> `geo.Point`). A remainder that starts with a digit
-// belongs to a nested module's longer prefix, which its own row claims.
+// (`M3GeoPoint` -> `geo.Point`, sema_name_lifted_under).
 sema_name_lifted_type_paths: fn(items: [Item], scope: String, display: String, paths: &[String:String]) Never! {
     type_prefix: sema_inline_type_prefix(scope)
-    prefix_end: type_prefix.bytes().len()
     loop item in items {
         name := ""
         if item == {
@@ -156,10 +154,8 @@ sema_name_lifted_type_paths: fn(items: [Item], scope: String, display: String, p
                 next
             }
         }
-        if !name.starts_with(type_prefix) || name.bytes().len() == prefix_end -> next
-        first: Int{name.bytes()[prefix_end]}
-        if first >= 48 && first <= 57 -> next
-        paths[name] = "{display}.{sema_name_strip_prefix(name, type_prefix)}"
+        spelled: sema_name_lifted_under(name, type_prefix, display) ?? next
+        paths[name] = spelled
     }
 }
 
@@ -191,6 +187,70 @@ sema_name_generated_type_paths: fn(items: [Item], paths: &[String:String]) Never
             }
         }
     }
+}
+
+// The canonical path of the type `name` that the module at `module_path`
+// declares among `items`, as the name ledger's declaration rows spell it
+// (sema_name_add_item): a type lifted from an inline module or a
+// generic-module instance is its source path (`M3GeoPoint` ->
+// `app.geo.Point`), any other type `module.Name`.
+sema_name_type_path: fn(module_path: String, items: [Item], name: String) -> String Never! {
+    spelled: sema_name_lifted_spelling(items, name) ?? name
+    if module_path == "" -> return spelled
+    "{module_path}.{spelled}"
+}
+
+// The source path inside its module of the type `name` lifted from an inline
+// module or a generic-module instance (`M3GeoPoint` -> `geo.Point`), found the
+// way sema_name_generated_type_paths keys it; None for any other type.
+sema_name_lifted_spelling: fn(items: [Item], name: String) -> String? Never! {
+    bytes: name.bytes()
+    if !sema_name_generated_shape(bytes, 0, bytes.len()) -> return None
+    loop item in items {
+        if item == .CodeModule(code_module) {
+            if code_module.instance_identity != None {
+                return sema_name_lifted_under(name, sema_inline_type_prefix(code_module.name), code_module.name) ?? next
+            }
+            if code_module.body != None {
+                return sema_name_plain_lifted(code_module, code_module.name, name) ?? next
+            }
+        }
+    }
+    None
+}
+
+// `name`'s source path when the module `source_path` (or one nested in it)
+// lifted it (sema_name_plain_type_paths).
+sema_name_plain_lifted: fn(code_module: CodeModule, source_path: String, name: String) -> String? Never! {
+    found: sema_name_lifted_under(name, sema_inline_type_prefix(sema_inline_type_alias(source_path)), source_path)
+    if found != None -> return found
+    body: code_module.body ?? return None
+    loop item in body {
+        if item == .CodeModule(child) {
+            nested: sema_name_plain_lifted(child, "{source_path}.{child.name}", name)
+            if nested != None -> return nested
+        }
+    }
+    None
+}
+
+// `display.Rest` when `name` is the compiler-owned `type_prefix` then `Rest`.
+// A remainder that starts with a digit belongs to a nested module's longer
+// prefix, which its own module claims.
+sema_name_lifted_under: fn(name: String, type_prefix: String, display: String) -> String? Never! {
+    prefix_end: type_prefix.bytes().len()
+    if !name.starts_with(type_prefix) || name.bytes().len() == prefix_end -> return None
+    first: Int{name.bytes()[prefix_end]}
+    if first >= 48 && first <= 57 -> return None
+    Val("{display}.{sema_name_strip_prefix(name, type_prefix)}")
+}
+
+// The leaf of the type `name` inside its module: a lifted type's own name
+// (`M3GeoPoint` -> `Point`), any other type its name.
+sema_name_type_leaf: fn(items: [Item], name: String) -> String Never! {
+    spelled: sema_name_lifted_spelling(items, name) ?? return name
+    if spelled.cut_last(".") == .Val(parts) -> return parts.after
+    spelled
 }
 
 // The path of every module with a body in `items`' module tree (`outer`,

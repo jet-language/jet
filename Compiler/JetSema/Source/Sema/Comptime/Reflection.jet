@@ -2381,7 +2381,7 @@ sema_comptime_reflection_case_payload_fields: fn(registration: SemaRegistrationG
 // cases in declaration order: its leaf name, its dotted path through any
 // groups, the wire name the checker gives it under the enum's rename style,
 // its payload, its written number, its markers and where it is written.
-sema_comptime_reflection_enum_case_info: fn(registration: SemaRegistrationGraph, caller: Int, definition: EnumDef, module_path: String, style: String?, variant: Variant, index: Int, registry: SemaScopeMembersMarkerRegistry) -> TComptimeValue Never! {
+sema_comptime_reflection_enum_case_info: fn(registration: SemaRegistrationGraph, caller: Int, definition: EnumDef, type_path: String, style: String?, variant: Variant, index: Int, registry: SemaScopeMembersMarkerRegistry) -> TComptimeValue Never! {
     payload: if variant.payload == {
         .Unit -> TComptimeValue.Enum{type_name: "CasePayload", variant: "Unit", args: [TComptimeEnumArg]{}}
         .Single(ty, _) -> TComptimeValue.Enum{type_name: "CasePayload", variant: "Single", args: [TComptimeEnumArg]{TComptimeEnumArg{name: None, value: sema_comptime_reflection_type_id(registration, caller, ty)}}}
@@ -2396,7 +2396,7 @@ sema_comptime_reflection_enum_case_info: fn(registration: SemaRegistrationGraph,
         "CaseInfo",
         [SemaComptimeReflectionField]{
             {name: "name", value: TComptimeValue.String{value: leaf}},
-            {name: "path", value: TComptimeValue.String{value: "{module_path}.{definition.name}.{variant.name}"}},
+            {name: "path", value: TComptimeValue.String{value: "{type_path}.{variant.name}"}},
             {name: "index", value: TComptimeValue.Int{value: index}},
             {name: "wire_name", value: TComptimeValue.String{value: sema_checked_variant_wire_name(variant, style)}},
             {name: "payload", value: payload},
@@ -2841,7 +2841,7 @@ sema_comptime_reflection_struct_type_info: fn(
     traits: sema_comptime_reflection_trait_contracts(registration, caller, registered_module.program, definition.name, definition.trait_impls, registered_module.module_path, identity, registry)
     sema_comptime_reflection_type_info_fields(
         definition.name,
-        "{registered_module.module_path}.{definition.name}",
+        sema_name_type_path(registered_module.module_path, registered_module.program.items, definition.name),
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, bindings),
         "struct",
@@ -2884,8 +2884,9 @@ sema_comptime_reflection_enum_type_info: fn(
     dimensions := [TComptimeValue]{}
     facts := [TComptimeValue]{}
     style: sema_checked_rename_case(definition.serde_markers)
+    type_path: sema_name_type_path(registered_module.module_path, registered_module.program.items, definition.name)
     loop (index, variant) in definition.variants {
-        cases.push(sema_comptime_reflection_enum_case_info(registration, caller, definition, registered_module.module_path, style, variant, index, registry))
+        cases.push(sema_comptime_reflection_enum_case_info(registration, caller, definition, type_path, style, variant, index, registry))
         if variant.payload == {
             .Unit -> {}
             .Single(ty, _) -> {
@@ -2912,7 +2913,7 @@ sema_comptime_reflection_enum_type_info: fn(
     transitions: sema_comptime_reflection_state_transitions(definition.name, definition.state, definition.methods)
     sema_comptime_reflection_type_info_fields(
         definition.name,
-        "{registered_module.module_path}.{definition.name}",
+        type_path,
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, bindings),
         "enum",
@@ -2953,7 +2954,7 @@ sema_comptime_reflection_distinct_type_info: fn(
     traits: sema_comptime_reflection_trait_contracts(registration, caller, registered_module.program, definition.name, [TraitImplBlock]{}, registered_module.module_path, identity, registry)
     sema_comptime_reflection_type_info_fields(
         definition.name,
-        "{registered_module.module_path}.{definition.name}",
+        sema_name_type_path(registered_module.module_path, registered_module.program.items, definition.name),
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, [SemaInferenceBinding]{}),
         "distinct",

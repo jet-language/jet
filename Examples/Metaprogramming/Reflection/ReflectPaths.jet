@@ -1,0 +1,59 @@
+// A reflected type's `path` is its canonical path, the one the name ledger
+// gives it: the module path, then each inline module, then the name. `name`
+// stays the leaf the declaration writes. A type declared in an inline module
+// reads `ReflectPaths.geo.Point`, never a name the compiler generates for it,
+// and so does its value at run time. `T.reflect().path` and
+// `reflect.of(x).path()` agree, and so do a case's two paths.
+use reflect: core.reflect
+
+geo: module {
+    Point: struct {
+        x: Int
+        y: Int
+    }
+
+    Shape: enum {
+        Dot
+        Line(Int)
+    }
+}
+
+Point: struct {
+    x: Int
+}
+
+Color: enum {
+    Red
+    Green
+}
+
+POINT_NAME: #run Point.reflect().name
+
+POINT_PATH: #run Point.reflect().path
+
+COLOR_PATH: #run Color.reflect().path
+
+GREEN_PATH: #run Color.reflect().cases[1].path
+
+color_case: fn(color: Color) -> String {
+    if reflect.of(color).case() == .Val(held) -> return "{held.name()} {held.path()}"
+    "none"
+}
+
+shape_case: fn(shape: geo.Shape) -> String {
+    if reflect.of(shape).case() == .Val(held) -> return "{held.name()} {held.path()}"
+    "none"
+}
+
+run: fn() {
+    print("{POINT_NAME} {POINT_PATH} {COLOR_PATH} {GREEN_PATH}")
+    top: reflect.of(Point{x: 1})
+    print("{top.type_name()} {top.path()} same={top.path() == POINT_PATH}")
+    green: color_case(Color.Green)
+    expected: "Green {GREEN_PATH}"
+    print("{green} same={green == expected}")
+    inner: reflect.of(geo.Point{x: 2, y: 3})
+    print("{inner.type_name()} {inner.path()}")
+    print(shape_case(geo.Shape.Line(4)))
+    print(shape_case(geo.Shape.Dot))
+}

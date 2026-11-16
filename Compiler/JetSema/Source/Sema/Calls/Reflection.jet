@@ -56,7 +56,7 @@ sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, envir
 }
 
 // The names a reflected value of `ty` carries: its type name and canonical
-// path (`module.Type`, the identity of the TypeId `T.reflect()` reads), then
+// path (sema_call_reflection_row_names, the text `T.reflect().path` reads), then
 // the count of the declared types an erased trait value of `ty` may hold and
 // each one's checked key (TTypeDef.key), type name and path, so the IR names
 // a trait value by the type whose payload key its box holds
@@ -204,7 +204,7 @@ sema_call_reflection_field_capturable: fn(ty: Type, environment: SemaScopeEnviro
     false
 }
 
-// A nominal type reflects as its declared name and `module.Name` path
+// A nominal type reflects as its leaf name and canonical path
 // (sema_call_reflection_row_names); any other type as its written spelling
 // for both.
 sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> (type_name: String, path: String) {
@@ -217,12 +217,15 @@ sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment,
     (type_name: shown, path: shown)
 }
 
-// The nominal at `row` reflects as its declared name and `module.Name` path
-// (the module path as an identifier: `reflect-value.jet` is `reflect_value`).
+// The nominal at `row` reflects as its leaf name and its canonical path
+// (sema_name_type_path, the module path as an identifier: `reflect-value.jet`
+// is `reflect_value`): a type lifted from an inline module is `Point` at
+// `app.geo.Point`, never its generated name.
 sema_call_reflection_row_names: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> (type_name: String, path: String) Never! {
-    name: graph.modules[row.module_index].nominals[row.row].symbol.name
-    if graph.modules[row.module_index].module_path == "" -> return (type_name: name, path: name)
-    (type_name: name, path: "{graph.modules[row.module_index].module_path.replace("-", "_")}.{name}")
+    registered: graph.modules[row.module_index]
+    name: registered.nominals[row.row].symbol.name
+    leaf: sema_name_type_leaf(registered.program.items, name)
+    (type_name: leaf, path: sema_name_type_path(registered.module_path.replace("-", "_"), registered.program.items, name))
 }
 
 sema_call_reflection_text: fn(text: String, span: Span) -> TExpr Never! {
