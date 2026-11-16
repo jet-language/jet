@@ -19,6 +19,7 @@ use jet_foundation.[
     expr_span,
     measure_literal_value,
     type_name,
+    type_union_member_tag,
 ]
 
 SemaCoverageTable: struct {
@@ -132,7 +133,7 @@ sema_coverage_payload_type: fn(subject_ty: Type, key: String, field: Int, enviro
         // A union member's payload is the member value (`.Err(.A(.Bad))`).
         .Union(members) -> {
             loop member in members {
-                if sema_pattern_union_tag(member) == key -> return Val(member)
+                if sema_pattern_union_tag(members, member) == key -> return Val(member)
             }
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
@@ -362,7 +363,7 @@ sema_coverage_missing: fn(subject_ty: Type, keys: [String], environment: SemaSco
         }
         .Union(members) -> {
             loop member in members {
-                member_tag: sema_pattern_union_tag(member)
+                member_tag: sema_pattern_union_tag(members, member)
                 if !sema_coverage_has_key(keys, member_tag) -> missing.push(member_tag)
             }
         }
@@ -512,12 +513,15 @@ sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span,
             return
         }
     }
-    names: missing.join(", ")
+    names: sema_coverage_shown_cases(subject_ty, missing)
     if multi_head {
         diagnostics.push(sema_error("E0307", span, "this multi-head function doesn't cover every case — missing: {names}", "each multi-head head covers one argument shape, so every variant must appear once", "add a head for: {names}"))
         return
     }
-    diagnostic: sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", "add an arm for: {names}")
+    // Members that share a type name have no arm of their own; an `else`
+    // reaches them.
+    fix: if sema_coverage_unnamed_missing(subject_ty, missing) -> "add `else -> {{ … }}` after the last arm: no arm can name {names}, which share a type name" else -> "add an arm for: {names}"
+    diagnostic: sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", fix)
     patterns := [String]{}
     loop name in missing {
         // A nested witness (`Err(.High)`) is already a whole pattern.
@@ -882,8 +886,14 @@ sema_coverage_case_pattern: fn(subject_ty: Type, name: String, environment: Sema
             name.starts_with("Ok") -> ".Ok(_)"
             else -> ".Err(_)"
         })
-        // A union member is tested by its tag alone (`.Int -> …`).
-        .Union(_) | .Case(_, _) -> return Val(".{name}")
+        // A union member is tested by its tag alone (`.Int -> …`). A member
+        // tagged by its full identity (two members of one name) has no
+        // written arm of its own the edit could spell.
+        .Union(members) -> {
+            if sema_coverage_identity_case(members, name) != None -> return None
+            return Val(".{name}")
+        }
+        .Case(_, _) -> return Val(".{name}")
         .Named(_) | .Apply(_, _) -> {}
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
@@ -900,6 +910,46 @@ sema_coverage_case_slots: fn(name: String, arity: Int) -> String {
     if arity == 0 -> return ".{name}"
     slots: loop _ in 0..<arity -> "_"
     ".{name}({slots.join(", ")})"
+}
+
+// The missing cases of `subject_ty` as a report lists them: a union member
+// tagged by its full identity (sema_coverage_identity_case) is listed by its
+// type, which the report shows with its module (`geo.Point`).
+sema_coverage_shown_cases: fn(subject_ty: Type, missing: [String]) -> String Never! {
+    members: if subject_ty == .Union(values) -> values else -> [Type]{}
+    shown := ""
+    loop (index, name) in missing {
+        separator: if index == 0 -> "" else -> ", "
+        shown = if sema_coverage_identity_case(members, name) == {
+            .Val(member) -> "{shown}{separator}{type_name(member)}"
+            .None -> "{shown}{separator}{name}"
+        }
+    }
+    shown
+}
+
+// The member of the union `members` whose tag `name` is when that tag is the
+// member's full identity, as two members of one name are tagged.
+sema_coverage_identity_case: fn(members: [Type], name: String) -> Type? {
+    loop member in members {
+        plain: sema_pattern_unwrap_tags(member)
+        if sema_pattern_union_tag(members, member) == name && type_union_member_tag(plain) != name {
+            return Val(plain)
+        }
+    }
+    None
+}
+
+// Whether a case `missing` lists is a union member no arm can name: one of
+// two members of one name (sema_coverage_identity_case), which only an
+// `else` reaches.
+sema_coverage_unnamed_missing: fn(subject_ty: Type, missing: [String]) -> Bool Never! {
+    if subject_ty == .Union(members) {
+        loop name in missing {
+            if sema_coverage_identity_case(members, name) != None -> return true
+        }
+    }
+    false
 }
 
 // E0641 (#6281): an `else` over a closed set (an enum, `T?`, `T E!`, or a
@@ -934,6 +984,11 @@ sema_coverage_check_closed_else: fn(heads: [SemaCoverageElseHead]?, span: Span, 
         if sema_pattern_is_option(ok_ty) {
             missing = sema_coverage_three_state_missing(ok_ty, shapes, keys, environment, program)
         }
+    }
+    // Members that share a type name have no arm of their own; the `else`
+    // is how a table reaches them.
+    if sema_coverage_unnamed_missing(subject_ty, missing) {
+        return
     }
     shown: type_name(subject_ty)
     // `T?` and `T E!` never gain a case; an enum or a union can.

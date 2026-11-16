@@ -1,0 +1,33 @@
+// `geo2.Point` and `map2.Point` share the name `Point` but are two members of
+// one union: each value keeps its own type through every widening and prints
+// its own fields.
+use {
+    geo2
+    map2
+}
+
+show: fn(item: geo2.Point | map2.Point) { print(item) }
+
+pick: fn(index: Int) -> geo2.Point | map2.Point {
+    if index == 0 -> return map2.Point{name: "quay"}
+    geo2.Point{x: 3, y: 4}
+}
+
+// A wider union takes each member as its own case; only the `else` reaches
+// the two members named `Point`.
+widen: fn(item: geo2.Point | map2.Point | Int) {
+    if item == {
+        .Int(n) -> print("int {n}")
+        else -> print(item)
+    }
+}
+
+run: fn() {
+    show(geo2.Point{x: 1, y: 2})
+    show(map2.Point{name: "harbor"})
+    show(pick(0))
+    show(pick(1))
+    widen(pick(0))
+    widen(pick(1))
+    widen(7)
+}

@@ -1616,7 +1616,7 @@ sema_expression_case_owners: fn(variant: String, span: Span, expected: Type?, en
     if expected == .Val(carrier) {
         if carrier == .Union(members) {
             loop member in members {
-                if sema_pattern_union_tag(member) == variant -> return [String]{}
+                if sema_pattern_union_tag(members, member) == variant -> return [String]{}
                 probe := [Diagnostic]{}
                 if !sema_pattern_payload(member, variant, environment, program, span, probe).known {
                     next

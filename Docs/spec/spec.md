@@ -638,6 +638,13 @@ is E0112. Only the value widens: a `&` parameter takes exactly its union type,
 and a list, optional or other container of the smaller union is not one of the
 larger (D-ALT-SUBSET1=A).
 
+A union member is the type itself, never its name: `geo.Point | map.Point`,
+two types named `Point` from different modules, holds two members, and each
+value keeps the member it was built as. An arm names a member by its type's
+name, so a `.Point` arm over that union names neither member (E0305); only an
+`else` reaches them, and a table over such a union keeps its `else` without
+E0641. To match each, make them named cases (`Geo(geo.Point) | Map(map.Point)`).
+
 A union member may be a named case, written exactly as inside an enum:
 `temp: Celsius(Float) | Fahrenheit(Float)`. Inside a union, `Name(T)` is a
 named case and a bare name is always a type, so named cases mix with type
