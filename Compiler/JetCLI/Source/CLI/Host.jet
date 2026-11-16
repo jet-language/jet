@@ -81,6 +81,7 @@ use {
         jet_driver_report_problems,
         jet_driver_source_query,
         jet_driver_entry_root_path,
+        jet_driver_package_name,
         JetDriverRunReceiptInput,
     ]
     jet_eval.[
@@ -1567,6 +1568,14 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
             closure_symbols["jet_ffi_{row.name}_cabi"] = true
             closure_symbols["jet_ffi_cabi_free"] = true
         }
+    }
+    // A run of a program that links the device store (JetRuntime World.jet)
+    // keeps the store under its entry package's name, which the entry passes
+    // first (JetIR Build.jet ir_device_package); a test build's stays in
+    // memory.
+    if harness == None && closure_symbols.get("jet_rt_device_load") != None {
+        declared: if result.authority_policy == .Val(policy) -> policy.subject else -> ""
+        checks.entry_package = jet_driver_package_name(declared, file)
     }
     entry_key: checked.entry_key ?? ""
     entry_source := ""

@@ -398,6 +398,10 @@ IRChecks: struct {
     // filters the entry passes to the runtime (ir_log_configure).
     log_package: String{""}
     log_flag: String{""}
+    // The entry package's name in a program that links the device store
+    // (JetRuntime World.jet): the entry passes it to the runtime first, which
+    // keeps the store under it (ir_device_package).
+    entry_package: String{""}
     // The entry package's `policy.harden` or the `hardened` profile: a
     // release build keeps the memory sentry (ir_checks_sentries), and when
     // a function holds a `timing: .Fixed` value, the entry first calls
@@ -1644,12 +1648,13 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
 // The function the executable starts: `entry` itself when it takes nothing,
 // returns nothing, the `backtrace` build option is the stock `full`, the
 // program allocator the system heap, no job is selectable, the build is
-// neither checked nor observed, sets no log filter and keeps the sentry,
-// otherwise a generated `entry` function. It first turns the runtime's
-// sentry off in a build without it (ir_sentry_release_link), links a
-// checked build's checked heap (ir_checked_alloc_link) and an observed
-// build's observation start (ir_observe_link), passes the log filters
-// (ir_log_configure), a `brief` or `off` backtrace to
+// neither checked nor observed, sets no log filter, links no device store
+// and keeps the sentry, otherwise a generated `entry` function. It first
+// turns the runtime's sentry off in a build without it
+// (ir_sentry_release_link), links a checked build's checked heap
+// (ir_checked_alloc_link) and an observed build's observation start
+// (ir_observe_link), passes the log filters (ir_log_configure) and the
+// device store's package (ir_device_package), a `brief` or `off` backtrace to
 // the runtime (jet_rt_fault_backtrace, the IRBacktrace word) and a counting
 // program allocator's cap (jet_rt_program_allocator_configure,
 // IRChecks.counting), then runs the job the program's
@@ -1658,7 +1663,7 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
 // ir_entry_unknown_job) or else runs `entry`, through ir_entry_call.
 ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p) && p.sentries) {
+    if m.functions[entry].param_count > 0 || (row < 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && p.checks.entry_package == "" && !ir_timing_admitted(p) && p.sentries) {
         return entry
     }
     ty: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
@@ -1674,6 +1679,7 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     if ir_timing_admitted(p) -> _: ir_runtime(m, b, "jet_rt_timing_admit", [Int]{}, -1)
     ir_observe_link(m, p, b)
     ir_log_configure(m, p, b)
+    ir_device_package(m, p, b)
     if p.checks.backtrace != .Full {
         mode: if p.checks.backtrace == .Brief -> 1 else -> 2
         word: ir_word_const(m, b, mode)
@@ -1758,6 +1764,19 @@ ir_log_configure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     flag_args: ir_static_text(m, b, p.checks.log_flag)
     flag: ir_runtime(m, b, "jet_rt_string_from_static", flag_args, string_row)
     _: ir_runtime(m, b, "jet_rt_log_configure", [Int]{package, flag}, -1)
+}
+
+// A program that links the device store passes its entry package's name to
+// the runtime first (JetRuntime World.jet jet_rt_entry_package_set), which
+// takes the text and keeps the store's files under it.
+ir_device_package: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
+    if p.checks.entry_package == "" {
+        return
+    }
+    string_row: ir_string_row(m)
+    args: ir_static_text(m, b, p.checks.entry_package)
+    package: ir_runtime(m, b, "jet_rt_string_from_static", args, string_row)
+    _: ir_runtime(m, b, "jet_rt_entry_package_set", [Int]{package}, -1)
 }
 
 // The branch of the entry function that runs `job` when the program's first

@@ -329,9 +329,20 @@ home_dir: fn() -[Env]> String? Never! {
 /// `os.homedir()` and Python's `expanduser` find it. None when there is none.
 cache_dir: fn() -[Env, FS.Read]> String? Never! { base_dir("XDG_CACHE_HOME", ".cache") }
 
-/// The XDG base directory for user data: $XDG_DATA_HOME, else `.local/share`
-/// under the home directory, read as `cache_dir` reads its own.
-data_dir: fn() -[Env, FS.Read]> String? Never! { base_dir("XDG_DATA_HOME", ".local/share") }
+/// The directory for the user's application data, where a program keeps
+/// what it saves for itself: on Linux and other Unix systems the XDG one,
+/// $XDG_DATA_HOME, else `.local/share` under the home directory; on macOS
+/// `Library/Application Support` under the home directory; on Windows
+/// %LOCALAPPDATA%, else `AppData/Local` under the home directory. The home
+/// directory is read as `cache_dir` reads its own. None when there is none.
+data_dir: fn() -[Env, FS.Read]> String? Never! { data_dir_on(is_windows(), is_macos()) }
+
+// `data_dir` on Windows (`windows`), on macOS (`macos`), or else on Unix.
+priv data_dir_on: fn(windows: Bool, macos: Bool) -[Env, FS.Read]> String? Never! {
+    if windows -> return base_dir("LOCALAPPDATA", "AppData/Local")
+    if macos -> return under_home("Library/Application Support")
+    base_dir("XDG_DATA_HOME", ".local/share")
+}
 
 /// The XDG base directory for user configuration: $XDG_CONFIG_HOME, else
 /// `.config` under the home directory, read as `cache_dir` reads its own.
@@ -355,6 +366,12 @@ config_dir: fn() -[Env, FS.Read]> String? Never! { base_dir("XDG_CONFIG_HOME", "
 base_dir: fn(variable: String, under: String) -[Env, FS.Read]> String? Never! {
     chosen: get(variable) ?? ""
     if chosen != "" -> return Val(chosen)
+    under_home(under)
+}
+
+// `under` joined to the home directory: $HOME, else `account_home`. None
+// when there is no home directory.
+priv under_home: fn(under: String) -[Env, FS.Read]> String? Never! {
     home: get("HOME") ?? account_home() ?? return None
     Val(files.join_all([String]{home, under}))
 }
@@ -2748,4 +2765,30 @@ config_tree: fn(tree: &&ConfigTree) -> Dyn Never! {
     assert_eq(base_dir("JET_SYS_BASE_DIR_PROBE", ".local/share"), Val(files.join_all([String]{home, ".local/share"})))
     assert(unset("JET_SYS_BASE_DIR_PROBE") ?? false)
     assert_eq(base_dir("JET_SYS_BASE_DIR_PROBE", ".config"), Val(files.join_all([String]{home, ".config"})))
+}
+
+#Test("data_dir is the platform's application data directory on Windows, macOS and Unix") {
+    home: get("HOME") ?? account_home() ?? panic("no home directory")
+    saved_local: get("LOCALAPPDATA")
+    saved_xdg: get("XDG_DATA_HOME")
+    set("LOCALAPPDATA", "/probe/local")
+    set("XDG_DATA_HOME", "/probe/share")
+    assert_eq(data_dir_on(true, false), Val("/probe/local"))
+    assert_eq(data_dir_on(false, true), Val(files.join_all([String]{home, "Library/Application Support"})))
+    assert_eq(data_dir_on(false, false), Val("/probe/share"))
+    set("LOCALAPPDATA", "")
+    set("XDG_DATA_HOME", "")
+    assert_eq(data_dir_on(true, false), Val(files.join_all([String]{home, "AppData/Local"})))
+    assert_eq(data_dir_on(false, false), Val(files.join_all([String]{home, ".local/share"})))
+    restore_env("LOCALAPPDATA", saved_local)
+    restore_env("XDG_DATA_HOME", saved_xdg)
+}
+
+// Put the variable `name` back as `saved` had it: set, or unset.
+priv restore_env: fn(name: String, saved: String?) -[Env]> Never! {
+    if saved == .Val(value) {
+        set(name, value)
+        return
+    }
+    _: unset(name) ?? false
 }

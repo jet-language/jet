@@ -1,0 +1,88 @@
+// A record type is written in braces, `{min: Int, max: Int}`, wherever a
+// type goes; the paren form `(min: Int, max: Int)` still parses. After a
+// function's arrow, a `{…}` is the record result when a body, a contract or
+// another result part follows it, or when each member's type starts as a
+// type does; otherwise it stays the body.
+use {
+    jet_foundation.[Func]
+}
+
+brace_records_result_names: fn(function: Func) -> String {
+    if function.return_type == .Val(.Tuple(fields)) {
+        names := ""
+        loop field in fields -> names = if names == "" -> "{field.name}" else -> "{names},{field.name}"
+        return names
+    }
+    "none"
+}
+
+#Test("brace_record_types_parse_in_every_type_position") {
+    program: parser_test_program(
+        `Bounds: {min: Int, max: Int}
+
+Span: struct {
+    range: {start: Int, end: Int}
+}
+
+Shape: trait {
+    extent: fn(self) -> {w: Int, h: Int}
+}
+
+bounds: fn(xs: [Int]) -> {min: Int, max: Int} {
+    {min: xs[0], max: xs[xs.len() - 1]}
+}
+
+read: fn(path: String) -[IO]> {size: Int, ok: Bool} {
+    {size: path.len(), ok: true}
+}
+
+apply: fn(f: fn(Int) -> {n: Int}, rows: [{name: String, n: Int}]) -> Int {
+    f(rows.len()).n
+}
+
+run: fn() {
+    {min, max}: bounds([1, 2])
+    pair: {x: 1, y: 2}
+    print(min + max + pair.x)
+}
+`,
+    )
+    assert_eq(brace_records_result_names(parser_test_function(program, "bounds")), "min,max")
+    assert_eq(brace_records_result_names(parser_test_function(program, "read")), "size,ok")
+    alias := false
+    loop item in program.items {
+        if item == .TypeAlias(value) && value.name == "Bounds" && value.target == .Tuple(_) -> alias = true
+    }
+    assert(alias, "`Bounds: {{min: Int, max: Int}}` is a type alias")
+}
+
+#Test("a_body_after_an_effect_row_stays_a_body") {
+    program: parser_test_program("count: fn() -> Int {{ 3 }}\nrun: fn() -[IO]> {{ total: count() }}\n")
+    run: parser_test_function(program, "run")
+    assert(run.return_type == None, "the braces after the row are the body")
+    assert(run.body.len() == 1, "the body keeps its binding")
+}
+
+#Test("a_record_value_binding_stays_a_constant") {
+    program: parser_test_program("Origin: {{x: 0, y: 0}}\n")
+    alias := false
+    loop item in program.items {
+        if item == .TypeAlias(_) -> alias = true
+    }
+    assert(!alias, "`Origin: {{x: 0, y: 0}}` binds a record value")
+}
+
+#Test("the_formatter_keeps_brace_and_paren_record_types") {
+    formatted: parser_test_stable("a: fn() -> {{x: Int, y: Int}} {{ {{x: 1, y: 2}} }}\nb: fn() -> (x: Int, y: Int) {{ (x: 1, y: 2) }}\n")
+    assert(formatted.contains("a: fn() -> {{x: Int, y: Int}} {{"), formatted)
+    assert(formatted.contains("b: fn() -> (x: Int, y: Int) {{"), formatted)
+}
+
+#Test("an_empty_record_type_is_refused") {
+    diagnostics: parser_test_errors("f: fn(p: {{}}) {{}}\n")
+    found := false
+    loop diagnostic in diagnostics {
+        if diagnostic.what == "A record type names no members" -> found = true
+    }
+    assert(found, "the empty record type is named")
+}

@@ -363,6 +363,7 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
         TOKEN_KW_FN -> parser_parse_function_type(state, depth + 1)
         TOKEN_LBRACKET -> parser_parse_collection_type(state, depth + 1)
         TOKEN_LPAREN -> parser_parse_tuple_type(state, depth + 1)
+        TOKEN_LBRACE -> parser_parse_record_type(state, depth + 1)
         else -> {
             if kind != TOKEN_IDENT && kind != TOKEN_SELF && !site_value {
                 found: parser_text(state, start)
@@ -487,6 +488,86 @@ parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
     ParsedType{ty: Type.Tuple{fields: fields}, span: parser_cover(open.span, close.span)}
 }
 
+// `{name: Type, …}`: a record type, an unnamed struct with named members. A
+// newline between members separates them as a comma does.
+parser_parse_record_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
+    open: parser_bump(state)
+    fields := [TypeTupleField]{}
+    loop {
+        loop parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
+        if parser_current_kind(state) == TOKEN_RBRACE -> break
+        name: parser_expect_name(state, "for a record member name")
+        parser_expect(state, TOKEN_COLON, "`:` after a record member name")
+        ty: parser_parse_type(state, depth + 1)
+        fields.push(TypeTupleField{name: parser_value(state, name), ty: ty.ty})
+        kind: parser_current_kind(state)
+        if kind == TOKEN_RBRACE -> break
+        if kind != TOKEN_COMMA && kind != TOKEN_SEMI {
+            token: parser_current(state)
+            parser_add_error(state, token.span, "expected `,` between record type members", "a record type lists its named members in source order", "add a comma or close the record type with `}}`")
+            break
+        }
+        parser_bump(state)
+    }
+    close: parser_expect(state, TOKEN_RBRACE, "`}}` after the record type")
+    span: parser_cover(open.span, close.span)
+    if fields.len() == 0 {
+        parser_add_error(state, span, "a record type names no members", "a record type is an unnamed struct, so it needs at least one `name: Type` member", "write its members, such as `{{min: Int, max: Int}}`, or write `Unit`")
+    }
+    ParsedType{ty: Type.Tuple{fields: fields}, span: span}
+}
+
+// The offset of the token after the `}` that closes a record type at offset
+// `at`: a `{` whose first member is `name:`. A record value has the same
+// shape, so only a type position asks.
+parser_record_type_end_at: fn(state: &JetParserState, at: Int) -> Int? Never! {
+    if parser_kind_at(state, at) != TOKEN_LBRACE -> return None
+    first := at + 1
+    loop parser_kind_at(state, first) == TOKEN_SEMI -> first += 1
+    if parser_kind_at(state, first) != TOKEN_IDENT || parser_kind_at(state, first + 1) != TOKEN_COLON -> return None
+    depth := 1
+    offset := at + 1
+    loop {
+        kind: parser_kind_at(state, offset)
+        if kind == TOKEN_EOF -> return None
+        if kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+        if kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET {
+            depth -= 1
+            if depth == 0 -> return Val(offset + 1)
+        }
+        offset += 1
+    }
+}
+
+// Whether every member of the record-shaped `{…}` at offset `at` starts its
+// type as a type does: a capitalized name that is not a constant, a case
+// path (`Kind.Fast`) or a construction (`Point{…}`, `Val(…)`), or `Self`,
+// `[`, `(`, `{`, `fn`, `*` or a `#Tag`. A body such as `{ total: count }`
+// fails it.
+parser_record_type_members_typed_at: fn(state: &JetParserState, at: Int) -> Bool Never! {
+    end: parser_record_type_end_at(state, at) ?? return false
+    depth := 0
+    offset := at + 1
+    loop offset < end - 1 {
+        kind: parser_kind_at(state, offset)
+        if kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+        if kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> depth -= 1
+        if depth == 0 && kind == TOKEN_COLON && !parser_record_member_type_starts_at(state, offset + 1) -> return false
+        offset += 1
+    }
+    true
+}
+
+parser_record_member_type_starts_at: fn(state: &JetParserState, at: Int) -> Bool Never! {
+    kind: parser_kind_at(state, at)
+    if kind != TOKEN_IDENT {
+        return kind == TOKEN_SELF || kind == TOKEN_LBRACKET || kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_KW_FN || kind == TOKEN_STAR || kind == TOKEN_HASH
+    }
+    name: parser_value_at(state, at)
+    after: parser_kind_at(state, at + 1)
+    parser_pascal_name(name) && !parser_constant_name(name) && after != TOKEN_DOT && after != TOKEN_LBRACE && after != TOKEN_LPAREN
+}
+
 // A function type `fn(T1, …) -> R`, `fn(T1, …) -[E]> R` or `fn(…) E!`. It
 // reuses the parameter grammar's zone separators public
 // labels and zones are part of callable identity, local names are not.
@@ -589,7 +670,7 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
     if {
         canonical -> {
             result = parser_parse_unit_fallible_return(state)
-            if !parser_has_type(result) && parser_type_starts_here(state) {
+            if !parser_has_type(result) && (parser_type_starts_here(state) || parser_record_type_members_typed_at(state, 0)) {
                 arrow_return = true
                 result = Val(parser_parse_type(state, depth + 1))
             }
@@ -598,7 +679,7 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
             parser_bump(state)
             arrow_return = true
             result = parser_parse_unit_fallible_return(state)
-            if !parser_has_type(result) && parser_type_starts_here(state) {
+            if !parser_has_type(result) && (parser_type_starts_here(state) || parser_record_type_end_at(state, 0) != None) {
                 result = Val(parser_parse_type(state, depth + 1))
             }
         }

@@ -900,6 +900,11 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
                         if definition.type_params.len() == 0 && definition.target == .Named(_) {
                             return sema_type_graph_resolve_named(graph, type_name(definition.target), sema_registration_module_index(graph, graph.modules[row.module_index].nominals[row.row].symbol.module_identity) ?? -1)
                         }
+                        // A record alias (`Bounds: {min: Int, max: Int}`)
+                        // names its record type, which has no other name.
+                        if definition.type_params.len() == 0 && sema_registration_record_type(definition.target) {
+                            return sema_type_resolve_declared_recursive(graph, definition.target, sema_registration_module_index(graph, graph.modules[row.module_index].nominals[row.row].symbol.module_identity) ?? -1, [TGenericParam]{})
+                        }
                     }
                 }
                 return Type.Named{name: sema_type_graph_canonical_name_at(graph, resolved, nominal)}

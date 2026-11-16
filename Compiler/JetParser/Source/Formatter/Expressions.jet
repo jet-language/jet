@@ -883,9 +883,15 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
         // Shape arguments use the measure spelling.
         .Measure(measure) -> { jfmt_write(f, measure_expression(measure)) }
         .TraitObject(bounds) -> { jfmt_write(f, bounds.join(" + ")) }
+        // A record type keeps the delimiters it is written with: `{…}` or
+        // the paren form `(…)`.
         .Tuple(fields) -> {
-            jfmt_write(f, "(")
-            list_source: jfmt_source_list_at(f, source, JFMT_DELIM_PAREN)
+            braced := false
+            if jfmt_source_list_at(f, source, JFMT_DELIM_BRACE) == .Val(brace) {
+                braced = if jfmt_source_list_at(f, source, JFMT_DELIM_PAREN) == .Val(paren) -> brace.span.start < paren.span.start else -> true
+            }
+            jfmt_write(f, if braced -> "{{" else -> "(")
+            list_source: jfmt_source_list_at(f, source, if braced -> JFMT_DELIM_BRACE else -> JFMT_DELIM_PAREN)
             item_spans: jfmt_list_item_spans(f, list_source)
             multiline: jfmt_comma_begin(f, fields.len(), list_source)
             written: jfmt_tuple_written_names(f, fields, list_source)
@@ -911,7 +917,7 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                 jfmt_comma_after(f, multiline, span.end)
             }
             jfmt_comma_end(f, multiline, list_source)
-            jfmt_write(f, ")")
+            jfmt_write(f, if braced -> "}}" else -> ")")
         }
         .FixedList(elem, len) -> {
             jfmt_write(f, "[")
