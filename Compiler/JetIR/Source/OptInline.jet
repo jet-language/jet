@@ -678,12 +678,14 @@ ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
     assert_eq(ir_opt_inline_test_calls(m.functions[4]), 1)
     // IR Lint stops a build on each one, naming the call site in source,
     // the inlined copy's too.
-    marked_rows := [String]{}
+    marked_rows := 0
     loop finding in ir_lint_module(m, "ir.opt", compiler_threads_single()) {
-        if finding.rule == IR_LINT_CALL_MARKED -> marked_rows.push(finding.message.copy())
+        if finding.rule == IR_LINT_CALL_MARKED {
+            marked_rows += 1
+            assert(finding.message.contains(" at marked.jet:5 left after the marked calls were inlined"))
+        }
     }
-    assert_eq(marked_rows.len(), 2)
-    loop row in marked_rows -> assert(row.contains(" at marked.jet:5 left after the marked calls were inlined"))
+    assert_eq(marked_rows, 2)
     assert_eq(report.inlined_calls, 3)
     assert_eq(report.inlines.len(), 3)
     assert_eq("{report.inlines[0].caller} {report.inlines[0].callee} {report.inlines[0].reason}", "h g marked #Inline(Always)")
