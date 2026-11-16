@@ -1,0 +1,8 @@
+Error [jet.InvalidScreen]: `.screen("/search/:q", …)` registers no screen: `q` is an `#App.Query` field of `SearchView`, which goes after `?`, not in the path.
+  --> Tests/UI/web_route_search_param_in_path.jet:9:56
+    |
+  9 | graph: fn() -> app.App Never! { app.new("Crew").screen("/search/:q", search_screen) }
+    |                                                        ^^^^^^^^^^^^
+ Why: A screen's state is its address: each of its fields is a `:field` segment of the path or, marked `#App.Query`, goes after `?`, and every target opens the screen from that address, so the state has one screen and each field a place in the address.
+ Fix: Write the path as a string literal starting with `/`, give the view one parameter besides its `app.Remote<S>` ones, a struct whose fields each derive `Encode` and `Decode`, make the view unable to fail and give a value that derives `Encode`, name each field that isn't `#App.Query` once as a `:field` segment, and register each state at one screen.
+More: jet-lang.dev/e/E2820

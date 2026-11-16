@@ -15,8 +15,9 @@
 // read the same way, and so is a Markdown file's ```jet fence; a record in
 // an interpolation hole is reported instead.
 use {
-    jet_lexer.[Token, TokenTables, lex_generated, STRING_PART_INTERPOLATION, TOKEN_BANG, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_GT, TOKEN_IDENT, TOKEN_KW_FN, TOKEN_KW_MODULE, TOKEN_LBRACE, TOKEN_LPAREN, TOKEN_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SELF, TOKEN_SEMI, TOKEN_SHR, TOKEN_STRING, lexer_without_comments]
-    jet_parser.[parse_generated_source]
+    jet_foundation.[Program]
+    jet_lexer.[Token, TokenTables, lex_generated, STRING_PART_INTERPOLATION, TOKEN_BANG, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_GT, TOKEN_IDENT, TOKEN_KW_FN, TOKEN_KW_MODULE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_MINUS, TOKEN_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SELF, TOKEN_SEMI, TOKEN_SHR, TOKEN_STRING, TOKEN_UNIFIED_ARROW, lexer_without_comments]
+    jet_parser.[jfmt_structure, jfmt_structure_difference, parse_generated_source]
 }
 
 // Rewrites the paren records of one file: a Jet source (`source`, or a
@@ -68,14 +69,8 @@ paren_tuple1_source: fn(path: String, text: String) -> MigrationOutcome {
 paren_tuple1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: &[String]) -> LambdaShapeQuoted? {
     raw: lambda_shape1_text(bytes, token.span.start, token.span.end)
     if !raw.contains("(") -> return None
-    quote: if token.kind == TOKEN_RAW_STRING -> lambda_shape1_fence(raw, 96) else -> lambda_shape1_fence(raw, 34)
-    if quote == 0 || raw.len() < quote * 2 -> return None
-    inner_raw: lambda_shape1_text(bytes, token.span.start + quote, token.span.end - quote)
-    if token.kind == TOKEN_STRING {
-        unquoted: lambda_shape1_unquote(inner_raw) ?? return None
-        if lambda_shape1_quote(unquoted) != inner_raw -> return None
-    }
-    inner: if token.kind == TOKEN_RAW_STRING -> inner_raw else -> lambda_shape1_unquote(inner_raw) ?? return None
+    quote: paren_tuple1_quote_width(bytes, token)
+    inner: paren_tuple1_quoted_text(bytes, token) ?? return None
     outcome := paren_tuple1_source("{path}:{lambda_shape1_line(bytes, token.span.start)}", inner)
     if outcome.rewritten == 0 -> return None
     parsed: parse_generated_source(outcome.text.bytes())
@@ -91,10 +86,31 @@ paren_tuple1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: &[Stri
     Val(LambdaShapeQuoted{start: token.span.start + quote, end: token.span.end - quote, text: replaced, rewritten: count})
 }
 
+// How many quote bytes open and close a string token: one `"`, or the run of
+// backticks that fences a raw string.
+paren_tuple1_quote_width: fn(bytes: [U8], token: Token) -> Int {
+    raw: lambda_shape1_text(bytes, token.span.start, token.span.end)
+    if token.kind == TOKEN_RAW_STRING -> lambda_shape1_fence(raw, 96) else -> lambda_shape1_fence(raw, 34)
+}
+
+// The text a string token holds, when it reads back the way it is written:
+// a raw string's bytes, or a quoted string without interpolation holes whose
+// escapes quote it again unchanged.
+paren_tuple1_quoted_text: fn(bytes: [U8], token: Token) -> String? {
+    quote: paren_tuple1_quote_width(bytes, token)
+    if quote == 0 || token.span.end - token.span.start < quote * 2 -> return None
+    inner_raw: lambda_shape1_text(bytes, token.span.start + quote, token.span.end - quote)
+    if token.kind == TOKEN_RAW_STRING -> return Val(inner_raw)
+    unquoted: lambda_shape1_unquote(inner_raw) ?? return None
+    if lambda_shape1_quote(unquoted) != inner_raw -> return None
+    Val(unquoted)
+}
+
 // Rewrites the paren records among one token run: a file's code tokens or
 // one interpolation hole's (`hole`). Returns how many it rewrote. A hole
 // ends at its first `}`, so a record inside one stays as written and is
-// reported: bind it to a name before the string.
+// reported: bind it to a name before the string. A `(name: Type)` before
+// `->` or `-[`, the retired arrow lambda's parameters, is reported too.
 paren_tuple1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Token], hole: Bool, edits: &[LambdaShapeEdit], skipped: &[String]) -> Int {
     tokens: lexer_without_comments(raw)
     rewritten := 0
@@ -110,8 +126,14 @@ paren_tuple1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Toke
         if token.kind != TOKEN_LPAREN || !paren_tuple1_record(tokens, index) -> next
         close: lambda_shape1_match(tokens, index)
         if close < 0 -> next
+        line: lambda_shape1_line(bytes, token.span.start)
         if hole {
-            skipped.push("{path}:{lambda_shape1_line(bytes, token.span.start)}: a record inside an interpolation hole stays; bind it to a name first")
+            skipped.push("{path}:{line}: a record inside an interpolation hole stays; bind it to a name first")
+            next
+        }
+        after: if close + 1 < tokens.len() -> tokens[close + 1].kind else -> TOKEN_SEMI
+        if after == TOKEN_UNIFIED_ARROW || (after == TOKEN_MINUS && close + 2 < tokens.len() && tokens[close + 2].kind == TOKEN_LBRACKET) {
+            skipped.push("{path}:{line}: a retired arrow lambda's parameters stay; write it as `fn(…) {{ … }}`")
             next
         }
         edits.push(LambdaShapeEdit{start: token.span.start, end: token.span.start + 1, text: "{{"})
@@ -163,6 +185,32 @@ paren_tuple1_markdown: fn(path: String, text: String) -> MigrationOutcome {
     edits := [LambdaShapeEdit]{}
     skipped := [String]{}
     rewritten := 0
+    loop fence in paren_tuple1_fences(bytes) {
+        outcome := paren_tuple1_source("{path}:{fence.line}", lambda_shape1_text(bytes, fence.start, fence.end))
+        skipped.extend(outcome.skipped.move())
+        if outcome.rewritten > 0 {
+            rewritten += outcome.rewritten
+            edits.push(LambdaShapeEdit{start: fence.start, end: fence.end, text: outcome.text.move()})
+        }
+    }
+    if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    result: lambda_shape1_apply(bytes, edits) ?? {
+        skipped.push("{path}: overlapping edits, file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    MigrationOutcome{text: result, rewritten: rewritten, skipped: skipped}
+}
+
+// The body of a Markdown ```jet fence: the bytes between its opening and
+// closing lines, and the line its opening fence is on.
+ParenTupleFence: struct {
+    start: Int
+    end: Int
+    line: Int
+}
+
+paren_tuple1_fences: fn(bytes: [U8]) -> [ParenTupleFence] {
+    fences := [ParenTupleFence]{}
     line_start := 0
     line_number := 1
     // The first byte inside the open fence, or -1 outside every fence.
@@ -183,13 +231,7 @@ paren_tuple1_markdown: fn(path: String, text: String) -> MigrationOutcome {
             }
             trimmed == "```" -> {
                 if jet_fence && line_start > fence_start {
-                    block_end: line_start - 1
-                    outcome := paren_tuple1_source("{path}:{fence_line}", lambda_shape1_text(bytes, fence_start, block_end))
-                    skipped.extend(outcome.skipped.move())
-                    if outcome.rewritten > 0 {
-                        rewritten += outcome.rewritten
-                        edits.push(LambdaShapeEdit{start: fence_start, end: block_end, text: outcome.text.move()})
-                    }
+                    fences.push(ParenTupleFence{start: fence_start, end: line_start - 1, line: fence_line})
                 }
                 fence_start = -1
             }
@@ -198,10 +240,93 @@ paren_tuple1_markdown: fn(path: String, text: String) -> MigrationOutcome {
         line_start = line_end + 1
         line_number += 1
     }
-    if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
-    result: lambda_shape1_apply(bytes, edits) ?? {
-        skipped.push("{path}: overlapping edits, file left alone")
-        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    fences
+}
+
+// Why `after`, the plan's rewrite of `before`, does not mean what `before`
+// means, or None when it does. A Jet source's two texts must parse to the
+// same program (paren_tuple1_same_source); a Markdown file's ```jet fences
+// must, one by one, and its other text must stay as written.
+paren_tuple1_same_meaning: fn(path: String, before: String, after: String, source: Bool) -> String? {
+    if before == after -> return None
+    if source || path.ends_with(".jet") || path.ends_with(".template") {
+        return paren_tuple1_same_source(before, after)
     }
-    MigrationOutcome{text: result, rewritten: rewritten, skipped: skipped}
+    if !path.ends_with(".md") -> return Val("the plan rewrites no such file")
+    old: before.bytes()
+    new: after.bytes()
+    old_fences: paren_tuple1_fences(old)
+    new_fences: paren_tuple1_fences(new)
+    if old_fences.len() != new_fences.len() -> return Val("the ```jet fences differ in number")
+    old_prose := ""
+    new_prose := ""
+    old_at := 0
+    new_at := 0
+    loop index in 0..<old_fences.len() {
+        was: old_fences[index]
+        now: new_fences[index]
+        changed: paren_tuple1_same_source(lambda_shape1_text(old, was.start, was.end), lambda_shape1_text(new, now.start, now.end))
+        if changed == .Val(why) -> return Val("the fence at line {was.line}: {why}")
+        old_prose = "{old_prose}{lambda_shape1_text(old, old_at, was.start)}"
+        new_prose = "{new_prose}{lambda_shape1_text(new, new_at, now.start)}"
+        old_at = was.end
+        new_at = now.end
+    }
+    if "{old_prose}{lambda_shape1_text(old, old_at, old.len())}" != "{new_prose}{lambda_shape1_text(new, new_at, new.len())}" {
+        return Val("the text outside the ```jet fences changed")
+    }
+    None
+}
+
+// Why the Jet source `after` does not mean what `before` means, or None.
+// Both parse with the parser that reads paren and brace records, and their
+// programs compare without positions (paren_tuple1_structure). A string
+// literal that changed must hold a Jet program, compared the same way, and
+// it is put back as written before the programs compare.
+paren_tuple1_same_source: fn(before: String, after: String) -> String? {
+    old: before.bytes()
+    new: after.bytes()
+    old_strings: paren_tuple1_strings(lex_generated(old).tokens)
+    new_strings: paren_tuple1_strings(lex_generated(new).tokens)
+    if old_strings.len() != new_strings.len() -> return Val("the string literals differ in number")
+    edits := [LambdaShapeEdit]{}
+    loop index in 0..<new_strings.len() {
+        was: old_strings[index]
+        now: new_strings[index]
+        written: lambda_shape1_text(old, was.span.start, was.span.end)
+        if written == lambda_shape1_text(new, now.span.start, now.span.end) -> next
+        line: lambda_shape1_line(new, now.span.start)
+        old_program: paren_tuple1_quoted_text(old, was) ?? return Val("the string at line {line} changed but holds no quoted program")
+        new_program: paren_tuple1_quoted_text(new, now) ?? return Val("the string at line {line} changed but holds no quoted program")
+        if paren_tuple1_same_source(old_program, new_program) == .Val(why) {
+            return Val("the program quoted at line {line}: {why}")
+        }
+        edits.push(LambdaShapeEdit{start: now.span.start, end: now.span.end, text: written})
+    }
+    compared: if edits.len() == 0 -> after else -> lambda_shape1_apply(new, edits) ?? return Val("the changed strings overlap")
+    old_parse: parse_generated_source(old)
+    new_parse: parse_generated_source(compared.bytes())
+    old_errors: old_parse.diagnostics.filter(fn(d) { d.code.starts_with("E") }).len()
+    new_errors: new_parse.diagnostics.filter(fn(d) { d.code.starts_with("E") }).len()
+    if new_errors != old_errors {
+        return Val("the source parses with {old_errors} errors, the rewrite with {new_errors}")
+    }
+    old_shape: paren_tuple1_structure(old_parse.program)
+    new_shape: paren_tuple1_structure(new_parse.program)
+    if old_shape == new_shape -> return None
+    Val(jfmt_structure_difference(old_shape, new_shape))
+}
+
+paren_tuple1_strings: fn(tokens: [Token]) -> [Token] {
+    tokens.filter(fn(token) { token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING })
+}
+
+// A program's structure, as the formatter compares it (jfmt_structure, no
+// positions or node ids), with a paren record value `(a: 1, b: 2)` and a
+// headless brace value `{a: 1, b: 2}` written as one node: the members are
+// the same, and only the brace node records each name's position. Record
+// types and destructures already parse to one node either way.
+paren_tuple1_structure: fn(program: Program) -> String {
+    shape: jfmt_structure(program)
+    shape.replace("StructLit {{ type_name: \"\", type_args: [], import_ns: None, as_trait: None, fields: [", "TupleLit {{ fields: [").replace("ExprField {{ name: ", "TupleField {{ name: ").replace("\", name_span: S, value: ", "\", value: ").replace("], inferred: true, span: S, id:  }}", "], span: S, ty: None, id:  }}")
 }
