@@ -1,0 +1,153 @@
+use {
+    cbor: core.encoding.cbor
+    core.encoding.[DataEvent]
+    files: core.files
+    json: core.encoding.json
+}
+
+// One DataEvent stream written by the JSON and the CBOR file writers and read
+// back by their readers. The events are values of the enum Core declares, held
+// inline like any other Core enum: built, moved through lists and options,
+// compared with `==` and taken apart by a match. Each block panics on the
+// first wrong value and prints its line once every check in it has held.
+
+// Object keys are listed shortest first, the order the CBOR writer sorts them
+// into, so both formats read the stream back exactly as written.
+stream: fn() -> [DataEvent] {
+    [DataEvent]{
+        .ObjectStart,
+        .Key("n"),
+        .Text("jet ☺"),
+        .Key("xs"),
+        .ArrayStart,
+        .Int(-7),
+        .Int(9007199254740993),
+        .Float(Float{1.5}),
+        .Bool(true),
+        .Bool(false),
+        .Null,
+        .ArrayEnd,
+        .Key("end"),
+        .ObjectStart,
+        .ObjectEnd,
+        .ObjectEnd,
+    }
+}
+
+describe: fn(event: DataEvent) -> String {
+    if event == {
+        .Null -> "null"
+        .Bool(value) -> "bool {value}"
+        .Int(value) -> "int {value}"
+        .Float(value) -> "float {value}"
+        .Number(text) -> "number {text}"
+        .Text(text) -> "text {text}"
+        .Bytes(bytes) -> "bytes {bytes.len()}"
+        .ArrayStart -> "array start"
+        .ArrayEnd -> "array end"
+        .ObjectStart -> "object start"
+        .Key(name) -> "key {name}"
+        .ObjectEnd -> "object end"
+    }
+}
+
+write_json: fn(path: String, events: [DataEvent]) {
+    output: files.create(path) ?? panic("create json")
+    sink := json.writer(output) ?? panic("json writer")
+    loop event in events { sink.write(event.copy()) ?? panic("json write {describe(event)}") }
+    sink.finish() ?? panic("json finish")
+}
+
+read_json: fn(path: String) -> [DataEvent] {
+    input: files.open(path) ?? panic("open json")
+    source := json.reader(input) ?? panic("json reader")
+    events := [DataEvent]{}
+    loop {
+        if source.next() == {
+            .Val(event) -> events.push(event)
+            .None -> return events
+            .Err(failure) -> panic("json read: {failure.reason}")
+        }
+    }
+}
+
+write_cbor: fn(path: String, events: [DataEvent]) {
+    output: files.create(path) ?? panic("create cbor")
+    sink := cbor.writer(output) ?? panic("cbor writer")
+    loop event in events { sink.write(event.copy()) ?? panic("cbor write {describe(event)}") }
+    sink.finish() ?? panic("cbor finish")
+}
+
+read_cbor: fn(path: String) -> [DataEvent] {
+    input: files.open(path) ?? panic("open cbor")
+    source := cbor.reader(input) ?? panic("cbor reader")
+    events := [DataEvent]{}
+    loop {
+        if source.next() == {
+            .Val(event) -> events.push(event)
+            .None -> return events
+            .Err(failure) -> panic("cbor read: {failure.reason}")
+        }
+    }
+}
+
+values_are_inline_enum_values: fn() {
+    events: stream()
+    assert_eq(events.len(), 16)
+    assert_eq(events[2], DataEvent.Text("jet ☺"))
+    assert(events[5] != DataEvent.Int(7))
+    assert(events[6] == DataEvent.Int(9007199254740993))
+    held := DataEvent?{None}
+    held = Val(events[7])
+    assert_eq(held, Val(DataEvent.Float(Float{1.5})))
+    total := 0
+    loop event in events {
+        if event == .Int(value) -> total += value
+    }
+    assert_eq(total, 9007199254740986)
+    print("events are built, held, compared and matched as Core enum values")
+}
+
+json_round_trip: fn() {
+    dir: files.temp_dir("jet-data-event-json") ?? panic("temp")
+    path: "{dir.path}/events.json"
+    write_json(path, stream())
+    assert_eq(files.read(path) ?? panic("read"), "{{\"n\":\"jet ☺\",\"xs\":[-7,9007199254740993,1.5,true,false,null],\"end\":{{}}}}")
+    read: read_json(path)
+    assert_eq(read, stream())
+    loop event in read -> print("json {describe(event)}")
+    print("json writes and reads the stream back unchanged")
+}
+
+cbor_round_trip: fn() {
+    dir: files.temp_dir("jet-data-event-cbor") ?? panic("temp")
+    path: "{dir.path}/events.cbor"
+    write_cbor(path, stream())
+    assert_eq(read_cbor(path), stream())
+    bytes_path: "{dir.path}/bytes.cbor"
+    write_cbor(bytes_path, [DataEvent]{.ArrayStart, .Bytes([U8]{0, 255}), .Text("b"), .ArrayEnd})
+    bytes: read_cbor(bytes_path)
+    assert_eq(bytes, [DataEvent]{.ArrayStart, .Bytes([U8]{0, 255}), .Text("b"), .ArrayEnd})
+    loop event in bytes -> print("cbor {describe(event)}")
+    print("cbor writes and reads the stream and a byte string back unchanged")
+}
+
+number_is_refused_by_both_writers: fn() {
+    dir: files.temp_dir("jet-data-event-number") ?? panic("temp")
+    json_sink := json.writer(files.create("{dir.path}/n.json") ?? panic("create")) ?? panic("json writer")
+    if json_sink.write(DataEvent.Number("1e400")) == .Err(failure) {
+        assert_eq(failure.kind, .Unsupported)
+    } else { panic("json wrote a Number") }
+    cbor_sink := cbor.writer(files.create("{dir.path}/n.cbor") ?? panic("create")) ?? panic("cbor writer")
+    if cbor_sink.write(DataEvent.Number("1e400")) == .Err(failure) {
+        assert_eq(failure.kind, .Unsupported)
+    } else { panic("cbor wrote a Number") }
+    print("both writers refuse a Number event as Unsupported")
+}
+
+run: fn() {
+    values_are_inline_enum_values()
+    json_round_trip()
+    cbor_round_trip()
+    number_is_refused_by_both_writers()
+}

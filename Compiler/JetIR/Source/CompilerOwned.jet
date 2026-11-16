@@ -389,9 +389,7 @@ IRCompilerOwnedEnum: struct {
 // value of it can arise. Where its module line lists its cases, that
 // CORE_ENUM_CASE_ROWS row stands in when no single declaration is loaded. The
 // Core-declared families still here carry payloads that row can't hold, and
-// either a program can hold their values without loading the declaring
-// module, or (DataEvent) this row lays them out as their runtime handle
-// carrier, where the Core declaration would lay them out inline.
+// a program can hold their values without loading the declaring module.
 IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "HookOutcome", variants: [String]{"Continue", "Cancel", "Fail"}},
     {name: "HookDecision", variants: [String]{"Continue", "Transform", "Cancel", "Fail"}},
@@ -403,7 +401,6 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "Key", variants: [String]{"Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Insert", "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown", "Shift", "Control", "Alt", "Super", "CapsLock", "F", "Ctrl", "Unknown"}},
     {name: "DurationUnit", variants: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}},
     {name: "Dyn", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}},
-    {name: "DataEvent", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"}},
     // The closed reflection detail menus sema types fact reads with
     // (sema_fact_enum_variants): a read `EXACTNESS.kind` or
     // `OBLIGATION.param_contract[0].zone` is a runtime value of these rows.
@@ -454,9 +451,8 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         }
         return ir_compiler_owned_single(Type.Named{name: "IOContext"})
     }
-    // The canonical twelve DataEvent payloads and Key's cases are the Core
-    // payload rows (data_event_payload), as are a reflected PreparedValue's.
-    if name == "DataEvent" || name == "Key" || name == "PreparedValue" {
+    // Key's cases and a reflected PreparedValue's are the Core payload rows.
+    if name == "Key" || name == "PreparedValue" {
         payload: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
         if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])
         return IRCompilerOwnedPayload.Unit

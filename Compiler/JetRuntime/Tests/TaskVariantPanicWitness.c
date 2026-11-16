@@ -87,7 +87,6 @@ extern int64_t jet_rt_int_clone(int64_t);
 extern bool jet_bit_set_has(int64_t, int64_t);
 extern void jet_bitset_remove(int64_t, int64_t);
 extern int64_t jet_loop_range_init(int64_t, int64_t, int64_t, uint8_t, uint8_t);
-extern int64_t jet_rt_record_new_data_event_int(int64_t);
 extern int64_t jet_rt_record_new_dyn_int(int64_t);
 extern int64_t jet_rt_record_get_dyn_int(int64_t);
 extern int64_t jet_rt_record_new_duration(int64_t);
@@ -229,7 +228,7 @@ static void run_int_stop(int64_t test) {
     } else if (test >= 19 && test <= 21) {
         assert(jet_loop_range_init(test == 20 ? big : 0, test == 21 ? big : 1, test == 19 ? big : 1, 1, 0) == 0);
     } else if (test == 22) assert(jet_rt_record_new_jet_async_policy(big, 0) == 0);
-    else if (test == 23) assert(jet_rt_record_new_data_event_int(big) == 0);
+    else if (test == 23) assert(jet_rt_record_new_jet_period(big, 1, 1) == 0);
     else if (test == 24) {
         /* Canonical Dyn keeps large exact Int instead of narrowing it. */
         int64_t tree = jet_rt_record_new_dyn_int(big);
