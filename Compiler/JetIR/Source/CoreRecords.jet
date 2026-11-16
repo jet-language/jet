@@ -109,7 +109,7 @@ ir_core_records_match: fn(left: CoreCallRecord, right: CoreCallRecord) -> Bool N
     if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !ir_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) {
         return false
     }
-    if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class {
+    if left.fallibility != right.fallibility || !ir_string_rows_equal(left.effects, right.effects) {
         return false
     }
     if left.pure_route != right.pure_route || left.symbol != right.symbol -> return false

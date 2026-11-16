@@ -460,17 +460,11 @@ sema_taint_encodable: fn(function: Func, ty: Type) -> Bool Never! {
 }
 
 // The effects of a Core member the Core dispatcher routes with no source
-// declaration: its call record's root and leaf, as
-// sema_call_core_record_effects bounds them.
+// declaration: its call record's, as sema_call_core_record_effects bounds
+// them.
 sema_taint_record_effects: fn(module_name: String, method: String) -> [String] Never! {
-    effects := [String]{}
-    record: core_call(module_name, method) ?? return effects
-    leaf: record.effect_leaf ?? ""
-    if record.effect_kind == .Val(root) {
-        if leaf == "" || !sema_effect_covers(root, leaf) -> effects.push(root)
-    }
-    if leaf != "" -> effects.push(leaf)
-    effects
+    record: core_call(module_name, method) ?? return [String]{}
+    record.effects
 }
 
 // A Prelude value tag (Prelude/Markers.jet, read ahead of time into

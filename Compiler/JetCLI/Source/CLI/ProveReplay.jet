@@ -2704,9 +2704,8 @@ jet_cli_replay_core_authority: fn(core: &JetCLIReplayCore, module_name: String, 
         return Val(sema_effect_root(root))
     }
     record: core_call(module_name, member) ?? return None
-    if record.effect_kind == .Val(root) -> return Val(root)
-    leaf: record.effect_leaf ?? return None
-    Val(sema_effect_root(leaf))
+    if record.effects.len() == 0 -> return None
+    Val(sema_effect_root(record.effects[0]))
 }
 
 // Local name -> the Core module or member it imports.

@@ -117,7 +117,12 @@ sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [Call
             module_name = "{module_name}.{leaf}"
             if core_module_export(module_name) == None -> return None
         }
-        record: core_call(module_name, method) ?? return None
+        // A source-owned row's effects are its Core declaration's.
+        record := core_call(module_name, method) ?? return None
+        declared := [String]{}
+        if sema_call_core_declared_effects(record, environment, program, declared) {
+            record.effects = declared
+        }
         return Val(sema_frame_core_call_operation(record, "{module_name}.{method}", args, index))
     }
     if path.leaves.len() > 0 -> return None

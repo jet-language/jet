@@ -55,7 +55,6 @@ use jet_foundation.[
     core_module_export,
     diagnostic_with_edit,
     expr_span,
-    sema_effect_covers,
     type_name,
     shared_lifetime_core_member,
     CORE_CALLS,
@@ -1193,18 +1192,12 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
     }
     normalized: sema_call_core_normalized_source_record(record, args, type_args)
     if core_call_source_member(normalized) == .Val(member) {
-        source_module := record.module_name
-        source_member := member
-        if member.starts_with("core.") {
-            parts := member.split(".").to_list()
-            source_member = parts.pop() ?? return None
-            source_module = parts.join(".")
-        }
-        identity: sema_call_core_module_identity(environment, program, source_module) ?? {
-            diagnostics.push(sema_error("E0902", span, "source-owned Core module `{source_module}` is not loaded", "this declaration has no host implementation route", "load the owning Core source package"))
+        path: sema_call_core_source_path(record.module_name, member) ?? return None
+        identity: sema_call_core_module_identity(environment, program, path.module_name) ?? {
+            diagnostics.push(sema_error("E0902", span, "source-owned Core module `{path.module_name}` is not loaded", "this declaration has no host implementation route", "load the owning Core source package"))
             return None
         }
-        target: sema_call_core_source_target(environment, program, identity, source_member, type_args, span, true, diagnostics) ?? {
+        target: sema_call_core_source_target(environment, program, identity, path.member, type_args, span, true, diagnostics) ?? {
             diagnostics.push(sema_error("E0902", span, "source-owned Core call `{record.module_name}.{member}` has no checked source target", "this declaration must execute its owning Jet function", "load the matching Core source export"))
             return None
         }
@@ -1241,30 +1234,45 @@ sema_call_core_source: fn(module_name: String, member: String, values: [TExpr], 
     Val(sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: arguments}, span))
 }
 
-// Record known root/leaf effects (including known purity) and enforce authored
-// transaction walls before the CoreCall reaches effect-graph collection.
+// The Core module and function a source-owned row's `member` names: the row's
+// own module, or the module a dotted `core.` source target names.
+sema_call_core_source_path: fn(module_name: String, member: String) -> (module_name: String, member: String)? Never! {
+    if !member.starts_with("core.") -> return Val((module_name: module_name, member: member))
+    parts := member.split(".").to_list()
+    function: parts.pop() ?? return None
+    Val((module_name: parts.join("."), member: function))
+}
+
+// Push the effects the Core declaration of a source-owned record writes;
+// false for an adapter row, or one whose function this program has not loaded.
+sema_call_core_declared_effects: fn(record: CoreCallRecord, environment: SemaScopeEnvironment, program: SemaProgramTables, effects: &[String]) -> Bool Never! {
+    member: core_call_source_member(record) ?? return false
+    path: sema_call_core_source_path(record.module_name, member) ?? return false
+    identity: sema_call_core_module_identity(environment, program, path.module_name) ?? return false
+    if program.registration_graph == .Val(graph) {
+        module_index: sema_registration_module_index(graph, identity) ?? return false
+        position: graph.modules[module_index].declaration_positions.get(path.member) ?? return false
+        if graph.modules[module_index].declarations[position] == .Func(function) {
+            if function.declared_effects == .Val(row) {
+                loop entry in row -> effects.push(entry.name)
+            }
+            return true
+        }
+    }
+    false
+}
+
+// Record the call's effects (including known purity) and enforce authored
+// transaction walls before the CoreCall reaches effect-graph collection. A
+// source-owned row's effects are its Core declaration's row; an adapter row
+// carries its own.
 sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_bound := [EffectRowEntry]{}
-    leaf_name: record.effect_leaf ?? ""
-    if record.effect_kind == {
-        .Val(root_name) -> {
-            // A precise leaf under the call's own root replaces
-            // that root, so a leaf grant (`FS.Read`, `Exec.Args`) covers the
-            // call and the root still covers the leaf. A leaf under another
-            // root (`Time.Wait` on a network call) adds to the root instead.
-            if leaf_name == "" || !sema_effect_covers(root_name, leaf_name) {
-                effect_bound.push(EffectRowEntry{name: root_name, span: span})
-            }
-        }
-        .None -> {}
-    }
-    if leaf_name != "" {
-        seen: loop entry in effect_bound {
-            if entry.name == leaf_name {
-                break true
-            }
-        } ?? false
-        if !seen -> effect_bound.push(EffectRowEntry{name: leaf_name, span: span})
+    declared := [String]{}
+    if sema_call_core_declared_effects(record, environment, program, declared) {
+        loop name in declared -> effect_bound.push(EffectRowEntry{name: name, span: span})
+    } else {
+        loop name in record.effects -> effect_bound.push(EffectRowEntry{name: name, span: span})
     }
     api: if record.module_name != "" -> "{record.module_name}.{record.member}" else -> record.member
     facts := SemaCallFacts{

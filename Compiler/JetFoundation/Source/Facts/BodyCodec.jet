@@ -4752,20 +4752,6 @@ body_codec_get_opt_corecallcompletion: fn(bytes: [U8], input: &BodyCodecIn) -> C
     None
 }
 
-body_codec_put_opt_sinkclass: fn(out: &BodyCodecOut, value: SinkClass?) Never! {
-    if value == .Val(inner) {
-        body_codec_put_bool(out, true)
-        body_codec_put_sinkclass(out, inner)
-        return
-    }
-    body_codec_put_bool(out, false)
-}
-
-body_codec_get_opt_sinkclass: fn(bytes: [U8], input: &BodyCodecIn) -> SinkClass? Never! {
-    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_sinkclass(bytes, input))
-    None
-}
-
 body_codec_put_opt_coremarkerapplication: fn(out: &BodyCodecOut, value: CoreMarkerApplication?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
@@ -4806,10 +4792,8 @@ body_codec_put_corecallrecord: fn(out: &BodyCodecOut, value: CoreCallRecord) Nev
     body_codec_put_list_corecallresourceaccess(out, value.frame_accesses)
     body_codec_put_opt_corecallcompletion(out, value.frame_completion)
     body_codec_put_corecallfallibility(out, value.fallibility)
-    body_codec_put_opt_string(out, value.effect_kind)
+    body_codec_put_list_string(out, value.effects)
     body_codec_put_corecapabilitycontract(out, value.capability)
-    body_codec_put_opt_string(out, value.effect_leaf)
-    body_codec_put_opt_sinkclass(out, value.sink_class)
     body_codec_put_corecallpureroute(out, value.pure_route)
     body_codec_put_corecallsymbol(out, value.symbol)
     body_codec_put_opt_string(out, value.source_target)
@@ -4829,20 +4813,18 @@ body_codec_get_corecallrecord: fn(bytes: [U8], input: &BodyCodecIn) -> CoreCallR
     f4: body_codec_get_list_corecallresourceaccess(bytes, input)
     f5: body_codec_get_opt_corecallcompletion(bytes, input)
     f6: body_codec_get_corecallfallibility(bytes, input)
-    f7: body_codec_get_opt_string(bytes, input)
+    f7: body_codec_get_list_string(bytes, input)
     f8: body_codec_get_corecapabilitycontract(bytes, input)
-    f9: body_codec_get_opt_string(bytes, input)
-    f10: body_codec_get_opt_sinkclass(bytes, input)
-    f11: body_codec_get_corecallpureroute(bytes, input)
-    f12: body_codec_get_corecallsymbol(bytes, input)
-    f13: body_codec_get_opt_string(bytes, input)
-    f14: body_codec_get_corecallcoverage(bytes, input)
-    f15: body_codec_get_bool(bytes, input)
-    f16: body_codec_get_bool(bytes, input)
-    f17: body_codec_get_list_string(bytes, input)
-    f18: body_codec_get_opt_coremarkerapplication(bytes, input)
-    f19: body_codec_get_opt_authoritydecision(bytes, input)
-    CoreCallRecord{module_name: f0, member: f1, receiver_types: f2, signature: f3, frame_accesses: f4, frame_completion: f5, fallibility: f6, effect_kind: f7, capability: f8, effect_leaf: f9, sink_class: f10, pure_route: f11, symbol: f12, source_target: f13, coverage: f14, aot_direct: f15, native_int_result: f16, ui_capabilities: f17, marker: f18, authority: f19}
+    f9: body_codec_get_corecallpureroute(bytes, input)
+    f10: body_codec_get_corecallsymbol(bytes, input)
+    f11: body_codec_get_opt_string(bytes, input)
+    f12: body_codec_get_corecallcoverage(bytes, input)
+    f13: body_codec_get_bool(bytes, input)
+    f14: body_codec_get_bool(bytes, input)
+    f15: body_codec_get_list_string(bytes, input)
+    f16: body_codec_get_opt_coremarkerapplication(bytes, input)
+    f17: body_codec_get_opt_authoritydecision(bytes, input)
+    CoreCallRecord{module_name: f0, member: f1, receiver_types: f2, signature: f3, frame_accesses: f4, frame_completion: f5, fallibility: f6, effects: f7, capability: f8, pure_route: f9, symbol: f10, source_target: f11, coverage: f12, aot_direct: f13, native_int_result: f14, ui_capabilities: f15, marker: f16, authority: f17}
 }
 
 body_codec_put_corecallsignature: fn(out: &BodyCodecOut, value: CoreCallSignature) Never! {
@@ -4959,17 +4941,6 @@ body_codec_get_corecapabilitykind: fn(bytes: [U8], input: &BodyCodecIn) -> CoreC
         3 -> CoreCapabilityKind.ExplicitSimulation
         else -> CoreCapabilityKind.Pure
     }
-}
-
-body_codec_put_sinkclass: fn(out: &BodyCodecOut, value: SinkClass) Never! {
-    if value == {
-        .Credential -> body_codec_put_tag(out, 0)
-    }
-}
-
-body_codec_get_sinkclass: fn(bytes: [U8], input: &BodyCodecIn) -> SinkClass Never! {
-    body_codec_skip_tag(bytes, input, 1)
-    SinkClass.Credential
 }
 
 body_codec_put_corecallpureroute: fn(out: &BodyCodecOut, value: CoreCallPureRoute) Never! {

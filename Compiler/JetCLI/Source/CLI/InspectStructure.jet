@@ -3,7 +3,8 @@
 // Core.rows's declarations as the compiler reads them (CORE_DECLARATIONS).
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[CORE_BOOTSTRAP_STEPS, CORE_CALLS, CORE_MODULE_DECLARATIONS, CORE_ROOT_TYPES, CORE_SOURCE_OWNED_ROWS, CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_FACT_ROWS, diagnostic_render_all, name_ledger_from_facts]
+    jet_foundation.[CORE_BOOTSTRAP_STEPS, CORE_CALLS, CORE_MODULE_DECLARATIONS, CORE_ROOT_TYPES, CORE_SOURCE_OWNED_ROWS, CoreCallRecord, CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_FACT_ROWS, core_call_source_member, diagnostic_render_all, name_ledger_from_facts]
+    jet_parser.[parse_source]
     jet_sema.[sema_gate_append_structure]
 }
 
@@ -91,17 +92,61 @@ jet_cli_structure_core_type: fn(entry: CoreModuleTypeExport) -> JetCLIStatusValu
     jet_cli_status_object(fields)
 }
 
+// The `module.function` a source-owned CORE_CALLS row runs: its own module,
+// or the module a dotted `core.` source target names. None for an adapter row.
+jet_cli_structure_core_source_key: fn(record: CoreCallRecord) -> String? Never! {
+    member: core_call_source_member(record) ?? return None
+    if member.starts_with("core.") -> return Val(member)
+    Val("{record.module_name}.{member}")
+}
+
+// The effect row each Core function a source-owned row runs declares, keyed
+// `module.function`, read from the Core built into this jet (the Core its
+// CORE_CALLS were built from): only those rows' modules are parsed, each once.
+jet_cli_structure_core_declared: fn() -> [String:[String]] Never! {
+    declared := [String:[String]]{}
+    modules := [String]{}
+    loop record in CORE_CALLS {
+        if record.module_name == "" -> next
+        key: jet_cli_structure_core_source_key(record) ?? next
+        module_name: key.slice(0, key.rfind("."))
+        if !modules.contains(module_name) -> modules.push(module_name)
+    }
+    loop source in jet_cli_builtin_core_rows() {
+        if !modules.contains(source.module_name) -> next
+        parsed: parse_source(source.source().bytes())
+        loop item in parsed.program.items {
+            if item == .Func(function) {
+                effects := [String]{}
+                if function.declared_effects == .Val(row) {
+                    loop entry in row -> effects.push(entry.name)
+                }
+                declared["{source.module_name}.{function.name}"] = effects
+            }
+        }
+    }
+    declared
+}
+
+// A call row's effects: an adapter row's own, or the row the Core
+// declaration of a source-owned row writes.
+jet_cli_structure_core_effects: fn(record: CoreCallRecord, declared: [String:[String]]) -> JetCLIStatusValue Never! {
+    key: jet_cli_structure_core_source_key(record) ?? return jet_cli_status_texts(record.effects)
+    jet_cli_status_texts(declared.get(key) ?? [String]{})
+}
+
 // `jet inspect structure --core`: Core.rows's bootstrap steps, root types and
 // modules (each with its Core.rows line), and the Core sources the compiler
 // loads; `--json` is the machine view Tools/Agent/CoreSurfaceLedger.jet reads,
-// and its `calls` (each CORE_CALLS record's effect fields and Prelude symbol)
-// the one Tools/Agent/RuntimeEffectRows.jet reads.
+// and its `calls` (each CORE_CALLS record's effects and Prelude symbol) the
+// one Tools/Agent/RuntimeEffectRows.jet reads.
 jet_cli_structure_core: fn(json: Bool) -> JetDriverVerbOutput Never! {
     if json {
         bootstrap: loop step in CORE_BOOTSTRAP_STEPS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(step.name)), jet_cli_status_field("dependencies", jet_cli_status_texts(step.dependencies))})
         modules: loop core_module in CORE_MODULE_DECLARATIONS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("module", jet_cli_status_text(core_module.module_name)), jet_cli_status_field("source_line", jet_cli_status_int(core_module.line)), jet_cli_status_field("members", jet_cli_status_texts(core_module.members)), jet_cli_status_field("type_exports", jet_cli_status_array(loop entry in core_module.type_exports -> jet_cli_structure_core_type(entry))), jet_cli_status_field("dependencies", jet_cli_status_texts(core_module.dependencies))})
         sources: loop row in CORE_SOURCE_OWNED_ROWS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(row.path)), jet_cli_status_field("module", jet_cli_status_text(row.module_name)), jet_cli_status_field("owner", jet_cli_status_text(row.owner)), jet_cli_status_field("runtime", jet_cli_status_bool(row.runtime))})
-        calls: loop record in CORE_CALLS if record.module_name != "" -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("module", jet_cli_status_text(record.module_name)), jet_cli_status_field("member", jet_cli_status_text(record.member)), jet_cli_status_field("effect_kind", jet_cli_status_optional_text(record.effect_kind)), jet_cli_status_field("effect_leaf", jet_cli_status_optional_text(record.effect_leaf)), jet_cli_status_field("symbol", jet_cli_status_optional_text(if record.symbol == .Prelude(name) -> Val(name) else -> None))})
+        declared: jet_cli_structure_core_declared()
+        calls: loop record in CORE_CALLS if record.module_name != "" -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("module", jet_cli_status_text(record.module_name)), jet_cli_status_field("member", jet_cli_status_text(record.member)), jet_cli_status_field("effects", jet_cli_structure_core_effects(record, declared)), jet_cli_status_field("symbol", jet_cli_status_optional_text(if record.symbol == .Prelude(name) -> Val(name) else -> None))})
         core: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("bootstrap", jet_cli_status_array(bootstrap)), jet_cli_status_field("root_types", jet_cli_status_texts(CORE_ROOT_TYPES)), jet_cli_status_field("modules", jet_cli_status_array(modules)), jet_cli_status_field("sources", jet_cli_status_array(sources)), jet_cli_status_field("calls", jet_cli_status_array(calls))})
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("core", core)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }

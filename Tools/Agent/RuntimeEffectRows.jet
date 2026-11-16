@@ -10,8 +10,7 @@
 // built records through `jet inspect structure --core --json` (its `calls`),
 // run by $JET, else `jet` on PATH, so the jet must be built from this tree.
 // While both tables carry that leaf, the member's declared row must be the
-// effect sema gives a call of the record: its `effect_kind` unless its
-// `effect_leaf` refines that kind, and its `effect_leaf`, sorted; else no
+// effect sema gives a call of the record: its `effects`, sorted; else no
 // effect. A leaf one table carries and the other does not is a
 // half-done cutover and a difference too; a leaf neither carries is cut over
 // (or never existed) and has nothing to compare. The report names each member
@@ -52,12 +51,11 @@ InterfaceMember: struct {
     symbol: String
 }
 
-// One CoreCallRecord's effect fields.
+// One CoreCallRecord's effects.
 CoreLeaf: struct {
     module_name: String
     member: String
-    effect_kind: String?
-    effect_leaf: String?
+    effects: [String]
     symbol: String
 }
 
@@ -163,7 +161,7 @@ interface_members: fn(text: String) -> [InterfaceMember] Never! {
 }
 
 // The `calls` of `jet inspect structure --core --json`'s `core` object: each
-// CORE_CALLS record's module, member, effect fields and Prelude symbol.
+// CORE_CALLS record's module, member, effects and Prelude symbol.
 core_leaves: fn(core: Dyn) -> [CoreLeaf] Never! {
     leaves := [CoreLeaf]{}
     calls: core.get("calls") ?? Dyn.Null
@@ -175,14 +173,26 @@ core_leaves: fn(core: Dyn) -> [CoreLeaf] Never! {
                 CoreLeaf{
                     module_name: module_name,
                     member: member,
-                    effect_kind: optional_text(record.get("effect_kind")),
-                    effect_leaf: optional_text(record.get("effect_leaf")),
+                    effects: text_list(record.get("effects")),
                     symbol: optional_text(record.get("symbol")) ?? "",
                 },
             )
         }
     }
     leaves
+}
+
+// The texts of a JSON array, else none.
+text_list: fn(value: Dyn?) -> [String] Never! {
+    texts := [String]{}
+    if value == .Val(found) {
+        if found == .Array(items) {
+            loop item in items {
+                if item == .Text(content) -> texts.push(content.copy())
+            }
+        }
+    }
+    texts
 }
 
 // `core.M __X` for each `dispatcher_row <kind> core.M __X | …` line.
@@ -196,18 +206,10 @@ dispatcher_keys: fn(text: String) -> [String] Never! {
     keys
 }
 
-// The effect sema gives a call of the record (Effects/Checks.jet
-// sema_effect_record_core_row): its kind unless its leaf refines that kind,
-// and its leaf, sorted; else none.
+// The effects sema gives a call of the record (Effects/Checks.jet
+// sema_effect_record_core_row), sorted; else none.
 leaf_effects: fn(leaf: CoreLeaf) -> [String] Never! {
-    effects := [String]{}
-    leaf_name: leaf.effect_leaf ?? ""
-    if leaf.effect_kind == .Val(kind) {
-        if leaf_name == "" || (leaf_name != kind && !leaf_name.starts_with("{kind}.")) {
-            effects.push(kind.copy())
-        }
-    }
-    if leaf_name != "" -> effects.push(leaf_name.copy())
+    effects := leaf.effects.copy()
     effects.sort()
     effects
 }
@@ -374,10 +376,10 @@ run: fn() {
         InterfaceMember{module_name: "jet.runtime.net", member: "dns_ptr_lookup", effects: [String]{"Time.Wait"}, symbol: "jet_net_dns_ptr_lookup"},
     }
     leaves: [CoreLeaf]{
-        CoreLeaf{module_name: "core.time", member: "__sleep_ns", effect_kind: Val("Time"), effect_leaf: Val("Time.Wait"), symbol: "jet_std_time_sleep_duration_ns"},
-        CoreLeaf{module_name: "core.time", member: "__task_timeout", effect_kind: Val("Time"), effect_leaf: None, symbol: "jet_task_timeout_duration_ns"},
-        CoreLeaf{module_name: "core.net", member: "__dns_txt_lookup", effect_kind: Val("Net"), effect_leaf: Val("Time.Wait"), symbol: "jet_net_dns_txt_lookup"},
-        CoreLeaf{module_name: "core.net", member: "__dns_ptr_lookup", effect_kind: Val("Net"), effect_leaf: Val("Time.Wait"), symbol: "jet_net_dns_ptr_lookup"},
+        CoreLeaf{module_name: "core.time", member: "__sleep_ns", effects: [String]{"Time.Wait"}, symbol: "jet_std_time_sleep_duration_ns"},
+        CoreLeaf{module_name: "core.time", member: "__task_timeout", effects: [String]{"Time"}, symbol: "jet_task_timeout_duration_ns"},
+        CoreLeaf{module_name: "core.net", member: "__dns_txt_lookup", effects: [String]{"Time.Wait", "Net"}, symbol: "jet_net_dns_txt_lookup"},
+        CoreLeaf{module_name: "core.net", member: "__dns_ptr_lookup", effects: [String]{"Net", "Time.Wait"}, symbol: "jet_net_dns_ptr_lookup"},
     }
     report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half", "core.net __dns_txt_lookup", "core.net __dns_ptr_lookup"}, [LeafAlias]{})
     assert_eq(report.joined, 4)
@@ -390,8 +392,8 @@ run: fn() {
         InterfaceMember{module_name: "jet.runtime.sys", member: "simd_lanes", effects: [String]{"GPU"}, symbol: "jet_compute_simd_lanes"},
     }
     leaves: [CoreLeaf]{
-        CoreLeaf{module_name: "core.perf", member: "__read_bits", effect_kind: Val("Env"), effect_leaf: None, symbol: "jet_perf_read_bits"},
-        CoreLeaf{module_name: "core.compute", member: "__simd_lanes", effect_kind: None, effect_leaf: None, symbol: "jet_compute_simd_lanes"},
+        CoreLeaf{module_name: "core.perf", member: "__read_bits", effects: [String]{"Env"}, symbol: "jet_perf_read_bits"},
+        CoreLeaf{module_name: "core.compute", member: "__simd_lanes", effects: [String]{}, symbol: "jet_compute_simd_lanes"},
     }
     aliases: [LeafAlias]{
         LeafAlias{member: "jet.runtime.sys.perf_bits", leaf: "core.perf __read_bits"},
@@ -423,11 +425,11 @@ run: fn() {
     parsed: interface_members(interface)
     assert_eq(parsed.len(), 1)
     assert_eq(parsed[0].effects.join("|"), "Time.Wait")
-    record: json.parse("{{\"calls\":[{{\"module\":\"core.time\",\"member\":\"__sleep_ns\",\"effect_kind\":\"Time\",\"effect_leaf\":\"Time.Wait\",\"symbol\":\"jet_std_time_sleep_duration_ns\"}},{{\"module\":\"core.time\",\"member\":\"__half\",\"effect_kind\":null,\"effect_leaf\":null,\"symbol\":null}}]}}") ?? panic("the call records did not parse: {err}")
+    record: json.parse("{{\"calls\":[{{\"module\":\"core.time\",\"member\":\"__sleep_ns\",\"effects\":[\"Time.Wait\"],\"symbol\":\"jet_std_time_sleep_duration_ns\"}},{{\"module\":\"core.time\",\"member\":\"__half\",\"effects\":[],\"symbol\":null}}]}}") ?? panic("the call records did not parse: {err}")
     leaf: core_leaves(record)
     assert_eq(leaf.len(), 2)
     assert_eq(leaf[0].symbol, "jet_std_time_sleep_duration_ns")
-    assert_eq(leaf[0].effect_leaf ?? "", "Time.Wait")
-    assert(leaf[1].effect_kind == None && leaf[1].symbol == "")
+    assert_eq(leaf[0].effects.join("|"), "Time.Wait")
+    assert(leaf[1].effects.len() == 0 && leaf[1].symbol == "")
     assert_eq(dispatcher_keys("dispatcher_row adapter core.time __sleep_ns | CoreCallRecord::new(…)").join("|"), "core.time __sleep_ns")
 }
