@@ -18,6 +18,7 @@ use jet_foundation.[
     Type,
     TypedLitBody,
     core_identity_in_module,
+    foundation_named_type,
     type_name,
 ]
 
@@ -70,13 +71,18 @@ sema_type_value_of: fn(ty: Type, value_type: Type, span: Span, environment: Sema
     None
 }
 
-// A type name where a `Type` is expected: the value it names. A generic
+// A type name where a `Type` is expected: the value it names. A builtin
+// type's name (`Int`, `U8`) names it as a declared type's does. A generic
 // parameter has no single type to name, so it stays E0636.
 sema_type_value_name: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext) -> TExpr? {
     if sema_type_name_is_generic(environment.generic_params, name) -> return None
     value_type: sema_type_value_type(expected, environment, program) ?? return None
-    if sema_expression_type_symbol(scopes, environment, program, name) == None -> return None
-    sema_type_value_of(Type.Named{name: name}, value_type, span, environment, program, scopes, context)
+    if sema_expression_type_symbol(scopes, environment, program, name) != None {
+        return sema_type_value_of(Type.Named{name: name}, value_type, span, environment, program, scopes, context)
+    }
+    builtin: foundation_named_type(name)
+    if builtin == .Named(_) -> return None
+    sema_type_value_of(builtin, value_type, span, environment, program, scopes, context)
 }
 
 // A written type (`Box<Int>`) where a `Type` is expected: the value it names.

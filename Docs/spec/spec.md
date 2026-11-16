@@ -3596,7 +3596,9 @@ is a type as a value: a `Type` parameter, field or result, a `[Type:V]` key, a
 switches on one. `Type{Rock}` names one explicitly, and `type_of(p)` is the
 static type of a name or field path, read without evaluating it. Two `Type`
 values are equal exactly when they name one type, generic arguments included:
-`Box<Int>` and `Box<String>` are different keys. A `Type` displays its path,
+`Box<Int>` and `Box<String>` are different keys. A builtin type's name is one
+as a declared type's is: `counts[Int] = 1` keys a map by `Int`, and
+`type_of(n) == Int` holds for an `Int` binding. A `Type` displays its path,
 each declared type qualified by its module. Only the compiler builds one.
 
 Anywhere else a type is not a value: binding, passing or printing a type, such

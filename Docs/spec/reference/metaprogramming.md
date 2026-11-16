@@ -513,8 +513,10 @@ form.
 A type name is also a value of the prelude's `Type` wherever a `Type` is
 expected: `counts[Position] = 2` keys a map by type, `if t == { Position -> … }`
 switches on one, `Type{Rock}` names one explicitly and `type_of(p)` is the
-static type of a name or field path. Two values are equal exactly when they
-name one type, so `Box<Int>` and `Box<String>` are different keys.
+static type of a name or field path. A builtin type's name is one too:
+`counts[Int] = 1` works as `counts[Position] = 2` does. Two values are equal
+exactly when they name one type, so `Box<Int>` and `Box<String>` are different
+keys.
 [`TypeValues`](../../../Examples/Metaprogramming/Reflection/TypeValues.jet)
 uses each form.
 
