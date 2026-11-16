@@ -21,6 +21,7 @@ use {
         SemaCoreBodiesAheadPart,
         SemaCoreBodyAhead,
         SemaCoreBodyRecord,
+        SemaCoreCaptures,
         SemaComptimeDeclarationStage,
         SemaForeignProviderInput,
         SemaFunctionResult,
@@ -422,7 +423,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
         if module_row.package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY -> next
         loop function in module_row.functions -> keys["{function.key}"] = true
     }
-    bodies: sema_core_bodies_read(checked.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
+    bodies: sema_core_bodies_read(body_codec_file(checked.core_bodies.move())) ?? panic("BodyCodec: the bodies file does not read back")
     if sema_core_bodies_problem(bodies.bytes) == .Val(problem) {
         failures.push("the bodies file does not read back whole: {problem}")
     }
@@ -619,6 +620,13 @@ BodyCodecRecords: struct {
     }
 }
 
+// The bodies file of a check's captures, as the Core library writes it
+// (JetCli CoreLibrary.jet jet_cli_core_bodies_file).
+body_codec_file: fn(captures: &&SemaCoreCaptures) -> [U8] {
+    held := captures.move()
+    sema_core_bodies_bytes(held.bodies.move(), held.context)
+}
+
 // Checks `main` (body_codec_check of `package`, `core`) as the Core
 // library's check does, then again with the bodies file that check wrote:
 // every function check is loaded, and each module's result and the
@@ -629,12 +637,12 @@ BodyCodecRecords: struct {
 body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     failures := [String]{}
     captured := body_codec_check(failures, package, body_codec_hooks(), core) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
-    bodies := sema_core_bodies_read(captured.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
+    bodies := sema_core_bodies_read(body_codec_file(captured.core_bodies.move())) ?? panic("BodyCodec: the bodies file does not read back")
     count: bodies.head.count
     file := [U8]{}
     if through_file {
         again := body_codec_check(failures, package, body_codec_hooks(), core) ?? panic("BodyCodec could not check module `main` again:\n{failures.join("\n")}")
-        file = again.core_bodies.move()
+        file = body_codec_file(again.core_bodies.move())
         loop index in sema_core_bodies_offset(bodies.bytes, bodies.head, 0)..<bodies.bytes.len() {
             bodies.bytes[index] = U8{0}
         }
@@ -653,7 +661,7 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     if count < 6 || loaded_count != count {
         failures.push("{count} function checks were captured and {loaded_count} loaded")
     }
-    if loaded.core_bodies.len() > 0 {
+    if loaded.core_bodies.bodies.len() > 0 {
         failures.push("a compile that loads function checks captured them too")
     }
     if loaded.modules.len() != captured.modules.len() {
@@ -706,7 +714,7 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
 #Test("Core function checks read ahead on compiler threads are the checks a load reads") {
     failures := [String]{}
     captured := body_codec_check(failures, "core", body_codec_hooks(), true) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
-    bodies := sema_core_bodies_read(captured.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
+    bodies := sema_core_bodies_read(body_codec_file(captured.core_bodies.move())) ?? panic("BodyCodec: the bodies file does not read back")
     stage := body_codec_declared(failures, "core", true, true, "") ?? panic("BodyCodec could not declare module `main`:\n{failures.join("\n")}")
     declared := stage.graph.move()
     graph := declared.move() ?? panic("BodyCodec: the declaration pass lost its registration graph")

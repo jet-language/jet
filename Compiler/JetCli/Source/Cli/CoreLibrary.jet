@@ -32,10 +32,10 @@ use {
         jet_driver_present_diagnostics,
         jet_driver_runtime_interface_sources,
     ]
-    jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_transfer_rows, symbol_table]
+    jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, symbol_table]
     jet_ir.[IRCoreLibrary, ir_build_core_library, ir_core_exports_text, ir_core_facts_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[JET_VERSION]
-    jet_sema.[sema_core_bodies_problem, sema_core_seal_bound]
+    jet_sema.[SemaCoreBody, SemaCoreCaptures, sema_core_bodies_bytes, sema_core_bodies_problem, sema_core_seal_bound]
 }
 
 // The Core packages the toolchain does not ship as machine code: each one
@@ -123,6 +123,12 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
         }
         .Checked(found) -> found.move()
     }
+    // The bodies file is written from the check's captures, and read back
+    // whole, on a task of its own while the library's IR builds; nothing
+    // else reads the captures.
+    captures: inputs.core_bodies.move()
+    inputs.core_bodies = SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}
+    writing: task jet_cli_core_bodies_file(captures, trace_sink)
     declarations := jet_driver_checked_declarations(inputs)
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
     library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, JET_CLI_CORE_LOWERED, compiler_threads)
@@ -144,14 +150,11 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
     // it by key with no Core facts beside it.
     seal: sema_core_seal_bound(inputs.core_seal.move(), jet_cli_core_facts(ir_core_facts_text(library.facts).bytes()).sealed).join("\n")
     inputs.core_seal = [String]{}
-    bodies: inputs.core_bodies.move()
-    inputs.core_bodies = [U8]{}
-    // A compile reads only the header of the bodies file and the records it
-    // looks up, so the build reads it whole: a file a compile would misread
-    // is the build's error (sema_core_bodies_problem).
-    if sema_core_bodies_problem(bodies) == .Val(problem) {
+    bodies_file := writing.join() ?? return JetCLICoreLibraryIR.Stopped{problem: "the Core bodies file stopped: {compiler_threads_failure_text(err)}"}
+    if bodies_file.problem == .Val(problem) {
         issues.push("the Core bodies file does not read back: {problem}")
     }
+    bodies: bodies_file.bytes.move()
     inputs.functions = [FnBody]{}
     inputs.symbols = symbol_table()
     inputs.sources = [String:String]{}
@@ -176,6 +179,26 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     JetCLICoreLibraryIR.Built{library: library, issues: issues, seal: seal, bodies: bodies, threads: threads}
+}
+
+// The Core bodies file (`{prefix}.bodies`) of the Core check's captures, and
+// what is wrong with it (None when nothing is), as the `runtime.core.bodies`
+// span.
+JetCLICoreBodiesFile: struct {
+    bytes: [U8]
+    problem: String?
+}
+
+// A compile reads only the header of the bodies file and the records it
+// looks up, so the build reads it whole: a file a compile would misread is
+// the build's error (sema_core_bodies_problem).
+jet_cli_core_bodies_file: fn(captures: &&SemaCoreCaptures, trace_sink: JetCLITraceSink?) -> JetCLICoreBodiesFile {
+    if trace_sink == .Val(sink) -> sink.begin("runtime.core.bodies", "", -1, -1)
+    held := captures.move()
+    bytes: sema_core_bodies_bytes(held.bodies.move(), held.context)
+    problem: sema_core_bodies_problem(bytes)
+    if trace_sink == .Val(sink) -> sink.end("runtime.core.bodies", bytes.len())
+    JetCLICoreBodiesFile{bytes: bytes, problem: problem}
 }
 
 // The Core library's machine code (jet_cli_core_library) from its IR

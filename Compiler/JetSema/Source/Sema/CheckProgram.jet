@@ -658,10 +658,10 @@ SemaGraphResult: struct {
     // SemaRegistrationGraph.core_seal: the Core seal's lines
     // (sema_core_seal_lines); empty otherwise.
     core_seal: [String]{[String]{}}
-    // SemaRegistrationGraph.core_seal: the Core function checks as the
-    // bodies file (CoreBodies.jet sema_core_bodies_bytes), in key order;
-    // empty otherwise.
-    core_bodies: [U8]{[U8]{}}
+    // SemaRegistrationGraph.core_seal: the Core function checks as captured,
+    // in capture order, which the Core library writes as the bodies file
+    // (CoreBodies.jet sema_core_bodies_bytes); empty otherwise.
+    core_bodies: SemaCoreCaptures{SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}}
     // A run bound to the Core image (SemaRegistrationGraph.core_stand_ins):
     // how many Core functions its demand checked as stand-ins, and, when
     // something they assume did not hold, why the finalization must run
@@ -12520,7 +12520,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     loop position in 0..<modules.len() {
         compiler_transfer_rows<SemaCoreBody>(core_bodies, modules[position].core_bodies)
     }
-    bodies_file: if final_graph.core_seal -> sema_core_bodies_bytes(core_bodies.move(), sema_core_bodies_context(final_graph)) else -> [U8]{}
+    // The Core library encodes the captures (sema_core_bodies_bytes) beside
+    // its IR build, not here on the finalization's thread.
+    captures: if final_graph.core_seal -> SemaCoreCaptures{bodies: core_bodies.move(), context: sema_core_bodies_context(final_graph)} else -> SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}
     result := SemaGraphResult{
         package_identity: final_graph.package_identity,
         entry_module_identity: final_graph.entry_module_identity,
@@ -12538,7 +12540,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         complete: complete,
         inferred_infallible: inferred_infallible,
         core_seal: core_seal,
-        core_bodies: bodies_file,
+        core_bodies: captures,
         core_stand_ins: stood_in,
         core_stand_in_rerun: rerun,
         programs: programs,

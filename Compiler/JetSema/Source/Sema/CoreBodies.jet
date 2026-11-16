@@ -18,9 +18,9 @@
 // in that check (symbol and declaration keys, module identities), which a
 // compile resolves to its own ids, and its strings as positions in the list
 // of the strings it holds, each once (BodyCodecOut.indexed). The check's
-// finalization writes the captures as the bodies file
-// (sema_core_bodies_bytes), which the Core library writes as
-// `{prefix}.bodies`:
+// finalization hands the captures on (SemaCoreCaptures), and the Core
+// library writes them as the bodies file (sema_core_bodies_bytes),
+// `{prefix}.bodies`, beside its IR build:
 //
 //   header, context, count, a table of two offsets per body in key order
 //   (SEMA_CORE_BODIES_OFFSET_BYTES little-endian bytes each), its key's and
@@ -102,6 +102,15 @@ SemaCoreBody: struct {
     modules: [String]
     strings: [String]
     ordinal: Int{0}
+}
+
+// The captures of a Core library's check (SemaGraphResult.core_bodies), in
+// capture order, and the context they were captured in
+// (sema_core_bodies_context): the bodies file once written
+// (sema_core_bodies_bytes).
+SemaCoreCaptures: struct {
+    bodies: [SemaCoreBody]
+    context: String
 }
 
 // A bodies file's header (sema_core_bodies_head): the context its checks

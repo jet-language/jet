@@ -26,6 +26,8 @@ use {
         SemaTotalityRow,
         SemaGraphResult,
         SemaCheckedMemoryFacts,
+        SemaCoreBody,
+        SemaCoreCaptures,
         sema_comptime_reflection_layout_engine,
         sema_checked_layout_projections,
         SemaModuleMetaSource,
@@ -4771,9 +4773,9 @@ JetDriverLoweringInputs: struct {
     // The Core library's check (JetDriverCompileRequest.core_seal): the
     // lines of the Core seal (JetSema CoreSeal.jet sema_core_seal_lines).
     core_seal: [String]{[String]{}}
-    // The Core library's check: the Core function checks as the bodies
-    // file (JetSema CoreBodies.jet).
-    core_bodies: [U8]{[U8]{}}
+    // The Core library's check: the Core function checks as captured, which
+    // the Core library writes as the bodies file (JetSema CoreBodies.jet).
+    core_bodies: SemaCoreCaptures{SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}}
 }
 
 JetDriverLoweringInputsResult: struct {
@@ -5954,9 +5956,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), core_seal: checked_graph.core_seal.move(), core_bodies: checked_graph.core_bodies.move()})
             jet_driver_trace_step_end(request.trace_sink, "driver.check.capture", -1)
             if request.release_state_aside {
-                // The lowering inputs took the Core seal and bodies file.
+                // The lowering inputs took the Core seal and captures.
                 checked_graph.core_seal = [String]{}
-                checked_graph.core_bodies = [U8]{}
+                checked_graph.core_bodies = SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}
                 jet_driver_release_aside(
                     checked_row,
                     JetDriverHeldState{
