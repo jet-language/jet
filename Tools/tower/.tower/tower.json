@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 107700,
+    "rev": 107725,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36,7 +36,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-11-16T00:51:08.249Z"
+    "completionCursor": "2026-11-16T01:09:50.381Z"
   },
   "epochs": [
     {
@@ -3517,7 +3517,7 @@
           "at": "2026-09-12T16:54:30.574Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-09-12T16:54:30.574Z"
     },
     {
@@ -23673,13 +23673,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "**Goal**\nTurn the remaining red HTTP-substrate cells green after #2255, and first fix the run/dev-tier probe hang (I9).\n\n**Measured baseline** (gauntlet run 20260902-1649436-mtkr9fvl, release compiler)\n- http-service (netserv.service) AOT:\n  - p50: Jet/Go 3.19x, Jet/Node 1.90x, Jet/Rust 1.58x, Jet/Python 1.09x.\n  - p99: Jet/Go 92.9x, Jet/Node 1.38x, Jet/Rust 1.24x.\n  - The run and dev tiers fail probe 2 (PUT /kv) with an HTTP probe timeout. AOT passes every probe.\n- concurrency-service AOT:\n  - p50 8.5 ms vs Node 8.05 ms (1.06x). It wins against Go 0.93x, Rust 0.94x and Python 0.90x.\n  - Startup on run/dev is 1.03-1.10x Go and Node.\n- http-client AOT wall: 1.25x Rust. It wins against Go 0.63x, Python 0.04x and Node 0.02x.\n- Targets: Jet/{Rust,Go,Node,Python} < 1.00 on every listed cell and tier, and Jet/ceiling <= 1.00 against the asm-parity reference.\n\n**Current state**\n- Server: `crates/jet-codegen/src/Prelude/CoreLib/Top/{HTTPServer.rs,HTTPMessage.rs,HTTPRoute.rs}`. Client: `HTTPClient.rs`, `NetHTTP.rs`. `Core/http/server.jet` delegates to the native provider.\n- JIT marshalling: `crates/jet-jit/src/{net_http_rt.rs,net_http_hosts.rs,Net.rs}`.\n- Tests: `tests/http_i9.rs`, `tests/http_server_lifecycle.rs`, `tests/http.rs`, `tests/services_runtime.rs`.\n- Gauntlet: `Tools/gauntlet/entries/{http-service,concurrency-service,http-client}` (`jet/run.jet`, `entry.json` probes). The harness is `Tools/gauntlet/harness/run.mjs --entry <name>`.\n\n**Changes (in order)**\n1. I9 first:\n   - Reproduce with `Tools/agent/jet-env jet run Tools/gauntlet/entries/http-service/jet/run.jet` plus the entry.json probes. The second probe never answers.\n   - Trace where the JIT-tier server blocks: a blocking accept-loop read, or a task that never yields while a Shared write is pending.\n   - Fix it in marshalling only, so the JIT host hands requests to the same scheduler path AOT uses.\n   - Add `kv_get_put_get_matches_across_tiers` to `tests/http_i9.rs`.\n2. Attribute on the current tree with `perf record` on the AOT binary under harness load: health vs kv, Shared state on/off, prebuilt vs formatted response, accept wakeups, per-request allocations. Record the split on the card.\n3. Server substrate (HTTPServer/HTTPMessage/HTTPRoute): headers prebuilt once per route, no per-request `String` for static parts, one `writev` per response, keep-alive without a wakeup per request, a bounded accept batch.\n4. Client (HTTPClient/NetHTTP): connection reuse and one allocation per response body.\n- Writable paths: the Prelude files above, the jet-jit net files (marshalling only), and `tests/http_i9.rs`.\n- Do not touch: `Tools/gauntlet/entries/` sources, `crates/jet-jit/src/jit/lower_ctx.rs`, `crates/jet-jit/src/ambient_interp.rs`, or `crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs`.\n- Non-goals: HTTP API, authority model, TLS, and scheduler policy in a host.\n\n**Proof**\n- `jet test Compiler --profile cases http_i9/ --test http_server_lifecycle --test http --test services_runtime` → green.\n- `node Tools/gauntlet/harness/run.mjs --entry http-service`, then `--entry concurrency-service`, then `--entry http-client` → every probe passes on AOT, run and dev with identical responses, and the ratios meet criteria 1-3. Any losing cell stays on the card.\n\n**Batch**\nbatch-host-runtime: Prelude HTTP runtime, JIT host marshalling, and tier parity.\n\n**Dependencies**\nNone.",
       "checkSteps": null,
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #2873 cN): #6953 (4), #6878 (1), #6884 (1)."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -23877,15 +23882,15 @@
       "parentId": "c0ut93qg",
       "needsAcceptance": false,
       "created": "2026-09-03T10:57:25.181Z",
-      "updated": "2026-11-16T00:47:34.397Z",
+      "updated": "2026-11-16T01:06:17.616Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
-      "claimedAt": "2026-11-11T12:44:49.807Z",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 10,
+      "completedAt": "2026-11-16T01:06:17.616Z"
     },
     {
       "id": "c0duj9rp",
@@ -23896,13 +23901,18 @@
       "track": "sidequest",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nMake the ratified columnar layout (`#Layout(c)`, D-SOA1/D-SOA2) at least as fast as AoS on the particle update it exists for, and vectorize it the same way.\n\nMeasured, N=2,000 (`x += vx*dt`, `y += vy*dt`, checksum of `mass*(x+y)`):\n\n| Layout | AOT median | Particle-loop arithmetic |\n|---|---|---|\n| AoS `List<Particle>` | 0.0126 s | `vmulpd` 15 / `vaddpd` 5 / `vsubpd` 5 |\n| Manual SoA | 0.0118 s | — |\n| Columnar | 0.180 s (dev and release) | none, only moves and masks |\n\nAll three print `599.9999999999977`. The 15x loss breaks the performance-budget law (`Docs/spec/performance-budget-decisions.md`) on the layout's headline case. Evidence: `~/.cache/jet-test-scratch/mine-20260903/simd/results.md` S5.\n\n## Current state\n- Jet printer: `Compiler/JetCodegen/Source/Emit/Operations.jet:1578-1597` `jet_rust_emit_columnar_read` prints every read as `(base).cell(k, i, file, line).jet_col_<field>()`. That is a per-element enum match with no loop-invariant typed projection.\n- Lowering goes through `jet_columns_gather_cell` (`Codegen/Expressions.jet:4729-4733`, `MirSemanticOp.ColumnarRead`). Legality facts are at `Compiler/JetOptimizer/Source/Verification/Legality.jet:721-723`.\n- `Compiler/JetEval/Source/Evaluator.jet:7662,8347` reads per element through a Prelude argument vector.\n- Host code:\n  - `crates/jet-codegen/src/Prelude/Core/Columns.rs` `gather`/`gather_cell` build `views()` on every call.\n  - `crates/jet-jit/src/jit/Collections.rs` rebuilds `JetColumns::from_rows` on every read.\n- The witness exists: `tests/s5_columnar_witness.rs` with `tests/s5_columnar_witness/{aos,columnar}.jet`. It checks output identity only.\n- The dependency cards are all done: #2888, #2892, #2895, #2899 and #2893. #2893 owns automatic AoS→SoA transposition, which is out of scope here.\n\n## Changes\n1. Optimizer (`Compiler/JetOptimizer/Source/Facts/LoopVector.jet`, `Verification/Legality.jet`): for a read-only numeric columnar scan whose field is loop-invariant, record a typed column projection. That is one typed field slice per touched field, hoisted before the loop. Log it in the #2899 decision ledger with its one-time cost.\n2. Jet printer (`jet_rust_emit_columnar_read`):\n   - When the fact is present, print plain indexed reads on a borrowed `&[f64]` (or the proven field type), keeping the shared bounds check and the error location.\n   - Otherwise, keep today's route.\n   - Mirror the same printing in the shipped MIRRust.rs.\n3. JetEval: add direct column access with no per-element argument vector.\n4. Host:\n   - `Columns.rs`: `gather`/`gather_cell` use stable column borrows and stop allocating `views()`.\n   - JIT: keep the column store for the whole operation.\n   - Row views, serialization and whole-record gather stay unchanged.\n5. Extend `tests/s5_columnar_witness.rs` with `s5_columnar_release_loop_is_packed`, which checks the release binary's `objdump` for `vmulpd`/`vaddpd` in the particle loop.\n\n## Proof\n- `jet test Compiler --profile cases s5_columnar_witness/`: both tests pass. Output is identical on O0, O1 and O2, and the columnar loop has packed f64 instructions.\n- Measurement: build `tests/s5_columnar_witness/{aos,columnar}.jet` with `jet build --release`, then run `hyperfine -w 3 -r 20 ./aos ./columnar`. The columnar median must be ≤ the AoS median.\n\n## Batch\nbatch-jetc-back: optimizer fact and printer, with the host Columns and JIT fixes in the same build.\n\n## Dependencies\nNone. All the prerequisite cards are done.\n",
       "checkSteps": "Planned proof only; not run during preparation. Rebuild before compiler/runtime smoke. Run repository commands through scripts/agent/jet-env. Use exact narrow criterion evidence; broad suites remain milestone-gated.\n\nUse the same S5 fixtures and same machine; every Jet invocation goes through `scripts/agent/jet-env`.\n\n1. Build both fixtures in release and run the packet's existing hyperfine comparison. Observable result: columnar median is <= AoS median under the existing strict gate; report raw runs, candidate identity, CPU, and output.\n2. Inspect the generated release artifact and run `objdump -d` over the particle loop. Observable result: `vmulpd` and `vaddpd` occur in the columnar loop, and the loop body has no `jet_columns_gather_cell`, `views()`, or per-element generated cell-enum field match. A source inspection of generated Rust must show one typed projection before the loop, not a `Vec`/projection recreated inside it.\n3. Run the three variants through release AOT, `scripts/agent/jet-env jet run`, and `scripts/agent/jet-env jet run --interpret`. Observable result: each prints `599.9999999999977`.\n4. Run negative/edge cells: empty columnar list, zero-field record, out-of-range positive/negative index, mixed field widths if representable, and whole-record serialization. Observable result: errors and row/field order match the pre-change canonical operation; no typed projection bypasses bounds or changes serialization.\n5. Run the JIT and interpreter parity rows from the card. Observable result required by the existing card is output parity; the implementation proof additionally records that JIT does not rebuild from rows per read and interpreter does not allocate a per-element prelude argument vector.",
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #2889 cN): #6314 (6)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
@@ -24120,15 +24130,15 @@
       "parentId": "c0i42tsl",
       "needsAcceptance": false,
       "created": "2026-09-03T19:06:19.185Z",
-      "updated": "2026-11-16T00:47:42.729Z",
+      "updated": "2026-11-16T01:06:22.582Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
-      "claimedAt": "2026-11-11T12:44:51.056Z",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 14
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-16T01:06:22.582Z"
     },
     {
       "id": "c030s933",
@@ -25461,7 +25471,7 @@
       "track": "sidequest",
       "epoch": "e15",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nShip the ratified D-RELEASE-RECIPE1=A declaration: `Pkg.adapt` carries `resolver:` and `asset:` beside `source:` for the `Releases` source (`RefSource.Releases`), around exactly one existing installer. Option B (`Recipe.release`) is rejected and must not exist.\n\n## Current state\n- `Jetpack/EnvModel/Source/ModuleEval/PackageSugar.jet:79-96` `envmodel_parse_adapter` admits only `name`, `source`, `deps`, `recipe` (`:81` field list); every shape error is E1270 (`:299-300`).\n- Field spellings live in `Jetpack/Foundation/Source/Syntax.jet:403-409` (`@ADAPTER_FIELD_*`, `@RECIPE_*`).\n- The `Releases` source (`RefSource.Releases`) exists only as a ref source: `Jetpack/PackageModel/Source/Refs/RefSpec.jet:45,66,110`, mapped to `ProviderKind.JetPackage` in `Jetpack/EnvModel/Source/ModuleEval/SourceLoader.jet:304`.\n- No `ReleaseResolver`, `ReleaseAssetSelector` or `Sha256` type exists anywhere in `Jetpack/`.\n- PackageSugar.jet has uncommitted edits from another writer: coordinate before you edit it.\n\n## Changes\n1. `Jetpack/PackageModel/Source/Release/ReleaseModel.jet` (new, listed in `Jetpack/Bootstrap/sources.list`): the finite family `ReleaseResolver` (`Release.github`, `Release.https{metadata, origins, decoder}`), `ReleaseFeed`, `ReleaseCandidate`, `ReleaseAsset`, `ReleaseAssetSelector`, `ReleaseAssetKind`, `ReleaseFormat`, `ReleaseEntryMode`, `Sha256`, `ReleaseDecodeError`. The pure decoder contract has no signature, key or proof field.\n2. Same module, pure validation used later by the Provider seam: nonempty fields, RFC3339 times, HTTPS-only URLs, safe relative root and entry, size and extraction bounds, and `sha256_parse` (bare 64-hex or `sha256:<64-hex>` → lowercase; whitespace, wrong length, non-hex and unknown algorithms fail; None stays None). Add `release_origin_admits(scope, url)` so metadata, artifact and redirect origins are checked before any request; the scope cannot be widened after the fact.\n3. `Syntax.jet` and the syntax registry (`Compiler/JetFoundation/Data/Syntax`): add `@ADAPTER_FIELD_RESOLVER`, `@ADAPTER_FIELD_ASSET` and the `Release.*` spellings.\n4. `PackageSugar.jet` `envmodel_parse_adapter`: accept `resolver:` and `asset:` only when the source classifies as `RefSource.Releases`, with exactly one Copy, Prebuilt or Build recipe. Reject release fields on other sources, duplicate selector fields, a second fetch and any `Recipe.release` spelling with E1270, and extend the E1270 help text. `Release.github` takes no repository argument; it derives owner/repo from the source.\n5. Record the ratified surface in `Docs/spec/syntax-decisions.md` and the packaging spec (A only; B absent).\nProvider wiring, trust and staging belong to #3031, #3032 and #3033. `BuildStep.fetch` hash and credential-free laws do not change.\n\n## Proof\n- `JETPACK_WORKER=rel Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area EnvModel --tests` prints `JETPACK CHECK OK (check, default run, AOT test)`. It runs new claims in `Jetpack/PackageModel/Tests/Release.jet` (SHA-256 table, RFC3339/URL/path/size rejections, origin admission) and `Jetpack/EnvModel/Tests/ModuleEvalReleases.jet` (the complete Acme HTTPS example with three ordered origins and one archive selector is accepted; release fields on a non-Releases source, a duplicate `asset:` and `Recipe.release(...)` each give E1270).\n- `Tools/agent/jet-env target/debug/jet self devtools grammars` produces no diff, because these are field names, not lexer tokens. That satisfies criteria 13-14 without re-blessing.\n\n## Batch\nbatch-jetpack-envmodel: the EnvModel area unit (with its PackageModel closure) proves the whole declaration.\n\n## Dependencies\nNone open.",
       "checkSteps": "Future proof, not run during preparation. After implementation, #2919 should use scripts/agent/jet-env and a fresh binary with focused adapter, decoder, pagination, origin, trust and transaction fixtures. Cover complete A/B HTTPS declarations, checksum normalization, bounded metadata, unsafe trees, pre-request origin approval, source-scope reuse, same-release mutation, rollback, cancellation, crash, concurrency and running-app preservation. Preparation runs no validation.",
@@ -25472,6 +25482,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3030 cN): #6941 (17)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -25781,12 +25796,13 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:01.979Z",
-      "updated": "2026-11-16T00:48:05.929Z",
+      "updated": "2026-11-16T01:06:26.647Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 29
+      "criteriaLastN": 29,
+      "completedAt": "2026-11-16T01:06:26.647Z"
     },
     {
       "id": "c01k5lts",
@@ -25797,15 +25813,20 @@
       "track": "sidequest",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nCarry the checked AutoVectorizationFacts from TIR into the existing MIR fact channel, bound to stable loop, value and access IDs with origin and validity window. Every adapter then consumes one scoped semantic proof instead of re-deriving eligibility from CFG and root-name heuristics.\n\n## Current state\n- Partly ported. Compiler/JetCodegen/Source/Codegen/Statements.jet:570-595 jet_codegen_record_checked_vector_fact records a MirVectorFact with accesses `[]` and a hard-coded Rejected(UnsupportedOperation) decision. Loop lowerings pass the facts in (:597,632,672,966).\n- Compiler/JetFoundation/Source/TIR/TIR.jet:320-322 and Compiler/JetAst/Source/AST/Statements.jet:183 carry the facts.\n- Compiler/JetOptimizer/Source/Facts/LoopVector.jet:33-79 re-derives structural facts.\n- Earlier Rust work (fca9168a2) honored Reduction/ConditionalAccumulate/EarlyExitSearch semantics in the archived optimizer and is reference only.\n\n## Changes\n1. Statements.jet jet_codegen_record_checked_vector_fact: bind facts to the MIR loop header, cursor, body blocks and each access (place ID and operation ID), with source span origin and a validity window (the block set). The decision comes from the checked facts, not a constant.\n2. JetFoundation MIR: extend MirVectorFact/checked_vector_facts in place, with no parallel schema. Update canonical serialization and digest.\n3. LoopVector.jet: reconcile structural CFG facts with the carried proof. A structural fact never overrides a semantic rejection, and a missing alias/effect/order proof stays a rejection, never a root-name guess. Transforms (FixedReduction and the others) invalidate or rebind facts whose subject they change.\n4. Verification/Legality.jet and every consumer (Emit, JetEval, the retained Cranelift host) read the canonical fact. #Scalar, early exits, effects and cross-iteration dependence stay conservative; exact reduction bits are preserved.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- Goldens and the harness row per add_criteria.\n\n## Batch\nbatch-jetc-back: codegen fact recording plus optimizer reconciliation. #3040 and #3447 build on it in the same batch.\n\n## Dependencies\nNone.",
       "checkSteps": "Extend existing Codegen::TIR::tests::d_simd3 cases for real checked-source-to-canonical-consumer behavior; cargo test -p jet-codegen d_simd3 is an existing filter, run through scripts/agent/jet-env and verify selected cases. Rebuild and execute the focused eligible/negative fixtures across tiers; inspect the exact generated Rust/LLVM/assembly for selection evidence. New behavioral regressions only for actual lost-proof/incorrect-selection cases.",
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3039 cN): #6971 (2), #6958 (1)."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -26029,13 +26050,13 @@
       "parentId": "c0i42tsl",
       "needsAcceptance": false,
       "created": "2026-09-10T23:23:09.423Z",
-      "updated": "2026-11-16T00:48:10.320Z",
+      "updated": "2026-11-16T01:06:31.051Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-11T12:44:52.246Z",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 11
+      "criteriaLastN": 11,
+      "completedAt": "2026-11-16T01:06:31.051Z"
     },
     {
       "id": "c0p39lw2",
@@ -27935,7 +27956,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m24-checked-source-facts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nOne checked fact owner for developer tools (D-ONE-TOOLS1=A). Calls, hover, signature help, diagnostics and reasoning views show the same checked callable contract (arity, parameter/result identity, failure and rights facts) at ambient and foreign boundaries, with no parallel analyzer.\n\n## Current state\n- The Jet fact owner exists. `Compiler/JetDriver/Source/Driver/CompilerQueries.jet:10-13` defines `JetDriverCompilerCheckResult{checked: JetCompilerServicesCheckedFacts?, diagnostics, failed_stage}`, and `Compiler/JetEval/Source/CompilerServices.jet:39-42,399` builds `JetCompilerServicesCheckedFacts{value, semantic_index_complete}`.\n- The host tools still run their own projections. The LSP has a private `CheckedBundle` (`Source/LSP/Server.rs:51-54`: diags, `ProgramBundle`, `SemIndexEffectFacts`). `jet inspect` has `CheckProjection` (`Source/CmdInspect.rs:35-38`: bundle, facts, `jet_semindex::SemIndex`). Both are built from the archived Rust sema/semindex.\n- Recorded evidence boundary: the `print` declaration stub and its special semantic arm disagree on arity. No hover mismatch has been observed yet.\n- Coverage today: `tests/lsp.rs` has `lsp_hover_returns_signature` (:3055) and `lsp_signature_help_returns_active_parameter` (:2480).\n\n## Changes\n1. Step 1, now, host only: add the print hover/signature/call comparison test. Where the declaration and the semantic arm disagree, make the presentation read the checked callable record. Do not infer effects from return-type tables. Keep unknown foreign behaviour marked unknown.\n2. Step 2, after #218 routes execute: define one typed projection of `JetCompilerServicesCheckedFacts` that carries source, overlay, target, settings and package identity across the host boundary (`Compiler/Bootstrap/Host`). Replace `CheckedBundle` and `CheckProjection` with consumers of that projection in `Source/LSP/{Server,Check,Features}.rs` and `Source/CmdInspect.rs`, and delete the Rust-side analyzers in the same cutover.\n3. Derive compiler CLI flag ownership from the command declarations. App `ArgsSpec` (#3242) keeps its own schema.\n4. Preserve registered codes, fixes, byte/UTF-16 spans, URI escaping, privacy and every LSP, report and replay contract. A backend failure stays an internal error (I2).\n\n## Proof\n- The added criterion (print parity test).\n- `jet test Compiler --profile cases lsp/` and `jet test Compiler --profile cases live_inspect/` stay green after the cutover.\n- A pure-looking helper that adds an outward operation shows the updated rights/failure explanation in hover and in `jet inspect --json` output (criterion 3).\n\n## Batch\n`batch-host-cli`: the LSP and inspect consumers are host CLI/tooling.\n\n## Dependencies\nStep 2 needs #218 (the Jet check query must execute through the host). #3325 owns operation facts, which this card consumes. #2986 owns Core module drift.",
       "checkSteps": "1. Ambient print and core.term.print expose consistent one-or-more-argument and Printable requirements where that is the accepted checked contract.\n2. The same declaration identity is used by calls, hover/signature help, diagnostics and any reasoning view.\n3. A pure-looking helper that adds an outward operation updates the relevant rights/failure explanation or produces the applicable registered diagnostic; exact behavior requires a runtime/front-end probe.\n4. Foreign/generated origins and unknown analysis boundaries are visible without asking the reader to inspect compiler special cases.",
@@ -27944,6 +27965,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3186 cN): #6904 (2), #6848 (2), #4913 (1), #6865 (1), #3418 (1)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -28160,13 +28186,14 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:18.693Z",
-      "updated": "2026-11-16T00:48:20.492Z",
+      "updated": "2026-11-16T01:06:34.738Z",
       "updatedBy": "Main",
       "workOrder": 84,
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 15
+      "criteriaLastN": 15,
+      "completedAt": "2026-11-16T01:06:34.738Z"
     },
     {
       "id": "c0dktg7a",
@@ -28433,12 +28460,12 @@
         },
         {
           "n": 31,
-          "text": "(was #3720 c81)",
+          "text": "D-DIAG-HEADER1=A: every diagnostic's header, More: link and closing hint show the type name (jet.ValueTypeMismatch), with the link at jet-lang.dev/e/<name>. The E-code stays the stable code: jet.report/v3 JSON carries both name and code, `jet explain E0112` still works, and the site redirects old E-code pages. Runtime reports (TrapMessages.jet, ServicesMessages.jet, report.S) print the name too. Every UI snapshot is regenerated from real output. Proof: `jet test Compiler --profile ui` and goldens pass on O0, O1 and O2. (was #3720 c81)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:40:32.060Z"
+          "at": "2026-11-16T01:09:57.149Z"
         },
         {
           "n": 32,
@@ -28477,7 +28504,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-16T00:40:32.976Z",
+      "updated": "2026-11-16T01:09:57.149Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "goals": [
@@ -28494,7 +28521,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m22-encoding-validation",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nClose custom-codec and reflection interoperability under D-ONE-CODECS1=A, with D-VALIDATE-DECODE1=B stated as current law. Field traversal, constraint application, override precedence and field-error paths get one canonical owner. Each wire format keeps its own leaves (duplicate keys, binary/text, extension tags, mixed XML, lossless numerics). The comparison targets are selected Serde, Glaze and Jackson custom mappings, without importing their reflection systems. No new marker, public error family, data-algebra category or storage mechanism is added.\n\n## Current state\n- The original finding is `Docs/research/mine-for-jet-2026-09-12.md#finding-core-f007`. The old `docs/` path is stale.\n- Sema: `Compiler/JetSema/Source/Sema/Serde.jet` checks codec admissibility, generic bounds and wire reachability (`sema_serde_field_reaches_wire` at :94, `sema_serde_type_is_admissible` at :148). Registration lives at `Registration/Checked.jet:140-141`.\n- Codegen: `Compiler/JetCodegen/Source/Codegen/Functions.jet:277-286` lowers type-level `MirSerdeAttribute` (RenameAll, Tag, Untagged, DenyUnknownFields). `AutoDerives.jet` and `EncodingCodecs.jet` generate Encode/Decode.\n- The format adapters are `Core/encoding/*.jet` and the host kernel `crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs`.\n- Existing witnesses in `Examples/features/serde/`: `hand_codec`, `field_metadata_edges`, `serde_derive`, `serde_generic`, `codable_default`, `decode_migration`, `json_typed`, `csv_typed`, `cbor_profile`, plus the `encoding_*_stream` examples.\n\n## Changes\n1. Capability inventory (criteria 1 and 3). Build a table covering alias, rename, skip, read-only, constraints, variants, enums, chrono, custom context and generic targets. For each row give the Jet spelling (derived and hand-written), the owning code (Serde.jet / AutoDerives.jet / EncodingCodecs.jet / Core adapter) and the status: supported, missing-by-law or missing-defect. Classify every missing capability before proposing anything. A new marker or API needs its own ballot. The table goes in the card log.\n2. One owner (criterion 4). Move field traversal, constraint application and error-path construction into one helper set in `AutoDerives.jet`, which `EncodingCodecs.jet` and every format adapter call. The precedence rule is: an explicit custom codec wins, then field attributes, then type-level `MirSerdeAttribute`, then derived defaults. Format syntax errors stay distinct from field errors.\n3. Formats (criterion 5): full, selective and streaming decoding must agree in meaning for each profile. Streaming does not fake buffering or allocation parity.\n4. Add examples for any gaps the inventory finds: `Examples/features/serde/codec_override_precedence.jet` and `codec_field_errors.jet`, each with a golden.\n\n## Proof\n- `jet test Compiler --profile golden serde/`: passes on O0, O1 and O2, including the two new examples.\n- `jet test Compiler --profile cases auto_derive_policy/`: passes.\n- The capability table (criteria 1 and 3) is attached to the card log.\n\n## Batch\nbatch-jetc-back: the consolidation lives in derive generation (AutoDerives and EncodingCodecs). The Core adapters ride in the same build.\n\n## Dependencies\nNone. D-ONE-CODECS1 is ratified.\n",
       "checkSteps": "1. Account aliases/rename/skip/read-only/constraints/variants/enums/chrono/custom context and generic targets.\n2. preserve custom override precedence and error ownership.\n3. classify each missing capability before proposing any new marker/API.",
@@ -28503,6 +28530,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3236 cN): #6877 (13), #6865 (2), #6831 (1), #6883 (1), #6408 (1), #5931 (1), #4913 (1)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
@@ -28903,13 +28935,14 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:12.813Z",
-      "updated": "2026-11-16T00:48:46.671Z",
+      "updated": "2026-11-16T01:06:38.754Z",
       "updatedBy": "Main",
       "workOrder": 74,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 36
+      "criteriaLastN": 36,
+      "completedAt": "2026-11-16T01:06:38.753Z"
     },
     {
       "id": "c06l1r0z",
@@ -29509,7 +29542,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m23-core-cli-text",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "**Goal**\nDeliver the four ratified ArgsSpec reference projections from one checked command model: `to_markdown` (D-CORE-CLI-MARKDOWN1=A), `to_man` (D-CORE-CLI-MAN1=A), `to_rest` (D-CORE-CLI-REST1=A) and `to_yaml` (D-CORE-CLI-YAML1=A, exact version1 fields).\n\n**Current state (dev 9a82866572)**\n- No `to_markdown`, `to_man`, `to_rest` or `to_yaml` exists for ArgsSpec.\n- ArgsSpec methods are typed in `Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet` (the op, arity, return and parameter tables), and `Compiler/JetIR/Source/BuildExpr.jet` routes each one to its Core/Args/Args.jet function.\n\n**Changes**\n1. Add the ops `ArgsSpecToMarkdown`, `ToMan`, `ToRest` and `ToYaml` in ProcessHandles.jet. Each takes no arguments except `to_man(date: String)`, whose date is explicit, never ambient. Each returns `String` and has receiver access `Read`. Route them in BuildExpr.jet.\n2. In Core/Args/Args.jet, add one command-doc projection (command path, inherited options, defaults, visibility and examples, with hidden and secret entries omitted) and four small renderers:\n   - Markdown fences and anchors;\n   - roff escaping with an explicit `.TH` date;\n   - ReST sections and links;\n   - YAML, through the Core YAML writer's escaping.\n   Help text is never parsed.\n3. Output is capped. Overflow and malformed metadata return the fallible error path, never a panic or exit.\n\n**Proof**\nThe golden Examples/features/cli/args_reference.jet uses one fixture with nested, inherited, hidden and secret options, multiline punctuation and fences. It matches args_reference.out on O0, O1 and O2. A Jet consumer test runs `man -l` or `groff -man -Tutf8`, a YAML reader, `rst2html --halt=warning` and `pandoc -f gfm` on the output, and a missing consumer is SKIP-HOST.\n\n**Dependencies**\nNone; all four decisions are ratified. Completion (#3241) and menus (#3294) stay separate.",
       "checkSteps": "1. Command names/options/examples/defaults agree with parsing and help.\n2. deterministic output and escaping.\n3. malformed/foreign embedded metadata fails safely.\n4. source program is not executed to extract docs.\n5. Compare the complete shared command fixture with parse/help and generated Markdown.\n6. Exercise punctuation/fences/multiline text, descendant anchors and hidden/secret omission.\n7. Verify real Markdown rendering plus bounded deterministic output.\n8. Keep one schema/formatter owner and no target or filesystem side effects.",
@@ -29518,6 +29551,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3242 cN): #4913 (8)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -29754,13 +29792,14 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:20.532Z",
-      "updated": "2026-11-16T00:49:14.848Z",
+      "updated": "2026-11-16T01:06:48.308Z",
       "updatedBy": "Main",
       "workOrder": 141,
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 47
+      "criteriaLastN": 47,
+      "completedAt": "2026-11-16T01:06:48.308Z"
     },
     {
       "id": "c0uyfbge",
@@ -31597,7 +31636,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m21-iterator-stdlib",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nImplement D-ITER-SELECTION1=A (ratified): lift the existing `filter_map` so that the callback carrier decides the selection rule.\n- `-> U?` skips `None`.\n- An explicitly returned `Result` keeps the ratified success-only selector.\n- A callback failure effect propagates and is never silently dropped.\n\nAdd `map_while` (`None` stops) and `find_map` (`None` continues) under their own exact contracts; the triggering item is consumed. There is no new absence or error type and no second selector engine.\n\n## Current state\n- Jet typing already unwraps an `Option` success (`Compiler/JetFoundation/Source/Collections.jet:607-614`) and routes to `TClosureOp.FilterMap` (`:864`, `Compiler/JetCodegen/Source/Codegen/ClosureMethods.jet:65-67`).\n- The runtime requires `Result`: `jet_iter_filter_map` needs `F: FnMut(&T) -> Result<U, E>` and calls `.ok()` (`crates/jet-codegen/src/Prelude/Core/Collections.rs:2261-2268`, list form `:2551-2558`). As a result an `Option` callback cannot lower, and a propagating error is dropped.\n- JIT: `crates/jet-jit/src/Collections.rs:11884` (`checked_iter_filter_map_typed`).\n- `map_while` and `find_map` exist nowhere in `Collections.jet`.\n- The only example is `Examples/features/collections/filter_map.jet` (Result form, successful parses).\n- Merged from #3357: an error item survives an ordinary data-preserving map unless a selector explicitly drops it. Nested optional/outcome items, all-error sources and empty sources keep their types. Remainder behaviour follows #3331.\n\n## Changes\n1. Jet compiler:\n   - `Collections.jet` records the callback carrier (Option vs Result vs failure effect) in the operation, and adds `map_while` and `find_map` rows (arity, argument type, result `Iter<U>` and `U?`).\n   - Add `TClosureOp.MapWhile` and `.FindMap` in `TIR.jet`.\n   - Add route rows in `ClosureMethods.jet`.\n2. Host mirror for the shipped proof:\n   - `crates/jet-foundation/src/Collections.rs` tables.\n   - `crates/jet-codegen/src/TIR/lower/builtins.rs` and `TIR/routes.rs`.\n   - Prelude `Collections.rs`: an `Option` variant of `jet_iter_filter_map`, the Result variant kept, the failure route propagated, plus `jet_iter_map_while` and `jet_iter_find_map`.\n   - `crates/jet-jit/src/Collections.rs`.\n   - Interpreter `crates/jet-codegen/src/Codegen/MIREval.rs`.\n3. Docs: the iterator family list in `Docs/spec/reference/core-library.md:308-312`.\n\n## Proof\n- New `Examples/features/collections/filter_map_absence.jet` prints `[1,3]` for `odd` (`-> Int?`) and keeps successful parses via Result. It also shows a propagated callback failure, error-as-data (#3357), `map_while` stopping at the first `None` with the remainder observable, and `find_map` skipping `None`.\n  - `JET_GOLDEN_FILTER=collections/filter_map Tools/agent/jet-env cargo test --test golden examples_compile_and_run` covers both examples.\n  - `JET_1216_STEM=collections/filter_map_absence Tools/agent/jet-env cargo test --test dev_tier_parity collections_memory_and_streams_match_interpreter_jit_and_aot` passes.\n\n## Batch\n`batch-host-runtime`. This is a lazy-adapter runtime change proved by three-tier goldens; it batches with #3328/#3349/#3377/#3384/#3317.\n\n## Dependencies\nNone. #3331 defines remainder semantics; coordinate with it, it does not block.",
       "checkSteps": "1. An absent output can omit an item without manufacturing a diagnostic error.\n2. A propagating callback error, deliberate successful-item selection and error-as-data are distinct observed contracts.\n3. Map-until-absence and first-success search retain their source remainder and terminating-item rules.",
@@ -31606,6 +31645,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3327 cN): #6890 (7)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -31807,13 +31851,14 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:26.482Z",
-      "updated": "2026-11-16T00:50:22.605Z",
+      "updated": "2026-11-16T01:07:12.881Z",
       "updatedBy": "Main",
       "workOrder": 46,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 16
+      "criteriaLastN": 16,
+      "completedAt": "2026-11-16T01:07:12.881Z"
     },
     {
       "id": "c02vmcbl",
@@ -31824,7 +31869,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m21-iterator-stdlib",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nImplement D-ITER-COLLECT1=A. `FromIterator` becomes the one user-extensible destination-construction protocol: one `Item` type, and `from(source)` consumes the source through the canonical Iterable conversion. The existing `Set.from` adopts it. List, Map, text, tuple and custom destinations own their ordering, duplicate and failure-cleanup policies. `collect()` and `to_list()` stay List terminals, and an expected type never changes eager or yielding behaviour. Extending existing state stays with D-ITER-EXTEND1 (#3330).\n\n## Current state\n- `collect` and `to_list` always return `List` (`Compiler/JetFoundation/Source/Collections.jet:266-268,647,893-894`).\n- `to_set` is List-only (`:265,654,905`).\n- `Set.from([…])` exists but takes a List (`Examples/features/collections/set.jet:12`).\n- The only generic static is `Map.fromkeys`/`from_keys` (`Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet:160-161`).\n- There is no FromIterator trait. Compiler-owned traits are listed in `Compiler/JetCodegen/Source/Codegen/Types.jet:77`.\n- The finding is at Docs/research/mine-for-jet-2026-09-12.md#finding-iter-f017. Operation facts come from #3325 (per #3398).\n\n## Changes\n1. Jet compiler:\n   - Declare a compiler-owned `FromIterator` trait (`type Item`, `from: fn(source: &&Iter<Item>) -> Self`) beside Iterable/Iterator: add it to `Types.jet:77` and the associated-name table in `Functions.jet:2175`.\n   - `Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet`: add `List.from`, `Set.from`, `Map.from` (items `(key, value)`) and `String.from` (items String or Char) as FromIterator statics that accept any Iterable.\n   - `Compiler/JetSema/Source/Sema/Calls/Static.jet`: `T.from(src)` on a user type resolves through its `impl T.FromIterator`.\n   - A fallible source (an `Iter` whose items carry `E!`) makes `from` return `T E!`: construction stops at the first error and drops the partial destination.\n   - Add routes in `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet`, plus JetEval.\n2. Host: `jet_set_from_iter`, `jet_map_from_iter` and `jet_string_from_iter` over `JetIter` in `Prelude/Core/Collections.rs`/`Core.rs` and the JIT, plus the Rust mirror.\n3. Migrate `Set.from([..])` callers to the protocol form (the spelling is unchanged). Update `Docs/spec/reference/core-library.md` to document the protocol and the explicit destination rule.\n4. Add the example and the UI fixture named in the criteria. The example includes tuple destinations through `unzip`, which is unchanged.\n\n## Proof\n- `JET_GOLDEN_FILTER=collections/from_iter Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes.\n- `JET_GOLDEN_FILTER=collections/set Tools/agent/jet-env cargo test --test golden examples_compile_and_run` still passes.\n- `jet run` and `jet run --interpret` of `from_iter` produce empty diffs.\n- The UI snapshot passes.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n\n## Batch\n`batch-jetc-sema`: trait resolution and static-call typing.\n\n## Dependencies\nNone. #3354 builds on this card.",
       "checkSteps": "1. List, Set, Map, text, tuple/product destinations, outcomes and a user-defined destination have exact ownership/order/duplicate/short-circuit contracts.\n2. The requested destination is explicit at the call; no expected type silently changes a yielding loop or a plain collection map/filter.\n3. One construction mechanism handles ordinary and fallible input with the approved partial-result and cleanup law; failed construction does not leak resources.",
@@ -31833,6 +31878,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3329 cN): #6882 (9), #6857 (3)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -32146,13 +32196,14 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:29.180Z",
-      "updated": "2026-11-16T00:50:38.637Z",
+      "updated": "2026-11-16T01:07:16.552Z",
       "updatedBy": "Main",
       "workOrder": 48,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 24
+      "criteriaLastN": 24,
+      "completedAt": "2026-11-16T01:07:16.552Z"
     },
     {
       "id": "c0svneex",
@@ -32881,15 +32932,20 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "**Goal**\nEvery default project-generated file lives under one top-level `.jet` root (D-GENERATED-STORAGE2=B, ratified). Project and target identities never collide or escape, and protected saved/audit data survives the migration. Criteria 1 and 3 are verified. Criteria 2, 4 and 5 remain open.\n\n**Current state**\n- The build root is `.jet/build`:\n  - `Source/CmdCompile.rs:9927` `build_output_root`.\n  - `:9931` `bin_path` = `.jet/build/<stem(file)>`.\n  - `:9942` `build_artifact_path` uses the bare target name.\n  - `:9961` test binaries.\n  - `:5314` writes `.gitignore` (`.jet/build/`, `.jet/lock`, `.jet/cache/`).\n  - Dependencies are at `Source/Fetch.rs:791,916,1228` (`.jet/build/deps/<dep>`), and exec at `Source/CmdExec.rs:161-165`.\n  - No `.jet-build` reference remains in `Source/`.\n- Open defects from the 2026-09-23 independent review:\n  - Final artifacts collide across entries, profiles, toolchains and targets, because `bin_path` keys on the stem only.\n  - Locked preflight compares planned generated modules against all same-member provenance.\n  - Action-generated sources get no peer-output overlays.\n  - An equal-root package can verify or replace nested-member lock rows as if its scope were global (E3512 shared `.jet/lock` provenance).\n  - The first CLI regression used retired `--allow-exec/--allow-fs` flags and tested nothing.\n- Other owners: `Source/ReceiptStore.rs` (`.jet/receipts`, canonical target identity), `Source/RecordIndex.rs` (`.jet/records`), `Source/ProveReplay.rs` (`.jet/records/saved/<id>`), `Source/ProductionReceipt.rs` (`.jet/reports`), `Source/RunCache.rs` (the external `~/.cache/jet/run` stays global), and the `Jetpack/Store` port.\n\n**Changes**\n1. Jet side: `Jetpack/Store` and `Jetpack/CLI` must use the same `.jet/build/deps` and lock layout as `Source/Fetch.rs`. Mirror any path helper in Jet, and add no second layout.\n2. `Source/CmdCompile.rs`: key artifact paths by the ballot's identity: entry (project-relative path for equal basenames), profile, target and toolchain. The default host dev build keeps its current `.jet/build/<name>`, and non-default identities get a distinct subpath. Use one helper for build, test, run and doctest.\n3. Lock provenance: scope `.jet/lock` rows per workspace member and limit preflight to the same member (the ReceiptStore/Fetch lock readers).\n4. Action outputs: overlay peer outputs for action-generated sources.\n5. Cleanup: `jet clean` removes only classified disposable subtrees (`build`, `cache`) and never `records/saved`, `receipts` or `reports`. Update ignore rules together.\n6. New `tests/generated_storage_root.rs` using the current authority flags.\n\n**Proof**\n- `Tools/agent/jet-env cargo test --test generated_storage_root` → all cases pass.\n- `jet test Compiler --profile cases build_entry/ --test package_outputs --test comptime_cli_parity` → still green (default `.jet/build/main` layout unchanged).\n- A grep for `.jet-build` and a bare `build/` default writer in Source/ and Jetpack/ → no hits.\n\n**Batch**\nbatch-host-cli: this is Source/ CLI path/lock/cleanup code, plus the Jetpack store path mirror.\n\n**Dependencies**\nNone open. #3415 (history FIFO) consumes this root but does not block it.",
       "checkSteps": "First check the owner-ratified option in D-GENERATED-STORAGE2. Under B, exercise nested entries and workspace members and verify that default build products stay under the same top-level .jet/build/ root. No sibling top-level build/ or .jet-build/ may appear. Check ignore rules do not hide protected saved claims. A read-only case must distinguish optional cache failure from required output failure; do not assume a silent user-cache fallback.\n\nRun rebuilt build/run/dev/test and record operations from isolated standalone and package projects, including a read-only source directory, symlinked path, second target, and concurrent invocation. Compare created files with the classified ownership map, inspect saved/audit links, then exercise selective cache cleanup. Verify another project and unrelated .jet contents are unchanged. Use a bounded cache fixture for failure injection.\n\nExisting focused regression starting points (future commands, not executed; they do not alone cover the new criteria):\n- `scripts/agent/jet-env cargo test --test run_cache dependency_and_argv_invalidate_cache_key -- --exact`\n- `scripts/agent/jet-env cargo test --test receipt_store explicit_check_receipt_tracks_package_workspace_and_generated_authorities -- --exact`\nRebuild through jet-env before compiler smoke work. Add only missing behavioral boundary proof; do not count source inspection, test-name presence, or interpreter fallback as runtime/tier evidence.",
       "probe": "jet run examples/features/packages/outputs_build/service/module.jet",
       "visualMedia": [],
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3421 cN): #4275 (5), #5969 (4), #5965 (2)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -33215,13 +33271,13 @@
       "parentId": "c0dp5efn",
       "needsAcceptance": false,
       "created": "2026-09-15T00:28:02.894Z",
-      "updated": "2026-11-16T00:50:53.892Z",
+      "updated": "2026-11-16T01:07:20.449Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-13T01:49:43.959Z",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 15
+      "criteriaLastN": 15,
+      "completedAt": "2026-11-16T01:07:20.449Z"
     },
     {
       "id": "c0meo2tr",
@@ -36488,15 +36544,20 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "**Goal.** This is the specialized wave of #3690: compute/models, ui/tui/font/game, plugin/mod, compiler/reflect/testing, and app/build/devtools/perf/rt. Jet source owns authority, error and effect meaning. Vetted engines (GTK, raylib, ONNX Runtime, wasmtime) remain typed Rust provider leaves until F4/F5 are ratified.\n\n**Current state.**\n- Specialized dispatcher rows in `crates/jet-codegen/src/Prelude/Core.jet`: 206 in total, 197 of them already Jet-owned duplicates.\n\n| Module | Rows | Jet-owned |\n|---|---|---|\n| compute | 64 | 64 |\n| ui | 52 | 48 |\n| tui | 35 | 35 |\n| game | 19 | 18 |\n| testing | 14 | 13 |\n| app | 11 | 11 |\n| perf | 4 | 4 |\n| font | 2 | 2 |\n| models, plugin, devtools | 1 each | 0 |\n\n- `core.compute.solve` ownership is resolved. Core.jet has `source_module core.compute.solve … owns { dense, lu }`, and `tests/core_compute_solve.rs` has `compute_solve_uses_scale_relative_pivots_and_checked_errors`.\n- The core.testing tier fix is proven: `core_testing_histories_error_is_stable_across_i9_tiers`, passing since 2026-09-24.\n- Probe failures that must clear first come from #3695: `Core/ui/ui.jet:121,126` E0768 and :141 E1102, clipboard `UiClipboardText`, and `Core/compiler/compiler.jet:30-40` undefined carriers.\n- Self-hosted routing mirrors: `Compiler/JetFoundation/Source/Registry/*.jet` and `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet`.\n\n**Changes (one module per patch).**\n1. compute/compute.solve: delete the 64 Jet-owned rows and the matching `Prelude/CoreLib` compute functions and JIT shims (F1). Keep CUDA/Metal/Vulkan device leaves typed.\n2. tui, then ui/font/game: delete the Jet-owned rows. GTK/raylib calls stay leaves. Give the 4 unowned ui rows and 1 unowned game row Jet bodies or leaf declarations.\n3. testing, app, perf, rt, mod: delete the Jet-owned rows.\n4. models, plugin and devtools each keep one unowned row. #3670 owns plugin policy. models `open` stays an ONNX leaf; declare it as a leaf in `Core/models`.\n5. Regenerate registries with `node Tools/agent/gen-core-tables.mjs --write`. Mirror the removals in the self-hosted registry and HandleMethods. Migrate examples and goldens in each patch.\n6. Measure no performance win unless a matched battery exists (compute cells are gated).\n\n**Proof.**\n- The commands in add_criteria.\n- `jet test Compiler --profile cases core_surface_ledger/`: passes.\n\n**Batch.** `batch-host-runtime`: the work removes Prelude CoreLib Rust routes and needs one build plus a tier-parity golden pass.\n\n**Dependencies.** Parent #3690. It shares ui/compiler probe fixes with #3695 and plugin policy with #3670. Neither is a hard prerequisite for the compute/tui/testing slices.\n",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3551 cN): #6880 (3)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -36805,13 +36866,13 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:05.017Z",
-      "updated": "2026-11-16T00:51:15.553Z",
+      "updated": "2026-11-16T01:07:36.486Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-13T01:49:50.563Z",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 17
+      "criteriaLastN": 17,
+      "completedAt": "2026-11-16T01:07:36.486Z"
     },
     {
       "id": "c0ty25lu",
@@ -40632,7 +40693,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m11-jetpack-in-jet",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "**Goal.** The HTTP client's meaning moves into Core:\n- HTTP/1.1 framing, HTTP/2 framing and HPACK\n- cookies with public-suffix rules\n- redirects, proxies, pool/per-origin limits, DNS TTL, phase timeouts\n- header/form/multipart encoding and retries\n\nIt lives in `Core/http/{client,http,h1,h2,hpack,cookie}.jet`. Rust keeps socket I/O, TLS (rustls) and gzip inflate leaves only.\n\n**Current state.**\n- `Core/http/` has `client.jet` (518 lines), `http.jet` (1227) and `server.jet` (91). There is no `h1`/`h2`/`hpack`/`cookie.jet`.\n- `crates/jet-pkg-model/src/Prelude/HTTP.rs` (5534 lines) holds the policy. The card body lists 18 semantic items with line ranges, which this plan keeps:\n  - ambient deadline :18-67, limit constants :68-78, pool :104-276\n  - client builders :283-700, cookies/PSL :704-1118\n  - H2 :1180-1660/:3915-4224, DNS cache :1746-1785, PEM :1842-1941\n  - timeouts :2088-2166, send parts :2167-2530, forbidden headers :2531-2588\n  - form/multipart :2589-2644/:5413-5534, redirects :2645-3020, proxy :3021-3078\n  - H1 write :3180-3511, head parse :3774-3914, body framing :4225-4562, HPACK :5003-5412\n- Retry divergence: `Core/http/client.jet:232` `retryable_method` retries GET/HEAD/OPTIONS/TRACE/PUT/DELETE, while Rust retries safe methods only.\n- `Core/http/http.jet` already has `valid_header_name`/`has_ctl` (:1043/:1051), `form_encode`/`query_encode` (:716-769) and `parse_response`/`content_length` (:474/:870).\n- #3663 was fixed in 6fc6f3862.\n\n**Changes (one sub-module per patch).**\n1. `h1.jet` (new): request encoding, upload body writing, the streaming head reader, and `BodyFraming` (content-length/chunked/close) readers over a byte-stream leaf.\n2. `hpack.jet` (new): static table, integer/string/Huffman codec and the decoder dynamic table. `h2.jet` (new): frame read/write, connection settings/flow control and the response body reader.\n3. `cookie.jet` (new): `CookieJar`, date parse, domain/path match, and the PSL `registrable_domain` over a generated constant table (F2).\n4. `client.jet`:\n   - pool/origin limits, the DNS TTL cache and phase timeouts\n   - redirect follow with body-replay rules, and proxy/no_proxy selection\n   - reconcile the limit constants with the existing `C_MAX_*`\n5. `http.jet`: the forbidden-request-header list and multipart encoding.\n6. Retry rule, kept as the one documented rule: RFC 9110 idempotent methods (current Jet `retryable_method`), and only when the body is replayable and no response bytes arrived. The Rust safe-only branch is deleted. Document it in the `client.jet` doc comment.\n7. PEM helpers move to `Core/net/tls.jet`, shared with #3666.\n8. Delete the ported Rust, the dead client-handle builders and `JetHTTPAmbientDeadline::push` if uncalled, plus the Jet-owned `core.http` dispatcher rows. Regenerate the tables.\n\n**Proof.**\n- The commands in add_criteria.\n- `jet test Compiler --profile cases http/` and `cargo test --test http_dependency_audit`: pass.\n- A perf cell is required only if the matched networking battery covers the client. Rerun it and keep the Rust route on any loss.\n\n**Batch.** `batch-core-net`: Core http/net source and its Rust Prelude twin, needing one build and the net retest.\n\n**Dependencies.** None open. It shares the PEM parser with #3666, and whichever lands first owns `Core/net/tls.jet` PEM.\n",
       "checkSteps": null,
@@ -40641,6 +40702,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3665 cN): #6878 (18), #6884 (2)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -41082,12 +41148,13 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-28T11:08:58.002Z",
-      "updated": "2026-11-16T00:52:21.457Z",
+      "updated": "2026-11-16T01:07:50.929Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 35
+      "criteriaLastN": 35,
+      "completedAt": "2026-11-16T01:07:50.929Z"
     },
     {
       "id": "c077ihdp",
@@ -41407,7 +41474,7 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "**Goal**\nA Jet-native local-first sync engine at Convex/Linear grade (owner note 2026-09-28: \"a jet-native tool that functions like convexdb as an excellent, world class sync engine\"). It covers client cache and partial bootstrap, local reads and writes as transactions, server accept or reject with rollback, socket fan-out, an offline queue and a local-only mode. Query, mutation and action are compiler-checked effect classes.\n\n**Current state**\n- Ratified mechanism: D-LIVEQUERY1 (footprint-tracked live queries over `-[DB.Read]>`, `#Transact` invalidation, `Signal<T>` push), D-EFFDBREAD1, D-SYNC1 (CRDT values), D-DBPOLICY1, D-DX-QUERY1 (optimistic mutation plus rollback), D-DX-SERVERFN1 and D-QUERY-LIVE1.\n- Code: Compiler/JetSema/Source/Sema/Calls/Database.jet:31-41 tags `query`/`query_one`/`live` as `DB.Read` and `execute` as `DB.Write`. Effect checks are in Compiler/JetSema/Source/Sema/Effects/Checks.jet. Core/sync/sync.jet exists. Core/app is string-keyed, and the D-LIVEQUERY1 example does not compile (#3700). app and core.web duplicate the surface (#3701).\n- Harvest: Linear (4:12-8:26 of https://youtu.be/pRf8_40EDtM): one bootstrap, then local reads and writes, identical local and remote change paths, accept or reject with rollback, lazy partial bootstrap, and sync-off prototyping. Convex runtimes: deterministic queries and mutations (seeded rng, frozen clock); only actions do non-deterministic I/O.\n\n**Changes**\n1. After #3700 and #3701, write Docs/proposals/sync-engine.md covering cache and bootstrap, transaction upload, accept/reject, rollback, socket fan-out, offline queue and local-only mode, each tied to the decisions above (criterion 1).\n2. Effect classes (no new syntax): a query is a fn whose inferred row ⊆ {DB.Read}; a mutation is a `#Transact` fn with no Net, Exec or irreversible effect; an action is anything else. Add the checks in Effects/Checks.jet, register two diagnostics in Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet with UI fixtures tests/ui/sync_query_writes.jet and sync_mutation_calls_net.jet, and mirror them in the Rust sema only as far as the shipped binary needs.\n3. Ballots before implementing each: frozen clock and seeded rng inside queries and mutations vs explicit Clock/Rng injection (D-DET1); the concurrent-mutation conflict policy (serializable retry vs CRDT merge); client persistence defaults.\n4. Add Examples/features/web/sync_two_clients plus its golden: two clients, one edits offline, both reconnect and see each other's change, and the server rejects one write, which rolls back.\n5. Add a gauntlet cell under Tools/gauntlet against Convex and one other engine before any battery claim, under the strict performance gate.\n\n**Proof**\n- `jet test Compiler --profile ui sync_`: both snapshots match.\n- `jet test Compiler --profile golden web/sync_two_clients`: passes on O0, O1 and O2. `Tools/agent/jet-env cargo test --test web_build -- sync_two_clients`: passes on the web tier.\n\n**Batch**\nbatch-jetc-sema: the first buildable slice is the effect-class checks. The proposal and ballots come before it.\n\n**Dependencies**\n#3700 (live-query example and ICE) and #3701 (app/web owner ballot).",
       "checkSteps": null,
@@ -41416,6 +41483,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #3709 cN): #6868 (2), #6867 (1), #6445 (1)."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -41773,12 +41845,13 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-16T00:52:41.704Z",
+      "updated": "2026-11-16T01:08:00.330Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
       ],
-      "criteriaLastN": 28
+      "criteriaLastN": 28,
+      "completedAt": "2026-11-16T01:08:00.329Z"
     },
     {
       "id": "c0o8f1p4",
@@ -43493,7 +43566,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -43502,6 +43575,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #4022 cN): #6857 (2), #3202 (1), #6854 (1), #6849 (1)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -43773,12 +43851,13 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-01T12:12:31.228Z",
-      "updated": "2026-11-16T00:53:05.850Z",
+      "updated": "2026-11-16T01:08:12.787Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 21
+      "criteriaLastN": 21,
+      "completedAt": "2026-11-16T01:08:12.787Z"
     },
     {
       "id": "c036453d",
@@ -44672,7 +44751,7 @@
       "track": "sidequest",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -44681,6 +44760,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #4260 cN): #6752 (6)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
@@ -44998,12 +45082,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-02T16:50:50.627Z",
-      "updated": "2026-11-16T00:53:13.373Z",
+      "updated": "2026-11-16T01:08:17.427Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 33
+      "criteriaLastN": 33,
+      "completedAt": "2026-11-16T01:08:17.427Z"
     },
     {
       "id": "c052rw8k",
@@ -45014,7 +45099,7 @@
       "track": "sidequest",
       "epoch": "e12",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": "Implement in the Jet compiler, Jet-hosted tooling and the owning Jet packages; regenerate generated registries rather than hand-editing them. Each criterion names its case.",
       "checkSteps": null,
@@ -45023,6 +45108,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #4268 cN): #3418 (8), #6930 (3)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -45428,12 +45518,13 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:05.406Z",
-      "updated": "2026-11-16T00:53:27.095Z",
+      "updated": "2026-11-16T01:08:21.999Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 60
+      "criteriaLastN": 60,
+      "completedAt": "2026-11-16T01:08:21.999Z"
     },
     {
       "id": "c0jm0xjt",
@@ -47291,7 +47382,7 @@
       "track": "sidequest",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Make every pass per-function and linear (scaling work under way). 2. Immutable shared program state after registration. 3. Job scheduler in the compiler (core.tasks) with canonical merge order. 4. --jobs flag (default all cores, 1 = single-threaded). 5. Determinism gate: jobs 1 vs N byte-identical on the corpus and the self-compile.",
       "checkSteps": null,
@@ -47300,6 +47391,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #4310 cN): #6967 (2)."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -47407,12 +47503,13 @@
       "parentId": "c0gomix3",
       "needsAcceptance": false,
       "created": "2026-10-02T19:54:04.358Z",
-      "updated": "2026-11-16T00:53:29.539Z",
+      "updated": "2026-11-16T01:08:26.200Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 23
+      "criteriaLastN": 23,
+      "completedAt": "2026-11-16T01:08:26.200Z"
     },
     {
       "id": "c0zgefsg",
@@ -50135,7 +50232,7 @@
       "track": "sidequest",
       "epoch": "e15",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "Write one game-shaped program (a frame that joins a task group, a recursive function, early returns inside core.log spans, a declared D-GAME-BUDGET1 frame budget) and capture it with jet perf on the shipping toolchain. Check each criterion; fix gaps in the existing profiler and trace product, reusing #2528's critical-path computation, with no second recorder.",
       "checkSteps": null,
@@ -50144,6 +50241,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #4632 cN): #6841 (6), #6830 (1), #6887 (1)."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -50286,12 +50388,13 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:53.383Z",
-      "updated": "2026-11-16T00:53:51.293Z",
+      "updated": "2026-11-16T01:08:35.091Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 9
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-16T01:08:35.091Z"
     },
     {
       "id": "c08idy63",
@@ -53097,7 +53200,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -53108,6 +53211,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #4917 cN): #6903 (6), #6901 (2), #6904 (2)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -53726,12 +53834,13 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-09T18:06:22.233Z",
-      "updated": "2026-11-16T00:54:18.988Z",
+      "updated": "2026-11-16T01:08:39.611Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 71
+      "criteriaLastN": 71,
+      "completedAt": "2026-11-16T01:08:39.611Z"
     },
     {
       "id": "c01sunrb",
@@ -56261,7 +56370,7 @@
       "track": "sidequest",
       "epoch": "e15",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "1. Survey the native UI host (#4951, #2999) and the existing Jet linker paths for what already presents pixels. 2. Draft and raise the API ballot (module home, Surface.present(pixels), Audio.queue(samples), input event stream). 3. Implement Linux first (Wayland + X11 fallback, PipeWire/ALSA), then Windows and macOS, all inside Core #Unsafe with audit reasons. 4. Example with golden output (headless surface checksum + recorded PCM checksum) on every tier (I5, I9).",
       "checkSteps": null,
@@ -56270,6 +56379,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #5035 cN): #6701 (4)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -56520,12 +56634,13 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:36:57.362Z",
-      "updated": "2026-11-16T00:54:27.858Z",
+      "updated": "2026-11-16T01:08:43.359Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 24
+      "criteriaLastN": 24,
+      "completedAt": "2026-11-16T01:08:43.359Z"
     },
     {
       "id": "c0grmd0j",
@@ -57783,7 +57898,7 @@
       "track": "sidequest",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -57792,6 +57907,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #5073 cN): #6952 (1), #6568 (1), #6880 (1), #6203 (1), #4723 (1), #6851 (1)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -58294,12 +58414,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T15:42:32.097Z",
-      "updated": "2026-11-16T00:54:36.170Z",
+      "updated": "2026-11-16T01:08:47.765Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 18
+      "criteriaLastN": 18,
+      "completedAt": "2026-11-16T01:08:47.765Z"
     },
     {
       "id": "c0nux77t",
@@ -61455,7 +61576,7 @@
       "track": "sidequest",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -61464,6 +61585,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #5910 cN): #6759 (2), #6793 (1)."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -61843,12 +61969,13 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-16T00:54:39.965Z",
+      "updated": "2026-11-16T01:08:52.268Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 62
+      "criteriaLastN": 62,
+      "completedAt": "2026-11-16T01:08:52.267Z"
     },
     {
       "id": "c0c209zc",
@@ -62395,7 +62522,7 @@
       "track": "epoch",
       "epoch": "e10",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
       "plan": null,
       "checkSteps": null,
@@ -62404,6 +62531,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed as merged: every open criterion moved to the card that owns its work, each tagged (was #5950 cN): #6810 (10)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
@@ -62562,12 +62694,13 @@
       "parentId": "c0h4r83r",
       "needsAcceptance": false,
       "created": "2026-10-28T11:02:34.272Z",
-      "updated": "2026-11-16T00:54:57.742Z",
+      "updated": "2026-11-16T01:09:02.635Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 14
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-16T01:09:02.635Z"
     },
     {
       "id": "c084tcrl",
@@ -224342,6 +224475,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T01:09:57.149Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#31: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3720 c81)"
+    },
+    {
+      "at": "2026-11-16T01:09:50.381Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-16T01:09:50.381Z"
+    },
+    {
+      "at": "2026-11-16T01:09:02.636Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c050uwwc",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:52.268Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:47.765Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c022g7qw",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:43.360Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0776o2m",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:39.614Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03183d1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:35.091Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x5guom",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:26.201Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dv8dlk",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:21.999Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c052rw8k",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:17.428Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xnvmrf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:12.788Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0q38sm2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:08:00.331Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ttcd0k",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:07:50.930Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c047t3lg",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:07:36.495Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c025w7rd",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:07:20.449Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04l6p7a",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:07:16.552Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02vmcbl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:07:12.882Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0u913de",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:06:48.309Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ym70o1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:06:38.755Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0eymgfx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:06:34.739Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ep844r",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:06:31.052Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01k5lts",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:06:26.647Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03habw5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:06:22.583Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0duj9rp",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T01:06:17.624Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j1k587",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-11-16T01:06:12.441Z",
       "by": "Main",
