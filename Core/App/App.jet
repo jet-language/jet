@@ -214,7 +214,10 @@ priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: S
 // that fails with `E` needs `impl CallError -> E`, and one that can't fail
 // answers `R CallError!`. A Remote made for a named client fails each call
 // `.Unreachable`, running nothing, while a test has that client cut off
-// (`disconnect`).
+// (`disconnect`). On a device that queues (`App.offline(.Queue)`), a
+// method that answers nothing is a write, and a write through a Remote
+// that posts joins the device's queue when it can't be sent now (`__write`);
+// every call through such a Remote sends its client's queued writes first.
 Remote: struct<S> {
     priv service: S?
     priv address: String
@@ -228,20 +231,8 @@ Remote: struct<S> {
     // the server, and `fail` gives a `CallError` as the method's own error.
     __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time]> R E! {
         if links_cut(self.client) -> return fail(links_unreachable(self.client, method))
-        if self.service == .Val(service) {
-            loop _ in 0..<transactions.attempts() {
-                call: transactions.begin() ?? return direct(service)
-                if direct(service) == {
-                    .Ok(value) -> {
-                        if transactions.end(call, true) -> return Ok(value)
-                    }
-                    .Err(error) -> {
-                        if transactions.end(call, false) -> return Err(error)
-                    }
-                }
-            }
-            return fail(.Unreachable("the database stayed busy"))
-        }
+        if self.service == .Val(service) -> return remote_direct(service, direct, fail)
+        if queue_on() -> _: queue_drain(self.client)
         reply: remote_post(self.address, self.local, method, args) ?? return fail(err)
         tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
         if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
@@ -252,18 +243,48 @@ Remote: struct<S> {
     // A call of the endpoint method `method` of `S`, which can't fail.
     __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time]> R CallError! {
         if links_cut(self.client) -> return Err(links_unreachable(self.client, method))
-        if self.service == .Val(service) {
-            loop _ in 0..<transactions.attempts() {
-                call: transactions.begin() ?? return Ok(direct(service))
-                value: direct(service)
-                if transactions.end(call, true) -> return Ok(value)
-            }
-            return Err(.Unreachable("the database stayed busy"))
-        }
+        if self.service == .Val(service) -> return remote_direct_value(service, direct)
+        if queue_on() -> _: queue_drain(self.client)
         reply: remote_post(self.address, self.local, method, args)
         tree: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
         value: live_json.at<R>(tree, "/ok") ?? return Err(.Unreachable("the server's reply to `{method}` has no value"))
         Ok(value)
+    }
+
+    // A call of the endpoint method `method` of `S` that answers nothing
+    // and can fail with `E`: a write. On a device that queues, a write
+    // through a Remote that posts joins the queue, and the call succeeds at
+    // once, when its client is cut off, when the client's earlier writes
+    // are still queued, or when no answer comes (`queue_post`); otherwise
+    // it runs as `__call` runs a call.
+    __write: fn<E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) E!, fail: fn(CallError) E!) E! -[Net, Time]> {
+        held: self.service == .Val(_)
+        queues: queue_on() && !held
+        if !queues && links_cut(self.client) -> return fail(links_unreachable(self.client, method))
+        if self.service == .Val(service) -> return remote_direct(service, direct, fail)
+        reply := ""
+        if queues {
+            reply = queue_post(self.client, self.address, self.local, method, args) ?? return fail(err)
+        } else { reply = remote_post(self.address, self.local, method, args) ?? return fail(err) }
+        if reply == "" -> return Ok()
+        tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
+        if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
+        Ok()
+    }
+
+    // A write of the endpoint method `method` of `S`, which can't fail.
+    __write_value: fn(self, method: String, args: [String], direct: fn(S) Never!) CallError! -[Net, Time]> {
+        held: self.service == .Val(_)
+        queues: queue_on() && !held
+        if !queues && links_cut(self.client) -> return Err(links_unreachable(self.client, method))
+        if self.service == .Val(service) -> return remote_direct_value(service, direct)
+        reply := ""
+        if queues {
+            reply = queue_post(self.client, self.address, self.local, method, args) ?? return Err(err)
+        } else { reply = remote_post(self.address, self.local, method, args) }
+        if reply == "" -> return Ok()
+        _: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
+        Ok()
     }
 
     // One argument of a remote call, encoded.
@@ -274,6 +295,33 @@ Remote: struct<S> {
     // `failure` as an error of the call; the compiler's `fail` binds it, so
     // the method's error type takes it through its conversion.
     __raise: fn<R>(self, failure: CallError) -> R CallError! { Err(failure) }
+}
+
+// A call that `direct` runs on `service`, the service a Remote holds, as one
+// transaction on each store it uses, retried while a store stays busy.
+priv remote_direct: fn<S, R, E>(service: S, direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -> R E! {
+    loop _ in 0..<transactions.attempts() {
+        call: transactions.begin() ?? return direct(service)
+        if direct(service) == {
+            .Ok(value) -> {
+                if transactions.end(call, true) -> return Ok(value)
+            }
+            .Err(error) -> {
+                if transactions.end(call, false) -> return Err(error)
+            }
+        }
+    }
+    fail(.Unreachable("the database stayed busy"))
+}
+
+// remote_direct for a method that can't fail.
+priv remote_direct_value: fn<S, R>(service: S, direct: fn(S) -> R Never!) -> R CallError! {
+    loop _ in 0..<transactions.attempts() {
+        call: transactions.begin() ?? return Ok(direct(service))
+        value: direct(service)
+        if transactions.end(call, true) -> return Ok(value)
+    }
+    Err(.Unreachable("the database stayed busy"))
 }
 
 // How a remote call failed. Every call through a `Remote` can fail this way,
@@ -468,8 +516,12 @@ remote_at: fn<S>(address: String, client: String{""}) -> Remote<S> Never! {
 disconnect: fn(client: String) Never! { links_set(client, true) }
 
 // Restores the link `disconnect` cut: the client's next call reaches the
-// server again.
-reconnect: fn(client: String) Never! { links_set(client, false) }
+// server again, and the writes the client queued meanwhile are sent now, in
+// order (`queue_drain`).
+reconnect: fn(client: String) Never! -[Net, Time]> {
+    links_set(client, false)
+    _: queue_drain(client)
+}
 
 // The clients a test cut off, one name a line, sorted, in one process-wide
 // cell; inside a deterministic world, the World's own cell `app.links`.
@@ -545,6 +597,243 @@ priv links_unreachable: fn(client: String, method: String) -> CallError Never! {
     assert_eq(links_names(links_load()).len(), 0)
 }
 
+// The device's queue of the writes it couldn't send, oldest first, when the
+// app graph queues (`App.offline(.Queue)`): each is the call of `method`
+// through a Remote of `client` that posts to `address` (`local`: the app
+// graph answers it), its encoded arguments `body`, and the request key it
+// keeps on every send, so a server that ran it once answers a repeat with
+// the reply it kept.
+#Equatable
+priv QueuedWrite: struct {
+    client: String
+    address: String
+    local: Bool
+    method: String
+    body: String
+    key: String
+}
+
+// The queue lives in one process-wide cell, or in the World's own cell
+// `app.queue` inside a deterministic world, as length-prefixed fields: each
+// write's client, address, "1" or "0" for local, method, body and key.
+priv QUEUE_CELL: Shared{LiveCell{bytes: [U8]{}}}
+
+priv QUEUE_STORE: "app.queue"
+
+priv queue_load: fn() -> [U8] Never! {
+    if world_rt.world_store_load(QUEUE_STORE) == .Val(bytes) -> return bytes
+    QUEUE_CELL.bytes
+}
+
+priv queue_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
+    if world_rt.world_store_replace(QUEUE_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    cell := QUEUE_CELL.guard_edit()
+    if cell.value.bytes != expected -> return false
+    cell.value.bytes = replacement.move()
+    true
+}
+
+// The writes of an encoded queue; malformed bytes are an empty queue.
+priv queue_decode: fn(raw: [U8]) -> [QueuedWrite] Never! {
+    fields: live_fields(raw) ?? return [QueuedWrite]{}
+    writes := [QueuedWrite]{}
+    at := 0
+    loop at + 5 < fields.len() {
+        writes.push(QueuedWrite{client: fields[at], address: fields[at + 1], local: fields[at + 2] == "1", method: fields[at + 3], body: fields[at + 4], key: fields[at + 5]})
+        at += 6
+    }
+    writes
+}
+
+priv queue_put: fn(out: &[U8], write: QueuedWrite) Never! {
+    live_put(out, write.client)
+    live_put(out, write.address)
+    live_put(out, if write.local -> "1" else -> "0")
+    live_put(out, write.method)
+    live_put(out, write.body)
+    live_put(out, write.key)
+}
+
+// Adds `write` to the end of the queue.
+priv queue_add: fn(write: QueuedWrite) Never! {
+    loop {
+        seen: queue_load()
+        kept := seen.copy()
+        queue_put(kept, write)
+        if queue_replace(seen, kept) {
+            return
+        }
+    }
+}
+
+// Removes the write whose request key is `key`; nothing when none is queued.
+priv queue_remove: fn(key: String) Never! {
+    loop {
+        seen: queue_load()
+        kept := [U8]{}
+        loop write in queue_decode(seen) {
+            if write.key != key -> queue_put(kept, write)
+        }
+        if queue_replace(seen, kept) {
+            return
+        }
+    }
+}
+
+// The oldest write client `client` queued.
+priv queue_first: fn(client: String) -> QueuedWrite? Never! {
+    loop write in queue_decode(queue_load()) {
+        if write.client == client -> return Val(write.copy())
+    }
+    None
+}
+
+// Whether the app graph queues the writes it can't send.
+priv queue_on: fn() -> Bool Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.offline == .Queue
+}
+
+// The number of writes the device's queue holds, waiting to send.
+pending: fn() -> Int Never! { queue_decode(queue_load()).len() }
+
+// The clients whose queue a task is sending now, so one task sends a
+// client's writes, in order, and a write made meanwhile, even by a call the
+// sending runs, waits behind them.
+priv QUEUE_SENDERS: Shared{[String]{}}
+
+priv queue_claim: fn(client: String) -> Bool Never! {
+    senders := QUEUE_SENDERS.guard_edit()
+    loop name in senders.value {
+        if name == client -> return false
+    }
+    senders.value.push(client.copy())
+    true
+}
+
+priv queue_release: fn(client: String) Never! {
+    senders := QUEUE_SENDERS.guard_edit()
+    kept := [String]{}
+    loop name in senders.value {
+        if name != client -> kept.push(name.copy())
+    }
+    senders.value = kept
+}
+
+// Sends client `client`'s queued writes, oldest first, each under its own
+// request key, unless another task sends them now. A write the server
+// commits leaves the queue. A write it refuses (its method's error, or
+// `.Invalid`) is rolled back: it leaves the queue, and a notice naming it
+// and the refusal joins the app's notice list (`__keep_notice`), since its
+// screen may be long gone. No answer, `.SignedOut` or `.UpdateRequired`
+// stops the sending and keeps the write. True when the client's queue is
+// empty after.
+priv queue_drain: fn(client: String) -[Net, Time]> Bool Never! {
+    if !queue_claim(client) -> return false
+    sent: queue_send(client)
+    queue_release(client)
+    sent
+}
+
+priv queue_send: fn(client: String) -[Net, Time]> Bool Never! {
+    loop {
+        if links_cut(client) -> return false
+        write: queue_first(client) ?? return true
+        refusal := String?{None}
+        if remote_send(write.address, write.local, write.method, write.body, write.key) == {
+            .Ok(reply) -> { refusal = queue_refusal(reply) }
+            .Err(failure) -> {
+                if failure == {
+                    .Invalid(fields) -> { refusal = Val(queue_invalid(fields)) }
+                    .Unreachable(_) | .SignedOut | .UpdateRequired -> return false
+                }
+            }
+        }
+        queue_remove(write.key)
+        if refusal == .Val(why) {
+            __keep_notice(Notice{text: "The server refused `{write.method}`, so it was undone: {why}"})
+        }
+    }
+}
+
+// The error JSON of a reply that `__reply_err` made, `{"err":…}`; None for
+// any other reply.
+priv queue_refusal: fn(reply: String) -> String? Never! {
+    if !reply.starts_with("{{\"err\":") || !reply.ends_with("}}") -> return None
+    Val(reply.slice(7, reply.len() - 1))
+}
+
+priv queue_invalid: fn(fields: [FieldError]) -> String Never! {
+    reasons := [String]{}
+    loop field in fields {
+        reasons.push(if field.path == "" -> field.reason.copy() else -> "{field.path}: {field.reason}")
+    }
+    reasons.join("; ")
+}
+
+// A write of `method` through a Remote of `client` that posts to `address`,
+// on a device that queues: queued, so the call succeeds at once (""), when
+// the client is cut off, when its earlier writes are still queued, or when
+// no answer comes; else the reply it got, which is never empty. Sent or
+// queued, the write keeps one request key.
+priv queue_post: fn(client: String, address: String, local: Bool, method: String, args: [String]) -[Net, Time]> String CallError! {
+    write: QueuedWrite{client: client, address: address, local: local, method: method, body: "[{args.join(",")}]", key: remote_key(address, method)}
+    if links_cut(client) || !queue_drain(client) {
+        queue_add(write)
+        return Ok("")
+    }
+    sent: remote_send(write.address, write.local, write.method, write.body, write.key) ?? {
+        if !call_unanswered(err) -> return Err(err)
+        queue_add(write)
+        return Ok("")
+    }
+    Ok(sent)
+}
+
+// Whether `failure` is no answer at all, so a write may wait in the queue.
+priv call_unanswered: fn(failure: CallError) -> Bool Never! {
+    if failure == {
+        .Unreachable(_) -> true
+        .Invalid(_) | .SignedOut | .UpdateRequired -> false
+    }
+}
+
+#Test("a queued write keeps its key and order, and leaves the queue by its key") {
+    before: pending()
+    queue_add(QueuedWrite{client: "queue-test", address: "http://127.0.0.1:9/api", local: false, method: "save", body: "[1]", key: "k1"})
+    queue_add(QueuedWrite{client: "queue-test", address: "http://127.0.0.1:9/api", local: false, method: "save", body: "[2]", key: "k2"})
+    assert_eq(pending(), before + 2)
+    first: queue_first("queue-test") ?? panic("a write is queued")
+    assert_eq(first.key, "k1")
+    assert_eq(first.body, "[1]")
+    assert(!first.local)
+    assert_eq(queue_first("queue-other"), None)
+    queue_remove("k1")
+    assert_eq((queue_first("queue-test") ?? panic("one write is left")).key, "k2")
+    queue_remove("k2")
+    assert_eq(pending(), before)
+}
+
+#Test("a refusal is the error JSON of an err reply, and an ok reply is none") {
+    assert_eq(queue_refusal("{{\"err\":\"Conflict\"}}"), Val("\"Conflict\""))
+    assert_eq(queue_refusal("{{\"ok\":null}}"), None)
+    assert_eq(queue_invalid([FieldError]{FieldError{path: "title", reason: "is empty"}, FieldError{path: "", reason: "no JSON"}}), "title: is empty; no JSON")
+    assert(call_unanswered(.Unreachable("down")))
+    assert(!call_unanswered(.SignedOut))
+}
+
+#Test("one task sends a client's queue at a time") {
+    assert(queue_claim("queue-claim"))
+    assert(!queue_claim("queue-claim"))
+    assert(queue_claim("queue-claim-other"))
+    queue_release("queue-claim")
+    queue_release("queue-claim-other")
+    assert(queue_claim("queue-claim"))
+    queue_release("queue-claim")
+}
+
 // The times a remote call is sent, in all, while its reply is lost: each
 // send carries the call's one request key, so a server that ran the call
 // answers a repeat with the reply it kept, and the call runs once.
@@ -554,20 +843,29 @@ priv REMOTE_SENDS: 3
 // sends so far.
 priv REMOTE_RESEND_MS: 200
 
-// One remote call: POST the JSON array of `args` to `{address}/{method}`;
-// the reply's body on 200, else the failure its status names. The call
-// carries a W3C `traceparent` that starts its trace, and that trace's id as
-// its `x-request-id`, so the server's span of the call has both. It also
-// carries a request key, its `idempotency-key`, and is sent again under the
-// same key when no reply comes, up to `REMOTE_SENDS` times. A `local` call
-// is the app graph's, answered in this process under the same key
-// (`graph_post`).
+// One remote call: POST the JSON array of `args` to `{address}/{method}`
+// under a fresh request key (`remote_send`).
 priv remote_post: fn(address: String, local: Bool, method: String, args: [String]) -[Net, Time]> String CallError! {
-    seed: "{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}"
-    trace: make_trace_id("trace:{seed}", 16)
-    key: make_trace_id("key:{seed}", 16)
-    body: "[{args.join(",")}]"
+    remote_send(address, local, method, "[{args.join(",")}]", remote_key(address, method))
+}
+
+// A fresh request key for a call of `{address}/{method}`.
+priv remote_key: fn(address: String, method: String) -> String Never! {
+    make_trace_id("key:{rt.clock_mono_ns()}:{trace_next()}:{address}/{method}", 16)
+}
+
+// One send of a remote call: POST `body`, the JSON array of its arguments,
+// to `{address}/{method}`; the reply's body on 200, else the failure its
+// status names. The call carries a W3C `traceparent` that starts its trace,
+// and that trace's id as its `x-request-id`, so the server's span of the
+// call has both. It also carries its request key `key`, its
+// `idempotency-key`, and is sent again under that key when no reply comes,
+// up to `REMOTE_SENDS` times. A `local` call is the app graph's, answered in
+// this process under the same key (`graph_post`).
+priv remote_send: fn(address: String, local: Bool, method: String, body: String, key: String) -[Net, Time]> String CallError! {
     if local -> return graph_post("{address}/{method}", key, body)
+    seed: "{rt.clock_mono_ns()}:{trace_next()}:{key}"
+    trace: make_trace_id("trace:{seed}", 16)
     lost := ""
     loop sends in 0..<REMOTE_SENDS {
         if sends > 0 -> tasks.sleep(REMOTE_RESEND_MS * sends)
@@ -2785,6 +3083,9 @@ priv RemoteArgs: struct {
     __reply_value: fn<R: Encode>(self, value: R) -> String Never! {
         "{{\"ok\":{live_json.to_string<R>(value) ?? "null"}}}"
     }
+
+    // The reply of a call whose method answers nothing: `{"ok": null}`.
+    __reply_unit: fn<R>(self, _value: R) -> String Never! { "{{\"ok\":null}}" }
 
     // The reply of a job that failed with an error that doesn't encode.
     __failed: fn<E>(self, _error: E) -> String Never! { "{{\"err\":null}}" }

@@ -5528,7 +5528,8 @@ tasks never read or change the process registry. The module source is
 | `remote(service: S, client: String = "") -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. `client` names the client holding it, which a test can cut off (`disconnect`). |
 | `remote_at<S>(address: String, client: String = "") -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. `client` is as for `remote`. |
 | `disconnect(client: String)` | — | The test host cuts client `client` off every server: until `reconnect(client)`, each call through a Remote made for it fails `CallError.Unreachable`, naming the client and the method, and runs nothing on the server. Nothing touches the network, so an offline, catch-up or replay case runs the same each time; the servers and every other client go on. Inside `testing.world` the links are the world's own. A blank name, or one with a control character, panics. |
-| `reconnect(client: String)` | — | Restore the link `disconnect` cut: the client's next call reaches the server. |
+| `reconnect(client: String) -[Net, Time]>` | — | Restore the link `disconnect` cut: the client's next call reaches the server, and the writes it queued meanwhile are sent now, in order (see `graph.offline(.Queue)` below). |
+| `pending() -> Int` | count | The number of writes the device's queue holds, waiting to send; always 0 on a device that doesn't queue. |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
 | `new_id() -[Rand, Time]> String` | ID | A fresh UUIDv7 as lowercase text: the Unix millisecond it was made, then 74 random bits. A client names a row it creates with it, so a row made offline has its final ID at once; a later ID sorts after it. It panics when the system has no random source. |
 | `as_caller<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
@@ -5807,9 +5808,29 @@ Remote of a service the graph doesn't mount posts each call to the
 that `#App.Webhook`, `#App.Every` or an HTTP route marker marks, is E2805
 (`jet.InvalidRoute`), as those answer only the server's `web.App`. A method
 `#App.Job` marks is a job of the graph, as on a served App. The graph's
-rate limits apply only to served endpoints. `graph.offline(.Queue)` records
-that the clients keep their writes while offline (`app.Offline`: `.Off`,
-the default, or `.Queue`).
+rate limits apply only to served endpoints. `graph.offline(.Queue)` makes
+the device keep its writes while offline (`app.Offline`: `.Off`, the
+default, or `.Queue`).
+
+On a device that queues, a call of a method that answers nothing (`fn(…)
+E!` or `fn(…)`) through a Remote that posts (`remote_at`, or the graph's
+Remote of a service) is a write. When its client is
+cut off (`disconnect`), when the client's earlier writes are still queued,
+or when no answer comes, the write joins the device's queue and the call
+succeeds at once; `app.pending()` counts the queue. A write keeps one
+request key however often it is sent, so a server that ran it once answers
+a repeat with the reply it kept. The queue is sent, oldest first, by
+`reconnect(client)` and before each later call through a Remote of that
+client; one task sends a client's queue at a time. A write the server
+commits leaves the queue. A write it refuses (the method's error, or
+`CallError.Invalid`) is rolled back: it leaves the queue, and a notice
+naming the method and the refusal joins the app's notice list, since the
+screen that made it may be gone. No answer, `SignedOut` or
+`UpdateRequired` stops the sending and keeps the write, so an expired
+session holds the queue. A Remote that runs its service directly
+(`remote(service)`) never queues. The queue and the notice list live in
+this process (inside `testing.world`, in the world's own store); they
+don't outlive it yet, on any target.
 
 `graph.screen("/projects/:project/board", board, signed_in: false)` adds a
 screen. `board` is a named function. Each of its parameters that is an
