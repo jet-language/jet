@@ -19,6 +19,14 @@ ReflectValue: struct {
     display: String
 }
 
+// A reflected enum case's payload: none, one unnamed value of a type, or its
+// named fields in declaration order.
+CasePayload: enum {
+    Unit
+    Single(TypeId)
+    Named([FieldInfo])
+}
+
 inspect: fn(value: String) -> ReflectValue Never! { classify(value) }
 
 classify: fn(value: String) -> ReflectValue {
