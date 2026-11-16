@@ -11,15 +11,15 @@ env: JET_STORE_DIR={work}/cache
 step: jet run main.jet
 exit: 0
 stdout: ~ "landing by POST: 200 | cache-control: public, max-age=600 | etag: set\n" # the policy's max_age, in seconds
-stdout: ~ "landing names its board: true\n"
+stdout: ~ "landing names its board: true\n" # the reply is the method's own
 stdout: ~ "landing by GET: 200 | same etag: true\n" # the ETag names the reply's bytes
-stdout: ~ "landing by GET naming its etag: 304 | body: 0 bytes\n"
-stdout: ~ "landing by GET naming another etag: 200\n"
+stdout: ~ "landing by GET naming its etag: 304 | body: 0 bytes\n" # a matching If-None-Match revalidates
+stdout: ~ "landing by GET naming another etag: 200\n" # a stale ETag gets the reply again
 stdout: ~ "count by POST: 200 | cache-control: none | etag: none\n" # no policy, no cache headers
 stdout: ~ "count by GET: 405 | allow: POST\n" # a GET runs only a cached read
-stdout: ~ "mine signed out: 401 | cache-control: private, no-store | etag: none\n"
+stdout: ~ "mine signed out: 401 | cache-control: private, no-store | etag: none\n" # a signed-in refusal is kept by no one
 
 step: jet check probes/cache_needs_reply_type.jet
 exit: nonzero
-stderr: ~ "`.cache` expects exactly one type argument, got 0"
-stderr: ~ "cache_needs_reply_type.jet:4:"
+stderr: ~ "`.cache` expects exactly one type argument, got 0" # the reply type is required
+stderr: ~ "cache_needs_reply_type.jet:4:" # at the probe's `.cache` call
