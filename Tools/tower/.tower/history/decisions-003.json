@@ -26491,6 +26491,195 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-22",
       "retiredAt": "2026-11-16T08:50:25.069Z"
+    },
+    {
+      "id": "D-JAI-SITE1",
+      "cardId": "c0dvyqnu",
+      "group": "syntax",
+      "title": "Facts about where code is: caller location, current location, constness and the called function",
+      "situation": "A logging or checking function is most useful when it reports the file and line of the code that called it. Jai provides this and related facts, such as the current function's name and which function a call will pick. Jet has none of them, and its rules mention a caller-location value that was never built. The vote decides which of these facts Jet adds; we recommend all of them, read with Jet's existing fact mark.",
+      "gist": "Which facts about the code's own location should Jet provide, like Jai's #caller_location?",
+      "lesson": "A fact is a value the compiler already knows, read with `$`, such as `T.$fields`. A source location is a file, line, column and enclosing function. The caller location is where the current function was called from. A default is the value a parameter takes when the call omits it, written `name: Type{value}`.",
+      "explainer": "",
+      "story": "Lena writes a check helper used in two hundred places. When a check fails, the log points inside the helper, not at the failing call, so she has to search by message text. Jai's version reports the caller's file and line.",
+      "inWild": "check :: (ok: bool, msg: string, loc := #caller_location) {\n    if !ok  log_error(\"%:%: %\", loc.fully_pathed_filename, loc.line_number, msg);\n}",
+      "detail": "Audit rows refer to Docs/audits/jai-parity-2026-10-16.md. Spellings use today's `prep` keyword and `$` fact mark (D-COMPILER-NS1=A, shipped 2026-09-30). The open ballots D-COMPTIME-WORD1 (prep to comptime) and D-META-HASH1 ($ reads to ##) would respell them mechanically. No choice here changes with those outcomes. Words used here. Jai is a systems programming language by Jonathan Blow, built for games, with no guardrails by default. `prep { }` runs Jet code while compiling.\n\nA `$` word such as `T.$fields` reads a fact the compiler knows. A `#Name` marker attaches a rule to the code below it. `package.jet` is a package's settings file. The main package is the one you build directly.\n\nFACTS UNDER A. `$here`: SourceLocation for the expression where it is written (Jai #file, #line, #filepath, #location and, through `$here.function`, #procedure_name). SourceLocation is new: SourceSpan holds byte offsets and SourceInfo describes generated source identity (D-META-REFLECT2), so neither carries line and column. Unlike D-META-REFLECT2's fallible queries, these roots never fail. Inside a closure, `function` is the enclosing named function.\n\n`$caller`: SourceLocation of the call, legal only as a parameter default and inside an #Expand macro (D-JAI-CODE1), where `$caller.code` is the call as Code. Anywhere else, `$caller` is a registered error naming those two places. A wrapper forwards its own location by declaring `at: SourceLocation{$caller}` and passing `at`. Nothing is implicit. Function values carry no defaults, so a call through one passes the location explicitly. SourceLocation prints as `path:line:column`.\n\n`x.$known` is true when x is a constant expression or a prep value. GENERIC1's `prep?` uses the same front-end definition, identical on every tier. It differs from `$phase`, which says where code runs. For `LIMIT :: 5` and `LIMIT :: prep { 5 }` it is true. For a run-time variable it is false (Jai is_constant). `call.$callee`: FunctionInfo of the function a call resolves to, without running it (Jai #procedure_of_call).\n\nJai #this maps to `Self` in a type and to the function's own name in a procedure. No new fact is needed. Jai #compile_time maps to the ratified `$phase`. Jai #location(code) maps to `c.$location` on Code values in D-JAI-CODE1.\n\nAMENDS. D-COMPILER-NS1 gains two subjectless roots. E2414 (defaults must be compile-time constants) treats `$caller` as a per-call constant. D-SHAPE2's `#Caller()` mention is replaced under A and B and built as a marker under C.\n\nSTATUS. None of these exist in code today. Each needs a registry row, an example with golden output on every tier (I5), and diagnostics. The example's `print` inside prep follows the compile-time output rules of D-CTIO1. The stale `@` fact text at D-ONCE-AT1 is cleaned up in the same cutover.\n\nREGRETS. In 2015 Blow had no call-site file and line for asserts (0KkW_Zo_pDc 00:05:15). #caller_location was not constant inside #run (pgiVrhsGkKY 00:40:09). `$caller` is a constant wherever it is legal. These citations come from the mining notes.\n\nEVIDENCE. Jai Appendix C rows for #file, #line, #filepath, #location, #caller_location, #procedure_name, #procedure_of_call and #this. Blow yJukJS81o-k 00:19:28-00:21:38. Rust, Swift and C++20 prove the caller-location default works with no run-time lookup.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Locations, constness and callee",
+          "detail": "`$here` is the location of the code where it is written. `$caller`, legal only as a parameter default or inside a macro, is the location of the call. Both give a SourceLocation record with file, line, column and enclosing function. `x.$known` says whether x is a constant. `call.$callee` names the function a call picks, without running it.",
+          "technical": "Subjectless roots `$here` and `$caller` -> new record SourceLocation{file, line, column, function}. They never fail, since every expression has a location. Member facts `.$known -> Bool` and `.$callee -> FunctionInfo`. `$caller` is a per-call-site constant, exempt from E2414. Each name is registered in Syntax.rs (I7). Misuse has registered codes with snapshots (I4).",
+          "code": "fn check(ok: Bool, msg: String, at: SourceLocation{$caller}) {\n    if !ok -> log.error(\"{at}: {msg}\")   // prints app.jet:12:5\n}\nprint($here.line, $here.function)\nLIMIT :: 5\nprep { print(LIMIT.$known, add(1, 2).$callee.name) }   // true add"
+        },
+        {
+          "key": "B",
+          "name": "Locations only",
+          "detail": "The two location roots of A. Jai is_constant and #procedure_of_call stay without a Jet form.",
+          "technical": "Roots `$here` and `$caller` only.",
+          "code": "fn check(ok: Bool, msg: String, at: SourceLocation{$caller}) {\n    if !ok -> log.error(\"{at}: {msg}\")\n}\nprint($here.line, $here.function)"
+        },
+        {
+          "key": "C",
+          "name": "Caller marker plus facts",
+          "detail": "The ratified `#Caller()` mention becomes a parameter marker that fills the parameter with the call's location. `$here`, `.$known` and `.$callee` are added as in A.",
+          "technical": "Parameter marker `#Caller` registered in the marker registry. Fact roots as A minus `$caller`.",
+          "code": "fn check(ok: Bool, msg: String, #Caller at: SourceLocation) {\n    if !ok -> log.error(\"{at}: {msg}\")\n}\nprint($here.line)\nprep { print(LIMIT.$known) }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "#[track_caller] plus Location::caller(); the attribute propagates through annotated wrappers.",
+          "code": "#[track_caller]\nfn check(ok: bool) { if !ok { panic!(\"at {}\", Location::caller()) } }"
+        },
+        {
+          "lang": "Swift",
+          "note": "#fileID and #line work as default arguments, filled at each call.",
+          "code": "func check(_ ok: Bool, file: String = #fileID, line: Int = #line)"
+        },
+        {
+          "lang": "C++20",
+          "note": "std::source_location::current() as a default argument.",
+          "code": "void check(bool ok, std::source_location at = std::source_location::current());"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One fact family covers Jai's location and call-site directives with the `$` mark Jet already uses for compiler knowledge.",
+        "gains": [
+          "Every Jai location directive has a home.",
+          "One fact mark for all compiler knowledge."
+        ],
+        "losses": [
+          {
+            "loss": "Four new fact names to learn.",
+            "mitigation": "A misplaced `$caller` is an error that names the two places it is allowed."
+          },
+          {
+            "loss": "A wrapper must forward the location explicitly.",
+            "mitigation": "A wrapper takes its own `$caller` parameter and passes it on, which keeps the flow visible."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B handles logging but leaves Jai's is_constant and #procedure_of_call without a Jet form."
+          },
+          {
+            "key": "C",
+            "reason": "C gives the caller location a marker while every other compiler fact uses `$`."
+          }
+        ],
+        "tradeoff": "Four fact names, for every Jai code-site directive."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: BegSite. Skill: rli5. The beginner pass tested the complete ballot. The reader could not name the record fields, so the surface now lists file, line, column and function and defines defaults.",
+        "adversarial": "Author model family: claude-opus. Adversarial model family: claude-haiku. Fresh agent: AdvSite. The adversarial review attacked the recommendation. It found the retired equals default, records without line or column, and duplicate function facts; the ballot now proposes one new location record and two roots."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Which facts about the code's own location should Jet provide, like Jai's #caller_location?",
+        "lesson": "A fact is a value the compiler already knows, read with `$`, such as `T.$fields`. A source location is a file, line, column and enclosing function. The caller location is where the current function was called from. A default is the value a parameter takes when the call omits it, written `name: Type{value}`.",
+        "trio": {
+          "current": {
+            "note": "Today a helper cannot learn its caller's line, so log lines point inside the helper.",
+            "code": "fn check(ok: Bool, msg: String) {\n    if !ok -> log.error(msg)     // reports this file, not the caller's\n}\ncheck(x > 0, \"x must be positive\")"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "#caller_location as a default argument (The Way to Jai, book/30A).",
+            "code": "check :: (ok: bool, msg: string, loc := #caller_location) {\n    if !ok  log_error(\"%:%: %\", loc.fully_pathed_filename, loc.line_number, msg);\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Locations, constness and callee",
+            "gist": "Add `$here`, `$caller`, `.$known` and `.$callee`.",
+            "gains": [
+              "Loggers and asserts report the caller's line.",
+              "Build code can ask which function a call picks.",
+              "Code can test whether a value is a constant."
+            ],
+            "losses": [
+              "Four new fact names to learn."
+            ],
+            "proposed": {
+              "code": "fn check(ok: Bool, msg: String, at: SourceLocation{$caller}) {\n    if !ok -> log.error(\"{at}: {msg}\")   // prints app.jet:12:5\n}\nprint($here.line, $here.function)\nLIMIT :: 5\nprep { print(LIMIT.$known, add(1, 2).$callee.name) }   // true add"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Locations only",
+            "gist": "Add only `$here` and `$caller`.",
+            "gains": [
+              "Covers the common logging case.",
+              "Fewest new names."
+            ],
+            "losses": [
+              "No constness or called-function facts."
+            ],
+            "proposed": {
+              "code": "fn check(ok: Bool, msg: String, at: SourceLocation{$caller}) {\n    if !ok -> log.error(\"{at}: {msg}\")\n}\nprint($here.line, $here.function)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Caller marker plus facts",
+            "gist": "Mark a parameter with `#Caller` to receive the caller's location; add the other facts.",
+            "gains": [
+              "Reads like Swift and Rust.",
+              "No default-value exception."
+            ],
+            "losses": [
+              "The caller location is a marker, not a fact like the rest."
+            ],
+            "proposed": {
+              "code": "fn check(ok: Bool, msg: String, #Caller at: SourceLocation) {\n    if !ok -> log.error(\"{at}: {msg}\")\n}\nprint($here.line)\nprep { print(LIMIT.$known) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "why": "One fact family covers Jai's location and call-site directives with the `$` mark Jet already uses for compiler knowledge.",
+          "gains": [
+            "Every Jai location directive has a home.",
+            "One fact mark for all compiler knowledge."
+          ],
+          "losses": [
+            {
+              "loss": "Four new fact names to learn.",
+              "mitigation": "A misplaced `$caller` is an error that names the two places it is allowed."
+            },
+            {
+              "loss": "A wrapper must forward the location explicitly.",
+              "mitigation": "A wrapper takes its own `$caller` parameter and passes it on, which keeps the flow visible."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B handles logging but leaves Jai's is_constant and #procedure_of_call without a Jet form."
+            },
+            {
+              "key": "C",
+              "reason": "C gives the caller location a marker while every other compiler fact uses `$`."
+            }
+          ],
+          "tradeoff": "Four fact names, for every Jai code-site directive.",
+          "rec": "A"
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-16T11:39:51.397Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-17",
+      "retiredAt": "2026-11-16T09:32:04.243Z"
     }
   ]
 }
