@@ -1,0 +1,27 @@
+// A crew's graph has a screen for a task and none for a project. Every
+// target runs this one graph, so a push that opens a task has an address on
+// each of them, and a push that opens a project has none.
+use {
+    app
+    auth: core.auth
+}
+
+TaskView: struct {
+    id: Int
+}
+
+ProjectView: struct {
+    id: Int
+}
+
+task_screen: fn(view: TaskView) -> Int Never! { view.id }
+
+graph: fn() -> app.App Never! { app.new("Crew").screen("/tasks/:id", task_screen) }
+
+tell_assignee: fn(who: auth.AccountID, task: Int) -[Net]> {
+    app.notify(to: who, title: "Assigned to you", body: "Task {task}", open: TaskView{id: task})
+}
+
+tell_project: fn(who: auth.AccountID, project: Int) -[Net]> {
+    app.notify(to: who, title: "Project changed", body: "Project {project}", open: ProjectView{id: project})
+}
