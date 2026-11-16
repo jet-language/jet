@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6979,
-    "rev": 108331,
+    "rev": 108332,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -224599,6 +224599,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T01:41:43.352Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0ntia4o",
+      "note": "p198 landed; owner order: precompiled Core, then G6 G9 G5 G3 G10 G7 G11"
+    },
+    {
       "at": "2026-11-16T01:37:48.530Z",
       "by": "Main",
       "action": "goal.update",
@@ -229470,6 +229477,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0ntia4o",
+      "title": "p198 landed; owner order: precompiled Core, then G6 G9 G5 G3 G10 G7 G11",
+      "body": "## Self-compile (receipt p197, batch compiler 07b2784a02)\n- Self-compile: 32.2 s wall, 173.6 CPU-s, 5.39x parallel, 4.67 GB peak (p196: 32.7 s, 157.5 CPU-s, 4.82x).\n- Throughput over 956,109 lines: check 84.8-87.4K lines/s (p196 79-81K), O0 28.4-28.9K (27.5-29.0K), release 22.7-23.5K (21.4-22.7K). The p196 check and release dips have recovered.\n- The p198 receipt runs with p199.\n\n## Owner order 2026-11-15 ~20:30 (now in force)\n- Precompiled Core is finished first, with all 4 agents. Then the goals run G6, G9, G5, G3, G10, G7, G11: 3 agents on the current goal, 1 on the next. G6 and G9 are due 2026-11-16 06:00.\n- Speed steps 2-5 move to G11. The type-ID switch is G6's first step (#6978). Ownership keyed by ids moves to G10 (#6066 c19). Parked patches are listed on #5479.\n- Enforced by a staffing check that each cycle prints, and by the queue: a SUB must name an allowed goal. AGENTS.md is aligned in SUB Main-agents-goal-chain (lands p199). All 7 goal bodies carry the new order.\n\n## Precompiled Core: 7 criteria open\n| Criterion | State | Agent |\n|---|---|---|\n| #6759 c20 Core ships precompiled | 0 of 498 toolchain syscalls on hello; golden O0/O1/O2 has 13 rows to fix (3 fail, 10 error); the strace receipt is not yet committed | MemKernel-6 |\n| #6759 c2 load+finalize < 0.3 s | p198: 324-332 ms (load 75-81 + finalize 249-251); was 356-388 | PrecompiledCore-4 |\n| #6759 c9 op twin 1 s / 400 MB | 1.00-1.02 s | PrecompiledCore-4 |\n| #6759 c4 memory scales with reach | rcc 325 MB, hello 53-55 MB | PrecompiledCore-4 |\n| #6759 c15 hello CPU mostly on user code | open | GoalsA-1-4 |\n| #6759 c1 one comptime child | open | Speed-3-2 |\n| #6501 c15 per-step receipts | open | MemKernel-6 (after c20) |\n\n## G6 / G9\n- G6: 25 cards, 177 open criteria (+2 from new #6978). G9: 40 cards, 172 open criteria (no change). Agents move there when precompiled Core closes.\n\n## p198 landed 4 SUBs (dev d304f826ac, master promoted)\n- Main-agents-bigwins: AGENTS.md biggest-wins and worktree-cap text (its cross-goal reading is corrected in p199).\n- GoalsA-1-4-c7-shared-ids: the shared Name/TypeID model (groundwork for #6978).\n- PrecompiledCore-4-core-interface-one-parse-each: Core interface parsed once each; rcc 0.53-0.55 s (p197 0.66-0.70 s).\n- Speed-3-5479-c6-trace-unix-anchor: trace spans anchored on Unix time.\n- Proofs 6/6 pass. Suite: 154 fail, 2 fixed, 3 new: TLS.jet dudect O1/O2 (timing checks that fail 0-3 times in nearly every cycle since p191; not a p198 change) and the Firefox notebook browser case.\n\n## p199 running\n- Main-tower-board-push, PrecompiledCore-4-ownership-symbol-ids (with a byte-identical `jet check Compiler` diagnostics check against p198), Main-agents-goal-chain.\n\n## Board\n- 407 open cards (+1), 2,515 open criteria (+4): new #6978 (2 criteria) and #6066 c19, from the owner's move.\n",
+      "by": "Main",
+      "created": "2026-11-16T01:41:43.352Z",
+      "sections": []
+    },
     {
       "id": "briefing0eiyvdn",
       "title": "p196+p197 landed: 32.7 s self-compile (24.4K lines/s, ~200 CPU-µs/line); suite 153 fail (-5); all 4 agents on c7/c8",
