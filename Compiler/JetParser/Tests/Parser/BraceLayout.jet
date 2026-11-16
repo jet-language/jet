@@ -1,0 +1,78 @@
+// Data members of a trait or impl body (associated types, trait constants
+// and their values, requirements without a body) may end at a comma, on one
+// line or many; a method with a body takes none.
+use jet_foundation.[Program]
+
+brace_layout_trait_shape: fn(program: Program) -> String {
+    loop item in program.items {
+        if item == .Trait(value) {
+            names := [String]{}
+            loop assoc in value.assoc_types -> names.push("type {assoc.name}")
+            loop constant in value.constants -> names.push("const {constant.name}")
+            loop method in value.methods {
+                body: if method.default_body == None -> "bare" else -> "body"
+                names.push("{method.name} {body}")
+            }
+            return names.join(", ")
+        }
+    }
+    panic("expected a trait")
+}
+
+brace_layout_impl_shape: fn(program: Program) -> String {
+    loop item in program.items {
+        if item == .Impl(value) {
+            names := [String]{}
+            loop assoc in value.assoc_type_impls -> names.push("type {assoc.name}")
+            loop constant in value.constants -> names.push("const {constant.name}")
+            loop method in value.methods -> names.push(method.name)
+            return names.join(", ")
+        }
+    }
+    panic("expected an impl")
+}
+
+#Test("trait data members end at a comma on many lines") {
+    program: parser_test_program(
+        `Shape: trait {
+    Unit: type,
+    limit: Int,
+    area: fn(self) -> Int,
+    name: fn(self) -> String,
+
+    twice: fn(self) -> Int { self.area() * 2 }
+}
+`,
+    )
+    assert_eq(brace_layout_trait_shape(program), "type Unit, const limit, area bare, name bare, twice body")
+}
+
+#Test("trait data members end at a comma on one line") {
+    program: parser_test_program(
+        `Shape: trait { Unit: type, area: fn(self) -> Int, name: fn(self) -> String }
+`,
+    )
+    assert_eq(brace_layout_trait_shape(program), "type Unit, area bare, name bare")
+}
+
+#Test("impl associated types and constants end at a comma") {
+    program: parser_test_program(
+        `impl Square.Shape {
+    Unit: Int,
+    limit: 4,
+
+    area: fn(self) -> Int { self.side * self.side }
+}
+`,
+    )
+    assert_eq(brace_layout_impl_shape(program), "type Unit, const limit, area")
+}
+
+#Test("a trait method with a body takes no comma") {
+    _ := parser_test_errors(
+        `Shape: trait {
+    twice: fn(self) -> Int { 2 },
+}
+`,
+    )
+}
