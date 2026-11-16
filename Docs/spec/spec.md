@@ -1906,7 +1906,10 @@ statement ends; one made in a branch or a loop condition of the statement
 closes right after the call that reads it. The result of a call that returns a
 view (`-> Directory from self | picked`) is borrowed, not owned: passed on,
 bound with `:`, wrapped in a carrier, or taken apart, it closes nothing, and
-its owner closes it. `x.copy()` is the one copy spelling
+its owner closes it. A trait method's `from` clause holds through the trait
+the same way: a call on a trait value or a bounded type parameter returns a
+borrowed view, and its owner can't be moved or changed while the view lives
+(E0212). `x.copy()` is the one copy spelling
 (D-COPY-WORD1=A); it is a compiler-owned method that no type can redefine, and
 it creates an independent owned value. `.clone()` is not user-typable Jet
 syntax. Copying a value that Jet cannot
