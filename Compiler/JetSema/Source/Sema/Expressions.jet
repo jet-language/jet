@@ -4979,6 +4979,12 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     if unresolved_index == None && name == "input" {
         return sema_call_check_ambient_input(span, expected, environment, program, scopes, context, diagnostics)
     }
+    // A builtin type's name (`Int`, `U8`), which no binding or declaration
+    // holds, is that type's value where a `Type` is expected.
+    if unresolved_index == None && !(foundation_named_type(name) == .Named(_)) {
+        type_value: sema_type_value_name(name, span, expected, environment, program, scopes, context)
+        if type_value != None -> return type_value
+    }
     // A module named as a value is its Module record (ModuleMeta.jet).
     if unresolved_index != None && sema_expr_core_module_alias_visible(name, scopes) {
         if program.registration_graph == .Val(graph) {

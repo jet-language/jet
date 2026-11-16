@@ -216,12 +216,12 @@ NAME_V: Name{id: U32{6}}
 
 NAME_ERR: Name{id: U32{7}}
 
-// Adds every spelling of `from` that `into` lacks, in `from`'s id order,
-// and returns each `from` id's id in `into`: the remap a merged source's
-// rows are renumbered by.
-name_table_merge: fn(into: &NameTable, from: NameTable) -> [Name] Never! {
+// Adds every spelling of `from` from id `first` on that `into` lacks, in
+// `from`'s id order, and returns each such id's id in `into`, by id - first:
+// the remap a merged source's rows are renumbered by.
+name_table_merge: fn(into: &NameTable, from: NameTable, first: Int) -> [Name] Never! {
     ids := [Name]{}
-    loop id in 0..<from.texts.len() {
+    loop id in first..<from.texts.len() {
         start: name_start(from, id)
         end: from.ends[id]
         slot: name_slot(into, from.hashes[id], from.bytes, start, end)
@@ -246,14 +246,14 @@ name_table_merge: fn(into: &NameTable, from: NameTable) -> [Name] Never! {
     source := name_table()
     point: name_intern(source, "Point")
     unit: name_intern(source, "Unit")
-    ids: name_table_merge(table, source)
+    ids: name_table_merge(table, source, 0)
     assert_eq(ids[name_index(unit)], NAME_UNIT)
     assert_eq(name_text(table, ids[name_index(point)]), "Point")
     assert_eq(ids[0], name_empty())
     // A second source's same spelling gets the same id.
     other := name_table()
     again: name_intern(other, "Point")
-    assert_eq(name_table_merge(table, other)[name_index(again)], ids[name_index(point)])
+    assert_eq(name_table_merge(table, other, 0)[name_index(again)], ids[name_index(point)])
 }
 
 // Loaded modules by identity (#6793, Docs/spec/compiler-data.md). The loader

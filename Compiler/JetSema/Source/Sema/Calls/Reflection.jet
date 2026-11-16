@@ -232,7 +232,17 @@ sema_call_reflection_is_displayable: fn(ty: Type, environment: SemaScopeEnvironm
             }
             return true
         }
-        .TraitObject(bounds) -> return sema_call_reflection_has_name(bounds, "Renderable")
+        .TraitObject(bounds) -> {
+            if sema_call_reflection_has_name(bounds, "Renderable") -> return true
+            graph: program.registration_graph ?? return false
+            impls: sema_call_reflection_trait_impls(graph, bounds) ?? return false
+            loop reference in graph.impl_trait_name_buckets[impls] {
+                if !sema_call_reflection_is_displayable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
+                    return false
+                }
+            }
+            return true
+        }
         .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> return false
         .FixedList(element, _) | .Tagged(_, element) | .Case(_, element) | .InlineRange(element, _, _) -> return sema_call_reflection_is_displayable(element, environment, program)
         .Union(members) -> {
@@ -251,6 +261,16 @@ sema_call_reflection_has_name: fn(names: [String], wanted: String) -> Bool Never
         if name == wanted || sema_call_reflection_leaf_name(name) == wanted -> return true
     }
     false
+}
+
+// The impls of the single trait `bounds`: their bucket in the graph's
+// by-name impl index (`impl_trait_name_buckets`), or None when `bounds` is
+// not one implemented trait. A trait value renders as the concrete value its
+// box holds, so it shows one way (print, `{value}` or Debug) exactly when the
+// type of every one of these impls does.
+sema_call_reflection_trait_impls: fn(graph: SemaRegistrationGraph, bounds: [String]) -> Int? Never! {
+    if bounds.len() != 1 -> return None
+    graph.impl_trait_name_slots.get(sema_call_reflection_leaf_name(bounds[0]))
 }
 
 // Apply the runtime reflection gate after the normal Core argument checker has

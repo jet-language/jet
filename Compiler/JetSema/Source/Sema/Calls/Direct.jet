@@ -199,7 +199,17 @@ sema_call_debug_traceable: fn(ty: Type, environment: SemaScopeEnvironment, progr
             }
             true
         }
-        .TraitObject(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> false
+        .TraitObject(bounds) -> {
+            graph: program.registration_graph ?? return false
+            impls: sema_call_reflection_trait_impls(graph, bounds) ?? return false
+            loop reference in graph.impl_trait_name_buckets[impls] {
+                if !sema_call_debug_traceable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
+                    return false
+                }
+            }
+            true
+        }
+        .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> false
     }
 }
 

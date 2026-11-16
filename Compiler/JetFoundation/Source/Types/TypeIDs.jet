@@ -1,46 +1,44 @@
-// The type id space (Docs/spec/compiler-data.md): each distinct type is one
-// row of a `TypeColumns` table, hash-consed, so equal types are equal ids
-// and a type is copied, compared and hashed as one U32. Id 0 is no type.
+// The compilation's interner (Docs/spec/compiler-data.md): its names and its
+// types, the one place text and type shapes become ids. A semantic type is a
+// `TypeID`, one row of the interner's `TypeColumns`, hash-consed, so equal
+// types are equal ids and a type is copied, compared and hashed as one U32.
+// Id 0 is no type. A written type (the AST's `Type`, a registry row) becomes
+// an id through type_intern_syntax, and type_syntax spells an id back.
 //
 // A row is a kind tag and scalar operands: `a` and `b` (a child type id, a
-// `Name` of the compilation's NameTable, or a number, by kind), `side` (a
-// row of the kind's side table, which its owner interns, so equal payloads
-// are equal rows), and a span of the shared `children` column. By kind:
+// `Name`, or a number, by kind), `side` (a row of the kind's side table,
+// hash-consed too, so equal payloads are equal rows; 0 is none), and a span
+// of the shared `children` column. By kind:
 //
 // | Kind | a | b | side | children |
 // |---|---|---|---|---|
 // | List, Shared, Option | element | | | |
-// | Map | key | value | key span row | |
+// | Map | key | value | key span | |
 // | Result | ok | err | | |
-// | Fn | result (0: none) | | metadata row | parameters |
+// | Fn | result (0: none) | | metadata | parameters |
 // | Named | name | | | |
 // | Apply | name | | | arguments |
 // | TraitObject | | | | bound names |
 // | Tuple | | | | field name, field type, in turn |
-// | FixedList | element | | length measure row | |
+// | FixedList | element | | length measure | |
 // | IntN | 1 when signed | bits | | |
-// | InlineRange | base | | bounds row | |
-// | Tagged | inner | | tag row | |
+// | InlineRange | base | | bounds | |
+// | Tagged | inner | | tag | |
 // | Union | | | | members |
 // | Case | name | payload | | |
-// | Quantity | base | | dimension row | |
-// | Measure | | | measure row | |
+// | Quantity | base | | dimension | |
+// | Measure | | | measure | |
 //
-// The compilation's table holds the types every phase shares. A parallel
-// phase lends it read-only to its workers; each worker interns the types it
-// makes in a local table of its own (`type_columns_local`), whose ids carry
-// TYPE_LOCAL_BIT so they never equal a compilation id, through
-// `type_intern_over`, which first looks in the compilation table. The
-// phase's merge adds each worker's table to the compilation's in a fixed
-// order (`type_columns_merge`), so one input always gets the same ids.
+// A parallel phase forks the compilation's interner for each worker
+// (interner_fork): the worker reads every shared row and adds its own after
+// them, so its ids need no second table. Two workers' own ids overlap, so
+// what a worker publishes is renumbered at the phase's merge
+// (interner_merge), which adds each worker's own rows to the compilation's
+// in a fixed order; one input always gets the same ids.
 
 TypeID: struct {
     id: U32
 }
-
-TYPE_LOCAL_BIT: U32{0x80000000}
-
-TYPE_ROW_BITS: U32{0x7fffffff}
 
 TypeKind: enum {
     Int
@@ -84,96 +82,177 @@ TypeColumns: struct {
     hashes: [Int]
     // Open-addressing slots: 0 is empty, otherwise the row plus one.
     slots: [Int]
-    // 0 for the compilation's table, TYPE_LOCAL_BIT for a local one: the
-    // bits every id of the table carries.
-    base: U32
 }
 
-TYPE_COLUMNS_INITIAL_SLOTS: 1024
-
-TYPE_COLUMNS_LOCAL_SLOTS: 64
-
-// The compilation's table; its row 0 is no type (`type_none`).
-type_columns: fn() -> TypeColumns Never! { type_columns_based(U32{0}, TYPE_COLUMNS_INITIAL_SLOTS) }
-
-// A worker's local table, whose ids carry TYPE_LOCAL_BIT.
-type_columns_local: fn() -> TypeColumns Never! {
-    type_columns_based(TYPE_LOCAL_BIT, TYPE_COLUMNS_LOCAL_SLOTS)
+// Hash-consed side rows of one payload type: equal payloads are one row,
+// named by its index plus one (0 is none).
+TypeSides: struct<T> {
+    rows: [T]
+    hashes: [Int]
+    slots: [Int]
 }
 
-type_columns_based: fn(base: U32, capacity: Int) -> TypeColumns Never! {
+// An InlineRange type's bounds.
+TypeRange: struct {
+    lo: Int
+    hi: Int
+}
+
+Interner: struct {
+    names: NameTable
+    types: TypeColumns
+    key_spans: TypeSides<Span>
+    ranges: TypeSides<TypeRange>
+    measures: TypeSides<Measure>
+    dimensions: TypeSides<Dimension>
+    tags: TypeSides<TagMarker>
+    // A Fn type with metadata (effects, contracts, call names, view
+    // provenance) keeps its written form as its side row, for the metadata.
+    functions: TypeSides<Type>
+    // A fork's first own row of each table: what interner_merge adds. All 0
+    // for the compilation's interner.
+    from: InternerMarks{InternerMarks{}}
+}
+
+InternerMarks: struct {
+    names: Int{0}
+    types: Int{0}
+    key_spans: Int{0}
+    ranges: Int{0}
+    measures: Int{0}
+    dimensions: Int{0}
+    tags: Int{0}
+    functions: Int{0}
+}
+
+// The ids of a worker's own rows in the compilation's interner after
+// interner_merge, by own row (row - the fork's mark).
+InternerRemap: struct {
+    marks: InternerMarks
+    names: [Name]
+    types: [TypeID]
+}
+
+TYPE_COLUMNS_INITIAL_SLOTS: 4096
+
+TYPE_SIDES_INITIAL_SLOTS: 64
+
+// The compilation's interner. Its first names are name_table_compilation's
+// and its first types the well-known ones, so a phase names each by its
+// constant (TYPE_INT and the rest) without the interner.
+interner: fn() -> Interner Never! {
+    result := Interner{names: name_table_compilation(), types: type_columns(), key_spans: type_sides(), ranges: type_sides(), measures: type_sides(), dimensions: type_sides(), tags: type_sides(), functions: type_sides()}
+    _: type_intern(result, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{})
+    _: type_intern(result, TypeKind.Float, U32{0}, U32{0}, U32{0}, [U32]{})
+    _: type_intern(result, TypeKind.Bool, U32{0}, U32{0}, U32{0}, [U32]{})
+    _: type_intern(result, TypeKind.String, U32{0}, U32{0}, U32{0}, [U32]{})
+    _: type_intern(result, TypeKind.Char, U32{0}, U32{0}, U32{0}, [U32]{})
+    _: type_intern(result, TypeKind.Float32, U32{0}, U32{0}, U32{0}, [U32]{})
+    _: type_intern(result, TypeKind.Named, NAME_UNIT.id, U32{0}, U32{0}, [U32]{})
+    _: type_intern(result, TypeKind.Named, NAME_NEVER.id, U32{0}, U32{0}, [U32]{})
+    loop signed in 0..<2 {
+        bits := 8
+        loop bits <= 64 {
+            _: type_intern(result, TypeKind.IntN, U32{1 - signed}, U32{bits}, U32{0}, [U32]{})
+            bits *= 2
+        }
+    }
+    result
+}
+
+TYPE_INT: TypeID{id: U32{1}}
+
+TYPE_FLOAT: TypeID{id: U32{2}}
+
+TYPE_BOOL: TypeID{id: U32{3}}
+
+TYPE_STRING: TypeID{id: U32{4}}
+
+TYPE_CHAR: TypeID{id: U32{5}}
+
+TYPE_FLOAT32: TypeID{id: U32{6}}
+
+TYPE_UNIT: TypeID{id: U32{7}}
+
+TYPE_NEVER: TypeID{id: U32{8}}
+
+TYPE_I8: TypeID{id: U32{9}}
+
+TYPE_I16: TypeID{id: U32{10}}
+
+TYPE_I32: TypeID{id: U32{11}}
+
+TYPE_I64: TypeID{id: U32{12}}
+
+TYPE_U8: TypeID{id: U32{13}}
+
+TYPE_U16: TypeID{id: U32{14}}
+
+TYPE_U32: TypeID{id: U32{15}}
+
+TYPE_U64: TypeID{id: U32{16}}
+
+type_columns: fn() -> TypeColumns Never! {
     slots := [Int]{}
-    loop _ in 0..<capacity -> slots.push(0)
-    table := TypeColumns{kind: [U8]{}, a: [U32]{}, b: [U32]{}, side: [U32]{}, first: [Int]{}, count: [Int]{}, children: [U32]{}, hashes: [Int]{}, slots: slots, base: base}
-    // Row 0 is no type; a local table keeps the row unused, so local row
-    // `n` is id `n` with the local bit and no local id is the bit alone.
-    table.kind.push(U8{0})
-    table.a.push(U32{0})
-    table.b.push(U32{0})
-    table.side.push(U32{0})
-    table.first.push(0)
-    table.count.push(0)
-    table.hashes.push(0)
-    table
+    loop _ in 0..<TYPE_COLUMNS_INITIAL_SLOTS -> slots.push(0)
+    // Row 0 is no type.
+    TypeColumns{kind: [U8]{U8{0}}, a: [U32]{U32{0}}, b: [U32]{U32{0}}, side: [U32]{U32{0}}, first: [Int]{0}, count: [Int]{0}, children: [U32]{}, hashes: [Int]{0}, slots: slots}
+}
+
+type_sides: fn<T>() -> TypeSides<T> Never! {
+    slots := [Int]{}
+    loop _ in 0..<TYPE_SIDES_INITIAL_SLOTS -> slots.push(0)
+    TypeSides<T>{rows: [T]{}, hashes: [Int]{}, slots: slots}
+}
+
+// A worker's interner: the compilation's rows, then the worker's own.
+interner_fork: fn(shared: Interner) -> Interner Never! {
+    // copy: the worker adds rows to its own interner, never to the shared one
+    result := shared.copy()
+    result.from = interner_marks(shared)
+    result
+}
+
+interner_marks: fn(table: Interner) -> InternerMarks Never! {
+    InternerMarks{names: table.names.texts.len(), types: table.types.kind.len(), key_spans: table.key_spans.rows.len(), ranges: table.ranges.rows.len(), measures: table.measures.rows.len(), dimensions: table.dimensions.rows.len(), tags: table.tags.rows.len(), functions: table.functions.rows.len()}
 }
 
 type_none: fn() -> TypeID Never! { TypeID{id: U32{0}} }
 
 type_is_none: fn(id: TypeID) -> Bool Never! { id.id == U32{0} }
 
-type_is_local: fn(id: TypeID) -> Bool Never! { id.id.bit_and(TYPE_LOCAL_BIT) != U32{0} }
+type_row: fn(id: TypeID) -> Int Never! { Int{id.id} }
 
-// The row of `id` in its table: the compilation's, or the local one its
-// TYPE_LOCAL_BIT names.
-type_row: fn(id: TypeID) -> Int Never! { Int{id.id.bit_and(TYPE_ROW_BITS)} }
+type_count: fn(table: Interner) -> Int Never! { table.types.kind.len() }
 
-type_columns_count: fn(table: TypeColumns) -> Int Never! { table.kind.len() }
-
-type_kind: fn(table: TypeColumns, id: TypeID) -> TypeKind Never! {
-    type_kind_of_code(table.kind[type_row(id)])
+type_kind: fn(table: Interner, id: TypeID) -> TypeKind Never! {
+    type_kind_of_code(table.types.kind[type_row(id)])
 }
 
-type_a: fn(table: TypeColumns, id: TypeID) -> U32 Never! { table.a[type_row(id)] }
+type_a: fn(table: Interner, id: TypeID) -> U32 Never! { table.types.a[type_row(id)] }
 
-type_b: fn(table: TypeColumns, id: TypeID) -> U32 Never! { table.b[type_row(id)] }
+type_b: fn(table: Interner, id: TypeID) -> U32 Never! { table.types.b[type_row(id)] }
 
-type_side: fn(table: TypeColumns, id: TypeID) -> U32 Never! { table.side[type_row(id)] }
+type_side: fn(table: Interner, id: TypeID) -> U32 Never! { table.types.side[type_row(id)] }
 
-type_child_count: fn(table: TypeColumns, id: TypeID) -> Int Never! { table.count[type_row(id)] }
+type_child_count: fn(table: Interner, id: TypeID) -> Int Never! { table.types.count[type_row(id)] }
 
 // Child `index` (below type_child_count) of `id`.
-type_child: fn(table: TypeColumns, id: TypeID, index: Int) -> U32 Never! {
-    table.children[table.first[type_row(id)] + index]
+type_child: fn(table: Interner, id: TypeID, index: Int) -> U32 Never! {
+    table.types.children[table.types.first[type_row(id)] + index]
 }
 
-// The readers of an id that may be a worker's local one: `local` when it
-// carries TYPE_LOCAL_BIT, else `shared`.
-type_kind_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> TypeKind Never! {
-    if type_is_local(id) -> type_kind(local, id) else -> type_kind(shared, id)
-}
+// Operand `a` of `id` read as a type (List's element, Fn's result, …).
+type_a_type: fn(table: Interner, id: TypeID) -> TypeID Never! { TypeID{id: type_a(table, id)} }
 
-type_a_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> U32 Never! {
-    if type_is_local(id) -> type_a(local, id) else -> type_a(shared, id)
-}
+// Operand `b` of `id` read as a type (Map's value, Result's err, …).
+type_b_type: fn(table: Interner, id: TypeID) -> TypeID Never! { TypeID{id: type_b(table, id)} }
 
-type_b_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> U32 Never! {
-    if type_is_local(id) -> type_b(local, id) else -> type_b(shared, id)
-}
+// Operand `a` of `id` read as a name (Named's, Apply's, Case's).
+type_a_name: fn(table: Interner, id: TypeID) -> Name Never! { Name{id: type_a(table, id)} }
 
-type_side_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> U32 Never! {
-    if type_is_local(id) -> type_side(local, id) else -> type_side(shared, id)
-}
-
-type_child_count_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> Int Never! {
-    if type_is_local(id) -> type_child_count(local, id) else -> type_child_count(shared, id)
-}
-
-type_child_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID, index: Int) -> U32 Never! {
-    if type_is_local(id) -> type_child(local, id, index) else -> type_child(shared, id, index)
-}
-
-type_hash_word: fn(hash: U32, word: U32) -> U32 Never! {
-    wrapping((hash.bit_xor(word)) * U32{0x01000193})
+type_child_type: fn(table: Interner, id: TypeID, index: Int) -> TypeID Never! {
+    TypeID{id: type_child(table, id, index)}
 }
 
 // The kind's one-byte tag, as the kind column holds it; 0 is no type's.
@@ -238,6 +317,10 @@ type_kind_of_code: fn(code: U8) -> TypeKind Never! {
     }
 }
 
+type_hash_word: fn(hash: U32, word: U32) -> U32 Never! {
+    wrapping((hash.bit_xor(word)) * U32{0x01000193})
+}
+
 type_row_hash: fn(kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> Int Never! {
     hash := type_hash_word(U32{0x811c9dc5}, U32{type_kind_code(kind)})
     hash = type_hash_word(hash, a)
@@ -275,39 +358,31 @@ type_slot: fn(table: TypeColumns, hash: Int, kind: TypeKind, a: U32, b: U32, sid
     slot
 }
 
-// The id of the type the operands give in `table`, added on first sight.
-// The child ids and the operand ids must be of the compilation's table or
-// of `table`.
-type_intern: fn(table: &TypeColumns, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
+// The id of the type the operands give, added on first sight. Its operand
+// ids and side rows must be the interner's.
+type_intern: fn(table: &Interner, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
     hash: type_row_hash(kind, a, b, side, children)
-    slot: type_slot(table, hash, kind, a, b, side, children)
-    if table.slots[slot] != 0 -> return TypeID{id: U32{table.slots[slot] - 1}.bit_or(table.base)}
-    row: table.kind.len()
-    table.kind.push(type_kind_code(kind))
-    table.a.push(a)
-    table.b.push(b)
-    table.side.push(side)
-    table.first.push(table.children.len())
-    table.count.push(children.len())
-    loop child in children -> table.children.push(child)
-    table.hashes.push(hash)
-    table.slots[slot] = row + 1
-    if (row + 1) * 2 > table.slots.len() -> type_columns_grow(table)
-    TypeID{id: U32{row}.bit_or(table.base)}
+    slot: type_slot(table.types, hash, kind, a, b, side, children)
+    if table.types.slots[slot] != 0 -> return TypeID{id: U32{table.types.slots[slot] - 1}}
+    row: table.types.kind.len()
+    table.types.kind.push(type_kind_code(kind))
+    table.types.a.push(a)
+    table.types.b.push(b)
+    table.types.side.push(side)
+    table.types.first.push(table.types.children.len())
+    table.types.count.push(children.len())
+    loop child in children -> table.types.children.push(child)
+    table.types.hashes.push(hash)
+    table.types.slots[slot] = row + 1
+    if (row + 1) * 2 > table.types.slots.len() -> type_columns_grow(table.types)
+    TypeID{id: U32{row}}
 }
 
-// The id of the type the operands give when `table` holds it; never adds.
-type_find: fn(table: TypeColumns, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID? Never! {
-    slot: type_slot(table, type_row_hash(kind, a, b, side, children), kind, a, b, side, children)
-    if table.slots[slot] == 0 -> return None
-    Val(TypeID{id: U32{table.slots[slot] - 1}.bit_or(table.base)})
-}
-
-// A worker's intern: the compilation's id when `shared` holds the type,
-// else the id in the worker's `local` table.
-type_intern_over: fn(shared: TypeColumns, local: &TypeColumns, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
-    if type_find(shared, kind, a, b, side, children) == .Val(id) -> return id
-    type_intern(local, kind, a, b, side, children)
+// The id of the type the operands give when the interner holds it.
+type_find: fn(table: Interner, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID? Never! {
+    slot: type_slot(table.types, type_row_hash(kind, a, b, side, children), kind, a, b, side, children)
+    if table.types.slots[slot] == 0 -> return None
+    Val(TypeID{id: U32{table.types.slots[slot] - 1}})
 }
 
 type_columns_grow: fn(table: &TypeColumns) Never! {
@@ -323,11 +398,267 @@ type_columns_grow: fn(table: &TypeColumns) Never! {
     table.slots = slots.move()
 }
 
-// Whether operand `a` of a `kind` row is a type id (not a name or number).
-type_a_is_type: fn(kind: TypeKind) -> Bool Never! {
+// The slot of `value`, whose hash is `hash` (equal payloads hash equal):
+// the one holding its row, or the empty one a new row takes.
+type_sides_slot: fn<T: Equatable>(sides: TypeSides<T>, value: T, hash: Int) -> Int Never! {
+    mask: sides.slots.len() - 1
+    slot := hash.bit_and(mask)
+    loop sides.slots[slot] != 0 {
+        row: sides.slots[slot] - 1
+        if sides.hashes[row] == hash && sides.rows[row] == value -> return slot
+        slot = (slot + 1).bit_and(mask)
+    }
+    slot
+}
+
+// Adds `value` as a new row at its empty slot `slot`; returns its side row.
+type_sides_add: fn<T>(sides: &TypeSides<T>, slot: Int, value: &&T, hash: Int) -> U32 Never! {
+    row: sides.rows.len()
+    sides.rows.push(value)
+    sides.hashes.push(hash)
+    sides.slots[slot] = row + 1
+    if (row + 1) * 2 > sides.slots.len() -> type_sides_grow(sides)
+    U32{row + 1}
+}
+
+// The side row (index plus one) of `value`, added on first sight.
+type_sides_intern: fn<T: Equatable>(sides: &TypeSides<T>, value: T, hash: Int) -> U32 Never! {
+    slot: type_sides_slot(sides, value, hash)
+    if sides.slots[slot] != 0 -> return U32{sides.slots[slot]}
+    // copy: a payload's first sight, which the table keeps as its row
+    type_sides_add(sides, slot, value.copy(), hash)
+}
+
+type_sides_grow: fn<T>(sides: &TypeSides<T>) Never! {
+    capacity: sides.slots.len() * 2
+    mask: capacity - 1
+    slots := [Int]{}
+    loop _ in 0..<capacity -> slots.push(0)
+    loop row in 0..<sides.rows.len() {
+        slot := sides.hashes[row].bit_and(mask)
+        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slots[slot] = row + 1
+    }
+    sides.slots = slots.move()
+}
+
+type_text_hash: fn(text: String) -> Int Never! { Int{text.hash().bit_and(U64{0x3fffffff})} }
+
+// A hash of Fn type `ty`'s metadata, read from its names.
+type_fn_side_hash: fn(ty: Type) -> Int Never! {
+    hash := U32{0x811c9dc5}
+    if ty == .Fn(params, _, effect_bound, param_contract, call_metadata, return_view_provenance) {
+        hash = type_hash_word(hash, U32{params.len()})
+        if effect_bound == .Val(entries) {
+            hash = type_hash_word(hash, U32{entries.len() + 1})
+            loop entry in entries -> hash = type_hash_word(hash, U32{type_text_hash(entry.name)})
+        }
+        if param_contract == .Val(rows) {
+            hash = type_hash_word(hash, U32{rows.len() + 1})
+            loop row in rows -> hash = type_hash_word(hash, U32{type_text_hash(row.label)})
+        }
+        if call_metadata == .Val(metadata) {
+            hash = type_hash_word(hash, U32{metadata.names.len() + 1})
+            loop name in metadata.names -> hash = type_hash_word(hash, U32{type_text_hash(name)})
+        }
+        if return_view_provenance == .Val(provenance) {
+            hash = type_hash_word(hash, U32{provenance.entries.len() + 1})
+        }
+    }
+    Int{hash}
+}
+
+type_tag_hash: fn(marker: TagMarker) -> Int Never! {
+    if marker == {
+        .User(name) -> type_text_hash(name)
+        // The few internal tags share a hash; the equality check tells them apart.
+        .Internal(_) -> 1
+    }
+}
+
+// The id of the written type `ty`: each part interned, names into the
+// interner's NameTable.
+type_intern_syntax: fn(table: &Interner, ty: Type) -> TypeID Never! {
+    none: U32{0}
+    if ty == {
+        .Int -> TYPE_INT
+        .Float -> TYPE_FLOAT
+        .Bool -> TYPE_BOOL
+        .String -> TYPE_STRING
+        .Char -> TYPE_CHAR
+        .Float32 -> TYPE_FLOAT32
+        .List(element) -> {
+            element_id: type_intern_syntax(table, element)
+            type_intern(table, TypeKind.List, element_id.id, none, none, [U32]{})
+        }
+        .Map(key, key_span, value) -> {
+            key_id: type_intern_syntax(table, key)
+            value_id: type_intern_syntax(table, value)
+            side: if key_span == .Val(span) -> type_sides_intern(table.key_spans, Span{start: span.start, end: span.end}, span.start * 31 + span.end) else -> none
+            type_intern(table, TypeKind.Map, key_id.id, value_id.id, side, [U32]{})
+        }
+        .Shared(inner) -> {
+            inner_id: type_intern_syntax(table, inner)
+            type_intern(table, TypeKind.Shared, inner_id.id, none, none, [U32]{})
+        }
+        .Option(inner) -> {
+            inner_id: type_intern_syntax(table, inner)
+            type_intern(table, TypeKind.Option, inner_id.id, none, none, [U32]{})
+        }
+        .Result(ok, err) -> {
+            ok_id: type_intern_syntax(table, ok)
+            err_id: type_intern_syntax(table, err)
+            type_intern(table, TypeKind.Result, ok_id.id, err_id.id, none, [U32]{})
+        }
+        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
+            children := [U32]{}
+            loop param in params -> children.push(type_intern_syntax(table, param).id)
+            result: if ret == .Val(value) -> type_intern_syntax(table, value).id else -> none
+            side: if effect_bound == None && param_contract == None && call_metadata == None && return_view_provenance == None -> none else -> type_sides_intern(table.functions, ty, type_fn_side_hash(ty))
+            type_intern(table, TypeKind.Fn, result, none, side, children)
+        }
+        .Named(name) -> {
+            if name == "Unit" -> return TYPE_UNIT
+            if name == "Never" -> return TYPE_NEVER
+            name_id: name_intern(table.names, name)
+            type_intern(table, TypeKind.Named, name_id.id, none, none, [U32]{})
+        }
+        .Apply(name, args) -> {
+            children := [U32]{}
+            loop arg in args -> children.push(type_intern_syntax(table, arg).id)
+            name_id: name_intern(table.names, name)
+            type_intern(table, TypeKind.Apply, name_id.id, none, none, children)
+        }
+        .TraitObject(bounds) -> {
+            children := [U32]{}
+            loop bound in bounds -> children.push(name_intern(table.names, bound).id)
+            type_intern(table, TypeKind.TraitObject, none, none, none, children)
+        }
+        .Tuple(fields) -> {
+            children := [U32]{}
+            loop field in fields {
+                children.push(name_intern(table.names, field.name).id)
+                children.push(type_intern_syntax(table, field.ty).id)
+            }
+            type_intern(table, TypeKind.Tuple, none, none, none, children)
+        }
+        .FixedList(elem, len) -> {
+            elem_id: type_intern_syntax(table, elem)
+            side: type_sides_intern(table.measures, len, type_text_hash(measure_key(len)))
+            type_intern(table, TypeKind.FixedList, elem_id.id, none, side, [U32]{})
+        }
+        .IntN(signed, bits) -> type_intern(table, TypeKind.IntN, if signed -> U32{1} else -> none, U32{bits}, none, [U32]{})
+        .InlineRange(base, lo, hi) -> {
+            base_id: type_intern_syntax(table, base)
+            side: type_sides_intern(table.ranges, TypeRange{lo: lo, hi: hi}, lo * 31 + hi)
+            type_intern(table, TypeKind.InlineRange, base_id.id, none, side, [U32]{})
+        }
+        .Tagged(marker, inner) -> {
+            inner_id: type_intern_syntax(table, inner)
+            side: type_sides_intern(table.tags, marker, type_tag_hash(marker))
+            type_intern(table, TypeKind.Tagged, inner_id.id, none, side, [U32]{})
+        }
+        .Union(members) -> {
+            children := [U32]{}
+            loop member in members -> children.push(type_intern_syntax(table, member).id)
+            type_intern(table, TypeKind.Union, none, none, none, children)
+        }
+        .Case(name, payload) -> {
+            payload_id: type_intern_syntax(table, payload)
+            name_id: name_intern(table.names, name)
+            type_intern(table, TypeKind.Case, name_id.id, payload_id.id, none, [U32]{})
+        }
+        .Quantity(base, dimension) -> {
+            base_id: type_intern_syntax(table, base)
+            side: type_sides_intern(table.dimensions, dimension, type_text_hash(dimension_identity(dimension)))
+            type_intern(table, TypeKind.Quantity, base_id.id, none, side, [U32]{})
+        }
+        .Measure(measure) -> {
+            side: type_sides_intern(table.measures, measure, type_text_hash(measure_key(measure)))
+            type_intern(table, TypeKind.Measure, none, none, side, [U32]{})
+        }
+    }
+}
+
+// The written form of type `id`, the inverse of type_intern_syntax.
+type_syntax: fn(table: Interner, id: TypeID) -> Type Never! {
+    side: Int{type_side(table, id)}
+    if type_kind(table, id) == {
+        .Int -> Type.Int
+        .Float -> Type.Float
+        .Bool -> Type.Bool
+        .String -> Type.String
+        .Char -> Type.Char
+        .Float32 -> Type.Float32
+        .List -> Type.List{element: type_syntax(table, type_a_type(table, id))}
+        .Map -> {
+            key_span: if side == 0 -> Span?{None} else -> Val(table.key_spans.rows[side - 1])
+            Type.Map{key: type_syntax(table, type_a_type(table, id)), key_span: key_span, value: type_syntax(table, type_b_type(table, id))}
+        }
+        .Shared -> Type.Shared{inner: type_syntax(table, type_a_type(table, id))}
+        .Option -> Type.Option{inner: type_syntax(table, type_a_type(table, id))}
+        .Result -> Type.Result{ok: type_syntax(table, type_a_type(table, id)), err: type_syntax(table, type_b_type(table, id))}
+        .Fn -> {
+            // copy: the side row keeps the written form; this is a new one
+            if side != 0 -> return table.functions.rows[side - 1].copy()
+            params := [Type]{}
+            loop index in 0..<type_child_count(table, id) {
+                params.push(type_syntax(table, type_child_type(table, id, index)))
+            }
+            result: type_a_type(table, id)
+            ret: if type_is_none(result) -> Type?{None} else -> Val(type_syntax(table, result))
+            Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+        }
+        .Named -> Type.Named{name: name_text(table.names, type_a_name(table, id))}
+        .Apply -> {
+            args := [Type]{}
+            loop index in 0..<type_child_count(table, id) {
+                args.push(type_syntax(table, type_child_type(table, id, index)))
+            }
+            Type.Apply{name: name_text(table.names, type_a_name(table, id)), args: args}
+        }
+        .TraitObject -> {
+            bounds := [String]{}
+            loop index in 0..<type_child_count(table, id) {
+                bounds.push(name_text(table.names, Name{id: type_child(table, id, index)}))
+            }
+            Type.TraitObject{bounds: bounds}
+        }
+        .Tuple -> {
+            fields := [TypeTupleField]{}
+            loop index in 0..<type_child_count(table, id) {
+                if index % 2 == 1 -> next
+                fields.push(TypeTupleField{name: name_text(table.names, Name{id: type_child(table, id, index)}), ty: type_syntax(table, type_child_type(table, id, index + 1))})
+            }
+            Type.Tuple{fields: fields}
+        }
+        .FixedList -> Type.FixedList{elem: type_syntax(table, type_a_type(table, id)), len: table.measures.rows[side - 1]}
+        .IntN -> Type.IntN{signed: type_a(table, id) != U32{0}, bits: Int{type_b(table, id)}}
+        .InlineRange -> {
+            bounds: table.ranges.rows[side - 1]
+            Type.InlineRange{base: type_syntax(table, type_a_type(table, id)), lo: bounds.lo, hi: bounds.hi}
+        }
+        .Tagged -> Type.Tagged{marker: table.tags.rows[side - 1], inner: type_syntax(table, type_a_type(table, id))}
+        .Union -> {
+            members := [Type]{}
+            loop index in 0..<type_child_count(table, id) {
+                members.push(type_syntax(table, type_child_type(table, id, index)))
+            }
+            Type.Union{members: members}
+        }
+        .Case -> Type.Case{name: name_text(table.names, type_a_name(table, id)), payload: type_syntax(table, type_b_type(table, id))}
+        .Quantity -> Type.Quantity{base: type_syntax(table, type_a_type(table, id)), dimension: table.dimensions.rows[side - 1]}
+        .Measure -> Type.Measure{measure: table.measures.rows[side - 1]}
+    }
+}
+
+// Operand `a` of a worker's `kind` row renumbered through `remap`: a type id
+// or a name, by kind, and any other operand as it is.
+type_merged_a: fn(remap: InternerRemap, kind: TypeKind, word: U32) -> U32 Never! {
     if kind == {
-        .List | .Map | .Shared | .Option | .Result | .Fn | .FixedList | .InlineRange | .Tagged | .Quantity -> true
-        .Int | .Float | .Bool | .String | .Char | .Named | .Apply | .TraitObject | .Tuple | .IntN | .Float32 | .Union | .Case | .Measure -> false
+        .List | .Map | .Shared | .Option | .Result | .Fn | .FixedList | .InlineRange | .Tagged | .Quantity -> type_merged_type(remap, word)
+        .Named | .Apply | .Case -> type_merged_name(remap, word)
+        .Int | .Float | .Bool | .String | .Char | .TraitObject | .Tuple | .IntN | .Float32 | .Union | .Measure -> word
     }
 }
 
@@ -339,93 +670,169 @@ type_b_is_type: fn(kind: TypeKind) -> Bool Never! {
     }
 }
 
-// Whether child `index` of a `kind` row is a type id: a Tuple's children
-// alternate field names and field types, a TraitObject's are names.
+// Whether child `index` of a `kind` row is a type id; otherwise it is a
+// name (a TraitObject's bounds, a Tuple's field names).
 type_child_is_type: fn(kind: TypeKind, index: Int) -> Bool Never! {
     if kind == {
-        .Fn | .Apply | .Union -> true
         .Tuple -> index % 2 == 1
-        .Int | .Float | .Bool | .String | .Char | .List | .Map | .Shared | .Option | .Result | .Named | .TraitObject | .FixedList | .IntN | .InlineRange | .Float32 | .Tagged | .Case | .Quantity | .Measure -> false
+        .TraitObject -> false
+        .Int | .Float | .Bool | .String | .Char | .List | .Map | .Shared | .Option | .Result | .Fn | .Named | .Apply | .FixedList | .IntN | .InlineRange | .Float32 | .Tagged | .Union | .Case | .Quantity | .Measure -> true
     }
 }
 
-// `word`, a type id operand, renumbered: a local id through `local_ids`
-// (each local row's compilation id), a compilation id as it is.
-type_merged_word: fn(word: U32, local_ids: [TypeID]) -> U32 Never! {
-    id: TypeID{id: word}
-    if !type_is_local(id) -> return word
-    local_ids[type_row(id)].id
+// A worker's name id in the compilation's interner.
+interner_remap_name: fn(remap: InternerRemap, name: Name) -> Name Never! {
+    row: Int{name.id}
+    if row < remap.marks.names -> return Name{id: name.id}
+    remap.names[row - remap.marks.names]
 }
 
-// Adds every row of the worker's `local` table to the compilation's `into`,
-// in local row order, and returns each local row's compilation id (row 0:
-// no type). A local row names only compilation ids and earlier local rows,
-// so one pass renumbers it. Merging the workers in a fixed order gives
-// every type the same id on any thread count.
-type_columns_merge: fn(into: &TypeColumns, local: TypeColumns) -> [TypeID] Never! {
-    ids := [TypeID]{type_none()}
-    loop row in 1..<local.kind.len() {
-        kind: type_kind_of_code(local.kind[row])
-        a: if type_a_is_type(kind) -> type_merged_word(local.a[row], ids) else -> local.a[row]
-        b: if type_b_is_type(kind) -> type_merged_word(local.b[row], ids) else -> local.b[row]
-        children := [U32]{}
-        first: local.first[row]
-        loop index in 0..<local.count[row] {
-            child: local.children[first + index]
-            children.push(if type_child_is_type(kind, index) -> type_merged_word(child, ids) else -> child)
+// A worker's type id in the compilation's interner.
+interner_remap_type: fn(remap: InternerRemap, id: TypeID) -> TypeID Never! {
+    row: type_row(id)
+    if row < remap.marks.types -> return TypeID{id: id.id}
+    remap.types[row - remap.marks.types]
+}
+
+// A worker's side row in the compilation's, given each own row's new row
+// and the fork's mark for the side table.
+type_remap_side: fn(side: U32, mark: Int, rows: [U32]) -> U32 Never! {
+    row: Int{side}
+    if row <= mark -> return side
+    rows[row - mark - 1]
+}
+
+// Adds the worker's own side rows (from `mark` on) to `into` in row order,
+// taking them out of the worker, and returns each one's row there.
+type_sides_merge: fn<T: Equatable>(into: &TypeSides<T>, worker: &TypeSides<T>, mark: Int) -> [U32] Never! {
+    // The own rows, last first.
+    own := [T]{}
+    loop worker.rows.len() > mark {
+        value: worker.rows.pop() ?? panic("a nonempty side table failed to pop")
+        own.push(value)
+    }
+    rows := [U32]{}
+    loop own.len() > 0 {
+        value: own.pop() ?? panic("a nonempty side list failed to pop")
+        hash: worker.hashes[mark + rows.len()]
+        slot: type_sides_slot(into, value, hash)
+        rows.push(if into.slots[slot] != 0 -> U32{into.slots[slot]} else -> type_sides_add(into, slot, value.move(), hash))
+    }
+    rows
+}
+
+// Adds a worker's own rows to the compilation's interner `into`, in row
+// order, and returns their ids there; the worker's own side rows move out.
+// Merging the workers in a fixed order gives every name and type the same
+// id on any thread count.
+interner_merge: fn(into: &Interner, worker: &Interner) -> InternerRemap Never! {
+    marks: worker.from
+    remap := InternerRemap{marks: marks, names: name_table_merge(into.names, worker.names, marks.names), types: [TypeID]{}}
+    key_spans: type_sides_merge(into.key_spans, worker.key_spans, marks.key_spans)
+    ranges: type_sides_merge(into.ranges, worker.ranges, marks.ranges)
+    measures: type_sides_merge(into.measures, worker.measures, marks.measures)
+    dimensions: type_sides_merge(into.dimensions, worker.dimensions, marks.dimensions)
+    tags: type_sides_merge(into.tags, worker.tags, marks.tags)
+    functions: type_sides_merge(into.functions, worker.functions, marks.functions)
+    loop row in marks.types..<worker.types.kind.len() {
+        kind: type_kind_of_code(worker.types.kind[row])
+        a: type_merged_a(remap, kind, worker.types.a[row])
+        b_word: worker.types.b[row]
+        b: if type_b_is_type(kind) -> type_merged_type(remap, b_word) else -> b_word
+        side: worker.types.side[row]
+        merged_side: if kind == {
+            .Map -> type_remap_side(side, marks.key_spans, key_spans)
+            .InlineRange -> type_remap_side(side, marks.ranges, ranges)
+            .FixedList | .Measure -> type_remap_side(side, marks.measures, measures)
+            .Quantity -> type_remap_side(side, marks.dimensions, dimensions)
+            .Tagged -> type_remap_side(side, marks.tags, tags)
+            .Fn -> type_remap_side(side, marks.functions, functions)
+            .Int | .Float | .Bool | .String | .Char | .List | .Shared | .Option | .Result | .Named | .Apply | .TraitObject | .Tuple | .IntN | .Float32 | .Union | .Case -> side
         }
-        ids.push(type_intern(into, kind, a, b, local.side[row], children))
+        children := [U32]{}
+        first: worker.types.first[row]
+        loop index in 0..<worker.types.count[row] {
+            child: worker.types.children[first + index]
+            children.push(if type_child_is_type(kind, index) -> type_merged_type(remap, child) else -> type_merged_name(remap, child))
+        }
+        remap.types.push(type_intern(into, kind, a, b, merged_side, children))
     }
-    ids
+    remap
+}
+
+// A worker's type id operand renumbered through `remap`.
+type_merged_type: fn(remap: InternerRemap, word: U32) -> U32 Never! {
+    interner_remap_type(remap, TypeID{id: word}).id
+}
+
+// A worker's name operand renumbered through `remap`.
+type_merged_name: fn(remap: InternerRemap, word: U32) -> U32 Never! {
+    interner_remap_name(remap, Name{id: word}).id
 }
 
 #Test("equal types are one id, and children and operands tell types apart") {
-    table := type_columns()
-    int: type_intern(table, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{})
-    list: type_intern(table, TypeKind.List, int.id, U32{0}, U32{0}, [U32]{})
-    again: type_intern(table, TypeKind.List, int.id, U32{0}, U32{0}, [U32]{})
+    table := interner()
+    list: type_intern(table, TypeKind.List, TYPE_INT.id, U32{0}, U32{0}, [U32]{})
+    again: type_intern(table, TypeKind.List, TYPE_INT.id, U32{0}, U32{0}, [U32]{})
     assert_eq(list, again)
-    function: type_intern(table, TypeKind.Fn, int.id, U32{0}, U32{0}, [U32]{int.id, list.id})
-    swapped: type_intern(table, TypeKind.Fn, int.id, U32{0}, U32{0}, [U32]{list.id, int.id})
+    function: type_intern(table, TypeKind.Fn, TYPE_INT.id, U32{0}, U32{0}, [U32]{TYPE_INT.id, list.id})
+    swapped: type_intern(table, TypeKind.Fn, TYPE_INT.id, U32{0}, U32{0}, [U32]{list.id, TYPE_INT.id})
     assert(function != swapped)
     assert_eq(type_kind(table, function), TypeKind.Fn)
     assert_eq(type_child_count(table, function), 2)
-    assert_eq(type_child(table, function, 1), list.id)
-    assert_eq(type_find(table, TypeKind.Fn, int.id, U32{0}, U32{0}, [U32]{int.id, list.id}), Val(function))
-    assert_eq(type_find(table, TypeKind.Option, int.id, U32{0}, U32{0}, [U32]{}), None)
-    assert(!type_is_local(function) && !type_is_none(function))
+    assert_eq(type_child_type(table, function, 1), list)
+    assert_eq(type_find(table, TypeKind.Fn, TYPE_INT.id, U32{0}, U32{0}, [U32]{TYPE_INT.id, list.id}), Val(function))
+    assert_eq(type_find(table, TypeKind.Option, TYPE_BOOL.id, U32{0}, U32{0}, [U32]{}), None)
 }
 
-#Test("the table grows past its slots and keeps every id") {
-    table := type_columns()
-    ids := [TypeID]{}
-    loop bits in 0..<3000 {
-        ids.push(type_intern(table, TypeKind.IntN, U32{1}, U32{bits}, U32{0}, [U32]{}))
-    }
-    loop bits in 0..<3000 {
-        assert_eq(type_intern(table, TypeKind.IntN, U32{1}, U32{bits}, U32{0}, [U32]{}), ids[bits])
-    }
-    assert_eq(type_columns_count(table), 3001)
+#Test("the well-known types are their constants") {
+    table := interner()
+    assert_eq(type_intern_syntax(table, Type.Named{name: "Unit"}), TYPE_UNIT)
+    assert_eq(type_intern_syntax(table, Type.Named{name: "Never"}), TYPE_NEVER)
+    assert_eq(type_intern_syntax(table, Type.IntN{signed: true, bits: 8}), TYPE_I8)
+    assert_eq(type_intern_syntax(table, Type.IntN{signed: true, bits: 64}), TYPE_I64)
+    assert_eq(type_intern_syntax(table, Type.IntN{signed: false, bits: 8}), TYPE_U8)
+    assert_eq(type_intern_syntax(table, Type.IntN{signed: false, bits: 64}), TYPE_U64)
+    assert_eq(type_intern_syntax(table, Type.Float32), TYPE_FLOAT32)
+    assert_eq(type_count(table), 17)
 }
 
-#Test("a worker's local types merge to the ids a serial intern gives") {
-    shared := type_columns()
-    int: type_intern(shared, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{})
-    local := type_columns_local()
-    // The shared type is found, not copied; new ones are local.
-    assert_eq(type_intern_over(shared, local, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{}), int)
-    list: type_intern_over(shared, local, TypeKind.List, int.id, U32{0}, U32{0}, [U32]{})
-    assert(type_is_local(list))
-    pair: type_intern_over(shared, local, TypeKind.Tuple, U32{0}, U32{0}, U32{0}, [U32]{U32{7}, list.id, U32{8}, int.id})
-    assert_eq(type_kind_over(shared, local, pair), TypeKind.Tuple)
-    assert_eq(type_child_over(shared, local, pair, 1), list.id)
-    ids: type_columns_merge(shared, local)
-    serial := type_columns()
-    serial_int: type_intern(serial, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{})
-    serial_list: type_intern(serial, TypeKind.List, serial_int.id, U32{0}, U32{0}, [U32]{})
-    serial_pair: type_intern(serial, TypeKind.Tuple, U32{0}, U32{0}, U32{0}, [U32]{U32{7}, serial_list.id, U32{8}, serial_int.id})
-    assert_eq(ids[type_row(list)], serial_list)
-    assert_eq(ids[type_row(pair)], serial_pair)
-    // The field names stay names: only the type children were renumbered.
-    assert_eq(type_child(shared, ids[type_row(pair)], 0), U32{7})
+#Test("a written type round-trips through its id") {
+    table := interner()
+    shapes: [Type]{
+        Type.Map{key: Type.String, key_span: Val(Span{start: 3, end: 9}), value: Type.List{element: Type.Named{name: "Point"}}},
+        Type.Fn{params: [Type]{Type.Int, Type.Option{inner: Type.Char}}, ret: Val(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}), effect_bound: Val([EffectRowEntry]{EffectRowEntry{name: "IO", span: Span{start: 1, end: 2}}}), param_contract: None, call_metadata: None, return_view_provenance: None},
+        Type.Apply{name: "Box", args: [Type]{Type.Bool, Type.Shared{inner: Type.Float}}},
+        Type.TraitObject{bounds: [String]{"Show", "Eq"}},
+        Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "x", ty: Type.Int}, TypeTupleField{name: "y", ty: Type.Float32}}},
+        Type.InlineRange{base: Type.Int, lo: -5, hi: 5},
+        Type.Union{members: [Type]{Type.Case{name: "Some", payload: Type.Int}, Type.Named{name: "Never"}}},
+        Type.Tagged{marker: TagMarker.User{name: "Celsius"}, inner: Type.Float},
+    }
+    loop shape in shapes {
+        id: type_intern_syntax(table, shape)
+        assert_eq(type_syntax(table, id), shape)
+        assert_eq(type_intern_syntax(table, shape), id)
+    }
+    // A key span is part of the Map's identity, as Type's equality has it.
+    other: type_intern_syntax(table, Type.Map{key: Type.String, key_span: None, value: Type.List{element: Type.Named{name: "Point"}}})
+    assert(other != type_intern_syntax(table, shapes[0]))
+}
+
+#Test("a worker's own types merge to the ids a serial intern gives") {
+    shared := interner()
+    point: type_intern_syntax(shared, Type.Named{name: "Point"})
+    worker := interner_fork(shared)
+    // The shared type is found, not added; new ones are the worker's own.
+    assert_eq(type_intern_syntax(worker, Type.Named{name: "Point"}), point)
+    nested: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "here", ty: Type.List{element: Type.Named{name: "Point"}}}, TypeTupleField{name: "span", ty: Type.Map{key: Type.Int, key_span: Val(Span{start: 1, end: 4}), value: Type.Named{name: "Fresh"}}}}}
+    own: type_intern_syntax(worker, nested)
+    assert(type_row(own) >= worker.from.types)
+    remap: interner_merge(shared, worker)
+    merged: interner_remap_type(remap, own)
+    assert_eq(type_syntax(shared, merged), nested)
+    serial := interner()
+    _: type_intern_syntax(serial, Type.Named{name: "Point"})
+    assert_eq(type_intern_syntax(serial, nested), merged)
+    assert_eq(interner_remap_type(remap, point), point)
 }

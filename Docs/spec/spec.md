@@ -936,9 +936,12 @@ overlap and are E0908, conditions or not. A conditional impl stays outside
 its type's body: a nested impl cannot state the bounds.
 
 A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
-dynamic dispatch with invisible boxing. Generic bounds use `f: fn<T: Bound>(…)`
-and `Pair: struct<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
-`Comparable`, `Encode`, and `Decode` derive when every field qualifies. The
+dynamic dispatch with invisible boxing. A trait value prints, interpolates and
+debug-prints as the concrete value it holds, so `print(shapes)` shows each
+shape; it can be shown a way only when every type implementing the trait can.
+Generic bounds use `f: fn<T: Bound>(…)` and `Pair: struct<T> { … }`. Built-in
+`Printable`, `Equatable`, `Debug`, `Comparable`, `Encode`, and `Decode` derive
+when every field qualifies. The
 package default can deny `auto_derive` through
 `policy: { lints: { deny: [auto_derive] } }`. A signed type marker opts one
 trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
@@ -3593,7 +3596,9 @@ is a type as a value: a `Type` parameter, field or result, a `[Type:V]` key, a
 switches on one. `Type{Rock}` names one explicitly, and `type_of(p)` is the
 static type of a name or field path, read without evaluating it. Two `Type`
 values are equal exactly when they name one type, generic arguments included:
-`Box<Int>` and `Box<String>` are different keys. A `Type` displays its path,
+`Box<Int>` and `Box<String>` are different keys. A builtin type's name is one
+as a declared type's is: `counts[Int] = 1` keys a map by `Int`, and
+`type_of(n) == Int` holds for an `Int` binding. A `Type` displays its path,
 each declared type qualified by its module. Only the compiler builds one.
 
 Anywhere else a type is not a value: binding, passing or printing a type, such
