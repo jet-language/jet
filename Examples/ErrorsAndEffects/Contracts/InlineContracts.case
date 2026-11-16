@@ -1,0 +1,30 @@
+# The contracts example on each tier (O0, O1, and O2 through `--release`),
+# and `jet inspect choices` on each: every call of an `#Inline(Always)`
+# function, `double` and the method `plus`, is inlined at its call in `run`
+# whatever the level, while the soft `#Inline` of `square` is the
+# optimizer's own pick.
+env: NO_COLOR=1
+step run_o0: jet run -O0 InlineContracts.jet
+exit: 0
+stdout: = InlineContracts.out
+stderr: empty
+step run_o1: jet run -O1 InlineContracts.jet
+exit: 0
+stdout: = InlineContracts.out
+stderr: empty
+step run_o2: jet run --release InlineContracts.jet
+exit: 0
+stdout: = InlineContracts.out
+stderr: empty
+step choices_o0: jet inspect choices -O0 InlineContracts.jet
+exit: 0
+stdout: ~ "in run: double inlined: marked #Inline(Always)" # the marked function at its call
+stdout: ~ "plus inlined: marked #Inline(Always)" # the marked method at its call
+step choices_o1: jet inspect choices -O1 InlineContracts.jet
+exit: 0
+stdout: ~ "in run: double inlined: marked #Inline(Always)" # the marked function at its call
+stdout: ~ "plus inlined: marked #Inline(Always)" # the marked method at its call
+step choices_o2: jet inspect choices -O2 InlineContracts.jet
+exit: 0
+stdout: ~ "in run: double inlined: marked #Inline(Always)" # the marked function at its call
+stdout: ~ "plus inlined: marked #Inline(Always)" # the marked method at its call

@@ -1,0 +1,7 @@
+// E0917: marked functions that call each other cannot all be expanded, as
+// each inlined copy would hold the next one.
+#Inline(Always) ping: fn(n: Int) -> Int { if n <= 0 -> 0 else -> pong(n - 1) }
+
+#Inline(Always) pong: fn(n: Int) -> Int { if n <= 0 -> 1 else -> ping(n - 1) }
+
+run: fn() { print(ping(3)) }

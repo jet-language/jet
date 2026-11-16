@@ -272,6 +272,18 @@ lp_result: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     lp_return(f, -1)
 }
 
+// `twice` marked `#Inline(Always)` and still called once the module's
+// marked calls count as inlined.
+lp_marked: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    m.functions[0].inline_always = true
+    m.marked_inlined = true
+    three: lp_const(f, t.int, 3)
+    six: lp_temp(f, t.int)
+    call_args: ir_args(f, [Int]{three})
+    _ := ir_emit(f, IROp.Call, six, 0, call_args, 1, 1)
+    lp_return(f, -1)
+}
+
 // The route jet_std_io_stdout_is_tty takes the stdout handle (one word),
 // here called with none.
 lp_route: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
@@ -519,6 +531,7 @@ LP_RULES: [String]{
     "call.arity",
     "call.arg",
     "call.result",
+    "call.marked",
     "call.indirect",
     "call.indirect#arg",
     "call.indirect#result",
@@ -560,6 +573,7 @@ lp_plant: fn(plant: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
         "call.arity" -> lp_arity(m, t, f)
         "call.arg" -> lp_arg(m, t, f)
         "call.result" -> lp_result(m, t, f)
+        "call.marked" -> lp_marked(m, t, f)
         "call.indirect" -> lp_indirect_arity(m, t, f)
         "call.indirect#arg" -> lp_indirect_arg(m, t, f)
         "call.indirect#result" -> lp_indirect_result(m, t, f)

@@ -1647,8 +1647,10 @@ at the call's line, with why it was taken: its size within the level's callee
 limit and the caller's remaining budget, its only call, or `marked
 #Inline(Always)`. A marked callee is listed under `--inline=off` and `-O0`
 too, which list no other.
-`#Inline(Always)` locks the callee inlined; a change that makes it recursive,
-address-taken, or too large fails the build (E0917-E0919).
+`#Inline(Always)` is a guarantee that locks the callee inlined; a change that
+makes it recursive or part of a cycle of marked calls (E0917), address-taken
+(E0918), too large (E0919), `#Scrub` (E1016) or a reader of `context.trace`
+(E1017) fails the build.
 Collection: under `#Policy(gc)`, a binding whose returned heap graph needs
 identity beyond its lexical owner is kept by the policy scope's collector, at
 the function's line, for example ``collection: main.jet:10 in build: `first`

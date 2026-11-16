@@ -377,6 +377,16 @@ its `markers`; and the `span` of its name. Reading a case builds no payload
 value
 ([`EnumCases`](../../../Examples/Metaprogramming/Reflection/EnumCases.jet)).
 
+A case has no visibility of its own; its enum's applies. Because an enum's
+`TypeInfo` holds its whole case catalog, `T.reflect()` on an enum checks every
+declaration detail its cases reach (each payload type, the fields of each
+struct and the cases of each enum it names, through type arguments and
+containers) from the module that asks. A detail that module can't read
+refuses the whole query with E0605; no catalog is filtered. A generic enum
+named without one type per parameter (`Slot.reflect()` for `Slot: enum<T>`)
+is refused with E0904, since its payloads have no one type; `Slot<Int>.reflect()`
+lists them at `Int`.
+
 A `FunctionInfo` and a `MethodInfo` share one typed contract: `signature` is
 a `CallableSignature`. Its `params` is a `[ParamInfo]` in declaration order,
 the receiver included; its `return_type` is the success type the callable

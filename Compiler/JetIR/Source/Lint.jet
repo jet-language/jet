@@ -20,7 +20,10 @@
 //     against its code word's signature, a memory access inside the
 //     Aggregate storage it addresses, ...); every opcode but a control one,
 //     Nop and Unreachable has one;
-//   - calls: a Call against the callee's parameter slots and result; a
+//   - calls: a Call against the callee's parameter slots and result, and
+//     no Call of an `#Inline(Always)` function once the module's marked
+//     calls were inlined (IRModule.marked_inlined: every tier inlines them
+//     before its passes, so one left is the guarantee broken); a
 //     CallRuntime of a runtime route against the route's carriers;
 //   - control: Block/Loop/If/Else/End nest and link to each other, every
 //     Br depth reaches an open construct, every construct is closed;
@@ -90,6 +93,9 @@ IRLintContext: struct {
     route_param_start: [Int]
     route_positions: [Int]
     route_kinds: [Int]
+    // Per module function, whether a Call of it is a marked call left
+    // (IR_LINT_CALL_MARKED); empty before the marked calls are inlined.
+    marked: [Bool]{[Bool]{}}
 }
 
 // What a ConstText's data row or a ConstBigInt's name row holds
@@ -132,6 +138,10 @@ IR_LINT_CALL_ARITY: "call.arity"
 IR_LINT_CALL_ARG: "call.arg"
 
 IR_LINT_CALL_RESULT: "call.result"
+
+// A Call of an `#Inline(Always)` function left after every marked call was
+// inlined (IRFunction.inline_always, IRModule.marked_inlined).
+IR_LINT_CALL_MARKED: "call.marked"
 
 // A CallIndirect against the signature its code word's row carries.
 IR_LINT_INDIRECT: "call.indirect"
@@ -502,6 +512,7 @@ ir_lint_context: fn(m: IRModule) -> IRLintContext Never! {
     params := [Int]{}
     results := [Int]{}
     function_names := [String]{}
+    marked := [Bool]{}
     loop f in m.functions {
         param_start.push(params.len())
         loop slot in 0..<f.param_count {
@@ -509,6 +520,7 @@ ir_lint_context: fn(m: IRModule) -> IRLintContext Never! {
         }
         results.push(f.result)
         function_names.push(f.name.copy())
+        if m.marked_inlined -> marked.push(f.inline_always)
     }
     param_start.push(params.len())
     exports := name_rows()
@@ -526,7 +538,7 @@ ir_lint_context: fn(m: IRModule) -> IRLintContext Never! {
     name_decimals := [Int]{}
     loop _ in 0..<m.names.len() -> name_decimals.push(IR_LINT_ROW_UNCHECKED)
     ir_lint_static_rows(m, data_texts, name_decimals)
-    context := IRLintContext{param_start: param_start.move(), params: params.move(), results: results.move(), function_names: function_names.move(), names: m.names.len(), data: m.data.len(), name_routes: name_routes.move(), kind_bits: kind_bits.move(), drop_functions: drop_functions.move(), data_texts: data_texts.move(), name_decimals: name_decimals.move(), modes: ir_lint_modes(), typings: ir_lint_typings(), route_words: [Int]{}, route_flags: [Int]{}, route_param_start: [Int]{}, route_positions: [Int]{}, route_kinds: [Int]{}}
+    context := IRLintContext{param_start: param_start.move(), params: params.move(), results: results.move(), function_names: function_names.move(), names: m.names.len(), data: m.data.len(), name_routes: name_routes.move(), kind_bits: kind_bits.move(), drop_functions: drop_functions.move(), data_texts: data_texts.move(), name_decimals: name_decimals.move(), modes: ir_lint_modes(), typings: ir_lint_typings(), route_words: [Int]{}, route_flags: [Int]{}, route_param_start: [Int]{}, route_positions: [Int]{}, route_kinds: [Int]{}, marked: marked.move()}
     ir_lint_route_rows(context)
     context
 }
@@ -1247,6 +1259,9 @@ ir_lint_typing: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, 
 // result; an Aggregate result's slot receives the caller's storage).
 ir_lint_call: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, pass: String, out: &[IRLintFinding]) Never! {
     callee: f.a[at]
+    if callee < context.marked.len() && context.marked[callee] {
+        out.push(ir_lint_at(f, at, pass, IR_LINT_CALL_MARKED, "a call of #Inline(Always) function {callee} {context.function_names[callee]} left after the marked calls were inlined"))
+    }
     first: context.param_start[callee]
     arity: context.param_start[callee + 1] - first
     start: f.b[at]
