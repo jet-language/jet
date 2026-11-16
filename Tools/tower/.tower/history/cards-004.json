@@ -101311,6 +101311,558 @@
         }
       ],
       "retiredAt": "2026-11-16T01:01:02.352Z"
+    },
+    {
+      "id": "c0692z4s",
+      "num": 3595,
+      "title": "core.http / core.net: capped streaming fetch, redirect policy, pinned addresses, inherited sockets for Jetpack",
+      "body": "Found by the Jetpack Rust-to-Jet port mapping (#3590; mapping receipts ~/.cache/jet-luna/jetpack-port/mapping-{A,B,C}.json). The Rust Jetpack uses these through std or crates; the Jet port cannot express them with current Core. Per the owner rule the port does not work around a missing Core API inside Jetpack. Each item is new public Core API, so it needs an owner ballot (AGENTS.md owner gates) with exact names, signatures, errors, effects and tier behavior before implementation. Prove each on AOT and default jet run (I9).\n\nNeeded (replacing jet_net uses in Store/Cache.rs, Store/NixCache.rs, Provider/native.rs, Provider/fetch.rs, NixIndex.rs, ToolchainUpdate.rs):\n1. Streaming GET response body with a caller-set byte cap (default body limit is 1 MiB) - jet_net::get_stream, get_stream_follow_redirects.\n2. Bounded fetch with an explicit redirect-policy callback - jet_net::fetch_bounded_with_redirect_policy.\n3. Request over pre-resolved, pinned public-only socket addresses - jet_net::get_stream_pinned + resolve_public_addresses; public-IP classification must match jet_net::is_public_ip (including CGNAT and other special ranges).\n4. Adopt an inherited listening socket (socket activation, fd 3) for non-JetOS dev services (see #329 for the JetOS twin).\n5. Unix-socket peer credentials (SO_PEERCRED) for the shared-store broker.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m11-jetpack-in-jet",
+      "phase": "done",
+      "priority": "P1",
+      "plan": "## Goal\nImplement the five ratified Jetpack network needs in Core Jet: a capped streaming body, a redirect host policy, pinned destinations, inherited listeners and Unix peer credentials. The syscalls stay as policy-free leaves.\n\n## Current state\n- Core/http/client.jet has no body-limit, stream, destination or redirect-target API. `RedirectPolicy` is `{Disabled, Limited, All}` (:26-29), with a fixed `C_MAX_BODY_BYTES` (:181, :282).\n- Core/net/net.jet has no `inherited_listeners` or `unix_peer`.\n- Core/net/ip.jet `is_global` (:81-83) and `ipv6_is_global` (:453-455) are narrower than the proposed table (no CGNAT 100.64/10, 198.18/15, documentation ranges or 2000::/3 rule).\n- Ratified A: D-CORE-HTTPBODYLIMIT1 (`HTTPResponse.body(limit: Int = 67108864) -> Body`, where Body implements `core.io.Reader`; over-cap gives `IOError.InvalidInput` through the reader or `HTTPError.BodyTooLarge(limit)` inherently; Content-Length above the cap fails before any byte; the Rust `HTTP_RESPONSE_BODY_LIMIT` checks are removed); D-CORE-HTTPREDIRECT1 (`RedirectTarget {AnyHost, SameOrigin, Hosts([String])}` in `Follow{max, same_origin_credentials, to}`, refusing with `HTTPError.Redirect` before connecting); D-CORE-HTTPDEST1 (`HTTPDestinations {Any, Public, Loopback}` and `HTTPClient.destinations(rule)`, resolving once per client, pinning, applying to IP literals and every hop, `HTTPError.Policy`); D-CORE-NETINHERIT1 (`net.inherited_listeners() -[Net, Env]> [InheritedListener] NetError!` under the sd_listen_fds protocol); D-CORE-NETPEER1 (`net.unix_peer(stream) -[Net]> UnixPeer NetError!`).\n- D-CORE-NETPUBLIC1 (which addresses count as public) is still open. Recommended: A, the jet_net table.\n- The ratified texts name #3665 as the port that merges the Rust transport and the Jet client.\n\n## Changes\n1. Net slice (independent; land first): Core/net/net.jet `InheritedListener`, `inherited_listeners` and `UnixPeer`/`unix_peer`, with LISTEN_PID/FDS/FDNAMES validation, SO_ACCEPTCONN and SO_TYPE checks, CLOEXEC and unsetting the variables. The leaves (getsockopt, SO_PEERCRED/getpeereid) go in the retained host.\n2. HTTP slice, on the #3665 Jet client: the body cap on every read path, `RedirectTarget` with Location resolved through core.net.url join, and destination pinning (a per-client map keyed by scheme, host and port, shared by clones, bypassing the DNS TTL, ignoring env proxies under .Public/.Loopback, and keeping SNI on the original host).\n3. The .Public rule uses the NETPUBLIC1 table once it is ratified. Written for A: `is_global` and `ipv6_is_global` bodies become that table in ip.jet, and nothing else changes.\n4. Regenerate with `node Tools/agent/gen-core-tables.mjs --write`.\n\n## Proof\n- `jet test Compiler --profile cases network_core_contract/network_core_contract_example_covers_reserved_cidr_and_mime_boundaries` passes, with Examples/features/net/network_core_contract.jet extended with the table rows and 240.0.0.1 still not public.\n- New tests: `cargo test --test http_client_law -- http_body_limit_streams_and_rejects_over_cap http_redirect_target_same_origin_and_hosts http_destinations_public_pins_and_refuses_private` pass.\n- New tests: `cargo test --test corelib_net -- net_inherited_listeners_sd_listen_fds net_unix_peer_reports_uid_gid` pass on Linux.\n\n## Batch\nbatch-core-net: Core/http and Core/net.\n\n## Dependencies\n#3665 for the HTTP slice. D-CORE-NETPUBLIC1 (open) gates only `.Public`.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [
+        "c047t3lg"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Merged into #3665 by board audit."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 7 criteria from archived #2382, #3080, #3444, #3445: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Correction to my two 2026-11-04 notes: $JET_RUN_ROOT/FoundFix/found.patch is RECOVERED (Prep-2 replayed the FoundFix agent transcript; diffstat identical, 5 files, 85+/37-; $JET_SCRATCH_ROOT/lanes/Main/recovery/3595/ with SOURCES.md). It held test-side fixes in Jetpack/Foundation/Tests only, not the four bridges. Dev has since fixed the same roots its own way: c3b14a3ce9 (core.sys and core.process imports), baae89db6c (the Foundation tests build), 6e912387a9 (the Foundation tests pass, 92/92). It is not to be landed: it weakened the IOError exact-equality assertions. No criterion depended on it. Bridge state is unchanged: c7144386cc landed foundation_addresses_are_public and foundation_resolve_public_addresses; foundation_get_stream_pinned is retired by owner ruling 2026-10-29; foundation_fetch stays open under c6, blocked by #3665."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Lost-work status (owner 2026-11-04: recover it, or record it as incomplete so it is never reported done): $JET_RUN_ROOT/FoundFix/found.patch is gone, and no copy is found in scratch, the rescued and recovered directories, or the agent transcripts so far; the search of git objects continues. It most likely implemented the four Jetpack/Foundation native bridges (foundation_addresses_are_public, foundation_resolve_public_addresses, foundation_fetch, foundation_get_stream_pinned). That work is incomplete and stays tracked by open criterion c6; no criterion was met by it."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Held-work citation moved into the repo (#6563 c2, landed 446b49726a; see Tools/tower/held/README.md). The cited patch $JET_RUN_ROOT/FoundFix/found.patch was lost in the 2026-11-04 scratch cleanup and cannot be recovered; recorded as lost in Tools/tower/held/README.md. The work must be redone from the card text."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "c6 progress (IrTypes-3 burn run, base jet 1620f05362, 2026-11-01): jet test Jetpack/Foundation/Tests/PublicDestination.jet = 92 passed, 0 failed; 'all DNS answers must be public' passes. The other two named tests (comptime_http_fetch loopback, pinned stream empty set) were removed by baae89db6c along with the unbuilt HTTP API (#3665), so c6 stays open until they return with that API."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at undefined in CardClose-6: CardClose-6.patch; CardClose-6.msg"
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "HttpDest-g1 landed as c7144386cc. It adds Core ip.is_public_destination/ipv6_is_public_destination (IANA 2025-10-09, refusing 6to4/Teredo/NAT64/3fff::/20), net.socket_addrs with socket_addr as its first answer, and Foundation foundation_addresses_are_public/foundation_resolve_public_addresses on the Core checks; foundation_get_stream_pinned is retired. New goldens ip_public_destination and socket_addrs pass on o0/o1/o2. A/B: golden 3936 to 3942, ui =, cases +1, 0 lost; lane-check CHECK OK. C6 is partial: the foundation_fetch row and the HTTPClient .destinations(.Public) row stay failing until #3665, as the owner ruled. HttpDest has stopped."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Owner rulings 2026-10-29 (direct): (1) HTTP destinations() waits for #3665 (HTTPClient port) and is placed on HTTPClient as D-CORE-HTTPDEST1 ratified, not on HTTPRequest; (2) foundation_get_stream_pinned is retired in favour of .destinations(.Public); the test's pinned case becomes 'a Public request refuses loopback/empty'. C6 fetch/pinned parts are blocked by #3665."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Owner ruling 2026-10-29 (direct, Main session): add public Core API net.socket_addrs(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] NetError!, which returns every resolver answer in OS order with no filter or dedupe, using the same input checks, leaf and errors as net.socket_addr; socket_addr becomes the first element of socket_addrs. Chosen over reviving D-NETDNS2 resolve_ip and over keeping resolution internal. Needed by Foundation PublicDestination (C6)."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Main 2026-10-29: reopened. The Jet port lacks the native bridges this card delivered in Rust. Jetpack/Foundation/Source/Net/PublicDestination.jet:35-53 marks foundation_addresses_are_public, foundation_resolve_public_addresses, foundation_fetch and foundation_get_stream_pinned as '#3595 REQUIRED native bridges, intentionally not guessed', and git log -S finds no definition. So 3 Foundation tests cannot compile (found by RustOut7 in the #6110 sweep). New criterion 6 tracks it."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "2026-10-23 Main: Jetpack/Foundation cannot compile its tests on dev 874411e08d: Source/Net/PublicDestination.jet:48-53 calls the four native bridges foundation_addresses_are_public, foundation_fetch, foundation_get_stream_pinned, foundation_resolve_public_addresses, which are defined nowhere (9 E0102 rows plus 10 E0107 for unresolved net). Every Foundation #Test (including the Rust-test ports of jetpack_output) is blocked on this. Scratch fixes for the other three roots (missing core.sys/core.process uses; TreeHashPublication fs effects; ReportJSON Dyn assert) are in $JET_RUN_ROOT/FoundFix/found.patch, not landed."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: merged into #3665; criteria carried there as [#3595]. Jetpack HTTP/net needs are blocked by #3665 and live in the same modules (Core/http/client.jet:26-29,181)."
+        },
+        {
+          "at": "2026-10-03",
+          "by": "Pip",
+          "text": "Jetpack fetch (JP-NET-ADDRESS) needs one Core-owned strict outbound public-IP policy: v4 and v6 (incl. v4-mapped) special-purpose classification, allocation-free octet/segment access on IPAddr, and typed all-answer DNS resolution with address pinning, matching Rust jet-net 681-711. Core IPAddr exposes only is_ipv4/to_string today. Public API: needs a ballot under this umbrella. Generic is_global keeps its general meaning; the outbound policy is a distinct, named check."
+        },
+        {
+          "at": "2026-10-02",
+          "by": "Pip",
+          "text": "Ratified-state audit 2026-10-02 (D-CORE-NETPUBLIC1): Decision IDs: D-CORE-NETPUBLIC1\n\nActive contract: `is_global` follows a dated copy of the IANA special-purpose registries, so it answers \"can this address be reached?\". A separate `is_public_destination` answers \"is it safe to fetch?\".\n\nGap evidence (static source witness, not a passing test): Core/net/ip.jet:81-82,453-454 implements is_global by simple negative categories and has no distinct is_public_destination. Ratified IANA reachability versus strict 6to4/Teredo/NAT64 fetch policy is not represented; both compilers import this shared API.\n\nCoverage disposition: #3595 treats the ballot as open and proposes replacing only is_global with one old table. It lacks separate dated IANA reachability and stricter is_public_destination fetch policy; amend that owner rather than duplicate HTTP policy.\n\nExisting owner: core.http / core.net: capped streaming fetch, redirect policy, pinned addresses, inherited sockets for Jetpack; open-cards.json plan/criteria inspected.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-core-net."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (jetpack1a, Opus 5.5): E_BUILD. Five of six decisions are ratified A (destination pinning, redirect policy, body limit, inherited socket, peer credentials); none is implemented in Core. The public-IP table waits on the open D-CORE-NETPUBLIC1. Evidence: No body_limit/redirect_policy/stream APIs in Core/http/client.jet (518 lines) or Core/net (grep); decisions HTTPDEST1/HTTPREDIRECT1/HTTPBODYLIMIT1/NETINHERIT1/NETPEER1 ratified A, NETPUBLIC1 open"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Inherited listeners and Unix peer credentials work per D-CORE-NETINHERIT1/NETPEER1; proof: `cargo test --test corelib_net -- net_inherited_listeners_sd_listen_fds net_unix_peer_reports_uid_gid` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:47.898Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 2,
+          "text": "Body cap, redirect target and destination pinning work per D-CORE-HTTPBODYLIMIT1/HTTPREDIRECT1/HTTPDEST1; proof: `cargo test --test http_client_law -- http_body_limit_streams_and_rejects_over_cap http_redirect_target_same_origin_and_hosts http_destinations_public_pins_and_refuses_private` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:50.033Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 3,
+          "text": "`.Public` uses the ratified D-CORE-NETPUBLIC1 table; proof: `cargo test --test network_core_contract -- network_core_contract_example_covers_reserved_cidr_and_mime_boundaries` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:52.196Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 4,
+          "text": "{\"decisionIds\": [\"D-CORE-NETPUBLIC1\"], \"text\": \"`is_global` follows a dated copy of the IANA special-purpose registries, so it answers \\\"can this address be reached?\\\". A separate `is_public_destination` answers \\\"is it safe to fetch?\\\".\", \"proof\": {\"testName\": \"v04_ratified_contract\", \"suite\": \"tests/ratified/V04.jet (proposed Jet-side production integration suite)\", \"golden\": \"tests/ratified/expected/V04/V04.out (proposed; security/process/measurement outcomes attach identity-bound receipts)\", \"requiredCases\": [\"dated IANA IPv4/IPv6 special-purpose table including reachability exceptions\", \"is_public_destination independently excludes 6to4/Teredo/NAT64 and forbidden fetch destinations\", \"HTTP Public uses stricter function on initial literal/resolution and every redirect before connecting\"]}}",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:54.355Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 5,
+          "text": "{\"text\": \"The inspected contradiction is absent from the active public product path, with complete affected caller/fixture/generated-doc cutover. A canonical successful consumer and each named rejection/transition exercise real behavior; bypassing the implementation fails the witness.\", \"proof\": {\"testName\": \"v04_cutover_regression\", \"suite\": \"tests/ratified/V04.jet (proposed)\", \"requiredCases\": [\"source witness boundary exercised through Jet compiler/Jet-hosted tool, not frozen Rust semantic change\", \"retired public path never executes under a compatibility alias\", \"matching stdout/stderr/exit and located registered errors across applicable staged engines; no unproved target treated as passed\"]}}",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:56.553Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 14,
+          "text": "Memory safety (I1): socket_addr(\"[zz]\", 80) in safe Jet returns Err(NetError) instead of crashing with SIGSEGV in resolve_socket_addrs (Core Net.jet:173). Found 11-07 by tests/cases/corelib_net/net_http_service_policy_tests_pass (known-failing under this card). Root fix, plus a #Test with malformed bracketed hosts (\"[zz]\", \"[\", \"[::1\", \"[]\") on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "d7d2b1e1f8 adds a bare-key __ResolveError IR_RUNTIME_HANDLES row. Before it, the resolver's Err record was copied as a Jet-layout shell and string_clone got a NULL message (SIGSEGV). Rows at o0, o1 and o2: hosts nosuch.invalid, zz and [zz] give the 'resolve socket address' NetError, and '[', '[::1' and '[]' give the socket_addr NetError. jet test passes at all three levels with no fault. tests/cases/corelib_net/net_http_service_policy_tests_pass: 7/8 at o0/o1/o2, with only c15 left (KF narrowed). LaneCheck RuntimeHandles.jet CHECK OK, and RuntimeGenerators --check is current.",
+          "at": "2026-11-07T17:09:29.927Z"
+        }
+      ],
+      "refs": [
+        "3590",
+        "329"
+      ],
+      "tags": [
+        "jetpack-port",
+        "corelib",
+        "core-gap",
+        "cluster-core-http",
+        "batch-core-net",
+        "merged"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-28T00:06:25.727Z",
+      "updated": "2026-11-13T02:04:58.211Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G3"
+      ],
+      "criteriaLastN": 15,
+      "completedAt": "2026-11-13T02:04:58.211Z",
+      "questions": [
+        {
+          "id": "q5a0e6bu",
+          "cardId": "c0692z4s",
+          "decisionId": "D-CORE-NETPUBLIC1",
+          "by": "owner",
+          "kind": "question",
+          "text": "I like the idea of being safer with 6to4 and Teredo ipv6 being private but why would we NOT want to use IANA conforming registry like python other than it taking more upfront work?",
+          "status": "answered",
+          "answer": "Use IANA, but for the right question. The IANA special-purpose registries answer \"is this address globally reachable?\". They do not answer \"is it safe for my server to fetch?\" (SSRF safety).\n\nIANA marks 6to4 (2002::/16) and Teredo (2001::/32) as N/A, not False. So treating them as not public is a stricter safety policy, not an IANA fact. Python's ipaddress follows IANA plus its own exceptions: current docs mark 2002::/16 and most of 2001::/23 private, and gh-113171 fixed missing ranges in 2024. The tables change over time. NAT64 (64:ff9b::/96) is globally reachable per IANA, yet it can reach private IPv4 hosts.\n\nSo one overloaded \"public\" meaning is the real risk. Recommendation: `is_global` follows a dated, versioned copy of the IANA tables (reachability); a separate `is_public_destination` policy, stricter (denies 6to4, Teredo, NAT64-to-private, and so on), guards HTTP fetches and provider downloads.\n\nEvidence: Core/net/ip.jet:62-83,448-455; crates/jet-net/src/lib.rs:651-713; https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml; https://www.iana.org/assignments/iana-ipv4-special-registry/; https://docs.python.org/3/library/ipaddress.html#ipaddress.IPv4Address.is_global; https://github.com/python/cpython/issues/113171; https://github.com/python/cpython/pull/118177.",
+          "created": "2026-09-28T19:22:50.891Z",
+          "answeredAt": "2026-09-30",
+          "answeredBy": "pip"
+        }
+      ],
+      "retiredAt": "2026-11-16T02:09:58.349Z"
+    },
+    {
+      "id": "c09kpw5i",
+      "num": 4732,
+      "title": "Portable math: sin, cos, exp, log and pow written in Jet with stated accuracy and identical bits on every tier and target",
+      "body": "Owner note: 'Sine is defined in Mojo so that it is portable; I want custom declarations where we can to make Jet code more portable and accurate' (OwnerNotes1 digest section 21). Today `math.sin` forwards to the compiler built-in `core.math.sin` (Core/math/math.jet:122) [INFERENCE: ends in the host libm through the Rust runtime], so results may differ in the last bit between systems, and they cannot serve as the CPU oracle GPU results are checked against (D-COMPUTE-BACKEND1). Directive 19 (no Rust) also requires these leaves to move into Jet.\n\nScope: implement the elementary functions in core.math as Jet code with a stated error bound per function (correctly rounded where the cost is acceptable, after the CORE-MATH project's results), using D-CORE-BOUNDARY1 instruction entries for chip speed-ups whose plain Jet body defines the meaning. Faster, looser versions are available only through a named compute precision profile, never silently. Test identical bits across jet run, jet build, release and every supported target.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met, retired or moved."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6417 \"One libm meaning on every tier: web Wasm must not use host Math for Core float functions\" into this card (portable math with one meaning on every tier); its 1 open item(s) are carried as \"(was #6417)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 5,
+          "text": "Retired: merged into #6700",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "merged into #6700",
+          "at": "2026-11-13T02:04:00.763Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [
+        "D-CORE-BOUNDARY1",
+        "D-COMPUTE-BACKEND1",
+        "D-STATS-CANONICAL1",
+        "$JET_STATE_ROOT/scratch/OwnerNotes1/DIGEST.md#21"
+      ],
+      "tags": [
+        "math",
+        "portability",
+        "owner-notes-2026-10-07",
+        "wayfinder:task"
+      ],
+      "parentId": "c0spgl2u",
+      "needsAcceptance": false,
+      "created": "2026-10-07T13:09:26.241Z",
+      "updated": "2026-11-13T02:04:13.379Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G3"
+      ],
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-13T02:04:13.379Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T02:09:58.350Z"
+    },
+    {
+      "id": "c0vsqf8a",
+      "num": 4741,
+      "title": "Execution architecture: shared meaning, portability boundaries and reported quick-run waits",
+      "body": "Owner direction (2026-10-07): one meaning structurally (AOT tiers only optimize, never change behavior); no running every test on every tier; a hardware-agnostic optimizer then hardware-specific AOT; a native-speed immediate tier instead of a slow interpreter; portability strong enough to replace Wasm/JS, plus a sandbox.\n\nResearch: $JET_STATE_ROOT/scratch/ExecArch1/RESEARCH.md (revision 2; adversarial audit AUDIT-adversary.md and fact-check AUDIT-Verifier.md beside it, both 'sound after repairs'; all 63 findings answered in §12). Owner questions and where each is settled: §9 and §9.12.\n\nBallots: D-EXEC3 (overall: shared optimizations, test policy, quick-run code generator chosen by measured contest; amends I5, I9 and D-EXEC1's code-generator clause), D-RESOURCE-LIMIT1 (stack/memory limits across levels), D-PERF-RUNCELL1 (is `jet run` time-to-answer a gated benchmark), D-PORTABLE2 (machine-code checker for the sandbox; reconciles D-PORTABLE1's interpreter start with D-EXEC2).\n\nAlready settled, no ballot: CPU floating point (D-SIMD3, D-CPU-DISPATCH1, D-COMPUTE-BACKEND1), precise traps (D-RTFAIL1, D-FAIL-BREACH1), capabilities vs authority and browser stance and portable boundary (D-PORTABLE1, D-WASISRV1), tier-up/OSR (D-ADAPTIVE-TIER1).\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-PERF-RUNCELL1=B\nCanonical gauntlet records same end-to-end run metric/peers/commands and precisely defined after-edit/repeat/install cache states as reported-only columns; gate/card/release selectors ignore these cells even when losing; required execution-time/build-time/native optimization cells remain fully gated.\nPaths: Tools/gauntlet/{measurement-manifest.json,status.mjs} run end-to-end metrics/cache states; performance reports; Tools/agent release/card gate selectors exclude reported-only cells\nRegistry/spec/UI/goldens: No Syntax.rs/keyword/marker change. Canonical metric manifest cites D-PERF-RUNCELL1=B, report-only classification distinct from required gate; Docs/spec performance measurement rules/AGENTS scope note; architecture D-PERF-RUNCELL1=B; CLOSURE7.14 report state; do not weaken other required runtime/build cells; Performance report columns show end-to-end wait/time-to-first-output and cache state with report-only label; no diagnostic or UI language snapshot required; After edit: product caches cold, prebuilt standard libs kept; repeat warm; first after install also reported, not gated; hello + small CLI/script peer commands reproducible; performance summary/gate fixture proves losing run-wait never holds release\nTiming: TOOLS/REPORTING NOW; no new feature/compiler seam or Rust-half work. #29 prioritizes ports; reported quick-run waits NEVER hold port/Rust-exit/release. Required runtime/build cells remain gates. #28 Sol author/Opus review.\nOpen prerequisite/conflict: Ballot CHECK acceptance text covers A only; chosen B expressly ignores metric for gates/cards. Do not hold Rust exit/release/NativeO2 progress on these cells or interpret B as dropping required runtime speed gates.",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met, retired or moved."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); D-EXEC2=A (native code generator only; Cranelift and MIREval are retired)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 43 criteria from archived #687, #1134, #2101, #2300, #2301, #2911, #2918, #2925, #2935, #2936, #2937, #2938, #2939, #2940, #2941, #2948, #2955, #3157, #3160, #3405, #3478, #3484, #3485, #3580, #4116: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner direction 2026-10-23: every improvement that takes the compiler to 30M lines/s must also be applied to codegen, so all code Jet generates is as fast as physically possible without taking control from experts. Rule for the throughput work: each slice is tagged GENERAL (a runtime, codegen or Core mechanism any Jet program gets automatically) or COMPILER-ONLY (a data-structure choice inside the compiler). Prefer GENERAL: implement it once in codegen/runtime/Core and let the compiler benefit as an ordinary Jet program (I8 one mechanism). Examples: non-atomic RC unless shared (#5475), frozen immortal constants (mapfreeze), no reclamation at process end (#5478), escape-proven bump/arena placement (Goose lesson), small-Int fast paths, tag compare (#5473), Shared/queue primitives without futex waits on hot paths, the work-stealing task scheduler, hashed Map instead of binary search (#5474), COW uniqueness at every place (#5480). COMPILER-ONLY wins (interned ids, SoA AST/IR) are each followed by a ticket asking how codegen or Core can give user programs the same (for example Columns<T>/SoA layout, an interned Symbol type, or arenas via escape analysis). Experts keep control via the existing explicit surfaces (layout attributes, #Region, #Unsafe, explicit allocators); defaults stay safe."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner direction 2026-10-23 ~08:45 (performance target): generated machine code must land roughly at the physical floor, i.e. what hand-written asm/binary achieves on the same machine. Jet aims to be the fastest language in existence, barring hand-written asm where that is physically faster; every case where hand-written code beats Jet is a codegen lesson to learn. A beginner who wants the best out-of-the-box performance must get near-floor code (aside from glaring design issues in their program), and it must beat C and Rust. Experts keep complete control and configurability. Consider advanced techniques. Implication: the perf manifest should gain hand-written asm floor references beside C/Rust/node/luajit for the core cells, and each gap to the floor is a carded codegen lesson."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner ruling 2026-10-23 ~07:30: profile reuse approved. Profiles gathered by jet run's O0 counters may feed O2 (tier-up) and jet build --release, and may be cached between runs in the project's .jet/ folder (beside the other jet data such as post-comptime expanded code). Condition: the cache must be robust and never go stale. Design requirements given to O0Load: per-function entries keyed by a content hash of the function's checked IR plus compiler identity, target and opt level, so an edit invalidates exactly the changed functions; mismatched or unreadable entries are discarded, never trusted; profiles are advisory only (they change optimization choices, never meaning; the O0-vs-O2 differential gate still applies); atomic write (temp file + rename) and safe under concurrent jet processes; one format version, mismatch = discard; size cap with eviction; removed by the existing clean path; --verbose reports profile hits and misses. Open owner question still to ballot: should jet build --release use a cached profile by default (build output then depends on local .jet state) or only when asked?"
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Owner 2026-10-23 ~07:00: tier-up stays required (start at O0, rise quickly to O1, approach O2 in long jet run; effectively a JIT). Separate and first: absolute performance is far off (O1 vs gcc -O2: fib 20.0 vs 3.9 ms, sieve 112 vs 9.1, push+sum 31 vs 9.0; jet run hello 186 ms vs lua 2 ms). O1/O2 must be real optimizing tiers (O2 essentially perfectly optimized, O1 the middle ground; more compile time allowed). Lanes: O0Image -> O1/O2 optimizer after the image slice; O0Speed -> startup + O0 codegen; tier-up lane after O0 completes (O0Load is the natural owner; the compiler stays resident beside the program)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "O0Speed tier-up evidence (2026-10-23 ~06:50, HEAD+codecword, 7 runs median): fib(32) O0 21.6 / O1 21.1 / O2 21.1 ms; sieve 5M+2M structs 216/195/196 ms; with intdiv loop 68.0 vs 68.1, arith 221 vs 213. Max tier-up gain about 10% today; jet run wall is compile+startup (loop 324 ms total, program 68 ms). Conflict: in-process exec unmaps all but the image, so tier-up needs (a) fork mode with a shared memfd code area/table, or (b) not unmapping the compiler. OSR adds hours. Proposal: spend the day on startup and O0 codegen; owner asked to rule whether tier-up+OSR stays required."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "OWNER ANSWERS (chat, 2026-10-23 ~05:50), binding as owner instructions: (a) relaunch: launching the running program's own script path (os.executable() under jet run) runs it through the same jet at the same level; (b) tier-up includes on-stack replacement at loop heads today; (c) a crash under in-memory jet run exits with the real signal, same as the built binary (no conversion to exit 1). Decision records D-EXEC-NOEXEC1 (A), D-EXEC-TIERUP1 (A), D-EXEC-RELAUNCH1 (A) posted as drafts with the owner's chat answers as outcomes; D-PERF-RUNCELL2 (reopen run-cell gate vs lua/luajit/python3/node) is a real ballot awaiting the owner. Tower requires a fresh-reader review before any verdict, so none was recorded."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Seed a0_011 (dev 23872f7ab) is current: chain FIXED POINT 9914d964688d2aab, packs identical, #5206 fixed, goldens 614 vs 537 (a0_010). One regression from dev source (comptime on the IR machine): collections/int_map_wide_keys E0956 'Compile-time evaluation does not implement materializing an IR value of type [Int:String]' (int_map_wide_keys.jet:7). Owned by lane O0Comptime: native comptime replaces the evaluator and this example is in its acceptance set. origin/master fast-forwarded to 23872f7ab (proven commit). O0 lanes O0Load/O0Image/O0Comptime/O0Speed started 05:45 on plan $JET_SCRATCH_ROOT/lanes/Main/exec/o0-plan.md."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "OWNER INSTRUCTIONS 2026-10-23 ~05:35 (chat): (1) In-memory native O0 for jet run, jet dev and compile-time code, as designed in $JET_SCRATCH_ROOT/lanes/Main/exec/o0-design.md, must be completely done by 20:00 today; at most 5 Opus subagents in total from 06:00. (2) Target: Jet at least Lua-level for scripts (measured here: lua/luajit hello 2.2 ms = process floor; jet run hello 241-311 ms). (3) If the OS forbids executable memory, jet run falls back to writing the same O0 code to a file and running it. (4) jet run recompiles hot functions at O1 in the background by DEFAULT (extends D-ADAPTIVE-TIER1=B). (5) Under in-memory jet run, os.executable() returns the script path (#4346; launches directly with a shebang per D-SCRIPT-ENTRY1). Still a ballot: reopening D-PERF-RUNCELL1 (gate time-to-answer against lua, luajit, python3, node)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Measured 2026-10-23 05:15, dev bb9414afd1 install-latest, machine loaded (load ~50), hello.jet (one print): direct 'jet run' 355-357 ms end to end (the jet-env wrapper adds about 240 ms more); 'jet --version' alone 122 ms, so about a third of the run wait is process startup before any work. The --trace of the run shows 0.2 s inside the compiler: sources 0.10 s, register 0.02, sema 0.02, ir.build 0.01, native.foreign 0.01, native.link 0.07; the rest is building and launching the executable. Biggest levers, in order: (1) startup cost of the jet binary itself, (2) link + exec, which in-memory O0 would remove, (3) loading the Prelude/Core sources on every run."
+        },
+        {
+          "at": "2026-10-07",
+          "by": "Pip",
+          "text": "D-PERF-RUNCELL1=B ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: unowned metric implementation (ScalingGate5 paused STREAMS:237; NativeO2/OptW workers consume required optimization gates, not newly assigned quick-run owner). Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 46,
+          "text": "Retired: 44-criterion archive of precut criteria; the living items moved to their owning cards (#6637, #6615, #6518, #3039, #3147, #6281, #3239, #6087) and the rest are obsolete (board audit 2026-11-12, scope F).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "44-criterion archive of precut criteria; the living items moved to their owning cards (#6637, #6615, #6518, #3039, #3147, #6281, #3239, #6087) and the rest are obsolete (board audit 2026-11-12, scope F).",
+          "at": "2026-11-13T02:04:07.119Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [
+        "D-EXEC1",
+        "D-EXEC2",
+        "D-EXEC3",
+        "D-RESOURCE-LIMIT1",
+        "D-PERF-RUNCELL1",
+        "D-PORTABLE2",
+        "D-PORTABLE1",
+        "$JET_STATE_ROOT/scratch/ExecArch1/RESEARCH.md"
+      ],
+      "tags": [
+        "architecture",
+        "owner-direction-2026-10-07",
+        "wayfinder:research"
+      ],
+      "parentId": "c0w9o2sz",
+      "needsAcceptance": false,
+      "created": "2026-10-07T15:05:28.935Z",
+      "updated": "2026-11-13T02:04:17.972Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G10"
+      ],
+      "criteriaLastN": 46,
+      "completedAt": "2026-11-13T02:04:17.972Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T02:09:58.350Z"
+    },
+    {
+      "id": "c0dm29w2",
+      "num": 4907,
+      "title": "Compiler-private text READ: exact checked caller authority for existing private memory operations",
+      "body": "Compiler diagnostics and shared CLI tables need to inspect a String without copying its bytes. Existing __string_byte and __bytes_into_text are restricted to actual vetted Core encoding definitions; Core-private imports bind only for real Core source. Compiler Foundation source has no approved caller relation. Genuine compiler-source provenance and an unsafe block do not grant that relation. CoreReview5 and TextReadFacade1 independently verified CheckInner1938-1953, Source Calls/Core795-804, Rust core_call2445-2510. #4903 is an unratified private native-carrier proposal, not this caller grant; #4896 stays its exact five toolchain families. Hold only new private String invocation. Borrowed-byte-array decoder/table algorithms, frontend and Gate2 continue. Sol owns closure; TextReadFacade1 implements; CoreReview5 supplies authority ruling. Never add a filename whitelist, broad compiler privilege, copied decoder, or zero-allocation label to String.bytes COPY.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Prepare one narrow owner decision after checking whether the ratified public byte_views/View contract offers an existing legal route. Compare genuine checked compiler-private standard-memory caller selection, repairing and reusing an existing approved public view interface, and retaining Core-only access while String invocation stays unimplemented. Name exact definition/source qualification/caller audience/lifetime-alias-escape rules/forged-caller rejection and shared runtime semantics. New audience requires owner ratification; then paired sema/runtime/caller cutover and allocation/lifetime/I9 proof. Independent byte-input source patch is not blocked.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [
+        "c0r8y1nt"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met, retired or moved."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "2026-10-28 Main: re-verified on 2330880e36 (CardVerify2): NOT DONE despite earlier log claims; evidence in $JET_SCRATCH_ROOT/lanes/Main/q/ts/looks-done-verdicts.md, section 4907."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: the open decision in this card is drafted as owner ballot D-CORE-PRIVATE-SEAM1 (draft for Main to file). The card text is background, not the decision."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: Same question as #4896 (how compiler-only Core internals are reached); resolved by that ballot."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 3,
+          "text": "Retired: Both open criteria are superseded by ratified D-CORE-PRIVATE-SEAM1=A (2026-11-01, #4896): borrowed text needs no seam.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Both open criteria are superseded by ratified D-CORE-PRIVATE-SEAM1=A (2026-11-01, #4896): borrowed text needs no seam.",
+          "at": "2026-11-13T02:04:11.198Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [
+        "#4896",
+        "#4903"
+      ],
+      "tags": [
+        "needs-triage",
+        "wayfinder:task"
+      ],
+      "parentId": "c0yfcz0w",
+      "needsAcceptance": false,
+      "created": "2026-10-08T22:22:47.614Z",
+      "updated": "2026-11-13T02:04:19.533Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G10"
+      ],
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-13T02:04:19.533Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T02:09:58.350Z"
+    },
+    {
+      "id": "c09uai16",
+      "num": 5027,
+      "title": "Layout control parity: overlapping fields, packed structs, relative pointers",
+      "body": "## Outcome\n\nDecision D-JAI-LAYOUT1. Jai has `#place` overlapping members, `#no_padding` packed structs and `*~s32` relative pointers. Jet has `#Layout(c)`, `#Layout(c, align(N))` and `#Layout(columnar)`; `packed` is reserved (D-REPRC1). Audit rows: G16, G17, G25, G26.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met, retired or moved."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 1 criteria from archived #2887: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: ratified D-JAI-LAYOUT1 already decides packed structs, overlapping fields and relative pointers; implementation remains."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 6,
+          "text": "Retired: merged into #6520",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "merged into #6520",
+          "at": "2026-11-13T02:04:04.640Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [
+        "Docs/audits/jai-parity-2026-10-16.md",
+        "#5021"
+      ],
+      "tags": [
+        "mining-2026-10-16",
+        "jai-vs-jet",
+        "jai-parity",
+        "layout",
+        "syntax",
+        "needs-owner",
+        "wayfinder:decision"
+      ],
+      "parentId": "c02y3vkg",
+      "needsAcceptance": false,
+      "created": "2026-10-16T10:54:45.128Z",
+      "updated": "2026-11-13T02:04:15.897Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G11"
+      ],
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-13T02:04:15.897Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T02:09:58.350Z"
     }
   ]
 }
