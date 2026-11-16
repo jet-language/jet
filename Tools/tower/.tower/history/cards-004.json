@@ -102926,6 +102926,346 @@
       "completedAt": "2026-11-13T09:33:58.652Z",
       "questions": [],
       "retiredAt": "2026-11-16T09:42:25.418Z"
+    },
+    {
+      "id": "c0qc1icb",
+      "num": 4148,
+      "title": "Post-stage-1 source cleanup of Compiler/ (and Core/Jetpack): guard clauses, no package prefixes, no needless temporaries, comments where code looks wrong",
+      "body": "Owner direction 2026-10-01: once stage 1/2 runs, clean up the source. Umbrella for: #4143 guard-clause lint + fixes applied across Compiler/, Core/, Jetpack/; #4144 drop package-prefixed names (real packages instead of the flattened bootstrap unit) + stutter lint; the needless-temporary lint (#4148) applied; removal of retired-spelling teaching (#4149); comments where code only looks wrong (e.g. JetLexer Terminators.jet split_spelling). Run after the Jet compiler builds itself, using its own lints and jet fix.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e11",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c4 progress: dev ee8bf96a5d (diagtext2c) and 41000f995c (diagtext4d) landed. The teaching rows diagtext1 removed stay removed under a guard, and no parser path recognizes a retired binding spelling (let/var/val mut get the generic E0003). Landed by Lander5 from g5-fold6."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met or removed."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: c4 is the single home for removing every retired-Jet-spelling teaching row (owner order: no teaching errors for old syntax); c11 respelled for D-DECL-COLON1=A."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6341 \"LSP decides whether a function is exported by reading the retired pub text, so the import quick-fix never fires and signature preview treats every function as private\" into this card (source cleanup after the Rust exit); its 1 open item(s) are carried as \"(was #6341)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6330 \"Visibility cutover residue: foreign binders emit retired pub fn, and the http_i9 guard splits on pub fn\" into this card (source cleanup after the Rust exit); its 1 open item(s) are carried as \"(was #6330)\" criteria, and its 3 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6221 \"Retired failure syntax in live sources: JetDevserver (339 lines), JetDebug (45), a JetLSP test and 2 docs still use `x?` propagation / `T ! E`\" into this card (source cleanup after the Rust exit); its 4 open item(s) are carried as \"(was #6221)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6215 \"556 comment lines in 189 files cite deleted Rust code\" into this card (source cleanup after the Rust exit); its 2 open item(s) are carried as \"(was #6215)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #4143, #4144, #4149, #4150, #4253; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "Pip",
+          "text": "Members: #4143 (guard clauses), #4144 (package prefixes + stutter lint), #4149 (needless-temporary lint), #4150 (remove retired-spelling teaching)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 12,
+          "text": "(was #6330) No live source, fixture or test under Compiler, Core, Jetpack, Tools, tests or Examples carries the retired pub or #PubFile spelling except where a test deliberately exercises the retirement diagnostic; the affected cases lose 0 rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "(was #6330 C3) Retired-spelling census (tmp/pubcount.mjs) over Compiler, Core, Jetpack, Tools, tests and Examples: 99 hits on 59213de00f, 91 after. Every remaining hit is a retirement diagnostic or test (Parser E0418, DiagnosticRows, Prelude/Diagnostics, SyntaxDictionaryData, JetParser Tests Entry02, tests/ui/vis_pub_removed, tests/ui/vis_pubfile_removed), DiagnosticRows teaching text embedded in the selfhost_terminators fixtures, or a module alias named PubFile (marker_groups_modules, known-failing under #5811). Cases lose 0 rows.",
+          "at": "2026-10-31T02:45:20.600Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:task"
+      ],
+      "parentId": "c0sp4z2k",
+      "needsAcceptance": false,
+      "created": "2026-10-01T15:43:24.878Z",
+      "updated": "2026-11-13T11:18:31.528Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G6"
+      ],
+      "criteriaLastN": 13,
+      "completedAt": "2026-11-13T02:01:16.396Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T11:22:25.647Z"
+    },
+    {
+      "id": "c0slmlyv",
+      "num": 6064,
+      "title": "Reuse test results for rows that read files or env, by recording their reads at run time",
+      "body": "Split from #6035 (D-TEST-PROFILE1 open question Q7, owner asked to card it 2026-10-28). Go's test cache records the files and environment variables a test reads at run time and reuses the result while they are unchanged. Under #6035, rows with undeclared effects are never reused, so file- and env-reading rows lose to Go on rerun time (Audit/drafts4/BEST-IN-CLASS.md). Design this on top of the #6035 S4 result store: what is recorded, how a read is detected under the effect system, and how the reuse key stays exact. A new user-visible setting or flag needs an owner ballot.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed under the closure rule: its only criterion, c1, was met at dev 616c0dda34 (cases test_results_rerun_when_a_read_file_changes and test_results_rerun_when_a_read_env_var_changes 2/2 PASS). G5DevX-2 found it with no open criterion on 2026-11-13."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Moved from G1 to G15 (testing toolkit) by owner order 2026-11-06: G1 keeps only hand-off and durability."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c2 scope (Main): the perf manifest has no matched pair for it yet; nothing under Tools/perf has a go test or test-cache row. The criterion defines the pair, so this is build work, not an owner call: add a Go peer suite under Tools/perf that mirrors a fixed golden subset (same programs, same expected outputs, one Go test per golden), plus a manifest row comparing the warm no-change rerun wall time of jet's golden runner against go test with its build and test caches warm, on the pinned Go toolchain. Then measure c2."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "D-TEST-READS1 A ratified by the owner 2026-10-30 (foreign code included, no new flag; fresh opts out). C3 added."
+        },
+        {
+          "at": "2026-10-30",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A file- or env-reading test row reruns from the store when its recorded reads are unchanged and re-executes when one changes, proven by a cases row for each.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 616c0dda34 (TestProfiles): cases test_results_rerun_when_a_read_file_changes and test_results_rerun_when_a_read_env_var_changes 2/2 PASS; testing_tiers 12 PASS / 1 KF (#5454); chain s2 from a93d1800d1+patch, fixed point SAME; no KF rows removed",
+          "at": "2026-11-06T01:22:52.506Z"
+        }
+      ],
+      "refs": [
+        "#6035"
+      ],
+      "tags": [
+        "testing",
+        "perf"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T18:55:47.470Z",
+      "updated": "2026-11-13T11:11:12.163Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G5"
+      ],
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-13T11:11:12.163Z",
+      "questions": [
+        {
+          "id": "q2fcasi8",
+          "cardId": "c0slmlyv",
+          "decisionId": "D-TEST-READS1",
+          "by": "owner",
+          "kind": "question",
+          "text": "all downsides not engineered away. Fix.",
+          "status": "answered",
+          "answer": "Accepted. The ballot is being reworked so that every listed downside of the recommended option is engineered away by the design itself (not just mitigated), or else the option changes. Each stated loss gets a design fix, the losses list goes empty or names only true trade-offs you must weigh, and the ballot returns to you after an adversarial pass.",
+          "created": "2026-10-30T09:49:28.192Z",
+          "answeredAt": "2026-10-30",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-16T11:22:25.647Z"
+    },
+    {
+      "id": "c0g93joj",
+      "num": 6592,
+      "title": "First jet cc pack install hashes the 450 MB tree about four times with pure-Jet SHA-256",
+      "body": "Found by Builder5 on dev b44941163a: the first jet cc toolchain pack install takes about 290 s, about 90% of it in the Store hashing the 450 MB unpacked tree about four times with core_crypto_sha256 (pkg_try_output_hash_of, store_record_realized_mode, publish_object, seal). Hash each tree once and reuse the digest across those steps, and bring core_crypto_sha256 throughput to the machine ceiling (SHA-NI where available) per the performance gate.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed under the closure rule (Main, 2026-11-13): every criterion on this card is met."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Speed or size card: moved from G4 to G11. Owner order 2026-11-09: all speed and size work is G11."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 06:00: phase 2 landed as a08ffb93e2 (G1Lead). Core sha256 runs blocks through the runtime __sha256_blocks (SHA-NI where the CPU has it) in a private module. Receipt: release build, on a host with sha_ni, best of 3, 64 x sha256 over 1 MiB takes 0.38 s against 1.43 s on dev (3.8x). A differential of 302 inputs (lengths 0..299, 4109, 1048583) against node crypto shows 0 mismatches on none and release. Golden Crypto/ 39 PASS, Jetc 3 PASS, cases crypto 43 PASS (1 known-failing E2702, 1 SKIP-HOST), argon2id 2 PASS; 12 ratchets --check pass on a0_037. With phase 1 (591744cc94 hash-once, 3058b17fff SHA-NI) that completes the build. c1 still needs the timing: a first `jet cc` pack install under 60 s on the reference machine, measured on a quiet machine with the next seed (it must contain a08ffb93e2; a0_037 does not)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 03:45: c1 progress by G1Lead. The hash-once half landed in 591744cc94. SHA-NI phase 1 landed in 3058b17fff: x64 SSE/SHA template forms (12 SDM encodings plus 3 rejections, tested), the leaf os_sha256_block_i64 behind cpuid with the scalar fallback kept, jet_crypto_sha256_blocks, and the core.crypto.__sha256_blocks row. Phase 2 (the Core sha2_256 and JETC2 stream through sha256_blocks) waits for a seed built from 3058b17fff or later, since the seed resolves Core dunders from its compiled-in rows. Lane rows with phase 2: SHA-256 of 16 MiB 435 ms -> 43-52 ms (about 9.4x); 302/302 differential rows against node sha256/sha224 at O0/O1/O2; crypto cases 43 PASS, 0 FAIL; jetc 5/5."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07: g13 landed as 591744cc94 (a cold fetch-toolchain hashes once; 20.6 s cold on the home NVMe, 1131 s before) and b1f1abe895 (the shared-CAS pass reseals a tree left writable). The Jetpack Engine+Environment aot jet test (seed a0_034): baseline eaa085b237 and fixed tree have the same 13 FAIL rows (empty diff), none from #6592: 2 lease recovery (recover_stale_leases and store_recover_hangar give 0, expected 1); 1 clean-plan quarantine (closure record has no dependency references); native runtime split (the test expects Rust `fn main()`, the generator emits `main: fn()`); 8 recipe sandbox rows (E1238 instead of E1236/E1237/E1275: the sandbox cannot start inside the test systemd scope); shared_hostile_corpus (Assemble does not copy tests/fixtures/build_sandbox/hostile-corpus.tsv). None is in the a0_034 full-profile run. Logs: $JET_SCRATCH_ROOT/lanes/PortsLead/g13/tests-base.log and tests-fix.log."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "PortsLead-2 AFTER numbers, g13 batch (link CAS, parallel fsync pool, hashing on worker tasks, one tree pass with a memo), not yet landed. Cold `jetpack env fetch-toolchain --json` from an empty HOME and state: 20.6 s wall on the home NVMe; 43.4 s on the contended scratch NVMe, and 96.6 s on a rerun at load 10, where the fsync writeback of 442 MB dominates. BEFORE was 1131.1 s. Tree hash unchanged: sha256-700385c9c906 (5931 files, 442377517 B); CAS 4019 entries, linked. Scratch split: verify 2.2 s, untar 7.1 s, seal 1.2 s, parallel hash 16.6 s, publish fsync 24.1 s, hangar 0.6 s. core.crypto SHA-256 runs at 45-50 MB/s at O1/O2, about 10x slower than a scalar native implementation (~500 MB/s) and 40x slower than SHA-NI; that work is on #6681."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "PortsLead-2 measured a cold fetch-toolchain before the fix at 135.6 s on its own s1. The c65 fresh run spent about 45 minutes in the same phase (17:10-17:55) under heavy machine load. The gap is unexplained: the per-file sync alone may not account for the 45 minutes."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Root cause of the 45-minute cold fetch-toolchain (c65 run 4df47ce6da, 17:10-17:55; PortsLead-2): AdmissionTransaction.publish_object → store_fsync_tree fsyncs every file and directory of the pack, about 1,900 journal commits at about 1.4 s each. Fix: write everything, one filesystem flush, then the publish rename. That needs a public Core function, because a Core  seam is reserved outside Core (Spellings.jet:13, Sema/Calls/Core.jet:514); ballot D-FS-SYNC1 (A: files.sync_filesystem, B: parallel fsync_tree, C: no API). Internal commit A (runtime syncfs export plus seam rows, no public surface) lands meanwhile; commit B (public function, store change, conformance case) waits on the ballot and the next seed."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The first `jet cc` pack install hashes each tree once and reuses the digest, and core_crypto_sha256 uses SHA-NI where available; the install takes under 60 s on the reference machine.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "591744cc94: git grep -n '__sha256_blocks' -- Core/Crypto/Crypto.jet Compiler/JetRuntime ; git merge-base --is-ancestor 591744cc94 0970c3af1f && git merge-base --is-ancestor a08ffb93e2 0970c3af1f -> Compiler/JetRuntime/Source/Sha256.jet:254:// core.crypto.__sha256_blocks: the `count` 64-byte blocks of the borrowed\nCore/Crypto/Crypto.jet:1984:                if !core.crypto.__sha256_blocks(fast, data, off, count) -> hashes.sha256_blocks(fast, data, off, count)\n(both ancestors: exit 0)\nTiming receipt (not rerun by Closer; card log 2026-11-08, PortsLead-2): cold `jetpack env fetch-toolchain --js",
+          "at": "2026-11-13T02:01:38.530Z"
+        },
+        {
+          "n": 2,
+          "text": "D-FS-SYNC1 = A is built: core.files.sync_filesystem(path) IOError! -[FS.Write]> (syncfs on Linux, sync where no per-filesystem flush exists, IOError where neither does) with a conformance case, and the store publishes with one sync_filesystem before the publish rename.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "9431b02bfa (runtime syncfs) and 2fc5236be1 (core.files.sync_filesystem; the store's store_fsync_tree flushes once with sync_filesystem before the publish rename, Jetpack/Store/Source/Cache/CacheBindings.jet): release gate of a0_036 at 8a85d45051 (candidate s2, 2026-11-08 01:10, all suites 0 lost, 0 untracked failures). Conformance case tests/conformance/corpus/core/files/sync_filesystem.jet run by Main with a0_036 at default and --release prints fixture, rc=0.",
+          "at": "2026-11-08T06:12:42.715Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T05:33:07.839Z",
+      "updated": "2026-11-13T11:18:46.415Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-13T11:18:46.415Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T11:22:25.648Z"
+    },
+    {
+      "id": "c0ov5fau",
+      "num": 6720,
+      "title": "Examples: finish the cutover to the new set with TitleCase names and ALL CAPS acronyms",
+      "body": "Owner order (2026-11-09): finish the examples transition to the new category set, with proper TitleCase naming and acronyms in all caps (TLSPeerIdentity, HTTPServer, WebWASMCallback, JSONDecode). Applies to every directory and file name an author chooses under Examples/: categories, example directories and program files, with their .out/.err.out goldens. Names a tool requires (package.jet, README.md, lock files) keep their spelling. One greenfield cutover: every consumer (goldens, corpus manifests, harness lists, tests, docs, site) is migrated in the same change, with no aliases.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed under the closure rule (Main, 2026-11-13): every criterion on this card is met."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A census lists every Examples/ path that breaks the rule (TitleCase; acronyms all caps; no snake_case, kebab-case or lowercase-first names apart from tool-required names), plus every old-set leftover not yet moved into the new categories.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "landed on dev 6a06b917cb (Main integration of ExamplesNaming-1; batch post42a census rc=0; guards 128/0 incl tests/guards/example_names.jet; comptime_cli_parity and web_app_graph cases PASS): 166-row old->new census in the commit message",
+          "at": "2026-11-09T17:09:58.292Z"
+        },
+        {
+          "n": 2,
+          "text": "Every listed path is renamed, and every consumer (expected output, golden discovery, corpus manifests, harness lists, tests, docs, site sources) is updated in the same cutover, with no aliases or old paths left; a repository-wide search for each old path finds nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "landed on dev 6a06b917cb (Main integration of ExamplesNaming-1; batch post42a census rc=0; guards 128/0 incl tests/guards/example_names.jet; comptime_cli_parity and web_app_graph cases PASS)",
+          "at": "2026-11-09T17:09:59.260Z"
+        },
+        {
+          "n": 3,
+          "text": "A guard fails on any new Examples/ name that breaks the rule, and it carries a UI-snapshot or guard test.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "landed on dev 6a06b917cb (Main integration of ExamplesNaming-1; batch post42a census rc=0; guards 128/0 incl tests/guards/example_names.jet; comptime_cli_parity and web_app_graph cases PASS): tests/guards/example_names.jet with its own planted-name test",
+          "at": "2026-11-09T17:10:00.309Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T13:45:14.592Z",
+      "updated": "2026-11-13T11:18:48.185Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-13T11:18:48.185Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T11:22:25.648Z"
     }
   ]
 }

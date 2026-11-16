@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108553,
+    "rev": 108568,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26077,6 +26077,11 @@
       "assignee": "Main",
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Criteria c4, c5, c6, c14, c24 and c25 rewritten to D-IFHOLE2=A (ratified 2026-11-15): the hole is spelled `<>`, a plain `subject == {` table compares one value, effectful hole headers are refused (E0950), hole tables refuse pattern/range arms and need else when they give a value, and the missing-hole diagnostic is dropped. Order of work: the A respell and its refusals first, then c3/c4/c20 in the `<>` spelling."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "Handoff (SweepFix-162 stopped, agent cap): partial D-IFHOLE2=A parser groundwork in SUB SweepFix-162-ifhole2-partial (DecisionTables.jet, never checked or run; not for landing as is). Left: the two State.jet fields; <> in parser_parse_pipe_value; header open/close in both if parsers; the statement-form E1013 and E1014; rows E1013-E1016 and updates to E0437, E0946 and E0948, then DiagnosticRows --write; the sema E1016 effect-call refusal; the formatter's hole detection; tests, snapshots, an example and the spec."
@@ -26158,30 +26163,30 @@
         },
         {
           "n": 4,
-          "text": "Header calls repeat per reached candidate; candidate expressions run at their substituted position at most once. Skipped candidates have no effects. Errors propagate rather than becoming nonmatches. Proof: `jet test Compiler --profile golden --filter if_hole/header_eval_per_candidate` on O0, O1 and O2.",
+          "text": "Under D-IFHOLE2=A a `<>` header runs once for each arm tried, in arm order, and never for an arm after the first match; candidate expressions run at their substituted position at most once; errors propagate rather than becoming nonmatches; a header with an effect (an effectful call, a `&` argument or a `&self` receiver that changes state) is refused (E0442 HoleHeaderEffect) with a fix that names the value first. Proof: `jet test Compiler --profile golden --filter if_hole/header_eval_per_candidate` on O0, O1 and O2, and `jet test Compiler --profile ui --filter E0442`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:45:54.849Z"
+          "at": "2026-11-16T12:13:47.714Z"
         },
         {
           "n": 5,
-          "text": "Equality pattern slots preserve range matching, payload wildcards, and safe bindings. OR cannot leak missing bindings. Failed guards do not consume payloads needed later. A changing subject cannot obtain unsound exhaustiveness. Proof: `jet test Compiler --profile cases --filter if_hole/pattern_slots`.",
+          "text": "Under D-IFHOLE2=A a hole table refuses pattern and range arms (E0948), and a hole table that gives a value needs `else` (registered code, UI snapshot); a plain `subject == {` table keeps range matching, payload wildcards and safe bindings, and a plain table over an enum that lists every case needs no `else`. Proof: `jet test Compiler --profile cases --filter if_hole/pattern_slots`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:45:55.766Z"
+          "at": "2026-11-16T11:33:48.887Z"
         },
         {
           "n": 6,
-          "text": "All old distributed headers and generated source producers are migrated. Explicit bindings preserve existing one-time reads where required. No old-header compatibility parser or alternative runtime mechanism remains. Proof: `jet test Compiler --profile cases --filter if_hole/old_header_refused` and the full golden profile passes on O0, O1 and O2.",
+          "text": "One cutover respells every hole table in Examples, tests, Core, Compiler and Tools from `_` to `<>` (D-IFHOLE2=A); `_` in an if header is no longer a hole, and no compatibility parser, alias or jet fix rule remains. Proof: `jet test Compiler --profile cases --filter if_hole/old_header_refused` and the full golden profile passes on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:45:56.701Z"
+          "at": "2026-11-16T11:33:51.239Z"
         },
         {
           "n": 13,
@@ -26194,12 +26199,12 @@
         },
         {
           "n": 14,
-          "text": "Every dispatch table requires exactly one statically typed hole. Missing, repeated, ambiguous, wrong-type and non-Bool headers get registered diagnostics (DiagnosticRows.jet) with UI snapshots. Proof: `jet test Compiler --profile ui --filter dispatch_hole_`.",
+          "text": "Every hole table has exactly one statically typed `<>` hole. Repeated, ambiguous, wrong-type and non-Bool headers get registered diagnostics (DiagnosticRows.jet) with UI snapshots. Proof: `jet test Compiler --profile ui --filter dispatch_hole_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T02:46:39.314Z"
+          "at": "2026-11-16T11:33:53.608Z"
         },
         {
           "n": 19,
@@ -26248,21 +26253,21 @@
         },
         {
           "n": 24,
-          "text": "The hole table's read count matches the ruling D-IFHOLE2 ratifies. Today the landed parser (4010511a89) maps `subject OP _` onto the comparison table, so `fetch() == _` reads its subject once, while D-IFHOLE1 says the header runs again for each arm tried. Proof: a case whose header call prints once per read, run on O0/O1/O2.",
+          "text": "Read counts follow D-IFHOLE2=A: a plain `subject == {` table reads its subject once, and a `<>` header runs once per arm tried. Proof: a case on O0/O1/O2 whose plain-table subject call prints once, and whose hole-table golden shows per-arm evaluation order.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T00:09:12.242Z"
+          "at": "2026-11-16T11:33:56.108Z"
         },
         {
           "n": 25,
-          "text": "If D-IFHOLE2 ratifies A: E0948's fix text no longer says 'write `subject == _`', and refusing `subject OP _` has its own registered code with what/why/fix and a UI snapshot. Proof: `jet test Compiler --profile ui --filter E0948` after D-IFHOLE2 (open ballot) ratifies A.",
+          "text": "E0948 fix text no longer says \"write `subject == _`\"; a header that only compares with `<>` is refused with its own registered code (what/why/fix, UI snapshot) and a fix that removes the `<>` (D-IFHOLE2=A). Proof: `jet test Compiler --profile ui --filter E0948` and the new code UI snapshot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:45:57.672Z"
+          "at": "2026-11-16T11:33:58.921Z"
         },
         {
           "n": 26,
@@ -26321,9 +26326,9 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-11T12:59:34.979Z",
-      "updated": "2026-11-15T11:47:40.478Z",
+      "updated": "2026-11-16T12:13:47.715Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-15T11:47:40.478Z",
+      "claimedAt": "2026-11-16T11:33:28.325Z",
       "goals": [
         "G6"
       ],
@@ -27300,6 +27305,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "Decision (Main, n15 step 3): TaskFailure { Cancelled, DeadlineBlown, Panicked(String) } is declared once in Core, and core.service's TaskOutcome becomes { Finished, Failed(TaskFailure) }. The two enums carried one meaning (I8; closed_lists refuses the duplicate and the ledger takes no new rows). Every caller migrates in one cutover, with no alias. Keeping TaskFailure compiler-owned was rejected: it is the compiler-owned list n15 removes. Owner: GoalsA-1-4."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "n15 step 4 scope (Main, 2026-11-16): TaskFailure (jet_builtins: Cancelled DeadlineBlown Panicked) joins PreparedValue as compiler-owned until the step-4 Core value-kind vocabulary lands. core.service TaskOutcome {Finished Panicked Cancelled DeadlineBlown} is TaskFailure plus Finished, so neither a mirror nor a subset ledger fits. Step 4 makes both checked views of one vocabulary constant, with no per-file #run check and no new duplicate-baseline row."
         },
         {
@@ -27545,7 +27555,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T10:38:06.077Z",
+      "updated": "2026-11-16T11:00:16.095Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -43709,96 +43719,6 @@
       ],
       "criteriaLastN": 5,
       "completedAt": "2026-11-15T01:18:46.472Z"
-    },
-    {
-      "id": "c0qc1icb",
-      "num": 4148,
-      "title": "Post-stage-1 source cleanup of Compiler/ (and Core/Jetpack): guard clauses, no package prefixes, no needless temporaries, comments where code looks wrong",
-      "body": "Owner direction 2026-10-01: once stage 1/2 runs, clean up the source. Umbrella for: #4143 guard-clause lint + fixes applied across Compiler/, Core/, Jetpack/; #4144 drop package-prefixed names (real packages instead of the flattened bootstrap unit) + stutter lint; the needless-temporary lint (#4148) applied; removal of retired-spelling teaching (#4149); comments where code only looks wrong (e.g. JetLexer Terminators.jet split_spelling). Run after the Jet compiler builds itself, using its own lints and jet fix.",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": "e11",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c4 progress: dev ee8bf96a5d (diagtext2c) and 41000f995c (diagtext4d) landed. The teaching rows diagtext1 removed stay removed under a guard, and no parser path recognizes a retired binding spelling (let/var/val mut get the generic E0003). Landed by Lander5 from g5-fold6."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "Closed by board audit: every criterion met or removed."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner deconfliction 2026-11-06: c4 is the single home for removing every retired-Jet-spelling teaching row (owner order: no teaching errors for old syntax); c11 respelled for D-DECL-COLON1=A."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Merged #6341 \"LSP decides whether a function is exported by reading the retired pub text, so the import quick-fix never fires and signature preview treats every function as private\" into this card (source cleanup after the Rust exit); its 1 open item(s) are carried as \"(was #6341)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Merged #6330 \"Visibility cutover residue: foreign binders emit retired pub fn, and the http_i9 guard splits on pub fn\" into this card (source cleanup after the Rust exit); its 1 open item(s) are carried as \"(was #6330)\" criteria, and its 3 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Merged #6221 \"Retired failure syntax in live sources: JetDevserver (339 lines), JetDebug (45), a JetLSP test and 2 docs still use `x?` propagation / `T ! E`\" into this card (source cleanup after the Rust exit); its 4 open item(s) are carried as \"(was #6221)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Merged #6215 \"556 comment lines in 189 files cite deleted Rust code\" into this card (source cleanup after the Rust exit); its 2 open item(s) are carried as \"(was #6215)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
-        },
-        {
-          "at": "2026-10-04",
-          "by": "Pip",
-          "text": "Burn-down consolidation 2026-10-04: absorbed #4143, #4144, #4149, #4150, #4253; their criteria are carried here as [#n] rows."
-        },
-        {
-          "at": "2026-10-01",
-          "by": "Pip",
-          "text": "Members: #4143 (guard clauses), #4144 (package prefixes + stutter lint), #4149 (needless-temporary lint), #4150 (remove retired-spelling teaching)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 12,
-          "text": "(was #6330) No live source, fixture or test under Compiler, Core, Jetpack, Tools, tests or Examples carries the retired pub or #PubFile spelling except where a test deliberately exercises the retirement diagnostic; the affected cases lose 0 rows.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "(was #6330 C3) Retired-spelling census (tmp/pubcount.mjs) over Compiler, Core, Jetpack, Tools, tests and Examples: 99 hits on 59213de00f, 91 after. Every remaining hit is a retirement diagnostic or test (Parser E0418, DiagnosticRows, Prelude/Diagnostics, SyntaxDictionaryData, JetParser Tests Entry02, tests/ui/vis_pub_removed, tests/ui/vis_pubfile_removed), DiagnosticRows teaching text embedded in the selfhost_terminators fixtures, or a module alias named PubFile (marker_groups_modules, known-failing under #5811). Cases lose 0 rows.",
-          "at": "2026-10-31T02:45:20.600Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "wayfinder:task"
-      ],
-      "parentId": "c0sp4z2k",
-      "needsAcceptance": false,
-      "created": "2026-10-01T15:43:24.878Z",
-      "updated": "2026-11-13T11:18:31.528Z",
-      "updatedBy": "Main",
-      "goals": [
-        "G6"
-      ],
-      "criteriaLastN": 13,
-      "completedAt": "2026-11-13T02:01:16.396Z"
     },
     {
       "id": "c0x2k4me",
@@ -67798,78 +67718,6 @@
       "criteriaLastN": 13
     },
     {
-      "id": "c0slmlyv",
-      "num": 6064,
-      "title": "Reuse test results for rows that read files or env, by recording their reads at run time",
-      "body": "Split from #6035 (D-TEST-PROFILE1 open question Q7, owner asked to card it 2026-10-28). Go's test cache records the files and environment variables a test reads at run time and reuses the result while they are unchanged. Under #6035, rows with undeclared effects are never reused, so file- and env-reading rows lose to Go on rerun time (Audit/drafts4/BEST-IN-CLASS.md). Design this on top of the #6035 S4 result store: what is recorded, how a read is detected under the effect system, and how the reuse key stays exact. A new user-visible setting or flag needs an owner ballot.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "Closed under the closure rule: its only criterion, c1, was met at dev 616c0dda34 (cases test_results_rerun_when_a_read_file_changes and test_results_rerun_when_a_read_env_var_changes 2/2 PASS). G5DevX-2 found it with no open criterion on 2026-11-13."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Moved from G1 to G15 (testing toolkit) by owner order 2026-11-06: G1 keeps only hand-off and durability."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "c2 scope (Main): the perf manifest has no matched pair for it yet; nothing under Tools/perf has a go test or test-cache row. The criterion defines the pair, so this is build work, not an owner call: add a Go peer suite under Tools/perf that mirrors a fixed golden subset (same programs, same expected outputs, one Go test per golden), plus a manifest row comparing the warm no-change rerun wall time of jet's golden runner against go test with its build and test caches warm, on the pinned Go toolchain. Then measure c2."
-        },
-        {
-          "at": "2026-10-30",
-          "by": "Main",
-          "text": "D-TEST-READS1 A ratified by the owner 2026-10-30 (foreign code included, no new flag; fresh opts out). C3 added."
-        },
-        {
-          "at": "2026-10-30",
-          "text": "All decisions ratified; advanced out of deciding."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A file- or env-reading test row reruns from the store when its recorded reads are unchanged and re-executes when one changes, proven by a cases row for each.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 616c0dda34 (TestProfiles): cases test_results_rerun_when_a_read_file_changes and test_results_rerun_when_a_read_env_var_changes 2/2 PASS; testing_tiers 12 PASS / 1 KF (#5454); chain s2 from a93d1800d1+patch, fixed point SAME; no KF rows removed",
-          "at": "2026-11-06T01:22:52.506Z"
-        }
-      ],
-      "refs": [
-        "#6035"
-      ],
-      "tags": [
-        "testing",
-        "perf"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-28T18:55:47.470Z",
-      "updated": "2026-11-13T11:11:12.163Z",
-      "updatedBy": "Main",
-      "goals": [
-        "G5"
-      ],
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-13T11:11:12.163Z"
-    },
-    {
       "id": "c0r02x8n",
       "num": 6066,
       "title": "Memory checks accept every safe program: no over-strict rejections",
@@ -83015,6 +82863,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c7 hand-in submitted as SUB Main-goose-lobster-mining-handin (p215): Docs/research/mine-for-jet-2026-10-23-goose-lobster.md with all 349 claims, the open recall gap (65 misses of audit 3 not re-mined), the lessons with claim ids, and prior-art rows for aardappel/goose @94cc64da and aardappel/lobster @ae4e3a42. Owner discussion 2026-11-16 on data stacks as the primary allocator: recommendation is sema-decided placement (registers, frame, nested-lifetime bump region, then general heap) as one mechanism, pending a ballot and an adversarial review."
+        },
+        {
           "at": "2026-11-12",
           "by": "Main",
           "text": "Moved G11 to G13 by Main 2026-11-12 02:25: every open criterion is a ceiling-stage criterion, and the owner ruled the asm ceiling is G13 hill climbing, which fails no G11 cell (AGENTS.md Performance gate on dev)."
@@ -83099,6 +82952,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T05:43:30.246Z"
+        },
+        {
+          "n": 7,
+          "text": "The Goose and Lobster mining run of 2026-10-23 ($JET_STATE_ROOT/scratch/mine/goose-2026-10-23: 349 claims, 242 Goose and 107 Lobster; recall audit 3 at about 77%, with 65 misses not re-mined) is committed as a Docs/research note with one prior-art row per source, as the mine-for-jet hand-in rule requires. Each claim that names a mechanism Jet could adopt (data stacks with bump reservation, bounds-check elimination, packed and narrow layouts, whole-program inlining) names its card or is marked as not fitting, with the reason. Proof: `git ls-files \"Docs/research/*goose*\"` names the note, and every claim id in it resolves to a card or a not-fitting reason.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T12:12:11.506Z"
         }
       ],
       "refs": [],
@@ -83111,9 +82973,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:46:47.099Z",
-      "updated": "2026-11-15T05:43:30.246Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 6
+      "updated": "2026-11-16T12:22:04.707Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 7
     },
     {
       "id": "c0l5a4vu",
@@ -87231,98 +87093,6 @@
       "updated": "2026-11-09T19:23:08.310Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
-    },
-    {
-      "id": "c0g93joj",
-      "num": 6592,
-      "title": "First jet cc pack install hashes the 450 MB tree about four times with pure-Jet SHA-256",
-      "body": "Found by Builder5 on dev b44941163a: the first jet cc toolchain pack install takes about 290 s, about 90% of it in the Store hashing the 450 MB unpacked tree about four times with core_crypto_sha256 (pkg_try_output_hash_of, store_record_realized_mode, publish_object, seal). Hash each tree once and reuse the digest across those steps, and bring core_crypto_sha256 throughput to the machine ceiling (SHA-NI where available) per the performance gate.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "Closed under the closure rule (Main, 2026-11-13): every criterion on this card is met."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Speed or size card: moved from G4 to G11. Owner order 2026-11-09: all speed and size work is G11."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08 06:00: phase 2 landed as a08ffb93e2 (G1Lead). Core sha256 runs blocks through the runtime __sha256_blocks (SHA-NI where the CPU has it) in a private module. Receipt: release build, on a host with sha_ni, best of 3, 64 x sha256 over 1 MiB takes 0.38 s against 1.43 s on dev (3.8x). A differential of 302 inputs (lengths 0..299, 4109, 1048583) against node crypto shows 0 mismatches on none and release. Golden Crypto/ 39 PASS, Jetc 3 PASS, cases crypto 43 PASS (1 known-failing E2702, 1 SKIP-HOST), argon2id 2 PASS; 12 ratchets --check pass on a0_037. With phase 1 (591744cc94 hash-once, 3058b17fff SHA-NI) that completes the build. c1 still needs the timing: a first `jet cc` pack install under 60 s on the reference machine, measured on a quiet machine with the next seed (it must contain a08ffb93e2; a0_037 does not)."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08 03:45: c1 progress by G1Lead. The hash-once half landed in 591744cc94. SHA-NI phase 1 landed in 3058b17fff: x64 SSE/SHA template forms (12 SDM encodings plus 3 rejections, tested), the leaf os_sha256_block_i64 behind cpuid with the scalar fallback kept, jet_crypto_sha256_blocks, and the core.crypto.__sha256_blocks row. Phase 2 (the Core sha2_256 and JETC2 stream through sha256_blocks) waits for a seed built from 3058b17fff or later, since the seed resolves Core dunders from its compiled-in rows. Lane rows with phase 2: SHA-256 of 16 MiB 435 ms -> 43-52 ms (about 9.4x); 302/302 differential rows against node sha256/sha224 at O0/O1/O2; crypto cases 43 PASS, 0 FAIL; jetc 5/5."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-07: g13 landed as 591744cc94 (a cold fetch-toolchain hashes once; 20.6 s cold on the home NVMe, 1131 s before) and b1f1abe895 (the shared-CAS pass reseals a tree left writable). The Jetpack Engine+Environment aot jet test (seed a0_034): baseline eaa085b237 and fixed tree have the same 13 FAIL rows (empty diff), none from #6592: 2 lease recovery (recover_stale_leases and store_recover_hangar give 0, expected 1); 1 clean-plan quarantine (closure record has no dependency references); native runtime split (the test expects Rust `fn main()`, the generator emits `main: fn()`); 8 recipe sandbox rows (E1238 instead of E1236/E1237/E1275: the sandbox cannot start inside the test systemd scope); shared_hostile_corpus (Assemble does not copy tests/fixtures/build_sandbox/hostile-corpus.tsv). None is in the a0_034 full-profile run. Logs: $JET_SCRATCH_ROOT/lanes/PortsLead/g13/tests-base.log and tests-fix.log."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "PortsLead-2 AFTER numbers, g13 batch (link CAS, parallel fsync pool, hashing on worker tasks, one tree pass with a memo), not yet landed. Cold `jetpack env fetch-toolchain --json` from an empty HOME and state: 20.6 s wall on the home NVMe; 43.4 s on the contended scratch NVMe, and 96.6 s on a rerun at load 10, where the fsync writeback of 442 MB dominates. BEFORE was 1131.1 s. Tree hash unchanged: sha256-700385c9c906 (5931 files, 442377517 B); CAS 4019 entries, linked. Scratch split: verify 2.2 s, untar 7.1 s, seal 1.2 s, parallel hash 16.6 s, publish fsync 24.1 s, hangar 0.6 s. core.crypto SHA-256 runs at 45-50 MB/s at O1/O2, about 10x slower than a scalar native implementation (~500 MB/s) and 40x slower than SHA-NI; that work is on #6681."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "PortsLead-2 measured a cold fetch-toolchain before the fix at 135.6 s on its own s1. The c65 fresh run spent about 45 minutes in the same phase (17:10-17:55) under heavy machine load. The gap is unexplained: the per-file sync alone may not account for the 45 minutes."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Root cause of the 45-minute cold fetch-toolchain (c65 run 4df47ce6da, 17:10-17:55; PortsLead-2): AdmissionTransaction.publish_object → store_fsync_tree fsyncs every file and directory of the pack, about 1,900 journal commits at about 1.4 s each. Fix: write everything, one filesystem flush, then the publish rename. That needs a public Core function, because a Core  seam is reserved outside Core (Spellings.jet:13, Sema/Calls/Core.jet:514); ballot D-FS-SYNC1 (A: files.sync_filesystem, B: parallel fsync_tree, C: no API). Internal commit A (runtime syncfs export plus seam rows, no public surface) lands meanwhile; commit B (public function, store change, conformance case) waits on the ballot and the next seed."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The first `jet cc` pack install hashes each tree once and reuses the digest, and core_crypto_sha256 uses SHA-NI where available; the install takes under 60 s on the reference machine.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "591744cc94: git grep -n '__sha256_blocks' -- Core/Crypto/Crypto.jet Compiler/JetRuntime ; git merge-base --is-ancestor 591744cc94 0970c3af1f && git merge-base --is-ancestor a08ffb93e2 0970c3af1f -> Compiler/JetRuntime/Source/Sha256.jet:254:// core.crypto.__sha256_blocks: the `count` 64-byte blocks of the borrowed\nCore/Crypto/Crypto.jet:1984:                if !core.crypto.__sha256_blocks(fast, data, off, count) -> hashes.sha256_blocks(fast, data, off, count)\n(both ancestors: exit 0)\nTiming receipt (not rerun by Closer; card log 2026-11-08, PortsLead-2): cold `jetpack env fetch-toolchain --js",
-          "at": "2026-11-13T02:01:38.530Z"
-        },
-        {
-          "n": 2,
-          "text": "D-FS-SYNC1 = A is built: core.files.sync_filesystem(path) IOError! -[FS.Write]> (syncfs on Linux, sync where no per-filesystem flush exists, IOError where neither does) with a conformance case, and the store publishes with one sync_filesystem before the publish rename.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "9431b02bfa (runtime syncfs) and 2fc5236be1 (core.files.sync_filesystem; the store's store_fsync_tree flushes once with sync_filesystem before the publish rename, Jetpack/Store/Source/Cache/CacheBindings.jet): release gate of a0_036 at 8a85d45051 (candidate s2, 2026-11-08 01:10, all suites 0 lost, 0 untracked failures). Conformance case tests/conformance/corpus/core/files/sync_filesystem.jet run by Main with a0_036 at default and --release prints fixture, rc=0.",
-          "at": "2026-11-08T06:12:42.715Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G11"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T05:33:07.839Z",
-      "updated": "2026-11-13T11:18:46.415Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-13T11:18:46.415Z"
     },
     {
       "id": "c0tpf98i",
@@ -95217,70 +94987,6 @@
       "updated": "2026-11-15T11:38:43.498Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 3
-    },
-    {
-      "id": "c0ov5fau",
-      "num": 6720,
-      "title": "Examples: finish the cutover to the new set with TitleCase names and ALL CAPS acronyms",
-      "body": "Owner order (2026-11-09): finish the examples transition to the new category set, with proper TitleCase naming and acronyms in all caps (TLSPeerIdentity, HTTPServer, WebWASMCallback, JSONDecode). Applies to every directory and file name an author chooses under Examples/: categories, example directories and program files, with their .out/.err.out goldens. Names a tool requires (package.jet, README.md, lock files) keep their spelling. One greenfield cutover: every consumer (goldens, corpus manifests, harness lists, tests, docs, site) is migrated in the same change, with no aliases.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "Closed under the closure rule (Main, 2026-11-13): every criterion on this card is met."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A census lists every Examples/ path that breaks the rule (TitleCase; acronyms all caps; no snake_case, kebab-case or lowercase-first names apart from tool-required names), plus every old-set leftover not yet moved into the new categories.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "landed on dev 6a06b917cb (Main integration of ExamplesNaming-1; batch post42a census rc=0; guards 128/0 incl tests/guards/example_names.jet; comptime_cli_parity and web_app_graph cases PASS): 166-row old->new census in the commit message",
-          "at": "2026-11-09T17:09:58.292Z"
-        },
-        {
-          "n": 2,
-          "text": "Every listed path is renamed, and every consumer (expected output, golden discovery, corpus manifests, harness lists, tests, docs, site sources) is updated in the same cutover, with no aliases or old paths left; a repository-wide search for each old path finds nothing.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "landed on dev 6a06b917cb (Main integration of ExamplesNaming-1; batch post42a census rc=0; guards 128/0 incl tests/guards/example_names.jet; comptime_cli_parity and web_app_graph cases PASS)",
-          "at": "2026-11-09T17:09:59.260Z"
-        },
-        {
-          "n": 3,
-          "text": "A guard fails on any new Examples/ name that breaks the rule, and it carries a UI-snapshot or guard test.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "landed on dev 6a06b917cb (Main integration of ExamplesNaming-1; batch post42a census rc=0; guards 128/0 incl tests/guards/example_names.jet; comptime_cli_parity and web_app_graph cases PASS): tests/guards/example_names.jet with its own planted-name test",
-          "at": "2026-11-09T17:10:00.309Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T13:45:14.592Z",
-      "updated": "2026-11-13T11:18:48.185Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-13T11:18:48.185Z"
     },
     {
       "id": "c00chl86",
@@ -104545,7 +104251,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c2 stays open: the EffectDeclarations golden passes on p214 (PASS 3), but `effect` is still a live declaration keyword (Compiler/JetLexer/Data/Lexer/Keywords.jet KW_EFFECT_DECL retired: false; registered in EffectsSurface.jet, Highlights.jet, PackageFiles.jet and the syntax dictionary). The criterion requires the word gone and the 46 Prelude effects converted."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -104577,11 +104289,11 @@
         {
           "n": 4,
           "text": "A derive with no trait is a field-less marker struct with `impl Marker { sites: [.Type] }` and an `expand(self, target: Target)` template that writes `impl $target { ... }` (D-DERIVE-PROVIDER1=A); writing #DebugText on a type is unchanged; every `derive T.X` provider in Examples, tests and Tools/perf is converted by a one-time script, with no jet fix rule. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Derives/UserDerive` on O0, O1 and O2",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:44.799Z"
+          "evidence": "Main ran on p214 (tree aa8715dacd): `jet test Compiler --profile golden --filter Metaprogramming/Derives/UserDerive` PASS 3 (O0, O1, O2), FAIL 0. Examples/Metaprogramming/Derives/UserDerive.jet declares the derive as a field-less struct with `impl Marker { sites: [.Type] expand: fn(self, target: Target) }`. `git grep -E \"derive [A-Z][A-Za-z]*\\.\"` over Examples, tests and Tools/perf finds only comments and the retired/ fixtures of ratified_p12 cases that prove the old form fails to parse.",
+          "at": "2026-11-16T11:22:25.476Z"
         },
         {
           "n": 5,
@@ -104613,11 +104325,11 @@
         {
           "n": 8,
           "text": "Every converted Prelude marker accepts both placements, above the declaration and as a `#X :: value` line inside its body (D-MARKER-INBODY1=A); no marker opts in or out, and the cutovers move no existing marker between the two places. Proof: `jet test Compiler --profile cases --filter marker_inbody`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:44.799Z"
+          "evidence": "Main ran on p214 (tree aa8715dacd): `jet test Compiler --profile cases --filter marker_inbody` PASS 6, FAIL 0.",
+          "at": "2026-11-16T11:22:26.911Z"
         },
         {
           "n": 9,
@@ -104659,7 +104371,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:44.799Z",
-      "updated": "2026-11-16T10:40:15.912Z",
+      "updated": "2026-11-16T11:22:27.849Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -106754,6 +106466,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:14:25.617Z"
+        },
+        {
+          "n": 14,
+          "text": "Closing a live connection ends that account's presence on the screens it held: the runtime hub hands a leave signal back to Core (ws_hub_leave), so app.presence never counts a closed session. Proof: `jet test Compiler --profile cases --filter web_app/presence_ends_when_the_connection_closes`, on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T11:56:01.060Z"
         }
       ],
       "refs": [],
@@ -106768,9 +106489,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-16T01:14:25.617Z",
+      "updated": "2026-11-16T11:56:01.060Z",
       "updatedBy": "Main",
-      "criteriaLastN": 13
+      "criteriaLastN": 14
     },
     {
       "id": "c0ems7zb",
@@ -174954,171 +174675,6 @@
       "ratifiedAt": "2026-10-30"
     },
     {
-      "id": "D-TEST-READS1",
-      "cardId": "c0slmlyv",
-      "group": "project",
-      "title": "A test that reads files or env vars, through Jet or through foreign code, is reused while what it read is unchanged",
-      "situation": "jet test will keep each passing test row in a result store (#6035) and skip it on rerun while nothing it depends on changed. A test that reads a file or an env var always reruns, because the store cannot see those inputs. Go records the reads its own library makes, but not reads made by C code. The vote decides if Jet records reads, including foreign code's. We recommend yes, with no new flag.",
-      "gist": "May a test that reads files or env vars, even through C code, be reused when what it read is unchanged?",
-      "lesson": "A result is safe to reuse only if every input is unchanged. Jet's effect rows already say which tests can touch files or env vars. Test builds can note every read, whether Jet code or a C library makes it. The reused row then carries the exact list of what it read.",
-      "explainer": "",
-      "story": "Ana's package has 300 tests that read fixtures from testdata/. Forty of them open a SQLite fixture through core.db, which is C code underneath. Every `jet test` reruns all 300, though she changed one file. With reads recorded, only the 4 tests that read that file rerun. The rest print `pass (cached)`.",
-      "inWild": "// Go: the test cache records the files and env vars a test reads.\n$ go test ./...\nok  example.com/greet  (cached)",
-      "detail": "Provenance. Card c0slmlyv (#6064), split from #6035 as open question Q7 (owner asked to card it, 2026-10-28). Audit/drafts4/BEST-IN-CLASS.md row Result caching marks file and env rows LOSES to Go. The owner rejected v1 because its loss stood: rows that call foreign code never reused. v2 records those reads too.\n\nHow foreign reads are seen. An extern whose declared row has no FS or Env reads nothing, so it reuses like pure code. That covers most foreign code, such as math, compression and hashing. For one that may read, the test build routes the C library's file calls through the recorder, as sanitizers intercept calls. So SQLite opening testdata/app.db is recorded like `files.read`.\n\nWhy it is sound. On Linux, a syscall filter checks where each file syscall comes from. A file syscall that bypasses the recorder marks the row unseen, and it reruns with the reason shown. On macOS and Windows the recorder sits in the lowest system library, libSystem or ntdll. Neither platform supports raw syscalls, which is why Go moved to libSystem. C code can read `environ` without a call, so an env read by foreign code keys on the whole environment.\n\nWhat still reruns, and why. Rows with Net, Clock, Random or Process rerun. Their inputs are a server, the time, a seed or a child, none of which the store can hash. That is the meaning of those effects, not a gap in recording. A `.case` row starts processes, so it reruns, as in Go.\n\nCost. The recorder exists only in test builds; normal and release builds are unchanged. Jet's own reads are recorded at the Core route layer. Foreign reads cost one extra call per open or stat in tests. Hashing reads each recorded file once per run, the same work as Go's test cache.\n\nHow it reads with other ballots. `fresh` is an existing jet test flag that PLAN-6035 makes a row: `--fresh`, `fresh: true`, `.fresh(true)`. Under D-TEST-PROFILE1 A, `fresh: true` sits in a package.jet profile; under B it is a `TestProfile` field in test.jet; under C it is the flag. Under D-TEST-MUTFUZZ1, mutant and generated rows never reuse, since each run is new work.\n\nProbes on the dev jet are in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/rd2. `jet check run.jet` is ok, and `jet test` passes both tests, the second through core.db's SQLite. probe/rd2mk builds the fixture database. `jet test --fresh` prints the fresh-run note today. The `(cached)` lines and `--explain-reuse` are proposed; no store exists today (spec.md:3528).\n\nAdversarial pass. Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotDesign (fresh pass). It attacked C code that reads `environ`, makes raw syscalls or maps a file. v2 keys on the whole environment, reruns rows Linux flags, and never stores a file changed mid-run.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Yes, always, foreign code included",
-          "detail": "A row whose effect row holds only FS and Env, beyond pure work, is eligible, whether the reads come from Jet or foreign code. While it runs, each read is recorded with a hash of what was returned, including a missing file. The next run reuses the stored pass when every recorded read still matches.\n\nRows with Net, Clock, Random or Process always rerun. `fresh` (flag, profile field, method) bypasses the store as today.",
-          "technical": "Adds a read log to the #6035 S4 store entry: (kind, path or name, content hash or absent). Jet reads are recorded in Core Files and Sys at the runtime route layer, under jet test only. Directory listings record a hash of the sorted names. A file that changes during the run is not stored. No new settings row.\n\nForeign reads: test builds link interceptors for the C library's open, openat, fopen, stat and opendir, as ASan does, at libSystem on macOS and ntdll on Windows. On Linux a seccomp filter compares each file syscall's instruction pointer to the recorder's own call sites; any other caller marks the row unseen. Env read by foreign code keys on the whole environment.",
-          "code": "// The beginner path, the same under every option\n// run.jet\nuse core.files as files\nuse core.db as db\n\nfn greet(name: String) -> String { \"Hello, {name}!\" }\n\n#Test(\"greets from the fixture\") {\n    name :: files.read(\"testdata/name.txt\") ?? panic(\"fixture\")\n    assert(greet(name.trim()) == \"Hello, Ada!\")\n}\n\n// core.db reaches SQLite through foreign code (#Import module c.sqlite3)\n#Test(\"counts the fixture users\") {\n    conn :: db.open(\"testdata/app.db\")\n    policy :: db.policy(\"users\", \"true\") ?? panic(\"policy\")\n    users :: conn.with_policy(policy, \"test\").query(SQL{\"SELECT name FROM users\"}) ?? panic(\"query\")\n    assert(users.len() == 3)\n}\n\n// $ jet test\n// greets from the fixture: pass\n// counts the fixture users: pass\n\n// The expert path: a rerun reuses both while their reads are unchanged (new)\n// $ jet test\n// greets from the fixture: pass (cached)\n// counts the fixture users: pass (cached)\n\n// SQLite read app.db through the C library; the test build recorded it\n// $ jet test --explain-reuse \"counts the fixture users\"\n// reads: file testdata/app.db  file testdata/app.db-journal (absent)\n\n// Change a fixture, and only its readers rerun\n// $ echo \"Grace\" > testdata/name.txt\n// $ jet test\n// greets from the fixture: FAIL\n// counts the fixture users: pass (cached)\n\n// Bypass the store for one run, or for a profile\n// $ jet test --fresh\ntest: { ci: .{ fresh: true } }      // package.jet (D-TEST-PROFILE1 A)"
-        },
-        {
-          "key": "B",
-          "name": "Opt in per profile",
-          "detail": "The recorder and eligibility rules match A, foreign code included, but they switch on only under a profile, or a run, with `reuse_reads: true`. Stock is false, so a bare `jet test` reruns every file and env test.",
-          "technical": "As A, plus one Bool row `reuse_reads` (`--reuse-reads`, `reuse_reads: true`, `.reuse_reads(true)`) in the PLAN-6035 settings table.",
-          "code": "// The beginner path, the same under every option\n// run.jet\nuse core.files as files\nuse core.db as db\n\nfn greet(name: String) -> String { \"Hello, {name}!\" }\n\n#Test(\"greets from the fixture\") {\n    name :: files.read(\"testdata/name.txt\") ?? panic(\"fixture\")\n    assert(greet(name.trim()) == \"Hello, Ada!\")\n}\n\n// core.db reaches SQLite through foreign code (#Import module c.sqlite3)\n#Test(\"counts the fixture users\") {\n    conn :: db.open(\"testdata/app.db\")\n    policy :: db.policy(\"users\", \"true\") ?? panic(\"policy\")\n    users :: conn.with_policy(policy, \"test\").query(SQL{\"SELECT name FROM users\"}) ?? panic(\"query\")\n    assert(users.len() == 3)\n}\n\n// $ jet test\n// greets from the fixture: pass\n// counts the fixture users: pass\n\n// The expert path: package.jet turns reuse on (new row)\ntest: { quick: .{ reuse_reads: true } }\n\n// $ jet test --profile quick\n// greets from the fixture: pass (cached)\n// counts the fixture users: pass (cached)"
-        },
-        {
-          "key": "C",
-          "name": "No, always rerun",
-          "detail": "The #6035 store reuses a row only when its effect row holds none of FS, Env, Net, Clock, Random or Process. Fixture tests always run.",
-          "technical": "No change to the #6035 S4 store.",
-          "code": "// The beginner path, the same under every option\n// run.jet\nuse core.files as files\nuse core.db as db\n\nfn greet(name: String) -> String { \"Hello, {name}!\" }\n\n#Test(\"greets from the fixture\") {\n    name :: files.read(\"testdata/name.txt\") ?? panic(\"fixture\")\n    assert(greet(name.trim()) == \"Hello, Ada!\")\n}\n\n// core.db reaches SQLite through foreign code (#Import module c.sqlite3)\n#Test(\"counts the fixture users\") {\n    conn :: db.open(\"testdata/app.db\")\n    policy :: db.policy(\"users\", \"true\") ?? panic(\"policy\")\n    users :: conn.with_policy(policy, \"test\").query(SQL{\"SELECT name FROM users\"}) ?? panic(\"query\")\n    assert(users.len() == 3)\n}\n\n// $ jet test\n// greets from the fixture: pass\n// counts the fixture users: pass\n\n// The expert path: every rerun runs both again\n// $ jet test\n// greets from the fixture: pass\n// counts the fixture users: pass"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Go",
-          "note": "go test caches results and records the files and env vars read through package os; reads made by cgo code are not recorded. Source: https://pkg.go.dev/cmd/go#hdr-Test_packages",
-          "code": "$ go test ./...\nok  example.com/greet  (cached)"
-        },
-        {
-          "lang": "Bazel",
-          "note": "Bazel reuses a test result when its declared inputs match; undeclared files are absent in the sandbox. Source: https://bazel.build/remote/caching",
-          "code": "sh_test(name = \"greet\", data = [\"testdata/name.txt\"])"
-        },
-        {
-          "lang": "Rust",
-          "note": "cargo test has no result cache; every test reruns. Source: https://doc.rust-lang.org/cargo/commands/cargo-test.html",
-          "code": "$ cargo test"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A beats Go's test cache on safety and reach. Effect rows say which rows can read, and test builds record every read, foreign code included. A read the recorder cannot see makes its row rerun. `fresh` is the way out.",
-        "gains": [
-          "Fixture-heavy suites rerun in seconds, including database and C-library tests.",
-          "No new setting; `fresh` already exists."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B adds a row nearly everyone sets, and the plain path stays slow."
-          },
-          {
-            "key": "C",
-            "reason": "C leaves fixture tests slower than Go's for good."
-          }
-        ],
-        "tradeoff": "A read recorder in test builds buys exact reuse for every file and env test."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree. In $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/rd2: `jet check run.jet` is ok, and `jet test` passes 2 tests, one through core.db's SQLite. `jet test --fresh` prints the fresh-run note.",
-      "surface": {
-        "gist": "May a test that reads files or env vars, even through C code, be reused when what it read is unchanged?",
-        "lesson": "A result is safe to reuse only if every input is unchanged. Jet's effect rows already say which tests can touch files or env vars. Test builds can note every read, whether Jet code or a C library makes it. The reused row then carries the exact list of what it read.",
-        "trio": {
-          "current": {
-            "note": "Today the store is not built, so every row reruns; `--fresh` already exists and prints a note.",
-            "code": "$ jet test --fresh\njet test: fresh result run (test-result cache bypassed; build cache reusable)\ngreets from the fixture: pass\ncounts the fixture users: pass"
-          },
-          "wild": {
-            "lang": "Go",
-            "note": "go test records the files and env vars a test reads through package os and reruns it when one changes; cgo reads are unseen. Source: https://pkg.go.dev/cmd/go#hdr-Test_packages",
-            "code": "$ go test ./...\nok  example.com/greet  (cached)\n$ go test -count=1 ./...   # bypass the cache"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Yes, always, foreign code included",
-            "gist": "Test builds record every file and env read, Jet's or a C library's; reuse is on for every profile, and `fresh` turns it off.",
-            "gains": [
-              "File, env and database tests rerun only when what they read changed.",
-              "No new flag or field to learn.",
-              "Exact: a read the recorder cannot see makes its row rerun."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "$ jet test\ngreets from the fixture: pass (cached)\ncounts the fixture users: pass (cached)\n\n$ jet test --fresh"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Opt in per profile",
-            "gist": "Reads are recorded only when a profile sets a new `reuse_reads: true` row.",
-            "gains": [
-              "Nobody gets a reused file test without asking for it."
-            ],
-            "losses": [
-              "A new row for something nearly every profile wants.",
-              "A plain `jet test` stays slow for file tests."
-            ],
-            "proposed": {
-              "code": "test: { quick: .{ reuse_reads: true } }\n\n$ jet test --profile quick"
-            }
-          },
-          {
-            "key": "C",
-            "name": "No, always rerun",
-            "gist": "Only pure rows are reused; any row that reads files or env vars runs every time.",
-            "gains": [
-              "Nothing to record, so no read can be missed."
-            ],
-            "losses": [
-              "File and env tests rerun every time, slower than Go.",
-              "Card #6064 criterion 2, beating Go's rerun time, cannot be met."
-            ],
-            "proposed": {
-              "code": "$ jet test\ngreets from the fixture: pass\ncounts the fixture users: pass"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A beats Go's test cache on safety and reach. Effect rows say which rows can read, and test builds record every read, foreign code included. A read the recorder cannot see makes its row rerun. `fresh` is the way out.",
-          "gains": [
-            "Fixture-heavy suites rerun in seconds, including database and C-library tests.",
-            "No new setting; `fresh` already exists."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B adds a row nearly everyone sets, and the plain path stays slow."
-            },
-            {
-              "key": "C",
-              "reason": "C leaves fixture tests slower than Go's for good."
-            }
-          ],
-          "tradeoff": "A read recorder in test builds buys exact reuse for every file and env test."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T01:49:55.025Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-30"
-    },
-    {
       "id": "D-DECL-TYPES1",
       "cardId": "c03pi177",
       "group": "markers",
@@ -192729,158 +192285,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-11-07T16:33:25.320Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-08"
-    },
-    {
-      "id": "D-FS-SYNC1",
-      "cardId": "c0g93joj",
-      "group": "core-files",
-      "title": "Core gets files.sync_filesystem: one durable flush for a whole tree of writes",
-      "situation": "",
-      "gist": "How does Jet code make a tree of many new files durable without one disk flush per file?",
-      "lesson": "core.files.fsync makes one file durable. Writing a tree of thousands of files and calling fsync on each one costs a journal commit per file. sync_filesystem flushes the whole filesystem that holds a path in one call, so a writer can create every file, flush once, and only then publish the tree with a rename.",
-      "explainer": "",
-      "story": "Jetpack installs a toolchain of about 1,900 files. Today it calls fsync on every file and directory before it publishes the tree, and a cold install takes 45 minutes on a normal ext4 disk. With sync_filesystem it writes every file, flushes once, and renames the finished tree into place. A crash before the flush still leaves no published tree, and the install takes a few minutes.",
-      "inWild": "Linux has syncfs(2), which flushes one filesystem. Go exposes it as unix.Syncfs in golang.org/x/sys, and Rust as nix::unistd::syncfs or rustix::fs::syncfs; neither standard library has it. Python has os.sync(), which flushes every filesystem. Package managers either fsync per file, like dpkg, which sorts its writes so the commits batch, or skip durability, like pip and npm.",
-      "detail": "Option A adds one public function beside fsync in Core/Files/Files.jet: sync_filesystem(path) IOError! -[FS.Write]>. On Linux it calls syncfs(2) on the filesystem that holds path. Elsewhere it calls sync(2), which flushes every filesystem in one call. Where the host has neither, it returns IOError and the caller keeps per-file fsync. Jetpack writes every object, flushes once, and renames the tree into place. A failed flush fails the publish, so a crash never publishes a partial tree.\n\nOption B adds a higher-level fsync_tree(dir) that fsyncs every file under dir from several threads at once, so the journal batches the commits. It adds no new kind of flush, but it still does one fsync per file, and its speed depends on the filesystem's batching.\n\nOption C adds no API and keeps per-file fsync. A cold toolchain install stays at about 45 minutes, and the clean-clone proof (#6096 c65) stays near 2 hours.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Add sync_filesystem(path)",
-          "detail": "One public Core function: a single flush of the filesystem that holds path (syncfs(2) on Linux, sync(2) elsewhere, IOError where neither exists). The store flushes once before its publish rename.",
-          "code": "use { files: core.files }\n\nloop object in objects -> files.write(object.path, object.bytes) ?? return Err(err)\nfiles.sync_filesystem(staging) ?? return Err(err)\nfiles.rename(staging, published) ?? return Err(err)"
-        },
-        {
-          "key": "B",
-          "name": "Add fsync_tree(dir)",
-          "detail": "One public Core function that fsyncs every file and directory under dir in parallel, so the journal can batch the commits. Still one fsync per file.",
-          "code": "use { files: core.files }\n\nloop object in objects -> files.write(object.path, object.bytes) ?? return Err(err)\nfiles.fsync_tree(staging) ?? return Err(err)\nfiles.rename(staging, published) ?? return Err(err)"
-        },
-        {
-          "key": "C",
-          "name": "No new API",
-          "detail": "Keep fsync per file. Installs stay slow.",
-          "code": "use { files: core.files }\n\nloop object in objects {\n    files.write(object.path, object.bytes) ?? return Err(err)\n    files.fsync(object.path) ?? return Err(err)\n}\nfiles.rename(staging, published) ?? return Err(err)"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "One call replaces thousands of journal commits, and the write-flush-rename order keeps the same crash guarantee. It maps directly to the operating system's own primitive.",
-        "tradeoff": "The flush also covers unrelated dirty data on the same filesystem, so one call can take longer than a single fsync on a busy disk.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It still does one flush per file; batching helps only on some filesystems and adds a thread pool to a file API."
-          },
-          {
-            "key": "C",
-            "reason": "A cold toolchain install stays at 45 minutes and dominates every clean-clone proof."
-          }
-        ],
-        "losses": [
-          {
-            "loss": "On hosts without syncfs(2), sync(2) flushes every filesystem, not just one.",
-            "mitigation": "It is still one call per publish, and the docs say which flush each host uses."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "How does Jet code make a tree of many new files durable without one disk flush per file?",
-        "lesson": "fsync flushes one file. sync_filesystem flushes the whole filesystem holding a path in one call. Write every file, flush once, then publish with a rename.",
-        "trio": {
-          "current": {
-            "note": "Today each file needs its own fsync.",
-            "code": "loop object in objects {\n    files.write(object.path, object.bytes) ?? return Err(err)\n    files.fsync(object.path) ?? return Err(err)\n}"
-          },
-          "wild": {
-            "lang": "Go",
-            "note": "Go exposes Linux syncfs in golang.org/x/sys.",
-            "code": "fd, _ := unix.Open(dir, unix.O_RDONLY, 0)\nunix.Syncfs(fd)"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "sync_filesystem(path)",
-            "gist": "One flush for the whole filesystem.",
-            "gains": [
-              "One call per tree",
-              "Maps to syncfs(2)"
-            ],
-            "losses": [
-              "Also flushes unrelated dirty data"
-            ],
-            "proposed": {
-              "code": "files.sync_filesystem(staging) ?? return Err(err)\nfiles.rename(staging, published) ?? return Err(err)"
-            }
-          },
-          {
-            "key": "B",
-            "name": "fsync_tree(dir)",
-            "gist": "Parallel fsync of every file.",
-            "gains": [
-              "No new kind of flush"
-            ],
-            "losses": [
-              "Still a flush per file",
-              "Speed depends on the filesystem"
-            ],
-            "proposed": {
-              "code": "files.fsync_tree(staging) ?? return Err(err)"
-            }
-          },
-          {
-            "key": "C",
-            "name": "No new API",
-            "gist": "Keep per-file fsync.",
-            "gains": [
-              "Nothing to add"
-            ],
-            "losses": [
-              "45-minute cold installs"
-            ],
-            "proposed": {
-              "code": "files.fsync(object.path) ?? return Err(err)"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "One call replaces thousands of journal commits with the same crash guarantee.",
-          "gains": [
-            "Cold installs drop from about 45 minutes to a few",
-            "Same write-flush-rename crash safety"
-          ],
-          "losses": [
-            {
-              "loss": "Flushes unrelated dirty data on the same filesystem.",
-              "mitigation": "Still one call per publish."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Still one flush per file."
-            },
-            {
-              "key": "C",
-              "reason": "Installs stay at 45 minutes."
-            }
-          ],
-          "tradeoff": "A wider flush in exchange for one call."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-08T00:56:50.121Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-08"
     },
@@ -218293,19 +217697,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "q2fcasi8",
-      "cardId": "c0slmlyv",
-      "decisionId": "D-TEST-READS1",
-      "by": "owner",
-      "kind": "question",
-      "text": "all downsides not engineered away. Fix.",
-      "status": "answered",
-      "answer": "Accepted. The ballot is being reworked so that every listed downside of the recommended option is engineered away by the design itself (not just mitigated), or else the option changes. Each stated loss gets a design fix, the losses list goes empty or names only true trade-offs you must weigh, and the ballot returns to you after an adversarial pass.",
-      "created": "2026-10-30T09:49:28.192Z",
-      "answeredAt": "2026-10-30",
-      "answeredBy": "Main"
-    },
-    {
       "id": "q3l5zn9g",
       "cardId": "c0fvnyiq",
       "decisionId": "D-TEST-MUTFUZZ1",
@@ -220384,6 +219775,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T12:22:04.707Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0agsbqj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T12:13:47.715Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0p39lw2",
+      "note": "#4: E0950 is FieldMethodClash; the effectful hole header refusal is E0442 HoleHeaderEffect.; was: Under D-IFHOLE2=A a `<>` header runs once for each arm tried, in arm order, and never for an arm after the first match; candidate expressions run at their substituted position at most once; errors pro"
+    },
+    {
+      "at": "2026-11-16T12:12:11.506Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0agsbqj",
+      "note": "#7 The Goose and Lobster mining run of 2026-10-23 ($JET_STATE_R"
+    },
+    {
+      "at": "2026-11-16T11:56:01.060Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00cqn1l",
+      "note": "#14 Closing a live connection ends that account's presence on th"
+    },
+    {
+      "at": "2026-11-16T11:33:58.921Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0p39lw2",
+      "note": "#25: D-IFHOLE2 ratified A (2026-11-15): the hole is `<>`, plain tables compare one value, effectful hole headers are refused.; was: If D-IFHOLE2 ratifies A: E0948's fix text no longer says 'write `subject == _`', and refusing `subject OP _` has its own registered code with what/why/fix and a UI snapshot. Proof: `jet test Compiler "
+    },
+    {
+      "at": "2026-11-16T11:33:56.108Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0p39lw2",
+      "note": "#24: D-IFHOLE2 ratified A (2026-11-15): the hole is `<>`, plain tables compare one value, effectful hole headers are refused.; was: The hole table's read count matches the ruling D-IFHOLE2 ratifies. Today the landed parser (4010511a89) maps `subject OP _` onto the comparison table, so `fetch() == _` reads its subject once, while D"
+    },
+    {
+      "at": "2026-11-16T11:33:53.608Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0p39lw2",
+      "note": "#14: D-IFHOLE2 ratified A (2026-11-15): the hole is `<>`, plain tables compare one value, effectful hole headers are refused.; was: Every dispatch table requires exactly one statically typed hole. Missing, repeated, ambiguous, wrong-type and non-Bool headers get registered diagnostics (DiagnosticRows.jet) with UI snapshots. Proof:"
+    },
+    {
+      "at": "2026-11-16T11:33:51.239Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0p39lw2",
+      "note": "#6: D-IFHOLE2 ratified A (2026-11-15): the hole is `<>`, plain tables compare one value, effectful hole headers are refused.; was: All old distributed headers and generated source producers are migrated. Explicit bindings preserve existing one-time reads where required. No old-header compatibility parser or alternative runtime me"
+    },
+    {
+      "at": "2026-11-16T11:33:48.887Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0p39lw2",
+      "note": "#5: D-IFHOLE2 ratified A (2026-11-15): the hole is `<>`, plain tables compare one value, effectful hole headers are refused.; was: Equality pattern slots preserve range matching, payload wildcards, and safe bindings. OR cannot leak missing bindings. Failed guards do not consume payloads needed later. A changing subject cannot obt"
+    },
+    {
+      "at": "2026-11-16T11:33:46.287Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0p39lw2",
+      "note": "#4: D-IFHOLE2 ratified A (2026-11-15): the hole is `<>`, plain tables compare one value, effectful hole headers are refused.; was: Header calls repeat per reached candidate; candidate expressions run at their substituted position at most once. Skipped candidates have no effects. Errors propagate rather than becoming nonmatches. P"
+    },
+    {
+      "at": "2026-11-16T11:33:28.325Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0p39lw2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T11:22:27.849Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0255wk0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T11:22:26.911Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0255wk0",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-16T11:22:25.476Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0255wk0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T11:00:16.095Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-16T10:50:49.624Z",
       "by": "Main",
