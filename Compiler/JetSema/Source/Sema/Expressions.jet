@@ -3130,6 +3130,12 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
     if scopes.comptime_execution_depth > 0 -> return true
     if !sema_expr_comptime_target_declared(environment, program, scopes, symbol) -> return true
     target: sema_expr_comptime_target(environment, program, scopes, symbol) ?? return true
+    // A `#run fn` runs while building: run-time code never calls it, or it
+    // would run with the program.
+    if sema_expr_runtime_body_owner(environment, scopes) != None {
+        diagnostics.push(sema_comptime_method_runtime_call_diagnostic(target.path, span))
+        return false
+    }
     args: sema_expr_comptime_call_args(checked.value, context) ?? {
         diagnostics.push(sema_error("E0956", span, "compile-time call `{target.path}` needs compile-time value arguments", "the deferred IR evaluator receives only canonical TComptimeValue arguments", "pass supported compile-time values to this call"))
         return false
@@ -6954,6 +6960,41 @@ sema_expr_contextual_literal: fn(expr: Expr, expected: Type?, environment: SemaS
     Val(Expr.MethodCall{receiver: receiver, method: "from_literal", method_span: span, owner_type_args: owner_type_args, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED})
 }
 
+// A literal hook runs while building, as a `#run` value does: in run-time
+// code its call is staged through the body comptime evaluator, and the value
+// it lands replaces the literal when the body is checked again. A hook that
+// stops, or reaches what compile-time code can't do, fails the build there
+// rather than running with the program. Code that already runs while
+// building calls the hook as it runs.
+sema_expr_check_literal_hook: fn(hooked: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    owner_key: sema_expr_runtime_body_owner(environment, scopes) ?? {
+        return sema_check_expression(hooked, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    fact_start: context.call_facts.len()
+    scopes.comptime_execution_depth += 1
+    checked: sema_check_expression(hooked, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    scopes.comptime_execution_depth -= 1
+    call: checked ?? return None
+    if sema_stmt_comptime_site_refused(program, context, fact_start, diagnostics) -> return None
+    landed: sema_comptime_body_value_find(context, environment.module_identity, owner_key, span, span) ?? {
+        _ := sema_comptime_body_capture(context, environment, program, scopes, "from_literal", hooked, call.ty, span, span)
+        // The call stands in until the value lands; nothing lowers it.
+        return Val(call)
+    }
+    value: sema_fact_prepared_expr(landed.value, landed.ty, span, environment, program, context) ?? return None
+    sema_expr_expected_owned(value, expected, environment, program, diagnostics)
+}
+
+// The owner key of the function body being checked when its code runs with
+// the program; None in code that runs while building (a `#run` operand, a
+// `#run fn` or `build: fn` body, a module value) or outside every body.
+sema_expr_runtime_body_owner: fn(environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String? Never! {
+    if sema_scope_build_time(scopes, environment.function_name) -> return None
+    owner_key: sema_scope_function_owner_key(scopes)
+    if owner_key == "" || sema_comptime_item_owner(owner_key) -> return None
+    Val(owner_key)
+}
+
 // A `impl T.Literal.Int` / `impl T.Literal.Float` capability of the nominal
 // `ty`, or an `impl Literal.Int` block in its body, read by the written
 // trait name.
@@ -6996,13 +7037,13 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
     return if expr == {
         .Int(value, span, width, raw, _) -> {
             if sema_expr_contextual_literal(expr, expected, environment, program) == .Val(hooked) {
-                return sema_check_expression(hooked, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                return sema_expr_check_literal_hook(hooked, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             }
             sema_expr_integer_literal(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, program, diagnostics)
         }
         .Float(value, span, is_f32, raw, _) -> {
             if sema_expr_contextual_literal(expr, expected, environment, program) == .Val(hooked) {
-                return sema_check_expression(hooked, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                return sema_expr_check_literal_hook(hooked, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             }
             sema_expr_float_literal(value, is_f32, raw, span, expected, environment, program, context, diagnostics)
         }

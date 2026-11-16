@@ -79,6 +79,19 @@ Work that needs the handle uses it inside one `#run`, such as a function it
 calls, and keeps the data that work returns
 ([`sequential_comptime_reads_advance_one_reader`](../../../tests/cases/comptime_diff/sequential_comptime_reads_advance_one_reader.case)).
 
+A `#run fn` runs while building, and never with the program. A literal
+hook (`#run from_literal`) is computed while building for each literal that
+takes it, and its value replaces the literal. A hook that panics stops the
+build (E3010), and a hook that reaches an effect such as printing is refused
+(E3410)
+([`comptime_no_silent_fallback_literal_hook`](../../../tests/cases/comptime_no_silent_fallback/comptime_no_silent_fallback_literal_hook.case)).
+Only code that runs while building calls a `#run fn`: a `#run` value, a
+`#run { … }` block, another `#run fn` body, `build: fn` and a module value.
+A call from run-time code is E1019 at the call. The fix computes the value
+with `value: #run T.f(…)`
+([`comptime_no_silent_fallback_run_fn_call.jet`](../../../tests/ui/comptime_no_silent_fallback_run_fn_call.jet),
+[`comptime_no_silent_fallback_run_fn_call`](../../../tests/cases/comptime_no_silent_fallback/comptime_no_silent_fallback_run_fn_call.case)).
+
 `@if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See

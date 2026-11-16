@@ -15323,6 +15323,31 @@ ComptimeValueIsRuntimeHandle: struct {
     }
 }
 
+ComptimeMethodCalledAtRunTime: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E1019"
+        safety_class: .Soundness
+        safety_reason: "A `#run fn` runs while building, so a call left in the shipped program would run it at run time, where its failures no longer stop the build."
+        expert_path: "none: a `#run fn` runs while building"
+        stage: [.Comptime]
+        meaning: "Run-time code calls a `#run fn`, a method that runs only while building"
+
+        what: fn(self) -> String {
+            "`{self.name}` is a `#run fn`, which runs while building, but run-time code calls it here"
+        }
+
+        why: fn(self) -> String {
+            "A `#run fn` runs only while the program builds. Called from code in the shipped program, it would run at run time instead, and a panic or print in it would happen there instead of stopping the build."
+        }
+
+        fix: fn(self) -> String {
+            "Compute the value while building with `value: #run {self.name}(…)` and use `value` here, or call `{self.name}` from compile-time code."
+        }
+    }
+}
+
 FlagArgumentCount: struct {
     impl Diagnostic {
         code: "E1301"

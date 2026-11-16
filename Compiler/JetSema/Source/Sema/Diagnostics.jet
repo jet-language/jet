@@ -460,6 +460,11 @@ sema_comptime_runtime_handle_diagnostic: fn(name: String, handle: String, span: 
     sema_error("E1018", span, what, why, fix)
 }
 
+sema_comptime_method_runtime_call_diagnostic: fn(name: String, span: Span) -> Diagnostic {
+    row: diagnostic_registry_row("E1019") ?? panic("E1019 has no registry row")
+    sema_error("E1019", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
+}
+
 sema_type_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) {
         return nested_fn
