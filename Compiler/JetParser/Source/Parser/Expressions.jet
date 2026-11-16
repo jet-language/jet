@@ -59,7 +59,6 @@ use {
         TOKEN_AND_AND,
         TOKEN_BANG,
         TOKEN_BREAK,
-        TOKEN_CARET,
         TOKEN_CHAR,
         TOKEN_COLON,
         TOKEN_COMMA,
@@ -387,13 +386,6 @@ parser_parse_operators: fn(state: &JetParserState, minimum: Int, depth: Int, all
             _ := parser_parse_operators(state, minimum, depth + 1, allow_struct_lit, stop_before_comparison)
             break
         }
-        // Infix power was retired: `^` marks ownership, so after a value on
-        // the same line it is the old power sign. It binds tighter than any
-        // operator, so its operand is one prefix expression.
-        if operator == TOKEN_CARET {
-            parser_report_infix_power(state, left, depth, allow_struct_lit)
-            next
-        }
         precedence := parser_expression_precedence(operator)
         if precedence == 0 || precedence < minimum -> break
         if stop_before_comparison && parser_expression_comparison_boundary(operator) -> break
@@ -507,22 +499,6 @@ parser_parse_operators: fn(state: &JetParserState, minimum: Int, depth: Int, all
 // The ordinary "expected a value" report, at the `&` that starts `span`.
 parser_report_marked_value: fn(state: &JetParserState, span: Span) {
     parser_add_error(state, Span{start: span.start, end: span.start + 1}, "expected a value, found `&`", "a value can be a name, literal, collection, call, or parenthesized expression", "write an expression such as `x`, `42`, or `\"hello\"`")
-}
-
-// `base ^ exponent`: E0398 with the `.pow` rewrite as its edit. The caller
-// keeps `base` as the value, so the line reports once.
-parser_report_infix_power: fn(state: &JetParserState, base: ParsedExpr, depth: Int, allow_struct_lit: Bool) {
-    caret: parser_bump(state)
-    prefix: parser_parse_prefix(state, depth + 1, allow_struct_lit, false)
-    exponent: parser_parse_postfix(state, prefix, depth + 1, allow_struct_lit, false)
-    base_text: parser_source_text(state, base.span)
-    receiver: if base.expr == .Ident(_, _, _) || base.expr == .Int(_, _, _, _, _) || base.expr == .Float(_, _, _, _, _) || base.expr == .Call(_, _) || base.expr == .MethodCall(_, _, _, _, _, _, _) || base.expr == .Field(_, _, _, _) || base.expr == .Index(_, _, _, _, _) -> base_text else -> "({base_text})"
-    rewrite: "{receiver}.pow({parser_source_text(state, exponent.span)})"
-    diagnostic: diagnostic_from_registry("E0398", Val(caret.span), "Infix `^` is retired; write `{rewrite}`", "`^` marks ownership; a power is the named method `pow`", "Write `{rewrite}`")
-    if parser_aborting(state) {
-        return
-    }
-    state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: parser_cover(base.span, exponent.span), new_text: rewrite}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.BehaviorPreserving))
 }
 
 // E0082 (amended 2026-09-28): an unparenthesized `&&`

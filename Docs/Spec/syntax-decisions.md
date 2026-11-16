@@ -316,9 +316,9 @@ Never on a local binding. Never `Type name`.
 
 **S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `<<=` `>>=`.
 Arithmetic four on Int/Float; the rest Int-only. `&=`, `|=` and `~|=` are
-retired with infix bit arithmetic, and `^=` with infix power
-(D-SIGIL-ALGEBRA1=B): an update assigns the `bit_and`, `bit_or`, `bit_xor` or
-`pow` result back. `String += piece`
+retired with infix bit arithmetic (D-SIGIL-ALGEBRA1=B): an update assigns the
+`bit_and`, `bit_or` or `bit_xor` result back. `^=` is not Jet syntax: a power
+update is `x = x.pow(n)`. `String += piece`
 appends text (a String or a borrowed text view); ordinary text construction
 still uses interpolation, not binary `+`. The append preserves explicitly
 copied values. The place must be mutable or reached through an `&` parameter.
@@ -1335,8 +1335,10 @@ and `!` negates Bool only.
 A written negative Int exponent (including a parenthesized negative numeral)
 selects Fraction; positive literals and negative zero remain Int. An exponent
 whose sign is dynamic remains Int and uses the shared runtime negative-power stop.
-Retired infix arithmetic and compounds produce E0398 naming the method, with
-a precedence-preserving structured repair. Updates explicitly assign the
+Retired infix bit arithmetic and its compounds produce E0398 naming the
+method, with a precedence-preserving structured repair. Infix `^` and `^=`
+for power are not Jet syntax and get only the generic parse error, with no
+teaching diagnostic (owner order, card #6857). Updates explicitly assign the
 method result back. `core.math.xor` and `core.math.pow` are removed.
 Generated Jet observers use these methods too: a wire writer extracts
 its hexadecimal byte nibbles with `.bit_and(15)`, not retired infix arithmetic.
@@ -9194,6 +9196,12 @@ D-GENMOD-VALUE1 and D-META-CODE1, reverses the intervening same-day ruling
 that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
+
+**2026-11-16 — infix power is not taught** *(card #6857; owner order under
+D-SIGIL-ALGEBRA1=B)*: `a ^ b` and `a ^= b` no longer get E0398 with a `pow`
+repair. They meet the generic parse error any stray token gets, and power is
+only `value.pow(exponent)`, which compiles to the code the operator did.
+Example: `Tests/UI/caret_is_not_power.jet`.
 
 **2026-11-13 — the `jet debug` prompt is `(Jet)`** *(card #6734; owner ruling
 2026-11-09)*: every readout a user sees starts with a capital, so the
