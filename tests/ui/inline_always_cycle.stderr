@@ -1,0 +1,8 @@
+Error [jet.RecursiveInlineAlways]: `pong` calls `ping`, whose calls lead back to `pong`, so `#Inline(Always)` cannot expand them
+  --> tests/ui/inline_always_cycle.jet:5:66
+    |
+  5 | #Inline(Always) pong: fn(n: Int) -> Int { if n <= 0 -> 1 else -> ping(n - 1) }
+    |                                                                  ^^^^^^^^^^^
+ Why: `#Inline(Always)` guarantees every call is inlined, and each inlined copy would hold the next one, so expanding the cycle would never end.
+ Fix: Drop `#Inline(Always)` from one function of the cycle (use `#Inline` as a hint), or break the cycle.
+More: jet-lang.dev/e/E0917

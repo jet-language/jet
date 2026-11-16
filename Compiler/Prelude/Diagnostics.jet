@@ -13620,18 +13620,18 @@ RecursiveInlineAlways: struct {
         safety_class: .Soundness
         safety_reason: "Inlining a call to itself never ends, so the function has no fixed expansion."
         expert_path: "none: a recursive function is not `#Inline(Always)`"
-        meaning: "A recursive `#Inline(Always)` function"
+        meaning: "A recursive `#Inline(Always)` function, or marked functions that call each other in a cycle"
 
         what: fn(self) -> String {
-            "`#Inline(Always) fn` calls itself — inlining a recursive call has no fixed expansion"
+            "`#Inline(Always) fn` calls itself, directly or through other marked functions — inlining a recursive call has no fixed expansion"
         }
 
         why: fn(self) -> String {
-            "Inlining copies the body into each call, and a body that calls itself would be copied without end"
+            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and a body that calls itself would be copied without end. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016) and a read of `context.trace` (E1017)"
         }
 
         fix: fn(self) -> String {
-            "Remove recursion from the `#Inline(Always)` function or relax the marker."
+            "Remove the recursion or the cycle, or relax the marker on one function of it."
         }
     }
 }
@@ -13649,7 +13649,7 @@ InlineAlwaysAddressTaken: struct {
         }
 
         why: fn(self) -> String {
-            "An `#Inline(Always)` function promises to be copied into each call, and a function value has no call site to copy into"
+            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and a function value has no call site to copy into. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016) and a read of `context.trace` (E1017)"
         }
 
         fix: fn(self) -> String {
@@ -13662,15 +13662,15 @@ InlineAlwaysTooLarge: struct {
     impl Diagnostic {
         code: "E0919"
         safety_class: .Opinion
-        safety_reason: "Inlining the larger body would run safely, and Jet refuses it so `#Inline(Always)` keeps its size promise."
+        safety_reason: "Inlining the larger body would run safely, and Jet refuses it so `#Inline(Always)` keeps its guarantee small."
         meaning: "An `#Inline(Always)` function body over the size ceiling"
 
         what: fn(self) -> String {
-            "`#Inline(Always) fn` body exceeds the checked promise's statement ceiling"
+            "`#Inline(Always) fn` body exceeds the guarantee's statement ceiling"
         }
 
         why: fn(self) -> String {
-            "`#Inline(Always)` promises a small body, and copying a large one into every call grows the program"
+            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and copying a large body into every call grows the program. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016) and a read of `context.trace` (E1017)"
         }
 
         fix: fn(self) -> String {
@@ -15258,6 +15258,42 @@ MissingCoreRole: struct {
         }
 
         fix: fn(self) -> String { "Mark the Core function that does `{self.role}` with `#Builtin.Role(.{self.role})`." }
+    }
+}
+
+InlineAlwaysScrub: struct {
+    impl Diagnostic {
+        code: "E1016"
+        safety_class: .Soundness
+        safety_reason: "A `#Scrub` routine's own call keeps a fixed value fixed up to its public result, and an inlined copy would carry that value on into the caller's code."
+        expert_path: "none: a `#Scrub` routine is not `#Inline(Always)`"
+        meaning: "An `#Inline(Always)` function marked `#Scrub`"
+
+        what: fn(self) -> String { "`#Inline(Always) fn` is `#Scrub`, and a `#Scrub` routine stays a call" }
+
+        why: fn(self) -> String {
+            "A `#Scrub` routine reveals a fixed value as a public result, and only its own call keeps the value fixed up to that result"
+        }
+
+        fix: fn(self) -> String { "Drop `#Inline(Always)` from the `#Scrub` routine." }
+    }
+}
+
+InlineAlwaysReadsTrace: struct {
+    impl Diagnostic {
+        code: "E1017"
+        safety_class: .Soundness
+        safety_reason: "`context.trace` starts at the reading function's own frame, and an inlined copy has no frame of its own, so the trace would name the caller."
+        expert_path: "none: a function that reads `context.trace` is not `#Inline(Always)`"
+        meaning: "An `#Inline(Always)` function that reads `context.trace`"
+
+        what: fn(self) -> String { "`#Inline(Always) fn` reads `context.trace`, which names the reading function's own frame" }
+
+        why: fn(self) -> String {
+            "`context.trace` starts at the frame of the function that reads it, and an inlined copy runs in its caller's frame"
+        }
+
+        fix: fn(self) -> String { "Drop `#Inline(Always)`, or read `context.trace` in the function's caller." }
     }
 }
 

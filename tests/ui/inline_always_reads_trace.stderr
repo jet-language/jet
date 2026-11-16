@@ -1,0 +1,8 @@
+Error [jet.InlineAlwaysReadsTrace]: `depth` reads `context.trace`, so `#Inline(Always)` cannot expand it
+  --> tests/ui/inline_always_reads_trace.jet:3:38
+    |
+  3 | #Inline(Always) depth: fn() -> Int { context.trace.len() }
+    |                                      ^^^^^^^^^^^^^
+ Why: `context.trace` starts at the reading function's own frame, and an inlined copy has no frame of its own: the trace would name the caller instead.
+ Fix: Drop `#Inline(Always)`, or read `context.trace` in the function that calls `depth`.
+More: jet-lang.dev/e/E1017

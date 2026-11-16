@@ -77,8 +77,9 @@ SPEC_DIR: "Docs/spec"
 // check until it is removed here, and a new mismatch can't be added.
 LETTER_LAW_EXCEPTIONS: [String]{"E2818", "E2930", "E2931", "E2934", "JT0101", "L1101", "W0410"}
 
-// The dated safety audit: the date --write wrote it, then AUDIT_NAME, in
-// AUDIT_DIR.
+// The dated safety audit: the date --write first wrote it, then AUDIT_NAME,
+// in AUDIT_DIR. A later --write rewrites it in place, so its path stays put
+// for the readers that name it.
 AUDIT_DIR: "Docs/audits"
 
 AUDIT_NAME: "-diagnostic-safety-audit.md"
@@ -1600,10 +1601,11 @@ diagnostic_rows_main: fn(args: [String]) -[FS, Time]> String DiagnosticRowsError
     }
     if mode == "--write" {
         if audit_differs {
-            dated: "{AUDIT_DIR}/{time.isoformat_date(time.today())}{AUDIT_NAME}"
-            files.write(dated, audit) ?? return Err(rows_fail("cannot write {dated}: {err}"))
-            if audit_at != "" && audit_at != dated {
-                files.remove(audit_at) ?? return Err(rows_fail("cannot remove {audit_at}: {err}"))
+            if audit_at == "" {
+                dated: "{AUDIT_DIR}/{time.isoformat_date(time.today())}{AUDIT_NAME}"
+                files.write(dated, audit) ?? return Err(rows_fail("cannot write {dated}: {err}"))
+            } else {
+                files.write(audit_at, audit) ?? return Err(rows_fail("cannot write {audit_at}: {err}"))
             }
         }
         loop path in stale {

@@ -5709,8 +5709,14 @@ and `O2`. `auto` (the stock) picks them by size, within the level's limits;
 inlined at every direct call under every value and on every tier, `O0`
 (`jet run`, `jet dev`), `O1`, `O2` and compile-time code alike, whatever its
 size and with no per-caller budget (`small` does not limit it): the mark is
-a guarantee, not a hint. The inliner
-cannot splice a recursive callee, a callee that writes a parameter, an
+a guarantee, not a hint. It also covers a body that writes a parameter or
+whose arithmetic can stop in another file (the stop reports at the call's
+line). Sema refuses a mark the inliner could not keep: a function that
+calls itself or another marked function calling back (E0917), one taken as
+a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine
+(E1016), and one that reads `context.trace` (E1017). A marked call left
+uninlined is a compiler bug (exit 101). For an unmarked callee the inliner
+does not splice a recursive callee, a callee that writes a parameter, an
 `#FFI(asm)` leaf, or a callee from another file whose arithmetic can stop
 (a division by a constant other than 0 and -1 cannot).
 `build: fn` writes `b.inline(.AlwaysMarked)`, and the

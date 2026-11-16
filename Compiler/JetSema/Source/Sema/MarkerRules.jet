@@ -35,6 +35,7 @@ use jet_foundation.[
     marker_hook_of_declaration,
     symbol_find,
     symbol_key_text,
+    symbol_table_key,
     type_name,
     module_text,
 ]
@@ -2200,9 +2201,9 @@ sema_inline_always_scan_expr: fn(expression: Expr, scan: &SemaInlineAlwaysScan) 
     }
 }
 
-// The local half of the promise: direct self-recursion (E0917) and the size
-// ceiling (E0919), both provable from the function alone. `imports` are its
-// file's imports; `method` says it is a method.
+// The local half of the promise: direct self-recursion (E0917), the size
+// ceiling (E0919) and `#Scrub` (E1016), all provable from the function
+// alone. `imports` are its file's imports; `method` says it is a method.
 sema_inline_always_check_function: fn(function: Func, imports: [ImportDecl], diagnostics: &[Diagnostic], method: Bool) Never! {
     if !function.is_inline_always {
         return
@@ -2212,15 +2213,114 @@ sema_inline_always_check_function: fn(function: Func, imports: [ImportDecl], dia
     span: function.inline_span ?? function.name_span
     name: function.name
     if scan.self_recursive {
-        diagnostics.push(sema_error("E0917", span, "`{name}` calls itself, so `#Inline(Always)` cannot expand it", "inlining a recursive call would either loop forever at compile time or require an artificial depth cutoff — neither is a real inline.", "drop `#Inline(Always)` (use `#Inline` as a hint), or restructure the function to be non-recursive."))
+        diagnostics.push(sema_error("E0917", span, "`{name}` calls itself, so `#Inline(Always)` cannot expand it", "`#Inline(Always)` guarantees every call is inlined, and inlining a recursive call would either loop forever at compile time or require an artificial depth cutoff — neither is a real inline.", "drop `#Inline(Always)` (use `#Inline` as a hint), or restructure the function to be non-recursive."))
     }
     if scan.stmt_count > SEMA_INLINE_ALWAYS_MAX_STMTS {
-        diagnostics.push(sema_error("E0919", span, "`{name}` is too large for `#Inline(Always)`", "its body has {scan.stmt_count} statements — over the {SEMA_INLINE_ALWAYS_MAX_STMTS}-statement ceiling `#Inline(Always)` enforces so a promised inline doesn't quietly bloat every call site.", "drop `#Inline(Always)` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline."))
+        diagnostics.push(sema_error("E0919", span, "`{name}` is too large for `#Inline(Always)`", "its body has {scan.stmt_count} statements — over the {SEMA_INLINE_ALWAYS_MAX_STMTS}-statement ceiling `#Inline(Always)` enforces so its guarantee to inline every call doesn't quietly bloat every call site.", "drop `#Inline(Always)` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline."))
+    }
+    if function.scrub_tag != None {
+        diagnostics.push(sema_error("E1016", span, "`{name}` is `#Scrub`, so `#Inline(Always)` cannot expand it", "a `#Scrub` routine reveals a fixed value as a public result, and only its own call keeps that value fixed up to the result; an inlined copy would let the fixed value flow on into the caller's code.", "drop `#Inline(Always)`; a `#Scrub` routine stays a call."))
     }
 }
 
+// One call between two `#Inline(Always)` functions (indexes into the marked
+// list of sema_inline_always_check_calls), at `span` in module `module`.
+SemaInlineAlwaysEdge: struct {
+    caller: Int
+    callee: Int
+    module: Int
+    span: Span
+}
+
+// The whole-program half for calls, read from the call facts: a marked
+// function that reads `context.trace` (E1017: the trace names the reading
+// function's own frame, which an inlined copy doesn't have) and marked
+// functions whose calls of each other come back around (E0917: each copy
+// would hold the next one without end). A lambda's facts are its enclosing
+// function's.
+sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
+    // The marked functions, as module and function indexes into `modules`.
+    marked_modules := [Int]{}
+    marked_functions := [Int]{}
+    loop (module_index, module_result) in modules {
+        loop (function_index, function) in module_result.functions {
+            if function.is_inline_always {
+                marked_modules.push(module_index)
+                marked_functions.push(function_index)
+            }
+        }
+    }
+    if marked_modules.len() == 0 -> return false
+    found := false
+    edges := [SemaInlineAlwaysEdge]{}
+    loop (module_index, module_result) in modules {
+        segments_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
+        start: diagnostics.len()
+        loop fact in module_result.call_facts {
+            caller: sema_inline_always_marked_index(modules, marked_modules, marked_functions, fact.caller_key) ?? next
+            name: modules[marked_modules[caller]].functions[marked_functions[caller]].name
+            if fact.detail == .Val(detail) {
+                if detail.intrinsic_api == .Val(api) {
+                    if api == "context.trace" {
+                        diagnostics.push(sema_error("E1017", fact.span, "`{name}` reads `context.trace`, so `#Inline(Always)` cannot expand it", "`context.trace` starts at the reading function's own frame, and an inlined copy has no frame of its own: the trace would name the caller instead.", "drop `#Inline(Always)`, or read `context.trace` in the function that calls `{name}`."))
+                    }
+                }
+            }
+            callee_id: fact.callee ?? next
+            callee: sema_inline_always_marked_index(modules, marked_modules, marked_functions, symbol_table_key(graph.symbols, callee_id)) ?? next
+            // A direct call of itself is the local half's E0917.
+            if callee != caller {
+                edges.push(SemaInlineAlwaysEdge{caller: caller, callee: callee, module: module_index, span: fact.span})
+            }
+        }
+        if diagnostics.len() > start -> found = true
+        sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[segments_index].source_segments)
+    }
+    state := (loop _ in marked_modules -> 0)
+    back := [Int]{}
+    loop node in 0..<marked_modules.len() {
+        if state[node] == 0 -> sema_inline_always_walk(node, edges, state, back)
+    }
+    loop index in back {
+        edge: edges[index]
+        caller: modules[marked_modules[edge.caller]].functions[marked_functions[edge.caller]].name
+        callee: modules[marked_modules[edge.callee]].functions[marked_functions[edge.callee]].name
+        segments_index: sema_registration_module_index(graph, modules[edge.module].module_identity) ?? next
+        start: diagnostics.len()
+        diagnostics.push(sema_error("E0917", edge.span, "`{caller}` calls `{callee}`, whose calls lead back to `{caller}`, so `#Inline(Always)` cannot expand them", "`#Inline(Always)` guarantees every call is inlined, and each inlined copy would hold the next one, so expanding the cycle would never end.", "drop `#Inline(Always)` from one function of the cycle (use `#Inline` as a hint), or break the cycle."))
+        sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[segments_index].source_segments)
+        found = true
+    }
+    found
+}
+
+// The position in the marked list of the marked function whose key is
+// `key`, or None.
+sema_inline_always_marked_index: fn(modules: [SemaGraphModuleResult], marked_modules: [Int], marked_functions: [Int], key: String) -> Int? Never! {
+    loop index in 0..<marked_modules.len() {
+        if modules[marked_modules[index]].functions[marked_functions[index]].key == key {
+            return Val(index)
+        }
+    }
+    None
+}
+
+// A depth-first walk of the marked calls from `node`: `state` is 0 before a
+// function's walk, 1 during it and 2 after, and each call of a function
+// still being walked closes a cycle, its edge index onto `back`.
+sema_inline_always_walk: fn(node: Int, edges: [SemaInlineAlwaysEdge], state: &[Int], back: &[Int]) Never! {
+    state[node] = 1
+    loop (index, edge) in edges {
+        if edge.caller != node -> next
+        if state[edge.callee] == 1 -> back.push(index)
+        if state[edge.callee] == 0 -> sema_inline_always_walk(edge.callee, edges, state, back)
+    }
+    state[node] = 2
+}
+
 // Every body of the bundle has been checked, so the function references
-// read as values are complete for the whole-program E0918 half. Methods
+// read as values are complete for the whole-program E0918 half, and the
+// call facts for the calls half (sema_inline_always_check_calls). Methods
 // cannot be read as bare values, so E0918 applies to top-level functions.
 sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
     address_taken := [U32:Bool]{}
@@ -2242,7 +2342,7 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
                 id: symbol_find(graph.symbols, key) ?? next
                 if function.is_inline_always && address_taken.get(id.id) != None {
                     name: function.name
-                    diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", "`#Inline(Always)` promises every call to `{name}` expands in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.", "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))
+                    diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", "`#Inline(Always)` guarantees every call to `{name}` is inlined in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.", "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))
                 }
             }
         }
@@ -2259,6 +2359,7 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
         if diagnostics.len() > start -> found = true
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[source_module_index].source_segments)
     }
+    if sema_inline_always_check_calls(graph, modules, diagnostics) -> found = true
     found
 }
 

@@ -1,10 +1,10 @@
-// D-INLINE-PARAM1=A — checked `#Inline`/`#Inline(Always)` contracts.
+// Checked `#Inline` contracts.
 // `#Inline` is a soft hint (the compiler is free to ignore it; never an
-// error). `#Inline(Always)` is a checked promise: the compiler proves it can
-// actually inline every call, or the build fails naming why (self-recursive,
-// address-taken, or too large) — never a silent miss. Methods stay ordinary
-// functions; there is no macro-rewrite hook, just an attribute on the
-// generated Rust once sema has confirmed the promise holds.
+// error). `#Inline(Always)` is a guarantee: every direct call is inlined on
+// every tier (O0, O1, O2 and compile-time code), or the build fails naming
+// why (a call of itself or a cycle of marked calls, address taken, too
+// large, `#Scrub`, or a read of `context.trace`) — never a silent miss.
+// Methods take the mark too; `jet inspect choices` lists each inlined call.
 #Inline square: fn(x: Int) -> Int { x * x }
 
 #Inline(Always) double: fn(x: Int) -> Int { x * 2 }

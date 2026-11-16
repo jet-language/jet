@@ -17,7 +17,8 @@
 // arguments (constants, ranges), and the copy adds at most its own size.
 //
 // The body sits in a Block of its own. Parameters read the call's argument
-// slots (a callee that wrote one is refused); every other callee slot is a
+// slots (a parameter the body writes takes its argument into a slot of its
+// own first); every other callee slot is a
 // new slot of the caller. `return v` becomes a move of v into the call's
 // result slot (an aggregate result: fresh frame storage and a copy of its
 // bytes, as the call's result storage) and a Br out of that Block. Lines of
@@ -38,11 +39,18 @@
 //
 // A callee marked `#Inline(Always)` (IRFunction.inline_always) is inlined
 // before every other pass, on every tier (O0, O1, O2 and a compile-time
-// batch) and under every `inline` value (ir_opt_inline_marked_module): at
-// every call site that passes the checks above but the size limits and the
-// budget, its copy drawing on neither. The mark is a guarantee, not a hint:
-// sema refuses one that can't keep it. Under `inline: always_marked` or
-// `off` (IROptInline.Marked) the bottom-up walk takes no other callee.
+// batch) and under every `inline` value (ir_opt_inline_marked_module), at
+// every call site, with no size limit and no budget. It may write a
+// parameter, and its stops may lie in another file: they report at the
+// call's line. The mark is a guarantee, not a hint. Sema refuses a mark
+// that can't keep it: a marked function that calls itself or another marked
+// function calling back (E0917), is taken as a value (E0918), is too large
+// (E0919), reveals a fixed value with `#Scrub` (E1016) or reads
+// `context.trace` (E1017). An asm leaf, a host provider and a last-owner
+// routine are the compiler's own and never marked. A marked call left after
+// this pass is a compiler bug: IR Lint's `call.marked` rule (Lint.jet) stops
+// the build. Under `inline: always_marked` or `off` (IROptInline.Marked) the
+// bottom-up walk takes no other callee.
 //
 // Each site taken is one IROptReport.inlines row with the reason it was
 // taken; `jet inspect choices` lists them as its inlining choices.
@@ -169,7 +177,10 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
 // The cost (ir_opt_inline_cost) of the callee of the Call at `at` when it
 // may be inlined there, else -1. An asm leaf's code is its template, never
 // IR to inline; a host provider leaf (IR.jet IR_HOST_PROVIDER) stays a call
-// its host can replace.
+// its host can replace. A marked callee also takes a body that writes a
+// parameter (ir_opt_splice gives it a slot of its own), an argument or
+// result of another type row of the same layout, and a stop in another
+// file (the stop reports at the call's line).
 ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, at: Int, recursive: [Bool], limit: Int) -> Int Never! {
     callee_id: caller.a[at]
     if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] || bodies[callee_id].len() == 0 {
@@ -181,7 +192,7 @@ ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
     // A last-owner routine stays one shared copy (BuildOwn.jet IR_LAST_OWNER).
     if callee.name == IR_LAST_OWNER && callee.source_file == "" -> return -1
     if caller.c[at] != callee.param_count -> return -1
-    if caller.dst[at] >= 0 && (callee.result < 0 || caller.slot_type[caller.dst[at]] != callee.result) {
+    if caller.dst[at] >= 0 && (callee.result < 0 || !ir_opt_inline_rows_fit(m, callee, caller.slot_type[caller.dst[at]], callee.result)) {
         return -1
     }
     // A callee holding a fixed value (IRFunction.slot_fixed) whose result
@@ -190,19 +201,35 @@ ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
     if caller.dst[at] >= 0 && !caller.slot_fixed[caller.dst[at]] && ir_timing_marked(callee) {
         return -1
     }
-    // A parameter becomes the call's argument slot: same type rows only.
+    // A parameter becomes the call's argument slot: same type rows only,
+    // unless the callee is marked.
     loop slot in 0..<callee.param_count {
-        if caller.slot_type[caller.args[caller.b[at] + slot]] != callee.slot_type[slot] -> return -1
+        if !ir_opt_inline_rows_fit(m, callee, caller.slot_type[caller.args[caller.b[at] + slot]], callee.slot_type[slot]) {
+            return -1
+        }
     }
     cost: ir_opt_inline_cost(m, callee)
     if cost > limit -> return -1
     loop k in 0..<callee.op.len() {
         written: ir_x64_write(callee, k)
-        if written >= 0 && written < callee.param_count -> return -1
-        if callee.source_file != caller.source_file && ir_opt_located(m, callee, k) -> return -1
+        if written >= 0 && written < callee.param_count && !callee.inline_always -> return -1
+        if callee.source_file != caller.source_file && !callee.inline_always && ir_opt_located(m, callee, k) {
+            return -1
+        }
         if ir_opt_calls_route(m, callee, k, "jet_rt_context_trace") -> return -1
     }
     cost
+}
+
+// Whether a value of type row `row` may stand for one of row `wanted` in
+// an inlined body of `callee`: the same row, or for a marked callee a row
+// of the same layout (the same kind, and for a word or an aggregate the
+// same size), as a call's argument and result may be.
+ir_opt_inline_rows_fit: fn(m: IRModule, callee: IRFunction, row: Int, wanted: Int) -> Bool Never! {
+    if row == wanted -> return true
+    if !callee.inline_always || m.types[row].kind != m.types[wanted].kind -> return false
+    kind: m.types[row].kind
+    (kind != .Word && kind != .Aggregate) || m.types[row].size == m.types[wanted].size
 }
 
 // The size inlining weighs: `f`'s instructions that do something
@@ -252,8 +279,14 @@ ir_opt_inline_marked: fn(bodies: [[IRFunction]], callee: Int) -> Bool Never! {
 // (a depth-first walk of the marked calls), so the copy it lends holds no
 // marked call of its own; then every unmarked function that calls one. A
 // marked callee its own marked calls reach again is recursive and stays a
-// call. Each site taken is one row of `report`.
+// call (sema refuses such a cycle, E0917). Each site taken is one row of
+// `report`. The module is marked done (IRModule.marked_inlined): a second
+// run leaves it as it is, and IR Lint holds it to no marked call left.
 ir_opt_inline_marked_module: fn(m: &IRModule, report: &IROptReport) Never! {
+    if m.marked_inlined {
+        return
+    }
+    m.marked_inlined = true
     count: m.functions.len()
     marked := [Bool]{}
     any := false
@@ -378,14 +411,31 @@ ir_opt_divisor: fn(f: IRFunction, at: Int) -> Int? Never! {
 }
 
 // The callee's body in place of the Call at `at` of `caller`, appended to `f`.
+// A parameter the body writes takes its argument into a slot of its own
+// first, so the caller's argument keeps its value: a copy, or a move of a
+// value with a drop (one the call hands over).
 ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, callee: IRFunction) Never! {
     site_line: caller.code_line[at]
     f.frame_bound = ir_frame_bound_add(f.frame_bound, callee.frame_bound)
     same_file: callee.source_file == caller.source_file
+    written := (loop _ in 0..<callee.param_count -> false)
+    loop k in 0..<callee.op.len() {
+        slot: ir_x64_write(callee, k)
+        if slot >= 0 && slot < callee.param_count -> written[slot] = true
+    }
     map := [Int]{}
     loop slot in 0..<callee.slot_type.len() {
         if slot < callee.param_count {
-            map.push(caller.args[caller.b[at] + slot])
+            argument: caller.args[caller.b[at] + slot]
+            if !written[slot] {
+                map.push(argument)
+                next
+            }
+            own: ir_slot(f, callee.slot_type[slot], IRSlotKind.Local, -1, 0)
+            f.slot_fixed[own] = callee.slot_fixed[slot]
+            transfer: if m.types[callee.slot_type[slot]].drop == "" -> IROp.Copy else -> IROp.Move
+            _ := ir_emit(f, transfer, own, argument, -1, -1, site_line)
+            map.push(own)
             next
         }
         name: if same_file -> callee.slot_name[slot] else -> -1
@@ -607,6 +657,56 @@ ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
     assert_eq("{report.inlines[0].caller} {report.inlines[0].callee} {report.inlines[0].reason}", "h g marked #Inline(Always)")
     assert_eq("{report.inlines[1].caller} {report.inlines[1].callee}", "a b")
     assert_eq("{report.inlines[2].caller} {report.inlines[2].callee} {report.inlines[2].line}", "f h 5")
+}
+
+// A module of marked function g of other.jet, which doubles its Int
+// parameter in place and returns it divided by itself (a stop located in
+// other.jet), and unmarked f of marked.jet, which calls g.
+ir_opt_inline_test_written: fn() -> IRModule Never! {
+    m := ir_module_new()
+    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    g := ir_function_new("g", "test:other.jet::g", "", "other.jet", 1)
+    g.inline_always = true
+    n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
+    g.result = int
+    _ := ir_emit(g, IROp.Add, n, n, n, -1, 2)
+    v: ir_slot(g, int, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.FloorDiv, v, n, n, -1, 3)
+    _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 3)
+    m.functions.push(g)
+    f := ir_opt_inline_test_caller("f", 0, int)
+    f.inline_always = false
+    m.functions.push(f)
+    m
+}
+
+#Test("A marked callee is inlined though it writes its parameter and can stop in another file") {
+    m := ir_opt_inline_test_written()
+    f: m.functions.pop() ?? panic("no f")
+    g := m.functions.pop() ?? panic("no g")
+    at := -1
+    loop k in 0..<f.op.len() {
+        if f.op[k] == .Call -> at = k
+    }
+    // Unmarked, the written parameter and the stop in another file refuse it.
+    g.inline_always = false
+    bodies := [[IRFunction]]{[IRFunction]{g.move()}, [IRFunction]{}}
+    recursive: [Bool]{false, false}
+    assert_eq(ir_opt_inline_size(m, bodies, f, at, recursive, 1000), -1)
+    bodies[0][0].inline_always = true
+    assert(ir_opt_inline_size(m, bodies, f, at, recursive, 1000) >= 0)
+    report := ir_opt_report(0)
+    out: ir_opt_inline_build(m, bodies, f, recursive, [Int]{}, false, 0, IROptInline.Marked, report) ?? panic("g was not inlined")
+    assert_eq(ir_opt_inline_test_calls(out), 0)
+    // The body doubles a slot of its own, a move of f's parameter, which no
+    // instruction writes.
+    moves := 0
+    loop k in 0..<out.op.len() {
+        if out.op[k] == .Move && out.a[k] == 0 -> moves += 1
+        assert(ir_x64_write(out, k) != 0)
+    }
+    assert_eq(moves, 1)
+    assert_eq(report.inlined_calls, 1)
 }
 
 // Whether the FloorDiv of an Int parameter by `divisor` (a constant, or the

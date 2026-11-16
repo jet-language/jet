@@ -1,0 +1,7 @@
+PII: tag { deny: [Exec] }
+
+// E1016: a `#Scrub` routine stays a call, so `#Inline(Always)` cannot expand it.
+#[Inline(Always), Scrub(PII)]
+redact: fn(value: #PII String) -> String { value }
+
+run: fn() { print(redact(#PII #Input "secret")) }

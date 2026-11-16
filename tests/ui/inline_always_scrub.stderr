@@ -1,0 +1,8 @@
+Error [jet.InlineAlwaysScrub]: `redact` is `#Scrub`, so `#Inline(Always)` cannot expand it
+  --> tests/ui/inline_always_scrub.jet:4:1
+    |
+  4 | #Inline(Always) #Scrub(PII) redact: fn(value: #PII String) -> String { value }
+    | ^^^^^^^^^^^^^^^
+ Why: A `#Scrub` routine reveals a fixed value as a public result, and only its own call keeps that value fixed up to the result; an inlined copy would let the fixed value flow on into the caller's code.
+ Fix: Drop `#Inline(Always)`; a `#Scrub` routine stays a call.
+More: jet-lang.dev/e/E1016

@@ -490,6 +490,10 @@ IRDataReloc: struct {
 // `dropped_early`: every body's String Drops already went back to their last
 // use (DropEarly.jet ir_drop_early, or at O0 Opt.jet ir_opt_o0_bodies), so a
 // second run leaves the module as it is.
+// `marked_inlined`: every direct call of an `#Inline(Always)` function was
+// inlined (OptInline.jet ir_opt_inline_marked_module), so a second run
+// leaves the module as it is, and IR Lint finds a marked call left a
+// compiler bug (Lint.jet IR_LINT_CALL_MARKED).
 // `debug_directory`: the compilation directory the image's DWARF records
 // ("": the working directory), which relative source paths (a fault
 // report's) resolve from. `host_literals`: the compile-time literals that are
@@ -548,6 +552,7 @@ IRModule: struct {
     single_thread: Bool{false}
     user_values: Bool{false}
     dropped_early: Bool{false}
+    marked_inlined: Bool{false}
     debug_directory: String{""}
     host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}}
     struct_fields: [String]{[String]{}}
