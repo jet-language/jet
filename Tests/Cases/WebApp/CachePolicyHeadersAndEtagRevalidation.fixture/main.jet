@@ -46,6 +46,7 @@ run: fn() (NetError | HTTPError | TaskFailure)! {
     }
     base: "http://{addr}/api"
     posted: client.post("{base}/landing", "[]")
+    print("landing by POST: {shown(posted)}")
     body: posted.text()
     print("landing names its board: {body.contains("\"title\":\"crew\"")}")
     etag: posted.header("etag") ?? ""

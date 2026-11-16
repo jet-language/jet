@@ -1,0 +1,111 @@
+// A Board mounted at /api whose `closed`, `zero` and `blank` reply false, 0
+// and empty text, types the app graph caches `.Public` for ten minutes;
+// `note` replies a Note, which has no policy. Each method counts its runs in
+// the store. The client calls each method twice with the same arguments,
+// prints what both calls gave, and then how often each method ran.
+use {
+    app
+    db: core.db
+    net: core.net
+    web: core.web
+}
+
+#Codable
+Runs: struct {
+    name: String
+    runs: Int
+}
+
+#Codable
+Note: struct {
+    text: String
+}
+
+#Error
+BoardError: enum {
+    Failed(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+runs_in: fn(store: db.Store) -> db.Table<String, Runs> {
+    store.table("runs", key: fn(row: Runs) { row.name.copy() })
+}
+
+// How often the method `name` ran.
+ran: fn(store: db.Store, name: String) -> Int {
+    if runs_in(store).get(name) == {
+        .Val(found) -> found.runs
+        .None -> 0
+        .Err(_) -> -1
+    }
+}
+
+// Counts a run of the method `name`.
+counted: fn(store: db.Store, name: String) -> Int BoardError! {
+    runs: ran(store, name) + 1
+    _: runs_in(store).put(Runs{name: name, runs: runs}) ?? return Err(BoardError.Failed(err.message()))
+    Ok(runs)
+}
+
+Board: struct {
+    store: db.Store
+
+    #App.Public closed: fn(self) -> Bool BoardError! {
+        _: counted(self.store, "closed") ?? return Err(err)
+        Ok(false)
+    }
+
+    #App.Public zero: fn(self) -> Int BoardError! {
+        _: counted(self.store, "zero") ?? return Err(err)
+        Ok(0)
+    }
+
+    #App.Public blank: fn(self) -> String BoardError! {
+        _: counted(self.store, "blank") ?? return Err(err)
+        Ok("")
+    }
+
+    #App.Public note: fn(self) -> Note BoardError! {
+        _: counted(self.store, "note") ?? return Err(err)
+        Ok(Note{text: ""})
+    }
+}
+
+// What one call of each method through `board` gave, as text.
+closed: fn(board: app.Remote<Board>) -> String { "{board.closed() ?? panic("closed")}" }
+
+zero: fn(board: app.Remote<Board>) -> String { "{board.zero() ?? panic("zero")}" }
+
+blank: fn(board: app.Remote<Board>) -> String { "\"{board.blank() ?? panic("blank")}\"" }
+
+note: fn(board: app.Remote<Board>) -> String {
+    got: board.note() ?? panic("note")
+    "\"{got.text}\""
+}
+
+run: fn() {
+    _: app.new("Board").cache<Bool>(.Public{max_age: 10min}).cache<Int>(.Public{max_age: 10min}).cache<String>(.Public{max_age: 10min})
+    store: db.open_memory()
+    served: web.app().mount("/api", Board{store: store.copy()})
+    listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<8 { served.serve_once(listener) ?? panic("serve") }
+    }
+    serving.detach()
+    url: "http://{addr}/api"
+    print("closed: {closed(app.remote_at<Board>(url))} then {closed(app.remote_at<Board>(url))}")
+    print("zero: {zero(app.remote_at<Board>(url))} then {zero(app.remote_at<Board>(url))}")
+    print("blank: {blank(app.remote_at<Board>(url))} then {blank(app.remote_at<Board>(url))}")
+    print("note: {note(app.remote_at<Board>(url))} then {note(app.remote_at<Board>(url))}")
+    print("runs: closed {ran(store, "closed")}, zero {ran(store, "zero")}, blank {ran(store, "blank")}, note {ran(store, "note")}")
+}

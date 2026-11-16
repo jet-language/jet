@@ -1,0 +1,14 @@
+# A reply the server keeps under a `.Public` policy is found by its being
+# kept, not by its value: false, 0 and empty text are each kept, so the
+# second call of each method with the same arguments is answered without a
+# run. `note` replies a type with no policy, and runs for both calls.
+fixture: CacheKeepsFalsyValues.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: ~ "closed: false then false\n"
+stdout: ~ "zero: 0 then 0\n"
+stdout: ~ "blank: \"\" then \"\"\n"
+stdout: ~ "note: \"\" then \"\"\n"
+stdout: ~ "runs: closed 1, zero 1, blank 1, note 2\n" # each kept reply ran once

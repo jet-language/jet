@@ -5824,6 +5824,13 @@ any site can make a browser send, never runs a method that may write.
 reply type with no policy carries no cache headers. `.cache` without the one
 type argument is E0119.
 
+The server also keeps a `.Public{max_age}` method's successful reply for
+`max_age`, by the call's JSON array of arguments: a call with the same
+arguments within it is answered with the kept reply and its `Age`, and the
+method does not run. A reply is kept for being a reply, not for its value, so
+`false`, `0` and `""` are kept like any other. A failed run, or a call
+replayed under its `Idempotency-Key`, keeps nothing.
+
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with

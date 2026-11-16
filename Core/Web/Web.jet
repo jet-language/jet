@@ -355,7 +355,7 @@ App: struct {
     // is cached `.Public` also answers GET `path`
     // (`app_remote_get_response`).
     __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, reply: String, at: SourceLocation{#caller}) -> App Never! {
-        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns), reply: reply}
+        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns), reply: reply, kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
         table: app_table(self)
         answers: http_server.__handler(fn(request: HTTPRequest) { Ok(if request.method == "GET" -> app_remote_get_response(endpoint, request) else -> app_remote_response(endpoint, request)) })
@@ -368,7 +368,7 @@ App: struct {
     // (sema lowers each here) as `__remote_public` does, for a signed-in
     // caller only (`app_signed_in_response`).
     __remote_signed_in: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
-        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns), reply: ""}
+        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns), reply: "", kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
         http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_signed_in_response(endpoint, request)) }), "", at)
         self.copy()
@@ -1360,11 +1360,55 @@ priv app_mount_response: fn(handler: AppHandler, request: HTTPRequest) -[Net, FS
 // One endpoint method of a mounted service; sema builds `answer` from it.
 // `reply` names the method's reply type, for its cache policy
 // (`app_remote_reply`); "" for a signed-in method, whose replies no one
-// keeps.
+// keeps. `kept` holds the replies a `.Public` policy lets the server keep,
+// by the call's JSON array of arguments (`app_kept_reply`).
 priv AppRemote: struct {
     answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!
     limit: AppRemoteLimit
     reply: String
+    kept: Shared<[String:AppKeptReply]>
+}
+
+// A reply the server keeps for a `.Public` policy's `max_age`: the encoded
+// reply, whatever it holds (`false`, `0` and `""` are replies like any
+// other), the monotonic instant it was kept, and the last instant it is
+// fresh at.
+priv AppKeptReply: struct {
+    reply: String
+    kept_ns: Int
+    fresh_ns: Int
+}
+
+// The most replies one endpoint keeps; past it, the stale ones are dropped
+// first, and then all of them.
+APP_KEPT_REPLIES: 4096
+
+// The reply `kept` holds for the arguments `args` while it is fresh at
+// `now_ns`: fresh through the instant its `max_age` ends, stale after it.
+priv app_kept_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, now_ns: Int) -> AppKeptReply? Never! {
+    held: kept.guard_read()
+    found: held.value.get(args) ?? return None
+    if now_ns > found.fresh_ns -> return None
+    Val(found.copy())
+}
+
+// Keeps `reply` for the arguments `args` from `now_ns` for `max_age`; a
+// `max_age` of none or less keeps nothing.
+priv app_keep_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, reply: String, now_ns: Int, max_age: Duration) Never! {
+    if max_age.ns <= 0 {
+        return
+    }
+    fresh_ns: if max_age.ns > 9223372036854775807 - now_ns -> 9223372036854775807 else -> now_ns + max_age.ns
+    guard := kept.guard_edit()
+    if guard.value.len() >= APP_KEPT_REPLIES {
+        fresh := [String:AppKeptReply]{}
+        loop key in guard.value.keys() {
+            held: guard.value.get(key) ?? next
+            if now_ns <= held.fresh_ns -> fresh[key] = held
+        }
+        guard.value = if fresh.len() >= APP_KEPT_REPLIES -> [String:AppKeptReply]{} else -> fresh
+    }
+    guard.value[args.copy()] = AppKeptReply{reply: reply.copy(), kept_ns: now_ns, fresh_ns: fresh_ns}
 }
 
 // An endpoint marker's `limit:`: at most `calls` calls from one caller in
@@ -1484,7 +1528,10 @@ priv app_remote_get_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Ne
 }
 
 // One call of `endpoint` (`app_remote_response`), whose JSON array of
-// arguments is `query`, or the request's body when None.
+// arguments is `query`, or the request's body when None. Under a
+// `.Public(max_age)` policy, a call whose arguments have a fresh kept reply
+// (`app_kept_reply`) is answered with it, with its `Age`, and the method
+// does not run; a run that succeeds keeps its reply for `max_age`.
 priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: String?) -[Net, FS.Read]> HTTPResponse Never! {
     if app_remote_limited(endpoint.limit, app_remote_who(request)) == .Val(wait_ns) {
         return app_limited(wait_ns)
@@ -1502,11 +1549,30 @@ priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: Strin
     }
     tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
     policy: calls.reply_cache.policy(endpoint.reply)
-    app_transacted(None, asked, fn() {
+    now: rt.clock_mono_ns()
+    if policy == .Val(.Public(_)) {
+        if app_kept_reply(endpoint.kept, text, now) == .Val(hit) {
+            return app_remote_reply(policy, request, hit.reply, Val(now - hit.kept_ns))
+        }
+    }
+    // The reply of the call's last run, for the server to keep.
+    last: Shared{[String]{}}
+    ran: last.copy()
+    answering: policy.copy()
+    answered: app_transacted(None, asked, fn() {
         reply: endpoint.answer(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
         if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
-        (response: app_remote_reply(policy, request, reply), commit: !app_reply_failed(reply))
+        guard := ran.guard_edit()
+        guard.value = [String]{reply.copy()}
+        (response: app_remote_reply(answering, request, reply, None), commit: !app_reply_failed(reply))
     })
+    if policy == .Val(.Public(max_age)) && (answered.status == 200 || answered.status == 304) && answered.header("idempotent-replayed") == None {
+        held: last.guard_read()
+        if held.value.len() == 1 && !app_reply_failed(held.value[0]) {
+            app_keep_reply(endpoint.kept, text, held.value[0], now, max_age)
+        }
+    }
+    answered
 }
 
 // The 200 answer of a call whose reply is `reply`, under the policy of its
@@ -1514,20 +1580,24 @@ priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: Strin
 // `Cache-Control: private, no-store`; `.Public(max_age)` is
 // `public, max-age=<whole seconds>` with an `ETag` that names the reply's
 // bytes, and a GET whose `If-None-Match` names that ETag is answered 304
-// with no body. A failed run's reply is kept by no one.
-priv app_remote_reply: fn(policy: calls.CachePolicy?, request: HTTPRequest, reply: String) -> HTTPResponse Never! {
+// with no body. A reply the server kept `age_ns` ago carries its `Age` in
+// whole seconds. A failed run's reply is kept by no one.
+priv app_remote_reply: fn(policy: calls.CachePolicy?, request: HTTPRequest, reply: String, age_ns: Int?) -> HTTPResponse Never! {
     answered: app_json(200, reply)
     kept: policy ?? return answered
     if kept == .Public(max_age) && !app_reply_failed(reply) {
         etag: "\"{http_server.static_hash(reply.bytes())}\""
-        control: "public, max-age={max_age.ns /% 1000000000}"
+        fields := core.http.headers_set(core.http.headers(), "etag", etag)
+        fields = core.http.headers_set(fields, "cache-control", "public, max-age={max_age.ns /% 1000000000}")
+        if age_ns == .Val(elapsed) {
+            fields = core.http.headers_set(fields, "age", "{elapsed /% 1000000000}")
+        }
         if request.method == "GET" && http_server.etag_matches(request.header("if-none-match") ?? "", etag) {
-            fields := core.http.headers_set(core.http.headers(), "etag", etag)
-            fields = core.http.headers_set(fields, "cache-control", control)
             return http_server.response_body(304, core.http.body_empty(), fields)
         }
-        tagged: answered.__with_header("etag", etag)
-        return tagged.__with_header("cache-control", control)
+        cached := answered
+        loop field in fields.fields -> cached = cached.__with_header(field.name, field.value)
+        return cached
     }
     answered.__with_header("cache-control", "private, no-store")
 }
@@ -1726,6 +1796,38 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
     unsigned: http_server.__dispatch(app_table(signed), web_http.server_request("POST", "/api/me", web_http.body_text("[]"), web_http.headers()))
     assert_eq(unsigned.status, 401)
     assert_eq(unsigned.header("cache-control"), Val("private, no-store"))
+}
+
+#Test("a reply a `.Public` policy keeps answers the same arguments again without a run, whether it is false, 0 or empty text") {
+    _: calls.new("Cache").__cache<Bool>("web-test.Kept", calls.CachePolicy.Public{max_age: 10min})
+    runs: Shared{0}
+    counted: runs.copy()
+    served: app().__remote_public(
+        "/api/kept",
+        fn(args: RemoteArgs) {
+            kind: args.__take<Int>(0) ?? return Err(err)
+            guard := counted.guard_edit()
+            guard.value += 1
+            if kind == 0 -> return Ok(args.__reply_value<Bool>(false))
+            if kind == 1 -> return Ok(args.__reply_value<Int>(0))
+            Ok(args.__reply_value<String>(""))
+        },
+        0,
+        0,
+        "web-test.Kept",
+    )
+    table: app_table(served)
+    replies: [String]{"{{\"ok\":false}}", "{{\"ok\":0}}", "{{\"ok\":\"\"}}"}
+    loop (kind, reply) in replies {
+        first: http_server.__dispatch(table, web_http.server_request("POST", "/api/kept", web_http.body_text("[{kind}]"), web_http.headers()))
+        assert_eq(first.text() ?? "unreadable", reply)
+        assert_eq(first.header("age"), String?{None})
+        again: http_server.__dispatch(table, web_http.server_request("POST", "/api/kept", web_http.body_text("[{kind}]"), web_http.headers()))
+        assert_eq(again.text() ?? "unreadable", reply)
+        assert_eq(again.header("age"), Val("0"))
+    }
+    held: runs.guard_read()
+    assert_eq(held.value, 3)
 }
 
 // One webhook method of a mounted service: how its sender signs, the names
