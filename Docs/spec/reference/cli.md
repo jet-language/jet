@@ -1649,8 +1649,9 @@ limit and the caller's remaining budget, its only call, or `marked
 too, which list no other.
 `#Inline(Always)` is a guarantee that locks the callee inlined; a change that
 makes it recursive or part of a cycle of marked calls (E0917), address-taken
-(E0918), too large (E0919), `#Scrub` (E1016) or a reader of `context.trace`
-(E1017) fails the build.
+(E0918), too large (E0919), `#Scrub` (E1016), a reader of `context.trace`
+(E1017) or foreign, `#FFI(c)`, `#FFI(asm)` or `#Import(c)` (E1021), fails
+the build.
 Collection: under `#Policy(gc)`, a binding whose returned heap graph needs
 identity beyond its lexical owner is kept by the policy scope's collector, at
 the function's line, for example ``collection: main.jet:10 in build: `first`

@@ -108,11 +108,12 @@ Kernel: struct {
 // `#Inline` on a function or method is a soft hint to inline it; sema never
 // rejects it and the compiler may ignore it. `#Inline(Always)` is a
 // guarantee, not a hint: every direct call is inlined on every tier (O0,
-// O1, O2, web and compile-time code), whatever its size. Sema refuses a mark
-// that can't keep it: a function that calls itself or another marked
-// function calling back (E0917), one taken as a value (E0918), one over the
-// size ceiling (E0919), a `#Scrub` routine (E1016), and one that reads
-// `context.trace` (E1017).
+// O1, O2, web and compile-time code), whatever its size, or the program is
+// refused. Sema refuses a mark that can't keep it: a function that calls
+// itself or another marked function calling back (E0917), one taken as a
+// value (E0918), one over the size ceiling (E0919), a `#Scrub` routine
+// (E1016), one that reads `context.trace` (E1017), and one with a foreign
+// body, `#FFI(c)`, `#FFI(asm)` or `#Import(c)` (E1021).
 Inline: struct {
     mode: InlineMode{.Hint}
 

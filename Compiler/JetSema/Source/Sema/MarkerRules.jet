@@ -2202,8 +2202,9 @@ sema_inline_always_scan_expr: fn(expression: Expr, scan: &SemaInlineAlwaysScan) 
 }
 
 // The local half of the promise: direct self-recursion (E0917), the size
-// ceiling (E0919) and `#Scrub` (E1016), all provable from the function
-// alone. `imports` are its file's imports; `method` says it is a method.
+// ceiling (E0919), `#Scrub` (E1016) and a foreign body (E1021), all provable
+// from the function alone. `imports` are its file's imports; `method` says
+// it is a method.
 sema_inline_always_check_function: fn(function: Func, imports: [ImportDecl], diagnostics: &[Diagnostic], method: Bool) Never! {
     if !function.is_inline_always {
         return
@@ -2213,14 +2214,30 @@ sema_inline_always_check_function: fn(function: Func, imports: [ImportDecl], dia
     span: function.inline_span ?? function.name_span
     name: function.name
     if scan.self_recursive {
-        diagnostics.push(sema_error("E0917", span, "`{name}` calls itself, so `#Inline(Always)` cannot expand it", "`#Inline(Always)` guarantees every call is inlined, and inlining a recursive call would either loop forever at compile time or require an artificial depth cutoff — neither is a real inline.", "drop `#Inline(Always)` (use `#Inline` as a hint), or restructure the function to be non-recursive."))
+        diagnostics.push(sema_error("E0917", span, "`{name}` calls itself, so `#Inline(Always)` cannot expand it", sema_inline_always_why("inlining a recursive call would either loop forever at compile time or need an artificial depth cutoff, and neither is a real inline."), "drop `#Inline(Always)` (use `#Inline` as a hint), or restructure the function to be non-recursive."))
     }
     if scan.stmt_count > SEMA_INLINE_ALWAYS_MAX_STMTS {
-        diagnostics.push(sema_error("E0919", span, "`{name}` is too large for `#Inline(Always)`", "its body has {scan.stmt_count} statements — over the {SEMA_INLINE_ALWAYS_MAX_STMTS}-statement ceiling `#Inline(Always)` enforces so its guarantee to inline every call doesn't quietly bloat every call site.", "drop `#Inline(Always)` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline."))
+        diagnostics.push(sema_error("E0919", span, "`{name}` is too large for `#Inline(Always)`", sema_inline_always_why("its body has {scan.stmt_count} statements, over the {SEMA_INLINE_ALWAYS_MAX_STMTS}-statement ceiling that keeps the copy at every call site small."), "drop `#Inline(Always)` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline."))
     }
     if function.scrub_tag != None {
-        diagnostics.push(sema_error("E1016", span, "`{name}` is `#Scrub`, so `#Inline(Always)` cannot expand it", "a `#Scrub` routine reveals a fixed value as a public result, and only its own call keeps that value fixed up to the result; an inlined copy would let the fixed value flow on into the caller's code.", "drop `#Inline(Always)`; a `#Scrub` routine stays a call."))
+        diagnostics.push(sema_error("E1016", span, "`{name}` is `#Scrub`, so `#Inline(Always)` cannot expand it", sema_inline_always_why("a `#Scrub` routine reveals a fixed value as a public result, and only its own call keeps that value fixed up to the result; an inlined copy would let the fixed value flow on into the caller's code."), "drop `#Inline(Always)`; a `#Scrub` routine stays a call."))
     }
+    // An `#FFI` function's body is C or assembly source, and an `#Import(c)`
+    // function's is the C symbol it names.
+    foreign: if {
+        function.inline_foreign == .Val(ffi) -> "`#FFI({ffi.lang})`"
+        sema_function_is_guest_import(function) -> "`#Import(c)`"
+        else -> ""
+    }
+    if foreign != "" {
+        diagnostics.push(sema_error("E1021", span, "`{name}` has a foreign body, so `#Inline(Always)` cannot expand it", sema_inline_always_why("the body of an {foreign} function is foreign code, not Jet: each call goes to that code, and there is no Jet body to copy into the caller."), "drop `#Inline(Always)`; a function with a foreign body stays a call."))
+    }
+}
+
+// The why of every `#Inline(Always)` refusal: `reason`, then the guarantee
+// and every mark sema refuses.
+sema_inline_always_why: fn(reason: String) -> String Never! {
+    "{reason} `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021)."
 }
 
 // One call between two `#Inline(Always)` functions (indexes into the marked
@@ -2262,7 +2279,7 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
             if fact.detail == .Val(detail) {
                 if detail.intrinsic_api == .Val(api) {
                     if api == "context.trace" {
-                        diagnostics.push(sema_error("E1017", fact.span, "`{name}` reads `context.trace`, so `#Inline(Always)` cannot expand it", "`context.trace` starts at the reading function's own frame, and an inlined copy has no frame of its own: the trace would name the caller instead.", "drop `#Inline(Always)`, or read `context.trace` in the function that calls `{name}`."))
+                        diagnostics.push(sema_error("E1017", fact.span, "`{name}` reads `context.trace`, so `#Inline(Always)` cannot expand it", sema_inline_always_why("`context.trace` starts at the reading function's own frame, and an inlined copy has no frame of its own: the trace would name the caller instead."), "drop `#Inline(Always)`, or read `context.trace` in the function that calls `{name}`."))
                     }
                 }
             }
@@ -2287,7 +2304,7 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
         callee: modules[marked_modules[edge.callee]].functions[marked_functions[edge.callee]].name
         segments_index: sema_registration_module_index(graph, modules[edge.module].module_identity) ?? next
         start: diagnostics.len()
-        diagnostics.push(sema_error("E0917", edge.span, "`{caller}` calls `{callee}`, whose calls lead back to `{caller}`, so `#Inline(Always)` cannot expand them", "`#Inline(Always)` guarantees every call is inlined, and each inlined copy would hold the next one, so expanding the cycle would never end.", "drop `#Inline(Always)` from one function of the cycle (use `#Inline` as a hint), or break the cycle."))
+        diagnostics.push(sema_error("E0917", edge.span, "`{caller}` calls `{callee}`, whose calls lead back to `{caller}`, so `#Inline(Always)` cannot expand them", sema_inline_always_why("each inlined copy would hold the next one, so expanding the cycle would never end."), "drop `#Inline(Always)` from one function of the cycle (use `#Inline` as a hint), or break the cycle."))
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[segments_index].source_segments)
         found = true
     }
@@ -2342,7 +2359,7 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
                 id: symbol_find(graph.symbols, key) ?? next
                 if function.is_inline_always && address_taken.get(id.id) != None {
                     name: function.name
-                    diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", "`#Inline(Always)` guarantees every call to `{name}` is inlined in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.", "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))
+                    diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", sema_inline_always_why("`{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at."), "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))
                 }
             }
         }

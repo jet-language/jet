@@ -45,12 +45,13 @@
 // call's line. The mark is a guarantee, not a hint. Sema refuses a mark
 // that can't keep it: a marked function that calls itself or another marked
 // function calling back (E0917), is taken as a value (E0918), is too large
-// (E0919), reveals a fixed value with `#Scrub` (E1016) or reads
-// `context.trace` (E1017). An asm leaf, a host provider and a last-owner
-// routine are the compiler's own and never marked. A marked call left after
-// this pass is a compiler bug: IR Lint's `call.marked` rule (Lint.jet) stops
-// the build. Under `inline: always_marked` or `off` (IROptInline.Marked) the
-// bottom-up walk takes no other callee.
+// (E0919), reveals a fixed value with `#Scrub` (E1016), reads
+// `context.trace` (E1017) or has a foreign body (E1021: `#FFI(c)`,
+// `#FFI(asm)` or `#Import(c)`). An asm leaf, a host provider and a
+// last-owner routine are the compiler's own and never marked. A marked call
+// left after this pass is a compiler bug: IR Lint's `call.marked` rule
+// (Lint.jet) stops the build. Under `inline: always_marked` or `off`
+// (IROptInline.Marked) the bottom-up walk takes no other callee.
 //
 // Each site taken is one IROptReport.inlines row with the reason it was
 // taken; `jet inspect choices` lists them as its inlining choices.
@@ -659,54 +660,129 @@ ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
     assert_eq("{report.inlines[2].caller} {report.inlines[2].callee} {report.inlines[2].line}", "f h 5")
 }
 
-// A module of marked function g of other.jet, which doubles its Int
-// parameter in place and returns it divided by itself (a stop located in
-// other.jet), and unmarked f of marked.jet, which calls g.
-ir_opt_inline_test_written: fn() -> IRModule Never! {
-    m := ir_module_new()
-    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    g := ir_function_new("g", "test:other.jet::g", "", "other.jet", 1)
-    g.inline_always = true
-    n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
-    g.result = int
-    _ := ir_emit(g, IROp.Add, n, n, n, -1, 2)
-    v: ir_slot(g, int, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.FloorDiv, v, n, n, -1, 3)
-    _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 3)
-    m.functions.push(g)
-    f := ir_opt_inline_test_caller("f", 0, int)
-    f.inline_always = false
-    m.functions.push(f)
-    m
+// What becomes of the call of g (the module's first function) in f (its
+// second), both taken out of `m`: the cost ir_opt_inline_size gives it with
+// g unmarked and then marked (-1: refused), and, marked, f's body after
+// ir_opt_inline_build: its calls, the Moves out of f's parameter, the
+// instructions that write that parameter, and each instruction's line.
+IROptInlineTestSplice: struct {
+    unmarked: Int
+    marked: Int
+    calls: Int
+    param_moves: Int
+    param_writes: Int
+    lines: [Int]
 }
 
-#Test("A marked callee is inlined though it writes its parameter and can stop in another file") {
-    m := ir_opt_inline_test_written()
+ir_opt_inline_test_splice: fn(m: &IRModule) -> IROptInlineTestSplice Never! {
     f: m.functions.pop() ?? panic("no f")
     g := m.functions.pop() ?? panic("no g")
     at := -1
     loop k in 0..<f.op.len() {
         if f.op[k] == .Call -> at = k
     }
-    // Unmarked, the written parameter and the stop in another file refuse it.
     g.inline_always = false
     bodies := [[IRFunction]]{[IRFunction]{g.move()}, [IRFunction]{}}
     recursive: [Bool]{false, false}
-    assert_eq(ir_opt_inline_size(m, bodies, f, at, recursive, 1000), -1)
+    unmarked: ir_opt_inline_size(m, bodies, f, at, recursive, 1000)
     bodies[0][0].inline_always = true
-    assert(ir_opt_inline_size(m, bodies, f, at, recursive, 1000) >= 0)
+    marked: ir_opt_inline_size(m, bodies, f, at, recursive, 1000)
     report := ir_opt_report(0)
     out: ir_opt_inline_build(m, bodies, f, recursive, [Int]{}, false, 0, IROptInline.Marked, report) ?? panic("g was not inlined")
-    assert_eq(ir_opt_inline_test_calls(out), 0)
+    assert_eq(report.inlined_calls, 1)
+    param_moves := 0
+    param_writes := 0
+    lines := [Int]{}
+    loop k in 0..<out.op.len() {
+        if out.op[k] == .Move && out.a[k] == 0 -> param_moves += 1
+        if ir_x64_write(out, k) == 0 -> param_writes += 1
+        lines.push(ir_code_line_source(out.code_line[k]))
+    }
+    IROptInlineTestSplice{unmarked: unmarked, marked: marked, calls: ir_opt_inline_test_calls(out), param_moves: param_moves, param_writes: param_writes, lines: lines.move()}
+}
+
+// A module of g, `file`'s function of one parameter of row `param` whose
+// value `body` makes from it, returned, then unmarked f of marked.jet,
+// whose parameter and result have row `arg`, which returns g's result for
+// its parameter.
+ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param: Type, arg: Type) -> IRModule Never! {
+    m := ir_module_new()
+    row: ir_type_row(m, param) ?? panic("no parameter row")
+    passed: ir_type_row(m, arg) ?? panic("no argument row")
+    g := ir_function_new("g", "test:{file}::g", "", file, 1)
+    n: ir_slot(g, row, IRSlotKind.Param, -1, 1)
+    g.result = row
+    v: ir_slot(g, row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, body, if write_param -> n else -> v, n, n, -1, 2)
+    _ := ir_emit(g, IROp.Return, -1, if write_param -> n else -> v, -1, -1, 3)
+    m.functions.push(g)
+    f := ir_opt_inline_test_caller("f", 0, passed)
+    f.inline_always = false
+    m.functions.push(f)
+    m
+}
+
+#Test("A marked callee is inlined though it writes its parameter") {
+    m := ir_opt_inline_test_module("marked.jet", IROp.Add, true, Type.Int, Type.Int)
+    splice: ir_opt_inline_test_splice(m)
+    // Unmarked, the written parameter refuses it.
+    assert_eq(splice.unmarked, -1)
+    assert(splice.marked >= 0)
+    assert_eq(splice.calls, 0)
     // The body doubles a slot of its own, a move of f's parameter, which no
     // instruction writes.
-    moves := 0
-    loop k in 0..<out.op.len() {
-        if out.op[k] == .Move && out.a[k] == 0 -> moves += 1
-        assert(ir_x64_write(out, k) != 0)
-    }
-    assert_eq(moves, 1)
+    assert_eq(splice.param_moves, 1)
+    assert_eq(splice.param_writes, 0)
+}
+
+#Test("A marked callee is inlined though it can stop in another file") {
+    // g of other.jet divides its parameter by itself, a stop located there.
+    m := ir_opt_inline_test_module("other.jet", IROp.FloorDiv, false, Type.Int, Type.Int)
+    splice: ir_opt_inline_test_splice(m)
+    // Unmarked, the stop in another file refuses it.
+    assert_eq(splice.unmarked, -1)
+    assert(splice.marked >= 0)
+    assert_eq(splice.calls, 0)
+    // The body's lines of other.jet become the call's line in marked.jet,
+    // where its stop reports.
+    loop line in splice.lines -> assert(line != 2 && line != 3)
+}
+
+#Test("A marked callee is inlined though its argument has another type row of the same layout") {
+    // g takes and returns an I64; f passes and returns a U64, a word of the
+    // same size.
+    m := ir_opt_inline_test_module("marked.jet", IROp.BitOr, false, Type.IntN{signed: true, bits: 64}, Type.IntN{signed: false, bits: 64})
+    splice: ir_opt_inline_test_splice(m)
+    // Unmarked, only the same row may stand for the parameter.
+    assert_eq(splice.unmarked, -1)
+    assert(splice.marked >= 0)
+    assert_eq(splice.calls, 0)
+}
+
+#Test("A last-owner routine is never marked, and a marked caller of it is still inlined") {
+    m := ir_module_new()
+    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    // Made as BuildOwn.jet makes every last-owner routine: one shared copy
+    // the drop sites call, unmarked.
+    last := ir_hashed_function(IR_LAST_OWNER, "#box.last<test>", "jet_ir_last_", "", 0)
+    assert(!last.inline_always)
+    n: ir_slot(last, int, IRSlotKind.Param, -1, 0)
+    last.result = int
+    _ := ir_emit(last, IROp.Return, -1, n, -1, -1, 0)
+    m.functions.push(last)
+    // Marked h calls the routine, and unmarked f calls h.
+    m.functions.push(ir_opt_inline_test_caller("h", 0, int))
+    f := ir_opt_inline_test_caller("f", 1, int)
+    f.inline_always = false
+    m.functions.push(f)
+    report := ir_opt_report(0)
+    ir_opt_inline_marked_module(m, report)
+    // f holds h's body, and with it the one call of the shared routine.
     assert_eq(report.inlined_calls, 1)
+    assert_eq(ir_opt_inline_test_calls(m.functions[2]), 1)
+    loop k in 0..<m.functions[2].op.len() {
+        if m.functions[2].op[k] == .Call -> assert_eq(m.functions[2].a[k], 0)
+    }
 }
 
 // Whether the FloorDiv of an Int parameter by `divisor` (a constant, or the

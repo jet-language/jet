@@ -32,7 +32,7 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">`#Inline(Always) fn` body exceeds the guarantee&#39;s statement ceiling</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`#Inline(Always)` guarantees every direct call is inlined on every tier, and copying a large body into every call grows the program. Sema refuses each mark that can&#39;t keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016) and a read of `context.trace` (E1017)</p>
+<p class="diag-copy why" data-registry-field="why">`#Inline(Always)` guarantees every direct call is inlined on every tier, and copying a large body into every call grows the program. Sema refuses each mark that can&#39;t keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Reduce the `#Inline(Always)` body below the checked statement ceiling or relax the marker.</p>
 <h2>Worked example</h2>
@@ -42,7 +42,7 @@
     |
   3 | #Inline(Always) big: fn() -&gt; Int {
     | ^^^^^^^^^^^^^^^
- Why: Its body has 44 statements — over the 40-statement ceiling `#Inline(Always)` enforces so its guarantee to inline every call doesn&#39;t quietly bloat every call site.
+ Why: Its body has 44 statements, over the 40-statement ceiling that keeps the copy at every call site small. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021).
  Fix: Drop `#Inline(Always)` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline.
 More: jet-lang.dev/e/E0919
 </pre>

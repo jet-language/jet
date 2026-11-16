@@ -3,6 +3,6 @@ Error [jet.InlineAlwaysTooLarge]: `big` is too large for `#Inline(Always)`
     |
   3 | #Inline(Always) big: fn() -> Int {
     | ^^^^^^^^^^^^^^^
- Why: Its body has 44 statements — over the 40-statement ceiling `#Inline(Always)` enforces so its guarantee to inline every call doesn't quietly bloat every call site.
+ Why: Its body has 44 statements, over the 40-statement ceiling that keeps the copy at every call site small. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021).
  Fix: Drop `#Inline(Always)` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline.
 More: jet-lang.dev/e/E0919
