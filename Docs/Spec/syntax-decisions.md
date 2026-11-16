@@ -424,8 +424,8 @@ from a value computed while building (D-JAI-COMPTIME1). **D-MODULE-VALUE1** (own
 instruction 2026-09-28, amended by owner ruling #4276 on 2026-10-23 and by
 D-MODULE-BUILD1 below) amends the immutable form: its initializer is any
 expression, read as an ordinary copy on every tier (spec "Values,
-expressions, and calls"). Loose top-level statements beside `run: fn` are
-E0621, and an imported file with loose statements is E0620. Notebook and REPL
+expressions, and calls"). Loose top-level statements beside a `run: fn`
+anywhere in the program are E0621 (one program entry form, below). Notebook and REPL
 adapters may construct an explicit `run: fn` for their submitted fragment.
 `dev: fn`, `build: fn`, and `#Test` declarations remain legal beside module
 globals.
@@ -438,9 +438,23 @@ entry (Main ruling 2026-11-09, option A): `total := 0` is written by a later
 top-level loop and captured by a lambda in the body; the file's functions take
 the locals they use as parameters (D-SCRIPT-HELPERS1). ALL_CAPS constants, `#Persist`
 and comptime bindings stay module declarations. A file with `run: fn` keeps the
-module rules above; a file with both is E0621; a file with neither is a library
-(E0101 on `jet run`). `jet run FILE`, `jet -e` and `jet run -` share this
-meaning on every tier.
+module rules above; a file with neither is a library (E0101 on `jet run`).
+`jet run FILE`, `jet -e` and `jet run -` share this meaning on every tier.
+
+**One program entry form** *(owner order 2026-11-11, #6857 c8; amends
+D-ENTRY-STATEMENTS1)*: a program is either script style, its entry file's
+top-level statements, or one `run: fn` entry, never mixed, at any scope. A
+`run: fn` anywhere in the program's load graph, package or project (the entry
+file, an imported module, a nested `name: module { … }`, another file of the
+package, generated code) or an import that binds the local name `run` (`use {
+run: other.main }`, a `pub use run: …` re-export) refuses top-level statements
+anywhere in that scope, and the reverse; top-level statements in any file but the
+entry are a second script entry. E0621 names both sites, the statements and the
+other entry, as `file:line`. E0620 (an imported file with loose statements) is
+retired into it. A Core module's `run`, such as `core.game.run`, is a library
+function, not an entry, and so is the `run: fn` of another entry file of the
+package (an entry its `outputs` name, or a `run.jet` home): that file is a
+program of its own.
 
 **D-SCRIPT-HELPERS1=A — a script's functions use the script's locals** *(amends
 D-ENTRY-STATEMENTS1)*: a function declared in a file of top-level statements

@@ -569,7 +569,7 @@ sema_process_byte_write: fn(args: [CallArg], environment: SemaScopeEnvironment, 
     probed: sema_probe_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return false
     offered: sema_expr_unwrap_tag(probed.ty)
     if offered != (Type.List{element: Type.IntN{signed: false, bits: 8}}) -> return false
-    diagnostics.push(sema_call_argument_mismatch("write", 0, Type.String, offered, args[0].expr, expr_span(args[0].expr)))
+    diagnostics.push(sema_call_argument_mismatch("write", 0, Type.String, offered, args[0].expr, expr_span(args[0].expr), program))
     true
 }
 

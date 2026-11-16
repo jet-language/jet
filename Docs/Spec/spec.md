@@ -425,8 +425,11 @@ locals the functions it calls reach. A call made before a local it needs is set 
 the function, the chain of calls and the line that sets the local. A function that changes a local
 is E0227 when used as a function value and E1101 when called in a task, and an argument that
 overlaps one of its extra parameters is E0204; each text names the extra parameter. Hover and
-`jet inspect expand --facts callable-signature` show the extra parameters. A file with top-level
-statements and a `run: fn` is E0621.
+`jet inspect expand --facts callable-signature` show the extra parameters. A program is either
+script style or one `run: fn` entry, never mixed: top-level statements anywhere in the program's
+load graph, package or project beside a `run: fn` there (in any module, nested module or
+generated file, or bound by an import such as `use { run: other.main }`), or in a file other than
+the entry, are E0621, which names both sites. A Core module's `run` is not an entry.
 The `const` keyword is retired and is recognized only to teach its replacement
 (E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME: value`,
 described below.

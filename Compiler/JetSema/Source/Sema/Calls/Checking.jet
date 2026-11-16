@@ -797,7 +797,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
                 }
                 if unmet -> return None
             } else {
-                diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(value.ty, environment, program), args[index].expr, expr_span(args[index].expr)))
+                diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(value.ty, environment, program), args[index].expr, expr_span(args[index].expr), program))
                 complete = false
                 next
             }
@@ -1144,7 +1144,7 @@ sema_crypto_argument_index: fn(params: [SemaCallParam], slots: [Int], parameter:
 
 // (Rust `check_call_args`): an argument that does not fit its parameter is
 // E0112 about the call, after a checked typed-text rejection.
-sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, offered: Type, value: Expr, span: Span) -> Diagnostic {
+sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, offered: Type, value: Expr, span: Span, program: SemaProgramTables) -> Diagnostic {
     // ("core.mem", "volatile_read" | "volatile_write"): the pointer argument is
     // not a typed pointer, or the written value is not the pointer's element
     // type.
@@ -1159,7 +1159,9 @@ sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, offe
     if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) {
         return nested_fn
     }
-    if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
+    if sema_typed_text_mismatch(required, offered, span, program) == .Val(typed_text) {
+        return typed_text
+    }
     if sema_plain_carrier_mismatch(required, offered, span) == .Val(carrier) -> return carrier
     // A value of a type that does not implement the one trait a trait-value
     // parameter names is the missing implementation, not a type mismatch.
@@ -1254,7 +1256,7 @@ sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Ty
     if value == .Lambda(shown_lambda, _) && ast_lambda_single_expr_span(shown_lambda.body) == .Val(shown_body_span) {
         shown_span = Span{start: value_span.start, end: shown_body_span.end}
     }
-    diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, offered_ty, value, shown_span)
+    diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, offered_ty, value, shown_span, program)
 }
 
 // Whether an argument after `own` references the binding `key`: arguments

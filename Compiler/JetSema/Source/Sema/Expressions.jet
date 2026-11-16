@@ -1393,7 +1393,7 @@ sema_expr_expected_owned: fn(value: &&TExpr, expected: Type?, environment: SemaS
             projected: sema_tree_node(as_field.ty, TExprKind.Field{receiver: owned.move(), field: as_field.field}, span)
             return sema_expr_expected_owned(projected, expected, environment, program, diagnostics)
         }
-        diagnostics.push(sema_expr_mismatch_diagnostic(required, offered, owned.span))
+        diagnostics.push(sema_expr_mismatch_diagnostic(required, offered, owned.span, program))
         return None
     }
     Val(sema_expr_expected_trait_coercion(owned, required, offered, environment, program))
@@ -1462,14 +1462,14 @@ sema_expr_scalar_leaf: fn(ty: Type) -> Bool Never! {
 
 // The rejection for a value that can't fill `required`: the callable and
 // carrier contracts get their own codes before the plain type mismatch.
-sema_expr_mismatch_diagnostic: fn(required: Type, offered: Type, span: Span) -> Diagnostic {
+sema_expr_mismatch_diagnostic: fn(required: Type, offered: Type, span: Span, program: SemaProgramTables) -> Diagnostic {
     // E2426: a callable promised to return `Never` can't be a
     // value-producing function.
     if required == .Fn(_, required_ret, _, _, _, _) && offered == .Fn(_, offered_ret, _, _, _, _) && sema_expr_never_success(required_ret) && !sema_expr_never_success(offered_ret) {
         return sema_error("E2426", span, "Function value does not satisfy `fn() Never`.", "`fn() Never` promises the callable never completes, so a returning function has the wrong contract.", "Pass a function declared `Never`, or change the expected function type.")
     }
     if sema_plain_carrier_mismatch(required, offered, span) == .Val(carrier) -> return carrier
-    sema_type_mismatch(required, offered, span)
+    sema_type_mismatch(required, offered, span, program)
 }
 
 // Rust `Type::has_never_success`: `Never`, or a fallible `Never E!`.

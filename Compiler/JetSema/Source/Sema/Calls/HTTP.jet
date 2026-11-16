@@ -182,7 +182,7 @@ sema_call_http_check_value: fn(argument: CallArg, required: Type, environment: S
         line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, required, checked.span, line, diagnostics)
     }
-    diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
+    diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span, program))
     None
 }
 
@@ -477,7 +477,7 @@ sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [Call
     callback: sema_check_expression_with_lambda_escapes(updated_args[0].expr, Val(callback_type), environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     compatible: sema_call_type_assignable(callback_type, callback.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !compatible {
-        diagnostics.push(sema_type_mismatch(callback_type, callback.ty, updated_args[0].span))
+        diagnostics.push(sema_type_mismatch(callback_type, callback.ty, updated_args[0].span, program))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !sema_call_http_check_middleware_callback(callback, environment, program, scopes, state, context, diagnostics) {
@@ -878,7 +878,7 @@ sema_call_http_transport: fn(record: CoreCallRecord, args: [CallArg], type_args:
         value := sema_check_expression(argument.expr, if index == url_index -> None else -> Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         if index == url_index && value.ty != Type.String {
             if !(sema_call_type_assignable(Type.Named{name: "URL"}, value.ty, environment, program) ?? false) {
-                diagnostics.push(sema_type_mismatch(Type.String, value.ty, argument.span))
+                diagnostics.push(sema_type_mismatch(Type.String, value.ty, argument.span, program))
                 return SemaDirectSpecialCheck{handled: true, value: None}
             }
             params[index].ty = Val(value.ty)

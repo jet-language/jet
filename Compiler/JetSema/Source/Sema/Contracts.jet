@@ -635,7 +635,9 @@ sema_contract_check_expr: fn(expr: Expr, expected: Type, kind: String, forbid_re
                 expected == Type.Bool -> {
                     diagnostics.push(sema_error("E0110", expr_span(expr), "a `#{kind}` condition must be Bool, but this is {type_name(actual.ty)}", "the program needs a clear yes or no here", "compare the value to something to produce Bool"))
                 }
-                else -> diagnostics.push(sema_type_mismatch(expected, actual.ty, expr_span(expr)))
+                else -> {
+                    diagnostics.push(sema_type_mismatch(expected, actual.ty, expr_span(expr), program))
+                }
             }
             valid = false
         }

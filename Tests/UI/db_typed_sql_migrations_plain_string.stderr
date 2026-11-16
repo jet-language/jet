@@ -3,7 +3,7 @@ Error [jet.RuntimeStringAsCheckedText]: A runtime `String` can't be used as `SQL
     |
   8 |     _tx := db.transaction(scope, "tx", [tx_text]) ?? panic("transaction")
     |                                         ^^^^^^^
- Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Why: `SQL` is checked text, built only from a checked literal whose `{value}` holes its `CheckedText` impl encodes, so untrusted text can't change its meaning
  Fix: Write `SQL{"..."}` with `{value}` holes, or use `SQL.raw("…")` if you have audited the text
 More: jet-lang.dev/e/E0149
 
@@ -12,6 +12,6 @@ Error [jet.RuntimeStringAsCheckedText]: A runtime `String` can't be used as `SQL
     |
  10 |     _migrate := db.migrate(scope, "migration", [migrate_text]) ?? panic("migrate")
     |                                                 ^^^^^^^^^^^^
- Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Why: `SQL` is checked text, built only from a checked literal whose `{value}` holes its `CheckedText` impl encodes, so untrusted text can't change its meaning
  Fix: Write `SQL{"..."}` with `{value}` holes, or use `SQL.raw("…")` if you have audited the text
 More: jet-lang.dev/e/E0149

@@ -8828,45 +8828,41 @@ ImportDeniedByBoundary: struct {
 }
 
 ImportedScriptExecutes: struct {
-    file: String
-
     impl Diagnostic {
         code: "E0620"
-        safety_class: .Opinion
-        safety_reason: "Running the imported file's statements would be defined, and Jet refuses it so an import never gains a hidden side effect."
-        meaning: "Imported script has executable top-level statements"
+        status: .Retired
+        no_fix: None
 
-        what: fn(self) -> String {
-            "Imported script `{self.file}` has executable top-level statements"
-        }
+        what: fn(self) -> String { "*Retired* (was: an imported file with top-level statements)" }
 
-        why: fn(self) -> String {
-            "Imported files provide declarations; executable code belongs in the entry file, so an import never gains a hidden side effect."
-        }
+        why: fn(self) -> String { "E0621 names both entries of a program whose files hold a second one" }
 
-        fix: fn(self) -> String {
-            "Move the statements into the entry file, or import a declaration-only file."
-        }
+        fix: fn(self) -> String { "Do not use E0620" }
     }
 }
 
-TopLevelStatementsBesideRun: struct {
+ProgramEntryMixed: struct {
+    statements: String
+    other: String
+
     impl Diagnostic {
         code: "E0621"
         safety_class: .Soundness
-        safety_reason: "Top-level statements and `run: fn` are both an entry, so the program would have no one place to start."
+        safety_reason: "Top-level statements and a `run: fn` are both an entry, so the program would have no one place to start."
         expert_path: "none: a program has one entry"
         detail: true
-        meaning: "A file has top-level statements and a `run: fn`"
+        meaning: "A program mixes top-level statements with a `run: fn` or a second script file"
 
-        what: fn(self) -> String { "This file has top-level statements and a `run: fn`" }
+        what: fn(self) -> String {
+            "Top-level statements at `{self.statements}` and {self.other} are two entries of one program"
+        }
 
         why: fn(self) -> String {
-            "A file's top-level statements are its entry, and so is `run: fn`; a program has one entry."
+            "A program is script style, its entry file's top-level statements, or one `run: fn`, never both, so it starts in one place."
         }
 
         fix: fn(self) -> String {
-            "Move the statements into `run: fn`, or remove `run: fn` so the statements run."
+            "Keep one entry: move the statements into `run: fn` or the entry file, or remove the `run` entry so the statements run."
         }
     }
 }

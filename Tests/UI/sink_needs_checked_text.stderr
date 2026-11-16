@@ -1,0 +1,8 @@
+Error [jet.RuntimeStringAsCheckedText]: A runtime `String` can't be used as `Token`
+  --> Tests/UI/sink_needs_checked_text.jet:28:10
+    |
+ 28 |     send(text)
+    |          ^^^^
+ Why: `Token` is checked text, built only from a checked literal whose `{value}` holes its `CheckedText` impl encodes, so untrusted text can't change its meaning
+ Fix: Write `Token{"..."}` with `{value}` holes, or use `Token.raw("…")` if you have audited the text
+More: jet-lang.dev/e/E0149

@@ -73,7 +73,7 @@ sema_call_concurrency_check_value: fn(argument: CallArg, required: Type, environ
         line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, required, checked.span, line, diagnostics)
     }
-    diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
+    diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span, program))
     None
 }
 
@@ -176,7 +176,7 @@ sema_call_concurrency_infer_callback: fn(argument: CallArg, required: Type, meth
     }
     compatible: sema_call_host_callback_assignable(contract, checked.ty, environment, program) ?? return None
     if !compatible {
-        diagnostics.push(sema_type_mismatch(contract, checked.ty, argument.span))
+        diagnostics.push(sema_type_mismatch(contract, checked.ty, argument.span, program))
         return None
     }
     Val(checked)
@@ -345,7 +345,7 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
         // success must be Bool.
         predicate_type := Type.Fn{params: [Type]{element}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
         callback: sema_call_concurrency_infer_callback(args[0], predicate_type, method, 0, Val(Type.Bool), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        makes_callback: sema_call_concurrency_callback_makes(callback.ty, [Type]{element}, Type.Bool, args[0].span, diagnostics)
+        makes_callback: sema_call_concurrency_callback_makes(callback.ty, [Type]{element}, Type.Bool, args[0].span, program, diagnostics)
         _ := sema_call_concurrency_check_parallel_callback(callback, args[0].expr, environment, program, scopes, state, context, diagnostics)
         if !makes_callback -> return SemaMethodSpecialCheck{handled: true, value: None}
         typed.push(callback.copy())
@@ -380,14 +380,14 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
     step_checked := sema_call_concurrency_infer_callback(args[1], step_type, method, 1, Val(accumulator), environment, program, scopes, state, tail_store, context, diagnostics)
     makes_step := false
     if step_checked == .Val(checked_step) {
-        makes_step = sema_call_concurrency_callback_makes(checked_step.ty, [Type]{accumulator, element}, accumulator, args[1].span, diagnostics)
+        makes_step = sema_call_concurrency_callback_makes(checked_step.ty, [Type]{accumulator, element}, accumulator, args[1].span, program, diagnostics)
         _ := sema_call_concurrency_check_parallel_callback(checked_step, args[1].expr, environment, program, scopes, state, context, diagnostics)
     }
     merge_type := Type.Fn{params: [Type]{accumulator, accumulator}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     merge_checked := sema_call_concurrency_infer_callback(args[2], merge_type, method, 2, Val(accumulator), environment, program, scopes, state, tail_store, context, diagnostics)
     makes_merge := false
     if merge_checked == .Val(checked_merge) {
-        makes_merge = sema_call_concurrency_callback_makes(checked_merge.ty, [Type]{accumulator, accumulator}, accumulator, args[2].span, diagnostics)
+        makes_merge = sema_call_concurrency_callback_makes(checked_merge.ty, [Type]{accumulator, accumulator}, accumulator, args[2].span, program, diagnostics)
         _ := sema_call_concurrency_check_parallel_callback(checked_merge, args[2].expr, environment, program, scopes, state, context, diagnostics)
     }
     if !makes_step || !makes_merge {
@@ -404,7 +404,7 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
         if sema_call_concurrency_callback_error(callback_ty) == .Val(error) {
             if fold_error == .Val(known) {
                 if known != error {
-                    diagnostics.push(sema_type_mismatch(known, error, args[index].span))
+                    diagnostics.push(sema_type_mismatch(known, error, args[index].span, program))
                     return SemaMethodSpecialCheck{handled: true, value: None}
                 }
             }
@@ -423,11 +423,11 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
 // Whether a callback of type `ty`, checked against an open result slot,
 // makes `want` (its success, for a fallible callback); a mismatch against
 // `fn(params) -> want` is reported at `span`.
-sema_call_concurrency_callback_makes: fn(ty: Type, params: [Type], want: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_call_concurrency_callback_makes: fn(ty: Type, params: [Type], want: Type, span: Span, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
     ret: sema_call_signature_return(ty) ?? return true
     if sema_call_concurrency_success_type(ret) == want -> return true
     required := Type.Fn{params: params, ret: Val(want), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    diagnostics.push(sema_type_mismatch(required, ty, span))
+    diagnostics.push(sema_type_mismatch(required, ty, span, program))
     false
 }
 

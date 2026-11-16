@@ -6150,6 +6150,24 @@ with its method, address, what answers it, how it was registered (`page`,
 `action`, `handler`, `mount`, `marked` or `static`) and its file:line;
 `--json` gives the same rows.
 
+A page row takes a loader (`.loader(page, loader, preload)`), a pending
+boundary (`.pending(view)`) and an error boundary (`.error(view)`), and the
+app takes a not-found boundary (`.not_found(view)`). Client navigation runs
+over the same route table: its page rows and the app graph's screens, which
+GET `path` picks as the server does. `app.navigate(path)` starts a navigation
+and shows the page row's pending boundary until it settles. When the row's
+loader preloads, the loader runs then. `app.settle()` answers the page as the
+server would. For a page row it runs the loader unless the preload already
+did, then shows the page, or the row's error boundary when either fails. For a
+screen it shows the screen's page. When nothing matches it shows the
+not-found boundary. It gives that page's status, or 0 when no navigation is
+in flight.
+`app.abort()` cancels the navigation in flight and its preload: the loaded
+data is dropped, and the page of the last settled navigation shows again.
+`app.navigating()` gives the path in flight, and `app.shown()` the document
+the client shows. `Tests/Run/Web/RouteLoaderBoundaries` is the golden, on
+every tier and on the web.
+
 `web.image(src, alt:)` places an image on a page. `src` is a PNG or JPEG
 file, relative to the working directory, that no part climbs out of or
 hides. When an app's route returns the page, the app plans one asset node for

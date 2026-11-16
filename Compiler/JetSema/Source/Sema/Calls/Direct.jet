@@ -1401,7 +1401,7 @@ sema_call_default_err_contextual_result: fn(call: Call, result: Type, ok: Type, 
     payload: sema_check_expression(call.args[0].expr, Val(err), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     compatible: sema_call_type_assignable(err, payload.ty, environment, program) ?? return None
     if !compatible {
-        diagnostics.push(sema_type_mismatch(err, payload.ty, expr_span(call.args[0].expr)))
+        diagnostics.push(sema_type_mismatch(err, payload.ty, expr_span(call.args[0].expr), program))
         return None
     }
     value: sema_tree_node(result, TExprKind.Err{value: payload}, sema_call_default_err_span(call))
@@ -1482,7 +1482,7 @@ sema_call_default_err_constructor: fn(call: Call, expected: Type?, wrap_result: 
         .Result(ok, err) -> {
             compatible: sema_call_type_assignable(err, payload.ty, environment, program) ?? return None
             if !compatible {
-                diagnostics.push(sema_type_mismatch(err, payload.ty, span))
+                diagnostics.push(sema_type_mismatch(err, payload.ty, span, program))
                 return None
             }
             value: sema_tree_node(Type.Result{ok: ok, err: err}, TExprKind.Err{value: payload}, span)

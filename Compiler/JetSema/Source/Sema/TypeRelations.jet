@@ -2082,6 +2082,39 @@ sema_type_graph_is_checked_text_impl: fn(graph: SemaRegistrationGraph, implement
     graph.modules[owner].module_name == "core.prelude"
 }
 
+// The declared text-sink fact of a type named `name` (a leaf name): None
+// when it declares no `CheckedText` impl, as an `impl Owner.CheckedText`
+// block or one in its own body; otherwise whether it has an audited `raw`
+// escape too, its own `raw` method or the `Type.raw` of a string-backed
+// distinct type. Only its checked literal or that escape fills the sink.
+// Matched by name, as it only words a rejection.
+sema_type_graph_checked_text_raw: fn(graph: SemaRegistrationGraph, name: String) -> Bool? Never! {
+    checked := false
+    raw := false
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[row].target_type_name == name && sema_type_graph_is_checked_text_impl(graph, graph.modules[module_index].impls[row]) {
+                checked = true
+            }
+        }
+        loop row in 0..<graph.modules[module_index].nominals.len() {
+            if graph.modules[module_index].nominals[row].symbol.name != name -> next
+            if graph.modules[module_index].nominals[row].kind == SemaRegistrationNominalKind.Distinct {
+                raw = true
+            }
+            loop method_index in 0..<graph.modules[module_index].nominals[row].methods.len() {
+                if graph.modules[module_index].nominals[row].methods[method_index].symbol.name == "raw" {
+                    raw = true
+                }
+            }
+            if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
+                if sema_registration_item_has_trait_block(item, "CheckedText") -> checked = true
+            }
+        }
+    }
+    if checked -> Val(raw) else -> None
+}
+
 sema_type_graph_impl_matches_nominal: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal) -> Bool? {
     if implementation.target_identity_key == nominal.identity_key -> return Val(true)
     if !module_is_none(implementation.target_module_identity) {
