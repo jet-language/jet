@@ -25599,6 +25599,134 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-17",
       "retiredAt": "2026-11-16T02:09:58.350Z"
+    },
+    {
+      "id": "D-ENTRY-EXPLICIT2",
+      "cardId": "c01231wx",
+      "group": "syntax",
+      "title": "Require explicit executable entries in ordinary files",
+      "gist": "Should ordinary files require an explicit run entry?",
+      "lesson": "An entry is the function that starts a program. Jet currently wraps loose file statements in an implicit run function. This choice removes that file shortcut. Interactive cells still receive a wrapper, and libraries still need no entry.",
+      "explainer": "",
+      "story": "Mira moves a small script into an application. She wants to see where execution starts without discovering hidden startup work.",
+      "inWild": "fn main() {\n    println!(\"hello\");\n}\n// rustc main.rs && ./main\n# Rust starts an executable at main. Source: https://doc.rust-lang.org/book/ch01-02-hello-world.html",
+      "detail": "Owner-selected contract awaiting formal Tower ratification. Related historical work: #1627 and #3122. No compiler work or runtime verification was performed during preparation.\n\nBeginner review prompted explicit file-role, initializer, safe-fix, typed-entry, and export explanations. No runtime result is claimed from those illustrative examples. Entry source forms are grounded in examples/features/cli/typed_entry_args.jet and examples/features/comptime/comptime_block.jet.\n\nFresh review findings were retained. The author resolved each through the contract and linked card criteria. Review metadata describes that sequence; it does not claim an independent rerun or runtime proof.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Explicit files, implicit interactive cells",
+          "detail": "Ordinary application targets declare an existing explicit application entry. Existing build/dev/test override-only sources retain their own entry roles. Library compilation, imports, and test discovery do not require an entry. Loose statements in any ordinary source are errors, not ignored code. A runtime top-level initializer is rejected; the author must move its work into a function.\n\nREPL submissions and notebook cells remain interactive inputs, not ordinary files. Their host supplies the entry internally. An ordinary-source executable export needs a legal explicit entry. Refuse unsafe wrapping or a mixed-entry export rather than guessing. Declaration-only exports need no wrapper.",
+          "technical": "The interview selects this amendment. Amend D-ENTRY-SCRIPT1, D-ENTRY-ORDER1, and run-specific D-CMDOVERRIDE1 wording. Existing explicit entry forms keep their signature, visibility, multiplicity, and binding rules. Basic forms are fn run() and fn run(args: T), where T is a #CLI type. Do not invent a second entry or change typed argument parsing.\n\nA selected application target needs its resolved source-declared application entry. A declaration-only library can be compiled or imported without one. Test discovery runs tests without a dummy application entry. Trying to execute a library as an application requires an entry; the filename alone does not change its role.\n\nCompile-time work finishes while the compiler builds the program, before launch. Existing explicit compile-time definitions remain valid:\n\n```jet\n@answer :: 1 + 1\nfn run() { print(@answer) }\n```\n\nRuntime initialization cannot remain hidden at file scope. This is rejected rather than silently moved:\n\n```jet\nuse core.testing as testing\nroot :: testing.temp_dir(\"demo\")\nfn run() { print(root) }\n```\n\nThe author can move that initialization into run when only run uses it. If another function refers to root, blindly moving the binding would break its scope. The automatic fix must refuse that relocation and explain that the value must be passed explicitly or initialized inside a suitable function.\n\nFor the simple loose hello program, jet fix hello.jet offers the existing source-edit workflow and produces the fn run() example shown in option A. Preserve statement order, declarations, comments, captures, return behavior, and source locations. Register exact what/why/fix diagnostics and snapshots. Never convert a backend rejection into a user error.\n\nA cell containing print(\"hello\") still runs directly. The host creates its entry internally; users do not edit that wrapper. Exporting executable ordinary source writes fn run() { print(\"hello\") }. Exporting only declarations writes those declarations without a dummy entry. No notebook visual or teaching-path redesign is included.\n\nRemove ordinary-file script lowering and use the canonical explicit-entry path internally. Migrate all callers, examples, generated fixtures, tests, format/LSP projections, and live explanations. Ahead-of-time binaries, run/dev, the interpreter, and applicable web execution preserve the same meaning. These examples isolate entry behavior; effect permission remains a separate requirement.\n\nCommand roles remain distinct. jet run and a stock application-launch path require an explicit application entry: fn run or an existing checked metadata-selected callable. jet build compiles its selected output or invokes its existing explicit build override. Libraries need no run. Override-only @build.jet remains valid.\n\njet dev invokes its selected explicit dev override; override-only @dev.jet needs no dummy run. Otherwise stock dev launches the explicit application entry. jet test invokes its explicit test override or stock test discovery; neither requires a dummy run. Preserve absent-override defaults. Only fn build with its existing BuildContext signature is build-only.\n\nWrapping fixes inspect checked command and import roles. Never synthesize an entry in library, imported, or test-only sources if that changes selection or multiplicity. If app.jet imports loose helper.jet, do not add a second fn run to the helper. Refuse that automatic edit and explain how to use an explicitly called function.\n\nInteractive execution preserves existing persistent session scope. A host entry must not turn cross-cell bindings into discarded function locals. Prove a binding created in one submission and mutated in the next, imported/declaration visibility, move/borrow state, failures, and reruns. Reuse existing session storage and checked semantics, not a second runtime model.\n\nDeclaration-only export preserves existing explicit entries. Executable export without a conflicting entry emits one legal wrapper when meaning is preserved. A notebook mixing an existing run and separately executed cells refuses automatic ordinary-source export rather than guessing a merge. It changes no output file and explains how to consolidate one entry first. Never silently produce a lossy export.\n\nTier proof observes actual execution identity. Exercise AOT output, normal run/dev, forced interpreter, and existing run_jit_once/dev_iteration JIT paths. Require Cranelift evidence where applicable; interpreter fallback cannot pass a JIT row. Keep applicable web proof separately identified.",
+          "code": "// hello.jet\nfn run() {\n    print(\"hello\")\n}\n// jet run hello.jet: hello\n// loose file statements: error with a safe wrapping fix\n// REPL and notebook cells: implicit wrapper remains"
+        },
+        {
+          "key": "B",
+          "name": "Keep file script sugar",
+          "detail": "Keep D-ENTRY-SCRIPT1 and D-ENTRY-ORDER1 unchanged. Loose file statements execute in source order within the generated run body. An explicit run conflicts with that body. Improve teaching without changing the boundary. This is the rejected comparison option, not the selected contract.",
+          "technical": "This is the existing alternative, not the owner recommendation. Imported scripts retain their current restrictions and explicit run remains optional for scripts.",
+          "code": "// hello.jet\nprint(\"hello\")\n// jet run hello.jet: hello\n// no explicit entry wrapper"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust starts an executable at main. Source: https://doc.rust-lang.org/book/ch01-02-hello-world.html",
+          "code": "fn main() {\n    println!(\"hello\");\n}\n// rustc main.rs && ./main"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A follows the owner’s explicit-entry choice while preserving direct interactive use.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves the implicit file execution the owner asked to remove."
+          }
+        ],
+        "tradeoff": "A adds a small wrapper in exchange for a visible executable boundary."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: EntryBeginner. Skill: rli5. The reader recovered the explicit entry boundary but lacked role, initializer, signature, fix, and export guidance. Added concrete examples and refusal conditions.",
+        "adversarial": "Author model family: openai. Adversarial model family: openai. Fresh agent: EntryAdversarial. The review found five gaps: command roles, imported fixes, session state, mixed export, and JIT identity. The author added contracts and criteria for each; this records revisions, not a second clean review."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should ordinary files require an explicit run entry?",
+        "lesson": "An entry is the function that starts a program. Jet currently wraps loose file statements in an implicit run function. This choice removes that file shortcut. Interactive cells still receive a wrapper, and libraries still need no entry.",
+        "trio": {
+          "current": {
+            "note": "The ratified script rule wraps loose statements. This is source-law evidence, not a new runtime measurement.",
+            "code": "// hello.jet\nprint(\"hello\")\n// jet run hello.jet: implicit run under current law"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust starts an executable at main. Source: https://doc.rust-lang.org/book/ch01-02-hello-world.html",
+            "code": "fn main() {\n    println!(\"hello\");\n}\n// rustc main.rs && ./main"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Explicit files, implicit interactive cells",
+            "gist": "Make the executable boundary visible in every ordinary file.",
+            "gains": [
+              "Startup is visible.",
+              "Interactive use stays direct."
+            ],
+            "losses": [
+              "Small executable files need an entry wrapper."
+            ],
+            "proposed": {
+              "code": "// hello.jet\nfn run() {\n    print(\"hello\")\n}\n// jet run hello.jet: hello\n// loose file statements: error with a safe wrapping fix\n// REPL and notebook cells: implicit wrapper remains"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep file script sugar",
+            "gist": "Keep loose statements as an implicit entry.",
+            "gains": [
+              "Shortest tiny scripts."
+            ],
+            "losses": [
+              "Readers must know the implicit startup rule."
+            ],
+            "proposed": {
+              "code": "// hello.jet\nprint(\"hello\")\n// jet run hello.jet: hello\n// no explicit entry wrapper"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A follows the owner’s explicit-entry choice while preserving direct interactive use.",
+          "gains": [
+            "Startup is visible.",
+            "Interactive use stays direct."
+          ],
+          "losses": [
+            {
+              "loss": "Small executable files need an entry wrapper.",
+              "mitigation": "Removing implicit file execution requires a visible place for executable statements."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B leaves the implicit file execution the owner asked to remove."
+            }
+          ],
+          "tradeoff": "A adds a small wrapper in exchange for a visible executable boundary."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-09-15T00:47:26.458Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-15",
+      "retiredAt": "2026-11-16T02:21:00.557Z"
     }
   ]
 }
