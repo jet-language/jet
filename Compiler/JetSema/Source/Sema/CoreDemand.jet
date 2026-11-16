@@ -77,12 +77,15 @@ use jet_foundation.[
 
 // Indexes the deferred bodies of `graph` for one finalization: none unless
 // `enabled`. Called at the start of each finalization, so a later one over
-// the same graph demands afresh.
-sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
+// the same graph demands afresh. Returns the Core bodies that stay checked
+// up front, each key mapped to its module, which the first body pass loads
+// (sema_core_bodies_ahead); none unless `enabled`.
+sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) -> [String:Int] {
     graph.core_wave_rows = [String:Bool]{}
     graph.core_stand_in_wave = false
     graph.core_checked = [String:Bool]{}
     rows := [String:Int]{}
+    upfront := [String:Int]{}
     if enabled {
         roots: graph.core_lowering_roots ?? [String:Bool]{}
         // Every method an impl that stays checked supplies; a nominal lists
@@ -97,16 +100,18 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
             }
         }
         loop module_index in 0..<graph.modules.len() {
-            sema_core_demand_module_rows(graph, module_index, roots, eager, rows)
+            sema_core_demand_module_rows(graph, module_index, roots, eager, rows, upfront)
         }
     }
     graph.core_demand_rows = rows.move()
+    upfront
 }
 
 // The deferred bodies of module `module_index`, each key mapped to the
-// module in `rows`: none for a module that isn't Core source or is the
-// entry. `roots` and `eager` are the keys that stay checked up front.
-sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int, roots: [String:Bool], eager: [String:Bool], rows: &[String:Int]) Never! {
+// module in `rows`, and those that stay checked up front in `upfront`: none
+// for a module that isn't Core source or is the entry. `roots` and `eager`
+// are the keys that stay checked up front.
+sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int, roots: [String:Bool], eager: [String:Bool], rows: &[String:Int], upfront: &[String:Int]) Never! {
     identity: graph.modules[module_index].module_identity
     if !module_is_core(identity) || identity == graph.entry_module_identity {
         return
@@ -115,7 +120,11 @@ sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int
     loop item in graph.modules[module_index].program.items {
         if item == .Func(func) {
             key: symbol_key_text(SymbolKind.Function, identity_text, "", func.name)
-            if roots.get(key) == None -> rows[key] = module_index
+            if roots.get(key) != None {
+                upfront[key] = module_index
+                next
+            }
+            rows[key] = module_index
         }
     }
     loop nominal in graph.modules[module_index].nominals {
@@ -125,18 +134,21 @@ sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int
         loop method in nominal.methods {
             key: symbol_table_key(graph.symbols, method.symbol.id)
             if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(key) != None || roots.get(key) != None || nested.get("{method.declaration.span.start}:{method.declaration.span.end}") != None {
+                upfront[key] = module_index
                 next
             }
             rows[key] = module_index
         }
     }
     loop implementation in graph.modules[module_index].impls {
-        if !sema_core_demand_impl_deferrable(implementation) -> next
+        deferrable: sema_core_demand_impl_deferrable(implementation)
         loop method in implementation.methods {
             key: symbol_table_key(graph.symbols, method.symbol.id)
-            if method.declaration.name != "close" && roots.get(key) == None {
-                rows[key] = module_index
+            if !deferrable || method.declaration.name == "close" || roots.get(key) != None {
+                upfront[key] = module_index
+                next
             }
+            rows[key] = module_index
         }
     }
 }
@@ -435,7 +447,9 @@ sema_core_demand_pass: fn(owned: &&SemaRegistrationGraph, first_affected: &&[Int
         if !timed {
             ahead_program := sema_check_shared_take_program(shared_state)
             ahead_plan := sema_check_shared_take_memory_plan(shared_state)
-            sema_core_bodies_ahead(ahead_program, host_hooks, threads)
+            if ahead_program.registration_graph == .Val(ahead_graph) {
+                sema_core_bodies_ahead(ahead_graph, loop key in ahead_graph.core_wave_rows.keys() -> key, ahead_graph.core_demand_rows, host_hooks, threads)
+            }
             sema_check_shared_put_tables(shared_state, ahead_program, ahead_plan)
         }
         checked_functions: sema_finalize_pass_modules(shared_state, values, comptime_functions, comptime_rows, affected, SemaWaveKind.Core, true, host_hooks, threads, "sema.core_demand", trace_sink, modules)
