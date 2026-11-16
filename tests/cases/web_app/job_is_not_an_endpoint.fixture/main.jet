@@ -1,0 +1,38 @@
+// A service with two endpoints, a job, a webhook with its signing key and an
+// unmarked helper. `app.endpoints<Crew>()` lists only the two endpoints.
+use app
+
+Crew: struct {
+    name: String
+
+    // A signed-in caller adds a task.
+    #App.SignedIn add_task: fn(self, title: String) -> Int Never! {
+        app.enqueue(fn() { self.tell_assignee(title.len()) })
+        title.len()
+    }
+
+    // Any caller reads the status.
+    #App.Public status: fn(self) -> String Never! { "{self.name} is up" }
+
+    // The job `add_task` queues; only the server runs it.
+    #App.Job tell_assignee: fn(self, id: Int) -> Int Never! { id }
+
+    // The webhook a tracker posts to, and its signing key.
+    #App.Webhook(path: "/hooks/:project", signature: app.Signature.GitHub, key: "webhook_secret") on_event: fn(self, project: String, event: String) -> Int Never! {
+        project.len() + event.len()
+    }
+
+    #App.SigningKey webhook_secret: fn(self, project: String) -> String? { Val("secret-{project}") }
+
+    // A helper; nothing marks it.
+    next_id: fn(self, id: Int) -> Int Never! { id + 1 }
+}
+
+run: fn() {
+    endpoints: app.endpoints<Crew>()
+    print("endpoints: {endpoints.join(", ")}")
+    names: [String]{"add_task", "status", "tell_assignee", "on_event", "webhook_secret", "next_id"}
+    loop name in names {
+        print("{name}: {if endpoints.contains(name) -> "endpoint" else -> "server-only"}")
+    }
+}

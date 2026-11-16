@@ -5489,6 +5489,7 @@ tasks never read or change the process registry. The module source is
 | `maybe_caller() -> String?` | account | The account this task acts for: `None` for the system or no one. |
 | `caller() -> String` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
 | `enqueue(fn() { self.job(args...) })` | — | Queue one call of the service's `#App.Job` method `job`, with its arguments evaluated and encoded here; it runs after the call that queued it commits. See below. |
+| `endpoints<S>() -> [String]` | names | The methods of the service `S` that `#App.SignedIn` or `#App.Public` marks, in the order `S` declares them. A job, a webhook, a signing key and an unmarked method are server-only and never listed. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. It may read the database, fetch over `Net` and wait
@@ -5659,6 +5660,12 @@ run keeps its row, which records its runs and the last failure. A job is
 therefore run at least once, and a job method should be safe to run again.
 A call that used no store, and code outside a call, run the job at once
 without keeping it.
+
+A job, a webhook and a webhook's signing key are server-only: no Remote
+calls one, and `app.endpoints<S>()` lists none. A method that
+`#App.SignedIn` or `#App.Public` marks beside `#App.Job`, `#App.Webhook` or
+`#App.SigningKey` is E2819 (`jet.ServerOnlyMethodMarkedEndpoint`), at the
+endpoint marker.
 
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
