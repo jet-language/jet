@@ -38,10 +38,10 @@ jetos_parse_target: fn(theme: Theme, raw: String) -[IO, FS, Env, Time.Wait]> Jet
 }
 
 // The target Package's projection and its System named by the target host.
-jetos_load_target: fn(theme: Theme, target: JetOSTarget) -[IO, FS, Env, Time.Wait]> (plan: JetOSLoadedPlan, system: SystemPlan)? Never! {
+jetos_load_target: fn(theme: Theme, target: JetOSTarget) -[IO, FS, Env, Time.Wait]> {plan: JetOSLoadedPlan, system: SystemPlan}? Never! {
     plan: jetos_load_plan(theme, target) ?? return None
     loop system in plan.systems {
-        if system.name == target.host -> return Val((plan: plan, system: system))
+        if system.name == target.host -> return Val({plan: plan, system: system})
     }
     names := loop system in plan.systems -> system.name
     names.sort()

@@ -716,19 +716,19 @@ RuntimeUnit: struct {
 
 // The runtime's explicit source manifest: every non-empty, non-comment line,
 // none twice.
-runtime_sources: fn(repo: String) -[FS]> (paths: [String], problem: String) Never! {
+runtime_sources: fn(repo: String) -[FS]> {paths: [String], problem: String} Never! {
     paths := [String]{}
-    text: files.read("{repo}/{RUNTIME_SOURCES}") ?? return (paths: paths, problem: "cannot read {RUNTIME_SOURCES}: {err}")
+    text: files.read("{repo}/{RUNTIME_SOURCES}") ?? return {paths: paths, problem: "cannot read {RUNTIME_SOURCES}: {err}"}
     loop raw in text.split("\n") {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
         if paths.contains(line) {
-            return (paths: [String]{}, problem: "{RUNTIME_SOURCES} lists {line} twice")
+            return {paths: [String]{}, problem: "{RUNTIME_SOURCES} lists {line} twice"}
         }
         paths.push(line.copy())
     }
-    if paths.len() == 0 -> return (paths: paths, problem: "{RUNTIME_SOURCES} lists no source")
-    (paths: paths, problem: "")
+    if paths.len() == 0 -> return {paths: paths, problem: "{RUNTIME_SOURCES} lists no source"}
+    {paths: paths, problem: ""}
 }
 
 runtime_unit: fn(repo: String) -[FS]> RuntimeUnit Never! {
@@ -1136,7 +1136,7 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
     path_args: grep_args(rules, "path")
     word_args: grep_args(rules, "word")
     found := [String]{}
-    passes: [(flags: [String], args: [String])]{(flags: [String]{"-l", "-a"}, args: path_args), (flags: [String]{"-l", "-i", "-I"}, args: word_args)}
+    passes: [{flags: [String], args: [String]}]{{flags: [String]{"-l", "-a"}, args: path_args}, {flags: [String]{"-l", "-i", "-I"}, args: word_args}}
     loop pass in passes {
         if pass.args.len() == 0 -> next
         argv := [String]{"git", "grep", "--no-index", "--exclude-standard", "-P"}

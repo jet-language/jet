@@ -207,7 +207,7 @@ browser_trace_encode_sources: fn(sources: [BrowserTraceSource]) -> String {
 // first source with that path, and a symbol name is unique across sources.
 browser_trace_decode_sources: fn(text: String) -> [BrowserTraceSource] BrowserTraceError! {
     sources := [BrowserTraceSource]{}
-    pending := [(path: String, symbol: BrowserTraceSymbol)]{}
+    pending := [{path: String, symbol: BrowserTraceSymbol}]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         line: lines[index]
@@ -220,7 +220,7 @@ browser_trace_decode_sources: fn(text: String) -> [BrowserTraceSource] BrowserTr
         } else if parts.len() == 4 && parts[0] == "symbol" {
             name: browser_trace_unhex(parts[2])
             if name == "" || (parts[3] != "fn" && parts[3] != "handler") -> return Err(browser_trace_error("compiler trace symbol identity is malformed"))
-            pending.push((path: browser_trace_unhex(parts[1]), symbol: BrowserTraceSymbol{name: name, kind: parts[3]}))
+            pending.push({path: browser_trace_unhex(parts[1]), symbol: BrowserTraceSymbol{name: name, kind: parts[3]}})
         } else {
             return Err(browser_trace_error("compiler trace map row is malformed"))
         }

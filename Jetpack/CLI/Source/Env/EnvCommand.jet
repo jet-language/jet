@@ -60,10 +60,10 @@ cli_cmd_env: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
 cli_debug_duration: fn(duration: time.Duration) -> String Never! {
     ns: duration.ns
     unit: if {
-        ns >= 1000000000 -> (divisor: 1000000000, digits: 9, name: "s")
-        ns >= 1000000 -> (divisor: 1000000, digits: 6, name: "ms")
-        ns >= 1000 -> (divisor: 1000, digits: 3, name: "µs")
-        else -> (divisor: 1, digits: 0, name: "ns")
+        ns >= 1000000000 -> {divisor: 1000000000, digits: 9, name: "s"}
+        ns >= 1000000 -> {divisor: 1000000, digits: 6, name: "ms"}
+        ns >= 1000 -> {divisor: 1000, digits: 3, name: "µs"}
+        else -> {divisor: 1, digits: 0, name: "ns"}
     }
     whole: ns /% unit.divisor
     fraction: ns %% unit.divisor

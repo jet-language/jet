@@ -682,7 +682,7 @@ priv atanh_refine: fn(x: Float, zh: Float, zl: Float, a: Float) -> Float Never! 
 // exponent field of b less off as e: a reciprocal r = r1[i1] r2[i2] picked by
 // log2's piecewise-linear guess, dx = r (1 + m 2^-52) - 1 and the tail f of
 // ln(1 + dx) - dx.
-priv ah_reduce: fn(b: Int, off: Int) -> (i1: Int, i2: Int, ed: Float, dx: Float, f: Float) Never! {
+priv ah_reduce: fn(b: Int, off: Int) -> {i1: Int, i2: Int, ed: Float, dx: Float, f: Float} Never! {
     m: b & 0xF_FFFF_FFFF_FFFF
     i: m >> 47
     d: m & 0x7FFF_FFFF_FFFF
@@ -692,7 +692,7 @@ priv ah_reduce: fn(b: Int, off: Int) -> (i1: Int, i2: Int, ed: Float, dx: Float,
     dx: fma(AH_R1[i1] * AH_R2[i2], from_bits(m | 0x3FF0_0000_0000_0000), Float{-1.0})
     dx2: dx * dx
     c: AH_C
-    (i1: i1, i2: i2, ed: Float{(b >> 52) - off}, dx: dx, f: dx2 * ((c[0] + dx * c[1]) + dx2 * ((c[2] + dx * c[3]) + dx2 * c[4])))
+    {i1: i1, i2: i2, ed: Float{(b >> 52) - off}, dx: dx, f: dx2 * ((c[0] + dx * c[1]) + dx2 * ((c[2] + dx * c[3]) + dx2 * c[4]))}
 }
 
 // The refine step of asinh.c, acosh.c and atanh.c: ln(zh + zl) / 2 with zh =
@@ -701,7 +701,7 @@ priv ah_reduce: fn(b: Int, off: Int) -> (i1: Int, i2: Int, ed: Float, dx: Float,
 // levels t1 t2 t3 t4 picked by a - e, ln(1/t) / 2 from triple-double tables,
 // e (l20 + l21 + l22) for e ln(2) / 2, and a degree-6 polynomial. atanh.c
 // (always) applies zl even at zero; acosh.c (two) adds with twosum.
-priv ah_refine: fn(zh: Float, zl: Float, a: Float, adj: Int, l20: Float, l21: Float, l22: Float, always: Bool, two: Bool) -> (v0: Float, v1: Float, v2: Float) Never! {
+priv ah_refine: fn(zh: Float, zl: Float, a: Float, adj: Int, l20: Float, l21: Float, l22: Float, always: Bool, two: Bool) -> {v0: Float, v1: Float, v2: Float} Never! {
     b: to_bits(zh)
     e: (b >> 52) - 1023 + adj
     tf: from_bits(b & 0xF_FFFF_FFFF_FFFF | 0x3FF0_0000_0000_0000)
@@ -741,16 +741,16 @@ priv ah_refine: fn(zh: Float, zl: Float, a: Float, adj: Int, l20: Float, l21: Fl
     s2: ah_add(s1.hi, s1.lo, l1, l2, two)
     w0: fast_two_sum(l0, s2.hi)
     w1: fast_two_sum(w0.lo, s2.lo)
-    (v0: w0.hi, v1: w1.hi, v2: w1.lo)
+    {v0: w0.hi, v1: w1.hi, v2: w1.lo}
 }
 
 // (xh + xl) + (ch + cl) as add_dd, or with two as acosh.c's adddd: twosum
 // of the high parts plus xl + cl.
-priv ah_add: fn(xh: Float, xl: Float, ch: Float, cl: Float, two: Bool) -> (hi: Float, lo: Float) Never! {
+priv ah_add: fn(xh: Float, xl: Float, ch: Float, cl: Float, two: Bool) -> {hi: Float, lo: Float} Never! {
     if !two -> return add_dd(xh, xl, ch, cl)
     s: xh + ch
     ap: s - ch
-    (hi: s, lo: ((xh - ap) + (ch - (s - ap))) + (xl + cl))
+    {hi: s, lo: ((xh - ap) + (ch - (s - ap))) + (xl + cl)}
 }
 
 // v0 + v1, or the listed sg (hi + lo) of a hard case |x| = ax when v1's
@@ -2041,7 +2041,7 @@ priv CBRT_RSCALE: [Float]{1.0, 0.5, 0.25}
 
 // One Newton step of cbrt.c: y - dy for zz^(1/3) with y^3 in double-double
 // (rr ~ 1/zz), as hi + lo with |lo| < ulp(hi)/2.
-priv cbrt_step: fn(y: Float, zz: Float, rr: Float) -> (hi: Float, lo: Float) Never! {
+priv cbrt_step: fn(y: Float, zz: Float, rr: Float) -> {hi: Float, lo: Float} Never! {
     y2: y * y
     y2l: fma(y, y, -y2)
     y3: y2 * y
@@ -2049,7 +2049,7 @@ priv cbrt_step: fn(y: Float, zz: Float, rr: Float) -> (hi: Float, lo: Float) Nev
     h: ((y3 - zz) + y3l) * rr
     dy: h * (y * Float{0.3333333333333333})
     y1: y - dy
-    (hi: y1, lo: (y - y1) - dy)
+    {hi: y1, lo: (y - y1) - dy}
 }
 
 /// cos x, correctly rounded (CORE-MATH cos.c): 1 for |x| < 2^-27, and NaN
@@ -2523,7 +2523,7 @@ erf: fn(n: Float) -> Float Never! {
 
 // erf.c cr_erf_fast: erf(z) as hi + lo within err (hi + lo) relatively, for
 // 2^-61 <= z <= 5.9215871957945065.
-priv erf_fast: fn(z: Float) -> (hi: Float, lo: Float, err: Float) Never! {
+priv erf_fast: fn(z: Float) -> {hi: Float, lo: Float, err: Float} Never! {
     if (z < Float{0.0625}) {
         // erf0.sollya's odd degree-11 polynomial, degree 1 and 3 as (hi, lo)
         z2h: z * z
@@ -2539,7 +2539,7 @@ priv erf_fast: fn(z: Float) -> (hi: Float, lo: Float, err: Float) Never! {
         s1: fast_two_sum(Float{1.1283791670955126}, t1)
         l1: s1.lo + fma(z2l, s3.hi, tl1)
         h: s1.hi * z
-        return (hi: h, lo: fma(l1, z, fma(s1.hi, z, -h)), err: Float{2.4881592825595072e-21})
+        return {hi: h, lo: fma(l1, z, fma(s1.hi, z, -h)), err: Float{2.4881592825595072e-21}}
     }
     // i/16 <= z < (i + 1)/16, and z - 1/32 - v/16 is exact
     v: core.math.floor(Float{16.0} * z)
@@ -2563,12 +2563,12 @@ priv erf_fast: fn(z: Float) -> (hi: Float, lo: Float, err: Float) Never! {
     t0: x * s1.hi
     tl0: fma(x, l1, fma(x, s1.hi, -t0))
     s0: fast_two_sum(ERF_C[b], t0)
-    (hi: s0.hi, lo: s0.lo + (tl0 + ERF_C[b + 1]), err: Float{1.8065624578158124e-21})
+    {hi: s0.hi, lo: s0.lo + (tl0 + ERF_C[b + 1]), err: Float{1.8065624578158124e-21}}
 }
 
 // erf.c cr_erf_accurate: erf(z) as a double-double within about 2^-106
 // relatively, for 2^-61 <= z <= 5.9215871957945065.
-priv erf_accurate: fn(z: Float) -> (hi: Float, lo: Float) Never! {
+priv erf_accurate: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     if (z < Float{0.125}) { return erf_accurate_tiny(z) }
     v: core.math.floor(Float{8.0} * z)
     b: 27 * ((checked(Int{v}) ?? 1) - 1)
@@ -2594,12 +2594,12 @@ priv erf_accurate: fn(z: Float) -> (hi: Float, lo: Float) Never! {
         }
         j -= 1
     }
-    (hi: h, lo: l)
+    {hi: h, lo: l}
 }
 
 // erf.c cr_erf_accurate_tiny: erf(z) as a double-double, for 2^-61 <= z <
 // 1/8.
-priv erf_accurate_tiny: fn(z: Float) -> (hi: Float, lo: Float) Never! {
+priv erf_accurate_tiny: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     z2: z * z
     h := ERF_TINY_P[14]
     k := 13
@@ -5721,22 +5721,22 @@ erfc: fn(n: Float) -> Float Never! {
 
 // erfc.c cr_erfc_fast: erfc(x) as hi + lo within err absolutely, for
 // 4.91954768840207e-17 < |x| and -5.863584748755168 < x < 27.226017111108366.
-priv erfc_fast: fn(x: Float) -> (hi: Float, lo: Float, err: Float) Never! {
+priv erfc_fast: fn(x: Float) -> {hi: Float, lo: Float, err: Float} Never! {
     if (x < Float{0.0}) {
         e: erf_fast(-x)
         s: fast_two_sum(Float{1.0}, e.hi)
-        return (hi: s.hi, lo: s.lo + e.lo, err: e.err * e.hi + Float{2.465190328815662e-31})
+        return {hi: s.hi, lo: s.lo + e.lo, err: e.err * e.hi + Float{2.465190328815662e-31}}
     }
     if (x <= Float{2.8845070422535213}) {
         e: erf_fast(x)
         s: fast_two_sum(Float{1.0}, -e.hi)
         err: e.err * e.hi
         // from 0.4769362762044699, 1 - h is exact
-        return (hi: s.hi, lo: s.lo - e.lo, err: if (x >= Float{0.4769362762044699}) -> err else -> err + Float{6.162975822039155e-32})
+        return {hi: s.hi, lo: s.lo - e.lo, err: if (x >= Float{0.4769362762044699}) -> err else -> err + Float{6.162975822039155e-32}}
     }
     // erfc(x) = e^(-x^2) p(1/x): from 25.85589130550742 the accurate path
     // takes it, away from underflow
-    if (x >= Float{25.85589130550742}) { return (hi: Float{0.0}, lo: Float{0.0}, err: Float{1.0}) }
+    if (x >= Float{25.85589130550742}) { return {hi: Float{0.0}, lo: Float{0.0}, err: Float{1.0}} }
     uh: x * x
     e: exp_dd_fast(-uh, -fma(x, x, -uh))
     yh: Float{1.0} / x
@@ -5764,7 +5764,7 @@ priv erfc_fast: fn(x: Float) -> (hi: Float, lo: Float, err: Float) Never! {
     w: d_mul(t.hi, t.lo + (d.lo + ERFC_ASYMPT[b + 1]), yh, yl)
     r: d_mul(w.hi, w.lo, e.hi, e.lo)
     // relative error 2^-67.115, held up to an absolute 2^-1022 near underflow
-    (hi: r.hi, lo: r.lo, err: if (r.hi >= Float{3.5543726719065856e-288}) -> Float{6.2601028758013134e-21} * r.hi else -> Float{2.2250738585072014e-308})
+    {hi: r.hi, lo: r.lo, err: if (r.hi >= Float{3.5543726719065856e-288}) -> Float{6.2601028758013134e-21} * r.hi else -> Float{2.2250738585072014e-308}}
 }
 
 // The ranges of y = 1/x of ERFC_ASYMPT's polynomials.
@@ -5836,7 +5836,7 @@ priv ERFC_ACC_CUT: [Float]{
 // erfc.c exp_accurate: e^(xh + xl) as (hi + lo) 2^k within about 2^-104
 // relatively, for -742 < xh: xh + xl = k log(2) + y, then a degree-19
 // polynomial of y.
-priv erfc_exp_accurate: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, k: Int) Never! {
+priv erfc_exp_accurate: fn(xh: Float, xl: Float) -> {hi: Float, lo: Float, k: Int} Never! {
     kf: round_ties_even(xh * Float{1.4426950408889634})
     // exact by Sterbenz
     yh: fma(-kf, Float{0.6931471805599453}, xh)
@@ -5860,7 +5860,7 @@ priv erfc_exp_accurate: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, k: In
         }
         i -= 1
     }
-    (hi: h, lo: l, k: checked(Int{kf}) ?? 0)
+    {hi: h, lo: l, k: checked(Int{kf}) ?? 0}
 }
 
 // erfc.c's T: for x past 2.8845070422535213, erfc(x) e^(x^2) = y p(y^2)
@@ -6735,7 +6735,7 @@ priv tgamma_accurate: fn(x: Float) -> Float Never! {
 // t2, t0 kept to multiples of 2^-25 so t0 ch[k] is exact, plus the
 // double-double polynomial of cl; ch and cl are runs of TGAMMA_ACC_CH and
 // TGAMMA_ACC_CL.
-priv gamma_poly3: fn(d: Float, ch: Int, nh: Int, cl: Int, nl: Int) -> (hi: Float, lo: Float) Never! {
+priv gamma_poly3: fn(d: Float, ch: Int, nh: Int, cl: Int, nl: Int) -> {hi: Float, lo: Float} Never! {
     t0 := Float{1.0}
     t1 := Float{0.0}
     t2 := Float{0.0}
@@ -6766,11 +6766,11 @@ priv gamma_poly3: fn(d: Float, ch: Int, nh: Int, cl: Int, nl: Int) -> (hi: Float
     q: gamma_polyddd(d, TGAMMA_ACC_CL, cl, nl, Float{0.0})
     s: two_sum_dd(s1, s2, q.hi, q.lo)
     a: fast_two_sum(s0, s.hi)
-    (hi: a.hi, lo: a.lo + s.lo)
+    {hi: a.hi, lo: a.lo + s.lo}
 }
 
 // tgamma.c muldd3: (xh + xl) (yh + yl) renormalized, all four products kept.
-priv gamma_mul_dd3: fn(xh: Float, xl: Float, yh: Float, yl: Float) -> (hi: Float, lo: Float) Never! {
+priv gamma_mul_dd3: fn(xh: Float, xl: Float, yh: Float, yl: Float) -> {hi: Float, lo: Float} Never! {
     ch: xh * yh
     fast_two_sum(ch, fma(xh, yh, -ch) + ((xl * yl + xh * yl) + xl * yh))
 }
@@ -6778,7 +6778,7 @@ priv gamma_mul_dd3: fn(xh: Float, xl: Float, yh: Float, yl: Float) -> (hi: Float
 // tgamma.c's and lgamma.c's polyddd: the n (hi, lo) pairs of c from index o
 // at the double x, Horner in double-double with two-sums, l added to the top
 // coefficient.
-priv gamma_polyddd: fn(x: Float, c: [Float], o: Int, n: Int, l: Float) -> (hi: Float, lo: Float) Never! {
+priv gamma_polyddd: fn(x: Float, c: [Float], o: Int, n: Int, l: Float) -> {hi: Float, lo: Float} Never! {
     i := n - 1
     t: fast_two_sum(c[o + 2 * i], l)
     ch := t.hi
@@ -6790,12 +6790,12 @@ priv gamma_polyddd: fn(x: Float, c: [Float], o: Int, n: Int, l: Float) -> (hi: F
         ch = s.hi
         cl = s.lo
     }
-    (hi: ch, lo: cl)
+    {hi: ch, lo: cl}
 }
 
 // tgamma.c's and lgamma.c's as_logd: ln(x) as a double-double for x > 0, by
 // log2's reduction to r (1 + m 2^-52) - 1 with r = r1[i1] r2[i2].
-priv gamma_log: fn(x: Float) -> (hi: Float, lo: Float) Never! {
+priv gamma_log: fn(x: Float) -> {hi: Float, lo: Float} Never! {
     // a subnormal x scaled by 2^52 into the normal range
     sub: (to_bits(x) >> 52) == 0
     b: if sub -> to_bits(x * Float{4503599627370496.0}) else -> to_bits(x)
@@ -6818,13 +6818,13 @@ priv gamma_log: fn(x: Float) -> (hi: Float, lo: Float) Never! {
     lt: (GAMMA_LOG_L1[2 * i1 + 1] + GAMMA_LOG_L2[2 * i2 + 1]) + ed * Float{0.6931471805437468}
     lh: lt + dxh
     ll: (((lt - lh) + dxh) + (((GAMMA_LOG_L1[2 * i1] + GAMMA_LOG_L2[2 * i2]) + Float{1.619851018665656e-11} * ed) + dxl)) + f
-    (hi: lh, lo: ll)
+    {hi: lh, lo: ll}
 }
 
 // tgamma.c as_sinpid and lgamma.c as_sinpipid: sin(pi x) (t sin(pi i/128))
 // or sin(pi x)/pi (t sin(pi i/128)/pi) as a double-double for 0 <= x < 1, as
 // cos(pi (x - 1/2)) from t at the nearest multiple of 1/128.
-priv gamma_sin_pi: fn(x: Float, t: [Float]) -> (hi: Float, lo: Float) Never! {
+priv gamma_sin_pi: fn(x: Float, t: [Float]) -> {hi: Float, lo: Float} Never! {
     v: fabs(x - Float{0.5}) * Float{128.0}
     iv: round_ties_even(v)
     d: iv - v
@@ -6847,7 +6847,7 @@ priv gamma_sin_pi: fn(x: Float, t: [Float]) -> (hi: Float, lo: Float) Never! {
 
 // tgamma.c as_expd: e^(xh + xl) as (hi + lo) 2^e, by x 1024/ln(2) = k + y,
 // 2^(k/1024) from two tables and 2^(y/1024) - 1 by a polynomial.
-priv tgamma_exp: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, e: Int) Never! {
+priv tgamma_exp: fn(xh: Float, xl: Float) -> {hi: Float, lo: Float, e: Int} Never! {
     t: exp_cr_muldd(xh, xl, Float{1477.3197218702985}, Float{2.0843800310713378e-14})
     kf: round_ties_even(t.hi)
     y: fast_two_sum(t.hi - kf, t.lo)
@@ -6861,12 +6861,12 @@ priv tgamma_exp: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, e: Int) Neve
     f: exp_cr_muldd(y.hi, y.lo, f0.hi, f0.lo + c[1])
     g: fast_two_sum(Float{1.0}, f.hi)
     p: exp_cr_muldd(r.hi, r.lo, g.hi, f.lo + g.lo)
-    (hi: p.hi, lo: p.lo, e: k >> 10)
+    {hi: p.hi, lo: p.lo, e: k >> 10}
 }
 
 // tgamma.c as_lgamma_asym: ln(gamma(x)) for x = xh + xl > 3 as a
 // double-double, Stirling's (x - 1/2) (ln(x) - 1) plus a series in 1/x.
-priv tgamma_lgamma_asym: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float) Never! {
+priv tgamma_lgamma_asym: fn(xh: Float, xl: Float) -> {hi: Float, lo: Float} Never! {
     zh: Float{1.0} / xh
     dz: xl * zh
     zl: (fma(zh, -xh, Float{1.0}) - dz) * zh
@@ -8620,7 +8620,7 @@ priv lgamma_piece: fn(a: Int) -> Int Never! {
 
 // lgamma on piece j at z = x - off[j]: degrees 0 to 4 in double-double, 5 to
 // 12 as Floats.
-priv lgamma_piece_poly: fn(j: Int, z: Float) -> (hi: Float, lo: Float) Never! {
+priv lgamma_piece_poly: fn(j: Int, z: Float) -> {hi: Float, lo: Float} Never! {
     z2: z * z
     z4: z2 * z2
     o: 8 * j
@@ -8631,7 +8631,7 @@ priv lgamma_piece_poly: fn(j: Int, z: Float) -> (hi: Float, lo: Float) Never! {
 
 // lgamma.c as_sinpipid: sin(pi x)/pi as a double-double for 0 < x < 1, by a
 // series in z = 1/2 - |x - 1/2| within 1/64 of 0 and 1.
-priv lgamma_sin_pi: fn(x: Float) -> (hi: Float, lo: Float) Never! {
+priv lgamma_sin_pi: fn(x: Float) -> {hi: Float, lo: Float} Never! {
     ax: fabs(x - Float{0.5})
     if (round_ties_even(ax * Float{128.0}) <= Float{62.0}) {
         return gamma_sin_pi(x, LGAMMA_SIN_PI_T)
@@ -8643,7 +8643,7 @@ priv lgamma_sin_pi: fn(x: Float) -> (hi: Float, lo: Float) Never! {
     f: exp_cr_muldd(z2, z2l, t.hi, t.lo + Float{-3.02274545379001e-17})
     g: exp2_cr_mulddd(z, f.hi, f.lo)
     s: fast_two_sum(z, g.hi)
-    (hi: s.hi, lo: g.lo + s.lo)
+    {hi: s.hi, lo: g.lo + s.lo}
 }
 
 // lgamma.c as_lgamma_accurate: ln|gamma(x)| for finite x where lgamma's
@@ -8788,31 +8788,31 @@ priv lgamma_accurate: fn(sx: Float) -> Float Never! {
 }
 
 // A triple-double from its three parts.
-priv lgamma_dd3: fn(hi: Float, mid: Float, lo: Float) -> (hi: Float, mid: Float, lo: Float) Never! {
-    (hi: hi, mid: mid, lo: lo)
+priv lgamma_dd3: fn(hi: Float, mid: Float, lo: Float) -> {hi: Float, mid: Float, lo: Float} Never! {
+    {hi: hi, mid: mid, lo: lo}
 }
 
 // (fh + fm + fl) + (h + m + l), lgamma.c's sumdd and twosum chain.
-priv lgamma_add3: fn(fh: Float, fm: Float, fl: Float, h: Float, m: Float, l: Float) -> (hi: Float, mid: Float, lo: Float) Never! {
+priv lgamma_add3: fn(fh: Float, fm: Float, fl: Float, h: Float, m: Float, l: Float) -> {hi: Float, mid: Float, lo: Float} Never! {
     s: two_sum_dd(fm, fl, m, l)
     t: two_sum(fh, h)
     r: two_sum_dd(s.hi, s.lo, t.lo, Float{0.0})
-    (hi: t.hi, mid: r.hi, lo: r.lo)
+    {hi: t.hi, mid: r.hi, lo: r.lo}
 }
 
 // ln(x - 1) + ln(x - 2) as a triple-double, for x near 3 and 7/2.
-priv lgamma_log2_accurate: fn(x: Float) -> (hi: Float, mid: Float, lo: Float) Never! {
+priv lgamma_log2_accurate: fn(x: Float) -> {hi: Float, mid: Float, lo: Float} Never! {
     l2: lgamma_log_accurate(x - Float{2.0})
     l1: lgamma_log_accurate(x - Float{1.0})
     a: two_sum_dd(l1.mid, l1.lo, l2.mid, l2.lo)
     h: fast_two_sum(l1.hi, l2.hi)
     r: two_sum_dd(a.hi, a.lo, h.lo, Float{0.0})
-    (hi: h.hi, mid: r.hi, lo: r.lo)
+    {hi: h.hi, mid: r.hi, lo: r.lo}
 }
 
 // lgamma.c as_logd_accurate: ln(x) as a triple-double for x > 0, as
 // gamma_log with triple-double tables and a longer series.
-priv lgamma_log_accurate: fn(x: Float) -> (hi: Float, mid: Float, lo: Float) Never! {
+priv lgamma_log_accurate: fn(x: Float) -> {hi: Float, mid: Float, lo: Float} Never! {
     sub: (to_bits(x) >> 52) == 0
     b: if sub -> to_bits(x * Float{4503599627370496.0}) else -> to_bits(x)
     ed: Float{(b >> 52) - (if sub -> 1075 else -> 1023)}
@@ -8837,12 +8837,12 @@ priv lgamma_log_accurate: fn(x: Float) -> (hi: Float, mid: Float, lo: Float) Nev
     l2: two_sum_dd(l1.hi, l1.lo, f.hi, f.lo)
     a: fast_two_sum(l0, l2.hi)
     e: fast_two_sum(a.lo, l2.lo)
-    (hi: a.hi, mid: e.hi, lo: e.lo)
+    {hi: a.hi, mid: e.hi, lo: e.lo}
 }
 
 // lgamma.c as_sinpipid_accurate: sin(pi x)/pi as a double-double for 0 < x
 // < 1, as gamma_sin_pi with double-double series.
-priv lgamma_sin_pi_accurate: fn(x: Float) -> (hi: Float, lo: Float) Never! {
+priv lgamma_sin_pi_accurate: fn(x: Float) -> {hi: Float, lo: Float} Never! {
     v: fabs(x - Float{0.5}) * Float{128.0}
     iv: round_ties_even(v)
     d: iv - v
@@ -8863,7 +8863,7 @@ priv lgamma_sin_pi_accurate: fn(x: Float) -> (hi: Float, lo: Float) Never! {
 
 // lgamma.c as_lgamma_asym_accurate: ln(gamma(x)) for x = xh + xl > 3.75 as a
 // triple-double, (x - 1/2) (ln(x) - 1) + c0 plus a series in 1/x.
-priv lgamma_asym_accurate: fn(xh: Float, xl: Float) -> (hi: Float, mid: Float, lo: Float) Never! {
+priv lgamma_asym_accurate: fn(xh: Float, xl: Float) -> {hi: Float, mid: Float, lo: Float} Never! {
     lg: lgamma_log_accurate(xh)
     l0: lg.hi - Float{1.0}
     l1 := lg.mid
@@ -8874,7 +8874,7 @@ priv lgamma_asym_accurate: fn(xh: Float, xl: Float) -> (hi: Float, mid: Float, l
         l1x: l1 * xh
         s: two_sum_dd(l1x, l2 * xh, fma(l0, xh, -l0x), fma(l1, xh, -l1x))
         s2: two_sum_dd(s.hi, s.lo, l0 * wl, l1 * wl)
-        return (hi: l0x, mid: s2.hi, lo: s2.lo)
+        return {hi: l0x, mid: s2.hi, lo: s2.lo}
     }
     zh: Float{1.0} / xh
     zl: (fma(zh, -xh, Float{1.0}) - xl * zh) * zh
@@ -8903,7 +8903,7 @@ priv lgamma_asym_accurate: fn(xh: Float, xl: Float) -> (hi: Float, mid: Float, l
     s4: two_sum_dd(s3.hi, s3.lo, f.hi, f.lo)
     a: fast_two_sum(l0x, s4.hi)
     e: fast_two_sum(a.lo, s4.lo)
-    (hi: a.hi, mid: e.hi, lo: e.lo)
+    {hi: a.hi, mid: e.hi, lo: e.lo}
 }
 
 // lgamma's piece borders for 1/2 <= |x| < 8.29541: |x|'s bits >> 37, then
@@ -11253,7 +11253,7 @@ log10: fn(n: Float) -> Float Never! {
     left: hi + (lo - Float{1.7205356741102976e-21})
     right: hi + (lo + Float{1.7205356741102976e-21})
     if left == right -> return left
-    dint_to_float(dint_mul((sig: 0xDE5B_D8A9_3728_7195_355B_AAAF_AD33_DC32, ex: -2, sgn: 0), dint_log(dint_from_float(n))))
+    dint_to_float(dint_mul({sig: 0xDE5B_D8A9_3728_7195_355B_AAAF_AD33_DC32, ex: -2, sgn: 0}, dint_log(dint_from_float(n))))
 }
 
 // 10^k for k in 0..=22, every one exact.
@@ -11293,11 +11293,11 @@ log2: fn(n: Float) -> Float Never! {
 }
 
 // x > 0 finite as 2^e (1 + m 2^-52), subnormals normalized.
-priv log2_cr_split: fn(n: Float) -> (m: Int, e: Int) Never! {
+priv log2_cr_split: fn(n: Float) -> {m: Int, e: Int} Never! {
     b: to_bits(n)
-    if b >= 0x0010_0000_0000_0000 -> return (m: b & 0xF_FFFF_FFFF_FFFF, e: (b >> 52) - 1023)
+    if b >= 0x0010_0000_0000_0000 -> return {m: b & 0xF_FFFF_FFFF_FFFF, e: (b >> 52) - 1023}
     k: clz64(b)
-    (m: (b << (k - 11)) & 0xF_FFFF_FFFF_FFFF, e: -1023 - (k - 12))
+    {m: (b << (k - 11)) & 0xF_FFFF_FFFF_FFFF, e: -1023 - (k - 12)}
 }
 
 // log2(x) when log2's fast path cannot round, from its estimate a: four
@@ -12092,7 +12092,7 @@ priv sinh_cosh: fn(ax: Float, sg: Float, m: Float, e36: Float, hard: [Float]) ->
 // (th + tl) e^(x - t log(2) / 4096) in double-double, for |x - t log(2) / 4096|
 // <= log(2) / 8192 (the shared as_exp_accurate of sinh.c, cosh.c and tanh.c;
 // acc: tanh.c's renormalizing products).
-priv hyp_exp_accurate: fn(x: Float, t: Float, th: Float, tl: Float, acc: Bool) -> (hi: Float, lo: Float) Never! {
+priv hyp_exp_accurate: fn(x: Float, t: Float, th: Float, tl: Float, acc: Bool) -> {hi: Float, lo: Float} Never! {
     dx: x - Float{0.00016922538588914904} * t
     dxl0: Float{1.0256140314162804e-14} * t
     dxll: Float{3.2042720746546034e-31} * t + fma(Float{1.0256140314162804e-14}, t, -dxl0)
@@ -12107,25 +12107,25 @@ priv hyp_exp_accurate: fn(x: Float, t: Float, th: Float, tl: Float, acc: Bool) -
     uh: zh + tl
     ul: ((zh - uh) + tl) + zl
     vh: uh + f2.lo
-    (hi: vh, lo: ((uh - vh) + f2.lo) + ul)
+    {hi: vh, lo: ((uh - vh) + f2.lo) + ul}
 }
 
 // (xh + xl) (ch + cl): sinh.c's and cosh.c's unnormalized muldd, or with acc
 // tanh.c's muldd_acc (mul_dd).
-priv hyp_mul_dd: fn(xh: Float, xl: Float, ch: Float, cl: Float, acc: Bool) -> (hi: Float, lo: Float) Never! {
+priv hyp_mul_dd: fn(xh: Float, xl: Float, ch: Float, cl: Float, acc: Bool) -> {hi: Float, lo: Float} Never! {
     if acc -> return mul_dd(xh, xl, ch, cl)
     h: xh * ch
-    (hi: h, lo: fma(xh, ch, -h) + xh * cl + xl * ch)
+    {hi: h, lo: fma(xh, ch, -h) + xh * cl + xl * ch}
 }
 
-priv hyp_mul_dd_d: fn(xh: Float, xl: Float, c: Float) -> (hi: Float, lo: Float) Never! {
+priv hyp_mul_dd_d: fn(xh: Float, xl: Float, c: Float) -> {hi: Float, lo: Float} Never! {
     h: xh * c
-    (hi: h, lo: fma(xh, c, -h) + xl * c)
+    {hi: h, lo: fma(xh, c, -h) + xl * c}
 }
 
 // The double-double polynomial of n (hi, lo) pairs of c in xh + xl, with l
 // added to the last coefficient (the polydd of sinh.c, cosh.c and tanh.c).
-priv hyp_poly_dd: fn(xh: Float, xl: Float, c: [Float], n: Int, l: Float, acc: Bool) -> (hi: Float, lo: Float) Never! {
+priv hyp_poly_dd: fn(xh: Float, xl: Float, c: [Float], n: Int, l: Float, acc: Bool) -> {hi: Float, lo: Float} Never! {
     i := n - 1
     s0: fast_two_sum(c[2 * i], l)
     ch := s0.hi
@@ -12137,7 +12137,7 @@ priv hyp_poly_dd: fn(xh: Float, xl: Float, c: [Float], n: Int, l: Float, acc: Bo
         ch = s.hi
         cl = (p.lo + c[2 * i + 1]) + s.lo
     }
-    (hi: ch, lo: cl)
+    {hi: ch, lo: cl}
 }
 
 // y1 moved one ulp toward y2 when its significand bits are all zero, so the
@@ -12656,16 +12656,16 @@ priv rsqrt_exact: fn(candidate: Float, n: Float) -> Float Never! {
 }
 
 // A finite x >= 0 as m * 2^e with m an Int.
-priv float_parts: fn(n: Float) -> (m: Int, e: Int) Never! {
+priv float_parts: fn(n: Float) -> {m: Int, e: Int} Never! {
     bits: to_bits(n) & 0x7FFF_FFFF_FFFF_FFFF
     biased: bits >> 52
     fraction: bits & 0xF_FFFF_FFFF_FFFF
-    if biased == 0 -> return (m: fraction, e: -1074)
-    (m: fraction | 0x10_0000_0000_0000, e: biased - 1075)
+    if biased == 0 -> return {m: fraction, e: -1074}
+    {m: fraction | 0x10_0000_0000_0000, e: biased - 1075}
 }
 
 // Whether (m * 2^e)^2 * x < 1, exactly.
-priv square_times_below_one: fn(m: Int, e: Int, x: (m: Int, e: Int)) -> Bool Never! {
+priv square_times_below_one: fn(m: Int, e: Int, x: {m: Int, e: Int}) -> Bool Never! {
     shift: 2 * e + x.e
     if shift >= 0 -> return false
     m * m * x.m < (Int{1} << -shift)
@@ -12787,7 +12787,7 @@ priv pow_cr: fn(a: Float, y: Float) -> Float Never! {
 // with t in (1/sqrt 2, sqrt 2), z = r t - 1 exact for the 9-bit inverse r,
 // log x = e log 2 - log r + log(1 + z). cancel when e = 0 and lo is not
 // below 2^-24 hi.
-priv pow_log_1: fn(x: Float) -> (hi: Float, lo: Float, cancel: Bool) Never! {
+priv pow_log_1: fn(x: Float) -> {hi: Float, lo: Float, cancel: Bool} Never! {
     u: __to_bits_i64(x)
     m := u & 0xF_FFFF_FFFF_FFFF
     e := (u >> 52) & 0x7FF
@@ -12815,14 +12815,14 @@ priv pow_log_1: fn(x: Float) -> (hi: Float, lo: Float, cancel: Bool) Never! {
     h: fast_sum_ddd(s.hi, s.lo + p.lo, p.hi)
     if e == 0 && (fabs(h.lo) > fabs(h.hi) * Float{5.960464477539063e-8}) {
         f: fast_two_sum(h.hi, h.lo)
-        return (hi: f.hi, lo: f.lo, cancel: true)
+        return {hi: f.hi, lo: f.lo, cancel: true}
     }
-    (hi: h.hi, lo: h.lo, cancel: false)
+    {hi: h.hi, lo: h.lo, cancel: false}
 }
 
 // log(1 + z) - z for |z| < 0.00403 as hi + lo (CORE-MATH pow.c p_1): a
 // degree-8 polynomial, -z^2/2 kept in double-double.
-priv pow_p_1: fn(z: Float) -> (hi: Float, lo: Float) Never! {
+priv pow_p_1: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     wh: z * z
     wl: fma(z, z, -wh)
     t: fma(Float{-0.12500370131039634}, z, Float{0.1428610267999632})
@@ -12830,23 +12830,23 @@ priv pow_p_1: fn(z: Float) -> (hi: Float, lo: Float) Never! {
     v := fma(Float{-0.25000000000000017}, z, Float{0.3333333333333335})
     u = fma(t, wh, u)
     v = fma(u, wh, v)
-    (hi: Float{-0.5} * wh, lo: fma(v * wh, z, Float{-0.5} * wl))
+    {hi: Float{-0.5} * wh, lo: fma(v * wh, z, Float{-0.5} * wl)}
 }
 
 // e^(rh + rl) as hi + lo (CORE-MATH pow.c exp_1): rh + rl = k log(2)/4096 + z,
 // then 2^(k/4096) e^z. Sure overflow gives DBL_MAX twice and sure underflow
 // zeros; NaN where the result could overflow or be subnormal, for the slow
 // path to settle.
-priv pow_exp_1: fn(rh: Float, rl: Float) -> (hi: Float, lo: Float) Never! {
+priv pow_exp_1: fn(rh: Float, rl: Float) -> {hi: Float, lo: Float} Never! {
     if is_nan(rh) || (rh > Float{709.7826672320183}) {
         if (rh > Float{709.7827585515907}) {
-            return (hi: Float{1.7976931348623157e308}, lo: Float{1.7976931348623157e308})
+            return {hi: Float{1.7976931348623157e308}, lo: Float{1.7976931348623157e308}}
         }
-        return (hi: NAN, lo: NAN)
+        return {hi: NAN, lo: NAN}
     }
     if (rh < Float{-656.4652340719966}) {
-        if (rh < Float{-745.1332670341407}) { return (hi: 0.0, lo: 0.0) }
-        return (hi: NAN, lo: NAN)
+        if (rh < Float{-745.1332670341407}) { return {hi: 0.0, lo: 0.0} }
+        return {hi: NAN, lo: NAN}
     }
     k: round_ties_even(rh * Float{5909.278887481194})
     zh: fma(Float{0.0001692253858788929}, -k, rh)
@@ -12855,7 +12855,7 @@ priv pow_exp_1: fn(rh: Float, rl: Float) -> (hi: Float, lo: Float) Never! {
 }
 
 // e^z for |z| < 2^-12.905 as hi + lo (CORE-MATH pow.c q_1): degree 4.
-priv pow_q_1: fn(z: Float) -> (hi: Float, lo: Float) Never! {
+priv pow_q_1: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     q := fma(Float{0.041666666688168076}, z, Float{0.16666666679061554})
     q = fma(q, z, Float{0.5})
     h0: fma(q, z, Float{1.0})
@@ -13442,7 +13442,7 @@ priv pow_ziv: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int) -> Float Never! {
 // (t + 1)) for x = 2^E t with t in [1/sqrt 2, sqrt 2), then y log x =
 // k log 2 + r and e^r = (e^(r / 2^8))^(2^8). Every truncation is counted
 // into err.
-priv pow_fixed: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, w: Int) -> (q: Int, err: Int, k: Int) Never! {
+priv pow_fixed: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, w: Int) -> {q: Int, err: Int, k: Int} Never! {
     one: Int{1} << w
     b: bit_len(xm)
     big_e := b + xe
@@ -13503,7 +13503,7 @@ priv pow_fixed: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, w: Int) -> (q: I
         err = ((2 * q * err + err * err) >> w) + 2
         q = (q * q) >> w
     }
-    (q: q, err: err, k: k)
+    {q: q, err: err, k: k}
 }
 
 // log(2) to 1024 bits, truncated: floor(2^1024 log 2).
@@ -14770,64 +14770,64 @@ priv ATAN2F_C: [Float]{
 
 // Double-double helpers of the CORE-MATH ports: a value is hi + lo, and every
 // fma recovers the exact rounding error of a product.
-priv fast_two_sum: fn(x: Float, y: Float) -> (hi: Float, lo: Float) Never! {
+priv fast_two_sum: fn(x: Float, y: Float) -> {hi: Float, lo: Float} Never! {
     s: x + y
-    (hi: s, lo: y - (s - x))
+    {hi: s, lo: y - (s - x)}
 }
 
-priv fast_two_sub: fn(x: Float, y: Float) -> (hi: Float, lo: Float) Never! {
+priv fast_two_sub: fn(x: Float, y: Float) -> {hi: Float, lo: Float} Never! {
     s: x - y
-    (hi: s, lo: (x - s) - y)
+    {hi: s, lo: (x - s) - y}
 }
 
 // hi + lo = x + y exactly, for any order of magnitude (Knuth's two-sum).
-priv two_sum: fn(x: Float, y: Float) -> (hi: Float, lo: Float) Never! {
+priv two_sum: fn(x: Float, y: Float) -> {hi: Float, lo: Float} Never! {
     s: x + y
     xa: s - y
     ya: s - xa
-    (hi: s, lo: (x - xa) + (y - ya))
+    {hi: s, lo: (x - xa) + (y - ya)}
 }
 
 // (xh + xl) + (yh + yl), the high parts summed exactly in either order.
-priv two_sum_dd: fn(xh: Float, xl: Float, yh: Float, yl: Float) -> (hi: Float, lo: Float) Never! {
+priv two_sum_dd: fn(xh: Float, xl: Float, yh: Float, yl: Float) -> {hi: Float, lo: Float} Never! {
     t: two_sum(xh, yh)
-    (hi: t.hi, lo: (xl + yl) + t.lo)
+    {hi: t.hi, lo: (xl + yl) + t.lo}
 }
 
-priv fast_sum_ddd: fn(xh: Float, xl: Float, c: Float) -> (hi: Float, lo: Float) Never! {
+priv fast_sum_ddd: fn(xh: Float, xl: Float, c: Float) -> {hi: Float, lo: Float} Never! {
     t: fast_two_sum(xh, c)
-    (hi: t.hi, lo: xl + t.lo)
+    {hi: t.hi, lo: xl + t.lo}
 }
 
 // (xh + xl) + (yh + yl), the high parts summed fast (|xh| >= |yh|).
-priv fast_sum_dd: fn(xh: Float, xl: Float, yh: Float, yl: Float) -> (hi: Float, lo: Float) Never! {
+priv fast_sum_dd: fn(xh: Float, xl: Float, yh: Float, yl: Float) -> {hi: Float, lo: Float} Never! {
     t: fast_two_sum(xh, yh)
-    (hi: t.hi, lo: (xl + yl) + t.lo)
+    {hi: t.hi, lo: (xl + yl) + t.lo}
 }
 
-priv add_dd: fn(xh: Float, xl: Float, ch: Float, cl: Float) -> (hi: Float, lo: Float) Never! {
+priv add_dd: fn(xh: Float, xl: Float, ch: Float, cl: Float) -> {hi: Float, lo: Float} Never! {
     s: xh + ch
     d: s - xh
-    (hi: s, lo: ((ch - d) + (xh + (d - s))) + (xl + cl))
+    {hi: s, lo: ((ch - d) + (xh + (d - s))) + (xl + cl)}
 }
 
-priv mul_dd: fn(xh: Float, xl: Float, ch: Float, cl: Float) -> (hi: Float, lo: Float) Never! {
+priv mul_dd: fn(xh: Float, xl: Float, ch: Float, cl: Float) -> {hi: Float, lo: Float} Never! {
     ahlh: ch * xl
     alhh: cl * xh
     ahhh: ch * xh
     fast_two_sum(ahhh, fma(ch, xh, -ahhh) + (alhh + ahlh))
 }
 
-priv mul_dd_d: fn(xh: Float, xl: Float, c: Float) -> (hi: Float, lo: Float) Never! {
+priv mul_dd_d: fn(xh: Float, xl: Float, c: Float) -> {hi: Float, lo: Float} Never! {
     ahhh: c * xh
     ahhl: fma(c, xh, -ahhh) + c * xl
     h: ahhh + ahhl
-    (hi: h, lo: (ahhh - h) + ahhl)
+    {hi: h, lo: (ahhh - h) + ahhl}
 }
 
 // The double-double polynomial c[0] + x * (c[1] + ...) of n pairs (hi, lo)
 // of `c`, with `l` added to the last coefficient.
-priv poly_dd: fn(xh: Float, xl: Float, c: [Float], n: Int, l: Float) -> (hi: Float, lo: Float) Never! {
+priv poly_dd: fn(xh: Float, xl: Float, c: [Float], n: Int, l: Float) -> {hi: Float, lo: Float} Never! {
     i := n - 1
     ch := c[2 * i] + l
     cl := ((c[2 * i] - ch) + l) + c[2 * i + 1]
@@ -14839,24 +14839,24 @@ priv poly_dd: fn(xh: Float, xl: Float, c: [Float], n: Int, l: Float) -> (hi: Flo
         ch = th
         cl = p.lo + (tl + c[2 * i + 1])
     }
-    (hi: ch, lo: cl)
+    {hi: ch, lo: cl}
 }
 
 // a (bh + bl), the low product's rounding folded into lo.
-priv s_mul: fn(a: Float, bh: Float, bl: Float) -> (hi: Float, lo: Float) Never! {
+priv s_mul: fn(a: Float, bh: Float, bl: Float) -> {hi: Float, lo: Float} Never! {
     h: a * bh
-    (hi: h, lo: fma(a, bl, fma(a, bh, -h)))
+    {hi: h, lo: fma(a, bl, fma(a, bh, -h))}
 }
 
 // (ah + al) (bh + bl) less al bl.
-priv d_mul: fn(ah: Float, al: Float, bh: Float, bl: Float) -> (hi: Float, lo: Float) Never! {
+priv d_mul: fn(ah: Float, al: Float, bh: Float, bl: Float) -> {hi: Float, lo: Float} Never! {
     h: ah * bh
-    (hi: h, lo: fma(al, bh, fma(ah, bl, fma(ah, bh, -h))))
+    {hi: h, lo: fma(al, bh, fma(ah, bl, fma(ah, bh, -h)))}
 }
 
 // x (c0 + x (c1 + ... x (c(n-1) + x (h + l)))), each ci the double-double
 // c[2i] + c[2i + 1]: one s_mul and fast two-sum per step.
-priv horner_dd_x: fn(x: Float, h0: Float, l0: Float, c: [Float], n: Int) -> (hi: Float, lo: Float) Never! {
+priv horner_dd_x: fn(x: Float, h0: Float, l0: Float, c: [Float], n: Int) -> {hi: Float, lo: Float} Never! {
     h := h0
     l := l0
     i := n
@@ -14975,23 +14975,23 @@ priv cos_large: fn(x: Float) -> Float Never! {
 
 // sin(t1 + t2) as hi + lo and cos(t1 + t2) as other, for t1 = i1 pi/2^7 and
 // t2 = i2 pi/2^14.
-priv sin_grid: fn(i1: Int, i2: Int) -> (hi: Float, lo: Float, other: Float) Never! {
+priv sin_grid: fn(i1: Int, i2: Int) -> {hi: Float, lo: Float, other: Float} Never! {
     a: 4 * i1
     b: 4 * i2
     s1: exp_cr_muldd(SINCOS_U1[a], SINCOS_U1[a + 1], SINCOS_U2[b + 2], SINCOS_U2[b + 3])
     s2: exp_cr_muldd(SINCOS_U2[b], SINCOS_U2[b + 1], SINCOS_U1[a + 2], SINCOS_U1[a + 3])
     s: fast_sum_dd(s1.hi, s1.lo, s2.hi, s2.lo)
-    (hi: s.hi, lo: s.lo, other: SINCOS_U1[a + 2] * SINCOS_U2[b + 2] - SINCOS_U1[a] * SINCOS_U2[b])
+    {hi: s.hi, lo: s.lo, other: SINCOS_U1[a + 2] * SINCOS_U2[b + 2] - SINCOS_U1[a] * SINCOS_U2[b]}
 }
 
 // cos(t1 + t2) as hi + lo and sin(t1 + t2) as other, as sin_grid.
-priv cos_grid: fn(i1: Int, i2: Int) -> (hi: Float, lo: Float, other: Float) Never! {
+priv cos_grid: fn(i1: Int, i2: Int) -> {hi: Float, lo: Float, other: Float} Never! {
     a: 4 * i1
     b: 4 * i2
     c1: exp_cr_muldd(SINCOS_U1[a + 2], SINCOS_U1[a + 3], SINCOS_U2[b + 2], SINCOS_U2[b + 3])
     c2: exp_cr_muldd(SINCOS_U2[b], SINCOS_U2[b + 1], SINCOS_U1[a], SINCOS_U1[a + 1])
     c: fast_sum_dd(c1.hi, c1.lo, -c2.hi, -c2.lo)
-    (hi: c.hi, lo: c.lo, other: SINCOS_U1[a] * SINCOS_U2[b + 2] + SINCOS_U1[a + 2] * SINCOS_U2[b])
+    {hi: c.hi, lo: c.lo, other: SINCOS_U1[a] * SINCOS_U2[b + 2] + SINCOS_U1[a + 2] * SINCOS_U2[b]}
 }
 
 // (-1)^s (fh + fl) when fl - eps and fl + eps round alike with fh; NaN when
@@ -15007,7 +15007,7 @@ priv sincos_round: fn(fh: Float, fl: Float, s: Int, eps: Float) -> Float Never! 
 
 // For x >= 2^31: x/(2pi) mod 1 = j/2^15 + r + s with 0 <= r < 2^-15 and
 // 0 <= s < 2^-67.988.
-priv sincos_reduce: fn(x: Float) -> (j: Int, r: Float) Never! {
+priv sincos_reduce: fn(x: Float) -> {j: Int, r: Float} Never! {
     b: to_bits(x)
     e: b >> 52
     m: b & 0xF_FFFF_FFFF_FFFF | 0x10_0000_0000_0000
@@ -15016,12 +15016,12 @@ priv sincos_reduce: fn(x: Float) -> (j: Int, r: Float) Never! {
     v: ((w << ((e - 1011) & 0x3F)) >> 64) & 0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
     // rounded to nearest by 2^59 + 2^52 below the 15 + 53 bits kept
     u: u128(m * v + 0x1_0000_0000_0000_0000_0000_0000_0000 + 0x810_0000_0000_0000)
-    (j: u >> 113, r: Float{(u >> 60) & 0x1F_FFFF_FFFF_FFFF} * Float{3.3881317890172014e-21} - Float{1.52587890625e-5})
+    {j: u >> 113, r: Float{(u >> 60) & 0x1F_FFFF_FFFF_FFFF} * Float{3.3881317890172014e-21} - Float{1.52587890625e-5}}
 }
 
 // For |x| >= 2^-27: x/(2pi) mod 1 = k/2^13 + (-1)^neg r/2^128 + eps with
 // |r/2^128| <= 2^-14 and 0 <= eps < 2^-127.999.
-priv sincos_reduce_acc: fn(x: Float) -> (k: Int, r: Int, neg: Bool) Never! {
+priv sincos_reduce_acc: fn(x: Float) -> {k: Int, r: Int, neg: Bool} Never! {
     b: to_bits(x) & 0x7FFF_FFFF_FFFF_FFFF
     e: b >> 52
     m: b & 0xF_FFFF_FFFF_FFFF | 0x10_0000_0000_0000
@@ -15034,9 +15034,9 @@ priv sincos_reduce_acc: fn(x: Float) -> (k: Int, r: Int, neg: Bool) Never! {
     u: u0 & 0x7_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
     // k rounded to nearest, so that |r/2^128| < 2^-14
     if (u >> 114) == 1 {
-        return (k: (k + 1) & 0x1FFF, r: 0x8_0000_0000_0000_0000_0000_0000_0000 - u, neg: true)
+        return {k: (k + 1) & 0x1FFF, r: 0x8_0000_0000_0000_0000_0000_0000_0000 - u, neg: true}
     }
-    (k: k, r: u, neg: false)
+    {k: k, r: u, neg: false}
 }
 
 // sin(2 pi r)/2^128 for 0 <= r < 2^-14, given u = 8 r, u2 = u^2, u2h = its
@@ -15062,15 +15062,15 @@ priv sincos_s1u: fn(i: Int) -> Int Never! {
 
 // (|sin z|, |cos z|) for z = k pi/2^12 mod pi, i1 = k/2^6 mod 2^6 and
 // i2 = k mod 2^6, in 2^-128 units.
-priv sincos_acc_grid: fn(i1: Int, i2: Int) -> (s: Int, c: Int) Never! {
+priv sincos_acc_grid: fn(i1: Int, i2: Int) -> {s: Int, c: Int} Never! {
     s1: if i1 <= 32 -> sincos_s1u(i1) else -> sincos_s1u(64 - i1)
     c1: if i1 <= 32 -> sincos_s1u(32 - i1) else -> sincos_s1u(i1 - 32)
     sa: mul_hi128(s1, SINCOS_C2U[i2])
     sb: mul_hi128(c1, SINCOS_S2U[i2])
     ca: mul_hi128(c1, SINCOS_C2U[i2])
     cb: mul_hi128(s1, SINCOS_S2U[i2])
-    if i1 < 32 -> return (s: u128(sa + sb), c: u128(ca - cb))
-    (s: u128(sa - sb), c: u128(ca + cb))
+    if i1 < 32 -> return {s: u128(sa + sb), c: u128(ca - cb)}
+    {s: u128(sa - sb), c: u128(ca + cb)}
 }
 
 // (-1)^s r/2^128 rounded to nearest, for r/2^128 above 2^-64 (the closest a
@@ -16370,7 +16370,7 @@ priv tan_trunc53: fn(v: Int) -> Float Never! {
 // x/(2pi) mod 1 as i/2^11 + h + l within 2^-104.815, 0 <= h < 2^-11, for x >
 // 1.3538603431225862e-8: beyond 2pi from 128 bits of the fraction, h and l
 // truncated from them as tan.c's set_dd does.
-priv tan_reduce_fast: fn(x: Float) -> (i: Int, h: Float, l: Float) Never! {
+priv tan_reduce_fast: fn(x: Float) -> {i: Int, h: Float, l: Float} Never! {
     h := Float{0.0}
     l := Float{0.0}
     if (x <= Float{6.283185307179585}) {
@@ -16404,13 +16404,13 @@ priv tan_reduce_fast: fn(x: Float) -> (i: Int, h: Float, l: Float) Never! {
         }
     }
     k: core.math.floor(h * Float{2048.0})
-    (i: checked(Int{k}) ?? 0, h: fma(k, Float{-0.00048828125}, h), l: l)
+    {i: checked(Int{k}) ?? 0, h: fma(k, Float{-0.00048828125}, h), l: l}
 }
 
 // tan x as hi + lo within |err| (CORE-MATH tan_fast): sin2pi and cos2pi of
 // the reduced argument from TAN_SC's points and short polynomials, then
 // their ratio; err 1 where the reduced argument is too small.
-priv tan_fast: fn(x: Float) -> (hi: Float, lo: Float, err: Float) Never! {
+priv tan_fast: fn(x: Float) -> {hi: Float, lo: Float, err: Float} Never! {
     red: tan_reduce_fast(fabs(x))
     // pi <= x mod 2pi: tan(x - pi); pi/2 <= x mod pi: -cot(x - pi/2)
     flip: red.i & 0x200 != 0
@@ -16427,7 +16427,7 @@ priv tan_fast: fn(x: Float) -> (hi: Float, lo: Float, err: Float) Never! {
         l = -l
     }
     if i == 0 && (h < Float{7.275957614183426e-12}) {
-        return (hi: Float{0.0}, lo: Float{0.0}, err: Float{1.0})
+        return {hi: Float{0.0}, lo: Float{0.0}, err: Float{1.0}}
     }
     t: fast_two_sum(h - TAN_SC[3 * i], l)
     uh: t.hi * t.hi
@@ -16466,12 +16466,12 @@ priv tan_fast: fn(x: Float) -> (hi: Float, lo: Float, err: Float) Never! {
     ql: y * (fma(ah, -qh, bh) + fma(al, -qh, bl))
     sg: if neg -> Float{-1.0} else -> Float{1.0}
     rh: qh * sg
-    (hi: rh, lo: ql * sg, err: rh * Float{1.4928955695357043e-20})
+    {hi: rh, lo: ql * sg, err: rh * Float{1.4928955695357043e-20}}
 }
 
 // The 192-bit float of a TAN_S, TAN_C, TAN_PS or TAN_PC entry.
-priv tan_coef: fn(t: [Int], i: Int) -> (sig: Int, ex: Int, sgn: Int) Never! {
-    (sig: t[3 * i] << 64, ex: t[3 * i + 1], sgn: t[3 * i + 2])
+priv tan_coef: fn(t: [Int], i: Int) -> {sig: Int, ex: Int, sgn: Int} Never! {
+    {sig: t[3 * i] << 64, ex: t[3 * i + 1], sgn: t[3 * i + 2]}
 }
 
 // tan x when the fast path cannot round (CORE-MATH tan_accurate): x/(2pi)
@@ -16514,7 +16514,7 @@ priv tan_accurate: fn(x: Float) -> Float Never! {
         i = 0x1FF - i
     }
     xn: exact_bit_length(xr)
-    xt: if xr == 0 -> (sig: 0, ex: -1076, sgn: 0) else -> (sig: xr << (192 - xn), ex: xn - 192, sgn: 0)
+    xt: if xr == 0 -> {sig: 0, ex: -1076, sgn: 0} else -> {sig: xr << (192 - xn), ex: xn - 192, sgn: 0}
     x2: tint_mul(xt, xt)
     u := tint_mul(x2, tan_coef(TAN_PC, 5))
     v := tint_mul(x2, tan_coef(TAN_PS, 5))
@@ -16534,11 +16534,11 @@ priv tan_accurate: fn(x: Float) -> Float Never! {
     ci: tan_coef(TAN_C, i)
     s: tint_add(tint_mul(si, u), tint_mul(ci, v))
     sv: tint_mul(si, v)
-    c: tint_add(tint_mul(ci, u), (sig: sv.sig, ex: sv.ex, sgn: 1 - sv.sgn))
+    c: tint_add(tint_mul(ci, u), {sig: sv.sig, ex: sv.ex, sgn: 1 - sv.sgn})
     r: if is_tan -> tint_div(s, c) else -> tint_div(c, s)
     // within 86 units of tan.c's 128-bit last place
     rs: if neg -> 1 - r.sgn else -> r.sgn
-    tint_to_float((sig: r.sig, ex: r.ex, sgn: rs), 86)
+    tint_to_float({sig: r.sig, ex: r.ex, sgn: rs}, 86)
 }
 
 // sin2pi(i/2^11) for 0 <= i < 256 to nearest, as tan_coef triples: the
@@ -19033,7 +19033,7 @@ priv pi_trig_refine: fn(iq: Int, z: Float, hard_iq: [Int], hard: [Float]) -> Flo
 
 // sin and cos of iq/2048 of a half turn (iq mod 4096) as double-doubles,
 // from a 32-step table and a 32-step fine table: about 2^-80 relative.
-priv sincos_pi_coarse: fn(iq: Int) -> (sh: Float, sl: Float, ch: Float, cl: Float) Never! {
+priv sincos_pi_coarse: fn(iq: Int) -> {sh: Float, sl: Float, ch: Float, cl: Float} Never! {
     q: iq & 0xFFF
     j: if q & 0x400 != 0 -> 1024 - (q & 0x3FF) else -> q & 0x3FF
     a: 2 * (j >> 5)
@@ -19059,7 +19059,7 @@ priv sincos_pi_coarse: fn(iq: Int) -> (sh: Float, sl: Float, ch: Float, cl: Floa
 }
 
 // sincos_pi_coarse to about 2^-106 relative, for the refinement paths.
-priv sincos_pi_fine: fn(iq: Int) -> (sh: Float, sl: Float, ch: Float, cl: Float) Never! {
+priv sincos_pi_fine: fn(iq: Int) -> {sh: Float, sl: Float, ch: Float, cl: Float} Never! {
     q: iq & 0xFFF
     j: if q & 0x400 != 0 -> 1024 - (q & 0x3FF) else -> q & 0x3FF
     a: 2 * (j >> 5)
@@ -19087,10 +19087,10 @@ priv sincos_pi_fine: fn(iq: Int) -> (sh: Float, sl: Float, ch: Float, cl: Float)
 }
 
 // The quadrant signs of a first-quadrant sin and cos pair.
-priv sincos_pi_signed: fn(q: Int, sh: Float, sl: Float, ch: Float, cl: Float) -> (sh: Float, sl: Float, ch: Float, cl: Float) Never! {
+priv sincos_pi_signed: fn(q: Int, sh: Float, sl: Float, ch: Float, cl: Float) -> {sh: Float, sl: Float, ch: Float, cl: Float} Never! {
     ss: if q & 0x800 != 0 -> Float{-1.0} else -> Float{1.0}
     cs: if (q + 1024) & 0x800 != 0 -> Float{-1.0} else -> Float{1.0}
-    (sh: ss * sh, sl: ss * sl, ch: cs * ch, cl: cs * cl)
+    {sh: ss * sh, sl: ss * sl, ch: cs * ch, cl: cs * cl}
 }
 
 // tan_pi where x is a multiple of 1/4: jq counts quarter turns.
@@ -19105,10 +19105,10 @@ priv tan_pi_pole_or_zero: fn(jq: Int, sgn: Int) -> Float Never! {
 
 // (n + t) / (1 - n * t) for the table's tan n of the grid point iq/64 and
 // tan t of the rest, or -1/t at the grid's pole; `ms` < 0 flips n's sign.
-priv tan_pi_combine: fn(iq: Int, ms: Int, th: Float, tl: Float) -> (hi: Float, lo: Float) Never! {
+priv tan_pi_combine: fn(iq: Int, ms: Int, th: Float, tl: Float) -> {hi: Float, lo: Float} Never! {
     if iq == 32 {
         ith: Float{-1.0} / th
-        return (hi: ith, lo: (fma(ith, th, Float{1.0}) + tl * ith) * ith)
+        return {hi: ith, lo: (fma(ith, th, Float{1.0}) + tl * ith) * ith}
     }
     sign: if ms < 0 -> Float{-1.0} else -> Float{1.0}
     nl0: TANPI_T[2 * iq] * sign
@@ -19120,7 +19120,7 @@ priv tan_pi_combine: fn(iq: Int, ms: Int, th: Float, tl: Float) -> (hi: Float, l
     nl: nl0 + (nn.lo + tl)
     imh: Float{1.0} / d.hi
     hi: nn.hi * imh
-    (hi: hi, lo: fma(nn.hi, imh, -hi) + (nl + nn.hi * (fma(-d.hi, imh, Float{1.0}) - ml * imh)) * imh)
+    {hi: hi, lo: fma(nn.hi, imh, -hi) + (nl + nn.hi * (fma(-d.hi, imh, Float{1.0}) - ml * imh)) * imh}
 }
 
 // tan_pi's hard cases, keyed by |x| reduced into [0, 1/2]; `f` otherwise.
@@ -20076,19 +20076,19 @@ priv ATAN_HARD: [Float]{
 
 // asin's and acos's fast path: f0 + asin(z + zl), asin(z)/z being piece j's
 // polynomial at t = z^2 - j/128; the bounds (lb, ub) are eps apart.
-priv asin_core: fn(jd: Float, t: Float, z: Float, zl: Float, f0h: Float, f0l: Float, eps: Float) -> (lb: Float, ub: Float) Never! {
+priv asin_core: fn(jd: Float, t: Float, z: Float, zl: Float, f0h: Float, f0l: Float, eps: Float) -> {lb: Float, ub: Float} Never! {
     c: ASIN_CC
     b: 8 * (checked(Int{jd}) ?? 0)
     t2: t * t
     d: t * ((c[b + 2] + t * c[b + 3]) + t2 * ((c[b + 4] + t * c[b + 5]) + t2 * (c[b + 6] + t * c[b + 7])))
     f: exp_cr_muldd(z, zl, c[b], c[b + 1] + d)
     s: fast_sum_dd(f0h, f0l, f.hi, f.lo)
-    (lb: s.hi + (s.lo - eps), ub: s.hi + (s.lo + eps))
+    {lb: s.hi + (s.lo - eps), ub: s.hi + (s.lo + eps)}
 }
 
 // For |x| = sin(phi), |x| cos(j pi/64) - sqrt(1 - x^2) sin(j pi/64) =
 // sin(phi - j pi/64) as a double-double: the rotation both refinements share.
-priv asin_rotate: fn(x: Float, j: Int) -> (hi: Float, lo: Float) Never! {
+priv asin_rotate: fn(x: Float, j: Int) -> {hi: Float, lo: Float} Never! {
     s2: x * x
     dx2: fma(x, x, -s2)
     c2a: fast_two_sum(Float{1.0}, -s2)
@@ -20113,7 +20113,7 @@ priv asin_rotate: fn(x: Float, j: Int) -> (hi: Float, lo: Float) Never! {
 }
 
 // asin(sg (v + dv)) as a double-double for the small rotated v.
-priv asin_series: fn(v: Float, dv: Float, sg: Float) -> (hi: Float, lo: Float) Never! {
+priv asin_series: fn(v: Float, dv: Float, sg: Float) -> {hi: Float, lo: Float} Never! {
     v2: exp_cr_muldd(v, dv, v, dv)
     fl: v2.hi * (Float{0.022372159104814857} + v2.hi * (Float{0.017352737142070387} + v2.hi * Float{0.013992707164303743}))
     f: exp_m1_cr_opolydd(v2.hi, v2.lo, ASIN_RC, 0, 5, fl)
@@ -20121,12 +20121,12 @@ priv asin_series: fn(v: Float, dv: Float, sg: Float) -> (hi: Float, lo: Float) N
 }
 
 // (ph + pl + ps) renormalized by two rounds of fast two-sums.
-priv asin_renorm: fn(ph: Float, pl: Float, ps: Float) -> (hi: Float, mid: Float, lo: Float) Never! {
+priv asin_renorm: fn(ph: Float, pl: Float, ps: Float) -> {hi: Float, mid: Float, lo: Float} Never! {
     a: fast_two_sum(ph, pl)
     b: fast_two_sum(a.lo, ps)
     c: fast_two_sum(a.hi, b.hi)
     d: fast_two_sum(c.lo, b.lo)
-    (hi: c.hi, mid: d.hi, lo: d.lo)
+    {hi: c.hi, mid: d.hi, lo: d.lo}
 }
 
 // asin to about 2^-149 for the inputs the fast path cannot round: phi
@@ -21758,23 +21758,23 @@ priv ASINPI_SMALL_HARD: [Float]{
 }
 
 // sqrt(x) as a double-double for 0 <= x <= 0.25, within 2^-102.677 relatively.
-priv sqrt_dd: fn(x: Float) -> (hi: Float, lo: Float) Never! {
+priv sqrt_dd: fn(x: Float) -> {hi: Float, lo: Float} Never! {
     h: sqrt(x)
-    (hi: h, lo: -fma(h, h, -x) / (h + h))
+    {hi: h, lo: -fma(h, h, -x) / (h + h)}
 }
 
 // (h + l) / pi as a double-double: the product with 1/pi's double-double,
 // without the l * lo term.
-priv acos_pi_div_pi: fn(h: Float, l: Float) -> (hi: Float, lo: Float) Never! {
+priv acos_pi_div_pi: fn(h: Float, l: Float) -> {hi: Float, lo: Float} Never! {
     ph: Float{0.3183098861837907}
     hi: h * ph
     lo := fma(h, ph, -hi)
     lo = fma(h, Float{-1.9678676675182486e-17}, lo)
-    (hi: hi, lo: fma(l, ph, lo))
+    {hi: hi, lo: fma(l, ph, lo)}
 }
 
 // The double-double ACOSPI_T2 polynomial of piece i at y.
-priv acos_pi_poly: fn(i: Int, y: Float, ordered: Bool) -> (hi: Float, lo: Float) Never! {
+priv acos_pi_poly: fn(i: Int, y: Float, ordered: Bool) -> {hi: Float, lo: Float} Never! {
     p: 21 * i
     h := ACOSPI_T2[p + 19]
     l := Float{0.0}
@@ -21794,7 +21794,7 @@ priv acos_pi_poly: fn(i: Int, y: Float, ordered: Bool) -> (hi: Float, lo: Float)
         }
         j -= 1
     }
-    (hi: h, lo: l)
+    {hi: h, lo: l}
 }
 
 // acos_pi when the fast path cannot round, for |x| < 1: degree-11
@@ -27201,7 +27201,7 @@ priv ACOSPI_HARD: [Float]{
 // The fast path of atan2_pi(y, x): (hi, lo) within err relatively, from z =
 // y/x or x/y in [0, 1] and a degree-7 polynomial of atan(z) on z's 1/64 piece
 // (degree 9 on the first).
-priv atan2_pi_fast: fn(y0: Float, x0: Float) -> (hi: Float, lo: Float, err: Float) Never! {
+priv atan2_pi_fast: fn(y0: Float, x0: Float) -> {hi: Float, lo: Float, err: Float} Never! {
     vy: to_bits(y0)
     vx: to_bits(x0)
     ay: vy & 0x7FFF_FFFF_FFFF_FFFF
@@ -27211,7 +27211,7 @@ priv atan2_pi_fast: fn(y0: Float, x0: Float) -> (hi: Float, lo: Float, err: Floa
         if y0 == x0 -> v = if (x0 > Float{0.0}) -> Float{0.25} else -> Float{-0.75} else if (x0 > Float{0.0}) {
             v = Float{-0.25}
         }
-        return (hi: v, lo: Float{0.0}, err: Float{0.0})
+        return {hi: v, lo: Float{0.0}, err: Float{0.0}}
     }
     inv: ay > ax
     negz: (vy < 0) != (vx < 0)
@@ -27264,7 +27264,7 @@ priv atan2_pi_fast: fn(y0: Float, x0: Float) -> (hi: Float, lo: Float, err: Floa
         hi = t.hi
         lo = t.lo + lo
     }
-    (hi: hi, lo: lo, err: ATAN2PI_ERR[i])
+    {hi: hi, lo: lo, err: ATAN2PI_ERR[i]}
 }
 
 // atan2_pi(y, x) when the fast path cannot round: z P(z) / Q(z) for z = y/x
@@ -27298,7 +27298,7 @@ priv atan2_pi_accurate: fn(y: Float, x: Float) -> Float Never! {
         return Float{-1.0} + Float{5.551115123125783e-17}
     }
     q: if inv -> tint_div(tint_from_float(x), tint_from_float(y)) else -> tint_div(tint_from_float(y), tint_from_float(x))
-    z: (sig: q.sig, ex: q.ex, sgn: 0)
+    z: {sig: q.sig, ex: q.ex, sgn: 0}
     p := tint_coef(ATAN2PI_P, 29)
     d := tint_coef(ATAN2PI_Q, 29)
     i := 28
@@ -27308,24 +27308,24 @@ priv atan2_pi_accurate: fn(y: Float, x: Float) -> Float Never! {
         i -= 1
     }
     // atan_pi(|z|) within 683 units of the last place
-    t: tint_mul(tint_div(tint_mul(p, z), d), (sig: 0xa2f9_836e_4e44_1529_fc27_57d1_f534_ddc0_db62_9599_3c43_9042, ex: -1, sgn: 0))
-    w := (sig: t.sig, ex: t.ex, sgn: q.sgn)
+    t: tint_mul(tint_div(tint_mul(p, z), d), {sig: 0xa2f9_836e_4e44_1529_fc27_57d1_f534_ddc0_db62_9599_3c43_9042, ex: -1, sgn: 0})
+    w := {sig: t.sig, ex: t.ex, sgn: q.sgn}
     err := 683
     if inv {
         // +-1/2 - atan_pi(x/y)
-        half: (sig: 1 << 191, ex: 0, sgn: 0)
-        if q.sgn == 0 -> w = tint_add(half, (sig: w.sig, ex: w.ex, sgn: 1)) else {
+        half: {sig: 1 << 191, ex: 0, sgn: 0}
+        if q.sgn == 0 -> w = tint_add(half, {sig: w.sig, ex: w.ex, sgn: 1}) else {
             v: tint_add(half, w)
-            w = (sig: v.sig, ex: v.ex, sgn: 1)
+            w = {sig: v.sig, ex: v.ex, sgn: 1}
         }
         err = 346
     }
     if (x < Float{0.0}) {
         // the opposite quadrant: plus or minus 1
-        one: (sig: 1 << 191, ex: 1, sgn: 0)
+        one: {sig: 1 << 191, ex: 1, sgn: 0}
         if w.sgn == 0 {
-            v: tint_add(one, (sig: w.sig, ex: w.ex, sgn: 1))
-            w = (sig: v.sig, ex: v.ex, sgn: 1)
+            v: tint_add(one, {sig: w.sig, ex: w.ex, sgn: 1})
+            w = {sig: v.sig, ex: v.ex, sgn: 1}
         } else { w = tint_add(one, w) }
         err = 177
     }
@@ -27407,9 +27407,9 @@ priv atan2_accurate: fn(y: Float, x: Float) -> Float Never! {
     q: if inv -> tint_div(tint_from_float(x), tint_from_float(y)) else -> tint_div(tint_from_float(y), tint_from_float(x))
     // |y/x| < 2^-96 and x > 0: atan(y/x) rounds as y/x nudged toward 0 does
     if !inv && (x > Float{0.0}) && q.ex <= -96 {
-        return tint_to_float((sig: q.sig - 2, ex: q.ex, sgn: q.sgn), 1)
+        return tint_to_float({sig: q.sig - 2, ex: q.ex, sgn: q.sgn}, 1)
     }
-    z: (sig: q.sig, ex: q.ex, sgn: 0)
+    z: {sig: q.sig, ex: q.ex, sgn: 0}
     p := tint_coef(ATAN2PI_P, 29)
     d := tint_coef(ATAN2PI_Q, 29)
     i := 28
@@ -27420,24 +27420,24 @@ priv atan2_accurate: fn(y: Float, x: Float) -> Float Never! {
     }
     // atan(|z|) within 662 units of the last place
     r: tint_div(tint_mul(p, z), d)
-    w := (sig: r.sig, ex: r.ex, sgn: q.sgn)
+    w := {sig: r.sig, ex: r.ex, sgn: q.sgn}
     err := 662
     pis: 0xc90f_daa2_2168_c234_c4c6_628b_80dc_1cd1_2902_4e08_8a67_cc74
     if inv {
         // +-pi/2 - atan(x/y)
-        pi2: (sig: pis, ex: 1, sgn: 0)
-        if q.sgn == 0 -> w = tint_add(pi2, (sig: w.sig, ex: w.ex, sgn: 1)) else {
+        pi2: {sig: pis, ex: 1, sgn: 0}
+        if q.sgn == 0 -> w = tint_add(pi2, {sig: w.sig, ex: w.ex, sgn: 1}) else {
             v: tint_add(pi2, w)
-            w = (sig: v.sig, ex: v.ex, sgn: 1)
+            w = {sig: v.sig, ex: v.ex, sgn: 1}
         }
         err = 524
     }
     if (x < Float{0.0}) {
         // the opposite quadrant: plus or minus pi
-        pi: (sig: pis, ex: 2, sgn: 0)
+        pi: {sig: pis, ex: 2, sgn: 0}
         if w.sgn == 0 {
-            v: tint_add(pi, (sig: w.sig, ex: w.ex, sgn: 1))
-            w = (sig: v.sig, ex: v.ex, sgn: 1)
+            v: tint_add(pi, {sig: w.sig, ex: w.ex, sgn: 1})
+            w = {sig: v.sig, ex: v.ex, sgn: 1}
         } else { w = tint_add(pi, w) }
         err = 266
     }
@@ -27602,13 +27602,13 @@ priv ATAN2_O: [Float]{
 // The 192-bit floats of CORE-MATH's tint.h, for atan2_pi's accurate path:
 // (-1)^sgn sig 2^(ex - 192), with sig 0 or in [2^191, 2^192). Each operation
 // truncates as tint.h does, so its error bounds hold.
-priv tint_coef: fn(t: [Int], i: Int) -> (sig: Int, ex: Int, sgn: Int) Never! {
-    (sig: t[3 * i], ex: t[3 * i + 1], sgn: t[3 * i + 2])
+priv tint_coef: fn(t: [Int], i: Int) -> {sig: Int, ex: Int, sgn: Int} Never! {
+    {sig: t[3 * i], ex: t[3 * i + 1], sgn: t[3 * i + 2]}
 }
 
 // a b within 10 units of the last place: of the partial products below the
 // top 192 bits, only the carries of the next 64 count.
-priv tint_mul: fn(a: (sig: Int, ex: Int, sgn: Int), b: (sig: Int, ex: Int, sgn: Int)) -> (sig: Int, ex: Int, sgn: Int) Never! {
+priv tint_mul: fn(a: {sig: Int, ex: Int, sgn: Int}, b: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex: Int, sgn: Int} Never! {
     w: 0xFFFF_FFFF_FFFF_FFFF
     ah: a.sig >> 128
     am: (a.sig >> 64) & w
@@ -27618,12 +27618,12 @@ priv tint_mul: fn(a: (sig: Int, ex: Int, sgn: Int), b: (sig: Int, ex: Int, sgn: 
     bl: b.sig & w
     r: ((ah * bh) << 64) + ah * bm + am * bh + ((ah * bl) >> 64) + ((am * bm) >> 64) + ((al * bh) >> 64)
     sgn: if a.sgn == b.sgn -> 0 else -> 1
-    if (r >> 191) == 0 -> return (sig: r << 1, ex: a.ex + b.ex - 1, sgn: sgn)
-    (sig: r, ex: a.ex + b.ex, sgn: sgn)
+    if (r >> 191) == 0 -> return {sig: r << 1, ex: a.ex + b.ex - 1, sgn: sgn}
+    {sig: r, ex: a.ex + b.ex, sgn: sgn}
 }
 
 // -1, 0 or 1 as |a| is below, at or above |b|.
-priv tint_cmp_abs: fn(a: (sig: Int, ex: Int, sgn: Int), b: (sig: Int, ex: Int, sgn: Int)) -> Int Never! {
+priv tint_cmp_abs: fn(a: {sig: Int, ex: Int, sgn: Int}, b: {sig: Int, ex: Int, sgn: Int}) -> Int Never! {
     if (a.sig >> 128) == 0 {
         if (b.sig >> 128) == 0 -> return 0
         return -1
@@ -27639,11 +27639,11 @@ priv tint_cmp_abs: fn(a: (sig: Int, ex: Int, sgn: Int), b: (sig: Int, ex: Int, s
 
 // a + b within 2 units of the last place: the smaller is truncated to the
 // larger's last place.
-priv tint_add: fn(a0: (sig: Int, ex: Int, sgn: Int), b0: (sig: Int, ex: Int, sgn: Int)) -> (sig: Int, ex: Int, sgn: Int) Never! {
+priv tint_add: fn(a0: {sig: Int, ex: Int, sgn: Int}, b0: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex: Int, sgn: Int} Never! {
     c: tint_cmp_abs(a0, b0)
     if c == 0 {
-        if a0.sgn != b0.sgn -> return (sig: 0, ex: -1076, sgn: 0)
-        return (sig: a0.sig, ex: a0.ex + 1, sgn: a0.sgn)
+        if a0.sgn != b0.sgn -> return {sig: 0, ex: -1076, sgn: 0}
+        return {sig: a0.sig, ex: a0.ex + 1, sgn: a0.sgn}
     }
     a: if c < 0 -> b0 else -> a0
     b: if c < 0 -> a0 else -> b0
@@ -27651,37 +27651,37 @@ priv tint_add: fn(a0: (sig: Int, ex: Int, sgn: Int), b0: (sig: Int, ex: Int, sgn
     t: b.sig >> sh
     if a.sgn == b.sgn {
         s: a.sig + t
-        if (s >> 192) != 0 -> return (sig: s >> 1, ex: a.ex + 1, sgn: a.sgn)
-        return (sig: s, ex: a.ex, sgn: a.sgn)
+        if (s >> 192) != 0 -> return {sig: s >> 1, ex: a.ex + 1, sgn: a.sgn}
+        return {sig: s, ex: a.ex, sgn: a.sgn}
     }
     d: a.sig - t
     lz: 192 - exact_bit_length(d)
-    if lz <= 1 || sh == 0 -> return (sig: d << lz, ex: a.ex - lz, sgn: a.sgn)
+    if lz <= 1 || sh == 0 -> return {sig: d << lz, ex: a.ex - lz, sgn: a.sgn}
     // a cancellation of 2 or more bits needs sh = 1: subtract again with b's
     // truncated bit kept
     e: ((a.sig << lz) - (b.sig << (lz - sh))) & (1 << 192) - 1
     le: 192 - exact_bit_length(e)
-    (sig: e << le, ex: a.ex - lz - le, sgn: a.sgn)
+    {sig: e << le, ex: a.ex - lz - le, sgn: a.sgn}
 }
 
 // The 192-bit float of nonzero finite x, exactly.
-priv tint_from_float: fn(x: Float) -> (sig: Int, ex: Int, sgn: Int) Never! {
+priv tint_from_float: fn(x: Float) -> {sig: Int, ex: Int, sgn: Int} Never! {
     u: to_bits(x)
     sgn: if u < 0 -> 1 else -> 0
     ax: u & 0x7FFF_FFFF_FFFF_FFFF
     e: ax >> 52
     if e == 0 {
         lz: clz64(ax)
-        return (sig: ax << (lz + 128), ex: -1010 - lz, sgn: sgn)
+        return {sig: ax << (lz + 128), ex: -1010 - lz, sgn: sgn}
     }
-    (sig: ((ax & 0xF_FFFF_FFFF_FFFF) + 0x10_0000_0000_0000) << 139, ex: e - 1022, sgn: sgn)
+    {sig: ((ax & 0xF_FFFF_FFFF_FFFF) + 0x10_0000_0000_0000) << 139, ex: e - 1022, sgn: sgn}
 }
 
 // a rounded to nearest, for |a| < 2^1024: err bounds a's error in units of
 // its last place, and is 0 when a is a Float. The CORE-MATH worst-case
 // search found no atan2pi argument whose error interval holds a rounding
 // boundary, where tint.h stops.
-priv tint_to_float: fn(a: (sig: Int, ex: Int, sgn: Int), err: Int) -> Float Never! {
+priv tint_to_float: fn(a: {sig: Int, ex: Int, sgn: Int}, err: Int) -> Float Never! {
     s: if a.sgn == 1 -> Float{-1.0} else -> Float{1.0}
     if a.ex <= -1074 {
         // below 2^-1074: 0 up to 2^-1075, else 2^-1074
@@ -27711,22 +27711,22 @@ priv tint_to_float: fn(a: (sig: Int, ex: Int, sgn: Int), err: Int) -> Float Neve
 
 // 1/a within 2^-103.9 when 1 <= 1/a <= 2: one Newton step from the Float
 // reciprocal.
-priv tint_inv: fn(a: (sig: Int, ex: Int, sgn: Int)) -> (sig: Int, ex: Int, sgn: Int) Never! {
+priv tint_inv: fn(a: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex: Int, sgn: Int} Never! {
     d: tint_to_float(a, 0)
     small: fabs(d) < Float{1.0}
     r0: tint_from_float(Float{1.0} / (d * (if small -> Float{9007199254740992.0} else -> Float{0.25})))
-    r: (sig: r0.sig, ex: r0.ex + (if small -> 53 else -> -2), sgn: r0.sgn)
+    r: {sig: r0.sig, ex: r0.ex + (if small -> 53 else -> -2), sgn: r0.sgn}
     q: tint_mul(a, r)
-    e: tint_add((sig: 1 << 191, ex: 1, sgn: 0), (sig: q.sig, ex: q.ex, sgn: 1 - q.sgn))
+    e: tint_add({sig: 1 << 191, ex: 1, sgn: 0}, {sig: q.sig, ex: q.ex, sgn: 1 - q.sgn})
     tint_add(r, tint_mul(r, e))
 }
 
 // b / a within 2^-185.53 relatively (Karp-Markstein).
-priv tint_div: fn(b: (sig: Int, ex: Int, sgn: Int), a: (sig: Int, ex: Int, sgn: Int)) -> (sig: Int, ex: Int, sgn: Int) Never! {
+priv tint_div: fn(b: {sig: Int, ex: Int, sgn: Int}, a: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex: Int, sgn: Int} Never! {
     y: tint_inv(a)
     r: tint_mul(y, b)
     q: tint_mul(a, r)
-    e: tint_add(b, (sig: q.sig, ex: q.ex, sgn: 1 - q.sgn))
+    e: tint_add(b, {sig: q.sig, ex: q.ex, sgn: 1 - q.sgn})
     tint_add(r, tint_mul(y, e))
 }
 
@@ -28714,7 +28714,7 @@ priv ATAN2PI_ERR: [Float]{
 
 // e^(xh + xl) within 2^-74.139 relatively, for |xl/xh| < 2^-23.89 and |xl| <
 // 2^-14.3486: x = k log(2)/4096 + y, then 2^(k/4096) e^y.
-priv exp_dd_fast: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float) Never! {
+priv exp_dd_fast: fn(xh: Float, xl: Float) -> {hi: Float, lo: Float} Never! {
     k: round_ties_even(xh * Float{5909.278887481194})
     kp: s_mul(k, Float{0.0001692253858788929}, Float{5.661735385366942e-21})
     y: fast_two_sum(xh - kp.hi, xl)
@@ -28723,7 +28723,7 @@ priv exp_dd_fast: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float) Never! {
 
 // 2^(k/4096) (qh + ql) for whole k with 2^(k/4096) a normal Float: 2^(k/4096)
 // from EXP_T1 and EXP_T2, the power of two exactly.
-priv exp_dd_tail: fn(k: Float, q: (hi: Float, lo: Float)) -> (hi: Float, lo: Float) Never! {
+priv exp_dd_tail: fn(k: Float, q: {hi: Float, lo: Float}) -> {hi: Float, lo: Float} Never! {
     kk: whole_i64(k)
     m: (kk >> 12) + 0x3FF
     i2: Int{(kk >> 6) & 0x3F}
@@ -28733,26 +28733,26 @@ priv exp_dd_tail: fn(k: Float, q: (hi: Float, lo: Float)) -> (hi: Float, lo: Flo
     if m == 0x7FF {
         // 2^1024 is no Float: scale by 2 and 2^1023
         s: __from_bits_i64(0x7FE0_0000_0000_0000)
-        return (hi: r.hi * Float{2.0} * s, lo: r.lo * Float{2.0} * s)
+        return {hi: r.hi * Float{2.0} * s, lo: r.lo * Float{2.0} * s}
     }
     s: __from_bits_i64(m << 52)
-    (hi: r.hi * s, lo: r.lo * s)
+    {hi: r.hi * s, lo: r.lo * s}
 }
 
 // e^(zh + zl) within 2^-74.346 absolutely for |z| < 0.000130273 and |zl| <
 // 2^-42.6: a degree-4 polynomial.
-priv exp_q1: fn(zh: Float, zl: Float) -> (hi: Float, lo: Float) Never! {
+priv exp_q1: fn(zh: Float, zl: Float) -> {hi: Float, lo: Float} Never! {
     z: zh + zl
     q: fma(fma(Float{0.0416666666881331}, zh, Float{0.16666666679041395}), z, Float{0.5})
     a: fast_two_sum(Float{1.0}, q * z)
     b: d_mul(zh, zl, a.hi, a.lo)
     c: fast_two_sum(Float{1.0}, b.hi)
-    (hi: c.hi, lo: b.lo + c.lo)
+    {hi: c.hi, lo: b.lo + c.lo}
 }
 
 // e^(zh + zl) within 2^-113.218 absolutely for |z| < 0.000130273 and |zl| <
 // 2^-42.6: a degree-7 polynomial, double-double from degree 3 down.
-priv exp_q2: fn(zh: Float, zl: Float) -> (hi: Float, lo: Float) Never! {
+priv exp_q2: fn(zh: Float, zl: Float) -> {hi: Float, lo: Float} Never! {
     z: zh + zl
     q := fma(Float{0.000198412702925094}, zh, Float{0.0013888890379584226})
     q = fma(q, z, Float{0.008333333333333333})
@@ -28765,36 +28765,36 @@ priv exp_q2: fn(zh: Float, zl: Float) -> (hi: Float, lo: Float) Never! {
     e: fast_two_sum(Float{1.0}, d.hi)
     f: d_mul(e.hi, d.lo + e.lo, zh, zl)
     g: fast_two_sum(Float{1.0}, f.hi)
-    (hi: g.hi, lo: f.lo + g.lo)
+    {hi: g.hi, lo: f.lo + g.lo}
 }
 
 // (h + l) - 1 for h + l = b^x, with the larger operand first.
-priv dd_minus_one: fn(x: Float, h: Float, l: Float) -> (hi: Float, lo: Float) Never! {
+priv dd_minus_one: fn(x: Float, h: Float, l: Float) -> {hi: Float, lo: Float} Never! {
     if (x >= Float{0.0}) {
         u: fast_two_sum(h, Float{-1.0})
-        return (hi: u.hi, lo: l + u.lo)
+        return {hi: u.hi, lo: l + u.lo}
     }
     u: fast_two_sum(Float{-1.0}, h)
-    (hi: u.hi, lo: l + u.lo)
+    {hi: u.hi, lo: l + u.lo}
 }
 
 // CORE-MATH exp.c's helpers. muldd: (xh + xl)(ch + cl) without the low
 // product and with no renormalization.
-priv exp_cr_muldd: fn(xh: Float, xl: Float, ch: Float, cl: Float) -> (hi: Float, lo: Float) Never! {
+priv exp_cr_muldd: fn(xh: Float, xl: Float, ch: Float, cl: Float) -> {hi: Float, lo: Float} Never! {
     h: ch * xh
-    (hi: h, lo: (ch * xl + cl * xh) + fma(ch, xh, -h))
+    {hi: h, lo: (ch * xl + cl * xh) + fma(ch, xh, -h)}
 }
 
 // Algorithm 4 of Jeannerod, Joldes, Louvet and Muller (Arith 2026):
 // (ah + al)(bh + bl) + (ch + cl) as a double-double.
-priv exp_cr_fma_dw: fn(ah: Float, al: Float, bh: Float, bl: Float, ch: Float, cl: Float) -> (hi: Float, lo: Float) Never! {
+priv exp_cr_fma_dw: fn(ah: Float, al: Float, bh: Float, bl: Float, ch: Float, cl: Float) -> {hi: Float, lo: Float} Never! {
     dh: fma(ah, bh, ch)
     e: fma(ah, bh, ch - dh)
-    (hi: dh, lo: al * bh + (ah * bl + (e + cl)))
+    {hi: dh, lo: al * bh + (ah * bl + (e + cl))}
 }
 
 // The double-double polynomial of the n (hi, lo) pairs of c at xh + xl.
-priv exp_cr_poly: fn(xh: Float, xl: Float, c: [Float], n: Int) -> (hi: Float, lo: Float) Never! {
+priv exp_cr_poly: fn(xh: Float, xl: Float, c: [Float], n: Int) -> {hi: Float, lo: Float} Never! {
     i := n - 1
     ch := c[2 * i]
     cl := c[2 * i + 1]
@@ -28804,7 +28804,7 @@ priv exp_cr_poly: fn(xh: Float, xl: Float, c: [Float], n: Int) -> (hi: Float, lo
         ch = r.hi
         cl = r.lo
     }
-    (hi: ch, lo: cl)
+    {hi: ch, lo: cl}
 }
 
 // y 2^e for a normal y 2^e: e added to the exponent field.
@@ -29206,14 +29206,14 @@ priv EXPCR_CH: [Float]{
 }
 
 // (ch + cl) xh as a double-double, cl xh's rounding error dropped.
-priv exp2_cr_mulddd: fn(xh: Float, ch: Float, cl: Float) -> (hi: Float, lo: Float) Never! {
+priv exp2_cr_mulddd: fn(xh: Float, ch: Float, cl: Float) -> {hi: Float, lo: Float} Never! {
     h: ch * xh
-    (hi: h, lo: cl * xh + fma(ch, xh, -h))
+    {hi: h, lo: cl * xh + fma(ch, xh, -h)}
 }
 
 // The n (hi, lo) coefficients of c at the double xh, Horner in
 // double-double.
-priv exp2_cr_polydd: fn(xh: Float, c: [Float], n: Int) -> (hi: Float, lo: Float) Never! {
+priv exp2_cr_polydd: fn(xh: Float, c: [Float], n: Int) -> {hi: Float, lo: Float} Never! {
     i := n - 1
     ch := c[2 * i]
     cl := c[2 * i + 1]
@@ -29225,7 +29225,7 @@ priv exp2_cr_polydd: fn(xh: Float, c: [Float], n: Int) -> (hi: Float, lo: Float)
         ch = th
         cl = p.lo + (tl + c[2 * i + 1])
     }
-    (hi: ch, lo: cl)
+    {hi: ch, lo: cl}
 }
 
 // exp2's accurate path: a degree-6 double-double polynomial in the
@@ -29367,7 +29367,7 @@ priv exp10_cr_accurate: fn(n: Float) -> Float Never! {
 }
 
 // The n (hi, lo) coefficients of c at xh + xl, Horner in double-double.
-priv exp10_cr_opolydd: fn(xh: Float, xl: Float, c: [Float], n: Int) -> (hi: Float, lo: Float) Never! {
+priv exp10_cr_opolydd: fn(xh: Float, xl: Float, c: [Float], n: Int) -> {hi: Float, lo: Float} Never! {
     i := n - 1
     ch := c[2 * i]
     cl := c[2 * i + 1]
@@ -29379,7 +29379,7 @@ priv exp10_cr_opolydd: fn(xh: Float, xl: Float, c: [Float], n: Int) -> (hi: Floa
         ch = th
         cl = p.lo + (tl + c[2 * i + 1])
     }
-    (hi: ch, lo: cl)
+    {hi: ch, lo: cl}
 }
 
 // The inputs of exp10's exceptions in exp10.c's order.
@@ -29834,15 +29834,15 @@ priv exp_m1_cr_listed: fn(n: Float, f: Float) -> Float Never! {
 }
 
 // (xh + xl) c as a double-double, xl c's rounding error dropped.
-priv exp_m1_cr_mulddd: fn(xh: Float, xl: Float, c: Float) -> (hi: Float, lo: Float) Never! {
+priv exp_m1_cr_mulddd: fn(xh: Float, xl: Float, c: Float) -> {hi: Float, lo: Float} Never! {
     h: c * xh
-    (hi: h, lo: c * xl + fma(c, xh, -h))
+    {hi: h, lo: c * xl + fma(c, xh, -h)}
 }
 
 // The n (hi, lo) coefficients of c from index o at xh + xl, Horner in
 // double-double, with l added to the top coefficient (expm1.c's opolydd at l
 // = 0, log1p.c's and lgamma.c's polydd).
-priv exp_m1_cr_opolydd: fn(xh: Float, xl: Float, c: [Float], o: Int, n: Int, l: Float) -> (hi: Float, lo: Float) Never! {
+priv exp_m1_cr_opolydd: fn(xh: Float, xl: Float, c: [Float], o: Int, n: Int, l: Float) -> {hi: Float, lo: Float} Never! {
     i := n - 1
     t: fast_two_sum(c[o + 2 * i], l)
     ch := t.hi
@@ -29854,13 +29854,13 @@ priv exp_m1_cr_opolydd: fn(xh: Float, xl: Float, c: [Float], o: Int, n: Int, l: 
         ch = s.hi
         cl = (c[o + 2 * i + 1] + p.lo) + s.lo
     }
-    (hi: ch, lo: cl)
+    {hi: ch, lo: cl}
 }
 
 // The n (hi, lo) coefficients of c from index o at the double x, Horner in
 // double-double, with l added to the top coefficient (lgamma.c's
 // polydddfst).
-priv exp_m1_cr_opolyddd: fn(x: Float, c: [Float], o: Int, n: Int, l: Float) -> (hi: Float, lo: Float) Never! {
+priv exp_m1_cr_opolyddd: fn(x: Float, c: [Float], o: Int, n: Int, l: Float) -> {hi: Float, lo: Float} Never! {
     i := n - 1
     t: fast_two_sum(c[o + 2 * i], l)
     ch := t.hi
@@ -29872,7 +29872,7 @@ priv exp_m1_cr_opolyddd: fn(x: Float, c: [Float], o: Int, n: Int, l: Float) -> (
         ch = s.hi
         cl = (c[o + 2 * i + 1] + p.lo) + s.lo
     }
-    (hi: ch, lo: cl)
+    {hi: ch, lo: cl}
 }
 
 // x^k/k! for k in 3..=13 as (hi, lo), exp_m1's small accurate path.
@@ -30089,19 +30089,19 @@ priv EXPM1CR_TZ: [Float]{
 
 // exp2_m1's fast path: (hi, lo) within err. Up to |x| = 1/8 a degree-10
 // polynomial, double-double from degree 3 down; beyond, e^(x log(2)) - 1.
-priv exp2_m1_fast: fn(x: Float, tiny: Bool) -> (hi: Float, lo: Float, err: Float) Never! {
+priv exp2_m1_fast: fn(x: Float, tiny: Bool) -> {hi: Float, lo: Float, err: Float} Never! {
     if tiny {
         p: EXP2M1_FAST
         x2: x * x
         c8: fma(p[12], x2, fma(p[11], x, p[10]))
         c4: fma(c8, x2 * x2, fma(fma(p[9], x, p[8]), x2, fma(p[7], x, p[6])))
         r: horner_dd_x(x, c4, Float{0.0}, p, 3)
-        return (hi: r.hi, lo: r.lo, err: Float{1.768181277393352e-20} * r.hi)
+        return {hi: r.hi, lo: r.lo, err: Float{1.768181277393352e-20} * r.hi}
     }
     s: s_mul(x, Float{0.6931471805599453}, Float{2.3190468138462996e-17})
     e: exp_dd_fast(s.hi, s.lo)
     d: dd_minus_one(x, e.hi, e.lo)
-    (hi: d.hi, lo: d.lo, err: Float{5.327043144841498e-22} * d.hi)
+    {hi: d.hi, lo: d.lo, err: Float{5.327043144841498e-22} * d.hi}
 }
 
 // exp2_m1 for 4.530329207760484e-16 < |x| <= 1/8 when the fast path cannot
@@ -30120,19 +30120,19 @@ priv exp2_m1_accurate_tiny: fn(x: Float) -> Float Never! {
 
 // exp10_m1's fast path: (hi, lo) within err. Up to |x| = 1/16 a degree-11
 // polynomial, double-double from degree 4 down; beyond, e^(x log(10)) - 1.
-priv exp10_m1_fast: fn(x: Float, tiny: Bool) -> (hi: Float, lo: Float, err: Float) Never! {
+priv exp10_m1_fast: fn(x: Float, tiny: Bool) -> {hi: Float, lo: Float, err: Float} Never! {
     if tiny {
         p: EXP10M1_FAST
         x2: x * x
         c9: fma(p[14], x2, fma(p[13], x, p[12]))
         c5: fma(c9, x2 * x2, fma(fma(p[11], x, p[10]), x2, fma(p[9], x, p[8])))
         r: horner_dd_x(x, c5, Float{0.0}, p, 4)
-        return (hi: r.hi, lo: r.lo, err: Float{3.520480687025686e-21} * r.hi)
+        return {hi: r.hi, lo: r.lo, err: Float{3.520480687025686e-21} * r.hi}
     }
     s: s_mul(x, Float{2.302585092994046}, Float{-2.1707562233822494e-16})
     e: exp_dd_fast(s.hi, s.lo)
     d: dd_minus_one(x, e.hi, e.lo)
-    (hi: d.hi, lo: d.lo, err: Float{3.1267427154504446e-22} * d.hi)
+    {hi: d.hi, lo: d.lo, err: Float{3.1267427154504446e-22} * d.hi}
 }
 
 // exp10_m1 for 2^-54 < |x| <= 1/16 when the fast path cannot round: a
@@ -32068,26 +32068,26 @@ priv EXP10M1_HARD: [Float]{
 //
 // 1 + x as a double-double (xh, xl) with xh = 1 + x rounded; from cap up,
 // (x, 1) as the C keeps it.
-priv one_plus: fn(x: Float, cap: Float) -> (hi: Float, lo: Float) Never! {
-    if (x >= cap) { return (hi: x, lo: Float{1.0}) }
+priv one_plus: fn(x: Float, cap: Float) -> {hi: Float, lo: Float} Never! {
+    if (x >= cap) { return {hi: x, lo: Float{1.0}} }
     if (x > Float{1.0}) { return fast_two_sum(x, Float{1.0}) }
     fast_two_sum(Float{1.0}, x)
 }
 
 // log(1 + z) - z for |z| < 0.0021210 as a double-double within 2^-78.25
 // (CORE-MATH's p_1).
-priv log_p1: fn(z: Float) -> (hi: Float, lo: Float) Never! {
+priv log_p1: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     c: LOG_P1
     z2h: z * z
     z2l: fma(z, z, -z2h)
     ph: fma(fma(fma(c[6], z, c[5]), z2h, fma(c[4], z, c[3])), z, c[2]) * z2h
     s: fast_two_sum(Float{-0.5} * z2h, ph * z)
-    (hi: s.hi, lo: s.lo + Float{-0.5} * z2l)
+    {hi: s.hi, lo: s.lo + Float{-0.5} * z2l}
 }
 
 // log(1 + z) - z for |z| < 2^-5 as a double-double within 2^-67.14
 // (CORE-MATH's p_1a); below 2^-255 the square is dropped, as in the C.
-priv log_p1a: fn(z: Float) -> (hi: Float, lo: Float) Never! {
+priv log_p1a: fn(z: Float) -> {hi: Float, lo: Float} Never! {
     c: LOG_P1A
     big: (fabs(z) >= Float{1.727233711018889e-77})
     z2h: if big -> z * z else -> Float{0.0}
@@ -32096,13 +32096,13 @@ priv log_p1a: fn(z: Float) -> (hi: Float, lo: Float) Never! {
     p36: fma(fma(c[6], z, c[5]), z2h, fma(c[4], z, c[3]))
     ph: fma(fma(p710, z2h * z2h, p36), z, c[2]) * z2h
     s: fast_two_sum(Float{-0.5} * z2h, ph * z)
-    (hi: s.hi, lo: s.lo + Float{-0.5} * z2l)
+    {hi: s.hi, lo: s.lo + Float{-0.5} * z2l}
 }
 
 // log(2^e v) for 1 <= v < 2 as a double-double within 2^-69.99 (CORE-MATH's
 // cr_log_fast): v halved above sqrt(2), times a 10-bit reciprocal r so that
 // z = r v - 1 is exact, then e log(2) - log(r) + z + (log(1 + z) - z).
-priv log_fast: fn(e0: Int, v: Float) -> (hi: Float, lo: Float) Never! {
+priv log_fast: fn(e0: Int, v: Float) -> {hi: Float, lo: Float} Never! {
     m: (to_bits(v) & 0xF_FFFF_FFFF_FFFF) + 0x10_0000_0000_0000
     c: m >= 0x16_A09E_667F_3BCD
     e: if c -> e0 + 1 else -> e0
@@ -32115,7 +32115,7 @@ priv log_fast: fn(e0: Int, v: Float) -> (hi: Float, lo: Float) Never! {
     // log(2) as hi + lo, hi a multiple of 2^-42 so that e hi is exact
     s: fast_two_sum(fma(ee, Float{0.6931471805598903}, LOG_FAST_LOG_INVERSE[2 * i]), z)
     l: p.hi + (s.lo + (LOG_FAST_LOG_INVERSE[2 * i + 1] + p.lo))
-    (hi: s.hi, lo: fma(ee, Float{5.497923018708371e-14}, l))
+    {hi: s.hi, lo: fma(ee, Float{5.497923018708371e-14}, l)}
 }
 
 // ln, log2 and log10 off the positive finite Floats: NaN for NaN and below
@@ -32131,7 +32131,7 @@ priv log_cr_special: fn(n: Float) -> Float Never! {
 // sqrt(2)), z = r v - 1 exact for log_fast's reciprocal r, then e log(2) -
 // log(r) + z + a degree-6 polynomial of z. log.c's table, for ln, has r = 1
 // and log(r) = 0 at its i = 511 and 512.
-priv log_cr_fast: fn(n: Float, ln: Bool) -> (hi: Float, lo: Float) Never! {
+priv log_cr_fast: fn(n: Float, ln: Bool) -> {hi: Float, lo: Float} Never! {
     b0: __to_bits_i64(n)
     sub: b0 < 0x0010_0000_0000_0000
     b: if sub -> __to_bits_i64(n * Float{4503599627370496.0}) else -> b0
@@ -32157,7 +32157,7 @@ priv log_cr_fast: fn(n: Float, ln: Bool) -> (hi: Float, lo: Float) Never! {
     // log(2) as hi + lo, hi a multiple of 2^-42 so that e hi is exact
     s: fast_two_sum(fma(ee, Float{0.6931471805598903}, l1), z)
     l: ph + (s.lo + l2)
-    (hi: s.hi, lo: fma(ee, Float{5.497923018708371e-14}, l))
+    {hi: s.hi, lo: fma(ee, Float{5.497923018708371e-14}, l)}
 }
 
 // ln for 1 - 2^-9 <= x < 1 + 2^-9 (log.c's cr_log_tiny): a degree-7
@@ -32190,15 +32190,15 @@ priv log_cr_round3: fn(h: Float, m: Float, l: Float) -> Float Never! {
 }
 
 // ln_1p's fast path for 2^-53 <= |x| < 2^-4 as (hi, lo, err).
-priv ln_1p_cr_small: fn(n: Float, a: Int) -> (hi: Float, lo: Float, err: Float) Never! {
+priv ln_1p_cr_small: fn(n: Float, a: Int) -> {hi: Float, lo: Float, err: Float} Never! {
     x2: n * n
     if a < 0x3F30_0000_0000_0000 {
         eps: Float{8.809142651444724e-20} * n
         if a < 0x3EA1_9B00_0000_0000 {
-            return (hi: n, lo: x2 * (Float{-0.5000000000000516} + n * Float{0.33333333333338494}), err: eps)
+            return {hi: n, lo: x2 * (Float{-0.5000000000000516} + n * Float{0.33333333333338494}), err: eps}
         }
         c: LOG1PCR_C2
-        return (hi: n, lo: x2 * ((c[0] + n * c[1]) + x2 * (c[2] + n * c[3])), err: eps)
+        return {hi: n, lo: x2 * ((c[0] + n * c[1]) + x2 * (c[2] + n * c[3])), err: eps}
     }
     c: LOG1PCR_C3
     x3: x2 * n
@@ -32207,14 +32207,14 @@ priv ln_1p_cr_small: fn(n: Float, a: Int) -> (hi: Float, lo: Float, err: Float) 
     ln1: fma(hx, n, n)
     ln0: fma(hx, n, n - ln1)
     f: ((c[0] + n * c[1]) + x2 * (c[2] + n * c[3])) + x4 * (((c[4] + n * c[5]) + x2 * (c[6] + n * c[7])) + x4 * ((c[8] + n * c[9]) + x2 * (c[10] + n * c[11])))
-    (hi: ln1, lo: ln0 + x3 * f, err: x3 * Float{3.7990444123892075e-16})
+    {hi: ln1, lo: ln0 + x3 * f, err: x3 * Float{3.7990444123892075e-16}}
 }
 
 // ln_1p's fast path for -1 < x <= -2^-4 and 2^-4 <= x < inf as (hi, lo,
 // err): 1 + x = t + dt, then t = 2^je v with r v - 1 small for rf's r.
-priv ln_1p_cr_large: fn(n: Float, b: Int) -> (hi: Float, lo: Float, err: Float) Never! {
+priv ln_1p_cr_large: fn(n: Float, b: Int) -> {hi: Float, lo: Float, err: Float} Never! {
     dt0: if b < 0x4690_0000_0000_0000 -> Float{1.0} else -> Float{0.0}
-    s: if b < 0x4340_0000_0000_0000 -> fast_two_sum(Float{1.0}, n) else -> (hi: n, lo: dt0)
+    s: if b < 0x4340_0000_0000_0000 -> fast_two_sum(Float{1.0}, n) else -> {hi: n, lo: dt0}
     j: to_bits(s.hi) - 0x3FE6_A000_0000_0000
     j1: (j >> 46) & 0x3F
     je: j >> 52
@@ -32234,7 +32234,7 @@ priv ln_1p_cr_large: fn(n: Float, b: Int) -> (hi: Float, lo: Float, err: Float) 
     ee: Float{je}
     // log(2) as 0.6931471805601177 - 1.7239444525614835e-13
     ln: fast_sum_dd(LOG1PCR_LF[2 * j1 + 1] + Float{0.6931471805601177} * ee, LOG1PCR_LF[2 * j1] + Float{-1.7239444525614835e-13} * ee, xd.hi, xl)
-    (hi: ln.hi, lo: ln.lo, err: Float{4.404571325722362e-20})
+    {hi: ln.hi, lo: ln.lo, err: Float{4.404571325722362e-20}}
 }
 
 // ln_1p when its fast path cannot round, from its estimate a: for |x| < 2^-10
@@ -32850,34 +32850,34 @@ priv LOG1PCR_C4: [Float]{
 
 // log_b(1 + x) for 2^-920 <= |x| < 2^-5 as (hi, lo, err) with 1/log(b) = ch
 // + cl: x + (log(1 + x) - x), times 1/log(b), within 0x1.d4p-62 |hi|.
-priv log_1p_fast_small: fn(x: Float, ch: Float, cl: Float) -> (hi: Float, lo: Float, err: Float) Never! {
+priv log_1p_fast_small: fn(x: Float, ch: Float, cl: Float) -> {hi: Float, lo: Float, err: Float} Never! {
     p: log_p1a(x)
     s: fast_two_sum(x, p.hi)
     d: d_mul(s.hi, s.lo + p.lo, ch, cl)
-    (hi: d.hi, lo: d.lo, err: Float{3.9641141931501256e-19} * d.hi)
+    {hi: d.hi, lo: d.lo, err: Float{3.9641141931501256e-19} * d.hi}
 }
 
 // log_b(xh + xl) for |xl| <= ulp(xh) / 2 as (hi, lo, err): log(xh) + xl / xh,
 // times 1/log(b) = ch + cl.
-priv log_1p_fast: fn(x: (hi: Float, lo: Float), ch: Float, cl: Float, err: Float) -> (hi: Float, lo: Float, err: Float) Never! {
+priv log_1p_fast: fn(x: {hi: Float, lo: Float}, ch: Float, cl: Float, err: Float) -> {hi: Float, lo: Float, err: Float} Never! {
     b: to_bits(x.hi)
     f: log_fast((b >> 52) - 1023, from_bits(b & 0xF_FFFF_FFFF_FFFF | 0x3FF0_0000_0000_0000))
     // beyond 2^1022 the C drops xl / xh, which would underflow
     c: if (x.hi <= Float{4.49423283715579e307}) -> x.lo / x.hi else -> Float{0.0}
     d: d_mul(f.hi, f.lo + c, ch, cl)
-    (hi: d.hi, lo: d.lo, err: err)
+    {hi: d.hi, lo: d.lo, err: err}
 }
 
 // The 128-bit floats of CORE-MATH's dint.h, for the accurate paths of
 // log2_1p and log10_1p: (-1)^sgn sig 2^(ex - 127), with sig 0 or in [2^127,
 // 2^128). Each operation rounds or truncates as dint.h does, so its error
 // bounds hold.
-priv dint_add: fn(a0: (sig: Int, ex: Int, sgn: Int), b0: (sig: Int, ex: Int, sgn: Int)) -> (sig: Int, ex: Int, sgn: Int) Never! {
-    if a0.sig == 0 -> return (sig: b0.sig, ex: b0.ex, sgn: b0.sgn)
-    if b0.sig == 0 -> return (sig: a0.sig, ex: a0.ex, sgn: a0.sgn)
+priv dint_add: fn(a0: {sig: Int, ex: Int, sgn: Int}, b0: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex: Int, sgn: Int} Never! {
+    if a0.sig == 0 -> return {sig: b0.sig, ex: b0.ex, sgn: b0.sgn}
+    if b0.sig == 0 -> return {sig: a0.sig, ex: a0.ex, sgn: a0.sgn}
     if a0.ex == b0.ex && a0.sig == b0.sig {
-        if a0.sgn != b0.sgn -> return (sig: 0, ex: 0, sgn: 0)
-        return (sig: a0.sig, ex: a0.ex + 1, sgn: a0.sgn)
+        if a0.sgn != b0.sgn -> return {sig: 0, ex: 0, sgn: 0}
+        return {sig: a0.sig, ex: a0.ex + 1, sgn: a0.sgn}
     }
     swap: a0.ex < b0.ex || (a0.ex == b0.ex && a0.sig < b0.sig)
     a: if swap -> b0 else -> a0
@@ -32903,11 +32903,11 @@ priv dint_add: fn(a0: (sig: Int, ex: Int, sgn: Int), b0: (sig: Int, ex: Int, sgn
         }
     }
     lz: 128 - exact_bit_length(c)
-    (sig: c << lz, ex: ex - lz, sgn: a.sgn)
+    {sig: c << lz, ex: ex - lz, sgn: a.sgn}
 }
 
 // a b: the low words' product dropped, then rounded by the next bit.
-priv dint_mul: fn(a: (sig: Int, ex: Int, sgn: Int), b: (sig: Int, ex: Int, sgn: Int)) -> (sig: Int, ex: Int, sgn: Int) Never! {
+priv dint_mul: fn(a: {sig: Int, ex: Int, sgn: Int}, b: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex: Int, sgn: Int} Never! {
     w: 0xFFFF_FFFF_FFFF_FFFF
     w2: (1 << 128) - 1
     ah: a.sig >> 64
@@ -32916,13 +32916,13 @@ priv dint_mul: fn(a: (sig: Int, ex: Int, sgn: Int), b: (sig: Int, ex: Int, sgn: 
     t: (ah * bh + ((m >> 128) << 64) + ((m >> 64) & w)) & w2
     round: (m >> 63) & 1
     sgn: if a.sgn == b.sgn -> 0 else -> 1
-    if (t >> 127) == 0 -> return (sig: ((t << 1) + round) & w2, ex: a.ex + b.ex, sgn: sgn)
-    (sig: (t + round) & w2, ex: a.ex + b.ex + 1, sgn: sgn)
+    if (t >> 127) == 0 -> return {sig: ((t << 1) + round) & w2, ex: a.ex + b.ex, sgn: sgn}
+    {sig: (t + round) & w2, ex: a.ex + b.ex + 1, sgn: sgn}
 }
 
 // n a for a whole n with |n| < 2^11 (dint.h's mul_dint_2).
-priv dint_mul_int: fn(n: Int, a: (sig: Int, ex: Int, sgn: Int)) -> (sig: Int, ex: Int, sgn: Int) Never! {
-    if n == 0 -> return (sig: 0, ex: 0, sgn: 0)
+priv dint_mul_int: fn(n: Int, a: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex: Int, sgn: Int} Never! {
+    if n == 0 -> return {sig: 0, ex: 0, sgn: 0}
     c: if n < 0 -> -n else -> n
     sgn: if n < 0 -> 1 - a.sgn else -> a.sgn
     w2: (1 << 128) - 1
@@ -32938,11 +32938,11 @@ priv dint_mul_int: fn(n: Int, a: (sig: Int, ex: Int, sgn: Int)) -> (sig: Int, ex
         s = (1 << 127) | s >> 1
         m -= 1
     }
-    (sig: s, ex: a.ex + 64 - m, sgn: sgn)
+    {sig: s, ex: a.ex + 64 - m, sgn: sgn}
 }
 
 // The 128-bit float of x, exactly; a zero has sig 0.
-priv dint_from_float: fn(x: Float) -> (sig: Int, ex: Int, sgn: Int) Never! {
+priv dint_from_float: fn(x: Float) -> {sig: Int, ex: Int, sgn: Int} Never! {
     u: to_bits(x)
     f: (u >> 52) & 0x7FF
     lead: if f != 0 -> 0x10_0000_0000_0000 else -> 0
@@ -32950,21 +32950,21 @@ priv dint_from_float: fn(x: Float) -> (sig: Int, ex: Int, sgn: Int) Never! {
     t: if m != 0 -> clz64(m) else -> 0
     drop: if t > 11 -> t - 12 else -> 0
     sgn: if (x < Float{0.0}) -> 1 else -> 0
-    (sig: m << (t + 64), ex: f - 1023 - drop, sgn: sgn)
+    {sig: m << (t + 64), ex: f - 1023 - drop, sgn: sgn}
 }
 
 // b / a for nonzero a (dint.h's div_dint): 1/a from the Float 4/a and one
 // Newton step, times b.
-priv dint_div: fn(b: Float, a: Float) -> (sig: Int, ex: Int, sgn: Int) Never! {
+priv dint_div: fn(b: Float, a: Float) -> {sig: Int, ex: Int, sgn: Int} Never! {
     r0: dint_from_float(Float{4.0} / a)
-    r: (sig: r0.sig, ex: r0.ex - 2, sgn: r0.sgn)
-    q: dint_add((sig: 1 << 127, ex: 0, sgn: 0), dint_mul(dint_from_float(-a), r))
+    r: {sig: r0.sig, ex: r0.ex - 2, sgn: r0.sgn}
+    q: dint_add({sig: 1 << 127, ex: 0, sgn: 0}, dint_mul(dint_from_float(-a), r))
     dint_mul(dint_add(r, dint_mul(r, q)), dint_from_float(b))
 }
 
 // a rounded to nearest for a in the normal range (dint.h's dint_tod): the top
 // 53 bits, with the round and sticky bits added as 2^-53 and 2^-54.
-priv dint_to_float: fn(a: (sig: Int, ex: Int, sgn: Int)) -> Float Never! {
+priv dint_to_float: fn(a: {sig: Int, ex: Int, sgn: Int}) -> Float Never! {
     hi: a.sig >> 64
     r: from_bits((hi >> 11) | 0x3FF0_0000_0000_0000)
     rd := Float{0.0}
@@ -32977,26 +32977,26 @@ priv dint_to_float: fn(a: (sig: Int, ex: Int, sgn: Int)) -> Float Never! {
 // log(x) for a positive 128-bit float x (dint.h's log_2): x scaled by 2^-E
 // into [1/sqrt(2), sqrt(2)) and times a table reciprocal, so that log(x) =
 // E log(2) - log(r) + log(1 + z) with a degree-13 polynomial in z.
-priv dint_log: fn(x: (sig: Int, ex: Int, sgn: Int)) -> (sig: Int, ex: Int, sgn: Int) Never! {
+priv dint_log: fn(x: {sig: Int, ex: Int, sgn: Int}) -> {sig: Int, ex: Int, sgn: Int} Never! {
     big: (x.sig >> 64) > 0xB504_F333_F9DE_6484
     e: if big -> x.ex + 1 else -> x.ex
     sh: if big -> 120 else -> 119
     i: (x.sig >> sh) - 128
-    z: dint_add((sig: 1 << 127, ex: 0, sgn: 1), dint_mul((sig: x.sig, ex: x.ex - e, sgn: x.sgn), tint_coef(LOG_DINT_INVERSE, i)))
+    z: dint_add({sig: 1 << 127, ex: 0, sgn: 1}, dint_mul({sig: x.sig, ex: x.ex - e, sgn: x.sgn}, tint_coef(LOG_DINT_INVERSE, i)))
     p := tint_coef(LOG_DINT_P, 0)
     loop k in 1..<13 -> p = dint_add(tint_coef(LOG_DINT_P, k), dint_mul(z, p))
-    ln2: (sig: 0xB172_17F7_D1CF_79AB_C9E3_B398_03F2_F6AF, ex: -1, sgn: 0)
+    ln2: {sig: 0xB172_17F7_D1CF_79AB_C9E3_B398_03F2_F6AF, ex: -1, sgn: 0}
     dint_add(dint_add(tint_coef(LOG_DINT_LOG_INVERSE, i), dint_mul(z, p)), dint_mul_int(e, ln2))
 }
 
 // log_b(1 + x) for |x| >= 2^-5 in 128-bit floats, rounded to nearest, with
 // inv = 1/log(b): log(xh) + log(1 + c) for c = xl / xh, as c - c^2/2.
-priv log_1p_dint: fn(x: Float, inv: (sig: Int, ex: Int, sgn: Int)) -> Float Never! {
+priv log_1p_dint: fn(x: Float, inv: {sig: Int, ex: Int, sgn: Int}) -> Float Never! {
     s: one_plus(x, INFINITY)
     y: dint_log(dint_from_float(s.hi))
     c: dint_div(s.lo, s.hi)
     c2: dint_mul(c, c)
-    t: dint_add(c, (sig: c2.sig, ex: c2.ex - 1, sgn: 1))
+    t: dint_add(c, {sig: c2.sig, ex: c2.ex - 1, sgn: 1})
     dint_to_float(dint_mul(dint_add(y, t), inv))
 }
 
@@ -33037,7 +33037,7 @@ priv log2_1p_accurate: fn(x: Float) -> Float Never! {
     // log2(1 + 2^e) rounds to e from e = 49 up (x > 0 only: the C's check also
     // fires on x = -2^-k through the sign bit, which would be wrong)
     if b & 0xF_FFFF_FFFF_FFFF == 0 && (b >> 52) >= 1072 -> return Float{(b >> 52) - 1023}
-    log_1p_dint(x, (sig: 0xB8AA_3B29_5C17_F0BB_BE87_FED0_691D_3E89, ex: 0, sgn: 0))
+    log_1p_dint(x, {sig: 0xB8AA_3B29_5C17_F0BB_BE87_FED0_691D_3E89, ex: 0, sgn: 0})
 }
 
 // log10_1p when the fast path cannot round.
@@ -33067,7 +33067,7 @@ priv log10_1p_accurate: fn(x: Float) -> Float Never! {
     if (x == Float{8.795571893350569e229}) {
         return Float{229.94426408279878} + Float{-4.636200928618683e-33}
     }
-    log_1p_dint(x, (sig: 0xDE5B_D8A9_3728_7195_355B_AAAF_AD33_DC32, ex: -2, sgn: 0))
+    log_1p_dint(x, {sig: 0xDE5B_D8A9_3728_7195_355B_AAAF_AD33_DC32, ex: -2, sgn: 0})
 }
 
 // log_fast's 10-bit reciprocals r of [1, 2) split at sqrt(2), for 362 <= i <= 724:
@@ -37781,69 +37781,69 @@ priv float_i64: fn(e: I64) -> Float Never! {
 }
 
 // Both of n's correctly rounded cos and sin.
-sin_cos: fn(n: Float) -> (cos: Float, sin: Float) Never! { (cos: cos(n), sin: sin(n)) }
+sin_cos: fn(n: Float) -> {cos: Float, sin: Float} Never! { {cos: cos(n), sin: sin(n)} }
 
 /// modf.c from musl 1.2.5: the whole part clears the fraction bits, and a
 /// whole `n` has a fraction of zero with its sign.
-modf: fn(n: Float) -> (fract: Float, whole: Float) Never! {
+modf: fn(n: Float) -> {fract: Float, whole: Float} Never! {
     bits: to_bits(n)
     signed_zero: from_bits(bits & -9223372036854775807 - 1)
     e: ((bits >> 52) & 2047) - 1023
     if e >= 52 {
-        if e == 1024 && bits & 4503599627370495 != 0 -> return (fract: n, whole: n)
-        return (fract: signed_zero, whole: n)
+        if e == 1024 && bits & 4503599627370495 != 0 -> return {fract: n, whole: n}
+        return {fract: signed_zero, whole: n}
     }
-    if e < 0 -> return (fract: n, whole: signed_zero)
+    if e < 0 -> return {fract: n, whole: signed_zero}
     mask: 4503599627370495 >> e
-    if bits & mask == 0 -> return (fract: signed_zero, whole: n)
+    if bits & mask == 0 -> return {fract: signed_zero, whole: n}
     whole: from_bits(bits - (bits & mask))
-    (fract: n - whole, whole: whole)
+    {fract: n - whole, whole: whole}
 }
 
 /// frexp.c from musl 1.2.5: `n` is frac * 2^exp with |frac| in [0.5, 1);
 /// a zero, an infinity or a NaN is its own frac with exp 0.
-frexp: fn(n: Float) -> (exp: Int, frac: Float) Never! {
+frexp: fn(n: Float) -> {exp: Int, frac: Float} Never! {
     bits: to_bits(n)
     biased: (bits >> 52) & 2047
     if biased == 0 {
-        if n == 0.0 -> return (exp: 0, frac: n)
+        if n == 0.0 -> return {exp: 0, frac: n}
         scaled: frexp(n * Float{18446744073709551616.0})
-        return (exp: scaled.exp - 64, frac: scaled.frac)
+        return {exp: scaled.exp - 64, frac: scaled.frac}
     }
-    if biased == 2047 -> return (exp: 0, frac: n)
-    (exp: biased - 1022, frac: from_bits(bits & -9218868437227405313 | 4602678819172646912))
+    if biased == 2047 -> return {exp: 0, frac: n}
+    {exp: biased - 1022, frac: from_bits(bits & -9218868437227405313 | 4602678819172646912)}
 }
 
 // modff.c from musl 1.2.5: modf's F32 form (an all-F32 call), clearing the
 // fraction bits of the binary32 word, so a NaN keeps its bits.
-priv modf_f32: fn(n: F32) -> (fract: F32, whole: F32) Never! {
+priv modf_f32: fn(n: F32) -> {fract: F32, whole: F32} Never! {
     bits: __to_bits_f32(n)
     signed_zero: __from_bits_f32(bits & 0x8000_0000)
     e: ((bits >> 23) & 255) - 127
     if e >= 23 {
-        if e == 128 && bits & 0x7F_FFFF != 0 -> return (fract: n, whole: n)
-        return (fract: signed_zero, whole: n)
+        if e == 128 && bits & 0x7F_FFFF != 0 -> return {fract: n, whole: n}
+        return {fract: signed_zero, whole: n}
     }
-    if e < 0 -> return (fract: n, whole: signed_zero)
+    if e < 0 -> return {fract: n, whole: signed_zero}
     mask: 0x7F_FFFF >> e
-    if bits & mask == 0 -> return (fract: signed_zero, whole: n)
+    if bits & mask == 0 -> return {fract: signed_zero, whole: n}
     whole: __from_bits_f32(bits - (bits & mask))
-    (fract: n - whole, whole: whole)
+    {fract: n - whole, whole: whole}
 }
 
 // frexpf.c from musl 1.2.5: frexp's F32 form (an all-F32 call) on the
 // binary32 word; a subnormal scales by 2^64 exactly first, and a zero, an
 // infinity or a NaN is its own frac, bits and all, with exp 0.
-priv frexp_f32: fn(n: F32) -> (exp: Int, frac: F32) Never! {
+priv frexp_f32: fn(n: F32) -> {exp: Int, frac: F32} Never! {
     bits: __to_bits_f32(n)
     biased: (bits >> 23) & 255
     if biased == 0 {
-        if bits & 0x7FFF_FFFF == 0 -> return (exp: 0, frac: n)
+        if bits & 0x7FFF_FFFF == 0 -> return {exp: 0, frac: n}
         scaled: frexp_f32(n * F32{18446744073709551616.0})
-        return (exp: scaled.exp - 64, frac: scaled.frac)
+        return {exp: scaled.exp - 64, frac: scaled.frac}
     }
-    if biased == 255 -> return (exp: 0, frac: n)
-    (exp: biased - 126, frac: __from_bits_f32(bits & 0x807F_FFFF | 0x3F00_0000))
+    if biased == 255 -> return {exp: 0, frac: n}
+    {exp: biased - 126, frac: __from_bits_f32(bits & 0x807F_FFFF | 0x3F00_0000)}
 }
 
 checked_abs: fn(n: Int) -> Int? Never! {
@@ -37966,18 +37966,18 @@ powmod: fn(base: Int, exponent: Int, modulus: Int) -> Int? Never! {
     Val(result)
 }
 
-div_mod: fn(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
+div_mod: fn(a: Int, b: Int) -> {quot: Int, rem: Int} Never! {
     rem := a %% b
     if rem < 0 {
         if b > 0 -> rem += b
         if b < 0 -> rem -= b
     }
-    (quot: (a - rem) /% b, rem: rem)
+    {quot: (a - rem) /% b, rem: rem}
 }
 
-div_rem: fn(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
+div_rem: fn(a: Int, b: Int) -> {quot: Int, rem: Int} Never! {
     rem: a %% b
-    (quot: (a - rem) /% b, rem: rem)
+    {quot: (a - rem) /% b, rem: rem}
 }
 
 digits: fn(n: Int) -> Int Never! {
@@ -38051,22 +38051,22 @@ remainder: fn(a: Float, b: Float) -> Float Never! { rem_quo(a, b).rem }
 /// remquo.c from musl 1.2.5: `a - n * b` for the integer n nearest a / b
 /// (ties to even), found by exact long division of the significands, and
 /// n's low 31 bits signed as a / b.
-rem_quo: fn(a: Float, b: Float) -> (rem: Float, quo: Int) Never! {
+rem_quo: fn(a: Float, b: Float) -> {rem: Float, quo: Int} Never! {
     ux: to_bits(a) & 18446744073709551615
     uy: to_bits(b) & 18446744073709551615
     ex := (ux >> 52) & 2047
     ey := (uy >> 52) & 2047
     sx: ux >> 63 != 0
     sy: uy >> 63 != 0
-    if is_nan(a) || is_nan(b) -> return (rem: nan_pair(a, b), quo: 0)
-    if uy & 9223372036854775807 == 0 || ex == 2047 -> return (rem: (a * b) / (a * b), quo: 0)
-    if ux & 9223372036854775807 == 0 -> return (rem: a, quo: 0)
+    if is_nan(a) || is_nan(b) -> return {rem: nan_pair(a, b), quo: 0}
+    if uy & 9223372036854775807 == 0 || ex == 2047 -> return {rem: (a * b) / (a * b), quo: 0}
+    if ux & 9223372036854775807 == 0 -> return {rem: a, quo: 0}
     uxi := remquo_significand(ux, ex)
     uyi: remquo_significand(uy, ey)
     if ex == 0 -> ex = remquo_exponent(ux)
     if ey == 0 -> ey = remquo_exponent(uy)
     q := 0
-    if ex < ey - 1 -> return (rem: a, quo: 0)
+    if ex < ey - 1 -> return {rem: a, quo: 0}
     if ex >= ey {
         loop ex > ey {
             if uxi >= uyi {
@@ -38096,14 +38096,14 @@ rem_quo: fn(a: Float, b: Float) -> (rem: Float, quo: Int) Never! {
         q += 1
     }
     q &= 2147483647
-    (rem: if sx -> -x else -> x, quo: if sx != sy -> -q else -> q)
+    {rem: if sx -> -x else -> x, quo: if sx != sy -> -q else -> q}
 }
 
 // rem_quo of two F32s (an all-F32 call): the Float rem_quo of the exactly
 // widened operands, whose remainder an F32 holds exactly; a NaN stays NaN.
-priv rem_quo_f32: fn(a: F32, b: F32) -> (rem: F32, quo: Int) Never! {
+priv rem_quo_f32: fn(a: F32, b: F32) -> {rem: F32, quo: Int} Never! {
     split: rem_quo(Float.from_f32(a), Float.from_f32(b))
-    (rem: f32_narrow(split.rem), quo: split.quo)
+    {rem: f32_narrow(split.rem), quo: split.quo}
 }
 
 // remquo.c: the significand of binary64 `bits` with its leading bit at bit
@@ -40316,7 +40316,7 @@ priv decimal_rounded: fn(value: Decimal, mode: Rounding) -> Decimal Never! {
 }
 
 #Test("a Decimal decode failure names the Dyn kind") {
-    trees: [(tree: Dyn, kind: String)]{(tree: Dyn.Null, kind: "Null"), (tree: Dyn.Float(1.5), kind: "Float"), (tree: Dyn.Bytes([U8]{1}), kind: "Bytes"), (tree: Dyn.Array([Dyn]{}), kind: "a list")}
+    trees: [{tree: Dyn, kind: String}]{{tree: Dyn.Null, kind: "Null"}, {tree: Dyn.Float(1.5), kind: "Float"}, {tree: Dyn.Bytes([U8]{1}), kind: "Bytes"}, {tree: Dyn.Array([Dyn]{}), kind: "a list"}}
     loop entry in trees {
         if Decimal.decode(entry.tree) == {
             .Err(errors) -> { assert_eq(errors[0].reason, "expected Decimal, found {entry.kind}") }
@@ -42654,8 +42654,8 @@ ScreenPoint: struct {
     }
 
     impl GeometryPoint {
-        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! {
-            (x: self.x, y: self.y, frame_id: self.frame_id)
+        __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! {
+            {x: self.x, y: self.y, frame_id: self.frame_id}
         }
     }
 }
@@ -42712,8 +42712,8 @@ WorldPoint: struct {
     }
 
     impl GeometryPoint {
-        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! {
-            (x: self.x, y: self.y, frame_id: self.frame_id)
+        __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! {
+            {x: self.x, y: self.y, frame_id: self.frame_id}
         }
     }
 }
@@ -42788,8 +42788,8 @@ ViewPoint: struct {
     }
 
     impl GeometryPoint {
-        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! {
-            (x: self.x, y: self.y, frame_id: self.frame_id)
+        __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! {
+            {x: self.x, y: self.y, frame_id: self.frame_id}
         }
     }
 }
@@ -42846,8 +42846,8 @@ CameraPoint: struct {
     }
 
     impl GeometryPoint {
-        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! {
-            (x: self.x, y: self.y, frame_id: self.frame_id)
+        __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! {
+            {x: self.x, y: self.y, frame_id: self.frame_id}
         }
     }
 }
@@ -42925,8 +42925,8 @@ DevicePoint: struct {
     }
 
     impl GeometryPoint {
-        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! {
-            (x: self.x, y: self.y, frame_id: self.frame_id)
+        __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! {
+            {x: self.x, y: self.y, frame_id: self.frame_id}
         }
     }
 }
@@ -42999,8 +42999,8 @@ Point2: struct<T, Space> {
     }
 
     impl GeometryPoint {
-        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! {
-            (x: self.x, y: self.y, frame_id: self.frame_id)
+        __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never! {
+            {x: self.x, y: self.y, frame_id: self.frame_id}
         }
     }
 }
@@ -43075,7 +43075,7 @@ priv coordinate_frame: fn(left: Int, right: Int) -> Int TransformError! {
 // Not exported from Core's public type table: payload extraction for the
 // existing geometry call contracts checked by sema, not a new coordinate API.
 GeometryPoint: trait {
-    __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never!
+    __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never!
 }
 
 Ray2: struct<T, From, To> {

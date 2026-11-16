@@ -313,11 +313,11 @@ Parser: struct {
         if depth + 1 > self.options.max_depth {
             return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
         }
-        entries := [(key: String, value: Dyn)]{}
+        entries := [{key: String, value: Dyn}]{}
         length := -1
         if additional == 31 -> self.indefinite(start, path) ?? return Err(err) else {
             length = self.argument(input, additional, start, path) ?? return Err(err)
-            self.reserve<(key: String, value: Dyn)>(entries, length, 56, start, path, "CBOR map") ?? return Err(err)
+            self.reserve<{key: String, value: Dyn}>(entries, length, 56, start, path, "CBOR map") ?? return Err(err)
         }
         prior_start := -1
         prior_end := -1
@@ -334,7 +334,7 @@ Parser: struct {
                 if self.items >= self.options.max_items {
                     return Err(failure(.Limit, self.cursor, path, "max_items {self.options.max_items} exceeded"))
                 }
-                self.reserve<(key: String, value: Dyn)>(entries, 1, 56, self.cursor, path, "CBOR map") ?? return Err(err)
+                self.reserve<{key: String, value: Dyn}>(entries, 1, 56, self.cursor, path, "CBOR map") ?? return Err(err)
             }
             key_start: self.cursor
             key_value: self.value(input, depth + 1, path) ?? return Err(err)
@@ -371,7 +371,7 @@ Parser: struct {
                 return Err(err)
             }
             self.live -= charged
-            entries.push((key: key, value: child))
+            entries.push({key: key, value: child})
             index += 1
         }
         Ok(stream.object_from_entries(entries))

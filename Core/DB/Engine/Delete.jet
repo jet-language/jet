@@ -96,8 +96,8 @@ is_read_only: fn(p: &cg.Parse, a: &ast.AST, t: Int) -> Bool Never! {
 // when given, says which of them (index 0 the table, i+1 index i) to open.
 // n is the number of indices; a virtual table opens nothing and its
 // cursors are -999.
-open_table_and_indices: fn(p: &cg.Parse, a: &ast.AST, t: Int, op: Int, p5_0: Int, i_base0: Int, to_open: [Bool]?) -> (n: Int, data_cur: Int, idx_cur: Int) Never! {
-    if ex.is_virtual(p.db, t) -> return (n: 0, data_cur: -999, idx_cur: -999)
+open_table_and_indices: fn(p: &cg.Parse, a: &ast.AST, t: Int, op: Int, p5_0: Int, i_base0: Int, to_open: [Bool]?) -> {n: Int, data_cur: Int, idx_cur: Int} Never! {
+    if ex.is_virtual(p.db, t) -> return {n: 0, data_cur: -999, idx_cur: -999}
     i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
     i_base := if i_base0 < 0 -> p.f.n_tab else -> i_base0
     data_cur := i_base
@@ -128,7 +128,7 @@ open_table_and_indices: fn(p: &cg.Parse, a: &ast.AST, t: Int, op: Int, p5_0: Int
         ix = p.db.indexes[ix].next
     }
     if i_base > p.f.n_tab -> p.f.n_tab = i_base
-    (n: i, data_cur: data_cur, idx_cur: idx_cur)
+    {n: i, data_cur: data_cur, idx_cur: idx_cur}
 }
 
 op_list_item: fn(opcode: Int, p1: Int, p2: Int, p3: Int) -> aux.VdbeOpList Never! {

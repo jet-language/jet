@@ -292,7 +292,7 @@ store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: Han
     if !store_path_starts_with(canonical_out, canonical_hangar) {
         return Err(store_repro_invalid("independent root result points outside its private Hangar"))
     }
-    projections: [(label: String, path: String)]{(label: "out", path: realized.out), (label: "bin", path: realized.bin), (label: "rlib", path: realized.rlib)}
+    projections: [{label: String, path: String}]{{label: "out", path: realized.out}, {label: "bin", path: realized.bin}, {label: "rlib", path: realized.rlib}}
     loop projection in projections {
         if projection.path == "" -> next
         canonical: files.canonicalize(projection.path) ?? return Err(store_repro_invalid("independent root `{projection.label}` output is unavailable: {err}"))
@@ -427,11 +427,11 @@ store_repro_compare_registration_entries: fn(verification: &StoreVerification, l
     if left.references != right.references {
         return Ok(Val(FirstDifference{path: "references", kind: .References, left: store_repro_debug_list(left.references), right: store_repro_debug_list(right.references)}))
     }
-    checks: [(kind: DifferenceKind, left: String, right: String)]{
-        (kind: .RecipeFingerprint, left: left.cache_identity.recipe_fingerprint, right: right.cache_identity.recipe_fingerprint),
-        (kind: .PolicyFingerprint, left: left.cache_identity.policy_fingerprint, right: right.cache_identity.policy_fingerprint),
-        (kind: .Platform, left: left.cache_identity.platform, right: right.cache_identity.platform),
-        (kind: .PlatformArtifactKind, left: left.platform_artifact_kind, right: right.platform_artifact_kind),
+    checks: [{kind: DifferenceKind, left: String, right: String}]{
+        {kind: .RecipeFingerprint, left: left.cache_identity.recipe_fingerprint, right: right.cache_identity.recipe_fingerprint},
+        {kind: .PolicyFingerprint, left: left.cache_identity.policy_fingerprint, right: right.cache_identity.policy_fingerprint},
+        {kind: .Platform, left: left.cache_identity.platform, right: right.cache_identity.platform},
+        {kind: .PlatformArtifactKind, left: left.platform_artifact_kind, right: right.platform_artifact_kind},
     }
     loop check in checks {
         if check.left != check.right {

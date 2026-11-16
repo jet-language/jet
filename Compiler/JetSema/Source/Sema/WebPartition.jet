@@ -9,8 +9,10 @@
 // (E-WEB-TARGET-BROWSER), and a call must stay in its bucket unless it is the
 // JS-to-`#Export(wasm)` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
 // onto each FnBody (`web_bucket`) and, once the program opts in, why it was
-// chosen (`web_reason`).
-use jet_foundation.[CompilerThreads, Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
+// chosen (`web_reason`). The same rows and edges place code at the app
+// boundary (sema_web_placement_check): JS code reaches no server resource
+// (E2823), and a method the server runs uses no `Browser` (E2824).
+use jet_foundation.[CompilerThreads, Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, diagnostic_registry_row, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
@@ -126,6 +128,9 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
             modules[metas[at].slot].functions[metas[at].row].web_reason = reasons[at].copy()
         }
     }
+    if any_js || active {
+        sema_web_placement_check(modules, graph, metas, buckets, callee_first, callees, active, diagnostics)
+    }
     if !active {
         return
     }
@@ -163,6 +168,64 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
             found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
         }
         if found.len() == 0 -> next
+        sema_attach_diagnostic_source_locations(found, 0, graph.modules[meta.registration].source_segments)
+        loop diagnostic in found -> diagnostics.push(diagnostic)
+    }
+}
+
+// The resources only the server has: code that reaches one runs there.
+SEMA_WEB_SERVER_RESOURCES: [String]{"DB", "Secret"}
+
+// Placement at the app boundary, over the partition's buckets and call
+// edges. Code in JS runs in the page, so in a program that opts in, a JS
+// function outside Core that reaches a server resource is E2823, reported
+// where the page first reaches it: at the function no JS callee of which
+// reaches one itself. A method the server runs (an endpoint, a job, a
+// schedule, a webhook or its signing key) can't use the `Browser` effect,
+// which only the page has: E2824, in any program.
+sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, metas: [SemaWebMeta], buckets: [WebBucket], callee_first: [Int], callees: [Int], active: Bool, diagnostics: &[Diagnostic]) Never! {
+    // The server resource each meta's function reaches when it is JS code
+    // outside Core of a program that opts in; "" for any other.
+    reached := [String]{}
+    loop at in 0..<metas.len() {
+        meta: metas[at]
+        found := ""
+        if active && meta.row >= 0 && buckets[at] == .JS && !module_is_core(graph.modules[meta.registration].module_identity) {
+            solved: modules[meta.slot].functions[meta.row].effects.solved
+            loop resource in SEMA_WEB_SERVER_RESOURCES {
+                if sema_web_has_root(solved, resource) {
+                    found = resource
+                    break
+                }
+            }
+        }
+        reached.push(found)
+    }
+    reported := [String:Bool]{}
+    loop at in 0..<metas.len() {
+        meta: metas[at]
+        if meta.row < 0 || module_is_core(graph.modules[meta.registration].module_identity) -> next
+        function: modules[meta.slot].functions[meta.row]
+        if reported.get(function.key) != None -> next
+        name: sema_app_caller_name(function)
+        marker: if function.endpoint != "" -> function.endpoint else -> function.system_run
+        found := [Diagnostic]{}
+        if marker != "" && sema_web_has_root(function.effects.solved, "Browser") {
+            entry: diagnostic_registry_row("E2824") ?? panic("E2824 must have a registry row")
+            found.push(sema_error("E2824", meta.name_span, entry.what.replace("{{method}}", name).replace("{{marker}}", marker), entry.why, entry.fix.replace("{{method}}", name)))
+        } else if reached[at] != "" {
+            inherited: loop edge in callee_first[at]..<callee_first[at + 1] {
+                if callees[edge] != at && reached[callees[edge]] != "" {
+                    break true
+                }
+            } ?? false
+            if !inherited {
+                entry: diagnostic_registry_row("E2823") ?? panic("E2823 must have a registry row")
+                found.push(sema_error("E2823", meta.name_span, entry.what.replace("{{function}}", name).replace("{{resource}}", reached[at]), entry.why, entry.fix.replace("{{function}}", name).replace("{{resource}}", reached[at])))
+            }
+        }
+        if found.len() == 0 -> next
+        reported[function.key] = true
         sema_attach_diagnostic_source_locations(found, 0, graph.modules[meta.registration].source_segments)
         loop diagnostic in found -> diagnostics.push(diagnostic)
     }

@@ -157,7 +157,7 @@ x509_create_value_string: fn(s: [U8], from: Int, to: Int) -> [U8] x509.X509Error
 // and tag (parse_attribute_value_hex_der_encoded). Odd or bad digits, DER
 // over X509_MAX_DN_NAME_SIZE + 4 bytes, a malformed length, content over
 // X509_MAX_DN_NAME_SIZE bytes, or a NUL in a string type is InvalidName.
-x509_create_value_hex_der: fn(s: [U8], from: Int, to: Int) -> (val: [U8], tag_id: Int) x509.X509Error! {
+x509_create_value_hex_der: fn(s: [U8], from: Int, to: Int) -> {val: [U8], tag_id: Int} x509.X509Error! {
     digits: to - from
     if digits %% 2 != 0 -> return Err(.InvalidName(None))
     der_len: digits /% 2
@@ -174,7 +174,7 @@ x509_create_value_hex_der: fn(s: [U8], from: Int, to: Int) -> (val: [U8], tag_id
     if val_len > x509.X509_MAX_DN_NAME_SIZE -> return Err(.InvalidName(None))
     val: cipher.bytes_of(der, p, val_len)
     if asn1.is_string_tag(tag_id) && val.contains(X509_CREATE_NUL) -> return Err(.InvalidName(None))
-    Ok((val: val, tag_id: tag_id))
+    Ok({val: val, tag_id: tag_id})
 }
 
 /// Parse a name in string form, "C=NL,O=Example,CN=host", into `head`,

@@ -30,13 +30,13 @@ use {
 }
 
 #Test("bracketed IPv6 resolver grammar matches the platform socket parser") {
-    cases: [(host: String, expected: String)]{
-        (host: "[::1]", expected: "[::1]:443"),
-        (host: "[0:0:0:0:0:0:0:1]", expected: "[::1]:443"),
-        (host: "[0000:0000:0000:0000:0000:0000:0000:0001]", expected: "[::1]:443"),
-        (host: "[::ffff:1.2.3.4]", expected: "[::ffff:1.2.3.4]:443"),
-        (host: "[0:0:0:0:0:ffff:0102:0304]", expected: "[::ffff:1.2.3.4]:443"),
-        (host: "[fe80::1%7]", expected: "[fe80::1%7]:443"),
+    cases: [{host: String, expected: String}]{
+        {host: "[::1]", expected: "[::1]:443"},
+        {host: "[0:0:0:0:0:0:0:1]", expected: "[::1]:443"},
+        {host: "[0000:0000:0000:0000:0000:0000:0000:0001]", expected: "[::1]:443"},
+        {host: "[::ffff:1.2.3.4]", expected: "[::ffff:1.2.3.4]:443"},
+        {host: "[0:0:0:0:0:ffff:0102:0304]", expected: "[::ffff:1.2.3.4]:443"},
+        {host: "[fe80::1%7]", expected: "[fe80::1%7]:443"},
     }
     loop item in cases {
         address: net.socket_addr(item.host, 443) ?? panic("bracketed IPv6")

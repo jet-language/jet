@@ -29,7 +29,7 @@ use {
 
 // The receipt files, then each `--runs-dir`'s `run-*/receipt.json` in name
 // order, each file once.
-read_receipts: fn(args: [String]) -> [(file: String, receipt: Dyn)] {
+read_receipts: fn(args: [String]) -> [{file: String, receipt: Dyn}] {
     paths := [String]{}
     i := 0
     loop i < args.len() {
@@ -45,14 +45,14 @@ read_receipts: fn(args: [String]) -> [(file: String, receipt: Dyn)] {
         runs: files.list_dir(dir, matching: "run-*").filter(fn(entry) { entry.is_dir })
         paths.extend(runs.map(fn(entry) { files.normpath("{dir}/{entry.name}/receipt.json") }).filter(fn(file) { files.exists(file) }))
     }
-    receipts := [(file: String, receipt: Dyn)]{}
+    receipts := [{file: String, receipt: Dyn}]{}
     loop path in combinatorics.unique(paths) {
-        receipts.push((file: path, receipt: json.parse(files.read(path))?(path)))
+        receipts.push({file: path, receipt: json.parse(files.read(path))?(path)})
     }
     receipts
 }
 
-command: fn(argv: [String]) -> (text: String, output: String, summary: String, missing: Bool) {
+command: fn(argv: [String]) -> {text: String, output: String, summary: String, missing: Bool} {
     inputs := [String]{}
     flags := [String:String]{}
     i := 0
@@ -113,7 +113,7 @@ command: fn(argv: [String]) -> (text: String, output: String, summary: String, m
         series += loaded.receipt.field("series").decode<[Dyn]>().len()
         failures += loaded.receipt.field("failures").decode<[String]>().len()
     }
-    (text: text, output: output, summary: "Report: {output}; {receipts.len()} receipts, {series} series, {failures} gate failures", missing: missing.len() > 0)
+    {text: text, output: output, summary: "Report: {output}; {receipts.len()} receipts, {series} series, {failures} gate failures", missing: missing.len() > 0}
 }
 
 // The writes stay in the entry: a unit write is outside `command`'s inferred

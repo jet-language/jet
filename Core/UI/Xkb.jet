@@ -264,13 +264,13 @@ Keymap: struct {
     /// A key press (`down`) or release of evdev key `code`: the key's
     /// level-1 symbol in the active group, and on a press the text it types
     /// ("" for none, for control characters and inside a Compose sequence).
-    press: fn(&self, code: Int, down: Bool) -> (key: Key, text: String) {
+    press: fn(&self, code: Int, down: Bool) -> {key: Key, text: String} {
         index: key_at(self, code + 8)
-        if index < 0 -> return (key: Key.Unknown, text: "")
+        if index < 0 -> return {key: Key.Unknown, text: ""}
         key: ui_key(self, index)
         text: if down -> press_text(self, index) else -> ""
         if !self.server -> update_key(self, index, down)
-        (key: key, text: text)
+        {key: key, text: text}
     }
 
     /// True when holding evdev key `code` repeats it. Modifier keys do not.

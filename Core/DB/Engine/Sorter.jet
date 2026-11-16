@@ -161,7 +161,7 @@ sorter_compare: fn(s: &VdbeSorter, cursor_info: record.KeyInfo, val: [U8], n_key
 #Test("the sorter orders by the key fields and keeps ties in insertion order") {
     info: record.KeyInfo{enc: base.UTF8, n_key_field: 1, n_all_field: 2, sort_flags: [Int]{0}, colls: [Int]{record.COLL_BINARY}}
     s := sorter_new(info, 1)
-    rows: [(k: Int, tag: Int)]{(k: 3, tag: 0), (k: 1, tag: 1), (k: 3, tag: 2), (k: 2, tag: 3), (k: 1, tag: 4), (k: 3, tag: 5)}
+    rows: [{k: Int, tag: Int}]{{k: 3, tag: 0}, {k: 1, tag: 1}, {k: 3, tag: 2}, {k: 2, tag: 3}, {k: 1, tag: 4}, {k: 3, tag: 5}}
     loop r in rows {
         vals := [base.Mem]{base.mem_int(r.k), base.mem_int(r.tag)}
         sorter_write(s, record.make_record(vals, 4))

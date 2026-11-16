@@ -555,7 +555,7 @@ envmodel_evaluate_host_override: fn(record: HostOverrideRecord, scope: ModuleEva
         if !readable.contains(name) -> readable.push(name)
     }
     prefix_len: record.wrapped.bytes().len() - source.bytes().len()
-    fields := [(name: String, value: HostOverrideValue)]{}
+    fields := [{name: String, value: HostOverrideValue}]{}
     provenance := [HostOverrideProvenance]{}
     loop field in record.lit.fields {
         value: if field.value == {
@@ -577,7 +577,7 @@ envmodel_evaluate_host_override: fn(record: HostOverrideRecord, scope: ModuleEva
             }
             .Other(expr) -> HostOverrideValue.Value{value: envmodel_value_of(expr, scope)}
         }
-        fields.push((name: field.name, value: value))
+        fields.push({name: field.name, value: value})
         provenance.push(HostOverrideProvenance{field: field.name, dependencies: envmodel_typed_field_dependencies(field.value, field_names), pure: true, source: envmodel_host_field_source(source, field.span, prefix_len)})
     }
     Ok(HostOverride{fields: fields, source: source, provenance: provenance})

@@ -880,7 +880,7 @@ fact, such as `f.marker(Since)?.version ?? 1`, is that fact's literal.
 
 `M.reflect().uses` lists every use of the marker struct `M` in the whole
 program, a library's uses in the app build included. Each entry is a
-`(m: M, site: ItemInfo)` record: the marker's value at that use (its
+`{m: M, site: ItemInfo}` record: the marker's value at that use (its
 arguments, then the declared defaults of the fields left out), under `M`'s
 snake_case name (`route` for `Route`), and the carrying item's `ItemInfo`
 (`name`, `path`, `module`, and `kind`: `struct`, `enum`, `distinct`,

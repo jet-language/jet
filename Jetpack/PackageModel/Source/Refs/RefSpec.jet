@@ -680,17 +680,17 @@ pkg_ref_valid_source: fn(source: String) -> Bool Never! {
 
 // Split `source#selector`. `empty_half` reports a present `#` with an empty
 // side, which every ref classifier rejects.
-pkg_ref_split_selector: fn(text: String) -> (source: String, selector: String?, empty_half: Bool) Never! {
-    parts: text.split_once(REF_CHANNEL_MARKER) ?? return (empty_half: false, selector: None, source: text)
+pkg_ref_split_selector: fn(text: String) -> {source: String, selector: String?, empty_half: Bool} Never! {
+    parts: text.split_once(REF_CHANNEL_MARKER) ?? return {empty_half: false, selector: None, source: text}
     empty_half: parts.before == "" || parts.after == ""
-    (empty_half: empty_half, selector: Val(parts.after), source: parts.before)
+    {empty_half: empty_half, selector: Val(parts.after), source: parts.before}
 }
 
 // Up to three closest labels to `query` by edit distance, for a did-you-mean
 // list. Ties order by label; the list is deterministic.
 pkg_ref_nearest: fn(query: String, labels: [String]) -> [String] Never! {
-    scored := [(distance: Int, label: String)]{}
-    loop label in labels -> scored.push((distance: pkg_edit_distance(query, label), label: label))
+    scored := [{distance: Int, label: String}]{}
+    loop label in labels -> scored.push({distance: pkg_edit_distance(query, label), label: label})
     // Two stable passes order by (distance, label).
     scored.sort_by(fn(entry) { entry.label })
     scored.sort_by(fn(entry) { entry.distance })
@@ -829,14 +829,14 @@ ProviderRef: struct {
     // Read a source selector: `#auto` and `#latest` track the latest release
     // (automatic vs manual movement), another channel selector moves manually,
     // and an exact selector stays part of the pinned target.
-    track: fn(target: String, selector: String?) -> (target: String, channel: ChannelRef?, policy: ChannelPolicy) Never! {
-        value: selector ?? return (channel: None, policy: ChannelPolicy.Pinned, target: target)
+    track: fn(target: String, selector: String?) -> {target: String, channel: ChannelRef?, policy: ChannelPolicy} Never! {
+        value: selector ?? return {channel: None, policy: ChannelPolicy.Pinned, target: target}
         if value == {
-            REF_CHANNEL_AUTO -> (channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Automatic, target: target)
-            REF_CHANNEL_LATEST -> (channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Manual, target: target)
+            REF_CHANNEL_AUTO -> {channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Automatic, target: target}
+            REF_CHANNEL_LATEST -> {channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Manual, target: target}
             else -> if ChannelRef.parse_selector(value) == {
-                .Val(channel) -> (channel: Val(channel), policy: ChannelPolicy.Manual, target: target)
-                .None -> (channel: None, policy: ChannelPolicy.Pinned, target: "{target}{REF_CHANNEL_MARKER}{value}")
+                .Val(channel) -> {channel: Val(channel), policy: ChannelPolicy.Manual, target: target}
+                .None -> {channel: None, policy: ChannelPolicy.Pinned, target: "{target}{REF_CHANNEL_MARKER}{value}"}
             }
         }
     }
@@ -868,10 +868,10 @@ pkg_policy_for_ref: fn(raw: String) -> ChannelPolicy Never! {
 
 // Split an internal provider-first target at its last `#` when that selector
 // is a channel. Exact selectors such as `#v1.2.3` are left untouched.
-pkg_split_channel_ref: fn(text: String) -> (base: String, channel: ChannelRef?) Never! {
-    halves: text.cut_last("#") ?? return (base: text, channel: None)
+pkg_split_channel_ref: fn(text: String) -> {base: String, channel: ChannelRef?} Never! {
+    halves: text.cut_last("#") ?? return {base: text, channel: None}
     if ChannelRef.parse_selector(halves.after) == {
-        .Val(channel) -> (base: halves.before, channel: Val(channel))
-        .None -> (base: text, channel: None)
+        .Val(channel) -> {base: halves.before, channel: Val(channel)}
+        .None -> {base: text, channel: None}
     }
 }

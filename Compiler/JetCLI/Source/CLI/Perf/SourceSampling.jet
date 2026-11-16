@@ -161,7 +161,7 @@ JetCLIPerfSource: struct {
 }
 
 jet_cli_perf_source: fn(path: String, text: String) -> JetCLIPerfSource Never! {
-    identity := SourceIdentity{path: path, sha256: sha256_hex(text), symbols: [(name: String, kind: String)]{}}
+    identity := SourceIdentity{path: path, sha256: sha256_hex(text), symbols: [{name: String, kind: String}]{}}
     block: jet_driver_inline_package(text)
     if block.error != None {
         return JetCLIPerfSource{identity: identity, run_span: None, text: text}
@@ -171,14 +171,14 @@ jet_cli_perf_source: fn(path: String, text: String) -> JetCLIPerfSource Never! {
     run_span := Span?{None}
     loop item in program.items {
         if item == .Func(function) {
-            identity.symbols.push((name: function.name, kind: "fn"))
+            identity.symbols.push({name: function.name, kind: "fn"})
             if function.name == "run" -> run_span = Val(function.span)
         }
     }
     JetCLIPerfSource{identity: identity, run_span: run_span, text: text}
 }
 
-jet_cli_perf_source_position: fn(text: String, offset: Int) -> (line: U64, column: U64) JetCLIReadError! {
+jet_cli_perf_source_position: fn(text: String, offset: Int) -> {line: U64, column: U64} JetCLIReadError! {
     bytes: text.bytes()
     if offset < 0 || offset > bytes.len() {
         return Err(jet_cli_read_error("parser source span lies outside its source bytes"))
@@ -195,7 +195,7 @@ jet_cli_perf_source_position: fn(text: String, offset: Int) -> (line: U64, colum
             column = U64{1}
         } else if byte < (U8{128}) || byte >= (U8{192}) { column += U64{1} }
     }
-    Ok((column: column, line: line))
+    Ok({column: column, line: line})
 }
 
 jet_cli_perf_source_profile: fn(source: JetCLIPerfSource, wall_samples: U64, cpu_samples: U64, truncated: Bool) -> TraceProfile JetCLIReadError! {

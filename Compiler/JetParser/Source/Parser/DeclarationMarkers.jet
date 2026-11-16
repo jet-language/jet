@@ -37,7 +37,7 @@ use jet_foundation.[
 // A struct or enum's derives and serde markers. A family marker (`#Codable`)
 // derives each of its traits, `#Codable(only: …)` the one it names; a
 // refused auto-derive (`!Debug`) derives nothing.
-parser_split_type_markers: fn(markers: [Marker]) -> (derives: [NamedSpan], serde_markers: [Marker]) Never! {
+parser_split_type_markers: fn(markers: [Marker]) -> {derives: [NamedSpan], serde_markers: [Marker]} Never! {
     serde := [Marker]{}
     derives := [NamedSpan]{}
     loop marker in markers {
@@ -57,12 +57,12 @@ parser_split_type_markers: fn(markers: [Marker]) -> (derives: [NamedSpan], serde
             else -> derives.push(NamedSpan{name: marker.name, span: marker.name_span})
         }
     }
-    (derives: derives.move(), serde_markers: serde.move())
+    {derives: derives.move(), serde_markers: serde.move()}
 }
 
 parser_apply_struct_type_markers: fn(state: &JetParserState, value: &StructDef, markers: [Marker]) Never! {
     value.type_markers = markers.copy()
-    (derives, serde_markers) := parser_split_type_markers(markers)
+    {derives, serde_markers} := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives
     value.auto_derive_default = true
@@ -71,7 +71,7 @@ parser_apply_struct_type_markers: fn(state: &JetParserState, value: &StructDef, 
 
 parser_apply_enum_type_markers: fn(state: &JetParserState, value: &EnumDef, markers: [Marker]) Never! {
     value.type_markers = markers.copy()
-    (derives, serde_markers) := parser_split_type_markers(markers)
+    {derives, serde_markers} := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives
     value.auto_derive_default = true

@@ -312,7 +312,7 @@ GainRow: struct {
     cell: String
     args: String
     wrong: [String]
-    variants: [(label: String, gains: Measured)]
+    variants: [{label: String, gains: Measured}]
 }
 
 // A malformed header ends the run with its own message.
@@ -747,23 +747,23 @@ gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launc
         }
     }
     wrong := [String]{}
-    measured := [(label: String, gains: Measured)]{}
+    measured := [{label: String, gains: Measured}]{}
     loop (k, variant) in variants {
         if output_text(outs[k], s.expect) != "same" || runs[k].any(fn(run) { run.code != 0 }) {
             wrong.push(variant.label)
         }
         least: runs[k].fold(runs[k][0].ns, fn(best, run) { min(best, run.ns) })
         most: runs[k].fold(0, fn(peak, run) { max(peak, run.rss) })
-        measured.push((label: variant.label, gains: Measured{ns: least, rss: most, bytes: stripped(variant.exe), runs: runs[k]}))
+        measured.push({label: variant.label, gains: Measured{ns: least, rss: most, bytes: stripped(variant.exe), runs: runs[k]}})
     }
     Ok(GainRow{mode: mode, cell: cell.name, args: args_text(s), wrong: wrong, variants: measured})
 }
 
 // A gains row: its cell's fields, then each variant's gains under its label.
 gain_json: fn(row: GainRow) -> Dyn Never! {
-    fields := [(key: String, value: Dyn)]{(key: "mode", value: row.mode.encode()), (key: "cell", value: row.cell.encode()), (key: "args", value: row.args.encode()), (key: "wrong", value: row.wrong.encode())}
+    fields := [{key: String, value: Dyn}]{{key: "mode", value: row.mode.encode()}, {key: "cell", value: row.cell.encode()}, {key: "args", value: row.args.encode()}, {key: "wrong", value: row.wrong.encode()}}
     loop variant in row.variants {
-        fields.push((key: variant.label.copy(), value: variant.gains.encode()))  // copy: the report owns its keys
+        fields.push({key: variant.label.copy(), value: variant.gains.encode()})  // copy: the report owns its keys
     }
     Dyn.Object(fields)
 }
@@ -854,9 +854,9 @@ gains: fn(o: Options, all: [Bench], candidate: String) -[Exec, FS, IO, Net, Time
             results.push(row)
         }
     }
-    named := [(key: String, value: Dyn)]{}
+    named := [{key: String, value: Dyn}]{}
     loop compiler in compilers {
-        named.push((key: compiler.label.copy(), value: compiler.path.encode()))  // copy: the report owns its keys
+        named.push({key: compiler.label.copy(), value: compiler.path.encode()})  // copy: the report owns its keys
     }
     report: Gains{
         best_of: o.best,

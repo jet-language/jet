@@ -142,13 +142,13 @@ nix_test_signed_client: fn(fixture: NixTestSignedFixture, endpoint: String, resp
     NixIndexClient.with_transport(fixture.root, endpoint, "test-key", fixture.public_key, nix_test_map_transport(responses), clock, offline) ?? panic("test client")
 }
 
-nix_test_install_local_index: fn(root: String, channel: String, revision: String, system: String) -[FS]> (path: String, compressed: [U8]) {
+nix_test_install_local_index: fn(root: String, channel: String, revision: String, system: String) -[FS]> {path: String, compressed: [U8]} {
     built: nix_index_canonical_test_index(channel, revision, system, 1, [NixIndexRecord]{nix_test_ripgrep_record()}, [NixIndexCoverageMiss]{}) ?? panic("test index")
     directory: files.join(files.join(files.join(root, NIX_INDEX_LOCAL_INDEX_ROOT), revision), "x86_64-linux")
     files.create_dir_all(directory) ?? panic("index directory")
     path: files.join(directory, "{pkg_sha256_hex(built.compressed)}.json.zst")
     files.write_bytes(path, built.compressed) ?? panic("index target")
-    (path: path, compressed: built.compressed)
+    {path: path, compressed: built.compressed}
 }
 
 nix_test_is_invalid: fn(error: NixIndexError) -> Bool {
@@ -226,7 +226,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
 }
 
 #Test("nix local channel rejects index identity mismatches") {
-    identities: [(channel: String, system: String)]{(channel: "nixpkgs-unstable", system: "x86_64-linux"), (channel: "nixos-unstable", system: "aarch64-linux")}
+    identities: [{channel: String, system: String}]{{channel: "nixpkgs-unstable", system: "x86_64-linux"}, {channel: "nixos-unstable", system: "aarch64-linux"}}
     loop identity in identities {
         root: nix_test_index_scratch("local-index-identity")
         _: nix_test_install_local_index(root, identity.channel, NIX_TEST_INDEX_REVISION, identity.system)

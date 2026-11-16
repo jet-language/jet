@@ -2,7 +2,7 @@
 // Names remain foreign here; rendering canonicalizes them.
 JetCLIImportFunction: struct {
     name: String
-    params: [(name: String, ty: String)]
+    params: [{name: String, ty: String}]
     result: String
     body: [JetCLIImportBodyLine]
 }
@@ -217,10 +217,10 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
 }
 
 // Rust `parse_foreign_params`.
-jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [(name: String, ty: String)] JetCLIImportTextError! {
+jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [{name: String, ty: String}] JetCLIImportTextError! {
     if raw.trim().is_empty() -> return Ok([])
     if language == "go" -> return Ok(jet_cli_import_parse_go_params(raw))
-    output := [(name: String, ty: String)]{}
+    output := [{name: String, ty: String}]{}
     loop raw_part in jet_cli_import_split_commas(raw) {
         part: raw_part.trim().copy()
         if part.contains("...") || part.contains("?") || part.contains("=") {
@@ -233,13 +233,13 @@ jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [(name
                 return Err(jet_cli_import_text_error("parameter `{name}` is not a safe Jet identifier"))
             }
             ty: jet_cli_import_byte_slice(part.bytes(), colon + 1, part.bytes().len()).trim().copy()
-            output.push((name: name, ty: jet_cli_import_map_foreign_type(language, ty)))
+            output.push({name: name, ty: jet_cli_import_map_foreign_type(language, ty)})
         } else {
             if language == "js" {
                 if !jet_cli_import_identifier(part) {
                     return Err(jet_cli_import_text_error("parameter `{part}` is not a safe Jet identifier"))
                 }
-                output.push((name: part, ty: "__js__"))
+                output.push({name: part, ty: "__js__"})
             } else {
                 tokens: jet_cli_import_words(part)
                 if tokens.len() < 2 {
@@ -255,7 +255,7 @@ jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [(name
                 if unsafe_parameter {
                     return Err(jet_cli_import_text_error("parameter `{name}` has no safe scalar mapping"))
                 }
-                output.push((name: name, ty: jet_cli_import_map_foreign_type(language, tokens[tokens.len() - 2])))
+                output.push({name: name, ty: jet_cli_import_map_foreign_type(language, tokens[tokens.len() - 2])})
             }
         }
     }
@@ -263,9 +263,9 @@ jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [(name
 }
 
 // Rust `parse_go_params`: grouped names drain once, duplicate lookup is hash-backed.
-jet_cli_import_parse_go_params: fn(raw: String) -> [(name: String, ty: String)] JetCLIImportTextError! {
+jet_cli_import_parse_go_params: fn(raw: String) -> [{name: String, ty: String}] JetCLIImportTextError! {
     pending := [String]{}
-    params := [(name: String, ty: String)]{}
+    params := [{name: String, ty: String}]{}
     // #4366: Set.add Bool result missing in Rust emit. Membership only, never iterated.
     names := [String:Bool]{}
     loop part in jet_cli_import_split_commas(raw) {
@@ -283,7 +283,7 @@ jet_cli_import_parse_go_params: fn(raw: String) -> [(name: String, ty: String)] 
                     return Err(jet_cli_import_text_error("duplicate Go parameter `{name}`"))
                 }
                 names.add(name.copy(), true).drop("duplicate Go names were refused")
-                params.push((name: name.copy(), ty: mapped.copy()))
+                params.push({name: name.copy(), ty: mapped.copy()})
             }
             pending = []
         }

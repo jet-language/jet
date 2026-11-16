@@ -52,7 +52,7 @@ canvas_html_test_scripts: fn(html: String) -> [CanvasHTMLTestScript] {
 CANVAS_HTML_TEST_ENGINE: "const vm = require('node:vm'); const writes = []; const window = new Proxy(Object.create(null), {{ set(target, key, value) {{ writes.push([key, value]); target[key] = value; return true; }} }}); new vm.Script(require('node:fs').readFileSync(0, 'utf8'), {{ filename: process.argv[1] }}).runInContext(vm.createContext({{ window }}), {{ timeout: 1000 }}); process.stdout.write(JSON.stringify(writes));"
 
 // The global assignments the inline script made, in order.
-canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script: String) -[Exec, IO, Time.Wait]> [(name: String, value: String)] {
+canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script: String) -[Exec, IO, Time.Wait]> [{name: String, value: String}] {
     child: canvas_html_test_process.cmd([String]{node, "-e", CANVAS_HTML_TEST_ENGINE, "canvas-{scenario}-{index}.js"})
         .stdin(.Stream).stdout(.Capture).stderr(.Capture)
         .spawn() ?? panic("Canvas bootstrap {scenario}: node could not start")
@@ -61,7 +61,7 @@ canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script
     receipt: child.wait() ?? panic("Canvas bootstrap JS evaluation failed to finish")
     if !receipt.success -> panic("Canvas bootstrap {scenario}: {receipt.errors}")
     pairs: canvas_html_test_json.parse(receipt.output) ?? panic("Canvas bootstrap {scenario}: the engine printed no JSON: {receipt.output}")
-    writes := [(name: String, value: String)]{}
+    writes := [{name: String, value: String}]{}
     if pairs == {
         .Array(items) -> {
             loop item in items {
@@ -72,7 +72,7 @@ canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script
                         }
                         name: pair[0].text() ?? panic("Canvas bootstrap {scenario}: a global name is not text")
                         value: pair[1].text() ?? panic("Canvas bootstrap {scenario}: global {name} was set to a non-string")
-                        writes.push((name: name, value: value))
+                        writes.push({name: name, value: value})
                     }
                     .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
                         panic("Canvas bootstrap {scenario}: a write is not a [name, value] pair")
@@ -93,13 +93,13 @@ canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script
 // order, before the app entry loads; the app entry is the exact versioned
 // route `src`. Without Node on PATH the claim reports skip; a harness failure
 // is a test failure, never a success fallback.
-canvas_html_test_bootstrap: fn(scenario: String, html: String, base: String, src: String, routes: [(name: String, value: String)]) -[Exec, IO, Time.Wait, FS, Env]> {
+canvas_html_test_bootstrap: fn(scenario: String, html: String, base: String, src: String, routes: [{name: String, value: String}]) -[Exec, IO, Time.Wait, FS, Env]> {
     node: kit_require_tool("node") ?? return
     scripts: canvas_html_test_scripts(html)
     assert(scripts.len() == 2, "Canvas bootstrap {scenario}: one bootstrap and one app entry must be emitted, not {scripts.len()}")
-    expected := [(name: String, value: String)]{(name: "__JET_CANVAS_BASE__", value: base)}
-    loop route in routes -> expected.push((name: route.name, value: route.value))
-    installed := [(name: String, value: String)]{}
+    expected := [{name: String, value: String}]{{name: "__JET_CANVAS_BASE__", value: base}}
+    loop route in routes -> expected.push({name: route.name, value: route.value})
+    installed := [{name: String, value: String}]{}
     loaded := [String]{}
     loop index in 0..<scripts.len() {
         script: scripts[index]
@@ -118,19 +118,19 @@ canvas_html_test_bootstrap: fn(scenario: String, html: String, base: String, src
 
 #Test("canvas_html_default_bootstrap_evaluates_before_versioned_app") {
     assert_eq(canvas_html(), canvas_html_for("/canvas"))
-    canvas_html_test_bootstrap("default", canvas_html(), "/canvas", "/canvas/app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
+    canvas_html_test_bootstrap("default", canvas_html(), "/canvas", "/canvas/app.js?canvas_ui=blueprint23", [{name: String, value: String}]{})
 }
 
 #Test("canvas_html_dynamic_base_retains_trailing_slash") {
-    canvas_html_test_bootstrap("nested", canvas_html_for("/project/canvas/"), "/project/canvas/", "/project/canvas//app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
+    canvas_html_test_bootstrap("nested", canvas_html_for("/project/canvas/"), "/project/canvas/", "/project/canvas//app.js?canvas_ui=blueprint23", [{name: String, value: String}]{})
 }
 
 #Test("canvas_html_empty_path_mode_does_not_enable_query_routes") {
-    canvas_html_test_bootstrap("empty", canvas_html_for(""), "", "/app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
+    canvas_html_test_bootstrap("empty", canvas_html_for(""), "", "/app.js?canvas_ui=blueprint23", [{name: String, value: String}]{})
 }
 
 #Test("canvas_html_base_is_opaque_not_url_normalized") {
-    canvas_html_test_bootstrap("opaque", canvas_html_for("/雪?q=1&path=../#leaf"), "/雪?q=1&path=../#leaf", "/雪?q=1&path=../#leaf/app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
+    canvas_html_test_bootstrap("opaque", canvas_html_for("/雪?q=1&path=../#leaf"), "/雪?q=1&path=../#leaf", "/雪?q=1&path=../#leaf/app.js?canvas_ui=blueprint23", [{name: String, value: String}]{})
 }
 
 #Test("canvas_html_hostile_base_uses_json_escaping_in_both_positions") {
@@ -139,11 +139,11 @@ canvas_html_test_bootstrap: fn(scenario: String, html: String, base: String, src
     // The src payload keeps the JSON escapes as raw bytes.
     src: "/a\\\"\\\\\\n\\r\\t<>&'雪\\u007f\\u0085\\u0000/app.js?canvas_ui=blueprint23"
     // #4303: pass the interpolation directly, not a local String-view binding.
-    canvas_html_test_bootstrap("hostile", canvas_html_for("/a\"\\\n{carriage}\t<>&'雪{controls}"), "/a\"\\\n{carriage}\t<>&'雪{controls}", src, [(name: String, value: String)]{})
+    canvas_html_test_bootstrap("hostile", canvas_html_for("/a\"\\\n{carriage}\t<>&'雪{controls}"), "/a\"\\\n{carriage}\t<>&'雪{controls}", src, [{name: String, value: String}]{})
 }
 
 #Test("canvas_html_marker_in_base_is_not_recursively_replaced") {
-    canvas_html_test_bootstrap("marker", canvas_html_for("/__JET_CANVAS_BOOTSTRAP__"), "/__JET_CANVAS_BOOTSTRAP__", "/__JET_CANVAS_BOOTSTRAP__/app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
+    canvas_html_test_bootstrap("marker", canvas_html_for("/__JET_CANVAS_BOOTSTRAP__"), "/__JET_CANVAS_BOOTSTRAP__", "/__JET_CANVAS_BOOTSTRAP__/app.js?canvas_ui=blueprint23", [{name: String, value: String}]{})
 }
 
 #Test("canvas_html_query_bootstrap_evaluates_all_route_overrides") {
@@ -152,13 +152,13 @@ canvas_html_test_bootstrap: fn(scenario: String, html: String, base: String, src
         canvas_html_query(),
         "",
         "/?jet_panel_app=1&canvas_ui=blueprint23",
-        [(name: String, value: String)]{
-            (name: "__JET_CANVAS_GRAPH__", value: "/?jet_panel_graph=1"),
-            (name: "__JET_CANVAS_TX__", value: "/canvas/transaction"),
-            (name: "__JET_CANVAS_QUERY__", value: "/canvas/query"),
-            (name: "__JET_CANVAS_SCM__", value: "/canvas/source-control"),
-            (name: "__JET_CANVAS_PROOF__", value: "/canvas/proof"),
-            (name: "__JET_CANVAS_COMMAND__", value: "/canvas/command"),
+        [{name: String, value: String}]{
+            {name: "__JET_CANVAS_GRAPH__", value: "/?jet_panel_graph=1"},
+            {name: "__JET_CANVAS_TX__", value: "/canvas/transaction"},
+            {name: "__JET_CANVAS_QUERY__", value: "/canvas/query"},
+            {name: "__JET_CANVAS_SCM__", value: "/canvas/source-control"},
+            {name: "__JET_CANVAS_PROOF__", value: "/canvas/proof"},
+            {name: "__JET_CANVAS_COMMAND__", value: "/canvas/command"},
         },
     )
 }

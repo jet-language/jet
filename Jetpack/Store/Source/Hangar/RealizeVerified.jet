@@ -72,8 +72,8 @@ VerifiedRealization: struct {
 
     original_reference: fn(self) -> String Never! { self.lease.original_reference() }
 
-    into_parts: fn(&&self) -> (entry: StoreEntry, source_state: SourceState, lease: CacheLease) Never! {
-        (entry: self.entry, source_state: self.source_state_value, lease: self.lease.move())
+    into_parts: fn(&&self) -> {entry: StoreEntry, source_state: SourceState, lease: CacheLease} Never! {
+        {entry: self.entry, source_state: self.source_state_value, lease: self.lease.move()}
     }
 }
 
@@ -169,7 +169,7 @@ store_record_verified: fn(verification: &StoreVerification, roots: HangarRoots, 
 
 store_record_verified_mode: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity, canonicalize_local: Bool) -> StoreEntry StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
-    paths: if canonicalize_local -> store_canonicalize_local_output_unlocked(verification, roots, out, bin, rlib, envelope.output_hash) else -> (out: out, bin: bin, rlib: rlib)
+    paths: if canonicalize_local -> store_canonicalize_local_output_unlocked(verification, roots, out, bin, rlib, envelope.output_hash) else -> {out: out, bin: bin, rlib: rlib}
     id: store_entry_id(name, version, reference, paths.out)
     dir: files.join(roots.hangar_dir(), id)
     now: store_now_secs()
@@ -493,13 +493,13 @@ store_register_prepared: fn(verification: &StoreVerification, roots: HangarRoots
 }
 
 // The cache reference, expectation, and Nix replay facts of one request.
-store_realize_request_facts: fn(verification: &StoreVerification, request: RealizeRequest, ctx: ProviderCtx) -> (reference: String, expectation: CacheExpectation?, locked_nix: Bool, indexed_nix_repair: Bool) RealizeError! {
+store_realize_request_facts: fn(verification: &StoreVerification, request: RealizeRequest, ctx: ProviderCtx) -> {reference: String, expectation: CacheExpectation?, locked_nix: Bool, indexed_nix_repair: Bool} RealizeError! {
     if request == {
         .Package(spec, table) -> {
             provider_validate_cache_authority(spec, table, ctx) ?? return Err(RealizeError.Provider(err))
-            Ok((reference: spec.raw, expectation: provider_cache_expectation(verification, spec, table, ctx), locked_nix: store_project_has_locked_nix(ctx.project_dir, spec.raw), indexed_nix_repair: provider_can_repair_indexed_nix(spec, table, ctx)))
+            Ok({reference: spec.raw, expectation: provider_cache_expectation(verification, spec, table, ctx), locked_nix: store_project_has_locked_nix(ctx.project_dir, spec.raw), indexed_nix_repair: provider_can_repair_indexed_nix(spec, table, ctx)})
         }
-        .Adapter(plan, _, adapter_expectation) -> Ok((reference: "adapt:{plan.name}:{plan.source}", expectation: Val(adapter_expectation), locked_nix: false, indexed_nix_repair: false))
+        .Adapter(plan, _, adapter_expectation) -> Ok({reference: "adapt:{plan.name}:{plan.source}", expectation: Val(adapter_expectation), locked_nix: false, indexed_nix_repair: false})
     }
 }
 
@@ -823,7 +823,7 @@ store_publish_realized_to_bound_caches: fn(verification: &StoreVerification, roo
 // recipe. Keeping the leases alive for the duration of the adapter build
 // prevents a dependency snapshot from disappearing while the child process
 // is using it.
-store_realize_adapter_tools: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, plan: AdapterPlan, table: SourceTable) -> (tools: [String:String], leases: [CacheLease]) RealizeError! {
+store_realize_adapter_tools: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, plan: AdapterPlan, table: SourceTable) -> {tools: [String:String], leases: [CacheLease]} RealizeError! {
     tools := [String:String]{}
     dependency_leases := [CacheLease]{}
     loop dependency in plan.deps {
@@ -869,20 +869,20 @@ store_realize_adapter_tools: fn(verification: &StoreVerification, roots: HangarR
         lease.mark_process_handoff()
         dependency_leases.push(lease)
     }
-    Ok((tools: tools, leases: dependency_leases))
+    Ok({tools: tools, leases: dependency_leases})
 }
 
 store_integrity_failure: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation, proof: CacheVerification) -> IntegrityFailure Never! {
     identity: expectation.identity
     facts: if {
-        !proof.output_exists -> (reason: "output existence", expected: entry.envelope.output_hash, actual: "missing output")
-        !proof.output_digest -> (reason: "content digest verification", expected: entry.envelope.output_hash, actual: store_try_entry_output_hash(verification, roots, entry) ?? "unreadable output: {err.message()}")
-        !proof.source -> (reason: "source identity verification", expected: identity.source_fingerprint, actual: entry.cache_identity.source_fingerprint)
-        !proof.recipe -> (reason: "recipe identity verification", expected: identity.recipe_fingerprint, actual: entry.cache_identity.recipe_fingerprint)
-        !proof.platform -> (reason: "platform verification", expected: identity.platform, actual: entry.cache_identity.platform)
-        !proof.policy -> (reason: "policy identity verification", expected: identity.policy_fingerprint, actual: entry.cache_identity.policy_fingerprint)
-        !proof.signature_verified && !proof.unsigned_local_allowed -> (reason: "signature verification", expected: "a trusted cache signature or an exact Hangar-owned local output", actual: if entry.envelope.signature == "" -> "unsigned non-local artifact" else -> "untrusted signature")
-        else -> (reason: "closure containment verification", expected: "canonical closure members strictly below the output root", actual: "closure member escaped or disappeared")
+        !proof.output_exists -> {reason: "output existence", expected: entry.envelope.output_hash, actual: "missing output"}
+        !proof.output_digest -> {reason: "content digest verification", expected: entry.envelope.output_hash, actual: store_try_entry_output_hash(verification, roots, entry) ?? "unreadable output: {err.message()}"}
+        !proof.source -> {reason: "source identity verification", expected: identity.source_fingerprint, actual: entry.cache_identity.source_fingerprint}
+        !proof.recipe -> {reason: "recipe identity verification", expected: identity.recipe_fingerprint, actual: entry.cache_identity.recipe_fingerprint}
+        !proof.platform -> {reason: "platform verification", expected: identity.platform, actual: entry.cache_identity.platform}
+        !proof.policy -> {reason: "policy identity verification", expected: identity.policy_fingerprint, actual: entry.cache_identity.policy_fingerprint}
+        !proof.signature_verified && !proof.unsigned_local_allowed -> {reason: "signature verification", expected: "a trusted cache signature or an exact Hangar-owned local output", actual: if entry.envelope.signature == "" -> "unsigned non-local artifact" else -> "untrusted signature"}
+        else -> {reason: "closure containment verification", expected: "canonical closure members strictly below the output root", actual: "closure member escaped or disappeared"}
     }
     IntegrityFailure{
         package: entry.name,

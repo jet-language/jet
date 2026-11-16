@@ -139,10 +139,10 @@ cli_package_dependency_flag: fn(raw: [String], flag: String) -> String? Never! {
     None
 }
 
-cli_package_dependency_add_spec: fn(raw: [String], name: String?, color: Bool, json: Bool) -[FS, Env]> (name: String, spec: DepSpec) PackageDependencyError! {
+cli_package_dependency_add_spec: fn(raw: [String], name: String?, color: Bool, json: Bool) -[FS, Env]> {name: String, spec: DepSpec} PackageDependencyError! {
     dependency: name ?? return Err(cli_package_dependency_cli_error("E2104", "`jet add` needs a dependency name", Val("try `jet add mylib --path ../mylib`"), color, json))
     if cli_package_dependency_flag(raw, "--path") == .Val(path) {
-        return Ok((name: dependency, spec: DepSpec.Path{path: path}))
+        return Ok({name: dependency, spec: DepSpec.Path{path: path}})
     }
     if cli_package_dependency_flag(raw, "--git") == .Val(url) {
         selector := GitSelector?{None}
@@ -159,16 +159,16 @@ cli_package_dependency_add_spec: fn(raw: [String], name: String?, color: Bool, j
             else -> {}
         }
         selected: selector ?? return Err(cli_package_dependency_cli_error("E2104", "git dependency `{dependency}` needs one of: --tag, --branch, --rev", None, color, json))
-        return Ok((name: dependency, spec: DepSpec.Git{url: url, selector: selected}))
+        return Ok({name: dependency, spec: DepSpec.Git{url: url, selector: selected}})
     }
     Err(cli_package_dependency_cli_error("E2104", "`jet add {dependency}` needs --path or --git", Val("try `jet add {dependency} --path ../{dependency}` or `jet add {dependency} --git <url> --tag <tag>`"), color, json))
 }
 
-cli_package_dependency_read: fn(path: String, color: Bool, json: Bool) -[FS, Env]> (raw: String, authority: FoundationFileAuthority) PackageDependencyError! {
+cli_package_dependency_read: fn(path: String, color: Bool, json: Bool) -[FS, Env]> {raw: String, authority: FoundationFileAuthority} PackageDependencyError! {
     authority := foundation_open_file_authority(files.dirname(path), files.basename(path)) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: {err}", None, color, json))
     bytes: authority.read_bounded(MAX_TREE_FILE_BYTES) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: {err}", None, color, json))
     raw: String.from_bytes(bytes) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: stream did not contain valid UTF-8", None, color, json))
-    Ok((raw: raw, authority: authority))
+    Ok({raw: raw, authority: authority})
 }
 
 // The checked Package carrier of `entry`: its inline `package: { }` block, or

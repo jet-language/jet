@@ -16,16 +16,16 @@ Pair: struct {
     right: Int
 }
 
-absent: fn() -> (left: Int, right: Int)? { None }
+absent: fn() -> {left: Int, right: Int}? { None }
 
-tuple_first: fn(pair: (left: Int, right: Int)) -> Int {
+tuple_first: fn(pair: {left: Int, right: Int}) -> Int {
     { left: first, right: _second }: pair
     first
 }
 
-indexed: fn(rows: [(left: Int, right: Int)]) -> Int { rows[0].left + rows[0].right }
+indexed: fn(rows: [{left: Int, right: Int}]) -> Int { rows[0].left + rows[0].right }
 
-edit_indexed: fn(rows: &[(left: Int, right: Int)]) { rows[0].left += 1 }
+edit_indexed: fn(rows: &[{left: Int, right: Int}]) { rows[0].left += 1 }
 
 read_shared: fn(state: Shared<Pair>) -> Int {
     guard: state.guard_read()
@@ -39,11 +39,11 @@ edit_shared: fn(state: Shared<Pair>) -> Int {
 }
 
 run: fn() {
-    rows := [(left: 2, right: 3)]
+    rows := [{left: 2, right: 3}]
     print(indexed(rows))
     edit_indexed(rows)
     print(indexed(rows))
-    some: Val((left: 7, right: 8))
+    some: Val({left: 7, right: 8})
     none: absent()
     print(some?.left ?? -1)
     print(none?.left ?? -1)
@@ -51,5 +51,5 @@ run: fn() {
     state: Shared{Pair{left: 17, right: 18}}
     print(read_shared(state))
     print(edit_shared(state))
-    print(tuple_first((left: 23, right: 24)))
+    print(tuple_first({left: 23, right: 24}))
 }

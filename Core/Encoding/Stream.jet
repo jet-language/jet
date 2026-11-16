@@ -11,12 +11,12 @@ use {
 }
 
 // #4737: preserve insertion order without materializing a map or cloning a tree.
-object_entries: fn(value: Dyn) -> View<(key: String, value: Dyn)> Never! from value {
+object_entries: fn(value: Dyn) -> View<{key: String, value: Dyn}> Never! from value {
     if value == .Object(entries) -> return entries[0..<entries.len()]
     panic("Object entry view requires an Object")
 }
 
-object_from_entries: fn(entries: &&[(key: String, value: Dyn)]) -> Dyn Never! {
+object_from_entries: fn(entries: &&[{key: String, value: Dyn}]) -> Dyn Never! {
     Dyn.Object(entries)
 }
 
@@ -893,7 +893,7 @@ JSONPull: struct<R: Reader> {
             }
             .ObjectStart -> {
                 self.fold_charge(1, heap)
-                entries := [(key: String, value: Dyn)]{}
+                entries := [{key: String, value: Dyn}]{}
                 loop {
                     child: self.next()
                     if child == None {
@@ -913,8 +913,8 @@ JSONPull: struct<R: Reader> {
                             return Err(self.error(.Truncated, "object key has no value"))
                         }
                         value: self.fold(first, heap)
-                        fold_reserve<(key: String, value: Dyn), R>(self, entries, heap)
-                        entries.push((key: owned_key, value: value))
+                        fold_reserve<{key: String, value: Dyn}, R>(self, entries, heap)
+                        entries.push({key: owned_key, value: value})
                     } else { return Err(self.error(.State, "expected an object key")) }
                 }
             }
@@ -1262,7 +1262,7 @@ WriteFrame: enum {
 CanonicalFrame: struct {
     is_object: Bool
     first: Bool
-    entries: [(key: String, value: [U8])]
+    entries: [{key: String, value: [U8]}]
     key: String?
     value: [U8]
     retained: U64
@@ -1596,12 +1596,12 @@ JSONPush: struct<W: Writer> {
         if !self.canonical_frames[at].is_object || self.canonical_frames[at].key == None {
             return
         }
-        capacity: mem.__list_capacity<(key: String, value: [U8])>(self.canonical_frames[at].entries)
+        capacity: mem.__list_capacity<{key: String, value: [U8]}>(self.canonical_frames[at].entries)
         length: self.canonical_frames[at].entries.len()
         growth: if length == capacity -> (if capacity < 1 -> 2 else -> capacity * 2) - capacity else -> 0
-        bytes: growth * mem.__type_size<(key: String, value: [U8])>()
+        bytes: growth * mem.__type_size<{key: String, value: [U8]}>()
         self.canonical_charge(at, bytes)
-        if growth > 0 && !mem.__list_reserve_exact<(key: String, value: [U8])>(self.canonical_frames[at].entries, growth) {
+        if growth > 0 && !mem.__list_reserve_exact<{key: String, value: [U8]}>(self.canonical_frames[at].entries, growth) {
             return Err(self.error(.Limit, "canonical JSON entry allocation failed within configured bounds"))
         }
         frame := self.canonical_frames.pop() ?? panic("canonical value requires an active object frame")
@@ -1609,7 +1609,7 @@ JSONPush: struct<W: Writer> {
         value: frame.value.move()
         frame.key = None
         frame.value = [U8]{}
-        frame.entries.push((key: key, value: value))
+        frame.entries.push({key: key, value: value})
         self.canonical_frames.push(frame)
     }
 
@@ -1621,7 +1621,7 @@ JSONPush: struct<W: Writer> {
         if frame.value.len() != 0 {
             return Err(self.state_error("canonical JSON object value was not completed"))
         }
-        frame.entries.sort_by(fn(left: (key: String, value: [U8]), right: (key: String, value: [U8])) {
+        frame.entries.sort_by(fn(left: {key: String, value: [U8]}, right: {key: String, value: [U8]}) {
             comparison: compare_text_units(left.key, right.key)
             if comparison < 0 -> .Less else if comparison > 0 -> .Greater else -> .Equal
         })
@@ -1810,10 +1810,10 @@ json_writer: fn<W: Writer>(output: &&W, limits: EncodingLimits, canonical: Bool)
 }
 
 canonical_frame: fn(is_object: Bool) -> CanonicalFrame Never! {
-    CanonicalFrame{is_object: is_object, first: true, entries: [(key: String, value: [U8])]{}, key: None, value: [U8]{}, retained: U64{0}}
+    CanonicalFrame{is_object: is_object, first: true, entries: [{key: String, value: [U8]}]{}, key: None, value: [U8]{}, retained: U64{0}}
 }
 
-next_text_unit: fn(text: String, at: Int) -> (unit: Int, position: Int, pending: Int) Never! {
+next_text_unit: fn(text: String, at: Int) -> {unit: Int, position: Int, pending: Int} Never! {
     first: Int{byte_at(text, at)}
     width: scalar_width(U8{first})
     codepoint := first
@@ -1822,8 +1822,8 @@ next_text_unit: fn(text: String, at: Int) -> (unit: Int, position: Int, pending:
     } else if width == 4 {
         codepoint = ((first & 7) << 18) | ((Int{byte_at(text, at + 1)} & 63) << 12) | ((Int{byte_at(text, at + 2)} & 63) << 6) | (Int{byte_at(text, at + 3)} & 63)
     }
-    if codepoint < 65536 -> return (unit: codepoint, position: at + width, pending: -1)
-    (unit: 55296 + ((codepoint - 65536) >> 10), position: at + width, pending: 56320 + ((codepoint - 65536) & 1023))
+    if codepoint < 65536 -> return {unit: codepoint, position: at + width, pending: -1}
+    {unit: 55296 + ((codepoint - 65536) >> 10), position: at + width, pending: 56320 + ((codepoint - 65536) & 1023)}
 }
 
 compare_text_units: fn(left: String, right: String) -> Int Never! {
@@ -2274,9 +2274,9 @@ jsonl_writer: fn<W: Writer>(output: &&W, limits: EncodingLimits) -> JSONLinesPus
 
 #Test("borrowed Object entries preserve insertion order") {
     tree: object_from_entries(
-        [(key: String, value: Dyn)]{
-            (key: "z", value: Dyn.Int(1)),
-            (key: "a", value: Dyn.Text("kept")),
+        [{key: String, value: Dyn}]{
+            {key: "z", value: Dyn.Int(1)},
+            {key: "a", value: Dyn.Text("kept")},
         },
     )
     entries: object_entries(tree)
@@ -2311,7 +2311,7 @@ jsonl_writer: fn<W: Writer>(output: &&W, limits: EncodingLimits) -> JSONLinesPus
     limits := EncodingLimits.safe()
     assert_eq(jsonl_tree_size(Dyn.Int(4), 0, limits) ?? panic("size"), 8)
     limits.max_item_bytes = 4
-    value: object_from_entries([(key: "a", value: Dyn.Text("longer"))])
+    value: object_from_entries([{key: "a", value: Dyn.Text("longer")}])
     if jsonl_tree_size(value, 0, limits) == {
         .Err(error) -> {
             assert_eq(error.kind, EncodingErrorKind.Limit)

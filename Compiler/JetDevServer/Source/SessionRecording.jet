@@ -395,14 +395,14 @@ recording_canonical_object: fn(text: String, label: String) -> String RecordingE
     if recording_object_fields(value) == None -> return Err(RecordingError.InvalidEvent{message: "{label} must be an object"})
     recording_canonical_json(value)
 }
-recording_object_fields: fn(value: Dyn) -> [(key: String, value: Dyn)]? {
+recording_object_fields: fn(value: Dyn) -> [{key: String, value: Dyn}]? {
     if value == {
         .Object(fields) -> Val(fields)
         else -> None
     }
 }
 // The last occurrence of a repeated key wins, as in the canonical object.
-recording_lookup: fn(fields: [(key: String, value: Dyn)], key: String) -> Dyn? {
+recording_lookup: fn(fields: [{key: String, value: Dyn}], key: String) -> Dyn? {
     found := Dyn?{None}
     loop field in fields {
         if field.key == key -> found = Val(field.value)
@@ -415,20 +415,20 @@ recording_text: fn(value: Dyn) -> String? {
         else -> None
     }
 }
-recording_required_string: fn(fields: [(key: String, value: Dyn)], key: String) -> String RecordingError! {
+recording_required_string: fn(fields: [{key: String, value: Dyn}], key: String) -> String RecordingError! {
     value: recording_lookup(fields, key) ?? return Err(RecordingError.InvalidEvent{message: "missing string `{key}`"})
     text: recording_text(value) ?? return Err(RecordingError.InvalidEvent{message: "missing string `{key}`"})
     recording_validate_text(text, "event {key}")
     text
 }
-recording_required_int: fn(fields: [(key: String, value: Dyn)], key: String) -> Int RecordingError! {
+recording_required_int: fn(fields: [{key: String, value: Dyn}], key: String) -> Int RecordingError! {
     value: recording_lookup(fields, key) ?? return Err(RecordingError.InvalidEvent{message: "missing integer `{key}`"})
     number: foundation_json_integer(value) ?? return Err(RecordingError.InvalidEvent{message: "event `{key}` must be an exact integer"})
     if number < 0 -> return Err(RecordingError.InvalidEvent{message: "event `{key}` must be a non-negative integer"})
     number
 }
 // An envelope may name its identity; when it does, both ids must be present and match.
-recording_validate_envelope_identity: fn(fields: [(key: String, value: Dyn)], expected: SessionRecordingIdentity) RecordingError! {
+recording_validate_envelope_identity: fn(fields: [{key: String, value: Dyn}], expected: SessionRecordingIdentity) RecordingError! {
     source: recording_lookup(fields, "source_id")
     build: recording_lookup(fields, "build_id")
     if source == None && build == None -> return Ok()

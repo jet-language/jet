@@ -38,10 +38,10 @@ provider_refresh_provider_facts: fn(producer: &ProducerRecord, reference: String
         if carriers.contains(key) -> next
         shared.add_fact(key, ProviderFactValue.Text(producer.facts[key]), "jet-producer-record-v1")
     }
-    extras: [(key: String, value: String)]{
-        (key: "provider.source_digest", value: producer.source_digest),
-        (key: "provider.toolchain_facts", value: producer.toolchain_facts),
-        (key: "provider.policy_facts", value: producer.policy_facts),
+    extras: [{key: String, value: String}]{
+        {key: "provider.source_digest", value: producer.source_digest},
+        {key: "provider.toolchain_facts", value: producer.toolchain_facts},
+        {key: "provider.policy_facts", value: producer.policy_facts},
     }
     loop extra in extras {
         shared.add_fact(extra.key, ProviderFactValue.Text(extra.value), "jet-producer-record-v1")

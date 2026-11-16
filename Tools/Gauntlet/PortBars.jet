@@ -575,15 +575,15 @@ not_run: fn(problem: String) -> Run Never! {
 // Builds the launcher every run goes through, from the checkout holding this
 // tool (the judged tree need not hold one), into `work`: its path, or the
 // problem when it cannot be built.
-build_launcher: fn(work: String) -[Env, Exec, FS]> (path: String, problem: String) Never! {
-    files.create_dir_all(work) ?? return (path: "", problem: "`{work}` cannot be made: {err}")
+build_launcher: fn(work: String) -[Env, Exec, FS]> {path: String, problem: String} Never! {
+    files.create_dir_all(work) ?? return {path: "", problem: "`{work}` cannot be made: {err}"}
     source: files.join(repo_root(), LAUNCHER)
     built: files.join(work, "launch")
-    receipt: process.cmd([String]{"cc", "-O2", "-o", built.copy(), source.copy()}).run() ?? return (path: "", problem: "`cc` cannot start: {err}")
+    receipt: process.cmd([String]{"cc", "-O2", "-o", built.copy(), source.copy()}).run() ?? return {path: "", problem: "`cc` cannot start: {err}"}
     if receipt.code != 0 {
-        return (path: "", problem: "the launcher {source} does not build: {receipt.errors.trim()}")
+        return {path: "", problem: "the launcher {source} does not build: {receipt.errors.trim()}"}
     }
-    (path: built, problem: "")
+    {path: built, problem: ""}
 }
 
 // Runs `argv` with `case`'s arguments and variables at `cwd`, a fresh copy

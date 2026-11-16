@@ -177,7 +177,7 @@ EnvFile: struct {
 
     // Remove a package from the env file in `dir`. Matches on the resolved
     // ref, so it works whether the entry was stored bare or with its source.
-    remove: fn(dir: String, spec: RefSpec) -[FS]> (file: EnvFile, removed: Bool) EnvironmentError! {
+    remove: fn(dir: String, spec: RefSpec) -[FS]> {file: EnvFile, removed: Bool} EnvironmentError! {
         file := EnvFile.load(dir) ?? EnvFile.empty()
         target: "{spec.package}{REF_PROVIDER_AT}{spec.source.label()}"
         before: file.packages.len()
@@ -188,7 +188,7 @@ EnvFile: struct {
         file.packages = keep
         removed: file.packages.len() != before
         if removed -> files.write(EnvFile.path_in(dir), file.render())
-        Ok((file: file, removed: removed))
+        Ok({file: file, removed: removed})
     }
 
     // How a ref is stored as a package entry: bare when it matches the

@@ -130,11 +130,11 @@ jet_cli_budget_samples: fn(spec: BudgetSpec, facts: JetDriverBudgetFacts, artifa
 // The measurement protocol and isolation recorded in the provider identity
 // of kind `kind`; a report is comparable only with history taken under the
 // same protocol.
-jet_cli_budget_provider_version: fn(kind: String) -> (version: String, isolation: String) Never! {
+jet_cli_budget_provider_version: fn(kind: String) -> {version: String, isolation: String} Never! {
     if kind == {
-        "BuildArtifact" -> (version: "jet-artifact-footprint-v1-first-line-vmhwm-trials-20", isolation: "fresh-child-process-per-trial")
-        "ServiceProbe" -> (version: "jet-service-readiness-v1-trials-20", isolation: "service-process-group-down-up-per-trial")
-        else -> (version: "1", isolation: "process")
+        "BuildArtifact" -> {version: "jet-artifact-footprint-v1-first-line-vmhwm-trials-20", isolation: "fresh-child-process-per-trial"}
+        "ServiceProbe" -> {version: "jet-service-readiness-v1-trials-20", isolation: "service-process-group-down-up-per-trial"}
+        else -> {version: "1", isolation: "process"}
     }
 }
 

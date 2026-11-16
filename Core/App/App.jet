@@ -1175,8 +1175,8 @@ priv(package) live_reads: module {
 
     // The narrowed reads of `source` in the bindings' read sets, each once:
     // its read-set entry, its condition and the values it binds.
-    narrowed: fn(source: String) -> [(entry: String, condition: String, values: [String])] Never! {
-        out := [(entry: String, condition: String, values: [String])]{}
+    narrowed: fn(source: String) -> [{entry: String, condition: String, values: [String]}] Never! {
+        out := [{entry: String, condition: String, values: [String]}]{}
         registry: live_decode(live_cell_load()) ?? return out
         prefix: "{source}?"
         seen := [String]{}
@@ -1189,7 +1189,7 @@ priv(package) live_reads: module {
                 if fields.len() == 0 -> next
                 values := [String]{}
                 loop at in 1..<fields.len() -> values.push(fields[at].copy())
-                out.push((entry: read.copy(), condition: fields[0].copy(), values: values))
+                out.push({entry: read.copy(), condition: fields[0].copy(), values: values})
             }
         }
         out

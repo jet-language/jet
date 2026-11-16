@@ -49,10 +49,10 @@ CLASSIFICATIONS: ["control", "candidate", "invalid_fast", "legal_slow", "legal_m
 VALUE_OPTIONS: ["--manifest", "--output", "--raw", "--scratch", "--jet-bin", "--runs", "--timeout-ms"]
 
 // The file a staged entry holds each peer language's source in.
-PEER_FILES: [(language: "python", file: "main.py"), (language: "rust", file: "main.rs"), (language: "c", file: "main.c"), (language: "zig", file: "main.zig"), (language: "node", file: "main.mjs")]
+PEER_FILES: [{language: "python", file: "main.py"}, {language: "rust", file: "main.rs"}, {language: "c", file: "main.c"}, {language: "zig", file: "main.zig"}, {language: "node", file: "main.mjs"}]
 
 // The peers whose rows the harness runs without a compile phase.
-INTERPRETED_PEERS: [(language: "python", command: "python3 main.py"), (language: "node", command: "node main.mjs")]
+INTERPRETED_PEERS: [{language: "python", command: "python3 main.py"}, {language: "node", command: "node main.mjs"}]
 
 // A time as JavaScript's toISOString writes it.
 ISO_FORMAT: "yyyy-MM-ddTHH:mm:ss.SSSZ"
@@ -92,7 +92,7 @@ Family: struct {
     owner_card: String
     required_peers: [String]
     expected_path: String
-    peer_paths: [(language: String, path: String)]
+    peer_paths: [{language: String, path: String}]
     variants: [Variant]
 }
 
@@ -236,7 +236,7 @@ load_context: fn(paths: Paths, manifest_path: String) -[FS]> Context Err! {
             return Err("canonical observation missing from manifest: {field}")
         }
     }
-    hashes: (manifest: file_sha256(manifest_path), harness: file_sha256(paths.harness))
+    hashes: {manifest: file_sha256(manifest_path), harness: file_sha256(paths.harness)}
     ids := [String]{}
     families := [Family]{}
     loop record in records {
@@ -254,7 +254,7 @@ load_context: fn(paths: Paths, manifest_path: String) -[FS]> Context Err! {
 // The family `record`, checked: its owner card, premises, falsifier,
 // observations, rule record, five variants, input, expected output and
 // every required peer's fixture.
-load_family: fn(root: String, record: Dyn, id: String, hashes: (manifest: Dyn, harness: Dyn)) -[FS]> Family Err! {
+load_family: fn(root: String, record: Dyn, id: String, hashes: {manifest: Dyn, harness: Dyn}) -[FS]> Family Err! {
     owner: text_at(record, "owner_card") ?? ""
     if !regex.is_match(Regex{"^#\d+$"}, owner) -> return Err("{id}: exact owner card missing")
     if !(dyn_at(record, "premises") == .Array(_)) || items_at(record, "premises").len() == 0 {
@@ -289,9 +289,9 @@ load_family: fn(root: String, record: Dyn, id: String, hashes: (manifest: Dyn, h
         }
     }
     peers: texts_at(record, "required_peers")
-    peer_paths := [(language: String, path: String)]{}
+    peer_paths := [{language: String, path: String}]{}
     loop language in peers {
-        peer_paths.push((language: language.copy(), path: fixture_path(root, record, sources.get(language) ?? Dyn.Null, "{id}.peer_sources.{language}")))
+        peer_paths.push({language: language.copy(), path: fixture_path(root, record, sources.get(language) ?? Dyn.Null, "{id}.peer_sources.{language}")})
     }
     if !files.exists(input_path) || !files.exists(expected_path) || peer_paths.any(fn(peer) { !files.exists(peer.path) }) {
         return Err("{id}: input, expected, and all required peer fixtures are required")
@@ -604,7 +604,7 @@ harness_ready: fn(report: Dyn, name: String, peers: [String]) -> Bool {
 // output mismatch, the control by its output, any other by legality, then
 // by its runtime against the control's in the same job.
 classify_variant: fn(family: Family, variant: Variant, raw: Dyn) -> Dyn {
-    wanted: (family: family.id.copy(), variant: variant.id.copy())
+    wanted: {family: family.id.copy(), variant: variant.id.copy()}
     found: items_at(raw, "variants").find(fn(item) { text_at(item, "family") == Val((wanted.family)) && text_at(item, "variant") == Val((wanted.variant)) })
     raw_variant: found ?? Dyn.Null
     direct: dyn_at(raw_variant, "direct_run")
@@ -661,9 +661,9 @@ classify_variant: fn(family: Family, variant: Variant, raw: Dyn) -> Dyn {
         return out
     }
     verdict: if {
-        candidate_seconds < control_seconds -> (observed: "legal_measured_improvement", profitability: "measured_improvement", reason: "same-job candidate runtime is lower than the unchanged control")
-        candidate_seconds > control_seconds -> (observed: "legal_slow", profitability: "slower_than_control", reason: "same-job candidate runtime is higher than the unchanged control")
-        else -> (observed: "legal_no_improvement", profitability: "parity_no_improvement", reason: "same-job runtime is equal to the unchanged control")
+        candidate_seconds < control_seconds -> {observed: "legal_measured_improvement", profitability: "measured_improvement", reason: "same-job candidate runtime is lower than the unchanged control"}
+        candidate_seconds > control_seconds -> {observed: "legal_slow", profitability: "slower_than_control", reason: "same-job candidate runtime is higher than the unchanged control"}
+        else -> {observed: "legal_no_improvement", profitability: "parity_no_improvement", reason: "same-job runtime is equal to the unchanged control"}
     }
     out["observed_classification"] = Dyn.Text(verdict.observed)
     out["legality"] = "legal"

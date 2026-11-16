@@ -125,7 +125,7 @@ sema_comptime_body_values_freeze: fn(values: &&[SemaComptimeBodyValue], work: Sh
 
 // The staging owner's one payload guard closes before diagnostic counters or
 // any caller/evaluator/sink executes. Work is proportional to new item rows.
-sema_comptime_body_facts_append_items: fn(facts: Shared<SemaComptimeBodyFacts>, values: [SemaComptimeItemValue], from: Int, expected_length: Int, count_key_bytes: Bool) -> (length: Int, rows: Int, key_utf8_bytes: Int) {
+sema_comptime_body_facts_append_items: fn(facts: Shared<SemaComptimeBodyFacts>, values: [SemaComptimeItemValue], from: Int, expected_length: Int, count_key_bytes: Bool) -> {length: Int, rows: Int, key_utf8_bytes: Int} {
     permit := facts.guard_edit()
     if permit.value.values.len() != expected_length {
         panic("body publication attempted to append through an old prefix generation")
@@ -141,7 +141,7 @@ sema_comptime_body_facts_append_items: fn(facts: Shared<SemaComptimeBodyFacts>, 
         permit.value.indexed_rows += 1
         appended += 1
     }
-    (key_utf8_bytes: key_utf8_bytes, length: permit.value.values.len(), rows: appended)
+    {key_utf8_bytes: key_utf8_bytes, length: permit.value.values.len(), rows: appended}
 }
 
 sema_comptime_body_values_append_items: fn(publication: &SemaComptimeBodyValues, values: [SemaComptimeItemValue], from: Int) {

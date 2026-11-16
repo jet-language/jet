@@ -5,7 +5,10 @@
 //   jet run check.jet -- verify <root> <manifest> <results>
 // reads that run's `--results` document and passes only when every family
 // and every contract row has each of its witnesses passing on every tier it
-// ran on. Each problem is a line on stderr, and any problem exits 1.
+// ran on, or known failing there. A known-failing witness is owed by the
+// open work its known-failing row names, never passed: the check prints each
+// owed row with that witness and its reason. Each problem is a line on
+// stderr, and any problem exits 1.
 use {
     files: core.files
     process: core.process
@@ -32,6 +35,9 @@ Coverage: struct {
     // The families no observed source shows.
     historical_only: [String]
     problems: [String]
+    // Each known-failing verdict, with its row, and how many rows hold one.
+    owed: [String]
+    owed_rows: Int
 }
 
 // A family id, `J01` to `J40`.
@@ -148,7 +154,7 @@ add_row: fn(root: String, name: String, witnesses: [String], coverage: &Coverage
 }
 
 coverage_of: fn(root: String, manifest: String) -> Coverage {
-    coverage := Coverage{rows: [], families: 0, contract: 0, historical_only: [], problems: []}
+    coverage := Coverage{rows: [], families: 0, contract: 0, historical_only: [], problems: [], owed: [], owed_rows: 0}
     manifest_text: files.read(manifest) ?? process.fail(1, "can't read the manifest `{manifest}`: {err}")
     registry_text: files.read(files.join(root, REGISTRY)) ?? process.fail(1, "can't read `{REGISTRY}`: {err}")
     read_manifest(root, manifest_text, coverage)
@@ -197,14 +203,26 @@ read_results: fn(path: String) -> [String:[Verdict]] {
     verdicts
 }
 
-// Why the witness `id` does not pass on its tiers; none when it does.
-witness_problems: fn(id: String, verdicts: [String:[Verdict]]) -> [String] {
-    problems := [String]{}
-    list: verdicts.get(id) ?? return [String]{"`{id}` has no result: it did not run"}
+// The witness `id` on its tiers: why it does not pass, and each known-failing
+// verdict, which leaves its row owed rather than passed.
+WitnessReport: struct {
+    problems: [String]
+    owed: [String]
+}
+
+witness_report: fn(id: String, verdicts: [String:[Verdict]]) -> WitnessReport {
+    report := WitnessReport{problems: [], owed: []}
+    list: verdicts.get(id) ?? {
+        report.problems.push("`{id}` has no result: it did not run")
+        return report
+    }
     tiers := [String]{}
     loop verdict in list {
-        if verdict.status != "PASS" {
-            problems.push("`{id}` is {verdict.status} at {verdict.tier}: {verdict.detail}")
+        line: "`{id}` is {verdict.status} at {verdict.tier}: {verdict.detail}"
+        if verdict.status == {
+            "PASS" -> {}
+            "KNOWN-FAILING" -> report.owed.push(line)
+            else -> report.problems.push(line)
         }
         tiers.push(verdict.tier.copy())  // copy: the level check reads them after the loop.
     }
@@ -214,19 +232,24 @@ witness_problems: fn(id: String, verdicts: [String:[Verdict]]) -> [String] {
         if !tiers.contains(level) -> missing.push(level)
     }
     if missing.len() < LEVELS.len() {
-        loop level in missing -> problems.push("`{id}` did not run at {level}")
+        loop level in missing -> report.problems.push("`{id}` did not run at {level}")
     }
-    problems
+    report
 }
 
 verify: fn(coverage: &Coverage, results: String) {
     verdicts: read_results(results)
     loop row in coverage.rows {
+        owed := false
         loop witness in row.witnesses {
-            loop problem in witness_problems(witness, verdicts) {
-                coverage.problems.push("{row.name}: {problem}")
+            report: witness_report(witness, verdicts)
+            loop problem in report.problems { coverage.problems.push("{row.name}: {problem}") }
+            loop line in report.owed {
+                coverage.owed.push("owed: {row.name}: {line}")
+                owed = true
             }
         }
+        if owed -> coverage.owed_rows += 1
     }
 }
 
@@ -250,7 +273,8 @@ run: fn() {
         return
     }
     verify(coverage, args[3])
+    loop line in coverage.owed -> print(line)
     fail_on_problems(coverage)
-    print("{coverage.families} Jai families and {coverage.contract} metadata contract rows pass their witnesses")
+    print("{coverage.families} Jai families and {coverage.contract} metadata contract rows: {coverage.rows.len() - coverage.owed_rows} pass their witnesses and {coverage.owed_rows} are owed")
     print("families only a historical demo shows: {coverage.historical_only.join(", ")}")
 }

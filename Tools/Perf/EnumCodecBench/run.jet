@@ -176,7 +176,7 @@ Matrix: struct {
 
 run: fn(args: Args) Err! {
     root: sys.executable().remove_suffix("/{HARNESS}")
-    bounds: [(value: args.samples, low: 1, high: 99), (value: args.rounds, low: 1, high: 1000000), (value: args.memory_limit_mib, low: 1, high: 65536), (value: args.max_output_bytes, low: 1, high: 16777216)]
+    bounds: [{value: args.samples, low: 1, high: 99}, {value: args.rounds, low: 1, high: 1000000}, {value: args.memory_limit_mib, low: 1, high: 65536}, {value: args.max_output_bytes, low: 1, high: 16777216}]
     in_range: bounds.all(fn(bound) { bound.value >= bound.low && bound.value <= bound.high })
     timeout: args.timeout ?? args.timeout_seconds
     if !in_range || !math.is_finite(timeout) || timeout <= 0.0 || timeout > 3600.0 {
@@ -419,16 +419,16 @@ base_cell: fn(form: String, case: String, operation: String) -> Matrix Never! {
 
 // Why a cell is not measured, when that does not depend on a command: the
 // adjacent form, or an encode of a witness no constructor can build.
-fixed_reason: fn(form: String, case: String, operation: String) -> (status: String, reason: String)? Never! {
+fixed_reason: fn(form: String, case: String, operation: String) -> {status: String, reason: String}? Never! {
     if {
-        form == "adjacent" -> Val((status: "unavailable", reason: ADJACENT_UNAVAILABLE))
+        form == "adjacent" -> Val({status: "unavailable", reason: ADJACENT_UNAVAILABLE})
         operation != "encode" || case == "payload" -> None
-        case == "malformed" -> Val((status: "unsupported", reason: "malformed wrong-shape witness is decode-only; no valid Command constructor can encode it"))
-        else -> Val((status: "unsupported", reason: "no source constructor exists in the closed Command workload for the {case} witness; decode-only rejection cell"))
+        case == "malformed" -> Val({status: "unsupported", reason: "malformed wrong-shape witness is decode-only; no valid Command constructor can encode it"})
+        else -> Val({status: "unsupported", reason: "no source constructor exists in the closed Command workload for the {case} witness; decode-only rejection cell"})
     }
 }
 
-with_reason: fn(base: Matrix, fixed: (status: String, reason: String)) -> Matrix Never! {
+with_reason: fn(base: Matrix, fixed: {status: String, reason: String}) -> Matrix Never! {
     cell := base
     cell.status = fixed.status
     cell.reason = fixed.reason
@@ -453,7 +453,7 @@ static_cells: fn(reason: String) -> [Matrix] Never! {
     loop form in FORMS {
         loop case in CASES {
             loop operation in OPERATIONS {
-                cells.push(with_reason(base_cell(form, case, operation), fixed_reason(form, case, operation) ?? (status: "unavailable", reason: reason)))
+                cells.push(with_reason(base_cell(form, case, operation), fixed_reason(form, case, operation) ?? {status: "unavailable", reason: reason}))
             }
         }
     }
@@ -508,10 +508,10 @@ measure_cell: fn(bench: Bench, base: Matrix) -> Matrix Err! {
     cell.sample_results = samples.map(fn(one) { one.tree.copy() })
     statuses: samples.map(fn(one) { one.status.copy() })
     verdict: if {
-        statuses.contains("timeout") -> (status: "timeout", reason: "at least one sample exceeded the timeout")
-        statuses.contains("error") -> (status: "error", reason: "at least one sample failed the adapter protocol or fixture check")
-        statuses.all(fn(status) { status == "measured" }) -> (status: "measured", reason: "all samples completed with the expected codec outcome")
-        else -> (status: "error", reason: "no successful samples")
+        statuses.contains("timeout") -> {status: "timeout", reason: "at least one sample exceeded the timeout"}
+        statuses.contains("error") -> {status: "error", reason: "at least one sample failed the adapter protocol or fixture check"}
+        statuses.all(fn(status) { status == "measured" }) -> {status: "measured", reason: "all samples completed with the expected codec outcome"}
+        else -> {status: "error", reason: "no successful samples"}
     }
     cell.status = verdict.status
     cell.reason = verdict.reason
@@ -613,9 +613,9 @@ sample: fn(bench: Bench, cell: Matrix, input: String, expected: String, index: I
         actual: read_bounded(output, bench.max_output_bytes) ?? return Ok(errored(tree, err.message))
         tree["encoded_bytes"] = actual.len()
         verdict: if {
-            returncode != 0 -> (status: "error", reason: "encode command exited {returncode}")
-            actual != cell.wire_payload.bytes() -> (status: "error", reason: "canonical encode output differs from the fixed wire fixture")
-            else -> (status: "measured", reason: "canonical encode output matched the fixed wire fixture")
+            returncode != 0 -> {status: "error", reason: "encode command exited {returncode}"}
+            actual != cell.wire_payload.bytes() -> {status: "error", reason: "canonical encode output differs from the fixed wire fixture"}
+            else -> {status: "measured", reason: "canonical encode output matched the fixed wire fixture"}
         }
         if verdict.status == "measured" -> tree["stdout_bytes"] = receipt.output.bytes().len()
         return Ok(judged(tree, verdict, wall_ns, read))
@@ -628,16 +628,16 @@ sample: fn(bench: Bench, cell: Matrix, input: String, expected: String, index: I
     }
     tree["stdout_bytes"] = receipt.output.bytes().len()
     verdict: if {
-        accepting && returncode != 0 -> (status: "error", reason: "decode command exited {returncode} for an accepting fixture")
-        !accepting && returncode == 0 -> (status: "error", reason: "decode command accepted a fixture expected to be rejected")
-        accepting -> (status: "measured", reason: "canonical decode accepted the fixed wire fixture")
-        else -> (status: "measured", reason: "canonical decode rejected the expected-invalid fixture")
+        accepting && returncode != 0 -> {status: "error", reason: "decode command exited {returncode} for an accepting fixture"}
+        !accepting && returncode == 0 -> {status: "error", reason: "decode command accepted a fixture expected to be rejected"}
+        accepting -> {status: "measured", reason: "canonical decode accepted the fixed wire fixture"}
+        else -> {status: "measured", reason: "canonical decode rejected the expected-invalid fixture"}
     }
     Ok(judged(tree, verdict, wall_ns, read))
 }
 
 // A sample the adapter ran to the end, with its verdict.
-judged: fn(tree: Dyn, verdict: (status: String, reason: String), wall_ns: Int, read: Metrics) -> Sample Never! {
+judged: fn(tree: Dyn, verdict: {status: String, reason: String}, wall_ns: Int, read: Metrics) -> Sample Never! {
     row := tree
     row["status"] = verdict.status
     row["reason"] = verdict.reason
@@ -730,15 +730,15 @@ format_word: fn(word: String, values: [String:String]) -> String? Never! {
     rest := word.copy()
     loop rest != "" {
         step: if {
-            rest.starts_with("{{{{") || rest.starts_with("}}}}") -> (text: rest.slice(0, 1), used: 2)
+            rest.starts_with("{{{{") || rest.starts_with("}}}}") -> {text: rest.slice(0, 1), used: 2}
             rest.starts_with("{{") -> {
                 close: rest.index_of("}}") ?? return None
-                (text: values.get(rest.slice(1, close)) ?? return None, used: close + 1)
+                {text: values.get(rest.slice(1, close)) ?? return None, used: close + 1}
             }
             rest.starts_with("}}") -> {
                 return None
             }
-            else -> (text: rest.slice(0, 1), used: 1)
+            else -> {text: rest.slice(0, 1), used: 1}
         }
         out = "{out}{step.text}"
         rest = rest.slice(step.used, rest.len())

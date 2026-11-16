@@ -110,10 +110,10 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
 }
 
 #Test("classifies direct scripting registry roots") {
-    cases: [(raw: String, source: RefSource, provider: ProviderKind)]{
-        (raw: "rack@ruby#version=3.2.0", source: RefSource.RubyGems, provider: ProviderKind.RubyGems),
-        (raw: "JSON-MaybeXS@perl#version=1.004008", source: RefSource.Cpan, provider: ProviderKind.Cpan),
-        (raw: "monolog/monolog@php#version=3.9.0", source: RefSource.Packagist, provider: ProviderKind.Packagist),
+    cases: [{raw: String, source: RefSource, provider: ProviderKind}]{
+        {raw: "rack@ruby#version=3.2.0", source: RefSource.RubyGems, provider: ProviderKind.RubyGems},
+        {raw: "JSON-MaybeXS@perl#version=1.004008", source: RefSource.Cpan, provider: ProviderKind.Cpan},
+        {raw: "monolog/monolog@php#version=3.9.0", source: RefSource.Packagist, provider: ProviderKind.Packagist},
     }
     loop case in cases {
         spec: pkg_test_classify(case.raw)
@@ -123,10 +123,10 @@ pkg_test_ws_index: fn() -> WorkspaceIndex {
 }
 
 #Test("classifies direct jet registry npm and cargo roots") {
-    cases: [(raw: String, source: RefSource, provider: ProviderKind)]{
-        (raw: "hello@jet-registry#version=1.0.0", source: RefSource.JetRegistry, provider: ProviderKind.JetRegistry),
-        (raw: "left-pad@npm#version=1.3.0", source: RefSource.Npm, provider: ProviderKind.Npm),
-        (raw: "serde@cargo#version=1.0.200", source: RefSource.Cargo, provider: ProviderKind.Cargo),
+    cases: [{raw: String, source: RefSource, provider: ProviderKind}]{
+        {raw: "hello@jet-registry#version=1.0.0", source: RefSource.JetRegistry, provider: ProviderKind.JetRegistry},
+        {raw: "left-pad@npm#version=1.3.0", source: RefSource.Npm, provider: ProviderKind.Npm},
+        {raw: "serde@cargo#version=1.0.200", source: RefSource.Cargo, provider: ProviderKind.Cargo},
     }
     loop case in cases {
         spec: pkg_test_classify(case.raw)

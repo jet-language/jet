@@ -545,14 +545,14 @@ fixture_put: fn(tree: String, path: String, text: String) -[FS]> () {
 // One fixture tree: this runner, the fake compiler and git, and the gate
 // sources. `export` is what the fake jet prints for ProofSource.jet.
 fixture_tree: fn(tree: String, runner: String, export: String) -[FS]> [String] {
-    written := [(path: String, text: String)]{
-        (path: "Tools/Agent/VerifyFull.jet", text: runner.copy()),
-        (path: "Tools/Agent/CoreCoverage.jet", text: "// fixture gate: passes\n"),
-        (path: "Tools/Agent/CoreModuleCheck.jet", text: "// fixture gate: passes\n"),
-        (path: "Tools/Agent/SafetyGate.jet", text: "// fixture gate: passes\n"),
-        (path: "fixture-export.txt", text: "{export}\n"),
-        (path: "bin/jet", text: FIXTURE_JET),
-        (path: "bin/git", text: FIXTURE_GIT),
+    written := [{path: String, text: String}]{
+        {path: "Tools/Agent/VerifyFull.jet", text: runner.copy()},
+        {path: "Tools/Agent/CoreCoverage.jet", text: "// fixture gate: passes\n"},
+        {path: "Tools/Agent/CoreModuleCheck.jet", text: "// fixture gate: passes\n"},
+        {path: "Tools/Agent/SafetyGate.jet", text: "// fixture gate: passes\n"},
+        {path: "fixture-export.txt", text: "{export}\n"},
+        {path: "bin/jet", text: FIXTURE_JET},
+        {path: "bin/git", text: FIXTURE_GIT},
     }
     paths := [String]{}
     loop item in written {

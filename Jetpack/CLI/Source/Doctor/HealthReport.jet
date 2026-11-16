@@ -273,7 +273,7 @@ DoctorRegistryFailure: enum {
 // Configured registries by name, sorted: `JET_REGISTRY_URL` is `jet`, and
 // each `JET_REGISTRY_<NAME>_URL` is `<name>` in lowercase. With nothing
 // configured the default Jet registry is used.
-cli_doctor_registry_endpoints: fn() -[Env]> [(name: String, url: String)] Never! {
+cli_doctor_registry_endpoints: fn() -[Env]> [{name: String, url: String}] Never! {
     found := [String:String]{}
     default_url: sys.get(ENV_JET_REGISTRY_URL) ?? ""
     if default_url != "" -> found["jet"] = default_url
@@ -289,8 +289,8 @@ cli_doctor_registry_endpoints: fn() -[Env]> [(name: String, url: String)] Never!
     if found.len() == 0 -> found["jet"] = "https://github.com/jet-lang/registry"
     ordered := found.keys().to_list()
     ordered.sort()
-    endpoints := [(name: String, url: String)]{}
-    loop name in ordered -> endpoints.push((name: name, url: found[name]))
+    endpoints := [{name: String, url: String}]{}
+    loop name in ordered -> endpoints.push({name: name, url: found[name]})
     endpoints
 }
 

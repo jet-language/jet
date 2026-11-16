@@ -29,11 +29,11 @@ header_or: fn(mapped: MappedFile, size: Int) -> View<U8> Missing! {
 }
 
 // The first two lines, each a view of the map, as a named pair.
-first_two: fn(mapped: MappedFile) -> (first: View<U8>, second: View<U8>)? {
+first_two: fn(mapped: MappedFile) -> {first: View<U8>, second: View<U8>}? {
     lines := [View<U8>]{}
     loop line in mapped.lines() {
         lines.push(line)
-        if lines.len() == 2 -> return Val((first: lines[0], second: lines[1]))
+        if lines.len() == 2 -> return Val({first: lines[0], second: lines[1]})
     }
     None
 }

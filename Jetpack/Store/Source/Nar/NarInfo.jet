@@ -359,13 +359,13 @@ NixNarInfo: struct {
         _: self.verified_signature(store_dir, trusted_keys)
     }
 
-    verified_signature: fn(self, store_dir: String, trusted_keys: [NixPublicKey]) -> (key_id: String, signature: [U8]) StoreError! {
+    verified_signature: fn(self, store_dir: String, trusted_keys: [NixPublicKey]) -> {key_id: String, signature: [U8]} StoreError! {
         fingerprint: self.fingerprint(store_dir)
         loop signature in self.signatures {
             loop key in trusted_keys {
                 if key.key_id != signature.key_id -> next
                 if crypto.verify(crypto.VerifyKey{bytes: key.public_key}, fingerprint, crypto.Signature{bytes: signature.signature}) ?? false {
-                    return Ok((key_id: key.key_id, signature: signature.signature))
+                    return Ok({key_id: key.key_id, signature: signature.signature})
                 }
                 break
             }

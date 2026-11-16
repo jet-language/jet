@@ -115,7 +115,7 @@ store_artifact_encode_record: fn(object: ObjectHandle, executable: Bool) -> [U8]
 }
 
 // The object and executable flag of an artifact record, or None.
-store_artifact_decode_record: fn(bytes: [U8]) -> (object: ObjectHandle, executable: Bool)? Never! {
+store_artifact_decode_record: fn(bytes: [U8]) -> {object: ObjectHandle, executable: Bool}? Never! {
     magic: store_artifact_record_magic()
     expected: magic.len() + 32 + 8 + 1
     if bytes.len() != expected || !pkg_bytes_starts_with(bytes, 0, magic) -> return None
@@ -126,7 +126,7 @@ store_artifact_decode_record: fn(bytes: [U8]) -> (object: ObjectHandle, executab
     if flag != 0 && flag != 1 -> return None
     executable: flag == 1
     object: ObjectHandle.new(ArtifactDigest{bytes: store_artifact_slice(bytes, digest_start, digest_end)}, length)
-    Val((executable: executable, object: object))
+    Val({executable: executable, object: object})
 }
 
 // Whether a filesystem failure means the path does not exist.

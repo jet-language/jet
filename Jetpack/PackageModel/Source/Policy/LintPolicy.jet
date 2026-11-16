@@ -37,12 +37,12 @@ pkg_lint_e1293: fn(original: Diagnostic) -> Diagnostic Never! {
     name: pkg_lint_name_for_code(original.code) ?? original.code
     why := original.why
     loop why.ends_with(".") -> why = why.removesuffix(".")
-    holes: [(key: String, value: String)]{
-        (key: "name", value: name),
-        (key: "code", value: original.code),
-        (key: "what_text", value: original.what),
-        (key: "why_text", value: why),
-        (key: "fix_text", value: original.fix),
+    holes: [{key: String, value: String}]{
+        {key: "name", value: name},
+        {key: "code", value: original.code},
+        {key: "what_text", value: original.what},
+        {key: "why_text", value: why},
+        {key: "fix_text", value: original.fix},
     }
     denied := diagnostic_from_registry("E1293", original.span, pkg_lint_fill_row(row.what, holes), pkg_lint_fill_row(row.why, holes), pkg_lint_fill_row(row.fix, holes))
     // The lint's site stays its site.
@@ -54,7 +54,7 @@ pkg_lint_e1293: fn(original: Diagnostic) -> Diagnostic Never! {
 }
 
 // Replace each `{hole}` of a registry template with its value.
-pkg_lint_fill_row: fn(template: String, holes: [(key: String, value: String)]) -> String Never! {
+pkg_lint_fill_row: fn(template: String, holes: [{key: String, value: String}]) -> String Never! {
     out := template
     loop hole in holes -> out = out.replace("{{{hole.key}}}", hole.value)
     out

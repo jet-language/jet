@@ -44,8 +44,8 @@ journey_color_end: fn(out: I64, color: Bool) {
 
 // Return offset into the original UTF8 path and whether to prefix an ellipsis.
 // Whole path segments shed first; basename is always the floor.
-journey_path_start: fn(file: I64, budget: I64) -> (offset: I64, ellipsis: Bool) {
-    if jet_char_len(file) <= budget -> return (offset: I64{0}, ellipsis: false)
+journey_path_start: fn(file: I64, budget: I64) -> {offset: I64, ellipsis: Bool} {
+    if jet_char_len(file) <= budget -> return {offset: I64{0}, ellipsis: false}
     data: rt_text_data(file)
     length: rt_text_len(file)
     start := I64{0}
@@ -57,15 +57,15 @@ journey_path_start: fn(file: I64, budget: I64) -> (offset: I64, ellipsis: Bool) 
         remaining -= I64{1}
         if (scalar == I64{47}) {
             start = at
-            if (remaining + I64{2} <= budget) { return (offset: start, ellipsis: true) }
+            if (remaining + I64{2} <= budget) { return {offset: start, ellipsis: true} }
         }
     }
-    (offset: start, ellipsis: false)
+    {offset: start, ellipsis: false}
 }
 
 journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, color: Bool) {
     file: rt_text_word(wrapping(hop + HOP_FILE))
-    start: if (width == I64{0}) -> (offset: I64{0}, ellipsis: false) else -> journey_path_start(file, budget)
+    start: if (width == I64{0}) -> {offset: I64{0}, ellipsis: false} else -> journey_path_start(file, budget)
     // Count the retained suffix without allocating it just to measure it.
     ptr: wrapping(rt_text_data(file) + start.offset)
     length: rt_text_len(file) - start.offset

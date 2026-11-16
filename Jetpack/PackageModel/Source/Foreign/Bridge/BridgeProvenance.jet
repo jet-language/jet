@@ -64,7 +64,7 @@ pkg_bridge_append_line: fn(text: &String, name: String, value: String) ForeignBr
     text = "{text}{name}={value}\n"
 }
 
-pkg_bridge_field_value: fn(fields: [(name: String, value: String)], name: String) -> String? Never! {
+pkg_bridge_field_value: fn(fields: [{name: String, value: String}], name: String) -> String? Never! {
     loop field in fields {
         if field.name == name -> return Val(field.value)
     }
@@ -85,7 +85,7 @@ pkg_bridge_append_capability_lines: fn(text: &String, language: ForeignLanguage)
 // Render the common queryable provenance format without publishing a file.
 // Binders use this when their result object carries the record to a CLI
 // writer; `pkg_bridge_write_provenance` uses the same formatter on disk.
-pkg_bridge_render_provenance: fn(identity: String, fields: [(name: String, value: String)], artifacts: [(name: String, digest: String)]) -[Env]> String ForeignBridgeError! {
+pkg_bridge_render_provenance: fn(identity: String, fields: [{name: String, value: String}], artifacts: [{name: String, digest: String}]) -[Env]> String ForeignBridgeError! {
     text := "schema={FOREIGN_BRIDGE_PROVENANCE_SCHEMA}\nidentity={identity}\n"
     has_boundary_fields := false
     loop field in fields {
@@ -133,7 +133,7 @@ pkg_bridge_render_provenance: fn(identity: String, fields: [(name: String, value
 
 // Write the queryable provenance sidecar for one published bridge: stage
 // beside the target, then rename into place.
-pkg_bridge_write_provenance: fn(path: String, identity: String, fields: [(name: String, value: String)], artifacts: [(name: String, digest: String)]) -[FS, Env]> ForeignBridgeError! {
+pkg_bridge_write_provenance: fn(path: String, identity: String, fields: [{name: String, value: String}], artifacts: [{name: String, digest: String}]) -[FS, Env]> ForeignBridgeError! {
     text: pkg_bridge_render_provenance(identity, fields, artifacts)
     temporary: bridge_core_files.with_suffix(path, ".tmp.{bridge_core_sys.pid()}")
     bridge_core_files.write_bytes(temporary, text.bytes()) ?? return Err(pkg_bridge_error("could not stage {path}: {err}"))

@@ -214,7 +214,7 @@ check_identity: fn(rows: [Trial]) MeasureError! {
 }
 
 // compareStartup: the receipt's leading fields and whether every median wins.
-compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [(key: String, value: Dyn)] MeasureError! {
+compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [{key: String, value: Dyn}] MeasureError! {
     if plain.len() < 3 || plain.len() != optimized.len() {
         return Err(measure_error("require at least three matched startup trials"))
     }
@@ -238,25 +238,25 @@ compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [(key: String, value:
     }
     check_identity(plain)
     check_identity(optimized)
-    metrics := [(key: String, value: Dyn)]{}
+    metrics := [{key: String, value: Dyn}]{}
     wins := true
     loop name in METRICS {
         base: median_timing(plain, name) ?? return Err(measure_error("no startup trials"))
         candidate: median_timing(optimized, name) ?? return Err(measure_error("no startup trials"))
         verdict: if candidate < base -> "win" else -> "loss"
         if candidate >= base -> wins = false
-        row := [(key: String, value: Dyn)]{}
-        row.push((key: "plain_ns", value: Dyn.Text("{base}")))
-        row.push((key: "optimized_ns", value: Dyn.Text("{candidate}")))
-        row.push((key: "verdict", value: Dyn.Text(verdict)))
-        metrics.push((key: name.copy(), value: Dyn.Object(row)))
+        row := [{key: String, value: Dyn}]{}
+        row.push({key: "plain_ns", value: Dyn.Text("{base}")})
+        row.push({key: "optimized_ns", value: Dyn.Text("{candidate}")})
+        row.push({key: "verdict", value: Dyn.Text(verdict)})
+        metrics.push({key: name.copy(), value: Dyn.Object(row)})
     }
-    out := [(key: String, value: Dyn)]{}
-    out.push((key: "schema", value: Dyn.Text(SCHEMA)))
-    out.push((key: "trials", value: Dyn.Int(plain.len())))
-    out.push((key: "artifact_sha256", value: Dyn.Text(oracle.artifact_sha256.copy())))
-    out.push((key: "metrics", value: Dyn.Object(metrics)))
-    out.push((key: "verdict", value: Dyn.Text(if wins -> "win" else -> "loss")))
+    out := [{key: String, value: Dyn}]{}
+    out.push({key: "schema", value: Dyn.Text(SCHEMA)})
+    out.push({key: "trials", value: Dyn.Int(plain.len())})
+    out.push({key: "artifact_sha256", value: Dyn.Text(oracle.artifact_sha256.copy())})
+    out.push({key: "metrics", value: Dyn.Object(metrics)})
+    out.push({key: "verdict", value: Dyn.Text(if wins -> "win" else -> "loss")})
     Ok(out)
 }
 
@@ -332,8 +332,8 @@ compare_directory: fn(root: String) -[Env, FS]> Compared MeasureError! {
     optimized: read_arm(root, "optimized", trials, pair, input_root, entry)
     out := compare_startup(plain, optimized)
     wins: out[4].value == Dyn.Text("win")
-    out.push((key: "pair", value: pair))
-    out.push((key: "trial_directories", value: Dyn.Array(trials.map(fn(name) { Dyn.Text(name.copy()) }))))
+    out.push({key: "pair", value: pair})
+    out.push({key: "trial_directories", value: Dyn.Array(trials.map(fn(name) { Dyn.Text(name.copy()) }))})
     Ok(Compared{receipt: Dyn.Object(out), win: wins})
 }
 

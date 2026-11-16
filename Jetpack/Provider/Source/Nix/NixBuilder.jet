@@ -143,7 +143,7 @@ provider_nix_build_derivation: fn(roots: HangarRoots, source_dir: String, evalua
     }
 }
 
-nix_builder_run_in_scratch: fn(scratch: NixBuildScratch, source_dir: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time.Wait]> (outputs: [String:NativeNixOutput], mechanism: String, policy: String) NativeNixBuildError! {
+nix_builder_run_in_scratch: fn(scratch: NixBuildScratch, source_dir: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time.Wait]> {outputs: [String:NativeNixOutput], mechanism: String, policy: String} NativeNixBuildError! {
     output: files.join(scratch.path, "output")
     nix_builder_create_real_directory(output, "native Nix output sandbox")
     names: nixeval_sorted(evaluation.outputs.keys().to_list())
@@ -173,7 +173,7 @@ nix_builder_run_in_scratch: fn(scratch: NixBuildScratch, source_dir: String, eva
         digest: pkg_try_output_hash_of(path) ?? return Err(NativeNixBuildError.Store("output `{name}`: {err.message()}"))
         outputs[name] = NativeNixOutput{name: name, store_path: declared.path, path: path, digest: digest}
     }
-    Ok((outputs: outputs, mechanism: sandbox.mechanism, policy: sandbox.policy))
+    Ok({outputs: outputs, mechanism: sandbox.mechanism, policy: sandbox.policy})
 }
 
 // Replace every declared output store path in `value` with its sandbox

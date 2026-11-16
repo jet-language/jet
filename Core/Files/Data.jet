@@ -93,9 +93,9 @@ csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T
         error.row = Val(row)
         return Err(error)
     }
-    entries := [(key: String, value: Dyn)]{}
+    entries := [{key: String, value: Dyn}]{}
     loop column in 0..<header.len() {
-        entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
+        entries.push({key: header[column].copy(), value: Dyn.Text(fields[column].copy())})
     }
     tree: encoding_stream.object_from_entries(entries)
     previous: rt.text_cells_enter()

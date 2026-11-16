@@ -55,7 +55,7 @@ driver_launch: fn(engine: String) -> Driver Failure! {
     pin: browser.locked(engine) ?? return Err(fail_with("{engine} is not locked in .jet/lock: {err}"))
     session: browser.launch(engine) ?? return Err(fail_with("{engine} launch failed: {err}"))
     bidi: session.protocol("bidi") ?? return Err(fail_with("BiDi protocol unavailable: {err}"))
-    created: command(bidi, "browsingContext.create", obj([(key: "type", value: Dyn.Text("tab"))]))
+    created: command(bidi, "browsingContext.create", obj([{key: "type", value: Dyn.Text("tab")}]))
     context: text(at(created, "context"))
     if context == "" -> return Err(fail_with("browsingContext.create returned no context"))
     Ok(Driver{session: session, bidi: bidi, context: context, engine: engine.copy(), version: pin.version.copy()})
@@ -78,13 +78,13 @@ driver_command: fn(d: Driver, method: String, params: Dyn) -> Dyn Failure! {
     command(d.bidi, method, params)
 }
 
-context_param: fn(d: Driver) -> (key: String, value: Dyn) {
-    (key: "context", value: Dyn.Text(d.context.copy()))
+context_param: fn(d: Driver) -> {key: String, value: Dyn} {
+    {key: "context", value: Dyn.Text(d.context.copy())}
 }
 
 // Navigate the tab and wait for its load event.
 driver_navigate: fn(d: Driver, url: String) Failure! {
-    driver_command(d, "browsingContext.navigate", obj([context_param(d), (key: "url", value: Dyn.Text(url.copy())), (key: "wait", value: Dyn.Text("complete"))]))
+    driver_command(d, "browsingContext.navigate", obj([context_param(d), {key: "url", value: Dyn.Text(url.copy())}, {key: "wait", value: Dyn.Text("complete")}]))
     Ok()
 }
 
@@ -97,11 +97,11 @@ driver_eval: fn(d: Driver, expression: String) -> Dyn Failure! {
         "script.evaluate",
         obj(
             [
-                (key: "expression", value: Dyn.Text(wrapped)),
-                (key: "target", value: obj([context_param(d)])),
-                (key: "awaitPromise", value: Dyn.Bool(true)),
-                (key: "resultOwnership", value: Dyn.Text("none")),
-                (key: "userActivation", value: Dyn.Bool(true)),
+                {key: "expression", value: Dyn.Text(wrapped)},
+                {key: "target", value: obj([context_param(d)])},
+                {key: "awaitPromise", value: Dyn.Bool(true)},
+                {key: "resultOwnership", value: Dyn.Text("none")},
+                {key: "userActivation", value: Dyn.Bool(true)},
             ],
         ),
     )
@@ -119,7 +119,7 @@ driver_eval: fn(d: Driver, expression: String) -> Dyn Failure! {
 
 // One `input.performActions` with the given input sources.
 driver_actions: fn(d: Driver, sources: [Dyn]) Failure! {
-    driver_command(d, "input.performActions", obj([context_param(d), (key: "actions", value: Dyn.Array(sources.copy()))]))
+    driver_command(d, "input.performActions", obj([context_param(d), {key: "actions", value: Dyn.Array(sources.copy())}]))
     Ok()
 }
 
@@ -130,27 +130,27 @@ driver_release: fn(d: Driver) Failure! {
 }
 
 pointer_source: fn(actions: [Dyn]) -> Dyn {
-    obj([(key: "type", value: Dyn.Text("pointer")), (key: "id", value: Dyn.Text("mouse")), (key: "parameters", value: obj([(key: "pointerType", value: Dyn.Text("mouse"))])), (key: "actions", value: Dyn.Array(actions.copy()))])
+    obj([{key: "type", value: Dyn.Text("pointer")}, {key: "id", value: Dyn.Text("mouse")}, {key: "parameters", value: obj([{key: "pointerType", value: Dyn.Text("mouse")}])}, {key: "actions", value: Dyn.Array(actions.copy())}])
 }
 
 key_source: fn(actions: [Dyn]) -> Dyn {
-    obj([(key: "type", value: Dyn.Text("key")), (key: "id", value: Dyn.Text("keyboard")), (key: "actions", value: Dyn.Array(actions.copy()))])
+    obj([{key: "type", value: Dyn.Text("key")}, {key: "id", value: Dyn.Text("keyboard")}, {key: "actions", value: Dyn.Array(actions.copy())}])
 }
 
 move_action: fn(x: Float, y: Float, duration: Int) -> Dyn {
-    obj([(key: "type", value: Dyn.Text("pointerMove")), (key: "x", value: Dyn.Int(round(x))), (key: "y", value: Dyn.Int(round(y))), (key: "origin", value: Dyn.Text("viewport")), (key: "duration", value: Dyn.Int(duration))])
+    obj([{key: "type", value: Dyn.Text("pointerMove")}, {key: "x", value: Dyn.Int(round(x))}, {key: "y", value: Dyn.Int(round(y))}, {key: "origin", value: Dyn.Text("viewport")}, {key: "duration", value: Dyn.Int(duration)}])
 }
 
 button_action: fn(kind: String, button: Int) -> Dyn {
-    obj([(key: "type", value: Dyn.Text(kind.copy())), (key: "button", value: Dyn.Int(button))])
+    obj([{key: "type", value: Dyn.Text(kind.copy())}, {key: "button", value: Dyn.Int(button)}])
 }
 
 key_action: fn(kind: String, key: String) -> Dyn {
-    obj([(key: "type", value: Dyn.Text(kind.copy())), (key: "value", value: Dyn.Text(webdriver_key(key)))])
+    obj([{key: "type", value: Dyn.Text(kind.copy())}, {key: "value", value: Dyn.Text(webdriver_key(key))}])
 }
 
 pause_action: fn() -> Dyn {
-    obj([(key: "type", value: Dyn.Text("pause")), (key: "duration", value: Dyn.Int(0))])
+    obj([{key: "type", value: Dyn.Text("pause")}, {key: "duration", value: Dyn.Int(0)}])
 }
 
 // Pointer `actions` with `modifiers` held: the key source presses them
@@ -198,24 +198,24 @@ driver_drag: fn(d: Driver, from: Point, to: Point, steps: Int, modifiers: [Strin
 driver_wheel: fn(d: Driver, x: Float, y: Float, delta_x: Float, delta_y: Float) Failure! {
     scroll: obj(
         [
-            (key: "type", value: Dyn.Text("scroll")),
-            (key: "x", value: Dyn.Int(round(x))),
-            (key: "y", value: Dyn.Int(round(y))),
-            (key: "deltaX", value: Dyn.Int(round(delta_x))),
-            (key: "deltaY", value: Dyn.Int(round(delta_y))),
-            (key: "origin", value: Dyn.Text("viewport")),
-            (key: "duration", value: Dyn.Int(0)),
+            {key: "type", value: Dyn.Text("scroll")},
+            {key: "x", value: Dyn.Int(round(x))},
+            {key: "y", value: Dyn.Int(round(y))},
+            {key: "deltaX", value: Dyn.Int(round(delta_x))},
+            {key: "deltaY", value: Dyn.Int(round(delta_y))},
+            {key: "origin", value: Dyn.Text("viewport")},
+            {key: "duration", value: Dyn.Int(0)},
         ],
     )
-    driver_actions(d, [Dyn]{obj([(key: "type", value: Dyn.Text("wheel")), (key: "id", value: Dyn.Text("wheel")), (key: "actions", value: Dyn.Array([Dyn]{scroll}))])})
+    driver_actions(d, [Dyn]{obj([{key: "type", value: Dyn.Text("wheel")}, {key: "id", value: Dyn.Text("wheel")}, {key: "actions", value: Dyn.Array([Dyn]{scroll})}])})
 }
 
 // Type each character of `value` as a key press.
 driver_type: fn(d: Driver, value: String) Failure! {
     actions := [Dyn]{}
     loop ch in value.chars() {
-        actions.push(obj([(key: "type", value: Dyn.Text("keyDown")), (key: "value", value: Dyn.Text("{ch}"))]))
-        actions.push(obj([(key: "type", value: Dyn.Text("keyUp")), (key: "value", value: Dyn.Text("{ch}"))]))
+        actions.push(obj([{key: "type", value: Dyn.Text("keyDown")}, {key: "value", value: Dyn.Text("{ch}")}]))
+        actions.push(obj([{key: "type", value: Dyn.Text("keyUp")}, {key: "value", value: Dyn.Text("{ch}")}]))
     }
     driver_actions(d, [Dyn]{key_source(actions)})
 }
@@ -264,8 +264,8 @@ driver_add_preload: fn(d: Driver, function_declaration: String) -> String Failur
         "script.addPreloadScript",
         obj(
             [
-                (key: "functionDeclaration", value: Dyn.Text(function_declaration.copy())),
-                (key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})),
+                {key: "functionDeclaration", value: Dyn.Text(function_declaration.copy())},
+                {key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})},
             ],
         ),
     )
@@ -273,7 +273,7 @@ driver_add_preload: fn(d: Driver, function_declaration: String) -> String Failur
 }
 
 driver_remove_preload: fn(d: Driver, id: String) Failure! {
-    driver_command(d, "script.removePreloadScript", obj([(key: "script", value: Dyn.Text(id.copy()))]))
+    driver_command(d, "script.removePreloadScript", obj([{key: "script", value: Dyn.Text(id.copy())}]))
     Ok()
 }
 
@@ -288,11 +288,11 @@ driver_screenshot: fn(d: Driver, path: String) -> String Failure! {
 // Size the tab's window (Chromium's CDP browser target; the BiDi context id is its target id).
 driver_set_viewport: fn(d: Driver, width: Int, height: Int) Failure! {
     cdp: d.session.protocol("cdp") ?? return Err(fail_with("{d.engine} has no CDP browser target to size the window: {err}"))
-    target_wire: json.to_string(obj([(key: "targetId", value: Dyn.Text(d.context.copy()))])) ?? "{{}}"
+    target_wire: json.to_string(obj([{key: "targetId", value: Dyn.Text(d.context.copy())}])) ?? "{{}}"
     window: cdp.send("Browser.getWindowForTarget", target_wire) ?? return Err(fail_with("Browser.getWindowForTarget failed: {err}"))
     window_tree: json.parse(window) ?? return Err(fail_with("Browser.getWindowForTarget reply is not JSON: {err}"))
-    bounds: obj([(key: "width", value: Dyn.Int(width)), (key: "height", value: Dyn.Int(height)), (key: "windowState", value: Dyn.Text("normal"))])
-    wire: json.to_string(obj([(key: "windowId", value: at(window_tree, "windowId")), (key: "bounds", value: bounds)])) ?? "{{}}"
+    bounds: obj([{key: "width", value: Dyn.Int(width)}, {key: "height", value: Dyn.Int(height)}, {key: "windowState", value: Dyn.Text("normal")}])
+    wire: json.to_string(obj([{key: "windowId", value: at(window_tree, "windowId")}, {key: "bounds", value: bounds}])) ?? "{{}}"
     cdp.send("Browser.setWindowBounds", wire) ?? return Err(fail_with("Browser.setWindowBounds failed: {err}"))
     Ok()
 }
@@ -315,7 +315,7 @@ round: fn(value: Float) -> Int { Int{math.round(value)} }
 
 // --- Dyn ----------------------------------------------------------------------
 
-obj: fn(entries: [(key: String, value: Dyn)]) -> Dyn {
+obj: fn(entries: [{key: String, value: Dyn}]) -> Dyn {
     fields := [String:Dyn]{}
     loop entry in entries -> fields[entry.key.copy()] = entry.value.copy()
     Dyn.Object(fields)

@@ -1332,11 +1332,11 @@ ZonedDateTime: struct {
     hours_in_day: fn(self) -> Int Never! { self.zone_value.hours_in_day(self.date()) }
 
     format: fn(self, pattern: String) -> String Never! {
-        civil_format(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds())))
+        civil_format(pattern, self.date(), self.time(), Val({name: self.zone_value.name(), offset: self.offset_seconds()}))
     }
 
     format_checked: fn(self, pattern: String) -> String TextError! {
-        civil_format_checked(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds())))
+        civil_format_checked(pattern, self.date(), self.time(), Val({name: self.zone_value.name(), offset: self.offset_seconds()}))
     }
 
     to_string: fn(self) -> String Never! {
@@ -1725,9 +1725,9 @@ civil_slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     String.from_bytes(out) ?? panic("civil-time string slice is not UTF-8")
 }
 
-civil_split: fn(value: String, separator: String) -> (head: String, tail: String)? Never! {
+civil_split: fn(value: String, separator: String) -> {head: String, tail: String}? Never! {
     pair: value.split_once(separator) ?? return None
-    Val((head: pair.before, tail: pair.after))
+    Val({head: pair.before, tail: pair.after})
 }
 
 parse: fn(value: String) -> LocalDate TimeError! { civil_parse_date(value, true, true) }
@@ -1821,12 +1821,12 @@ parse_time: fn(value: String) -> LocalTime TimeError! {
     Ok(civil_time(parts.hour, parts.minute, parts.second, parts.nanos))
 }
 
-civil_rfc_time: fn(value: String) -> (time: LocalTime, leap: Bool) TimeError! {
+civil_rfc_time: fn(value: String) -> {time: LocalTime, leap: Bool} TimeError! {
     parts: civil_time_parts(value, true)
     if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 60 || (parts.second == 60 && (parts.hour != 23 || parts.minute != 59)) {
         return Err(TimeError{reason: "time out of range: {value}"})
     }
-    Ok((time: civil_time(parts.hour, parts.minute, parts.second, parts.nanos), leap: parts.second == 60))
+    Ok({time: civil_time(parts.hour, parts.minute, parts.second, parts.nanos), leap: parts.second == 60})
 }
 
 // The value of the two ASCII digits at `at`, or -1 when one is not a digit.
@@ -1920,13 +1920,13 @@ parse_rfc3339: fn(value: String) -> DateTime TimeError! {
     Ok(civil_timestamp(seconds, t.time.nanos, t.leap))
 }
 
-civil_rfc_suffix: fn(rest: String, whole: String, reason: String) -> (head: String, tail: String) TimeError! {
+civil_rfc_suffix: fn(rest: String, whole: String, reason: String) -> {head: String, tail: String} TimeError! {
     raw: rest.bytes()
     if raw.len() > 0 && raw[raw.len() - 1] == (U8{90}) {
-        return Ok((head: civil_slice(raw, 0, raw.len() - 1), tail: "Z"))
+        return Ok({head: civil_slice(raw, 0, raw.len() - 1), tail: "Z"})
     }
     if raw.len() >= 6 {
-        return Ok((head: civil_slice(raw, 0, raw.len() - 6), tail: civil_slice(raw, raw.len() - 6, raw.len())))
+        return Ok({head: civil_slice(raw, 0, raw.len() - 6), tail: civil_slice(raw, raw.len() - 6, raw.len())})
     }
     Err(TimeError{reason: "{reason}: {whole}"})
 }
@@ -2020,7 +2020,7 @@ civil_be: fn(bytes: [U8], start: Int, width: Int, signed: Bool) -> Int TimeError
     Ok(value)
 }
 
-civil_tzif_header: fn(bytes: [U8], base: Int) -> (version: Int, counts: [Int]) TimeError! {
+civil_tzif_header: fn(bytes: [U8], base: Int) -> {version: Int, counts: [Int]} TimeError! {
     if base < 0 || base + 4 > bytes.len() -> return Err(TimeError{reason: "invalid tzif header"})
     if bytes[base] != (U8{84}) || bytes[base + 1] != (U8{90}) || bytes[base + 2] != (U8{105}) || bytes[base + 3] != (U8{102}) {
         return Err(TimeError{reason: "invalid tzif header"})
@@ -2029,7 +2029,7 @@ civil_tzif_header: fn(bytes: [U8], base: Int) -> (version: Int, counts: [Int]) T
     if base + 4 < bytes.len() -> version = Int{bytes[base + 4]}
     counts := [Int]{}
     loop i in 0..<6 -> counts.push(civil_be(bytes, base + 20 + i * 4, 4, false))
-    Ok((version: version, counts: counts))
+    Ok({version: version, counts: counts})
 }
 
 civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
@@ -2152,7 +2152,7 @@ priv civil_tz_name: fn(raw: [U8], at: Int) -> Int TimeError! {
 }
 
 // A number of up to three digits.
-priv civil_tz_number: fn(raw: [U8], at: Int) -> (value: Int, end: Int) TimeError! {
+priv civil_tz_number: fn(raw: [U8], at: Int) -> {value: Int, end: Int} TimeError! {
     if !civil_tz_digit(raw, at) -> return Err(civil_tz_error(raw))
     value := 0
     end := at
@@ -2161,11 +2161,11 @@ priv civil_tz_number: fn(raw: [U8], at: Int) -> (value: Int, end: Int) TimeError
         value = value * 10 + Int{raw[end]} - 48
         end += 1
     }
-    Ok((value: value, end: end))
+    Ok({value: value, end: end})
 }
 
 // `[+|-]hh[:mm[:ss]]` in seconds, hours at most 167 (RFC 8536's extension).
-priv civil_tz_time: fn(raw: [U8], at: Int) -> (seconds: Int, end: Int) TimeError! {
+priv civil_tz_time: fn(raw: [U8], at: Int) -> {seconds: Int, end: Int} TimeError! {
     sign := 1
     start := at
     if start < raw.len() && (raw[start] == (U8{43}) || raw[start] == (U8{45})) {
@@ -2184,11 +2184,11 @@ priv civil_tz_time: fn(raw: [U8], at: Int) -> (seconds: Int, end: Int) TimeError
         end = part.end
         scale = scale /% 60
     }
-    Ok((seconds: sign * seconds, end: end))
+    Ok({seconds: sign * seconds, end: end})
 }
 
 // `Jn`, `n` or `Mm.w.d`, then `/time`, which defaults to 02:00:00.
-priv civil_tz_edge: fn(raw: [U8], at: Int) -> (edge: ZoneRuleEdge, end: Int) TimeError! {
+priv civil_tz_edge: fn(raw: [U8], at: Int) -> {edge: ZoneRuleEdge, end: Int} TimeError! {
     if at >= raw.len() -> return Err(civil_tz_error(raw))
     edge := ZoneRuleEdge{form: ZoneRuleForm.Ordinal, month: 0, week: 0, day: 0, at: 7200}
     end := at
@@ -2225,7 +2225,7 @@ priv civil_tz_edge: fn(raw: [U8], at: Int) -> (edge: ZoneRuleEdge, end: Int) Tim
         edge.at = time.seconds
         end = time.end
     }
-    Ok((edge: edge, end: end))
+    Ok({edge: edge, end: end})
 }
 
 // The day number (civil_day's count) an edge falls on in `year`.
@@ -2315,10 +2315,10 @@ priv civil_zone_shifts: fn(value: Zone, local: Int) -> [ZoneShift] Never! {
     shifts
 }
 
-civil_local_parts: fn(value: Zone, seconds: Int) -> (date: LocalDate, time: LocalTime, offset: Int) Never! {
+civil_local_parts: fn(value: Zone, seconds: Int) -> {date: LocalDate, time: LocalTime, offset: Int} Never! {
     offset: civil_zone_info(value, seconds).offset
     local: from_timestamp(saturating_add_ns(seconds, offset))
-    (date: local.date(), time: local.time(), offset: offset)
+    {date: local.date(), time: local.time(), offset: offset}
 }
 
 civil_local_matches: fn(value: Zone, date: LocalDate, t: LocalTime, offset: Int, seconds: Int) -> Bool Never! {
@@ -2388,9 +2388,9 @@ zoned_local: fn(date: LocalDate, t: LocalTime, zone: Zone, disambiguation: Strin
     Ok(zoned(civil_timestamp(seconds, t.nanos, false), zone))
 }
 
-civil_zoned_parts: fn(value: ZonedDateTime) -> (date: LocalDate, time: LocalTime, offset: Int) Never! {
+civil_zoned_parts: fn(value: ZonedDateTime) -> {date: LocalDate, time: LocalTime, offset: Int} Never! {
     if value.instant.leap_second && value.zone_value.name_value == "UTC" {
-        return (date: value.instant.date(), time: value.instant.time(), offset: 0)
+        return {date: value.instant.date(), time: value.instant.time(), offset: 0}
     }
     civil_local_parts(value.zone_value, value.instant.to_timestamp())
 }
@@ -2430,7 +2430,7 @@ civil_offset: fn(value: Int) -> String Never! {
     "{sign}{pad2(abs /% 3600, 2)}:{pad2((abs /% 60) %% 60, 2)}"
 }
 
-civil_format: fn(pattern: String, date: LocalDate, t: LocalTime, zone: (name: String, offset: Int)?) -> String Never! {
+civil_format: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {name: String, offset: Int}?) -> String Never! {
     weekdays: [String]{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
     weekdays_full: [String]{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
     months: [String]{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
@@ -2461,52 +2461,52 @@ civil_format: fn(pattern: String, date: LocalDate, t: LocalTime, zone: (name: St
     }
     // Ordered replacement is deliberately the permissive native contract.
     // Inserted names are subject to subsequent replacements as well.
-    pairs: [(token: String, value: String)]{
-        (token: "%%", value: "%"),
-        (token: "%A", value: weekday_full),
-        (token: "%a", value: weekday),
+    pairs: [{token: String, value: String}]{
+        {token: "%%", value: "%"},
+        {token: "%A", value: weekday_full},
+        {token: "%a", value: weekday},
         // The glibc/BSD no-pad flag: `%-I:%M %p` is 6:09 AM.
-        (token: "%-H", value: "{t.hour()}"),
-        (token: "%-I", value: "{((t.hour() + 11) %% 12) + 1}"),
-        (token: "%-M", value: "{t.minute()}"),
-        (token: "%-S", value: "{t.second()}"),
-        (token: "%-d", value: "{date.day()}"),
-        (token: "%-m", value: "{date.month()}"),
-        (token: "%-j", value: "{date.day_of_year()}"),
-        (token: "%B", value: month_full),
-        (token: "%b", value: month_short),
-        (token: "%Y", value: year),
-        (token: "%y", value: year_short),
-        (token: "%m", value: month),
-        (token: "%d", value: day),
-        (token: "%e", value: space_day),
-        (token: "%j", value: doy),
-        (token: "%H", value: hour),
-        (token: "%I", value: hour12),
-        (token: "%M", value: minute),
-        (token: "%S", value: second),
-        (token: "%p", value: meridiem),
-        (token: "%z", value: offset),
-        (token: "%Z", value: name),
-        (token: "%F", value: "{year}-{month}-{day}"),
-        (token: "%T", value: "{hour}:{minute}:{second}"),
-        (token: "%R", value: "{hour}:{minute}"),
-        (token: "%D", value: "{month}/{day}/{year_short}"),
-        (token: "%f", value: nanos),
-        (token: "EEEE", value: weekday_full),
-        (token: "MMMM", value: month_full),
-        (token: "MMM", value: month_short),
-        (token: "yyyy", value: year),
-        (token: "DDD", value: doy),
-        (token: "EEE", value: weekday),
-        (token: "MM", value: month),
-        (token: "dd", value: day),
-        (token: "HH", value: hour),
-        (token: "mm", value: minute),
-        (token: "ss", value: second),
-        (token: "SSSSSSSSS", value: nanos),
-        (token: "SSSSSS", value: micros),
-        (token: "SSS", value: millis),
+        {token: "%-H", value: "{t.hour()}"},
+        {token: "%-I", value: "{((t.hour() + 11) %% 12) + 1}"},
+        {token: "%-M", value: "{t.minute()}"},
+        {token: "%-S", value: "{t.second()}"},
+        {token: "%-d", value: "{date.day()}"},
+        {token: "%-m", value: "{date.month()}"},
+        {token: "%-j", value: "{date.day_of_year()}"},
+        {token: "%B", value: month_full},
+        {token: "%b", value: month_short},
+        {token: "%Y", value: year},
+        {token: "%y", value: year_short},
+        {token: "%m", value: month},
+        {token: "%d", value: day},
+        {token: "%e", value: space_day},
+        {token: "%j", value: doy},
+        {token: "%H", value: hour},
+        {token: "%I", value: hour12},
+        {token: "%M", value: minute},
+        {token: "%S", value: second},
+        {token: "%p", value: meridiem},
+        {token: "%z", value: offset},
+        {token: "%Z", value: name},
+        {token: "%F", value: "{year}-{month}-{day}"},
+        {token: "%T", value: "{hour}:{minute}:{second}"},
+        {token: "%R", value: "{hour}:{minute}"},
+        {token: "%D", value: "{month}/{day}/{year_short}"},
+        {token: "%f", value: nanos},
+        {token: "EEEE", value: weekday_full},
+        {token: "MMMM", value: month_full},
+        {token: "MMM", value: month_short},
+        {token: "yyyy", value: year},
+        {token: "DDD", value: doy},
+        {token: "EEE", value: weekday},
+        {token: "MM", value: month},
+        {token: "dd", value: day},
+        {token: "HH", value: hour},
+        {token: "mm", value: minute},
+        {token: "ss", value: second},
+        {token: "SSSSSSSSS", value: nanos},
+        {token: "SSSSSS", value: micros},
+        {token: "SSS", value: millis},
     }
     out := pattern.copy()
     loop pair in pairs -> out = out.replace(pair.token, pair.value)
@@ -2526,11 +2526,11 @@ civil_byte_character: fn(byte: U8) -> String Never! {
     String.from_bytes([U8]{U8{192 + Int{byte} /% 64}, U8{128 + Int{byte} %% 64}}) ?? ""
 }
 
-civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: (name: String, offset: Int)?) -> String TextError! {
+civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {name: String, offset: Int}?) -> String TextError! {
     tokens: [String]{"SSSSSSSSS", "EEEE", "MMMM", "yyyy", "DDD", "XXX", "SSSSSS", "MMM", "EEE", "VV", "MM", "dd", "HH", "mm", "ss", "SSS"}
     raw: pattern.bytes()
     normalized := ""
-    literals := [(marker: String, value: String)]{}
+    literals := [{marker: String, value: String}]{}
     i := 0
     loop i < raw.len() {
         byte: raw[i]
@@ -2557,7 +2557,7 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: (
             if !closed -> return Err(TextError{message: "E2703: unterminated format literal"})
             marker: "{literals.len()}"
             normalized = "{normalized}{marker}"
-            literals.push((marker: marker, value: literal))
+            literals.push({marker: marker, value: literal})
             next
         }
         if byte == (U8{37}) {
@@ -2576,7 +2576,7 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: (
             if code == "%" {
                 marker: "{literals.len()}"
                 normalized = "{normalized}{marker}"
-                literals.push((marker: marker, value: "%"))
+                literals.push({marker: marker, value: "%"})
                 i += 2
                 next
             }
@@ -3079,7 +3079,7 @@ priv civil_footer_test_stamp: fn(text: String) -> Int Never! {
 }
 
 #Test("a ZonedDateTime decode failure names the Dyn kind") {
-    trees: [(tree: Dyn, kind: String)]{(tree: Dyn.Null, kind: "Null"), (tree: Dyn.Int(1), kind: "Int"), (tree: Dyn.Bytes([U8]{1}), kind: "Bytes"), (tree: Dyn.object(), kind: "an object")}
+    trees: [{tree: Dyn, kind: String}]{{tree: Dyn.Null, kind: "Null"}, {tree: Dyn.Int(1), kind: "Int"}, {tree: Dyn.Bytes([U8]{1}), kind: "Bytes"}, {tree: Dyn.object(), kind: "an object"}}
     loop entry in trees {
         if ZonedDateTime.decode(entry.tree) == {
             .Err(errors) -> {

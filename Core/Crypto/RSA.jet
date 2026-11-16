@@ -293,9 +293,9 @@ rsa_export_raw: fn(ctx: RSAContext, part: RSAPart, len: Int) -> [U8] RSAError! {
 }
 
 /// The CRT values (dp, dq, qp) of a private key (mbedtls_rsa_export_crt).
-rsa_export_crt: fn(ctx: RSAContext) -> (dp: bn.Mpi, dq: bn.Mpi, qp: bn.Mpi) RSAError! {
+rsa_export_crt: fn(ctx: RSAContext) -> {dp: bn.Mpi, dq: bn.Mpi, qp: bn.Mpi} RSAError! {
     if !has_private_parts(ctx) -> return Err(.BadInput(None))
-    Ok((dp: bn.copy_mpi(ctx.dp), dq: bn.copy_mpi(ctx.dq), qp: bn.copy_mpi(ctx.qp)))
+    Ok({dp: bn.copy_mpi(ctx.dp), dq: bn.copy_mpi(ctx.dq), qp: bn.copy_mpi(ctx.qp)})
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@ DEDUCE_PRIMES: [Int]{
 /// The primes p, q of n = p q from the exponents d and e, by Miller's
 /// reduction (mbedtls_rsa_deduce_primes; HAC 8.2.2). Only d e matters, so
 /// d and e may come in either order. BadInput when no small base splits n.
-rsa_deduce_primes: fn(n: bn.Mpi, e: bn.Mpi, d: bn.Mpi) -> (p: bn.Mpi, q: bn.Mpi) bn.MpiError! {
+rsa_deduce_primes: fn(n: bn.Mpi, e: bn.Mpi, d: bn.Mpi) -> {p: bn.Mpi, q: bn.Mpi} bn.MpiError! {
     if bn.cmp_int(n, 0) <= 0 || bn.cmp_int(d, 1) <= 0 || bn.cmp_mpi(d, n) >= 0 || bn.cmp_int(e, 1) <= 0 || bn.cmp_mpi(e, n) >= 0 {
         return Err(.BadInput)
     }
@@ -390,7 +390,7 @@ rsa_deduce_primes: fn(n: bn.Mpi, e: bn.Mpi, d: bn.Mpi) -> (p: bn.Mpi, q: bn.Mpi)
             split: bn.gcd_modinv_odd(k1, n, false)
             if bn.cmp_int(split.g, 1) == 1 && bn.cmp_mpi(split.g, n) == -1 {
                 qr: bn.div_mpi(n, split.g)
-                return Ok((p: bn.copy_mpi(split.g), q: bn.copy_mpi(qr.q)))
+                return Ok({p: bn.copy_mpi(split.g), q: bn.copy_mpi(qr.q)})
             }
             sq: bn.mul_mpi(k, k)
             reduced: bn.mod_mpi(sq, n)
@@ -421,13 +421,13 @@ rsa_deduce_private_exponent: fn(p: bn.Mpi, q: bn.Mpi, e: bn.Mpi) -> bn.Mpi bn.Mp
 
 /// The CRT values dp = d mod (p - 1), dq = d mod (q - 1) and
 /// qp = q^-1 mod p (mbedtls_rsa_deduce_crt).
-rsa_deduce_crt: fn(p: bn.Mpi, q: bn.Mpi, d: bn.Mpi) -> (dp: bn.Mpi, dq: bn.Mpi, qp: bn.Mpi) bn.MpiError! {
+rsa_deduce_crt: fn(p: bn.Mpi, q: bn.Mpi, d: bn.Mpi) -> {dp: bn.Mpi, dq: bn.Mpi, qp: bn.Mpi} bn.MpiError! {
     p1: bn.sub_int(p, 1)
     dp: bn.mod_mpi(d, p1)
     q1: bn.sub_int(q, 1)
     dq: bn.mod_mpi(d, q1)
     qp: bn.inv_mod_odd(q, p)
-    Ok((dp: dp, dq: dq, qp: qp))
+    Ok({dp: dp, dq: dq, qp: qp})
 }
 
 /// A bignum failure inside a key check carries KEY_CHECK_FAILED.
@@ -662,7 +662,7 @@ gcd_is_one: fn(g: bn.Mpi) -> Bool Never! {
 /// CRT. mbedtls draws a mod p and a mod q apart, which reads the bit lengths
 /// of p and q; one draw below the public n needs neither, and a draw that is
 /// a multiple of p or q (odds near 2^-(bitlen(p) - 1)) fails as RNGFailed.
-gen_rand_with_inverse: fn<R: RNG>(ctx: &RSAContext, rng: &R) -> (a: bn.Mpi, b: bn.Mpi) RSAError! {
+gen_rand_with_inverse: fn<R: RNG>(ctx: &RSAContext, rng: &R) -> {a: bn.Mpi, b: bn.Mpi} RSAError! {
     a: bn.random(1, ctx.n, rng)
     ap: bn.mod_ct(a, ctx.p, ctx.rp)
     gp: bn.gcd_modinv_odd(ap, ctx.p, true)
@@ -672,7 +672,7 @@ gen_rand_with_inverse: fn<R: RNG>(ctx: &RSAContext, rng: &R) -> (a: bn.Mpi, b: b
     gq: bn.gcd_modinv_odd(aq, ctx.q, true)
     if !gcd_is_one(gq.g) -> return Err(.RNGFailed)
     b: apply_crt(gp.i, gq.i, ctx)
-    Ok((a: a, b: b))
+    Ok({a: a, b: b})
 }
 
 /// Make the blinding pair, or refresh it by squaring both halves mod n by

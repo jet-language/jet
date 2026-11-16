@@ -371,18 +371,18 @@ NixClosureRecord: struct {
     // authority: no field that claims to be content addressed may smuggle a
     // machine-local path.
     validate: fn(self) LockError! {
-        fields: [(name: String, value: String)]{
-            (name: "channel", value: self.channel),
-            (name: "revision", value: self.revision),
-            (name: "system", value: self.system),
-            (name: "index-authority", value: self.index_authority),
-            (name: "derivation", value: self.derivation),
-            (name: "output", value: self.output),
-            (name: "nar-hash", value: self.nar_hash),
-            (name: "compression", value: self.compression),
-            (name: "upstream-proof", value: self.upstream_proof),
-            (name: "cache-key", value: self.cache_key),
-            (name: "project-cas-bundle", value: self.project_cas_bundle),
+        fields: [{name: String, value: String}]{
+            {name: "channel", value: self.channel},
+            {name: "revision", value: self.revision},
+            {name: "system", value: self.system},
+            {name: "index-authority", value: self.index_authority},
+            {name: "derivation", value: self.derivation},
+            {name: "output", value: self.output},
+            {name: "nar-hash", value: self.nar_hash},
+            {name: "compression", value: self.compression},
+            {name: "upstream-proof", value: self.upstream_proof},
+            {name: "cache-key", value: self.cache_key},
+            {name: "project-cas-bundle", value: self.project_cas_bundle},
         }
         loop field in fields {
             if field.value.trim() == "" {
@@ -493,7 +493,7 @@ LockedToolchain: struct {
 
     validate_completeness: fn(self) LockCompletenessError! {
         name: if self.channel.trim() == "" -> "jet" else -> self.channel
-        fields: [(field: String, value: String)]{(field: "id", value: self.id), (field: "channel", value: self.channel), (field: "version", value: self.version)}
+        fields: [{field: String, value: String}]{{field: "id", value: self.id}, {field: "channel", value: self.channel}, {field: "version", value: self.version}}
         loop entry in fields {
             if entry.value.trim() == "" {
                 return Err(LockCompletenessError.missing(LockIncompleteKind.Toolchain, name, entry.field, LockRegeneration.toolchain()))
@@ -512,7 +512,7 @@ LockedSourceChannel: struct {
 
     validate_completeness: fn(self) LockCompletenessError! {
         name: if self.name.trim() == "" -> "<unnamed>" else -> self.name
-        fields: [(field: String, value: String)]{(field: "name", value: self.name), (field: "channel", value: self.channel), (field: "exact", value: self.exact)}
+        fields: [{field: String, value: String}]{{field: "name", value: self.name}, {field: "channel", value: self.channel}, {field: "exact", value: self.exact}}
         loop entry in fields {
             if entry.value.trim() == "" {
                 return Err(LockCompletenessError.missing(LockIncompleteKind.SourceChannel, name, entry.field, LockRegeneration.source_channel(self.name)))

@@ -1499,7 +1499,7 @@ sema_call_static_bound_method: fn(name: String, method: String, type_args: [Type
         resolved: sema_call_materialize_defaults(params, binding, checked_args, defaults, span, diagnostics) ?? return failed
         resolved_binding = resolved
     }
-    (lowered, pins) := sema_call_check_bound_arguments_owned(state, callee, params, None, true, resolved_binding, checked_args, environment, program, scopes, tail_store, context, span, diagnostics) ?? {
+    {lowered, pins} := sema_call_check_bound_arguments_owned(state, callee, params, None, true, resolved_binding, checked_args, environment, program, scopes, tail_store, context, span, diagnostics) ?? {
         return failed
     }
     result_type: sema_call_resolved_type(sema_call_signature_return(signature) ?? return failed, environment, program)
@@ -1522,7 +1522,7 @@ sema_call_static_bound_method: fn(name: String, method: String, type_args: [Type
 // `name` declare, with the trait declaring it: the innermost `name` binds,
 // and its first visible bound declaring `method` answers. None when `name` is
 // no type parameter here or no bound declares a static `method`.
-sema_call_static_bound_declaration: fn(graph: SemaRegistrationGraph, name: String, method: String, environment: SemaScopeEnvironment) -> (owner: SymbolID, declared: SemaRegistrationTraitMethod)? {
+sema_call_static_bound_declaration: fn(graph: SemaRegistrationGraph, name: String, method: String, environment: SemaScopeEnvironment) -> {owner: SymbolID, declared: SemaRegistrationTraitMethod}? {
     loop index in 0..<environment.generic_params.len() {
         parameter: environment.generic_params[environment.generic_params.len() - 1 - index]
         if parameter.name != name -> next
@@ -1537,7 +1537,7 @@ sema_call_static_bound_declaration: fn(graph: SemaRegistrationGraph, name: Strin
                 if trait_method.declaration.params.len() > 0 && trait_method.declaration.params[0].name == "self" {
                     next
                 }
-                return Val((owner: nominal.symbol.id, declared: trait_method))
+                return Val({owner: nominal.symbol.id, declared: trait_method})
             }
         }
         return None

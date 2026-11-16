@@ -12,7 +12,7 @@ Select: trait {
     select: fn(self, left: [Int], right: [Int]) -> Pair
     optional: fn(self, left: [Int], right: [Int]) -> Pair?
     fallible: fn(self, left: [Int], right: [Int]) -> Pair String!
-    tupled: fn(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int)
+    tupled: fn(self, left: [Int], right: [Int]) -> {pair: Pair, count: Int}
     generic: fn(self, left: [Int], right: [Int]) -> Envelope<Pair>
 }
 
@@ -42,10 +42,10 @@ First: struct {
             return Ok(Pair{left: left_view, right: right_view})
         }
 
-        tupled: fn(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
+        tupled: fn(self, left: [Int], right: [Int]) -> {pair: Pair, count: Int} {
             left_view: left[0..1]
             right_view: right[0..1]
-            return (pair: Pair{left: left_view, right: right_view}, count: 1)
+            return {pair: Pair{left: left_view, right: right_view}, count: 1}
         }
 
         generic: fn(self, left: [Int], right: [Int]) -> Envelope<Pair> {
@@ -81,10 +81,10 @@ Last: struct {
             return Ok(Pair{left: left_view, right: right_view})
         }
 
-        tupled: fn(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
+        tupled: fn(self, left: [Int], right: [Int]) -> {pair: Pair, count: Int} {
             left_view: left[0..1]
             right_view: right[0..1]
-            return (pair: Pair{left: left_view, right: right_view}, count: 1)
+            return {pair: Pair{left: left_view, right: right_view}, count: 1}
         }
 
         generic: fn(self, left: [Int], right: [Int]) -> Envelope<Pair> {

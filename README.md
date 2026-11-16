@@ -47,8 +47,8 @@ count_words: fn(text: String) -> [String:Int] {
 
 run: fn(args: Args) {
     text: fs.read(args.path)
-    rows := [(word: String, n: Int)]{}
-    loop (word, n) in count_words(text) -> rows.push((word: word, n: n))
+    rows := [{word: String, n: Int}]{}
+    loop (word, n) in count_words(text) -> rows.push({word: word, n: n})
     rows.sort_by(fn(a, b) { (b.n <=> a.n).then(a.word <=> b.word) })
     loop row in rows.take(args.top) -> print("{row.n}  {row.word}")
 }

@@ -145,7 +145,7 @@ StagedPlanAction: struct {
         authority_tools: pkg_staged_unique_tools(self.authority.tools)
         authority_effects: pkg_staged_unique_effects(self.authority.effects)
         names := [String]{}
-        output_owners := [(output: String, owner: String)]{}
+        output_owners := [{output: String, owner: String}]{}
         dependencies := [String:[String]]{}
         if fragment.actions.len() == 0 -> return Err(StagedPlanError.EmptyFragment)
         loop action in fragment.actions {
@@ -190,7 +190,7 @@ StagedPlanAction: struct {
                         return Err(StagedPlanError.OutputConflict{first: owned.output, first_owner: owned.owner, second: output.copy(), second_owner: action.name})
                     }
                 }
-                output_owners.push((output: output, owner: action.name))
+                output_owners.push({output: output, owner: action.name})
             }
             loop dependency in action.dependencies {
                 if dependency == action.name || dependency.trim() == "" {

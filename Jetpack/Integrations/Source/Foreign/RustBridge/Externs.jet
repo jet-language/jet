@@ -88,7 +88,7 @@ ExternEntry: struct {
     jet_name: String
     rust_path: String
     wrapper_name: String
-    params: [(convention: AccessConvention, ty: Type)]
+    params: [{convention: AccessConvention, ty: Type}]
     param_names: [String]
     return_type: Type?
     crate_spec: String
@@ -181,7 +181,7 @@ pkg_ffi_is_handle: fn(ty: Type, handle_names: [String]) -> Bool Never! {
 // One checked `#[repr(C)]` record declaration.
 CRecordDecl: struct {
     rust_name: String
-    fields: [(name: String, ty: Type)]
+    fields: [{name: String, ty: Type}]
     alignment: Int?
 }
 
@@ -350,9 +350,9 @@ pkg_ffi_param_names: fn(params: [Param]) -> [String] Never! {
     names
 }
 
-pkg_ffi_param_shapes: fn(params: [Param]) -> [(convention: AccessConvention, ty: Type)] Never! {
-    shapes := [(convention: AccessConvention, ty: Type)]{}
-    loop param in params -> shapes.push((convention: param.convention, ty: param.ty))
+pkg_ffi_param_shapes: fn(params: [Param]) -> [{convention: AccessConvention, ty: Type}] Never! {
+    shapes := [{convention: AccessConvention, ty: Type}]{}
+    loop param in params -> shapes.push({convention: param.convention, ty: param.ty})
     shapes
 }
 
@@ -535,9 +535,9 @@ pkg_ffi_collect_record: fn(definition: StructDef, owner: String, records: &[CRec
     rust_name: pkg_ffi_c_record_rust_name(key)
     names[key] = rust_name
     if !names.has_key(definition.name) -> names[definition.name] = rust_name
-    fields := [(name: String, ty: Type)]{}
+    fields := [{name: String, ty: Type}]{}
     declared: definition.fields
-    loop field in declared -> fields.push((name: field.name, ty: field.ty))
+    loop field in declared -> fields.push({name: field.name, ty: field.ty})
     records.push(CRecordDecl{rust_name: rust_name, fields: fields, alignment: pkg_ffi_struct_layout_alignment(layout)})
 }
 
@@ -808,11 +808,11 @@ pkg_ffi_collect_crate_deps: fn(entries: [ExternEntry]) -> [String:String] Never!
 }
 
 // `std` is `None`; `name@version` is the pair.
-pkg_ffi_parse_crate_spec: fn(spec: String) -> (name: String, version: String)? Never! {
+pkg_ffi_parse_crate_spec: fn(spec: String) -> {name: String, version: String}? Never! {
     if spec == "std" -> return None
     parts: spec.split_once("@") ?? return None
     if parts.before == "" || parts.after == "" -> return None
-    Val((name: parts.before, version: parts.after))
+    Val({name: parts.before, version: parts.after})
 }
 
 // A map's keys in sorted order (the Rust `BTreeMap` iteration order).

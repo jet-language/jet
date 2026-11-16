@@ -497,12 +497,12 @@ Dissent: struct {
 
 // `/^<prefix>([^.]+)\./`: the text after `prefix` up to the first `.` (at
 // least one character), and the text after that `.`.
-prefixed_field: fn(text: String, prefix: String) -> (value: String, rest: String)? Never! {
+prefixed_field: fn(text: String, prefix: String) -> {value: String, rest: String}? Never! {
     if !text.starts_with(prefix) -> return None
     tail: text.remove_prefix(prefix)
     if tail.find(".") <= 0 -> return None
     parts: tail.partition(".")
-    Val((value: parts.head.copy(), rest: parts.tail.copy()))
+    Val({value: parts.head.copy(), rest: parts.tail.copy()})
 }
 
 // store.mjs `dissentMetadata`.

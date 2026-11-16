@@ -95,10 +95,10 @@ PackageIndex: struct {
     // then documentation; ties by source and name.
     search: fn(self, query: String) -> [PackageIndexEntry] Never! {
         q: pkg_ascii_lower(query)
-        scored := [(score: Int, record: PackageIndexEntry)]{}
+        scored := [{score: Int, record: PackageIndexEntry}]{}
         loop record in self.packages {
             score: env_discovery_score(record, q) ?? next
-            scored.push((score: score, record: record))
+            scored.push({score: score, record: record})
         }
         // Stable passes from the least significant key.
         scored.sort_by(fn(item) { item.record.name })
@@ -367,19 +367,19 @@ env_discovery_published_source: fn(source: String) -> String Never! {
 }
 
 // A version read from the ref's offline provider fixture.
-env_discovery_fixture_version: fn(fixtures: String?, spec: RefSpec) -[FS]> (version: String, provenance: String)? Never! {
+env_discovery_fixture_version: fn(fixtures: String?, spec: RefSpec) -[FS]> {version: String, provenance: String}? Never! {
     dir: fixtures ?? return None
     path: files.join(dir, provider_fixture_name(spec))
     text: files.read(path) ?? return None
     out: env_discovery_provider_output_path(text) ?? return None
-    Val((version: env_discovery_store_path_version(out, spec.short_name()), provenance: "fixture:{path}"))
+    Val({version: env_discovery_store_path_version(out, spec.short_name()), provenance: "fixture:{path}"})
 }
 
 // A version from the hangar record realized for exactly this ref.
-env_discovery_store_version: fn(entries: [StoreEntry], spec: RefSpec) -> (version: String, provenance: String)? Never! {
+env_discovery_store_version: fn(entries: [StoreEntry], spec: RefSpec) -> {version: String, provenance: String}? Never! {
     loop entry in entries {
         if entry.reference == spec.raw {
-            return Val((version: entry.version, provenance: "hangar:{entry.id}"))
+            return Val({version: entry.version, provenance: "hangar:{entry.id}"})
         }
     }
     None
@@ -444,20 +444,20 @@ env_discovery_version_after_name: fn(rest: String, name: String) -> String? Neve
 }
 
 // A query's optional source and its package name.
-env_discovery_split_query: fn(query: String) -> (source: String?, name: String) Never! {
+env_discovery_split_query: fn(query: String) -> {source: String?, name: String} Never! {
     if query.cut_last(REF_PROVIDER_AT) == {
-        .Val(halves) -> return (source: Val(halves.after), name: halves.before)
+        .Val(halves) -> return {source: Val(halves.after), name: halves.before}
         .None -> {}
     }
     if query.split_once(REF_SEPARATOR) == {
-        .Val(halves) -> return (source: Val(halves.before), name: halves.after)
+        .Val(halves) -> return {source: Val(halves.before), name: halves.after}
         .None -> {}
     }
     if query.split_once(".") == {
-        .Val(halves) -> return (source: Val(halves.before), name: halves.after)
+        .Val(halves) -> return {source: Val(halves.before), name: halves.after}
         .None -> {}
     }
-    (source: None, name: query)
+    {source: None, name: query}
 }
 
 env_discovery_record_tree: fn(record: PackageIndexEntry) -> Dyn Never! {

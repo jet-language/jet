@@ -382,13 +382,13 @@ pkg_lock_e1202: fn(lock_path: String) -> Diagnostic Never! {
 
 // E1205: lock data is corrupt or exceeds the reader safety bound.
 pkg_lock_e1205_lock_corrupt: fn(lock_path: String) -> Diagnostic Never! {
-    pkg_diagnostic_from_row("E1205", [(name: String, value: String)]{(name: "path", value: lock_path)}, None)
+    pkg_diagnostic_from_row("E1205", [{name: String, value: String}]{{name: "path", value: lock_path}}, None)
 }
 
 // E1214: the lock declares a format version outside this reader's support
 // set.
 pkg_lock_e1214_lock_unsupported: fn(lock_path: String, version: String, supported: String) -> Diagnostic Never! {
-    pkg_diagnostic_from_row("E1214", [(name: String, value: String)]{(name: "path", value: lock_path), (name: "version", value: version), (name: "supported", value: supported)}, None)
+    pkg_diagnostic_from_row("E1214", [{name: String, value: String}]{{name: "path", value: lock_path}, {name: "version", value: version}, {name: "supported", value: supported}}, None)
 }
 
 // E1202 for a workspace lock whose source/index identity cannot be trusted.
@@ -428,12 +428,12 @@ pkg_lock_dep_source: fn(dep_name: String, spec: DepSpec) -> LockSource Never! {
 // A registered diagnostic whose What/Why/Fix come from the registry row
 // templates, with each `{name}` placeholder filled (Rust
 // `Diagnostic::from_row`).
-pkg_diagnostic_from_row: fn(code: String, args: [(name: String, value: String)], span: Span?) -> Diagnostic Never! {
+pkg_diagnostic_from_row: fn(code: String, args: [{name: String, value: String}], span: Span?) -> Diagnostic Never! {
     row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
     diagnostic_from_registry(code, span, pkg_diagnostic_fill_row(row.what, args), pkg_diagnostic_fill_row(row.why, args), pkg_diagnostic_fill_row(row.fix, args))
 }
 
-pkg_diagnostic_fill_row: fn(template: String, args: [(name: String, value: String)]) -> String Never! {
+pkg_diagnostic_fill_row: fn(template: String, args: [{name: String, value: String}]) -> String Never! {
     text := template
     loop arg in args -> text = text.replace("{{{arg.name}}}", arg.value)
     text

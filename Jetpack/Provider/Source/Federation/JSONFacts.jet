@@ -237,12 +237,12 @@ impl ProviderFactReport {
         facts.source_identity = "npm:{facts.name}@{facts.version}"
         facts.add_json_projection("provider.npm.native", object)
         if separate_package -> facts.add_json_projection("provider.npm.package", metadata)
-        dependency_sets: [(field: String, kind: String)]{
-            (field: "dependencies", kind: "runtime"),
-            (field: "devDependencies", kind: "dev"),
-            (field: "optionalDependencies", kind: "optional"),
-            (field: "peerDependencies", kind: "peer"),
-            (field: "bundledDependencies", kind: "bundled"),
+        dependency_sets: [{field: String, kind: String}]{
+            {field: "dependencies", kind: "runtime"},
+            {field: "devDependencies", kind: "dev"},
+            {field: "optionalDependencies", kind: "optional"},
+            {field: "peerDependencies", kind: "peer"},
+            {field: "bundledDependencies", kind: "bundled"},
         }
         loop set in dependency_sets {
             value: metadata.get(set.field) ?? next
@@ -338,13 +338,13 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        projections: [(field: String, target: String)]{
-            (field: "deprecated", target: "provider.npm.advisory.deprecated"),
-            (field: "repository", target: "provider.npm.source.repository"),
-            (field: "publishConfig", target: "provider.npm.source.publish_config"),
-            (field: "author", target: "provider.npm.source.author"),
-            (field: "maintainers", target: "provider.npm.source.maintainers"),
-            (field: "dist-tags", target: "provider.npm.channel.dist_tags"),
+        projections: [{field: String, target: String}]{
+            {field: "deprecated", target: "provider.npm.advisory.deprecated"},
+            {field: "repository", target: "provider.npm.source.repository"},
+            {field: "publishConfig", target: "provider.npm.source.publish_config"},
+            {field: "author", target: "provider.npm.source.author"},
+            {field: "maintainers", target: "provider.npm.source.maintainers"},
+            {field: "dist-tags", target: "provider.npm.channel.dist_tags"},
         }
         loop projection in projections {
             value: metadata.get(projection.field) ?? next
@@ -428,11 +428,11 @@ impl ProviderFactReport {
             }
             facts.add_typed_text("{namespace}.{key}", value)
         }
-        list_fields: [(field: String, kind: String)]{
-            (field: "requires_dist", kind: "runtime"),
-            (field: "provides_extra", kind: "extra"),
-            (field: "classifiers", kind: "classifier"),
-            (field: "project_urls", kind: "project_url"),
+        list_fields: [{field: String, kind: String}]{
+            {field: "requires_dist", kind: "runtime"},
+            {field: "provides_extra", kind: "extra"},
+            {field: "classifiers", kind: "classifier"},
+            {field: "project_urls", kind: "project_url"},
         }
         loop list_field in list_fields {
             value: info.get(list_field.field) ?? next
@@ -503,18 +503,18 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        json_projections: [(field: String, target: String)]{
-            (field: "obsoletes_dist", target: "provider.pypi.advisory.obsoletes"),
-            (field: "provides_dist", target: "provider.pypi.metadata.provides"),
-            (field: "license_files", target: "provider.pypi.metadata.license_files"),
-            (field: "import_name", target: "provider.pypi.metadata.import_name"),
-            (field: "import_namespaces", target: "provider.pypi.metadata.import_namespaces"),
+        json_projections: [{field: String, target: String}]{
+            {field: "obsoletes_dist", target: "provider.pypi.advisory.obsoletes"},
+            {field: "provides_dist", target: "provider.pypi.metadata.provides"},
+            {field: "license_files", target: "provider.pypi.metadata.license_files"},
+            {field: "import_name", target: "provider.pypi.metadata.import_name"},
+            {field: "import_namespaces", target: "provider.pypi.metadata.import_namespaces"},
         }
         loop projection in json_projections {
             value: info.get(projection.field) ?? next
             facts.add_typed_json(projection.target, value)
         }
-        artifact_hashes := [(filename: String, digest: String)]{}
+        artifact_hashes := [{filename: String, digest: String}]{}
         urls: pkg_json_array(object.get("urls") ?? Dyn.Null) ?? [Dyn]{}
         loop index in 0..<urls.len() {
             url: pkg_json_object(urls[index]) ?? {
@@ -543,7 +543,7 @@ impl ProviderFactReport {
                                     next
                                 }
                                 if algorithm == "sha256" {
-                                    artifact_hashes.push((filename: filename, digest: digest))
+                                    artifact_hashes.push({filename: filename, digest: digest})
                                     facts.add_typed_text("provider.pypi.artifact.{index}.sha256", digest)
                                 }
                                 facts.add_typed_text("provider.pypi.signature.{index}.{algorithm}", digest)

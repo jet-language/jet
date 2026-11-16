@@ -279,20 +279,20 @@ expr_code_subselect: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
 // exprVectorRegister: the register of field i_field of vector `v` (a
 // TK_SELECT's results start at reg_select), the field's expression, and a
 // temporary register for the caller to free.
-expr_vector_register: fn(p: &cg.Parse, a: &ast.AST, v: Int, i_field: Int, reg_select: Int) -[DB]> (reg: Int, e: Int, free: Int) Never! {
+expr_vector_register: fn(p: &cg.Parse, a: &ast.AST, v: Int, i_field: Int, reg_select: Int) -[DB]> {reg: Int, e: Int, free: Int} Never! {
     op: a.exprs[v].op
     if op == tk.TK_REGISTER {
-        return (reg: a.exprs[v].itable + i_field, e: ast.vector_field_subexpr(a, v, i_field), free: 0)
+        return {reg: a.exprs[v].itable + i_field, e: ast.vector_field_subexpr(a, v, i_field), free: 0}
     }
     if op == tk.TK_SELECT {
-        return (reg: reg_select + i_field, e: ast.list_expr(a, a.selects[a.exprs[v].x].elist, i_field), free: 0)
+        return {reg: reg_select + i_field, e: ast.list_expr(a, a.selects[a.exprs[v].x].elist, i_field), free: 0}
     }
     if op == tk.TK_VECTOR {
         fe: ast.list_expr(a, a.exprs[v].x, i_field)
         t: expr_code_temp(p, a, fe)
-        return (reg: t.reg, e: fe, free: t.free)
+        return {reg: t.reg, e: fe, free: t.free}
     }
-    (reg: 0, e: -1, free: 0)
+    {reg: 0, e: -1, free: 0}
 }
 
 // codeVectorCompare: the comparison `e` of two vectors, its result (1, 0 or
@@ -503,7 +503,7 @@ in_rhs_is_constant: fn(a: &ast.AST, e: Int) -> Bool Never! {
 // (an IN_INDEX_* type), its cursor, and the index column each LHS field
 // maps to. With want_null, rhs_has_null receives the register that is NULL
 // when the RHS holds a NULL (untouched when it cannot).
-find_in_index: fn(p: &cg.Parse, a: &ast.AST, x: Int, in_flags: Int, want_null: Bool, rhs_has_null: &Int) -[DB]> (typ: Int, tab: Int, map: [Int]) Never! {
+find_in_index: fn(p: &cg.Parse, a: &ast.AST, x: Int, in_flags: Int, want_null: Bool, rhs_has_null: &Int) -[DB]> {typ: Int, tab: Int, map: [Int]} Never! {
     must_be_unique: in_flags & IN_INDEX_LOOP != 0
     i_tab := p.f.n_tab
     p.f.n_tab += 1
@@ -619,7 +619,7 @@ find_in_index: fn(p: &cg.Parse, a: &ast.AST, x: Int, in_flags: Int, want_null: B
     if e_type != IN_INDEX_INDEX_ASC && e_type != IN_INDEX_INDEX_DESC {
         loop i in 0..<n_vec -> ai_map[i] = i
     }
-    (typ: e_type, tab: i_tab, map: ai_map)
+    {typ: e_type, tab: i_tab, map: ai_map}
 }
 
 // exprINAffinity: the affinity of each comparison of IN `e`.
@@ -1054,13 +1054,13 @@ expr_to_register: fn(a: &ast.AST, e: Int, i_reg: Int) Never! {
 
 // exprCodeVector: vector or scalar `e` into consecutive registers; the
 // first, and a temporary scalar register to free (0 for none).
-expr_code_vector: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (reg: Int, free: Int) Never! {
+expr_code_vector: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> {reg: Int, free: Int} Never! {
     n_result: ast.vector_size(a, e)
     if n_result == 1 {
         t: expr_code_temp(p, a, e)
-        return (reg: t.reg, free: t.free)
+        return {reg: t.reg, free: t.free}
     }
-    if a.exprs[e].op == tk.TK_SELECT -> return (reg: code_subselect(p, a, e), free: 0)
+    if a.exprs[e].op == tk.TK_SELECT -> return {reg: code_subselect(p, a, e), free: 0}
     i_result: p.f.n_mem + 1
     p.f.n_mem += n_result
     list: a.exprs[e].x
@@ -1068,7 +1068,7 @@ expr_code_vector: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (reg: Int, free: 
         ie: ast.list_expr(a, list, i)
         expr_code_factorable(p, a, ie, i + i_result)
     }
-    (reg: i_result, free: 0)
+    {reg: i_result, free: 0}
 }
 
 // setDoNotMergeFlagOnCopy.
@@ -1684,16 +1684,16 @@ expr_code_run_just_once: fn(p: &cg.Parse, a: &ast.AST, e0: Int, reg_dest0: Int) 
 
 // sqlite3ExprCodeTemp: code `e0` into a register; the register, and the
 // temporary register to free (0 when the result is not a temporary).
-expr_code_temp: fn(p: &cg.Parse, a: &ast.AST, e0: Int) -[DB]> (reg: Int, free: Int) Never! {
+expr_code_temp: fn(p: &cg.Parse, a: &ast.AST, e0: Int) -[DB]> {reg: Int, free: Int} Never! {
     e: ast.skip_collate_and_likely(a, e0)
     if p.f.ok_const_factor && e >= 0 && a.exprs[e].op != tk.TK_REGISTER && ast.expr_is_constant_not_join(a, e) {
-        return (reg: expr_code_run_just_once(p, a, e, -1), free: 0)
+        return {reg: expr_code_run_just_once(p, a, e, -1), free: 0}
     }
     r1: cg.get_temp_reg(p)
     r2: expr_code_target(p, a, e, r1)
-    if r2 == r1 -> return (reg: r1, free: r1)
+    if r2 == r1 -> return {reg: r1, free: r1}
     cg.release_temp_reg(p, r1)
-    (reg: r2, free: 0)
+    {reg: r2, free: 0}
 }
 
 // sqlite3ExprCode: code `e` into register target.

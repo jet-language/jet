@@ -182,7 +182,7 @@ RegistrySourceObject: struct {
 
 // The CAS closure edges and `dependency.object.*` facts of every non-root
 // source archive, in closure order (Rust `dependency_objects`).
-provider_registry_dependency_objects: fn(root: String, objects: [RegistrySourceObject]) -> (references: [String], facts: [String:String]) Never! {
+provider_registry_dependency_objects: fn(root: String, objects: [RegistrySourceObject]) -> {references: [String], facts: [String:String]} Never! {
     references := [String]{}
     facts := [String:String]{}
     loop object in objects {
@@ -191,7 +191,7 @@ provider_registry_dependency_objects: fn(root: String, objects: [RegistrySourceO
         facts["dependency.object.{digest}"] = "sources/{object.file_name}"
         references.push(digest)
     }
-    (references: references, facts: facts)
+    {references: references, facts: facts}
 }
 
 // A tool on PATH (Rust `which`: the first `PATH` entry holding a file).
@@ -260,9 +260,9 @@ provider_registry_tail: fn(text: String, start: Int) -> String Never! {
 }
 
 // `str::rsplit_once`.
-provider_registry_rsplit_once: fn(text: String, needle: String) -> (before: String, after: String)? Never! {
+provider_registry_rsplit_once: fn(text: String, needle: String) -> {before: String, after: String}? Never! {
     at: provider_registry_rfind(text, needle) ?? return None
-    Val((before: provider_registry_slice(text, 0, at), after: provider_registry_tail(text, at + needle.bytes().len())))
+    Val({before: provider_registry_slice(text, 0, at), after: provider_registry_tail(text, at + needle.bytes().len())})
 }
 
 // A `u64` parse (`str::parse::<u64>`): an optional `+`, then ASCII digits.

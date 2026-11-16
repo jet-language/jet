@@ -289,7 +289,7 @@ E3203 for a non-C type, E1341 for a shared symbol).
 leaves: `host_monotonic_ns` (`-[Time]> Int`) and `clock_mono_ns` (`-[Time.Wait]> Int`, the deadline reads of waits), `sleep_ns`
 (`-[Time.Wait]>`), `task_timeout` (the `task.timeout` deadline),
 `reject_uncontrolled`, `wall_sample`
-(`(epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool)`), the controlled
+(`{epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool}`), the controlled
 and world clocks `world_wall_ms`, `wall_override_ms`, `controlled_monotonic_ns`
 and `world_monotonic_ns` (`Int?`), `zone_env` (`-[Env]> String?`),
 `zone_file_bytes` (`-[FS.Read]> [U8]?`) and the pure `embedded_zone_bytes`. A
@@ -303,11 +303,11 @@ built on: `stdio_put_text`, `stdio_put_bytes` and `stdio_flush`
 own, the one stdout policy decides), the pure `stdio_fault`, `stdout_terminal` and
 `stderr_terminal`, and the `terminal8_*` reads and writes. A read answers its
 failure as an item: `terminal8_line` is
-`(eof: Bool, line: String, read_error: String?)` and `terminal8_stty` is
-`(h: Int, w: Int)?`. `jet.runtime.log` holds the logging cells `core.log` is
+`{eof: Bool, line: String, read_error: String?}` and `terminal8_stty` is
+`{h: Int, w: Int}?`. `jet.runtime.log` holds the logging cells `core.log` is
 built on (`level_load`, `filter_store`, …; the sink and format cells are the
 process's, the rest the calling thread's), `flush`,
-`process_exit` and `span_allocate` (`(id: Int, name: String)`), each
+`process_exit` and `span_allocate` (`{id: Int, name: String}`), each
 `-[Log]>`, and the pure `metric_publish`. `jet.runtime.encoding` holds the pure codec scopes
 `text_cells_*` and `etf_strings_*` that CSV, typed data, `core.sys.decode`
 and ETF decoding enter.
@@ -2711,8 +2711,8 @@ need `Env, Exec`, as `fork()` does.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `cpu_time_limit()` / `set_cpu_time_limit(soft, hard)` | `-[Env]> (soft: Duration?, hard: Duration?) IOError!` / `-[Env, Exec]> IOError!` | CPU time (`RLIMIT_CPU`). |
-| `memory_limit()` / `set_memory_limit(soft, hard)` | `-[Env]> (soft: Int?, hard: Int?) IOError!` / `-[Env, Exec]> IOError!` | Address space (`RLIMIT_AS`), the limit `ProcessSpec.memory_limit` sets for one child. |
+| `cpu_time_limit()` / `set_cpu_time_limit(soft, hard)` | `-[Env]> {soft: Duration?, hard: Duration?} IOError!` / `-[Env, Exec]> IOError!` | CPU time (`RLIMIT_CPU`). |
+| `memory_limit()` / `set_memory_limit(soft, hard)` | `-[Env]> {soft: Int?, hard: Int?} IOError!` / `-[Env, Exec]> IOError!` | Address space (`RLIMIT_AS`), the limit `ProcessSpec.memory_limit` sets for one child. |
 | `open_file_limit()` / `set_open_file_limit(soft, hard)` | as above | Open descriptors (`RLIMIT_NOFILE`). |
 | `core_file_limit()` / `set_core_file_limit(soft, hard)` | as above | Core-file size (`RLIMIT_CORE`); `set_core_file_limit(0, hard)` turns off core dumps. |
 | `stack_limit()` / `set_stack_limit(soft, hard)` | as above | Stack size (`RLIMIT_STACK`). |
@@ -3242,7 +3242,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 `scaleb`) returns the exact `F32` result, and `next_up`, `next_down` and
 `next_after` step by one binary32 unit (C23 `fmodf`, `fmaximumf`,
 `nextupf` and the rest); the exponent of `ldexp` and `scaleb` stays an
-`Int`. An all-F32 `rem_quo` returns `(rem: F32, quo: Int)` (C23
+`Int`. An all-F32 `rem_quo` returns `{rem: F32, quo: Int}` (C23
 `remquof`): its remainder is exact in `F32` and its quotient stays an
 `Int`. An all-F32 `frexp` and `modf` split the binary32 word into `F32`
 parts, the exponent an `Int` (C23 `frexpf` and `modff`). The bit-level calls
@@ -3302,7 +3302,7 @@ The other spellings `expm1`, `log1p`, `truncate`, `nextafter` and
 | `math.round_even(x)` | the type of `x` | Round to the nearest integral value of `x`'s own `Roundable` type, ties to even (for a Float, C23 `roundeven`, and `rint`/`nearbyint` in the default rounding mode). |
 | `x.rounded(mode)` / `math.Roundable` | the type of `x` | The trait behind the five roundings: `rounded(mode: math.Rounding) -> Self Never!`, implemented by `Float`, `F32`, `Decimal` and `Fraction` (exactly, in every mode) and by `Int` and every sized integer (the value itself). A rounding can't fail, so a call through the trait returns its value plainly. Call it when the mode is a runtime value; `impl MyNumber.Roundable` makes a user type round with `math.round` and the others, and its `rounded` writes `-> MyNumber Never!`. |
 | `math.round_to_signed(x, mode, bits)` / `math.round_to_unsigned(x, mode, bits)` | `Int?` | Round in `mode` (a `math.Rounding`: `TowardNegative`, `TowardPositive`, `TowardZero`, `TiesToAway` or `TiesToEven`) to an integer that fits a two's-complement or unsigned integer of `bits` bits (C23 `fromfp`/`ufromfp`; widths above 64 read as 64). `None` for an infinity, a NaN, `bits` below 1 or a result outside the width. |
-| `math.remainder(a, b)` / `math.rem_quo(a, b)` | `Float` / `(rem: Float, quo: Int)`; two `F32`s give `F32` / `(rem: F32, quo: Int)` | IEEE remainder `a - n * b` for the integer `n` nearest `a / b`, ties to even; `rem_quo` also returns the low 31 bits of `n` with the sign of `a / b` (C `remquo`). |
+| `math.remainder(a, b)` / `math.rem_quo(a, b)` | `Float` / `{rem: Float, quo: Int}`; two `F32`s give `F32` / `{rem: F32, quo: Int}` | IEEE remainder `a - n * b` for the integer `n` nearest `a / b`, ties to even; `rem_quo` also returns the low 31 bits of `n` with the sign of `a / b` (C `remquo`). |
 | `math.fdim(a, b)` | `Float` | `a - b` when `a` is greater, else `+0`; a NaN operand is the result. |
 | `math.min_float(a, b)` / `math.max_float(a, b)` | `Float` | C `fmin`/`fmax`: a NaN operand gives the other, and `-0` orders below `+0`. |
 | `math.minimum(a, b)` / `maximum(a, b)`, `minimum_num(a, b)` / `maximum_num(a, b)`, `minimum_mag(a, b)` / `maximum_mag(a, b)`, `minimum_mag_num(a, b)` / `maximum_mag_num(a, b)` | `Float` | IEEE 754-2019 minimum and maximum (C23 `fminimum` family): `-0` orders below `+0`; the plain and `_mag` forms give a NaN when either operand is one, the `_num` forms give a NaN only when both are; the `_mag` forms compare magnitudes first. |
@@ -3314,9 +3314,9 @@ The other spellings `expm1`, `log1p`, `truncate`, `nextafter` and
 | `math.round(x)` | the type of `x` | Round to the nearest integral value of `x`'s own `Roundable` type, ties away from zero: a Float 2.5 is 3.0, and `Int{math.round(x)}` is the nearest Int (stopping, as `Int{…}` does, on a NaN, an infinity or a value outside the signed 64-bit range). |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
 | `math.f32_to_bits(x)` / `math.f32_from_bits(word)` | `U32` / `F32` | Convert between an `F32` and its binary32 bits: one bit copy, so NaN payloads and the sign of zero cross unchanged; no allocation, no failure. |
-| `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together, each correctly rounded as `cos` and `sin` give it. |
-| `math.modf(x)` | `(fract: Float, whole: Float)`; `F32` parts for an `F32` | Split a value into fractional and whole parts, each with the sign of `x`; an infinity has fraction `±0`. |
-| `math.frexp(x)` | `(exp: Int, frac: Float)`; an `F32` `frac` for an `F32` | Split a value into `frac * 2^exp` with `abs(frac)` in [0.5, 1) (C `frexp`); a zero, an infinity or a NaN is its own `frac` with `exp` 0. |
+| `math.sin_cos(x)` | `{cos: Float, sin: Float}` | Compute cosine and sine together, each correctly rounded as `cos` and `sin` give it. |
+| `math.modf(x)` | `{fract: Float, whole: Float}`; `F32` parts for an `F32` | Split a value into fractional and whole parts, each with the sign of `x`; an infinity has fraction `±0`. |
+| `math.frexp(x)` | `{exp: Int, frac: Float}`; an `F32` `frac` for an `F32` | Split a value into `frac * 2^exp` with `abs(frac)` in [0.5, 1) (C `frexp`); a zero, an infinity or a NaN is its own `frac` with `exp` 0. |
 | `math.checked_abs(x)`, `checked_neg(x)`, `checked_add(a,b)`, `checked_sub(a,b)`, `checked_mul(a,b)`, `checked_div(a,b)`, `checked_rem(a,b)`, `checked_pow(a,b)` | `Int?` | Return `None` on integer overflow or invalid division/remainder; checked power also rejects a negative exponent. |
 | `math.int_pow(base, exponent)` | `Int` | Exact integer exponentiation through `base ^ exponent`; a negative runtime exponent stops with E3010 instead of returning a sentinel. |
 | `math.saturating_add(a,b)`, `saturating_sub(a,b)`, `saturating_mul(a,b)` | `Int` | Perform integer arithmetic while clamping overflow to the representable endpoint. |
@@ -4079,7 +4079,7 @@ native date-time carrier.
 | `calendar.isleap(year)` | `Bool` | Test leap-year status. |
 | `calendar.leapdays(y1, y2)` | `Int` | Count leap days between the smaller and larger endpoint, excluding the larger year. |
 | `calendar.weekday(year, month, day)` | `Int` | Return Monday `0` through Sunday `6`. |
-| `calendar.monthrange(year, month)` | `(days: Int, weekday: Int)` | Return the day count and Monday-based first weekday. Invalid months retain the `30`-day default. |
+| `calendar.monthrange(year, month)` | `{days: Int, weekday: Int}` | Return the day count and Monday-based first weekday. Invalid months retain the `30`-day default. |
 | `calendar.monthcalendar(year, month)` / `monthcalendar_start(year, month, firstweekday)` | `[[Int]]` | Build a month grid. |
 | `calendar.yearcalendar(year)` | `[[[Int]]]` | Build a year calendar. |
 | `calendar.day_name(index)` / `day_abbr(index)` | `String` | Return fixed English day names. |
@@ -4092,7 +4092,7 @@ native date-time carrier.
 
 `core.encoding` converts complete values to and from `Dyn`. Objects retain
 arrival order: the `Object` payload is the ordered pair list
-`[(key: String, value: Dyn)]` (D-DATATREE-ORDER1), and a repeated name is a
+`[{key: String, value: Dyn}]` (D-DATATREE-ORDER1), and a repeated name is a
 `Syntax` error except under `json.parse_allow_duplicates`. Integers and
 floating-point numbers remain distinct, and
 malformed input returns a typed `EncodingError`. The whole-value codecs are
@@ -4815,7 +4815,7 @@ sendability rules. The implementation is in
 | `recv<T>(rx: Receiver<T>) -[Time.Wait]> T?` | value | Receive the next value; None once the channel is closed and drained. |
 | `try_recv<T>(rx: Receiver<T>) -> T?` | value | Take a queued value without waiting; None when nothing is queued. |
 | `waitall<T>(receivers: [Receiver<T>]) -[Time.Wait]> [T?]` | values | One `recv` per receiver, in order. |
-| `waitany<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?)` | answer | The receiver that answered and its `recv` result; the list must not be empty. |
+| `waitany<T>(receivers: [Receiver<T>]) -[Time.Wait]> {index: Int, value: T?}` | answer | The receiver that answered and its `recv` result; the list must not be empty. |
 | `yield_now() -[Time.Wait]>` | — | Yield to another runnable task. |
 | `current_task() -> TaskID` | identity | Identify the running task. |
 | `cpu_ns() -[Time]> Int` | nanoseconds | The CPU time the running task has used. |
@@ -4880,7 +4880,7 @@ Core enum names from generated metadata, and still require a public type export
 from the imported module.
 
 The source scheduler-channel constructors preserve the declared
-`(sender: Sender<T>, receiver: Receiver<T>)` pair by projecting the raw
+`{sender: Sender<T>, receiver: Receiver<T>}` pair by projecting the raw
 channel's fields by name, rather than returning `TaskState` or depending on
 the raw tuple's positional order. Bounded scheduler channels clamp capacities
 below one to one. Interval periods truncate to whole milliseconds and clamp to at least
@@ -5394,7 +5394,7 @@ and Compose sequences from the en_US.UTF-8 table. Keys are `core.term`'s
 |---|---|---|
 | `keymap(bytes: [U8]) -> Keymap UIError!` | keymap | Compile an XKB text-v1 keymap. |
 | `Keymap.modifiers(depressed: Int, latched: Int, locked: Int, group: Int)` | — | Apply a `wl_keyboard.modifiers` event. |
-| `Keymap.press(code: Int, down: Bool) -> (key: Key, text: String)` | key, text | Press or release evdev key `code`: its key and the text it types (`""` for none, for control characters and inside a Compose sequence). |
+| `Keymap.press(code: Int, down: Bool) -> {key: Key, text: String}` | key, text | Press or release evdev key `code`: its key and the text it types (`""` for none, for control characters and inside a Compose sequence). |
 | `Keymap.repeats(code: Int) -> Bool` | Boolean | Whether holding the key repeats it; modifier keys do not. |
 | `Keymap.codes() -> [Int]` | codes | The evdev codes of the keys with symbols at level 1 of group 1. |
 | `Keymap.keysym(code: Int) -> Int` / `.keysym_name(sym: Int) -> String` | keysym | The key's keysym, as `xkb_state_key_get_one_sym`, and libxkbcommon's name for a keysym. |
@@ -5800,6 +5800,15 @@ Remote calls one, and `app.endpoints<S>()` lists none. A method that
 calls one, each runs as the system (`db.Who.System`), which no row policy
 limits, and `jet inspect choices` lists it as a `rights` row under its
 marker.
+
+Code runs on the side of the app boundary that has what it uses. An
+endpoint, a job, a schedule, a webhook and a signing key run on the server,
+so such a method that uses the `Browser` effect is E2824
+(`jet.ServerCodeUsesBrowser`), at the method's name. In a program that opts
+in to the web partition, a function the partition places in JS runs in the
+page, so one that reaches a server resource (`DB` or `Secret`) is E2823
+(`jet.BrowserCodeReachesServerResource`), at the function where the page
+first reaches it: the one whose own JS callees reach none.
 
 The app graph is the program's one client-safe description: its services,
 its screens and how it works offline. `app.new(title)` starts it, and each
@@ -6431,9 +6440,9 @@ including for empty text. This is a separate operation from the module function
 |---|---|---|
 | `split(text: String, sep: String) -> [String]` | list | Split on a separator. |
 | `rsplit(text: String, sep: String, maxsplit: Int) -> [String]` | list | Split from the right with a maximum. |
-| `split_once(text: String, sep: String) -> (found: Bool, head: String, tail: String)` | tuple | Split at the first separator and report whether it was found. |
-| `partition(text: String, sep: String) -> (head: String, sep: String, tail: String)` | tuple | Return text before, separator, and after. |
-| `rpartition(text: String, sep: String) -> (head: String, sep: String, tail: String)` | tuple | Partition at the last separator. |
+| `split_once(text: String, sep: String) -> {found: Bool, head: String, tail: String}` | tuple | Split at the first separator and report whether it was found. |
+| `partition(text: String, sep: String) -> {head: String, sep: String, tail: String}` | tuple | Return text before, separator, and after. |
+| `rpartition(text: String, sep: String) -> {head: String, sep: String, tail: String}` | tuple | Partition at the last separator. |
 | `find(text: String, needle: String) -> Int` / `rfind(text, needle) -> Int` | index | Find the first or last byte index. |
 | `count(text: String, needle: String) -> Int` | integer | Count non-overlapping occurrences. |
 | `replace(text: String, old: String, new: String, count: Int) -> String` | text | Replace up to `count` occurrences; a negative count means all. |
@@ -6456,7 +6465,7 @@ including for empty text. This is a separate operation from the module function
 | `find_from(text, needle, start)`, `rfind_from(text, needle, end)` | index | Search from a byte position. |
 | `index(text, needle) -> Int` / `contains(text, needle) -> Bool` | index/Boolean | Return or test a match index. |
 | `parse_bool(text: String) -> Bool?` | option | Parse common Boolean spellings. |
-| `parse_kv(text: String, sep: String) -> (key: String, ok: Bool, value: String)` | tuple | Split and trim a key/value pair. |
+| `parse_kv(text: String, sep: String) -> {key: String, ok: Bool, value: String}` | tuple | Split and trim a key/value pair. |
 | `split_ws(text: String) -> [String]` | list | Split on ASCII whitespace. |
 | `unescape_c(text: String) -> String` / `escape_c(text: String) -> String` | text | Decode or encode C-style escapes. |
 | `expandtabs(text: String, tabsize: Int) -> String` | text | Expand tabs to the requested columns. |

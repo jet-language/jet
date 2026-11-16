@@ -206,7 +206,7 @@ run: fn() {
     // keep-going, as chain s2 does.
     if ["", "1"].contains(process.env_get_or("CENSUS_SELFCHECK", "")) {
         loop (package, name) in
-            [(package: "Compiler/JetCLI", name: "selfcheck"), (package: "Core", name: "selfcheck-core")] {
+            [{package: "Compiler/JetCLI", name: "selfcheck"}, {package: "Core", name: "selfcheck-core"}] {
             tsv: "{at}/{name}-keep-going.tsv"
             code: pass(jetenv(g, self_jet, Sh{"check --threads 12 {package}"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", ".").env("JET_KEEP_GOING", "1").env("JET_KEEP_GOING_REPORT", tsv).timeout(time.duration_seconds(1200)), "{at}/{name}.out", "{at}/{name}.err")
             count: rows(tsv)

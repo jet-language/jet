@@ -55,7 +55,7 @@ store_test_register_entry_locked: fn(verification: &StoreVerification, roots: Ha
     second_roots: store_test_temp_roots()
     forward: [String]{"a", "z"}
     reverse: [String]{"z", "a"}
-    orders: [(roots: HangarRoots, names: [String])]{(roots: first_roots, names: forward), (roots: second_roots, names: reverse)}
+    orders: [{roots: HangarRoots, names: [String]}]{{roots: first_roots, names: forward}, {roots: second_roots, names: reverse}}
     loop order in orders {
         journal: store_journal_dir(order.roots)
         files.create_dir_all(journal) ?? panic("journal dir")

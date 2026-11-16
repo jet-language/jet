@@ -1490,19 +1490,19 @@ ir_lint_out_words: fn(carrier: IRRouteCarrier) -> Int Never! {
 
 // The out pointers a route's result adds after its parameters' words, and
 // whether the call writes a result slot.
-ir_lint_result_words: fn(result: IRRouteResult) -> (words: Int, value: Bool) Never! {
+ir_lint_result_words: fn(result: IRRouteResult) -> {words: Int, value: Bool} Never! {
     if result == {
         .Plain(carrier) -> {
-            if carrier == .Unit -> return (words: 0, value: false)
-            if carrier == .List(_) -> return (words: 1, value: true)
-            (words: 0, value: true)
+            if carrier == .Unit -> return {words: 0, value: false}
+            if carrier == .List(_) -> return {words: 1, value: true}
+            {words: 0, value: true}
         }
-        .Option(some) -> (words: if some == .List(_) || some == .Frozen(_) || some == .Tuple(_) -> ir_lint_out_words(some) else -> 1, value: true)
-        .Result(ok, err) -> (words: (if ok == .Unit -> 0 else -> ir_lint_out_words(ok)) + (if err == .Unit -> 0 else -> ir_lint_out_words(err)), value: true)
+        .Option(some) -> {words: if some == .List(_) || some == .Frozen(_) || some == .Tuple(_) -> ir_lint_out_words(some) else -> 1, value: true}
+        .Result(ok, err) -> {words: (if ok == .Unit -> 0 else -> ir_lint_out_words(ok)) + (if err == .Unit -> 0 else -> ir_lint_out_words(err)), value: true}
         .Tuple(items) -> {
             words := 0
             loop item in items -> words += ir_lint_out_words(item)
-            (words: words, value: false)
+            {words: words, value: false}
         }
     }
 }

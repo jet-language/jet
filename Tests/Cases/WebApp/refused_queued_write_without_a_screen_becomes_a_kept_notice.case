@@ -1,0 +1,54 @@
+# A device that queues (`app.new(…).offline(.Queue)`), with no screen. The
+# first run queues three edits made offline: task 1, task 1 again on top of
+# the first edit (against version 2, the version that edit makes), and task
+# 2. After a restart, the desk has edited task 1 twice (version 3), and the
+# queue replays each edit with the version it was made against: both edits
+# of task 1 are refused as `Conflict`, each with its own notice in the app's
+# notice list, and the edit of task 2 commits. After another restart both
+# notices are still listed: a notice is kept until it is dismissed. Each
+# tier keeps its own data directory: the same output on O0, O1 and O2.
+fixture: RefusedQueuedWriteBecomesAKeptNotice.fixture
+env: NO_COLOR=1
+step o0: jet run -A -O0 main.jet
+env: XDG_DATA_HOME={work}/o0
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: = "phone reads: plan (version 1); ship (version 1)\nfirst run\npending: 3\n"
+step o0_restart: jet run -A -O0 main.jet
+env: XDG_DATA_HOME={work}/o0
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: = "after restart\npending: 3\nphone reconnected\npending: 0\nnotice: The server refused `edit`, so it was undone: {\"Conflict\":3}\nnotice: The server refused `edit`, so it was undone: {\"Conflict\":3}\ndesk reads: desk plan v3 (version 3); ship it (version 2)\n"
+file: o0/main/app.queue empty # every queued edit left the device's queue
+step o0_kept: jet run -A -O0 main.jet
+env: XDG_DATA_HOME={work}/o0
+exit: 0
+stdout: = "after the second restart\npending: 0\nnotice: The server refused `edit`, so it was undone: {\"Conflict\":3}\nnotice: The server refused `edit`, so it was undone: {\"Conflict\":3}\n"
+step o1: jet run -A -O1 main.jet
+env: XDG_DATA_HOME={work}/o1
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: == o0
+step o1_restart: jet run -A -O1 main.jet
+env: XDG_DATA_HOME={work}/o1
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: == o0_restart
+step o1_kept: jet run -A -O1 main.jet
+env: XDG_DATA_HOME={work}/o1
+exit: 0
+stdout: == o0_kept
+step o2: jet run -A -O2 main.jet
+env: XDG_DATA_HOME={work}/o2
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: == o0
+step o2_restart: jet run -A -O2 main.jet
+env: XDG_DATA_HOME={work}/o2
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: == o0_restart
+step o2_kept: jet run -A -O2 main.jet
+env: XDG_DATA_HOME={work}/o2
+exit: 0
+stdout: == o0_kept

@@ -411,7 +411,7 @@ env_overlay_publish: fn(entry: OverlayStagedFile, parent: Directory, file: &File
 }
 
 // `@@ -a,b +c,d @@` -> (old start, old count, new count).
-env_overlay_parse_hunk_range: fn(header: String) -> (old_start: Int, old_count: Int, new_count: Int) OverlayError! {
+env_overlay_parse_hunk_range: fn(header: String) -> {old_start: Int, old_count: Int, new_count: Int} OverlayError! {
     old_part := String?{None}
     new_part := String?{None}
     loop word in env_overlay_text.split_ws(header) {
@@ -422,10 +422,10 @@ env_overlay_parse_hunk_range: fn(header: String) -> (old_start: Int, old_count: 
     new: new_part ?? return Err(OverlayError.Patch("patch hunk missing new range"))
     old_side: env_overlay_parse_hunk_side(old, "-")
     new_side: env_overlay_parse_hunk_side(new, "+")
-    Ok((old_start: old_side.start, old_count: old_side.count, new_count: new_side.count))
+    Ok({old_start: old_side.start, old_count: old_side.count, new_count: new_side.count})
 }
 
-env_overlay_parse_hunk_side: fn(raw: String, prefix: String) -> (start: Int, count: Int) OverlayError! {
+env_overlay_parse_hunk_side: fn(raw: String, prefix: String) -> {start: Int, count: Int} OverlayError! {
     bad: OverlayError.Patch("patch hunk has bad range")
     trimmed := raw
     loop trimmed.starts_with(prefix) -> trimmed = trimmed.removeprefix(prefix)
@@ -433,7 +433,7 @@ env_overlay_parse_hunk_side: fn(raw: String, prefix: String) -> (start: Int, cou
     if parts.len() > 2 -> return Err(bad)
     start: env_overlay_parse_count(parts[0]) ?? return Err(bad)
     count: if parts.len() == 2 -> (env_overlay_parse_count(parts[1]) ?? return Err(bad)) else -> 1
-    Ok((start: start, count: count))
+    Ok({start: start, count: count})
 }
 
 // Rust `str::parse::<usize>`: an optional `+`, then decimal digits.

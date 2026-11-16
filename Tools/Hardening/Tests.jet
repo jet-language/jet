@@ -376,7 +376,7 @@ errors_of: fn(tree: Dyn) -> String Never! { validate_repro(tree, "").errors.join
     excluded.exclusions_text = "{inputs.exclusions_text}# reviewed again\n"
     registry := inputs.copy()
     registry.registry_files = edited(inputs.registry_files, inputs.registry_files[0].path, "\n", "\n\n")
-    cases: [(inputs: Inputs, part: String)]{(inputs: excluded, part: "exclusions"), (inputs: registry, part: "registries")}
+    cases: [{inputs: Inputs, part: String}]{{inputs: excluded, part: "exclusions"}, {inputs: registry, part: "registries"}}
     loop case in cases {
         fresh := clean.copy()
         fresh.snapshot = build_snapshot(case.inputs)

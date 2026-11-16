@@ -19,8 +19,8 @@ spin: fn(seed: Int) -> Int {
 
 run: fn() {
     main: tid()
-    handles := [Task<(tid: String, value: Int)>]{}
-    loop i in 0..<ROUNDS -> handles.push(task { (tid: tid(), value: spin(i)) })
+    handles := [Task<{tid: String, value: Int}>]{}
+    loop i in 0..<ROUNDS -> handles.push(task { {tid: tid(), value: spin(i)} })
     off_main := 0
     loop handle in handles {
         result: handle.join() ?? panic("join")

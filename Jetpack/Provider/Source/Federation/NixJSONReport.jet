@@ -68,7 +68,7 @@ impl ProviderFactReport {
         pname: provider_nix_string_field(object, "pname", "pname", losses)
         package: provider_nix_string_field(object, "package", "package", losses)
         meta_name: if meta == None -> None else -> provider_nix_string_field(meta_fields, "name", "meta.name", losses)
-        provider_nix_conflicting_values(conflicts, "Nix metadata declares conflicting package names", [(label: String, value: String?)]{(label: "pname", value: pname), (label: "package", value: package), (label: "meta.name", value: meta_name)})
+        provider_nix_conflicting_values(conflicts, "Nix metadata declares conflicting package names", [{label: String, value: String?}]{{label: "pname", value: pname}, {label: "package", value: package}, {label: "meta.name", value: meta_name}})
         if top_name != None && pname != None {
             top: top_name
             short: pname
@@ -78,7 +78,7 @@ impl ProviderFactReport {
         }
         top_version: provider_nix_string_field(object, "version", "version", losses)
         meta_version: if meta == None -> None else -> provider_nix_string_field(meta_fields, "version", "meta.version", losses)
-        provider_nix_conflicting_values(conflicts, "Nix metadata declares conflicting package versions", [(label: String, value: String?)]{(label: "version", value: top_version), (label: "meta.version", value: meta_version)})
+        provider_nix_conflicting_values(conflicts, "Nix metadata declares conflicting package versions", [{label: String, value: String?}]{{label: "version", value: top_version}, {label: "meta.version", value: meta_version}})
         drv_path := provider_nix_string_field(object, "drvPath", "drvPath", losses)
         if drv_path == None {
             drv_path = provider_nix_string_field(object, "derivationPath", "derivationPath", losses)
@@ -121,18 +121,18 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        provider_nix_conflicting_values(conflicts, "Nix metadata declares conflicting integrity hashes", [(label: String, value: String?)]{(label: "native", value: top_hash), (label: "outputs.out", value: output_hash)})
+        provider_nix_conflicting_values(conflicts, "Nix metadata declares conflicting integrity hashes", [{label: String, value: String?}]{{label: "native", value: top_hash}, {label: "outputs.out", value: output_hash}})
         facts.integrity_hash = provider_graph_either(top_hash, output_hash) ?? ""
-        dependency_fields: [(field: String, kind: String)]{
-            (field: "dependencies", kind: "runtime"),
-            (field: "runtimeInputs", kind: "runtime"),
-            (field: "propagatedBuildInputs", kind: "propagated"),
-            (field: "devDependencies", kind: "dev"),
-            (field: "devInputs", kind: "dev"),
-            (field: "buildInputs", kind: "build"),
-            (field: "nativeBuildInputs", kind: "native-build"),
-            (field: "checkInputs", kind: "check"),
-            (field: "inputDrvs", kind: "input"),
+        dependency_fields: [{field: String, kind: String}]{
+            {field: "dependencies", kind: "runtime"},
+            {field: "runtimeInputs", kind: "runtime"},
+            {field: "propagatedBuildInputs", kind: "propagated"},
+            {field: "devDependencies", kind: "dev"},
+            {field: "devInputs", kind: "dev"},
+            {field: "buildInputs", kind: "build"},
+            {field: "nativeBuildInputs", kind: "native-build"},
+            {field: "checkInputs", kind: "check"},
+            {field: "inputDrvs", kind: "input"},
         }
         provider_nix_dependencies(facts, object, losses, dependency_fields)
         provider_nix_hooks(facts, object, losses)
@@ -247,7 +247,7 @@ provider_nix_string_field: fn(object: [String:Dyn], key: String, label: String, 
 }
 
 // Every present value that disagrees with the first present one.
-provider_nix_conflicting_values: fn(conflicts: &[String], message: String, values: [(label: String, value: String?)]) Never! {
+provider_nix_conflicting_values: fn(conflicts: &[String], message: String, values: [{label: String, value: String?}]) Never! {
     selected_label := ""
     selected_value := ""
     has_selected := false
@@ -367,7 +367,7 @@ provider_nix_dependency_values: fn(value: Dyn, losses: &[String], label: String)
     fields.keys().to_list()
 }
 
-provider_nix_dependencies: fn(facts: &MetadataFacts, object: [String:Dyn], losses: &[String], fields: [(field: String, kind: String)]) Never! {
+provider_nix_dependencies: fn(facts: &MetadataFacts, object: [String:Dyn], losses: &[String], fields: [{field: String, kind: String}]) Never! {
     loop entry in fields {
         value: object.get(entry.field) ?? next
         facts.add_typed_json("provider.nix.dependency.{entry.kind}", value)

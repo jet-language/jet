@@ -168,7 +168,7 @@ Task: struct {
     args: [String]
     stdin: String?
     expected: String
-    files: [(name: String, text: String)]
+    files: [{name: String, text: String}]
     ready_path: String
     probes: [Probe]
     spec: Dyn
@@ -479,7 +479,7 @@ validate_task: fn(task: Dyn) -> Task Failure! {
                 if !(entry.value == .Text(_)) || entry.key == "" || entry.key.starts_with("/") || entry.key.replace("\\", "/").split("/").to_list().contains("..") {
                     usage("{id}: unsafe or non-text fixture {entry.key}")
                 }
-                out.files.push((name: entry.key.copy(), text: shown(entry.value)))
+                out.files.push({name: entry.key.copy(), text: shown(entry.value)})
             }
         } else { usage("{id}: files must be an object") }
     }
@@ -739,11 +739,11 @@ free_port: fn() -> String {
 }
 
 // The probe's answer: status 0 when there is none.
-request: fn(port: String, method: String, path: String, body: String?, timeout_ms: Int) -> (status: Int, body: String, content_type: String) {
+request: fn(port: String, method: String, path: String, body: String?, timeout_ms: Int) -> {status: Int, body: String, content_type: String} {
     req := http.request(method, "http://127.0.0.1:{port}{path}").timeout(timeout_ms)
     if body == .Val(given) -> req = req.header("content-type", "text/plain").body(given)
-    answer: req.send() ?? return (status: 0, body: "", content_type: "")
-    (status: answer.status(), body: answer.text(1048576) ?? "", content_type: answer.header("content-type") ?? "")
+    answer: req.send() ?? return {status: 0, body: "", content_type: ""}
+    {status: answer.status(), body: answer.text(1048576) ?? "", content_type: answer.header("content-type") ?? ""}
 }
 
 // Polls `child` until it exits or `ms` pass: whether it exited.
@@ -1139,7 +1139,7 @@ compare_baseline: fn(r: Dyn, b: Dyn) Failure! {
         regress("harness changed; record a new baseline")
     }
     loop field in
-        [(key: "required_families", what: "required model families"), (key: "fixtures", what: "evaluation fixtures"), (key: "adapters", what: "model adapter identity"), (key: "tasks", what: "evaluation task identity")] {
+        [{key: "required_families", what: "required model families"}, {key: "fixtures", what: "evaluation fixtures"}, {key: "adapters", what: "model adapter identity"}, {key: "tasks", what: "evaluation task identity"}] {
         if identity(member(r, field.key)) != identity(member(b, field.key)) {
             regress("{field.what} changed; record a new baseline")
         }

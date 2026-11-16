@@ -696,7 +696,7 @@ browser_web_parse_action: fn(payload: [U8], default_placement: BrowserPlacement)
         else -> Err("unknown browser action `{name}`")
     }
 }
-browser_web_source_grant: fn(object: [(key: String, value: Dyn)]) -> BrowserSourceGrant Err! {
+browser_web_source_grant: fn(object: [{key: String, value: Dyn}]) -> BrowserSourceGrant Err! {
     grant: browser_web_nested(object, "grant")
     source: browser_web_nested(grant, "source")
     function := String?{None}
@@ -707,29 +707,29 @@ browser_web_source_grant: fn(object: [(key: String, value: Dyn)]) -> BrowserSour
     location: BrowserSourceLocation{source_id: browser_web_string(source, "source_id", "browser action"), line: browser_web_count(source, "line"), column: column, function: function}
     Ok(BrowserSourceGrant{session_id: browser_web_string(grant, "session_id", "browser action"), revision: browser_web_count(grant, "revision"), panel_id: browser_web_string(grant, "panel_id", "browser action"), node_id: browser_web_string(grant, "node_id", "browser action"), source: location})
 }
-browser_web_action_grant: fn(object: [(key: String, value: Dyn)]) -> BrowserActionGrant Err! {
+browser_web_action_grant: fn(object: [{key: String, value: Dyn}]) -> BrowserActionGrant Err! {
     grant: browser_web_nested(object, "grant")
     Ok(BrowserActionGrant{session_id: browser_web_string(grant, "session_id", "browser action"), revision: browser_web_count(grant, "revision"), panel_id: browser_web_string(grant, "panel_id", "browser action"), node_id: browser_web_string(grant, "node_id", "browser action"), action_id: browser_web_string(grant, "action_id", "browser action")})
 }
-browser_web_body_object: fn(payload: [U8], what: String) -> [(key: String, value: Dyn)] Err! {
+browser_web_body_object: fn(payload: [U8], what: String) -> [{key: String, value: Dyn}] Err! {
     if payload.len() > MAX_REQUEST_BODY_BYTES -> return Err("{what} body is not valid bounded JSON")
     text: String.from_bytes(payload) ?? return Err("{what} body must be UTF-8 JSON")
     root: foundation_json_parse(text) ?? return Err("{what} body is not valid bounded JSON")
     fields: recording_object_fields(root) ?? return Err("{what} body must be an object")
     Ok(fields)
 }
-browser_web_nested: fn(object: [(key: String, value: Dyn)], key: String) -> [(key: String, value: Dyn)] Err! {
+browser_web_nested: fn(object: [{key: String, value: Dyn}], key: String) -> [{key: String, value: Dyn}] Err! {
     value: recording_lookup(object, key) ?? return Err("browser action is missing `{key}`")
     fields: recording_object_fields(value) ?? return Err("browser action `{key}` must be an object")
     Ok(fields)
 }
-browser_web_string: fn(object: [(key: String, value: Dyn)], key: String, what: String) -> String Err! {
+browser_web_string: fn(object: [{key: String, value: Dyn}], key: String, what: String) -> String Err! {
     value: recording_lookup(object, key) ?? return Err("{what} is missing `{key}`")
     text: recording_text(value) ?? return Err("{what} `{key}` must be a string")
     if text == "" -> return Err("{what} `{key}` must not be empty")
     Ok(text)
 }
-browser_web_count: fn(object: [(key: String, value: Dyn)], key: String) -> Int Err! {
+browser_web_count: fn(object: [{key: String, value: Dyn}], key: String) -> Int Err! {
     value: recording_lookup(object, key) ?? return Err("browser action is missing `{key}`")
     number: foundation_json_integer(value) ?? return Err("browser action `{key}` must be a non-negative integer")
     if number < 0 -> return Err("browser action `{key}` must be a non-negative integer")

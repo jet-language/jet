@@ -44,7 +44,7 @@ Problem: enum {
 // A record with a list of tuples.
 #[Printable, Debug]
 Pairs: struct {
-    rows: [(name: String, count: Int)]
+    rows: [{name: String, count: Int}]
 }
 
 // Struct, fieldless-enum and nested composite map keys.
@@ -90,13 +90,13 @@ run: fn() {
     print("{bad:Debug}")
     print("{Problem.Empty}")
 
-    pairs: Pairs{rows: [(name: "a", count: 1), (name: "b", count: 2)]}
+    pairs: Pairs{rows: [{name: "a", count: 1}, {name: "b", count: 2}]}
     print("{pairs}")
     print("{pairs:Debug}")
-    tuple: (name: "t", n: 4, ok: true)
+    tuple: {name: "t", n: 4, ok: true}
     print("{tuple} {tuple:Debug}")
 
-    assert_eq(Val((name: "a", count: 1)), Val((name: "a", count: 1)))
+    assert_eq(Val({name: "a", count: 1}), Val({name: "a", count: 1}))
     assert_eq(order(1, 2), Ordering.Less)
     print("asserts ok")
 

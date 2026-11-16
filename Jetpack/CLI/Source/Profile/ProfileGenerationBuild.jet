@@ -411,7 +411,7 @@ cli_format_package_generation_metadata: fn(generation: Int, plan: PackageProfile
             ),
         )
     }
-    collisions := [(key: String, value: Dyn)]{}
+    collisions := [{key: String, value: Dyn}]{}
     paths := groups.keys().to_list()
     paths.sort()
     loop path in paths {
@@ -421,7 +421,7 @@ cli_format_package_generation_metadata: fn(generation: Int, plan: PackageProfile
         loop node in nodes {
             contenders.push(Dyn.Object(["provider": Dyn.Text(node.package), "kind": Dyn.Text(node.kind.as_str()), "digest": Dyn.Text(node.digest)]))
         }
-        collisions.push((key: path, value: Dyn.Object(["selected": cli_json_optional_text(plan.collisions.get(path)), "contenders": Dyn.Array(contenders)])))
+        collisions.push({key: path, value: Dyn.Object(["selected": cli_json_optional_text(plan.collisions.get(path)), "contenders": Dyn.Array(contenders)])})
     }
     root_hash: pkg_try_output_hash_of(rootfs) ?? return Err(CLIError.Other(err.message()))
     metadata: Dyn.Object(

@@ -61,7 +61,7 @@ pkg_cffi_error: fn(diagnostic: Diagnostic) -> CFFIError Never! {
 
 // E3208: a binding input, cache, or sidecar is unusable.
 pkg_cffi_e3208: fn(header: String, lib: String, reason: String) -> Diagnostic Never! {
-    pkg_ffi_diagnostic_from_row("E3208", [(name: String, value: String)]{(name: "header", value: header), (name: "lib", value: lib), (name: "reason", value: reason)})
+    pkg_ffi_diagnostic_from_row("E3208", [{name: String, value: String}]{{name: "header", value: header}, {name: "lib", value: lib}, {name: "reason", value: reason}})
 }
 
 // Handle facts and link closure collected over every binding of a program.
@@ -352,7 +352,7 @@ pkg_cffi_generated_cache_language: fn(display: String) -> ForeignLanguage? Never
 
 // The cache of a generated foreign binding whose loaded library carries the
 // language's bridge prefix, and its source library name.
-pkg_cffi_generated_boundary_cache: fn(project_root: String, language: ForeignLanguage, loaded_lib: String) -> (cache: String, lib: String) ForeignBridgeError! {
+pkg_cffi_generated_boundary_cache: fn(project_root: String, language: ForeignLanguage, loaded_lib: String) -> {cache: String, lib: String} ForeignBridgeError! {
     prefix: language.bridge_prefix()
     source_lib := loaded_lib
     if prefix != "" {
@@ -364,7 +364,7 @@ pkg_cffi_generated_boundary_cache: fn(project_root: String, language: ForeignLan
     if source_lib == "" {
         return Err(pkg_bridge_error("generated `{language.root()}` binding library `{loaded_lib}` does not match its bridge prefix `{prefix}`"))
     }
-    Ok((cache: pkg_cffi_binding_cache_file(project_root, language, source_lib), lib: source_lib))
+    Ok({cache: pkg_cffi_binding_cache_file(project_root, language, source_lib), lib: source_lib})
 }
 
 // The local archive of a `<lib>: c@"<dir>"` dependency, when declared.
@@ -448,18 +448,18 @@ pkg_cffi_write_c_binding_provenance_with_boundary: fn(project_root: String, lib:
         boundary.assumptions.push("cache was published without an in-memory overlay identity; foreign source remains authoritative")
     }
     cache_sha: pkg_bridge_sha_file(cache_path)
-    fields := [(name: String, value: String)]{
-        (name: "language", value: (ForeignLanguage.C).root()),
-        (name: "abi", value: "c_{lib}"),
-        (name: "transport", value: "direct-c-abi"),
-        (name: "binder-schema", value: C_BINDER_SCHEMA),
-        (name: "descriptor", value: descriptor.stamp()),
-        (name: "source", value: header_path),
-        (name: "source-sha256", value: header_sha),
-        (name: "cache", value: cache_path),
-        (name: "cache-sha256", value: cache_sha),
-        (name: "cc", value: cc),
-        (name: "ar", value: ar),
+    fields := [{name: String, value: String}]{
+        {name: "language", value: (ForeignLanguage.C).root()},
+        {name: "abi", value: "c_{lib}"},
+        {name: "transport", value: "direct-c-abi"},
+        {name: "binder-schema", value: C_BINDER_SCHEMA},
+        {name: "descriptor", value: descriptor.stamp()},
+        {name: "source", value: header_path},
+        {name: "source-sha256", value: header_sha},
+        {name: "cache", value: cache_path},
+        {name: "cache-sha256", value: cache_sha},
+        {name: "cc", value: cc},
+        {name: "ar", value: ar},
     }
     loop field in boundary.provenance_fields() -> fields.push(field)
     // One `handle-fact` row per handle, the same repeated-row form the bridge
@@ -472,24 +472,24 @@ pkg_cffi_write_c_binding_provenance_with_boundary: fn(project_root: String, lib:
         if !handle_keys.contains(key) -> handle_keys.push(key)
     }
     handle_keys.sort()
-    loop key in handle_keys -> fields.push((name: "handle-fact", value: key))
-    fields.push((name: "link-closure", value: metadata.link_closure.stable_key()))
+    loop key in handle_keys -> fields.push({name: "handle-fact", value: key})
+    fields.push({name: "link-closure", value: metadata.link_closure.stable_key()})
     if pkg_cffi_declared_c_dep_for_entry(lib, project_root, entry) == .Val(target) {
-        fields.push((name: "dependency", value: target))
+        fields.push({name: "dependency", value: target})
     }
     loop input in pkg_cffi_local_c_archive_inputs(project_root, lib, entry) {
-        fields.push((name: "linked-library", value: input.library))
-        fields.push((name: "linked-archive", value: input.path))
+        fields.push({name: "linked-library", value: input.library})
+        fields.push({name: "linked-archive", value: input.path})
         archive_sha: if input.bytes == {
             .Val(bytes) -> pkg_sha256_hex(bytes)
             .None -> "missing"
         }
-        fields.push((name: "linked-archive-sha256", value: archive_sha))
+        fields.push({name: "linked-archive-sha256", value: archive_sha})
     }
-    artifacts := [(name: String, digest: String)]{(name: files.basename(cache_path), digest: cache_sha)}
+    artifacts := [{name: String, digest: String}]{{name: files.basename(cache_path), digest: cache_sha}}
     metadata_path: pkg_cffi_binding_metadata_path(cache_path)
     if files.is_file(metadata_path) {
-        artifacts.push((name: files.basename(metadata_path), digest: pkg_bridge_sha_file(metadata_path)))
+        artifacts.push({name: files.basename(metadata_path), digest: pkg_bridge_sha_file(metadata_path)})
     }
     provenance: pkg_cffi_sidecar(cache_path, "provenance")
     pkg_bridge_write_provenance(provenance, identity, fields, artifacts)

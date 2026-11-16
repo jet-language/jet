@@ -197,7 +197,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     states := [Type]{}
     // The view's parameters in order: the service of each `app.Remote<S>`
     // one, with its key, and None for the state.
-    services := [(ty: Type, key: String)?]{}
+    services := [{ty: Type, key: String}?]{}
     loop parameter in handler.function.declaration.params {
         ty: sema_type_resolve_declared(graph, parameter.ty, view_module)
         if !sema_app_is_remote(ty, environment, program) {
@@ -473,10 +473,10 @@ sema_app_list_element: fn(ty: Type) -> Type? Never! {
 // The service `S` of the Remote type `ty` (`app.Remote<S>`), seen from
 // `module_identity`, with its key, the identity of its nominal; None when
 // `S` is no nominal type.
-sema_app_remote_service: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> (ty: Type, key: String)? {
+sema_app_remote_service: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> {ty: Type, key: String}? {
     if ty == .Apply(_, args) && args.len() == 1 {
         row: sema_type_resolve_nominal_row(graph, args[0], module_identity) ?? return None
-        return Val((ty: args[0].copy(), key: graph.modules[row.module_index].nominals[row.row].identity_key.copy()))
+        return Val({ty: args[0].copy(), key: graph.modules[row.module_index].nominals[row.row].identity_key.copy()})
     }
     None
 }
@@ -492,7 +492,7 @@ sema_app_remote_service: fn(graph: SemaRegistrationGraph, ty: Type, module_ident
 // `App.__remote<S>`) and the state one the state. The view runs in the
 // opener's own body, so it has the opener's unbounded effects
 // (`sema_app_screen_callback`): no inner callback bounds its Remotes' calls.
-sema_app_screen_opener: fn(view: Expr, services: [(ty: Type, key: String)?], state_ty: Type, text: [Type], found: SemaAppState, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
+sema_app_screen_opener: fn(view: Expr, services: [{ty: Type, key: String}?], state_ty: Type, text: [Type], found: SemaAppState, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
     graph_name: "__jet_app_graph_{span.start}"
     fields_name: "__jet_app_fields_{span.start}"
     state_name: "__jet_app_state_{span.start}"

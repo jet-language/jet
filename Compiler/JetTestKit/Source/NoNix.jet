@@ -46,7 +46,7 @@ kit_no_nix_field: fn(image: [U8], offset: Int, width: Int) -> Int? {
 // The bytes of the image's PT_INTERP path, from its first byte up to its NUL;
 // None for an image without one (a static image, such as Jet's own binaries)
 // and for any header but little-endian ELF32 or ELF64.
-kit_no_nix_interpreter: fn(image: [U8]) -> (start: Int, end: Int)? {
+kit_no_nix_interpreter: fn(image: [U8]) -> {start: Int, end: Int}? {
     if image.len() < 6 || (Int{image[5]}) != 1 -> return None
     class: Int{image[4]}
     if class != 1 && class != 2 -> return None
@@ -63,7 +63,7 @@ kit_no_nix_interpreter: fn(image: [U8]) -> (start: Int, end: Int)? {
         if size < 1 || start + size > image.len() -> return None
         end := start
         loop end < start + size && image[end] != (U8{0}) -> end += 1
-        return Val((start: start, end: end))
+        return Val({start: start, end: end})
     }
     None
 }

@@ -242,15 +242,15 @@ sema_call_reflection_case_member: fn(ty: Type, leaf: String, label: String, memb
 // optional type. A unit success or a `Never` error holds no payload. The IR
 // reads the held case in the same order (ir_reflect_outcome_cases). None for
 // any other type.
-sema_call_reflection_outcome_cases: fn(ty: Type) -> [(name: String, payload: Type?)]? Never! {
+sema_call_reflection_outcome_cases: fn(ty: Type) -> [{name: String, payload: Type?}]? Never! {
     if sema_expr_unwrap_tag(ty) == {
-        .Option(inner) -> Val([(name: String, payload: Type?)]{(name: "Val", payload: sema_call_reflection_outcome_payload(inner)), (name: "None", payload: None)})
+        .Option(inner) -> Val([{name: String, payload: Type?}]{{name: "Val", payload: sema_call_reflection_outcome_payload(inner)}, {name: "None", payload: None}})
         .Result(ok, error) -> {
-            failed: (name: "Err", payload: sema_call_reflection_outcome_payload(error))
+            failed: {name: "Err", payload: sema_call_reflection_outcome_payload(error)}
             if sema_expr_unwrap_tag(ok) == .Option(inner) {
-                return Val([(name: String, payload: Type?)]{(name: "Val", payload: sema_call_reflection_outcome_payload(inner)), (name: "None", payload: None), failed})
+                return Val([{name: String, payload: Type?}]{{name: "Val", payload: sema_call_reflection_outcome_payload(inner)}, {name: "None", payload: None}, failed})
             }
-            Val([(name: String, payload: Type?)]{(name: "Ok", payload: sema_call_reflection_outcome_payload(ok)), failed})
+            Val([{name: String, payload: Type?}]{{name: "Ok", payload: sema_call_reflection_outcome_payload(ok)}, failed})
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
@@ -283,7 +283,7 @@ sema_call_reflection_field_capturable: fn(ty: Type, environment: SemaScopeEnviro
 // (type_name), each nominal it holds as an optional's, result's or list's
 // part named the same way: an `Int? Lookup!` field is `Int? Lookup!` at
 // `Int? app.Lookup!`, never its module identity.
-sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> (type_name: String, path: String) {
+sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> {type_name: String, path: String} {
     if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == .Val(row) {
             return sema_call_reflection_row_names(graph, row)
@@ -291,34 +291,34 @@ sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment,
     }
     if ty == .Option(inner) {
         names: sema_call_reflection_marked_names(inner, environment, program)
-        return (type_name: "{names.type_name}?", path: "{names.path}?")
+        return {type_name: "{names.type_name}?", path: "{names.path}?"}
     }
     if ty == .Result(ok, err) {
         if ok == (Type.Named{name: "Unit"}) {
             names: sema_call_reflection_marked_names(err, environment, program)
-            return (type_name: "{names.type_name}!", path: "{names.path}!")
+            return {type_name: "{names.type_name}!", path: "{names.path}!"}
         }
         if err == (Type.Named{name: "Err"}) {
             return sema_call_reflection_type_names(ok, environment, program)
         }
         success: sema_call_reflection_marked_names(ok, environment, program)
         failure: sema_call_reflection_marked_names(err, environment, program)
-        return (type_name: "{success.type_name} {failure.type_name}!", path: "{success.path} {failure.path}!")
+        return {type_name: "{success.type_name} {failure.type_name}!", path: "{success.path} {failure.path}!"}
     }
     if ty == .List(element) {
         names: sema_call_reflection_type_names(element, environment, program)
-        return (type_name: "[{names.type_name}]", path: "[{names.path}]")
+        return {type_name: "[{names.type_name}]", path: "[{names.path}]"}
     }
     shown: type_name(ty)
-    (type_name: shown, path: shown)
+    {type_name: shown, path: shown}
 }
 
 // The names of a type written before a suffix mark, grouped as
 // type_marked_name groups it.
-sema_call_reflection_marked_names: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> (type_name: String, path: String) {
+sema_call_reflection_marked_names: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> {type_name: String, path: String} {
     names: sema_call_reflection_type_names(ty, environment, program)
     if ty == .Union(_) || ty == .Result(_, _) || ty == .Tagged(_, _) || ty == .Fn(_, _, _, _, _, _) {
-        return (type_name: "({names.type_name})", path: "({names.path})")
+        return {type_name: "({names.type_name})", path: "({names.path})"}
     }
     names
 }
@@ -327,11 +327,11 @@ sema_call_reflection_marked_names: fn(ty: Type, environment: SemaScopeEnvironmen
 // (sema_name_type_path, the module path as an identifier: `reflect-value.jet`
 // is `reflect_value`): a type lifted from an inline module is `Point` at
 // `app.geo.Point`, never its generated name.
-sema_call_reflection_row_names: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> (type_name: String, path: String) Never! {
+sema_call_reflection_row_names: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> {type_name: String, path: String} Never! {
     registered: graph.modules[row.module_index]
     name: registered.nominals[row.row].symbol.name
     leaf: sema_name_type_leaf(registered.program.items, name)
-    (type_name: leaf, path: sema_name_type_path(registered.module_path.replace("-", "_"), registered.program.items, name))
+    {type_name: leaf, path: sema_name_type_path(registered.module_path.replace("-", "_"), registered.program.items, name)}
 }
 
 sema_call_reflection_text: fn(text: String, span: Span) -> TExpr Never! {

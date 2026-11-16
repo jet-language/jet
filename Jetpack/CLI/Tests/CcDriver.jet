@@ -31,10 +31,10 @@ cli_test_cc_parse_error: fn(args: [String]) -> String {
 }
 
 #Test("cc standalone compiler probes are bounded and do not need sources") {
-    probes: [(argument: String, probe: DriverProbe)]{
-        (argument: "-dumpmachine", probe: DriverProbe.DumpMachine),
-        (argument: "-print-sysroot", probe: DriverProbe.PrintSysroot),
-        (argument: "-dumpversion", probe: DriverProbe.DumpVersion),
+    probes: [{argument: String, probe: DriverProbe}]{
+        {argument: "-dumpmachine", probe: DriverProbe.DumpMachine},
+        {argument: "-print-sysroot", probe: DriverProbe.PrintSysroot},
+        {argument: "-dumpversion", probe: DriverProbe.DumpVersion},
     }
     loop entry in probes {
         options: cli_test_cc_parse([String]{entry.argument})

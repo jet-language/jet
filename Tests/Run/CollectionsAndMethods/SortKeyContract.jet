@@ -51,7 +51,7 @@ OwnedNamedKey: struct {
     }
 }
 
-tuple_key: fn(j: Job) -> (team: Int, cost: Int) KeyError! { Ok((team: j.team, cost: j.cost)) }
+tuple_key: fn(j: Job) -> {team: Int, cost: Int} KeyError! { Ok({team: j.team, cost: j.cost}) }
 
 named_key: fn(j: Job) -> NamedKey KeyError! { Ok(NamedKey{team: j.team, label: j.name}) }
 
@@ -152,7 +152,7 @@ run: fn() {
     // record key orders in written order: `team`, then
     // `cost`.
     tuples := jobs.copy()
-    tuples.sort_by(fn(j: Job) { (team: j.team, cost: j.cost) })
+    tuples.sort_by(fn(j: Job) { {team: j.team, cost: j.cost} })
     print("tuple key: {show(tuples)}")
     try_tuples := jobs.copy()
     try_tuples.sort_by(fn(j: Job) { tuple_key(j) }) ?? panic("tuple key")

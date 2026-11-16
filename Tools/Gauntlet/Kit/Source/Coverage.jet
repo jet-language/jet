@@ -343,7 +343,7 @@ test_scriptbench_program: fn(name: String, twin: String) -> CoverageProgram {
 
 // A gauntlet report holding `name`'s aot comparison with peer `c`, one
 // reading per metric at `ratio` (Jet ratio * 10 against 10).
-test_report: fn(name: String, ratios: [(metric: String, ratio: Float)]) -> Dyn {
+test_report: fn(name: String, ratios: [{metric: String, ratio: Float}]) -> Dyn {
     metrics: ratios.map(fn(row) { "\"{row.metric}\": {{\"jet\": {row.ratio * 10.0}, \"peer\": 10, \"ratio\": {row.ratio}}}" }).join(", ")
     json.parse("{{\"entries\": [{{\"entry\": {{\"name\": \"{name}\"}}, \"comparisons\": {{\"c\": {{\"primary_metric\": \"runtime_wall_seconds\", \"tiers\": {{\"aot\": {{\"metrics\": {{{metrics}}}}}}}}}}}}}]}}") ?? panic("report: {err}")
 }
@@ -353,7 +353,7 @@ TEST_HEADER: "workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcar
 #Test("a planted memory loss and time loss are listed with program, peer, metric, ratio and owner, grouped by owner") {
     here: files.cwd()
     programs: [test_gauntlet_program("kernel", here), test_scriptbench_program("words", here)]
-    report: test_report("kernel", [(metric: "runtime_wall_seconds", ratio: 0.5), (metric: "runtime_peak_rss_kb", ratio: 1.25)])
+    report: test_report("kernel", [{metric: "runtime_wall_seconds", ratio: 0.5}, {metric: "runtime_peak_rss_kb", ratio: 1.25}])
     cells: parse_cells([TEST_HEADER, "w-words\tjet-bin\tpython\twall\t30\t20\t1.50\tLOSS\t#2222", "w-words\tjet-bin\tpython\trss\t1000\t9000\t0.11\twin\t#2222", "w-words\tjet-run-first\tpython\twall\t90\t20\t4.50\tloss (report-only)\t#2222"].join("\n"))
     census: build_census(programs, report, cells)
     assert_eq(census.measured, 4)
@@ -365,7 +365,7 @@ TEST_HEADER: "workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcar
 #Test("a ratio of exactly 1.00 is a loss, and a peer that overran the timeout is a win without a ratio") {
     here: files.cwd()
     programs: [test_gauntlet_program("tie", here), test_scriptbench_program("slow", here)]
-    report: test_report("tie", [(metric: "runtime_wall_seconds", ratio: 1.0), (metric: "runtime_peak_rss_kb", ratio: 0.9)])
+    report: test_report("tie", [{metric: "runtime_wall_seconds", ratio: 1.0}, {metric: "runtime_peak_rss_kb", ratio: 0.9}])
     cells: parse_cells([TEST_HEADER, "w-slow\tjet-bin\tpython\twall\t30\t>60s\t<1\twin\t#2222", "w-slow\tjet-bin\tpython\trss\t1000\t9000\t0.11\twin\t#2222"].join("\n"))
     census: build_census(programs, report, cells)
     assert_eq(census.losses.map(fn(loss) { "{loss.program} {loss.metric} {loss.owner}" }), ["tie runtime_wall_seconds #1111"])
@@ -375,7 +375,7 @@ TEST_HEADER: "workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcar
 #Test("a program, peer or metric without a reading is uncovered, not a win") {
     here: files.cwd()
     programs: [test_gauntlet_program("absent", here), test_gauntlet_program("partial", here), test_scriptbench_program("halfway", here)]
-    report: test_report("partial", [(metric: "runtime_wall_seconds", ratio: 0.5)])
+    report: test_report("partial", [{metric: "runtime_wall_seconds", ratio: 0.5}])
     cells: parse_cells([TEST_HEADER, "w-halfway\tjet-bin\tpython\twall\t30\t40\t0.75\twin\t#2222"].join("\n"))
     census: build_census(programs, report, cells)
     assert_eq(census.losses.len(), 0)

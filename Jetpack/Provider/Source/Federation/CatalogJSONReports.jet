@@ -20,13 +20,13 @@ impl ProviderFactReport {
             .None -> {}
         }
         version_fields: [String]{"version", "version-string", "version-semver", "version-date"}
-        versions := [(key: String, version: String)]{}
+        versions := [{key: String, version: String}]{}
         loop key in version_fields {
             value: object.get(key) ?? next
             if pkg_json_text(value) == {
                 .Val(version) -> {
                     if version.trim() == "" -> losses.push("vcpkg `{key}` must not be empty") else {
-                        versions.push((key: key, version: version))
+                        versions.push({key: key, version: version})
                     }
                 }
                 .None -> losses.push("vcpkg `{key}` must be a string")
@@ -212,12 +212,12 @@ impl ProviderFactReport {
         facts.dependencies = provider_graph_dependency_field(facts, object, "dependencies", "runtime", "homebrew", losses)
         facts.build_dependencies = provider_graph_dependency_field(facts, object, "build_dependencies", "build", "homebrew", losses)
         facts.dev_dependencies = provider_graph_dependency_field(facts, object, "test_dependencies", "test", "homebrew", losses)
-        extra_fields: [(field: String, kind: String)]{
-            (field: "recommended_dependencies", kind: "recommended"),
-            (field: "optional_dependencies", kind: "optional"),
-            (field: "uses_from_macos", kind: "platform"),
-            (field: "requirements", kind: "requirement"),
-            (field: "conflicts", kind: "conflict"),
+        extra_fields: [{field: String, kind: String}]{
+            {field: "recommended_dependencies", kind: "recommended"},
+            {field: "optional_dependencies", kind: "optional"},
+            {field: "uses_from_macos", kind: "platform"},
+            {field: "requirements", kind: "requirement"},
+            {field: "conflicts", kind: "conflict"},
         }
         loop extra in extra_fields {
             _: provider_graph_dependency_field(facts, object, extra.field, extra.kind, "homebrew", losses)
@@ -283,15 +283,15 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        roles: [(field: String, role: String)]{
-            (field: "build_dependencies", role: "build"),
-            (field: "tool_dependencies", role: "tool"),
-            (field: "dev_dependencies", role: "dev"),
-            (field: "test_dependencies", role: "test"),
-            (field: "optional_dependencies", role: "optional"),
-            (field: "peer_dependencies", role: "peer"),
-            (field: "plugin_dependencies", role: "plugin"),
-            (field: "target_dependencies", role: "target"),
+        roles: [{field: String, role: String}]{
+            {field: "build_dependencies", role: "build"},
+            {field: "tool_dependencies", role: "tool"},
+            {field: "dev_dependencies", role: "dev"},
+            {field: "test_dependencies", role: "test"},
+            {field: "optional_dependencies", role: "optional"},
+            {field: "peer_dependencies", role: "peer"},
+            {field: "plugin_dependencies", role: "plugin"},
+            {field: "target_dependencies", role: "target"},
         }
         loop entry in roles {
             value: object.get(entry.field) ?? next
@@ -337,29 +337,29 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        shapes: [(field: String, valid: Bool)]{
-            (field: "license", valid: provider_graph_shape_is(object.get("license"), true, false, true)),
-            (field: "source", valid: provider_graph_shape_is(object.get("source"), true, false, true)),
-            (field: "advisories", valid: provider_graph_shape_is(object.get("advisories"), false, true, true)),
-            (field: "variants", valid: provider_graph_shape_is(object.get("variants"), false, false, true)),
-            (field: "hooks", valid: provider_graph_shape_is(object.get("hooks"), false, false, true)),
+        shapes: [{field: String, valid: Bool}]{
+            {field: "license", valid: provider_graph_shape_is(object.get("license"), true, false, true)},
+            {field: "source", valid: provider_graph_shape_is(object.get("source"), true, false, true)},
+            {field: "advisories", valid: provider_graph_shape_is(object.get("advisories"), false, true, true)},
+            {field: "variants", valid: provider_graph_shape_is(object.get("variants"), false, false, true)},
+            {field: "hooks", valid: provider_graph_shape_is(object.get("hooks"), false, false, true)},
         }
         loop shape in shapes {
             if !shape.valid -> losses.push("registry `{shape.field}` has an unsupported shape")
         }
-        projections: [(field: String, target: String)]{
-            (field: "content_hash", target: "provider.registry.content_hash"),
-            (field: "fingerprint", target: "provider.registry.fingerprint"),
-            (field: "yanked", target: "provider.registry.yanked"),
-            (field: "tier", target: "provider.registry.tier"),
-            (field: "gate_status", target: "provider.registry.gate_status"),
-            (field: "public_key", target: "provider.registry.publisher_key"),
-            (field: "signature", target: "provider.registry.signature"),
-            (field: "owner", target: "provider.registry.owner"),
-            (field: "source", target: "provider.registry.source"),
-            (field: "advisories", target: "provider.registry.advisories"),
-            (field: "variants", target: "provider.registry.variants"),
-            (field: "hooks", target: "provider.registry.hooks"),
+        projections: [{field: String, target: String}]{
+            {field: "content_hash", target: "provider.registry.content_hash"},
+            {field: "fingerprint", target: "provider.registry.fingerprint"},
+            {field: "yanked", target: "provider.registry.yanked"},
+            {field: "tier", target: "provider.registry.tier"},
+            {field: "gate_status", target: "provider.registry.gate_status"},
+            {field: "public_key", target: "provider.registry.publisher_key"},
+            {field: "signature", target: "provider.registry.signature"},
+            {field: "owner", target: "provider.registry.owner"},
+            {field: "source", target: "provider.registry.source"},
+            {field: "advisories", target: "provider.registry.advisories"},
+            {field: "variants", target: "provider.registry.variants"},
+            {field: "hooks", target: "provider.registry.hooks"},
         }
         loop projection in projections {
             value: object.get(projection.field) ?? next
@@ -471,28 +471,28 @@ impl ProviderFactReport {
             .Val(assets) -> { provider_github_asset_facts(facts, assets, losses) }
             .None -> {}
         }
-        projections: [(field: String, target: String)]{
-            (field: "html_url", target: "provider.github.source.html_url"),
-            (field: "tarball_url", target: "provider.github.source.tarball_url"),
-            (field: "zipball_url", target: "provider.github.source.zipball_url"),
-            (field: "repository", target: "provider.github.source.repository"),
-            (field: "owner", target: "provider.github.source.owner"),
-            (field: "url", target: "provider.github.source.api_url"),
-            (field: "node_id", target: "provider.github.identity.node_id"),
-            (field: "id", target: "provider.github.identity.id"),
-            (field: "draft", target: "provider.github.release.draft"),
-            (field: "prerelease", target: "provider.github.release.prerelease"),
-            (field: "immutable", target: "provider.github.release.immutable"),
-            (field: "created_at", target: "provider.github.release.created_at"),
-            (field: "published_at", target: "provider.github.release.published_at"),
-            (field: "body", target: "provider.github.release.notes"),
-            (field: "signature", target: "provider.github.signature"),
-            (field: "verification", target: "provider.github.signature.verification"),
-            (field: "provenance", target: "provider.github.provenance"),
-            (field: "advisories", target: "provider.github.advisories"),
-            (field: "yanked", target: "provider.github.yanked"),
-            (field: "hooks", target: "provider.github.hooks"),
-            (field: "variants", target: "provider.github.variants"),
+        projections: [{field: String, target: String}]{
+            {field: "html_url", target: "provider.github.source.html_url"},
+            {field: "tarball_url", target: "provider.github.source.tarball_url"},
+            {field: "zipball_url", target: "provider.github.source.zipball_url"},
+            {field: "repository", target: "provider.github.source.repository"},
+            {field: "owner", target: "provider.github.source.owner"},
+            {field: "url", target: "provider.github.source.api_url"},
+            {field: "node_id", target: "provider.github.identity.node_id"},
+            {field: "id", target: "provider.github.identity.id"},
+            {field: "draft", target: "provider.github.release.draft"},
+            {field: "prerelease", target: "provider.github.release.prerelease"},
+            {field: "immutable", target: "provider.github.release.immutable"},
+            {field: "created_at", target: "provider.github.release.created_at"},
+            {field: "published_at", target: "provider.github.release.published_at"},
+            {field: "body", target: "provider.github.release.notes"},
+            {field: "signature", target: "provider.github.signature"},
+            {field: "verification", target: "provider.github.signature.verification"},
+            {field: "provenance", target: "provider.github.provenance"},
+            {field: "advisories", target: "provider.github.advisories"},
+            {field: "yanked", target: "provider.github.yanked"},
+            {field: "hooks", target: "provider.github.hooks"},
+            {field: "variants", target: "provider.github.variants"},
         }
         loop projection in projections {
             value: object.get(projection.field) ?? next
@@ -608,21 +608,21 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        projections: [(field: String, target: String)]{
-            (field: "license", target: "provider.binary.license"),
-            (field: "url", target: "provider.binary.source.url"),
-            (field: "urls", target: "provider.binary.source.urls"),
-            (field: "source", target: "provider.binary.source.identity"),
-            (field: "owner", target: "provider.binary.source.owner"),
-            (field: "signature", target: "provider.binary.signature"),
-            (field: "signatures", target: "provider.binary.signature.set"),
-            (field: "provenance", target: "provider.binary.provenance"),
-            (field: "sbom", target: "provider.binary.sbom"),
-            (field: "advisories", target: "provider.binary.advisories"),
-            (field: "yanked", target: "provider.binary.yanked"),
-            (field: "revoked", target: "provider.binary.revoked"),
-            (field: "variants", target: "provider.binary.variants"),
-            (field: "hooks", target: "provider.binary.hooks"),
+        projections: [{field: String, target: String}]{
+            {field: "license", target: "provider.binary.license"},
+            {field: "url", target: "provider.binary.source.url"},
+            {field: "urls", target: "provider.binary.source.urls"},
+            {field: "source", target: "provider.binary.source.identity"},
+            {field: "owner", target: "provider.binary.source.owner"},
+            {field: "signature", target: "provider.binary.signature"},
+            {field: "signatures", target: "provider.binary.signature.set"},
+            {field: "provenance", target: "provider.binary.provenance"},
+            {field: "sbom", target: "provider.binary.sbom"},
+            {field: "advisories", target: "provider.binary.advisories"},
+            {field: "yanked", target: "provider.binary.yanked"},
+            {field: "revoked", target: "provider.binary.revoked"},
+            {field: "variants", target: "provider.binary.variants"},
+            {field: "hooks", target: "provider.binary.hooks"},
         }
         loop projection in projections {
             value: object.get(projection.field) ?? next
@@ -753,29 +753,29 @@ provider_vcpkg_dependencies: fn(object: [String:Dyn], facts: &MetadataFacts, los
 
 // Homebrew source, variant, hook, and advisory fields as typed facts.
 provider_homebrew_named_facts: fn(facts: &MetadataFacts, object: [String:Dyn]) Never! {
-    fields: [(field: String, category: String)]{
-        (field: "homepage", category: "source"),
-        (field: "tap", category: "source"),
-        (field: "full_name", category: "source"),
-        (field: "urls", category: "source"),
-        (field: "source", category: "source"),
-        (field: "head", category: "source"),
-        (field: "bottle", category: "variant"),
-        (field: "variations", category: "variant"),
-        (field: "keg_only", category: "variant"),
-        (field: "relocatable", category: "variant"),
-        (field: "cellar", category: "variant"),
-        (field: "prefix", category: "variant"),
-        (field: "install", category: "hook"),
-        (field: "post_install", category: "hook"),
-        (field: "service", category: "hook"),
-        (field: "test", category: "hook"),
-        (field: "caveats", category: "hook"),
-        (field: "deprecated", category: "advisory"),
-        (field: "disabled", category: "advisory"),
-        (field: "deprecation_date", category: "advisory"),
-        (field: "disable_date", category: "advisory"),
-        (field: "replacement", category: "advisory"),
+    fields: [{field: String, category: String}]{
+        {field: "homepage", category: "source"},
+        {field: "tap", category: "source"},
+        {field: "full_name", category: "source"},
+        {field: "urls", category: "source"},
+        {field: "source", category: "source"},
+        {field: "head", category: "source"},
+        {field: "bottle", category: "variant"},
+        {field: "variations", category: "variant"},
+        {field: "keg_only", category: "variant"},
+        {field: "relocatable", category: "variant"},
+        {field: "cellar", category: "variant"},
+        {field: "prefix", category: "variant"},
+        {field: "install", category: "hook"},
+        {field: "post_install", category: "hook"},
+        {field: "service", category: "hook"},
+        {field: "test", category: "hook"},
+        {field: "caveats", category: "hook"},
+        {field: "deprecated", category: "advisory"},
+        {field: "disabled", category: "advisory"},
+        {field: "deprecation_date", category: "advisory"},
+        {field: "disable_date", category: "advisory"},
+        {field: "replacement", category: "advisory"},
     }
     loop entry in fields {
         value: object.get(entry.field) ?? next

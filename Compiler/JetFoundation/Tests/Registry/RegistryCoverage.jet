@@ -29,7 +29,7 @@ registry_coverage_has: fn(values: [String], value: String) -> Bool Never! {
 
 #Test("registered_codes_keep_explicit_severity_and_lint_names") {
     loop expected in
-        [(code: "E2930", severity: DIAGNOSTIC_LINT), (code: "W0410", severity: DIAGNOSTIC_LINT), (code: "R0801", severity: DIAGNOSTIC_ERROR), (code: "E0003", severity: DIAGNOSTIC_ERROR)] {
+        [{code: "E2930", severity: DIAGNOSTIC_LINT}, {code: "W0410", severity: DIAGNOSTIC_LINT}, {code: "R0801", severity: DIAGNOSTIC_ERROR}, {code: "E0003", severity: DIAGNOSTIC_ERROR}] {
         row: diagnostic_registry_row(expected.code) ?? panic("{expected.code} must stay registered")
         assert(row.severity == expected.severity, "{expected.code} must keep the registry row's explicit severity")
     }
@@ -42,15 +42,15 @@ registry_coverage_has: fn(values: [String], value: String) -> Bool Never! {
 #Test("semantic_guidance_lints_round_trip_through_the_registry") {
     loop expected in
         [
-        (code: "L0516", name: "message_text"),
-        (code: "L0517", name: "path_containment_string_prefix"),
-        (code: "L0518", name: "redundant_fixed_cleanup"),
-        (code: "L0519", name: "unit_scalar_rewrap"),
-        (code: "L0520", name: "display_migration"),
-        (code: "L0521", name: "complete_ascii_case_ladder"),
-        (code: "L0522", name: "walk_files_filter"),
-        (code: "L0523", name: "repeated_list_head"),
-        (code: "L0524", name: "raw_multiline_html"),
+        {code: "L0516", name: "message_text"},
+        {code: "L0517", name: "path_containment_string_prefix"},
+        {code: "L0518", name: "redundant_fixed_cleanup"},
+        {code: "L0519", name: "unit_scalar_rewrap"},
+        {code: "L0520", name: "display_migration"},
+        {code: "L0521", name: "complete_ascii_case_ladder"},
+        {code: "L0522", name: "walk_files_filter"},
+        {code: "L0523", name: "repeated_list_head"},
+        {code: "L0524", name: "raw_multiline_html"},
     ] {
         row: diagnostic_registry_row(expected.code) ?? panic("{expected.code} must stay registered")
         assert(row.severity == DIAGNOSTIC_LINT, "{expected.code} is a lint")

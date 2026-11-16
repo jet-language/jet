@@ -217,8 +217,8 @@ JetSQLQuery: struct {
     source: String
     projection: [JetSQLSelectItem]
     group_by: [JetSQLGroupKey]
-    filter: (field: String, operator: String, value: String)?
-    order: (field: String, descending: Bool)?
+    filter: {field: String, operator: String, value: String}?
+    order: {field: String, descending: Bool}?
     limit: U64?
 }
 
@@ -263,7 +263,7 @@ parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
             if clause_keyword(value) || value == "," || value == ")" {
                 return Err("SQL WHERE needs a literal value")
             }
-            query.filter = Val((field: field, operator: operator.copy(), value: value.copy()))
+            query.filter = Val({field: field, operator: operator.copy(), value: value.copy()})
             cursor += 4
             next
         }
@@ -312,7 +312,7 @@ parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
                     return Err("SQL ORDER BY direction must be `ASC` or `DESC`")
                 }
             }
-            query.order = Val((field: field, descending: descending))
+            query.order = Val({field: field, descending: descending})
             cursor += if explicit -> 4 else -> 3
             next
         }
@@ -361,7 +361,7 @@ JetSQLValue: enum {
 
 #Equatable
 JetSQLResultRow: struct {
-    fields: [(field: String, value: JetSQLValue)]
+    fields: [{field: String, value: JetSQLValue}]
     source_indices: [U64]
 }
 
@@ -716,22 +716,22 @@ priv internal: module {
     }
 
     // Rust parse_alias:306–325. The next cursor is a scalar tuple, not an owner.
-    parse_alias: fn(tokens: [String], cursor: Int) -> (alias: String?, cursor: Int) Err! {
+    parse_alias: fn(tokens: [String], cursor: Int) -> {alias: String?, cursor: Int} Err! {
         if token_at(tokens, cursor) == .Val(token) {
             if keyword(token, "as") {
                 alias: identifier(token_at(tokens, cursor + 1), "SELECT alias") ?? return Err(err)
-                return (alias: Val(alias), cursor: cursor + 2)
+                return {alias: Val(alias), cursor: cursor + 2}
             }
             if token != "," && !clause_keyword(token) {
                 alias: identifier(Val(token), "SELECT alias") ?? return Err(err)
-                return (alias: Val(alias), cursor: cursor + 1)
+                return {alias: Val(alias), cursor: cursor + 1}
             }
         }
-        (alias: None, cursor: cursor)
+        {alias: None, cursor: cursor}
     }
 
     // Rust parse_select_item:327–384. No GROUP/ORDER/LIMIT or width assumptions.
-    parse_select_item: fn(tokens: [String], cursor: Int) -> (item: JetSQLSelectItem, cursor: Int) Err! {
+    parse_select_item: fn(tokens: [String], cursor: Int) -> {item: JetSQLSelectItem, cursor: Int} Err! {
         first: token_at(tokens, cursor) ?? return Err(sql_error("SQL SELECT needs a projection"))
         at := cursor + 1
         if first == "*" {
@@ -740,12 +740,12 @@ priv internal: module {
                     return Err(sql_error("SQL wildcard projection cannot have an alias"))
                 }
             }
-            return (item: JetSQLSelectItem.Wildcard, cursor: at)
+            return {item: JetSQLSelectItem.Wildcard, cursor: at}
         }
         name: identifier(Val(first), "SELECT column or function") ?? return Err(err)
         if !token_is(tokens, at, "(") {
             alias: parse_alias(tokens, at) ?? return Err(err)
-            return (item: JetSQLSelectItem.Field{field: name, alias: alias.alias}, cursor: alias.cursor)
+            return {item: JetSQLSelectItem.Field{field: name, alias: alias.alias}, cursor: alias.cursor}
         }
         at += 1
         function := JetSQLAggregate.Count
@@ -775,7 +775,7 @@ priv internal: module {
         }
         at += 1
         alias: parse_alias(tokens, at) ?? return Err(err)
-        (item: JetSQLSelectItem.Aggregate{function: function, field: field, alias: alias.alias}, cursor: alias.cursor)
+        {item: JetSQLSelectItem.Aggregate{function: function, field: field, alias: alias.alias}, cursor: alias.cursor}
     }
 
     // Rust query_shape_error:410–435. Kept as its independently tested prefix;
@@ -803,7 +803,7 @@ priv internal: module {
     // One strict decimal byte scan: no exact Int, whitespace, prefixes or separators.
     // The checked bound is tested BEFORE multiplication; arbitrarily long leading
     // zeroes remain valid, and overflow fails without changing error precedence.
-    decimal_magnitude: fn(text: String, signed: Bool, positive_max: U64, negative_max: U64) -> (negative: Bool, magnitude: U64)? Never! {
+    decimal_magnitude: fn(text: String, signed: Bool, positive_max: U64, negative_max: U64) -> {negative: Bool, magnitude: U64}? Never! {
         bytes: sql_text.utf8_bytes(text)
         if bytes.len() == 0 -> return None
         at := 0
@@ -827,7 +827,7 @@ priv internal: module {
             value = value * U64{10} + digit
             at += 1
         }
-        Val((negative: negative, magnitude: value))
+        Val({negative: negative, magnitude: value})
     }
 
     parse_usize: fn(text: String) -> U64? Never! {
@@ -983,23 +983,23 @@ priv internal: module {
     // Rust sql_project_group:891–941. Transfer the consumed grouping positions
     // into the result rather than cloning the otherwise dead Rust group Vec.
     sql_project_group: fn(fields: [String], query: JetSQLQuery, group: &&[U64], cell: fn(U64, String) -> JetSQLValue?) -> JetSQLResultRow Never! {
-        projected := [(field: String, value: JetSQLValue)]{}
+        projected := [{field: String, value: JetSQLValue}]{}
         loop item in query.projection {
             if item == {
                 .Wildcard -> {
                     loop field in fields {
                         value := JetSQLValue.Null
                         if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
-                        projected.push((field: field.copy(), value: value))
+                        projected.push({field: field.copy(), value: value})
                     }
                 }
                 .Field(field, alias) -> {
                     value := JetSQLValue.Null
                     if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
-                    projected.push((field: alias ?? field.copy(), value: value))
+                    projected.push({field: alias ?? field.copy(), value: value})
                 }
                 .Aggregate(function, field, _) -> {
-                    projected.push((field: item.output_name(), value: sql_aggregate_value(group, function, field, cell)))
+                    projected.push({field: item.output_name(), value: sql_aggregate_value(group, function, field, cell)})
                 }
             }
         }

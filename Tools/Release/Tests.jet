@@ -431,10 +431,10 @@ texts: fn(items: [Dyn]) -> [String] Never! {
 }
 
 #Test("a skipped check blocks: a blocked row, a partial case count, or a gate that ran nothing") {
-    cases: [(label: String, rows: [Dyn], part: String)]{
-        (label: "blocked", rows: [Dyn]{scope_row("gates", "PASS"), scope_row("Tests/Cases", "BLOCKED")}, part: "Tests/Cases is BLOCKED"),
-        (label: "count", rows: [Dyn]{scope_row("gates", "PASS"), counted("Tests/golden", 3, 2)}, part: "passed 2 of 3 cases"),
-        (label: "empty", rows: [Dyn]{}, part: "the gate ran nothing"),
+    cases: [{label: String, rows: [Dyn], part: String}]{
+        {label: "blocked", rows: [Dyn]{scope_row("gates", "PASS"), scope_row("Tests/Cases", "BLOCKED")}, part: "Tests/Cases is BLOCKED"},
+        {label: "count", rows: [Dyn]{scope_row("gates", "PASS"), counted("Tests/golden", 3, 2)}, part: "passed 2 of 3 cases"},
+        {label: "empty", rows: [Dyn]{}, part: "the gate ran nothing"},
     }
     loop item in cases {
         fixture := new_fixture("skip-{item.label}")
@@ -446,9 +446,9 @@ texts: fn(items: [Dyn]) -> [String] Never! {
 }
 
 #Test("a shipped file that names personal information blocks: a path rule, and a word rule in any case") {
-    leaks: [(label: String, jet: String)]{
-        (label: "path", jet: "#!/bin/sh\necho /fixture-home/ada\n"),
-        (label: "word", jet: "#!/bin/sh\necho built on Fixture-Secret-Host\n"),
+    leaks: [{label: String, jet: String}]{
+        {label: "path", jet: "#!/bin/sh\necho /fixture-home/ada\n"},
+        {label: "word", jet: "#!/bin/sh\necho built on Fixture-Secret-Host\n"},
     }
     loop leak in leaks {
         fixture := new_fixture("leak-{leak.label}")

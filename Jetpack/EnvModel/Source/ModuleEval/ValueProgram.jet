@@ -66,7 +66,7 @@ EnvValueProgram: struct {
     // A value known without the compiler, by its expression's start.
     known: [Int:CtValue]
     // Source text the program spells differently, by its span.
-    respelled: [(span: Span, text: String)]
+    respelled: [{span: Span, text: String}]
     // Whether some generated value needs the compiler.
     needed: Bool
     // The span the first generated value stands for.
@@ -92,7 +92,7 @@ envmodel_value_program: fn(source: String, environment: [String:CtValue]) -> Env
         leaves: [Int:String]{},
         labels: [String:String]{},
         known: [Int:CtValue]{},
-        respelled: [(span: Span, text: String)]{},
+        respelled: [{span: Span, text: String}]{},
         needed: false,
         first: None,
     }
@@ -307,23 +307,23 @@ envmodel_value_leaf: fn(plan: &EnvValueProgram, expr: Expr, expect: String, name
     }
     head: if wrap == "" -> "{generated}: " else -> "{generated}: {wrap}("
     envmodel_value_append(plan, head, label_span)
-    sites := [(span: Span, text: String)]{}
+    sites := [{span: Span, text: String}]{}
     loop site in comptime_walk_identifiers(expr) {
         if site.name.starts_with("$") {
             value: plan.environment.get(site.name) ?? CtValue.Str{value: ""}
             literal: jet_config_literal(value) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(site.span), "the environment read `{site.name}` holds a value the module values' program can't spell")})
-            sites.push((span: site.span, text: literal))
+            sites.push({span: site.span, text: literal})
             next
         }
         sibling: siblings.get(site.name) ?? next
         if sibling == "" {
             return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(site.span), "`{site.name}` is written in environment syntax, so another field can't read its value")})
         }
-        sites.push((span: site.span, text: sibling))
+        sites.push({span: site.span, text: sibling})
     }
     loop respelling in plan.respelled {
         if respelling.span.start >= extent.start && respelling.span.end <= extent.end {
-            sites.push((span: respelling.span, text: respelling.text))
+            sites.push({span: respelling.span, text: respelling.text})
         }
     }
     sites.sort_by(fn(site) { site.span.start })

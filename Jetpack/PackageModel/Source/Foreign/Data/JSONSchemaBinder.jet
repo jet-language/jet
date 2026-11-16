@@ -53,7 +53,7 @@ pkg_data_json_number_lexeme: fn(value: Dyn) -> String? Never! {
 }
 
 // The one type every value shares, and whether any value is null.
-pkg_data_json_values_type: fn(builder: &SchemaBuilder, values: [Dyn], hint: String) -> (ty: BoundType, nullable: Bool) DataBindError! {
+pkg_data_json_values_type: fn(builder: &SchemaBuilder, values: [Dyn], hint: String) -> {ty: BoundType, nullable: Bool} DataBindError! {
     nullable := false
     nonnull := [Dyn]{}
     loop value in values {
@@ -61,13 +61,13 @@ pkg_data_json_values_type: fn(builder: &SchemaBuilder, values: [Dyn], hint: Stri
             nonnull.push(value.copy())
         }
     }
-    if nonnull.len() == 0 -> return Ok((nullable: true, ty: BoundType.Dynamic))
+    if nonnull.len() == 0 -> return Ok({nullable: true, ty: BoundType.Dynamic})
     first: pkg_data_json_kind(nonnull[0])
     uniform := true
     loop value in nonnull {
         if pkg_data_json_kind(value) != first -> uniform = false
     }
-    if !uniform -> return Ok((nullable: nullable, ty: BoundType.Dynamic))
+    if !uniform -> return Ok({nullable: nullable, ty: BoundType.Dynamic})
     ty: if first == {
         .Object -> BoundType.Named(pkg_data_add_json_record(builder, hint, nonnull))
         .Array -> pkg_data_json_array_type(builder, nonnull, hint)
@@ -76,7 +76,7 @@ pkg_data_json_values_type: fn(builder: &SchemaBuilder, values: [Dyn], hint: Stri
         .Number -> pkg_data_json_number_type(nonnull)
         .Null | .Other -> BoundType.Dynamic
     }
-    Ok((nullable: nullable, ty: ty))
+    Ok({nullable: nullable, ty: ty})
 }
 
 // A list over every element of every array; a nullable element type becomes

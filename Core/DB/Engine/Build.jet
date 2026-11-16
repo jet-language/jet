@@ -59,14 +59,14 @@ name_byte: fn(z: [U8], i: Int) -> Int Never! { if i < z.len() -> (Int{z[i]}) els
 
 // The connection-wide half of C's db->suppressErr++: the previous flags,
 // for unsuppress_err.
-suppress_err: fn(p: &cg.Parse, a: &ast.AST) -> (ast_flag: Bool, db_flag: Int) Never! {
-    saved: (ast_flag: a.suppress_err, db_flag: p.db.suppress_err)
+suppress_err: fn(p: &cg.Parse, a: &ast.AST) -> {ast_flag: Bool, db_flag: Int} Never! {
+    saved: {ast_flag: a.suppress_err, db_flag: p.db.suppress_err}
     a.suppress_err = true
     p.db.suppress_err += 1
     saved
 }
 
-unsuppress_err: fn(p: &cg.Parse, a: &ast.AST, saved: (ast_flag: Bool, db_flag: Int)) Never! {
+unsuppress_err: fn(p: &cg.Parse, a: &ast.AST, saved: {ast_flag: Bool, db_flag: Int}) Never! {
     a.suppress_err = saved.ast_flag
     p.db.suppress_err = saved.db_flag
 }
@@ -225,22 +225,22 @@ find_db: fn(db: conn.Conn, a: ast.AST, t: ast.SQLTok) -> Int Never! {
 
 // sqlite3TwoPartName: the database of "name1.name2" (or of "name1") and
 // the unqualified name; i_db -1 after an error.
-two_part_name: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -> (i_db: Int, name: ast.SQLTok) Never! {
+two_part_name: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -> {i_db: Int, name: ast.SQLTok} Never! {
     if name2.n > 0 {
         if p.db.init.busy {
             ast.error(a, "corrupt database")
-            return (i_db: -1, name: name2)
+            return {i_db: -1, name: name2}
         }
         i_db: find_db(p.db, a, name1)
         if i_db < 0 {
             msg: "unknown database {ast.tok_text(a, name1)}"
             off: ast.tok_offset(a, name1)
             ast.error_at(a, msg, off)
-            return (i_db: -1, name: name2)
+            return {i_db: -1, name: name2}
         }
-        return (i_db: i_db, name: name2)
+        return {i_db: i_db, name: name2}
     }
-    (i_db: p.db.init.i_db, name: name1)
+    {i_db: p.db.init.i_db, name: name1}
 }
 
 // sqlite3CheckObjectName: 0 when `name` may name a new `typ` object on

@@ -381,9 +381,9 @@ TypedCSV: struct {
         capture: fn(&self) -> Dyn Never! {
             if self.member() -> return self.cell()
             if self.cursor != TYPED_CSV_RECORD -> return Dyn.Null
-            entries := [(key: String, value: Dyn)]{}
+            entries := [{key: String, value: Dyn}]{}
             loop column in 0..<self.header.len() {
-                entries.push((key: self.header[column].copy(), value: Dyn.Text(self.text(column))))
+                entries.push({key: self.header[column].copy(), value: Dyn.Text(self.text(column))})
             }
             stream.object_from_entries(entries)
         }

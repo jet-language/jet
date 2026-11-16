@@ -53,7 +53,7 @@ adds_word: fn(patch: String, word: Regex) -> Bool {
 
 // The SUBs of `run` that `hits` names, each with every later SUB of its
 // lead, and the others; a SUB whose patch did not apply is in neither.
-quarantine: fn(integ: String, run: [String], hits: [Bool]) -> (blamed: [String], keep: [String]) {
+quarantine: fn(integ: String, run: [String], hits: [Bool]) -> {blamed: [String], keep: [String]} {
     blamed := [String]{}
     keep := [String]{}
     loop at in 0..<run.len() {
@@ -64,7 +64,7 @@ quarantine: fn(integ: String, run: [String], hits: [Bool]) -> (blamed: [String],
             keep.push(run[at])
         }
     }
-    (blamed: blamed, keep: keep)
+    {blamed: blamed, keep: keep}
 }
 
 // The files the census rows name: column 2 without `<corelib>/`, its final `:line.col` and `.jet`.

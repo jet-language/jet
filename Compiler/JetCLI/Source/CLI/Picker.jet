@@ -1029,10 +1029,10 @@ jet_cli_picker_sequence: fn(introducer: Int, bytes: [U8], from: Int, final: Int)
 
 // The terminal's columns (24 to 160) and rows (at least 5); a terminal that
 // reports no size gets the smallest frame.
-jet_cli_picker_size: fn() -[IO]> (h: Int, w: Int) Never! {
-    size: picker_rt.terminal8_stty() ?? (h: 0, w: 0)
+jet_cli_picker_size: fn() -[IO]> {h: Int, w: Int} Never! {
+    size: picker_rt.terminal8_stty() ?? {h: 0, w: 0}
     columns: if size.w < 24 -> 24 else if size.w > 160 -> 160 else -> size.w
-    (h: if size.h < 5 -> 5 else -> size.h, w: columns)
+    {h: if size.h < 5 -> 5 else -> size.h, w: columns}
 }
 
 // Moves the cursor to the first line of the last frame (at most `height`

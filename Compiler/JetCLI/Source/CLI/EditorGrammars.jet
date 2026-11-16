@@ -272,7 +272,7 @@ jet_cli_grammar_string: fn(literal: String, field: String) -> String JetCLIReadE
 
 // `NAME: "literal"` at the start of `line`, with only an optional `//`
 // comment after it.
-jet_cli_grammar_constant_line: fn(line: String) -> (name: String, literal: String)? Never! {
+jet_cli_grammar_constant_line: fn(line: String) -> {name: String, literal: String}? Never! {
     raw: line.bytes()
     name_end: jet_cli_grammar_ident_end(raw, 0)
     if name_end == 0 || name_end + 1 >= raw.len() || raw[name_end] != (U8{58}) -> return None
@@ -282,7 +282,7 @@ jet_cli_grammar_constant_line: fn(line: String) -> (name: String, literal: Strin
     if close < 0 -> return None
     tail: jet_cli_grammar_slice(line, close, raw.len()).trim().copy()
     if tail != "" && !tail.starts_with(COMMENT_PREFIX) -> return None
-    Val((name: jet_cli_grammar_slice(line, 0, name_end), literal: jet_cli_grammar_slice(line, at, close)))
+    Val({name: jet_cli_grammar_slice(line, 0, name_end), literal: jet_cli_grammar_slice(line, at, close)})
 }
 
 // Every `NAME: "literal"` constant in the syntax registry directory.

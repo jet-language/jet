@@ -188,7 +188,7 @@ vlq_digit: fn(code: Int) -> Int {
 // the section's payload is a length-prefixed string.
 wasm_source_mapping_url: fn(bytes: [U8]) -> String? {
     offset := 8
-    payload := (start: 0, end: 0 - 1)
+    payload := {start: 0, end: 0 - 1}
     loop offset < bytes.len() {
         id: Int{bytes[offset]}
         offset += 1
@@ -199,7 +199,7 @@ wasm_source_mapping_url: fn(bytes: [U8]) -> String? {
             name_len: leb(bytes, offset)
             name_end: name_len.next + name_len.value
             if name_end <= end && bytes_are(bytes, name_len.next, name_end, "sourceMappingURL") {
-                payload = (start: name_end, end: end)
+                payload = {start: name_end, end: end}
                 break
             }
         }
@@ -221,7 +221,7 @@ bytes_are: fn(bytes: [U8], start: Int, end: Int, word: String) -> Bool {
 }
 
 // An unsigned LEB128 at `at`: its value and the offset after it.
-leb: fn(bytes: [U8], at: Int) -> (value: Int, next: Int) {
+leb: fn(bytes: [U8], at: Int) -> {value: Int, next: Int} {
     value := 0
     shift := 0
     index := at
@@ -232,7 +232,7 @@ leb: fn(bytes: [U8], at: Int) -> (value: Int, next: Int) {
         if byte < 128 -> break
         shift += 7
     }
-    (value: value, next: index)
+    {value: value, next: index}
 }
 
 parse: fn(body: String, label: String) -> Dyn Failure! {

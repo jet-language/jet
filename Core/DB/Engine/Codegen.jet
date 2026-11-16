@@ -458,7 +458,7 @@ Gen: trait {
     // vtabBestIndex's xBestIndex call (where.c) for virtual table t:
     // info's outputs filled in, with the result code and the module's
     // error message (zErrMsg), if any.
-    vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never!
+    vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never!
     // xFindFunction of virtual table t's module for function `name` of
     // n_arg arguments (isAuxiliaryVtabOperator): its result, 0 when the
     // module has none.
@@ -1234,8 +1234,8 @@ CodegenTestGen: struct {
             def.copy()
         }
 
-        vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! {
-            (rc: base.ERROR, err: None)
+        vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never! {
+            {rc: base.ERROR, err: None}
         }
 
         vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {

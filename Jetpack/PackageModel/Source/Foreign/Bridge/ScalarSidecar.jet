@@ -186,38 +186,38 @@ pkg_bridge_write_scalar_provenance_with_sources: fn(cache: String, lib: String, 
         boundary.set_obligation(obligation, FFIEvidenceBasis.Trusted, "scalar-sidecar-generator", [String]{"adapter implementation remains TRUSTED outside hardening", "loaded archive and generated worker identities are recorded"})
     }
     provenance: files.join(cache, "{lib}.provenance")
-    fields := [(name: String, value: String)]{
-        (name: "language", value: language.root()),
-        (name: "abi", value: abi),
-        (name: "runtime", value: runtime),
-        (name: "transport", value: "supervised-scalar-sidecar"),
-        (name: "descriptor", value: descriptor),
-        (name: "calling", value: contract.calling_convention.debug_name()),
-        (name: "layout", value: contract.layout.debug_name()),
-        (name: "ownership", value: contract.ownership.debug_name()),
-        (name: "errors", value: contract.errors.debug_name()),
-        (name: "callbacks", value: contract.callbacks.debug_name()),
-        (name: "async", value: contract.async_completion.debug_name()),
-        (name: "tasks", value: contract.task_boundary.debug_name()),
-        (name: "safety", value: contract.safety.debug_name()),
-        (name: "provider", value: descriptor_row.provider.debug_name()),
-        (name: "runtime-toolchain", value: runtime_toolchain),
-        (name: "cc", value: cc),
-        (name: "ar", value: ar),
+    fields := [{name: String, value: String}]{
+        {name: "language", value: language.root()},
+        {name: "abi", value: abi},
+        {name: "runtime", value: runtime},
+        {name: "transport", value: "supervised-scalar-sidecar"},
+        {name: "descriptor", value: descriptor},
+        {name: "calling", value: contract.calling_convention.debug_name()},
+        {name: "layout", value: contract.layout.debug_name()},
+        {name: "ownership", value: contract.ownership.debug_name()},
+        {name: "errors", value: contract.errors.debug_name()},
+        {name: "callbacks", value: contract.callbacks.debug_name()},
+        {name: "async", value: contract.async_completion.debug_name()},
+        {name: "tasks", value: contract.task_boundary.debug_name()},
+        {name: "safety", value: contract.safety.debug_name()},
+        {name: "provider", value: descriptor_row.provider.debug_name()},
+        {name: "runtime-toolchain", value: runtime_toolchain},
+        {name: "cc", value: cc},
+        {name: "ar", value: ar},
     }
     loop field in boundary.provenance_fields() -> fields.push(field)
     loop entry in sources {
-        fields.push((name: entry.role, value: entry.path))
-        fields.push((name: "{entry.role}-sha256", value: pkg_bridge_sha_file(entry.path)))
+        fields.push({name: entry.role, value: entry.path})
+        fields.push({name: "{entry.role}-sha256", value: pkg_bridge_sha_file(entry.path)})
     }
-    fields.push((name: "worker", value: worker))
-    fields.push((name: "worker-sha256", value: worker_digest))
+    fields.push({name: "worker", value: worker})
+    fields.push({name: "worker-sha256", value: worker_digest})
     loop function in functions {
-        fields.push((name: "function", value: function.name))
-        fields.push((name: "function-params", value: pkg_foreign_scalar_list_debug(function.params)))
-        fields.push((name: "function-result", value: function.result.debug_name()))
+        fields.push({name: "function", value: function.name})
+        fields.push({name: "function-params", value: pkg_foreign_scalar_list_debug(function.params)})
+        fields.push({name: "function-result", value: function.result.debug_name()})
     }
-    artifacts: [(name: String, digest: String)]{(name: files.basename(worker), digest: worker_digest), (name: files.basename(archive), digest: archive_digest)}
+    artifacts: [{name: String, digest: String}]{{name: files.basename(worker), digest: worker_digest}, {name: files.basename(archive), digest: archive_digest}}
     pkg_bridge_write_provenance(provenance, identity, fields, artifacts)
     Ok(provenance)
 }

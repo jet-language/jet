@@ -556,7 +556,7 @@ ir_accumulate_test_op: fn(g: &IRFunction, op: IROp, a: Int, b: Int, c: Int, line
 // Ends g with `drops` and `return sum`, runs the passes of `level` over the
 // module (without "accumulate" unless `enabled`) with IR Lint after each,
 // and returns g's calls of itself and its Loops.
-ir_accumulate_test_run: fn(m: &&IRModule, g: &&IRFunction, sum: Int, drops: [Int], level: Int, enabled: Bool) -> (calls: Int, loops: Int) Never! {
+ir_accumulate_test_run: fn(m: &&IRModule, g: &&IRFunction, sum: Int, drops: [Int], level: Int, enabled: Bool) -> {calls: Int, loops: Int} Never! {
     built := m.move()
     f := g.move()
     loop slot in drops -> _ := ir_emit(f, IROp.Drop, -1, slot, -1, -1, 9)
@@ -578,7 +578,7 @@ ir_accumulate_test_run: fn(m: &&IRModule, g: &&IRFunction, sum: Int, drops: [Int
         if out.op[at] == .Call && out.a[at] == 1 -> calls += 1
         if out.op[at] == .Loop -> loops += 1
     }
-    (calls: calls, loops: loops)
+    {calls: calls, loops: loops}
 }
 
 // n * 3 + g(n - 1): x is computed before the call. (Int versioning and the

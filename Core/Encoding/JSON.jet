@@ -673,7 +673,7 @@ Parser: struct {
     parse_object: fn(&self) -> Dyn EncodingError! {
         if !self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
-        entries := [(key: String, value: Dyn)]{}
+        entries := [{key: String, value: Dyn}]{}
         // A repeated key is found by scanning the members up to
         // JSON_SEEN_SCAN of them; past it, in a map of their positions.
         positions := [String:Int]{}
@@ -720,7 +720,7 @@ Parser: struct {
             name: self.path.pop() ?? ""
             if position >= 0 -> entries[position].value = value else {
                 // parse_allow_duplicates: the later value, at the first name's position.
-                entries.push((key: name, value: value))
+                entries.push({key: name, value: value})
             }
             self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             b: self.peek() ?? return Err(self.err("unterminated object"))
@@ -1794,19 +1794,19 @@ PatchOp: struct {
 }
 
 // The first member named `name`, scanning the object's ordered pairs.
-object_member: fn(members: [(key: String, value: Dyn)], name: String) -> Dyn? {
+object_member: fn(members: [{key: String, value: Dyn}], name: String) -> Dyn? {
     loop pair in members {
         if pair.key == name -> return Val(pair.value)
     }
     None
 }
 
-patch_field: fn(members: [(key: String, value: Dyn)], index: Int, name: String) -> Dyn EncodingError! {
+patch_field: fn(members: [{key: String, value: Dyn}], index: Int, name: String) -> Dyn EncodingError! {
     value: object_member(members, name) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} needs a `{name}` member"))
     Ok(value)
 }
 
-patch_pointer_field: fn(members: [(key: String, value: Dyn)], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
+patch_pointer_field: fn(members: [{key: String, value: Dyn}], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
     raw: patch_field(members, index, name)
     text := ""
     valid := false
@@ -1847,7 +1847,7 @@ patch_operations: fn(ops: Dyn, limits: EncodingLimits) -> [PatchOp] EncodingErro
     }
     list := [PatchOp]{}
     loop index in 0..<items.len() {
-        members := [(key: String, value: Dyn)]{}
+        members := [{key: String, value: Dyn}]{}
         is_object := false
         if items[index] == {
             .Object(fields) -> {
@@ -1910,26 +1910,26 @@ patch_edit: fn(node: Dyn, segments: [String], depth: Int, kind: Int, value: Dyn)
     last: depth + 1 == segments.len()
     if node == {
         .Object(entries) -> {
-            out := [(key: String, value: Dyn)]{}
+            out := [{key: String, value: Dyn}]{}
             found := false
             loop pair in entries {
                 if pair.key != segment {
-                    out.push((key: pair.key, value: pair.value))
+                    out.push({key: pair.key, value: pair.value})
                     next
                 }
                 found = true
                 if !last {
                     child: patch_edit(pair.value, segments, depth + 1, kind, value)
-                    out.push((key: pair.key, value: child))
+                    out.push({key: pair.key, value: child})
                     next
                 }
-                if kind != PATCH_REMOVE -> out.push((key: pair.key, value: value))
+                if kind != PATCH_REMOVE -> out.push({key: pair.key, value: value})
             }
             if !found {
                 if !last || kind != PATCH_ADD {
                     return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
                 }
-                out.push((key: segment, value: value))
+                out.push({key: segment, value: value})
             }
             return Ok(stream.object_from_entries(out))
         }
@@ -2247,11 +2247,11 @@ patch_step: fn(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
     assert_eq(at<[String]>(tree, "receipts/0/metrics/tags") ?? panic("string list"), [String]{"a", "b"})
     assert_eq((at<[Dyn]>(tree, "receipts") ?? panic("list")).len(), 1)
     assert_eq(at<Int>(tree, "/receipts/0/metrics/n") ?? panic("pointer spelling"), 42)
-    rows: [(path: String, shown: String)]{
-        (path: "receipts/0/metrics/name", shown: "at `receipts/0/metrics/name`: expected Int, found text \"cold\""),
-        (path: "receipts/0/metrics/p50", shown: "at `receipts/0/metrics/p50`: JSON number `1.5` is not an exact integer"),
-        (path: "receipts/3/metrics/p50", shown: "at `receipts/3/metrics/p50`: array index 3 is out of range for length 1"),
-        (path: "receipts/0/metrics/p99", shown: "at `receipts/0/metrics/p99`: no object member named `p99`"),
+    rows: [{path: String, shown: String}]{
+        {path: "receipts/0/metrics/name", shown: "at `receipts/0/metrics/name`: expected Int, found text \"cold\""},
+        {path: "receipts/0/metrics/p50", shown: "at `receipts/0/metrics/p50`: JSON number `1.5` is not an exact integer"},
+        {path: "receipts/3/metrics/p50", shown: "at `receipts/3/metrics/p50`: array index 3 is out of range for length 1"},
+        {path: "receipts/0/metrics/p99", shown: "at `receipts/0/metrics/p99`: no object member named `p99`"},
     }
     loop row in rows {
         if at<Int>(tree, row.path) == {

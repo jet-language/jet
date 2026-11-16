@@ -673,17 +673,17 @@ wrap32: fn(n: Int) -> Int Never! { n & 4294967295 }
 #Test("every Dyn variant has one decode kind in Core and in the runtime scalar decodes") {
     stamp: Dyn.DateTime(time.zoned(time.from_unix_seconds(0), time.utc()))
     number: stream.typed_number("1")
-    trees: [(tree: Dyn, kind: String)]{
-        (tree: Dyn.Null, kind: "Null"),
-        (tree: Dyn.Bool(true), kind: "Bool"),
-        (tree: Dyn.Int(1), kind: "Int"),
-        (tree: Dyn.Float(1.5), kind: "Float"),
-        (tree: number, kind: "number"),
-        (tree: Dyn.Text("a"), kind: "Text"),
-        (tree: Dyn.Bytes([U8]{1}), kind: "Bytes"),
-        (tree: stamp, kind: "DateTime"),
-        (tree: Dyn.Array([Dyn]{}), kind: "a list"),
-        (tree: Dyn.object(), kind: "an object"),
+    trees: [{tree: Dyn, kind: String}]{
+        {tree: Dyn.Null, kind: "Null"},
+        {tree: Dyn.Bool(true), kind: "Bool"},
+        {tree: Dyn.Int(1), kind: "Int"},
+        {tree: Dyn.Float(1.5), kind: "Float"},
+        {tree: number, kind: "number"},
+        {tree: Dyn.Text("a"), kind: "Text"},
+        {tree: Dyn.Bytes([U8]{1}), kind: "Bytes"},
+        {tree: stamp, kind: "DateTime"},
+        {tree: Dyn.Array([Dyn]{}), kind: "a list"},
+        {tree: Dyn.object(), kind: "an object"},
     }
     loop entry in trees {
         assert_eq(__dyn_kind(entry.tree), entry.kind)

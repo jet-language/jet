@@ -622,7 +622,7 @@ build_stage_inputs: fn(sandbox: String, inputs: [ActionInputCapture]) -[FS, Env]
     task.group staging(limit: sys.cpu_count()) {
         writes: loop index in 0..<staged -> task build_stage_input(sandbox, inputs[index])
         loop (index, handle) in writes {
-            written: handle.join() ?? (written: false, error: Val(BuildIOError.new(.Other, "writing `{inputs[index].snapshot.path}` stopped")))
+            written: handle.join() ?? {written: false, error: Val(BuildIOError.new(.Other, "writing `{inputs[index].snapshot.path}` stopped"))}
             if write_failure == None && written.error == .Val(error) -> write_failure = Val(error)
         }
     }
@@ -640,13 +640,13 @@ build_stage_folder: fn(sandbox: String, input: ActionInputCapture) -[FS]> BuildI
 
 // Writes input `input` under `sandbox`, runnable where the input is; else
 // why it can't be.
-build_stage_input: fn(sandbox: String, input: ActionInputCapture) -[FS]> (written: Bool, error: BuildIOError?) Never! {
-    to: build_resolve_under(sandbox, input.snapshot.path) ?? return (written: false, error: Val(err))
-    files.write_bytes(to, input.bytes) ?? return (written: false, error: Val(BuildIOError.from(err)))
+build_stage_input: fn(sandbox: String, input: ActionInputCapture) -[FS]> {written: Bool, error: BuildIOError?} Never! {
+    to: build_resolve_under(sandbox, input.snapshot.path) ?? return {written: false, error: Val(err)}
+    files.write_bytes(to, input.bytes) ?? return {written: false, error: Val(BuildIOError.from(err))}
     if input.snapshot.executable {
-        files.set_mode(to, 493) ?? return (written: false, error: Val(BuildIOError.from(err)))
+        files.set_mode(to, 493) ?? return {written: false, error: Val(BuildIOError.from(err))}
     }
-    (written: true, error: None)
+    {written: true, error: None}
 }
 
 // The digest the action's key holds for its tool at `executable`: a made
@@ -808,13 +808,13 @@ build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Ex
         if !selected.contains(probe.id) -> next
         result: if probe.kind == {
             .FindProgram(program) -> if build_resolve_program_path(plan, probe.toolchain, program) == {
-                .Val(path) -> (success: true, detail: path)
-                .None -> (success: false, detail: "program `{program}` not found")
+                .Val(path) -> {success: true, detail: path}
+                .None -> {success: false, detail: "program `{program}` not found"}
             }
             .FindFolder(file) -> {
                 search: foundation_find_folder(file, foundation_library_folders())
                 found: search.found ?? return Err(BuildExecutionError.FolderNotFound{probe: probe.name, file: file, searched: loop miss in search.misses -> "{miss.folder}: {miss.reason}"})
-                (success: true, detail: found.folder)
+                {success: true, detail: found.folder}
             }
             .PkgConfig(package, min_version) -> {
                 pkg_config: build_resolve_program_path(plan, probe.toolchain, "pkg-config") ?? return Err(BuildExecutionError.ProbeFailed{probe: probe.name, detail: "pkg-config not found"})
@@ -823,7 +823,7 @@ build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Ex
                     .None -> package
                 }
                 receipt: build_run_probe_sandboxed(pkg_config, [String]{"--exists", requirement}, None, time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS))
-                (success: receipt.success, detail: "pkg-config exit {build_receipt_code(receipt)}")
+                {success: receipt.success, detail: "pkg-config exit {build_receipt_code(receipt)}"}
             }
             .HeaderCheck(header) -> build_run_compile_probe(plan, probe.toolchain, "#include <{header}>\nint main(void) {{ return 0; }}\n")
             .CompileCheck(_, includes, code) -> {
@@ -865,7 +865,7 @@ build_receipt_code: fn(receipt: ProcessReceipt) -> Int Never! {
 // no network, then the root removed. Unlike Rust, the run has the same
 // finite wall-clock budget as an action: a probe past `timeout` is killed and
 // fails the build.
-build_run_probe_sandboxed: fn(executable: String, args: [String], source: (path: String, contents: String)?, timeout: Duration) -[FS, Env, Exec, Time.Wait, Rand]> ProcessReceipt BuildExecutionError! {
+build_run_probe_sandboxed: fn(executable: String, args: [String], source: {path: String, contents: String}?, timeout: Duration) -[FS, Env, Exec, Time.Wait, Rand]> ProcessReceipt BuildExecutionError! {
     nonce: random.bytes(8) ?? return Err(BuildExecutionError.IO{action: "build probe sandbox", detail: "{err}"})
     root: files.join(sys.temp_dir(), "jet-build-probe-{sys.pid()}-{build_hex_encode(nonce)}")
     if files.create_dir_all(root) == .Err(error) {
@@ -898,17 +898,17 @@ build_run_probe_sandboxed: fn(executable: String, args: [String], source: (path:
 
 // Rust `run_compile_probe`: the first declared `cc`, `clang` or `gcc` checks
 // the probe source's syntax inside the sandbox.
-build_run_compile_probe: fn(plan: HermeticBuildPlan, toolchain: ToolchainHandle, source: String) -[FS, Env, Exec, Time.Wait, Rand]> (success: Bool, detail: String) BuildExecutionError! {
+build_run_compile_probe: fn(plan: HermeticBuildPlan, toolchain: ToolchainHandle, source: String) -[FS, Env, Exec, Time.Wait, Rand]> {success: Bool, detail: String} BuildExecutionError! {
     compiler := String?{None}
     names: [String]{"cc", "clang", "gcc"}
     loop name in names {
         if compiler == None -> compiler = build_resolve_program_path(plan, toolchain, name)
     }
-    found: compiler ?? return Ok((success: false, detail: "no C compiler (`cc`, `clang`, or `gcc`) was found"))
-    receipt: build_run_probe_sandboxed(found, [String]{"-x", "c", "-fsyntax-only", "probe.c"}, Val((path: "probe.c", contents: source)), time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS))
-    if receipt.success -> return Ok((success: true, detail: "{found} accepted the syntax probe"))
+    found: compiler ?? return Ok({success: false, detail: "no C compiler (`cc`, `clang`, or `gcc`) was found"})
+    receipt: build_run_probe_sandboxed(found, [String]{"-x", "c", "-fsyntax-only", "probe.c"}, Val({path: "probe.c", contents: source}), time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS))
+    if receipt.success -> return Ok({success: true, detail: "{found} accepted the syntax probe"})
     detail: receipt.errors.trim()
-    Ok((success: false, detail: if detail == "" -> "{found} rejected the syntax probe" else -> "{found}: {detail}"))
+    Ok({success: false, detail: if detail == "" -> "{found} rejected the syntax probe" else -> "{found}: {detail}"})
 }
 
 // Rust `Path::components().count()`.

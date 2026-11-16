@@ -662,7 +662,7 @@ pkg_data_sql_unique_stop_word: fn(value: String) -> Bool Never! {
 
 // One table constraint declaration. Returns the lower-cased columns it makes
 // required and whether it declared the table's PRIMARY KEY.
-pkg_data_sql_table_constraint: fn(segment: [String], primary_seen: Bool) -> (required: [String], primary: Bool) DataBindError! {
+pkg_data_sql_table_constraint: fn(segment: [String], primary_seen: Bool) -> {required: [String], primary: Bool} DataBindError! {
     cursor := SQLCursor{tokens: segment, index: 0}
     if cursor.at_word("CONSTRAINT") {
         cursor.index += 1
@@ -723,7 +723,7 @@ pkg_data_sql_table_constraint: fn(segment: [String], primary_seen: Bool) -> (req
     }
     // Written in the tuple's canonical member order: the O0 seed zips a
     // literal's members by position after sorting its type's.
-    Ok((primary: primary, required: required))
+    Ok({primary: primary, required: required})
 }
 
 // One `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] [schema.]name (...)`.

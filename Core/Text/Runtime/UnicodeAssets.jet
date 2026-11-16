@@ -107,12 +107,12 @@ mapping_row: fn(index: View<U8>, cp: Int, stride: Int) -> Int? {
     None
 }
 
-mapping: fn(index: View<U8>, scalars: View<U8>, cp: Int) -> (start: Int, length: Int)? {
+mapping: fn(index: View<U8>, scalars: View<U8>, cp: Int) -> {start: Int, length: Int}? {
     row: mapping_row(index, cp, 11) ?? return None
     start: uint(index, row + 3, 4)
     length: uint(index, row + 7, 4)
     assert(length > 0 && scalars.len() % 3 == 0 && start + length <= scalars.len() /% 3, "invalid Unicode mapping extent")
-    Val((start: start, length: length))
+    Val({start: start, length: length})
 }
 
 scalar: fn(table: View<U8>, index: Int) -> Int Never! {

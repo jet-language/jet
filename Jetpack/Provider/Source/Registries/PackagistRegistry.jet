@@ -156,22 +156,22 @@ provider_packagist_expand_releases: fn(metadata: Dyn, releases: [Dyn]) -> [Dyn] 
         return Err(RegistryError.Reason("unsupported Packagist metadata minifier"))
     }
     expanded := [Dyn]{}
-    previous := [(key: String, value: Dyn)]{}
+    previous := [{key: String, value: Dyn}]{}
     loop release in releases {
         changes: pkg_json_object(release) ?? return Err(RegistryError.Reason("invalid minified release: {PKG_JSON_NOT_OBJECT}"))
         loop change in changes {
             unset: (pkg_json_text(change.value) ?? "") == "__unset"
-            next_fields := [(key: String, value: Dyn)]{}
+            next_fields := [{key: String, value: Dyn}]{}
             replaced := false
             loop field in previous {
                 if field.key == change.key {
                     if !unset {
-                        next_fields.push((key: field.key, value: change.value))
+                        next_fields.push({key: field.key, value: change.value})
                         replaced = true
                     }
                 } else { next_fields.push(field) }
             }
-            if !unset && !replaced -> next_fields.push((key: change.key, value: change.value))
+            if !unset && !replaced -> next_fields.push({key: change.key, value: change.value})
             previous = next_fields
         }
         object := [String:Dyn]{}

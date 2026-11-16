@@ -197,17 +197,17 @@ impl PackageOverride {
 
 // A value with its optional priority wrapper: `Force(v)` is 100,
 // `Default(v)` is -100, `Priority(n: v)` is n, and a bare value is 0.
-pkg_overlay_priority_payload: fn(input: String) -> (value: String, priority: Int) OverlayError! {
+pkg_overlay_priority_payload: fn(input: String) -> {value: String, priority: Int} OverlayError! {
     raw: pkg_overlay_trim_end_all(input.trim(), ",")
     if pkg_overlay_strip_wrapped(raw, "Force(", ")") == {
-        .Val(inner) -> return Ok((priority: 100, value: inner.trim()))
+        .Val(inner) -> return Ok({priority: 100, value: inner.trim()})
         .None -> {}
     }
     if pkg_overlay_strip_wrapped(raw, "Default(", ")") == {
-        .Val(inner) -> return Ok((priority: -100, value: inner.trim()))
+        .Val(inner) -> return Ok({priority: -100, value: inner.trim()})
         .None -> {}
     }
-    inner: pkg_overlay_strip_wrapped(raw, "Priority(", ")") ?? return Ok((priority: 0, value: raw))
+    inner: pkg_overlay_strip_wrapped(raw, "Priority(", ")") ?? return Ok({priority: 0, value: raw})
     weight := ""
     value := ""
     if pkg_overlay_split_colon(inner) == {
@@ -225,7 +225,7 @@ pkg_overlay_priority_payload: fn(input: String) -> (value: String, priority: Int
         }
     }
     priority: pkg_overlay_parse_i32(weight) ?? return Err(OverlayError.Malformed("Priority(n) needs an integer weight"))
-    Ok((priority: priority, value: value))
+    Ok({priority: priority, value: value})
 }
 
 // A decimal `i32` with an optional sign, as Rust `str::parse::<i32>`.

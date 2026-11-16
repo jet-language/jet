@@ -1414,14 +1414,14 @@ batch_ab: fn(options: Options) -> String {
 
 // The phase budgets of the current compiler's median A/B compile in each
 // mode (budget_lines), read from its kept trace.
-batch_budgets: fn(options: Options, runs: [Run], lines: Int) -> (lines: [String], unowned: Bool) {
+batch_budgets: fn(options: Options, runs: [Run], lines: Int) -> {lines: [String], unowned: Bool} {
     out := [String]{}
     unowned := false
     budget_file: files.join(options.tree, BUDGET_FILE)
     file: json.decode<BudgetFile>(files.read(budget_file) ?? "") ?? {
         out.push("")
         out.push("phase budgets: cannot read {budget_file}")
-        return (lines: out, unowned: unowned)
+        return {lines: out, unowned: unowned}
     }
     current: runs.filter(fn(r) { r.compiler == "current" })
     loop mode in options.modes {
@@ -1432,7 +1432,7 @@ batch_budgets: fn(options: Options, runs: [Run], lines: Int) -> (lines: [String]
         out.extend(checked.lines)
         if checked.unowned -> unowned = true
     }
-    (lines: out, unowned: unowned)
+    {lines: out, unowned: unowned}
 }
 
 // The --batch form. Returns the exit code: 0 PASS, 1 FAIL, 3 INCONCLUSIVE.
@@ -2027,7 +2027,7 @@ budget_table: fn(file: BudgetFile) -> [String] {
 // lines per second against its budget's, then each phase over budget with
 // its root, the owner cards of its row. `unowned` is a phase over budget that
 // names no owner card.
-budget_lines: fn(file: BudgetFile, run: Run, trace_text: String, lines: Int) -> (lines: [String], unowned: Bool) {
+budget_lines: fn(file: BudgetFile, run: Run, trace_text: String, lines: Int) -> {lines: [String], unowned: Bool} {
     cell: read_cell_trace(trace_text)
     sample: Sample{label: "median", wall_ns: run.wall_ns, cpu_user_ns: run.cpu_ns, cpu_sys_ns: 0, peak_rss_bytes: run.peak_bytes, parallelism_pct: 0, startup_ns: -1, phases: cell.phases, counters: [Counter]{}, artifact_sha256: "", diagnostic_sha256: "", run_exit: -1, stdout_sha256: "", problems: [String]{}}
     checked: phase_budget_check(file, summarize([Sample]{sample}), lines)
@@ -2038,7 +2038,7 @@ budget_lines: fn(file: BudgetFile, run: Run, trace_text: String, lines: Int) -> 
         if row.status == "over" && row.owners.len() == 0 -> unowned = true
     }
     loop over in checked.over -> out.push("  over budget: {over}")
-    (lines: out, unowned: unowned)
+    {lines: out, unowned: unowned}
 }
 
 // The distinct artifact and diagnostics digests over every sample of every
@@ -2118,12 +2118,12 @@ compare: fn(out: &[Comparison], failures: &[String], program: String, arm: Strin
 
 // The quick lane: each complete arm's median wall, peak memory and phase
 // walls against the baseline's.
-quick_compare: fn(baseline: Baseline?, machine: Machine, programs: [Program], budgets: PerfBudgets) -> (failures: [String], comparisons: [Comparison]) {
+quick_compare: fn(baseline: Baseline?, machine: Machine, programs: [Program], budgets: PerfBudgets) -> {failures: [String], comparisons: [Comparison]} {
     failures := [String]{}
     comparisons := [Comparison]{}
-    base: baseline ?? return (failures: [String]{"quick-lane baseline is missing or unreadable"}, comparisons: comparisons)
+    base: baseline ?? return {failures: [String]{"quick-lane baseline is missing or unreadable"}, comparisons: comparisons}
     if base.schema != BASELINE_SCHEMA {
-        return (failures: [String]{"quick-lane baseline has schema {base.schema}, not {BASELINE_SCHEMA}"}, comparisons: comparisons)
+        return {failures: [String]{"quick-lane baseline has schema {base.schema}, not {BASELINE_SCHEMA}"}, comparisons: comparisons}
     }
     if base.machine.cpu_model != machine.cpu_model {
         failures.push("baseline machine cpu_model {base.machine.cpu_model} differs from {machine.cpu_model}")
@@ -2160,7 +2160,7 @@ quick_compare: fn(baseline: Baseline?, machine: Machine, programs: [Program], bu
             }
         }
     }
-    (failures: failures, comparisons: comparisons)
+    {failures: failures, comparisons: comparisons}
 }
 
 quick_baseline: fn(receipt: Receipt) -> Baseline {

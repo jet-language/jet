@@ -70,8 +70,8 @@ gh_strip_comma: fn(text: String) -> String {
 
 // Every `NAME: "literal"` constant in the syntax registry directory
 // (EditorGrammars.jet `jet_cli_grammar_constants`).
-gh_constants: fn() -> [(name: String, value: String)] {
-    constants := [(name: String, value: String)]{}
+gh_constants: fn() -> [{name: String, value: String}] {
+    constants := [{name: String, value: String}]{}
     loop child in (gh_files.list_dir(GH_SYNTAX_DIR) ?? panic("list {GH_SYNTAX_DIR}: {err}")) {
         if child.is_dir || !child.name.ends_with(".jet") -> next
         loop line in gh_read(child.path).split("\n") {
@@ -90,14 +90,14 @@ gh_constants: fn() -> [(name: String, value: String)] {
             if close < 0 -> next
             tail: gh_slice(rest, close + 1, rest.count_bytes()).trim().copy()
             if tail != "" && !tail.starts_with("//") -> next
-            constants.push((name: name, value: gh_unescape(gh_slice(rest, 0, close))))
+            constants.push({name: name, value: gh_unescape(gh_slice(rest, 0, close))})
         }
     }
     assert(constants.len() > 100, "the syntax registry constants must be readable")
     constants
 }
 
-gh_resolve: fn(constants: [(name: String, value: String)], written: String) -> String {
+gh_resolve: fn(constants: [{name: String, value: String}], written: String) -> String {
     if written.starts_with("\"") {
         return gh_unescape(gh_slice(written, 1, written.count_bytes() - 1))
     }
@@ -284,7 +284,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 // tests/grammar.rs:176.
 #Test("every_highlight_token_is_in_each_generated_section") {
     guards_enter_root()
-    sections: [GH_VSCODE, GH_TREE_SITTER].map(fn(path) { (path: path, section: gh_generated_section(path)) })
+    sections: [GH_VSCODE, GH_TREE_SITTER].map(fn(path) { {path: path, section: gh_generated_section(path)} })
     missing := [String]{}
     loop token in gh_tokens() {
         if gh_bracket(token.text) -> next

@@ -112,7 +112,7 @@ Index: struct {
 
 // Counts by key, in first-seen order.
 Counts: struct {
-    entries: [(key: String, count: Int)]
+    entries: [{key: String, count: Int}]
     slots: [String:Int]
 }
 
@@ -287,7 +287,7 @@ pct: fn(count: Int, total: Int) -> String Never! {
 
 add: fn(counts: &Counts, key: String) Never! {
     slot: slot_of(counts.slots, counts.entries.len(), key)
-    if slot == counts.entries.len() -> counts.entries.push((key: key, count: 0))
+    if slot == counts.entries.len() -> counts.entries.push({key: key, count: 0})
     counts.entries[slot].count += 1
 }
 
@@ -348,7 +348,7 @@ flush: fn(profile: &Profile, stack: &[String]) Never! {
 analyze: fn(script: String, map_file: String, repo: String, out: String, graph: String) -[Env, FS, IO]> Err! {
     index: source_index(map_file, repo)
     names := [String:String]{}
-    profile := Profile{samples: 0, short_stacks: 0, unresolved_roots: 0, jet_stacks: 0, rows: [Row]{}, row_slots: [String:Int]{}, folded: Counts{entries: [(key: String, count: Int)]{}, slots: [String:Int]{}}, phases: Counts{entries: [(key: String, count: Int)]{}, slots: [String:Int]{}}}
+    profile := Profile{samples: 0, short_stacks: 0, unresolved_roots: 0, jet_stacks: 0, rows: [Row]{}, row_slots: [String:Int]{}, folded: Counts{entries: [{key: String, count: Int}]{}, slots: [String:Int]{}}, phases: Counts{entries: [{key: String, count: Int}]{}, slots: [String:Int]{}}}
     stack := [String]{}
     loop line in read_text(script).replace("\r\n", "\n").replace("\r", "\n").split("\n") {
         // perf script callchain rows: address symbol (DSO), including (inlined).
@@ -390,9 +390,9 @@ analyze: fn(script: String, map_file: String, repo: String, out: String, graph: 
     files.write(files.join(out, "flamegraph.svg"), render_folded(folded))
     // Each phase's count, in the order the samples first named it (a map
     // encodes in key order).
-    phase_counts := [(key: String, value: Dyn)]{}
+    phase_counts := [{key: String, value: Dyn}]{}
     loop phase in profile.phases.entries {
-        phase_counts.push((key: phase.key.copy(), value: phase.count.encode()))  // copy: the summary owns its keys
+        phase_counts.push({key: phase.key.copy(), value: phase.count.encode()})  // copy: the summary owns its keys
     }
     summary: Report{
         samples: samples,

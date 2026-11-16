@@ -114,13 +114,13 @@ drained: fn(label: String, path: Path) (EncodingError | IOError)! {
 
 run: fn() (EncodingError | IOError)! {
     cases: [
-        (label: "valid", text: document("\"f19\":null", "")),
-        (label: "malformed skipped field", text: document("\"f19\":[1,]", "")),
-        (label: "trailing garbage", text: document("\"f19\":null", " x")),
-        (label: "second root", text: document("\"f19\":null", "\n{{}}")),
-        (label: "duplicate key in skipped field", text: document("\"f19\":{{\"k\":1,\"k\":2}}", "")),
-        (label: "bad escape in skipped string", text: document("\"f19\":\"\\q\"", "")),
-        (label: "truncated", text: document("\"f19\":[1,2", "").removesuffix("}}")),
+        {label: "valid", text: document("\"f19\":null", "")},
+        {label: "malformed skipped field", text: document("\"f19\":[1,]", "")},
+        {label: "trailing garbage", text: document("\"f19\":null", " x")},
+        {label: "second root", text: document("\"f19\":null", "\n{{}}")},
+        {label: "duplicate key in skipped field", text: document("\"f19\":{{\"k\":1,\"k\":2}}", "")},
+        {label: "bad escape in skipped string", text: document("\"f19\":\"\\q\"", "")},
+        {label: "truncated", text: document("\"f19\":[1,2", "").removesuffix("}}")},
     ]
     path: Path.from(testing.temp_dir("json-selective")).join("doc.json")
     loop case in cases {

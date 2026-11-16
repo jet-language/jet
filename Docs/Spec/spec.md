@@ -362,7 +362,7 @@ head when needed; a headed literal whose fields or elements do not match its
 head is an ordinary type error.
 
 An expected tuple type flows to its fields by position or by field name.
-For example, a declared `(lines: [String], at: Int, message: String)` return
+For example, a declared `{lines: [String], at: Int, message: String}` return
 type gives an empty `lines: []` field the element type `String`; it does not
 default that field to `[Int]`. The same contextual rule applies at call arguments.
 
@@ -685,7 +685,7 @@ loop i := init, i < limit {
 The two-name form over a list or other indexed source yields the index and
 the item, as in `loop (i, row) in rows`. When either name is a member of the
 source's named-tuple items, the form destructures each item by name instead:
-`loop (package, name) in [(package: "a", name: "b")]` binds `name` to `"b"`,
+`loop (package, name) in [{package: "a", name: "b"}]` binds `name` to `"b"`,
 in either order. It is the tuple destructure a binding writes, so a name that
 is no member is E0313 and a count that differs from the tuple's is E0315. A
 map keeps its key-value pair.
@@ -1604,7 +1604,7 @@ Concrete lists provide eager `map`, `filter`, `each`, `find`, `any`, `all`,
 Call `.lazy()` to enter the deferred `Iter` vocabulary. The lazy adapter set
 includes `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`,
 `take_while`, `skip_while`, `flat_map`, `scan`, `fold`, `position`, `min_by`,
-`max_by`, `group_by`, and `partition`. `indexed()` yields `(idx: Int, item: T)`
+`max_by`, `group_by`, and `partition`. `indexed()` yields `{idx: Int, item: T}`
 (D-ITER1, D-EXT1 Tier 1, D-CORE-EAGER1).
 
 The zip family is variadic and named. Strict `zip` requires equal lengths and
@@ -1612,7 +1612,7 @@ reports **E0128**; `zip_short` stops at the shortest input; `zip_pad` reaches
 the longest input and uses `None`, one typed `fill:`, or typed per-column
 `fills:` values. Free calls preserve labels; method calls use `a`, `b`, `c`,
 and so on. Zero free inputs produce an empty `Iter<Unit>`; one input is the
-identity. `partition(f)` returns `(false_: [T], true_: [T])`. These adapters
+identity. `partition(f)` returns `{false_: [T], true_: [T]}`. These adapters
 are lazy on `Iter`, while concrete list, map, and set `map` and `filter` are
 eager.
 
@@ -4333,7 +4333,7 @@ does. A program that spells either form loads core.term.
 
 Lists expose `para_map`, `para_filter`, `para_partition`, and `para_fold`.
 The older `par_*` spellings are not aliases. Map and filter preserve source
-order. `para_partition` returns `(false_: [T], true_: [T])` with source order
+order. `para_partition` returns `{false_: [T], true_: [T]}` with source order
 within each side.
 
 All four use one bounded indexed chunk engine. Chunk boundaries are stable;
@@ -6711,7 +6711,7 @@ export is `Int`, `Float`, `Bool`, or `Text`, mixed freely across positions, or
 a recursively closed `#Codable` record, list, `Option`, or `Result` of those
 (E1260). A result may also be a Component tuple of those scalars, such as
 `tuple<s64, s64>`; the host reads it from the export's return area as the Jet
-tuple `(part0: Int, part1: Int)`, the member `partN` holding the field at
+tuple `{part0: Int, part1: Int}`, the member `partN` holding the field at
 position N (D-COMPONENT-TUPLE1=A). A
 sandbox export must return a value; fixed widths, maps, tuple parameters,
 unions, handles, and generic applications do not cross the Component boundary.

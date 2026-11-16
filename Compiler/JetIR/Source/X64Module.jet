@@ -1169,21 +1169,21 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
     // stem's ranks come in list order and then its functions in function
     // order.
     missing := 0
-    stems := [(stem: String, side: Int, at: Int)]{}
+    stems := [{stem: String, side: Int, at: Int}]{}
     loop (position, name) in hot {
         if named[position] || (ranks.get(name) ?? -1) != position -> next
         missing += 1
         start: ir_x64_hash_start(name)
-        if start >= 0 -> stems.push((stem: name.slice(0, start), side: 0, at: position))
+        if start >= 0 -> stems.push({stem: name.slice(0, start), side: 0, at: position})
     }
     if stems.len() > 0 {
         loop index in 0..<count {
             if found[index] >= 0 -> next
             name: compiled.functions[index].name
             start: ir_x64_hash_start(name)
-            if start >= 0 -> stems.push((stem: name.slice(0, start), side: 1, at: index))
+            if start >= 0 -> stems.push({stem: name.slice(0, start), side: 1, at: index})
         }
-        stems.sort_by(fn(left: (stem: String, side: Int, at: Int), right: (stem: String, side: Int, at: Int)) { (left.stem <=> right.stem).then(left.side <=> right.side).then(left.at <=> right.at) })
+        stems.sort_by(fn(left: {stem: String, side: Int, at: Int}, right: {stem: String, side: Int, at: Int}) { (left.stem <=> right.stem).then(left.side <=> right.side).then(left.at <=> right.at) })
         first := 0
         loop first < stems.len() {
             functions := first

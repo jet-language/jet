@@ -82,7 +82,7 @@ jet_cli_perf_browser_decode: fn(text: String, pid: Int, started: String) -> JetC
                 return Err(jet_cli_read_error("browser source identities exceed their bound"))
             }
             paths[path] = sources.len()
-            sources.push(SourceIdentity{path: path, sha256: fields[2], symbols: [(name: String, kind: String)]{}})
+            sources.push(SourceIdentity{path: path, sha256: fields[2], symbols: [{name: String, kind: String}]{}})
         } else if fields.len() == 4 && fields[0] == "symbol" {
             path: jet_cli_perf_hex_text(fields[1])
             name: jet_cli_perf_hex_text(fields[2])
@@ -93,7 +93,7 @@ jet_cli_perf_browser_decode: fn(text: String, pid: Int, started: String) -> JetC
                 return Err(jet_cli_read_error("browser symbols exceed their bound"))
             }
             index: paths[path]
-            sources[index].symbols.push((name: name, kind: fields[3]))
+            sources[index].symbols.push({name: name, kind: fields[3]})
             symbols[name] = path
         } else { return Err(jet_cli_read_error("browser source identity TSV is malformed")) }
     }

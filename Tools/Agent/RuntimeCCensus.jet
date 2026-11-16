@@ -48,7 +48,7 @@ Symbols: struct {
 Census: struct {
     defined: Set<String>
     wanted: Set<String>
-    wants: [(from: String, name: String)]
+    wants: [{from: String, name: String}]
 }
 
 // Wants `name` for `from` unless it is defined or already wanted.
@@ -57,7 +57,7 @@ want: fn(census: &Census, name: String, from: String) {
         return
     }
     census.wanted.add(name.copy())
-    census.wants.push((name: name.copy(), from: from.copy()))
+    census.wants.push({name: name.copy(), from: from.copy()})
 }
 
 elf_symbols: fn(bytes: [U8], name: String) -> Symbols {

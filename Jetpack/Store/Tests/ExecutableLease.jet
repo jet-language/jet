@@ -9,12 +9,12 @@ store_lease_test_scratch: fn(label: String) -[FS]> String {
     files.tmpdir("jet-exec-lease-{label}-") ?? panic("lease scratch")
 }
 
-store_lease_test_snapshot: fn(root: String, name: String, bytes: String) -[FS, Env]> (path: String, digest: String) {
+store_lease_test_snapshot: fn(root: String, name: String, bytes: String) -[FS, Env]> {path: String, digest: String} {
     path: files.join(files.join(files.join(root, "leases"), name), "snapshot")
     files.create_dir_all(path) ?? panic("snapshot dir")
     files.write(files.join(path, "program"), bytes) ?? panic("snapshot program")
     digest: pkg_try_output_hash_of(path) ?? panic("snapshot digest")
-    (path: path, digest: digest)
+    {path: path, digest: digest}
 }
 
 store_lease_test_member: fn(bytes: String) -> LeaseMember {
@@ -33,7 +33,7 @@ store_lease_test_generation_dir: fn(root: String, lease_id: String, generation: 
 }
 
 // Publish generation 1 for a fresh lease and release its owner claim.
-store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, container: String, bytes: String) -[FS, Env, Rand, Time]> (lease_id: String, scope: String, snapshot: String, digest: String, receipt: LeaseReceipt) {
+store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, container: String, bytes: String) -[FS, Env, Rand, Time]> {lease_id: String, scope: String, snapshot: String, digest: String, receipt: LeaseReceipt} {
     lease_id: store_lease_random_id(16) ?? panic("lease id")
     scope: store_lease_owner_scope(lease_id) ?? panic("owner scope")
     snapshot: store_lease_test_snapshot(root, container, bytes)
@@ -41,7 +41,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     frame: protocol.encode_request(prepared.request) ?? panic("encode")
     receipt: protocol.accept_snapshot(frame, snapshot.digest, snapshot.path) ?? panic("accept")
     close(prepared.owner_lock.move())
-    (lease_id: lease_id, scope: scope, snapshot: snapshot.path, digest: snapshot.digest, receipt: receipt)
+    {lease_id: lease_id, scope: scope, snapshot: snapshot.path, digest: snapshot.digest, receipt: receipt}
 }
 
 #Test("unversioned snapshot authenticates and preserves content identity") {
@@ -62,12 +62,12 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
         assert(store_lease_test_is_err(protocol.accept_snapshot(malformed.bytes(), snapshot.digest, snapshot.path)))
     }
     oversized: "v".repeat(LEASE_MAX_FIELD_BYTES + 1)
-    cases: [(package: String, version: String, reference: String, output: String)]{
-        (package: "", version: "", reference: reference, output: snapshot.digest),
-        (package: "demo", version: "", reference: "", output: snapshot.digest),
-        (package: "demo", version: "", reference: reference, output: ""),
-        (package: "demo", version: "1\nforged", reference: reference, output: snapshot.digest),
-        (package: "demo", version: oversized, reference: reference, output: snapshot.digest),
+    cases: [{package: String, version: String, reference: String, output: String}]{
+        {package: "", version: "", reference: reference, output: snapshot.digest},
+        {package: "demo", version: "", reference: "", output: snapshot.digest},
+        {package: "demo", version: "", reference: reference, output: ""},
+        {package: "demo", version: "1\nforged", reference: reference, output: snapshot.digest},
+        {package: "demo", version: oversized, reference: reference, output: snapshot.digest},
     }
     loop case in cases {
         assert(protocol.request(LeaseOperation.Acquire, lease_id, 1, scope, snapshot.path, case.package, case.version, case.reference, case.output, "", members) == .Err(_))

@@ -502,9 +502,9 @@ jet_cli_compiler_identity: fn() -> String? Never! {
 }
 
 // The refusal when this compiler has no identity, naming both places it looks.
-jet_cli_identity_missing: fn() -> (what: String, fix: String) Never! {
+jet_cli_identity_missing: fn() -> {what: String, fix: String} Never! {
     file: jet_cli_authority_path(jet_cli_executable_dir(), JET_CLI_IDENTITY_FILE)
-    (what: "this compiler has no identity: `{JET_CLI_COMPILER_IDENTITY_ENV}` is not set and `{file}` names none", fix: "set `{JET_CLI_COMPILER_IDENTITY_ENV}` to the compiler's `name@version#build-id`, or write that one line to `{file}`")
+    {what: "this compiler has no identity: `{JET_CLI_COMPILER_IDENTITY_ENV}` is not set and `{file}` names none", fix: "set `{JET_CLI_COMPILER_IDENTITY_ENV}` to the compiler's `name@version#build-id`, or write that one line to `{file}`"}
 }
 
 // Whether `directory` holds a Jet toolchain: the Core library and the
@@ -3058,7 +3058,7 @@ JET_CLI_TRACE_NAME_ARG: "\"args\":{{\"name\":"
 
 // The first `"key":` integer in the event `line` (a JSON string can't hold
 // that text, whose quotes it escapes): where its digits are and its value.
-jet_cli_trace_field: fn(line: String, key: String) -> (from: Int, to: Int, value: Int)? Never! {
+jet_cli_trace_field: fn(line: String, key: String) -> {from: Int, to: Int, value: Int}? Never! {
     label: "\"{key}\":"
     at: line.find(label)
     if at < 0 -> return None
@@ -3068,7 +3068,7 @@ jet_cli_trace_field: fn(line: String, key: String) -> (from: Int, to: Int, value
     loop to < bytes.len() && bytes[to] >= (U8{48}) && bytes[to] <= (U8{57}) -> to += 1
     value: jet_cli_trace_number(bytes, from, to)
     if value < 0 -> return None
-    Val((from: from, to: to, value: value))
+    Val({from: from, to: to, value: value})
 }
 
 // The event `line` (`"ts"`, when it has one, then `"pid"` and `"tid"`, as
@@ -3389,9 +3389,9 @@ jet_cli_trace_finish: fn(sink: JetCLITraceSink) -[FS, Time]> Never! {
     jet_cli_trace_drain(sink.target, permit.value)
 }
 
-jet_cli_trace_totals: fn(state: Shared<JetCLITraceState>) -> (bytes: Int, flushes: Int) Never! {
+jet_cli_trace_totals: fn(state: Shared<JetCLITraceState>) -> {bytes: Int, flushes: Int} Never! {
     permit: state.guard_read()
-    (bytes: permit.value.bytes, flushes: permit.value.flushes)
+    {bytes: permit.value.bytes, flushes: permit.value.flushes}
 }
 
 jet_cli_trace_put: fn(writer: &cli_files.FileWriter, text: String) -> String? Never! {

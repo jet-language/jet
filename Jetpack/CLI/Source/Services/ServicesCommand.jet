@@ -468,12 +468,12 @@ cli_services_down: fn(theme: Theme, plan: RunPlan, name: String?) -[IO, FS, Env,
 
 // The health word and whether it counts as healthy; JSON and human output
 // spell `not running` differently.
-cli_service_health_label: fn(health: ServiceHealth, json: Bool) -> (label: String, healthy: Bool) Never! {
+cli_service_health_label: fn(health: ServiceHealth, json: Bool) -> {label: String, healthy: Bool} Never! {
     if health == {
-        .Disabled -> (label: "disabled", healthy: true)
-        .NotRunning -> (label: if json -> "not-running" else -> "not running", healthy: false)
-        .Unhealthy -> (label: "unhealthy", healthy: false)
-        .Healthy -> (label: "healthy", healthy: true)
+        .Disabled -> {label: "disabled", healthy: true}
+        .NotRunning -> {label: if json -> "not-running" else -> "not running", healthy: false}
+        .Unhealthy -> {label: "unhealthy", healthy: false}
+        .Healthy -> {label: "healthy", healthy: true}
     }
 }
 

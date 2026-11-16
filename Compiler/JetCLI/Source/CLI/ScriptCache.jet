@@ -345,7 +345,7 @@ jet_cli_eval_parses: fn(body: String, result: String) -> Bool Never! {
 // zero that parses alone as declarations (a type, a function, an impl, a
 // `use`) is an item, in order; every other line, a binding such as `x: 1`
 // included, stays in the body.
-jet_cli_eval_items: fn(lines: String) -> (items: String, body: String) Never! {
+jet_cli_eval_items: fn(lines: String) -> {items: String, body: String} Never! {
     bytes: lines.bytes()
     starts: jet_cli_eval_line_starts(bytes, lex(bytes).tokens)
     items := ""
@@ -359,7 +359,7 @@ jet_cli_eval_items: fn(lines: String) -> (items: String, body: String) Never! {
         }
         body.push(line)
     }
-    (items: items, body: body.join("\n"))
+    {items: items, body: body.join("\n")}
 }
 
 // The offsets at which the lines of `bytes` (lexed as `tokens`) at bracket

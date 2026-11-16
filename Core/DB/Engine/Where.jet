@@ -147,8 +147,8 @@ where_continue_label: fn(wi: we.WhereInfo) -> Int Never! { wi.i_continue }
 where_break_label: fn(wi: we.WhereInfo) -> Int Never! { wi.i_break }
 
 // sqlite3WhereOkOnePass: the ONEPASS_* answer and aiCurOnePass.
-where_ok_one_pass: fn(wi: we.WhereInfo) -> (e: Int, cur: [Int]) Never! {
-    (e: wi.e_one_pass, cur: wi.ai_cur_one_pass.copy())
+where_ok_one_pass: fn(wi: we.WhereInfo) -> {e: Int, cur: [Int]} Never! {
+    {e: wi.e_one_pass, cur: wi.ai_cur_one_pass.copy()}
 }
 
 // sqlite3WhereUsesDeferredSeek.
@@ -450,7 +450,7 @@ index_affinity_str: fn(db: &conn.Conn, a: ast.AST, ix: Int) -> [U8] Never! {
 // index jumps to for a row it does not hold (0 for a full index). prior is
 // the index (-1 for none) whose key is already in the registers at
 // reg_prior.
-generate_index_key: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_data_cur: Int, reg_out: Int, prefix_only: Bool, want_label: Bool, prior0: Int, reg_prior: Int) -[DB]> (reg_base: Int, label: Int) Never! {
+generate_index_key: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_data_cur: Int, reg_out: Int, prefix_only: Bool, want_label: Bool, prior0: Int, reg_prior: Int) -[DB]> {reg_base: Int, label: Int} Never! {
     prior := prior0
     label := 0
     if want_label {
@@ -476,7 +476,7 @@ generate_index_key: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_data_cur: Int, reg_
     }
     if reg_out != 0 -> _: cg.op3(p, opc.OP_MAKE_RECORD, reg_base, n_col, reg_out)
     cg.release_temp_range(p, reg_base, n_col)
-    (reg_base: reg_base, label: label)
+    {reg_base: reg_base, label: label}
 }
 
 // sqlite3ResolvePartIdxLabel.
@@ -697,7 +697,7 @@ smask_bit32: fn(n: Int) -> Int Never! { if n < 32 -> 1 << n else -> 0 }
 // allocateIndexInfo: the IndexInfo for the virtual table of FROM item si
 // over the usable terms of clause wc (marked TERM_OK), and the constraints
 // not to omit (mNoOmit).
-allocate_index_info: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: Int, m_unusable: Int, si: Int) -> (info: conn.IndexInfo, no_omit: Int) Never! {
+allocate_index_info: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: Int, m_unusable: Int, si: Int) -> {info: conn.IndexInfo, no_omit: Int} Never! {
     t: a.items[si].tab
     cur: a.items[si].cursor
     jt: a.items[si].jointype
@@ -789,7 +789,7 @@ allocate_index_info: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, wc: Int, m
         if ast.expr_is_constant(a, e) -> next
         info.order_by.push(conn.IndexOrderBy{i_column: a.exprs[e].icolumn, desc: a.lists[ob].items[i].sort_flags & base.KEYINFO_ORDER_DESC != 0})
     }
-    (info: info, no_omit: no_omit)
+    {info: info, no_omit: no_omit}
 }
 
 // sqlite3_vtab_collation: the collating sequence name of constraint i_cons.
@@ -811,10 +811,10 @@ vtab_in: fn(info: &conn.IndexInfo, i_cons: Int, b_handle: Int) -> Bool Never! {
 
 // sqlite3_vtab_rhs_value: the constant right-hand value of constraint
 // i_cons; SQLITE_NOTFOUND when it has none, SQLITE_MISUSE out of range.
-vtab_rhs_value: fn(info: conn.IndexInfo, i_cons: Int) -> (rc: Int, val: base.Mem?) Never! {
-    if i_cons < 0 || i_cons >= info.constraints.len() -> return (rc: base.MISUSE, val: None)
-    if !info.has_rhs[i_cons] -> return (rc: base.NOTFOUND, val: None)
-    (rc: base.OK, val: Val(mem.mem_copy(info.rhs[i_cons])))
+vtab_rhs_value: fn(info: conn.IndexInfo, i_cons: Int) -> {rc: Int, val: base.Mem?} Never! {
+    if i_cons < 0 || i_cons >= info.constraints.len() -> return {rc: base.MISUSE, val: None}
+    if !info.has_rhs[i_cons] -> return {rc: base.NOTFOUND, val: None}
+    {rc: base.OK, val: Val(mem.mem_copy(info.rhs[i_cons]))}
 }
 
 // sqlite3_vtab_distinct.
@@ -1010,7 +1010,7 @@ loop_adjust_cost: fn(wi: &we.WhereInfo, t: Int) Never! {
 // whereLoopFindLesser over the list from link prev0: keep false when
 // template t is to be dropped, else the link to the loop t replaces (a link
 // to nothing at the tail).
-loop_find_lesser: fn(wi: we.WhereInfo, prev0: Int, t: Int) -> (keep: Bool, prev: Int) Never! {
+loop_find_lesser: fn(wi: we.WhereInfo, prev0: Int, t: Int) -> {keep: Bool, prev: Int} Never! {
     prev := prev0
     l := link_get(wi, prev)
     tp: wi.loops[t].prereq
@@ -1021,7 +1021,7 @@ loop_find_lesser: fn(wi: we.WhereInfo, prev0: Int, t: Int) -> (keep: Bool, prev:
                 break
             }
             if lp & tp == lp && wi.loops[l].r_setup <= wi.loops[t].r_setup && wi.loops[l].r_run <= wi.loops[t].r_run && wi.loops[l].n_out <= wi.loops[t].n_out {
-                return (keep: false, prev: prev)
+                return {keep: false, prev: prev}
             }
             if lp & tp == tp && wi.loops[l].r_run >= wi.loops[t].r_run && wi.loops[l].n_out >= wi.loops[t].n_out {
                 break
@@ -1030,7 +1030,7 @@ loop_find_lesser: fn(wi: we.WhereInfo, prev0: Int, t: Int) -> (keep: Bool, prev:
         prev = l
         l = wi.loops[l].next
     }
-    (keep: true, prev: prev)
+    {keep: true, prev: prev}
 }
 
 // whereLoopInsert: template t onto the list (or into the builder's OR
@@ -1640,7 +1640,7 @@ mask_bit32: fn(n: Int) -> Int Never! { 1 << (n & 31) }
 // marked usable, and its plan added. b_in: the plan uses an IN term;
 // retry: a LIMIT or OFFSET was used with one, so try again without them
 // (has_retry is C's non-NULL pbRetryLimit).
-add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder, m_prereq: Int, m_usable: Int, m_exclude: Int, info: &conn.IndexInfo, no_omit: Int, has_retry: Bool) -[DB]> (rc: Int, b_in: Bool, retry: Bool) Never! {
+add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder, m_prereq: Int, m_usable: Int, m_exclude: Int, info: &conn.IndexInfo, no_omit: Int, has_retry: Bool) -[DB]> {rc: Int, b_in: Bool, retry: Bool} Never! {
     wc: b.wc
     nw: b.new
     si: ast.src_item(a, wi.tab_list, wi.loops[nw].i_tab)
@@ -1666,8 +1666,8 @@ add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
     info.m_handle_in = 0
     rc := vtab_best_index_call(p, a, t, info)
     if rc != base.OK {
-        if rc == base.CONSTRAINT -> return (rc: base.OK, b_in: false, retry: false)
-        return (rc: rc, b_in: false, retry: false)
+        if rc == base.CONSTRAINT -> return {rc: base.OK, b_in: false, retry: false}
+        return {rc: rc, b_in: false, retry: false}
     }
     mx_term := -1
     loop i in 0..<n_constraint -> wi.loops[nw].lterm[i] = -1
@@ -1685,7 +1685,7 @@ add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
         if i_term >= n_constraint || j < 0 || j >= wi.wcs[wc].a.len() || wi.loops[nw].lterm[i_term] >= 0 || !info.constraints[i].usable {
             tname: ast.text(p.db.tables[t].name)
             ast.error(a, "{tname}.xBestIndex malfunction")
-            return (rc: base.ERROR, b_in: b_in, retry: false)
+            return {rc: base.ERROR, b_in: b_in, retry: false}
         }
         term: wi.wcs[wc].a[j]
         wi.loops[nw].prereq = wi.loops[nw].prereq | wi.terms[term].prereq_right
@@ -1711,7 +1711,7 @@ add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
                 info.idx_str = None
                 info.need_to_free_idx_str = false
             }
-            return (rc: base.OK, b_in: b_in, retry: true)
+            return {rc: base.OK, b_in: b_in, retry: true}
         }
     }
     wi.loops[nw].n_lterm = mx_term + 1
@@ -1719,7 +1719,7 @@ add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
         if wi.loops[nw].lterm[i] < 0 {
             tname: ast.text(p.db.tables[t].name)
             ast.error(a, "{tname}.xBestIndex malfunction")
-            return (rc: base.ERROR, b_in: b_in, retry: false)
+            return {rc: base.ERROR, b_in: b_in, retry: false}
         }
     }
     wi.loops[nw].idx_num = info.idx_num
@@ -1739,7 +1739,7 @@ add_virtual_one: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopB
         wi.loops[nw].idx_str = None
         wi.loops[nw].need_free = false
     }
-    (rc: rc, b_in: b_in, retry: false)
+    {rc: rc, b_in: b_in, retry: false}
 }
 
 // whereLoopAddVirtual: the loops for the virtual table of the builder's
@@ -1945,11 +1945,11 @@ add_all: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder) 
 // DISTINCT) the first n_loop loops of path_loops then loop last deliver
 // in order: N > 0 that many, 0 none, -1 not yet known; rev the loops to
 // run in reverse.
-path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: Int, path_loops: [Int], wctrl: Int, n_loop: Int, last: Int) -> (n: Int, rev: Int) Never! {
+path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: Int, path_loops: [Int], wctrl: Int, n_loop: Int, last: Int) -> {n: Int, rev: Int} Never! {
     rev_mask := 0
-    if n_loop > 0 && cg.opt_disabled(p, cg.OPT_ORDER_BY_IDX_JOIN) -> return (n: 0, rev: 0)
+    if n_loop > 0 && cg.opt_disabled(p, cg.OPT_ORDER_BY_IDX_JOIN) -> return {n: 0, rev: 0}
     n_order_by: ast.list_len(a, ob)
-    if n_order_by > rs.BMS - 1 -> return (n: 0, rev: 0)
+    if n_order_by > rs.BMS - 1 -> return {n: 0, rev: 0}
     is_order_distinct := true
     ob_done: mask_bit(n_order_by) - 1
     ob_sat := 0
@@ -2009,7 +2009,7 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
             n_column := 1
             if ws & we.WHERE_IPK == 0 {
                 ix = wi.loops[l].index
-                if ix < 0 || p.db.indexes[ix].b_unordered -> return (n: 0, rev: rev_mask)
+                if ix < 0 || p.db.indexes[ix].b_unordered -> return {n: 0, rev: rev_mask}
                 n_key_col = p.db.indexes[ix].n_key_col
                 n_column = p.db.indexes[ix].n_column
                 is_order_distinct = is_unique_index(p.db, ix) && ws & we.WHERE_SKIPSCAN == 0
@@ -2118,17 +2118,17 @@ path_satisfies_order_by: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, ob: In
             }
         }
     }
-    if ob_sat == ob_done -> return (n: n_order_by, rev: rev_mask)
+    if ob_sat == ob_done -> return {n: n_order_by, rev: rev_mask}
     if !is_order_distinct {
         i := n_order_by - 1
         loop i > 0 {
             m: mask_bit(i) - 1
-            if ob_sat & m == m -> return (n: i, rev: rev_mask)
+            if ob_sat & m == m -> return {n: i, rev: rev_mask}
             i -= 1
         }
-        return (n: 0, rev: rev_mask)
+        return {n: 0, rev: rev_mask}
     }
-    (n: -1, rev: rev_mask)
+    {n: -1, rev: rev_mask}
 }
 
 // whereSortingCost: the cost of sorting n_row rows on n_order_by keys of
@@ -3269,7 +3269,7 @@ code_equality_term: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, t: Int, lv:
 // codeAllEqualityTerms: the == and IN constraints of the index loop of
 // level lv into n_eq consecutive registers (n_extra_reg more allocated),
 // and the index affinity string with BLOB where no conversion is needed.
-code_all_equality_terms: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, b_rev: Bool, n_extra_reg: Int) -[DB]> (reg: Int, aff: [U8]) Never! {
+code_all_equality_terms: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: Int, b_rev: Bool, n_extra_reg: Int) -[DB]> {reg: Int, aff: [U8]} Never! {
     l: wi.levels[lv].w_loop
     n_eq: wi.loops[l].n_eq
     n_skip: wi.loops[l].n_skip
@@ -3315,7 +3315,7 @@ code_all_equality_terms: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: In
             }
         }
     }
-    (reg: reg_base, aff: aff)
+    {reg: reg_base, aff: aff}
 }
 
 // whereLikeOptimizationStringFixup: the OP_String8 of a LIKE range bound

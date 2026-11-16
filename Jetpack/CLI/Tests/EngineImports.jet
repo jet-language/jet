@@ -28,7 +28,7 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     files.write(files.join(project, "Cargo.lock"), "version = 4\n\n[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"serde-checksum\"\n\n[[package]]\nname = \"cc\"\nversion = \"1.0.99\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"cc-checksum\"\n\n[[package]]\nname = \"insta\"\nversion = \"1.39.0\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"insta-checksum\"\n") ?? panic("lock fixture")
     plan: cli_import_cargo(files.read(files.join(project, "Cargo.toml")) ?? panic("manifest read"), files.read(files.join(project, "Cargo.lock")) ?? panic("lock read"))
     assert(engine_import_todo(plan, "Cargo.toml", "build script"))
-    cases: [(name: String, version: String, reference: String)]{(name: "serde", version: "1.0.200", reference: "serde@cargo#version=1.0.200"), (name: "cc", version: "1.0.99", reference: "cc@cargo#version=1.0.99&platform=cfg(unix)")}
+    cases: [{name: String, version: String, reference: String}]{{name: "serde", version: "1.0.200", reference: "serde@cargo#version=1.0.200"}, {name: "cc", version: "1.0.99", reference: "cc@cargo#version=1.0.99&platform=cfg(unix)"}}
     loop entry in cases {
         assert(plan.emit_pkg_jet().contains("{entry.name}: {entry.reference}"))
         facts: plan.provider_facts.get(entry.reference) ?? panic("real project provider facts")
@@ -75,7 +75,7 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     generated: plan.emit_pkg_jet()
     names: [String]{"vite", "typescript", "fsevents", "react"}
     loop name in names -> assert(!generated.contains("{name}:"))
-    cases: [(name: String, field: String)]{(name: "vite", field: "dependencies"), (name: "typescript", field: "devDependencies"), (name: "react", field: "peerDependencies")}
+    cases: [{name: String, field: String}]{{name: "vite", field: "dependencies"}, {name: "typescript", field: "devDependencies"}, {name: "react", field: "peerDependencies"}}
     loop entry in cases {
         facts: plan.provider_facts.get("{entry.name}@npm") ?? panic("unresolved npm facts")
         assert(facts.native_document.contains("web-app"))

@@ -416,7 +416,7 @@ pkg_ffi_publish_bridge_manifest: fn(target: String, crate_name: String, artifact
 // bridge carries. A mixed bridge is one Cargo artifact but not one foreign
 // contract: C, C++, and Rust keep independent descriptors, identities, and
 // obligation rows in the same provenance sidecar.
-pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String, selected_target: String, crate_name: String, source: String, toolchain_digest: String, artifact_digests: [(name: String, digest: String)]) -[FS]> [(name: String, value: String)] ForeignBridgeError! {
+pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String, selected_target: String, crate_name: String, source: String, toolchain_digest: String, artifact_digests: [{name: String, digest: String}]) -[FS]> [{name: String, value: String}] ForeignBridgeError! {
     source_digest: pkg_bridge_sha_file(source)
     artifact_identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
     loop artifact in artifact_digests {
@@ -432,7 +432,7 @@ pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String,
     loop index in 1..<artifact_digests.len() {
         transitive.push("{artifact_digests[index].name}:sha256-{artifact_digests[index].digest}")
     }
-    rows := [(name: String, value: String)]{}
+    rows := [{name: String, value: String}]{}
     loop language in pkg_ffi_entry_languages(entries) {
         descriptor: pkg_binder_descriptor(language) ?? return Err(pkg_bridge_error("missing binder descriptor for {language.debug_name()}"))
         descriptor_stamp: descriptor.stamp()
@@ -443,10 +443,10 @@ pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String,
         boundary.validate()
         loop field in boundary.provenance_fields() -> rows.push(field)
         capability: pkg_foreign_boundary_capability(language)
-        rows.push((name: "boundary-mixed-debug", value: pkg_bridge_bool_text(capability.mixed_debug)))
-        rows.push((name: "boundary-native-export", value: pkg_bridge_bool_text(capability.native_export)))
-        rows.push((name: "boundary-build-host", value: pkg_bridge_bool_text(capability.build_host)))
-        rows.push((name: "boundary-reason", value: capability.reason))
+        rows.push({name: "boundary-mixed-debug", value: pkg_bridge_bool_text(capability.mixed_debug)})
+        rows.push({name: "boundary-native-export", value: pkg_bridge_bool_text(capability.native_export)})
+        rows.push({name: "boundary-build-host", value: pkg_bridge_bool_text(capability.build_host)})
+        rows.push({name: "boundary-reason", value: capability.reason})
     }
     Ok(rows)
 }
@@ -487,35 +487,35 @@ pkg_ffi_boundary_entry_identity: fn(entries: [ExternEntry], language: ForeignLan
 // Publish the bridge provenance sidecar: build receipt, descriptors, one
 // boundary row per language, handle facts, link closure, artifact digests.
 pkg_ffi_publish_bridge_provenance: fn(path: String, cache_identity: String, selected_target: String, crate_name: String, target: String, source: String, receipt: CargoBridgeReceipt, entries: [ExternEntry], handle_facts: [FFIHandleFact], link_closure: FFILinkClosure, artifacts: [String], rust_toolchain: String) -[FS, Env]> ForeignBridgeError! {
-    artifact_digests := [(name: String, digest: String)]{}
+    artifact_digests := [{name: String, digest: String}]{}
     loop artifact in artifacts {
         relative: pkg_ffi_artifact_relative_path(target, artifact) ?? return Err(pkg_bridge_error("FFI artifact escapes the shared target dir: {artifact}"))
         bytes: files.read_bytes(artifact) ?? return Err(pkg_bridge_error("could not read FFI artifact {artifact}: {err}"))
-        artifact_digests.push((name: relative, digest: pkg_sha256_hex(bytes)))
+        artifact_digests.push({name: relative, digest: pkg_sha256_hex(bytes)})
     }
     toolchain_digest: pkg_sha256_hex(rust_toolchain.bytes())
     boundary_rows: pkg_ffi_inline_boundary_rows(entries, cache_identity, selected_target, crate_name, source, toolchain_digest, artifact_digests)
     compile_time: if receipt.compile_time_code -> "present" else -> "none"
-    fields := [(name: String, value: String)]{
-        (name: "target", value: selected_target),
-        (name: "crate", value: crate_name),
-        (name: "source", value: source),
-        (name: "source-digest", value: cache_identity),
-        (name: "capabilities", value: "exec:cargo"),
-        (name: "sandbox", value: receipt.sandbox_class),
-        (name: "sandbox-policy", value: receipt.sandbox_policy),
-        (name: "compile-time-code", value: compile_time),
-        (name: "bridge-descriptor", value: FFI_INLINE_BRIDGE_SCHEMA),
-        (name: "toolchain", value: toolchain_digest),
+    fields := [{name: String, value: String}]{
+        {name: "target", value: selected_target},
+        {name: "crate", value: crate_name},
+        {name: "source", value: source},
+        {name: "source-digest", value: cache_identity},
+        {name: "capabilities", value: "exec:cargo"},
+        {name: "sandbox", value: receipt.sandbox_class},
+        {name: "sandbox-policy", value: receipt.sandbox_policy},
+        {name: "compile-time-code", value: compile_time},
+        {name: "bridge-descriptor", value: FFI_INLINE_BRIDGE_SCHEMA},
+        {name: "toolchain", value: toolchain_digest},
     }
     loop stamp in pkg_ffi_foreign_descriptor_stamps(entries) {
-        fields.push((name: "descriptor", value: stamp))
+        fields.push({name: "descriptor", value: stamp})
     }
     loop row in boundary_rows -> fields.push(row)
     handle_keys := [String]{}
     loop fact in handle_facts -> handle_keys.push(fact.stable_key())
-    loop key in pkg_ffi_sorted_unique(handle_keys) -> fields.push((name: "handle-fact", value: key))
-    fields.push((name: "link-closure", value: link_closure.stable_key()))
+    loop key in pkg_ffi_sorted_unique(handle_keys) -> fields.push({name: "handle-fact", value: key})
+    fields.push({name: "link-closure", value: link_closure.stable_key()})
     pkg_bridge_write_provenance(path, cache_identity, fields, artifact_digests)
 }
 
@@ -533,13 +533,13 @@ pkg_ffi_bridge_artifact_integrity_diagnostic: fn(target: String, crate_name: Str
         names: pkg_ffi_sorted_keys(deps)
         package: if names.len() > 0 -> names[0] else -> "foreign crate"
         version: if names.len() > 0 -> deps[names[0]] else -> "bridge"
-        return Val(pkg_ffi_diagnostic_from_row("E2604", [(name: String, value: String)]{(name: "package", value: package), (name: "version", value: version), (name: "expected", value: "sha256-{expected_digest}"), (name: "actual", value: "sha256-{actual_digest}")}))
+        return Val(pkg_ffi_diagnostic_from_row("E2604", [{name: String, value: String}]{{name: "package", value: package}, {name: "version", value: version}, {name: "expected", value: "sha256-{expected_digest}"}, {name: "actual", value: "sha256-{actual_digest}"}}))
     }
     None
 }
 
 // A registry row with its `{field}` placeholders filled (Rust `Diagnostic::from_row`).
-pkg_ffi_diagnostic_from_row: fn(code: String, fields: [(name: String, value: String)]) -> Diagnostic Never! {
+pkg_ffi_diagnostic_from_row: fn(code: String, fields: [{name: String, value: String}]) -> Diagnostic Never! {
     row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
     what := row.what
     why := row.why

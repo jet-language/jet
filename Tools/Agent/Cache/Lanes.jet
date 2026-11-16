@@ -76,7 +76,7 @@ Lane: struct {
     wait_ms: Int
     memory: String
     timeout_s: Int?
-    env: [(name: String, value: String)]
+    env: [{name: String, value: String}]
 }
 
 // Hold the first free slot (waiting while every slot is busy), then run the
@@ -187,7 +187,7 @@ jet_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     slots: [String]{"{state}/jet-slots/1", "{state}/jet-slots/2", "{state}/jet-slots/3"}
     argv := [String]{jet}
     loop arg in args -> argv.push(arg.copy())
-    run_in_lane(Lane{name: "safe-jet", slots: slots, wait_ms: 500, memory: memory, timeout_s: Val(timeout), env: [(name: String, value: String)]{(name: "TMPDIR", value: scratch_root())}}, argv)
+    run_in_lane(Lane{name: "safe-jet", slots: slots, wait_ms: 500, memory: memory, timeout_s: Val(timeout), env: [{name: String, value: String}]{{name: "TMPDIR", value: scratch_root()}}}, argv)
 }
 
 small_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
@@ -200,7 +200,7 @@ small_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never!
     }
     d: "{state_root()}/laneS"
     slots: [String]{"{d}/1", "{d}/2", "{d}/3", "{d}/4"}
-    run_in_lane(Lane{name: "laneS", slots: slots, wait_ms: 1000, memory: mem, timeout_s: None, env: [(name: String, value: String)]{}}, args)
+    run_in_lane(Lane{name: "laneS", slots: slots, wait_ms: 1000, memory: mem, timeout_s: None, env: [{name: String, value: String}]{}}, args)
 }
 
 heavy_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
@@ -212,7 +212,7 @@ heavy_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never!
     }
     state: state_root()
     slots: [String]{"{state}/laneB2.lock", "{state}/unitcheck/lock"}
-    run_in_lane(Lane{name: "laneB", slots: slots, wait_ms: 2000, memory: "{gb}G", timeout_s: None, env: [(name: String, value: String)]{}}, args[1..<args.len()])
+    run_in_lane(Lane{name: "laneB", slots: slots, wait_ms: 2000, memory: "{gb}G", timeout_s: None, env: [{name: String, value: String}]{}}, args[1..<args.len()])
 }
 
 // --- memory guard ------------------------------------------------------------

@@ -26,10 +26,10 @@ ProviderSelector: struct {
 
     // At least one exact version, revision, or digest, and no inexact one.
     is_exact: fn(self) -> Bool Never! {
-        identities: [(field: ProviderSelectorField, value: String)]{
-            (field: ProviderSelectorField.Version, value: self.version),
-            (field: ProviderSelectorField.Revision, value: self.revision),
-            (field: ProviderSelectorField.Digest, value: self.digest),
+        identities: [{field: ProviderSelectorField, value: String}]{
+            {field: ProviderSelectorField.Version, value: self.version},
+            {field: ProviderSelectorField.Revision, value: self.revision},
+            {field: ProviderSelectorField.Digest, value: self.digest},
         }
         exact := false
         loop identity in identities {
@@ -176,13 +176,13 @@ ProviderSelectorField: enum {
 ProviderSelectorDetails: struct {
     selector: ProviderSelector
     unknown: [String]
-    conflicts: [(key: String, left: String, right: String)]
+    conflicts: [{key: String, left: String, right: String}]
     duplicates: [String]
 
     // Facts separate on `&`, and on a `,` that starts another known
     // `key=value` fact; a fact without `=` is a version.
     parse: fn(raw: String) -> ProviderSelectorDetails Never! {
-        details := ProviderSelectorDetails{selector: ProviderSelector.empty(raw), unknown: [String]{}, conflicts: [(key: String, left: String, right: String)]{}, duplicates: [String]{}}
+        details := ProviderSelectorDetails{selector: ProviderSelector.empty(raw), unknown: [String]{}, conflicts: [{key: String, left: String, right: String}]{}, duplicates: [String]{}}
         body: raw.removeprefix("#")
         if raw != "" && body.trim() == "" {
             details.unknown.push("empty selector")
@@ -238,7 +238,7 @@ ProviderSelectorDetails: struct {
         }
         if {
             current != value -> {
-                self.conflicts.push((key: field.name(), left: current, right: value))
+                self.conflicts.push({key: field.name(), left: current, right: value})
             }
             else -> self.duplicates.push("{field.name()}={value}")
         }

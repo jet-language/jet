@@ -1609,7 +1609,7 @@ render_point_svg :: fn(labels: [String], values: [Float]) -> String Never! {
     "{out}</svg>"
 }
 
-value_bounds :: fn(values: [Float]) -> (min: Float, max: Float) Never! {
+value_bounds :: fn(values: [Float]) -> {min: Float, max: Float} Never! {
     minimum := Float{0.0}
     maximum := Float{0.0}
     loop value in values {
@@ -1620,7 +1620,7 @@ value_bounds :: fn(values: [Float]) -> (min: Float, max: Float) Never! {
         minimum = minimum - (Float{1.0})
         maximum = maximum + (Float{1.0})
     }
-    (min: minimum, max: maximum)
+    {min: minimum, max: maximum}
 }
 
 scale_between :: fn(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int Never! {
@@ -1915,7 +1915,7 @@ data_loader_render :: fn(out: &[U8], tree: encoding.Dyn) Never! {
         .Object(_) -> {
             // Sort the owned entries directly; the comparator captures no tree.
             entries := encoding_stream.object_entries(tree)
-            &entries.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
+            &entries.sort_by((left: {key: String, value: Dyn}, right: {key: String, value: Dyn}) -> left.key <=> right.key)
             &out.push(U8{123})
             loop (position, entry) in entries {
                 if position != 0 -> &out.push(U8{44})

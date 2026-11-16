@@ -1383,8 +1383,8 @@ fl_simple_union_type_annotation: fn(tokens: [FmtTok], start: Int) -> Bool {
 
 // The members of `A | B | ...` at `start` and the index after it; `end` is
 // -1 when the type is not a simple union.
-fl_simple_union_members: fn(tokens: [FmtTok], start: Int) -> (members: [String], end: Int) {
-    none: (members: [String]{}, end: -1)
+fl_simple_union_members: fn(tokens: [FmtTok], start: Int) -> {members: [String], end: Int} {
+    none: {members: [String]{}, end: -1}
     if fl_kind(tokens, start) != TOKEN_IDENT -> return none
     members := [String]{tokens[start].text}
     cursor := start + 1
@@ -1395,7 +1395,7 @@ fl_simple_union_members: fn(tokens: [FmtTok], start: Int) -> (members: [String],
     }
     after: fl_kind(tokens, cursor)
     if members.len() > 1 && (after == TOKEN_COMMA || after == TOKEN_EQ || after == TOKEN_RBRACE || after == TOKEN_RPAREN) {
-        return (members: members, end: cursor)
+        return {members: members, end: cursor}
     }
     none
 }
@@ -1578,11 +1578,11 @@ fl_ordered_sources_diff: fn(original: String, formatted: String) -> String {
 
 // `jet fmt`'s source formatter: ordinary sources, and sources led by one
 // inline `package: { ... }` carrier.
-fl_format: fn(src: String) -> (ok: Bool, text: String, codes: String) {
+fl_format: fn(src: String) -> {ok: Bool, text: String, codes: String} {
     result: jet_cli_fmt_ordinary(src, false, false)
     codes := ""
     loop diagnostic in result.diagnostics -> codes = "{codes} {diagnostic.code}"
-    (ok: result.ok, text: result.text, codes: codes)
+    {ok: result.ok, text: result.text, codes: codes}
 }
 
 // "" when formatting keeps the token stream and is byte-stable.
@@ -1919,7 +1919,7 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"sigil rule keeps the sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: String) {{}}\n"},
         {"unit rule leaves a Unit value path", "run: fn() {{ x: Unit.default() }}\n", "run: fn() {{ x: ().default() }}\n"},
         {"import grouping keeps import order", "use core.files\nuse core.term\nrun: fn() {{}}\n", "use {{\n    core.term\n    core.files\n}}\nrun: fn() {{}}\n"},
-        {"named tuple member order is part of the type", "f: fn(p: (x: Int, y: Int)) {{}}\n", "f: fn(p: (y: Int, x: Int)) {{}}\n"},
+        {"named tuple member order is part of the type", "f: fn(p: {{x: Int, y: Int}}) {{}}\n", "f: fn(p: {{y: Int, x: Int}}) {{}}\n"},
         {"loop comma rule requires a loop header", "run: fn() {{\n    if ok {{\n        print(1)\n    }}\n}}\n", "run: fn() {{\n    if ok, {{\n        print(1)\n    }}\n}}\n"},
         {"empty-paren rule keeps marker arguments", "#Inline(always)\nf: fn() {{}}\n", "#Inline\nf: fn() {{}}\n"},
         {"function-type rule keeps declaration parameter names", "f: fn(line: String) {{}}\n", "f: fn(String) {{}}\n"},
@@ -2086,6 +2086,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/param_zone_misplaced.jet",
         "Tests/UI/param_zone_repeated.jet",
         "Tests/UI/params_not_yet.jet",
+        "Tests/UI/paren_tuple_not_jet.jet",
         "Tests/UI/parse_pattern_adjacent_holes.jet",
         "Tests/UI/pattern_ratified_list_rest_not_last.jet",
         "Tests/UI/perf_budget_unknown_role_field.jet",
@@ -2136,7 +2137,6 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/triple_delimiter_interpolation.jet",
         "Tests/UI/triple_delimiter_one_line.jet",
         "Tests/UI/triple_delimiter_opening.jet",
-        "Tests/UI/tuple_single_field.jet",
         "Tests/UI/two_capability_markers.jet",
         "Tests/UI/two_parse_errors.jet",
         "Tests/UI/type_double_optional.jet",

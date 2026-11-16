@@ -38,12 +38,12 @@ ir_dyn_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     }
     // The encoding.dyn routes: the tree is borrowed, an index moves.
     route: if operation == {
-        .DynAt | .JSONAt -> (symbol: "jet_dyn_at", arity: 1, mask: [Bool]{true, false})
-        .DynGetAt -> (symbol: "jet_dyn_get_at", arity: 1, mask: [Bool]{true, false})
-        .DynInt | .JSONInt -> (symbol: "jet_dyn_int", arity: 0, mask: [Bool]{true})
-        .DynBool | .JSONBool -> (symbol: "jet_dyn_bool", arity: 0, mask: [Bool]{true})
-        .DynFloat | .JSONFloat -> (symbol: "jet_dyn_float", arity: 0, mask: [Bool]{true})
-        .DynKeys -> (symbol: "jet_dyn_keys", arity: 0, mask: [Bool]{true})
+        .DynAt | .JSONAt -> {symbol: "jet_dyn_at", arity: 1, mask: [Bool]{true, false}}
+        .DynGetAt -> {symbol: "jet_dyn_get_at", arity: 1, mask: [Bool]{true, false}}
+        .DynInt | .JSONInt -> {symbol: "jet_dyn_int", arity: 0, mask: [Bool]{true}}
+        .DynBool | .JSONBool -> {symbol: "jet_dyn_bool", arity: 0, mask: [Bool]{true}}
+        .DynFloat | .JSONFloat -> {symbol: "jet_dyn_float", arity: 0, mask: [Bool]{true}}
+        .DynKeys -> {symbol: "jet_dyn_keys", arity: 0, mask: [Bool]{true}}
         .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCancelled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .HTTPClientNew | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecHelp | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .ProcessSpecMethod(_, _) | .ProcessChildMethod(_) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCancelled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .MathMethod(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .LoadableMethod(_) | .CivilTimeMethod(_, _) | .HTTPClientMethod(_, _) | .HTTPServerMethod(_, _) | .DynField | .DynText | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynHas | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONText | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> {
             return None
         }
@@ -491,7 +491,7 @@ ir_dyn_set_key: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rece
     detail_length: ir_temp(m, b, word_row)
     ir_emit(b.f, IROp.Const, detail_data, 0, -1, -1, b.line)
     ir_emit(b.f, IROp.Const, detail_length, 0, -1, -1, b.line)
-    others: [(kind: String, name: String)]{(kind: "Null", name: "Null"), (kind: "Bool", name: "Bool"), (kind: "Int", name: "Int"), (kind: "Float", name: "Float"), (kind: "number", name: "Number"), (kind: "Text", name: "Text"), (kind: "Bytes", name: "Bytes"), (kind: "DateTime", name: "DateTime"), (kind: "a list", name: "Array")}
+    others: [{kind: String, name: String}]{{kind: "Null", name: "Null"}, {kind: "Bool", name: "Bool"}, {kind: "Int", name: "Int"}, {kind: "Float", name: "Float"}, {kind: "number", name: "Number"}, {kind: "Text", name: "Text"}, {kind: "Bytes", name: "Bytes"}, {kind: "DateTime", name: "DateTime"}, {kind: "a list", name: "Array"}}
     loop other in others {
         found: ir_variant_index(p, dyn_row, other.name) ?? return ir_fail_slot(b, span, "canonical Dyn has no {other.name} variant")
         variant: ir_word_const(m, b, found)
@@ -696,21 +696,21 @@ ir_codec_arg: fn(value: Int) -> BodyCallArg Never! {
 // The Core decode helper for a target with no Decode implementation of its
 // own, and its type arguments: a List (a byte List also takes Bytes and
 // base64 Text), an Option, a String-keyed Map, an F32 and Dyn itself.
-ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> (name: String, type_args: [Type])? Never! {
-    if ir_dyn_def(p, target) != None -> return Val((name: "__decode_dyn", type_args: [Type]{}))
+ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> {name: String, type_args: [Type]}? Never! {
+    if ir_dyn_def(p, target) != None -> return Val({name: "__decode_dyn", type_args: [Type]{}})
     if ir_untag(target) == {
         .List(element) -> {
             if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
-                return Val((name: "__decode_bytes", type_args: [Type]{}))
+                return Val({name: "__decode_bytes", type_args: [Type]{}})
             }
-            Val((name: "__decode_list", type_args: [Type]{element.copy()}))
+            Val({name: "__decode_list", type_args: [Type]{element.copy()}})
         }
-        .Option(inner) -> Val((name: "__decode_option", type_args: [Type]{inner.copy()}))
+        .Option(inner) -> Val({name: "__decode_option", type_args: [Type]{inner.copy()}})
         .Map(key, _, value) -> {
             if ir_untag(key) != Type.String -> return None
-            Val((name: "__decode_map", type_args: [Type]{value.copy()}))
+            Val({name: "__decode_map", type_args: [Type]{value.copy()}})
         }
-        .Float32 -> Val((name: "__decode_f32", type_args: [Type]{}))
+        .Float32 -> Val({name: "__decode_f32", type_args: [Type]{}})
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
@@ -983,7 +983,7 @@ ir_dyn_encode_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot
 // derived `Wrap<T>` at `Wrap<Int>`), or None when it has none. A generic
 // owner matches any instance of its declaration; any other owner matches
 // only its own type.
-ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -> (key: String, args: [Type])? Never! {
+ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -> {key: String, args: [Type]}? Never! {
     identity: ir_trait_identity(p, concrete)
     declaration: ir_render_type_key(p.type_rows, p.types, concrete)
     candidates: p.trait_methods.get("{codec}|{method}") ?? [Int]{}
@@ -1002,7 +1002,7 @@ ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -
         implementer: owner ?? next
         if ir_owner_binders(p, p.functions[row]).len() == 0 {
             if ir_trait_identity(p, implementer) == identity {
-                return Val((key: p.functions[row].key.copy(), args: [Type]{}))
+                return Val({key: p.functions[row].key.copy(), args: [Type]{}})
             }
             // A derived codec of a generic declaration (SerdeItems) declares
             // the declaration's parameters on the method itself: its instance
@@ -1011,11 +1011,11 @@ ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -
                 next
             }
             method_args: ir_codec_method_args(p, p.functions[row], concrete) ?? next
-            return Val((key: p.functions[row].key.copy(), args: method_args))
+            return Val({key: p.functions[row].key.copy(), args: method_args})
         }
         if ir_render_type_key(p.type_rows, p.types, implementer) != declaration -> next
         args: ir_owner_args(p, p.functions[row], concrete) ?? next
-        return Val((key: p.functions[row].key.copy(), args: args))
+        return Val({key: p.functions[row].key.copy(), args: args})
     }
     None
 }
@@ -1049,7 +1049,7 @@ ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Typ
 // String-keyed map, Int, Bool, Float or String, each with its arguments and
 // then Source. None for another call, and for any other target, which takes
 // the reference body: the value's captured tree, decoded.
-ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> (key: String, args: [Type])? Never! {
+ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> {key: String, args: [Type]}? Never! {
     if function.name != "read" || type_args.len() != 2 || !function.key.ends_with("read") {
         return None
     }
@@ -1066,7 +1066,7 @@ ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> (key:
     if ir_codec_impl(p, target, "Decode", "__read") == .Val(own) {
         args := own.args.copy()
         args.push(source.copy())
-        return Val((key: own.key.copy(), args: args))
+        return Val({key: own.key.copy(), args: args})
     }
     helper := ""
     args := [Type]{}
@@ -1099,5 +1099,5 @@ ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> (key:
     }
     if helper == "" -> return None
     args.push(source.copy())
-    Val((key: "{function.key.slice(0, function.key.len() - 4)}{helper}", args: args))
+    Val({key: "{function.key.slice(0, function.key.len() - 4)}{helper}", args: args})
 }

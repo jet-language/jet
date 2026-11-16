@@ -21,7 +21,7 @@ Lookups: struct {
 // The app-scoped resource: built once, then shared by every request.
 Catalog: struct {
     name: String
-    prices: [(item: String, cents: Int)]
+    prices: [{item: String, cents: Int}]
     lookups: Shared<Lookups>
 }
 
@@ -78,8 +78,8 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         None -> print("nothing bound")
     }
 
-    shop: Catalog{name: "shop", prices: [(item: "tea", cents: 350), (item: "cake", cents: 420)], lookups: Shared{Lookups{count: 0}}}
-    fake: Catalog{name: "fake", prices: [(item: "tea", cents: 1)], lookups: Shared{Lookups{count: 0}}}
+    shop: Catalog{name: "shop", prices: [{item: "tea", cents: 350}, {item: "cake", cents: 420}], lookups: Shared{Lookups{count: 0}}}
+    fake: Catalog{name: "fake", prices: [{item: "tea", cents: 1}], lookups: Shared{Lookups{count: 0}}}
     live_app: compose(Val(shop.copy())) ?? panic("compose shop")
     fake_app: compose(Val(fake.copy())) ?? panic("compose fake")
 

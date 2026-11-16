@@ -12,10 +12,10 @@ pass: fn<T>(value: &&T) -> T { value.move() }
 
 ordered: fn(early: Bool) {
     _before: pass(
-        (
+        {
             first: scope.guard(fn() { print("before first") }),
             second: scope.guard(fn() { print("before second") }),
-        ),
+        },
     )
     Bundle{retained: _retained, ..}: pass(
         Bundle<ScopeGuard>{
@@ -25,10 +25,10 @@ ordered: fn(early: Bool) {
         },
     )
     _after: pass(
-        (
+        {
             first: scope.guard(fn() { print("after first") }),
             second: scope.guard(fn() { print("after second") }),
-        ),
+        },
     )
     print("body")
     if early {

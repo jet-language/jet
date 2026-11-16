@@ -5,7 +5,7 @@ use {
 }
 
 // Exact independent-root engine claims; PENDING-SEAM(package-tests), no runtime proof claimed.
-engine_independent_root_fixture: fn() -> (base: String, roots: HangarRoots, repo: String, table: SourceTable, spec: RefSpec, ctx: ProviderCtx) {
+engine_independent_root_fixture: fn() -> {base: String, roots: HangarRoots, repo: String, table: SourceTable, spec: RefSpec, ctx: ProviderCtx} {
     base: files.tmpdir("jet-engine-independent-root-") ?? panic("base fixture")
     repo: files.join(base, "jet-pkgs")
     project: files.join(base, "proj")
@@ -24,7 +24,7 @@ engine_independent_root_fixture: fn() -> (base: String, roots: HangarRoots, repo
     table: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "mine", upstream: "path:{repo}", via: ProviderKind.Core}})
     spec: RefSpec.classify_in("hello@mine", table) ?? panic("reference")
     ctx: ProviderCtx{fixtures: None, store_dir: roots.hangar_dir(), offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
-    (base: base, roots: roots, repo: repo, table: table, spec: spec, ctx: ctx)
+    {base: base, roots: roots, repo: repo, table: table, spec: spec, ctx: ctx}
 }
 
 engine_independent_root_cleanup: fn(base: String) {

@@ -157,7 +157,7 @@ OpaqueHandleDiscovery: struct {
     // Opaque typedefs that cannot safely become owned handles, with the
     // reason, so the binder reports them instead of pretending they are
     // scalars.
-    unresolved: [(reason: String, typedef_name: String)]
+    unresolved: [{reason: String, typedef_name: String}]
     priv opaque: [String:OpaqueHandleShape]
     priv handle_indices: [String:Int]
 
@@ -190,7 +190,7 @@ OpaqueHandleDiscovery: struct {
         }
         used_names := [String]{}
         handles := [HandleFact]{}
-        unresolved := [(reason: String, typedef_name: String)]{}
+        unresolved := [{reason: String, typedef_name: String}]{}
         links: LinkClosure.new(lib, overlay.links)
         loop typedef_name in pkg_opaque_sorted_keys(opaque.keys().to_list()) {
             shape: opaque[typedef_name]
@@ -208,7 +208,7 @@ OpaqueHandleDiscovery: struct {
             if overlay.close_for(typedef_name, jet_name, shape.struct_tag) == {
                 .Val(symbol) -> {
                     if !pkg_opaque_is_ident(symbol) {
-                        unresolved.push((reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier", typedef_name: typedef_name.copy()))
+                        unresolved.push({reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier", typedef_name: typedef_name.copy()})
                         next
                     }
                     close = symbol
@@ -216,11 +216,11 @@ OpaqueHandleDiscovery: struct {
                 }
                 .None -> {
                     if candidates.len() == 0 {
-                        unresolved.push((reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping", typedef_name: typedef_name.copy()))
+                        unresolved.push({reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping", typedef_name: typedef_name.copy()})
                         next
                     }
                     if candidates.len() > 1 {
-                        unresolved.push((typedef_name: typedef_name.copy(), reason: "opaque handle `{typedef_name}` has ambiguous conventional close functions ({candidates.join(", ")}); provide an overlay close mapping"))
+                        unresolved.push({typedef_name: typedef_name.copy(), reason: "opaque handle `{typedef_name}` has ambiguous conventional close functions ({candidates.join(", ")}); provide an overlay close mapping"})
                         next
                     }
                     close = candidates[0]
@@ -419,7 +419,7 @@ pkg_opaque_complete_struct_tags: fn(declarations: [String]) -> [String] Never! {
 
 // `typedef <type> name`; function-pointer typedefs need a declarator parser
 // and are never guessed as handles.
-pkg_opaque_parse_typedef: fn(declaration: String) -> (name: String, decl: OpaqueAliasDecl)? Never! {
+pkg_opaque_parse_typedef: fn(declaration: String) -> {name: String, decl: OpaqueAliasDecl}? Never! {
     tokens: pkg_opaque_tokenize(declaration)
     if tokens.len() == 0 || tokens[0] != "typedef" -> return None
     if tokens[1..<tokens.len()].contains("(") -> return None
@@ -454,7 +454,7 @@ pkg_opaque_parse_typedef: fn(declaration: String) -> (name: String, decl: Opaque
         }
         else -> {}
     }
-    Val((decl: OpaqueAliasDecl{base: base, pointer_depth: pointer_depth}, name: tokens[alias_position]))
+    Val({decl: OpaqueAliasDecl{base: base, pointer_depth: pointer_depth}, name: tokens[alias_position]})
 }
 
 pkg_opaque_only_void_pointer: fn(tokens: [String]) -> Bool Never! {

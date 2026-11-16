@@ -191,37 +191,37 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
     ar_identity: pkg_bridge_tool_identity("ar")
     record: pkg_com_input_record(input, file_input)
     identity: pkg_com_identity(lib, descriptor.stamp(), metadata_digest, generated_digest, record, cc_identity, ar_identity)
-    fields := [(name: String, value: String)]{
-        (name: "language", value: "com"),
-        (name: "abi", value: "jet_com_{lib}"),
-        (name: "transport", value: COM_TRANSPORT),
-        (name: "binder-schema", value: COM_BINDER_SCHEMA),
-        (name: "descriptor", value: descriptor.stamp()),
-        (name: "type-library-name", value: schema.name),
-        (name: "type-library-guid", value: schema.guid),
-        (name: "class-guid", value: schema.class_guid),
-        (name: "root-interface", value: schema.root_interface),
-        (name: "metadata-sha256", value: metadata_digest),
-        (name: "generated-sha256", value: generated_digest),
-        (name: "archive-sha256", value: archive_digest),
-        (name: "cc", value: cc_identity),
-        (name: "ar", value: ar_identity),
-        (name: "input-kind", value: input.kind()),
+    fields := [{name: String, value: String}]{
+        {name: "language", value: "com"},
+        {name: "abi", value: "jet_com_{lib}"},
+        {name: "transport", value: COM_TRANSPORT},
+        {name: "binder-schema", value: COM_BINDER_SCHEMA},
+        {name: "descriptor", value: descriptor.stamp()},
+        {name: "type-library-name", value: schema.name},
+        {name: "type-library-guid", value: schema.guid},
+        {name: "class-guid", value: schema.class_guid},
+        {name: "root-interface", value: schema.root_interface},
+        {name: "metadata-sha256", value: metadata_digest},
+        {name: "generated-sha256", value: generated_digest},
+        {name: "archive-sha256", value: archive_digest},
+        {name: "cc", value: cc_identity},
+        {name: "ar", value: ar_identity},
+        {name: "input-kind", value: input.kind()},
     }
     if input == {
         .File(_) -> {
             path: file_input ?? panic("file input was resolved before provenance was written")
-            fields.push((name: "type-library", value: path))
-            fields.push((name: "type-library-sha256", value: pkg_bridge_sha_file(path)))
+            fields.push({name: "type-library", value: path})
+            fields.push({name: "type-library-sha256", value: pkg_bridge_sha_file(path)})
         }
         .Registered(guid, major, minor, lcid) -> {
-            fields.push((name: "registry-guid", value: guid))
-            fields.push((name: "registry-major", value: "{major}"))
-            fields.push((name: "registry-minor", value: "{minor}"))
-            fields.push((name: "registry-lcid", value: "{lcid}"))
+            fields.push({name: "registry-guid", value: guid})
+            fields.push({name: "registry-major", value: "{major}"})
+            fields.push({name: "registry-minor", value: "{minor}"})
+            fields.push({name: "registry-lcid", value: "{lcid}"})
         }
     }
-    artifacts: [(name: String, digest: String)]{(name: files.basename(archive), digest: archive_digest)}
+    artifacts: [{name: String, digest: String}]{{name: files.basename(archive), digest: archive_digest}}
     provenance: pkg_bridge_render_provenance(identity, fields, artifacts)
     methods := [String]{}
     loop method in schema.methods -> methods.push(method.name())
@@ -249,7 +249,7 @@ pkg_com_validate_provenance: fn(provenance_path: String, generated_source: Strin
     metadata_digest: pkg_com_provenance_single(provenance, "metadata-sha256")
     generated_digest: pkg_com_provenance_single(provenance, "generated-sha256")
     archive_digest: pkg_com_provenance_single(provenance, "archive-sha256")
-    digests: [(name: String, value: String)]{(name: "metadata-sha256", value: metadata_digest), (name: "generated-sha256", value: generated_digest), (name: "archive-sha256", value: archive_digest)}
+    digests: [{name: String, value: String}]{{name: "metadata-sha256", value: metadata_digest}, {name: "generated-sha256", value: generated_digest}, {name: "archive-sha256", value: archive_digest}}
     loop digest in digests {
         if !pkg_com_is_digest(digest.value) {
             return Err(ForeignBindError.Source("COM binding provenance has an invalid `{digest.name}` digest"))
@@ -283,7 +283,7 @@ pkg_com_validate_provenance: fn(provenance_path: String, generated_source: Strin
     if identity != expected_identity {
         return Err(ForeignBindError.Source("COM binding identity differs from its provenance; regenerate the binding"))
     }
-    guids: [(name: String, value: String)]{(name: "type-library-guid", value: pkg_com_provenance_single(provenance, "type-library-guid")), (name: "class-guid", value: pkg_com_provenance_single(provenance, "class-guid"))}
+    guids: [{name: String, value: String}]{{name: "type-library-guid", value: pkg_com_provenance_single(provenance, "type-library-guid")}, {name: "class-guid", value: pkg_com_provenance_single(provenance, "class-guid")}}
     loop guid in guids {
         if pkg_com_validate_guid(guid.value) == {
             .Ok(_) -> {}

@@ -2206,11 +2206,11 @@ priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: Strin
     ran: last.copy()
     answering: policy.copy()
     answered: app_transacted(None, asked, fn() {
-        reply: endpoint.answer(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
+        reply: endpoint.answer(RemoteArgs{tree: tree.copy()}) ?? return {response: app_json(422, app_invalid_json(err)), commit: false}
         if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
         guard := ran.guard_edit()
         guard.value = [String]{reply.copy()}
-        (response: app_remote_reply(answering, request, reply, None), commit: !app_reply_failed(reply))
+        {response: app_remote_reply(answering, request, reply, None), commit: !app_reply_failed(reply)}
     })
     if policy == .Val(.Public(max_age)) && (answered.status == 200 || answered.status == 304) && answered.header("idempotent-replayed") == None {
         held: last.guard_read()
@@ -2355,8 +2355,8 @@ priv app_upload_checked: fn(endpoint: AppUploadEndpoint, request: HTTPRequest) -
     args: app_upload_query(request, "args", "[]") ?? return app_upload_refused(app_json(422, app_invalid_json(err)))
     tree: live_json.parse(args) ?? return app_upload_refused(app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}})))
     checked: app_transacted(None, None, fn() {
-        reply: endpoint.upload.check(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
-        (response: app_json(if app_reply_failed(reply) -> 403 else -> 200, reply), commit: false)
+        reply: endpoint.upload.check(RemoteArgs{tree: tree.copy()}) ?? return {response: app_json(422, app_invalid_json(err)), commit: false}
+        {response: app_json(if app_reply_failed(reply) -> 403 else -> 200, reply), commit: false}
     })
     if checked.status != 200 -> return app_upload_refused(checked)
     HTTPAdmit{refused: None, max_body: max}
@@ -2422,11 +2422,11 @@ priv app_upload_call: fn(endpoint: AppUploadEndpoint, request: HTTPRequest) -[Ne
     last: Shared{""}
     ran: last.copy()
     answered: app_transacted(None, None, fn() {
-        reply: endpoint.remote.answer(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
+        reply: endpoint.remote.answer(RemoteArgs{tree: tree.copy()}) ?? return {response: app_json(422, app_invalid_json(err)), commit: false}
         if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
         kept := ran.guard_edit()
         kept.value = reply.copy()
-        (response: app_json(200, reply), commit: !app_reply_failed(reply))
+        {response: app_json(200, reply), commit: !app_reply_failed(reply)}
     })
     finished: endpoint.upload.files(calls.FileJob{step: .Finish}) ?? return answered
     reply: last.guard_read()
@@ -2483,7 +2483,7 @@ priv app_reply_failed: fn(reply: String) -> Bool Never! { reply.starts_with("{{\
 // call carries `request` (None for a call that carries no request key): a
 // store that keeps a reply under its key makes the call roll back, and the
 // call is answered 200 with that reply, marked `Idempotent-Replayed: true`.
-priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallRequest?, run: fn() -[Net, FS.Read]> (response: HTTPResponse, commit: Bool) Never!) -[Net, FS.Read]> HTTPResponse Never! {
+priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallRequest?, run: fn() -[Net, FS.Read]> {response: HTTPResponse, commit: Bool} Never!) -[Net, FS.Read]> HTTPResponse Never! {
     loop _ in 0..<calls.transactions.attempts() {
         call: calls.transactions.begin() ?? return run().response
         if delivery == .Val(given) -> calls.transactions.deliver(call, given)
@@ -2516,7 +2516,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
         if count.value < 3 {
             calls.transactions.refuse(calls.transactions.current() ?? panic("the call is open"))
         }
-        (response: app_json(200, "{{\"ok\":{count.value}}}"), commit: true)
+        {response: app_json(200, "{{\"ok\":{count.value}}}"), commit: true}
     })
     assert_eq(flaky.status, 200)
     assert_eq(flaky.text(), "{{\"ok\":3}}")
@@ -2524,7 +2524,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
         count := second.guard_edit()
         count.value += 1
         calls.transactions.refuse(calls.transactions.current() ?? panic("the call is open"))
-        (response: app_json(200, "{{\"ok\":0}}"), commit: true)
+        {response: app_json(200, "{{\"ok\":0}}"), commit: true}
     })
     assert_eq(refused.status, 503)
     assert_eq(refused.header("retry-after"), Val("1"))
@@ -2539,7 +2539,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
         call: calls.transactions.current() ?? panic("the call is open")
         assert_eq(calls.transactions.delivery(call), Val(delivery))
         calls.transactions.repeat(call)
-        (response: app_json(500, "{{\"err\":\"the store refused\"}}"), commit: false)
+        {response: app_json(500, "{{\"err\":\"the store refused\"}}"), commit: false}
     })
     assert_eq(repeated.status, 200)
     assert_eq(repeated.text(), "{{\"repeated\":\"d-1\"}}")
@@ -2561,7 +2561,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
         calls.transactions.answer(call, "{{\"ok\":7}}")
         calls.transactions.repeat(call)
         calls.transactions.answer(call, "{{\"err\":\"dropped\"}}")
-        (response: app_json(200, "{{\"err\":\"dropped\"}}"), commit: false)
+        {response: app_json(200, "{{\"err\":\"dropped\"}}"), commit: false}
     })
     assert_eq(replayed.status, 200)
     assert_eq(replayed.text(), "{{\"ok\":7}}")
@@ -2724,9 +2724,9 @@ priv app_webhook_response: fn(hook: AppWebhook, request: HTTPRequest) -[Net, FS.
     values.push(text)
     arguments: live_json.parse("[{values.join(",")}]") ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the delivery is not JSON: {err}"}}))
     app_transacted(delivery, None, fn() {
-        reply: hook.answer(RemoteArgs{tree: arguments.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
-        if app_reply_failed(reply) -> return (response: app_json(500, reply), commit: false)
-        (response: app_json(200, reply), commit: true)
+        reply: hook.answer(RemoteArgs{tree: arguments.copy()}) ?? return {response: app_json(422, app_invalid_json(err)), commit: false}
+        if app_reply_failed(reply) -> return {response: app_json(500, reply), commit: false}
+        {response: app_json(200, reply), commit: true}
     })
 }
 
@@ -3477,7 +3477,7 @@ priv openapi_pattern: fn(pattern: String) -> OpenAPIPattern OpenAPIError! {
     Ok(OpenAPIPattern{path: http_server.route_openapi_path(parsed.segments), key: key, names: names, catch_alls: catch_alls})
 }
 
-priv openapi_object: fn(value: Dyn) -> [(key: String, value: Dyn)] OpenAPIError! {
+priv openapi_object: fn(value: Dyn) -> [{key: String, value: Dyn}] OpenAPIError! {
     if value == {
         .Object(members) -> return Ok(members)
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(openapi_fault("OpenAPI route contract must be an object"))
@@ -3491,19 +3491,19 @@ priv openapi_is_object: fn(value: Dyn) -> Bool Never! {
     }
 }
 
-priv openapi_member: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? {
+priv openapi_member: fn(fields: [{key: String, value: Dyn}], name: String) -> Dyn? {
     loop pair in fields {
         if pair.key == name -> return Val(pair.value)
     }
     None
 }
 
-priv openapi_field: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn OpenAPIError! {
+priv openapi_field: fn(fields: [{key: String, value: Dyn}], name: String) -> Dyn OpenAPIError! {
     value: openapi_member(fields, name) ?? return Err(openapi_fault("OpenAPI route contract is missing `{name}`"))
     Ok(value)
 }
 
-priv openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String OpenAPIError! {
+priv openapi_text: fn(fields: [{key: String, value: Dyn}], name: String) -> String OpenAPIError! {
     value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Text(text) -> return Ok(text)
@@ -3511,7 +3511,7 @@ priv openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> Stri
     }
 }
 
-priv openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? OpenAPIError! {
+priv openapi_optional_text: fn(fields: [{key: String, value: Dyn}], name: String) -> String? OpenAPIError! {
     value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Null -> return Ok(String?{None})
@@ -3520,7 +3520,7 @@ priv openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String
     }
 }
 
-priv openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool OpenAPIError! {
+priv openapi_bool: fn(fields: [{key: String, value: Dyn}], name: String) -> Bool OpenAPIError! {
     value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Bool(flag) -> return Ok(flag)
@@ -3528,7 +3528,7 @@ priv openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool
     }
 }
 
-priv openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] OpenAPIError! {
+priv openapi_array: fn(fields: [{key: String, value: Dyn}], name: String) -> [Dyn] OpenAPIError! {
     value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Array(items) -> return Ok(items)
@@ -3536,7 +3536,7 @@ priv openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dy
     }
 }
 
-priv openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int OpenAPIError! {
+priv openapi_integer: fn(fields: [{key: String, value: Dyn}], name: String) -> Int OpenAPIError! {
     value: openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Int(number) -> return Ok(number)
@@ -3587,7 +3587,7 @@ priv openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String O
     Ok("{{}}")
 }
 
-priv openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path: String, errors: &[String]) -> String OpenAPIError! {
+priv openapi_typed_schema: fn(kind: Dyn, fields: [{key: String, value: Dyn}], path: String, errors: &[String]) -> String OpenAPIError! {
     name: if kind == {
         .Text(text) -> text
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
@@ -3634,7 +3634,7 @@ priv openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], pa
             return Err(openapi_fault("OpenAPI object schema `additionalProperties` must be boolean"))
         }
     }
-    properties.sort_by(fn(left: (key: String, value: Dyn), right: (key: String, value: Dyn)) { left.key <=> right.key })
+    properties.sort_by(fn(left: {key: String, value: Dyn}, right: {key: String, value: Dyn}) { left.key <=> right.key })
     rendered := [String]{}
     required_names := [String]{}
     loop property in properties {

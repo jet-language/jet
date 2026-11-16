@@ -301,7 +301,7 @@ get_sequence_of: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> [ASN1Buf] ASN
 
 /// An AlgorithmIdentifier: the OID, and the parameters, asn1_none() when there
 /// are none (mbedtls_asn1_get_alg).
-get_alg: fn(data: [U8], p: &Int, end: Int) -> (alg: ASN1Buf, params: ASN1Buf) ASN1Error! {
+get_alg: fn(data: [U8], p: &Int, end: Int) -> {alg: ASN1Buf, params: ASN1Buf} ASN1Error! {
     len: get_tag(data, p, end, ASN1_CONSTRUCTED | ASN1_SEQUENCE)
     if end - p < 1 -> return Err(.OutOfData)
     alg_tag: Int{layout_byte(data, p)}
@@ -309,14 +309,14 @@ get_alg: fn(data: [U8], p: &Int, end: Int) -> (alg: ASN1Buf, params: ASN1Buf) AS
     alg_len: get_tag(data, p, seq_end, ASN1_OID)
     alg: ASN1Buf{tag_id: alg_tag, p: p, len: alg_len}
     p += alg_len
-    if p == seq_end -> return Ok((alg: alg, params: asn1_none()))
+    if p == seq_end -> return Ok({alg: alg, params: asn1_none()})
     params_tag: Int{layout_byte(data, p)}
     p += 1
     params_len: get_len(data, p, seq_end)
     params: ASN1Buf{tag_id: params_tag, p: p, len: params_len}
     p += params_len
     if p != seq_end -> return Err(.LengthMismatch)
-    Ok((alg: alg, params: params))
+    Ok({alg: alg, params: params})
 }
 
 /// An AlgorithmIdentifier whose parameters are NULL or absent

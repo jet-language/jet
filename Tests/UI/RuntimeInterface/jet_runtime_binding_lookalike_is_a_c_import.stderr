@@ -19,16 +19,16 @@ More: jet-lang.dev/e/E3203
 Error [jet.MemoryOperationOutsideUnsafe]: `#Import(c)` of the Jet runtime symbol `jet_time_raw_wall_sample` can only sit inside `#Unsafe`.
   --> Tests/UI/RuntimeInterface/jet_runtime_binding_lookalike_is_a_c_import.jet:10:16
     |
- 10 |     #Import(c) wall_sample: fn() -[Time]> (epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool) = "jet_time_raw_wall_sample"
+ 10 |     #Import(c) wall_sample: fn() -[Time]> {epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool} = "jet_time_raw_wall_sample"
     |                ^^^^^^^^^^^
  Why: The runtime's C exports are its internals, not a checked API, so reaching one directly needs an audited region.
  Fix: Gate the declaration with `#[Import(c), Unsafe("why this is safe")]`, or call the Core function that wraps it.
 More: jet-lang.dev/e/E3101
 
-Error [jet.NonCAbiType]: `(epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool)` is not a C-compatible type for a foreign function parameter or return.
+Error [jet.NonCAbiType]: `{epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool}` is not a C-compatible type for a foreign function parameter or return.
   --> Tests/UI/RuntimeInterface/jet_runtime_binding_lookalike_is_a_c_import.jet:10:43
     |
- 10 |     #Import(c) wall_sample: fn() -[Time]> (epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool) = "jet_time_raw_wall_sample"
+ 10 |     #Import(c) wall_sample: fn() -[Time]> {epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool} = "jet_time_raw_wall_sample"
     |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.

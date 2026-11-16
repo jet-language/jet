@@ -203,7 +203,7 @@ run: fn() {
 refuse: fn(failure: Failure, json_out: Bool) -[Exec, IO]> Never {
     term.eprint("tower: {failure.message}")
     if json_out {
-        error: Dyn.Object([(key: String, value: Dyn)]{(key: "error", value: Dyn.Text(failure.code.copy())), (key: "message", value: Dyn.Text(failure.message.copy()))})
+        error: Dyn.Object([{key: String, value: Dyn}]{{key: "error", value: Dyn.Text(failure.code.copy())}, {key: "message", value: Dyn.Text(failure.message.copy())}})
         print(json.to_string(error) ?? "")
     }
     process.exit(1)
@@ -281,7 +281,7 @@ parent_of: fn(path: String) -> String Never! {
 // A linked worktree's root and its main checkout, found from the nearest
 // `.git` above `path`: in a linked worktree it is a file naming
 // `<main>/.git/worktrees/<name>`.
-linked_worktree: fn(path: String) -[FS]> (root: String, main: String)? {
+linked_worktree: fn(path: String) -[FS]> {root: String, main: String}? {
     dir := path.copy()
     loop {
         git: "{dir}/.git"
@@ -299,7 +299,7 @@ linked_worktree: fn(path: String) -[FS]> (root: String, main: String)? {
                 loop at in 0..<parts.len() - 3 {
                     if parts[at] != "" -> main = "{main}/{parts[at]}"
                 }
-                return Val((root: dir.copy(), main: main))
+                return Val({root: dir.copy(), main: main})
             }
             return None
         }
@@ -311,11 +311,11 @@ linked_worktree: fn(path: String) -[FS]> (root: String, main: String)? {
 // The canonical home of a data directory: itself, or its main-checkout
 // counterpart when it sits inside a linked worktree (None when that
 // counterpart has no board).
-canonical_dir: fn(dir: String) -[FS]> (dir: String, note: String)? {
-    wt: linked_worktree(dir) ?? return Val((dir: dir.copy(), note: ""))
+canonical_dir: fn(dir: String) -[FS]> {dir: String, note: String}? {
+    wt: linked_worktree(dir) ?? return Val({dir: dir.copy(), note: ""})
     main: "{wt.main}{dir.removeprefix(wt.root)}"
     if !files.exists("{main}/tower.json") -> return None
-    Val((dir: main.copy(), note: "tower: worktree checkout detected — using canonical board at {main}"))
+    Val({dir: main.copy(), note: "tower: worktree checkout detected — using canonical board at {main}"})
 }
 
 inside: fn(root: String, path: String) -> Bool Never! {
@@ -380,31 +380,31 @@ has: fn(tree: Dyn, name: String) -> Bool Never! {
 
 // The object with `name` set: in place when present, else last.
 with: fn(tree: Dyn, name: String, value: Dyn) -> Dyn Never! {
-    kept := [(key: String, value: Dyn)]{}
+    kept := [{key: String, value: Dyn}]{}
     found := false
     if tree == .Object(entries) {
         loop entry in entries {
             if entry.key == name {
                 found = true
-                kept.push((key: entry.key.copy(), value: value.copy()))
-            } else { kept.push((key: entry.key.copy(), value: entry.value.copy())) }
+                kept.push({key: entry.key.copy(), value: value.copy()})
+            } else { kept.push({key: entry.key.copy(), value: entry.value.copy()}) }
         }
     }
-    if !found -> kept.push((key: name.copy(), value: value.copy()))
+    if !found -> kept.push({key: name.copy(), value: value.copy()})
     Dyn.Object(kept)
 }
 
 without: fn(tree: Dyn, name: String) -> Dyn Never! {
-    kept := [(key: String, value: Dyn)]{}
+    kept := [{key: String, value: Dyn}]{}
     if tree == .Object(entries) {
         loop entry in entries {
-            if entry.key != name -> kept.push((key: entry.key.copy(), value: entry.value.copy()))
+            if entry.key != name -> kept.push({key: entry.key.copy(), value: entry.value.copy()})
         }
     }
     Dyn.Object(kept)
 }
 
-object: fn(pairs: [(key: String, value: Dyn)]) -> Dyn Never! {
+object: fn(pairs: [{key: String, value: Dyn}]) -> Dyn Never! {
     owned := pairs.copy()
     Dyn.Object(owned)
 }
@@ -679,17 +679,17 @@ visual_media: fn(value: Dyn) -> Dyn Failure! {
     if !(value == .Array(_)) -> return Err(fail("E_INVALID", "visualMedia must be an array"))
     shaped := [Dyn]{}
     loop item in items(value) {
-        pairs := [(key: String, value: Dyn)]{
-            (key: "kind", value: field(item, "kind")),
-            (key: "path", value: field(item, "path")),
-            (key: "alt", value: Dyn.Text(text(field(item, "alt")).trim())),
-            (key: "caption", value: Dyn.Text(text(field(item, "caption")).trim())),
+        pairs := [{key: String, value: Dyn}]{
+            {key: "kind", value: field(item, "kind")},
+            {key: "path", value: field(item, "path")},
+            {key: "alt", value: Dyn.Text(text(field(item, "alt")).trim())},
+            {key: "caption", value: Dyn.Text(text(field(item, "caption")).trim())},
         }
         if !is_null(field(item, "state")) {
-            pairs.push((key: "state", value: Dyn.Text(text(field(item, "state")).trim())))
+            pairs.push({key: "state", value: Dyn.Text(text(field(item, "state")).trim())})
         }
         if !is_null(field(item, "poster")) {
-            pairs.push((key: "poster", value: field(item, "poster")))
+            pairs.push({key: "poster", value: field(item, "poster")})
         }
         shaped.push(Dyn.Object(pairs))
     }
@@ -754,7 +754,7 @@ normalize_decision: fn(decision: Dyn) -> Dyn Failure! {
 CRITERION_STATUSES: [String]{"open", "met", "verified"}
 
 milestone_criterion: fn(item: Dyn, at: Int) -> Dyn Failure! {
-    source: if item == .Text(value) -> object([(key: String, value: Dyn)]{(key: "text", value: Dyn.Text(value.copy()))}) else -> item.copy()
+    source: if item == .Text(value) -> object([{key: String, value: Dyn}]{{key: "text", value: Dyn.Text(value.copy())}}) else -> item.copy()
     n: if is_null(field(source, "n")) -> Dyn.Int(at + 1) else -> field(source, "n")
     status: if is_null(field(source, "status")) -> Dyn.Text("open") else -> field(source, "status")
     if !CRITERION_STATUSES.contains(text(status)) {
@@ -763,14 +763,14 @@ milestone_criterion: fn(item: Dyn, at: Int) -> Dyn Failure! {
     evidence: if truthy(field(source, "evidence")) -> field(source, "evidence") else -> Dyn.Text("")
     Ok(
         object(
-            [(key: String, value: Dyn)]{
-                (key: "n", value: n),
-                (key: "text", value: Dyn.Text(text(field(source, "text")).trim())),
-                (key: "status", value: status),
-                (key: "metBy", value: field(source, "metBy")),
-                (key: "verifiedBy", value: field(source, "verifiedBy")),
-                (key: "evidence", value: evidence),
-                (key: "at", value: field(source, "at")),
+            [{key: String, value: Dyn}]{
+                {key: "n", value: n},
+                {key: "text", value: Dyn.Text(text(field(source, "text")).trim())},
+                {key: "status", value: status},
+                {key: "metBy", value: field(source, "metBy")},
+                {key: "verifiedBy", value: field(source, "verifiedBy")},
+                {key: "evidence", value: evidence},
+                {key: "at", value: field(source, "at")},
             },
         ),
     )
@@ -860,11 +860,11 @@ milestone_progress: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
     ready: linked.len() > 0 && done == linked.len()
     met: ready && is_text(field(milestone, "status"), "met") && truthy(field(milestone, "verification"))
     object(
-        [(key: String, value: Dyn)]{
-            (key: "total", value: Dyn.Int(linked.len())),
-            (key: "done", value: Dyn.Int(done)),
-            (key: "reviewReady", value: Dyn.Bool(ready)),
-            (key: "met", value: Dyn.Bool(met)),
+        [{key: String, value: Dyn}]{
+            {key: "total", value: Dyn.Int(linked.len())},
+            {key: "done", value: Dyn.Int(done)},
+            {key: "reviewReady", value: Dyn.Bool(ready)},
+            {key: "met", value: Dyn.Bool(met)},
         },
     )
 }
@@ -895,8 +895,8 @@ find_by_ref: fn(cards: [CardRow], ref: String) -> Int? Never! {
     None
 }
 
-lane: fn(name: String, who: Dyn, label: String) -> [(key: String, value: Dyn)] Never! {
-    [(key: String, value: Dyn)]{(key: "lane", value: Dyn.Text(name.copy())), (key: "who", value: who.copy()), (key: "label", value: Dyn.Text(label.copy()))}
+lane: fn(name: String, who: Dyn, label: String) -> [{key: String, value: Dyn}] Never! {
+    [{key: String, value: Dyn}]{{key: "lane", value: Dyn.Text(name.copy())}, {key: "who", value: who.copy()}, {key: "label", value: Dyn.Text(label.copy())}}
 }
 
 // store.mjs laneOf over the draft-free board: draft ballots are skipped.
@@ -916,7 +916,7 @@ lane_of: fn(card: Dyn, live: Live) -> Dyn Never! {
     if open.len() > 0 {
         plural: if open.len() > 1 -> "s" else -> ""
         pairs := lane("decide", Dyn.Text("owner"), "{open.len()} decision{plural} to make")
-        pairs.push((key: "decisions", value: Dyn.Array(open)))
+        pairs.push({key: "decisions", value: Dyn.Array(open)})
         return object(pairs)
     }
     blockers := [Dyn]{}
@@ -940,7 +940,7 @@ lane_of: fn(card: Dyn, live: Live) -> Dyn Never! {
     }
     if blockers.len() > 0 {
         pairs := lane("blocked", Dyn.Null, "Blocked by {labels.join(", ")}")
-        pairs.push((key: "blockers", value: Dyn.Array(blockers)))
+        pairs.push({key: "blockers", value: Dyn.Array(blockers)})
         return object(pairs)
     }
     planned: truthy(field(card, "plan"))
@@ -998,11 +998,11 @@ project_card: fn(live: Live, at: Int, hidden: [String]) -> Dyn Failure! {
     ratified: linked.len() - open.len()
     total: linked.len()
     clearance: object(
-        [(key: String, value: Dyn)]{
-            (key: "state", value: Dyn.Text(state)),
-            (key: "open", value: Dyn.Array(open)),
-            (key: "total", value: Dyn.Int(total)),
-            (key: "ratified", value: Dyn.Int(ratified)),
+        [{key: String, value: Dyn}]{
+            {key: "state", value: Dyn.Text(state)},
+            {key: "open", value: Dyn.Array(open)},
+            {key: "total", value: Dyn.Int(total)},
+            {key: "ratified", value: Dyn.Int(ratified)},
         },
     )
     out := with(card, "clearance", clearance)
@@ -1116,7 +1116,7 @@ docs_default: fn(place: Place) -> String Never! {
 }
 
 // `lint --docs`: the findings as Tower prints them, and how many there are.
-lint_request: fn(request: Request, place: Place) -[FS]> (shown: String, findings: Int) Failure! {
+lint_request: fn(request: Request, place: Place) -[FS]> {shown: String, findings: Int} Failure! {
     if request.words.len() != 1 || !request.flags.has_key("docs") {
         return Err(fail("E_USAGE", "Tools/tower/Board.jet lints only `lint --docs` (the Docs/Spec reference scan); `tower lint` runs the board rules"))
     }
@@ -1124,11 +1124,11 @@ lint_request: fn(request: Request, place: Place) -[FS]> (shown: String, findings
     found: docs_findings(place, docs) ?? return Err(err)
     if request.flags.has_key("json") {
         shown: pretty(Dyn.Array(found)) ?? return Err(err)
-        return Ok((shown: shown, findings: found.len()))
+        return Ok({shown: shown, findings: found.len()})
     }
-    if found.len() == 0 -> return Ok((shown: "(clean)", findings: 0))
+    if found.len() == 0 -> return Ok({shown: "(clean)", findings: 0})
     lines := loop item in found -> "{text(field(item, "rule"))}  {text(field(item, "ref"))}  {text(field(item, "msg"))}"
-    Ok((shown: lines.join("\n"), findings: found.len()))
+    Ok({shown: lines.join("\n"), findings: found.len()})
 }
 
 // Card and decision IDs cited under `docs`/spec that have no live or archived
@@ -1203,7 +1203,7 @@ cite: fn(citations: &Citations, id: String, at: String) Never! {
 }
 
 finding: fn(rule: String, ref: String, msg: String) -> Dyn Never! {
-    object([(key: String, value: Dyn)]{(key: "rule", value: Dyn.Text(rule.copy())), (key: "ref", value: Dyn.Text(ref.copy())), (key: "msg", value: Dyn.Text(msg.copy()))})
+    object([{key: String, value: Dyn}]{{key: "rule", value: Dyn.Text(rule.copy())}, {key: "ref", value: Dyn.Text(ref.copy())}, {key: "msg", value: Dyn.Text(msg.copy())}})
 }
 
 // The text spec files under `dir` as lint.mjs walks them: entries in

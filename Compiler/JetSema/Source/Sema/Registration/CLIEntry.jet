@@ -274,7 +274,7 @@ SemaCLIEntrySpec: struct {
     parse: String
     literal: [String]
     assigned: [String]
-    inputs: [(field: String, explicit: String)]
+    inputs: [{field: String, explicit: String}]
     commands: [SemaCLIArm]
 }
 
@@ -296,7 +296,7 @@ sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) 
     }
     literal := [String]{}
     assigned := [String]{}
-    inputs := [(field: String, explicit: String)]{}
+    inputs := [{field: String, explicit: String}]{}
     loop field in definition.fields {
         if field.computed != None -> next
         kind: sema_registration_cli_field_kind(field) ?? return None
@@ -309,7 +309,7 @@ sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) 
         slot: root.len()
         source: if direct -> "__v{slot}" else -> "__jet_cli_args.__cli_value(__parsed, {name})"
         explicit: if direct -> "__x{slot}" else -> "__jet_cli_args.__cli_explicit(__parsed, {name})"
-        inputs.push((field: field.name.copy(), explicit: explicit))
+        inputs.push({field: field.name.copy(), explicit: explicit})
         if kind == {
             .Flag -> {
                 root.push(sema_cli_entry_input(flag, short, help, true, Type.Bool, None, env, false, false))
@@ -937,7 +937,7 @@ sema_cli_entry_member_declared: fn(items: [Item], definition: StructDef, name: S
 // function's first parameter of the program type `shared_type` receives the
 // shared program value (Rust `command_payload_params`); every other parameter
 // is one input.
-sema_cli_entry_command: fn(command: String, description: String?, params: [Param], shared_type: String, callee: String) -> (command: SemaCLICommand, arm: SemaCLIArm)? {
+sema_cli_entry_command: fn(command: String, description: String?, params: [Param], shared_type: String, callee: String) -> {command: SemaCLICommand, arm: SemaCLIArm}? {
     inputs := [SemaCLIInput]{}
     arguments := [String]{}
     loop (index, param) in params {
@@ -974,7 +974,7 @@ sema_cli_entry_command: fn(command: String, description: String?, params: [Param
         if labeled -> arguments.push("{label}: {value}") else -> arguments.push(value)
     }
     arm: SemaCLIArm{patterns: [sema_cli_entry_text(command)], body: ["    {callee}({arguments.join(", ")})"]}
-    Val((command: SemaCLICommand{name: command.copy(), description: description.copy(), inputs: inputs}, arm: arm))
+    Val({command: SemaCLICommand{name: command.copy(), description: description.copy(), inputs: inputs}, arm: arm})
 }
 
 // One spec input. A presence flag takes no value, default or variable.

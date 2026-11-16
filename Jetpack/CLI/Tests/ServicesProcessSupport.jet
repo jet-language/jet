@@ -359,7 +359,7 @@ ServicesClaim: struct {
 
     // `jetpack <args>` from `cwd` with this claim's root, home, and fake
     // systemd; `extra` adds environment pairs.
-    jetpack_in: fn(self, cwd: String, args: [String], extra: [(name: String, value: String)]) -[Env, Exec]> ProcessSpec {
+    jetpack_in: fn(self, cwd: String, args: [String], extra: [{name: String, value: String}]) -[Env, Exec]> ProcessSpec {
         spec := cli_test_jetpack(args).cwd(cwd).env("JETPACK_ROOT", self.root).env("HOME", self.home)
         if self.fake == {
             .Val(fake) -> {
@@ -371,7 +371,7 @@ ServicesClaim: struct {
         spec
     }
 
-    run: fn(self, args: [String], extra: [(name: String, value: String)]) -[Env, Exec, Time.Wait]> ProcessReceipt {
+    run: fn(self, args: [String], extra: [{name: String, value: String}]) -[Env, Exec, Time.Wait]> ProcessReceipt {
         self.jetpack_in(self.project, args, extra).run() ?? panic("run jetpack {args}")
     }
 
@@ -385,10 +385,10 @@ ServicesClaim: struct {
     }
 }
 
-cli_test_no_env: fn() -> [(name: String, value: String)] { [(name: String, value: String)]{} }
+cli_test_no_env: fn() -> [{name: String, value: String}] { [{name: String, value: String}]{} }
 
-cli_test_health_timeout: fn(ms: String) -> [(name: String, value: String)] {
-    [(name: String, value: String)]{(name: "JETPACK_SERVICE_HEALTH_TIMEOUT_MS", value: ms)}
+cli_test_health_timeout: fn(ms: String) -> [{name: String, value: String}] {
+    [{name: String, value: String}]{{name: "JETPACK_SERVICE_HEALTH_TIMEOUT_MS", value: ms}}
 }
 
 cli_test_wait_for_file_lines: fn(path: String, minimum: Int) -[FS, Time]> {

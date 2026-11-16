@@ -58,25 +58,25 @@ rsplit: fn(text: String, sep: String, maxsplit: Int) -> [String] Never! {
     out
 }
 
-split_once: fn(text: String, sep: String) -> (found: Bool, head: String, tail: String) Never! {
+split_once: fn(text: String, sep: String) -> {found: Bool, head: String, tail: String} Never! {
     i: find(text, sep)
-    if i < 0 -> return (head: text, tail: "", found: false)
+    if i < 0 -> return {head: text, tail: "", found: false}
     n: sep.bytes().len()
-    (head: slice_str(text, 0, i), tail: slice_str(text, i + n, text.bytes().len()), found: true)
+    {head: slice_str(text, 0, i), tail: slice_str(text, i + n, text.bytes().len()), found: true}
 }
 
-partition: fn(text: String, sep: String) -> (head: String, sep: String, tail: String) Never! {
+partition: fn(text: String, sep: String) -> {head: String, sep: String, tail: String} Never! {
     i: find(text, sep)
-    if i < 0 -> return (head: text, sep: "", tail: "")
+    if i < 0 -> return {head: text, sep: "", tail: ""}
     n: sep.bytes().len()
-    (head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len()))
+    {head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len())}
 }
 
-rpartition: fn(text: String, sep: String) -> (head: String, sep: String, tail: String) Never! {
+rpartition: fn(text: String, sep: String) -> {head: String, sep: String, tail: String} Never! {
     i: rfind(text, sep)
-    if i < 0 -> return (head: "", sep: "", tail: text)
+    if i < 0 -> return {head: "", sep: "", tail: text}
     n: sep.bytes().len()
-    (head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len()))
+    {head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len())}
 }
 
 find: fn(text: String, needle: String) -> Int Never! {
@@ -704,10 +704,10 @@ parse_bool: fn(text: String) -> Bool? Never! {
     }
 }
 
-parse_kv: fn(text: String, sep: String) -> (key: String, ok: Bool, value: String) Never! {
+parse_kv: fn(text: String, sep: String) -> {key: String, ok: Bool, value: String} Never! {
     p: partition(text, sep)
-    if p.sep.bytes().len() == 0 -> return (key: strip(text), value: "", ok: false)
-    (key: strip(p.head), value: strip(p.tail), ok: true)
+    if p.sep.bytes().len() == 0 -> return {key: strip(text), value: "", ok: false}
+    {key: strip(p.head), value: strip(p.tail), ok: true}
 }
 
 split_ws: fn(text: String) -> [String] Never! {

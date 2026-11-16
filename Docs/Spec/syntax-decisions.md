@@ -1298,12 +1298,12 @@ destructure structs, tuples, and lists:
 ```jet
 { id, severity: sev }: incident       // struct: bind id, rename severity
 { kind, .. }: event                   // partial needs mandatory `..` (E0326)
-(y, x): point                         // tuple: bind members by name, in any order
+{y, x}: point                         // tuple: bind members by name, in any order
 { x: a, y: b }: point                 // tuple: rename members explicitly
 [a, b]: xs                            // list, runtime length check (E0315)
 ```
 
-Tuple parentheses bind only member names, never positions. A name that is not
+A tuple record pattern binds only member names, never positions. A name that is not
 a member (including `_`) is an error; use a dotless `{ member: local }` pattern
 to rename. A partial tuple record pattern requires `..` (E0326). Two-binding
 loops, such as `loop (i, item) in xs`, are unchanged.
@@ -1532,10 +1532,12 @@ generic parameters followed by the method's own parameters. A method parameter
 with the same name shadows the owner parameter; checking that lexical scope
 does not alter the method's declared generic signature.
 
-**S73 — Tuples**: named members only — `p: (x: 1, y: 2)`, `p.x`, type
-position `(min: Int, max: Int)`. No positional tuples, no `.0`.
-**D-RECORD-ORDER1=A**: member order is part of a record's type. `(x: Int,
-y: Int)` and `(y: Int, x: Int)` are two types, and the written order is the
+**S73 — Tuples**: named members only — `p: {x: 1, y: 2}`, `p.x`, type
+position `{min: Int, max: Int}`. No positional tuples, no `.0`. A record is
+always written in braces: the paren spelling `(x: 1, y: 2)` is not Jet and
+gets the generic parse error, and `jet migrate` rewrites old sources.
+**D-RECORD-ORDER1=A**: member order is part of a record's type. `{x: Int,
+y: Int}` and `{y: Int, x: Int}` are two types, and the written order is the
 one comparison (`<`, `<=>`, `sort`, `sort_desc`, `min`, `max`, Map keys),
 printing and encoding use: the first written member decides first. A record
 converts by name to an expected record type with the same members (a parameter,
@@ -2078,7 +2080,7 @@ bytes alike (`slice(1, 3)` = items 1 and 2, same as `a..<b`; owner ruling #4001)
 materialize with `to_list`, `collect`, or terminal reducers. String `.split`
 returns the same `Iter<String>`. Unconsumed chains are `#MustUse` (E0419);
 driving a consumed `Iter` twice is use-after-move (E0121).
-`indexed()` (D-RANGE-EXCL1=C amend of D-ITER1) yields `(idx: Int, item: T)`;
+`indexed()` (D-RANGE-EXCL1=C amend of D-ITER1) yields `{idx: Int, item: T}`;
 there is no public `enumerate` adapter.
 
 **D-CORE-EAGER1=A / D-LOOPMAP1=B amends the default above for concrete
@@ -3658,9 +3660,9 @@ combinators. The current surface is one `task` word with nested
 borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 `async`/`await` coloring (gated on scheduler work). **D-TUPLE-DESTRUCT1**
 *(ratified/implemented 2026-07-04)*: `channel<T>()` returns
-`(sender: Sender<T>, receiver: Receiver<T>)` directly — no combined "Channel"
+`{sender: Sender<T>, receiver: Receiver<T>}` directly — no combined "Channel"
 handle, no `.sender()` method. Bind by member name with
-`(sender, receiver): channel<T>()`, or rename with
+`{sender, receiver}: channel<T>()`, or rename with
 `{ sender: tx, receiver: rx }: channel<T>()`; a second sender is `~tx`. A
 `Receiver<T>` is a plain endpoint for a readiness arm table.
 
@@ -3769,7 +3771,7 @@ spelling for the spawn surface.
 card #2279)*: `task.all` accepts either all positional branches or all
 `name: expression` branches. The positional form remains an ordered
 `[T] !TaskFailure`; the named form returns an anonymous named tuple/record
-`(name_1: T_1, name_2: T_2, …) !TaskFailure` and supports heterogeneous field
+`{name_1: T_1, name_2: T_2, …} !TaskFailure` and supports heterogeneous field
 types. Existing tuple field naming and canonicalization rules remain the type
 authority, while branch evaluation and result assembly stay in authored source
 order. `task.race` and `task.any` remain positional. Mixing named and
@@ -5393,13 +5395,13 @@ accessors leave it empty and a containing decoder uses `FieldError.under`, so
 `?` chains inside a hand `decode` remain direct; hand-built object
 nodes take the map literal — `Dyn.Object({ "name": v, … })` —
 insertion-ordered. *Amended by D-DATATREE-ORDER1 = A:* `Dyn.Object` also
-accepts the ordered pair list `[(key: String, value: Dyn)]` for
+accepts the ordered pair list `[{key: String, value: Dyn}]` for
 programmatic building (list order is kept), and a `[String: Dyn]` Map
 value contributes its sorted iteration order.
 
 **D-DATATREE-ORDER1 = A** *(ratified 2026-10-05)*: a `Dyn` object keeps its
 fields in arrival order; ordinary Maps stay sorted. The `Object` payload is the
-ordered pair list `[(key: String, value: Dyn)]` on every tier, so
+ordered pair list `[{key: String, value: Dyn}]` on every tier, so
 `if tree == .Object(fields)` binds that list and `.field(name)` scans it.
 Parsers build the pair list and reject a repeated name (strict JSON, TOML
 including inline tables, YAML, text-key CBOR) with a temporary key set;

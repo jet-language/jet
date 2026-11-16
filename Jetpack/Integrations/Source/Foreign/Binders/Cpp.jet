@@ -262,7 +262,7 @@ pkg_cpp_validate_options: fn(options: CppBindOptions) -[FS]> ForeignBindError! {
     if options.target.trim() == "" {
         return Err(ForeignBindError.Source("a selected target triple is required"))
     }
-    tools: [(name: String, path: String)]{(name: "clang++", path: options.clang), (name: "ar", path: options.archiver)}
+    tools: [{name: String, path: String}]{{name: "clang++", path: options.clang}, {name: "ar", path: options.archiver}}
     loop tool in tools {
         if !files.is_abs(tool.path) || !files.is_file(tool.path) {
             return Err(ForeignBindError.SelectedToolMissing("{tool.name}` at `{tool.path}"))
@@ -422,47 +422,47 @@ pkg_cpp_render_provenance: fn(header: String, digest: String, surface: CppSurfac
     header_digest: pkg_bridge_sha_file(header) ?? return Err(ForeignBindError.Source(err.message))
     link_digest: pkg_bridge_sha_file(resolved_link) ?? return Err(ForeignBindError.Source(err.message))
     carrier: surface.classes.len() == 0 && surface.functions.len() == 0
-    fields := [(name: String, value: String)]{
-        (name: "language", value: "cpp"),
-        (name: "abi", value: "jet_cpp_{options.lib}"),
-        (name: "transport", value: "clang-cxx-shim"),
-        (name: "binder-schema", value: CPP_BIND_SCHEMA),
-        (name: "descriptor", value: pkg_cpp_descriptor_stamp()),
-        (name: "source", value: header),
-        (name: "source-sha256", value: header_digest),
-        (name: "link", value: resolved_link),
-        (name: "link-sha256", value: link_digest),
-        (name: "target", value: options.target),
-        (name: "clang", value: options.clang),
-        (name: "archiver", value: options.archiver),
-        (name: "clang-version", value: pkg_cpp_flatten_tool_version(clang_version)),
-        (name: "archiver-version", value: pkg_cpp_flatten_tool_version(archiver_version)),
-        (name: "classes", value: "{surface.classes.len()}"),
-        (name: "functions", value: "{surface.functions.len()}"),
-        (name: "surface", value: if carrier -> "c-abi-implementation-carrier" else -> "cpp-facade"),
-        (name: "overlay", value: overlay.stable_identity()),
+    fields := [{name: String, value: String}]{
+        {name: "language", value: "cpp"},
+        {name: "abi", value: "jet_cpp_{options.lib}"},
+        {name: "transport", value: "clang-cxx-shim"},
+        {name: "binder-schema", value: CPP_BIND_SCHEMA},
+        {name: "descriptor", value: pkg_cpp_descriptor_stamp()},
+        {name: "source", value: header},
+        {name: "source-sha256", value: header_digest},
+        {name: "link", value: resolved_link},
+        {name: "link-sha256", value: link_digest},
+        {name: "target", value: options.target},
+        {name: "clang", value: options.clang},
+        {name: "archiver", value: options.archiver},
+        {name: "clang-version", value: pkg_cpp_flatten_tool_version(clang_version)},
+        {name: "archiver-version", value: pkg_cpp_flatten_tool_version(archiver_version)},
+        {name: "classes", value: "{surface.classes.len()}"},
+        {name: "functions", value: "{surface.functions.len()}"},
+        {name: "surface", value: if carrier -> "c-abi-implementation-carrier" else -> "cpp-facade"},
+        {name: "overlay", value: overlay.stable_identity()},
     }
     loop field in boundary.provenance_fields() -> fields.push(field)
-    loop namespace in options.namespaces -> fields.push((name: "namespace", value: namespace))
-    loop directory in options.include_dirs -> fields.push((name: "include", value: directory))
+    loop namespace in options.namespaces -> fields.push({name: "namespace", value: namespace})
+    loop directory in options.include_dirs -> fields.push({name: "include", value: directory})
     loop directory in options.library_dirs {
-        fields.push((name: "library-search", value: directory))
+        fields.push({name: "library-search", value: directory})
     }
-    loop library in options.libraries -> fields.push((name: "library", value: library))
+    loop library in options.libraries -> fields.push({name: "library", value: library})
     loop template in options.templates {
-        fields.push((name: "template", value: "{template.qualified_name}<{template.cpp_args.join(",")}> as {template.jet_name}"))
+        fields.push({name: "template", value: "{template.qualified_name}<{template.cpp_args.join(",")}> as {template.jet_name}"})
     }
     loop input in pkg_bridge_local_archive_inputs(options.library_dirs, options.libraries) {
-        fields.push((name: "linked-library", value: input.library))
-        fields.push((name: "linked-archive", value: input.path))
+        fields.push({name: "linked-library", value: input.library})
+        fields.push({name: "linked-archive", value: input.path})
         bytes_digest: if input.bytes == {
             .Val(bytes) -> pkg_sha256_hex(bytes)
             .None -> "missing"
         }
-        fields.push((name: "linked-archive-sha256", value: bytes_digest))
+        fields.push({name: "linked-archive-sha256", value: bytes_digest})
     }
     archive_digest: pkg_bridge_sha_file(archive) ?? return Err(ForeignBindError.Source(err.message))
-    artifacts: [(name: String, digest: String)]{(name: files.basename(archive), digest: archive_digest)}
+    artifacts: [{name: String, digest: String}]{{name: files.basename(archive), digest: archive_digest}}
     rendered: pkg_bridge_render_provenance(digest, fields, artifacts) ?? return Err(ForeignBindError.Source(err.message))
     Ok(rendered)
 }
@@ -470,7 +470,7 @@ pkg_cpp_render_provenance: fn(header: String, digest: String, surface: CppSurfac
 // A supervised toolchain run: 64 MiB per stream, a missing tool is the
 // selected tool, and a timeout is a toolchain rejection.
 pkg_cpp_supervised: fn(argv: [String], timeout: Duration, tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
-    output: if pkg_binder_supervise(argv, None, [(name: String, value: String)]{}, CPP_TOOL_CAPTURE_LIMIT, timeout, tool) == {
+    output: if pkg_binder_supervise(argv, None, [{name: String, value: String}]{}, CPP_TOOL_CAPTURE_LIMIT, timeout, tool) == {
         .Ok(result) -> result
         .Err(error) -> {
             if error == {

@@ -9,8 +9,8 @@ Incident: struct {
     kind: String
 }
 
-owned_pair: fn(seed: Int) -> (left: [Int], right: [Int]) {
-    (left: [seed, seed + 1], right: [seed + 2])
+owned_pair: fn(seed: Int) -> {left: [Int], right: [Int]} {
+    {left: [seed, seed + 1], right: [seed + 2]}
 }
 
 owned_incident: fn() -> Incident {
@@ -27,7 +27,7 @@ run: fn() {
         else -> print("other")
     }
     loop i in 0..<3 {
-        (left, right): owned_pair(i)
+        {left, right}: owned_pair(i)
         print(left[1] + right[0])
     }
     Incident{id: owned_id, title: owned_title, ..}: owned_incident()

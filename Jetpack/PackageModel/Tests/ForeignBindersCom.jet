@@ -89,7 +89,7 @@ COM_TEST_OFFICE_METADATA: #run "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-0
     runtime: files.join(scratch.path, "runtime.c")
     files.write(inspector, COM_DISCOVERY_C) ?? panic("write inspector")
     files.write(runtime, pkg_com_render_c("office", schema)) ?? panic("write runtime")
-    sources: [(source: String, object: String)]{(source: inspector, object: "inspect.o"), (source: runtime, object: "runtime.o")}
+    sources: [{source: String, object: String}]{{source: inspector, object: "inspect.o"}, {source: runtime, object: "runtime.o"}}
     loop entry in sources {
         receipt: process.cmd([String]{winegcc.copy(), "-std=gnu11", "-c", entry.source, "-o", files.join(scratch.path, entry.object)}).stdout(.Capture).stderr(.Capture).run() ?? panic("winegcc runs")
         if !receipt.success -> panic("winegcc failed for {entry.source}: {receipt.errors}")

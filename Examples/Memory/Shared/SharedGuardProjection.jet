@@ -10,10 +10,10 @@ project_left: fn(state: Shared<Pair>) -> Int {
     return projected.value
 }
 
-project_both: fn(state: Shared<Pair>) -> (left: Int, right: Int) {
+project_both: fn(state: Shared<Pair>) -> {left: Int, right: Int} {
     guard: state.guard_edit()
-    (first, second): guard.split(fn(value) { value.left }, fn(value) { value.right })
-    return (left: first.value, right: second.value)
+    {first, second}: guard.split(fn(value) { value.left }, fn(value) { value.right })
+    return {left: first.value, right: second.value}
 }
 
 run: fn() {

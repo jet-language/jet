@@ -24,7 +24,7 @@ use {
 }
 
 // The first top-level constant of `source`, with the source's functions.
-envmodel_service_test_constant: fn(source: String) -> (expr: Expr, funcs: [String:Func]) {
+envmodel_service_test_constant: fn(source: String) -> {expr: Expr, funcs: [String:Func]} {
     parsed: parse_source(source.bytes())
     assert_eq(parsed.diagnostics.len(), 0)
     funcs := [String:Func]{}
@@ -38,7 +38,7 @@ envmodel_service_test_constant: fn(source: String) -> (expr: Expr, funcs: [Strin
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    (expr: found ?? panic("the fixture declares a constant"), funcs: funcs)
+    {expr: found ?? panic("the fixture declares a constant"), funcs: funcs}
 }
 
 #Test("compiler service comptime request carries the config value program") {

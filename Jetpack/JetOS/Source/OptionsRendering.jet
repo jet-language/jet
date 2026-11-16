@@ -131,18 +131,18 @@ jetos_option_doc: fn(key: String) -> String Never! {
     }
 }
 
-jetos_prefixed_options: fn(system: SystemPlan, prefix: String) -> [(key: String, value: String)] Never! {
-    rows := [(key: String, value: String)]{}
+jetos_prefixed_options: fn(system: SystemPlan, prefix: String) -> [{key: String, value: String}] Never! {
+    rows := [{key: String, value: String}]{}
     loop option in system.options {
         if option.key.starts_with(prefix) {
-            rows.push((key: option.key.removeprefix(prefix), value: jetos_clean_value(option.value)))
+            rows.push({key: option.key.removeprefix(prefix), value: jetos_clean_value(option.value)})
         }
     }
     rows
 }
 
 // `{"key": .., "value": ..}` rows in declaration order.
-jetos_option_rows_dyn: fn(rows: [(key: String, value: String)]) -> Dyn Never! {
+jetos_option_rows_dyn: fn(rows: [{key: String, value: String}]) -> Dyn Never! {
     items := [Dyn]{}
     loop row in rows {
         items.push(Dyn.Object(["key": Dyn.Text(row.key.copy()), "value": Dyn.Text(row.value.copy())]))
@@ -208,7 +208,7 @@ jetos_render_user_profile_json: fn(system: SystemPlan, user: String) -> String N
     jetos_render_user_profile_json_parts(user, home, shell, packages, services, jetos_prefixed_options(system, "user.{user}.files."))
 }
 
-jetos_render_user_profile_json_parts: fn(user: String, home: String, shell: String, packages: [String], services: [String], file_rows: [(key: String, value: String)]) -> String Never! {
+jetos_render_user_profile_json_parts: fn(user: String, home: String, shell: String, packages: [String], services: [String], file_rows: [{key: String, value: String}]) -> String Never! {
     file_items := [Dyn]{}
     loop row in file_rows {
         file_items.push(Dyn.Object(["path": Dyn.Text(row.key.copy()), "source": Dyn.Text(row.value.copy())]))

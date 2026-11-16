@@ -13,22 +13,22 @@ DC_RUSTC_CODES: [String]{"E0061", "E0277", "E0425"}
 // The active rows the compiler emits nothing for yet, each staged on its
 // owning card (tests/diagnostics_coverage.rs:2005-2055). Rows the registry
 // marks `retired` stay explainable without an emitter and are not listed.
-DC_SPEC_AHEAD_OF_IMPL: [(code: String, reason: String)]{
+DC_SPEC_AHEAD_OF_IMPL: [{code: String, reason: String}]{
     // Jetos rows, on the owner-frozen card that builds jetos.
-    (code: "E1278", reason: "staged #6604"),
-    (code: "E1279", reason: "staged #6604"),
-    (code: "E1280", reason: "staged #6604"),
-    (code: "E1281", reason: "staged #6604"),
-    (code: "E1282", reason: "staged #6604"),
-    (code: "E1283", reason: "staged #6604"),
-    (code: "E1284", reason: "staged #6604"),
-    (code: "E1285", reason: "staged #6604"),
-    (code: "E1286", reason: "staged #6604"),
-    (code: "E1287", reason: "staged #6604"),
-    (code: "E1288", reason: "staged #6604"),
-    (code: "E1289", reason: "staged #4842"),
-    (code: "E1290", reason: "staged #6604"),
-    (code: "E1291", reason: "staged #4842"),
+    {code: "E1278", reason: "staged #6604"},
+    {code: "E1279", reason: "staged #6604"},
+    {code: "E1280", reason: "staged #6604"},
+    {code: "E1281", reason: "staged #6604"},
+    {code: "E1282", reason: "staged #6604"},
+    {code: "E1283", reason: "staged #6604"},
+    {code: "E1284", reason: "staged #6604"},
+    {code: "E1285", reason: "staged #6604"},
+    {code: "E1286", reason: "staged #6604"},
+    {code: "E1287", reason: "staged #6604"},
+    {code: "E1288", reason: "staged #6604"},
+    {code: "E1289", reason: "staged #4842"},
+    {code: "E1290", reason: "staged #6604"},
+    {code: "E1291", reason: "staged #4842"},
 }
 
 // The generated registry rows and their Prelude source list every code by
@@ -157,24 +157,24 @@ dc_contains_any: fn(text: String, needles: [String]) -> Bool {
 }
 
 // tests/diagnostics_coverage.rs:1128-1168: every user-facing rendered snapshot.
-dc_snapshot_texts: fn() -> [(path: String, text: String)] {
-    out := [(path: String, text: String)]{}
+dc_snapshot_texts: fn() -> [{path: String, text: String}] {
+    out := [{path: String, text: String}]{}
     loop directory in
         ["Tests/UI", "Tests/UILint", "Tests/Cases/UILintStyle", "Tests/Fixtures/JetpackDiagnostics", "Tests/Fixtures/ModuleEvalDiagnostics"] {
         if !dc_files.exists(directory) -> next
         loop child in (dc_files.list_dir(directory) ?? panic("list {directory}: {err}")) {
             if child.is_dir {
                 nested: dc_files.join(child.path, "stderr")
-                if dc_files.exists(nested) -> out.push((path: nested, text: dc_read(nested)))
+                if dc_files.exists(nested) -> out.push({path: nested, text: dc_read(nested)})
             } else if child.name.ends_with(".stderr") || child.name.ends_with(".warn") {
-                out.push((path: child.path, text: dc_read(child.path)))
+                out.push({path: child.path, text: dc_read(child.path)})
             }
         }
     }
     loop name in
         ["bind_missing_e3208.txt", "bind_data_invalid_e3208.txt", "doctor_l2101.txt", "fetch_no_git_e1203.txt", "prove_artifact_corrupt_e3611.txt", "prove_artifact_unsafe_e3614.txt", "repl_e1801.txt", "unknown_target_e3302.txt"] {
         path: "Tests/CLI/{name}"
-        if dc_files.exists(path) -> out.push((path: path, text: dc_read(path)))
+        if dc_files.exists(path) -> out.push({path: path, text: dc_read(path)})
     }
     assert(out.len() > 1000, "the rendered snapshot corpus must be readable")
     out
@@ -381,7 +381,7 @@ dc_raw_code_panic: fn(line: String) -> Bool {
 }
 
 // tests/marker_registry_coverage.rs:665-696.
-dc_marker_literal_offenders: fn(sources: [(path: String, text: String)], names: [String]) -> [String] {
+dc_marker_literal_offenders: fn(sources: [{path: String, text: String}], names: [String]) -> [String] {
     offenders := [String]{}
     loop source in sources {
         loop (index, line) in source.text.split("\n").to_list() {
@@ -423,9 +423,9 @@ dc_marker_names: fn() -> [String] {
         dc_walk(directory, paths)
     }
     assert(paths.len() > 10, "the compiler front-end sources must be readable")
-    sources := [(path: String, text: String)]{}
-    loop path in paths -> sources.push((path: path, text: dc_read(path)))
+    sources := [{path: String, text: String}]{}
+    loop path in paths -> sources.push({path: path, text: dc_read(path)})
     assert_eq(dc_marker_literal_offenders(sources, names).join("\n"), "")
-    seeded: dc_marker_literal_offenders([(path: String, text: String)]{(path: "synthetic.jet", text: "if marker_name == \"Inline\" {{}}")}, ["Inline"])
+    seeded: dc_marker_literal_offenders([{path: String, text: String}]{{path: "synthetic.jet", text: "if marker_name == \"Inline\" {{}}"}}, ["Inline"])
     assert_eq(seeded.len(), 1)
 }

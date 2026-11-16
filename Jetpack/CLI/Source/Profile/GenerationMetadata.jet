@@ -168,7 +168,7 @@ ToolGenerationMetadata: struct {
         if self.generation == 0 || self.tools.len() > TOOL_PROFILE_MAX_TOOLS {
             return Err(CLIError.InvalidData("tool generation exceeds bounds"))
         }
-        identities := [(name: String, reference: String)]{}
+        identities := [{name: String, reference: String}]{}
         bins := [String]{}
         physical_bins := [String]{}
         loop tool in self.tools {
@@ -179,7 +179,7 @@ ToolGenerationMetadata: struct {
             if tool.bins.len() == 0 || tool.bins.len() != tool.members.len() || tool.bins.len() != tool.projection_hashes.len() {
                 return Err(CLIError.InvalidData("profile tool has mismatched projection fields"))
             }
-            identity: (name: tool.name, reference: tool.reference)
+            identity: {name: tool.name, reference: tool.reference}
             if identities.contains(identity) {
                 return Err(CLIError.InvalidData("duplicate profile tool identity"))
             }

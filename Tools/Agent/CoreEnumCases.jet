@@ -227,12 +227,12 @@ carried_payload: fn(payload: String) -> Bool Never! {
 
 // The cases the sources of `module_name` declare for `name`, and the path of
 // the source that declares them; None when no source of the module does.
-module_cases: fn(texts: [String:String], sources: [String:[String]], module_name: String, name: String) -> (cases: [String], path: String)? {
+module_cases: fn(texts: [String:String], sources: [String:[String]], module_name: String, name: String) -> {cases: [String], path: String}? {
     paths: sources.get(module_name) ?? [String]{}
     loop path in paths {
         text: texts.get(path) ?? next
         cases: declared_cases(text, name) ?? next
-        return Val((cases: cases, path: path))
+        return Val({cases: cases, path: path})
     }
     None
 }

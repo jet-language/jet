@@ -101,7 +101,7 @@ sema_shared_cycle_holds_function: fn(ty: Type) -> Bool Never! {
 
 // The cell a write into `place` lands in and the written place's type: the
 // innermost `Shared<T>` handle or editing guard's `.value` on the place's path.
-sema_shared_cycle_place: fn(place: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (owner: Type, place: Type)? {
+sema_shared_cycle_place: fn(place: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> {owner: Type, place: Type}? {
     if place == {
         .Paren(inner, _, _) -> return sema_shared_cycle_place(inner, environment, program, scopes)
         .Field(base, member, _, _) -> return sema_shared_cycle_field_place(base, member, environment, program, scopes)
@@ -110,28 +110,28 @@ sema_shared_cycle_place: fn(place: Expr, environment: SemaScopeEnvironment, prog
     }
 }
 
-sema_shared_cycle_field_place: fn(base: Expr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (owner: Type, place: Type)? {
+sema_shared_cycle_field_place: fn(base: Expr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> {owner: Type, place: Type}? {
     base_ty: sema_shared_access_place_type(base, environment, program, scopes)
     if base_ty == .Val(known) {
         if known == .Shared(inner) {
             field: sema_shared_access_field_type(inner, member, environment, program, scopes) ?? return None
-            return Val((owner: inner, place: field))
+            return Val({owner: inner, place: field})
         }
         if member == "value" {
             if sema_expression_shared_guard_value(known) == .Val(guard) {
-                if guard.editable -> return Val((owner: guard.value_type, place: guard.value_type))
+                if guard.editable -> return Val({owner: guard.value_type, place: guard.value_type})
             }
         }
     }
     outer: sema_shared_cycle_place(base, environment, program, scopes) ?? return None
     field: sema_shared_access_field_type(outer.place, member, environment, program, scopes) ?? return None
-    Val((owner: outer.owner, place: field))
+    Val({owner: outer.owner, place: field})
 }
 
-sema_shared_cycle_element_place: fn(base: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (owner: Type, place: Type)? {
+sema_shared_cycle_element_place: fn(base: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> {owner: Type, place: Type}? {
     outer: sema_shared_cycle_place(base, environment, program, scopes) ?? return None
     if outer.place == {
-        .List(element) | .FixedList(element, _) | .Map(_, _, element) -> Val((owner: outer.owner, place: element))
+        .List(element) | .FixedList(element, _) | .Map(_, _, element) -> Val({owner: outer.owner, place: element})
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
@@ -352,7 +352,7 @@ sema_shared_cycle_check_write: fn(target: LValue, value: Expr, environment: Sema
     }
 }
 
-sema_shared_cycle_check_stored: fn(found: (owner: Type, place: Type)?, span: Span, value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
+sema_shared_cycle_check_stored: fn(found: {owner: Type, place: Type}?, span: Span, value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     cell: found ?? return
     owner: sema_shared_cycle_owner_key(cell.owner, environment, program) ?? return
     if !sema_shared_cycle_reaches(owner, cell.place, environment, program) {

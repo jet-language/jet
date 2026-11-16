@@ -990,7 +990,7 @@ rt_text_search_byte: fn(data: I64, len: I64, at: I64, reverse: Bool) -> I64 {
     rt_text_byte(wrapping(data + (if reverse -> len - I64{1} - at else -> at)))
 }
 
-rt_text_maximal_suffix: fn(pattern: I64, len: I64, reverse: Bool, order: Bool) -> (period: I64, split: I64) {
+rt_text_maximal_suffix: fn(pattern: I64, len: I64, reverse: Bool, order: Bool) -> {period: I64, split: I64} {
     suffix := I64{-1}
     candidate := I64{0}
     offset := I64{1}
@@ -1021,7 +1021,7 @@ rt_text_maximal_suffix: fn(pattern: I64, len: I64, reverse: Bool, order: Bool) -
             }
         }
     }
-    (split: suffix + I64{1}, period: period)
+    {split: suffix + I64{1}, period: period}
 }
 
 // A one-byte needle needs no two-way setup: the first (or last) equal byte

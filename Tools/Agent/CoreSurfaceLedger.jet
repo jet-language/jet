@@ -186,107 +186,107 @@ fail: fn(message: String) -> LedgerError Never! { LedgerError{message: message.c
 // read from that language's own primary source. Python keeps its interpreter
 // snapshot; the other ten are read from a runtime, from standard-library
 // source, or from official machine-readable documentation.
-SURFACE_FILES: [(language: String, path: String)]{
-    (language: "Rust", path: "Docs/Spec/Reference/Surfaces/rust-surface.json"),
-    (language: "Go", path: "Docs/Spec/Reference/Surfaces/go-surface.json"),
-    (language: "Swift", path: "Docs/Spec/Reference/Surfaces/swift-surface.json"),
-    (language: "Kotlin", path: "Docs/Spec/Reference/Surfaces/kotlin-surface.json"),
-    (language: "C#", path: "Docs/Spec/Reference/Surfaces/csharp-surface.json"),
-    (language: "TypeScript", path: "Docs/Spec/Reference/Surfaces/js-surface.json"),
-    (language: "Ruby", path: "Docs/Spec/Reference/Surfaces/ruby-surface.json"),
-    (language: "Elixir", path: "Docs/Spec/Reference/Surfaces/elixir-surface.json"),
-    (language: "Julia", path: "Docs/Spec/Reference/Surfaces/julia-surface.json"),
-    (language: "R", path: "Docs/Spec/Reference/Surfaces/r-surface.json"),
+SURFACE_FILES: [{language: String, path: String}]{
+    {language: "Rust", path: "Docs/Spec/Reference/Surfaces/rust-surface.json"},
+    {language: "Go", path: "Docs/Spec/Reference/Surfaces/go-surface.json"},
+    {language: "Swift", path: "Docs/Spec/Reference/Surfaces/swift-surface.json"},
+    {language: "Kotlin", path: "Docs/Spec/Reference/Surfaces/kotlin-surface.json"},
+    {language: "C#", path: "Docs/Spec/Reference/Surfaces/csharp-surface.json"},
+    {language: "TypeScript", path: "Docs/Spec/Reference/Surfaces/js-surface.json"},
+    {language: "Ruby", path: "Docs/Spec/Reference/Surfaces/ruby-surface.json"},
+    {language: "Elixir", path: "Docs/Spec/Reference/Surfaces/elixir-surface.json"},
+    {language: "Julia", path: "Docs/Spec/Reference/Surfaces/julia-surface.json"},
+    {language: "R", path: "Docs/Spec/Reference/Surfaces/r-surface.json"},
 }
 
 // Python's snapshot predates the container shape, so it is projected onto the
 // shared containers rather than re-read. The map runs source to container, not
 // container to source: the earlier shape let one module feed three containers,
 // so every os function minted three separate gap rows.
-PYTHON_SOURCE_CONTAINER: [(source: String, container: String)]{
-    (source: "type:list", container: "List"),
-    (source: "type:tuple", container: "List"),
-    (source: "type:range", container: "Iter"),
-    (source: "type:dict", container: "Map"),
-    (source: "type:set", container: "Set"),
-    (source: "type:str", container: "String"),
-    (source: "type:bytes", container: "Bytes"),
-    (source: "type:int", container: "core.math"),
-    (source: "type:float", container: "core.math"),
-    (source: "mod:builtins", container: "core.term"),
-    (source: "mod:itertools", container: "Iter"),
-    (source: "mod:collections", container: "Queue"),
-    (source: "mod:heapq", container: "PriorityQueue"),
-    (source: "mod:functools", container: "Cache"),
-    (source: "mod:io", container: "Bytes"),
-    (source: "mod:string", container: "String"),
-    (source: "mod:textwrap", container: "String"),
-    (source: "mod:math", container: "core.math"),
-    (source: "mod:decimal", container: "core.math"),
-    (source: "mod:fractions", container: "core.math"),
-    (source: "mod:random", container: "core.math.random"),
-    (source: "mod:secrets", container: "core.crypto.random"),
-    (source: "mod:hashlib", container: "core.crypto"),
-    (source: "mod:hmac", container: "core.crypto"),
-    (source: "mod:datetime", container: "core.time"),
-    (source: "mod:time", container: "core.time"),
-    (source: "mod:json", container: "core.encoding.json"),
-    (source: "mod:csv", container: "core.encoding.csv"),
-    (source: "mod:tomllib", container: "core.encoding.toml"),
-    (source: "mod:base64", container: "core.encoding.base64"),
-    (source: "mod:binascii", container: "core.encoding.hex"),
-    (source: "mod:re", container: "core.regex"),
-    (source: "mod:pathlib", container: "core.files"),
-    (source: "mod:os", container: "core.sys"),
-    (source: "mod:sys", container: "core.sys"),
-    (source: "mod:shutil", container: "core.files"),
-    (source: "mod:glob", container: "core.files"),
-    (source: "mod:tempfile", container: "core.files"),
-    (source: "mod:subprocess", container: "core.process"),
-    (source: "mod:socket", container: "core.net"),
-    (source: "mod:ssl", container: "core.net.tls"),
-    (source: "mod:http", container: "core.http"),
-    (source: "mod:http.server", container: "core.http"),
-    (source: "mod:urllib.parse", container: "core.net.url"),
-    (source: "mod:uuid", container: "core.crypto.uuid"),
-    (source: "mod:sqlite3", container: "core.db"),
-    (source: "mod:asyncio", container: "core.tasks"),
-    (source: "mod:threading", container: "core.sync"),
-    (source: "mod:queue", container: "core.sync"),
-    (source: "mod:argparse", container: "core.args"),
-    (source: "mod:inspect", container: "core.reflect"),
-    (source: "mod:mimetypes", container: "core.net.mime"),
-    (source: "mod:xml.etree.ElementTree", container: "core.encoding.xml"),
-    (source: "mod:copy", container: "core.mem"),
-    (source: "mod:unittest", container: "core.testing"),
-    (source: "mod:logging", container: "core.log"),
-    (source: "mod:struct", container: "core.encoding"),
-    (source: "mod:zipfile", container: "core.archive"),
-    (source: "mod:tarfile", container: "core.archive"),
-    (source: "mod:gzip", container: "core.archive"),
-    (source: "mod:zlib", container: "core.archive"),
-    (source: "mod:statistics", container: "core.data"),
-    (source: "mod:unicodedata", container: "core.text"),
+PYTHON_SOURCE_CONTAINER: [{source: String, container: String}]{
+    {source: "type:list", container: "List"},
+    {source: "type:tuple", container: "List"},
+    {source: "type:range", container: "Iter"},
+    {source: "type:dict", container: "Map"},
+    {source: "type:set", container: "Set"},
+    {source: "type:str", container: "String"},
+    {source: "type:bytes", container: "Bytes"},
+    {source: "type:int", container: "core.math"},
+    {source: "type:float", container: "core.math"},
+    {source: "mod:builtins", container: "core.term"},
+    {source: "mod:itertools", container: "Iter"},
+    {source: "mod:collections", container: "Queue"},
+    {source: "mod:heapq", container: "PriorityQueue"},
+    {source: "mod:functools", container: "Cache"},
+    {source: "mod:io", container: "Bytes"},
+    {source: "mod:string", container: "String"},
+    {source: "mod:textwrap", container: "String"},
+    {source: "mod:math", container: "core.math"},
+    {source: "mod:decimal", container: "core.math"},
+    {source: "mod:fractions", container: "core.math"},
+    {source: "mod:random", container: "core.math.random"},
+    {source: "mod:secrets", container: "core.crypto.random"},
+    {source: "mod:hashlib", container: "core.crypto"},
+    {source: "mod:hmac", container: "core.crypto"},
+    {source: "mod:datetime", container: "core.time"},
+    {source: "mod:time", container: "core.time"},
+    {source: "mod:json", container: "core.encoding.json"},
+    {source: "mod:csv", container: "core.encoding.csv"},
+    {source: "mod:tomllib", container: "core.encoding.toml"},
+    {source: "mod:base64", container: "core.encoding.base64"},
+    {source: "mod:binascii", container: "core.encoding.hex"},
+    {source: "mod:re", container: "core.regex"},
+    {source: "mod:pathlib", container: "core.files"},
+    {source: "mod:os", container: "core.sys"},
+    {source: "mod:sys", container: "core.sys"},
+    {source: "mod:shutil", container: "core.files"},
+    {source: "mod:glob", container: "core.files"},
+    {source: "mod:tempfile", container: "core.files"},
+    {source: "mod:subprocess", container: "core.process"},
+    {source: "mod:socket", container: "core.net"},
+    {source: "mod:ssl", container: "core.net.tls"},
+    {source: "mod:http", container: "core.http"},
+    {source: "mod:http.server", container: "core.http"},
+    {source: "mod:urllib.parse", container: "core.net.url"},
+    {source: "mod:uuid", container: "core.crypto.uuid"},
+    {source: "mod:sqlite3", container: "core.db"},
+    {source: "mod:asyncio", container: "core.tasks"},
+    {source: "mod:threading", container: "core.sync"},
+    {source: "mod:queue", container: "core.sync"},
+    {source: "mod:argparse", container: "core.args"},
+    {source: "mod:inspect", container: "core.reflect"},
+    {source: "mod:mimetypes", container: "core.net.mime"},
+    {source: "mod:xml.etree.ElementTree", container: "core.encoding.xml"},
+    {source: "mod:copy", container: "core.mem"},
+    {source: "mod:unittest", container: "core.testing"},
+    {source: "mod:logging", container: "core.log"},
+    {source: "mod:struct", container: "core.encoding"},
+    {source: "mod:zipfile", container: "core.archive"},
+    {source: "mod:tarfile", container: "core.archive"},
+    {source: "mod:gzip", container: "core.archive"},
+    {source: "mod:zlib", container: "core.archive"},
+    {source: "mod:statistics", container: "core.data"},
+    {source: "mod:unicodedata", container: "core.text"},
 }
 
 // A recorded Python module with no container yet. Listing it keeps the gap
 // countable; dropping it silently would hide a whole workflow.
-PYTHON_UNASSIGNED: [(source: String, reason: String)]{
-    (source: "type:bool", reason: "bool mirrors int, which is recorded under core.math"),
-    (source: "mod:email", reason: "Jet ships no email support"),
+PYTHON_UNASSIGNED: [{source: String, reason: String}]{
+    {source: "type:bool", reason: "bool mirrors int, which is recorded under core.math"},
+    {source: "mod:email", reason: "Jet ships no email support"},
 }
 
-PYTHON_ABSENT: [(container: String, reason: String)]{
-    (container: "Rank", reason: "no Python standard-library ordered set"),
-    (container: "Bits", reason: "no Python standard-library bit set; int carries bit operations"),
-    (container: "core.sys", reason: "environment and system facts share the sys module"),
-    (container: "core.path", reason: "path operations live on pathlib, recorded under core.files"),
-    (container: "core.encoding.base32", reason: "base32 lives in the base64 module, recorded under core.encoding.base64"),
-    (container: "core.text.fmt", reason: "formatting lives on str.format, recorded under String"),
-    (container: "core.text", reason: "text handling lives on str, recorded under String"),
-    (container: "core.encoding.yaml", reason: "no Python standard-library YAML codec"),
-    (container: "core.term", reason: "curses is platform-conditional, so it is not recorded here"),
-    (container: "core.web", reason: "http.server answers core.http; Python ships no web framework"),
+PYTHON_ABSENT: [{container: String, reason: String}]{
+    {container: "Rank", reason: "no Python standard-library ordered set"},
+    {container: "Bits", reason: "no Python standard-library bit set; int carries bit operations"},
+    {container: "core.sys", reason: "environment and system facts share the sys module"},
+    {container: "core.path", reason: "path operations live on pathlib, recorded under core.files"},
+    {container: "core.encoding.base32", reason: "base32 lives in the base64 module, recorded under core.encoding.base64"},
+    {container: "core.text.fmt", reason: "formatting lives on str.format, recorded under String"},
+    {container: "core.text", reason: "text handling lives on str, recorded under String"},
+    {container: "core.encoding.yaml", reason: "no Python standard-library YAML codec"},
+    {container: "core.term", reason: "curses is platform-conditional, so it is not recorded here"},
+    {container: "core.web", reason: "http.server answers core.http; Python ships no web framework"},
 }
 
 // A Jet module whose workflow is the one an existing container already
@@ -295,29 +295,29 @@ PYTHON_ABSENT: [(container: String, reason: String)]{
 // Jet types, but their workflow is the Core module a competitor answers with:
 // without them a correctly read Task.cancel could never defend core.tasks.
 // Civil-time types live in net_text_time.rs; their workflows are core.time.
-CONTAINER_ALIASES: [(name: String, container: String)]{
-    (name: "core.http.client", container: "core.http"),
-    (name: "core.files.path", container: "core.files"),
-    (name: "core.http.server", container: "core.http"),
-    (name: "core.time.expiring", container: "core.time"),
-    (name: "core.archive.gzip", container: "core.archive"),
-    (name: "core.archive.zstd", container: "core.archive"),
-    (name: "core.encoding", container: "core.encoding.json"),
-    (name: "core.crypto.expert", container: "core.crypto"),
-    (name: "Task", container: "core.tasks"),
-    (name: "TaskList", container: "core.tasks"),
-    (name: "Sender", container: "core.tasks"),
-    (name: "Receiver", container: "core.tasks"),
-    (name: "Duration", container: "core.time"),
-    (name: "Path", container: "core.files"),
-    (name: "Date", container: "core.time"),
-    (name: "LocalDate", container: "core.time"),
-    (name: "LocalTime", container: "core.time"),
-    (name: "DateTime", container: "core.time"),
-    (name: "Instant", container: "core.time"),
-    (name: "Period", container: "core.time"),
-    (name: "Zone", container: "core.time"),
-    (name: "ZonedDateTime", container: "core.time"),
+CONTAINER_ALIASES: [{name: String, container: String}]{
+    {name: "core.http.client", container: "core.http"},
+    {name: "core.files.path", container: "core.files"},
+    {name: "core.http.server", container: "core.http"},
+    {name: "core.time.expiring", container: "core.time"},
+    {name: "core.archive.gzip", container: "core.archive"},
+    {name: "core.archive.zstd", container: "core.archive"},
+    {name: "core.encoding", container: "core.encoding.json"},
+    {name: "core.crypto.expert", container: "core.crypto"},
+    {name: "Task", container: "core.tasks"},
+    {name: "TaskList", container: "core.tasks"},
+    {name: "Sender", container: "core.tasks"},
+    {name: "Receiver", container: "core.tasks"},
+    {name: "Duration", container: "core.time"},
+    {name: "Path", container: "core.files"},
+    {name: "Date", container: "core.time"},
+    {name: "LocalDate", container: "core.time"},
+    {name: "LocalTime", container: "core.time"},
+    {name: "DateTime", container: "core.time"},
+    {name: "Instant", container: "core.time"},
+    {name: "Period", container: "core.time"},
+    {name: "Zone", container: "core.time"},
+    {name: "ZonedDateTime", container: "core.time"},
 }
 
 // Interchangeable spellings of one operation live in SYNONYM_GROUPS below. A
@@ -913,60 +913,60 @@ TYPE_ONLY_GROUP_HEADS: [String]{
 //
 // Matching looks across a domain. Minting a gap stays per container, so a
 // missing operation is still reported once, in one place.
-MATCH_DOMAIN: [(container: String, domain: String)]{
-    (container: "core.files", domain: "filesystem"),
-    (container: "core.sys", domain: "filesystem"),
-    (container: "Bytes", domain: "bytes"),
-    (container: "core.encoding", domain: "bytes"),
-    (container: "core.term", domain: "bytes"),
-    (container: "core.net", domain: "network"),
-    (container: "core.net.tls", domain: "network"),
-    (container: "List", domain: "sequence"),
-    (container: "Iter", domain: "sequence"),
-    (container: "String", domain: "text"),
-    (container: "core.text", domain: "text"),
+MATCH_DOMAIN: [{container: String, domain: String}]{
+    {container: "core.files", domain: "filesystem"},
+    {container: "core.sys", domain: "filesystem"},
+    {container: "Bytes", domain: "bytes"},
+    {container: "core.encoding", domain: "bytes"},
+    {container: "core.term", domain: "bytes"},
+    {container: "core.net", domain: "network"},
+    {container: "core.net.tls", domain: "network"},
+    {container: "List", domain: "sequence"},
+    {container: "Iter", domain: "sequence"},
+    {container: "String", domain: "text"},
+    {container: "core.text", domain: "text"},
 }
 
 // The card that owns a container's losses. --check rejects a reference to a
 // card that is closed or missing, which is how a stale owner surfaces instead
 // of quietly reading as covered.
-CLUSTER_OWNER: [(container: String, card: Int)]{
-    (container: "core.text.fmt", card: 1493),
-    (container: "Bits", card: 1493),
-    (container: "core.text", card: 1493),
-    (container: "core.math", card: 1464),
-    (container: "core.sys", card: 1465),
-    (container: "core.time", card: 1466),
-    (container: "Bytes", card: 1467),
-    (container: "core.tasks", card: 1468),
-    (container: "core.net", card: 1469),
-    (container: "core.archive", card: 1470),
-    (container: "core.regex", card: 1471),
-    (container: "core.net.url", card: 1472),
-    (container: "core.crypto", card: 1725),
-    (container: "core.log", card: 1474),
-    (container: "Queue", card: 1475),
-    (container: "String", card: 1581),
-    (container: "List", card: 1477),
-    (container: "Map", card: 1477),
-    (container: "Set", card: 1584),
-    (container: "Rank", card: 1584),
-    (container: "core.term", card: 1480),
-    (container: "core.files", card: 288),
-    (container: "core.sync", card: 1590),
-    (container: "core.encoding.xml", card: 1590),
-    (container: "core.process", card: 1590),
-    (container: "core.db", card: 1590),
-    (container: "core.testing", card: 1590),
-    (container: "core.reflect", card: 1590),
-    (container: "core.http", card: 1590),
-    (container: "core.crypto.uuid", card: 1590),
-    (container: "core.encoding", card: 1590),
-    (container: "core.encoding.csv", card: 1590),
-    (container: "core.math.random", card: 1590),
-    (container: "core.args", card: 1590),
-    (container: "core.encoding.json", card: 1590),
-    (container: "core.mem", card: 1590),
+CLUSTER_OWNER: [{container: String, card: Int}]{
+    {container: "core.text.fmt", card: 1493},
+    {container: "Bits", card: 1493},
+    {container: "core.text", card: 1493},
+    {container: "core.math", card: 1464},
+    {container: "core.sys", card: 1465},
+    {container: "core.time", card: 1466},
+    {container: "Bytes", card: 1467},
+    {container: "core.tasks", card: 1468},
+    {container: "core.net", card: 1469},
+    {container: "core.archive", card: 1470},
+    {container: "core.regex", card: 1471},
+    {container: "core.net.url", card: 1472},
+    {container: "core.crypto", card: 1725},
+    {container: "core.log", card: 1474},
+    {container: "Queue", card: 1475},
+    {container: "String", card: 1581},
+    {container: "List", card: 1477},
+    {container: "Map", card: 1477},
+    {container: "Set", card: 1584},
+    {container: "Rank", card: 1584},
+    {container: "core.term", card: 1480},
+    {container: "core.files", card: 288},
+    {container: "core.sync", card: 1590},
+    {container: "core.encoding.xml", card: 1590},
+    {container: "core.process", card: 1590},
+    {container: "core.db", card: 1590},
+    {container: "core.testing", card: 1590},
+    {container: "core.reflect", card: 1590},
+    {container: "core.http", card: 1590},
+    {container: "core.crypto.uuid", card: 1590},
+    {container: "core.encoding", card: 1590},
+    {container: "core.encoding.csv", card: 1590},
+    {container: "core.math.random", card: 1590},
+    {container: "core.args", card: 1590},
+    {container: "core.encoding.json", card: 1590},
+    {container: "core.mem", card: 1590},
 }
 
 // Every row D-STR-DECLINE1, D-SET-DECLINE1, and D-CORESURF-SMALL1 decline,
@@ -981,101 +981,101 @@ CLUSTER_OWNER: [(container: String, card: Int)]{
 // D-ITER-DECLINE1 needs no entry here: every name it declines already
 // normalizes onto a Jet-shipped Iter member through SYNONYM_GROUPS, so no gap
 // row is minted for them in the first place.
-RATIFIED_DECLINES: [(id: String, decision: String, spelling: String)]{
-    (id: "gap.text.pop", decision: "D-STR-DECLINE1", spelling: "String is immutable — rebuild with + or .replace()/.slice()"),
-    (id: "gap.text.write", decision: "D-STR-DECLINE1", spelling: "String is immutable — rebuild with + or .replace()/.slice()"),
-    (id: "gap.text.all", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.all"),
-    (id: "gap.text.map", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.map"),
-    (id: "gap.text.fold", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.fold"),
-    (id: "gap.text.skip", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.skip"),
-    (id: "gap.text.chunk", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.chunk"),
-    (id: "gap.text.droplast", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.drop_last"),
-    (id: "gap.text.indexed", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.indexed"),
-    (id: "gap.text.flatmap", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.flat_map"),
-    (id: "gap.text.each", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.each"),
-    (id: "gap.text.max", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.max"),
-    (id: "gap.text.min", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.min"),
-    (id: "gap.text.scan", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.scan"),
-    (id: "gap.text.first", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.first"),
-    (id: "gap.text.last", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.last"),
-    (id: "gap.text.get", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.get"),
-    (id: "gap.text.codepointat", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.get"),
-    (id: "gap.text.concat", decision: "D-STR-DECLINE1", spelling: "the + operator / string interpolation"),
-    (id: "gap.text.isvalid", decision: "D-STR-DECLINE1", spelling: "a live String is always valid UTF-8 by construction"),
-    (id: "gap.text.replacerange", decision: "D-STR-DECLINE1", spelling: "String.slice() + String.replace()"),
-    (id: "gap.text.isprint", decision: "D-STR-DECLINE1", spelling: "niche buffer op — two-witness, covered by the shipped String surface"),
-    (id: "gap.text.intern", decision: "D-STR-DECLINE1", spelling: "niche buffer op — two-witness, covered by the shipped String surface"),
-    (id: "gap.text.indexofany", decision: "D-STR-DECLINE1", spelling: "niche buffer op — two-witness, covered by the shipped String surface"),
-    (id: "gap.text.lastindexofany", decision: "D-STR-DECLINE1", spelling: "niche buffer op — two-witness, covered by the shipped String surface"),
-    (id: "gap.text.chop", decision: "D-STR-DECLINE1", spelling: "String.slice()"),
-    (id: "gap.Set.indexof", decision: "D-SET-DECLINE1", spelling: "Set.to_list() then List.index_of — a hash Set keeps no position"),
-    (id: "gap.Set.indexed", decision: "D-SET-DECLINE1", spelling: "Set.to_list() then List.indexed — a hash Set keeps no position"),
-    (id: "gap.Set.flatten", decision: "D-SET-DECLINE1", spelling: "no legal Set<T> can hold a nested container (E0506 requires Hash+Eq elements)"),
-    (id: "gap.core.sync.broadcast", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.sync.clear", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — no shared mutable state to clear"),
-    (id: "gap.core.sync.lock", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.sync.put", decision: "D-CORESURF-SMALL1", spelling: "SyncMap.map_set"),
-    (id: "gap.core.sync.rlock", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.sync.signal", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.sync.trylock", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.sync.unlock", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.sync.wait", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.sync.thread", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.sync.timer", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.sync.locked", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"),
-    (id: "gap.core.encoding.xml.close", decision: "D-CORESURF-SMALL1", spelling: "XMLWriter.finish"),
-    (id: "gap.core.encoding.xml.copy", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"),
-    (id: "gap.core.encoding.xml.end", decision: "D-CORESURF-SMALL1", spelling: "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"),
-    (id: "gap.core.encoding.xml.flush", decision: "D-CORESURF-SMALL1", spelling: "XMLWriter.flush"),
-    (id: "gap.core.encoding.xml.indent", decision: "D-CORESURF-SMALL1", spelling: "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"),
-    (id: "gap.core.encoding.xml.name", decision: "D-CORESURF-SMALL1", spelling: "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"),
-    (id: "gap.core.encoding.xml.nodetype", decision: "D-CORESURF-SMALL1", spelling: "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"),
-    (id: "gap.core.encoding.xml.write", decision: "D-CORESURF-SMALL1", spelling: "XMLWriter.write"),
-    (id: "gap.core.encoding.xml.clear", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"),
-    (id: "gap.core.process.id", decision: "D-CORESURF-SMALL1", spelling: "ProcessChild.id"),
-    (id: "gap.core.process.kill", decision: "D-CORESURF-SMALL1", spelling: "ProcessChild.kill"),
-    (id: "gap.core.process.wait", decision: "D-CORESURF-SMALL1", spelling: "ProcessChild.wait"),
-    (id: "gap.core.process.spawn", decision: "D-CORESURF-SMALL1", spelling: "ProcessSpec.spawn"),
-    (id: "gap.core.process.output", decision: "D-CORESURF-SMALL1", spelling: "ProcessChild.output"),
-    (id: "gap.core.process.success", decision: "D-CORESURF-SMALL1", spelling: "ProcessResult.success"),
-    (id: "gap.core.process.exitcode", decision: "D-CORESURF-SMALL1", spelling: "ProcessResult.code"),
-    (id: "gap.core.process.start", decision: "D-CORESURF-SMALL1", spelling: "ProcessSpec.spawn"),
-    (id: "gap.core.db.close", decision: "D-CORESURF-SMALL1", spelling: "Store.close"),
-    (id: "gap.core.db.commit", decision: "D-CORESURF-SMALL1", spelling: "DBTransaction.commit"),
-    (id: "gap.core.db.name", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"),
-    (id: "gap.core.db.first", decision: "D-CORESURF-SMALL1", spelling: "DBScope.query_one"),
-    (id: "gap.core.db.raw", decision: "D-CORESURF-SMALL1", spelling: "declined — would open an unaudited escape from the portable DB-plugin-wire protocol"),
-    (id: "gap.core.db.rollback", decision: "D-CORESURF-SMALL1", spelling: "DBTransaction.rollback"),
-    (id: "gap.core.db.copy", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"),
-    (id: "gap.core.db.count", decision: "D-CORESURF-SMALL1", spelling: "DBScope.query(...).len()"),
-    (id: "gap.core.testing.benchmark", decision: "D-CORESURF-SMALL1", spelling: "#Test .measure member + `jet test --measure`"),
-    (id: "gap.core.testing.fail", decision: "D-CORESURF-SMALL1", spelling: "#Test marker block + `jet test`"),
-    (id: "gap.core.testing.main", decision: "D-CORESURF-SMALL1", spelling: "#Test marker block + `jet test`"),
-    (id: "gap.core.testing.runtests", decision: "D-CORESURF-SMALL1", spelling: "#Test marker block + `jet test`"),
-    (id: "gap.core.testing.stop", decision: "D-CORESURF-SMALL1", spelling: "#Test marker block + `jet test`"),
-    (id: "gap.core.reflect.clear", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"),
-    (id: "gap.core.reflect.copy", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"),
-    (id: "gap.core.reflect.equal", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"),
-    (id: "gap.core.reflect.get", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"),
-    (id: "gap.core.reflect.set", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"),
-    (id: "gap.core.reflect.getfile", decision: "D-CORESURF-SMALL1", spelling: "declined — a compiled, ahead-of-time language does not load code at runtime"),
-    (id: "gap.core.reflect.getmodule", decision: "D-CORESURF-SMALL1", spelling: "declined — a compiled, ahead-of-time language does not load code at runtime"),
-    (id: "gap.core.reflect.loadfile", decision: "D-CORESURF-SMALL1", spelling: "declined — a compiled, ahead-of-time language does not load code at runtime"),
-    (id: "gap.core.http.cancelrequest", decision: "D-CORESURF-SMALL1", spelling: "duplicates the deadline every request already takes"),
-    (id: "gap.core.http.copy", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"),
-    (id: "gap.core.http.postform", decision: "D-CORESURF-SMALL1", spelling: "the request builder's .form(...) call"),
-    (id: "gap.network.start", decision: "D-CORESURF-SMALL1", spelling: "tls.client()"),
-    (id: "gap.network.handshake", decision: "D-CORESURF-SMALL1", spelling: "happens inside tls.client() automatically, by design"),
-    (id: "gap.network.verifyhostname", decision: "D-CORESURF-SMALL1", spelling: "mandatory already — TLSPeerIdentity.verified_server_name, no opt-out"),
-    (id: "gap.network.copy", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"),
-    (id: "gap.core.crypto.uuid.join", decision: "D-CORESURF-SMALL1", spelling: "matches no real UUID operation in any compared language"),
-    (id: "gap.core.crypto.uuid.uuid1", decision: "D-CORESURF-SMALL1", spelling: "declined — MAC-address-based, weaker than the already-shipped v7"),
-    (id: "gap.core.crypto.uuid.uuid4", decision: "D-CORESURF-SMALL1", spelling: "uuid.v4 — same call, existing name"),
-    (id: "gap.core.encoding.csv.flush", decision: "D-CORESURF-SMALL1", spelling: "CSVWriter.flush"),
-    (id: "gap.core.encoding.csv.read", decision: "D-CORESURF-SMALL1", spelling: "CSVReader.next"),
-    (id: "gap.core.encoding.csv.fieldsizelimit", decision: "D-CORESURF-SMALL1", spelling: "EncodingLimits.max_item_bytes"),
-    (id: "gap.core.args.parseargs", decision: "D-CORESURF-SMALL1", spelling: "ArgsSpec.parse"),
-    (id: "gap.core.mem.replace", decision: "D-CORESURF-SMALL1", spelling: "the take operator (^) + assignment"),
+RATIFIED_DECLINES: [{id: String, decision: String, spelling: String}]{
+    {id: "gap.text.pop", decision: "D-STR-DECLINE1", spelling: "String is immutable — rebuild with + or .replace()/.slice()"},
+    {id: "gap.text.write", decision: "D-STR-DECLINE1", spelling: "String is immutable — rebuild with + or .replace()/.slice()"},
+    {id: "gap.text.all", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.all"},
+    {id: "gap.text.map", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.map"},
+    {id: "gap.text.fold", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.fold"},
+    {id: "gap.text.skip", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.skip"},
+    {id: "gap.text.chunk", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.chunk"},
+    {id: "gap.text.droplast", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.drop_last"},
+    {id: "gap.text.indexed", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.indexed"},
+    {id: "gap.text.flatmap", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.flat_map"},
+    {id: "gap.text.each", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.each"},
+    {id: "gap.text.max", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.max"},
+    {id: "gap.text.min", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.min"},
+    {id: "gap.text.scan", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.scan"},
+    {id: "gap.text.first", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.first"},
+    {id: "gap.text.last", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.last"},
+    {id: "gap.text.get", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.get"},
+    {id: "gap.text.codepointat", decision: "D-STR-DECLINE1", spelling: "String.chars() then Iter.get"},
+    {id: "gap.text.concat", decision: "D-STR-DECLINE1", spelling: "the + operator / string interpolation"},
+    {id: "gap.text.isvalid", decision: "D-STR-DECLINE1", spelling: "a live String is always valid UTF-8 by construction"},
+    {id: "gap.text.replacerange", decision: "D-STR-DECLINE1", spelling: "String.slice() + String.replace()"},
+    {id: "gap.text.isprint", decision: "D-STR-DECLINE1", spelling: "niche buffer op — two-witness, covered by the shipped String surface"},
+    {id: "gap.text.intern", decision: "D-STR-DECLINE1", spelling: "niche buffer op — two-witness, covered by the shipped String surface"},
+    {id: "gap.text.indexofany", decision: "D-STR-DECLINE1", spelling: "niche buffer op — two-witness, covered by the shipped String surface"},
+    {id: "gap.text.lastindexofany", decision: "D-STR-DECLINE1", spelling: "niche buffer op — two-witness, covered by the shipped String surface"},
+    {id: "gap.text.chop", decision: "D-STR-DECLINE1", spelling: "String.slice()"},
+    {id: "gap.Set.indexof", decision: "D-SET-DECLINE1", spelling: "Set.to_list() then List.index_of — a hash Set keeps no position"},
+    {id: "gap.Set.indexed", decision: "D-SET-DECLINE1", spelling: "Set.to_list() then List.indexed — a hash Set keeps no position"},
+    {id: "gap.Set.flatten", decision: "D-SET-DECLINE1", spelling: "no legal Set<T> can hold a nested container (E0506 requires Hash+Eq elements)"},
+    {id: "gap.core.sync.broadcast", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.sync.clear", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — no shared mutable state to clear"},
+    {id: "gap.core.sync.lock", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.sync.put", decision: "D-CORESURF-SMALL1", spelling: "SyncMap.map_set"},
+    {id: "gap.core.sync.rlock", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.sync.signal", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.sync.trylock", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.sync.unlock", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.sync.wait", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.sync.thread", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.sync.timer", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.sync.locked", decision: "D-CORESURF-SMALL1", spelling: "core.tasks — message passing, not raw shared-memory locks"},
+    {id: "gap.core.encoding.xml.close", decision: "D-CORESURF-SMALL1", spelling: "XMLWriter.finish"},
+    {id: "gap.core.encoding.xml.copy", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"},
+    {id: "gap.core.encoding.xml.end", decision: "D-CORESURF-SMALL1", spelling: "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"},
+    {id: "gap.core.encoding.xml.flush", decision: "D-CORESURF-SMALL1", spelling: "XMLWriter.flush"},
+    {id: "gap.core.encoding.xml.indent", decision: "D-CORESURF-SMALL1", spelling: "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"},
+    {id: "gap.core.encoding.xml.name", decision: "D-CORESURF-SMALL1", spelling: "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"},
+    {id: "gap.core.encoding.xml.nodetype", decision: "D-CORESURF-SMALL1", spelling: "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"},
+    {id: "gap.core.encoding.xml.write", decision: "D-CORESURF-SMALL1", spelling: "XMLWriter.write"},
+    {id: "gap.core.encoding.xml.clear", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"},
+    {id: "gap.core.process.id", decision: "D-CORESURF-SMALL1", spelling: "ProcessChild.id"},
+    {id: "gap.core.process.kill", decision: "D-CORESURF-SMALL1", spelling: "ProcessChild.kill"},
+    {id: "gap.core.process.wait", decision: "D-CORESURF-SMALL1", spelling: "ProcessChild.wait"},
+    {id: "gap.core.process.spawn", decision: "D-CORESURF-SMALL1", spelling: "ProcessSpec.spawn"},
+    {id: "gap.core.process.output", decision: "D-CORESURF-SMALL1", spelling: "ProcessChild.output"},
+    {id: "gap.core.process.success", decision: "D-CORESURF-SMALL1", spelling: "ProcessResult.success"},
+    {id: "gap.core.process.exitcode", decision: "D-CORESURF-SMALL1", spelling: "ProcessResult.code"},
+    {id: "gap.core.process.start", decision: "D-CORESURF-SMALL1", spelling: "ProcessSpec.spawn"},
+    {id: "gap.core.db.close", decision: "D-CORESURF-SMALL1", spelling: "Store.close"},
+    {id: "gap.core.db.commit", decision: "D-CORESURF-SMALL1", spelling: "DBTransaction.commit"},
+    {id: "gap.core.db.name", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"},
+    {id: "gap.core.db.first", decision: "D-CORESURF-SMALL1", spelling: "DBScope.query_one"},
+    {id: "gap.core.db.raw", decision: "D-CORESURF-SMALL1", spelling: "declined — would open an unaudited escape from the portable DB-plugin-wire protocol"},
+    {id: "gap.core.db.rollback", decision: "D-CORESURF-SMALL1", spelling: "DBTransaction.rollback"},
+    {id: "gap.core.db.copy", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"},
+    {id: "gap.core.db.count", decision: "D-CORESURF-SMALL1", spelling: "DBScope.query(...).len()"},
+    {id: "gap.core.testing.benchmark", decision: "D-CORESURF-SMALL1", spelling: "#Test .measure member + `jet test --measure`"},
+    {id: "gap.core.testing.fail", decision: "D-CORESURF-SMALL1", spelling: "#Test marker block + `jet test`"},
+    {id: "gap.core.testing.main", decision: "D-CORESURF-SMALL1", spelling: "#Test marker block + `jet test`"},
+    {id: "gap.core.testing.runtests", decision: "D-CORESURF-SMALL1", spelling: "#Test marker block + `jet test`"},
+    {id: "gap.core.testing.stop", decision: "D-CORESURF-SMALL1", spelling: "#Test marker block + `jet test`"},
+    {id: "gap.core.reflect.clear", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"},
+    {id: "gap.core.reflect.copy", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"},
+    {id: "gap.core.reflect.equal", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"},
+    {id: "gap.core.reflect.get", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"},
+    {id: "gap.core.reflect.set", decision: "D-CORESURF-SMALL1", spelling: "declined — reflect.of(x) is read-only (I1: no field write by string name)"},
+    {id: "gap.core.reflect.getfile", decision: "D-CORESURF-SMALL1", spelling: "declined — a compiled, ahead-of-time language does not load code at runtime"},
+    {id: "gap.core.reflect.getmodule", decision: "D-CORESURF-SMALL1", spelling: "declined — a compiled, ahead-of-time language does not load code at runtime"},
+    {id: "gap.core.reflect.loadfile", decision: "D-CORESURF-SMALL1", spelling: "declined — a compiled, ahead-of-time language does not load code at runtime"},
+    {id: "gap.core.http.cancelrequest", decision: "D-CORESURF-SMALL1", spelling: "duplicates the deadline every request already takes"},
+    {id: "gap.core.http.copy", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"},
+    {id: "gap.core.http.postform", decision: "D-CORESURF-SMALL1", spelling: "the request builder's .form(...) call"},
+    {id: "gap.network.start", decision: "D-CORESURF-SMALL1", spelling: "tls.client()"},
+    {id: "gap.network.handshake", decision: "D-CORESURF-SMALL1", spelling: "happens inside tls.client() automatically, by design"},
+    {id: "gap.network.verifyhostname", decision: "D-CORESURF-SMALL1", spelling: "mandatory already — TLSPeerIdentity.verified_server_name, no opt-out"},
+    {id: "gap.network.copy", decision: "D-CORESURF-SMALL1", spelling: "one witness language; no consistent competitor meaning"},
+    {id: "gap.core.crypto.uuid.join", decision: "D-CORESURF-SMALL1", spelling: "matches no real UUID operation in any compared language"},
+    {id: "gap.core.crypto.uuid.uuid1", decision: "D-CORESURF-SMALL1", spelling: "declined — MAC-address-based, weaker than the already-shipped v7"},
+    {id: "gap.core.crypto.uuid.uuid4", decision: "D-CORESURF-SMALL1", spelling: "uuid.v4 — same call, existing name"},
+    {id: "gap.core.encoding.csv.flush", decision: "D-CORESURF-SMALL1", spelling: "CSVWriter.flush"},
+    {id: "gap.core.encoding.csv.read", decision: "D-CORESURF-SMALL1", spelling: "CSVReader.next"},
+    {id: "gap.core.encoding.csv.fieldsizelimit", decision: "D-CORESURF-SMALL1", spelling: "EncodingLimits.max_item_bytes"},
+    {id: "gap.core.args.parseargs", decision: "D-CORESURF-SMALL1", spelling: "ArgsSpec.parse"},
+    {id: "gap.core.mem.replace", decision: "D-CORESURF-SMALL1", spelling: "the take operator (^) + assignment"},
 }
 
 // ---- Text helpers ---------------------------------------------------------
@@ -1145,8 +1145,8 @@ count_then_key: fn(left_count: Int, left_key: [U8], right_count: Int, right_key:
 
 // `values` in Unicode's default collation order (a localeCompare sort).
 collated: fn(values: [String]) -> [String] Never! {
-    keyed := loop value in values -> (key: text.collation_key(value), value: value.copy())
-    keyed.sort_by(fn(left: (key: [U8], value: String), right: (key: [U8], value: String)) { compare_bytes(left.key, right.key) })
+    keyed := loop value in values -> {key: text.collation_key(value), value: value.copy()}
+    keyed.sort_by(fn(left: {key: [U8], value: String}, right: {key: [U8], value: String}) { compare_bytes(left.key, right.key) })
     loop item in keyed -> item.value.copy()
 }
 
@@ -1274,9 +1274,9 @@ items: fn(value: Dyn) -> [Dyn] Never! {
     [Dyn]{}
 }
 
-entries: fn(value: Dyn) -> [(key: String, value: Dyn)] Never! {
+entries: fn(value: Dyn) -> [{key: String, value: Dyn}] Never! {
     if value == .Object(list) -> return list.copy()
-    [(key: String, value: Dyn)]{}
+    [{key: String, value: Dyn}]{}
 }
 
 keys_of: fn(value: Dyn) -> [String] Never! {
@@ -1853,13 +1853,13 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
         sources[at].push(key.copy())
         loop member in members -> operations[at].push(member)
     }
-    containers := [(key: String, value: Dyn)]{}
+    containers := [{key: String, value: Dyn}]{}
     loop (at, name) in names {
         record := Dyn.object()
         record["present"] = Dyn.Bool(true)
         record["pythonSources"] = texts(sorted_unique(sources[at]))
         record["operations"] = texts(sorted_unique(operations[at]))
-        containers.push((key: name.copy(), value: record))
+        containers.push({key: name.copy(), value: record})
     }
     loop absent in PYTHON_ABSENT {
         record := Dyn.object()
@@ -1870,8 +1870,8 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
         loop (position, entry) in containers {
             if entry.key == absent.container -> at = position
         }
-        if at >= 0 -> containers[at] = (key: absent.container.copy(), value: record) else {
-            containers.push((key: absent.container.copy(), value: record))
+        if at >= 0 -> containers[at] = {key: absent.container.copy(), value: record} else {
+            containers.push({key: absent.container.copy(), value: record})
         }
     }
     present := 0
@@ -2659,8 +2659,8 @@ loss_clusters: fn(rows: [Row], board: Board) -> Dyn Never! {
         if row.pooled_witness_count > 0 -> pooled[at] = pooled[at] + 1
         loop language in row.languages -> languages[at].push(language.copy())
     }
-    keyed := loop (at, container) in containers -> (count: counts[at], key: text.collation_key(container), at: at)
-    keyed.sort_by(fn(left: (count: Int, key: [U8], at: Int), right: (count: Int, key: [U8], at: Int)) { count_then_key(left.count, left.key, right.count, right.key) })
+    keyed := loop (at, container) in containers -> {count: counts[at], key: text.collation_key(container), at: at}
+    keyed.sort_by(fn(left: {count: Int, key: [U8], at: Int}, right: {count: Int, key: [U8], at: Int}) { count_then_key(left.count, left.key, right.count, right.key) })
     out := [Dyn]{}
     loop item in keyed {
         at: item.at
@@ -2690,7 +2690,7 @@ loss_clusters: fn(rows: [Row], board: Board) -> Dyn Never! {
 // It can confirm a Jet match but cannot mint a gap row, so it is listed here
 // and the skip stays countable.
 package_attributed_containers: fn(surfaces: [LanguageSurface]) -> Dyn Never! {
-    found := [(language: [U8], container: [U8], value: Dyn)]{}
+    found := [{language: [U8], container: [U8], value: Dyn}]{}
     loop surface in surfaces {
         loop (at, container) in surface.names {
             if !surface.records[at].present || surface.records[at].attribution != "package" -> next
@@ -2699,10 +2699,10 @@ package_attributed_containers: fn(surfaces: [LanguageSurface]) -> Dyn Never! {
             entry["container"] = jtext(container)
             entry["recordedOperations"] = Dyn.Int(surface.records[at].operations.len())
             entry["reason"] = jtext("the recorded index is per package, so it cannot attribute an operation to this container")
-            found.push((language: text.collation_key(surface.language), container: text.collation_key(container), value: entry))
+            found.push({language: text.collation_key(surface.language), container: text.collation_key(container), value: entry})
         }
     }
-    found.sort_by(fn(left: (language: [U8], container: [U8], value: Dyn), right: (language: [U8], container: [U8], value: Dyn)) { if compare_bytes(left.language, right.language) != Ordering.Equal -> compare_bytes(left.language, right.language) else -> compare_bytes(left.container, right.container) })
+    found.sort_by(fn(left: {language: [U8], container: [U8], value: Dyn}, right: {language: [U8], container: [U8], value: Dyn}) { if compare_bytes(left.language, right.language) != Ordering.Equal -> compare_bytes(left.language, right.language) else -> compare_bytes(left.container, right.container) })
     Dyn.Array(loop item in found -> item.value.copy())
 }
 
@@ -2729,13 +2729,13 @@ repeated_operations: fn(rows: [Row]) -> [Repeat] Never! {
         }
         repeats[at].containers.push(row.container.copy())
     }
-    kept := [(count: Int, key: [U8], at: Int)]{}
+    kept := [{count: Int, key: [U8], at: Int}]{}
     loop (at, item) in repeats {
         if item.containers.len() >= 3 {
-            kept.push((count: item.containers.len(), key: text.collation_key(item.operation), at: at))
+            kept.push({count: item.containers.len(), key: text.collation_key(item.operation), at: at})
         }
     }
-    kept.sort_by(fn(left: (count: Int, key: [U8], at: Int), right: (count: Int, key: [U8], at: Int)) { count_then_key(left.count, left.key, right.count, right.key) })
+    kept.sort_by(fn(left: {count: Int, key: [U8], at: Int}, right: {count: Int, key: [U8], at: Int}) { count_then_key(left.count, left.key, right.count, right.key) })
     out := [Repeat]{}
     loop item in kept {
         sorted := repeats[item.at].containers.copy()
@@ -2934,8 +2934,8 @@ file_digest: fn(path: String) -[FS]> String LedgerError! {
 
 walk_fixture_input: fn(root: String, current: String, found: &[String]) -[FS]> Int LedgerError! {
     listed: files.list_dir(current) ?? return Err(fail("cannot list {current}: {err}"))
-    keyed := loop entry in listed -> (name: entry.name.copy(), is_dir: entry.is_dir)
-    keyed.sort_by(fn(left: (name: String, is_dir: Bool), right: (name: String, is_dir: Bool)) { compare_bytes(left.name.bytes(), right.name.bytes()) })
+    keyed := loop entry in listed -> {name: entry.name.copy(), is_dir: entry.is_dir}
+    keyed.sort_by(fn(left: {name: String, is_dir: Bool}, right: {name: String, is_dir: Bool}) { compare_bytes(left.name.bytes(), right.name.bytes()) })
     loop entry in keyed {
         child: "{current}/{entry.name}"
         if entry.is_dir {
@@ -4400,11 +4400,11 @@ validate_core_api_syntax_coverage: fn(root: String) -[FS]> Int LedgerError! {
         return Err(fail("hover fixture teaches a retired arrow or misses `-[IO]>`"))
     }
     loop pair in
-        ([(path: String, name: String)]{
-        (path: "Tests/UI/variadic_not_last.stderr", name: "jet.MisplacedVariadicParameter"),
-        (path: "Tests/UI/spread_bad_call.stderr", name: "jet.SpreadWithoutVariadic"),
-        (path: "Tests/UI/yield_type_mismatch.stderr", name: "jet.YieldTypeMismatch"),
-        (path: "Tests/UI/user_policy_bad_args.stderr", name: "jet.MissingArgument"),
+        ([{path: String, name: String}]{
+        {path: "Tests/UI/variadic_not_last.stderr", name: "jet.MisplacedVariadicParameter"},
+        {path: "Tests/UI/spread_bad_call.stderr", name: "jet.SpreadWithoutVariadic"},
+        {path: "Tests/UI/yield_type_mismatch.stderr", name: "jet.YieldTypeMismatch"},
+        {path: "Tests/UI/user_policy_bad_args.stderr", name: "jet.MissingArgument"},
     }) {
         diagnostics: read_source(root, pair.path) ?? return Err(err)
         complete := false
@@ -4952,10 +4952,10 @@ validate_ledger: fn(root: String, built: Built) -[FS]> Int LedgerError! {
 }
 
 without_generated_on: fn(ledger: Dyn) -> Dyn Never! {
-    kept := [(key: String, value: Dyn)]{}
+    kept := [{key: String, value: Dyn}]{}
     loop entry in entries(ledger) {
         if entry.key != "generatedOn" {
-            kept.push((key: entry.key.copy(), value: entry.value.copy()))
+            kept.push({key: entry.key.copy(), value: entry.value.copy()})
         }
     }
     Dyn.Object(kept)
@@ -5112,19 +5112,19 @@ edited: fn(value: Dyn, path: [String], kind: String, new_value: Dyn) -> Dyn Neve
         out[at] = edited(out[at], rest, kind, new_value)
         return Dyn.Array(out)
     }
-    kept := [(key: String, value: Dyn)]{}
+    kept := [{key: String, value: Dyn}]{}
     found := false
     loop entry in entries(value) {
         if entry.key != step {
-            kept.push((key: entry.key.copy(), value: entry.value.copy()))
+            kept.push({key: entry.key.copy(), value: entry.value.copy()})
             next
         }
         found = true
         if rest.len() == 0 && kind == "remove" -> next
-        kept.push((key: entry.key.copy(), value: edited(entry.value, rest, kind, new_value)))
+        kept.push({key: entry.key.copy(), value: edited(entry.value, rest, kind, new_value)})
     }
     if !found && rest.len() == 0 && kind == "set" {
-        kept.push((key: step.copy(), value: new_value.copy()))
+        kept.push({key: step.copy(), value: new_value.copy()})
     }
     Dyn.Object(kept)
 }
@@ -5160,10 +5160,10 @@ holds: fn(name: String, outcome: Int LedgerError!) -> String LedgerError! {
 collection_verbs_stay_in_containers: fn() -> Int LedgerError! {
     names: synonyms()
     loop pair in
-        ([(operation: String, container: String)]{
-        (operation: "truncate", container: "core.math"),
-        (operation: "add", container: "core.time"),
-        (operation: "reset", container: "core.time"),
+        ([{operation: String, container: String}]{
+        {operation: "truncate", container: "core.math"},
+        {operation: "add", container: "core.time"},
+        {operation: "reset", container: "core.time"},
     }) {
         key: canonical_key(names, pair.operation, pair.container)
         if key != normalize(pair.operation) {
@@ -5265,16 +5265,16 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     workflow_path: [String]{"coreApiGate", "workflowManifest", "0"}
     measured := edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "input", "fixtureStatus"}, "set", jtext("accepted"))
     loop change in
-        ([(name: String, value: Dyn)]{
-        (name: "status", value: jtext("measured")),
-        (name: "rawSourceCounts", value: counts),
-        (name: "mandatoryConceptIds", value: Dyn.Array([Dyn]{})),
-        (name: "hiddenFacts", value: Dyn.Array([Dyn]{})),
-        (name: "nonlocalLookups", value: Dyn.Array([Dyn]{})),
-        (name: "extraConstructs", value: Dyn.Array([Dyn]{})),
-        (name: "reasoningBurden", value: burden),
-        (name: "independentFixtureReview", value: Dyn.object()),
-        (name: "jetWin", value: Dyn.object()),
+        ([{name: String, value: Dyn}]{
+        {name: "status", value: jtext("measured")},
+        {name: "rawSourceCounts", value: counts},
+        {name: "mandatoryConceptIds", value: Dyn.Array([Dyn]{})},
+        {name: "hiddenFacts", value: Dyn.Array([Dyn]{})},
+        {name: "nonlocalLookups", value: Dyn.Array([Dyn]{})},
+        {name: "extraConstructs", value: Dyn.Array([Dyn]{})},
+        {name: "reasoningBurden", value: burden},
+        {name: "independentFixtureReview", value: Dyn.object()},
+        {name: "jetWin", value: Dyn.object()},
     }) {
         path := workflow_path.copy()
         path.push("evidence")
@@ -5610,14 +5610,14 @@ run: fn() { print(ledger_main(process.args()) ?? process.fail(1, err.message)) }
     doc: parse_json("{{\"a\": {{\"b\": [1, 2]}}, \"c\": \"x\"}}", "doc") ?? panic("the fixture document did not parse: {err.message}")
     three: parse_json("3", "three") ?? panic("the fixture number did not parse: {err.message}")
     loop step in
-        ([(path: [String], kind: String, value: Dyn, want: String)]{
-        (path: [String]{"c"}, kind: "set", value: jtext("y"), want: "{{\"a\": {{\"b\": [1, 2]}}, \"c\": \"y\"}}"),
-        (path: [String]{"d"}, kind: "set", value: jtext("z"), want: "{{\"a\": {{\"b\": [1, 2]}}, \"c\": \"x\", \"d\": \"z\"}}"),
-        (path: [String]{"c"}, kind: "remove", value: Dyn.Null, want: "{{\"a\": {{\"b\": [1, 2]}}}}"),
-        (path: [String]{"a", "b"}, kind: "pop", value: Dyn.Null, want: "{{\"a\": {{\"b\": [1]}}, \"c\": \"x\"}}"),
-        (path: [String]{"a", "b"}, kind: "push", value: three.copy(), want: "{{\"a\": {{\"b\": [1, 2, 3]}}, \"c\": \"x\"}}"),
-        (path: [String]{"a", "b", "0"}, kind: "set", value: three.copy(), want: "{{\"a\": {{\"b\": [3, 2]}}, \"c\": \"x\"}}"),
-        (path: [String]{}, kind: "set", value: three.copy(), want: "3"),
+        ([{path: [String], kind: String, value: Dyn, want: String}]{
+        {path: [String]{"c"}, kind: "set", value: jtext("y"), want: "{{\"a\": {{\"b\": [1, 2]}}, \"c\": \"y\"}}"},
+        {path: [String]{"d"}, kind: "set", value: jtext("z"), want: "{{\"a\": {{\"b\": [1, 2]}}, \"c\": \"x\", \"d\": \"z\"}}"},
+        {path: [String]{"c"}, kind: "remove", value: Dyn.Null, want: "{{\"a\": {{\"b\": [1, 2]}}}}"},
+        {path: [String]{"a", "b"}, kind: "pop", value: Dyn.Null, want: "{{\"a\": {{\"b\": [1]}}, \"c\": \"x\"}}"},
+        {path: [String]{"a", "b"}, kind: "push", value: three.copy(), want: "{{\"a\": {{\"b\": [1, 2, 3]}}, \"c\": \"x\"}}"},
+        {path: [String]{"a", "b", "0"}, kind: "set", value: three.copy(), want: "{{\"a\": {{\"b\": [3, 2]}}, \"c\": \"x\"}}"},
+        {path: [String]{}, kind: "set", value: three.copy(), want: "3"},
     }) {
         expected: parse_json(step.want, "want") ?? panic("the expected document did not parse: {err.message}")
         assert(same(edited(doc, step.path, step.kind, step.value), expected))

@@ -11,13 +11,13 @@ package: {
 use core.encoding.json
 
 run: fn() {
-    built: Dyn.Object([(key: "z", value: Dyn.Text("last")), (key: "a", value: Dyn.Text("first"))])
+    built: Dyn.Object([{key: "z", value: Dyn.Text("last")}, {key: "a", value: Dyn.Text("first")}])
     print("built: {json.to_string(built) ?? panic("json")}")
     parsed: json.parse("{{\"z\":\"last\",\"a\":\"first\"}}") ?? panic("parse")
     print("parsed: {json.to_string(parsed) ?? panic("json")}")
     print("parsed == built: {parsed == built}")
 
-    flipped: Dyn.Object([(key: "a", value: Dyn.Text("first")), (key: "z", value: Dyn.Text("last"))])
+    flipped: Dyn.Object([{key: "a", value: Dyn.Text("first")}, {key: "z", value: Dyn.Text("last")}])
     print("built == flipped: {built == flipped}")
     print("equal_unordered: {built.equal_unordered(flipped)}")
 

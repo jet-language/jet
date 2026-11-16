@@ -1065,7 +1065,7 @@ jet_cli_stdin_source_at: fn(argv: [String]) -> Int? Never! {
 // project (the file form, jet_cli_eval) or is a `:meta` word. `--json` and
 // `--pure`, before or after CODE (`jet eval "1 + 2" --json`), keep the
 // expression form (JetCLIPlan.EvalExpression).
-jet_cli_eval_code_at: fn(argv: [String]) -[FS]> (verb: Int, code: Int)? Never! {
+jet_cli_eval_code_at: fn(argv: [String]) -[FS]> {verb: Int, code: Int}? Never! {
     loop argument in argv {
         if argument == "--" -> break
         if argument == "--json" || argument == "--pure" -> return None
@@ -1084,7 +1084,7 @@ jet_cli_eval_code_at: fn(argv: [String]) -[FS]> (verb: Int, code: Int)? Never! {
         }
         if verb == .Val(at) {
             if argument.starts_with(":") || jet_cli_looks_like_source(argument) -> return None
-            return Val((verb: at, code: index))
+            return Val({verb: at, code: index})
         }
         if argument != "eval" -> return None
         verb = Val(index)

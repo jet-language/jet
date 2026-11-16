@@ -278,17 +278,17 @@ ssl_tls13_get_configured_psk_count: fn(ssl: ssldefs.SSLContext) -> Int Never! {
 }
 
 // The ticket's PSK and digest (ssl_tls13_ticket_get_psk).
-ssl_tls13_ticket_get_psk: fn(ssl: ssldefs.SSLContext) -> (md: hashes.Md?, psk: [U8])? Never! {
+ssl_tls13_ticket_get_psk: fn(ssl: ssldefs.SSLContext) -> {md: hashes.Md?, psk: [U8]}? Never! {
     if !ssl_tls13_has_configured_ticket(ssl) -> return None
     sn: ssl.session_negotiate
-    Val((md: ssl_tls13_get_ciphersuite_hash_alg(ssl.spool[sn].ciphersuite), psk: ssl.spool[sn].resumption_key))
+    Val({md: ssl_tls13_get_ciphersuite_hash_alg(ssl.spool[sn].ciphersuite), psk: ssl.spool[sn].resumption_key})
 }
 
 // The external PSK, always SHA-256's (ssl_tls13_psk_get_psk).
-ssl_tls13_psk_get_psk: fn(ssl: ssldefs.SSLContext) -> (md: hashes.Md?, psk: [U8])? Never! {
+ssl_tls13_psk_get_psk: fn(ssl: ssldefs.SSLContext) -> {md: hashes.Md?, psk: [U8]}? Never! {
     if !ssltls.ssl_conf_has_static_psk(ssl.conf) -> return None
     psk: ssl.conf.psk ?? return None
-    Val((md: Val(hashes.Md.SHA256), psk: psk))
+    Val({md: Val(hashes.Md.SHA256), psk: psk})
 }
 
 // PSA_HASH_LENGTH: 0 for no digest.
@@ -330,10 +330,10 @@ ssl_tls13_write_binder: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, psk_typ
 /// 4.2.11). A ticket's age is obfuscated with its ticket_age_add; the
 /// ticket lifetime, which ssl_prepare_client_hello checked the age
 /// against, is at most 7 days, so the age fits 32 bits.
-ssl_tls13_write_identities_of_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> (len: Int, binders_len: Int) ssldefs.SSLError! {
+ssl_tls13_write_identities_of_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> {len: Int, binders_len: Int} ssldefs.SSLError! {
     p := buf
     l_binders_len := 0
-    if ssl_tls13_get_configured_psk_count(ssl) == 0 -> return Ok((len: 0, binders_len: 0))
+    if ssl_tls13_get_configured_psk_count(ssl) == 0 -> return Ok({len: 0, binders_len: 0})
     // extension_type, extension_data_len and identities_len.
     ssltls.ssl_chk_buf(p, end, 6) ?? return Err(err)
     p += 6
@@ -358,7 +358,7 @@ ssl_tls13_write_identities_of_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, b
     ssldefs.ssl_put_u16(ssl.out_buf, buf, ssldefs.TLS_EXT_PRE_SHARED_KEY)
     ssldefs.ssl_put_u16(ssl.out_buf, buf + 2, p - buf - 4 + l_binders_len)
     ssldefs.ssl_put_u16(ssl.out_buf, buf + 4, p - buf - 6)
-    Ok((len: p - buf + l_binders_len, binders_len: l_binders_len))
+    Ok({len: p - buf + l_binders_len, binders_len: l_binders_len})
 }
 
 /// The pre_shared_key extension's binders at out_buf[buf..<end], over the
@@ -389,7 +389,7 @@ ssl_tls13_write_binders_of_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, buf:
 // when it is the first and we offered one, else the external PSK's
 // (ssl_tls13_parse_server_pre_shared_key_ext's choice). None when we have
 // neither.
-ssl_tls13_selected_psk: fn(ssl: ssldefs.SSLContext, selected_identity: Int) -> (md: hashes.Md?, psk: [U8])? Never! {
+ssl_tls13_selected_psk: fn(ssl: ssldefs.SSLContext, selected_identity: Int) -> {md: hashes.Md?, psk: [U8]}? Never! {
     if selected_identity == 0 && ssl_tls13_has_configured_ticket(ssl) {
         return ssl_tls13_ticket_get_psk(ssl)
     }
@@ -901,7 +901,7 @@ ssl_tls13_parse_new_session_ticket_exts: fn(ssl: &ssldefs.SSLContext, buf: Int, 
 // lifetime of at most 7 days, the age obfuscator and the ticket, whose
 // flags are cleared; the offset and length of its nonce
 // (ssl_tls13_parse_new_session_ticket).
-ssl_tls13_parse_new_session_ticket: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> (nonce: Int, nonce_len: Int) ssldefs.SSLError! {
+ssl_tls13_parse_new_session_ticket: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> {nonce: Int, nonce_len: Int} ssldefs.SSLError! {
     p := buf
     s: ssl.session
     // ticket_lifetime, ticket_age_add and the ticket_nonce length.
@@ -928,7 +928,7 @@ ssl_tls13_parse_new_session_ticket: fn(ssl: &ssldefs.SSLContext, buf: Int, end: 
     p += 2
     ssltls.ssl_chk_buf_read(ssl, p, end, extensions_len) ?? return Err(err)
     ssl_tls13_parse_new_session_ticket_exts(ssl, p, p + extensions_len) ?? return Err(err)
-    Ok((nonce: ticket_nonce, nonce_len: ticket_nonce_len))
+    Ok({nonce: ticket_nonce, nonce_len: ticket_nonce_len})
 }
 
 // Complete a received ticket: its reception time, its resumption key

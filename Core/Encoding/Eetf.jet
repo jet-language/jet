@@ -57,7 +57,7 @@ Atom: struct {
     /// alone turns into an atom; other codecs see that object.
     impl Encode {
         encode: fn(self) -> Dyn {
-            stream.object_from_entries([(key: String, value: Dyn)]{(key: ATOM_KEY, value: Dyn.Text(self.name.copy()))})
+            stream.object_from_entries([{key: String, value: Dyn}]{{key: ATOM_KEY, value: Dyn.Text(self.name.copy())}})
         }
     }
 
@@ -426,7 +426,7 @@ TermReader: struct {
             self.need(4, path) ?? return Err(err)
             count: self.take_u32()
             self.arity(count, 2, path) ?? return Err(err)
-            entries := [(key: String, value: Dyn)]{}
+            entries := [{key: String, value: Dyn}]{}
             loop i in 0..<count {
                 key: self.key("{path}[key {i}]") ?? return Err(err)
                 loop entry in entries {
@@ -435,7 +435,7 @@ TermReader: struct {
                     }
                 }
                 value: self.term("{path}[{key:Debug}]", depth + 1) ?? return Err(err)
-                entries.push((key: key, value: value))
+                entries.push({key: key, value: value})
             }
             return Ok(stream.object_from_entries(entries))
         }
@@ -468,7 +468,7 @@ TermReader: struct {
     // A proplist: `count` `{Key, Value}` 2-tuples, read as an object.
     pairs: fn(&self, count: Int, path: String, depth: Int) -> Dyn EncodingError! {
         self.arity(count, 4, path) ?? return Err(err)
-        entries := [(key: String, value: Dyn)]{}
+        entries := [{key: String, value: Dyn}]{}
         loop i in 0..<count {
             self.need(2, path) ?? return Err(err)
             tuple: self.byte()
@@ -483,7 +483,7 @@ TermReader: struct {
                 }
             }
             value: self.term("{path}[{key:Debug}]", depth + 1) ?? return Err(err)
-            entries.push((key: key, value: value))
+            entries.push({key: key, value: value})
         }
         Ok(stream.object_from_entries(entries))
     }
@@ -787,5 +787,5 @@ append_scalar: fn(out: &[U8], scalar: Int) Never! {
     atom_key: [U8]{131, 116, 0, 0, 0, 1, 119, 5, 99, 111, 117, 110, 116, 97, 2}
     assert_eq(to_json(binary_key) ?? panic("binary-key ETF converts"), "{{\"count\":2}}")
     assert_eq(to_json(atom_key) ?? panic("atom-key ETF converts"), "{{\"count\":2}}")
-    assert_eq(encode(stream.object_from_entries([(key: String, value: Dyn)]{(key: "count", value: Dyn.Int(2))})) ?? panic("object encodes"), atom_key)
+    assert_eq(encode(stream.object_from_entries([{key: String, value: Dyn}]{{key: "count", value: Dyn.Int(2)}})) ?? panic("object encodes"), atom_key)
 }

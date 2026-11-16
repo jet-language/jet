@@ -772,9 +772,9 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
 // entries' `at` are distinct): the first row of a key in `at` order. The
 // entries are sorted by (key, at), so the map fills in ascending key order
 // and every insert appends (a map put in row order shifts every later key).
-ir_first_rows: fn(entries: &&[(key: String, at: Int, row: Int)]) -> [String:Int] Never! {
+ir_first_rows: fn(entries: &&[{key: String, at: Int, row: Int}]) -> [String:Int] Never! {
     order := entries.move()
-    order.sort_by(fn(left: (key: String, at: Int, row: Int), right: (key: String, at: Int, row: Int)) { (left.key <=> right.key).then(left.at <=> right.at) })
+    order.sort_by(fn(left: {key: String, at: Int, row: Int}, right: {key: String, at: Int, row: Int}) { (left.key <=> right.key).then(left.at <=> right.at) })
     rows := [String:Int]{}
     loop (index, entry) in order {
         if index == 0 || order[index - 1].key != entry.key -> rows[entry.key] = entry.row
@@ -825,9 +825,9 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     // literals spell it bare, so it claims its name ahead of the Prelude's.
     builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}::"
     families: ir_unit_family_rows(types)
-    type_keys := [(key: String, at: Int, row: Int)]{}
+    type_keys := [{key: String, at: Int, row: Int}]{}
     loop (index, definition) in types {
-        type_keys.push((key: definition.key.copy(), at: index, row: index))
+        type_keys.push({key: definition.key.copy(), at: index, row: index})
     }
     loop (index, definition) in types {
         tier: if {
@@ -836,7 +836,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
             ir_unit_minted_row(definition, types, families) -> 2
             else -> 4
         }
-        type_keys.push((key: definition.name.copy(), at: tier * types.len() + index, row: index))
+        type_keys.push({key: definition.name.copy(), at: tier * types.len() + index, row: index})
     }
     type_rows: ir_first_rows(type_keys)
     impls: impl_defs.move()
@@ -856,11 +856,11 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
             defs.push(TConstantDef{module_identity: implementation.module_identity, key: ir_trait_constant_key(ir_short_name(trait_name), owner, constant.name), name: "{owner}.{constant.name}", span: constant.span, visibility: TVisibility.Public, ty: constant.ty.copy(), is_comptime: true, is_storage: false, value: constant.value.copy()})
         }
     }
-    constant_keys := [(key: String, at: Int, row: Int)]{}
+    constant_keys := [{key: String, at: Int, row: Int}]{}
     loop (index, definition) in defs {
-        constant_keys.push((key: definition.key.copy(), at: 2 * index, row: 2 * index))
+        constant_keys.push({key: definition.key.copy(), at: 2 * index, row: 2 * index})
         if definition.symbol_key != "" {
-            constant_keys.push((key: definition.symbol_key.copy(), at: 2 * index + 1, row: 2 * index + 1))
+            constant_keys.push({key: definition.symbol_key.copy(), at: 2 * index + 1, row: 2 * index + 1})
         }
     }
     constant_rows: ir_first_rows(constant_keys)
@@ -876,14 +876,14 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     impl_slots := [String:Int]{}
     impl_traits := [[String]]{}
     impl_methods := [IRImplMethod]{}
-    implementers := [(identity: String, first: Int)]{}
+    implementers := [{identity: String, first: Int}]{}
     empty_impls := [IREmptyImpl]{}
     loop implementation in impls.move() {
         trait_name: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
         if trait_name == "" -> next
         identity := ir_type_identity(type_rows, types, implementation.self_type)
         first: ir_trait_key_hash(identity, 0)
-        implementers.push((identity: identity.move(), first: first))
+        implementers.push({identity: identity.move(), first: first})
         if implementation.target_os == .Val(os) {
             if os != .Linux -> next
         }

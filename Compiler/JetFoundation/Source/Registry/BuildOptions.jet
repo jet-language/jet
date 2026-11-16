@@ -528,7 +528,7 @@ build_option_accepts: fn(row: BuildOptionRow, value: String) -> Bool Never! {
 // written so, or that comes to less than one millisecond, has none.
 build_option_duration_ms: fn(value: String) -> Int? Never! {
     // Longer suffixes first, so `ms` is not read as `s`.
-    units: [(suffix: String, ns: Int)]{(suffix: "ns", ns: 1), (suffix: "us", ns: 1000), (suffix: "ms", ns: 1000000), (suffix: "min", ns: 60000000000), (suffix: "s", ns: 1000000000), (suffix: "h", ns: 3600000000000)}
+    units: [{suffix: String, ns: Int}]{{suffix: "ns", ns: 1}, {suffix: "us", ns: 1000}, {suffix: "ms", ns: 1000000}, {suffix: "min", ns: 60000000000}, {suffix: "s", ns: 1000000000}, {suffix: "h", ns: 3600000000000}}
     loop unit in units {
         if !value.ends_with(unit.suffix) -> next
         digits: value.removesuffix(unit.suffix).replace("_", "")

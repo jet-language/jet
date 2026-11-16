@@ -2863,7 +2863,7 @@ render_point_svg: fn(labels: [String], values: [Float]) -> String Never! {
     "{out}</svg>"
 }
 
-value_bounds: fn(values: [Float]) -> (min: Float, max: Float) Never! {
+value_bounds: fn(values: [Float]) -> {min: Float, max: Float} Never! {
     minimum := Float{0.0}
     maximum := Float{0.0}
     loop value in values {
@@ -2874,7 +2874,7 @@ value_bounds: fn(values: [Float]) -> (min: Float, max: Float) Never! {
         minimum -= (Float{1.0})
         maximum += (Float{1.0})
     }
-    (min: minimum, max: maximum)
+    {min: minimum, max: maximum}
 }
 
 scale_between: fn(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int Never! {
@@ -3171,7 +3171,7 @@ data_loader_render: fn(out: &[U8], tree: encoding.Dyn) Never! {
         .Object(_) -> {
             // Sort the owned entries directly; the comparator captures no tree.
             entries := encoding_stream.object_entries(tree)
-            entries.sort_by(fn(left: (key: String, value: Dyn), right: (key: String, value: Dyn)) { left.key <=> right.key })
+            entries.sort_by(fn(left: {key: String, value: Dyn}, right: {key: String, value: Dyn}) { left.key <=> right.key })
             out.push(U8{123})
             loop (position, entry) in entries {
                 if position != 0 -> out.push(U8{44})
@@ -3305,15 +3305,15 @@ __read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS.Read]> [U8] Err
 // last-good bytes. A local file loader's bytes are bound by
 // `core.files.data.read`; every other source needs its provider to bind the
 // payload.
-data_loader_payload: fn<T>(loader: DataLoader<T>) -> (data: [U8], offline: Bool) DataError! {
+data_loader_payload: fn<T>(loader: DataLoader<T>) -> {data: [U8], offline: Bool} DataError! {
     if loader.payload == .Val(bound) {
         data_loader_check_payload(loader.limits, bound.len(), "data.loader") ?? return Err(err)
-        return Ok((data: bound.copy(), offline: loader.offline))
+        return Ok({data: bound.copy(), offline: loader.offline})
     }
     if loader.offline || loader.source.kind == DataLoaderKind.Value {
         if loader.last_good == .Val(good) {
             data_loader_check_payload(loader.limits, good.len(), "data.loader.offline") ?? return Err(err)
-            return Ok((data: good.copy(), offline: loader.offline))
+            return Ok({data: good.copy(), offline: loader.offline})
         }
     }
     local_file: loader.source.kind == DataLoaderKind.File && loader.source.member.len() == 0
@@ -3419,9 +3419,9 @@ data_loader_csv_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
         if fields.len() != header.len() {
             return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "CSV row has {fields.len()} fields; header has {header.len()}"))
         }
-        entries := [(key: String, value: Dyn)]{}
+        entries := [{key: String, value: Dyn}]{}
         loop column in 0..<header.len() {
-            entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
+            entries.push({key: header[column].copy(), value: Dyn.Text(fields[column].copy())})
         }
         values.push(encoding_stream.object_from_entries(entries))
     }
@@ -3450,7 +3450,7 @@ data_loader_jsonl_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
 // nullable; Int and Float share `float`, other conflicts widen to `Any`.
 // The identity is the length-delimited format and column facts.
 data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
-    fields := [(name: String, type_name: String, nullable: Bool)]{}
+    fields := [{name: String, type_name: String, nullable: Bool}]{}
     if tree == {
         .Object(_) -> {
             loop entry in encoding_stream.object_entries(tree) {
@@ -3471,7 +3471,7 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
                             if entry.key == fields[index].name -> present = true
                         }
                         if !present {
-                            fields[index] = (name: fields[index].name.copy(), type_name: fields[index].type_name.copy(), nullable: true)
+                            fields[index] = {name: fields[index].name.copy(), type_name: fields[index].type_name.copy(), nullable: true}
                         }
                     }
                 } else { data_schema_absorb(fields, "$", value, rows_seen > 0 || value == .Null) }
@@ -3482,7 +3482,7 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
             data_schema_absorb(fields, "$", tree, tree == .Null)
         }
     }
-    fields.sort_by(fn(left: (name: String, type_name: String, nullable: Bool), right: (name: String, type_name: String, nullable: Bool)) { left.name <=> right.name })
+    fields.sort_by(fn(left: {name: String, type_name: String, nullable: Bool}, right: {name: String, type_name: String, nullable: Bool}) { left.name <=> right.name })
     format_name: data_format_text(format)
     identity := data_loader_identity_part("", format_name)
     columns := [DataColumn]{}
@@ -3497,29 +3497,29 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
     DataSchema{identity: identity, format: format, columns: columns, projection: None}
 }
 
-data_schema_absorb: fn(fields: &[(name: String, type_name: String, nullable: Bool)], name: String, value: Dyn, nullable: Bool) Never! {
+data_schema_absorb: fn(fields: &[{name: String, type_name: String, nullable: Bool}], name: String, value: Dyn, nullable: Bool) Never! {
     current: data_schema_value_type(value)
     loop index in 0..<fields.len() {
         if fields[index].name == name {
             merged: data_schema_merge(fields[index].type_name, current)
-            fields[index] = (name: name.copy(), type_name: merged.type_name, nullable: fields[index].nullable || nullable || merged.nullable)
+            fields[index] = {name: name.copy(), type_name: merged.type_name, nullable: fields[index].nullable || nullable || merged.nullable}
             return
         }
     }
-    fields.push((name: name.copy(), type_name: current, nullable: nullable || current == "null"))
+    fields.push({name: name.copy(), type_name: current, nullable: nullable || current == "null"})
 }
 
-data_schema_merge: fn(left: String, right: String) -> (type_name: String, nullable: Bool) Never! {
+data_schema_merge: fn(left: String, right: String) -> {type_name: String, nullable: Bool} Never! {
     if left == right {
         known: left == "null" || left == "bool" || left == "int" || left == "float" || left == "text" || left == "bytes" || left == "array" || left == "object"
-        return (type_name: if known -> left.copy() else -> "Any", nullable: left == "null")
+        return {type_name: if known -> left.copy() else -> "Any", nullable: left == "null"}
     }
-    if left == "null" -> return (type_name: right.copy(), nullable: true)
-    if right == "null" -> return (type_name: left.copy(), nullable: true)
+    if left == "null" -> return {type_name: right.copy(), nullable: true}
+    if right == "null" -> return {type_name: left.copy(), nullable: true}
     if (left == "int" && right == "float") || (left == "float" && right == "int") {
-        return (type_name: "float", nullable: false)
+        return {type_name: "float", nullable: false}
     }
-    (type_name: "Any", nullable: false)
+    {type_name: "Any", nullable: false}
 }
 
 data_schema_value_type: fn(value: Dyn) -> String Never! {

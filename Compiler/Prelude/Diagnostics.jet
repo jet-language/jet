@@ -22841,6 +22841,60 @@ MissingAsset: struct {
     }
 }
 
+BrowserCodeReachesServerResource: struct {
+    function: String
+    resource: String
+
+    impl Diagnostic {
+        code: "E2823"
+        safety_class: .Soundness
+        safety_reason: "Code in the page that reaches a database or a secret would need the server's resource where only the page runs, so the call could never be made."
+        expert_path: "none: moving the server work behind an endpoint that the page calls through `app.Remote` keeps it on the server"
+        stage: [.Compile]
+        meaning: "A function the web partition places in JS, so in the page, that reaches a server resource (`DB` or `Secret`)"
+        detail: true
+
+        what: fn(self) -> String {
+            "`{self.function}` runs in the page, but it reaches `{self.resource}`, which only the server has."
+        }
+
+        why: fn(self) -> String {
+            "Code in JS (pinned `#Target(JS)`, using the `Browser` effect, or called from code that is) runs in the page, and a database or a secret stays on the server, so the page can never reach it; it is reported where the page first reaches it."
+        }
+
+        fix: fn(self) -> String {
+            "Move the `{self.resource}` work into a method of a service marked `#App.SignedIn` or `#App.Public` and call it through `app.Remote`, or keep `{self.function}` out of the page."
+        }
+    }
+}
+
+ServerCodeUsesBrowser: struct {
+    method: String
+    marker: String
+
+    impl Diagnostic {
+        code: "E2824"
+        safety_class: .Soundness
+        safety_reason: "A method the server runs that uses the `Browser` effect would call the page's DOM, storage or events where no page exists, so the call could never be made."
+        expert_path: "none: doing the `Browser` work in the page keeps it where the page is"
+        stage: [.Compile]
+        meaning: "A method the server runs (an endpoint, a job, a schedule, a webhook or its signing key) that uses the `Browser` effect"
+        detail: true
+
+        what: fn(self) -> String {
+            "`{self.method}` runs on the server, as `{self.marker}` marks it, but it uses the `Browser` effect, which only the page has."
+        }
+
+        why: fn(self) -> String {
+            "An endpoint, a job, a schedule, a webhook and a signing key run their bodies on the server, and the `Browser` effect (the page's DOM, its local and session storage and its events) exists only in the page, so the server can never make the call."
+        }
+
+        fix: fn(self) -> String {
+            "Do the `Browser` work in the page, in a screen or a `#Target(JS)` function, and keep `{self.method}` to work the server can do."
+        }
+    }
+}
+
 AppFeatureNotOnTarget: struct {
     feature: String
     required: String

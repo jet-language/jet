@@ -421,7 +421,7 @@ history_step: fn(c: Ctx, step: String) -> String Failure! {
     fresh_text: text(at(fresh, "source_text"))
     restored: !is_null(fresh) && !is_null(ui) && fresh_text != before && js(at(ui, "source_id")) == js(at(fresh, "source_id")) && js(at(ui, "revision")) == js(at(fresh, "revision")) && text(at(ui, "source_text")) == fresh_text
     if !restored {
-        facts: js(obj([(key: "freshSource", value: at(fresh, "source_id")), (key: "freshRevision", value: at(fresh, "revision")), (key: "uiSource", value: at(ui, "source_id")), (key: "uiRevision", value: at(ui, "revision"))]))
+        facts: js(obj([{key: "freshSource", value: at(fresh, "source_id")}, {key: "freshRevision", value: at(fresh, "revision")}, {key: "uiSource", value: at(ui, "source_id")}, {key: "uiRevision", value: at(ui, "revision")}]))
         return Err(fail_with("{step} UI did not reach restored revision/source: {facts}"))
     }
     Ok(fresh_text)
@@ -429,7 +429,7 @@ history_step: fn(c: Ctx, step: String) -> String Failure! {
 
 replace_source: fn(c: Ctx, value: String) -> Dyn Failure! {
     current: graph(c)
-    result: transaction(c, obj([(key: "schema_version", value: Dyn.Int(1)), (key: "op", value: Dyn.Text("replace_source")), (key: "revision", value: at(current, "revision")), (key: "source", value: Dyn.Text(value.copy()))]))
+    result: transaction(c, obj([{key: "schema_version", value: Dyn.Int(1)}, {key: "op", value: Dyn.Text("replace_source")}, {key: "revision", value: at(current, "revision")}, {key: "source", value: Dyn.Text(value.copy())}]))
     if !truthy(at(result, "ok")) {
         reply: js(at(result, "json"))
         return Err(fail_with("replace_source failed: {reply}"))

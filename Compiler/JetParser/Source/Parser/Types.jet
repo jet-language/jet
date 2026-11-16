@@ -459,19 +459,8 @@ parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
     }
     fields := [TypeTupleField]{}
     loop {
-        kind: parser_current_kind(state)
-        if {
-            kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON -> {
-                name: parser_expect_name(state, "for a tuple member name")
-                parser_bump(state)
-                ty: parser_parse_type(state, depth + 1)
-                fields.push(TypeTupleField{name: parser_value(state, name), ty: ty.ty})
-            }
-            else -> {
-                ty: parser_parse_type(state, depth + 1)
-                fields.push(TypeTupleField{name: "", ty: ty.ty})
-            }
-        }
+        ty: parser_parse_type(state, depth + 1)
+        fields.push(TypeTupleField{name: "", ty: ty.ty})
         if parser_current_kind(state) == TOKEN_RPAREN -> break
         if parser_current_kind(state) != TOKEN_COMMA {
             token: parser_current(state)

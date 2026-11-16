@@ -98,22 +98,22 @@ LeaseRequest: struct {
 
     // The canonical frame, with or without the authentication tag.
     encode_fields: fn(self, include_mac: Bool) -> String IOError! {
-        fields: [(name: String, value: String)]{
-            (name: "op", value: self.operation.as_str()),
-            (name: "key", value: self.key_id),
-            (name: "request", value: self.request_id),
-            (name: "lease", value: self.lease_id),
-            (name: "generation", value: "{self.generation}"),
-            (name: "pid", value: "{self.owner_pid}"),
-            (name: "owner", value: store_lease_encode_text(self.owner_scope)),
-            (name: "package", value: store_lease_encode_text(self.package)),
-            (name: "version", value: store_lease_encode_text(self.version)),
-            (name: "reference", value: store_lease_encode_text(self.reference)),
-            (name: "output", value: store_lease_encode_text(self.output_digest)),
-            (name: "previous", value: store_lease_encode_text(self.previous_output_digest)),
-            (name: "snapshot", value: store_lease_encode_text(self.snapshot_rel)),
-            (name: "members", value: store_lease_encode_members(self.members)),
-            (name: "nonce", value: self.nonce),
+        fields: [{name: String, value: String}]{
+            {name: "op", value: self.operation.as_str()},
+            {name: "key", value: self.key_id},
+            {name: "request", value: self.request_id},
+            {name: "lease", value: self.lease_id},
+            {name: "generation", value: "{self.generation}"},
+            {name: "pid", value: "{self.owner_pid}"},
+            {name: "owner", value: store_lease_encode_text(self.owner_scope)},
+            {name: "package", value: store_lease_encode_text(self.package)},
+            {name: "version", value: store_lease_encode_text(self.version)},
+            {name: "reference", value: store_lease_encode_text(self.reference)},
+            {name: "output", value: store_lease_encode_text(self.output_digest)},
+            {name: "previous", value: store_lease_encode_text(self.previous_output_digest)},
+            {name: "snapshot", value: store_lease_encode_text(self.snapshot_rel)},
+            {name: "members", value: store_lease_encode_members(self.members)},
+            {name: "nonce", value: self.nonce},
         }
         out := [String]{"{LEASE_PROTOCOL_HEADER}\n"}
         loop field in fields -> out.push("{field.name}={field.value}\n")
@@ -150,17 +150,17 @@ store_lease_request_canonical: fn(request: LeaseRequest, include_mac: Bool) -> [
 }
 
 store_lease_receipt_canonical: fn(receipt: LeaseReceipt, include_mac: Bool) -> String IOError! {
-    fields: [(name: String, value: String)]{
-        (name: "lease", value: receipt.lease_id),
-        (name: "generation", value: "{receipt.generation}"),
-        (name: "pid", value: "{receipt.owner_pid}"),
-        (name: "owner", value: store_lease_encode_text(receipt.owner_scope)),
-        (name: "package", value: store_lease_encode_text(receipt.package)),
-        (name: "version", value: store_lease_encode_text(receipt.version)),
-        (name: "reference", value: store_lease_encode_text(receipt.reference)),
-        (name: "output", value: store_lease_encode_text(receipt.output_digest)),
-        (name: "snapshot", value: store_lease_encode_text(receipt.snapshot_rel)),
-        (name: "members", value: store_lease_encode_members(receipt.members)),
+    fields: [{name: String, value: String}]{
+        {name: "lease", value: receipt.lease_id},
+        {name: "generation", value: "{receipt.generation}"},
+        {name: "pid", value: "{receipt.owner_pid}"},
+        {name: "owner", value: store_lease_encode_text(receipt.owner_scope)},
+        {name: "package", value: store_lease_encode_text(receipt.package)},
+        {name: "version", value: store_lease_encode_text(receipt.version)},
+        {name: "reference", value: store_lease_encode_text(receipt.reference)},
+        {name: "output", value: store_lease_encode_text(receipt.output_digest)},
+        {name: "snapshot", value: store_lease_encode_text(receipt.snapshot_rel)},
+        {name: "members", value: store_lease_encode_members(receipt.members)},
     }
     out := [String]{"{LEASE_RECEIPT_HEADER}\n"}
     loop field in fields -> out.push("{field.name}={field.value}\n")

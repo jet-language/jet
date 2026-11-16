@@ -658,18 +658,18 @@ ir_static_map_order: fn(m: &IRModule, p: IRProgram, shape: IRMapShape, entries: 
     // makes the last of a run the later duplicate. A key beyond 64 bits (an
     // Int's, or a uword's at 2^63 and above) is a BigInt decimal, ordered by
     // its exact value, so uword keys keep their unsigned order.
-    words := [(key: Int, at: Int)]{}
-    texts := [(key: String, at: Int)]{}
+    words := [{key: Int, at: Int}]{}
+    texts := [{key: String, at: Int}]{}
     loop (index, entry) in entries {
         if entry.key == {
-            .Int(value) | .Char(value) -> words.push((key: value, at: index))
+            .Int(value) | .Char(value) -> words.push({key: value, at: index})
             .BigInt(decimal) -> {
                 if kind != "int" && kind != "uword" -> return None
-                words.push((key: Int.parse(decimal) ?? return None, at: index))
+                words.push({key: Int.parse(decimal) ?? return None, at: index})
             }
-            .Bool(flag) -> words.push((key: if flag -> 1 else -> 0, at: index))
-            .String(text) -> texts.push((key: text, at: index))
-            .Enum(_, variant) -> words.push((key: ir_static_variant_word(m, p, shape.key.ty, variant) ?? return None, at: index))
+            .Bool(flag) -> words.push({key: if flag -> 1 else -> 0, at: index})
+            .String(text) -> texts.push({key: text, at: index})
+            .Enum(_, variant) -> words.push({key: ir_static_variant_word(m, p, shape.key.ty, variant) ?? return None, at: index})
             .Tuple(_) | .Struct(_, _) -> return None
         }
     }
@@ -701,13 +701,13 @@ ir_static_map_order: fn(m: &IRModule, p: IRProgram, shape: IRMapShape, entries: 
 // a key holds a member this does not order.
 ir_static_compound_order: fn(m: &IRModule, p: IRProgram, key_row: Int, entries: [TComptimeMapEntry]) -> [Int]? Never! {
     if ir_static_own_order(m, p, key_row) -> return Val(loop index in 0..<entries.len() -> index)
-    keys := [(key: [(n: Int, s: String)], at: Int)]{}
+    keys := [{key: [{n: Int, s: String}], at: Int}]{}
     loop (index, entry) in entries {
-        atoms := [(n: Int, s: String)]{}
+        atoms := [{n: Int, s: String}]{}
         if !ir_static_key_atoms(m, p, key_row, entry.key, atoms) -> return None
-        keys.push((key: atoms, at: index))
+        keys.push({key: atoms, at: index})
     }
-    keys.sort_by(fn(left: (key: [(n: Int, s: String)], at: Int), right: (key: [(n: Int, s: String)], at: Int)) { (left.key <=> right.key).then(left.at <=> right.at) })
+    keys.sort_by(fn(left: {key: [{n: Int, s: String}], at: Int}, right: {key: [{n: Int, s: String}], at: Int}) { (left.key <=> right.key).then(left.at <=> right.at) })
     kept := [Int]{}
     loop (index, pair) in keys {
         if index + 1 < keys.len() && keys[index + 1].key == pair.key -> next
@@ -754,33 +754,33 @@ ir_static_own_members: fn(m: &IRModule, p: IRProgram, members: [IRMember]) -> Bo
 // payload-free enum by its variant's index, a tuple or struct member by
 // member. false for a key it does not order (a struct with a written
 // Comparable impl).
-ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey, atoms: &[(n: Int, s: String)]) -> Bool Never! {
+ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey, atoms: &[{n: Int, s: String}]) -> Bool Never! {
     kind: m.types[row].kind
     if key == {
         .Int(value) | .Char(value) -> {
             if kind != .Int && kind != .Char && (kind != .Word || ir_option_inline(m, row)) {
                 return false
             }
-            atoms.push((n: value, s: ""))
+            atoms.push({n: value, s: ""})
             true
         }
         .BigInt(decimal) -> {
             if kind != .Int && kind != .Word -> return false
-            atoms.push((n: Int.parse(decimal) ?? return false, s: ""))
+            atoms.push({n: Int.parse(decimal) ?? return false, s: ""})
             true
         }
         .Bool(flag) -> {
             if kind != .Bool -> return false
-            atoms.push((n: if flag -> 1 else -> 0, s: ""))
+            atoms.push({n: if flag -> 1 else -> 0, s: ""})
             true
         }
         .String(text) -> {
             if kind != .String -> return false
-            atoms.push((n: 0, s: text))
+            atoms.push({n: 0, s: text})
             true
         }
         .Enum(_, variant) -> {
-            atoms.push((n: ir_static_variant_word(m, p, row, variant) ?? return false, s: ""))
+            atoms.push({n: ir_static_variant_word(m, p, row, variant) ?? return false, s: ""})
             true
         }
         .Tuple(fields) -> {
@@ -831,7 +831,7 @@ ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey,
 // Appends the atoms (ir_static_key_atoms) of key field `name` of `fields`,
 // typed as the member of `members` with that name. false when either is
 // missing.
-ir_static_member_atoms: fn(m: &IRModule, p: IRProgram, members: [IRMember], name: String, fields: [TComptimeKeyField], atoms: &[(n: Int, s: String)]) -> Bool Never! {
+ir_static_member_atoms: fn(m: &IRModule, p: IRProgram, members: [IRMember], name: String, fields: [TComptimeKeyField], atoms: &[{n: Int, s: String}]) -> Bool Never! {
     loop member in members {
         if member.name != name -> next
         loop field in fields {

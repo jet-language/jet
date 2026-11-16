@@ -182,7 +182,7 @@ le_number: fn(bytes: [U8], at: Int, count: Int) -> Int Never! {
 // has owner "Jet" and type PART_NOTE and whose descriptor is the part's name,
 // NUL-padded to eight bytes, then its bytes (Compiler/JetBackend ELF.jet
 // x64_executable_add_parts).
-image_part: fn(image: [U8], name: String) -> (at: Int, size: Int)? Never! {
+image_part: fn(image: [U8], name: String) -> {at: Int, size: Int}? Never! {
     if image.len() < 64 -> return None
     phoff: le_number(image, 32, 8)
     phnum: le_number(image, 56, 2)
@@ -204,7 +204,7 @@ image_part: fn(image: [U8], name: String) -> (at: Int, size: Int)? Never! {
         loop index in 0..<label.len() {
             if image[from + 16 + index] != label[index] -> named = false
         }
-        if named -> return Val((at: from + 16 + descriptor, size: length - descriptor))
+        if named -> return Val({at: from + 16 + descriptor, size: length - descriptor})
     }
     None
 }

@@ -154,7 +154,7 @@ run: fn(args: LiveArgs) Failure! {
 // The page opens with a breakpoint at `hit`'s generated position and must
 // pause where `mappings` maps the same Jet line as `hit`; the paused position,
 // 0-based, and whether the page's script named its map.
-pause_in: fn(session: Browser, origin: String, prefix: String, mappings: [Mapping], hit: Mapping) -> (line: Int, column: Int, named: Bool) Failure! {
+pause_in: fn(session: Browser, origin: String, prefix: String, mappings: [Mapping], hit: Mapping) -> {line: Int, column: Int, named: Bool} Failure! {
     timeout: browser.timeout(C_PAUSE_MS) ?? return Err(Failure{message: "the pause timeout is refused: {err}"})
     context: session.context() ?? return Err(Failure{message: "Chromium opened no browsing context: {err}"})
     page: context.page() ?? return Err(Failure{message: "Chromium opened no page: {err}"})
@@ -186,7 +186,7 @@ pause_in: fn(session: Browser, origin: String, prefix: String, mappings: [Mappin
         }
         found: at ?? return Err(Failure{message: "the page paused at app.js:{line + 1}:{column}, where app.js.map maps nothing"})
         check(found.source == hit.source && found.original_line == hit.original_line, "the page paused at app.js:{line + 1}:{column}, which app.js.map maps to Jet line {found.original_line + 1}, not {hit.original_line + 1}")
-        return Ok((line: line, column: column, named: named))
+        return Ok({line: line, column: column, named: named})
     }
 }
 

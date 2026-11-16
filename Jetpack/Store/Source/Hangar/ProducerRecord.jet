@@ -110,12 +110,12 @@ ProducerRecord: struct {
     }
 
     validate: fn(self) StoreError! {
-        named: [(name: String, value: String)]{
-            (name: "provider", value: self.provider),
-            (name: "immutable_source", value: self.immutable_source),
-            (name: "source_digest", value: self.source_digest),
-            (name: "toolchain_facts", value: self.toolchain_facts),
-            (name: "policy_facts", value: self.policy_facts),
+        named: [{name: String, value: String}]{
+            {name: "provider", value: self.provider},
+            {name: "immutable_source", value: self.immutable_source},
+            {name: "source_digest", value: self.source_digest},
+            {name: "toolchain_facts", value: self.toolchain_facts},
+            {name: "policy_facts", value: self.policy_facts},
         }
         loop field in named {
             if field.value.trim() == "" {
@@ -261,11 +261,11 @@ store_validate_build_hook_producer: fn(producer: ProducerRecord, plan: AdapterPl
     }
     if {
         !executes -> {
-            checks: [(name: String, expected: String, actual: String?)]{
-                (name: "build.sandbox", expected: "non-executing", actual: recorded_sandbox),
-                (name: "adapter.build.sandbox", expected: "non-executing", actual: planned_sandbox),
-                (name: "build.sandbox_policy", expected: "no child launched", actual: producer_policy),
-                (name: "adapter.build.sandbox_policy", expected: "no child launched", actual: plan_policy),
+            checks: [{name: String, expected: String, actual: String?}]{
+                {name: "build.sandbox", expected: "non-executing", actual: recorded_sandbox},
+                {name: "adapter.build.sandbox", expected: "non-executing", actual: planned_sandbox},
+                {name: "build.sandbox_policy", expected: "no child launched", actual: producer_policy},
+                {name: "adapter.build.sandbox_policy", expected: "no child launched", actual: plan_policy},
             }
             loop check in checks {
                 expected_value: check.expected
@@ -378,10 +378,10 @@ store_bind_adapter_hook_identity: fn(realized: &Realized, plan: AdapterPlan, tab
     if expected != expectation.identity {
         return Err(StoreError.InvalidData("adapter cache expectation is not derived from the exact build-hook subject"))
     }
-    checks: [(name: String, expected: String, actual: String)]{
-        (name: "source-fingerprint", expected: expectation.identity.source_fingerprint, actual: realized.cache_identity.source_fingerprint),
-        (name: "policy-fingerprint", expected: expectation.identity.policy_fingerprint, actual: realized.cache_identity.policy_fingerprint),
-        (name: "platform", expected: expectation.identity.platform, actual: realized.cache_identity.platform),
+    checks: [{name: String, expected: String, actual: String}]{
+        {name: "source-fingerprint", expected: expectation.identity.source_fingerprint, actual: realized.cache_identity.source_fingerprint},
+        {name: "policy-fingerprint", expected: expectation.identity.policy_fingerprint, actual: realized.cache_identity.policy_fingerprint},
+        {name: "platform", expected: expectation.identity.platform, actual: realized.cache_identity.platform},
     }
     loop check in checks {
         if check.expected != check.actual {

@@ -513,12 +513,12 @@ jet_cli_budget_result_rank: fn(row: JetCLIBudgetResult) -> Int Never! {
 }
 
 // The code, message and fix of a result that did not pass.
-jet_cli_budget_diagnostic: fn(row: JetCLIBudgetResult) -> (code: String, message: String, fix: String) Never! {
+jet_cli_budget_diagnostic: fn(row: JetCLIBudgetResult) -> {code: String, message: String, fix: String} Never! {
     if row.evidence == PerfEvidence.Unavailable {
-        return (code: "E2906", message: "performance budget {row.name} has no usable evidence", fix: "correct the provider evidence or bootstrap only when absent or stale evidence is eligible")
+        return {code: "E2906", message: "performance budget {row.name} has no usable evidence", fix: "correct the provider evidence or bootstrap only when absent or stale evidence is eligible"}
     }
     verdict: if row.evidence == PerfEvidence.Inconclusive -> "is inconclusive" else -> "regressed"
-    (code: "E2907", message: "performance budget {row.name} {verdict}", fix: "improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception")
+    {code: "E2907", message: "performance budget {row.name} {verdict}", fix: "improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception"}
 }
 
 // One result row of the `budget` status.

@@ -802,7 +802,7 @@ table_column_to_storage: fn(db: conn.Conn, t: Int, i_col: Int) -> Int Never! {
 
 // sqlite3AffinityType: the affinity of declared type `z`, and the
 // column-size estimate C stores in Column.szEst.
-affinity_type: fn(z: [U8]) -> (aff: Int, sz_est: Int) Never! {
+affinity_type: fn(z: [U8]) -> {aff: Int, sz_est: Int} Never! {
     h := 0
     aff := base.AFF_NUMERIC
     z_char := -1
@@ -847,7 +847,7 @@ affinity_type: fn(z: [U8]) -> (aff: Int, sz_est: Int) Never! {
     }
     v = v /% 4 + 1
     if v > 255 -> v = 255
-    (aff: aff, sz_est: v)
+    {aff: aff, sz_est: v}
 }
 
 // sqlite3KeyInfoAlloc: n key fields and x more, every collation unset.

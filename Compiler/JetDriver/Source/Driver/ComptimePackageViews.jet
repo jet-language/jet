@@ -274,8 +274,8 @@ jet_driver_package_read_profiles: fn(root: String) -[FS, Env, Exec, Time.Wait]> 
 jet_driver_package_profile_view: fn(profile: PackageProfileSpec) -> ProfileView Never! {
     keys := profile.collisions.keys().to_list()
     keys.sort()
-    collisions := [(key: String, value: String)]{}
-    loop key in keys -> collisions.push((key: key, value: profile.collisions[key]))
+    collisions := [{key: String, value: String}]{}
+    loop key in keys -> collisions.push({key: key, value: profile.collisions[key]})
     ProfileView.from_parts(profile.name, profile.extends, profile.packages, collisions, profile.sources)
 }
 

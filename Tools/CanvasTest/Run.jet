@@ -419,8 +419,8 @@ edit_transactions: fn(canvas_url: String, entry: String, original: String) Failu
 // A schema 1 Canvas edit request for `op` at `revision`, with `source` when
 // given.
 edit_request: fn(op: String, revision: String, source: String?) -> String {
-    fields := [(key: String, value: Dyn)]{(key: "schema_version", value: Dyn.Int(1)), (key: "op", value: Dyn.Text(op.copy())), (key: "revision", value: Dyn.Text(revision.copy())), (key: "client_id", value: Dyn.Text("native-edit"))}
-    if source == .Val(text) -> fields.push((key: "source", value: Dyn.Text(text.copy())))
+    fields := [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "op", value: Dyn.Text(op.copy())}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "client_id", value: Dyn.Text("native-edit")}}
+    if source == .Val(text) -> fields.push({key: "source", value: Dyn.Text(text.copy())})
     js(obj(fields))
 }
 

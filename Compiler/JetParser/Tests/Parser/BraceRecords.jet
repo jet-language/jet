@@ -1,8 +1,9 @@
-// A record type is written in braces, `{min: Int, max: Int}`, wherever a
-// type goes; the paren form `(min: Int, max: Int)` still parses. After a
-// function's arrow, a `{…}` is the record result when a body, a contract or
-// another result part follows it, or when each member's type starts as a
-// type does; otherwise it stays the body.
+// A record is written in braces, `{min: Int, max: Int}` as a type and
+// `{min: 1, max: 9}` as a value, wherever a type or value goes; the paren
+// form `(min: Int, max: Int)` is not Jet. After a function's arrow, a `{…}`
+// is the record result when a body, a contract or another result part
+// follows it, or when each member's type starts as a type does; otherwise it
+// stays the body.
 use jet_foundation.[Func]
 
 brace_records_result_names: fn(function: Func) -> String {
@@ -97,16 +98,21 @@ run: fn() {
     } else { panic("the record on its own line ends the body as a value") }
 }
 
-#Test("the_formatter_keeps_brace_and_paren_record_types") {
-    formatted: parser_test_stable("a: fn() -> {{x: Int, y: Int}} {{ {{x: 1, y: 2}} }}\nb: fn() -> (x: Int, y: Int) {{ (x: 1, y: 2) }}\n")
+#Test("the_formatter_writes_records_in_braces") {
+    formatted: parser_test_stable("a: fn() -> {{x: Int, y: Int}} {{ {{x: 1, y: 2}} }}\nb: fn(pair: (Int, String)) -> (Int, String) {{ pair }}\n")
     assert(formatted.contains("a: fn() -> {{x: Int, y: Int}} {{"), formatted)
-    assert(formatted.contains("b: fn() -> (x: Int, y: Int) {{"), formatted)
+    assert(formatted.contains("b: fn(pair: (Int, String)) -> (Int, String) {{"), formatted)
 }
 
-#Test("the_formatter_keeps_brace_and_paren_destructures") {
-    formatted: parser_test_stable("run: fn() {{\n    {{min, max}}: bounds()\n    (lo, hi): bounds()\n    print(min + max + lo + hi)\n}}\n")
+#Test("the_formatter_writes_destructures_in_braces") {
+    formatted: parser_test_stable("run: fn() {{\n    {{min, max}}: bounds()\n    print(min + max)\n}}\n")
     assert(formatted.contains("{{min, max}}: bounds()"), formatted)
-    assert(formatted.contains("(lo, hi): bounds()"), formatted)
+}
+
+#Test("a_paren_record_is_not_jet") {
+    assert(parser_test_errors("f: fn() {{ p: (x: 1, y: 2) }}\n").len() > 0, "a paren record value")
+    assert(parser_test_errors("f: fn(p: (x: Int, y: Int)) {{}}\n").len() > 0, "a paren record type")
+    assert(parser_test_errors("f: fn() {{\n    (lo, hi): bounds()\n}}\n").len() > 0, "a paren destructure")
 }
 
 #Test("an_empty_record_type_is_refused") {

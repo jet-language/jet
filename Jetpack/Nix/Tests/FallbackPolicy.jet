@@ -20,7 +20,7 @@ use {
 }
 
 #Test("nix ci and non interactive modes need the explicit allow policy") {
-    cases: [(ci: Bool, interactive: Bool)]{(ci: true, interactive: true), (ci: true, interactive: false), (ci: false, interactive: false)}
+    cases: [{ci: Bool, interactive: Bool}]{{ci: true, interactive: true}, {ci: true, interactive: false}, {ci: false, interactive: false}}
     loop case in cases {
         receipt: nix_fallback_decide(false, case.ci, case.interactive, "")
         assert(!receipt.allowed)
@@ -62,7 +62,7 @@ use {
 
 #Test("nix explicit refusal is not overridden by interactive mode") {
     policies: [String]{"deny", "yes"}
-    cases: [(ci: Bool, interactive: Bool)]{(ci: false, interactive: true), (ci: false, interactive: false), (ci: true, interactive: true)}
+    cases: [{ci: Bool, interactive: Bool}]{{ci: false, interactive: true}, {ci: false, interactive: false}, {ci: true, interactive: true}}
     loop policy in policies {
         loop case in cases {
             receipt: nix_fallback_decide(false, case.ci, case.interactive, policy)

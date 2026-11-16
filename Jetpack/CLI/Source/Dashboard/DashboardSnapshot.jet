@@ -96,7 +96,7 @@ DashboardKeyReader: struct {
     priv keys: Receiver<DashboardKey>?
 
     terminal: fn() -[IO, Time.Wait]> DashboardKeyReader Never! {
-        (sender, receiver): channel<DashboardKey>(capacity: 16)
+        {sender, receiver}: channel<DashboardKey>(capacity: 16)
         task cli_dashboard_forward_keys(sender)
         DashboardKeyReader{script: None, position: 0, keys: Val(receiver)}
     }
@@ -201,7 +201,7 @@ DashboardLoader: struct {
     priv held: Sender<DashboardLoadResult>?
 
     spawn: fn(verification: &StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
-        (sender, receiver): channel<DashboardLoadResult>(capacity: 1)
+        {sender, receiver}: channel<DashboardLoadResult>(capacity: 1)
         // A borrowed owner cannot cross into the detached task; a copy of the
         // owner shares its locked verification ledger.
         ledger: verification.copy()
@@ -211,14 +211,14 @@ DashboardLoader: struct {
 
     // A load that has already finished with `result`.
     completed: fn(result: DashboardLoadResult) -> DashboardLoader Never! {
-        (sender, receiver): channel<DashboardLoadResult>(capacity: 1)
+        {sender, receiver}: channel<DashboardLoadResult>(capacity: 1)
         cli_dashboard_send_result(sender, result.copy()).drop("the loader holds the receiver")
         DashboardLoader{result: receiver, held: None}
     }
 
     // A load that never finishes.
     stalled: fn() -> DashboardLoader Never! {
-        (sender, receiver): channel<DashboardLoadResult>(capacity: 1)
+        {sender, receiver}: channel<DashboardLoadResult>(capacity: 1)
         DashboardLoader{result: receiver, held: Val(sender)}
     }
 

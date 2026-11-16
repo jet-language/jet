@@ -49,7 +49,7 @@ bytes_text: fn(bytes: [U8], from: Int, to: Int) -> String Never! {
 
 // One input line split as `IFS=$'\t' read -r weight item` splits it: tabs
 // around and between the two fields are skipped, the item keeps inner tabs.
-split_row: fn(line: [U8]) -> (weight: String, item: String) Never! {
+split_row: fn(line: [U8]) -> {weight: String, item: String} Never! {
     tab: U8{9}
     start := 0
     loop start < line.len() && line[start] == tab -> start += 1
@@ -59,7 +59,7 @@ split_row: fn(line: [U8]) -> (weight: String, item: String) Never! {
     loop at < line.len() && line[at] == tab -> at += 1
     end := line.len()
     loop end > at && line[end - 1] == tab -> end -= 1
-    (weight: weight, item: bytes_text(line, at, end))
+    {weight: weight, item: bytes_text(line, at, end)}
 }
 
 parse_rows: fn(input: String) -> [WeightedRow] ShardError! {
@@ -121,7 +121,7 @@ assign: fn(rows: [WeightedRow], shard_index: Int, shard_count: Int, index_text: 
     ShardPlan{selected: selected, summary: summary}
 }
 
-shard_counts: fn(args: [String]) -> (index: Int, count: Int) ShardError! {
+shard_counts: fn(args: [String]) -> {index: Int, count: Int} ShardError! {
     if args.len() != 2 {
         return Err(ShardError{message: "usage: WeightedShards.jet SHARD_INDEX SHARD_COUNT", code: 64})
     }
@@ -141,7 +141,7 @@ shard_counts: fn(args: [String]) -> (index: Int, count: Int) ShardError! {
     if shard_index >= shard_count {
         return Err(ShardError{message: "error: SHARD_INDEX ({index_text}) must be < SHARD_COUNT ({count_text})", code: 64})
     }
-    Ok((index: shard_index, count: shard_count))
+    Ok({index: shard_index, count: shard_count})
 }
 
 fail: fn(error: ShardError) { process.fail(error.code, error.message) }

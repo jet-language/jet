@@ -872,7 +872,7 @@ priv db_live_wrote: fn(driver: &DBDriver, table: String, rows: [String]?) Never!
     reads: app.live_reads.narrowed(source)
     if reads.len() == 0 -> return app.live_reads.invalidate(source, [String]{})
     // Each changed row as a one-row table of its field columns.
-    selects := [(sql: String, values: [DBValue])]{}
+    selects := [{sql: String, values: [DBValue]}]{}
     loop row in changed {
         tree: json.parse(row) ?? Dyn.Null
         columns := [String]{}
@@ -882,7 +882,7 @@ priv db_live_wrote: fn(driver: &DBDriver, table: String, rows: [String]?) Never!
             values.push(field.value.copy())
         }
         from: if columns.len() == 0 -> "" else -> " FROM (SELECT {columns.join(", ")})"
-        selects.push((sql: "SELECT 1 AS held{from}", values: values))
+        selects.push({sql: "SELECT 1 AS held{from}", values: values})
     }
     held := [String]{}
     loop read in reads {
@@ -1152,12 +1152,12 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         table: self.again()
         deferred: data.__query_narrowed<T>("table", fn(condition: String, values: [String]) {
             stored_rows: table_rows<K, T>(table, condition, table_bound(values), Val(values.copy())) ?? return Err(table_data_error(err))
-            keyed := [(key: K, row: T)]{}
+            keyed := [{key: K, row: T}]{}
             loop stored in stored_rows {
                 row: table_decode<T>(stored) ?? return Err(table_data_error(err))
-                keyed.push((key: table.key_of(row.copy()), row: row))
+                keyed.push({key: table.key_of(row.copy()), row: row})
             }
-            keyed.sort_by(fn(left: (key: K, row: T), right: (key: K, row: T)) { left.key <=> right.key })
+            keyed.sort_by(fn(left: {key: K, row: T}, right: {key: K, row: T}) { left.key <=> right.key })
             out := [T]{}
             loop entry in keyed {
                 allowed: table_judge<K, T>(table, entry.row.copy(), Op.Read, who) ?? return Err(table_data_error(err))
@@ -1224,7 +1224,7 @@ priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table:
     every: "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\""
     if filter.len() == 0 -> return table_read(guard.value.driver, table.name, every, values, None)
     if narrowed == .Val(bound) {
-        read: (condition: filter.copy(), values: bound.copy())
+        read: {condition: filter.copy(), values: bound.copy()}
         if table_read(guard.value.driver, table.name, "{every} WHERE {filter}", values.copy(), Val(read)) == .Ok(rows) {
             return Ok(rows)
         }
@@ -1236,7 +1236,7 @@ priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table:
 }
 
 // The stored row under the key `cells`, read without the row policy.
-priv table_stored: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, cells: [(column: String, value: DBValue)]) -[DB.Read]> T? DBError! {
+priv table_stored: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, cells: [{column: String, value: DBValue}]) -[DB.Read]> T? DBError! {
     rows: table_rows<K, T>(table, table_match(cells), table_values(cells), None) ?? return Err(err)
     if rows.len() == 0 -> return Ok(None)
     row: table_decode<T>(rows[0]) ?? return Err(err)
@@ -1367,14 +1367,14 @@ priv table_blob_read: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(t
 // The stored row's field columns, which a filter written as SQL compares
 // (`__query_filter`): one per top-level scalar field of its encoding, named
 // `jet_row.<field>`. A row that is not a record has none.
-priv table_fields: fn(row: Dyn) -> [(column: String, value: DBValue)] Never! {
-    cells := [(column: String, value: DBValue)]{}
+priv table_fields: fn(row: Dyn) -> [{column: String, value: DBValue}] Never! {
+    cells := [{column: String, value: DBValue}]{}
     if !(row == .Object(_)) -> return cells
     loop entry in stream.object_entries(row) {
         if !sql_identifier(entry.key.bytes()) -> next
         if entry.value == {
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Text(_) -> {
-                cells.push((column: "{TABLE_ROW_COLUMN}.{entry.key}", value: table_value(entry.value)))
+                cells.push({column: "{TABLE_ROW_COLUMN}.{entry.key}", value: table_value(entry.value)})
             }
             .Bytes(_) | .Number(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
         }
@@ -1386,14 +1386,14 @@ priv table_fields: fn(row: Dyn) -> [(column: String, value: DBValue)] Never! {
 // the first row written to it, as it was created; one created before it kept
 // field columns has none, and a condition over a column it lacks reads the
 // whole table (`table_rows`).
-priv table_columns: fn(driver: &DBDriver, name: String, fields: [(column: String, value: DBValue)]) -> [(column: String, value: DBValue)] DBError! {
+priv table_columns: fn(driver: &DBDriver, name: String, fields: [{column: String, value: DBValue}]) -> [{column: String, value: DBValue}] DBError! {
     known: __driver_query(driver, "PRAGMA table_info(\"{name}\")", [DBValue]{}) ?? return Err(err)
     names := [String]{}
     loop column in known -> names.push(row_text(column, "name") ?? "")
-    kept := [(column: String, value: DBValue)]{}
+    kept := [{column: String, value: DBValue}]{}
     loop field in fields {
         if names.contains(field.column) {
-            kept.push((column: field.column.copy(), value: field.value.copy()))
+            kept.push({column: field.column.copy(), value: field.value.copy()})
         }
     }
     Ok(kept)
@@ -1401,18 +1401,18 @@ priv table_columns: fn(driver: &DBDriver, name: String, fields: [(column: String
 
 // The key columns and values of an encoded key: one per field of a record
 // key, else the one column `key`.
-priv table_cells: fn(name: String, key: Dyn) -> [(column: String, value: DBValue)] DBError! {
+priv table_cells: fn(name: String, key: Dyn) -> [{column: String, value: DBValue}] DBError! {
     if !sql_identifier(name.bytes()) -> return Err(table_name_error(name))
-    cells := [(column: String, value: DBValue)]{}
+    cells := [{column: String, value: DBValue}]{}
     if !(key == .Object(_)) {
-        cells.push((column: TABLE_KEY_COLUMN, value: table_value(key)))
+        cells.push({column: TABLE_KEY_COLUMN, value: table_value(key)})
         return Ok(cells)
     }
     loop entry in stream.object_entries(key) {
         if !sql_identifier(entry.key.bytes()) || entry.key == TABLE_ROW_COLUMN {
             return Err(db_error("table `{name}` cannot have the key column `{entry.key}`"))
         }
-        cells.push((column: entry.key.copy(), value: table_value(entry.value)))
+        cells.push({column: entry.key.copy(), value: table_value(entry.value)})
     }
     if cells.len() == 0 -> return Err(db_error("table `{name}` has a key with no fields"))
     Ok(cells)
@@ -1432,13 +1432,13 @@ priv table_value: fn(value: Dyn) -> DBValue Never! {
     }
 }
 
-priv table_match: fn(cells: [(column: String, value: DBValue)]) -> String Never! {
+priv table_match: fn(cells: [{column: String, value: DBValue}]) -> String Never! {
     terms := [String]{}
     loop cell in cells -> terms.push("\"{cell.column}\" = ?")
     terms.join(" AND ")
 }
 
-priv table_values: fn(cells: [(column: String, value: DBValue)]) -> [DBValue] Never! {
+priv table_values: fn(cells: [{column: String, value: DBValue}]) -> [DBValue] Never! {
     values := [DBValue]{}
     loop cell in cells -> values.push(cell.value.copy())
     values
@@ -1458,7 +1458,7 @@ priv table_exists: fn(driver: &DBDriver, name: String) -> Bool Never! {
 // first (app.live_reads), even before the table exists, so the write that
 // creates it re-runs the binding: as the whole table, or as the table
 // narrowed by the stored-row `condition` that selects what it reads.
-priv table_read: fn(driver: &DBDriver, name: String, sql: String, values: [DBValue], narrowed: (condition: String, values: [String])?) -> [[String:DBValue]] DBError! {
+priv table_read: fn(driver: &DBDriver, name: String, sql: String, values: [DBValue], narrowed: {condition: String, values: [String]}?) -> [[String:DBValue]] DBError! {
     if app.live_reads.running() {
         if narrowed == .Val(read) {
             app.live_reads.record_where(live_source(name), read.condition, read.values)
@@ -3345,8 +3345,8 @@ priv dyn_value: fn(value: DBValue) -> Dyn Never! {
 // Typed `decode<T>(row)`: sema supplies `names`, the column name and decode
 // key of each of T's fields whose column differs from its key; every other
 // column decodes under its own name.
-decode: fn<T: Decode>(row: [String:DBValue], names: [(db_name: String, key: String)]) -> T [FieldError]! {
-    entries := [(key: String, value: Dyn)]{}
+decode: fn<T: Decode>(row: [String:DBValue], names: [{db_name: String, key: String}]) -> T [FieldError]! {
+    entries := [{key: String, value: Dyn}]{}
     loop (column, value) in row {
         key := column.copy()
         loop rename in names {
@@ -3355,7 +3355,7 @@ decode: fn<T: Decode>(row: [String:DBValue], names: [(db_name: String, key: Stri
                 break
             }
         }
-        entries.push((key: key, value: dyn_value(value)))
+        entries.push({key: key, value: dyn_value(value)})
     }
     tree: stream.object_from_entries(entries)
     if tree.decode<T>() == {
@@ -3879,17 +3879,17 @@ priv driver_cache_parity_probe: fn() Never! {
         assert_eq(outside.text, text)
         assert_eq(outside.values.len(), 0)
     }
-    rejected: [(sql: String, message: String)]{
-        (sql: "SELECT title FROM other JOIN tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"),
-        (sql: "SELECT title FROM other WHERE owner IN (SELECT owner FROM tasks)", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"),
-        (sql: "SELECT 1 FROM main.tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"),
-        (sql: "SELECT 1 FROM tasks; DROP TABLE tasks", message: "policy-scoped SQL must be one statement without control characters"),
-        (sql: "SELECT * FROM tasks -- note", message: "policy-scoped SQL cannot contain comments"),
-        (sql: "CREATE TABLE tasks (x)", message: "schema and transaction-control SQL is only allowed in db.migrate or through the scope transaction controls"),
-        (sql: "SELECT * FROM tasks JOIN other", message: "policy-scoped SQL must name one simple target table without joins or subqueries"),
-        (sql: "UPDATE tasks SET owner = 'bob' WHERE id = 1", message: "owner policy does not allow changing the owner column"),
-        (sql: "VACUUM", message: "row policy supports SELECT, INSERT, UPDATE, and DELETE only"),
-        (sql: "SELECT * FROM __jet_migrations", message: "migration metadata is managed only by db.migrate"),
+    rejected: [{sql: String, message: String}]{
+        {sql: "SELECT title FROM other JOIN tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"},
+        {sql: "SELECT title FROM other WHERE owner IN (SELECT owner FROM tasks)", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"},
+        {sql: "SELECT 1 FROM main.tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"},
+        {sql: "SELECT 1 FROM tasks; DROP TABLE tasks", message: "policy-scoped SQL must be one statement without control characters"},
+        {sql: "SELECT * FROM tasks -- note", message: "policy-scoped SQL cannot contain comments"},
+        {sql: "CREATE TABLE tasks (x)", message: "schema and transaction-control SQL is only allowed in db.migrate or through the scope transaction controls"},
+        {sql: "SELECT * FROM tasks JOIN other", message: "policy-scoped SQL must name one simple target table without joins or subqueries"},
+        {sql: "UPDATE tasks SET owner = 'bob' WHERE id = 1", message: "owner policy does not allow changing the owner column"},
+        {sql: "VACUUM", message: "row policy supports SELECT, INSERT, UPDATE, and DELETE only"},
+        {sql: "SELECT * FROM __jet_migrations", message: "migration metadata is managed only by db.migrate"},
     }
     loop entry in rejected {
         if policy_apply(sql_raw(entry.sql), owned, "alice", false) == .Err(failure) {

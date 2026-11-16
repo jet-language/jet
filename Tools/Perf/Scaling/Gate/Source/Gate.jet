@@ -467,9 +467,9 @@ nlogn: fn(x: Float) -> Float Never! { x * math.log2(if x > TWO -> x else -> TWO)
 // Least-squares exponent of `values` against `sizes` (log-log), over the
 // points with a positive value.
 exponent: fn(sizes: [Int], values: [Float]) -> Float? Never! {
-    points := [(x: Float, y: Float)]{}
+    points := [{x: Float, y: Float}]{}
     loop i in 0..<sizes.len() {
-        if values[i] > ZERO -> points.push((x: math.ln(Float{sizes[i]}), y: math.ln(values[i])))
+        if values[i] > ZERO -> points.push({x: math.ln(Float{sizes[i]}), y: math.ln(values[i])})
     }
     if points.len() < 2 -> return None
     mx := Float{0.0}
@@ -501,9 +501,9 @@ unmeasured: fn(reason: String, bounds: Family, values: [Float?]) -> Growth Never
 // last "appears": work no smaller input does. Measured time or memory below
 // resolution on every earlier rung is noise, not appearance.
 growth: fn(sizes: [Int], values: [Float?], bounds: Family, exact: Bool) -> Growth Never! {
-    usable := [(x: Int, v: Float)]{}
+    usable := [{x: Int, v: Float}]{}
     loop i in 0..<sizes.len() {
-        if values[i] == .Val(v) -> usable.push((x: sizes[i], v: v))
+        if values[i] == .Val(v) -> usable.push({x: sizes[i], v: v})
     }
     if usable.len() < 2 -> return unmeasured("fewer than two rungs", bounds, values)
     top: usable[usable.len() - 1]
@@ -630,7 +630,7 @@ floor_failure: fn(phase: String, text: String) -> Failure Never! {
     Failure{kind: "floor", metric: None, phase: Val(phase), counter: None, ratio: None, exponent: None, text: text}
 }
 
-check_floors: fn(point: Point, limits: Limits) -> (rows: [FloorRow], failures: [Failure]) Never! {
+check_floors: fn(point: Point, limits: Limits) -> {rows: [FloorRow], failures: [Failure]} Never! {
     lines: Float{point.code_lines}
     total: lines / (point.metrics.get("wall_seconds") ?? Float{0.0})
     rows := [FloorRow]{FloorRow{phase: "end to end", lines_per_second: finite(total), floor: limits.total_lines_per_second, owners: None}}
@@ -649,7 +649,7 @@ check_floors: fn(point: Point, limits: Limits) -> (rows: [FloorRow], failures: [
             failures.push(floor_failure(rule.phase, "{rule.phase} ({rule.kinds.join("+")}) {whole(rate)} lines/s < floor {whole(rule.lines_per_second)} (root: {rule.owners.join(", ")})"))
         }
     }
-    (rows: rows, failures: failures)
+    {rows: rows, failures: failures}
 }
 
 // Every phase's wall at TARGET_LINES from the largest passing rung and the
@@ -687,7 +687,7 @@ parse_compiler: fn(spec: String) -> Compiler Err! {
 quote: fn(value: String) -> String Never! { "'{value.replace("'", "'\\''")}'" }
 
 // A command template with each `{name}` placeholder shell-quoted.
-expand: fn(template: String, values: [(key: String, value: String)]) -> String Err! {
+expand: fn(template: String, values: [{key: String, value: String}]) -> String Err! {
     pieces: template.split("{{").to_list()
     out := pieces[0].copy()
     loop piece in pieces.slice(1, pieces.len()) {
@@ -709,7 +709,7 @@ memory_bytes: fn(text: String) -> Int? Never! {
     scale := 1
     digits := text.copy()
     loop unit in
-        [(suffix: "K", factor: 1024), (suffix: "M", factor: 1048576), (suffix: "G", factor: 1073741824), (suffix: "T", factor: 1099511627776)] {
+        [{suffix: "K", factor: 1024}, {suffix: "M", factor: 1048576}, {suffix: "G", factor: 1073741824}, {suffix: "T", factor: 1099511627776}] {
         if text.ends_with(unit.suffix) {
             scale = unit.factor
             digits = text.removesuffix(unit.suffix)
@@ -739,7 +739,7 @@ prepare: fn(config: Config, compiler: Compiler, built: Corpus, n: Int, dir: Stri
     command: if compiler.kind == {
         "bootstrap" -> [String]{compiler.path ?? ""}
         "jet" -> [String]{compiler.path ?? "", config.jet_command, "--color=never", entry}
-        else -> [String]{"/bin/sh", "-c", expand(compiler.template ?? "", [(key: "project", value: project_dir), (key: "entry", value: entry), (key: "n", value: "{n}"), (key: "trace", value: trace), (key: "dir", value: build_dir)])}
+        else -> [String]{"/bin/sh", "-c", expand(compiler.template ?? "", [{key: "project", value: project_dir}, {key: "entry", value: entry}, {key: "n", value: "{n}"}, {key: "trace", value: trace}, {key: "dir", value: build_dir}])}
     }
     scoped: compiler.kind != "command"
     argv := [String]{"/bin/sh", "-c", REDIRECT, "redirect", files.join(dir, "stdout.log"), files.join(dir, "stderr.log")}
@@ -752,22 +752,22 @@ prepare: fn(config: Config, compiler: Compiler, built: Corpus, n: Int, dir: Stri
     }
     if compiler.kind == "bootstrap" {
         spec = spec.env_clear()
-        bootstrap: [(name: String, value: String)]{
-            (name: "HOME", value: env("HOME") ?? sys.home_dir() ?? ""),
-            (name: "PATH", value: process.env_get("PATH") ?? ""),
-            (name: "LC_ALL", value: "C"),
-            (name: "JET_BOOTSTRAP_MODE", value: "runner"),
-            (name: "JET_BOOTSTRAP_FACTORY_TIER", value: "aot"),
-            (name: "JET_BOOTSTRAP_SOURCE_ROOT", value: project_dir),
-            (name: "JET_BOOTSTRAP_ENTRY", value: "main.jet"),
-            (name: "JET_BOOTSTRAP_OUTPUT", value: files.join(build_dir, "out.rs")),
-            (name: "JET_BOOTSTRAP_RECEIPT", value: receipt),
-            (name: "RUST_MIN_STACK", value: "8388608"),
+        bootstrap: [{name: String, value: String}]{
+            {name: "HOME", value: env("HOME") ?? sys.home_dir() ?? ""},
+            {name: "PATH", value: process.env_get("PATH") ?? ""},
+            {name: "LC_ALL", value: "C"},
+            {name: "JET_BOOTSTRAP_MODE", value: "runner"},
+            {name: "JET_BOOTSTRAP_FACTORY_TIER", value: "aot"},
+            {name: "JET_BOOTSTRAP_SOURCE_ROOT", value: project_dir},
+            {name: "JET_BOOTSTRAP_ENTRY", value: "main.jet"},
+            {name: "JET_BOOTSTRAP_OUTPUT", value: files.join(build_dir, "out.rs")},
+            {name: "JET_BOOTSTRAP_RECEIPT", value: receipt},
+            {name: "RUST_MIN_STACK", value: "8388608"},
         }
         loop variable in bootstrap -> spec = spec.env(variable.name, variable.value)
     }
     loop variable in
-        [(name: "JET_STORE_DIR", value: store), (name: "JET_TRACE_FILE", value: trace), (name: "JET_PHASE_COUNTERS", value: "1"), (name: "TMPDIR", value: build_dir), (name: "NO_COLOR", value: "1")] {
+        [{name: "JET_STORE_DIR", value: store}, {name: "JET_TRACE_FILE", value: trace}, {name: "JET_PHASE_COUNTERS", value: "1"}, {name: "TMPDIR", value: build_dir}, {name: "NO_COLOR", value: "1"}] {
         spec = spec.env(variable.name, variable.value)
     }
     x: if built.kind == .Domain -> built.code_lines else -> n
@@ -796,7 +796,7 @@ phase_table: fn(path: String, spawn_unix_ms: Int) -> PhaseTable Never! {
     }
     offset_ns: if events.find(fn(event) { shown(event, "name") == "trace.start" }) == .Val(origin) -> (number(origin.get("args") ?? Dyn.Null, "unix_ms") - Float{spawn_unix_ms}) * Float{1000000.0} else -> Float{0.0}
     slots := [String:Int]{}
-    open := [(kind: String, starts: [Float])]{}
+    open := [{kind: String, starts: [Float]}]{}
     kinds := [String:Int]{}
     spans := [[Span]]{}
     first := Float?{None}
@@ -813,7 +813,7 @@ phase_table: fn(path: String, spawn_unix_ms: Int) -> PhaseTable Never! {
             if t < (first ?? math.INFINITY) -> first = Val(t)
             if !slots.has_key(key) {
                 slots[key] = open.len()
-                open.push((kind: kind.copy(), starts: [Float]{}))
+                open.push({kind: kind.copy(), starts: [Float]{}})
             }
             open[slots[key]].starts.push(t)
             next
@@ -862,7 +862,7 @@ report_code: fn(text: String) -> String Never! {
 
 // Diagnostics a compile reported: the bootstrap receipt's report rows, or
 // `Error [CODE]` lines of `jet`.
-outcome: fn(compiler: Compiler, rung: Rung, code: Int, text: String) -> (complete: Bool, errors: Int) Never! {
+outcome: fn(compiler: Compiler, rung: Rung, code: Int, text: String) -> {complete: Bool, errors: Int} Never! {
     errors := 0
     if compiler.kind == "bootstrap" {
         written: if files.exists(rung.receipt) -> files.read(rung.receipt) ?? "" else -> ""
@@ -873,12 +873,12 @@ outcome: fn(compiler: Compiler, rung: Rung, code: Int, text: String) -> (complet
                 errors += 1
             }
         }
-        return (complete: complete, errors: errors)
+        return {complete: complete, errors: errors}
     }
     loop line in text.split("\n") {
         if line.starts_with("Error [E") -> errors += 1
     }
-    (complete: code == 0, errors: errors)
+    {complete: code == 0, errors: errors}
 }
 
 // Wait for a started compile and read its point.
@@ -1007,10 +1007,10 @@ log: fn(config: Config, line: String) {
 }
 
 summary: fn(point: Point) -> String Never! {
-    phases := [(name: String, seconds: Float)]{}
+    phases := [{name: String, seconds: Float}]{}
     loop (key, value) in point.metrics {
         if key.starts_with("phase.") {
-            phases.push((name: key.removeprefix("phase."), seconds: value))
+            phases.push({name: key.removeprefix("phase."), seconds: value})
         }
     }
     phases.sort_by(fn(a, b) { b.seconds <=> a.seconds })

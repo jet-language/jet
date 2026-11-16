@@ -71,10 +71,10 @@ nixeval_replace_first: fn(text: String, needle: String, replacement: String) -> 
 nixeval_test_set_members: fn(value: Dyn, key: String, to: String) -> Dyn {
     if value == {
         .Object(pairs) -> {
-            out := [(key: String, value: Dyn)]{}
+            out := [{key: String, value: Dyn}]{}
             loop pair in pairs {
                 member: if pair.key == key -> Dyn.Text(to.copy()) else -> nixeval_test_set_members(pair.value, key, to)
-                out.push((key: pair.key.copy(), value: member))
+                out.push({key: pair.key.copy(), value: member})
             }
             Dyn.Object(out)
         }

@@ -2136,8 +2136,8 @@ sema_data_check_schema: fn(args: [CallArg], type_args: [Type], span: Span, expec
     SemaDirectSpecialCheck{handled: true, value: Val(result)}
 }
 
-sema_data_schema_columns: fn(row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [(name: String, type_name: String)] {
-    single: [(name: String, type_name: String)]{(name: "value", type_name: sema_data_schema_type_name(row))}
+sema_data_schema_columns: fn(row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [{name: String, type_name: String}] {
+    single: [{name: String, type_name: String}]{{name: "value", type_name: sema_data_schema_type_name(row)}}
     owner_name: if row == {
         .Named(name) | .Apply(name, _) -> name
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -2155,11 +2155,11 @@ sema_data_schema_columns: fn(row: Type, environment: SemaScopeEnvironment, progr
     owner_symbol: owner ?? return single
     definition: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return single
     names: loop parameter in definition.type_params -> parameter.name
-    columns := [(name: String, type_name: String)]{}
+    columns := [{name: String, type_name: String}]{}
     loop field in definition.fields {
         if field.computed != None -> next
         field_type: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_identity, field.ty, names), names, owner_args)
-        columns.push((name: field.name, type_name: sema_data_schema_type_name(field_type)))
+        columns.push({name: field.name, type_name: sema_data_schema_type_name(field_type)})
     }
     columns
 }

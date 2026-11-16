@@ -358,14 +358,14 @@ pack_one: fn(code: Int, little: Bool, value: Int) -> [U8] BinaryError! {
     pack_u64be(value)
 }
 
-unpack_one: fn(code: Int, little: Bool, data: [U8], offset: Int) -> (next: Int, value: Int) BinaryError! {
+unpack_one: fn(code: Int, little: Bool, data: [U8], offset: Int) -> {next: Int, value: Int} BinaryError! {
     if code == 99 || code == 66 {
         n: unpack_u8(data, offset) ?? return Err(BinaryError.Buffer)
-        return (value: n, next: offset + 1)
+        return {value: n, next: offset + 1}
     }
     if code == 98 {
         n: unpack_u8(data, offset) ?? return Err(BinaryError.Buffer)
-        return (value: sign_extend(n, 8), next: offset + 1)
+        return {value: sign_extend(n, 8), next: offset + 1}
     }
     if code == 104 || code == 72 {
         n := 0
@@ -373,7 +373,7 @@ unpack_one: fn(code: Int, little: Bool, data: [U8], offset: Int) -> (next: Int, 
             n = unpack_u16be(data, offset) ?? return Err(BinaryError.Buffer)
         }
         if code == 104 -> n = sign_extend(n, 16)
-        return (value: n, next: offset + 2)
+        return {value: n, next: offset + 2}
     }
     if code == 105 || code == 73 || code == 108 || code == 76 {
         n := 0
@@ -381,12 +381,12 @@ unpack_one: fn(code: Int, little: Bool, data: [U8], offset: Int) -> (next: Int, 
             n = unpack_u32be(data, offset) ?? return Err(BinaryError.Buffer)
         }
         if code == 105 || code == 108 -> n = sign_extend(n, 32)
-        return (value: n, next: offset + 4)
+        return {value: n, next: offset + 4}
     }
     n := 0
     if little -> n = unpack_u64le(data, offset) ?? return Err(BinaryError.Buffer) else {
         n = unpack_u64be(data, offset) ?? return Err(BinaryError.Buffer)
     }
     if code == 113 -> n = sign_extend(n, 64)
-    (value: n, next: offset + 8)
+    {value: n, next: offset + 8}
 }

@@ -6,7 +6,7 @@
 
 // End offset of the extended grapheme cluster starting at start (< length),
 // and the regional-indicator run the next window continues from.
-text_grapheme_next: fn(data: I64, length: I64, start: I64, carried: I64) -> (end: I64, ri: I64) {
+text_grapheme_next: fn(data: I64, length: I64, start: I64, carried: I64) -> {end: I64, ri: I64} {
     first: rt_text_decode(wrapping(data + start))
     at := start + rt_text_width(wrapping(data + start))
     previous := first
@@ -25,7 +25,7 @@ text_grapheme_next: fn(data: I64, length: I64, start: I64, carried: I64) -> (end
             (incb_pending && incb_linker && incb == I64{2}) -> false
             else -> text_grapheme_break_classes(pc, cc)
         }
-        if breaks -> return (end: at, ri: ri)
+        if breaks -> return {end: at, ri: ri}
         previous = current
         at += rt_text_width(wrapping(data + at))
         ri = if (cc == I64{6}) -> wrapping(ri + I64{1}) else -> I64{0}
@@ -41,7 +41,7 @@ text_grapheme_next: fn(data: I64, length: I64, start: I64, carried: I64) -> (end
             incb_linker = false
         }
     }
-    (end: at, ri: ri)
+    {end: at, ri: ri}
 }
 
 // jet_text_grapheme_break_classes (GB3-GB9b/GB999) over the pinned

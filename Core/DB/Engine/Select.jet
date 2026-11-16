@@ -107,17 +107,17 @@ find_rightmost: fn(a: ast.AST, s0: Int) -> Int Never! {
 // whose table has a column z_col (not a hidden one with ignore_hidden), as
 // the item and the column, -1 for none. With mark_used the column's use is
 // recorded (C's non-NULL piTab).
-table_and_column_index: fn(db: conn.Conn, a: &ast.AST, src: Int, i_start: Int, i_end: Int, z_col: [U8], ignore_hidden: Bool, mark_used: Bool) -> (tab: Int, col: Int) Never! {
+table_and_column_index: fn(db: conn.Conn, a: &ast.AST, src: Int, i_start: Int, i_end: Int, z_col: [U8], ignore_hidden: Bool, mark_used: Bool) -> {tab: Int, col: Int} Never! {
     loop i in i_start..<(i_end + 1) {
         si: ast.src_item(a, src, i)
         t: a.items[si].tab
         i_col: cat.column_index(db, t, z_col)
         if i_col >= 0 && (!ignore_hidden || !is_hidden_column(db.tables[t].cols[i_col])) {
             if mark_used -> rs.src_item_column_used(a, si, i_col)
-            return (tab: i, col: i_col)
+            return {tab: i, col: i_col}
         }
     }
-    (tab: -1, col: -1)
+    {tab: -1, col: -1}
 }
 
 // unsetJoinExpr: undo sqlite3SetJoinExpr for join i_table (every join when
@@ -196,7 +196,7 @@ process_join: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Int Never! {
             loop j in 0..<a.idlists[list].items.len() {
                 z: a.idlists[list].items[j].name ?? [U8]{}
                 i_right_col: cat.column_index(p.db, right_tab, z)
-                found := (tab: -1, col: -1)
+                found := {tab: -1, col: -1}
                 if i_right_col >= 0 {
                     found = table_and_column_index(p.db, a, src, 0, i, z, synth, true)
                 }
@@ -2264,10 +2264,10 @@ disable_unused_subquery_result_columns: fn(p: &cg.Parse, a: &ast.AST, si: Int) -
 // minMaxQuery: for the one aggregate e, WHERE_ORDERBY_MIN or _MAX with
 // the ORDER BY (its argument) that finds the answer first, when e is
 // min() or max() of one argument.
-min_max_query: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> (ret: Int, ob: Int) Never! {
+min_max_query: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> {ret: Int, ob: Int} Never! {
     elist: a.exprs[e].x
     if elist < 0 || ast.list_len(a, elist) != 1 || ast.has(a, e, ast.EP_WIN_FUNC) || cg.opt_disabled(p, cg.OPT_MIN_MAX_OPT) {
-        return (ret: cg.WHERE_ORDERBY_NORMAL, ob: -1)
+        return {ret: cg.WHERE_ORDERBY_NORMAL, ob: -1}
     }
     z: a.exprs[e].token ?? [U8]{}
     ret := cg.WHERE_ORDERBY_NORMAL
@@ -2280,10 +2280,10 @@ min_max_query: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> (ret: Int, ob: Int) Neve
     } else if util.str_icmp(z, "max".bytes()) == 0 {
         ret = cg.WHERE_ORDERBY_MAX
         sort_flags = base.KEYINFO_ORDER_DESC
-    } else { return (ret: ret, ob: -1) }
+    } else { return {ret: ret, ob: -1} }
     ob: ast.expr_list_dup(a, elist, 0)
     if ob >= 0 -> a.lists[ob].items[0].sort_flags = sort_flags
-    (ret: ret, ob: ob)
+    {ret: ret, ob: ob}
 }
 
 // isSimpleCount: the table of "SELECT count(*) FROM <tbl>" (aggregate s,
@@ -2395,16 +2395,16 @@ cannot_be_function: fn(a: &ast.AST, si: Int) -> Bool Never! {
 
 // searchWith: the CTE named z in the WITH clauses from w0 outwards (up to
 // a view's), with the WITH that holds it; cte -1 for none.
-search_with: fn(a: ast.AST, w0: Int, z: [U8]) -> (cte: Int, with: Int) Never! {
+search_with: fn(a: ast.AST, w0: Int, z: [U8]) -> {cte: Int, with: Int} Never! {
     w := w0
     loop w >= 0 {
         loop c in a.withs[w].ctes {
-            if util.str_icmp(z, a.ctes[c].name ?? [U8]{}) == 0 -> return (cte: c, with: w)
+            if util.str_icmp(z, a.ctes[c].name ?? [U8]{}) == 0 -> return {cte: c, with: w}
         }
         if a.withs[w].bview -> break
         w = a.withs[w].outer
     }
-    (cte: -1, with: -1)
+    {cte: -1, with: -1}
 }
 
 // resolveFromTermToCte: FROM item si as a reference to a CTE in scope
@@ -3845,19 +3845,19 @@ select_aggregate: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, so
 
 // The body of sqlite3Select after sqlite3SelectPrep: its result code, and
 // whether the caller pops the EXPLAIN QUERY PLAN level (see above).
-select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> (rc: Int, pop: Bool) Never! {
+select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> {rc: Int, pop: Bool} Never! {
     if a.selects[s].sel_flags & ast.SF_UF_SRC_CHECK != 0 {
         src: a.selects[s].src
         p0: ast.src_item(a, src, 0)
         if same_src_alias(a, p0, src) {
             name: a.items[p0].alias ?? p.db.tables[a.items[p0].tab].name
             ast.error(a, "target object/alias may not appear in FROM clause: {ast.text(name)}")
-            return (rc: 1, pop: true)
+            return {rc: 1, pop: true}
         }
         a.selects[s].sel_flags = util.clear_bits(a.selects[s].sel_flags, ast.SF_UF_SRC_CHECK)
     }
     if dest.e_dest == cg.SRT_OUTPUT -> generate_column_names(p, a, s)
-    if wn.window_rewrite(p, a, s) != 0 -> return (rc: 1, pop: true)
+    if wn.window_rewrite(p, a, s) != 0 -> return {rc: 1, pop: true}
     is_agg: a.selects[s].sel_flags & ast.SF_AGGREGATE != 0
     sort := no_sort()
     sort.order_by = a.selects[s].order_by
@@ -3866,20 +3866,20 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
         loop i >= 0 && i < ast.src_len(a, a.selects[s].src) {
             i = simplify_from_term(p, a, s, i, is_agg, dest.e_dest, sort)
         }
-        if i < 0 -> return (rc: 1, pop: true)
+        if i < 0 -> return {rc: 1, pop: true}
     }
     if a.selects[s].prior >= 0 {
         rc: multi_select(p, a, s, dest)
-        return (rc: rc, pop: a.selects[s].next_sel < 0)
+        return {rc: rc, pop: a.selects[s].next_sel < 0}
     }
     w0: a.selects[s].where_expr
     if w0 >= 0 && a.exprs[w0].op == tk.TK_AND && cg.opt_enabled(p, cg.OPT_PROPAGATE_CONST) {
         _: propagate_constants(p, a, s)
     }
     if cg.opt_enabled(p, cg.OPT_QUERY_FLATTENER | cg.OPT_COUNT_OF_VIEW) && count_of_view_optimization(p, a, s) {
-        if p.db.malloc_failed -> return (rc: 1, pop: true)
+        if p.db.malloc_failed -> return {rc: 1, pop: true}
     }
-    if code_from_subqueries(p, a, s) -> return (rc: 1, pop: true)
+    if code_from_subqueries(p, a, s) -> return {rc: 1, pop: true}
     tab_list: a.selects[s].src
     elist: a.selects[s].elist
     distinct := no_distinct()
@@ -3967,9 +3967,9 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
                 select_inner_loop(p, a, s, -1, sort, distinct, dest, i_cont, i_break)
                 wh.where_end(p, a, wi)
             }
-        } else { return (rc: 1, pop: true) }
+        } else { return {rc: 1, pop: true} }
     } else {
-        if select_aggregate(p, a, s, dest, sort, distinct) -> return (rc: 1, pop: true)
+        if select_aggregate(p, a, s, dest, sort, distinct) -> return {rc: 1, pop: true}
     }
     if distinct.e_tnct_type == cg.WHERE_DISTINCT_UNORDERED {
         _: cg.explain(p, a, false, "USE TEMP B-TREE FOR DISTINCT")
@@ -3979,7 +3979,7 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
         generate_sort_tail(p, a, s, sort, n_col, dest)
     }
     cg.v_resolve_label(p, i_end)
-    (rc: if cg.n_err(a) > 0 -> 1 else -> 0, pop: true)
+    {rc: if cg.n_err(a) > 0 -> 1 else -> 0, pop: true}
 }
 
 // sqlite3Select: the code of SELECT s, its rows going to dest; 1 when

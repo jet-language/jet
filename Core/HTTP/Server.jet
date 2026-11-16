@@ -1375,14 +1375,14 @@ priv route_contract: fn(method: String, pattern: String, segments: [HTTPSegment]
     completed
 }
 
-priv contract_member: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? {
+priv contract_member: fn(fields: [{key: String, value: Dyn}], name: String) -> Dyn? {
     loop pair in fields {
         if pair.key == name -> return Val(pair.value)
     }
     None
 }
 
-priv contract_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? {
+priv contract_text: fn(fields: [{key: String, value: Dyn}], name: String) -> String? {
     value: contract_member(fields, name) ?? return None
     if value == {
         .Text(text) -> return Val(text)
@@ -1391,12 +1391,12 @@ priv contract_text: fn(fields: [(key: String, value: Dyn)], name: String) -> Str
 }
 
 // `fields` with member `name` replaced (it must be present).
-priv contract_set: fn(fields: [(key: String, value: Dyn)], name: String, value: Dyn) -> [(key: String, value: Dyn)] Never! {
-    out := [(key: String, value: Dyn)]{}
+priv contract_set: fn(fields: [{key: String, value: Dyn}], name: String, value: Dyn) -> [{key: String, value: Dyn}] Never! {
+    out := [{key: String, value: Dyn}]{}
     found := false
     loop pair in fields {
         if pair.key == name {
-            out.push((key: name.copy(), value: value.copy()))
+            out.push({key: name.copy(), value: value.copy()})
             found = true
         } else { out.push(pair.copy()) }
     }
@@ -1504,7 +1504,7 @@ priv route_require_contract: fn(method: String, pattern: String, contract: Strin
 }
 
 // The JSON kind of member `name`; "" when it is absent.
-priv contract_kind: fn(fields: [(key: String, value: Dyn)], name: String) -> String Never! {
+priv contract_kind: fn(fields: [{key: String, value: Dyn}], name: String) -> String Never! {
     value: contract_member(fields, name) ?? return ""
     if value == {
         .Null -> "null"

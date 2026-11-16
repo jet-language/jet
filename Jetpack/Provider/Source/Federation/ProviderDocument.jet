@@ -213,27 +213,27 @@ impl ProviderFactReport {
 // Copy the report's metadata, typed projection, and replacement candidates
 // onto the shared carrier.
 provider_add_metadata_facts: fn(shared: &ProviderFacts, facts: MetadataFacts) Never! {
-    scalars: [(key: String, value: String)]{
-        (key: "package.name", value: facts.name),
-        (key: "package.version", value: facts.version),
-        (key: "package.source", value: facts.source_identity),
-        (key: "package.integrity", value: facts.integrity_hash),
-        (key: "package.license", value: facts.license),
+    scalars: [{key: String, value: String}]{
+        {key: "package.name", value: facts.name},
+        {key: "package.version", value: facts.version},
+        {key: "package.source", value: facts.source_identity},
+        {key: "package.integrity", value: facts.integrity_hash},
+        {key: "package.license", value: facts.license},
     }
     loop scalar in scalars {
         if scalar.value != "" {
             shared.add_fact(scalar.key, ProviderFactValue.Text(scalar.value), "provider.metadata")
         }
     }
-    lists: [(key: String, values: [String])]{
-        (key: "package.dependencies", values: facts.dependencies),
-        (key: "package.dev_dependencies", values: facts.dev_dependencies),
-        (key: "package.build_dependencies", values: facts.build_dependencies),
-        (key: "package.scripts", values: facts.scripts),
-        (key: "package.platforms", values: facts.platforms),
-        (key: "package.bins", values: facts.bins),
-        (key: "package.trust_roots", values: facts.trust_roots),
-        (key: "package.todos", values: facts.todos),
+    lists: [{key: String, values: [String]}]{
+        {key: "package.dependencies", values: facts.dependencies},
+        {key: "package.dev_dependencies", values: facts.dev_dependencies},
+        {key: "package.build_dependencies", values: facts.build_dependencies},
+        {key: "package.scripts", values: facts.scripts},
+        {key: "package.platforms", values: facts.platforms},
+        {key: "package.bins", values: facts.bins},
+        {key: "package.trust_roots", values: facts.trust_roots},
+        {key: "package.todos", values: facts.todos},
     }
     loop list in lists {
         if list.values.len() > 0 {

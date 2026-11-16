@@ -49,7 +49,7 @@ JetCLIDapStop: struct {
 JetCLIDapRequest: struct {
     seq: Int
     command: String
-    arguments: [(key: String, value: Dyn)]
+    arguments: [{key: String, value: Dyn}]
 }
 
 // The adapter's state across requests.
@@ -73,7 +73,7 @@ JetCLIDap: struct {
             "launch" -> {
                 self.stop_on_entry = jet_cli_dap_bool(request.arguments, "stopOnEntry")
                 self.args = jet_cli_dap_texts_of(request.arguments.move(), "args")
-                request.arguments = [(key: String, value: Dyn)]{}
+                request.arguments = [{key: String, value: Dyn}]{}
                 self.respond(request, "{{}}")
                 self.event("initialized", "{{}}")
             }
@@ -402,7 +402,7 @@ jet_cli_dap_send: fn(json: String) -[IO, Time.Wait]> Never! {
 // The request `text` holds; a request that is not a JSON object has no
 // command, and is answered as an unknown one.
 jet_cli_dap_request: fn(text: String) -> JetCLIDapRequest Never! {
-    request := JetCLIDapRequest{seq: 0, command: "", arguments: [(key: String, value: Dyn)]{}}
+    request := JetCLIDapRequest{seq: 0, command: "", arguments: [{key: String, value: Dyn}]{}}
     parsed: dap_json.parse(text) ?? return request
     fields := jet_cli_dap_members(parsed.move())
     loop fields.len() > 0 {
@@ -424,15 +424,15 @@ jet_cli_dap_request: fn(text: String) -> JetCLIDapRequest Never! {
 }
 
 // The members of a JSON object, taken out of it; none for another value.
-jet_cli_dap_members: fn(value: &&Dyn) -> [(key: String, value: Dyn)] Never! {
+jet_cli_dap_members: fn(value: &&Dyn) -> [{key: String, value: Dyn}] Never! {
     if value.move() == {
         .Object(fields) -> fields
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> [(key: String, value: Dyn)]{}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> [{key: String, value: Dyn}]{}
     }
 }
 
 // The strings of the array member `name`, in order, taken out of `members`.
-jet_cli_dap_texts_of: fn(members: &&[(key: String, value: Dyn)], name: String) -> [String] Never! {
+jet_cli_dap_texts_of: fn(members: &&[{key: String, value: Dyn}], name: String) -> [String] Never! {
     fields := members.move()
     loop fields.len() > 0 {
         field := fields.pop() ?? break
@@ -458,7 +458,7 @@ jet_cli_dap_texts_of: fn(members: &&[(key: String, value: Dyn)], name: String) -
 jet_cli_dap_number: fn(value: Dyn) -> Int Never! { foundation_json_integer(value) ?? -1 }
 
 // The integer member `name`, or -1.
-jet_cli_dap_int: fn(members: [(key: String, value: Dyn)], name: String) -> Int Never! {
+jet_cli_dap_int: fn(members: [{key: String, value: Dyn}], name: String) -> Int Never! {
     loop member in members {
         if member.key == name -> return jet_cli_dap_number(member.value)
     }
@@ -466,7 +466,7 @@ jet_cli_dap_int: fn(members: [(key: String, value: Dyn)], name: String) -> Int N
 }
 
 // The boolean member `name`, or false.
-jet_cli_dap_bool: fn(members: [(key: String, value: Dyn)], name: String) -> Bool Never! {
+jet_cli_dap_bool: fn(members: [{key: String, value: Dyn}], name: String) -> Bool Never! {
     loop member in members {
         if member.key == name && member.value == .Bool(flag) -> return flag
     }
@@ -474,7 +474,7 @@ jet_cli_dap_bool: fn(members: [(key: String, value: Dyn)], name: String) -> Bool
 }
 
 // The string member `name`, or "".
-jet_cli_dap_string: fn(members: [(key: String, value: Dyn)], name: String) -> String Never! {
+jet_cli_dap_string: fn(members: [{key: String, value: Dyn}], name: String) -> String Never! {
     loop member in members {
         if member.key == name && member.value == .Text(text) -> return text
     }
@@ -542,10 +542,10 @@ jet_cli_dap_variables: fn(session: &NativeSession, frame: Int) -> String NativeD
 jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -> String JetCLIDapEvalError! {
     expr: debug_parse_expression(text) ?? return Err(jet_cli_dap_eval_error(err.message))
     locals: jet_cli_dap_frame_locals(session, if frame > 0 -> frame else -> 0) ?? return Err(jet_cli_dap_eval_error(err.detail))
-    shown := (text: "", type_name: "")
+    shown := {text: "", type_name: ""}
     if ast_expr(expr.tables, expr.root) == .Ident(name, _, _) {
         loop local in locals {
-            if local.name == name -> shown = (text: local.value, type_name: local.type_name)
+            if local.name == name -> shown = {text: local.value, type_name: local.type_name}
         }
     }
     if shown.type_name == "" {

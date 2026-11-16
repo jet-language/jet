@@ -91,14 +91,14 @@ store_text_lines: fn(raw: String) -> [String] Never! {
 }
 
 // Rust `rsplit_once(needle)`.
-store_text_split_last: fn(text: String, needle: String) -> (before: String, after: String)? Never! {
+store_text_split_last: fn(text: String, needle: String) -> {before: String, after: String}? Never! {
     raw: text.bytes()
     pattern: needle.bytes()
     if pattern.len() > raw.len() -> return None
     at := raw.len() - pattern.len()
     loop at >= 0 {
         if pkg_bytes_starts_with(raw, at, pattern) {
-            return Val((before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + pattern.len(), raw.len())))
+            return Val({before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + pattern.len(), raw.len())})
         }
         at -= 1
     }

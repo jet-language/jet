@@ -291,7 +291,7 @@ arm: fn(samples: [Int], baseline: Int) -> Arm Never! {
 // The builds, the warm-up and the samples in a fresh scratch directory,
 // which is removed however the measuring ends; then the JSON to print and
 // the exit status.
-measure: fn(options: Options) -> (report: String, code: Int) Err! {
+measure: fn(options: Options) -> {report: String, code: Int} Err! {
     rounds: options.rounds
     samples: options.samples
     root: files.dirname(files.dirname(files.dirname(files.dirname(sys.executable()))))
@@ -319,7 +319,7 @@ measure: fn(options: Options) -> (report: String, code: Int) Err! {
     ready := paths.map(fn(path) { files.is_file(path) })
     ready.extend([rust.exit == 0, source.exit == 0])
     if ready.contains(false) {
-        return Ok((report: tight(json.to_string_pretty(Unbuilt{builds: builds, metric: "runtime_only_ns", passed: false})), code: 1))
+        return Ok({report: tight(json.to_string_pretty(Unbuilt{builds: builds, metric: "runtime_only_ns", passed: false})), code: 1})
     }
     // The warm-up checks every output and is left out of the samples.
     loop path in paths -> run_binary(root, path)
@@ -342,7 +342,7 @@ measure: fn(options: Options) -> (report: String, code: Int) Err! {
         samples: samples,
         workload: "base64 encode, 257-byte payload",
     }
-    Ok((report: json.to_string_pretty(report), code: if passed || !options.require_win -> 0 else -> 1))
+    Ok({report: json.to_string_pretty(report), code: if passed || !options.require_win -> 0 else -> 1})
 }
 
 // Indented JSON on one line with json.dumps's `, ` and `: ` separators. A

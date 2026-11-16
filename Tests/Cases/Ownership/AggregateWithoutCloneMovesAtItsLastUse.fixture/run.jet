@@ -54,9 +54,9 @@ shelved: fn(input: &&[Checked]) -> Shelf {
     again
 }
 
-paired: fn(input: &&Shelf) -> (shelf: Shelf, count: Int) {
+paired: fn(input: &&Shelf) -> {shelf: Shelf, count: Int} {
     count: input.items.len()
-    pair := (shelf: input, count: count)
+    pair := {shelf: input, count: count}
     pair
 }
 
@@ -95,6 +95,6 @@ run: fn() {
     print("nested leaked {open_fds() - before}")
 }
 
-drop_pair: fn(pair: &&(shelf: Shelf, count: Int)) { print("dropping {pair.shelf.name}") }
+drop_pair: fn(pair: &&{shelf: Shelf, count: Int}) { print("dropping {pair.shelf.name}") }
 
 drop_lists: fn(lists: &&[[Checked]]) { print("dropping {lists.len()}") }

@@ -32,9 +32,9 @@ ProviderFactValue: enum {
                 Dyn.Array(items)
             }
             .Map(values) -> {
-                object := [(key: String, value: Dyn)]{}
+                object := [{key: String, value: Dyn}]{}
                 loop key in pkg_provider_sorted_keys(values.keys().to_list()) {
-                    object.push((key: key, value: values[key].to_json_tree()))
+                    object.push({key: key, value: values[key].to_json_tree()})
                 }
                 Dyn.Object(object)
             }
@@ -401,10 +401,10 @@ ProviderFacts: struct {
                 return Err(ProviderFactsError{message: "provider provenance `{key}` has no fact"})
             }
         }
-        identities: [(expected: String, key: String)]{
-            (expected: self.provider, key: "provider.name"),
-            (expected: self.target, key: "provider.target"),
-            (expected: self.selector.raw, key: "provider.selector"),
+        identities: [{expected: String, key: String}]{
+            {expected: self.provider, key: "provider.name"},
+            {expected: self.target, key: "provider.target"},
+            {expected: self.selector.raw, key: "provider.selector"},
         }
         loop identity in identities {
             if identity.expected != "" && self.text_fact(identity.key) != Val(identity.expected) {
@@ -414,10 +414,10 @@ ProviderFacts: struct {
         if self.selector.raw == "" && self.facts.has_key("provider.selector") {
             return Err(ProviderFactsError{message: "provider selector fact is present without a selector"})
         }
-        fields: [(expected: String, key: String)]{
-            (expected: self.resolved_source, key: "provider.resolved_source"),
-            (expected: self.profile, key: "profile.name"),
-            (expected: self.profile_provenance, key: "profile.provenance"),
+        fields: [{expected: String, key: String}]{
+            {expected: self.resolved_source, key: "provider.resolved_source"},
+            {expected: self.profile, key: "profile.name"},
+            {expected: self.profile_provenance, key: "profile.provenance"},
         }
         loop field in fields {
             if field.expected != "" && self.text_fact(field.key) != Val(field.expected) {
@@ -595,16 +595,16 @@ pkg_provider_sorted_keys: fn(keys: [String]) -> [String] Never! {
 }
 
 // `target@provider#selector`: the selector follows the source authority.
-pkg_provider_split_reference_selector: fn(reference: String) -> (root: String, selector: String?) Never! {
-    halves: reference.split_once("#") ?? return (root: reference, selector: None)
-    (root: halves.before, selector: Val(halves.after))
+pkg_provider_split_reference_selector: fn(reference: String) -> {root: String, selector: String?} Never! {
+    halves: reference.split_once("#") ?? return {root: reference, selector: None}
+    {root: halves.before, selector: Val(halves.after)}
 }
 
 // `target@authority`; a leading or trailing `@` names no authority.
-pkg_provider_split_reference_authority: fn(reference: String) -> (target: String, provider: String) Never! {
-    halves: reference.cut_last("@") ?? return (provider: "", target: reference)
-    if halves.before == "" || halves.after == "" -> return (provider: "", target: reference)
-    (provider: halves.after, target: halves.before)
+pkg_provider_split_reference_authority: fn(reference: String) -> {target: String, provider: String} Never! {
+    halves: reference.cut_last("@") ?? return {provider: "", target: reference}
+    if halves.before == "" || halves.after == "" -> return {provider: "", target: reference}
+    {provider: halves.after, target: halves.before}
 }
 
 // The external ecosystems whose references must name their provider and an

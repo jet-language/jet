@@ -476,7 +476,7 @@ use {
 #Test("cloud and vault fact contracts reject dropped authority") {
     src: "\nenv.dev: module {{\n    imports: [\n        env.cloud.credentials([aws_production]),\n        env.security.vault([database_password])\n    ]\n}}\n"
     plan: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
-    cases: [(kind: IntegrationKind, grant: String)]{(kind: IntegrationKind.CloudCredentials, grant: "credential.read"), (kind: IntegrationKind.Vault, grant: "vault.read")}
+    cases: [{kind: IntegrationKind, grant: String}]{{kind: IntegrationKind.CloudCredentials, grant: "credential.read"}, {kind: IntegrationKind.Vault, grant: "vault.read"}}
     loop expected in cases {
         facts := plan.integration_facts
         found := false

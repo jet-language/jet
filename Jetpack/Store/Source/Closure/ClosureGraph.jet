@@ -498,14 +498,14 @@ store_wal_state_stamp: fn(roots: HangarRoots) -> String StoreError! {
     Ok(store_sha256_hex(table))
 }
 
-store_migrate_closure_graph_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> (migrated: Int, graph: ClosureGraph) StoreError! {
+store_migrate_closure_graph_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> {migrated: Int, graph: ClosureGraph} StoreError! {
     recovered: store_recover_closure_journal_graph_unlocked(verification, roots)
     entries := store_list_unlocked(roots)
     entries.sort_by(fn(entry) { entry.id })
     store_migrate_closure_graph_from_entries(verification, roots, recovered.graph, entries)
 }
 
-store_migrate_closure_graph_unlocked_ignoring: fn(verification: &StoreVerification, roots: HangarRoots, ignored: [String]) -> (migrated: Int, graph: ClosureGraph) StoreError! {
+store_migrate_closure_graph_unlocked_ignoring: fn(verification: &StoreVerification, roots: HangarRoots, ignored: [String]) -> {migrated: Int, graph: ClosureGraph} StoreError! {
     graph := store_closure_graph_structure_read_only(verification, roots)
     deleted := graph.deleted_records.copy()
     loop id in ignored {
@@ -522,7 +522,7 @@ store_migrate_closure_graph_unlocked_ignoring: fn(verification: &StoreVerificati
     store_migrate_closure_graph_from_entries(verification, roots, graph, entries)
 }
 
-store_migrate_closure_graph_from_entries: fn(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph, entries: [StoreEntry]) -> (migrated: Int, graph: ClosureGraph) StoreError! {
+store_migrate_closure_graph_from_entries: fn(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph, entries: [StoreEntry]) -> {migrated: Int, graph: ClosureGraph} StoreError! {
     seen_records := [String:Bool]{}
     objects := [String:ClosureObject]{}
     records := [ClosureRecord]{}
@@ -561,7 +561,7 @@ store_migrate_closure_graph_from_entries: fn(verification: &StoreVerification, r
         // Steady state is exactly where an overgrown journal must fold into
         // one snapshot; skipping here meant a warm store never compacted.
         store_compact_if_needed(verification, roots)
-        return Ok((migrated: 0, graph: graph))
+        return Ok({migrated: 0, graph: graph})
     }
     migrated: records.len()
     object_list := [ClosureObject]{}
@@ -576,7 +576,7 @@ store_migrate_closure_graph_from_entries: fn(verification: &StoreVerification, r
     _: store_append_entry(roots, transaction)
     loop record in transaction.records -> _: store_materialize_package_record(roots, record)
     store_compact_if_needed(verification, roots)
-    Ok((migrated: migrated, graph: updated))
+    Ok({migrated: migrated, graph: updated})
 }
 
 store_sorted_object_keys: fn(objects: [String:ClosureObject]) -> [String] Never! {
@@ -826,10 +826,10 @@ store_recover_closure_journal_unlocked: fn(verification: &StoreVerification, roo
     Ok(store_recover_closure_journal_graph_unlocked(verification, roots).recovered)
 }
 
-store_recover_closure_journal_graph_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> (recovered: Int, graph: ClosureGraph) StoreError! {
+store_recover_closure_journal_graph_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> {recovered: Int, graph: ClosureGraph} StoreError! {
     recovered := store_recover_receipt_staging(roots)
     journal: store_journal_dir(roots)
-    entries: files.list_dir(journal) ?? return Ok((recovered: recovered, graph: ClosureGraph.empty()))
+    entries: files.list_dir(journal) ?? return Ok({recovered: recovered, graph: ClosureGraph.empty()})
     loop entry in entries {
         if {
             entry.name.ends_with(STORE_JOURNAL_PARTIAL_SUFFIX) -> {
@@ -857,10 +857,10 @@ store_recover_closure_journal_graph_unlocked: fn(verification: &StoreVerificatio
     loop id in graph.deleted_records {
         if store_remove_package_record(roots, id) -> recovered += 1
     }
-    Ok((recovered: recovered, graph: graph))
+    Ok({recovered: recovered, graph: graph})
 }
 
-store_descriptor_for_entry: fn(verification: &StoreVerification, roots: HangarRoots, original: StoreEntry) -> (objects: [ClosureObject], record: ClosureRecord) StoreError! {
+store_descriptor_for_entry: fn(verification: &StoreVerification, roots: HangarRoots, original: StoreEntry) -> {objects: [ClosureObject], record: ClosureRecord} StoreError! {
     entry := original.copy()
     // The package projection is a cache of the canonical receipt. Rebuild it
     // from the current facts at migration/registration boundaries; stale
@@ -940,7 +940,7 @@ store_descriptor_for_entry: fn(verification: &StoreVerification, roots: HangarRo
         producer_record: entry.producer_record,
         package_meta: package_entry.meta_json(),
     }
-    Ok((objects: unique, record: record))
+    Ok({objects: unique, record: record})
 }
 
 store_normalize_legacy_entry: fn(original: StoreEntry) -> StoreEntry StoreError! {

@@ -20,7 +20,7 @@ CProto: struct {
 // C unions stay overlay-only.
 CStructDef: struct {
     jet_name: String
-    fields: [(name: String, ty: String)]
+    fields: [{name: String, ty: String}]
 }
 
 CRawRecord: struct {
@@ -44,7 +44,7 @@ CTypeCatalog: struct {
         catalog := CTypeCatalog{aliases: [String:String]{}, records: [String:CStructDef]{}, names: [String:String]{}}
         used_names := [String]{}
         loop handle in handles.handles -> used_names.push(handle.jet_name)
-        raw_records := [(jet_name: String, record: CRawRecord)]{}
+        raw_records := [{jet_name: String, record: CRawRecord}]{}
 
         loop declaration in declarations {
             if pkg_cbind_parse_complete_record(declaration) == {
@@ -62,7 +62,7 @@ CTypeCatalog: struct {
                         }
                         .None -> {}
                     }
-                    raw_records.push((jet_name: jet_name, record: record))
+                    raw_records.push({jet_name: jet_name, record: record})
                     next
                 }
                 .None -> {}
@@ -244,7 +244,7 @@ pkg_cbind_first_ident_word: fn(text: String) -> String? Never! {
 // A simple C function-pointer typedef. The checked surface stores it as a Jet
 // `fn(...)` type; registration/context ownership stays on the generated
 // callback facade, never in an untyped pointer alias.
-pkg_cbind_parse_callback_alias: fn(decl: String) -> (alias: String, target: String)? Never! {
+pkg_cbind_parse_callback_alias: fn(decl: String) -> {alias: String, target: String}? Never! {
     text: decl.trim()
     if !text.starts_with("typedef ") || !text.contains("(*") -> return None
     bytes: text.bytes()
@@ -265,14 +265,14 @@ pkg_cbind_parse_callback_alias: fn(decl: String) -> (alias: String, target: Stri
     params: pkg_cbind_split_params(pkg_bytes_text(bytes, params_open + 1, params_close)) ?? return None
     types := [String]{}
     loop param in params -> types.push(pkg_cbind_split_param_type_and_name(param, 0).ty)
-    Val((alias: alias, target: "{CBIND_CALLBACK_MARKER}{ret}|{types.join("|")}"))
+    Val({alias: alias, target: "{CBIND_CALLBACK_MARKER}{ret}|{types.join("|")}"})
 }
 
 // `typedef <target> <alias>` without a body or parameter list. The target is
 // the text between the `typedef` keyword and the alias. A split declaration
 // keeps the whitespace before it (the newline after the previous `;`), so the
 // keyword offset holds only once the declaration is trimmed.
-pkg_cbind_parse_scalar_or_alias_typedef: fn(raw_decl: String) -> (alias: String, target: String)? Never! {
+pkg_cbind_parse_scalar_or_alias_typedef: fn(raw_decl: String) -> {alias: String, target: String}? Never! {
     decl: raw_decl.trim()
     tokens: pkg_cbind_words(decl)
     if tokens.len() == 0 || tokens[0] != "typedef" || decl.contains("{{") || decl.contains("(") {
@@ -295,15 +295,15 @@ pkg_cbind_parse_scalar_or_alias_typedef: fn(raw_decl: String) -> (alias: String,
     if target == "" || pkg_cbind_normalize_type(target) == pkg_cbind_normalize_type(alias) {
         return None
     }
-    Val((alias: alias, target: target))
+    Val({alias: alias, target: target})
 }
 
 // The fields of a complete record body, or nothing when any field is outside
 // the checked layout subset (bit-fields, declarator lists, unknown types).
-pkg_cbind_parse_record_fields: fn(body: String, catalog: CTypeCatalog) -> [(name: String, ty: String)]? Never! {
+pkg_cbind_parse_record_fields: fn(body: String, catalog: CTypeCatalog) -> [{name: String, ty: String}]? Never! {
     declarations: pkg_opaque_split_declarations(body)
     if declarations.len() == 0 -> return None
-    fields := [(name: String, ty: String)]{}
+    fields := [{name: String, ty: String}]{}
     loop index in 0..<declarations.len() {
         declaration: declarations[index].trim()
         if declaration == "" || declaration.contains(":") || declaration.contains(",") {
@@ -312,7 +312,7 @@ pkg_cbind_parse_record_fields: fn(body: String, catalog: CTypeCatalog) -> [(name
         split: pkg_cbind_split_param_type_and_name(declaration, index)
         if !pkg_cbind_is_ident(split.name) -> return None
         ty: catalog.map_layout_type(split.ty) ?? return None
-        fields.push((name: foundation_generated_snake_name(split.name, "field"), ty: ty))
+        fields.push({name: foundation_generated_snake_name(split.name, "field"), ty: ty})
     }
     Val(fields)
 }
@@ -447,7 +447,7 @@ pkg_cbind_split_params: fn(src: String) -> [String]? Never! {
 }
 
 // A parameter's type and name; an unnamed parameter is called `arg<idx>`.
-pkg_cbind_split_param_type_and_name: fn(input: String, idx: Int) -> (ty: String, name: String) Never! {
+pkg_cbind_split_param_type_and_name: fn(input: String, idx: Int) -> {ty: String, name: String} Never! {
     raw: input.trim()
     bytes: raw.bytes()
     position := bytes.len() - 1
@@ -459,10 +459,10 @@ pkg_cbind_split_param_type_and_name: fn(input: String, idx: Int) -> (ty: String,
         // leaves an empty tail and a lone type keyword is not a name.
         if pkg_cbind_is_ident(tail) && (separator == 42 || pkg_cbind_is_ascii_space(separator)) {
             ty: pkg_bytes_text(bytes, 0, position + 1).trim()
-            if ty != "" -> return (name: tail, ty: ty)
+            if ty != "" -> return {name: tail, ty: ty}
         }
     }
-    (name: "arg{idx}", ty: raw)
+    {name: "arg{idx}", ty: raw}
 }
 
 // Collapse whitespace and drop the qualifiers the binder ignores.
@@ -479,13 +479,13 @@ pkg_cbind_normalize_type: fn(c_type: String) -> String Never! {
 
 // A type's base spelling (without `*` or a struct/union/enum keyword) and
 // how many `*` it carries.
-pkg_cbind_pointer_base: fn(c_type: String) -> (base: String, depth: Int) Never! {
+pkg_cbind_pointer_base: fn(c_type: String) -> {base: String, depth: Int} Never! {
     norm: pkg_cbind_normalize_type(c_type)
     depth := 0
     loop byte in norm.bytes() {
         if (Int{byte}) == 42 -> depth += 1
     }
-    (base: pkg_cbind_canonical_c_type(norm.replace("*", " ")), depth: depth)
+    {base: pkg_cbind_canonical_c_type(norm.replace("*", " ")), depth: depth}
 }
 
 pkg_cbind_canonical_c_type: fn(c_type: String) -> String Never! {

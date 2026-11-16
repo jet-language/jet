@@ -8,7 +8,7 @@ Args: struct {
 run: fn(args: Args) Err! {
     meetings := files.read(args.path).lines().filter(fn(line) { line != "" }).map(fn(line) {
         fields: line.split_once("|") ?? panic("bad meeting")
-        (name: fields.before, when: time.parse_rfc3339(fields.after) ?? panic("bad timestamp"))
+        {name: fields.before, when: time.parse_rfc3339(fields.after) ?? panic("bad timestamp")}
     })
     meetings.sort_by(.when)
     loop (position, meeting) in meetings {

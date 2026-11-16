@@ -2442,7 +2442,7 @@ jfmt_diff_mark: fn(a: [Int], b: [Int], a_start: Int, a_end: Int, b_start: Int, b
 // `a[a0..<a1]` and `b[b0..<b1]`, searched from both ends at once in linear
 // space, or None when the ranges share no line. Each search keeps, per
 // diagonal `k = x - y`, the furthest `x` its paths with `d` edits reach.
-jfmt_diff_middle: fn(a: [Int], b: [Int], a0: Int, a1: Int, b0: Int, b1: Int) -> (old: Int, new: Int)? Never! {
+jfmt_diff_middle: fn(a: [Int], b: [Int], a0: Int, a1: Int, b0: Int, b1: Int) -> {old: Int, new: Int}? Never! {
     n: a1 - a0
     m: b1 - b0
     max_d: (n + m + 1) /% 2
@@ -2480,7 +2480,7 @@ jfmt_diff_middle: fn(a: [Int], b: [Int], a0: Int, a1: Int, b0: Int, b1: Int) -> 
             if {
                 x1 > n -> k1_end += 2
                 y1 > m -> k1_start += 2
-                front && jfmt_diff_reached(backward, offset + delta - k1, n - x1) -> return Val((old: a0 + x1, new: b0 + y1))
+                front && jfmt_diff_reached(backward, offset + delta - k1, n - x1) -> return Val({old: a0 + x1, new: b0 + y1})
             }
             k1 += 2
         }
@@ -2499,7 +2499,7 @@ jfmt_diff_middle: fn(a: [Int], b: [Int], a0: Int, a1: Int, b0: Int, b1: Int) -> 
                 y2 > m -> k2_start += 2
                 !front && jfmt_diff_reached(forward, offset + delta - k2, n - x2) -> {
                     x1: forward[offset + delta - k2]
-                    return Val((old: a0 + x1, new: b0 + x1 - delta + k2))
+                    return Val({old: a0 + x1, new: b0 + x1 - delta + k2})
                 }
             }
             k2 += 2

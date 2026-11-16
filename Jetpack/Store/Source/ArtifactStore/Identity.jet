@@ -284,11 +284,11 @@ store_artifact_unique_keys: fn(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] N
 }
 
 // `str::split_once`: the text around the first `separator`.
-store_artifact_split_once: fn(value: String, separator: String) -> (before: String, after: String)? Never! {
+store_artifact_split_once: fn(value: String, separator: String) -> {before: String, after: String}? Never! {
     raw: value.bytes()
     at: store_artifact_find(raw, separator.bytes(), 0)
     if at < 0 -> return None
-    Val((after: pkg_bytes_text(raw, at + separator.bytes().len(), raw.len()), before: pkg_bytes_text(raw, 0, at)))
+    Val({after: pkg_bytes_text(raw, at + separator.bytes().len(), raw.len()), before: pkg_bytes_text(raw, 0, at)})
 }
 
 // The first byte offset at or after `from` where `needle` occurs, or -1.

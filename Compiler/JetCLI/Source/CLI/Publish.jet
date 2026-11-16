@@ -123,7 +123,7 @@ jet_cli_yank_plan: fn(jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
     }
     // words[0] is the command word `yank`.
     if words.len() < 2 || words[1] == "" {
-        return JetCLIPlan.Refused{report: pkg_diagnostic_from_row("E2606", [(name: String, value: String)]{}, None), color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""}
+        return JetCLIPlan.Refused{report: pkg_diagnostic_from_row("E2606", [{name: String, value: String}]{}, None), color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""}
     }
     JetCLIPlan.Yank{version: words[1], message: jet_cli_option_value(jet_argv, "--message"), color: color}
 }
@@ -177,7 +177,7 @@ jet_cli_publish_has_metadata_chain: fn(repo: String) -[FS]> Bool Never! {
 
 // The source hash and plan fingerprint for the index entry: the lock's root
 // entry when it records a fingerprint, else the registry artifact hash.
-jet_cli_publish_hashes: fn(root: String, name: String) -[FS, Env]> (content_hash: String, fingerprint: String) Never! {
+jet_cli_publish_hashes: fn(root: String, name: String) -[FS, Env]> {content_hash: String, fingerprint: String} Never! {
     if pkg_lock_load(root) == .Val(lock) {
         loop package in lock.packages {
             is_root: if package.source == {
@@ -188,19 +188,19 @@ jet_cli_publish_hashes: fn(root: String, name: String) -[FS, Env]> (content_hash
             if package.fingerprint == "" -> break
             recorded: package.content_hash ?? ""
             content_hash: if recorded != "" -> recorded else -> publication_registry_artifact_hash(root) ?? foundation_tree_hash(root)
-            return (content_hash: content_hash, fingerprint: package.fingerprint)
+            return {content_hash: content_hash, fingerprint: package.fingerprint}
         }
     }
     content_hash: publication_registry_artifact_hash(root) ?? foundation_tree_hash(root)
-    (content_hash: content_hash, fingerprint: pkg_lock_compute_fingerprint(content_hash, [String]{}, ""))
+    {content_hash: content_hash, fingerprint: pkg_lock_compute_fingerprint(content_hash, [String]{}, "")}
 }
 
 // Runs this `jet` with `args` in `root`; None when it could not start.
-jet_cli_publish_self: fn(root: String, args: [String]) -[Env, Exec, Time.Wait]> (success: Bool, code: Int, stdout: String, stderr: String)? Never! {
+jet_cli_publish_self: fn(root: String, args: [String]) -[Env, Exec, Time.Wait]> {success: Bool, code: Int, stdout: String, stderr: String}? Never! {
     argv := [String]{publish_sys.executable()}
     loop arg in args -> argv.push(arg.copy())
     ran: publish_process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return None
-    Val((success: ran.success, code: ran.code, stdout: ran.output, stderr: ran.errors))
+    Val({success: ran.success, code: ran.code, stdout: ran.output, stderr: ran.errors})
 }
 
 // The removal failure of a checkout, reported before the primary failure.
@@ -245,7 +245,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     dirty: jet_cli_publish_dirty_files(root)
     if dirty.len() > 0 {
         if !force {
-            log.render(pkg_diagnostic_from_row("E2605", [(name: String, value: String)]{(name: "name", value: name), (name: "version", value: version)}, None))
+            log.render(pkg_diagnostic_from_row("E2605", [{name: String, value: String}]{{name: "name", value: name}, {name: "version", value: version}}, None))
             log.err("\n  uncommitted changes ({dirty.len()}):\n")
             loop (index, line) in dirty {
                 if index >= 10 -> break

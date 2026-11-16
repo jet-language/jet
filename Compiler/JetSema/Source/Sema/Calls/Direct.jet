@@ -1962,7 +1962,7 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
         resolved_binding = resolved
     }
     abi: sema_call_direct_target_abi(candidate, environment, program)
-    (lowered, pins) := sema_call_check_bound_arguments_owned(state, call.name, params, abi, true, resolved_binding, args, environment, program, scopes, tail_store, context, call.name_span, diagnostics) ?? {
+    {lowered, pins} := sema_call_check_bound_arguments_owned(state, call.name, params, abi, true, resolved_binding, args, environment, program, scopes, tail_store, context, call.name_span, diagnostics) ?? {
         sema_call_direct_rejected_propagation(candidate, call, root_mark, expected, environment, program, scopes, context, diagnostics)
         return None
     }

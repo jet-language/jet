@@ -944,10 +944,10 @@ histogram: fn(xs: [Float], bins: Int) -> [Int] Never! {
     out
 }
 
-describe: fn(xs: [Float]) -> (max: Float, mean: Float, median: Float, min: Float, n: Int, q1: Float, q3: Float, stdev: Float) Never! {
-    empty := (max: (Float{0.0}), mean: (Float{0.0}), median: (Float{0.0}), min: (Float{0.0}), n: 0, q1: (Float{0.0}), q3: (Float{0.0}), stdev: (Float{0.0}))
+describe: fn(xs: [Float]) -> {max: Float, mean: Float, median: Float, min: Float, n: Int, q1: Float, q3: Float, stdev: Float} Never! {
+    empty := {max: (Float{0.0}), mean: (Float{0.0}), median: (Float{0.0}), min: (Float{0.0}), n: 0, q1: (Float{0.0}), q3: (Float{0.0}), stdev: (Float{0.0})}
     if xs.len() == 0 || invalid_sample(xs) -> return empty
-    return (
+    return {
         max: max(xs) ?? (Float{0.0}),
         mean: mean(xs) ?? (Float{0.0}),
         median: median(xs) ?? (Float{0.0}),
@@ -956,7 +956,7 @@ describe: fn(xs: [Float]) -> (max: Float, mean: Float, median: Float, min: Float
         q1: quantile(xs, (Float{0.25})) ?? (Float{0.0}),
         q3: quantile(xs, (Float{0.75})) ?? (Float{0.0}),
         stdev: stdev(xs) ?? (Float{0.0}),
-    )
+    }
 }
 
 clip: fn(xs: [Float], lo: Float, hi: Float) -> [Float] Never! {

@@ -208,7 +208,7 @@ run: fn() -> Never Err! {
     linked := [Bool]{}
     if built.all(fn(ok) { ok }) {
         loop link in
-            [(arm: "O0", libraries: [o0, remaining]), (arm: "O1", libraries: [o1, remaining]), (arm: "Rust", libraries: [rust])] {
+            [{arm: "O0", libraries: [o0, remaining]}, {arm: "O1", libraries: [o1, remaining]}, {arm: "Rust", libraries: [rust]}] {
             linked.push(step(steps, out, tree, "link-{link.arm}", ["cc", "-fno-lto", driver].concat(link.libraries).concat(["-lpthread", "-ldl", "-lm", "-o", files.join(out, link.arm)])))
         }
     }

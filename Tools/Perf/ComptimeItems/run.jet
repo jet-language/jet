@@ -254,13 +254,13 @@ print_table: fn(title: String, rows: [Row], top: Int) {
 }
 
 row_json: fn(row: Row) -> Dyn {
-    fields := [(key: String, value: Dyn)]{(key: "key", value: Dyn.Text(row.key.copy())), (key: "count", value: Dyn.Int(row.count)), (key: "wall", value: Dyn.Float(row.wall)), (key: "cpu", value: Dyn.Float(row.cpu))}
-    loop (i, step) in STEPS -> fields.push((key: step.copy(), value: Dyn.Float(row.steps[i])))
+    fields := [{key: String, value: Dyn}]{{key: "key", value: Dyn.Text(row.key.copy())}, {key: "count", value: Dyn.Int(row.count)}, {key: "wall", value: Dyn.Float(row.wall)}, {key: "cpu", value: Dyn.Float(row.cpu)}}
+    loop (i, step) in STEPS -> fields.push({key: step.copy(), value: Dyn.Float(row.steps[i])})
     Dyn.Object(fields)
 }
 
 report: fn(summary: Summary) -> Report {
-    phase: if summary.phase == .Val(span) -> Dyn.Object([(key: "wall", value: Dyn.Int(span.wall)), (key: "cpu", value: Dyn.Int(span.cpu))]) else -> Dyn.Null
+    phase: if summary.phase == .Val(span) -> Dyn.Object([{key: "wall", value: Dyn.Int(span.wall)}, {key: "cpu", value: Dyn.Int(span.cpu)}]) else -> Dyn.Null
     Report{phase: phase, kinds: summary.kinds.copy(), files: summary.files.map(fn(row) { row_json(row) }), items: summary.items.map(fn(row) { row_json(row) })}
 }
 

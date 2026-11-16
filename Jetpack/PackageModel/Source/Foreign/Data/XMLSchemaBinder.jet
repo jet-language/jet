@@ -31,7 +31,7 @@ XMLContent: enum {
 // the namespace bindings in scope.
 XMLNode: struct {
     name: String
-    attrs: [(name: String, value: String)]
+    attrs: [{name: String, value: String}]
     content: [XMLContent]
     namespaces: [String:String]
 }
@@ -262,7 +262,7 @@ XMLParser: struct {
             }
             self.pos += 1
             raw_name: self.read_name()
-            raw_attrs := [(name: String, value: String)]{}
+            raw_attrs := [{name: String, value: String}]{}
             attr_names := [String]{}
             self_closing := false
             loop {
@@ -292,12 +292,12 @@ XMLParser: struct {
                     return Err(DataBindError{message: "XML attribute {attr_name} contains <"})
                 }
                 pkg_data_validate_xml_entities(value)
-                raw_attrs.push((name: attr_name, value: value))
+                raw_attrs.push({name: attr_name, value: value})
             }
             inherited: if stack.len() > 0 -> stack[stack.len() - 1].namespaces else -> pkg_data_xml_initial_namespaces()
             namespaces: pkg_data_xml_resolve_namespaces(inherited, raw_attrs)
             name: pkg_data_xml_resolve_name(raw_name, namespaces, true)
-            attrs := [(name: String, value: String)]{}
+            attrs := [{name: String, value: String}]{}
             expanded_names := [String]{}
             loop attr in raw_attrs {
                 if attr.name == "xmlns" || attr.name.starts_with("xmlns:") -> next
@@ -306,7 +306,7 @@ XMLParser: struct {
                     return Err(DataBindError{message: "XML has duplicate attribute {expanded}"})
                 }
                 expanded_names.push(expanded.copy())
-                attrs.push((name: expanded, value: attr.value))
+                attrs.push({name: expanded, value: attr.value})
             }
             node: XMLNode{name: name, attrs: attrs, content: [XMLContent]{}, namespaces: namespaces}
             if self_closing -> root = pkg_data_xml_attach(stack, root, node) else {
@@ -337,7 +337,7 @@ pkg_data_xml_initial_namespaces: fn() -> [String:String] Never! {
 }
 
 // The namespace bindings in scope after an element's `xmlns` attributes.
-pkg_data_xml_resolve_namespaces: fn(inherited: [String:String], attrs: [(name: String, value: String)]) -> [String:String] DataBindError! {
+pkg_data_xml_resolve_namespaces: fn(inherited: [String:String], attrs: [{name: String, value: String}]) -> [String:String] DataBindError! {
     namespaces := inherited
     loop attr in attrs {
         if !attr.name.starts_with("xmlns:") {

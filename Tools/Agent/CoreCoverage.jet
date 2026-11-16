@@ -603,7 +603,7 @@ result_type: fn(source: [U8], tokens: [Token], start: Int, unit: String, local_t
     first: token(tokens, at)
     if {
         is_identifier(first) -> at = after_generics(tokens, chain(tokens, at).end)
-        first == "[" || first == "(" -> at = compound_end(tokens, at)
+        first == "[" || first == "(" || first == "{{" -> at = compound_end(tokens, at)
         else -> return ""
     }
     if token(tokens, at) == "?" -> at += 1
@@ -635,6 +635,7 @@ compound_end: fn(tokens: [Token], start: Int) -> Int Never! {
         if {
             value == "[" -> closers.push("]")
             value == "(" -> closers.push(")")
+            value == "{{" -> closers.push("}}")
             value == "<" -> closers.push(">")
             closers.len() > 0 && value == closers[closers.len() - 1] -> _ := closers.pop()
         }
@@ -1889,8 +1890,8 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 }
 
 #Test("return types preserve builtin, prelude and compound spellings") {
-    found: public_functions("Core/demo/demo.jet", "flag: fn() -> Bool Never! {{ true }}\n    count: fn() -> Int Never! {{ 1 }}\n    text: fn() -> String Never! {{ \"\" }}\n    number: fn() -> Float Never! {{ Float{{1.0}} }}\n    items: fn() -> [String] Never! {{ [] }}\n    lookup: fn() -> [String: Int] Never! {{ {{}} }}\n    maybe: fn() -> Int? Never! {{ None }}\n    limits: fn() -> Duration Never! {{ 1ms }}\n    pair: fn() -> (name: String, n: Int) Never! {{ (\"\", 1) }}\n  ")
-    assert_eq(found.map(fn(row) { row.return_type.copy() }), [String]{"Bool", "Int", "String", "Float", "[String]", "[String: Int]", "Int?", "Duration", "(name: String, n: Int)"})
+    found: public_functions("Core/demo/demo.jet", "flag: fn() -> Bool Never! {{ true }}\n    count: fn() -> Int Never! {{ 1 }}\n    text: fn() -> String Never! {{ \"\" }}\n    number: fn() -> Float Never! {{ Float{{1.0}} }}\n    items: fn() -> [String] Never! {{ [] }}\n    lookup: fn() -> [String: Int] Never! {{ {{}} }}\n    maybe: fn() -> Int? Never! {{ None }}\n    limits: fn() -> Duration Never! {{ 1ms }}\n    pair: fn() -> {{name: String, n: Int}} Never! {{ {{name: \"\", n: 1}} }}\n  ")
+    assert_eq(found.map(fn(row) { row.return_type.copy() }), [String]{"Bool", "Int", "String", "Float", "[String]", "[String: Int]", "Int?", "Duration", "{{name: String, n: Int}}"})
 }
 
 #Test("calls resolve fully qualified, alias rows, member imports, use blocks and generics") {

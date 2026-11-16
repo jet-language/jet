@@ -80,11 +80,11 @@ ExplainReport: struct {
         tree: report.to_tree()
         if tree == {
             .Object(fields) -> {
-                extended := [(key: String, value: Dyn)]{}
+                extended := [{key: String, value: Dyn}]{}
                 loop pair in fields {
                     if pair.key != "kind" -> extended.push(pair)
                 }
-                extended.push((key: "kind", value: Dyn.Text(self.kind.label())))
+                extended.push({key: "kind", value: Dyn.Text(self.kind.label())})
                 Dyn.Object(extended)
             }
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> tree
@@ -907,11 +907,11 @@ store_explain_lock_record_matches_entry: fn(record: SemanticRecord, entry: Store
 }
 
 store_explain_compare_provider_identity: fn(source: ProviderFacts, locked: ProviderFacts, reports: &[ExplainReport]) Never! {
-    fields: [(field: String, left: String, right: String)]{
-        (field: "provider", left: source.provider, right: locked.provider),
-        (field: "reference", left: source.reference, right: locked.reference),
-        (field: "target", left: source.target, right: locked.target),
-        (field: "resolved_source", left: source.resolved_source, right: locked.resolved_source),
+    fields: [{field: String, left: String, right: String}]{
+        {field: "provider", left: source.provider, right: locked.provider},
+        {field: "reference", left: source.reference, right: locked.reference},
+        {field: "target", left: source.target, right: locked.target},
+        {field: "resolved_source", left: source.resolved_source, right: locked.resolved_source},
     }
     loop item in fields {
         if item.left != "" && item.right != "" && item.left != item.right {

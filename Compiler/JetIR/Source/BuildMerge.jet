@@ -48,11 +48,11 @@ IRMergeSide: struct {
 // (kind, row) pairs `uses[use_starts[local]..<use_starts[local + 1]]`
 // (kinds: IR_MERGE_USE_*).
 IRMergePrep: struct {
-    functions: [(key: String, local: Int)]
-    types: [(key: String, local: Int)]
-    names: [(key: String, local: Int)]
-    texts: [(key: String, local: Int)]
-    constants: [(key: String, local: Int)]
+    functions: [{key: String, local: Int}]
+    types: [{key: String, local: Int}]
+    names: [{key: String, local: Int}]
+    texts: [{key: String, local: Int}]
+    constants: [{key: String, local: Int}]
     use_starts: [Int]
     uses: [Int]
 }
@@ -373,11 +373,11 @@ ir_merge_new: fn(parts: [IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRo
     if preps.len() != parts.len() {
         panic("the merge has {preps.len()} part preparations for {parts.len()} parts")
     }
-    functions := [[(key: String, local: Int)]]{}
-    types := [[(key: String, local: Int)]]{}
-    names := [[(key: String, local: Int)]]{}
-    texts := [[(key: String, local: Int)]]{}
-    constants := [[(key: String, local: Int)]]{}
+    functions := [[{key: String, local: Int}]]{}
+    types := [[{key: String, local: Int}]]{}
+    names := [[{key: String, local: Int}]]{}
+    texts := [[{key: String, local: Int}]]{}
+    constants := [[{key: String, local: Int}]]{}
     use_starts := [[Int]]{}
     uses := [[Int]]{}
     // Popped from the last part down, then put back in part order.
@@ -403,14 +403,14 @@ ir_merge_new: fn(parts: [IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRo
     if {
         ir_merge_row_count(parts) < IR_MERGE_MIN_ROWS_FOR_THREADS -> {
             ir_merge_group(functions, function_group, function_keys)
-            grouped.push(ir_merge_grouped(types, [[(key: String, local: Int)]]{}, type_counts))
-            grouped.push(ir_merge_grouped(names, [[(key: String, local: Int)]]{}, name_counts))
+            grouped.push(ir_merge_grouped(types, [[{key: String, local: Int}]]{}, type_counts))
+            grouped.push(ir_merge_grouped(names, [[{key: String, local: Int}]]{}, name_counts))
             grouped.push(ir_merge_grouped(texts, constants, data_counts))
         }
         else -> {
             task.group ir_merge_groups {
-                typed: task ir_merge_grouped(types, [[(key: String, local: Int)]]{}, type_counts)
-                named: task ir_merge_grouped(names, [[(key: String, local: Int)]]{}, name_counts)
+                typed: task ir_merge_grouped(types, [[{key: String, local: Int}]]{}, type_counts)
+                named: task ir_merge_grouped(names, [[{key: String, local: Int}]]{}, name_counts)
                 data: task ir_merge_grouped(texts, constants, data_counts)
                 ir_merge_group(functions, function_group, function_keys)
                 grouped.push(typed.join() ?? panic(compiler_threads_failure_text(err)))
@@ -439,8 +439,8 @@ ir_merge_new: fn(parts: [IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRo
 // value is built at each read (-1) shares no row, so its run leaves it out:
 // name_rows_sorted keeps rows >= 0) and its functions' uses (ir_merge_uses).
 ir_merge_prepare: fn(m: IRModule) -> IRMergePrep Never! {
-    functions := [(key: String, local: Int)]{}
-    loop (local, f) in m.functions -> functions.push((key: f.key.copy(), local: local))
+    functions := [{key: String, local: Int}]{}
+    loop (local, f) in m.functions -> functions.push({key: f.key.copy(), local: local})
     functions.sort()
     seen := IRMergeSeen{types: ir_merge_unset(m.types.len()), names: ir_merge_unset(m.names.len()), data: ir_merge_unset(m.data.len()), functions: ir_merge_unset(m.functions.len())}
     use_starts := [Int]{}
@@ -501,7 +501,7 @@ IRMergeGroups: struct {
     texts: Int
 }
 
-ir_merge_grouped: fn(runs: &&[[(key: String, local: Int)]], later: &&[[(key: String, local: Int)]], counts: &&[Int]) -> IRMergeGroups Never! {
+ir_merge_grouped: fn(runs: &&[[{key: String, local: Int}]], later: &&[[{key: String, local: Int}]], counts: &&[Int]) -> IRMergeGroups Never! {
     leading := runs.move()
     trailing := later.move()
     grouped := [[Int]]{}
@@ -525,7 +525,7 @@ ir_merge_unset: fn(count: Int) -> [Int] Never! {
 // that key. A row is in one group: every key names a row its module made for
 // it (IR.jet ir_intern_*, BuildStatic), so no data row has a text key and a
 // constant key.
-ir_merge_group: fn(runs: [[(key: String, local: Int)]], groups: &[[Int]], keys: &[String]) Never! {
+ir_merge_group: fn(runs: [[{key: String, local: Int}]], groups: &[[Int]], keys: &[String]) Never! {
     heads := ir_merge_unset(runs.len())
     loop part in 0..<runs.len() -> heads[part] = 0
     loop {

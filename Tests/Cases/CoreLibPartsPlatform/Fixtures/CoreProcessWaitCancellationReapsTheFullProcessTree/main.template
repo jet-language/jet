@@ -6,7 +6,7 @@ use {
 }
 
 run: fn() {
-    (ready_tx, ready_rx): channel<Int>()
+    {ready_tx, ready_rx}: channel<Int>()
     worker: task {
         child: process.cmd(["{work}/cancel-tree.sh"]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn failed")
         ready_tx.send(1) ?? panic("ready")

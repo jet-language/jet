@@ -883,13 +883,10 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
         // Shape arguments use the measure spelling.
         .Measure(measure) -> { jfmt_write(f, measure_expression(measure)) }
         .TraitObject(bounds) -> { jfmt_write(f, bounds.join(" + ")) }
-        // A record type keeps the delimiters it is written with: `{…}` or
-        // the paren form `(…)`.
+        // A record type is written in braces, `{min: Int, max: Int}`; a
+        // positional tuple type keeps its parens.
         .Tuple(fields) -> {
-            braced := false
-            if jfmt_source_list_at(f, source, JFMT_DELIM_BRACE) == .Val(brace) {
-                braced = if jfmt_source_list_at(f, source, JFMT_DELIM_PAREN) == .Val(paren) -> brace.span.start < paren.span.start else -> true
-            }
+            braced: fields.len() == 0 || fields[0].name != ""
             jfmt_write(f, if braced -> "{{" else -> "(")
             list_source: jfmt_source_list_at(f, source, if braced -> JFMT_DELIM_BRACE else -> JFMT_DELIM_PAREN)
             item_spans: jfmt_list_item_spans(f, list_source)
@@ -911,8 +908,10 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                     }
                     at = Val(Span{start: written[index].end, end: written[index].end})
                 }
-                jfmt_write(f, fields[slot].name)
-                jfmt_write(f, ": ")
+                if braced {
+                    jfmt_write(f, fields[slot].name)
+                    jfmt_write(f, ": ")
+                }
                 jfmt_fmt_type_at(f, fields[slot].ty, at)
                 jfmt_comma_after(f, multiline, span.end)
             }
@@ -1459,8 +1458,9 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_comma_end(f, multiline, source)
             jfmt_write(f, "]")
         }
+        // A record value is written in braces, `{min: 1, max: 9}`.
         .TupleLit(fields, span, _, _) -> {
-            jfmt_write(f, "(")
+            jfmt_write(f, "{{")
             if jfmt_source_span_multiline(f, span) {
                 jfmt_newline(f)
                 f.indent += 1
@@ -1491,7 +1491,7 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
                     jfmt_fmt_expr(f, field.value, JFMT_PREC_OR_FALLBACK)
                 }
             }
-            jfmt_write(f, ")")
+            jfmt_write(f, "}}")
         }
         // An empty map is spelled `[]`, like an empty list.
         .MapLit(entries, span, _) -> {

@@ -718,7 +718,7 @@ decode_bytes<T: Codable>(bytes: [U8],
     -> T [FieldError]!
 root(document: Dyn) -> Dyn XMLError!
 expanded_name(node: Dyn)
-    -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLError!
+    -> {raw: String, prefix: String?, local: String, namespace_uri: String?} XMLError!
 attribute(element: Dyn, name: String) -> String? XMLError!
 content(element: Dyn) -> [Dyn] XMLError!
 ```

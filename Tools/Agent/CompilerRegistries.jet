@@ -871,26 +871,26 @@ specification: fn(id: String) -> Spec? Never! {
         // the fragment (FRAGMENT_HOST calls its entry), or for a codec
         // fixture generates the driver around its export.
         plain: if name == {
-            "Alloc" -> Val((call: Val("alloc_tests"), witness: FRAGMENT_HOST, expected: "alloc tests: ok\n"))
-            "Collections" -> Val((call: Val("collections_tests"), witness: FRAGMENT_HOST, expected: ""))
-            "Scan" -> Val((call: Val("scan_tests"), witness: FRAGMENT_HOST, expected: ""))
-            "Text" -> Val((call: Val("text_tests"), witness: FRAGMENT_HOST, expected: ""))
-            "Unicode" -> Val((call: Val("unicode_tests"), witness: FRAGMENT_HOST, expected: ""))
-            "Secret" -> Val((call: Val("secret_tests"), witness: FRAGMENT_HOST, expected: "secret tests: ok\n"))
-            "FilesWalk" -> Val((call: Val("files_walk_tests"), witness: FRAGMENT_HOST, expected: ""))
-            "HostParallelism" -> Val((call: Val("host_parallelism_tests"), witness: FRAGMENT_HOST, expected: ""))
-            "TestSuite" -> Val((call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"))
-            "Parallel" -> Val((call: None, witness: "{RT}parallel-fixture.c", expected: ""))
-            "Scheduler" -> Val((call: None, witness: "{RT}scheduler-fixture.c", expected: ""))
-            "World" | "Sentry" | "TestScope" | "AllocationPolicy" -> Val((call: None, witness: "{RT}world-sentry-fixture.c", expected: ""))
-            "Channel" -> Val((call: None, witness: "{RT}channel-fixture.c", expected: ""))
-            "Stm" | "Sync" | "Observe" -> Val((call: None, witness: "{RT}sync-fixture.c", expected: sync_expected(name)))
-            "SharedPublication" -> Val((call: None, witness: "{RT}shared-publication-fixture.c", expected: "Shared World race/loser once/register once/reset owner only ok\nShared Process race/loser once/no World registration ok\n"))
-            "SharedThread" -> Val((call: None, witness: "{RT}thread-fixture.c", expected: ""))
-            "CollectionsStop" -> Val((call: None, witness: "{RT}collections-stop.c", expected: collections_stop_expected()))
-            "ProcessExecution" | "TerminalProcess" -> Val((call: None, witness: "{RT}{name}Witness.c", expected: ""))
-            "CodecCSV" | "CodecEnv" | "DynCodec" | "CompilerFileLeaves" -> Val((call: None, witness: "", expected: ""))
-            else -> if CRYPTO.contains(name) -> Val((call: None, witness: "{RT}{name}Witness.c", expected: "")) else -> None
+            "Alloc" -> Val({call: Val("alloc_tests"), witness: FRAGMENT_HOST, expected: "alloc tests: ok\n"})
+            "Collections" -> Val({call: Val("collections_tests"), witness: FRAGMENT_HOST, expected: ""})
+            "Scan" -> Val({call: Val("scan_tests"), witness: FRAGMENT_HOST, expected: ""})
+            "Text" -> Val({call: Val("text_tests"), witness: FRAGMENT_HOST, expected: ""})
+            "Unicode" -> Val({call: Val("unicode_tests"), witness: FRAGMENT_HOST, expected: ""})
+            "Secret" -> Val({call: Val("secret_tests"), witness: FRAGMENT_HOST, expected: "secret tests: ok\n"})
+            "FilesWalk" -> Val({call: Val("files_walk_tests"), witness: FRAGMENT_HOST, expected: ""})
+            "HostParallelism" -> Val({call: Val("host_parallelism_tests"), witness: FRAGMENT_HOST, expected: ""})
+            "TestSuite" -> Val({call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"})
+            "Parallel" -> Val({call: None, witness: "{RT}parallel-fixture.c", expected: ""})
+            "Scheduler" -> Val({call: None, witness: "{RT}scheduler-fixture.c", expected: ""})
+            "World" | "Sentry" | "TestScope" | "AllocationPolicy" -> Val({call: None, witness: "{RT}world-sentry-fixture.c", expected: ""})
+            "Channel" -> Val({call: None, witness: "{RT}channel-fixture.c", expected: ""})
+            "Stm" | "Sync" | "Observe" -> Val({call: None, witness: "{RT}sync-fixture.c", expected: sync_expected(name)})
+            "SharedPublication" -> Val({call: None, witness: "{RT}shared-publication-fixture.c", expected: "Shared World race/loser once/register once/reset owner only ok\nShared Process race/loser once/no World registration ok\n"})
+            "SharedThread" -> Val({call: None, witness: "{RT}thread-fixture.c", expected: ""})
+            "CollectionsStop" -> Val({call: None, witness: "{RT}collections-stop.c", expected: collections_stop_expected()})
+            "ProcessExecution" | "TerminalProcess" -> Val({call: None, witness: "{RT}{name}Witness.c", expected: ""})
+            "CodecCSV" | "CodecEnv" | "DynCodec" | "CompilerFileLeaves" -> Val({call: None, witness: "", expected: ""})
+            else -> if CRYPTO.contains(name) -> Val({call: None, witness: "{RT}{name}Witness.c", expected: ""}) else -> None
         }
         if plain == .Val(table) {
             found := spec("plain", name, RUNTIME_UNIT_TOOL)
@@ -1472,7 +1472,7 @@ stage_toolchain: fn(jet: String, runtime: Runtime, out: String) -[FS]> String Pr
     staged
 }
 
-run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime, adapter: String) -[Env, Exec, FS, IO, Time, Time.Wait]> (ran: Ran, evidence: [Dyn]) Problem! {
+run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime, adapter: String) -[Env, Exec, FS, IO, Time, Time.Wait]> {ran: Ran, evidence: [Dyn]} Problem! {
     id: text_field(entry, "id")
     found: specification(transport_key(id)) ?? return Err(problem("unknown transport {id}"))
     if found.blocked != "" -> return Err(problem(found.blocked))
@@ -1487,9 +1487,9 @@ run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtim
     lane := Lane{id: id.copy(), out: out.copy(), repo: repo.copy(), log_dir: log_dir.copy(), jet: staged, runtime_dir: runtime.dir.copy(), object: runtime.object.copy(), evidence: [Dyn]{}}
     if drive(lane, found) == {
         .Ok(_) -> {}
-        .Err(failure) -> return (ran: Ran{code: 1, signal: None, timed_out: false, stdout: "", stderr: "{failure.message}\n"}, evidence: lane.evidence.copy())
+        .Err(failure) -> return {ran: Ran{code: 1, signal: None, timed_out: false, stdout: "", stderr: "{failure.message}\n"}, evidence: lane.evidence.copy()}
     }
-    (ran: Ran{code: 0, signal: None, timed_out: false, stdout: text_field(entry, "stdout"), stderr: ""}, evidence: lane.evidence.copy())
+    {ran: Ran{code: 0, signal: None, timed_out: false, stdout: text_field(entry, "stdout"), stderr: ""}, evidence: lane.evidence.copy()}
 }
 
 // The transport body: the native build or library, the C driver, and the

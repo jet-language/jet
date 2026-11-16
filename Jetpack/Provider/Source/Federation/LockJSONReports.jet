@@ -24,9 +24,9 @@ impl ProviderFactReport {
         packages := [NuGetLockPackage]{}
         dependency_values := [String]{}
         losses := [String]{}
-        typed_projection := [(key: String, value: String)]{}
+        typed_projection := [{key: String, value: String}]{}
         target_frameworks := [String]{}
-        library_hashes := [(identity: String, hash: String)]{}
+        library_hashes := [{identity: String, hash: String}]{}
         if object.get("dependencies") == {
             .Val(raw_dependencies) -> {
                 if pkg_json_object(raw_dependencies) == {
@@ -51,13 +51,13 @@ impl ProviderFactReport {
                                 }
                                 if entry.get("requested") == {
                                     .Val(raw_requested) -> {
-                                        typed_projection.push((key: "provider.nuget.request.{framework}.{name}", value: pkg_json_render(raw_requested)))
+                                        typed_projection.push({key: "provider.nuget.request.{framework}.{name}", value: pkg_json_render(raw_requested)})
                                     }
                                     .None -> {}
                                 }
                                 if provider_graph_either(entry.get("resolved"), entry.get("version")) == {
                                     .Val(raw_resolved) -> {
-                                        typed_projection.push((key: "provider.nuget.resolution.{framework}.{name}", value: pkg_json_render(raw_resolved)))
+                                        typed_projection.push({key: "provider.nuget.resolution.{framework}.{name}", value: pkg_json_render(raw_resolved)})
                                     }
                                     .None -> {}
                                 }
@@ -96,7 +96,7 @@ impl ProviderFactReport {
                                 .Val(record) -> {
                                     if provider_graph_json_first_string(record, [String]{"sha512", "contentHash"}) == {
                                         .Val(hash) -> {
-                                            library_hashes.push((identity: identity, hash: hash))
+                                            library_hashes.push({identity: identity, hash: hash})
                                         }
                                         .None -> {}
                                     }
@@ -144,7 +144,7 @@ impl ProviderFactReport {
                                 }
                                 loop dependency in dependencies.keys().to_list() {
                                     resolved: dependencies[dependency]
-                                    typed_projection.push((key: "provider.nuget.target.{framework}.{identity}.{dependency}", value: pkg_json_render(resolved)))
+                                    typed_projection.push({key: "provider.nuget.target.{framework}.{identity}.{dependency}", value: pkg_json_render(resolved)})
                                     version := pkg_json_text(resolved) ?? ""
                                     if pkg_json_object(resolved) == {
                                         .Val(fields) -> {
@@ -183,7 +183,7 @@ impl ProviderFactReport {
                                     losses.push("NuGet project dependency `{framework}[{index}]` is not a string")
                                     next
                                 }
-                                typed_projection.push((key: "provider.nuget.project.request.{framework}.{index}", value: pkg_json_render(requests[index])))
+                                typed_projection.push({key: "provider.nuget.project.request.{framework}.{index}", value: pkg_json_render(requests[index])})
                             }
                         }
                     }

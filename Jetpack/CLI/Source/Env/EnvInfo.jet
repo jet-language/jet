@@ -78,11 +78,11 @@ cli_env_info_service_summary: fn(service: DevServicePlan) -> String Never! {
         }
         facts.push("restart={value}")
     }
-    lists: [(label: String, values: [String])]{
-        (label: "watch", values: service.watch),
-        (label: "after", values: service.after),
-        (label: "before_start", values: service.before_start),
-        (label: "sockets", values: service.sockets),
+    lists: [{label: String, values: [String]}]{
+        {label: "watch", values: service.watch},
+        {label: "after", values: service.after},
+        {label: "before_start", values: service.before_start},
+        {label: "sockets", values: service.sockets},
     }
     loop list in lists {
         if list.values.len() > 0 -> facts.push("{list.label}={list.values.join(",")}")
