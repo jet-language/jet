@@ -9,7 +9,7 @@
 use {
     jet_lexer.[lex_generated]
     jet_parser.[parse_lexed_with_source, parser_line_starts]
-    jet_ir.[IRRecordSchema, IR_RECORD_SCHEMAS, IR_GENERATED_RECORDS, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_handle_civil_time_route, ir_handle_precise_route, ir_handle_math_route, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
+    jet_ir.[IRRecordSchema, IR_RECORD_SCHEMAS, IR_GENERATED_RECORDS, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_handle_civil_time_route, ir_handle_math_route, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, AccessConvention, CoreCallSignatureRequest, CoreCallSymbol, Type, TypeTupleField, core_call, core_call_coverage_contains, core_sig_fixed, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
     jet_eval.[jet_eval_compiler_value_method_record]
 }
@@ -433,7 +433,7 @@ receiver_row: fn(id: String, owner: String, member: String, symbol: String, targ
     if symbol != "" && ir_route(symbol, route_files) == .Val(route) {
         return SurfaceRow{id: id.copy(), kind: "receiver_method", owner: owner.copy(), member: member.copy(), route: Val(route.copy()), problem: "", declared_aot: declared_aot, result_type: "", result_class: "unknown"}
     }
-    if ir_handle_civil_time_route(owner, member) != None || ir_handle_precise_route(owner, member) != None || ir_handle_math_route(owner, member) != None {
+    if ir_handle_civil_time_route(owner, member) != None || ir_handle_math_route(owner, member) != None {
         return SurfaceRow{id: id.copy(), kind: "receiver_method", owner: owner.copy(), member: member.copy(), route: Val(Route{kind: "ir-handle-route", path: ROUTE_HANDLE_PATH, line: file_line(route_files, ROUTE_HANDLE_PATH, "\"{member}\""), symbol: key.copy()}), problem: "", declared_aot: declared_aot, result_type: "", result_class: "unknown"}
     }
     shown: if symbol == "" -> "no registry symbol" else -> "registry symbol `{symbol}`"
