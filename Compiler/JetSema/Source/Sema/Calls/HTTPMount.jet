@@ -420,10 +420,13 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
     returned: declaration.return_type ?? Type.Named{name: "Unit"}
     declared_return: sema_type_resolve_declared(graph, returned, service_module)
     raised_return: sema_type_resolve_declared(graph, returned, service_module)
+    // A method that can't fail (`T Never!`) is called as one that answers
+    // `T`: it has no error to encode.
+    answer: if declared_return == .Result(ok, .Named(never)) && never == "Never" -> ok else -> declared_return
     lowered: if {
-        declared_return == .Result(ok, failure) -> sema_app_remote_fallible(remote, hidden, wire, ok, failure, raised_return, method_span)
-        declared_return == (Type.Named{name: "Unit"}) -> sema_app_remote_method_call(remote, SEMA_APP_REMOTE_WRITE_VALUE, [Type]{}, wire, method_span)
-        else -> sema_app_remote_method_call(remote, SEMA_APP_REMOTE_CALL_VALUE, [Type]{declared_return}, wire, method_span)
+        answer == .Result(ok, failure) -> sema_app_remote_fallible(remote, hidden, wire, ok, failure, raised_return, method_span)
+        answer == (Type.Named{name: "Unit"}) -> sema_app_remote_method_call(remote, SEMA_APP_REMOTE_WRITE_VALUE, [Type]{}, wire, method_span)
+        else -> sema_app_remote_method_call(remote, SEMA_APP_REMOTE_CALL_VALUE, [Type]{answer}, wire, method_span)
     }
     // The lowered call keeps its Result carrier: the remote call is the call
     // root, which its consumer (`??`, `?`) reads or auto-propagates.
