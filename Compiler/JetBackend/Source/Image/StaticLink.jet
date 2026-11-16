@@ -56,7 +56,7 @@
 // the input bytes when needed, and only live sections and global symbols get
 // rows. See "In-process linking" in Docs/research/jet-backend-design-2026-10-01.md.
 use {
-    jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_count, name_find, name_index, name_intern, name_table, name_table_sized, sha256_bytes]
+    jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_count, name_find, name_index, name_intern, name_table, name_table_sized, sha256_bytes]
     link_hex: core.encoding.hex
 }
 
@@ -3153,9 +3153,105 @@ link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int, lines: &&[U8
 
 // The CRC-32 of the side debug file `side` that debuggers check a
 // `.gnu_debuglink` by, at the image's file offset `at`
-// (link_image_note_section).
-link_debug_link_crc: fn(image: &[U8], at: Int, side: [U8]) Never! {
-    link_put32(image, at, link_hex.crc32(side))
+// (link_image_note_section), taken on `threads` (link_crc32).
+link_debug_link_crc: fn(image: &[U8], at: Int, side: [U8], threads: CompilerThreads) Never! {
+    link_put32(image, at, link_crc32(side, threads))
+}
+
+// A CRC-32 thread is admitted for at least this many bytes, tens of
+// milliseconds of table lookups.
+LINK_CRC_MIN_BYTES_PER_THREAD: 8388608
+
+// The reflected CRC-32 polynomial (core.encoding.hex crc32).
+LINK_CRC_POLY: 0xEDB88320
+
+// The CRC-32 of `bytes`, the value core.encoding.hex crc32 answers, on the
+// threads its length admits: each thread takes one consecutive range and
+// the ranges' CRCs combine in order (link_crc32_combine), so every thread
+// count answers the same value. Release side debug files run to tens of
+// megabytes, too long for one thread at a link's tail.
+link_crc32: fn(bytes: [U8], threads: CompilerThreads) -> Int Never! {
+    workers: compiler_threads_admit(threads, bytes.len(), bytes.len(), LINK_CRC_MIN_BYTES_PER_THREAD, 0, bytes.len())
+    if workers <= 1 -> return link_hex.crc32(bytes)
+    crcs: link_crc32_parts(bytes, workers, 0)
+    crc := crcs[0]
+    loop part in 1..<workers {
+        length: link_crc32_bound(bytes.len(), workers, part + 1) - link_crc32_bound(bytes.len(), workers, part)
+        crc = link_crc32_combine(crc, crcs[part], length)
+    }
+    crc
+}
+
+// Where part `part` of `workers` equal consecutive ranges of `length`
+// bytes starts.
+link_crc32_bound: fn(length: Int, workers: Int, part: Int) -> Int Never! {
+    (length * part).div_euclid(workers)
+}
+
+// The CRCs of parts `part..<workers` of `bytes`, in order: one task per part
+// and the last part on this thread, each reading `bytes` in place.
+link_crc32_parts: fn(bytes: [U8], workers: Int, part: Int) -> [Int] Never! {
+    if part == workers - 1 -> return [Int]{link_crc32_range(bytes, workers, part)}
+    crcs := [Int]{}
+    task.group link_crc32_threads {
+        head: task link_crc32_range(bytes, workers, part)
+        rest: link_crc32_parts(bytes, workers, part + 1)
+        crcs.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop crc in rest -> crcs.push(crc)
+    }
+    crcs
+}
+
+// The CRC-32 of part `part` of `workers` of `bytes`.
+link_crc32_range: fn(bytes: [U8], workers: Int, part: Int) -> Int Never! {
+    link_hex.crc32(bytes[link_crc32_bound(bytes.len(), workers, part)..<link_crc32_bound(bytes.len(), workers, part + 1)])
+}
+
+// The CRC-32 of A then B from A's CRC `first`, B's CRC `second` and B's
+// length `length` (zlib crc32_combine): `first` moved past `length` bytes,
+// a product with x^(8·length) modulo the polynomial, then `second` added.
+link_crc32_combine: fn(first: Int, second: Int, length: Int) -> Int Never! {
+    // x^1, reflected: bit 31 is x^0.
+    power := 1073741824
+    loop _ in 0..<3 -> power = link_crc32_multiply(power, power)
+    shift := 2147483648
+    count := length
+    loop count > 0 {
+        if count.bit_and(1) != 0 -> shift = link_crc32_multiply(power, shift)
+        power = link_crc32_multiply(power, power)
+        count = count >> 1
+    }
+    link_crc32_multiply(shift, first).bit_xor(second)
+}
+
+// The product of the reflected polynomials `a` and `b` modulo the CRC-32
+// polynomial.
+link_crc32_multiply: fn(a: Int, b: Int) -> Int Never! {
+    product := 0
+    factor := b
+    bit := 2147483648
+    loop bit > 0 {
+        if a.bit_and(bit) != 0 -> product = product.bit_xor(factor)
+        factor = if factor.bit_and(1) != 0 -> (factor >> 1).bit_xor(LINK_CRC_POLY) else -> factor >> 1
+        bit = bit >> 1
+    }
+    product
+}
+
+#Test("the side file CRC-32 is the same on any number of threads") {
+    bytes := [U8]{}
+    loop i in 0..<(3 * LINK_CRC_MIN_BYTES_PER_THREAD + 4099) {
+        bytes.push(U8{(i * (i + 3) * 31 + 7) % 256})
+    }
+    one: link_hex.crc32(bytes)
+    assert(link_crc32(bytes, compiler_threads_single()) == one)
+    assert(link_crc32(bytes, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}) == one)
+    whole: link_hex.crc32(bytes[0..<4099])
+    assert(link_crc32_combine(link_hex.crc32(bytes[0..<1]), link_hex.crc32(bytes[1..<4099]), 4098) == whole)
+    assert(link_crc32_combine(link_hex.crc32(bytes[0..<1000]), link_hex.crc32(bytes[1000..<4099]), 3099) == whole)
+    assert(link_crc32_combine(link_hex.crc32(bytes[0..<4098]), link_hex.crc32(bytes[4098..<4099]), 1) == whole)
+    assert(link_crc32_combine(whole, link_hex.crc32([U8]{}), 0) == whole)
+    assert(link_crc32_combine(0, whole, 4099) == whole)
 }
 
 // The linked `.debug_jetline` a split image keeps: its program reads
@@ -3559,7 +3655,7 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
         crc: link_image_note_section(image, layout, c.base, lines.move(), name)
         link_write_code(c, image, layout, emitted.pieces)
         build_id = link_build_id(image, debug_file, layout.note_at - c.base)
-        link_debug_link_crc(image, crc, debug_file)
+        link_debug_link_crc(image, crc, debug_file, threads)
     } else {
         link_write_sections(c, image, layout, debug, emitted.pieces, false)
         link_write_code(c, image, layout, emitted.pieces)
