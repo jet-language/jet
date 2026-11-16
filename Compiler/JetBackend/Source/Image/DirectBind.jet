@@ -64,12 +64,14 @@ link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectMod
     if main_row < 0 -> return false
     // The object's `.text`: each function on its alignment, in order.
     offsets := [Int]{}
+    sizes := [Int]{}
     text_size := 0
     text_align := X64_FUNCTION_ALIGN
     loop function in functions {
         if function.align > text_align -> text_align = function.align
         loop text_size % function.align != 0 -> text_size += 1
         offsets.push(text_size)
+        sizes.push(function.code.len())
         text_size += function.code.len()
     }
     if !x64_fits_i32(text_size) -> return false
@@ -134,7 +136,7 @@ link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectMod
     // A loaded section of no bytes still moves what follows to its
     // alignment; the object route lays it out.
     if (data_live && data.len() == 0) || (rodata_live && rodata.len() == 0) -> return false
-    eh: dwarf_eh_frame(functions, debug, offsets, X64DwarfSymbols{text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS, functions: [Int]{}})
+    eh: dwarf_eh_frame(debug, offsets, sizes, X64DwarfSymbols{text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS, functions: [Int]{}})
     frames: link_image_defines(c, view, "__register_frame_info")
     startup: link_bind_startup(frames)
     // link_bind_layout's layout: the program header table, `.rodata` and
