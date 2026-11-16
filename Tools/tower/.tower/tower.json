@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108494,
+    "rev": 108500,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102593,12 +102593,12 @@
         },
         {
           "n": 3,
-          "text": "Under the ratified D-PRIM-ANY1 option: member arms over an Any accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reaches else. A trait or Any value holding a view of a local, returned from its function, fails with the provenance diagnostic. Proof: cases rows plus a UI snapshot for the escape (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g6, q1). The same spelling holds over union and trait-value subjects. It separates two instances of one generic: over Box<Int> | Box<String>, the arms are .Box<Int>(b) and .Box<String>(b) (qualified: .geo.Box<Int>(b)). The bare .Box(b) is E0305 'names more than one member' and offers both arms, and a table of both arms needs no else (review 9 probes f01-f01d).",
+          "text": "Under the ratified D-PRIM-ANY1 option: member arms over an Any accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reaches else. A trait or Any value holding a view of a local, returned from its function, fails with the provenance diagnostic. Proof: cases rows plus a UI snapshot for the escape (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g6, q1). The same spelling holds over union and trait-value subjects. It separates two instances of one generic: over Box<Int> | Box<String>, the arms are .Box<Int>(b) and .Box<String>(b) (qualified: .geo.Box<Int>(b)). The bare .Box(b) is E0305 'names more than one member' and offers both arms, and a table of both arms needs no else (review 9 probes f01-f01d). Over a union with one instance of a generic, Int \\| Box<Int>, the bare .Box(b) names that instance, whether Box is local or imported; today both are E0305 'doesn't belong' (v05; k04 in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes/fm). Over a trait value a generic arm always spells its arguments. In an arm, .Name< opens type arguments; as an expression it would be a direction-changing chain, E0333 (t04).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T07:50:00.532Z"
+          "at": "2026-11-16T08:07:58.823Z"
         },
         {
           "n": 4,
@@ -102611,12 +102611,12 @@
         },
         {
           "n": 5,
-          "text": "If D-PRIM-ANY1 adopts C: an arm over a union, trait value or Any resolves by type position first, then by member name when type position names nothing. Every member has an arm, so a package's own Point is .Point(p) beside geo2.Point. .Point(p) names one type throughout a file. o7's fallback still works and v03 stays E0305. The E0641 exemption for same-leaf members (Sema/Coverage.jet's same-name skip) is removed, so an else over a later-added member is E0641 (a04b). E0307's fix names each member's arm (f06, with #6839 c52). Proof: cases rows for o7, the package's own member's arm and the generic arms; UI snapshots for v03 (E0305), a04b (E0641) and f05; probes are in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes and lanes/AnyBallot/probes/fm.",
+          "text": "If D-PRIM-ANY1 adopts C: a bare arm over a union or a trait value names the type its name names in type position. Over a union only, a name that names no type there names the union's one member with that leaf. Every member has an arm, so a package's own Point is .Point(p) beside geo2.Point. Where Point names a type in scope, .Point(p) names it throughout the file; where it names none, each union's arm names its own member (k01). o7's fallback still works, and v03, whose arm binds geo.Point today, becomes E0305. The E0641 exemption for same-leaf members (Sema/Coverage.jet's same-name skip) is removed, so an else over a later-added member is E0641 (a04b). E0307's fix names each member's arm (f06, with #6839 c52). Proof: cases rows for o7, k01, the package's own member's arm and the generic arms; UI snapshots for v03 (E0305), a04b (E0641) and f05; probes are in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes, lanes/AnyReview10/probes/fm and lanes/AnyBallot/probes/fm.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T07:50:02.740Z"
+          "at": "2026-11-16T08:07:59.796Z"
         }
       ],
       "refs": [],
@@ -102628,7 +102628,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T23:01:38.012Z",
-      "updated": "2026-11-16T07:50:02.740Z",
+      "updated": "2026-11-16T08:07:59.796Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -103350,12 +103350,12 @@
         },
         {
           "n": 46,
-          "text": "A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or through trait dispatch) carries a pointer into the owner's payload, with no new cell, no byte copy and no retain, on O0, O1 and O2. Two cases must stay safe first: (a) an argument converted at the call (a Point passed where a union is expected) lives in a temporary cell that is released right after the call (op 16 in the IR, probe z04), so the loan must keep that temporary alive for the result's life, or the call is refused; (b) a body that returns a fresh value, or a copy of another parameter, on some path under from item (probe z05) has no owner to point into, so that path either stays a copy that jet audit reports or is refused. Today the from form and the same function without from emit identical IR at O0 (a 24-byte optional cell, a byte copy and a retain), and jet audit counts only the one without from (p207-p209; D-PRIM-ANY1 reviews 6 and 7, probes y12_from_val_copy_audit.jet with its .ir.out in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes, z01, z01b, z04 and z05 in $JET_SCRATCH_ROOT/lanes/AnyReview7/probes). Proof: a cases row whose IR or jet audit shows no copy for each form, a case or UI row for (a) and for (b), and a paired size/speed cell against the copy form. Before lowering, two more cases must be checked (D-PRIM-ANY1 review 8): a view captured by a lambda (c50) and a view of a Shared field written through any handle (c51); c46 lands only after both. Review 9 found more carriers: c46 also lands only after c54 (struct field, enum payload, list, defer, method value, Shared to task).",
+          "text": "A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or through trait dispatch) carries a pointer into the owner's payload, with no new cell, no byte copy and no retain, on O0, O1 and O2. Two cases must stay safe first: (a) an argument converted at the call (a Point passed where a union is expected) lives in a temporary cell that is released right after the call (op 16 in the IR, probe z04), so the loan must keep that temporary alive for the result's life, or the call is refused; (b) a body that returns a fresh value, or a copy of another parameter, on some path under from item (probe z05) has no owner to point into, so that path either stays a copy that jet audit reports or is refused. Today the from form and the same function without from emit identical IR at O0 (a 24-byte optional cell, a byte copy and a retain), and jet audit counts only the one without from (p207-p209; D-PRIM-ANY1 reviews 6 and 7, probes y12_from_val_copy_audit.jet with its .ir.out in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes, z01, z01b, z04 and z05 in $JET_SCRATCH_ROOT/lanes/AnyReview7/probes). Proof: a cases row whose IR or jet audit shows no copy for each form, a case or UI row for (a) and for (b), and a paired size/speed cell against the copy form. Before lowering, two more cases must be checked (D-PRIM-ANY1 review 8): a view captured by a lambda (c50) and a view of a Shared field written through any handle (c51); c46 lands only after both. Review 9 found more carriers: c46 lands only after c50, c51, c54 and c56 (struct field, enum payload, list, defer, method value, Shared to task).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T07:40:17.001Z"
+          "at": "2026-11-16T08:07:57.743Z"
         },
         {
           "n": 47,
@@ -103422,12 +103422,12 @@
         },
         {
           "n": 54,
-          "text": "A loan keeps its owner through every carrier: a view (a from result or an arm binding) stored in a struct field (e01, against control e01b, which is E0212), an enum payload or nested binding (e07, against e07b), a list built in a loop (e05), a defer (e06), a method value bound to it (e08), or a Shared cell handed to a task (e09, which bypasses E1102) keeps the owner borrowed: moving or rewriting the owner while the carrier lives is E0212. A plain arm binding escapes the same way today (e10), and rewriting the owner leaves the view reading the old value (e11). Safe today only because views are copies; #6839 c46 must not lower views to pointers until this holds (p209, dev a1c3325a65, O0/O1/O2 alike; D-PRIM-ANY1 review 9, probes in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes). Proof: one UI snapshot per carrier, plus a cases row of each legal carrier use.",
+          "text": "A loan keeps its owner through every carrier: a view (a from result or an arm binding) stored in a struct field (e01, against control e01b, which is E0212), an enum payload or nested binding (e07, against e07b), a list built in a loop (e05), a defer (e06), a method value bound to it (e08), or a Shared cell handed to a task (e09, which bypasses E1102) keeps the owner borrowed: moving or rewriting the owner while the carrier lives is E0212. A plain arm binding escapes the same way today (e10), and rewriting the owner leaves the view reading the old value (e11). Safe today only because views are copies; #6839 c46 must not lower views to pointers until this holds (p209, dev a1c3325a65, O0/O1/O2 alike; D-PRIM-ANY1 review 9, probes in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes). Proof: one UI snapshot per carrier, plus a cases row of each legal carrier use. Also a tuple field, pair: (view: got, tag: 1) (h02), and a map value, m[\"k\"] = got (h05): each lets the owner move and reads the old value today (D-PRIM-ANY1 review 10, probes in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T07:39:58.816Z"
+          "at": "2026-11-16T08:07:56.678Z"
         },
         {
           "n": 55,
@@ -103437,6 +103437,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T07:40:04.089Z"
+        },
+        {
+          "n": 56,
+          "text": "A from result or an arm binding chosen by a value-producing if or table keeps its owner borrowed: with got: pick(item), w: if flag -> got else -> None (h06), the call itself in a branch, w: if flag -> pick(item) else -> None (h09), the same view in both branches (h08), a table's value (h10) or an arm binding (h11), moving or rewriting the owner while w lives is E0212, as it is for a second local (h01) or a relay through a from function (h03). Today each compiles, the move prints the old value, and rewriting the owner leaves w reading 41 (h12). spec.md:2054-2055 keeps invalidation through control-flow joins and 2065-2066 unions branch sources (dev a1c3325a65). Safe today only because views are copies; #6839 c46 must not lower views to pointers until this holds (p209 and p210, O0/O1/O2 alike; D-PRIM-ANY1 review 10, probes in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes). Proof: a UI snapshot per form and a cases row of the legal use.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T08:07:54.640Z"
+        },
+        {
+          "n": 57,
+          "text": "A bare generic name in type position (fn(b: Box) with Box: struct<T>) reports E0104 alone: one root, one report. Today it adds an E0112 at the call, '`show` wants `Box` for argument 1, but this is `Box`<Int>', whose type text puts the type arguments outside the backticks (p209, O0/O1/O2 alike; D-PRIM-ANY1 review 10, probe t03 in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes). Proof: a UI snapshot showing E0104 alone.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T08:07:55.581Z"
         }
       ],
       "refs": [],
@@ -103447,9 +103465,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T07:50:04.947Z",
+      "updated": "2026-11-16T08:07:57.743Z",
       "updatedBy": "Main",
-      "criteriaLastN": 55
+      "criteriaLastN": 57
     },
     {
       "id": "c0c3gh6u",
@@ -220986,6 +221004,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T08:07:59.796Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0reo0hk",
+      "note": "#5: D-PRIM-ANY1 review 10: v03 binds geo.Point today; no fallback over trait values; the per-file claim was false (k01); was: If D-PRIM-ANY1 adopts C: an arm over a union, trait value or Any resolves by type position first, then by member name when type position names nothing. Every member has an arm, so a package's own Poin"
+    },
+    {
+      "at": "2026-11-16T08:07:58.823Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0reo0hk",
+      "note": "#3: D-PRIM-ANY1 review 10: the single-instance bare generic arm; was: Under the ratified D-PRIM-ANY1 option: member arms over an Any accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reach"
+    },
+    {
+      "at": "2026-11-16T08:07:57.743Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#46: D-PRIM-ANY1 review 10: c56 (views through value-producing if and tables) is a prerequisite too; was: A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or throug"
+    },
+    {
+      "at": "2026-11-16T08:07:56.678Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#54: D-PRIM-ANY1 review 10: tuple and map carriers; was: A loan keeps its owner through every carrier: a view (a from result or an arm binding) stored in a struct field (e01, against control e01b, which is E0212), an enum payload or nested binding (e07, aga"
+    },
+    {
+      "at": "2026-11-16T08:07:55.581Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#57 A bare generic name in type position (fn(b: Box) with Box: s"
+    },
+    {
+      "at": "2026-11-16T08:07:54.640Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#56 A from result or an arm binding chosen by a value-producing "
+    },
     {
       "at": "2026-11-16T08:06:07.863Z",
       "by": "Main",
