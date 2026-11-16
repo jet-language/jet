@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108409,
+    "rev": 108415,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51137,6 +51137,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:11:02.748Z"
+        },
+        {
+          "n": 11,
+          "text": "A priv struct is private like a priv function: naming, building or using it as a parameter type outside its module gets E0605, as a priv fn beside it already does. Today the struct is usable from outside with no diagnostic (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probe n12b_priv_type_vs_fn.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a UI snapshot of each refused use.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:19:57.098Z"
+        },
+        {
+          "n": 12,
+          "text": "use geo.[Point] imports a type from an inline module just as it imports a function from the same module. Today the type import gets E0611 'not defined' while the function import works (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probes n14b_imported_member_arm_first.jet and n16_inline_use_fn_control.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a cases row importing a type and a function from one inline module.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:19:59.046Z"
         }
       ],
       "refs": [],
@@ -51146,12 +51164,12 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-07T11:23:08.090Z",
-      "updated": "2026-11-16T01:11:02.748Z",
+      "updated": "2026-11-16T05:19:59.046Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 12
     },
     {
       "id": "c038vt4s",
@@ -103299,6 +103317,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T05:01:39.698Z"
+        },
+        {
+          "n": 34,
+          "text": "Passing a union value (Int | geo.Point) to a trait-value parameter gets a registered diagnostic or works, never exit 101. Today it stops with ICE 'sema.body totality … checked incomplete without a report' (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probe n01_union_into_trait.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: the probe as a UI snapshot or cases row on each tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:20:01.591Z"
+        },
+        {
+          "n": 35,
+          "text": "A qualified dotted member arm (.geo.Point(p)) gets a diagnostic that names what it looked for. Today it is E0107 'Nothing named  exists here' with an empty name (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probe n03b_qualified_member_dotted_arm.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:20:05.143Z"
         }
       ],
       "refs": [],
@@ -103309,9 +103345,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T05:01:39.698Z",
+      "updated": "2026-11-16T05:20:05.143Z",
       "updatedBy": "Main",
-      "criteriaLastN": 33
+      "criteriaLastN": 35
     },
     {
       "id": "c0c3gh6u",
@@ -104259,6 +104295,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T05:01:34.169Z"
+        },
+        {
+          "n": 16,
+          "text": "reflect.of on a trait value reports the user's spelling: type_name() gives the concrete type's name and path() its module path, never the internal key (today module:14:…::Shown) (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probes n09_reflect_trait_value.jet and n13_reflect_trait_value_method.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a reflect/ cases row on each tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:20:07.275Z"
+        },
+        {
+          "n": 17,
+          "text": "A struct declared in an inline module prints with its declared name: Point { x: 1, y: 2 }, never the mangled M3GeoPoint { … } (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probe n16_inline_use_fn_control.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a cases row printing an inline-module struct directly, interpolated and in a list on each tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T05:20:09.675Z"
         }
       ],
       "refs": [],
@@ -104273,9 +104327,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-16T05:13:47.974Z",
+      "updated": "2026-11-16T05:20:09.676Z",
       "updatedBy": "Main",
-      "criteriaLastN": 15
+      "criteriaLastN": 17
     },
     {
       "id": "c0r6d7ja",
@@ -221129,6 +221183,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T05:20:09.676Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0apk7x9",
+      "note": "#17 A struct declared in an inline module prints with its declar"
+    },
+    {
+      "at": "2026-11-16T05:20:07.275Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0apk7x9",
+      "note": "#16 reflect.of on a trait value reports the user's spelling: typ"
+    },
+    {
+      "at": "2026-11-16T05:20:05.143Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#35 A qualified dotted member arm (.geo.Point(p)) gets a diagnos"
+    },
+    {
+      "at": "2026-11-16T05:20:01.591Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#34 Passing a union value (Int | geo.Point) to a trait-value par"
+    },
+    {
+      "at": "2026-11-16T05:19:59.046Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06m6abh",
+      "note": "#12 use geo.[Point] imports a type from an inline module just as"
+    },
+    {
+      "at": "2026-11-16T05:19:57.099Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06m6abh",
+      "note": "#11 A priv struct is private like a priv function: naming, build"
+    },
     {
       "at": "2026-11-16T05:14:28.091Z",
       "by": "Main",
