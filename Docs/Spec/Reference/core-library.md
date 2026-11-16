@@ -1822,6 +1822,11 @@ resolves outside the root. A directory serves its `index.html` unless
 `accept-ranges`, an `etag` and `last-modified`; `If-None-Match` and
 `If-Modified-Since` answer `304`, one byte range answers `206` (guarded by
 `If-Range`), an unsatisfiable range `416`, and anything unservable `404`.
+Each file is also served under its hashed name: the first 16 hex digits of
+the SHA-256 of its bytes before its extension, so `fonts/body.woff2` is also
+`fonts/body.<hash16>.woff2`. A hashed name answers with
+`Cache-Control: public, max-age=31536000, immutable` and no validators, and
+once the file's bytes change its old hashed name answers `404`.
 
 The Jet CORS constructor accepts named-origin lists or `.Any`/`.List` policies.
 Empty method/header lists retain the published defaults, credentials default to
@@ -5922,6 +5927,15 @@ boundary. Serving the app (`App.serve`, `App.bind`, `App.serve_once`,
 has no page or already routes something under `/a/`. An address no source
 makes gets the app's not-found page. The row's file reads are charged where
 the first page is registered, so `App.bind` stays `-[Net]>`.
+
+Files under the app's first `assets` root (fonts, icons, scripts, styles and
+any other static file) get the same treatment. A page that links one as a
+quoted `"/assets/<path>"` (an `href`, `src` or other attribute value) is
+served linking its hashed name, `/assets/<dir>/<stem>.<hash16>.<ext>`, which
+answers with immutable caching (see `static_files`). Editing the file changes
+the name the next page links. A path with a query, fragment or escape, or
+that names no file under the root, stays as written. The file's own name
+keeps answering with its validators.
 
 `app.images(formats:, widths:, quality:, enabled:)` sets how variants are
 made. Every option is labelled and optional, and one left out keeps its

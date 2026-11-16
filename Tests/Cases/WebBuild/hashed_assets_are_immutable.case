@@ -1,0 +1,27 @@
+# Files under an app's assets root (a stylesheet, a font, an icon)
+# are linked from pages by content-hashed names that answer with immutable
+# caching; editing a file changes its name and retires the old one.
+fixture: HashedAssetsAreImmutable.fixture
+spawn server: jet run app.jet
+env: JET_APP_PORT={free-port:app}
+step: jet run client.jet
+env: HASHED_ASSETS_PORT={free-port:app}
+exit: 0
+file: page.html ~ "<link rel=\"stylesheet\" href=\"/assets/app." # the stylesheet is linked by a longer name than its own
+file: page.html !~ "href=\"/assets/app.css\"" # never by its own name
+file: page.html !~ "href=\"/assets/fonts/body.woff2\"" # nor the font
+file: page.html !~ "src=\"/assets/icons/logo.svg\"" # nor the icon
+file: page.html ~ "<a href=\"/assets/missing.css\">kept</a>" # a path naming no file stays as written
+stdout: ~ "/assets/app.css: 200 | text/css; charset=utf-8 | public, max-age=31536000, immutable | named by its bytes: true" # a stylesheet's hashed name holds its bytes' hash and is immutable
+stdout: ~ "/assets/fonts/body.woff2: 200 | font/woff2 | public, max-age=31536000, immutable | named by its bytes: true" # so does a font's
+stdout: ~ "/assets/icons/logo.svg: 200 | image/svg+xml | public, max-age=31536000, immutable | named by its bytes: true" # and an icon's
+stdout: ~ "/assets/missing.css: linked as written" # no file, no hashed name
+stdout: ~ "/assets/app.css by its own name: 200 | none | etag: true" # the own name still answers, revalidated rather than immutable
+stdout: ~ "edited app.css links a new name: true" # changing an asset changes its name
+stdout: ~ "unchanged font keeps its name: true" # an unchanged asset keeps its name
+stdout: ~ "old app.css name: 404" # the old name no longer names the file's bytes
+stdout: ~ "new app.css name: 200 | public, max-age=31536000, immutable | the edited bytes: true" # the new name serves the edited bytes
+stdout: ~ "forged hash: 404" # a hash the bytes do not have names nothing
+signal server: KILL
+wait: server
+exit: any # the case kills the server; its status is not part of this proof

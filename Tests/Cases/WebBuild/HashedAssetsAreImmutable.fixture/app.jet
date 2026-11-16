@@ -1,0 +1,14 @@
+// A page that links a stylesheet, a font and an icon under the app's assets
+// root by their own names.
+package: {
+    name: "hashed_assets"
+    authority: { allow: [Env, Net, FS.Read, Time] }
+}
+
+use web: core.web
+
+home: fn() -> WebPage {
+    web.page("Assets", "<link rel=\"stylesheet\" href=\"/assets/app.css\"><link rel=\"preload\" href=\"/assets/fonts/body.woff2\" as=\"font\"><h1>Assets</h1><img src=\"/assets/icons/logo.svg\" alt=\"Logo\"><a href=\"/assets/missing.css\">kept</a>")
+}
+
+run: fn() { web.app().route("/", home).assets("Public").serve() }

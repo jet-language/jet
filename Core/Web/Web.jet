@@ -489,7 +489,8 @@ App: struct {
         self.copy()
     }
 
-    // The first assets root answers GET `/assets/*`.
+    // The first assets root answers GET `/assets/*`, each file under its own
+    // name and its hashed name (immutable); pages link the hashed name.
     assets: fn(self, path: String, at: SourceLocation{#caller}) -> App Never! {
         guard := self.__state.guard_edit()
         if guard.value.assets.len() == 0 {
@@ -855,12 +856,40 @@ priv app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, 
             if placed.failure != "" {
                 return app_boundary(500, route.error, "Route error", placed.failure, call)
             }
-            app_html(200, WebPage{title: "{rendered.title}", body: placed.body}, app_route_data(path, request.path, call.data))
+            linked: app_asset_links(app, placed.body)
+            app_html(200, WebPage{title: "{rendered.title}", body: linked}, app_route_data(path, request.path, call.data))
         }
         .Rejected(message) -> app_boundary(400, route.error, "Route error", message, call)
         .Failed(message) -> app_boundary(500, route.error, "Route error", message, call)
         .JSON(_) -> app_boundary(500, route.error, "Route error", "the handler of `{path}` returned data instead of a page", call)
     }
+}
+
+// `body` with each quoted `/assets/<path>` that names a file under the
+// app's first assets root linked by that file's hashed name
+// (http_server.static_hashed), which answers with a year's immutable
+// caching; changing the file changes the name the page links. A path with
+// a query, fragment or escape, or that names no file, stays as written.
+priv app_asset_links: fn(app: App, body: String) -[FS.Read]> String Never! {
+    guard: app.__state.guard_read()
+    if guard.value.assets.len() == 0 -> return body.copy()
+    root: guard.value.assets[0].copy()
+    pieces: body.split("\"/assets/").to_list()
+    out := [String]{}
+    loop (at, piece) in pieces {
+        if at == 0 {
+            out.push("{piece}")
+            next
+        }
+        ends: piece.split("\"").to_list()
+        path: ends[0].copy()
+        plain: ends.len() > 1 && path != "" && !path.contains("?") && !path.contains("#") && !path.contains("%") && !path.contains("&")
+        hashed: if plain -> http_server.static_hashed(root, path) else -> None
+        if hashed == .Val(name) -> out.push("{name}{piece.slice(path.len(), piece.len())}") else {
+            out.push("{piece}")
+        }
+    }
+    out.join("\"/assets/")
 }
 
 priv app_not_found_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {

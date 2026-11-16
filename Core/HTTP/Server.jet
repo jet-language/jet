@@ -2043,8 +2043,82 @@ priv mime: fn(path: String) -> String Never! {
     if extension == "json" -> return "application/json"
     if extension == "png" -> return "image/png"
     if extension == "svg" -> return "image/svg+xml"
+    if extension == "webp" -> return "image/webp"
+    if extension == "ico" -> return "image/x-icon"
+    if extension == "woff2" -> return "font/woff2"
+    if extension == "woff" -> return "font/woff"
+    if extension == "ttf" -> return "font/ttf"
+    if extension == "otf" -> return "font/otf"
     if extension == "wasm" -> return "application/wasm"
     "application/octet-stream"
+}
+
+// ---- Hashed names ----
+//
+// A file under a static root is also served under its hashed name: its
+// content hash before its extension, so `fonts/body.woff2` is
+// `fonts/body.<hash>.woff2`. A hashed name names its bytes, so it answers
+// with a year's immutable caching; once the file changes, its old hashed
+// name is not found and the new bytes have a new one. `static_hashed` gives
+// the name a page links to (core.web's `assets` root does this for every
+// page it serves).
+
+// A year, never revalidated: a hashed name names its bytes.
+priv C_STATIC_IMMUTABLE: "public, max-age=31536000, immutable"
+
+// The hex digits of the SHA-256 of a file's bytes that its hashed name holds.
+priv C_STATIC_HASH_DIGITS: 16
+
+priv static_hash: fn(bytes: [U8]) -> String Never! {
+    core.crypto.sha256(bytes).hex().slice(0, C_STATIC_HASH_DIGITS)
+}
+
+// `relative` with `hash` before the extension of its last segment; None for
+// a last segment with no extension or no stem.
+priv static_hashed_name: fn(relative: String, hash: String) -> String? Never! {
+    parts := relative.split("/").to_list()
+    if parts.len() == 0 -> return None
+    last: parts[parts.len() - 1].copy()
+    pieces: last.split(".").to_list()
+    if pieces.len() < 2 || pieces[0] == "" -> return None
+    named := [String]{}
+    loop (at, piece) in pieces {
+        if at + 1 == pieces.len() -> named.push(hash.copy())
+        named.push("{piece}")
+    }
+    parts[parts.len() - 1] = named.join(".")
+    Val(parts.join("/"))
+}
+
+// The hashed name of the file `relative` names under `root` (no dot-files,
+// no links, nothing outside the root), or None when there is no such file.
+priv static_hashed: fn(root: String, relative: String) -[FS.Read]> String? Never! {
+    mount: HTTPStaticMount{root: root, index: false, dotfiles: false, follow_links: false}
+    target: static_target(mount, relative) ?? return None
+    bytes: core.files.read_bytes(target.path) ?? return None
+    static_hashed_name(relative, static_hash(bytes))
+}
+
+// The answer to `relative`, a name with no file under the mount: the file
+// its hashed name names, while that file's bytes still have the hash.
+priv static_hashed_serve: fn(mount: HTTPStaticMount, relative: String) -[FS.Read]> HTTPResponse Never! {
+    parts := relative.split("/").to_list()
+    if parts.len() == 0 -> return status_page(404)
+    pieces: parts[parts.len() - 1].split(".").to_list()
+    if pieces.len() < 3 -> return status_page(404)
+    hash: pieces[pieces.len() - 2].copy()
+    if hash.len() != C_STATIC_HASH_DIGITS -> return status_page(404)
+    plain := [String]{}
+    loop (at, piece) in pieces {
+        if at + 2 != pieces.len() -> plain.push("{piece}")
+    }
+    parts[parts.len() - 1] = plain.join(".")
+    target: static_target(mount, parts.join("/")) ?? return status_page(404)
+    bytes: core.files.read_bytes(target.path) ?? return status_page(404)
+    if static_hash(bytes) != hash -> return status_page(404)
+    fields := http.headers_set(http.headers(), "content-type", mime(target.path))
+    fields = http.headers_set(fields, "cache-control", C_STATIC_IMMUTABLE)
+    response_body(200, http.body_bytes(bytes), fields)
 }
 
 // The file a mounted request names, refusing dot-files, links and anything
@@ -2087,7 +2161,7 @@ priv etag_matches: fn(list: String, etag: String) -> Bool Never! {
 
 priv static_serve: fn(mount: HTTPStaticMount, request: HTTPRequest) -[FS.Read]> HTTPResponse Never! {
     relative: request.param("jet_static_path") ?? ""
-    target: static_target(mount, relative) ?? return status_page(404)
+    target: static_target(mount, relative) ?? return static_hashed_serve(mount, relative)
     bytes: core.files.read_bytes(target.path) ?? return status_page(404)
     seconds: target.modified_seconds
     etag: "\"{__hex(bytes.len())}-{__hex(seconds)}\""
@@ -2291,4 +2365,15 @@ priv imf_date: fn(seconds: Int) -> String Never! {
     assert(imf_date(951868799) == "Tue, 29 Feb 2000 23:59:59 GMT")
     assert(__hex(255) == "ff")
     assert(__hex(0) == "0")
+}
+
+#Test("a hashed name puts the content hash before the extension") {
+    hash: static_hash("body".bytes())
+    assert(hash.len() == 16)
+    assert(hash != static_hash("body!".bytes()))
+    expected: "fonts/body.{hash}.woff2"
+    assert((static_hashed_name("fonts/body.woff2", hash) ?? "") == expected)
+    assert((static_hashed_name("app.min.css", "0123456789abcdef") ?? "") == "app.min.0123456789abcdef.css")
+    assert(static_hashed_name("LICENSE", hash) == None)
+    assert(static_hashed_name("fonts/.woff2", hash) == None)
 }
