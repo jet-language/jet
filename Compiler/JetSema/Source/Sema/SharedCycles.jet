@@ -26,6 +26,7 @@ use jet_foundation.[
     Lambda,
     LValue,
     Span,
+    SymbolID,
     SymbolKind,
     Type,
     ast_expr,
@@ -166,12 +167,12 @@ sema_shared_cycle_enum_arg: fn(argument: EnumLitArg) -> Expr Never! {
     }
 }
 
-// True when every recorded reference of binding `key` lies inside one of the
+// True when every recorded reference of binding `id` lies inside one of the
 // `allowed` spans: the arguments of the write being checked and the
 // initializers of the new cells that took the binding.
-sema_shared_cycle_unread: fn(state: SemaOwnershipState, key: String, allowed: [Span]) -> Bool Never! {
+sema_shared_cycle_unread: fn(state: SemaOwnershipState, id: SymbolID, allowed: [Span]) -> Bool Never! {
     loop reference in state.references {
-        if reference.def_key != key -> next
+        if reference.def_id != id -> next
         inside := false
         loop span in allowed {
             if reference.use_span.start >= span.start && reference.use_span.end <= span.end {
@@ -306,7 +307,7 @@ sema_shared_cycle_fresh_name: fn(name: String, owner: String, allowed: [Span], e
     // copy: checking the initializer below may edit the scope table that holds it.
     init: (scopes.bindings[row].fresh_cell ?? return false).copy()
     if !sema_shared_cycle_frame_runs_once(scopes, scopes.bindings[row].frame) -> return false
-    if !sema_shared_cycle_unread(state, scopes.bindings[row].key, allowed) -> return false
+    if !sema_shared_cycle_unread(state, scopes.bindings[row].symbol.id, allowed) -> return false
     within := allowed.copy()
     within.push(expr_source_span(init))
     sema_shared_cycle_fresh(init, None, owner, within, environment, program, scopes, state)

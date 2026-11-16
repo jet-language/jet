@@ -1557,18 +1557,18 @@ sema_function_apply_scope_policies: fn(environment: SemaScopeEnvironment, progra
     }
 }
 
-sema_function_static_roots: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> [String] Never! {
+sema_function_static_roots: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> [SymbolID] Never! {
     if program.registration_graph == .Val(graph) {
         return sema_ownership_static_roots(graph, module_identity)
     }
-    [String]{}
+    [SymbolID]{}
 }
 
-sema_function_persist_roots: fn(program: SemaProgramTables, module_identity: ModuleID) -> [String] Never! {
+sema_function_persist_roots: fn(program: SemaProgramTables, module_identity: ModuleID) -> [SymbolID] Never! {
     if program.registration_graph == .Val(graph) {
         return sema_ownership_persist_roots(graph, module_identity)
     }
-    [String]{}
+    [SymbolID]{}
 }
 
 sema_function_resolve_declared: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, module_identity: ModuleID, generic_params: [TGenericParam]) -> Type Never! {
@@ -1917,9 +1917,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
                 complete = false
             }
             else -> {
-                sema_ownership_declare_binding(state, param_symbol, param_key, true)
+                sema_ownership_declare_binding(state, param_symbol, true)
                 if param_index == 0 && func.params[param_index].name == "self" && func.params[param_index].convention == AccessConvention.Move && func.name == "close" && sema_function_is_consuming_close_body(func, module_identity, program) {
-                    state.close_receiver_key = param_key.copy()
+                    state.close_receiver_id = SymbolID{id: param_symbol.id.id}
                 }
                 if function_kind == {
                     .Method(_, _) | .TraitMethod(_, _, _, _, _) -> {
@@ -10078,7 +10078,7 @@ sema_comptime_declare_prepared_locals: fn(source: SemaComptimeItemSource, module
         last: table.bindings.len() - 1
         sema_scope_note_binding_edit(table, last)
         table.bindings[last].prepared = Val(local.value)
-        sema_ownership_declare_binding(state, symbol, key, false)
+        sema_ownership_declare_binding(state, symbol, false)
     }
 }
 

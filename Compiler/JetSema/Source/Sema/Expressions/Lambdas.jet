@@ -1209,11 +1209,11 @@ sema_expression_lambda_outer_binding: fn(name: String, use_span: Span, frame: In
     None
 }
 
-sema_expression_lambda_outer_binding_key: fn(key: String, frame: Int, scopes: &SemaScopeTable) -> Int? {
+sema_expression_lambda_outer_binding_key: fn(key: SymbolID, frame: Int, scopes: &SemaScopeTable) -> Int? {
     index := 0
     loop index < scopes.bindings.len() {
         binding: scopes.bindings[index]
-        if binding.frame < frame && (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.key == key {
+        if binding.frame < frame && (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.id == key {
             return Val(index)
         }
         index += 1
@@ -1221,45 +1221,45 @@ sema_expression_lambda_outer_binding_key: fn(key: String, frame: Int, scopes: &S
     None
 }
 
-sema_expression_lambda_add_capture_key: fn(keys: &[String], key: String) Never! {
+sema_expression_lambda_add_capture_key: fn(keys: &[SymbolID], key: SymbolID) Never! {
     loop existing in keys {
         if existing == key {
             return
         }
     }
-    keys.push(key.copy())
+    keys.push(SymbolID{id: key.id})
 }
 
-sema_expression_lambda_collect_reference_keys: fn(state: &SemaOwnershipState, first_reference: Int, frame: Int, scopes: &SemaScopeTable, keys: &[String], mutable_keys: &[String]) Never! {
+sema_expression_lambda_collect_reference_keys: fn(state: &SemaOwnershipState, first_reference: Int, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID], mutable_keys: &[SymbolID]) Never! {
     index := first_reference
     loop index < state.references.len() {
         reference: state.references[index]
-        if sema_expression_lambda_outer_binding_key(reference.def_key, frame, scopes) != None {
-            sema_expression_lambda_add_capture_key(keys, reference.def_key)
+        if sema_expression_lambda_outer_binding_key(reference.def_id, frame, scopes) != None {
+            sema_expression_lambda_add_capture_key(keys, reference.def_id)
             // Rust `block_collect_captures`: a `#Reactive` body writes its
             // registration's clone, so the lambda only reads the root.
             if reference.kind == SemaOwnershipReferenceKind.Write && !sema_ownership_in_reactive_body(state, reference.use_span) {
-                sema_expression_lambda_add_capture_key(mutable_keys, reference.def_key)
+                sema_expression_lambda_add_capture_key(mutable_keys, reference.def_id)
             }
         }
         index += 1
     }
 }
 
-sema_expression_lambda_collect_tree_capture_local: fn(local: TLocal, frame: Int, scopes: &SemaScopeTable, keys: &[String]) Never! {
+sema_expression_lambda_collect_tree_capture_local: fn(local: TLocal, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) Never! {
     symbol: local.symbol_id ?? return
     index := 0
     loop index < scopes.bindings.len() {
         binding: scopes.bindings[index]
         if binding.frame < frame && (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.id == symbol {
-            sema_expression_lambda_add_capture_key(keys, binding.key)
+            sema_expression_lambda_add_capture_key(keys, binding.symbol.id)
             return
         }
         index += 1
     }
 }
 
-sema_expression_lambda_collect_tree_place: fn(place: TPlace, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_place: fn(place: TPlace, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     if place == {
         .Local(local) -> {
             sema_expression_lambda_collect_tree_capture_local(local, frame, scopes, keys)
@@ -1268,21 +1268,21 @@ sema_expression_lambda_collect_tree_place: fn(place: TPlace, frame: Int, scopes:
     }
 }
 
-sema_expression_lambda_collect_tree_optional_expr: fn(value: TExpr?, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_optional_expr: fn(value: TExpr?, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     if value != None {
         actual: value
         sema_expression_lambda_collect_tree_expr(actual, frame, scopes, keys)
     }
 }
 
-sema_expression_lambda_collect_tree_optional_statement: fn(value: TStmt?, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_optional_statement: fn(value: TStmt?, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     if value != None {
         actual: value
         sema_expression_lambda_collect_tree_statements([TStmt]{actual}, frame, scopes, keys)
     }
 }
 
-sema_expression_lambda_collect_tree_condition: fn(condition: TIfCond, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_condition: fn(condition: TIfCond, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     if condition == {
         .Plain(value) -> { sema_expression_lambda_collect_tree_expr(value, frame, scopes, keys) }
         .And(left, right) -> {
@@ -1293,7 +1293,7 @@ sema_expression_lambda_collect_tree_condition: fn(condition: TIfCond, frame: Int
     }
 }
 
-sema_expression_lambda_collect_tree_lambda: fn(lambda: TLambda, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_lambda: fn(lambda: TLambda, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     loop capture in lambda.captures {
         sema_expression_lambda_collect_tree_capture_local(capture.local, frame, scopes, keys)
     }
@@ -1303,14 +1303,14 @@ sema_expression_lambda_collect_tree_lambda: fn(lambda: TLambda, frame: Int, scop
     }
 }
 
-sema_expression_lambda_collect_tree_optional_lambda: fn(lambda: TLambda?, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_optional_lambda: fn(lambda: TLambda?, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     if lambda != None {
         value: lambda
         sema_expression_lambda_collect_tree_lambda(value, frame, scopes, keys)
     }
 }
 
-sema_expression_lambda_collect_tree_fn_value: fn(kind: TFnValueKind, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_fn_value: fn(kind: TFnValueKind, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     if kind == {
         .NamedFn(_, lambda) -> {
             sema_expression_lambda_collect_tree_optional_lambda(lambda, frame, scopes, keys)
@@ -1334,7 +1334,7 @@ sema_expression_lambda_collect_tree_fn_value: fn(kind: TFnValueKind, frame: Int,
     }
 }
 
-sema_expression_lambda_collect_tree_core_closure: fn(kind: TCoreClosureKind, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_core_closure: fn(kind: TCoreClosureKind, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     if kind == {
         .Spawn(group, _, _, executable) -> {
             sema_expression_lambda_collect_tree_optional_expr(group, frame, scopes, keys)
@@ -1362,7 +1362,7 @@ sema_expression_lambda_collect_tree_core_closure: fn(kind: TCoreClosureKind, fra
     }
 }
 
-sema_expression_lambda_collect_tree_fallback: fn(fallback: TOrFallback, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_fallback: fn(fallback: TOrFallback, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     if fallback == {
         .Value(value) -> { sema_expression_lambda_collect_tree_expr(value, frame, scopes, keys) }
         .Return(value) -> {
@@ -1373,7 +1373,7 @@ sema_expression_lambda_collect_tree_fallback: fn(fallback: TOrFallback, frame: I
     }
 }
 
-sema_expression_lambda_collect_tree_expr: fn(value: TExpr, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_expr: fn(value: TExpr, frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     if value.kind == {
         .Local(local) -> {
             sema_expression_lambda_collect_tree_capture_local(local, frame, scopes, keys)
@@ -1529,7 +1529,7 @@ sema_expression_lambda_collect_tree_expr: fn(value: TExpr, frame: Int, scopes: &
     }
 }
 
-sema_expression_lambda_collect_tree_statements: fn(statements: [TStmt], frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+sema_expression_lambda_collect_tree_statements: fn(statements: [TStmt], frame: Int, scopes: &SemaScopeTable, keys: &[SymbolID]) {
     loop statement in statements {
         if statement == {
             .Let(_, _, init, _, _, _) -> {
@@ -2335,7 +2335,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         }
         param_conventions.push(convention)
         if context.lambda_lending_views && parameter_type == .Apply(view_name, view_args) && view_name == "ViewMut" && view_args.len() == 1 {
-            sema_ownership_declare_binding(lambda_state, parameter_symbol, parameter_key, true)
+            sema_ownership_declare_binding(lambda_state, parameter_symbol, true)
             source: sema_ownership_place_from_expr_inner(Expr.Ident{name: parameter.name, span: parameter.name_span, id: AST_NODE_GENERATED}, lambda_scopes) ?? return None
             _ := sema_ownership_record_view_fact(lambda_state, parameter.name, parameter.name_span, source, [String]{}, AccessConvention.Write, lambda_scopes, -1)
             lambda_context.lending_view_parameter_keys.push(parameter_key.copy())
@@ -2607,7 +2607,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 next
             }
             if sema_ownership_place_moved(lambda_parent_state, moved.place) != None -> next
-            if sema_expression_lambda_outer_binding_key(moved.place.root_key, frame, lambda_scopes) == None {
+            if sema_expression_lambda_outer_binding_key(moved.place.root_id, frame, lambda_scopes) == None {
                 next
             }
             explicit_capture := false
@@ -2635,8 +2635,8 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             lambda_work.meta.escapes = false
         }
         else -> {
-            capture_keys := [String]{}
-            mutable_keys := [String]{}
+            capture_keys := [SymbolID]{}
+            mutable_keys := [SymbolID]{}
             sema_expression_lambda_collect_reference_keys(lambda_state, first_reference, frame, lambda_scopes, capture_keys, mutable_keys)
             if executable_value == {
                 .Expr(value) -> {
@@ -2656,7 +2656,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                     diagnostics.push(sema_unknown_name(capture.name, capture.span))
                     return None
                 }
-                sema_expression_lambda_add_capture_key(capture_keys, lambda_scopes.bindings[outer_index ?? 0].key)
+                sema_expression_lambda_add_capture_key(capture_keys, lambda_scopes.bindings[outer_index ?? 0].symbol.id)
                 sema_expression_lambda_append_name(lambda_work.meta.moved_captures, capture.name)
             }
             declared_mutable := [String]{}
@@ -2665,7 +2665,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             loop name in declared_mutable {
                 outer_index := sema_expression_lambda_outer_binding(name, lambda.span, frame, lambda_scopes)
                 if outer_index != None {
-                    key: lambda_scopes.bindings[outer_index ?? 0].key
+                    key: lambda_scopes.bindings[outer_index ?? 0].symbol.id
                     sema_expression_lambda_add_capture_key(capture_keys, key)
                     sema_expression_lambda_add_capture_key(mutable_keys, key)
                 }
@@ -2711,13 +2711,13 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
 
             // The body has run its course: its windows end before the captures move in.
             sema_ownership_release_loans_from(lambda_state, lambda_parent_state.scope_depth + 1)
-            found_capture_keys := [String]{}
+            found_capture_keys := [SymbolID]{}
             index = 0
             // Only a capture key can match; a capture-free lambda skips the table walk.
             loop capture_keys.len() > 0 && index < lambda_scopes.bindings.len() {
                 binding: lambda_scopes.bindings[index]
-                key: binding.key
-                if binding.frame < frame && sema_expression_lambda_name_contains(capture_keys, key) {
+                key: binding.symbol.id
+                if binding.frame < frame && capture_keys.contains(key) {
                     sema_expression_lambda_add_capture_key(found_capture_keys, key)
                     capture_ty: sema_scope_binding_type(environment, lambda_scopes, index) ?? return None
                     local := checked_symbol_local(binding.symbol.name, binding.symbol.span, binding.symbol.id, capture_ty)
@@ -2978,7 +2978,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     if !inline_loop {
         outer := [SemaOwnershipReference]{}
         loop body_reference in first_reference..<lambda_state.references.len() {
-            if sema_ownership_first_row(state, lambda_state.references[body_reference].def_key) >= 0 {
+            if sema_ownership_first_row(state, lambda_state.references[body_reference].def_id) >= 0 {
                 outer.push(lambda_state.references[body_reference])
             }
         }

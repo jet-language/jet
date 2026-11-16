@@ -500,9 +500,9 @@ sema_expression_struct_field_view_escape: fn(field_value: Expr, scopes: SemaScop
         if !window {
             return
         }
-        key: scopes.bindings[index].key
+        id: scopes.bindings[index].symbol.id
         loop fact in state.views {
-            if !fact.active || fact.carrier_key != key -> next
+            if !fact.active || fact.carrier_id != id -> next
             owner_name: fact.source.root
             owner: sema_scope_resolve(scopes, owner_name) ?? return
             if owner.kind == SymbolKind.Parameter || owner.kind == SymbolKind.Constant {

@@ -40,6 +40,7 @@ use {
         expr_source_span,
         expr_span,
         symbol_key_text,
+        symbol_none,
         checked_symbol_local,
         checked_user_local,
         core_call,
@@ -405,7 +406,7 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGrou
             valid = false
         }
         else -> {
-            sema_ownership_declare_binding(state, symbol, key, false)
+            sema_ownership_declare_binding(state, symbol, false)
             group_ref: sema_check_expression(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, scopes, state, tail_store, context, diagnostics)
             if group_ref == None -> valid = false
         }
@@ -726,7 +727,7 @@ sema_taskgroup_admit_capture_borrow: fn(capture: TCapture, facts: TCaptureFacts,
         }
     }
     if place == None -> return None
-    admitted: sema_taskgroup_admit_scoped_borrow(context, name, place ?? SemaOwnershipPlace{root: name, root_key: "", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, window, span, scopes, diagnostics)
+    admitted: sema_taskgroup_admit_scoped_borrow(context, name, place ?? SemaOwnershipPlace{root: name, root_id: symbol_none(), root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, window, span, scopes, diagnostics)
     sema_taskgroup_publish_loans(context, state)
     admitted
 }

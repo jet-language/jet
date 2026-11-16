@@ -24,6 +24,7 @@ use jet_foundation.[
     Span,
     Stmt,
     Symbol,
+    SymbolID,
     Type,
     UnOp,
     ast_expr,
@@ -94,14 +95,14 @@ sema_single_use_is_task: fn(ty: Type) -> Bool Never! {
 
 // A binding that owns a `#SingleUse` value carries the consume duty.
 // The duty transfers on `y: x`: the move marks `x` consumed and `y` owns it.
-// `key` is the binding's symbol key. A record or tuple that holds the duty in
-// its fields is also consumed once each of those fields is moved out.
-sema_single_use_note_binding: fn(state: &SemaOwnershipState, symbol: Symbol, key: String, environment: SemaScopeEnvironment, program: SemaProgramTables) {
+// The binding is keyed by its symbol's id. A record or tuple that holds the
+// duty in its fields is also consumed once each of those fields is moved out.
+sema_single_use_note_binding: fn(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) {
     ty: symbol.ty ?? return
     if !sema_single_use_type(ty, environment, program) {
         return
     }
-    row: sema_ownership_last_row(state, key)
+    row: sema_ownership_last_row(state, symbol.id)
     if row < 0 {
         return
     }
@@ -156,8 +157,8 @@ sema_single_use_check_discard: fn(ty: Type, span: Span, in_taskgroup_spawn: Bool
     }
 }
 
-sema_single_use_key: fn(state: SemaOwnershipState, key: String) -> Bool Never! {
-    row: sema_ownership_first_row(state, key)
+sema_single_use_key: fn(state: SemaOwnershipState, id: SymbolID) -> Bool Never! {
+    row: sema_ownership_first_row(state, id)
     row >= 0 && state.declarations[row].single_use
 }
 
@@ -165,7 +166,7 @@ sema_single_use_key: fn(state: SemaOwnershipState, key: String) -> Bool Never! {
 sema_single_use_argument: fn(state: SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> String? {
     if expr == .Ident(name, span, _) {
         index: sema_scope_resolve_index_at(scopes, name, span) ?? return None
-        if sema_single_use_key(state, scopes.bindings[index].key) -> return Val(name)
+        if sema_single_use_key(state, scopes.bindings[index].symbol.id) -> return Val(name)
     }
     None
 }
@@ -197,7 +198,7 @@ sema_single_use_check_argument: fn(state: SemaOwnershipState, callee: String, pa
     if param_convention == AccessConvention.Move -> return true
     name: sema_single_use_argument(state, expr, scopes) ?? return true
     index: sema_scope_resolve_index_at(scopes, name, expr_span(expr)) ?? return true
-    row: sema_ownership_first_row(state, scopes.bindings[index].key)
+    row: sema_ownership_first_row(state, scopes.bindings[index].symbol.id)
     if state.declarations[row].lendable -> return true
     diagnostics.push(sema_single_use_diag_aliased(name, callee, expr_span(expr)))
     false
@@ -211,19 +212,19 @@ sema_single_use_moved: fn(state: SemaOwnershipState, fact: SemaOwnershipBindingF
 
 sema_single_use_moved_in: fn(moved: [SemaOwnershipMovedPlace], fact: SemaOwnershipBindingFact) -> Bool Never! {
     loop entry in moved {
-        if entry.place.root_key == fact.key && entry.place.projections.len() == 0 -> return true
+        if entry.place.root_id == fact.id && entry.place.projections.len() == 0 -> return true
     }
     if fact.duty_fields.len() == 0 -> return false
     loop field in fact.duty_fields {
-        if !sema_single_use_field_moved(moved, fact.key, field) -> return false
+        if !sema_single_use_field_moved(moved, fact.id, field) -> return false
     }
     true
 }
 
-// Whether `field` of the binding `key` was moved out whole.
-sema_single_use_field_moved: fn(moved: [SemaOwnershipMovedPlace], key: String, field: String) -> Bool Never! {
+// Whether `field` of the binding `id` was moved out whole.
+sema_single_use_field_moved: fn(moved: [SemaOwnershipMovedPlace], id: SymbolID, field: String) -> Bool Never! {
     loop entry in moved {
-        if entry.place.root_key != key || entry.place.typed_projections.len() != 1 -> next
+        if entry.place.root_id != id || entry.place.typed_projections.len() != 1 -> next
         if entry.place.typed_projections[0] == .Field(name, _) && name == field -> return true
     }
     false
@@ -287,7 +288,7 @@ sema_single_use_note_drain: fn(tables: ASTTables, state: &SemaOwnershipState, co
             return
         }
         index: sema_scope_resolve_index_at(scopes, name, span) ?? return
-        row: sema_ownership_last_row(state, scopes.bindings[index].key)
+        row: sema_ownership_last_row(state, scopes.bindings[index].symbol.id)
         if row < 0 || !state.declarations[row].single_use {
             return
         }

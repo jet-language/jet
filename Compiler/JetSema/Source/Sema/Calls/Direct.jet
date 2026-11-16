@@ -3,6 +3,7 @@
 // specialized SemaCallDirectTarget for imported, overloaded, or Core routes.
 use jet_foundation.[
     symbol_is_local,
+    symbol_is_none,
     AST_NODE_GENERATED,
     AccessConvention,
     BinOp,
@@ -2038,7 +2039,7 @@ sema_call_check_param_view_from: fn(callee: SemaContractCalleeFacts, slots: [Int
         if allowed.len() == 0 -> next
         inside: loop place in actual {
             covered: loop owner in allowed {
-                if place.root_key != "" && place.root_key == owner.root_key && sema_ownership_path_starts(place.projections, owner.projections) {
+                if !symbol_is_none(place.root_id) && place.root_id == owner.root_id && sema_ownership_path_starts(place.projections, owner.projections) {
                     break true
                 }
             } ?? false

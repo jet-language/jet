@@ -160,10 +160,10 @@ sema_string_view_exempt_receiver: fn(receiver: Expr, method: String, scopes: Sem
 
 sema_string_view_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipState, name: String) -> String Never! {
     index: sema_scope_resolve_index(scopes, name) ?? return "its owner"
-    key: scopes.bindings[index].key
+    id: scopes.bindings[index].symbol.id
     owner := "its owner"
     loop fact_index in 0..<state.views.len() {
-        if state.views[fact_index].active && state.views[fact_index].carrier_key == key {
+        if state.views[fact_index].active && state.views[fact_index].carrier_id == id {
             owner = state.views[fact_index].source.root
         }
     }
@@ -233,9 +233,9 @@ sema_read_view_owning_read: fn(name: String, destination: Type, scopes: SemaScop
 // receiver included) or a module-level value, so it outlives the function.
 sema_string_view_stable_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipState, name: String) -> Bool Never! {
     index: sema_scope_resolve_index(scopes, name) ?? return false
-    key: scopes.bindings[index].key
+    id: scopes.bindings[index].symbol.id
     loop fact_index in 0..<state.views.len() {
-        if !state.views[fact_index].active || state.views[fact_index].carrier_key != key -> next
+        if !state.views[fact_index].active || state.views[fact_index].carrier_id != id -> next
         owner: sema_scope_resolve(scopes, state.views[fact_index].source.root) ?? return false
         return owner.kind == SymbolKind.Parameter || owner.kind == SymbolKind.Constant
     }
@@ -314,9 +314,9 @@ sema_string_view_record_return: fn(value: Expr, scopes: SemaScopeTable, state: &
             return false
         }
         index: sema_scope_resolve_index(scopes, name) ?? return false
-        key: scopes.bindings[index].key
+        id: scopes.bindings[index].symbol.id
         loop fact in state.views {
-            if fact.active && fact.carrier_key == key -> places.push(fact.source)
+            if fact.active && fact.carrier_id == id -> places.push(fact.source)
         }
         loop place in places {
             owner: sema_scope_resolve(scopes, place.root) ?? return false

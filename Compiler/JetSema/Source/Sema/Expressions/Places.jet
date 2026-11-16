@@ -1601,7 +1601,7 @@ sema_expression_optional_method_call: fn(receiver: Expr, method: String, method_
         diagnostics.push(sema_already_defined(name, receiver_span))
         return None
     }
-    sema_ownership_declare_binding(state, symbol, key, false)
+    sema_ownership_declare_binding(state, symbol, false)
     call_expr: expr_optional_method_call_as_call(Expr.Ident{name: name, span: receiver_span, id: AST_NODE_GENERATED}, method, method_span, type_args, args)
     checked_call := sema_check_expression(call_expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     sema_scope_leave(scopes, state)
