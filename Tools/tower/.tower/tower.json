@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108453,
+    "rev": 108455,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100119,6 +100119,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T11:38:21.205Z"
+        },
+        {
+          "n": 4,
+          "text": "auth.AccountID is the one account identity type, as ratified (D-DB-TABLE1: Member.account: auth.AccountID; app.caller() returns it). Today it doesn't exist and accounts are Strings: Core/App/App.jet:619 Who.Account(String), :640 as_caller(account: String, ...), :651 maybe_caller() -> String?, :660 caller() -> String, Core/Db/Db.jet:954-955 db.Who.Account(String). One cutover: add the type, move every API listed here to it, migrate every caller in every tree, and leave no String spelling. Proof: a cases row where a #Table struct with an auth.AccountID column round-trips through the store and app.caller() returns it, on O0/O1/O2; git grep shows no Account(String).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T06:59:58.038Z"
         }
       ],
       "refs": [],
@@ -100129,9 +100138,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:41.131Z",
-      "updated": "2026-11-15T11:38:48.399Z",
-      "updatedBy": "TowerKeeper-2",
-      "criteriaLastN": 3
+      "updated": "2026-11-16T06:59:58.038Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     },
     {
       "id": "c01pk3vf",
@@ -101955,6 +101964,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c9 ruling (Main): a queue store adapter can't be written by user code today. The only adapter seam is core.app's priv(package) transactions module with CallOutbox (Core/App/App.jet:775, :836), joined only by core.db (Core/Db/Db.jet:1362). Refusing a service with #App.Job methods that holds no db.Store would contradict the ratified text in core-library.md:5664-5665 (a call that used no store runs the job at once without keeping it), so that reading is rejected. c9 has a subject only once a public adapter surface exists, and adding one is owner-gated public API. c9 is blocked on a ballot for it; Speed-3-2 moved to #6800 c1."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
           "text": "Cleanup 2026-11-15 (TowerKeeper-2): c1 split; the per-send keys are #6825 c10."
@@ -102060,8 +102074,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-15T11:39:40.264Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T06:59:16.374Z",
+      "updatedBy": "Main",
       "criteriaLastN": 10
     },
     {
@@ -221281,6 +221295,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T06:59:58.038Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0f4o904",
+      "note": "#4 auth.AccountID is the one account identity type, as ratified"
+    },
+    {
+      "at": "2026-11-16T06:59:16.374Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0se7lpr",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-16T06:52:19.337Z",
       "by": "Main",
