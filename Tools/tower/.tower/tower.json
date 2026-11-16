@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108415,
+    "rev": 108418,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -104539,11 +104539,11 @@
         {
           "n": 4,
           "text": "A compile-time fragment can call Core source functions through their loaded signatures (no E0956 'no loaded signature'), and a plain-literal constant registers without re-walking its unit, so registration time stays linear in unit size. Proof: `jet test Compiler --profile cases --filter comptime_core_call`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:42.975Z"
+          "evidence": "p206 batch compiler (dev fe8c7b89ef; landed as fe8c7b89ef, which also reverts the JetCli Core-assets workaround): jet test Compiler --profile cases --filter comptime_core_call → PASS 1 FAIL 0 (p206 cycle proof row).",
+          "at": "2026-11-16T05:34:09.942Z"
         },
         {
           "n": 5,
@@ -104648,8 +104648,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-15T11:36:10.190Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T05:34:09.942Z",
+      "updatedBy": "Main",
       "criteriaLastN": 14
     },
     {
@@ -120061,6 +120061,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p206 (dev fe8c7b89ef): census-r3 dc38cfa29d (the call.marked IR lint, E1016/E1017, E0917 for cycles, guarantee text) and core-abs f9128ac736 landed. golden Contracts/InlineContracts passes; the suites show no new exit-101. Three ui snapshots fail: inline_always_scrub has a wrong fixture (ReadOnlyValueNotOwned fires before E1016), and cycle and reads_trace need their real spans blessed. Three O2 .err.out files cite shifted Math.jet lines. One fix SUB from PrecompiledCore-4; c1, c2 and c4 are met after it."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "p205 (dev 16c1bda2d9): inspect-choices JSON line landed as 583f538540; cases build_entry/inspect_choices_shows_each_inlined_call_and_why passes. c1's census and golden, c2, c3 and c4 are queued for p206 (inline-always-refusals-census-r3 and core-abs-inline-always), with a full suite and self-build that must show zero new exit-101s."
         },
         {
@@ -120091,11 +120096,11 @@
         {
           "n": 3,
           "text": "Marked bodies cross module, package and precompiled-Core boundaries: a program that calls a Core or another package's `#Inline(Always)` function (for example core.math abs) gets the body inlined, with no call to it in the image on O0/O1/O2. Proof: `jet inspect choices` and an image symbol census for that program on each tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:44:38.658Z"
+          "evidence": "p206 batch compiler (dev fe8c7b89ef; core.math.abs marked #Inline(Always) in f9128ac736): jet test Compiler --profile cases --filter build_entry/inline_always_crosses_package_and_core_boundaries → PASS 1 FAIL 0. The case calls abs, Int.abs() and a dependency package's marked gap across module, package and Core boundaries. It runs jet inspect choices on O0/O1/O2 and builds an image on each tier that holds neither core_math_abs nor geom_gap. The p206 suites show no new exit-101 (cases: the same 44 lines as p205).",
+          "at": "2026-11-16T05:34:08.921Z"
         },
         {
           "n": 4,
@@ -120115,7 +120120,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T01:44:26.232Z",
-      "updated": "2026-11-16T05:13:50.555Z",
+      "updated": "2026-11-16T05:34:11.067Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     }
@@ -221183,6 +221188,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T05:34:11.067Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hjzhes",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T05:34:09.942Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07ywjvi",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T05:34:08.921Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hjzhes",
+      "note": "#3"
+    },
     {
       "at": "2026-11-16T05:20:09.676Z",
       "by": "Main",
