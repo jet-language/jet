@@ -536,3 +536,10 @@ and `services:` are module values of the source, and so is the reference in
 `base: oci("debian:{DEBIAN}")`. `kind: .Oci`, `from:`, `format:` and
 `target:` stay names. A value of the wrong shape (`expose: "8080"`) is still
 E1269 at the field.
+
+So are a system's service field values and the `options:` values that read
+a module value (`tuning.port: PORT * 2`); an option that reads none keeps
+its spelling (`network.hostName: laptop`, `.Default`). A fleet or vmtest
+host's override record (`system.web{ offset: 10, services: { … } }`) is
+computed the same way, its own fields read by name from the record's other
+fields in any order.

@@ -613,7 +613,7 @@ use {
 
 // Ordinary System capture is unchanged.
 #Test("fleet host fields shadow globals without changing the system") {
-    src: "base: #run 100\nsystem.web: module {{ target: linux.x64, options: [tuning.retries: 9] }}\nfleet.prod: module {{ hosts: {{ web1: system.web{{ options: [tuning.retries: base + 1], base: 4 }}, web2: system.web }} }}\n"
+    src: "BASE: #run 100\nsystem.web: module {{ target: linux.x64, options: [tuning.retries: 9] }}\nfleet.prod: module {{ hosts: {{ web1: system.web{{ options: [tuning.retries: BASE + 1], BASE: 4 }}, web2: system.web }} }}\n"
     plan: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("fleet override evaluates")
     assert_eq(plan.systems[0].options[0].value, "9")
     fleets: envmodel_test_host_groups(src, false)
@@ -627,6 +627,32 @@ use {
     assert_eq(override_plan.fields[1].value, HostOverrideValue.Value{value: CtValue.Int{value: 4}})
     assert(fleets[0].hosts[1].overrides == None)
     assert(fleets[0].hosts[1].override_source == None)
+}
+
+#Test("system service and option values are the compilers") {
+    src: "PORT: 8000\nENABLED: 2 > 1\nport_of: fn(n: Int) -> Int {{ n + 1 }}\nsystem.web: module {{ target: linux.x64, services: {{ api: {{ enable: ENABLED, port: port_of(PORT) }} }}, options: [tuning.port: PORT * 2, network.hostName: laptop] }}\nfleet.prod: module {{ hosts: {{ web1: system.web{{ services: {{ api: {{ enable: !ENABLED, port: PORT + offset }} }}, offset: port_of(9) }} }} }}\n"
+    plan: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the system plans: {err.diagnostic.what}")
+    service: plan.systems[0].services[0]
+    assert(service.enable)
+    assert_eq(service.extra[0].value, "8001")
+    assert_eq(plan.systems[0].options[0].value, "16000")
+    assert_eq(plan.systems[0].options[1].value, "laptop")
+    override_plan: envmodel_test_host_groups(src, false)[0].hosts[0].overrides ?? panic("the host has typed overrides")
+    services: if override_plan.fields[0].value == {
+        .Services(values) -> values
+        .Platform(_) | .Packages(_) | .Options(_) | .Value(_) -> panic("the first field is services")
+    }
+    assert(!services[0].enable)
+    assert_eq(services[0].extra[0].value, "8010")
+    assert_eq(override_plan.fields[1].value, HostOverrideValue.Value{value: CtValue.Int{value: 10}})
+}
+
+#Test("system option value errors are at their line") {
+    src: "PORT: 8000\nsystem.web: module {{\n    target: linux.x64,\n    options: [tuning.port: PORT + \"x\"],\n}}\n"
+    error: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    rendered: envmodel_test_render("system.jet", src, error)
+    assert(rendered.contains("--> system.jet:4:"), rendered)
+    assert(!rendered.contains("ENVMODEL_VALUE"), rendered)
 }
 
 #Test("fleet host service override rejects non boolean enable") {
