@@ -152,15 +152,13 @@ sema_expression_names_enum: fn(name: String, environment: SemaScopeEnvironment, 
     sema_expression_core_enum_name(name)
 }
 
-// The tail of Rust `is_known_enum`: Core enum leaves (`core_enum_cases`) and
-// the compiler-owned Core enum families with no Core.rows case list, known
-// whether or not the program imports them.
+// The tail of Rust `is_known_enum`: Core enum leaves (`core_enum_cases`), the
+// compiler-owned payload families (`core_enum_payload_variants`) and the
+// compiler-owned unit and hook enums, known whether or not the program
+// imports them. A Core enum a loaded Core source declares (`NetError`)
+// resolves through its symbol instead.
 sema_expression_core_enum_name: fn(name: String) -> Bool Never! {
-    if core_enum_cases(name) != None || core_enum_payload_variants(name) != None -> return true
-    if name == {
-        "TextWidthAmbiguous" | "TextWidthControls" | "DurationUnit" | "HookDecision" | "HookOutcome" | "NetError" | "NetDNSError" -> true
-        else -> false
-    }
+    core_enum_cases(name) != None || core_enum_payload_variants(name) != None || sema_expression_compiler_unit_enum_variants(name) != None || sema_expression_hook_decision_variants(name) != None
 }
 
 SemaExpressionEnumPath: struct {
@@ -293,8 +291,8 @@ sema_expression_enum_declares_variant: fn(enum_name: String, variant: String, en
             return sema_scope_declaration_enum_declares(environment, program, symbol.id, variant)
         }
     }
-    if enum_name == "HookDecision" {
-        return sema_expression_hook_decision_variants().contains(variant)
+    if sema_expression_hook_decision_variants(enum_name) == .Val(variants) {
+        return variants.contains(variant)
     }
     core_enum_variant_payload(enum_name, variant) != None
 }
@@ -1347,15 +1345,19 @@ sema_expression_core_enum_literal: fn(enum_name: String, display_name: String, v
     sema_expression_core_enum_positional_literal(enum_name, display_name, variant, payload_types, Type.Named{name: enum_name}, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-sema_expression_hook_decision_variants: fn() -> [String] Never! {
-    [String]{"Continue", "Transform", "Cancel", "Fail"}
+// `HookDecision` is compiler-owned: core.event exports it as a generic leaf,
+// but no Core source declares it, so its cases live here beside the decision
+// hook checks that read them.
+sema_expression_hook_decision_variants: fn(name: String) -> [String]? Never! {
+    if name == "HookDecision" -> return Val([String]{"Continue", "Transform", "Cancel", "Fail"})
+    None
 }
 
 // A `HookDecision` variant: `Transform` carries the hook's `T`, `Fail` its
 // `E`, and the other two are unit. The decision type is the expected
 // `HookDecision<T, E>` (a decision hook handler's result).
 sema_expression_hook_decision_literal: fn(variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    variants: sema_expression_hook_decision_variants()
+    variants: sema_expression_hook_decision_variants("HookDecision") ?? return None
     if !variants.contains(variant) {
         diagnostics.push(sema_enum_unknown_variant("HookDecision", variant, variants, span, variant_span))
         return None
