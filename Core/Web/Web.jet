@@ -394,6 +394,17 @@ App: struct {
         self.copy()
     }
 
+    // An `#App.Every` method of `app.mount(service)` (sema lowers each
+    // here): schedule `name` runs `run` at each minute the cron line `cron`
+    // allows, from when a server first serves the app (`__on_serve`). The
+    // schedule waits in a cell of its own, which the start empties, so a
+    // second start finds nothing to start.
+    __every: fn(self, name: String, cron: String, run: &&fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
+        waiting: Shared{[AppSchedule]{AppSchedule{name: name.copy(), cron: cron.copy(), run: run.move()}}}
+        http_server.__on_serve(app_table(self), fn() { app_schedules_start(waiting) })
+        self.copy()
+    }
+
     // `app.get(path, handler)` and its sibling verbs, `app.custom(method,
     // path, handler)` and each marked method of `app.mount(value)` land here
     // with the route's checked contract (sema lowers each). `at` is the
@@ -1482,6 +1493,25 @@ priv AppTraced: struct {
 priv app_traced: fn(app: App, pattern: String, method: String) Never! {
     guard := app.__state.guard_edit()
     guard.value.traced.push(AppTraced{pattern: pattern, method: method})
+}
+
+// One `#App.Every` method of a mounted service, waiting for a server to
+// serve the app: its schedule's name (`<service module>.<Service>.<method>`),
+// its cron line, and the call sema builds that runs it.
+priv AppSchedule: struct {
+    name: String
+    cron: String
+    run: fn(RemoteArgs) -> String [FieldError]!
+}
+
+// Starts the schedules `waiting` holds (`calls.schedules`), each once: it
+// takes each out, so a later start finds none.
+priv app_schedules_start: fn(waiting: Shared<[AppSchedule]>) Never! {
+    guard := waiting.guard_edit()
+    loop {
+        schedule: guard.value.remove(0, .Slot) ?? return
+        calls.schedules.start(schedule.name, schedule.cron, schedule.run)
+    }
 }
 
 // An endpoint's method: the last segment of its row's path.

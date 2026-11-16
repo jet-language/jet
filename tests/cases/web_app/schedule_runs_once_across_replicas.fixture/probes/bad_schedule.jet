@@ -1,0 +1,16 @@
+// Must fail: a schedule's cron line has four fields, and another schedule
+// takes a parameter the clock has nothing to pass.
+use {
+    app
+    web: core.web
+}
+
+Board: struct {
+    name: String
+
+    #App.Every(cron: "0 8 * *") morning: fn(self) -> Int Never! { 1 }
+
+    #App.Every(cron: "0 8 * * *") remind: fn(self, who: String) -> Int Never! { who.len() }
+}
+
+run: fn() { _: web.app().mount(Board{name: "board"}) }

@@ -525,7 +525,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2412 | UnknownDecodedField | Compiler/JetSema/Source/Sema/Registration/SerdeItems.jet:924 | the type leaves out `#Codable(unknown: .Deny)` |
 | E2414 | DefaultNotConstant | Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet:232 | the default is a compile-time constant |
 | E2415 | AmbiguousUnionShape | Compiler/JetSema/Source/Sema/Registration/Items.jet:4461 | members have distinct wire shapes |
-| E2416 | EnvDecodeFailed | Core/Web/Web.jet:647 | the environment variable is fixed |
+| E2416 | EnvDecodeFailed | Core/Web/Web.jet:658 | the environment variable is fixed |
 | E2417 | FailureDomainNotErrorType | Compiler/JetSema/Source/Sema/FailureLaw.jet:915 | the domain is an error type |
 | E2418 | ErrorConversionCycle | Compiler/JetSema/Source/Sema/FailureLaw.jet:927 | the conversions form no cycle |
 | E2419 | AmbiguousErrorConversion | Compiler/JetSema/Source/Sema/FailureLaw.jet:931 | one route per pair |
@@ -561,18 +561,18 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2704 | EpochOutOfRange | Core/Time/Time.jet:1679 | a coarser unit |
 | E2712 | CheckedTextRejected | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:2215 | the literal passes the check |
 | E2804 | AmbiguousRoute | Compiler/JetSema/Source/Sema/Calls/HttpRouting.jet:455 | each route has its own pattern |
-| E2805 | InvalidRoute | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:318 | the route binds decodable inputs by name |
+| E2805 | InvalidRoute | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:322 | the route binds decodable inputs by name |
 | E2806 | MissingPageFunction | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1378 | declare `page: fn`, or start the file name with `_` |
-| E2808 | RouteMethodTokenRefused | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:593 | a standard method, or an RFC 9110 token |
-| E2809 | AppPortUnavailable | Core/Web/Web.jet:692 | free the port or choose another |
+| E2808 | RouteMethodTokenRefused | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:608 | a standard method, or an RFC 9110 token |
+| E2809 | AppPortUnavailable | Core/Web/Web.jet:703 | free the port or choose another |
 | E2811 | ImageSettingNotLiteral | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1532 | each setting is written where the app sets it |
-| E2812 | ServerOnlyMethod | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:241 | a method is an endpoint only where its own marker says so |
+| E2812 | ServerOnlyMethod | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:245 | a method is an endpoint only where its own marker says so |
 | E2813 | FieldErrorPathUnknown | Compiler/JetSema/Source/Sema/Calls/FieldErrors.jet:22 | `FieldError{path:, reason:}` builds an error by hand where no argument field fits |
-| E2814 | WebhookKeyNotSigningKey | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:746 | a webhook checks each delivery under the key its `#App.SigningKey` method gives |
+| E2814 | WebhookKeyNotSigningKey | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:761 | a webhook checks each delivery under the key its `#App.SigningKey` method gives |
 | E2815 | CallerWithoutSignedInPath | Compiler/JetSema/Source/Sema/Calls/AppCaller.jet:401 | `app.maybe_caller()` is the form for a path that may act for no account |
 | E2816 | LiveNotOneRemoteCall | Compiler/JetSema/Source/Sema/Calls/Live.jet:319 | a named source function, `app.live(source, args…)`, is the form for a query that is not one remote call |
-| E2817 | EnqueueNotOneJobCall | Compiler/JetSema/Source/Sema/Calls/AppJobs.jet:136 | a method marked `#App.Job` is the form for work that runs after a call commits |
-| E2819 | ServerOnlyMethodMarkedEndpoint | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:115 | an endpoint method that does its own work and queues the job with `app.enqueue` gives clients the call |
+| E2817 | EnqueueNotOneJobCall | Compiler/JetSema/Source/Sema/Calls/AppJobs.jet:144 | a method marked `#App.Job` is the form for work that runs after a call commits |
+| E2819 | ServerOnlyMethodMarkedEndpoint | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:119 | an endpoint method that does its own work and queues the job with `app.enqueue` gives clients the call |
 | E2903 | InvalidPerformanceBudget | Compiler/JetSema/Source/Sema/BudgetSpecs.jet:451 | the budget follows the grammar |
 | E2904 | PerformanceBudgetOverlap | Compiler/JetSema/Source/Sema/BudgetSpecs.jet:433 | one budget per metric and scope |
 | E2905 | UnresolvedPerformanceBudget | Compiler/JetSema/Source/Sema/BudgetSpecs.jet:399 | the attachment names one target |
@@ -1475,7 +1475,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E2815 | CallerWithoutSignedInPath | soundness | `app.caller()` is the signed-in account; on a path where no one signed in there is no account to give, so a run would stop instead of answering. |
 | E2816 | LiveNotOneRemoteCall | soundness | A live query is keyed by the one endpoint call it makes; a closure that did anything else would share and cache results under a key that does not name what it ran. |
 | E2817 | EnqueueNotOneJobCall | soundness | A queued job is kept as its job's name and its encoded arguments, to run after its call commits; a closure that did anything else would run work the outbox does not record and that a retry could not repeat. |
-| E2819 | ServerOnlyMethodMarkedEndpoint | soundness | A job, a webhook or a signing key that an endpoint marker also marks would be called by any client directly: a job outside the call that queued it and as that client rather than the system, a webhook without its sender's signature, a signing key by anyone who asks for it. |
+| E2819 | ServerOnlyMethodMarkedEndpoint | soundness | A job, a schedule, a webhook or a signing key that an endpoint marker also marks would be called by any client directly: a job outside the call that queued it and as that client rather than the system, a schedule off its clock, a webhook without its sender's signature, a signing key by anyone who asks for it. |
 | E2901 | DoctestMismatch | opinion | The code runs safely, and the doc example claims a different result, so Jet refuses the doc. |
 | E2903 | InvalidPerformanceBudget | soundness | An invalid budget declaration states no limit to check. |
 | E2904 | PerformanceBudgetOverlap | soundness | Two budgets cover one metric and scope, so the limit has two meanings. |

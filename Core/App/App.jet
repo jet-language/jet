@@ -22,6 +22,7 @@ use {
     core.net.ws.[WsConn]
     tasks: core.tasks
     core.tasks.[TaskID]
+    time: core.time
     rt: jet.runtime.time
     rt_web: jet.runtime.web
     world_rt: jet.runtime.testing
@@ -109,6 +110,26 @@ SigningKey: struct {
 // job is no endpoint: no Remote calls it.
 Job: struct {
     retries: Int{5}
+
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+// A schedule: `#App.Every(cron: "0 8 * * *")` runs a method of a mounted
+// service at each minute its cron line allows, in UTC, while the App serves.
+// The line has five fields, each a `*`, a number, a range `a-b`, or a list
+// of those, each optionally stepped (`*/15`): the minute (0-59), the hour
+// (0-23), the day of the month (1-31), the month (1-12) and the day of the
+// week (0-7, Sunday 0 or 7). A day is due when both day fields allow it,
+// or either does when neither starts with `*`. At start-up a server runs
+// the schedule's latest due minute, a run it missed while no server ran,
+// and then each next one. A store the run uses records it, so each due
+// minute runs on one server, however many serve the App. A schedule runs
+// as the system (`as_system`), in a call of its own, and is no endpoint:
+// no Remote calls it.
+Every: struct {
+    cron: String
 
     impl Marker {
         sites: [.Method]
@@ -735,7 +756,9 @@ priv(package) callers: module {
 // then runs it again. A webhook's call carries its delivery (`deliver`),
 // whose ID core.db records in each store's transaction as the call joins
 // it; a store that has run the delivery already marks the call repeated, and
-// the framework rolls it back and drops the delivery. A job the call queues
+// the framework rolls it back and drops the delivery. A schedule's call
+// carries its due run (`schedule`), which core.db records the same way, so
+// a run another server has done is dropped as well. A job the call queues
 // (`enqueue`) waits for it: `end` keeps the job in the outbox of the first
 // store the call joined, in that store's transaction, and once the call
 // commits, runs it on a task of its own (`job_run`); a call that rolls back
@@ -783,12 +806,22 @@ CallDelivery: struct {
     at: Int
 }
 
+// A schedule's run a call is: the schedule's name (`<service
+// module>.<Service>.<method>`) and the second (since the Unix epoch) it was
+// due.
+#Equatable
+CallTick: struct {
+    schedule: String
+    due: Int
+}
+
 CallRun: struct {
     task: TaskID
     id: Int
     joins: [CallJoin]
     refused: Bool
     delivery: CallDelivery?
+    tick: CallTick?
     repeated: Bool
     jobs: [CallJob]
 }
@@ -815,7 +848,7 @@ priv(package) transactions: module {
             if run.task == me -> return None
         }
         runs.value.made += 1
-        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, repeated: false, jobs: [CallJob]{}})
+        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, tick: None, repeated: false, jobs: [CallJob]{}})
         Val(runs.value.made)
     }
 
@@ -888,7 +921,25 @@ priv(package) transactions: module {
         None
     }
 
-    // Marks call `call` repeated: a store it uses has run its delivery.
+    // Gives call `call` the schedule's run it is.
+    schedule: fn(call: Int, tick: CallTick) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call -> runs.value.runs[index].tick = Val(tick.copy())
+        }
+    }
+
+    // The schedule's run call `call` is; None for any other call.
+    tick: fn(call: Int) -> CallTick? Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.tick.copy()
+        }
+        None
+    }
+
+    // Marks call `call` repeated: a store it uses has run its delivery or
+    // its schedule's run.
     repeat: fn(call: Int) Never! {
         runs := CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
@@ -896,7 +947,8 @@ priv(package) transactions: module {
         }
     }
 
-    // Whether a store has run call `call`'s delivery already.
+    // Whether a store has run call `call`'s delivery or schedule's run
+    // already.
     repeated: fn(call: Int) -> Bool Never! {
         runs: CALLS.guard_read()
         loop run in runs.value.runs {
@@ -1069,6 +1121,255 @@ priv job_attempt: fn(job: CallJob, outbox: Shared<CallOutbox>?, row: Int) -> Str
 priv job_reply: fn(run: fn(RemoteArgs) -> String [FieldError]!, args: String) -> String Never! {
     tree: live_json.parse(args) ?? return "{{\"err\":\"the job's arguments are not JSON\"}}"
     run(RemoteArgs{tree: tree}) ?? "{{\"err\":\"the job's arguments don't decode\"}}"
+}
+
+// The schedules of a served App: core.web starts each `#App.Every` method
+// of a mounted service as the App starts serving (`start`).
+priv(package) schedules: module {
+    // Whether `cron` is a cron line a schedule runs on.
+    valid: fn(cron: String) -> Bool Never! { cron_parse(cron) != None }
+
+    // Starts schedule `name` on a task of its own: it runs `run` at the
+    // latest minute the cron line `cron` allows, unless a store records that
+    // run, and then at each next one (`schedule_run`).
+    start: fn(name: String, cron: String, run: &&fn(RemoteArgs) -> String [FieldError]!) Never! {
+        line: cron_parse(cron) ?? panic("`{cron}` is not a cron line")
+        runner: task { schedule_run(name, line, run) }
+        runner.detach()
+    }
+}
+
+// Runs schedule `name` on its cron line `line`: first the latest minute the
+// line allows, a run missed while no server ran, then each next minute it
+// allows, each as a call of its own (`schedule_tick`). A run that ends
+// after its next minute has passed is followed by the latest minute that
+// passed, once.
+priv schedule_run: fn(name: String, line: CronLine, run: fn(RemoteArgs) -> String [FieldError]!) Never! {
+    due := schedule_minute()
+    if cron_due_by(line, due) == .Val(missed) {
+        schedule_tick(name, missed, run)
+        due = missed
+    }
+    loop {
+        next := cron_due_after(line, due) ?? return
+        now: schedule_minute()
+        if next < now -> next = cron_due_by(line, now) ?? next
+        loop {
+            wait_ms: next * 60000 - time.unix_ns() /% 1000000
+            if wait_ms <= 0 -> break
+            tasks.sleep(wait_ms)
+        }
+        schedule_tick(name, next, run)
+        due = next
+    }
+}
+
+// The minute it is, since the Unix epoch.
+priv schedule_minute: fn() -> Int Never! { time.unix_ns() /% 60000000000 }
+
+// One run of schedule `name`, due at minute `due`, in a call of its own as
+// the system. Each store the run uses records it in the call's transaction
+// (core.db's `__jet_schedules`): a store that has recorded it, or a later
+// run, already marks the call repeated, and the run is dropped. A store
+// busy with another server's run refuses the call, which runs again, up to
+// `transactions.attempts()` times, and then finds the run recorded. A run
+// that fails rolls back and records nothing. A run that uses no store
+// records nothing, so each server runs it.
+priv schedule_tick: fn(name: String, due: Int, run: fn(RemoteArgs) -> String [FieldError]!) Never! {
+    loop _ in 0..<transactions.attempts() {
+        call: transactions.begin() ?? panic("a schedule's task runs no other call")
+        transactions.schedule(call, CallTick{schedule: name.copy(), due: due * 60})
+        reply: as_system<String>(fn() { job_reply(run, "[]") })
+        if transactions.end(call, !reply.starts_with("{{\"err\":")) {
+            return
+        }
+    }
+}
+
+// A cron line's five fields, each as the values it allows, by value: the
+// minutes (0-59), hours (0-23), days of the month (1-31), months (1-12) and
+// days of the week (0-6, Sunday 0). `any_day` and `any_weekday` hold when
+// the day field and the weekday field start with `*`.
+priv CronLine: struct {
+    minutes: [Bool]
+    hours: [Bool]
+    days: [Bool]
+    months: [Bool]
+    weekdays: [Bool]
+    any_day: Bool
+    any_weekday: Bool
+}
+
+// The days, back or ahead, a due minute is looked for in: eight years,
+// enough to reach a February 29.
+CRON_SEARCH_DAYS: 2928
+
+// `text` as a cron line; None when it isn't one.
+priv cron_parse: fn(text: String) -> CronLine? {
+    fields := [String]{}
+    loop part in text.split(" ") {
+        if part != "" -> fields.push(part)
+    }
+    if fields.len() != 5 -> return None
+    weekdays := cron_field(fields[4], 0, 7) ?? return None
+    if weekdays[7] -> weekdays[0] = true
+    _: weekdays.pop()
+    Val(CronLine{
+        minutes: cron_field(fields[0], 0, 59) ?? return None,
+        hours: cron_field(fields[1], 0, 23) ?? return None,
+        days: cron_field(fields[2], 1, 31) ?? return None,
+        months: cron_field(fields[3], 1, 12) ?? return None,
+        weekdays: weekdays,
+        any_day: fields[2].starts_with("*"),
+        any_weekday: fields[4].starts_with("*"),
+    })
+}
+
+// The values from `low` to `high` that the cron field `text` allows, by
+// value (each below `low` false); None when it isn't a field of that range.
+priv cron_field: fn(text: String, low: Int, high: Int) -> [Bool]? {
+    allowed := [Bool]{}
+    loop _ in 0..<(high + 1) -> allowed.push(false)
+    loop item in text.split(",") {
+        stepped: item.split("/").to_list()
+        if stepped.len() > 2 -> return None
+        step: if {
+            stepped.len() == 2 -> cron_number(stepped[1]) ?? return None
+            else -> 1
+        }
+        if step < 1 -> return None
+        first := low
+        last := high
+        if stepped[0] != "*" {
+            bounds: stepped[0].split("-").to_list()
+            if bounds.len() > 2 -> return None
+            first = cron_number(bounds[0]) ?? return None
+            // `5/15` steps from 5 to the field's end.
+            last = if {
+                bounds.len() == 2 -> cron_number(bounds[1]) ?? return None
+                stepped.len() == 2 -> high
+                else -> first
+            }
+        }
+        if first < low || last > high || first > last -> return None
+        at := first
+        loop {
+            if at > last -> break
+            allowed[at] = true
+            at += step
+        }
+    }
+    Val(allowed)
+}
+
+// The number `text` writes, of one or two digits; None otherwise.
+priv cron_number: fn(text: String) -> Int? {
+    if text.len() == 0 || text.len() > 2 -> return None
+    loop byte in text.bytes() {
+        n: Int{byte}
+        if n < 48 || n > 57 -> return None
+    }
+    Val(Int.parse(text) ?? return None)
+}
+
+// Whether `line` allows day `day` (since the Unix epoch): its month, and its
+// day of the month and day of the week, both, or either when neither field
+// starts with `*`.
+priv cron_day_allowed: fn(line: CronLine, day: Int) -> Bool {
+    date: cron_date(day)
+    if !line.months[date.month] -> return false
+    by_date: line.days[date.day]
+    by_weekday: line.weekdays[(day + 4) % 7]
+    if line.any_day || line.any_weekday -> return by_date && by_weekday
+    by_date || by_weekday
+}
+
+// A day's month (1-12) and day of the month (1-31).
+priv CronDate: struct {
+    month: Int
+    day: Int
+}
+
+// The date of day `day` since the Unix epoch, in the proleptic Gregorian
+// calendar (Howard Hinnant's `civil_from_days`).
+priv cron_date: fn(day: Int) -> CronDate {
+    shifted: day + 719468
+    era: shifted /% 146097
+    of_era: shifted - era * 146097
+    year_of_era: (of_era - of_era /% 1460 + of_era /% 36524 - of_era /% 146096) /% 365
+    of_year: of_era - (365 * year_of_era + year_of_era /% 4 - year_of_era /% 100)
+    month_from_march: (5 * of_year + 2) /% 153
+    CronDate{
+        month: if month_from_march < 10 -> month_from_march + 3 else -> month_from_march - 9,
+        day: of_year - (153 * month_from_march + 2) /% 5 + 1,
+    }
+}
+
+// The latest minute, since the Unix epoch, at or before `minute` that
+// `line` allows; None when none does in the search window.
+priv cron_due_by: fn(line: CronLine, minute: Int) -> Int? {
+    first_day: minute /% 1440
+    loop back in 0..<CRON_SEARCH_DAYS {
+        day: first_day - back
+        if !cron_day_allowed(line, day) -> next
+        top_hour: if back == 0 -> (minute % 1440) /% 60 else -> 23
+        loop hour_back in 0..<(top_hour + 1) {
+            hour: top_hour - hour_back
+            if !line.hours[hour] -> next
+            top_minute: if back == 0 && hour == top_hour -> minute % 60 else -> 59
+            loop minute_back in 0..<(top_minute + 1) {
+                at: top_minute - minute_back
+                if line.minutes[at] -> return Val(day * 1440 + hour * 60 + at)
+            }
+        }
+    }
+    None
+}
+
+// The earliest minute, since the Unix epoch, after `minute` that `line`
+// allows; None when none does in the search window.
+priv cron_due_after: fn(line: CronLine, minute: Int) -> Int? {
+    start: minute + 1
+    first_day: start /% 1440
+    loop ahead in 0..<CRON_SEARCH_DAYS {
+        day: first_day + ahead
+        if !cron_day_allowed(line, day) -> next
+        low_hour: if ahead == 0 -> (start % 1440) /% 60 else -> 0
+        loop hour in low_hour..<24 {
+            if !line.hours[hour] -> next
+            low_minute: if ahead == 0 && hour == low_hour -> start % 60 else -> 0
+            loop at in low_minute..<60 {
+                if line.minutes[at] -> return Val(day * 1440 + hour * 60 + at)
+            }
+        }
+    }
+    None
+}
+
+#Test("a cron line allows the minutes its fields allow, in UTC, and a malformed one is refused") {
+    daily: cron_parse("0 8 * * *") ?? panic("a daily line")
+    // 2026-11-16 07:00 UTC, a Monday.
+    monday_seven: 29913540
+    assert_eq(cron_due_by(daily, monday_seven), Val(29912160))
+    assert_eq(cron_due_after(daily, monday_seven), Val(29913600))
+    assert_eq(cron_due_by(daily, 29913600), Val(29913600))
+    assert_eq(cron_due_after(daily, 29913600), Val(29915040))
+    quarters: cron_parse("*/15 * * * *") ?? panic("a quarter-hour line")
+    assert_eq(cron_due_by(quarters, 29913571), Val(29913570))
+    assert_eq(cron_due_after(quarters, 29913571), Val(29913585))
+    // Either the 13th or a Friday, since neither day field is `*`.
+    friday_or_13th: cron_parse("0 0 13 * 5") ?? panic("a day line")
+    assert_eq(cron_due_by(friday_or_13th, 29908800), Val(29908800))
+    assert_eq(cron_due_after(friday_or_13th, 29908800), Val(29918880))
+    assert_eq(cron_due_after(cron_parse("0 0 29 2 *") ?? panic("a leap-day line"), monday_seven), Val(30589920))
+    monthly: cron_parse("0 0 1 * *") ?? panic("a monthly line")
+    assert_eq(cron_due_by(monthly, 29934719), Val(29891520))
+    assert_eq(cron_due_after(monthly, 29934719), Val(29934720))
+    assert_eq(cron_due_by(cron_parse("0 8 * * 7") ?? panic("a Sunday line"), monday_seven), Val(29912160))
+    assert_eq(cron_due_after(cron_parse("0 0 31 2 *") ?? panic("a line no day matches"), monday_seven), Int?{None})
+    assert(schedules.valid("5/15 1-3,9 * 1-12/2 1-5"))
+    malformed_lines: [String]{"0 8 * *", "0 8 * * * *", "60 * * * *", "*/0 * * * *", "a * * * *", "5-1 * * * *", "1,,2 * * * *", "* * 0 * *", "* * * 13 *", "* * * * 8", "1-2-3 * * * *", "*/100 * * * *"}
+    loop malformed in malformed_lines { assert(!schedules.valid(malformed), malformed) }
 }
 
 // An outbox that keeps nothing, for the calls of the test below, which queue

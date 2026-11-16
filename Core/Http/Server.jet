@@ -241,6 +241,8 @@ priv HTTPMuxState: struct {
     routes: [HTTPRoute]
     layers: [Shared<HTTPLayerCell>]
     request_seq: Int
+    // What the first server that serves this table starts (`__on_serve`).
+    starts: [fn() -[Time]> Never!]
 }
 
 /// One route table: routes and middleware layers. A `web.app()` owns one and
@@ -355,6 +357,7 @@ HTTPServer: struct {
     // the connections still open after that as cancelled.
     serve: fn(self) -[Net, FS.Read, Time]> HTTPShutdownReport HTTPError! {
         if !server_begin(self) -> return Err(.IO{operation: "HTTP server can only be served once"})
+        mux_serving(self.__mux)
         accepted := 0
         overloaded := 0
         failure := HTTPError?{None}
@@ -700,11 +703,29 @@ priv accept_transient_code: fn(os_code: Int?) -> Bool Never! {
 // An empty route table: a `web.app()`'s, and the one an `http.router()`
 // routes with.
 priv mux_new: fn() -> HTTPMux Never! {
-    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0}}}
+    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0, starts: [fn() -[Time]> Never!]{}}}}
+}
+
+// Has the first server that serves `mux`, by `serve` or `serve_once`, run
+// `start` as it begins, once: a web app's schedules start so, and a table a
+// server is only bound over starts nothing.
+__on_serve: fn(mux: HTTPMux, start: &&fn() -[Time]> Never!) Never! {
+    guard := mux.__state.guard_edit()
+    guard.value.starts.push(start.move())
+}
+
+// Runs, and drops, what `__on_serve` left on `mux`.
+priv mux_serving: fn(mux: HTTPMux) Never! -[Time]> {
+    guard := mux.__state.guard_edit()
+    loop {
+        start: guard.value.starts.remove(0, .Slot) ?? return
+        start()
+    }
 }
 
 // Answer one connection the listener accepts (`app.serve_once(listener)`).
 priv server_serve_once: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
+    mux_serving(mux)
     stream: listener.accept(deadline: Duration{ns: C_ACCEPT_ONCE_NS}) ?? {
         if accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})

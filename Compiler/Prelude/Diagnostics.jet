@@ -22613,10 +22613,10 @@ ServerOnlyMethodMarkedEndpoint: struct {
     impl Diagnostic {
         code: "E2819"
         safety_class: .Soundness
-        safety_reason: "A job, a webhook or a signing key that an endpoint marker also marks would be called by any client directly: a job outside the call that queued it and as that client rather than the system, a webhook without its sender's signature, a signing key by anyone who asks for it."
+        safety_reason: "A job, a schedule, a webhook or a signing key that an endpoint marker also marks would be called by any client directly: a job outside the call that queued it and as that client rather than the system, a schedule off its clock, a webhook without its sender's signature, a signing key by anyone who asks for it."
         expert_path: "none: an endpoint method that does its own work and queues the job with `app.enqueue` gives clients the call"
         stage: [.Compile]
-        meaning: "A method marked both server-only (`#App.Job`, `#App.Webhook`, `#App.SigningKey`) and as an endpoint (`#App.SignedIn`, `#App.Public`)"
+        meaning: "A method marked both server-only (`#App.Job`, `#App.Every`, `#App.Webhook`, `#App.SigningKey`) and as an endpoint (`#App.SignedIn`, `#App.Public`)"
         detail: true
 
         what: fn(self) -> String {
@@ -22624,7 +22624,7 @@ ServerOnlyMethodMarkedEndpoint: struct {
         }
 
         why: fn(self) -> String {
-            "A job runs after the call that queued it commits, as the system; a webhook runs for a sender that signs its deliveries; a signing key gives the key that checks them. Only the server runs each, so no client may call one through `app.Remote`."
+            "A job runs after the call that queued it commits, as the system; a schedule runs on its clock, as the system; a webhook runs for a sender that signs its deliveries; a signing key gives the key that checks them. Only the server runs each, so no client may call one through `app.Remote`."
         }
 
         fix: fn(self) -> String {

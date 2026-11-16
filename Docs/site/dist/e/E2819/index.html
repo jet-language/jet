@@ -32,7 +32,7 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">`{method}` is marked `#{marker}`, which keeps it on the server, and `#{endpoint}`, which makes it an endpoint.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A job runs after the call that queued it commits, as the system; a webhook runs for a sender that signs its deliveries; a signing key gives the key that checks them. Only the server runs each, so no client may call one through `app.Remote`.</p>
+<p class="diag-copy why" data-registry-field="why">A job runs after the call that queued it commits, as the system; a schedule runs on its clock, as the system; a webhook runs for a sender that signs its deliveries; a signing key gives the key that checks them. Only the server runs each, so no client may call one through `app.Remote`.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove `#{endpoint}` from `{method}`, and give clients an endpoint method of their own; it can queue a job with `app.enqueue`.</p>
 <h2>Worked example</h2>
@@ -42,7 +42,7 @@
     |
   4 |     #[App.Job, App.SignedIn]
     |                ^^^^^^^^^^^^
- Why: A job runs after the call that queued it commits, as the system; a webhook runs for a sender that signs its deliveries; a signing key gives the key that checks them. Only the server runs each, so no client may call one through `app.Remote`.
+ Why: A job runs after the call that queued it commits, as the system; a schedule runs on its clock, as the system; a webhook runs for a sender that signs its deliveries; a signing key gives the key that checks them. Only the server runs each, so no client may call one through `app.Remote`.
  Fix: Remove `#App.SignedIn` from `send`, and give clients an endpoint method of their own; it can queue a job with `app.enqueue`.
 More: jet-lang.dev/e/E2819
 </pre>
