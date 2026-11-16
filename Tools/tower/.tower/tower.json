@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110225,
+    "rev": 110227,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74980,7 +74980,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-16T13:31:58.308Z",
+      "updated": "2026-11-16T13:46:21.884Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -105220,7 +105220,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "IfHole-6-1 owns this card. Order: c13 power half (infix ^ gets the generic parse error), then c10/c11, then the D-BIT-SIGILS1=A operator cutover (new tokens, sema, lowering on every tier, E0398 flipped, a jet fix rule, a sweep of 6,582 .bit_* calls in 688 files, one SUB per tree), then c12's meaning table and guard on the finished lexer. Then c8, c5/c6, c1/c2, c3/c4 and c7."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -105351,7 +105357,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.039Z",
-      "updated": "2026-11-16T13:07:04.412Z",
+      "updated": "2026-11-16T13:44:40.449Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -209969,35 +209975,35 @@
       "id": "D-GUARD-LINT1",
       "cardId": "c06he0ee",
       "group": "language",
-      "title": "Branching on an enum: type else freely, and the build names the cases it covers",
+      "title": "Branching on an enum: single tests stay free; else over several cases is an error with an instant fix",
       "situation": "An enum is a type with a fixed list of cases, such as a shape that is a circle, a square, a line or a dot. Code that tests one value against several cases often ends in else for the rest. When someone later adds a case, that else quietly takes it, and the program gives a wrong answer with no error. This vote picks how Jet catches that with the least friction for the common cases. We recommend letting people type else, and having jet fix write out the cases it covers before a build.",
       "gist": "When code tests one enum value against several cases, how do we catch a case added later, with the least writing?",
       "lesson": "An enum has a fixed list of cases. The bug to prevent: code that tests a few cases and ends in else quietly takes any case added later. One test of one case stays free. The options differ in how much the writer must type to keep later cases from slipping into else.",
       "explainer": "Words used here, shown on the one program this ballot uses throughout.\n\n```jet\nShape: enum {                  // an enum: a type with a fixed list of cases\n    Circle(radius: Int)        // a case that carries a value, its radius\n    Square(side: Int)          // a case that carries its side length\n    Line                       // a case that carries nothing\n    Dot\n}\n```\n\nA case test asks whether a value is one case. shape == .Circle(r) is true for a circle, and r is then its radius.\n\nA chain is if ... else if ... else, with one case test per branch. Its final else takes every case not tested above, including cases added later.\n\nA table names the value once and gives one arm per case, as in if shape == { .Circle(r) -> 3 * r * r ... }. The arrow -> gives the arm's result, and | joins cases in one arm. A table over an enum must name every case, so an else arm there is refused.\n\nThe rest means the cases that code does not handle one by one, such as Line and Dot in area.",
-      "story": "Ana writes area(shape) as a chain: a circle, then a square, then else for the rest. Under A, jet run and jet test accept it as she iterates. Before shipping, jet build says else stands for .Line | .Dot, and jet fix writes them. Months later Ben adds Triangle, and the build stops at Ana's code until he decides what a triangle's area is. A key handler that should treat every other key, now or later, the same writes _ and is never stopped.",
+      "story": "Ana writes area(shape) as a table: a circle, a square, then else for the rest. The editor marks the else and offers the fix, and one keystroke turns it into .Line | .Dot. Months later Ben adds Triangle, and the build stops at Ana's code until he decides what a triangle's area is. A key handler that should treat every other key, now or later, the same writes _ and is never stopped.",
       "inWild": "OCaml: warning 4, off by default, flags a fragile match, one whose wildcard would silently take constructors added later. A polymorphic variant type can be named, type flat = [ `Line | `Dot ], and the pattern #flat matches any of its members.\n\nSwift: a switch over an enum must be exhaustive. For an enum that may grow, @unknown default runs for unknown cases, and the compiler warns when a known case is not named.\n\nRust: a match must be exhaustive, and the wildcard _ takes the rest silently. The opt-in Clippy lint wildcard_enum_match_arm flags that wildcard.\n\nKotlin and Java: a when or switch over an enum or sealed type must be exhaustive, and else or default may take the rest.\n\nThese outside facts were not re-checked for this ballot.",
       "detail": "What Jet does today. Every example here ran with the gate-p66 jet on dev 03d5f7b309. The v4 probes hold the exact programs this ballot shows, with their outputs.\n\nThe table form of area checks clean and runs (t1). Add Triangle to Shape, and it stops with E0307: This `if` doesn't cover every case — missing: Triangle. The fix line says: Add an arm for: Triangle (t2).\n\nThe chain form of area, ending in else, gets two warnings, L0302 and L0507, and runs (t3). With Triangle added, it still runs and returns 0 for a triangle (t4).\n\nArea can also be written as separate ifs, one after another, that each return:\n\n```jet\narea: fn(shape: Shape) -> Int {\n    if shape == .Circle(r) -> return 3 * r * r   // one test; return leaves area\n    if shape == .Square(s) -> return s * s\n    0                                            // the rest: every other case gives 0\n}\n```\n\nThat form gets no finding at all. With Triangle added, it checks clean and returns 0 for a triangle (t5, and v3 probe r1). The same holds when the ifs assign to a result instead of returning (v3 probe r4).\n\nTwo more escapes. A second test hidden in an else block, else { if shape == .Square(s) ... }, gets no L0302. A table with a plain true-or-false arm, such as verbose == true, may keep an else over an enum, and that else takes Dot silently. A guarded arm, .Circle(r) && r > 10, does not count as covering Circle, and that part is already right: E0307 names Circle.\n\nThe rule every option shares. It applies when code tests one value, a name or a field path, against two or more cases. The tests may sit in one chain, one table, or separate ifs in a row in one block. Those ifs have nothing between them and no body that changes the value. Such code must name every case, and else cannot stand for the rest.\n\nAn else whose whole body is another if on the same value counts as part of the chain. When separate ifs each leave (return, next, break or panic), the rest is the code after them. When they fall through, the rest is doing nothing. Either way, a case added later stops the build. A true-or-false arm may sit among the tests, but it covers no case.\n\nWhat stays free. One test is free whatever its pattern, with or without an else, so if shape == .Line | .Dot { … } else { … } is free. So are tests with other code between them, and ifs whose body changes the value (a state machine stepping state). So is a test through a helper such as shape.is_round(). The rule covers every closed set: an enum, an optional, a result and a union.\n\nL0302 retires under every option, since Jet has no warnings.\n\nHow big the change is. A rough scan of dev finds 35 chains with two or more tests of one value. A rerun on 03d5f7b309 finds 11 of them ending in else, where the first count said 13. It also finds 5 if { } tables that test one value twice or more, all ending in else, so 16 sites have an else to replace.\n\nSeparate ifs are the commonest form. Scans of one-line ifs alone find 130 groups whose bodies leave and 33 that fall through, over two or more cases. The scans are v3/exitscan.awk and v3/sepscan.awk. They skip block bodies, so these counts are lower bounds. The scans read text, not types, so the chain and table counts are upper bounds.\n\nSome rests are long under every option. Two chains ending in else test the compiler's Type, which has 24 cases, so each else stands for 22. Expr has 51 cases. And ir_builtin in BuildRoutes.jet tests 13 of TBuiltinOp's 214 cases before handing the rest to ir_builtin_on.\n\nWhich syntax is new. Options B and C add no syntax: every line of their programs runs today (t1, t6 and t7). They add only the new error E0644. Option A adds the case set line, Flat: .Line | .Dot, and the pattern .Flat. Today that line is a parse error (t8).\n\nWhy A's case set is written with dots. Name: .A | .B reuses the colon that declares a name and the dotted or-pattern a table arm already writes. So | keeps its meaning, one case or another.\n\nThe undotted Name: A | B already means a union type wherever a Name: line sits today. In a struct body it is a field of type Line | Dot, and at file scope it is a union alias (v3 probes r2 and r2a). No option adds a glyph, and the range .. and the spread ... are not used.",
       "options": [
         {
           "key": "A",
-          "name": "Type else; the build names the cases",
-          "detail": "One test of one case stays free. Two or more tests of one enum value may be a chain of ifs or a table, as today. Their rest may be typed as else. jet run, jet dev and jet test accept it, so trying code costs nothing.\n\njet check and jet build report such an else as a tidy error (D-NO-WARNINGS1), naming the cases it stands for. jet fix replaces it with them, such as .Line | .Dot. From then on a case added to the enum stops the build at every place that does not name it. A rest meant to take every other case, now or later, is written _ and is never stopped; a key handler is the usual example.",
-          "technical": "Today E0641 already refuses an else over an enum in a table, everywhere, and its fix writes the cases. A moves E0641 to the tidy tier, so run, dev and test accept the else, and applies it to a chain of ifs over one value too. Sema recognises the chain by the same subject test it uses for tables, so both forms get one rule (I8).\n\n_ is a new table arm meaning every remaining case, including later ones; it is not a binding, and no Jet code uses _ as an arm today. Non-enum subjects (Int, String) keep else unchanged, since their cases cannot be listed.",
-          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\n// Ana types this; jet run and jet test accept it:\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0\n    }\n}\n// jet build: tidy error, else stands for .Line | .Dot.\n// jet fix writes:   .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n\non_key: fn(key: Key) {\n    if key == {\n        .Enter -> submit()\n        .Escape -> close()\n        _ -> type_into(key)  // every other key, now or later\n    }\n}"
+          "name": "An error with an instant fix",
+          "detail": "One test of one case stays free: if order == .Paid { … }. Two or more tests of one enum value, in a chain of ifs or a table, must name every case. An else over an enum is an error everywhere (E0641, as tables already do), and jet fix or the editor's quick fix replaces it with the cases it stands for. A rest meant to take every other case, now or later, is written _ and is never stopped; a key handler is the usual example.\n\nEvidence (Docs/Research/2026-11-16-enum-branching-in-real-code.md): single-case tests are 82–86% of enum branches in Java, TypeScript and Go. In Rust, half of the catch-alls cover three cases or fewer, and a quarter cover more than ten. Jet's own code holds 1.86 MB of long lists whose arm does nothing or fails, which _ removes.",
+          "technical": "E0641 already refuses else over an enum in a table, and its fix writes the cases. A extends it to a chain of ifs over one value. Sema recognises that chain by the same subject test it uses for tables (I8).\n\nA also adds _, a table arm for every remaining case, including later ones. It is not a binding, and no Jet code uses _ as an arm today. Non-enum subjects keep else. jet fix turns existing long lists whose arms do nothing or fail into _ only when asked (--open-rest).",
+          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0  // error: else stands for .Line | .Dot\n    }\n}\n// jet fix (or the editor's quick fix) writes:  .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n// Every other key, now or later:  _ -> type_into(key)"
         },
         {
           "key": "B",
+          "name": "A tidy error before build",
+          "detail": "One test of one case stays free. Two or more tests of one enum value may be a chain of ifs or a table, as today. Their rest may be typed as else. jet run, jet dev and jet test accept it, so trying code costs nothing.\n\njet check and jet build report such an else as a tidy error (D-NO-WARNINGS1), naming the cases it stands for. jet fix replaces it with them, such as .Line | .Dot. From then on a case added to the enum stops the build at every place that does not name it. A rest meant to take every other case, now or later, is written _ and is never stopped; a key handler is the usual example.",
+          "technical": "Today E0641 already refuses an else over an enum in a table, everywhere, and its fix writes the cases. A moves E0641 to the tidy tier, so run, dev and test accept the else, and applies it to a chain of ifs over one value too. Sema recognises the chain by the same subject test it uses for tables, so both forms get one rule (I8).\n\n_ is a new table arm meaning every remaining case, including later ones; it is not a binding, and no Jet code uses _ as an arm today. Non-enum subjects (Int, String) keep else unchanged, since their cases cannot be listed.",
+          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\n// Same rule, but jet run, jet dev and jet test accept the else;\n// jet check and jet build refuse it until jet fix writes .Line | .Dot.\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0\n    }\n}"
+        },
+        {
+          "key": "C",
           "name": "Tables and case sets",
           "detail": "Two or more tests of one value must be a table, and a chain is an error with a fix that writes the table. The rest is listed case by case, or named by a case set the enum declares, such as Flat.",
           "technical": "A new enum member form for sets, a new error for chains, and E0307 for missed cases.",
           "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n    Flat: .Line | .Dot  // a named case set\n}\narea: fn(shape: Shape) -> Int {  // a chain here is an error\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Flat -> 0\n    }\n}"
-        },
-        {
-          "key": "C",
-          "name": "Name every case by hand",
-          "detail": "Chains and tables stay; any chain or table testing two or more cases of one value must name every case, and else is an error everywhere, run and test included.",
-          "technical": "E0307's rule extends to chains and to else; no tidy tier, no _ arm.",
-          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == .Circle(r) -> return 3 * r * r\n    if shape == .Square(s) -> return s * s\n    if shape == .Line | .Dot -> return 0  // every case named by hand\n    0\n}"
         }
       ],
       "comparisons": [
@@ -210020,28 +210026,32 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "Typing stays as short as today, and the bug is still caught before anything ships.",
+        "why": "It catches every later case with one quick fix, keeps single tests free, and _ ends long filler lists.",
         "gains": [
-          "Zero extra writing while trying code.",
-          "Every new case is decided before a build."
+          "Single-case tests stay free.",
+          "A later case is decided at every site."
         ],
         "losses": [
           {
-            "loss": "A tidy error before build until jet fix runs.",
-            "mitigation": "jet fix writes the cases in one step, and run, dev and test never stop for it."
+            "loss": "Trying code stops until the fix runs.",
+            "mitigation": "The editor's quick fix writes the cases in one keystroke."
+          },
+          {
+            "loss": "Adding a case to a package's enum breaks users' tables.",
+            "mitigation": "That is the point within one program; a package lists the change in its API diff."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B forces chains into tables and adds a declaration form."
+            "reason": "B adds an error tier and lets unfixed else lines pile up."
           },
           {
             "key": "C",
-            "reason": "C charges every multi-case test from the first run."
+            "reason": "C forces chains into tables and adds case sets."
           }
         ],
-        "tradeoff": "A shipped table lists its cases, in exchange for catching every case added later."
+        "tradeoff": "One quick fix per multi-case test, in exchange for every later case being decided."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -210068,22 +210078,36 @@
         "options": [
           {
             "key": "A",
-            "name": "Type else; the build names the cases",
-            "gist": "else works while trying code; jet fix writes the cases before a build; _ keeps a rest open on purpose.",
+            "name": "An error with an instant fix",
+            "gist": "else over an enum is an error; jet fix writes the cases; _ keeps a rest open on purpose.",
             "gains": [
-              "No extra typing while writing or testing.",
               "A new case stops every place that has not decided it.",
-              "Chains and tables both stay."
+              "One quick fix writes the list."
             ],
             "losses": [
-              "A tidy error before build until jet fix runs."
+              "Trying code stops until the fix runs."
             ],
             "proposed": {
-              "code": "// Ana types this; jet run and jet test accept it:\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0\n    }\n}\n// jet build: tidy error, else stands for .Line | .Dot.\n// jet fix writes:   .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here."
+              "code": "area: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0  // error: else stands for .Line | .Dot\n    }\n}\n// jet fix (or the editor's quick fix) writes:  .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n// Every other key, now or later:  _ -> type_into(key)"
             }
           },
           {
             "key": "B",
+            "name": "A tidy error before build",
+            "gist": "Same rule, but run, dev and test accept the else until a build.",
+            "gains": [
+              "No stop while trying code."
+            ],
+            "losses": [
+              "A second error tier to learn.",
+              "Unfixed else lines pile up until a build."
+            ],
+            "proposed": {
+              "code": "// Same rule, but jet run, jet dev and jet test accept the else;\n// jet check and jet build refuse it until jet fix writes .Line | .Dot.\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0\n    }\n}"
+            }
+          },
+          {
+            "key": "C",
             "name": "Tables and case sets",
             "gist": "Chains become tables; the rest is listed or named by a declared set.",
             "gains": [
@@ -210096,46 +210120,36 @@
             "proposed": {
               "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n    Flat: .Line | .Dot  // a named case set\n}\narea: fn(shape: Shape) -> Int {  // a chain here is an error\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Flat -> 0\n    }\n}"
             }
-          },
-          {
-            "key": "C",
-            "name": "Name every case by hand",
-            "gist": "Every multi-case test names every case, even while trying code.",
-            "gains": [
-              "Nothing new to learn."
-            ],
-            "losses": [
-              "Friction on every multi-case test, from the first run."
-            ],
-            "proposed": {
-              "code": "area: fn(shape: Shape) -> Int {\n    if shape == .Circle(r) -> return 3 * r * r\n    if shape == .Square(s) -> return s * s\n    if shape == .Line | .Dot -> return 0  // every case named by hand\n    0\n}"
-            }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Typing stays as short as today, and the bug is still caught before anything ships.",
+          "why": "It catches every later case with one quick fix, keeps single tests free, and _ ends long filler lists.",
           "gains": [
-            "Zero extra writing while trying code.",
-            "Every new case is decided before a build."
+            "Single-case tests stay free.",
+            "A later case is decided at every site."
           ],
           "losses": [
             {
-              "loss": "A tidy error before build until jet fix runs.",
-              "mitigation": "jet fix writes the cases in one step, and run, dev and test never stop for it."
+              "loss": "Trying code stops until the fix runs.",
+              "mitigation": "The editor's quick fix writes the cases in one keystroke."
+            },
+            {
+              "loss": "Adding a case to a package's enum breaks users' tables.",
+              "mitigation": "That is the point within one program; a package lists the change in its API diff."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B forces chains into tables and adds a declaration form."
+              "reason": "B adds an error tier and lets unfixed else lines pile up."
             },
             {
               "key": "C",
-              "reason": "C charges every multi-case test from the first run."
+              "reason": "C forces chains into tables and adds case sets."
             }
           ],
-          "tradeoff": "A shipped table lists its cases, in exchange for catching every case added later."
+          "tradeoff": "One quick fix per multi-case test, in exchange for every later case being decided."
         }
       },
       "draft": false,
@@ -210145,10 +210159,11 @@
         {
           "loss": "Naming every case is friction on common code.",
           "attempts": [
-            "Require names when writing: rejected, it charges every test from the first run.",
-            "Accept else while trying code, and have jet fix write the names before a build: kept."
+            "Make single-case tests subject to the rule: rejected, they are 82–86% of enum branches in Java, TypeScript and Go.",
+            "Accept else until a build (tidy tier): kept as B, since it adds a second error tier.",
+            "An error whose quick fix writes the cases in one keystroke: kept."
           ],
-          "result": "No extra typing; one fix command before shipping."
+          "result": "One quick fix per multi-case test; single tests stay free."
         },
         {
           "loss": "Some rests really mean every other case, now or later.",
@@ -220343,6 +220358,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:46:21.884Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-GUARD-LINT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:44:40.449Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01gyy9b",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-16T13:40:20.716Z",
       "by": "Main",
