@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 108900,
+    "rev": 108925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62068,12 +62068,12 @@
         },
         {
           "n": 5,
-          "text": "`jet doc --out <dir>` never overwrites a file that lacks the generated-file header: with a hand-written docs/index.md, `jet doc --out docs` exits non-zero with a registered error naming docs/index.md and leaves the file unchanged. Proof: `jet test Compiler --profile cases --filter jet_doc/out_refuses_hand_written_file`. (was #3421 c12)",
+          "text": "`jet doc --out <dir>` never overwrites a file that lacks the generated-file header: with a hand-written docs/index.md, `jet doc --out docs` exits non-zero with a registered error naming docs/index.md and leaves the file unchanged. Proof: `jet test Compiler --profile cases --filter JetDoc/out_refuses_hand_written_file`. (was #3421 c12)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:34.978Z"
+          "at": "2026-11-16T12:57:39.638Z"
         }
       ],
       "refs": [],
@@ -62085,7 +62085,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:13.858Z",
-      "updated": "2026-11-16T12:57:38.408Z",
+      "updated": "2026-11-16T12:57:39.638Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -62132,21 +62132,21 @@
         },
         {
           "n": 2,
-          "text": "The lock holds no per-machine state: building the same project on two machines gives byte-identical locks, and build stamps live under `.jet/build/`. Proof: `jet test Compiler --profile packages --filter lock/machine_independent`.",
+          "text": "The lock holds no per-machine state: building the same project on two machines gives byte-identical locks, and build stamps live under `.jet/build/`. Proof: `jet test Compiler --profile packages --filter Lock/machine_independent`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:12:10.136Z"
+          "at": "2026-11-16T12:57:40.574Z"
         },
         {
           "n": 3,
-          "text": "The spec lists every `.jet/` subpath and whether it is disposable, and files meant to be committed live outside `.jet/`. Proof: `jet test tests/guards --filter dot_jet_layout_spec`.",
+          "text": "The spec lists every `.jet/` subpath and whether it is disposable, and files meant to be committed live outside `.jet/`. Proof: `jet test Tests/Guards --filter dot_jet_layout_spec`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:12:11.108Z"
+          "at": "2026-11-16T12:57:41.500Z"
         },
         {
           "n": 4,
@@ -62159,21 +62159,21 @@
         },
         {
           "n": 6,
-          "text": "A channel dependency update writes the exact lock and a build then uses it offline, a channel build with no lock is E1271, and `jetpack outdated` lists channel refs with newer releases. Proof: `jet test Compiler --profile cases --filter jetpack_engine/channel_update_writes_exact_lock_and_build_uses_it_offline` and `--filter jetpack_engine/channel_build_without_lock_is_e1271`.",
+          "text": "A channel dependency update writes the exact lock and a build then uses it offline, a channel build with no lock is E1271, and `jetpack outdated` lists channel refs with newer releases. Proof: `jet test Compiler --profile cases --filter JetpackEngine/channel_update_writes_exact_lock_and_build_uses_it_offline` and `--filter jetpack_engine/channel_build_without_lock_is_e1271`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:54:43.664Z"
+          "at": "2026-11-16T12:57:42.433Z"
         },
         {
           "n": 7,
-          "text": "A clean prepared environment runs a script with its recorded dependency and source hashes, missing or changed material is an error with no registry fallback, and lifting the script into a package keeps its dependency identity. Proof: `jet test Compiler --profile cases --filter jetpack_script/locked_script_reproducible_`.",
+          "text": "A clean prepared environment runs a script with its recorded dependency and source hashes, missing or changed material is an error with no registry fallback, and lifting the script into a package keeps its dependency identity. Proof: `jet test Compiler --profile cases --filter JetpackScript/locked_script_reproducible_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:02:15.566Z"
+          "at": "2026-11-16T12:57:43.329Z"
         }
       ],
       "refs": [],
@@ -62185,8 +62185,8 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:14.997Z",
-      "updated": "2026-11-15T05:12:12.240Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:57:43.329Z",
+      "updatedBy": "Main",
       "goals": [
         "G7"
       ],
@@ -62242,12 +62242,12 @@
         },
         {
           "n": 2,
-          "text": "Reading a CSV into a frame and running filter, group-by with a sum, join, sort and select by column name works and matches Polars on the same file (golden). Proof: `jet test Compiler --profile core --filter data/frame_ops` against the Polars golden.",
+          "text": "Reading a CSV into a frame and running filter, group-by with a sum, join, sort and select by column name works and matches Polars on the same file (golden). Proof: `jet test Compiler --profile core --filter Data/frame_ops` against the Polars golden.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:46:26.515Z"
+          "at": "2026-11-16T12:57:44.236Z"
         },
         {
           "n": 3,
@@ -62260,30 +62260,30 @@
         },
         {
           "n": 4,
-          "text": "In a frame built from `csv.decode<Row>`, a misspelled column name or a column type mismatch is a compile error; the paired Polars and pandas programs fail only at run time (test pairs). Proof: `jet test Compiler --profile ui --filter data/frame_column_check`.",
+          "text": "In a frame built from `csv.decode<Row>`, a misspelled column name or a column type mismatch is a compile error; the paired Polars and pandas programs fail only at run time (test pairs). Proof: `jet test Compiler --profile ui --filter Data/frame_column_check`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:46:28.810Z"
+          "at": "2026-11-16T12:57:45.155Z"
         },
         {
           "n": 5,
-          "text": "Columns can carry units: adding a `Meters` column to a `Seconds` column is a compile error (test). Proof: `jet test Compiler --profile ui --filter data/frame_units`.",
+          "text": "Columns can carry units: adding a `Meters` column to a `Seconds` column is a compile error (test). Proof: `jet test Compiler --profile ui --filter Data/frame_units`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:46:29.887Z"
+          "at": "2026-11-16T12:57:46.079Z"
         },
         {
           "n": 7,
-          "text": "`jet notebook` shows a frame as a table and draws `frame.plot(x, y)` with no package install (test). Proof: `jet test Compiler --profile cases --filter notebook/frame_table_plot`.",
+          "text": "`jet notebook` shows a frame as a table and draws `frame.plot(x, y)` with no package install (test). Proof: `jet test Compiler --profile cases --filter Notebook/frame_table_plot`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:46:30.950Z"
+          "at": "2026-11-16T12:57:47.041Z"
         },
         {
           "n": 8,
@@ -62296,21 +62296,21 @@
         },
         {
           "n": 9,
-          "text": "Text and SVG projections share the one plot plan and materialize deterministically; finite values render exactly and signed zero is normalized. Proof: `jet test Compiler --profile golden --filter Data/PlotSvg`.",
+          "text": "Text and SVG projections share the one plot plan and materialize deterministically; finite values render exactly and signed zero is normalized. Proof: `jet test Compiler --profile golden --filter Data/PlotSVG`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:40:48.222Z"
+          "at": "2026-11-16T12:57:48.010Z"
         },
         {
           "n": 10,
-          "text": "The inspector derives selections, values, schema and transformation facts from the same typed plot and table source. Proof: `jet test Compiler --profile cases --filter data/plot_inspector_facts`.",
+          "text": "The inspector derives selections, values, schema and transformation facts from the same typed plot and table source. Proof: `jet test Compiler --profile cases --filter Data/plot_inspector_facts`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:40:49.172Z"
+          "at": "2026-11-16T12:57:48.929Z"
         },
         {
           "n": 11,
@@ -62349,7 +62349,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:17.509Z",
-      "updated": "2026-11-16T01:11:35.944Z",
+      "updated": "2026-11-16T12:57:48.929Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -62406,48 +62406,48 @@
         },
         {
           "n": 2,
-          "text": "D-MANIFEST-ONE1=A: a project with environments and workspace members has only package.jet at its root, env.jet and workspace.jet are no longer read, and every in-repo project is migrated in one cutover. Proof: `git ls-files '*env.jet' '*workspace.jet'` prints nothing and `jet test Compiler --profile cases --filter manifest/one_file_members_environments`.",
+          "text": "D-MANIFEST-ONE1=A: a project with environments and workspace members has only package.jet at its root, env.jet and workspace.jet are no longer read, and every in-repo project is migrated in one cutover. Proof: `git ls-files '*env.jet' '*workspace.jet'` prints nothing and `jet test Compiler --profile cases --filter Manifest/one_file_members_environments`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:12:13.725Z"
+          "at": "2026-11-16T12:57:49.861Z"
         },
         {
           "n": 3,
-          "text": "Package dependencies imply a prepared environment (D-DEPS-ENV1=A): each battery example compiles after `jet env --prep` with no env.jet. Proof: `jet test Compiler --profile cases --filter env/deps_imply_prepared_env`.",
+          "text": "Package dependencies imply a prepared environment (D-DEPS-ENV1=A): each battery example compiles after `jet env --prep` with no env.jet. Proof: `jet test Compiler --profile cases --filter Env/deps_imply_prepared_env`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:12:15.098Z"
+          "at": "2026-11-16T12:57:50.781Z"
         },
         {
           "n": 4,
-          "text": "Every remaining per-package or cwd-relative `.jet/` writer (build/deps, lock unless a ratified package-scoped lock, cache/api, cache/schema, codemods, game-*, jobs, state/jobs.db) writes to the one workspace root, and shared cache goes under ~/.cache. Proof: `jet test tests/guards --filter project_state_dir_single`. (was #3421 c7)",
+          "text": "Every remaining per-package or cwd-relative `.jet/` writer (build/deps, lock unless a ratified package-scoped lock, cache/api, cache/schema, codemods, game-*, jobs, state/jobs.db) writes to the one workspace root, and shared cache goes under ~/.cache. Proof: `jet test Tests/Guards --filter project_state_dir_single`. (was #3421 c7)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:36.930Z"
+          "at": "2026-11-16T12:57:51.706Z"
         },
         {
           "n": 5,
-          "text": "After build, test and run inside each member of a three-member workspace, exactly one `.jet` directory exists, at the workspace root. Proof: `jet test Compiler --profile cases --filter project_root/workspace_has_one_state_dir` (counts with `find . -name .jet -type d`). (was #3421 c9)",
+          "text": "After build, test and run inside each member of a three-member workspace, exactly one `.jet` directory exists, at the workspace root. Proof: `jet test Compiler --profile cases --filter ProjectRoot/workspace_has_one_state_dir` (counts with `find . -name .jet -type d`). (was #3421 c9)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:37.933Z"
+          "at": "2026-11-16T12:57:52.620Z"
         },
         {
           "n": 6,
-          "text": "One function returns the project state directory (the workspace root, else the package root), and no other code joins a `.jet` path by hand. Proof: `jet test tests/guards --filter project_state_dir_single` over Compiler/, Core/ and Jetpack/. (was #3421 c10)",
+          "text": "One function returns the project state directory (the workspace root, else the package root), and no other code joins a `.jet` path by hand. Proof: `jet test Tests/Guards --filter project_state_dir_single` over Compiler/, Core/ and Jetpack/. (was #3421 c10)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:38.875Z"
+          "at": "2026-11-16T12:57:53.573Z"
         },
         {
           "n": 7,
@@ -62468,7 +62468,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:18.786Z",
-      "updated": "2026-11-16T01:11:39.853Z",
+      "updated": "2026-11-16T12:57:53.573Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -66175,48 +66175,48 @@
         },
         {
           "n": 2,
-          "text": "`./wc.jet notes.txt`, where wc.jet takes a #CLI struct with a `Path` field, reads notes.txt with no prompt and no flag, while reading any other file still prompts. Proof: `jet test Compiler --profile cases --filter authority/cli_path_designates_read` (a pty case).",
+          "text": "`./wc.jet notes.txt`, where wc.jet takes a #CLI struct with a `Path` field, reads notes.txt with no prompt and no flag, while reading any other file still prompts. Proof: `jet test Compiler --profile cases --filter Authority/cli_path_designates_read` (a pty case).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:47:41.410Z"
+          "at": "2026-11-16T12:57:54.556Z"
         },
         {
           "n": 3,
-          "text": "The grant covers exactly the passed path after resolving `..` and symlinks, and only for reading: writing the passed path still prompts. Proof: `jet test Compiler --profile cases --filter authority/cli_path_designation_exact_`, one case for the resolution and one for the write.",
+          "text": "The grant covers exactly the passed path after resolving `..` and symlinks, and only for reading: writing the passed path still prompts. Proof: `jet test Compiler --profile cases --filter Authority/cli_path_designation_exact_`, one case for the resolution and one for the write.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:47:42.308Z"
+          "at": "2026-11-16T12:57:55.532Z"
         },
         {
           "n": 4,
-          "text": "A script that calls `files.temp_dir(prefix)` gets a fresh directory under a per-run root with no prompt, and the root is removed at exit, also after a failure. Proof: `jet test Compiler --profile cases --filter authority/private_temp_dir_`.",
+          "text": "A script that calls `files.temp_dir(prefix)` gets a fresh directory under a per-run root with no prompt, and the root is removed at exit, also after a failure. Proof: `jet test Compiler --profile cases --filter Authority/private_temp_dir_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:47:43.221Z"
+          "at": "2026-11-16T12:57:56.491Z"
         },
         {
           "n": 5,
-          "text": "`jet run --verbose -A` and the prompt list designated paths as granted by argument, and the spec and the #5949 basics list are updated in the same change. Proof: `jet test Compiler --profile cases --filter authority/verbose_lists_designated_paths`.",
+          "text": "`jet run --verbose -A` and the prompt list designated paths as granted by argument, and the spec and the #5949 basics list are updated in the same change. Proof: `jet test Compiler --profile cases --filter Authority/verbose_lists_designated_paths`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:47:44.110Z"
+          "at": "2026-11-16T12:57:57.460Z"
         },
         {
           "n": 6,
-          "text": "D-SCRIPT-CONFIRM1=A: a manifest-less script shows one default-yes confirmation naming each authority and call site before any effect; there is no prompt when authority is fully declared, and EOF or unknown input never grants. Proof: `jet test Compiler --profile cases --filter script_confirm/` covering accept, refuse and non-TTY.",
+          "text": "D-SCRIPT-CONFIRM1=A: a manifest-less script shows one default-yes confirmation naming each authority and call site before any effect; there is no prompt when authority is fully declared, and EOF or unknown input never grants. Proof: `jet test Compiler --profile cases --filter ScriptConfirm/` covering accept, refuse and non-TTY.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:02:16.466Z"
+          "at": "2026-11-16T12:57:58.389Z"
         }
       ],
       "refs": [
@@ -66234,8 +66234,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:09.798Z",
-      "updated": "2026-11-15T05:02:16.466Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:57:58.389Z",
+      "updatedBy": "Main",
       "goals": [
         "G10"
       ],
@@ -66273,21 +66273,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Under `--profile=hardened` (D-MEM-HARDEN1=A, on `jet build` and `jet test`; no new spelling), every #Unsafe operation and foreign edge stops with a named run-time code and the source location on an out-of-bounds access, use after release, double release, a data race on shared memory, a read of uninitialized memory, and a write through an aliased mutable view. Proof: `jet test Compiler --profile cases --filter hardened/` passes one case per class.",
+          "text": "Under `--profile=hardened` (D-MEM-HARDEN1=A, on `jet build` and `jet test`; no new spelling), every #Unsafe operation and foreign edge stops with a named run-time code and the source location on an out-of-bounds access, use after release, double release, a data race on shared memory, a read of uninitialized memory, and a write through an aliased mutable view. Proof: `jet test Compiler --profile cases --filter Hardened/` passes one case per class.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:43:48.905Z"
+          "at": "2026-11-16T12:57:59.321Z"
         },
         {
           "n": 2,
-          "text": "A planted-bug corpus, one program per class inside #Unsafe or a foreign edge, stops under the hardened profile with a named run-time code and the source location, and runs without a report under the normal profile. Proof: `jet test Compiler --profile cases --filter hardened/planted_`.",
+          "text": "A planted-bug corpus, one program per class inside #Unsafe or a foreign edge, stops under the hardened profile with a named run-time code and the source location, and runs without a report under the normal profile. Proof: `jet test Compiler --profile cases --filter Hardened/planted_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:43:49.831Z"
+          "at": "2026-11-16T12:58:00.304Z"
         },
         {
           "n": 3,
@@ -66300,12 +66300,12 @@
         },
         {
           "n": 6,
-          "text": "First slice of c1 (bounds): under `--profile=hardened`, an out-of-bounds read or write through an #Unsafe pointer or raw slice stops with a named run-time code and the source location on O0, O1 and O2, and the normal profile emits no extra check (a byte-identical O2 build). Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/test_hardened_profile_catches_a_local_wrong_unsafe_region` passes and leaves tests/known-failing.tsv.",
+          "text": "First slice of c1 (bounds): under `--profile=hardened`, an out-of-bounds read or write through an #Unsafe pointer or raw slice stops with a named run-time code and the source location on O0, O1 and O2, and the normal profile emits no extra check (a byte-identical O2 build). Proof: `jet test Compiler --profile cases --filter CLIPartsInspect/test_hardened_profile_catches_a_local_wrong_unsafe_region` passes and leaves Tests/known-failing.tsv.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:43:51.707Z"
+          "at": "2026-11-16T12:58:01.288Z"
         },
         {
           "n": 7,
@@ -66332,7 +66332,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:15.083Z",
-      "updated": "2026-11-16T01:11:40.886Z",
+      "updated": "2026-11-16T12:58:01.288Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -66386,12 +66386,12 @@
         },
         {
           "n": 2,
-          "text": "Under `reruns:`, each rerun picks a different task order at the pause points (task start or join, lock, channel send or receive, shared read or write, yield). A test with fewer possible orders than its count runs each order once, depth-first, and says `all N orders`, and reruns run in parallel on virtual time. A planted lost-update race and a planted lock-order deadlock each fail within the default count. The report prints the rerun, its order number, each step with its source line and the replay command, and a deadlock or suspected livelock names who holds what and who waits. Proof: `jet test Compiler --profile cases --filter test_schedules/planted_race_and_deadlock`.",
+          "text": "Under `reruns:`, each rerun picks a different task order at the pause points (task start or join, lock, channel send or receive, shared read or write, yield). A test with fewer possible orders than its count runs each order once, depth-first, and says `all N orders`, and reruns run in parallel on virtual time. A planted lost-update race and a planted lock-order deadlock each fail within the default count. The report prints the rerun, its order number, each step with its source line and the replay command, and a deadlock or suspected livelock names who holds what and who waits. Proof: `jet test Compiler --profile cases --filter TestSchedules/planted_race_and_deadlock`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:24:37.823Z"
+          "at": "2026-11-16T12:58:02.284Z"
         },
         {
           "n": 3,
@@ -66456,7 +66456,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:19.302Z",
-      "updated": "2026-11-16T01:11:41.871Z",
+      "updated": "2026-11-16T12:58:02.284Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -219983,6 +219983,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T12:58:02.284Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c09f1iks",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Under `reruns:`, each rerun picks a different task order at the pause points (task start or join, lock, channel send or receive, shared read or write, yield). A test with fewer possible orders than it"
+    },
+    {
+      "at": "2026-11-16T12:58:01.288Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0bmxzrb",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: First slice of c1 (bounds): under `--profile=hardened`, an out-of-bounds read or write through an #Unsafe pointer or raw slice stops with a named run-time code and the source location on O0, O1 and O2"
+    },
+    {
+      "at": "2026-11-16T12:58:00.304Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0bmxzrb",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A planted-bug corpus, one program per class inside #Unsafe or a foreign edge, stops under the hardened profile with a named run-time code and the source location, and runs without a report under the n"
+    },
+    {
+      "at": "2026-11-16T12:57:59.321Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0bmxzrb",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Under `--profile=hardened` (D-MEM-HARDEN1=A, on `jet build` and `jet test`; no new spelling), every #Unsafe operation and foreign edge stops with a named run-time code and the source location on an ou"
+    },
+    {
+      "at": "2026-11-16T12:57:58.389Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w8kkg9",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-SCRIPT-CONFIRM1=A: a manifest-less script shows one default-yes confirmation naming each authority and call site before any effect; there is no prompt when authority is fully declared, and EOF or un"
+    },
+    {
+      "at": "2026-11-16T12:57:57.460Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w8kkg9",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `jet run --verbose -A` and the prompt list designated paths as granted by argument, and the spec and the #5949 basics list are updated in the same change. Proof: `jet test Compiler --profile cases --f"
+    },
+    {
+      "at": "2026-11-16T12:57:56.491Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w8kkg9",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A script that calls `files.temp_dir(prefix)` gets a fresh directory under a per-run root with no prompt, and the root is removed at exit, also after a failure. Proof: `jet test Compiler --profile case"
+    },
+    {
+      "at": "2026-11-16T12:57:55.532Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w8kkg9",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The grant covers exactly the passed path after resolving `..` and symlinks, and only for reading: writing the passed path still prompts. Proof: `jet test Compiler --profile cases --filter authority/cl"
+    },
+    {
+      "at": "2026-11-16T12:57:54.556Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w8kkg9",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `./wc.jet notes.txt`, where wc.jet takes a #CLI struct with a `Path` field, reads notes.txt with no prompt and no flag, while reading any other file still prompts. Proof: `jet test Compiler --profile "
+    },
+    {
+      "at": "2026-11-16T12:57:53.573Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05i2uiq",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: One function returns the project state directory (the workspace root, else the package root), and no other code joins a `.jet` path by hand. Proof: `jet test tests/guards --filter project_state_dir_si"
+    },
+    {
+      "at": "2026-11-16T12:57:52.620Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05i2uiq",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: After build, test and run inside each member of a three-member workspace, exactly one `.jet` directory exists, at the workspace root. Proof: `jet test Compiler --profile cases --filter project_root/wo"
+    },
+    {
+      "at": "2026-11-16T12:57:51.706Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05i2uiq",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every remaining per-package or cwd-relative `.jet/` writer (build/deps, lock unless a ratified package-scoped lock, cache/api, cache/schema, codemods, game-*, jobs, state/jobs.db) writes to the one wo"
+    },
+    {
+      "at": "2026-11-16T12:57:50.781Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05i2uiq",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Package dependencies imply a prepared environment (D-DEPS-ENV1=A): each battery example compiles after `jet env --prep` with no env.jet. Proof: `jet test Compiler --profile cases --filter env/deps_imp"
+    },
+    {
+      "at": "2026-11-16T12:57:49.861Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05i2uiq",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-MANIFEST-ONE1=A: a project with environments and workspace members has only package.jet at its root, env.jet and workspace.jet are no longer read, and every in-repo project is migrated in one cutove"
+    },
+    {
+      "at": "2026-11-16T12:57:48.929Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The inspector derives selections, values, schema and transformation facts from the same typed plot and table source. Proof: `jet test Compiler --profile cases --filter data/plot_inspector_facts`."
+    },
+    {
+      "at": "2026-11-16T12:57:48.010Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Text and SVG projections share the one plot plan and materialize deterministically; finite values render exactly and signed zero is normalized. Proof: `jet test Compiler --profile golden --filter Data"
+    },
+    {
+      "at": "2026-11-16T12:57:47.041Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `jet notebook` shows a frame as a table and draws `frame.plot(x, y)` with no package install (test). Proof: `jet test Compiler --profile cases --filter notebook/frame_table_plot`."
+    },
+    {
+      "at": "2026-11-16T12:57:46.079Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Columns can carry units: adding a `Meters` column to a `Seconds` column is a compile error (test). Proof: `jet test Compiler --profile ui --filter data/frame_units`."
+    },
+    {
+      "at": "2026-11-16T12:57:45.155Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: In a frame built from `csv.decode<Row>`, a misspelled column name or a column type mismatch is a compile error; the paired Polars and pandas programs fail only at run time (test pairs). Proof: `jet te"
+    },
+    {
+      "at": "2026-11-16T12:57:44.236Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Reading a CSV into a frame and running filter, group-by with a sum, join, sort and select by column name works and matches Polars on the same file (golden). Proof: `jet test Compiler --profile core --"
+    },
+    {
+      "at": "2026-11-16T12:57:43.329Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0etvk8s",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A clean prepared environment runs a script with its recorded dependency and source hashes, missing or changed material is an error with no registry fallback, and lifting the script into a package keep"
+    },
+    {
+      "at": "2026-11-16T12:57:42.433Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0etvk8s",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A channel dependency update writes the exact lock and a build then uses it offline, a channel build with no lock is E1271, and `jetpack outdated` lists channel refs with newer releases. Proof: `jet te"
+    },
+    {
+      "at": "2026-11-16T12:57:41.500Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0etvk8s",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The spec lists every `.jet/` subpath and whether it is disposable, and files meant to be committed live outside `.jet/`. Proof: `jet test tests/guards --filter dot_jet_layout_spec`."
+    },
+    {
+      "at": "2026-11-16T12:57:40.574Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0etvk8s",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The lock holds no per-machine state: building the same project on two machines gives byte-identical locks, and build stamps live under `.jet/build/`. Proof: `jet test Compiler --profile packages --fil"
+    },
+    {
+      "at": "2026-11-16T12:57:39.638Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0vzmbkk",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `jet doc --out <dir>` never overwrites a file that lacks the generated-file header: with a hand-written docs/index.md, `jet doc --out docs` exits non-zero with a registered error naming docs/index.md "
+    },
     {
       "at": "2026-11-16T12:57:38.408Z",
       "by": "Main",
