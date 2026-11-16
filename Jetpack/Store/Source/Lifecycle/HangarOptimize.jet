@@ -152,7 +152,7 @@ store_optimize_objects_cas_pool: fn(verification: &StoreVerification, roots: Han
     store_ensure_real_directory(hangar, "Hangar root")
     store_ensure_real_directory(objects, "Hangar object pool")
     object_dirs: store_optimize_object_dirs(objects)
-    shared_lock: store_with_shared_cas_lock(roots)
+    _shared_lock: store_with_shared_cas_lock(roots)
     report := CleanReport.empty()
     loop path in object_dirs {
         sealed: store_check_seal(verification, path, hangar)
@@ -183,7 +183,7 @@ store_optimize_same_file: fn(left: String, right: String) -[FS, Env]> Bool Never
 // Rust `optimize_cas_pool`: the CAS-pool optimizer under the Hangar lock
 // (also run by `clean`).
 store_optimize_cas_pool: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_optimize_objects_cas_pool(verification, roots)
 }
 
@@ -222,7 +222,7 @@ store_hardlink_replace: fn(first: String, file: String) StoreError! -[FS, Env]> 
 // Rust `verify_hangar_object`: re-hash a Hangar object under the Hangar lock
 // with the CAS-peer hardlink law (Hangar-internal peers are accepted).
 store_verify_hangar_object: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
-    hangar_lock: env_acquire_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
+    _hangar_lock: env_acquire_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_verify_hangar_object_unlocked(verification, roots, entry)
 }
 

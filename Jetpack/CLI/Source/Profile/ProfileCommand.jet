@@ -124,7 +124,7 @@ cli_package_profile_build: fn(verification: &StoreVerification, cache: &Workspac
 }
 
 cli_build_package_generation_locked: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
-    lock: cli_package_profile_lock(project_dir, plan.name)
+    _lock: cli_package_profile_lock(project_dir, plan.name)
     cli_build_package_generation(verification, cache, theme, parsed, project_dir, plan)
 }
 
@@ -144,7 +144,7 @@ cli_package_profile_switch: fn(verification: &StoreVerification, cache: &Workspa
 // Reuse the newest generation built from this exact plan, else build one,
 // then activate it.
 cli_switch_package_generation_locked: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> PackageGenerationRecord CLIError! {
-    lock: cli_package_profile_lock(project_dir, plan.name)
+    _lock: cli_package_profile_lock(project_dir, plan.name)
     state: cli_package_profile_state_dir(project_dir, plan.name)
     records: cli_read_package_generations(verification, state)
     generation := 0
@@ -190,7 +190,7 @@ cli_package_profile_rollback: fn(verification: &StoreVerification, cache: &Works
 
 // The explicit target, or the newest generation older than the current one.
 cli_rollback_package_generation_locked: fn(verification: &StoreVerification, project_dir: String, name: String, target: Int?) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
-    lock: cli_package_profile_lock(project_dir, name)
+    _lock: cli_package_profile_lock(project_dir, name)
     state: cli_package_profile_state_dir(project_dir, name)
     records: cli_read_package_generations(verification, state)
     pointer: cli_read_package_current_pointer(verification, state)
@@ -216,7 +216,7 @@ PackageGenerationHistory: struct {
 }
 
 cli_package_generation_history_locked: fn(verification: &StoreVerification, project_dir: String, name: String) -[FS, Env, Time]> PackageGenerationHistory CLIError! {
-    lock: cli_package_profile_lock(project_dir, name)
+    _lock: cli_package_profile_lock(project_dir, name)
     state: cli_package_profile_state_dir(project_dir, name)
     records: cli_read_package_generations(verification, state)
     pointer: cli_read_package_current_pointer(verification, state)

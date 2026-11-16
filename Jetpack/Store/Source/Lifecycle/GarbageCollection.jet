@@ -456,7 +456,7 @@ store_clean_plan: fn(verification: &StoreVerification, roots: HangarRoots) -[FS,
     found: store_node_stat(store)
     if found == None -> return Ok(CleanReport.empty())
     store_require_real_directory(store, "Hangar root")
-    locks: store_clean_locks(roots)
+    _locks: store_clean_locks(roots)
     store_clean_plan_unlocked(verification, roots)
 }
 
@@ -501,7 +501,7 @@ store_clean_plan_unlocked: fn(verification: &StoreVerification, roots: HangarRoo
 
 // Rust `clean`.
 store_clean: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
-    locks: store_clean_locks(roots)
+    _locks: store_clean_locks(roots)
     store_clean_unlocked(verification, roots)
 }
 
@@ -551,7 +551,7 @@ store_clean_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -
 // Rust `maybe_auto_clean`: clean at most once a day unless
 // JETPACK_AUTO_CLEAN_ALWAYS is set; None when the stamp is fresh.
 store_maybe_auto_clean: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport? StoreError! {
-    locks: store_clean_locks(roots)
+    _locks: store_clean_locks(roots)
     hangar: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     stamp: files.join(hangar, STORE_AUTO_CLEAN_STAMP)

@@ -165,7 +165,7 @@ recipe_update_install_verified: fn(current_exe: String, bytes: [U8], plan: Toolc
     if lock_root == "" {
         return Err(RecipeError.Update("toolchain update state has no lock parent"))
     }
-    update_lock: env_acquire_lock(lock_root, "toolchain-update") ?? return Err(RecipeError.Update("lock toolchain update: {err}"))
+    _update_lock: env_acquire_lock(lock_root, "toolchain-update") ?? return Err(RecipeError.Update("lock toolchain update: {err}"))
     if {
         sys.is_windows() -> recipe_update_install_windows_deferred(current_exe, parent, bytes, plan, state_path, running_version)
         sys.is_unix() -> {
@@ -460,7 +460,7 @@ recipe_update_windows_helper_run: fn() RecipeError! -[FS, Env, Exec, Time, Time.
     if lock_root == "" {
         return Err(RecipeError.Update("Windows self-update state has no lock parent"))
     }
-    update_lock: env_acquire_lock(lock_root, "toolchain-update") ?? return Err(RecipeError.Update("lock Windows self-update: {err}"))
+    _update_lock: env_acquire_lock(lock_root, "toolchain-update") ?? return Err(RecipeError.Update("lock Windows self-update: {err}"))
     recipe_update_helper_regular(current, "Windows self-update current executable")
     staged_info: recipe_update_helper_regular(staged, "Windows self-update staging file")
     if staged_info.size != size {

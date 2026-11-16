@@ -444,7 +444,7 @@ STORE_QUARANTINE_SEQUENCE: Shared{ProcessSequence{next: 0}}
 // mistake the same tampered directory for a fresh hit. Never removes external
 // outputs such as `/nix/store`; their provider must realize them again.
 store_quarantine_invalid_entry: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation) StoreError! -[IO, FS, Env, Time]> {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     expected_id: store_expected_entry_id(entry)
     if entry.id != expected_id || !store_is_single_component(entry.id) {
         return Err(StoreError.Other("invalid cache record identity"))
@@ -636,7 +636,7 @@ store_ingest_store_error: fn(error: StoreError) -> IngestError Never! {
 
 // Sweep abandoned staging / `.partial` object dirs left by a crash.
 store_recover_hangar_staging: fn(roots: HangarRoots) -[FS, Env, Time]> Int StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     AdmissionTransaction.recover_unlocked(roots)
 }
 
@@ -675,7 +675,7 @@ store_ingest_tree: fn(verification: &StoreVerification, roots: HangarRoots, requ
 // `store_ingest_tree` with a hook run after each copied child source path
 // (Rust's test-only `with_after_child_copy_hook`, made an explicit argument).
 store_ingest_tree_observed: fn(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
+    _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_ingest_tree_unlocked(verification, roots, request, after_child_copy)
 }
 

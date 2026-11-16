@@ -416,7 +416,7 @@ provider_record_nix_lock_after_store: fn(verification: &StoreVerification, ctx: 
     locked_producer.policy_facts = "policy={lock_entry.cache_identity.policy_fingerprint}\nplatform={lock_entry.cache_identity.platform}"
     lock_entry.producer_record = locked_producer.encode()
 
-    project_lock: env_runtime_project_lock(project, "nix-lock-publication") ?? return Err(ProviderError.BadOutput("{err}"))
+    _project_lock: env_runtime_project_lock(project, "nix-lock-publication") ?? return Err(ProviderError.BadOutput("{err}"))
     locked_digest: provider_project_lock_digest(Val(project)) ?? return Err(ProviderError.BadOutput(err.message()))
     if locked_digest != expected_lock_digest {
         return Err(ProviderError.BadOutput("Nix project lock changed during Store publication: prepared `{expected_lock_digest}`, current `{locked_digest}`"))

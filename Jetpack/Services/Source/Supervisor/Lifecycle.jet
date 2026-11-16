@@ -108,7 +108,7 @@ services_start_one: fn(host: ServiceHost, project_dir: String, env: &ShellEnv, p
 }
 
 services_start_one_with_recovery: fn(host: ServiceHost, project_dir: String, env: &ShellEnv, plan: DevServicePlan, recovery: String) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> StartedService? ServicesError! {
-    guard: services_state_lock(project_dir)
+    _guard: services_state_lock(project_dir)
     if !plan.enable -> return Ok(None)
     resolved := services_resolve(project_dir, plan)
     files.create_dir_all(resolved.dir) ?? return Err(ServicesError.new("{err}"))
@@ -493,7 +493,7 @@ services_restart_delay: fn(backoff_ms: Int, exponential: Bool, attempt: Int) -> 
     if shift > 20 -> shift = 20
     multiplier := 1
     if exponential {
-        loop step in 0..<shift -> multiplier *= 2
+        loop _ in 0..<shift -> multiplier *= 2
     }
     if backoff_ms > SERVICES_MAX_RESTART_DELAY_MS /% multiplier {
         return SERVICES_MAX_RESTART_DELAY_MS
@@ -516,7 +516,7 @@ services_stop_started_process: fn(started: &StartedService, shutdown: ShutdownPo
 // A generation that already ended (a dependency failure stopped it, or it
 // exited) keeps its terminal evidence.
 services_mark_lifecycle_ready: fn(project_dir: String, plan: DevServicePlan) ServicesError! -[FS, Env, Time]> {
-    guard: services_state_lock(project_dir)
+    _guard: services_state_lock(project_dir)
     dir: services_service_dir(project_dir, plan.name)
     found: services_read_lifecycle(dir)
     facts := found ?? return
@@ -537,7 +537,7 @@ services_finish_supervisor: fn(host: ServiceHost, project_dir: String, plan: Dev
     dir: services_service_dir(project_dir, plan.name)
     // Never remove state without the lock `up`/`down` use: stale evidence is
     // safer than racing a live supervisor or a user-issued shutdown.
-    guard: services_state_lock(project_dir) ?? return
+    _guard: services_state_lock(project_dir) ?? return
     existing: if services_read_lifecycle(dir) == {
         .Ok(found) -> found
         .Err(_) -> LifecycleFacts?{None}

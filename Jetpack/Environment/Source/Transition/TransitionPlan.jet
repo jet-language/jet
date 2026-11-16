@@ -86,7 +86,7 @@ TransitionPlan: struct {
     }
 
     apply: fn(self) -[FS, Env, Time]> TransitionResult EnvironmentError! {
-        held: env_runtime_lock(self.root, "package-transition") ?? return Err(env_transition_error("couldn't lock package transition: {err}"))
+        _held: env_runtime_lock(self.root, "package-transition") ?? return Err(env_transition_error("couldn't lock package transition: {err}"))
         if self.apply_locked() == {
             .Ok(result) -> Ok(result)
             .Err(error) -> Err(env_transition_error("couldn't lock package transition: {error.message()}"))

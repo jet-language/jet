@@ -176,7 +176,7 @@ cli_tool_profile_switch: fn(verification: &StoreVerification, theme: Theme, pars
 }
 
 cli_tool_activate_under_lock: fn(verification: &StoreVerification, generation: Int) CLIError! -[FS, Env, Exec, Time, Rand]> {
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     cli_recover_tool_profile_state(verification)
     cli_activate_tool_generation_locked(verification, generation)
 }
@@ -192,7 +192,7 @@ cli_tool_profile_rollback: fn(verification: &StoreVerification, theme: Theme, pa
 
 // The explicit target, or the newest generation older than the current one.
 cli_tool_rollback_locked: fn(verification: &StoreVerification, target: Int?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     cli_recover_tool_profile_state(verification)
     current: cli_tool_current_generation_locked() ?? return Err(CLIError.Other("user-tools profile has no current generation to roll back"))
     generation := target ?? 0
@@ -222,7 +222,7 @@ ToolProfileUsage: struct {
 }
 
 cli_tool_profile_usage_locked: fn(verification: &StoreVerification) -[FS, Env, Exec, Time, Rand]> ToolProfileUsage CLIError! {
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     cli_recover_tool_profile_state(verification)
     current: cli_tool_current_generation_locked()
     generations := [ToolGenerationUsage]{}
@@ -320,7 +320,7 @@ cli_update_user_tools_with_plan: fn(verification: &StoreVerification, theme: The
 }
 
 cli_update_user_tools_locked: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation, has_other_plan: Bool, apply_other: fn() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never!) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> UserToolsUpdateOutcome CLIError! {
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     cli_recover_tool_profile_state(verification)
     manifest := cli_read_tool_manifest()
     refreshed: cli_refresh_tool_manifest_sources(theme, parsed, manifest, true)
@@ -419,7 +419,7 @@ cli_tool_list: fn(verification: &StoreVerification, theme: Theme) -[IO, FS, Env,
 }
 
 cli_tool_list_locked: fn(verification: &StoreVerification) -[FS, Env, Exec, Time, Rand]> [InstalledUserTool] CLIError! {
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     cli_recover_tool_profile_state(verification)
     cli_read_current_tools()
 }
@@ -653,7 +653,7 @@ cli_check_user_tools_drift: fn(verification: &StoreVerification, theme: Theme, p
 
 // Pin each drifted tool to the identity actually installed.
 cli_move_tool_pins: fn(drifts: [ToolDrift]) CLIError! -[FS, Env, Time]> {
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     manifest := cli_read_tool_manifest()
     loop drift in drifts {
         loop index in 0..<manifest.tools.len() {
@@ -669,7 +669,7 @@ cli_move_tool_pins: fn(drifts: [ToolDrift]) CLIError! -[FS, Env, Time]> {
 
 // Point each drifted tool's realization input back at its pin.
 cli_restore_tool_pins: fn(drifts: [ToolDrift]) CLIError! -[FS, Env, Time]> {
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     manifest := cli_read_tool_manifest()
     loop drift in drifts {
         loop index in 0..<manifest.tools.len() {
@@ -756,7 +756,7 @@ cli_refresh_tool_manifest_sources: fn(theme: Theme, parsed: CLIParsed, manifest:
 // Realize every manifest entry under the user-profile scope, verify each
 // receipt, and write one new generation for the declared tools.
 cli_build_tool_manifest_generation: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     cli_recover_tool_profile_state(verification)
     manifest := cli_read_tool_manifest()
     refreshed: cli_refresh_tool_manifest_sources(theme, parsed, manifest, false)
@@ -847,7 +847,7 @@ cli_tool_project_install: fn(verification: &StoreVerification, cache: &Workspace
     }
     version: receipt.version
     declared_sources: cli_tool_manifest_source_table(cache, spec, version, channel_policy)
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     cli_recover_tool_profile_state(verification)
     short: spec.short_name()
     new_bins := [String]{}
@@ -888,7 +888,7 @@ cli_tool_manifest_source_table: fn(cache: &WorkspaceDeclarationCache, spec: RefS
 // Remove the tool named `name` (or owning bin `name`); false when none is
 // installed.
 cli_uninstall_tool: fn(verification: &StoreVerification, name: String) -[FS, Env, Exec, Time, Rand]> Bool CLIError! {
-    lock: cli_tool_profile_lock()
+    _lock: cli_tool_profile_lock()
     cli_recover_tool_profile_state(verification)
     current: cli_read_current_tools()
     kept := [InstalledUserTool]{}

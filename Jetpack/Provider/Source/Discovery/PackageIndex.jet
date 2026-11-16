@@ -205,7 +205,7 @@ env_discovery_load: fn(project_dir: String) -[FS]> PackageIndex? ProviderReason!
 // Replace the project index under the project lock.
 env_discovery_write: fn(project_dir: String, index: PackageIndex) ProviderReason! -[FS, Env, Time]> {
     path: env_discovery_index_path(project_dir)
-    project_lock: env_runtime_project_lock(project_dir, "discovery-index") ?? return Err(ProviderReason{message: "{err}"})
+    _project_lock: env_runtime_project_lock(project_dir, "discovery-index") ?? return Err(ProviderReason{message: "{err}"})
     files.create_dir_all(files.dirname(path)) ?? return Err(ProviderReason{message: "{err}"})
     out := ""
     loop record in index.packages -> out = "{out}{env_discovery_record_to_json(record)}\n"

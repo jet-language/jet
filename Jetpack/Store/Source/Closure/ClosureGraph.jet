@@ -213,14 +213,14 @@ store_validate_universe_isolation: fn(graph: ClosureGraph, allow_legacy: Bool) S
 }
 
 store_closure_graph: fn(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     migrated: store_migrate_closure_graph_unlocked(verification, roots)
     store_validate_graph_store_proofs(verification, roots, migrated.graph, false)
     Ok(migrated.graph)
 }
 
 store_closure_graph_structure: fn(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_closure_graph_structure_unlocked(verification, roots)
 }
 
@@ -422,7 +422,7 @@ store_action_replay_fact: fn(key: String) -> Bool Never! {
 }
 
 store_migrate_closure_graph: fn(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     migrated: store_migrate_closure_graph_unlocked(verification, roots)
     Ok(migrated.migrated)
 }
@@ -784,7 +784,7 @@ store_rollback_registration_dir: fn(dir: String, created_dir: Bool, had_gc_root:
 // simulate an old entry without waiting real time. It re-registers the same
 // entry through the full validation path; only the timestamp changes.
 store_test_backdate_last_used_at: fn(verification: &StoreVerification, roots: HangarRoots, id: String, last_used_at: Int) StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     _: store_recover_closure_journal_unlocked(verification, roots)
     found: store_list_unlocked(roots)
     matched := StoreEntry?{None}
@@ -800,7 +800,7 @@ store_test_backdate_last_used_at: fn(verification: &StoreVerification, roots: Ha
 }
 
 store_remove_closure_record: fn(verification: &StoreVerification, roots: HangarRoots, id: String) -> Bool StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     _: store_recover_closure_journal_unlocked(verification, roots)
     if !store_load_graph(verification, roots).records.has_key(id) -> return Ok(false)
     _: store_append_entry(roots, ClosureJournalEntry{kind: ClosureJournalKind.Delta, objects: [ClosureObject]{}, records: [ClosureRecord]{}, deleted_records: [String]{id}})
@@ -818,7 +818,7 @@ store_tombstone_closure_record_unlocked: fn(verification: &StoreVerification, ro
 }
 
 store_recover_closure_journal: fn(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_recover_closure_journal_unlocked(verification, roots)
 }
 

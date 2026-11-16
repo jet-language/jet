@@ -21,8 +21,8 @@ env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
     if result == {
         .Ok(_) -> false
         .Err(error) -> if error == {
-            .HashMismatch(engine, expected, actual) -> true
-            .SizeMismatch(engine, expected, actual) -> true
+            .HashMismatch(_, _, _) -> true
+            .SizeMismatch(_, _, _) -> true
             .UnknownEngine(_) | .MissingBinary(_) | .MissingLock(_) | .IO(_) | .InvalidProtocol(_) -> false
         }
     }

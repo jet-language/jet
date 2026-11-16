@@ -45,7 +45,7 @@ store_test_canonicalize_admitted_records: fn(verification: &StoreVerification, r
 }
 
 store_test_register_canonical: fn(verification: &StoreVerification, roots: HangarRoots, entries: &[StoreEntry]) Never! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     loop index in 0..<entries.len() {
         entry := entries[index]
         store_prepare_entry_receipt(roots, entry) ?? panic("receipt")
@@ -226,7 +226,7 @@ store_test_admit_signed_closure: fn(verification: &StoreVerification, roots: Han
 }
 
 store_test_register_conflict: fn(verification: &StoreVerification, roots: HangarRoots, original: StoreEntry) -> Bool StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     entry := original
     store_prepare_entry_receipt(roots, entry)
     store_register_entry_unlocked(verification, roots, entry)

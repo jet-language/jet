@@ -163,7 +163,7 @@ store_sorted_record_ids: fn(graph: ClosureGraph) -> [String] Never! {
 // same legacy closure migration used by verify, clean, and cache reuse so
 // every consumer observes one receipt-bearing projection.
 store_list_checked: fn(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_list_checked_unlocked(verification, roots)
 }
 
@@ -205,7 +205,7 @@ store_list_checked_unlocked: fn(verification: &StoreVerification, roots: HangarR
 // outputs; the audit loop must be the only content-hashing authority for
 // `hangar verify`.
 store_list_for_full_audit: fn(roots: HangarRoots) -> [StoreEntry] StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_list_unlocked(roots)
 }
 
@@ -220,7 +220,7 @@ store_list: fn(verification: &StoreVerification, roots: HangarRoots) -> [StoreEn
 // Recover every Hangar crash surface under one advisory-lock ownership
 // interval. The unlocked helpers are also used by already-locked operations.
 store_recover_hangar: fn(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_ensure_real_directory(roots.hangar_dir(), "Hangar root")
     staging: AdmissionTransaction.recover_unlocked(roots)
     reproducibility: store_recover_certification_staging_unlocked(roots)

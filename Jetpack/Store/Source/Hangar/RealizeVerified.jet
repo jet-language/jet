@@ -127,7 +127,7 @@ store_report_integrity: fn(theme: Theme, failure: IntegrityFailure) Never! -[IO,
 // verification; any stamp mutation falls back to the unchanged cold path.
 store_reuse_verified_environment: fn(verification: &StoreVerification, roots: HangarRoots, expected_stamp: String, project: String, definition_fingerprint: String, selections: [EnvironmentSelection], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
     if selections.len() == 0 -> return Ok(None)
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     entries: store_list_read_only(roots)
     index: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
     actual_stamp: store_environment_entry_stamp_with_index(roots, project, definition_fingerprint, selections, index)
@@ -168,7 +168,7 @@ store_record_verified: fn(verification: &StoreVerification, roots: HangarRoots, 
 }
 
 store_record_verified_mode: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity, canonicalize_local: Bool) -> StoreEntry StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     paths: if canonicalize_local -> store_canonicalize_local_output_unlocked(verification, roots, out, bin, rlib, envelope.output_hash) else -> (out: out, bin: bin, rlib: rlib)
     id: store_entry_id(name, version, reference, paths.out)
     dir: files.join(roots.hangar_dir(), id)
@@ -207,12 +207,12 @@ store_record_verified_mode: fn(verification: &StoreVerification, roots: HangarRo
 }
 
 store_record_realized_mode: fn(verification: &StoreVerification, roots: HangarRoots, realized: Realized) -> StoreEntry StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_record_realized_mode_unlocked(verification, roots, realized, None)
 }
 
 store_record_realized_mode_with_fresh_agreement: fn(verification: &StoreVerification, roots: HangarRoots, action_key: String, realized: Realized) -> StoreEntry StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_record_realized_mode_unlocked(verification, roots, realized, Val(action_key))
 }
 
@@ -612,7 +612,7 @@ store_authorize_and_project_realization: fn(ctx: ProviderCtx, entry: StoreEntry)
 }
 
 store_project_receipt_under_lock: fn(ctx: ProviderCtx, project: String, producer: ProducerRecord, entry: StoreEntry) StoreError! {
-    project_lock: env_runtime_project_lock(project, "receipt-projection")
+    _project_lock: env_runtime_project_lock(project, "receipt-projection")
     if producer.provider == "nix" {
         if producer.facts.get("nix.lock.digest") == {
             .Val(expected) -> {
@@ -763,7 +763,7 @@ store_substitute_into_stage: fn(verification: &StoreVerification, roots: HangarR
 }
 
 store_restore_substituted_candidate: fn(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, stage: String) -> Bool StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     loop entry in store_list_unlocked(roots) {
         if entry.id == candidate.id -> return Ok(false)
     }
