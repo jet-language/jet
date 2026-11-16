@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6993,
-    "rev": 110450,
+    "nextNum": 6994,
+    "rev": 110465,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99125,7 +99125,7 @@
     {
       "id": "c0s5hn28",
       "num": 6810,
-      "title": "Desktop install, auto-update and signing: MSIX, notarized DMG, AppImage and Flatpak, with signed delta updates",
+      "title": "Desktop install, auto-update and signing on Linux: AppImage and Flatpak, with signed delta updates",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G12).",
       "kind": "feature",
       "track": "sidequest",
@@ -99139,16 +99139,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6992 (G13)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "The desktop output writes an MSIX on Windows, a signed and notarized DMG on macOS, and an AppImage and a Flatpak on Linux, signed with the identities named in outputs:. Proof: `jet test Compiler --profile cases --filter BuildEntry/desktop_output_writes_signed_installers` (it checks the structure and the signature of each package the host can verify).",
+          "text": "The desktop output writes an AppImage and a Flatpak on Linux, signed with the identities named in outputs:. Proof: `jet test Compiler --profile cases --filter BuildEntry/desktop_output_writes_signed_linux_packages` (it checks the structure and the signature of each package).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:19.201Z"
+          "at": "2026-11-16T21:55:07.820Z"
         },
         {
           "n": 2,
@@ -99223,15 +99229,6 @@
           "at": "2026-11-16T13:05:25.534Z"
         },
         {
-          "n": 10,
-          "text": "The same one-line install works on macOS arm64 and Windows x64 (`irm … | iex`), and `jet run hello.jet` prints the greeting on both. Proof: the release gate's committed install receipts for both hosts (parked by the owner's standing order on macOS and Windows; 2026-11-09 log). (was #5950 c7)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:13:20.771Z"
-        },
-        {
           "n": 11,
           "text": "A freestanding aarch64 program runs under QEMU in the release gate and prints its expected output. Proof: the release gate's committed receipt of the QEMU run (waits for hosted CI, which returns with a pinned native seed release; owner ruling 2026-11-08). (was #5950 c8)",
           "status": "open",
@@ -99242,12 +99239,12 @@
         },
         {
           "n": 12,
-          "text": "The install, scaffold, run, check, test and edit commands named in the getting-started docs are the same on every supported beginner host, and each runs as documented. Proof: `jet test Compiler --profile cases --filter Onboarding/beginner_path_`. (was #5950 c12)",
+          "text": "The install, scaffold, run, check, test and edit commands named in the getting-started docs are the same on every supported Linux beginner host, and each runs as documented. Proof: `jet test Compiler --profile cases --filter Onboarding/beginner_path_`. (was #5950 c12)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:26.966Z"
+          "at": "2026-11-16T21:55:09.874Z"
         },
         {
           "n": 13,
@@ -99260,21 +99257,21 @@
         },
         {
           "n": 14,
-          "text": "A published toolchain channel lists per-platform releases with digests; `jet self` resolves, verifies, installs beside the running binary and swaps; a corrupt or mismatched release is refused with a registered error; the keyless tier needs an explicit override. Proof: `jet test Compiler --profile cases --filter SelfUpdate/`. (was #5950 c14)",
+          "text": "A published toolchain channel lists the Linux releases with digests; `jet self` resolves, verifies, installs beside the running binary and swaps; a corrupt or mismatched release is refused with a registered error; the keyless tier needs an explicit override. Proof: `jet test Compiler --profile cases --filter SelfUpdate/`. (was #5950 c14)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:29.311Z"
+          "at": "2026-11-16T21:55:11.902Z"
         },
         {
           "n": 15,
-          "text": "The app's ui.asset files are packaged per native target: a desktop bundle, an iOS asset catalog with Info.plist entries, and Android resources with manifest entries. (Moved from #6816 c2.) Proof: `jet test Compiler --profile cases --filter BuildEntry/assets_are_packaged_per_target`.",
+          "text": "The app's ui.asset files are packaged into the Linux desktop bundle. (Moved from #6816 c2.) Proof: `jet test Compiler --profile cases --filter BuildEntry/assets_are_packaged_per_target` on Linux.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T18:47:06.329Z"
+          "at": "2026-11-16T21:55:13.891Z"
         }
       ],
       "refs": [],
@@ -99285,7 +99282,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:54.979Z",
-      "updated": "2026-11-16T18:47:06.329Z",
+      "updated": "2026-11-16T21:55:19.770Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -99779,7 +99776,7 @@
     {
       "id": "c0akrada",
       "num": 6818,
-      "title": "Native sessions: short access tokens, refresh tokens in the system keychain, revocation",
+      "title": "Native sessions on Linux: short access tokens, refresh tokens in the Secret Service, revocation",
       "body": "Gap card K4 from the #6792 r2 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md) and review round 1 (Docs/audits/2026-11-13-web-app-framework-shape-review.md). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md.",
       "kind": "feature",
       "track": "sidequest",
@@ -99793,16 +99790,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6993 (G13)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "Phone and desktop apps sign in with a short-lived access token and a refresh token stored in Keychain or Keystore; revoking a device ends its refresh within one access-token lifetime. Proof: `jet test Compiler --profile cases --filter app_native_session_` runs a client on the native target against a running server: it signs in, refreshes, is revoked, and its next refresh after one access-token lifetime is refused, with the same output on O0, O1 and O2. (#6792 r2 gap K4)",
+          "text": "The Linux desktop app signs in with a short-lived access token and a refresh token stored in the Secret Service (libsecret); revoking a device ends its refresh within one access-token lifetime. Proof: `jet test Compiler --profile cases --filter app_native_session_` runs a client on the Linux native target against a running server: it signs in, refreshes, is revoked, and its next refresh after one access-token lifetime is refused, with the same output on O0, O1 and O2. (#6792 r2 gap K4)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T08:47:46.194Z"
+          "at": "2026-11-16T21:55:25.627Z"
         }
       ],
       "refs": [],
@@ -99813,8 +99816,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:23.640Z",
-      "updated": "2026-11-15T11:39:17.780Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T21:55:29.224Z",
+      "updatedBy": "Main",
       "criteriaLastN": 1
     },
     {
@@ -119781,6 +119784,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T21:55:00.832Z"
+        },
+        {
+          "n": 3,
+          "text": "The getting-started commands are the same on macOS and Windows beginner hosts and run as documented, and the toolchain channel lists their releases with digests for `jet self`. Proof: `jet test Compiler --profile cases --filter Onboarding/beginner_path_` and `--filter SelfUpdate/` on those hosts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:55:03.678Z"
+        },
+        {
+          "n": 4,
+          "text": "The app's ui.asset files are packaged per target: an iOS asset catalog with Info.plist entries, Android resources with manifest entries, and the macOS and Windows bundles. Proof: `jet test Compiler --profile cases --filter BuildEntry/assets_are_packaged_per_target` on those outputs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:55:05.788Z"
         }
       ],
       "refs": [],
@@ -119791,9 +119812,50 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:54:56.739Z",
-      "updated": "2026-11-16T21:55:00.832Z",
+      "updated": "2026-11-16T21:55:05.788Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 4
+    },
+    {
+      "id": "c08b38mr",
+      "num": 6993,
+      "title": "Native sessions on macOS, Windows and phones: refresh tokens in Keychain, Keystore and the Windows credential store",
+      "body": "Platform half of #6818 (owner order 2026-11-16): #6818 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Native sessions: short access tokens, refresh tokens in the system keychain, revocation.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Phone, macOS and Windows apps sign in with a short-lived access token and a refresh token stored in Keychain, Keystore or the Windows credential store; revoking a device ends its refresh within one access-token lifetime. Proof: `jet test Compiler --profile cases --filter app_native_session_` on those hosts, with the same output on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T21:55:23.723Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G13"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-16T21:55:21.749Z",
+      "updated": "2026-11-16T21:55:23.723Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -218955,6 +219017,111 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T21:55:52.159Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing078ga0s",
+      "note": "Native cards split: Linux in G9, other platforms in G13 (#6982-#6993); #4623 to G5"
+    },
+    {
+      "at": "2026-11-16T21:55:50.862Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G13",
+      "note": "Owner order 2026-11-16: the macOS, Windows, iOS and Android "
+    },
+    {
+      "at": "2026-11-16T21:55:49.605Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G9",
+      "note": "Owner order 2026-11-16: native-platform cards that need cros"
+    },
+    {
+      "at": "2026-11-16T21:55:29.225Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0akrada",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-11-16T21:55:25.627Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0akrada",
+      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6993.; was: Phone and desktop apps sign in with a short-lived access token and a refresh token stored in Keychain or Keystore; revoking a device ends its refresh within one access-token lifetime. Proof: `jet test"
+    },
+    {
+      "at": "2026-11-16T21:55:23.723Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08b38mr",
+      "note": "#1 Phone, macOS and Windows apps sign in with a short-lived acc"
+    },
+    {
+      "at": "2026-11-16T21:55:21.750Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c08b38mr",
+      "note": "Native sessions on macOS, Windows and phones: refresh tokens in Keychain, Keystore and the Windows credential store"
+    },
+    {
+      "at": "2026-11-16T21:55:19.770Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0s5hn28",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-11-16T21:55:15.964Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0s5hn28",
+      "note": "#10: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. Moved whole to #6992: it covers no Linux or web behavior.; was [open]: The same one-line install works on macOS arm64 and Windows x64 (`irm … | iex`), and `jet run hello.jet` prints the greeting on both. Proof: the release gate's committed install receipts for both hosts"
+    },
+    {
+      "at": "2026-11-16T21:55:13.891Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#15: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6992.; was: The app's ui.asset files are packaged per native target: a desktop bundle, an iOS asset catalog with Info.plist entries, and Android resources with manifest entries. (Moved from #6816 c2.) Proof: `jet"
+    },
+    {
+      "at": "2026-11-16T21:55:11.902Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#14: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6992.; was: A published toolchain channel lists per-platform releases with digests; `jet self` resolves, verifies, installs beside the running binary and swaps; a corrupt or mismatched release is refused with a r"
+    },
+    {
+      "at": "2026-11-16T21:55:09.874Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#12: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6992.; was: The install, scaffold, run, check, test and edit commands named in the getting-started docs are the same on every supported beginner host, and each runs as documented. Proof: `jet test Compiler --prof"
+    },
+    {
+      "at": "2026-11-16T21:55:07.820Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6992.; was: The desktop output writes an MSIX on Windows, a signed and notarized DMG on macOS, and an AppImage and a Flatpak on Linux, signed with the identities named in outputs:. Proof: `jet test Compiler --pro"
+    },
+    {
+      "at": "2026-11-16T21:55:05.788Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qocvhc",
+      "note": "#4 The app's ui.asset files are packaged per target: an iOS ass"
+    },
+    {
+      "at": "2026-11-16T21:55:03.678Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qocvhc",
+      "note": "#3 The getting-started commands are the same on macOS and Windo"
+    },
+    {
       "at": "2026-11-16T21:55:00.832Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -223813,6 +223980,14 @@
   ],
   "briefings": [
     {
+      "id": "briefing078ga0s",
+      "title": "Native cards split: Linux in G9, other platforms in G13 (#6982-#6993); #4623 to G5",
+      "body": "Owner order: native-platform cards that need cross-platform work are split into Linux and other platforms; Linux is done in G9, the other platforms in G13.\n\nDone. Twelve G9 cards now cover Linux and the web only: #6799 menus and tray, #6800 notifications (freedesktop notifications and Web Push), #6801 background work, #6802 files (the desktop portal), #6803 camera and location (PipeWire, GeoClue), #6804 deep links, #6805 share and clipboard, #6806 permissions, #6807 accessibility (AT-SPI), #6809 lifecycle, #6810 install (AppImage, Flatpak) and #6818 native sessions (Secret Service). Each has a G13 twin with the macOS, Windows, iOS and Android criteria: #6982-#6993. Criteria that only phones have moved whole: the background time budget, the app-link files and the macOS/Windows one-line install. #6722 (GPU drawing, already Linux and the web) and #6808 (localization, platform-neutral) stay whole in G9.\n\n#4623 (names in every script, look-alike names as errors) moved to G5, where it fits better. #4723 (visibility and re-exports) stays in G6, because it is declaration semantics.\n",
+      "by": "Main",
+      "created": "2026-11-16T21:55:52.159Z",
+      "sections": []
+    },
+    {
       "id": "briefing002f80z",
       "title": "p227/p228 landed: brace-only records; #6845 closed; #6857 c8, #6852 c6 met",
       "body": "p227 landed on dev eab1677096: records are written in braces only, so paren tuples are no longer Jet (#6857 c3/c4, about 6000 sites swept), plus the closed_lists dispatch guard, C-import byte spans, the MetaSuite owed-row check, the web capability boundary (E2823/E2824) and the kept-notice case. Suite: 158 failures, 6 new. Two are load flakes (the C toolchain unpack race and ConformanceCapsule o2), added to #6772 c7. E2824 missed one case and fired falsely on two; the fix is in p229. The migration case and 21 JetCLI unit tests broke after the sweep; IfHole is fixing them in one batch. The RSS probe now copies its input from the tree under test.\n\np228 landed on dev f720a24dc5: the checked-text crossing cases accept the precise E0149, the nested-module E0621 fix, and the first dead lowering routes deleted for #6852 c7. Suite: 152 failures, 0 new, 6 fixed; golden 5020/5020, core 2607/2607.\n\nClosed: #6845 (18/18). Met: #6857 c8, #6852 c6, #6867 c7. #6831 c2 waits on #6821 c1 (kit.Form).\n\np229 running: three more DeclTypes SUBs (c7 dead routes, and the E2104 text without a card citation), IfHole's #6857 c14 placement guards, the E2824 fix that closes #6864, and the stale field-error case lines.\n",
@@ -225405,6 +225580,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards that need cross-platform work are split. G9 keeps Linux and the web (#6799-#6807, #6809, #6810, #6818 rewritten to that scope; #6722 and #6808 unchanged). macOS, Windows, iOS and Android moved to G13 twins #6982-#6993."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 order and the 06:00 speed deadline): precompiled Core is finished first, ASAP, with up to all 4 agents (#6759 c20, c15, c1, c2, c9, c4; #6501 c15). Then the goals run in the chain G6 -> G9 -> G5 -> G3 -> G10 -> G7 -> G11: 3 of the 4 agents always work the current goal and 1 works the goal after it (start: 3 on G6, 1 on G9). G6 and G9 are both due 2026-11-16 06:00. Speed work (#5479 steps 2-5) moves to G11; the type-ID switch is G6's first step; ownership keyed by ids moves into G10 (#6066)."
         },
         {
@@ -225439,7 +225619,7 @@
         }
       ],
       "created": "2026-11-04T18:09:58.998Z",
-      "updated": "2026-11-16T01:37:46.119Z",
+      "updated": "2026-11-16T21:55:49.605Z",
       "updatedBy": "Main"
     },
     {
@@ -225587,6 +225767,11 @@
       "status": "active",
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: the macOS, Windows, iOS and Android halves of the G9 native-app cards live here: #6982 (menus, tray), #6983 (notifications), #6984 (background work), #6985 (files), #6986 (camera, sensors), #6987 (deep links), #6988 (share, clipboard), #6989 (permissions), #6990 (accessibility), #6991 (lifecycle), #6992 (install, signing), #6993 (native sessions)."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier allocation and goal orders). Five agent slots: (1) FINISH precompiled Core ASAP (#6328 c22/c37 and #6759: a measured win over no precompiled Core), then help finish speed steps 1-5 (#5479). (2) Finish speed steps 1-5 (#5479) ASAP. (3) Finish the memory kernel (#6842, D-MEM-CHOKEPOINT1=A) ASAP. (4) and (5) Finish G6 and G9 ASAP. When slots 1-3 are done, they help on G6 and G9. After G6 and G9: G3, then G5, then G10; then G7, then G11, then G13. Pareto wins land first (a hard requirement). Main self-evaluates every 30 minutes against these goals and the overnight timeline and corrects course; the order is recorded durably (Tower, plus Main's handoff file) so compaction cannot lose it."
@@ -225608,7 +225793,7 @@
         }
       ],
       "created": "2026-11-07T03:16:08.318Z",
-      "updated": "2026-11-15T01:35:02.998Z",
+      "updated": "2026-11-16T21:55:50.862Z",
       "updatedBy": "Main"
     },
     {
