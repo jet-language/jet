@@ -557,7 +557,8 @@ class Host {
   // The scene the runtime's last core.ui paint recorded (UiBackends.jet), as
   // the children of `#jet-app`: a button for a Button, an input for a
   // TextInput, a span for a Text and a div for any other leaf, each placed
-  // at its frame. An element with a click slot runs its handler on click.
+  // at its frame. An element with a click slot runs its handler on click; one
+  // with a drop slot accepts drops and runs its handler on each dropped item.
   paintScene() {
     if (!this.dom || this.rt.jet_ui_web_scene_take() === 0n) return;
     const doc = globalThis.document;
@@ -574,12 +575,12 @@ class Host {
     let offset = 0;
     while (offset < bytes.length) {
       const fields = [];
-      while (fields.length < 8) {
+      while (fields.length < 9) {
         const end = bytes.indexOf(9, offset);
         fields.push(decoder.decode(bytes.subarray(offset, end)));
         offset = end + 1;
       }
-      const [kind, slot, x, y, width, height, color, length] = fields;
+      const [kind, slot, dropSlot, x, y, width, height, color, length] = fields;
       const label = decoder.decode(bytes.subarray(offset, offset + Number(length)));
       offset += Number(length) + 1;
       const tag = kind === "3" ? "button" : kind === "4" ? "input" : kind === "1" ? "span" : "div";
@@ -594,6 +595,14 @@ class Host {
       else element.textContent = label;
       const id = Number(slot);
       if (id !== 0) element.addEventListener("click", () => this.click(id));
+      const dropId = Number(dropSlot);
+      if (dropId !== 0) {
+        element.addEventListener("dragover", (event) => event.preventDefault());
+        element.addEventListener("drop", (event) => {
+          event.preventDefault();
+          this.drop(dropId, event.dataTransfer);
+        });
+      }
       root.appendChild(element);
     }
   }
@@ -604,6 +613,42 @@ class Host {
     if (this.outcome !== 0) return;
     try {
       this.rt.jet_ui_web_click(BigInt(id));
+      this.rt.jet_rt_stdout_flush();
+    } catch (error) {
+      this.flushLines();
+      if (error instanceof JetHostExit) {
+        this.outcome = error.status;
+        return;
+      }
+      this.outcome = TRAP_STATUS;
+      this.error = new JetHostWasmError("the program trapped: " + error.message, { cause: error });
+      throw this.error;
+    }
+    this.flushLines();
+    this.paintScene();
+  }
+
+  // A drop on a scene element with a drop slot, as core.ui.host.drag_drop
+  // reads one: nonempty `text/plain` is one Text item (kind 0) and each
+  // `text/uri-list` line that is neither empty nor a `#` comment one URI item
+  // (kind 1). Each item runs the element's handler in order, then stdout
+  // drains and the scene it painted shows.
+  drop(id, data) {
+    if (this.outcome !== 0 || !data) return;
+    const items = [];
+    const text = data.getData("text/plain");
+    if (text.length > 0) items.push([0, text]);
+    for (const line of data.getData("text/uri-list").split("\n")) {
+      const uri = line.trim();
+      if (uri.length > 0 && !uri.startsWith("#")) items.push([1, uri]);
+    }
+    try {
+      for (const [kind, value] of items) {
+        const bytes = encoder.encode(value);
+        const at = Number(this.rt.jet_ui_web_drop_buffer(BigInt(bytes.length)));
+        this.u8().set(bytes, at);
+        this.rt.jet_ui_web_drop(BigInt(id), BigInt(kind));
+      }
       this.rt.jet_rt_stdout_flush();
     } catch (error) {
       this.flushLines();

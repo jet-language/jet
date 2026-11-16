@@ -170,3 +170,44 @@ ui_slots_push: fn(base: I64, env: I64, invoke: I64, release: I64) -> I64 {
     first: (id - I64{1}) * I64{3}
     _ := coll_call2(event_words_get(base, first + I64{1}), event_words_get(base, first), I64{0})
 }
+
+// The UTF-8 text of the item a web host is dropping: the host writes it into
+// the bytes jet_ui_web_drop_buffer returns, then jet_ui_web_drop takes them.
+ui_web_drop_bytes := I64{0}
+
+ui_web_drop_length := I64{0}
+
+#Export(c) jet_ui_web_drop_buffer: fn(length: I64) -> I64 {
+    bytes: jet_rt_alloc(wrapping(length + I64{1}), I64{1})
+    #Unsafe("a web page's module runs on one thread") {
+        ui_web_drop_bytes = bytes
+        ui_web_drop_length = length
+    }
+    bytes
+}
+
+// A web host's drop of one item on a scene element: runs the handler drop
+// slot `id` keeps on a Text (kind 0) or URI (kind 1) item over the text in
+// jet_ui_web_drop_buffer's bytes, through the slot's lazy.ui_drop adapter
+// (invoke(env, kind, text), which takes the text over). An unknown id or
+// kind does nothing.
+#Export(c) jet_ui_web_drop: fn(id: I64, kind: I64) {
+    bytes: ui_web_drop_bytes
+    length: ui_web_drop_length
+    if (bytes == I64{0}) {
+        return
+    }
+    #Unsafe("a web page's module runs on one thread") {
+        ui_web_drop_bytes = I64{0}
+        ui_web_drop_length = I64{0}
+    }
+    base: ui_drop_slots
+    known: base != I64{0} && id >= I64{1} && id * I64{3} <= ui_carrier_word(base) && (kind == I64{0} || kind == I64{1})
+    text: if (known) -> rt_text_copy(bytes, length) else -> I64{0}
+    jet_rt_free(bytes, wrapping(length + I64{1}), I64{1})
+    if (text == I64{0}) {
+        return
+    }
+    first: (id - I64{1}) * I64{3}
+    _ := coll_call3(event_words_get(base, first + I64{1}), event_words_get(base, first), kind, text)
+}

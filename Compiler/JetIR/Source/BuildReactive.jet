@@ -172,12 +172,13 @@ ir_reactive_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
 }
 
 // The body closure of `executable` handed to the runtime: (env, invoke,
-// release).
-ir_reactive_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: BodyLambda, span: Span) -> [Int] Never! {
+// release), where invoke is the lazy helper `role` builds for the closure
+// (lazy.callback for a body the runtime runs as it is).
+ir_reactive_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: BodyLambda, role: String, span: Span) -> [Int] Never! {
     closure_ty: ir_lambda_function_type(executable)
     env: ir_lambda(m, p, b, closure_ty, executable, span)
     if ir_failed(b) || env < 0 -> return [Int]{}
-    invoke_id: ir_lazy_helper(m, p, b, "callback", closure_ty, span)
+    invoke_id: ir_lazy_helper(m, p, b, role, closure_ty, span)
     if invoke_id < 0 -> return [Int]{}
     invoke: ir_lazy_address(m, b, invoke_id)
     handed: ir_closure_handover(m, p, b, env, span)
@@ -191,7 +192,7 @@ ir_reactive_derived: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, exe
     if kind != "Derived" && kind != "Computed" {
         return ir_fail_slot(b, span, "reactive.derived producing {ir_type_name(ty)}")
     }
-    body := ir_reactive_body(m, p, b, executable, span)
+    body := ir_reactive_body(m, p, b, executable, "callback", span)
     if body.len() != 3 -> return -1
     meta: ir_lazy_meta(m, p, b, ir_reactive_element(ty), span)
     if meta < 0 -> return -1
@@ -207,7 +208,7 @@ ir_reactive_effect: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, exec
     if (ir_reactive_kind(p, ty) ?? "") != "Effect" {
         return ir_fail_slot(b, span, "reactive.autorun producing {ir_type_name(ty)}")
     }
-    body: ir_reactive_body(m, p, b, executable, span)
+    body: ir_reactive_body(m, p, b, executable, "callback", span)
     if body.len() != 3 -> return -1
     row: ir_reactive_row(m, p, ty)
     observer: ir_runtime(m, b, "jet_reactive_effect", body, row)
@@ -218,7 +219,7 @@ ir_reactive_effect: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, exec
 // `#Reactive { body }` and `ui.reactive_render(body)`: an effect the thread
 // retains, re-run whenever a signal its last run read changes.
 ir_reactive_rooted: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: BodyLambda, span: Span) -> Int Never! {
-    body: ir_reactive_body(m, p, b, executable, span)
+    body: ir_reactive_body(m, p, b, executable, "callback", span)
     if body.len() != 3 -> return -1
     _: ir_runtime(m, b, "jet_reactive_effect_rooted", body, -1)
     return -1
@@ -226,15 +227,54 @@ ir_reactive_rooted: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: Bo
 
 // `ui.button(label, shortcut:, accessible_label:, () -> { on_click })` and
 // `ui.text_input(state, ime, on_drop: (item) -> { … })`: the runtime registry
-// `export` names keeps the handler; its slot Int names the button's click or
-// the input's drop.
-ir_ui_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, export: String, span: Span) -> Int Never! {
-    body: ir_reactive_body(m, p, b, executable, span)
+// `export` names keeps the handler with the invoke helper `role` builds; its
+// slot Int names the button's click or the input's drop.
+ir_ui_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, export: String, role: String, span: Span) -> Int Never! {
+    body: ir_reactive_body(m, p, b, executable, role, span)
     if body.len() != 3 -> return -1
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     slot: ir_runtime(m, b, export, body, row)
     b.fresh[slot] = true
     slot
+}
+
+// lazy.ui_drop(env, kind, text) -> 0: runs the drop handler closure `env`
+// on the item a web host's drop carries (jet_ui_web_drop), a Text (kind 0)
+// or URI (kind 1) item over `text`, which it takes over. The item ends after
+// the call.
+ir_ui_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+    pointer_row: ir_pointer_row(m)
+    word_row: ir_word_row(m)
+    a.f.result = word_row
+    env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
+    kind: ir_new_slot(a, word_row, IRSlotKind.Param, ir_intern_name(m, "kind"))
+    text: ir_new_slot(a, ir_string_row(m), IRSlotKind.Param, ir_intern_name(m, "text"))
+    params: if ir_untag(ty) == .Fn(fn_params, _, _, _, _, _) -> fn_params else -> [Type]{}
+    if params.len() != 1 -> return ir_fail(a, span, "drop handler of {ir_type_name(ty)}")
+    item_ty: params[0]
+    item_row: ir_value_type(m, p, item_ty) ?? return ir_fail(a, span, "type {ir_type_name(item_ty)}")
+    row: ir_lazy_definition(p, item_ty) ?? return ir_fail(a, span, "drop item {ir_type_name(item_ty)}")
+    text_index: ir_variant_index(p, row, "Text") ?? return ir_fail(a, span, "drop item {ir_type_name(item_ty)} without Text")
+    uri_index: ir_variant_index(p, row, "URI") ?? return ir_fail(a, span, "drop item {ir_type_name(item_ty)} without URI")
+    args: ir_row_args(m, item_row)
+    text_members: ir_variant_members(m, p, row, args, text_index) ?? return ir_fail(a, span, "payload of Text")
+    uri_members: ir_variant_members(m, p, row, args, uri_index) ?? return ir_fail(a, span, "payload of URI")
+    if m.types[item_row].kind != .Pointer || text_members.len() != 1 || uri_members.len() != 1 || text_members[0].offset != uri_members[0].offset {
+        return ir_fail(a, span, "drop item layout of {ir_type_name(item_ty)}")
+    }
+    text_size: ir_enum_variant_box_size(m, p, row, args, text_index) ?? return ir_fail(a, span, "layout of {ir_type_name(item_ty)}")
+    uri_size: ir_enum_variant_box_size(m, p, row, args, uri_index) ?? return ir_fail(a, span, "layout of {ir_type_name(item_ty)}")
+    item: ir_box_alloc(m, a, if text_size > uri_size -> text_size else -> uri_size, item_row)
+    first: ir_word_const(m, a, text_index)
+    step: ir_word_const(m, a, uri_index - text_index)
+    shift: ir_word_op(m, a, IROp.Mul, kind, step)
+    discriminant: ir_word_op(m, a, IROp.Add, first, shift)
+    ir_emit(a.f, IROp.Store, -1, item, 0, discriminant, a.line)
+    ir_member_store(m, p, a, item, text_members[0], text)
+    _: ir_call_closure(m, a, env, [Int]{item}, -1)
+    ir_emit(a.f, IROp.Drop, -1, item, -1, -1, a.line)
+    done: ir_word_const(m, a, 0)
+    ir_emit(a.f, IROp.Return, -1, done, -1, -1, a.line)
 }
 
 // The Signal/Derived/Computed `get`/`set` and Effect `unsubscribe` /
