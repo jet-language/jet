@@ -1,0 +1,15 @@
+// E0442: a hole table runs its header once per arm, so the header can't call
+// a function that changes a value it is given.
+grow: fn(items: &[Int]) -> Int {
+    items.push(0)
+    items.len()
+}
+
+run: fn() {
+    items := [Int]{1, 2}
+    if grow(items) % <> == 0 {
+        4 -> print("four")
+        3 -> print("three")
+        else -> print("other")
+    }
+}

@@ -2472,7 +2472,15 @@ sema_expression_unchecked_condition_bindings: fn(names: [BindName], bound: [Sema
 
 sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaConditionCheck {
     if condition == {
-        .Paren(inner, _, _) -> return sema_expression_check_condition_inner(inner, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Paren(inner, span, _) -> {
+            // A hole table's arm test: its header, marked as in
+            // sema_expr_check_paren (E0442).
+            outer: scopes.hole_header
+            if inner == .Paren(_, inner_span, _) && inner_span == span -> scopes.hole_header = Val(span)
+            checked: sema_expression_check_condition_inner(inner, environment, program, scopes, state, tail_store, context, diagnostics)
+            scopes.hole_header = outer
+            return checked
+        }
         .PatternTest(subject, pattern, span, _) -> return sema_expression_check_pattern_condition(subject, pattern, span, environment, program, scopes, state, tail_store, context, diagnostics)
         .Binary(op, left, right, span, _) -> {
             if op == BinOp.And && sema_expression_condition_binds(condition) {

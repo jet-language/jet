@@ -3125,7 +3125,7 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
                     unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
                     foreign_capability: sema_expr_call_foreign_capability(program, callee),
                     replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
-                    hole_header: sema_expr_in_hole_header(scopes, span),
+                    hole_header: sema_expr_hole_header_site(scopes, span),
                 },
             ),
         },
@@ -3157,7 +3157,13 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
 }
 
 // The call at `span` is written in the header of the hole table being
-// checked, which runs once per arm tried (E0442).
+// checked, which runs once per arm tried (E0442): its fix until the call's
+// check names the value (sema_expr_check_hole_header_call).
+sema_expr_hole_header_site: fn(scopes: SemaScopeTable, span: Span) -> SemaHoleHeaderFix? Never! {
+    if !sema_expr_in_hole_header(scopes, span) -> return None
+    Val(SemaHoleHeaderFix{fix: "name the value on the line above the table, then read the name in the header", edits: [TextEdit]{}, reported: false})
+}
+
 sema_expr_in_hole_header: fn(scopes: SemaScopeTable, span: Span) -> Bool Never! {
     header: scopes.hole_header ?? return false
     span.start >= header.start && span.end <= header.end
@@ -7072,8 +7078,8 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
         .Paren(value, span, _) -> sema_expr_check_paren(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Unary(op, operand, span, _) -> sema_expr_check_unary(op, operand, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
         .Binary(op, left, right, span, _) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .Call(call, _) -> sema_expr_check_call_expr(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> sema_expr_check_method_call_expr(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Call(call, _) -> if scopes.hole_header != None -> sema_expr_hole_header_call(expr, sema_expr_check_call_expr(call, expected, environment, program, scopes, state, tail_store, context, diagnostics), environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_call_expr(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> if scopes.hole_header != None -> sema_expr_hole_header_call(expr, sema_expr_check_method_call_expr(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics), environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_method_call_expr(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .ListLit(elements, span, _) -> sema_expr_check_list_literal(elements, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Range(start, end, exclusive, span, _) -> sema_expression_range(start, end, exclusive, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Index(base, index, span, kind, _) -> sema_expression_index(base, index, kind, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

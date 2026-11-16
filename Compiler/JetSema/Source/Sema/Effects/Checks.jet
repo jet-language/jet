@@ -6951,27 +6951,29 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
 // A call written in a hole table's header whose callee acts outside the
 // program: the header runs once per arm tried, so the action would repeat
 // once per arm (E0442). The parser checks the header once per arm, so one
-// written call reports once.
+// written call reports once, with the fix its check found
+// (sema_expr_hole_header_fix); a call already refused for a change it makes
+// is not refused again.
 sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: NameRows, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
     reported := [Diagnostic]{}
     seen := [Span]{}
     loop fact in call_facts {
         detail: fact.detail ?? next
-        if !detail.hole_header || seen.contains(fact.span) -> next
-        name := detail.intrinsic_api ?? "this call"
-        effects := [String]{}
-        if {
-            fact.callee == .Val(callee) -> {
-                callee_key: sema_effect_run_key(symbols, callee) ?? next
-                node_index: sema_effect_node_index(node_by_key, callee_key) ?? next
-                name = nodes[node_index].name.copy()
-                effects = solved[node_index].copy()
-            }
-            fact.facts.effect_bound == .Val(bound) -> loop entry in bound -> effects.push(entry.name.copy())
+        fix: detail.hole_header ?? next
+        if fix.reported || seen.contains(fact.span) -> next
+        if fact.callee == .Val(callee) {
+            callee_key: sema_effect_run_key(symbols, callee) ?? next
+            node_index: sema_effect_node_index(node_by_key, callee_key) ?? next
+            if sema_effect_deep_check_over(solved[node_index]).len() == 0 -> next
+            seen.push(fact.span)
+            reported.push(sema_expr_hole_header_diagnostic(nodes[node_index].name, "has an effect", fix, fact.span))
+            next
         }
-        if sema_effect_deep_check_over(effects).len() == 0 -> next
+        bound: fact.facts.effect_bound ?? next
+        names: loop entry in bound -> entry.name
+        if sema_effect_deep_check_over(names).len() == 0 -> next
         seen.push(fact.span)
-        reported.push(sema_error("E0442", fact.span, "this `if` table header calls `{name}`, which has an effect", "a hole table runs its header once for each arm it tries, so the effect of `{name}` would run again for every arm", "name the value first: `value: {name}(…)` on the line above, then read `value` in the header"))
+        reported.push(sema_expr_hole_header_diagnostic(detail.intrinsic_api ?? "this call", "has an effect", fix, fact.span))
     }
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, reported)
 }

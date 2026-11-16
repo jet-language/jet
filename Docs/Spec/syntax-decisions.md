@@ -1077,9 +1077,13 @@ E0437, which E0947 retires into, and a `_` where the hole goes is E0443, whose
 fix writes `<>`. A header whose whole test, ignoring parentheses, is
 `subject OP <>` or `<> OP subject` is E0441, whose fix deletes the `<>` (and
 flips the operator when `<>` stood on the left). A pattern or range arm in a
-hole table is E0948, whose fix is `if subject == {`. A call with an effect in
-a hole header is E0442, whose fix names the value on the line above; a pure
-call stays. A hole table used as a value requires `else` (E0003), since its
+hole table is E0948, whose fix is `if subject == {`. A call in a hole header
+that has an effect, or that changes a value it is given (`&`) or is called on
+(`&self`), is E0442, whose fix names the value on the line above, as the
+method's name or `value`, and reads the name in the header; it is applied when
+the table starts its statement and shown otherwise, and a call that holds the
+`<>` gets plain tests instead. A pure call stays. A hole table used as a value
+requires `else` (E0003), wherever it stands, since its
 arms are tests, not cases of one type; one used as a statement may leave
 `else` out. Inside a pipe step `<>` is always the step's value, so a table
 header there that needs a hole is E0444, whose fix ends the pipe one line

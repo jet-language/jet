@@ -415,11 +415,16 @@ parser_parse_tail_if: fn(state: &JetParserState) -> Stmt {
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
     saved_else_arms: state.else_arms.len()
+    if_start: parser_current(state).span.start
     parsed: parser_parse_expression(state, 1, 0)
     at_tail: parser_at_body_close(state)
     if at_tail && !parser_error_since(state, saved_diagnostics) {
         return Stmt.Expr{expr: parsed.expr}
     }
+    // A hole table's arms are values here, as its statement reading can't
+    // take them, so the value reading's errors are the ones to report (E0003
+    // for a missing `else`).
+    if at_tail && state.hole_value_table == if_start -> return Stmt.Expr{expr: parsed.expr}
     value_errors: state.diagnostics.len() - saved_diagnostics
     parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     statement: parser_parse_statement(state)

@@ -34,6 +34,7 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     SymbolTable,
+    TextEdit,
     symbol_find,
     symbol_is_local,
     symbol_key_text,
@@ -235,8 +236,9 @@ SemaCallSiteDetail: struct {
     // wouldn't call the replacement.
     replacement_hidden: Bool{false}
     // The call is in a hole table's header, which runs once per arm tried:
-    // the effect phase reports it when the callee has an effect (E0442).
-    hole_header: Bool{false}
+    // the effect phase reports it when the callee has an effect (E0442),
+    // with this fix, unless the call was already reported for a change.
+    hole_header: SemaHoleHeaderFix?{None}
     shared_lifetime: SharedLifetime?{None}
     shared_member: String{""}
     shared_source: String{""}
@@ -259,7 +261,7 @@ sema_call_site_detail_of: fn(detail: SemaCallSiteDetail) -> SemaCallSiteDetail? 
     if detail.foreign_effect_root != None || detail.foreign_opaque || detail.unsafe_foreign_name != None || detail.audited_operation || detail.foreign_capability != None || detail.lifecycle != None {
         return Val(detail)
     }
-    if detail.replacement_hidden || detail.shared_lifetime != None || detail.shared_member != "" || detail.shared_source != "" || detail.intrinsic_api != None || detail.runtime_export != None || detail.operator != None || detail.hole_header {
+    if detail.replacement_hidden || detail.shared_lifetime != None || detail.shared_member != "" || detail.shared_source != "" || detail.intrinsic_api != None || detail.runtime_export != None || detail.operator != None || detail.hole_header != None {
         return Val(detail)
     }
     None
@@ -280,6 +282,17 @@ SemaOperatorSite: struct {
     receiver: Span
     argument: Span
     bare: Bool
+}
+
+// The fix of an E0442 report on a call in a hole table's header
+// (sema_expr_hole_header_fix): `edits` name the call's value on the line
+// above the table and read the name in the header, and are empty when the
+// fix is only shown. `reported` when the call was refused for a change it
+// makes, so its effect is not refused again.
+SemaHoleHeaderFix: struct {
+    fix: String
+    edits: [TextEdit]
+    reported: Bool
 }
 
 // A raw `extern rust` callee's name and the capability sigil (`&` or `&&`)

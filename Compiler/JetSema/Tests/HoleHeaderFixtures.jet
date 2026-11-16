@@ -1,0 +1,140 @@
+// Production parser + registration graph + checker coverage for hole tables:
+// a call in a hole header that has an effect or changes a value is E0442, with
+// a fix that names the value on the line above when the table starts its
+// statement, and a hole table ending a value block needs `else` (E0003, which
+// the parser reports, so a fixture's parse errors are its errors).
+// The effect check reads the registration graph, so fixtures go through graph
+// preparation and finalization, not the single-module checker.
+use {
+    jet_parser.[parse_source]
+    jet_sema.[
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_collect_comptime_declarations,
+        sema_finalize_registration_graph,
+        sema_registration_prepare_graph,
+    ]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, TextEdit, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
+}
+
+// copy: SharedCycleParity's shared_cycle_diagnostics, under this package name.
+hole_header_errors: fn(failures: &[String], source: String) -> [Diagnostic]? {
+    parsed := parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> return Val(parsed.diagnostics.move())
+    table := module_table()
+    main_id: module_intern(table, "hole-header::main")
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
+        failures.push("canonical effect module declares no effects")
+        return None
+    }
+    effects_id: effects.module_identity
+    facts: SemaBuildFacts{package_name: "hole-header", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    input: SemaRegistrationModuleInput{package_identity: "hole-header", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "hole-header", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
+        failures.push("registration failed {err}: {source}")
+        return None
+    }
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    // Declaration checking loans the graph to its stage, which returns it.
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? {
+        failures.push("declaration checking failed {err}: {source}")
+        return None
+    }
+    declared := stage.graph.move()
+    stage.graph = None
+    registration := declared.move() ?? {
+        failures.push("the declaration pass lost its registration graph: {source}")
+        return None
+    }
+    checked := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? {
+        failures.push("finalization failed {err}: {source}")
+        return None
+    }
+    errors := [Diagnostic]{}
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic.copy())
+    }
+    Val(errors)
+}
+
+// `source` with every edit of the fix `diagnostic` opens, last edit first.
+hole_header_applied: fn(source: String, diagnostic: Diagnostic) -> String {
+    first: diagnostic.edit ?? return source.copy()
+    edits := [TextEdit]{first}
+    loop edit in diagnostic.fix_edits -> edits.push(edit.copy())
+    edits.sort_by(fn(edit) { 0 - edit.span.start })
+    text := source.copy()
+    loop edit in edits {
+        text = "{text.slice(0, edit.span.start)}{edit.new_text}{text.slice(edit.span.end, text.len())}"
+    }
+    text
+}
+
+hole_header_clean: fn(failures: &[String], source: String) {
+    errors: hole_header_errors(failures, source) ?? return
+    loop error in errors -> failures.push("unexpected {error.code}: {error.what} in {source}")
+}
+
+// One error `code` whose what and fix hold `what` and `fix`. `applied` is the
+// source with its fix applied, or "" when the fix has no edit.
+hole_header_expect: fn(failures: &[String], source: String, code: String, what: String, fix: String, applied: String) {
+    errors: hole_header_errors(failures, source) ?? return
+    if errors.len() != 1 {
+        codes := [String]{}
+        loop error in errors -> codes.push("{error.code}: {error.what}")
+        failures.push("wanted one {code}, found [{codes.join("; ")}] in {source}")
+        return
+    }
+    found: errors[0]
+    if found.code != code -> failures.push("wanted {code}, found {found.code}: {found.what} in {source}")
+    if !found.what.contains(what) -> failures.push("{code} says `{found.what}`, wanted `{what}` in {source}")
+    if !found.fix.contains(fix) -> failures.push("{code} fix says `{found.fix}`, wanted `{fix}` in {source}")
+    if applied == "" {
+        if found.edit != None -> failures.push("{code} has an edit it should only show in {source}")
+        return
+    }
+    edited: hole_header_applied(source, found)
+    if edited != applied -> failures.push("{code} fix gives:\n{edited}\nwanted:\n{applied}")
+}
+
+HOLE_NOISY: "noisy: fn(n: Int) -> Int {{\n    print(\"checking {{n}}\")\n    n\n}}\n"
+
+HOLE_GROW: "grow: fn(items: &[Int]) -> Int {{\n    items.push(0)\n    items.len()\n}}\n"
+
+HOLE_ARMS: " {{\n        4 -> print(\"four\")\n        else -> print(\"other\")\n    }}\n}}\n"
+
+#Test("hole_header_fixtures") {
+    failures := [String]{}
+    // A hole table ending a value block needs `else`; as a statement, or with
+    // `else`, it doesn't.
+    hole_header_expect(failures, "label: fn(n: Int) -> String {{\n    if n % <> == 0 {{\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n    }}\n}}\n", "E0003", "hole table used as a value needs a final `else` arm", "`else -> value` so every path produces a value", "")
+    hole_header_clean(failures, "label: fn(n: Int) -> String {{\n    if n % <> == 0 {{\n        3 -> \"Fizz\"\n        else -> \"other\"\n    }}\n}}\n")
+    hole_header_clean(failures, "run: fn(n: Int) {{\n    if n % <> == 0 {{\n        3 -> print(\"Fizz\")\n    }}\n}}\n")
+    // A pure call in the header stays.
+    hole_header_clean(failures, "double: fn(n: Int) -> Int {{\n    n * 2\n}}\nrun: fn() {{\n    n: 6\n    if double(n) % <> == 0{HOLE_ARMS}")
+    // A call with an effect is named first when the table starts its statement.
+    hole_header_expect(failures, "{HOLE_NOISY}run: fn() {{\n    n: 6\n    if noisy(n) % <> == 0{HOLE_ARMS}", "E0442", "table header calls `noisy`, which has an effect", "`value: noisy(n)` on the line above", "{HOLE_NOISY}run: fn() {{\n    n: 6\n    value: noisy(n)\n    if value % <> == 0{HOLE_ARMS}")
+    // A name in scope already gets a number.
+    hole_header_expect(failures, "{HOLE_NOISY}run: fn() {{\n    value: 6\n    if noisy(value) % <> == 0{HOLE_ARMS}", "E0442", "calls `noisy`", "`value2: noisy(value)`", "{HOLE_NOISY}run: fn() {{\n    value: 6\n    value2: noisy(value)\n    if value2 % <> == 0{HOLE_ARMS}")
+    // A table that doesn't start its statement only shows the fix.
+    hole_header_expect(failures, "{HOLE_NOISY}pick: fn(n: Int) -> Int {{\n    return if noisy(n) % <> == 0 {{\n        4 -> 1\n        else -> 2\n    }}\n}}\n", "E0442", "calls `noisy`", "`value: noisy(n)` on the line above", "")
+    // A call that changes a value it is given, or the value it is called on.
+    hole_header_expect(failures, "{HOLE_GROW}run: fn() {{\n    items := [Int]{{1, 2}}\n    if grow(items) % <> == 0{HOLE_ARMS}", "E0442", "calls `grow`, which changes a value it is given", "`value: grow(items)`", "{HOLE_GROW}run: fn() {{\n    items := [Int]{{1, 2}}\n    value: grow(items)\n    if value % <> == 0{HOLE_ARMS}")
+    hole_header_expect(failures, "run: fn() {{\n    items := [Int]{{1, 2}}\n    if (items.pop() ?? 0) % <> == 0{HOLE_ARMS}", "E0442", "calls `pop`, which changes the value it is called on", "`pop: items.pop()`", "run: fn() {{\n    items := [Int]{{1, 2}}\n    pop: items.pop()\n    if (pop ?? 0) % <> == 0{HOLE_ARMS}")
+    // A call that holds the `<>` can't be named: its fix shows plain tests.
+    hole_header_expect(failures, "fits: fn(n: Int, size: Int) -> Bool {{\n    print(\"fits\")\n    n <= size\n}}\nrun: fn() {{\n    if fits(<>, 4){HOLE_ARMS}", "E0442", "calls `fits`, which has an effect", "`if {{ fits(4, 4) -> … }}`", "")
+    if failures.len() > 0 {
+        panic("HoleHeaderFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
+}

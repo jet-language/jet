@@ -23790,25 +23790,29 @@ HoleHeaderOnlyCompares: struct {
 
 HoleHeaderEffect: struct {
     name: String
+    action: String
+    value: String
+    call: String
 
     impl Diagnostic {
         code: "E0442"
         safety_class: .Opinion
-        safety_reason: "The header runs once for each arm tried, so the program is defined, and Jet refuses an effect there because it would repeat once per arm without the code saying so."
+        safety_reason: "The header runs once for each arm tried, so the program is defined, and Jet refuses an effect or a change there because it would repeat once per arm without the code saying so."
         stage: [.Sema]
-        meaning: "An `if` table header with `<>` calls a function that has an effect"
+        meaning: "An `if` table header with `<>` calls a function that has an effect or changes a value"
         detail: true
-        no_fix: .Behavior
-        fix_next: "Name the value on the line above the table, then read the name in the header."
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
 
-        what: fn(self) -> String { "This `if` table header calls `{self.name}`, which has an effect" }
+        what: fn(self) -> String { "This `if` table header calls `{self.name}`, which {self.action}" }
 
         why: fn(self) -> String {
-            "A hole table runs its header once for each arm it tries, so the effect of `{self.name}` would run again for every arm"
+            "A hole table runs its header once for each arm it tries, so `{self.name}` would run again for every arm"
         }
 
         fix: fn(self) -> String {
-            "Name the value first: `value: {self.name}(…)` on the line above, then read `value` in the header"
+            "Name the value first: `{self.value}: {self.call}` on the line above, then read `{self.value}` in the header"
         }
     }
 }

@@ -119,6 +119,10 @@ JetParserState: struct {
     // being read, innermost last, each grouped over its written span; an arm
     // atom fills the innermost one.
     dispatch_hole_headers: [Expr]{[Expr]{}}
+    // Where the last value hole table read starts (-1 = none). A callable
+    // body's final `if` whose value reading is one keeps that reading, so a
+    // missing `else` is reported as such (parser_parse_tail_if).
+    hole_value_table: Int{-1}
     // Rust `block_depth`: braced statement lists entered so far. Value
     // blocks read their lines at the enclosing depth, as in Rust.
     block_depth: Int{0}

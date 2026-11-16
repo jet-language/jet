@@ -721,34 +721,34 @@ parser_dispatch_hole_is: fn(expr: Expr) -> Bool Never! {
     false
 }
 
-// The holes of `header`, in source order, each the `<>` or `_` name written
-// there (parser_dispatch_hole_count's places).
-parser_dispatch_holes_in: fn(expr: Expr, holes: &[Expr]) {
+// The holes of `header` written `_` (among parser_dispatch_hole_count's
+// places), in source order.
+parser_dispatch_underscore_holes: fn(expr: Expr, underscores: &[Span]) {
     if parser_dispatch_hole_count(expr) == 0 -> return
-    if parser_dispatch_hole_is(expr) {
-        holes.push(expr.copy())
+    if expr == .Ident(name, span, _) {
+        if name == PARSER_DISPATCH_UNDERSCORE -> underscores.push(span.copy())
         return
     }
     if expr == .Binary(_, left, right, _, _) {
-        parser_dispatch_holes_in(left, holes)
-        parser_dispatch_holes_in(right, holes)
+        parser_dispatch_underscore_holes(left, underscores)
+        parser_dispatch_underscore_holes(right, underscores)
     }
-    if expr == .Unary(_, operand, _, _) -> parser_dispatch_holes_in(operand, holes)
-    if expr == .Paren(value, _, _) -> parser_dispatch_holes_in(value, holes)
-    if expr == .Field(base, _, _, _) -> parser_dispatch_holes_in(base, holes)
+    if expr == .Unary(_, operand, _, _) -> parser_dispatch_underscore_holes(operand, underscores)
+    if expr == .Paren(value, _, _) -> parser_dispatch_underscore_holes(value, underscores)
+    if expr == .Field(base, _, _, _) -> parser_dispatch_underscore_holes(base, underscores)
     if expr == .Index(base, index, _, _, _) {
-        parser_dispatch_holes_in(base, holes)
-        parser_dispatch_holes_in(index, holes)
+        parser_dispatch_underscore_holes(base, underscores)
+        parser_dispatch_underscore_holes(index, underscores)
     }
     if expr == .CompareChain(operands, _, _, _, _) {
-        loop operand in operands -> parser_dispatch_holes_in(operand, holes)
+        loop operand in operands -> parser_dispatch_underscore_holes(operand, underscores)
     }
     if expr == .Call(call, _) {
-        loop arg in call.args -> parser_dispatch_holes_in(arg.expr, holes)
+        loop arg in call.args -> parser_dispatch_underscore_holes(arg.expr, underscores)
     }
     if expr == .MethodCall(receiver, _, _, _, _, args, _) {
-        parser_dispatch_holes_in(receiver, holes)
-        loop arg in args -> parser_dispatch_holes_in(arg.expr, holes)
+        parser_dispatch_underscore_holes(receiver, underscores)
+        loop arg in args -> parser_dispatch_underscore_holes(arg.expr, underscores)
     }
 }
 
@@ -874,21 +874,16 @@ parser_dispatch_hole_pattern: fn(state: &JetParserState, subject: Expr, pattern:
 // spelled `<>` (E0443), in a header that does more than compare with it
 // (E0441).
 parser_dispatch_hole_check_header: fn(state: &JetParserState, header: Expr, cond: Span) {
-    holes := [Expr]{}
-    parser_dispatch_holes_in(header, holes)
-    if holes.len() > 1 {
-        parser_add_error_code(state, "E0946", cond, "an `if` table header holds one `<>` hole, and this one has {holes.len()}", "each arm's candidate takes the place of the one `<>`, so a second `<>` would stand for nothing", "keep one `<>` and write the other value out in the header")
+    holes: parser_dispatch_hole_count(header)
+    if holes > 1 {
+        parser_add_error_code(state, "E0946", cond, "an `if` table header holds one `<>` hole, and this one has {holes}", "each arm's candidate takes the place of the one `<>`, so a second `<>` would stand for nothing", "keep one `<>` and write the other value out in the header")
     }
-    underscore := false
-    loop hole in holes {
-        if hole == .Ident(name, span, _) {
-            if name == PARSER_DISPATCH_UNDERSCORE {
-                underscore = true
-                parser_add_error_code_edit(state, "E0443", span, "an `if` table's hole is written `<>`, not `_`", "`_` is a value thrown away, so it can't stand for the candidate each arm puts in the header", "write `<>` in place of `_`", TextEdit{span: span, new_text: PARSER_DISPATCH_HOLE})
-            }
-        }
+    underscores := [Span]{}
+    parser_dispatch_underscore_holes(header, underscores)
+    loop span in underscores {
+        parser_add_error_code_edit(state, "E0443", span, "an `if` table's hole is written `<>`, not `_`", "`_` is a value thrown away, so it can't stand for the candidate each arm puts in the header", "write `<>` in place of `_`", TextEdit{span: span, new_text: PARSER_DISPATCH_HOLE})
     }
-    if underscore || holes.len() != 1 -> return
+    if underscores.len() > 0 || holes != 1 -> return
     compared: parser_dispatch_hole_comparison(header) ?? return
     plain: parser_dispatch_hole_plain_text(state, cond, compared)
     parser_add_error_code_edit(state, "E0441", cond, "this header only compares with `<>`, so it is the plain table `if {plain} {{`", "a plain `subject OP {{` table compares each arm with its subject itself, and it keeps pattern and range arms and their coverage", "write `if {plain} {{` without the `<>`", TextEdit{span: cond, new_text: plain})
@@ -995,6 +990,7 @@ parser_expression_form_parse_hole_table: fn(state: &JetParserState, header: &&Ex
     if compared == .Val(table) {
         return parser_expression_form_parse_dispatch_table(state, table.subject, table.op, start, depth + 1)
     }
+    state.hole_value_table = start.start
     saved_else_arms: state.else_arms.len()
     marker: parser_dispatch_hole_marker(header)
     state.dispatch_hole_headers.push(parser_dispatch_hole_header(state, header, cond))

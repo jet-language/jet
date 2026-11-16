@@ -608,10 +608,13 @@ turn. After a candidate, `&&` and `||` are ordinary operators
 (`2 && ready || emergency` reads `(H[2] && ready) || emergency`), and a Bool
 candidate is written in parentheses. A payload-free case (`.Green`) or `None`
 fills the hole as a value. Since the header runs once per arm, it may not call
-a function with an effect (E0442); name the value on the line above and read
-the name. A pattern or range arm belongs in a plain `if subject == {` table
-(E0948), and a header whose whole test is `subject OP <>` is that plain table
-written with a needless hole (E0441). A hole table used as a value needs a
+a function with an effect or one that changes a value it is given or is called
+on (E0442); name the value on the line above and read the name, which the fix
+does when the table starts its statement. A call that holds the `<>` can't be
+named first, so its arms become plain tests. A pattern or range arm belongs in
+a plain `if subject == {` table (E0948), and a header whose whole test is
+`subject OP <>` is that plain table written with a needless hole (E0441). A
+hole table used as a value needs a
 final `else` (E0003), because its arms are tests rather than cases of one
 type. A header holds exactly one `<>` (E0946); `_` is no hole (E0443), and
 inside a `|>` step `<>` is the step's value, so a header there holds no hole
