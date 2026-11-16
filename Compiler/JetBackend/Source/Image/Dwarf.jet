@@ -62,13 +62,15 @@ X64DwarfSections: struct {
     eh_frame: [U8]
     eh_relas: [X64ObjectRela]
     abbrev: [U8]
-    info: [U8]
+    // `.debug_info` and `.debug_loclists` as the pieces their threads built,
+    // in order and contiguous (x64_object_file writes them into the file).
+    info: [X64ObjectPiece]
     info_relas: [X64ObjectRela]
     line: [U8]
     line_relas: [X64ObjectRela]
     jet_line: [U8]
     jet_line_relas: [X64ObjectRela]
-    loclists: [U8]
+    loclists: [X64ObjectPiece]
     loclists_relas: [X64ObjectRela]
 }
 
@@ -713,12 +715,13 @@ dwarf_function_debug: fn(program: X64ObjectModule, function: X64CompiledFunction
 // are built in consecutive function parts on the threads `threads` admits
 // (one part per thread, weighted by the functions' variables, ranges and
 // inline runs): each part's bytes, relocations and references to its own
-// DIEs are relative to the part's own start, and the join appends the
-// parts in function order, shifting each relocation's offset and each such
-// reference (its place and value) by the info bytes before its part and
-// the loclists offsets (the relocations against `symbols.loclists`) and the
-// loclists relocations' offsets by the loclists bytes before it, so the
-// sections are those of the one-thread loop.
+// DIEs are relative to the part's own start. Each part's bytes become a
+// piece of its section as they are, in function order, after the unit's
+// header (X64DwarfSections); each relocation's offset and each such
+// reference (its place and value) shift by the info bytes before its part,
+// and the loclists offsets (the relocations against `symbols.loclists`)
+// and the loclists relocations' offsets by the loclists bytes before it, so
+// the sections are those of the one-thread loop.
 dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) Never! {
     info := [U8]{}
     relas := [X64ObjectRela]{}
@@ -765,41 +768,66 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
         loop (index, function) in functions {
             dwarf_info_function(info, relas, refs, lists, list_relas, program, function, debug[index], offsets[index], dwarf_function_symbol(symbols, index), type_offsets, symbols)
         }
-    } else {
-        bounds: compiler_threads_partition(weights, workers)
-        inputs: Shared{DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, type_offsets: type_offsets, symbols: symbols}}
-        parts := [Shared<DwarfInfoPart>]{}
-        loop part in 0..<(bounds.len() - 1) {
-            parts.push(Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}})
-        }
-        _ := dwarf_info_parts(inputs, parts, 0) ?? panic("the DWARF info threads failed")
-        loop part in parts {
-            rows: dwarf_info_part_take(part)
-            info_base: info.len()
-            lists_base: lists.len()
-            loop rela in rows.relas {
-                addend: if rela.symbol == symbols.loclists -> rela.addend + lists_base else -> rela.addend
-                relas.push(X64ObjectRela{at: rela.at + info_base, symbol: rela.symbol, kind: rela.kind, addend: addend})
-            }
-            loop rela in rows.list_relas {
-                list_relas.push(X64ObjectRela{at: rela.at + lists_base, symbol: rela.symbol, kind: rela.kind, addend: rela.addend})
-            }
-            // Bytes append as one block copy; popping them out one by one
-            // (compiler_take_rows) grew the target per byte.
-            info.extend(rows.info)
-            lists.extend(rows.lists)
-            loop pair in 0..<(rows.refs.len() >> 1) {
-                dwarf_patch_u32(info, info_base + rows.refs[2 * pair], info_base + rows.refs[2 * pair + 1])
-            }
-        }
+        dwarf_uleb(info, 0)
+        dwarf_patch_length(info, 0)
+        dwarf_patch_length(lists, 0)
+        sections.info = [X64ObjectPiece]{X64ObjectPiece{at: 0, bytes: info.move()}}
+        sections.info_relas = relas.move()
+        sections.loclists = [X64ObjectPiece]{X64ObjectPiece{at: 0, bytes: lists.move()}}
+        sections.loclists_relas = list_relas.move()
+        return
     }
-    dwarf_uleb(info, 0)
-    dwarf_patch_length(info, 0)
-    dwarf_patch_length(lists, 0)
-    sections.info = info
-    sections.info_relas = relas
-    sections.loclists = lists
-    sections.loclists_relas = list_relas
+    bounds: compiler_threads_partition(weights, workers)
+    inputs: Shared{DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, type_offsets: type_offsets, symbols: symbols}}
+    parts := [Shared<DwarfInfoPart>]{}
+    loop part in 0..<(bounds.len() - 1) {
+        parts.push(Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}})
+    }
+    _ := dwarf_info_parts(inputs, parts, 0) ?? panic("the DWARF info threads failed")
+    taken := [DwarfInfoRows]{}
+    loop part in parts -> taken.push(dwarf_info_part_take(part))
+    // The unit's length counts every part and its closing null entry.
+    info_size := info.len() + 1
+    lists_size := lists.len()
+    loop rows in taken {
+        info_size += rows.info.len()
+        lists_size += rows.lists.len()
+    }
+    dwarf_patch_u32(info, 0, info_size - 4)
+    dwarf_patch_u32(lists, 0, lists_size - 4)
+    // Each part's bytes become a piece of its section as they are; its
+    // relocations and references shift by the bytes before it.
+    info_base := info.len()
+    lists_base := lists.len()
+    info_pieces := [X64ObjectPiece]{X64ObjectPiece{at: 0, bytes: info.move()}}
+    list_pieces := [X64ObjectPiece]{X64ObjectPiece{at: 0, bytes: lists.move()}}
+    taken.reverse()
+    loop taken.len() > 0 {
+        rows := taken.pop() ?? {
+            break
+        }
+        loop rela in rows.relas {
+            addend: if rela.symbol == symbols.loclists -> rela.addend + lists_base else -> rela.addend
+            relas.push(X64ObjectRela{at: rela.at + info_base, symbol: rela.symbol, kind: rela.kind, addend: addend})
+        }
+        loop rela in rows.list_relas {
+            list_relas.push(X64ObjectRela{at: rela.at + lists_base, symbol: rela.symbol, kind: rela.kind, addend: rela.addend})
+        }
+        loop pair in 0..<(rows.refs.len() >> 1) {
+            dwarf_patch_u32(rows.info, rows.refs[2 * pair], info_base + rows.refs[2 * pair + 1])
+        }
+        info_at: info_base
+        lists_at: lists_base
+        info_base += rows.info.len()
+        lists_base += rows.lists.len()
+        info_pieces.push(X64ObjectPiece{at: info_at, bytes: rows.info.move()})
+        list_pieces.push(X64ObjectPiece{at: lists_at, bytes: rows.lists.move()})
+    }
+    info_pieces.push(X64ObjectPiece{at: info_base, bytes: [U8]{U8{0}}})
+    sections.info = info_pieces.move()
+    sections.info_relas = relas.move()
+    sections.loclists = list_pieces.move()
+    sections.loclists_relas = list_relas.move()
 }
 
 // Fewest weight units (a function, each of its variables, each of its
@@ -1202,13 +1230,13 @@ x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction
         eh_frame: [U8]{},
         eh_relas: [X64ObjectRela]{},
         abbrev: [U8]{},
-        info: [U8]{},
+        info: [X64ObjectPiece]{},
         info_relas: [X64ObjectRela]{},
         line: [U8]{},
         line_relas: [X64ObjectRela]{},
         jet_line: [U8]{},
         jet_line_relas: [X64ObjectRela]{},
-        loclists: [U8]{},
+        loclists: [X64ObjectPiece]{},
         loclists_relas: [X64ObjectRela]{},
     }
     rows := 0
@@ -1263,6 +1291,17 @@ dwarf_test_relas: fn(relas: [X64ObjectRela]) -> [Int] Never! {
     out
 }
 
+// A section's pieces joined, for comparing them; a piece that does not
+// start where the one before it ends leaves the bytes empty.
+dwarf_test_bytes: fn(pieces: [X64ObjectPiece]) -> [U8] Never! {
+    out := [U8]{}
+    loop piece in pieces {
+        if piece.at != out.len() -> return [U8]{}
+        out.extend(piece.bytes)
+    }
+    out
+}
+
 #Test("the debug sections built beside the subprograms are those of one thread") {
     count: 3000
     functions := [X64CompiledFunction]{}
@@ -1289,11 +1328,13 @@ dwarf_test_relas: fn(relas: [X64ObjectRela]) -> [Int] Never! {
     assert(one.line.len() > 0 && one.jet_line.len() > 0 && one.eh_frame.len() > 0)
     assert_eq(many.eh_frame, one.eh_frame)
     assert_eq(dwarf_test_relas(many.eh_relas), dwarf_test_relas(one.eh_relas))
-    assert_eq(many.info, one.info)
+    assert(many.info.len() > 2 && one.info.len() == 1)
+    assert(dwarf_test_bytes(one.info).len() > 0)
+    assert_eq(dwarf_test_bytes(many.info), dwarf_test_bytes(one.info))
     assert_eq(dwarf_test_relas(many.info_relas), dwarf_test_relas(one.info_relas))
     assert_eq(many.line, one.line)
     assert_eq(dwarf_test_relas(many.line_relas), dwarf_test_relas(one.line_relas))
     assert_eq(many.jet_line, one.jet_line)
     assert_eq(dwarf_test_relas(many.jet_line_relas), dwarf_test_relas(one.jet_line_relas))
-    assert_eq(many.loclists, one.loclists)
+    assert_eq(dwarf_test_bytes(many.loclists), dwarf_test_bytes(one.loclists))
 }

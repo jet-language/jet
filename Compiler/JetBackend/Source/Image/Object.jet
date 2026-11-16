@@ -127,15 +127,51 @@ X64ObjectSymbol: struct {
 }
 
 // One section header after the null one: its contents and header fields.
+// The contents are `bytes`, then `pieces` (each at its offset in the
+// section, the gap before it `fill` bytes), then the RELA entries `relas`;
+// x64_object_file writes them straight into the file, so a section built
+// in parts on threads is never joined first.
 X64ObjectSection: struct {
     name: String
     kind: Int
     flags: Int
     bytes: [U8]
+    pieces: [X64ObjectPiece]{[X64ObjectPiece]{}}
+    fill: Int{0}
+    relas: [X64ObjectRela]{[X64ObjectRela]{}}
     link: Int
     info: Int
     align: Int
     entry_size: Int
+}
+
+// Part of a section's contents and its offset in the section; a section's
+// pieces ascend and do not overlap.
+X64ObjectPiece: struct {
+    at: Int
+    bytes: [U8]
+}
+
+// The size of `section`'s contents.
+x64_object_section_size: fn(section: X64ObjectSection) -> Int Never! {
+    size := section.bytes.len()
+    if section.pieces.len() > 0 {
+        last: section.pieces[section.pieces.len() - 1]
+        size = last.at + last.bytes.len()
+    }
+    size + ELF64_RELA_SIZE * section.relas.len()
+}
+
+// Appends `section`'s contents to `bytes`, where the section starts at `start`.
+x64_object_section_write: fn(bytes: &[U8], start: Int, section: X64ObjectSection) Never! {
+    bytes.extend(section.bytes)
+    loop piece in section.pieces {
+        loop bytes.len() < start + piece.at -> bytes.push(U8{section.fill})
+        bytes.extend(piece.bytes)
+    }
+    loop row in section.relas {
+        x64_object_rela_put(bytes, row.at, row.symbol, row.kind, row.addend)
+    }
 }
 
 // Append `text` to a string table; returns its offset.
@@ -219,9 +255,7 @@ x64_object_main_debug: fn(main: X64CompiledFunction) -> X64FunctionDebug Never! 
 }
 
 x64_object_rela_section: fn(name: String, relas: [X64ObjectRela], target: Int) -> X64ObjectSection Never! {
-    bytes := [U8]{}
-    loop row in relas -> x64_object_rela_put(bytes, row.at, row.symbol, row.kind, row.addend)
-    x64_object_rela_bytes_section(name, bytes, target)
+    X64ObjectSection{name: name, kind: 4, flags: 0x40, bytes: [U8]{}, relas: relas, link: ELF64_OBJECT_SYMTAB, info: target, align: 8, entry_size: ELF64_RELA_SIZE}
 }
 
 // One RELA entry: offset, (symbol << 32) | kind, addend.
@@ -425,7 +459,7 @@ x64_object_function_section: fn(own_sections: Bool, index: Int) -> Int Never! {
 // Bytes `start..<end` of `bytes`.
 x64_object_bytes: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
-    loop at in start..<end -> out.push(bytes[at])
+    out.extend(bytes[start..<end])
     out
 }
 
@@ -704,12 +738,12 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
 // symbols, with own sections the functions' and data objects' sections,
 // and how many `.text` threads were admitted; with an error only `errors`.
 X64ObjectLaid: struct {
-    text: [U8]{[U8]{}}
+    text: [X64ObjectPiece]{[X64ObjectPiece]{}}
     data: [U8]{[U8]{}}
     data_align: Int{1}
     rodata: [U8]{[U8]{}}
     rodata_align: Int{1}
-    rela_text: [U8]{[U8]{}}
+    rela_text: [X64ObjectPiece]{[X64ObjectPiece]{}}
     symtab: [U8]{[U8]{}}
     xindex: [U8]{[U8]{}}
     strtab: [U8]{[U8]{}}
@@ -868,8 +902,11 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
         parts.push(Shared{X64ObjectTextPart{start: bounds[part], end: bounds[part + 1], outputs: [X64ObjectTextRows]{}}})
     }
     _ := x64_object_text_parts(inputs, parts, 0) ?? panic("the .text threads failed")
-    text := [U8]{}
-    rela_text := [U8]{}
+    // Without own sections: `.text` and `.rela.text` as each part's piece,
+    // in function order (x64_object_file writes them into the file).
+    text := [X64ObjectPiece]{}
+    rela_text := [X64ObjectPiece]{}
+    rela_size := 0
     // With own sections: from ELF64_OBJECT_FIRST_OWN, per function its
     // section and that section's relocations, then the same per data object.
     own := [X64ObjectSection]{}
@@ -896,10 +933,6 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
     loop part in parts {
         rows := x64_object_text_part_take(part)
         errors.extend(rows.errors)
-        if !own_sections && rows.text.len() > 0 {
-            loop text.len() < rows.start -> x64_byte(text, 0xcc)
-            text.extend(rows.text)
-        }
         globals := [Int]{}
         loop symbol in rows.imports {
             id: x64_object_symbol(symbol_names, import_of, export_of, symbol)
@@ -914,18 +947,23 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
             found: import_of[id]
             globals.push(first_import + found)
         }
-        base: if own_sections -> 0 else -> rela_text.len()
-        if !own_sections -> rela_text.extend(rows.relas)
         // The symbol is the high word of the entry's info (bytes 12..15).
         loop (at_index, at) in rows.runtime_at {
             symbol: globals[rows.runtime_local[at_index]]
             loop shift in 0..<4 {
-                byte: U8{(symbol >> (8 * shift)).bit_and(255)}
-                if {
-                    own_sections -> rows.relas[at + 12 + shift] = byte
-                    else -> rela_text[base + at + 12 + shift] = byte
-                }
+                rows.relas[at + 12 + shift] = U8{(symbol >> (8 * shift)).bit_and(255)}
             }
+        }
+        if !own_sections {
+            if rows.text.len() > 0 {
+                text.push(X64ObjectPiece{at: rows.start, bytes: rows.text.move()})
+            }
+            if rows.relas.len() > 0 {
+                at: rela_size
+                rela_size += rows.relas.len()
+                rela_text.push(X64ObjectPiece{at: at, bytes: rows.relas.move()})
+            }
+            next
         }
         text_from := 0
         rela_from := 0
@@ -1045,14 +1083,14 @@ x64_object_release_programs: fn(released: Shared<X64ObjectReleased>) -> [X64Obje
 // `xindex` holds the symbols' extended section indices, empty when no
 // index reaches ELF64_OBJECT_SECTION_LIMIT; with them the object ends in
 // `.symtab_shndx`, and with that many headers section 0 holds their count.
-x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: &&[U8], symtab: [U8], xindex: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection]) -> [U8] Never! {
+x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [U8], xindex: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection]) -> [U8] Never! {
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
-        // .text: PROGBITS, ALLOC | EXECINSTR
-        {name: ".text", kind: 1, flags: 6, bytes: text, link: 0, info: 0, align: text_align, entry_size: 0},
+        // .text: PROGBITS, ALLOC | EXECINSTR; int3 between the parts
+        {name: ".text", kind: 1, flags: 6, bytes: [U8]{}, pieces: text, fill: 0xcc, link: 0, info: 0, align: text_align, entry_size: 0},
         // .data: PROGBITS, WRITE + ALLOC
         {name: ".data", kind: 1, flags: 3, bytes: data, link: 0, info: 0, align: data_align, entry_size: 0},
-        x64_object_rela_bytes_section(".rela.text", rela_text, ELF64_OBJECT_TEXT),
+        {name: ".rela.text", kind: 4, flags: 0x40, bytes: [U8]{}, pieces: rela_text, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_TEXT, align: 8, entry_size: ELF64_RELA_SIZE},
         // .symtab: names in .strtab, locals before `first_global`
         {name: ".symtab", kind: 2, flags: 0, bytes: symtab, link: ELF64_OBJECT_STRTAB, info: first_global, align: 8, entry_size: ELF64_SYMBOL_SIZE},
         {name: ".strtab", kind: 3, flags: 0, bytes: strtab, link: 0, info: 0, align: 1, entry_size: 0},
@@ -1066,11 +1104,11 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
         {name: ".eh_frame", kind: 1, flags: 2, bytes: dwarf.eh_frame, link: 0, info: 0, align: 8, entry_size: 0},
         x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME),
         x64_object_debug_section(".debug_abbrev", dwarf.abbrev),
-        x64_object_debug_section(".debug_info", dwarf.info),
+        {name: ".debug_info", kind: 1, flags: 0, bytes: [U8]{}, pieces: dwarf.info, link: 0, info: 0, align: 1, entry_size: 0},
         x64_object_rela_section(".rela.debug_info", dwarf.info_relas, ELF64_OBJECT_DEBUG_INFO),
         x64_object_debug_section(".debug_line", dwarf.line),
         x64_object_rela_section(".rela.debug_line", dwarf.line_relas, ELF64_OBJECT_DEBUG_LINE),
-        x64_object_debug_section(".debug_loclists", dwarf.loclists),
+        {name: ".debug_loclists", kind: 1, flags: 0, bytes: [U8]{}, pieces: dwarf.loclists, link: 0, info: 0, align: 1, entry_size: 0},
         x64_object_debug_section(".debug_jetline", dwarf.jet_line),
         x64_object_rela_section(".rela.debug_jetline", dwarf.jet_line_relas, ELF64_OBJECT_DEBUG_JETLINE),
         // .rodata: PROGBITS, ALLOC: no address word, so no relocations.
@@ -1128,9 +1166,25 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
         at: name_at[id]
         name_offsets.push(at)
     }
+    sections[ELF64_OBJECT_SHSTRTAB - 1].bytes = shstrtab.move()
 
-    // File: header, section contents, section header table.
+    // File: header, section contents, section header table. The layout
+    // comes first, so the file is reserved once and each section is written
+    // straight into it.
+    section_offsets := [Int]{}
+    section_sizes := [Int]{}
+    end := ELF64_HEADER_SIZE
+    loop section in sections {
+        size: x64_object_section_size(section)
+        loop end % section.align != 0 -> end += 1
+        section_offsets.push(end)
+        section_sizes.push(size)
+        end += size
+    }
+    loop end % 8 != 0 -> end += 1
+    shoff: end
     bytes := [U8]{}
+    bytes.try_reserve(shoff + ELF64_SECTION_HEADER_SIZE * count) ?? panic("the object file: {err}")
     ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop byte in ident -> bytes.push(U8{byte})
     elf64_u16(bytes, 1)
@@ -1138,8 +1192,7 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
     elf64_u32(bytes, 1)
     elf64_u64(bytes, 0)
     elf64_u64(bytes, 0)
-    shoff_at: bytes.len()
-    elf64_u64(bytes, 0)
+    elf64_u64(bytes, shoff)
     elf64_u32(bytes, 0)
     elf64_u16(bytes, ELF64_HEADER_SIZE)
     elf64_u16(bytes, 0)
@@ -1147,18 +1200,11 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
     elf64_u16(bytes, ELF64_SECTION_HEADER_SIZE)
     elf64_u16(bytes, if count >= ELF64_OBJECT_SECTION_LIMIT -> 0 else -> count)
     elf64_u16(bytes, ELF64_OBJECT_SHSTRTAB)
-    section_offsets := [Int]{}
-    section_sizes := [Int]{}
     loop (index, section) in sections {
-        contents: if index + 1 == ELF64_OBJECT_SHSTRTAB -> shstrtab else -> section.bytes
         elf64_pad(bytes, section.align)
-        section_offsets.push(bytes.len())
-        section_sizes.push(contents.len())
-        bytes.extend(contents)
+        x64_object_section_write(bytes, section_offsets[index], section)
     }
     elf64_pad(bytes, 8)
-    shoff: bytes.len()
-    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{((shoff >> (8 * shift))).bit_and(255)}
     elf64_section_header(bytes, 0, 0, 0, 0, if count >= ELF64_OBJECT_SECTION_LIMIT -> count else -> 0, 0, 0, 0, 0)
     loop (index, section) in sections {
         elf64_section_header(bytes, name_offsets[index], section.kind, section.flags, section_offsets[index], section_sizes[index], section.link, section.info, section.align, section.entry_size)
