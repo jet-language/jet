@@ -1,0 +1,14 @@
+# Two servers of one app share one cache store, the database file they
+# share. Server A (the program run again as a child process, sharing only the
+# file) runs the `.Public` method `is_open` once and keeps its `false` there;
+# A and server B (the program) then both answer with that kept `false` and
+# run nothing. B's write to the flag the method reads drops the kept reply for
+# both: A runs it again and B answers with A's `true`. A server whose kept-reply
+# table is broken answers from the method instead of failing the request.
+# No cache server runs.
+requires: os:unix
+fixture: SharedCacheTwoInstances.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "server a: 200 {\"ok\":false} (ran)\nserver a again: 200 {\"ok\":false} (kept)\nserver b: 200 {\"ok\":false} (kept)\nafter the write, server a: 200 {\"ok\":true} (ran)\nafter the write, server b: 200 {\"ok\":true} (kept)\nserver a ran is_open: 2\nserver b ran is_open: 0\nover a broken kept-reply table: 200 {\"ok\":false} (ran)\nover a broken kept-reply table ran is_open: 1\n"

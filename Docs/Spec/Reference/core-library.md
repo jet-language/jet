@@ -5963,7 +5963,7 @@ any site can make a browser send, never runs a method that may write.
 reply type with no policy carries no cache headers. `.cache` without the one
 type argument is E0119.
 
-The server also keeps a `.Public{max_age}` method's successful reply for
+The server keeps a `.Public{max_age}` method's successful reply for
 `max_age`, by the call's JSON array of arguments: a call with the same
 arguments within it is answered with the kept reply and its `Age`, and the
 method does not run. `max_age` is a Duration, measured on the monotonic
@@ -5973,15 +5973,25 @@ is kept for being a reply, not for its value, so `false`, `0` and `""` are
 kept like any other. A failed run, a call replayed under its
 `Idempotency-Key`, or a `max_age` of zero keeps nothing.
 
-Servers of one App that share a database file share these replies. Each
-database file `db.open` opens keeps them in its table `__jet_kept_replies`,
-keyed by the method's address and its arguments, with the instants each
-was kept and stays fresh through, in Unix milliseconds by the file's
-clock. A reply is kept in the App's first file still open; a server that
-keeps no fresh reply of its own answers with one that any open file keeps,
-with its `Age`, and does not run the method. Each keep drops the stale
-rows, so the table holds only fresh replies. No cache server runs, and an
-in-memory database shares nothing.
+Servers of one App that share a database file share these replies, the
+file being their one cache store. Each database file `db.open` opens keeps
+them in its table `__jet_kept_replies`, keyed by the method's address and
+its arguments, with the instants each was kept and stays fresh through, in
+Unix milliseconds by the file's clock. A reply is kept in the App's first
+file still open; a server answers with one that any open file keeps, with
+its `Age`, and does not run the method. Each keep drops the stale rows, so
+the table holds only fresh replies. No cache server runs, and an in-memory
+database shares nothing.
+
+A write committed to a table of a file drops every reply the file keeps, on
+every server, as each may have read what the write changed; the next call
+runs the method. A run that began no later than a write the file took,
+including a write of its own, keeps no reply in the file, so a method that
+writes keeps none. A server keeps a reply for itself only when no file takes
+it, as when the App opens none; a write committed to any database the server
+has open, a file or in memory, drops those, and a run that saw one keeps
+none. A file whose kept replies can't be read or written is passed over: the
+call runs the method and is answered as if no reply were kept.
 
 `app.Notice{text:, retry:}` is where a handler's failure goes. A control's
 handler has the type `fn() app.Notice!`, so its error type converts to a

@@ -1819,12 +1819,14 @@ priv AppRemote: struct {
 
 // A reply the server keeps for a `.Public` policy's `max_age`: the encoded
 // reply, whatever it holds (`false`, `0` and `""` are replies like any
-// other), the monotonic instant it was kept, and the last instant it is
-// fresh at.
+// other), the monotonic instant it was kept, the last instant it is fresh
+// at, and the count of this process's committed writes its run began at
+// (app.reply_cache.writes).
 priv AppKeptReply: struct {
     reply: String
     kept_ns: Int
     fresh_ns: Int
+    writes: Int
 }
 
 // The most replies one endpoint keeps; past it, the stale ones are dropped
@@ -1832,17 +1834,20 @@ priv AppKeptReply: struct {
 APP_KEPT_REPLIES: 4096
 
 // The reply `kept` holds for the arguments `args` while it is fresh at
-// `now_ns`: fresh through the instant its `max_age` ends, stale after it.
-priv app_kept_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, now_ns: Int) -> AppKeptReply? Never! {
+// `now_ns`: fresh through the instant its `max_age` ends, stale after it,
+// and stale once a write committed after its run began, as `writes`, this
+// process's count of them now, shows.
+priv app_kept_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, now_ns: Int, writes: Int) -> AppKeptReply? Never! {
     held: kept.guard_read()
     found: held.value.get(args) ?? return None
-    if now_ns > found.fresh_ns -> return None
+    if now_ns > found.fresh_ns || found.writes != writes -> return None
     Val(found.copy())
 }
 
-// Keeps `reply` for the arguments `args` from `now_ns` for `max_age`; a
-// `max_age` of none or less keeps nothing.
-priv app_keep_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, reply: String, now_ns: Int, max_age: Duration) Never! {
+// Keeps `reply`, whose run began when this process had committed `writes`
+// writes, for the arguments `args` from `now_ns` for `max_age`; a `max_age`
+// of none or less keeps nothing.
+priv app_keep_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, reply: String, now_ns: Int, max_age: Duration, writes: Int) Never! {
     if max_age.ns <= 0 {
         return
     }
@@ -1856,7 +1861,7 @@ priv app_keep_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, reply
         }
         guard.value = if fresh.len() >= APP_KEPT_REPLIES -> [String:AppKeptReply]{} else -> fresh
     }
-    guard.value[args.copy()] = AppKeptReply{reply: reply.copy(), kept_ns: now_ns, fresh_ns: fresh_ns}
+    guard.value[args.copy()] = AppKeptReply{reply: reply.copy(), kept_ns: now_ns, fresh_ns: fresh_ns, writes: writes}
 }
 
 // An endpoint marker's `limit:`: at most `calls` calls from one caller in
@@ -1981,7 +1986,9 @@ priv app_remote_get_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Ne
 // is answered with it, with its `Age`, and the method does not run: the
 // reply this server keeps (`app_kept_reply`), or else the one any server of
 // the App keeps in a database file they share (`calls.reply_cache`). A run
-// that succeeds keeps its reply for `max_age` in both.
+// that succeeds keeps its reply for `max_age` in that file, so a write any
+// server commits to it drops the reply for all; only when no file keeps it
+// does this server keep it, until a write this process commits.
 priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: String?) -[Net, FS.Read]> HTTPResponse Never! {
     if app_remote_limited(endpoint.limit, app_remote_who(request)) == .Val(wait_ns) {
         return app_limited(wait_ns)
@@ -2000,11 +2007,12 @@ priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: Strin
     tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
     policy: calls.reply_cache.policy(endpoint.reply)
     now: rt.clock_mono_ns()
+    writes: calls.reply_cache.writes()
     // The key a reply is kept under in the App's database files, the same on
     // every server of the App.
     shared: "{endpoint.path} {text}"
     if policy == .Val(.Public(_)) {
-        if app_kept_reply(endpoint.kept, text, now) == .Val(hit) {
+        if app_kept_reply(endpoint.kept, text, now, writes) == .Val(hit) {
             return app_remote_reply(policy, request, hit.reply, Val(now - hit.kept_ns))
         }
         if calls.reply_cache.find(shared) == .Val(found) {
@@ -2025,9 +2033,9 @@ priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: Strin
     if policy == .Val(.Public(max_age)) && (answered.status == 200 || answered.status == 304) && answered.header("idempotent-replayed") == None {
         held: last.guard_read()
         if held.value.len() == 1 && !app_reply_failed(held.value[0]) {
-            app_keep_reply(endpoint.kept, text, held.value[0], now, max_age)
-            if max_age.ns > 0 {
-                _: calls.reply_cache.keep(shared, held.value[0], max_age.ns /% 1000000)
+            ran_ms: (rt.clock_mono_ns() - now) /% 1000000
+            if max_age.ns <= 0 || !calls.reply_cache.keep(shared, held.value[0], max_age.ns /% 1000000, ran_ms) {
+                app_keep_reply(endpoint.kept, text, held.value[0], now, max_age, writes)
             }
         }
     }
@@ -2293,19 +2301,20 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
     assert_eq(held.value, 3)
 }
 
-#Test("a kept reply is fresh through the instant its max_age ends and stale after it") {
+#Test("a kept reply is fresh through the instant its max_age ends and stale after it, or once a write commits") {
     kept: Shared{[String:AppKeptReply]{}}
-    app_keep_reply(kept, "[1]", "{{\"ok\":0}}", 1000, Duration{ns: 500})
-    assert_eq((app_kept_reply(kept, "[1]", 1000) ?? panic("kept at once")).reply, "{{\"ok\":0}}")
-    assert_eq((app_kept_reply(kept, "[1]", 1500) ?? panic("kept at the instant max_age ends")).kept_ns, 1000)
-    assert_eq(app_kept_reply(kept, "[1]", 1501) == None, true)
-    assert_eq(app_kept_reply(kept, "[2]", 1000) == None, true)
-    app_keep_reply(kept, "[1]", "{{\"ok\":1}}", 1501, Duration{ns: 500})
-    assert_eq((app_kept_reply(kept, "[1]", 2001) ?? panic("kept again after it ran")).reply, "{{\"ok\":1}}")
-    app_keep_reply(kept, "[3]", "{{\"ok\":0}}", 1000, Duration{ns: 0})
-    assert_eq(app_kept_reply(kept, "[3]", 1000) == None, true)
-    app_keep_reply(kept, "[4]", "{{\"ok\":0}}", 1000, Duration{ns: 9223372036854775807})
-    assert_eq(app_kept_reply(kept, "[4]", 9223372036854775807) == None, false)
+    app_keep_reply(kept, "[1]", "{{\"ok\":0}}", 1000, Duration{ns: 500}, 0)
+    assert_eq((app_kept_reply(kept, "[1]", 1000, 0) ?? panic("kept at once")).reply, "{{\"ok\":0}}")
+    assert_eq((app_kept_reply(kept, "[1]", 1500, 0) ?? panic("kept at the instant max_age ends")).kept_ns, 1000)
+    assert_eq(app_kept_reply(kept, "[1]", 1501, 0) == None, true)
+    assert_eq(app_kept_reply(kept, "[1]", 1000, 1) == None, true)
+    assert_eq(app_kept_reply(kept, "[2]", 1000, 0) == None, true)
+    app_keep_reply(kept, "[1]", "{{\"ok\":1}}", 1501, Duration{ns: 500}, 0)
+    assert_eq((app_kept_reply(kept, "[1]", 2001, 0) ?? panic("kept again after it ran")).reply, "{{\"ok\":1}}")
+    app_keep_reply(kept, "[3]", "{{\"ok\":0}}", 1000, Duration{ns: 0}, 0)
+    assert_eq(app_kept_reply(kept, "[3]", 1000, 0) == None, true)
+    app_keep_reply(kept, "[4]", "{{\"ok\":0}}", 1000, Duration{ns: 9223372036854775807}, 0)
+    assert_eq(app_kept_reply(kept, "[4]", 9223372036854775807, 0) == None, false)
 }
 
 // One webhook method of a mounted service: how its sender signs, the names

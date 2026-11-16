@@ -1,0 +1,190 @@
+// Two servers of one app, each its own process, over one database file.
+// `is_open` replies whether the board's flag is open, a Bool the app graph
+// caches `.Public` for ten minutes, and the flag starts closed. Server A, a
+// child process that shares nothing with server B (the program) but the
+// file, runs `is_open` once and keeps its `false` in the file; A and B then
+// each answer with that kept `false`, its Age set, and run nothing. B opens
+// the flag: the write drops the kept reply for both, so A runs `is_open`
+// again and B answers with A's new `true`. A third server, over a file whose
+// kept-reply table is broken, answers each call from the method rather than
+// failing it. No cache server runs.
+use {
+    app
+    client: core.http.client
+    db: core.db
+    fs: core.files
+    net: core.net
+    process: core.process
+    sys: core.sys
+    time: core.time
+    web: core.web
+}
+
+FILE: "shared_cache.db"
+
+BROKEN: "broken_cache.db"
+
+// Where server A writes its address once it listens.
+ADDRESS: "server_a.addr"
+
+#Codable
+Flag: struct {
+    id: Int
+    open: Bool
+}
+
+flags_in: fn(store: db.Store) -> db.Table<Int, Flag> {
+    store.table("flags", key: fn(row: Flag) { row.id })
+}
+
+Board: struct {
+    store: db.Store
+    runs: Shared<Int>
+
+    #App.Public is_open: fn(self) -> Bool {
+        guard := self.runs.guard_edit()
+        guard.value += 1
+        if flags_in(self.store).get(1) == {
+            .Val(flag) -> flag.open
+            .None | .Err(_) -> false
+        }
+    }
+}
+
+// A server of the app: where it listens, how often it ran `is_open`, and
+// how many calls it has answered.
+Server: struct {
+    addr: String
+    runs: Shared<Int>
+    answered: Shared<Int>
+}
+
+// Starts a server over the file `path` that answers `calls` calls.
+serving: fn(path: String, calls: Int) -> Server {
+    _: app.new("Board").cache<Bool>(.Public{max_age: 10min})
+    runs: Shared{0}
+    answered: Shared{0}
+    counted: answered.copy()
+    mounted: web.app().mount("/api", Board{store: db.open(path), runs: runs.copy()})
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<calls {
+            mounted.serve_once(listener) ?? panic("serve")
+            guard := counted.guard_edit()
+            guard.value += 1
+        }
+    }
+    serving.detach()
+    Server{addr: addr, runs: runs, answered: answered}
+}
+
+// Waits until `server` has answered `calls` calls.
+answered_all: fn(server: Server, calls: Int) {
+    loop count(server.answered) < calls -> time.sleep(10ms)
+}
+
+// A call of `is_open` on the server at `addr`: its status, its reply, and
+// whether it carries an Age, so came from a kept reply.
+asked: fn(addr: String) -> String {
+    answered: client.post("http://{addr}/api/is_open", "[]") ?? panic("call is_open")
+    age: if answered.header("age") == None -> "ran" else -> "kept"
+    "{answered.status} {answered.text() ?? "unreadable"} ({age})"
+}
+
+count: fn(counted: Shared<Int>) -> Int {
+    held: counted.guard_read()
+    held.value
+}
+
+clear: fn(path: String) {
+    leftovers: [String]{path, "{path}-journal", "{path}-wal", "{path}-shm", "{path}.part"}
+    loop leftover in leftovers {
+        if fs.exists(leftover) -> fs.remove(leftover) ?? panic("clear {leftover}")
+    }
+}
+
+// Server A: writes the address it listens at, answers three calls, and then
+// reports how often it ran `is_open`.
+server_a: fn() {
+    a: serving(FILE, 3)
+    fs.write("{ADDRESS}.part", a.addr) ?? panic("write the address")
+    fs.rename("{ADDRESS}.part", ADDRESS) ?? panic("publish the address")
+    answered_all(a, 3)
+    print("server a ran is_open: {count(a.runs)}")
+}
+
+// The address server A wrote, once it has.
+address_of_a: fn() -> String {
+    waited := 0
+    loop !fs.exists(ADDRESS) {
+        if waited >= 1500 -> panic("server a did not listen")
+        time.sleep(20ms)
+        waited += 1
+    }
+    fs.read(ADDRESS) ?? panic("read the address")
+}
+
+// A server over a file whose kept-reply table has the wrong columns, so the
+// store can neither find nor keep a reply. It runs as a child process too,
+// as the program's own servers name the shared file as a store.
+server_broken: fn() {
+    clear(BROKEN)
+    store: db.open(BROKEN)
+    policy: db.policy("flags", "true") ?? panic("policy")
+    _: db.migrate(
+        store.with_policy(policy, "test"),
+        "broken-kept-replies",
+        [
+            SQL{"CREATE TABLE __jet_kept_replies (key TEXT)"},
+        ],
+    ) ?? panic("break the kept-reply table")
+    broken: serving(BROKEN, 1)
+    print("over a broken kept-reply table: {asked(broken.addr)}")
+    answered_all(broken, 1)
+    print("over a broken kept-reply table ran is_open: {count(broken.runs)}")
+}
+
+// Runs another server of the app as a child process, and prints what it
+// printed.
+child: fn(mode: String) {
+    other: process.cmd([sys.executable(), mode])
+        .stdout(.Stream)
+        .spawn() ?? panic("start {mode}")
+    loop line in other.stdout.lines() -> print(line.trim())
+    _: other.wait() ?? panic("{mode} ends")
+}
+
+run: fn() {
+    mode: process.args().get(0) ?? ""
+    if mode == "--server-a" {
+        server_a()
+        return
+    }
+    if mode == "--broken" {
+        server_broken()
+        return
+    }
+    clear(FILE)
+    clear(ADDRESS)
+    store: db.open(FILE)
+    _: flags_in(store).put(Flag{id: 1, open: false}) ?? panic("the flag starts closed")
+    other: process.cmd([sys.executable(), "--server-a"])
+        .stdout(.Stream)
+        .spawn() ?? panic("start server a")
+    a_addr: address_of_a()
+    b: serving(FILE, 2)
+    print("server a: {asked(a_addr)}")
+    print("server a again: {asked(a_addr)}")
+    print("server b: {asked(b.addr)}")
+    _: flags_in(store).put(Flag{id: 1, open: true}) ?? panic("the flag opens")
+    // A run that begins in the millisecond of the write keeps nothing.
+    time.sleep(20ms)
+    print("after the write, server a: {asked(a_addr)}")
+    print("after the write, server b: {asked(b.addr)}")
+    answered_all(b, 2)
+    loop line in other.stdout.lines() -> print(line.trim())
+    _: other.wait() ?? panic("server a ends")
+    print("server b ran is_open: {count(b.runs)}")
+    child("--broken")
+}
