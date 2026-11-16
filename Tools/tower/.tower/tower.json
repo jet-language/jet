@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108465,
+    "rev": 108466,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -221326,6 +221326,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T07:13:07.340Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing08movxh",
+      "note": "p209: 7 landed; a mux hang, a law-kit panic and a comptime ICE traced to owners"
+    },
+    {
       "at": "2026-11-16T07:12:48.421Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -226428,6 +226435,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing08movxh",
+      "title": "p209: 7 landed; a mux hang, a law-kit panic and a comptime ICE traced to owners",
+      "body": "# Cycle p209: 7 landings, 3 regressions traced to their owners\n\n**Landed on dev** (b467d0da48 → a1c3325a65; the census was clean, the core suite passed 2433/2433, and guards pass):\n\n| Commit | Change | Card |\n|---|---|---|\n| a403b6e912 | the comptime root loop waits for #run values | #6847 c9 |\n| 06c5d8b172 | module values may hold named functions | #6847 c10 |\n| c4f916ca2d | BodyCodec --check matches the generated codecs | #6847 c15 |\n| 8987b1961d | law kit: a Core trait's laws run under jet test | #6855 c4 |\n| 9fb22f4c60 | #App.Every runs once across replicas | #6825 c2 |\n| 4977565c79 | jobs, schedules and webhooks run as the system and are listed by inspect choices | #6825 c4 |\n| a1c3325a65 | union members of one name from two modules stay two members (an I1 fix) | #6839 c36 |\n\n**Met:** #6847 c9 and c15, #6839 c36, #6825 c5.\n\n**Suites against p207:** 108 new failures and 9 fixed. Each new failure was rerun alone on the p209 gate; three roots explain all but one flake:\n\n1. **9fb22f4c60 hangs every served mux (about 100 rows: HTTP examples, web_app, server lifecycle, ws, tls, canvas).** `mux_serving` expected list `remove(0, .Slot)` to give None on an empty list. `.Slot` stops on an index out of range, as its ratified text keeps the bounds check. So every serving task died at its first serve, and clients timed out. Speed-3-2 sends the fix first in p210 and sweeps every `.Slot ?? return|default` caller in the repository (App.jet and Db.jet have two more).\n2. **8987b1961d: `jet test` panics with \"the law `law` does not parse\"** (2 cases). MemKernel-6-2 fixes the law text and replaces the panic with a registered diagnostic.\n3. **06c5d8b172: an ICE (exit 101) on a module value holding a named function** (1 case). PrecompiledCore-4 owns the fix.\n\nAlso: the `reflect_of_field_not_capturable` UI snapshot now reports resource state instead of the secret field. GoalsA-1-4 is finding its root (u36 is the first suspect). `ffi_missing_version` passed alone, so it was a flake.\n\n**Decisions made tonight:**\n- A run-time call of a `#run fn` is refused (E1019, #6847 n7).\n- Jetpack's EnvModel stops being a second evaluator; its env schema becomes Jet types the compiler checks (#6847 c16).\n- `auth.AccountID` replaces String accounts in one cutover (#6800 c4, as D-DB-TABLE1 ratified).\n- Built-in enum case lists come from one table generated from the Core declarations, not from loading more of Core per program (#3147 n15).\n- #6825 c9 (a store adapter contract) has no subject until a public adapter API exists. That API is owner-gated, so it waits for a ballot.\n\n**Any ballot (D-PRIM-ANY1):** review 7 failed on four gaps, and round 7 fixed them, still recommending C. Review 8 is running.\n\n**Next:** p210 lands the three root fixes plus 11 queued SUBs (#3147 c5 and n14, #6847 n1, n2 and n7, #6825 c1, n6, n7 and n8, the AccountID cutover, and the first EnvModel step).\n",
+      "by": "Main",
+      "created": "2026-11-16T07:13:07.340Z",
+      "sections": []
+    },
     {
       "id": "briefing0bucgf0",
       "title": "Cycle p207 landed: assembled-unit imports, root loop waits (proof failing), lander regenerates diagnostics",
