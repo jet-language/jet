@@ -5650,16 +5650,32 @@ with each argument in its place and of a type that derives `Encode` and
 `Decode`; anything else is E2817 (`jet.EnqueueNotOneJobCall`). The arguments
 are evaluated and encoded where `enqueue` is called. Inside a call, the job
 is kept in the call's transaction, as a row of the `__jet_jobs` table of the
-first store the call used: a call that rolls back queues nothing, and once
-it commits each of its jobs runs, on a task of its own, as the system
-(`as_system`), and in a call of its own, which also deletes the job's row.
-A run that fails, its method's error or a failed commit, runs again after
-half a second, then after twice the wait before, an hour at most, up to
-`#App.Job(retries: n)` more times, five unless set; a job that failed every
-run keeps its row, which records its runs and the last failure. A job is
-therefore run at least once, and a job method should be safe to run again.
-A call that used no store, and code outside a call, run the job at once
-without keeping it.
+first store the call used, under a random key of its own: a call that rolls
+back queues nothing, and once it commits each of its jobs runs, on a task of
+its own, as the system (`as_system`), and in a call of its own, which also
+deletes the job's row. A run that fails, its method's error or a failed
+commit, runs again after half a second, then after twice the wait before, an
+hour at most, up to `#App.Job(retries: n)` more times, five unless set; each
+failure is recorded on the row, and a job that failed every run keeps its
+row, with its runs and the last failure, and runs no more.
+
+The row is the job's delivery. The process that runs a job holds its row,
+renewing a five-second lease each second while the job runs or waits to run
+again. A server that serves an App mounting the job's service takes, each
+second, the rows of its jobs whose lease has run out from each store it
+knows: one that its process used for a job, and each database file `open`
+found keeping jobs. So a job whose server stopped before deleting its row,
+as after a crash or a restart, runs again on a serving server, which goes on
+from the failures the row records. Each run of a kept job is a delivery
+whose ID is the job's key: each store it uses records the key with its
+writes, as a webhook delivery's ID is recorded, so a run again of a job a
+store already ran is dropped there, and the job's row is deleted. A job is
+therefore run at least once, and its writes to stores happen once; other
+effects of a job method, such as a message it sends, should be safe to
+repeat. A call that used no store, and code outside a call, run the job at
+once without keeping it. A mounted service's job method takes read-only
+`self`, a concrete signature and parameters whose types derive `Encode` and
+`Decode`; anything else is E2805 (`jet.InvalidRoute`) at its marker.
 
 A method marked `#App.Every(cron: "0 8 * * 1-5")` is a schedule: it runs at
 each minute its cron line allows, in UTC, once a server first serves its

@@ -813,6 +813,9 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
 priv DBState: struct {
     driver: DBDriver
     path: String
+    // Names the store among the open ones, as its job outbox
+    // (app.CallOutbox): its path, or for an in-memory database, one of its own.
+    store: String
     written: [String]
     ended: Condition
     open: Int{0}
@@ -1245,9 +1248,24 @@ priv table_decode: fn<T: Decode>(stored: [String:DBValue]) -> T DBError! {
     }
 }
 
+// The in-memory databases opened so far, which name each one's store.
+priv DB_MEMORY_OPENED: Shared{0}
+
+// A database file whose outbox keeps jobs is named to app.jobs as it opens,
+// so a serving server takes from it the jobs no server holds, such as those
+// a server that stopped left.
 priv db_open: fn(path: String, failure: String) -> Store Never! {
     driver := __driver_open(path) ?? panic(failure)
-    Store{state: Shared{DBState{driver: driver.move(), path: path.copy(), written: [String]{}, ended: Condition.new()}}}
+    store := path.copy()
+    if path == ":memory:" {
+        opened := DB_MEMORY_OPENED.guard_edit()
+        opened.value += 1
+        store = ":memory: {opened.value}"
+    }
+    jobs: path != ":memory:" && table_exists(driver, "__jet_jobs")
+    state: Shared{DBState{driver: driver.move(), path: path.copy(), store: store.copy(), written: [String]{}, ended: Condition.new()}}
+    if jobs -> app.jobs.store(db_outbox(state, store))
+    Store{state: state}
 }
 
 open: fn(path: String) -[DB]> Store Never! { db_open(path, "database open failed") }
@@ -1359,7 +1377,7 @@ priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
     held.began += 1
     held.open = held.began
     held.call = call
-    app.transactions.join(call, fn(commit: Bool) { db_end(state, commit) }, db_outbox(state))
+    app.transactions.join(call, fn(commit: Bool) { db_end(state, commit) }, db_outbox(state, held.store))
     if db_ran(held.driver, call) == {
         .Ok(ran) -> {
             if !ran -> return Ok()
@@ -1437,46 +1455,113 @@ priv db_end: fn(state: Shared<DBState>, commit: Bool) -> Bool Never! {
 }
 
 // The store's outbox (app.CallOutbox): the table `__jet_jobs`, a row for
-// each job a committed call queued that hasn't run yet. A job that failed
-// every run keeps its row, which records the runs and the last error.
-priv db_outbox: fn(state: Shared<DBState>) -> app.CallOutbox Never! {
+// each job a committed call queued that hasn't run yet, found by its key and
+// taken until its `due` time (Unix milliseconds). A job that failed every
+// run keeps its row, which records the runs and the last error and is
+// taken for good.
+priv db_outbox: fn(state: Shared<DBState>, store: String) -> app.CallOutbox Never! {
     app.CallOutbox{
-        keep: fn(job: String, args: String) { db_job_keep(state, job, args) },
-        done: fn(row: Int) { db_job_done(state, row) },
-        failed: fn(row: Int, runs: Int, error: String) { db_job_failed(state, row, runs, error) },
+        store: store.copy(),
+        now: fn() { db_job_now(state) },
+        keep: fn(job: String, args: String, until: Int) { db_job_keep(state, job, args, until) },
+        done: fn(key: String) { db_job_done(state, key) },
+        failed: fn(key: String, runs: Int, error: String, until: Int) { db_job_failed(state, key, runs, error, until) },
+        take: fn(names: [String], now: Int, until: Int) { db_job_take(state, names, now, until) },
+        hold: fn(keys: [String], until: Int) { db_job_hold(state, keys, until) },
     }
 }
 
-// Keeps job `job` with its encoded arguments in the transaction the call
-// running on this task has open on the store; its row, or 0 when that
-// failed.
-priv db_job_keep: fn(state: Shared<DBState>, job: String, args: String) -> Int Never! {
+// The time it is by the database's clock, in Unix milliseconds; 0 once the
+// store has closed.
+priv db_job_now: fn(state: Shared<DBState>) -> Int Never! {
     guard := state.guard_edit()
-    _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS __jet_jobs (id INTEGER PRIMARY KEY, job TEXT NOT NULL, args TEXT NOT NULL, runs INTEGER NOT NULL DEFAULT 0, error TEXT)", [DBValue]{}) ?? return 0
-    _: __driver_execute(guard.value.driver, "INSERT INTO __jet_jobs (job, args) VALUES (?, ?)", [DBValue]{.Text(job.copy()), .Text(args.copy())}) ?? return 0
-    found: __driver_query_one(guard.value.driver, "SELECT last_insert_rowid() AS id", [DBValue]{}) ?? return 0
-    if found.get("id") == .Val(.Int(id)) -> return id
-    0
+    found: __driver_query_one(guard.value.driver, "SELECT CAST((julianday('now') - 2440587.5) * 86400000.0 AS INTEGER) AS now", [DBValue]{}) ?? return 0
+    row_int(found, "now") ?? 0
 }
 
-// Deletes row `row` of the outbox in the call running on this task, as its
-// job runs in that call: 1; 0 when another run has deleted it; -1 when the
-// store couldn't.
-priv db_job_done: fn(state: Shared<DBState>, row: Int) -> Int Never! {
+// Keeps job `job` with its encoded arguments, taken until `until`, in the
+// transaction the call running on this task has open on the store; its
+// key, a random one the store makes, or "" when that failed.
+priv db_job_keep: fn(state: Shared<DBState>, job: String, args: String, until: Int) -> String Never! {
+    guard := state.guard_edit()
+    _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS __jet_jobs (key TEXT PRIMARY KEY, job TEXT NOT NULL, args TEXT NOT NULL, runs INTEGER NOT NULL DEFAULT 0, error TEXT, due INTEGER NOT NULL)", [DBValue]{}) ?? return ""
+    _: __driver_execute(guard.value.driver, "CREATE INDEX IF NOT EXISTS __jet_jobs_due ON __jet_jobs (due)", [DBValue]{}) ?? return ""
+    _: __driver_execute(guard.value.driver, "INSERT INTO __jet_jobs (key, job, args, due) VALUES (lower(hex(randomblob(16))), ?, ?, ?)", [DBValue]{.Text(job.copy()), .Text(args.copy()), .Int(until)}) ?? return ""
+    found: __driver_query_one(guard.value.driver, "SELECT key FROM __jet_jobs WHERE rowid = last_insert_rowid()", [DBValue]{}) ?? return ""
+    row_text(found, "key") ?? ""
+}
+
+// Deletes the outbox row of key `key` in the call running on this task, as
+// its job runs in that call: 1; 0 when another run has deleted it; -1 when
+// the store couldn't.
+priv db_job_done: fn(state: Shared<DBState>, key: String) -> Int Never! {
     guard := state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return -1
     if db_join(guard.value, state, call) == .Err(_) -> return -1
-    __driver_execute(guard.value.driver, "DELETE FROM __jet_jobs WHERE id = ?", [DBValue]{.Int(row)}) ?? -1
+    __driver_execute(guard.value.driver, "DELETE FROM __jet_jobs WHERE key = ?", [DBValue]{.Text(key.copy())}) ?? -1
 }
 
-// Records on row `row` of the outbox that its job ran `runs` times and
-// failed each time, the last with `error`; false when the store couldn't.
-priv db_job_failed: fn(state: Shared<DBState>, row: Int, runs: Int, error: String) -> Bool Never! {
+// Records on the outbox row of key `key` that its job ran `runs` times and
+// failed each time, the last with `error`, and takes it until `until`;
+// false when the store couldn't.
+priv db_job_failed: fn(state: Shared<DBState>, key: String, runs: Int, error: String, until: Int) -> Bool Never! {
     guard := state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return false
     if db_join(guard.value, state, 0) == .Err(_) -> return false
-    __driver_execute(guard.value.driver, "UPDATE __jet_jobs SET runs = ?, error = ? WHERE id = ?", [DBValue]{.Int(runs), .Text(error.copy()), .Int(row)}) == .Ok(_)
+    __driver_execute(guard.value.driver, "UPDATE __jet_jobs SET runs = ?, error = ?, due = ? WHERE key = ?", [DBValue]{.Int(runs), .Text(error.copy()), .Int(until), .Text(key.copy())}) == .Ok(_)
+}
+
+// The outbox rows of keys `keys` are taken until `until`, unless they are
+// taken longer; false when the store couldn't.
+priv db_job_hold: fn(state: Shared<DBState>, keys: [String], until: Int) -> Bool Never! {
+    guard := state.guard_edit()
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return false
+    if db_join(guard.value, state, 0) == .Err(_) -> return false
+    values := [DBValue]{.Int(until), .Int(until)}
+    loop key in keys -> values.push(.Text(key.copy()))
+    __driver_execute(guard.value.driver, "UPDATE __jet_jobs SET due = ? WHERE due < ? AND key IN ({db_marks(keys.len())})", values) == .Ok(_)
+}
+
+// The most outbox rows one take takes.
+priv DB_JOBS_TAKEN: 64
+
+// Takes, in one IMMEDIATE transaction, the outbox rows of jobs named in
+// `names` that are not taken at `now`, until `until`, and gives each; one
+// that another server took first is left to it. Gives none when the store
+// is busy or keeps no jobs, and None once it has closed.
+priv db_job_take: fn(state: Shared<DBState>, names: [String], now: Int, until: Int) -> [app.CallQueued]? Never! {
+    taken := [app.CallQueued]{}
+    guard := state.guard_edit()
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return Val(taken)
+    if driver_closed(guard.value.driver) -> return None
+    if !table_exists(guard.value.driver, "__jet_jobs") -> return Val(taken)
+    sql: "SELECT key, job, args, runs FROM __jet_jobs WHERE due <= ? AND job IN ({db_marks(names.len())}) ORDER BY due LIMIT {DB_JOBS_TAKEN}"
+    values := [DBValue]{.Int(now)}
+    loop name in names -> values.push(.Text(name.copy()))
+    due: __driver_query(guard.value.driver, sql, values) ?? return Val(taken)
+    if due.len() == 0 || !__driver_begin_immediate(guard.value.driver) -> return Val(taken)
+    rows: __driver_query(guard.value.driver, sql, values) ?? [[String:DBValue]]{}
+    loop row in rows {
+        key: row_text(row, "key") ?? next
+        job: row_text(row, "job") ?? next
+        args: row_text(row, "args") ?? next
+        runs: row_int(row, "runs") ?? next
+        changed: __driver_execute(guard.value.driver, "UPDATE __jet_jobs SET due = ? WHERE key = ?", [DBValue]{.Int(until), .Text(key.copy())}) ?? 0
+        if changed == 1 -> taken.push(app.CallQueued{key: key, name: job, args: args, runs: runs})
+    }
+    if !__driver_commit(guard.value.driver) {
+        _: __driver_rollback(guard.value.driver)
+        return Val([app.CallQueued]{})
+    }
+    Val(taken)
+}
+
+// `count` SQL parameter marks, comma-separated.
+priv db_marks: fn(count: Int) -> String Never! {
+    marks := [String]{}
+    loop _ in 0..<count -> marks.push("?")
+    marks.join(", ")
 }
 
 #Codable
@@ -1650,6 +1735,35 @@ priv db_jobs_kept: fn(store: Store) -> String {
     assert_eq(ran.value, 2)
     never_ran: dropped.guard_read()
     assert_eq(never_ran.value, 0)
+}
+
+#Test("a store's outbox gives each row no server holds to one take, which holds it until its time; a closed store gives None") {
+    store: open_memory()
+    counts: call_counts(store)
+    _: counts.put(CallCount{id: 1, count: 0}) ?? panic("the first row")
+    outbox: db_outbox(store.state, "db.Test outbox")
+    names: [String]{"db.Test.add"}
+    call: app.transactions.begin() ?? panic("no call is open")
+    _: counts.put(CallCount{id: 1, count: 1}) ?? panic("the call writes")
+    key: outbox.keep("db.Test.add", "[]", 100)
+    assert(app.transactions.end(call, true))
+    assert_eq(key.len(), 32)
+    assert_eq((outbox.take(names, 99, 1000) ?? panic("the store is open")).len(), 0)
+    taken: outbox.take(names, 100, 1000) ?? panic("the store is open")
+    assert_eq(taken.len(), 1)
+    assert_eq(taken[0].key, key)
+    assert_eq(taken[0].args, "[]")
+    assert_eq((outbox.take(names, 500, 2000) ?? panic("the store is open")).len(), 0)
+    assert(outbox.hold([String]{key.copy()}, 5000))
+    assert_eq((outbox.take(names, 4999, 9000) ?? panic("the store is open")).len(), 0)
+    assert_eq((outbox.take([String]{"db.Test.other"}, 6000, 9000) ?? panic("the store is open")).len(), 0)
+    assert(outbox.failed(key, 3, "no", 7000))
+    retaken: outbox.take(names, 7000, 9000) ?? panic("the store is open")
+    assert_eq(retaken.len(), 1)
+    assert_eq(retaken[0].runs, 3)
+    assert(store.close())
+    closed: outbox.take(names, 10000, 11000)
+    if closed == .Val(_) -> panic("a closed store takes no row")
 }
 
 priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {

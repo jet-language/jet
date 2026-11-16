@@ -37,6 +37,7 @@ use jet_foundation.[
     checked_symbol_local,
     type_name,
     module_text,
+    owned_trait_codec_names,
     ModuleID,
 ]
 
@@ -613,6 +614,15 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                         }
                         break
                     }
+                    // A job's rows a store keeps run on a serving server.
+                    loop marker in method.markers {
+                        if !sema_app_marker_is(marker, SEMA_APP_JOB_MARKER, graph, method_module) {
+                            next
+                        }
+                        job: sema_app_mount_job(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, method, method_module, marker, span, environment, program, scopes, state, tail_store, context, diagnostics)
+                        if job == .Val(value) -> body.push(TStmt.ExprStmt{value: value, span: span})
+                        break
+                    }
                     loop marker in method.markers {
                         verb: sema_http_route_marker_verb(marker, graph, method_module) ?? next
                         if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
@@ -826,6 +836,44 @@ sema_app_mount_schedule: fn(mux: TExpr, value_name: String, service: String, met
     statements: sema_app_job_statements(args_name, value_name, method, method_module, span, graph, environment)
     run: sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__every", 2, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     sema_call_http_mux_source_call(mux, "__every", [TCallArg]{name_arg, cron_arg, run}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+}
+
+// The job method `method` of the mounted value `value_name`, of the service
+// `service`, declared to the App `mux` through its `__job`, so a serving
+// server runs the job's rows a store keeps, by the job's name, the one an
+// `enqueue` of it keeps (`sema_app_job_endpoint`), with the retries of its
+// `#App.Job` `marker`. As a queued job's function does, the run decodes the
+// arguments, calls the method and replies `{"err":...}` when it failed
+// (`sema_app_job_statements`). The method takes read-only `self` and
+// parameters that are Encode and Decode, and has a concrete signature
+// (E2805 otherwise). The generated code is the mount call's, at `span`.
+sema_app_mount_job: fn(mux: TExpr, value_name: String, service: String, method: Func, method_module: ModuleID, marker: Marker, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph: program.registration_graph ?? return None
+    if !sema_app_mount_concrete(method) {
+        diagnostics.push(sema_error("E2805", marker.span, "job method `{method.name}` needs read-only self and a concrete signature", "a serving server runs a job's kept rows on a copy of the mounted service", "write `{method.name}: fn(self, ...)` without method type parameters"))
+        return None
+    }
+    loop index in 1..<method.params.len() {
+        param: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
+        missing: loop codec in owned_trait_codec_names() {
+            if sema_type_bound_satisfied(graph, param, codec, environment.module_identity) != (Val(true)) {
+                break "{codec}"
+            }
+        } ?? ""
+        if missing != "" {
+            diagnostics.push(sema_error("E2805", marker.span, "parameter `{method.params[index].name}` of job method `{method.name}` has the type {sema_type_show_quoted(param)}, which isn't `{missing}`", "a job's arguments are kept encoded in a store's outbox and decoded when it runs", "derive `Encode` and `Decode` on the parameter's type, or pass a value of a type that has them"))
+            return None
+        }
+    }
+    name: "{module_text(graph.module_table, method_module)}.{service}.{method.name}"
+    name_arg: sema_call_http_static_tree_arg(sema_call_http_core_string(name, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: name}}, span: span, id: AST_NODE_GENERATED}, span))
+    retries: sema_app_job_retries(marker)
+    retries_checked: sema_check_expression(retries, Val(sema_app_mux_param_type(mux, "__job", 1, span, environment, program, diagnostics)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    retries_arg: sema_call_http_static_tree_arg(retries_checked, sema_http_mount_arg(retries, expr_span(retries)))
+    args_name: "__jet_http_job_args_{span.start}"
+    statements: sema_app_job_statements(args_name, value_name, method, method_module, span, graph, environment)
+    run: sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__job", 2, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    sema_call_http_mux_source_call(mux, "__job", [TCallArg]{name_arg, retries_arg, run}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
 }
 
 // Why `text` is not a cron line, in the grammar the app module's scheduler

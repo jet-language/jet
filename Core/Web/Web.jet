@@ -405,6 +405,17 @@ App: struct {
         self.copy()
     }
 
+    // An `#App.Job` method of `app.mount(service)` (sema lowers each here):
+    // declares job `name`, run with `run` and retried `retries` times, so
+    // that once a server first serves the app (`__on_serve`), the process
+    // takes the job's rows no server holds from each store it knows, as a
+    // server that stopped left them, and runs them.
+    __job: fn(self, name: String, retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
+        calls.jobs.know(name, retries, run)
+        http_server.__on_serve(app_table(self), fn() { calls.jobs.serve() })
+        self.copy()
+    }
+
     // `app.get(path, handler)` and its sibling verbs, `app.custom(method,
     // path, handler)` and each marked method of `app.mount(value)` land here
     // with the route's checked contract (sema lowers each). `at` is the

@@ -258,9 +258,14 @@ sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_s
         }
         encoded.push(sema_live_module_call(alias, "__live_arg", [Type]{param}, [CallArg]{sema_live_arg(argument.expr.copy(), argument.span)}, argument.span))  // copy: the written call keeps its argument
     }
-    retries := Expr.Int{value: SEMA_APP_JOB_RETRIES, span: marker.span, width: None, raw: None, id: AST_NODE_GENERATED}
+    Val(SemaAppJob{method: declaration, module: service_module, wire: "{module_text(graph.module_table, service_module)}.{service_name}.{method}", retries: sema_app_job_retries(marker), receiver_span: receiver_span, receiver_id: receiver_id, encoded: encoded})
+}
+
+// The retries a job's `#App.Job` marker writes as `retries:`, else the
+// default.
+sema_app_job_retries: fn(marker: Marker) -> Expr {
     if sema_app_marker_arg_at(marker, "retries", 0) == .Val(at) {
-        if marker.args[at] == .Expr(value) -> retries = value.copy()  // copy: the marker keeps its argument
+        if marker.args[at] == .Expr(value) -> return value.copy()  // copy: the marker keeps its argument
     }
-    Val(SemaAppJob{method: declaration, module: service_module, wire: "{module_text(graph.module_table, service_module)}.{service_name}.{method}", retries: retries, receiver_span: receiver_span, receiver_id: receiver_id, encoded: encoded})
+    Expr.Int{value: SEMA_APP_JOB_RETRIES, span: marker.span, width: None, raw: None, id: AST_NODE_GENERATED}
 }
