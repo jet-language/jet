@@ -1702,6 +1702,13 @@ sema_expression_typed_literal_printable_bound: fn(ty: Type, environment: SemaSco
     false
 }
 
+// Whether a trait value prints when its box holds a `held`: a secret-bearing
+// type never prints, any other prints as itself or through its display.
+sema_expression_trait_held_printable: fn(held: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if sema_call_reflection_secret_bearing(held) -> return false
+    sema_expression_typed_literal_printable(held, environment, program) || sema_call_reflection_is_displayable(held, environment, program)
+}
+
 sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .String | .Char | .Quantity(_, _) -> return true
@@ -1726,11 +1733,14 @@ sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvi
         }
         .TraitObject(bounds) -> {
             graph: program.registration_graph ?? return false
-            impls: sema_call_reflection_trait_impls(graph, bounds) ?? return false
-            loop reference in graph.impl_trait_name_buckets[impls] {
-                held: graph.modules[reference.module_index].impls[reference.row].target_type
-                if sema_call_reflection_secret_bearing(held) -> return false
-                if !sema_expression_typed_literal_printable(held, environment, program) && !sema_call_reflection_is_displayable(held, environment, program) {
+            holders: sema_call_reflection_trait_holders(graph, bounds) ?? return false
+            loop reference in holders.impls {
+                if !sema_expression_trait_held_printable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
+                    return false
+                }
+            }
+            loop reference in holders.nominals {
+                if !sema_expression_trait_held_printable(graph.modules[reference.module_index].nominals[reference.row].ty, environment, program) {
                     return false
                 }
             }

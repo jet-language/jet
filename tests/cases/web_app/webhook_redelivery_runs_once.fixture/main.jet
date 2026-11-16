@@ -1,0 +1,133 @@
+// Webhooks that count the events GitHub and Stripe deliver, in a store. The
+// framework records each delivery's ID (GitHub's `X-GitHub-Delivery`, a
+// Stripe event's `id`) in the webhook's transaction, so a delivery that comes
+// again after it ran is answered as repeated and counts nothing. A delivery
+// whose run fails records nothing, so it runs when it comes again.
+use {
+    app
+    crypto: core.crypto
+    db: core.db
+    hex: core.encoding.hex
+    http: core.http
+    net: core.net
+    web: core.web
+}
+
+Issue: struct {
+    action: String
+}
+
+Payment: struct {
+    id: String
+}
+
+#Codable
+Count: struct {
+    name: String
+    events: Int
+}
+
+#Error
+HookError: enum {
+    Refused
+    Failed(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> HookError {
+    if self == {
+        .Unreachable(why) -> HookError.Unreachable(why)
+        .Invalid(errors) -> HookError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> HookError.Unreachable("signed out")
+        .UpdateRequired -> HookError.Unreachable("update required")
+    }
+}
+
+counts_in: fn(store: db.Store) -> db.Table<String, Count> {
+    store.table("counts", key: fn(count: Count) { count.name })
+}
+
+// The events counted so far.
+events_now: fn(counts: db.Table<String, Count>) -[DB.Read]> Int HookError! {
+    if counts.get("events") == {
+        .Val(count) -> Ok(count.events)
+        .None -> Ok(0)
+        .Err(failure) -> Err(HookError.Failed(failure.message()))
+    }
+}
+
+// Counts one event, and gives the count.
+counted: fn(store: db.Store) -[DB.Read, DB.Write]> Int HookError! {
+    counts: counts_in(store)
+    events: (events_now(counts) ?? return Err(err)) + 1
+    _: counts.put(Count{name: "events", events: events}) ?? return Err(HookError.Failed(err.message()))
+    Ok(events)
+}
+
+Hooks: struct {
+    store: db.Store
+    secret: String
+
+    // An issue event counts; a `fail` action is refused after it counted, so
+    // its run rolls back.
+    #App.Webhook(path: "/hooks/github/:project", signature: app.Signature.GitHub, key: "github_key") on_issue: fn(self, project: String, event: Issue) -> Int HookError! {
+        events: counted(self.store) ?? return Err(err)
+        if event.action == "fail" -> return Err(HookError.Refused)
+        Ok(events)
+    }
+
+    #App.SigningKey github_key: fn(self, project: String) -> String? { Val(self.secret.copy()) }
+
+    #App.Webhook(path: "/hooks/stripe", signature: app.Signature.Stripe, key: "stripe_key") on_payment: fn(self, event: Payment) -> Int HookError! {
+        counted(self.store)
+    }
+
+    #App.SigningKey stripe_key: fn(self) -> String? { Val(self.secret.copy()) }
+}
+
+// POST `body` to `addr`'s `path` with `fields`, and give the answer's status
+// and text.
+post: fn(addr: String, path: String, fields: http.Headers, body: String) -> String HTTPError! {
+    answer: http.send_request(http.request_with(.Post, "http://{addr}{path}", fields, http.body_text(body)))
+    Ok("{answer.status} {answer.text()}")
+}
+
+// Delivery `delivery` of an issue event, signed as GitHub signs.
+deliver_issue: fn(addr: String, key: String, delivery: String, action: String) -> String HTTPError! {
+    body: "{{\"action\":\"{action}\"}}"
+    mac: hex.encode(crypto.hmac_sha256(key.bytes(), body.bytes()))
+    signed: http.headers_set(http.headers(), "X-Hub-Signature-256", "sha256={mac}")
+    post(addr, "/hooks/github/jet", http.headers_set(signed, "X-GitHub-Delivery", delivery), body)
+}
+
+// Stripe event `id` of a payment, signed as Stripe signs.
+deliver_payment: fn(addr: String, key: String, id: String) -> String HTTPError! {
+    body: "{{\"id\":\"{id}\"}}"
+    mac: hex.encode(crypto.hmac_sha256(key.bytes(), "1700000000.{body}".bytes()))
+    post(addr, "/hooks/stripe", http.headers_set(http.headers(), "Stripe-Signature", "t=1700000000,v1={mac}"), body)
+}
+
+// The status of an answer `post` gave.
+status: fn(answer: String) -> String { answer.split(" ").to_list()[0] }
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    secret: "It's a Secret to Everybody"
+    store: db.open_memory()
+    served: web.app().mount(Hooks{store: store.copy(), secret: secret})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<8 { served.serve_once(listener) }
+    }
+    print(deliver_issue(addr, secret, "d-1", "opened"))
+    print(deliver_issue(addr, secret, "d-1", "opened"))
+    print(deliver_issue(addr, secret, "d-2", "closed"))
+    print(status(deliver_issue(addr, secret, "d-3", "fail")))
+    print(deliver_issue(addr, secret, "d-3", "opened"))
+    print(deliver_issue(addr, secret, "d-2", "closed"))
+    print(deliver_payment(addr, secret, "evt_1"))
+    print(deliver_payment(addr, secret, "evt_1"))
+    serving.join()
+    events: events_now(counts_in(store)) ?? panic("the count reads")
+    print("events counted: {events}")
+}

@@ -5581,6 +5581,23 @@ Duration. A call past the limit is answered 429 with `Retry-After` in whole
 seconds. The Remote reads that as `Unreachable`, with text that ends
 `is limited: retry after N s`.
 
+Each call of a marked method or a webhook is one serializable transaction on
+each store it uses, whichever Remote makes it. The call's first statement on
+a store begins an IMMEDIATE transaction on that store's connection, and every
+later statement of the call there, in the methods it calls and the row
+policies they ask, belongs to it; a statement of another task on that store
+waits until the call's transaction ends. A call that succeeds commits; one
+that fails (its error, a 422 or a 500) rolls back everything it wrote. Two
+calls that read and then write the same row therefore run one after the
+other: the later one reads what the earlier one committed. A store that
+stays busy past its busy timeout refuses the call, which rolls back and
+runs again, five times in all; a served call past them is answered 503 with
+`Retry-After: 1`, which the Remote reads as `Unreachable`. A call that uses
+two stores commits each on its own, so it is atomic per store. A task the
+method spawns runs outside the call, and its statements on a store the call
+uses wait for the call to end. A mounted method may use whatever its
+package's authority allows, as a route handler may.
+
 A method reports a rule its argument's `validate` block can't check, such as
 one that reads the database, as `app.field_error(at:, reason:)`. Its `at:`
 walks a struct argument of the method: a stored field by name and a list
@@ -5610,6 +5627,18 @@ decoded. The MAC is compared in constant time. A delivery that passes runs
 the webhook: 200 with `{"ok": value}`, 500 with `{"err": error}`, or 422 when
 the body does not decode. Neither method is an endpoint, so no Remote calls
 it.
+
+A sender delivers an event again when it saw no answer, so a webhook runs
+each delivery once. The delivery's ID is GitHub's `X-GitHub-Delivery` header
+or a Stripe event's top-level `id`, which stays the same each time the sender
+delivers it again. The webhook's call records that ID in its transaction on
+each store it uses, in the store's `__jet_deliveries` table, with the second
+the server received the delivery, and keeps it 30 days. A delivery whose ID a
+store has already recorded is answered 200 with `{"repeated": id}`, so its
+sender stops delivering it, and the call rolls back: its method's writes are
+dropped. A run that fails rolls its record back with the rest, so a delivery
+that failed runs when it comes again. A delivery without an ID, and a webhook
+that uses no store, have nothing to record and run every time.
 
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
@@ -6414,6 +6443,9 @@ A commit that fails rolls the transaction back before it reports the error.
 An unwind that leaves a transaction still open, such as a task cancelled
 inside it, rolls it back, so it writes nothing and the connection can begin
 again.
+Inside a call of a mounted method, which is one transaction already, `begin`
+is `DBError.Failed`; outside one, it waits for a call's transaction on the
+store to end.
 
 `DBScope` implements the prelude trait `Driver` (`query`, `query_one`,
 `execute`, `begin`), which a generic bound names bare:

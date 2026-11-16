@@ -201,9 +201,14 @@ sema_call_debug_traceable: fn(ty: Type, environment: SemaScopeEnvironment, progr
         }
         .TraitObject(bounds) -> {
             graph: program.registration_graph ?? return false
-            impls: sema_call_reflection_trait_impls(graph, bounds) ?? return false
-            loop reference in graph.impl_trait_name_buckets[impls] {
+            holders: sema_call_reflection_trait_holders(graph, bounds) ?? return false
+            loop reference in holders.impls {
                 if !sema_call_debug_traceable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
+                    return false
+                }
+            }
+            loop reference in holders.nominals {
+                if !sema_call_debug_traceable(graph.modules[reference.module_index].nominals[reference.row].ty, environment, program) {
                     return false
                 }
             }

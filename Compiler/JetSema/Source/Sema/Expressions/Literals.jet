@@ -1537,7 +1537,25 @@ sema_expression_displayable: fn(ty: Type, environment: SemaScopeEnvironment, pro
             }
             return true
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> return sema_call_reflection_is_displayable(ty, environment, program)
+        // A trait value shows the concrete value its box holds, so it
+        // interpolates when every type it may hold does.
+        .TraitObject(bounds) -> {
+            if sema_call_reflection_has_name(bounds, "Renderable") -> return true
+            graph: program.registration_graph ?? return false
+            holders: sema_call_reflection_trait_holders(graph, bounds) ?? return false
+            loop reference in holders.impls {
+                if !sema_expression_displayable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
+                    return false
+                }
+            }
+            loop reference in holders.nominals {
+                if !sema_expression_displayable(graph.modules[reference.module_index].nominals[reference.row].ty, environment, program) {
+                    return false
+                }
+            }
+            return true
+        }
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> return sema_call_reflection_is_displayable(ty, environment, program)
     }
 }
 

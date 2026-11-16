@@ -1565,6 +1565,7 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
                 request := received
                 request.__upgrade = Val(cell)
                 request.__peer = stream.peer.copy()
+                request.__received = core.time.now_utc().to_timestamp()
                 // The handler runs as its own task, so a panic in it is this
                 // connection's 500 and serving goes on; it is shielded as its
                 // connection is.

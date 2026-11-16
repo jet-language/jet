@@ -775,11 +775,18 @@ sema_app_mount_answer: fn(value_name: String, method: Func, method_module: Modul
 }
 
 // The lambda of one parameter `args_name` running `statements`, checked as
-// the escaping callback type `callback_type` an App registration takes.
+// the escaping callback type `callback_type` an App registration takes. As
+// a route handler is, it is checked with no effect bound: a mounted method
+// may use whatever its package's authority allows, a store above all, and
+// the framework runs it on a request worker as one transaction.
 sema_app_mount_callback: fn(args_name: String, statements: [Stmt], callback_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
     handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: args_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: statements}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
     callback_arg := sema_http_mount_arg(handler, span)
-    callback: sema_check_expression_with_lambda_escapes(callback_arg.expr, Val(callback_type), environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return None
+    unbounded: if {
+        callback_type == .Fn(params, ret, _, contract, metadata, provenance) -> Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
+        else -> callback_type
+    }
+    callback: sema_check_expression_with_lambda_escapes(callback_arg.expr, Val(unbounded), environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return None
     if !sema_call_http_check_middleware_callback(callback, environment, program, scopes, state, context, diagnostics) {
         return None
     }

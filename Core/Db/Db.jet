@@ -807,12 +807,17 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
 // location it was opened at, for display. `written` names the tables written
 // since the last begin or commit, so a rollback can re-run their live bindings.
 // `open` numbers the transaction open on it (0: none), out of `began` so far.
+// `call` is the mounted method's call (app.transactions) whose transaction
+// that is (0: none, or one a `begin` opened); `ended` wakes the statements
+// waiting for it to end (`db_free`).
 priv DBState: struct {
     driver: DBDriver
     path: String
     written: [String]
+    ended: Condition
     open: Int{0}
     began: Int{0}
+    call: Int{0}
 
     // A write that changed `table` marks every live binding that reads it for
     // a re-run once the write is committed: at once outside a transaction,
@@ -1037,7 +1042,9 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
             }
         }
         guard := self.state.guard_edit()
-        if driver_closed(guard.value.driver) -> return Err(db_closed())
+        call: app.transactions.current() ?? 0
+        guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+        db_join(guard.value, self.state, call) ?? return Err(err)
         if !table_exists(guard.value.driver, self.name) -> return Ok()
         changed: __driver_execute(guard.value.driver, "DELETE FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
         if changed > 0 -> guard.value.wrote(self.name)
@@ -1083,7 +1090,9 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
                 values := [DBValue]{.Text(encoded)}
                 loop value in table_values(cells) -> values.push(value)
                 guard := self.state.guard_edit()
-                if driver_closed(guard.value.driver) -> return Err(db_closed())
+                call: app.transactions.current() ?? 0
+                guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+                db_join(guard.value, self.state, call) ?? return Err(err)
                 _: __driver_execute(guard.value.driver, "UPDATE \"{self.name}\" SET {TABLE_ROW_COLUMN} = ? WHERE {table_match(cells)}", values) ?? return Err(err)
                 guard.value.wrote(self.name)
                 rewritten += 1
@@ -1099,7 +1108,9 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
 priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, filter: String, values: [DBValue]) -[DB.Read]> [[String:DBValue]] DBError! {
     if !sql_identifier(table.name.bytes()) -> return Err(table_name_error(table.name))
     guard := table.state.guard_edit()
-    if driver_closed(guard.value.driver) -> return Err(db_closed())
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+    db_join(guard.value, table.state, call) ?? return Err(err)
     clause: if filter.len() == 0 -> "" else -> " WHERE {filter}"
     table_read(guard.value.driver, table.name, "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\"{clause}", values)
 }
@@ -1142,7 +1153,9 @@ priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     loop cell in cells -> columns.push("\"{cell.column}\"")
     names: columns.join(", ")
     guard := table.state.guard_edit()
-    if driver_closed(guard.value.driver) -> return Err(db_closed())
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+    db_join(guard.value, table.state, call) ?? return Err(err)
     _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS \"{table.name}\" ({names}, {TABLE_ROW_COLUMN} TEXT NOT NULL, PRIMARY KEY ({names}))", [DBValue]{}) ?? return Err(err)
     if !replace {
         held: __driver_query(guard.value.driver, "SELECT 1 AS held FROM \"{table.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
@@ -1234,18 +1247,22 @@ priv table_decode: fn<T: Decode>(stored: [String:DBValue]) -> T DBError! {
 
 priv db_open: fn(path: String, failure: String) -> Store Never! {
     driver := __driver_open(path) ?? panic(failure)
-    Store{state: Shared{DBState{driver: driver.move(), path: path.copy(), written: [String]{}}}}
+    Store{state: Shared{DBState{driver: driver.move(), path: path.copy(), written: [String]{}, ended: Condition.new()}}}
 }
 
 open: fn(path: String) -[DB]> Store Never! { db_open(path, "database open failed") }
 
 open_memory: fn() -[DB]> Store Never! { db_open(":memory:", "in-memory database open failed") }
 
+// A `begin` waits for a call's transaction on the connection to end first
+// (`db_free`); a call is one transaction already, so it can't begin one.
 priv db_begin: fn(state: Shared<DBState>, immediate: Bool) -> DBTransaction DBError! {
-    guard := state.guard_edit()
-    if driver_closed(guard.value.driver) {
-        return Err(db_error("could not begin a transaction: the database is closed"))
+    if app.transactions.current() != None {
+        return Err(db_error("could not begin a transaction: a mounted method's call is one already, which commits when it succeeds"))
     }
+    guard := state.guard_edit()
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return Err(db_waited())
+    db_join(guard.value, state, 0) ?? return Err(err)
     began: if immediate -> __driver_begin_immediate(guard.value.driver) else -> __driver_begin(guard.value.driver)
     if !began {
         return Err(db_error("could not begin a transaction: one is already open, or the database is busy"))
@@ -1266,10 +1283,13 @@ priv db_open_is: fn(state: Shared<DBState>, number: Int) -> Bool Never! {
 // back before the failure is reported: the transaction ends either way.
 // Either way every live binding over a table it wrote re-runs on its next
 // read: after a commit it reads the committed rows, and after a failed one
-// it drops anything read from the transaction's own uncommitted writes.
+// it drops anything read from the transaction's own uncommitted writes. The
+// statements waiting for the transaction to end go on (`db_free`).
 priv db_commit: fn(state: Shared<DBState>) DBError! {
     guard := state.guard_edit()
     guard.value.open = 0
+    guard.value.call = 0
+    guard.value.ended.notify_all()
     if driver_closed(guard.value.driver) {
         return Err(db_error("could not commit: the database is closed"))
     }
@@ -1286,6 +1306,8 @@ priv db_commit: fn(state: Shared<DBState>) DBError! {
 priv db_rollback: fn(state: Shared<DBState>) DBError! {
     guard := state.guard_edit()
     guard.value.open = 0
+    guard.value.call = 0
+    guard.value.ended.notify_all()
     if driver_closed(guard.value.driver) {
         return Err(db_error("could not roll back: the database is closed"))
     }
@@ -1294,6 +1316,182 @@ priv db_rollback: fn(state: Shared<DBState>) DBError! {
     guard.value.written = [String]{}
     if !rolled -> return Err(db_error("could not roll back the transaction"))
     Ok()
+}
+
+// Each statement readies the connection it holds in two steps. A mounted
+// method's call (app.transactions) runs as one IMMEDIATE transaction on each
+// store it uses: its first statement on the connection begins one, once no
+// other transaction is open there, and joins it to the call, which commits or
+// rolls it back as it ends. While a call's transaction is open, another
+// task's statement waits until it ends, so no statement outside the call
+// reads its rows before they commit or writes among them. So a statement
+// first waits on `db_ended` until `db_free` holds, then `db_join`s.
+priv db_ended: fn(held: DBState) -> Condition Never! { held.ended.copy() }
+
+// Whether a statement of call `call` (0: of no call) may run now.
+priv db_free: fn(held: DBState, call: Int) -> Bool Never! {
+    held.call == call || (held.call == 0 && (call == 0 || held.open == 0))
+}
+
+priv db_waited: fn() -> DBError Never! {
+    db_error("the wait for another call's transaction ended early")
+}
+
+// Begins call `call`'s transaction on the connection when this is its first
+// statement there. A store that stays busy past the connection's wait
+// (another connection holds its write lock) refuses the call, and every
+// later statement of the attempt fails at once; the framework then runs the
+// call again. A webhook's call records its delivery's ID in the transaction
+// it begins (`db_delivered`); when the store has run that delivery already,
+// the call is repeated, every later statement of it fails at once, and the
+// framework rolls it back and drops the delivery.
+priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
+    if driver_closed(held.driver) -> return Err(db_closed())
+    if call == 0 -> return Ok()
+    if app.transactions.repeated(call) -> return Err(db_repeated())
+    if held.call == call -> return Ok()
+    if app.transactions.refused(call) || !__driver_begin_immediate(held.driver) {
+        app.transactions.refuse(call)
+        return Err(db_error("the database is busy, so the call runs again"))
+    }
+    held.written = [String]{}
+    held.began += 1
+    held.open = held.began
+    held.call = call
+    app.transactions.join(call, fn(commit: Bool) { db_end(state, commit) })
+    delivery: app.transactions.delivery(call) ?? return Ok()
+    if db_delivered(held.driver, delivery) == {
+        .Ok(ran) -> {
+            if !ran -> return Ok()
+            app.transactions.repeat(call)
+            Err(db_repeated())
+        }
+        .Err(failure) -> {
+            app.transactions.refuse(call)
+            Err(failure)
+        }
+    }
+}
+
+priv db_repeated: fn() -> DBError Never! {
+    db_error("the webhook's delivery has run already, so it is dropped")
+}
+
+// A store keeps the ID of each webhook delivery it has run this long, in
+// seconds: 30 days.
+priv DB_DELIVERY_KEPT: 2592000
+
+// Whether the store has run `delivery` in the 30 days before it came; when
+// not, records it, in the open transaction, as run when it came, and forgets
+// the deliveries kept longer. A rollback forgets it with the rest of the
+// call, so a failed run is run again when the sender delivers it again.
+priv db_delivered: fn(driver: &DBDriver, delivery: app.CallDelivery) -> Bool DBError! {
+    _: __driver_execute(driver, "CREATE TABLE IF NOT EXISTS __jet_deliveries (id TEXT PRIMARY KEY, at INTEGER NOT NULL)", [DBValue]{}) ?? return Err(err)
+    _: __driver_execute(driver, "CREATE INDEX IF NOT EXISTS __jet_deliveries_at ON __jet_deliveries (at)", [DBValue]{}) ?? return Err(err)
+    _: __driver_execute(driver, "DELETE FROM __jet_deliveries WHERE at < ?", [DBValue]{.Int(delivery.at - DB_DELIVERY_KEPT)}) ?? return Err(err)
+    if __driver_query_one(driver, "SELECT id FROM __jet_deliveries WHERE id = ?", [DBValue]{.Text(delivery.id.copy())}) == {
+        .Ok(found) -> {
+            if found != None -> return Ok(true)
+        }
+        .Err(failure) -> return Err(failure)
+    }
+    _: __driver_execute(driver, "INSERT INTO __jet_deliveries (id, at) VALUES (?, ?)", [DBValue]{.Text(delivery.id.copy()), .Int(delivery.at)}) ?? return Err(err)
+    Ok(false)
+}
+
+// Ends a call's transaction on `state`: commits it, or rolls it back when
+// `commit` is false; false when that failed.
+priv db_end: fn(state: Shared<DBState>, commit: Bool) -> Bool Never! {
+    if commit -> return db_commit(state) == .Ok(_)
+    db_rollback(state) == .Ok(_)
+}
+
+#Codable
+priv CallCount: struct {
+    id: Int
+    count: Int
+}
+
+// The table of the test below, and its row 1's count.
+priv call_counts: fn(store: Store) -> Table<Int, CallCount> {
+    store.table("counts", key: fn(row: CallCount) { row.id })
+}
+
+priv call_count: fn(counts: Table<Int, CallCount>) -> Int {
+    row: counts.get(1) ?? panic("row 1 reads")
+    row.count
+}
+
+#Test("a call's statements on a store are one transaction, which other tasks wait for") {
+    store: open_memory()
+    counts: call_counts(store)
+    _: counts.put(CallCount{id: 1, count: 0}) ?? panic("the first row")
+    call: app.transactions.begin() ?? panic("no call is open")
+    _: counts.put(CallCount{id: 1, count: 1}) ?? panic("the call writes")
+    assert_eq(call_count(counts), 1)
+    if store.begin() == {
+        .Ok(opened) -> {
+            opened.rollback() ?? panic("the rollback")
+            panic("a call began a transaction of its own")
+        }
+        .Err(_) -> {}
+    }
+    reader: store.copy()
+    waiting: task { call_count(call_counts(reader)) }
+    assert(app.transactions.end(call, false))
+    assert_eq(waiting.join() ?? panic("the waiting task reads"), 0)
+    committed: app.transactions.begin() ?? panic("no call is open")
+    _: counts.put(CallCount{id: 1, count: 2}) ?? panic("the call writes")
+    assert(app.transactions.end(committed, true))
+    assert_eq(call_count(counts), 2)
+    opened: store.begin() ?? panic("no transaction is open")
+    writes: store.copy()
+    writer: task {
+        later: app.transactions.begin() ?? panic("the task runs no call")
+        _: call_counts(writes).put(CallCount{id: 1, count: 3}) ?? panic("the call writes once the transaction ends")
+        app.transactions.end(later, true)
+    }
+    opened.rollback() ?? panic("the rollback")
+    assert(writer.join() ?? panic("the writer ends"))
+    assert_eq(call_count(counts), 3)
+}
+
+// One webhook call of delivery `id`, which came at second `at`, that writes
+// `count` to row 1 and commits when `commit` holds; whether the store had run
+// the delivery.
+priv call_deliver: fn(counts: Table<Int, CallCount>, id: String, at: Int, count: Int, commit: Bool) -> Bool {
+    call: app.transactions.begin() ?? panic("no call is open")
+    app.transactions.deliver(call, app.CallDelivery{id: id, at: at})
+    if counts.put(CallCount{id: 1, count: count}) == {
+        .Ok(_) -> {}
+        .Err(failure) -> assert(app.transactions.repeated(call), failure.message())
+    }
+    repeated: app.transactions.repeated(call)
+    assert(app.transactions.end(call, commit))
+    repeated
+}
+
+#Test("a delivery's call records its ID in its transaction, and a store drops a delivery it has run in the 30 days before") {
+    store: open_memory()
+    counts: call_counts(store)
+    _: counts.put(CallCount{id: 1, count: 0}) ?? panic("the first row")
+    came: 1000000000
+    // A run that rolls back forgets the delivery, which then runs again.
+    assert(!call_deliver(counts, "d-1", came, 1, false))
+    assert_eq(call_count(counts), 0)
+    assert(!call_deliver(counts, "d-1", came, 2, true))
+    assert_eq(call_count(counts), 2)
+    assert(call_deliver(counts, "d-1", came + 1, 3, true))
+    assert_eq(call_count(counts), 2)
+    assert(!call_deliver(counts, "d-2", came, 4, true))
+    assert_eq(call_count(counts), 4)
+    // Kept for 30 days, and forgotten a second later.
+    assert(call_deliver(counts, "d-2", came + DB_DELIVERY_KEPT, 5, true))
+    assert_eq(call_count(counts), 4)
+    assert(!call_deliver(counts, "d-2", came + DB_DELIVERY_KEPT + 1, 6, true))
+    assert_eq(call_count(counts), 6)
+    assert(!call_deliver(counts, "d-1", came + DB_DELIVERY_KEPT + 1, 7, true))
+    assert_eq(call_count(counts), 7)
 }
 
 priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {
@@ -1306,7 +1504,9 @@ priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {
 priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError! {
     scoped: policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     guard := scope.state.guard_edit()
-    if driver_closed(guard.value.driver) -> return Err(db_closed())
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+    db_join(guard.value, scope.state, call) ?? return Err(err)
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
     if sql_table(scoped) == .Val(table) && (changed > 0 || sql_schema(scoped)) {
         guard.value.wrote(table)
@@ -1322,7 +1522,9 @@ priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:D
         app.live_reads.record(live_source(table))
     }
     guard := scope.state.guard_edit()
-    if driver_closed(guard.value.driver) -> return Err(db_closed())
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+    db_join(guard.value, scope.state, call) ?? return Err(err)
     __driver_query(guard.value.driver, scoped.text, scoped.values)
 }
 

@@ -165,9 +165,10 @@ priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: S
 // is E2812, and the service itself stays out of reach. A call through a
 // Remote that `remote` made runs the method directly on that service; one
 // through a Remote that `remote_at` made posts it to the server. Either way
-// the call's error type takes a `CallError`: a method that fails with `E`
-// needs `impl CallError -> E`, and one that can't fail answers
-// `R CallError!`.
+// the call is one transaction on each store it uses, as a served call is
+// (`transactions`), and the call's error type takes a `CallError`: a method
+// that fails with `E` needs `impl CallError -> E`, and one that can't fail
+// answers `R CallError!`.
 Remote: struct<S> {
     priv service: S?
     priv address: String
@@ -177,7 +178,20 @@ Remote: struct<S> {
     // service the Remote holds; otherwise `args`, the encoded arguments, go to
     // the server, and `fail` gives a `CallError` as the method's own error.
     __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time.Wait]> R E! {
-        if self.service == .Val(service) -> return direct(service)
+        if self.service == .Val(service) {
+            loop _ in 0..<transactions.attempts() {
+                call: transactions.begin() ?? return direct(service)
+                if direct(service) == {
+                    .Ok(value) -> {
+                        if transactions.end(call, true) -> return Ok(value)
+                    }
+                    .Err(error) -> {
+                        if transactions.end(call, false) -> return Err(error)
+                    }
+                }
+            }
+            return fail(.Unreachable("the database stayed busy"))
+        }
         reply: remote_post(self.address, method, args) ?? return fail(err)
         tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
         if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
@@ -187,7 +201,14 @@ Remote: struct<S> {
 
     // A call of the endpoint method `method` of `S`, which can't fail.
     __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time.Wait]> R CallError! {
-        if self.service == .Val(service) -> return Ok(direct(service))
+        if self.service == .Val(service) {
+            loop _ in 0..<transactions.attempts() {
+                call: transactions.begin() ?? return Ok(direct(service))
+                value: direct(service)
+                if transactions.end(call, true) -> return Ok(value)
+            }
+            return Err(.Unreachable("the database stayed busy"))
+        }
         reply: remote_post(self.address, method, args)
         tree: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
         value: live_json.at<R>(tree, "/ok") ?? return Err(.Unreachable("the server's reply to `{method}` has no value"))
@@ -683,6 +704,215 @@ priv(package) callers: module {
     assert_eq(maybe_caller(), String?{None})
     assert_eq(acting_tag(Val(Acting.Account("ann"))), "account:ann")
     assert_eq(acting_tag(None), "")
+}
+
+// A call of a mounted service's method runs as one transaction on each
+// store it uses. The framework opens the call on the task that runs it
+// (`transactions.begin`); core.db begins an IMMEDIATE transaction on a
+// store's connection at the call's first statement there and joins it to the
+// call (`join`); `end` commits every joined transaction or rolls each back.
+// A method the call reaches, and a row policy it asks, run on the same task
+// and so in the same transaction; a task the call spawns is outside it. A
+// store that can't begin or commit marks the call refused, and the framework
+// then runs it again. A webhook's call carries its delivery (`deliver`),
+// whose ID core.db records in each store's transaction as the call joins
+// it; a store that has run the delivery already marks the call repeated, and
+// the framework rolls it back and drops the delivery.
+CallJoin: struct {
+    // Commits (true) or rolls back (false) one store's transaction; false
+    // when it couldn't do as asked.
+    end: fn(Bool) -[]> Bool Never!
+}
+
+// A webhook delivery a call runs: the ID its sender gives it, the same each
+// time it is delivered again, and the second (since the Unix epoch) the
+// server received it.
+#Equatable
+CallDelivery: struct {
+    id: String
+    at: Int
+}
+
+CallRun: struct {
+    task: TaskID
+    id: Int
+    joins: [CallJoin]
+    refused: Bool
+    delivery: CallDelivery?
+    repeated: Bool
+}
+
+CallRuns: struct {
+    runs: [CallRun]
+    made: Int
+}
+
+CALLS: Shared{CallRuns{runs: [CallRun]{}, made: 0}}
+
+priv(package) transactions: module {
+    // The times a call runs, in all, while a busy store refuses it. Each
+    // refusal has already waited out the store's busy timeout, so the
+    // attempts need no wait of their own.
+    attempts: fn() -> Int Never! { 5 }
+
+    // Opens a call on this task and gives its number; None when the task
+    // runs one already, which the new call then belongs to.
+    begin: fn() -> Int? Never! {
+        me: tasks.current_task()
+        runs := CALLS.guard_edit()
+        loop run in runs.value.runs {
+            if run.task == me -> return None
+        }
+        runs.value.made += 1
+        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, repeated: false})
+        Val(runs.value.made)
+    }
+
+    // The call this task runs, by number; None outside one.
+    current: fn() -> Int? Never! {
+        me: tasks.current_task()
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.task == me -> return Val(run.id)
+        }
+        None
+    }
+
+    // Joins one store's transaction, which `end` finishes, to call `call`.
+    join: fn(call: Int, end: &&fn(Bool) -[]> Bool Never!) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call {
+                runs.value.runs[index].joins.push(CallJoin{end: end.move()})
+                return
+            }
+        }
+    }
+
+    // Marks call `call` refused: a store it uses was busy.
+    refuse: fn(call: Int) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call -> runs.value.runs[index].refused = true
+        }
+    }
+
+    // Whether a store refused call `call`.
+    refused: fn(call: Int) -> Bool Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.refused
+        }
+        false
+    }
+
+    // Gives call `call` the webhook delivery it runs.
+    deliver: fn(call: Int, delivery: CallDelivery) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call {
+                runs.value.runs[index].delivery = Val(delivery.copy())
+            }
+        }
+    }
+
+    // The webhook delivery call `call` runs; None for any other call.
+    delivery: fn(call: Int) -> CallDelivery? Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.delivery.copy()
+        }
+        None
+    }
+
+    // Marks call `call` repeated: a store it uses has run its delivery.
+    repeat: fn(call: Int) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call -> runs.value.runs[index].repeated = true
+        }
+    }
+
+    // Whether a store has run call `call`'s delivery already.
+    repeated: fn(call: Int) -> Bool Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.repeated
+        }
+        false
+    }
+
+    // Ends call `call`: commits each joined transaction, in the order the
+    // call joined them, when `commit` holds and no store refused the call or
+    // had run its delivery, and otherwise rolls each back. False when the
+    // call has to run again: a store refused it, or the first commit failed
+    // (and was rolled back). A call that writes two stores commits each on
+    // its own; once one has committed, a later failed commit can't undo it,
+    // so the call stands.
+    end: fn(call: Int, commit: Bool) -> Bool Never! {
+        ended: calls_take(call) ?? return true
+        if ended.refused || ended.repeated || !commit {
+            loop joined in ended.joins -> _: joined.end(false)
+            return !ended.refused
+        }
+        loop (index, joined) in ended.joins {
+            if joined.end(true) || index > 0 -> next
+            loop rest in 1..<ended.joins.len() -> _: ended.joins[rest].end(false)
+            return false
+        }
+        true
+    }
+}
+
+// Removes call `call` from the open calls and gives it.
+priv calls_take: fn(call: Int) -> CallRun? Never! {
+    runs := CALLS.guard_edit()
+    loop index in 0..<runs.value.runs.len() {
+        if runs.value.runs[index].id == call -> return runs.value.runs.remove(index, .Slot)
+    }
+    None
+}
+
+#Test("a call commits or rolls back every transaction joined to it, runs again when one refused it, and rolls back a delivery run already") {
+    seen: Shared{[String]{}}
+    note: fn(name: String, commits: Bool) -> fn(Bool) -[]> Bool Never! {
+        fn(commit: Bool) {
+            log := seen.guard_edit()
+            log.value.push(if commit -> "commit {name}" else -> "roll back {name}")
+            commits || !commit
+        }
+    }
+    assert_eq(transactions.current(), Int?{None})
+    call: transactions.begin() ?? panic("no call is open")
+    assert_eq(transactions.begin(), Int?{None})
+    assert_eq(transactions.current(), Val(call))
+    transactions.join(call, note("a", true))
+    transactions.join(call, note("b", true))
+    assert(transactions.end(call, true))
+    assert_eq(transactions.current(), Int?{None})
+    failed: transactions.begin() ?? panic("no call is open")
+    transactions.join(failed, note("c", true))
+    assert(transactions.end(failed, false))
+    refused: transactions.begin() ?? panic("no call is open")
+    transactions.join(refused, note("d", true))
+    transactions.refuse(refused)
+    assert(transactions.refused(refused))
+    assert(!transactions.end(refused, true))
+    lost: transactions.begin() ?? panic("no call is open")
+    transactions.join(lost, note("e", false))
+    transactions.join(lost, note("f", true))
+    assert(!transactions.end(lost, true))
+    delivered: transactions.begin() ?? panic("no call is open")
+    assert_eq(transactions.delivery(delivered), CallDelivery?{None})
+    transactions.deliver(delivered, CallDelivery{id: "d-1", at: 1})
+    assert_eq(transactions.delivery(delivered), Val(CallDelivery{id: "d-1", at: 1}))
+    transactions.join(delivered, note("g", true))
+    assert(!transactions.repeated(delivered))
+    transactions.repeat(delivered)
+    assert(transactions.repeated(delivered))
+    assert(transactions.end(delivered, true))
+    log: seen.guard_read()
+    assert_eq(log.value.join(", "), "commit a, commit b, roll back c, roll back d, commit e, roll back f, roll back g")
 }
 
 LIVE_MAX_QUERIES: 1024

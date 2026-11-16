@@ -1,9 +1,10 @@
 # `jet inspect choices` lists each call site the optimizer inlined as
 # `jet build` optimizes the program, at the call's line, with why it was
 # taken. Optimized, the small `bump` is spliced into `run` at line 7. With
-# `--inline=off`, or at O0, nothing is inlined and the kind says none. Under
-# `--inline=always_marked`, only the `#Inline(Always)` callee is taken, and
-# the row says so. `#Inline(Always)` locks the choice: a callee that calls
+# `--inline=off`, or at O0, no unmarked callee is inlined and the kind says
+# none. An `#Inline(Always)` callee is inlined at every call on every tier
+# and under every `inline` value, and the row says so. `#Inline(Always)`
+# locks the choice: a callee that calls
 # itself fails the build naming it (E0917; the UI snapshot is
 # tests/ui/inline_always_recursive.stderr). A call of another function with
 # the callee's name, through an import or closing a field, is no recursion.
@@ -21,10 +22,19 @@ stdout: ~ "inlining: none" # off inlines nothing
 stdout: !~ "bump inlined" # the call stays a call
 step none: jet inspect choices -O0 inline.jet
 exit: 0
-stdout: ~ "inlining: none" # O0 runs no inlining
+stdout: ~ "inlining: none" # O0 inlines no unmarked callee
 step marked: jet inspect choices -O2 --inline=always_marked marked.jet
 exit: 0
 stdout: ~ "marked.jet:4 in run: bump inlined: marked #Inline(Always)" # only the marked callee is taken
+step marked_off: jet inspect choices -O2 --inline=off marked.jet
+exit: 0
+stdout: ~ "marked.jet:4 in run: bump inlined: marked #Inline(Always)" # off leaves the marked callee inlined
+step marked_o0: jet inspect choices -O0 marked.jet
+exit: 0
+stdout: ~ "marked.jet:4 in run: bump inlined: marked #Inline(Always)" # so does O0
+step marked_o1: jet inspect choices -O1 marked.jet
+exit: 0
+stdout: ~ "marked.jet:4 in run: bump inlined: marked #Inline(Always)" # and O1
 step json: jet inspect choices -O2 inline.jet --json
 exit: 0
 json: stdout doc $.action = "inspect.choices"

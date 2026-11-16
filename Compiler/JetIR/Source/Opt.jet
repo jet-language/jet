@@ -70,23 +70,19 @@ IROptOptions: struct {
     dump: String
 }
 
-// Which callees inlining takes (the `inline` build option; level 0 inlines
-// nothing): Auto the level's choice by size (OptInline.jet), Marked only the
-// callees marked `#Inline(Always)`, at every call the inliner can splice and
-// past the size limits, Off none.
+// Which callees the bottom-up inlining takes (the `inline` build option;
+// level 0 runs none): Auto the level's choice by size (OptInline.jet),
+// Marked none (`always_marked` and `off`). The callees marked
+// `#Inline(Always)` are inlined under both, on every tier
+// (OptInline.jet ir_opt_inline_marked_module).
 IROptInline: enum {
     Auto
     Marked
-    Off
 }
 
 // The `inline` build option's value as an IROptInline.
 ir_opt_inline_of: fn(value: String) -> IROptInline Never! {
-    if value == {
-        "always_marked" -> IROptInline.Marked
-        "off" -> IROptInline.Off
-        else -> IROptInline.Auto
-    }
+    if value == "always_marked" || value == "off" -> IROptInline.Marked else -> IROptInline.Auto
 }
 
 ir_opt_options: fn(level: Int) -> IROptOptions Never! {
@@ -217,9 +213,10 @@ IR_FRAME_BOX_BYTES: 64
 // final bodies of its non-recursive callees, so a function runs once those
 // callees are done (ir_opt_scheduled) and every body is the one the
 // single-threaded bottom-up walk produces, for any thread count. At O0 only
-// the return slots (a calling convention, the same at every level) and the
-// inline Int facts run (ir_opt_module_facts). The report's instruction
-// counts stay 0; ir_optimize_module_measured fills them.
+// the return slots (a calling convention, the same at every level), the
+// `#Inline(Always)` callees (ir_opt_module_start) and the inline Int facts
+// run (ir_opt_module_facts). The report's instruction counts stay 0;
+// ir_optimize_module_measured fills them.
 ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThreads) -> IROptReport Never! {
     level: options.level
     report := ir_opt_module_start(m, options, threads)
@@ -325,11 +322,15 @@ ir_opt_dump: fn(m: IRModule, names: [String], stage: String, report: &IROptRepor
 
 // The report every level starts with: the functions `options.dump` lists as
 // they came, then the return slots (`retslot`), before IR Lint reads the
-// signatures: a return slot is a parameter.
+// signatures: a return slot is a parameter. Then every direct call of an
+// `#Inline(Always)` callee is inlined (OptInline.jet
+// ir_opt_inline_marked_module), on every tier and under every `inline`
+// value, before any pass that reads the call graph.
 ir_opt_module_start: fn(m: &IRModule, options: IROptOptions, threads: CompilerThreads) -> IROptReport Never! {
     report := ir_opt_report(options.level)
     ir_opt_dump(m, ir_opt_dump_names(options), "before", report)
     if ir_opt_enabled(options, "retslot") -> _ := ir_opt_return_slots(m, threads)
+    ir_opt_inline_marked_module(m, report)
     report
 }
 
@@ -978,7 +979,7 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: &&IR
     // its callee limit and budget, and no once-called callees (each copy
     // adds up to its callee's size).
     inline_level: if options.small || body.cold -> 1 else -> level
-    out := if options.inline == .Off -> body.move() else -> ir_opt_inline_build(m, bodies, body, recursive, sites, inline_level >= 2 && ir_opt_enabled(options, "once"), inline_level, options.inline, report) ?? body.move()
+    out := if options.inline == .Marked -> body.move() else -> ir_opt_inline_build(m, bodies, body, recursive, sites, inline_level >= 2 && ir_opt_enabled(options, "once"), inline_level, IROptInline.Auto, report) ?? body.move()
     if checking -> checking = ir_opt_lint(m, lint, out, "inline", report)
     if ir_opt_enabled(options, "glue") {
         ir_opt_glue_drops(out, m, keys)
@@ -1181,15 +1182,13 @@ ir_opt_caller_edges: fn(count: Int, callee_start: [Int], callees: [Int], caller_
 // done), how many of the callees it waits for are not done, and its rank
 // (IROptQueue); the edges both ways; and the ready queue with the Condition
 // its waiting threads park on. A thread changes only the atomics, the
-// queue and the cells of the functions it claims. `marked[g]` is function
-// g's IRFunction.inline_always. `lint` is IR Lint's view of the module
-// (empty unless the options verify).
+// queue and the cells of the functions it claims. `lint` is IR Lint's view
+// of the module (empty unless the options verify).
 IROptGraph: struct {
     views: [IRModule]
     keys: [String]
     recursive: [Bool]
     sites: [Int]
-    marked: [Bool]
     options: IROptOptions
     lint: IRLintContext
     cells: [Shared<IROptCell>]
@@ -1265,11 +1264,9 @@ ir_opt_scheduled: fn(m: &IRModule, functions: &[IRFunction], keys: &&[String], o
         sizes.push(IROptCount{value: -1})
         if waits == 0 -> ir_opt_heap_push(heap, ranks, id)
     }
-    marked := [Bool]{}
-    loop f in functions -> marked.push(f.inline_always)
     cells: ir_opt_cells(functions)
     view: ir_opt_view(m, keys)
-    graph: Shared{IROptGraph{views: [IRModule]{view.move()}, keys: keys.move(), recursive: order.recursive.copy(), sites: sites.move(), marked: marked.move(), options: options.copy(), lint: lint.move(), cells: cells.move(), sizes: sizes.move(), pending: pending.move(), ranks: ranks.move(), callee_start: callee_start.move(), callees: callees.move(), caller_start: caller_start.move(), callers: callers.move(), queue: Shared{IROptQueue{heap: heap.move(), claimed: 0, count: count, failed: false}}, changed: Condition.new()}}
+    graph: Shared{IROptGraph{views: [IRModule]{view.move()}, keys: keys.move(), recursive: order.recursive.copy(), sites: sites.move(), options: options.copy(), lint: lint.move(), cells: cells.move(), sizes: sizes.move(), pending: pending.move(), ranks: ranks.move(), callee_start: callee_start.move(), callees: callees.move(), caller_start: caller_start.move(), callers: callers.move(), queue: Shared{IROptQueue{heap: heap.move(), claimed: 0, count: count, failed: false}}, changed: Condition.new()}}
     parts: ir_opt_schedulers(graph, workers) ?? panic("the IR optimizing threads failed")
     loop part in parts -> ir_opt_report_add(report, part)
     held := graph.guard_edit()
@@ -1322,7 +1319,7 @@ ir_opt_scheduled_thread: fn(graph: Shared<IROptGraph>) -> IROptReport {
         last: reads.value.callee_start[id + 1]
         loop k in first..<last {
             callee: reads.value.callees[k]
-            if reads.value.sizes[callee].value.load() <= ir_opt_inline_reach(reads.value.sites, callee, once, reads.value.options.level, reads.value.options.inline, reads.value.marked[callee]) {
+            if reads.value.sizes[callee].value.load() <= ir_opt_inline_reach(reads.value.sites, callee, once, reads.value.options.level, reads.value.options.inline) {
                 callees[callee].push(ir_opt_cell_copy(reads.value.cells[callee]))
             }
         }
