@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110237,
+    "rev": 110250,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27444,8 +27444,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "jet test Compiler --profile cases --filter enum_case_no_unused_table: n=1, 0 bad, on the p208 batch compiler (dev 54326edf75, census build), cycle p208 proof run by Main. Landed as GoalsA-1-4-g6-enum-case-named-literals-r2 f37675ef99 and -zero-cost-r2 523a73197f.",
-          "at": "2026-11-16T06:16:48.241Z"
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: golden Metaprogramming/Reflection/OutcomeCases PASS (ga-outcome-golden)",
+          "at": "2026-11-16T16:07:53.929Z"
         },
         {
           "n": 14,
@@ -27453,8 +27453,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "`jet test Compiler --profile golden --filter Metaprogramming/Reflection/ReflectPaths`: 3 rows (O0, O1, O2), 0 failed. Leaf-unless-ambiguous diagnostics: ui type_names_leaf_unless_ambiguous passes. Hover and JSON: cases lsp_hover_and_json_spell_an_inline_module_type_by_its_path passes. Project output: cases cli_parts_core 11 pass, and the other 5 are older known-failing budget and lua rows. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
-          "at": "2026-11-16T08:01:13.343Z"
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: cases enum_cases_builtin_roles PASS (ga-enumroles)",
+          "at": "2026-11-16T16:07:56.238Z"
         },
         {
           "n": 15,
@@ -27527,6 +27527,15 @@
           "verifiedBy": null,
           "evidence": "p211 gate (dev d6d482c5f7; bf85cc4c42, 04af41eb40): jet test Compiler --profile golden --filter GroupedNamedPayloadBraceLiteral -> n=3 bad=0 (O0, O1, O2: builds and matches a grouped named-payload case); jet test Compiler --profile ui --filter enum_grouped_named_payload_needs_dot_brace -> n=1 bad=0 (the E0764 snapshot whose fix spelling the golden compiles).",
           "at": "2026-11-16T09:23:36.765Z"
+        },
+        {
+          "n": 26,
+          "text": "Regression from p215 (0974d35064): cases CoreLib/key_is_the_core_term_declaration passes again on the batch compiler (it exits 1 on the p215 batch compiler and passed on the previous cycle's). Proof: jet test Compiler --profile cases --filter key_is_the_core_term_declaration",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T16:07:57.197Z"
         }
       ],
       "refs": [
@@ -27555,13 +27564,13 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T11:00:16.095Z",
+      "updated": "2026-11-16T16:07:57.197Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 25
+      "criteriaLastN": 26
     },
     {
       "id": "c04lnbtj",
@@ -42588,6 +42597,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "Owner order 2026-11-16: c9 (err.as<T>, waiting on D-PRIM-ANY1) moved to #6833 so the Any work does not block G6."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "p209: law-kit-r2 (8987b1961d, #6855 c4) stops jet test with panic 'the law `law` does not parse' at TraitLaws.jet:186: cases law_kit_names_broken_law and assert_eq_compares_through_authored_equatable fail. MemKernel-6-2 owns the fix: correct law source text, and a registered diagnostic instead of the panic."
         },
         {
@@ -42725,15 +42739,6 @@
           "evidence": "Moved to #3838 c22: the five failure-law gaps split one per outcome: G1-G5",
           "at": "2026-11-15T02:42:18.312Z",
           "closure": "obsolete"
-        },
-        {
-          "n": 9,
-          "text": "`err.as<T>()` recovers a typed failure from an Err carrier as `T?`, using the typed identity recorded at conversion (D-ERR-TRAIT1=A). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ErrAs` on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:16.439Z"
         },
         {
           "n": 10,
@@ -42891,7 +42896,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-16T07:12:40.206Z",
+      "updated": "2026-11-16T15:38:22.759Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -95885,6 +95890,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:46:35.032Z"
+        },
+        {
+          "n": 6,
+          "text": "Each diagnostic page in Docs/Site/Dist/e cites a worked example chosen by a rule that does not depend on folder-name case: after the TitleCase rename, DiagnosticRows' first-by-name rule moved pages such as E0003's from a dedicated snapshot to an unrelated C FFI one. Proof: `jet Tools/Agent/DiagnosticRows.jet --check` exits 0 and Docs/Site/Dist/e/E0003/index.html cites Tests/UI/bare_error_mark_is_not_a_contract.stderr.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T15:20:06.137Z"
         }
       ],
       "refs": [],
@@ -95895,9 +95909,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-16T13:46:35.032Z",
+      "updated": "2026-11-16T15:20:06.137Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0cnf5w8",
@@ -101853,6 +101867,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T08:52:20.009Z"
+        },
+        {
+          "n": 6,
+          "text": "`err.as<T>()` recovers a typed failure from an Err carrier as `T?`, using the typed identity recorded at conversion (D-ERR-TRAIT1=A). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ErrAs` on o0, o1 and o2. (moved from #3838 c9 by owner order 2026-11-16: the Any work must not block G6)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T15:38:17.888Z"
         }
       ],
       "refs": [],
@@ -101864,9 +101887,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T23:01:38.012Z",
-      "updated": "2026-11-16T14:26:23.685Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 5
+      "updated": "2026-11-16T15:38:17.888Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6
     },
     {
       "id": "c0w0b4wd",
@@ -104215,11 +104238,11 @@
         {
           "n": 1,
           "text": "Markers are structs implementing Core Marker (sites, repeatable, inherits, resolution, scopes, companion and group as trait constants; an `expand(self, target)` template; wrap); the Prelude's 81 markers are converted and the `marker` declaration word is gone; package markers cannot set resolution (D-MARKER-LAW1=A) and the Prelude's .Merge and .Tighten markers keep their built-in rules. Proof: `jet test Compiler --profile cases --filter decl_types_marker_`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:44.799Z"
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: dt-marker-law PASS",
+          "at": "2026-11-16T16:07:58.167Z"
         },
         {
           "n": 2,
@@ -104324,7 +104347,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:44.799Z",
-      "updated": "2026-11-16T11:22:27.849Z",
+      "updated": "2026-11-16T16:07:58.167Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -106175,6 +106198,26 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "c10 split (Main): the native leg ships now (B1: data_dir on Linux/macOS/Windows; B3: jet_rt_device_load/replace, temp+fsync+rename under data_dir()/<package>/; the entry package name is an image fact the runtime exposes, not a sema rewrite of one call). c10 stays open for the web leg, which needs #6445 c9 (the web Remote network leg) and a jet test browser harness with IndexedDB across a reload (#6866). B2 dropped: #package.name already gives the entry name at compile time, and server: meets no criterion here."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Plan (Main, from DeclTypes): SUB A = server: field (JET_APP_SERVER under jet run), the Unit-write queue with drop-plus-notice rollback, app.pending(), drain on reconnect and before the next call, c1 case sync_two_clients on o0/O1/O2; queue and notices in process cells. B1 = Core/Sys data_dir made correct on Linux/macOS/Windows through one runtime symbol, which the device cell reuses (no second helper). B2 = the driver embeds the entry package name and server: as a compile-time fact of the image. B3 = jet.runtime.device load/replace (atomic; a truncated file loads empty) under both cells, plus the c7 restart case."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Decision (Main): the device store is a runtime-owned cell (jet.runtime.device load/replace), effect-free in Core like the World store and NOTICE_CELL, so remote calls keep -[Net, Time]>. core.db is unusable here (it imports app) and a core.files store would add FS and Env to every remote write. Native is keyed by package name under the platform data dir, written through atomically. Web IndexedDB persistence is a criterion on this card."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Decision (Main, within approved scope): the offline write queue is built to the approved contract for writes whose result is Unit; each such write is queued and returns () at once. c1 rollback of a Unit write drops it and posts the notice; c7 rebases queued Unit writes. Value-returning writes keep the current offline behaviour (.Unreachable, as on the web) until #6555 c2 (prediction, gated on D-PREDICT-JOB1 and D-PREDICT-PIN1) lands; they get no separate path. c1, c3 and c7 proofs use Unit-result writes; queueing of value-returning writes is completed under #6555 c2."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "c1, c3 and c7 need the client graph (new #6445 criterion: app.new/.api/.screen/.offline), app.Notice with its list (#6445 c7) and prediction (D-OPTIMISTIC1, #6555 c1 review then c2/c7). DeclTypes-6-1 builds them in that order. No stopgap web.App.offline: it would be a second, unratified mechanism (I8)."
         },
         {
@@ -106269,6 +106312,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:07:17.782Z"
+        },
+        {
+          "n": 10,
+          "text": "The device store that keeps queued writes and the notice list across restarts has one meaning on every tier: native writes through atomically to the platform data directory keyed by the app's package name, and the web target persists the same cell in IndexedDB through the same runtime load/replace symbols; a reload in the browser keeps the queue and notices exactly as a native restart does. Proof: a golden app case that queues a Unit write, restarts (native) or reloads (web), and prints the same queue and notice list on o0, O1, O2 and web.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T15:35:00.277Z"
         }
       ],
       "refs": [],
@@ -106283,9 +106335,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:09.432Z",
-      "updated": "2026-11-16T13:40:20.716Z",
+      "updated": "2026-11-16T16:02:36.498Z",
       "updatedBy": "Main",
-      "criteriaLastN": 9
+      "criteriaLastN": 10
     },
     {
       "id": "c00cqn1l",
@@ -220758,6 +220810,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T16:07:58.167Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0255wk0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-16T16:07:57.197Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w7t4qu",
+      "note": "#26 Regression from p215 (0974d35064): cases CoreLib/key_is_the_"
+    },
+    {
+      "at": "2026-11-16T16:07:56.238Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-16T16:07:53.930Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-16T16:02:36.498Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m0czk2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T15:38:22.759Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0flvd7x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T15:38:19.768Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0flvd7x",
+      "note": "#9: Owner order 2026-11-16: the Any work is done later and must not block G6; moved to #6833.; was [open]: `err.as<T>()` recovers a typed failure from an Err carrier as `T?`, using the typed identity recorded at conversion (D-ERR-TRAIT1=A). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffec"
+    },
+    {
+      "at": "2026-11-16T15:38:17.888Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0reo0hk",
+      "note": "#6 `err.as<T>()` recovers a typed failure from an Err carrier a"
+    },
+    {
+      "at": "2026-11-16T15:36:37.509Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m0czk2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T15:35:04.240Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m0czk2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T15:35:00.277Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0m0czk2",
+      "note": "#10 The device store that keeps queued writes and the notice lis"
+    },
+    {
+      "at": "2026-11-16T15:29:44.518Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m0czk2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T15:20:06.137Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07k91t6",
+      "note": "#6 Each diagnostic page in Docs/Site/Dist/e cites a worked exam"
+    },
     {
       "at": "2026-11-16T14:35:41.461Z",
       "by": "Main",
