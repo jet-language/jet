@@ -1,0 +1,1269 @@
+// Private Core source part: HTTP/2 (RFC 9113) for core.http.client, with
+// no I/O of its own. An H2Exchange is one request on a connection of its
+// own. h2_start queues the client's preface, its SETTINGS, the request's
+// HEADERS and as much of its body as the flow-control windows allow in
+// `out`. h2_feed takes the bytes the server sent: it acks the server's
+// SETTINGS and PINGs, sends the rest of the body as WINDOW_UPDATEs open the
+// windows, decodes the header blocks (HPACK, RFC 7541) and gathers the
+// response. The caller moves `out` and the server's bytes over a TCP stream
+// (h2c with prior knowledge) or a TLS stream that negotiated `h2`.
+use core
+
+/// The client connection preface (RFC 9113 section 3.4).
+H2_PREFACE: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+
+// Frame types (RFC 9113 section 6).
+H2_DATA: 0
+
+H2_HEADERS: 1
+
+H2_RST_STREAM: 3
+
+H2_SETTINGS: 4
+
+H2_PUSH_PROMISE: 5
+
+H2_PING: 6
+
+H2_GOAWAY: 7
+
+H2_WINDOW_UPDATE: 8
+
+H2_CONTINUATION: 9
+
+// Frame flags.
+H2_END_STREAM: 1
+
+H2_ACK: 1
+
+H2_END_HEADERS: 4
+
+H2_PADDED: 8
+
+H2_PRIORITY: 32
+
+// Settings (RFC 9113 section 6.5.2).
+H2_SETTING_ENABLE_PUSH: 2
+
+H2_SETTING_INITIAL_WINDOW_SIZE: 4
+
+H2_SETTING_MAX_FRAME_SIZE: 5
+
+/// The flow-control window every stream and the connection start with.
+H2_INITIAL_WINDOW: 65535
+
+/// The largest frame payload either side takes before SETTINGS raise it.
+H2_INITIAL_FRAME: 16384
+
+/// The largest flow-control window (2^31 - 1).
+H2_MAX_WINDOW: 2147483647
+
+/// The largest frame payload a server may announce (2^24 - 1).
+H2_MAX_FRAME: 16777215
+
+/// The dynamic table size the decoder allows (SETTINGS_HEADER_TABLE_SIZE's
+/// default, which the client never changes).
+H2_TABLE_SIZE: 4096
+
+/// The most bytes a response body may have.
+H2_BODY_MAX: 1048576
+
+/// The most bytes one response's header blocks may have.
+H2_HEADER_BLOCK_MAX: 65536
+
+/// The one stream an exchange opens.
+H2_STREAM: 1
+
+/// The bit lengths of the HPACK Huffman code of each symbol, 0 to 255 and
+/// EOS (RFC 7541 Appendix B). The code is canonical: the codes of one
+/// length are consecutive, in symbol order, so the lengths alone give it.
+HPACK_HUFFMAN_BITS: [Int]{
+    13,
+    23,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    24,
+    30,
+    28,
+    28,
+    30,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    30,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    6,
+    10,
+    10,
+    12,
+    13,
+    6,
+    8,
+    11,
+    10,
+    10,
+    8,
+    11,
+    8,
+    6,
+    6,
+    6,
+    5,
+    5,
+    5,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    7,
+    8,
+    15,
+    6,
+    12,
+    10,
+    13,
+    6,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    8,
+    7,
+    8,
+    13,
+    19,
+    13,
+    14,
+    6,
+    15,
+    5,
+    6,
+    5,
+    6,
+    5,
+    6,
+    6,
+    6,
+    5,
+    7,
+    7,
+    6,
+    6,
+    6,
+    5,
+    6,
+    7,
+    6,
+    5,
+    5,
+    6,
+    7,
+    7,
+    7,
+    7,
+    7,
+    15,
+    11,
+    14,
+    13,
+    28,
+    20,
+    22,
+    20,
+    20,
+    22,
+    22,
+    22,
+    23,
+    22,
+    23,
+    23,
+    23,
+    23,
+    23,
+    24,
+    23,
+    24,
+    24,
+    22,
+    23,
+    24,
+    23,
+    23,
+    23,
+    23,
+    21,
+    22,
+    23,
+    22,
+    23,
+    23,
+    24,
+    22,
+    21,
+    20,
+    22,
+    22,
+    23,
+    23,
+    21,
+    23,
+    22,
+    22,
+    24,
+    21,
+    22,
+    23,
+    23,
+    21,
+    21,
+    22,
+    21,
+    23,
+    22,
+    23,
+    23,
+    20,
+    22,
+    22,
+    22,
+    23,
+    22,
+    22,
+    23,
+    26,
+    26,
+    20,
+    19,
+    22,
+    23,
+    22,
+    25,
+    26,
+    26,
+    26,
+    27,
+    27,
+    26,
+    24,
+    25,
+    19,
+    21,
+    26,
+    27,
+    27,
+    26,
+    27,
+    24,
+    21,
+    21,
+    26,
+    26,
+    28,
+    27,
+    27,
+    27,
+    20,
+    24,
+    20,
+    21,
+    22,
+    21,
+    21,
+    23,
+    22,
+    22,
+    25,
+    25,
+    24,
+    24,
+    26,
+    23,
+    26,
+    27,
+    26,
+    26,
+    27,
+    27,
+    27,
+    27,
+    27,
+    28,
+    27,
+    27,
+    27,
+    27,
+    27,
+    26,
+    30,
+}
+
+/// The longest Huffman code.
+HPACK_HUFFMAN_LONGEST: 30
+
+/// The Huffman symbol that ends the string; never in a string.
+HPACK_EOS: 256
+
+/// One header field. A request's names and every decoded name are lower
+/// case.
+H2Header: struct {
+    name: String
+    value: String
+}
+
+/// Why an exchange failed: the server broke the protocol, refused or reset
+/// the stream, or went away before it.
+#Error
+H2Error: struct {
+    reason: String
+
+    impl Display {
+        display: fn(self) -> String { self.reason }
+    }
+}
+
+/// The canonical Huffman code, by length: `first[n]` is the first code of
+/// length n, `count[n]` how many there are, and `at[n]` where they start in
+/// `symbols`, which lists the symbols by code.
+HpackHuffman: struct {
+    first: [Int]
+    count: [Int]
+    at: [Int]
+    symbols: [Int]
+}
+
+/// An HPACK decoder (RFC 7541 section 3): the static table, the dynamic
+/// table oldest entry first with its size (each entry counts its name and
+/// value bytes and 32), its maximum size, and the most a size update may
+/// set it to.
+HpackDecoder: struct {
+    statics: [H2Header]
+    dynamic: [H2Header]
+    size: Int
+    max: Int
+    limit: Int
+    huffman: HpackHuffman
+}
+
+/// One request on a connection of its own, and the response it got.
+/// `out` holds the bytes to send next; the caller takes them. The response
+/// is whole once `done`: `status`, its header fields (the pseudo-header
+/// fields and any trailers left out) and `body`.
+H2Exchange: struct {
+    out: [U8]
+    done: Bool
+    status: Int
+    headers: [H2Header]
+    body: [U8]
+    decoder: HpackDecoder
+    // The server's bytes not yet a whole frame, from `input_at`.
+    input: [U8]
+    input_at: Int
+    // A header block that CONTINUATION frames still add to: its stream (0
+    // for none), its bytes, and whether its HEADERS ended the stream.
+    block_stream: Int
+    block: [U8]
+    block_ends: Bool
+    // The bytes all of the response's header blocks had.
+    block_bytes: Int
+    // The request body, sent up to `sent`.
+    request_body: [U8]
+    sent: Int
+    // The send windows of the connection and of the stream, the window a
+    // stream starts with and the largest frame, as the server set them.
+    connection_window: Int
+    stream_window: Int
+    initial_window: Int
+    max_frame: Int
+}
+
+/// Starts the exchange of the request `method` `path` on `authority` over
+/// `scheme` (`https` or `http`), with the header fields `headers` and the
+/// body `body`. A header name is sent lower case; the fields HTTP/2 has no
+/// place for (connection-specific ones and `host`) are left out.
+h2_start: fn(method: String, scheme: String, authority: String, path: String, headers: [H2Header], body: [U8]) -> H2Exchange Never! {
+    out := H2_PREFACE.bytes()
+    settings := [U8]{}
+    h2_setting(settings, H2_SETTING_ENABLE_PUSH, 0)
+    h2_frame(out, H2_SETTINGS, 0, 0, settings)
+    fields := [H2Header]{
+        H2Header{name: ":method", value: method.copy()},
+        H2Header{name: ":scheme", value: scheme.copy()},
+        H2Header{name: ":authority", value: authority.copy()},
+        H2Header{name: ":path", value: path.copy()},
+    }
+    loop field in headers {
+        name: h2_lower(field.name)
+        if !h2_connection_field(name) {
+            fields.push(H2Header{name: name, value: field.value.copy()})
+        }
+    }
+    x := H2Exchange{
+        out: out,
+        done: false,
+        status: 0,
+        headers: [H2Header]{},
+        body: [U8]{},
+        decoder: hpack_decoder(H2_TABLE_SIZE),
+        input: [U8]{},
+        input_at: 0,
+        block_stream: 0,
+        block: [U8]{},
+        block_ends: false,
+        block_bytes: 0,
+        request_body: body.copy(),
+        sent: 0,
+        connection_window: H2_INITIAL_WINDOW,
+        stream_window: H2_INITIAL_WINDOW,
+        initial_window: H2_INITIAL_WINDOW,
+        max_frame: H2_INITIAL_FRAME,
+    }
+    h2_headers(x.out, H2_STREAM, hpack_encode(fields), body.len() == 0, x.max_frame)
+    h2_send_body(x)
+    x
+}
+
+/// Takes `bytes` the server sent: each whole frame among them and the
+/// bytes before them is handled, and what it calls for is queued in `out`.
+/// Fails when the server broke the protocol, reset the stream or went away
+/// before it.
+h2_feed: fn(x: &H2Exchange, bytes: [U8]) H2Error! {
+    x.input.extend(bytes.copy())
+    loop x.input.len() - x.input_at >= 9 {
+        at: x.input_at
+        size: Int{x.input[at]} * 65536 + Int{x.input[at + 1]} * 256 + Int{x.input[at + 2]}
+        if size > H2_INITIAL_FRAME {
+            return Err(h2_fail("the server sent a frame of {size} bytes, more than the {H2_INITIAL_FRAME} the client takes"))
+        }
+        if x.input.len() - at < 9 + size -> break
+        kind: Int{x.input[at + 3]}
+        flags: Int{x.input[at + 4]}
+        stream: (Int{x.input[at + 5]} * 16777216 + Int{x.input[at + 6]} * 65536 + Int{x.input[at + 7]} * 256 + Int{x.input[at + 8]}).bit_and(H2_MAX_WINDOW)
+        payload: x.input.slice(at + 9, at + 9 + size)
+        x.input_at = at + 9 + size
+        _: h2_frame_take(x, kind, flags, stream, payload) ?? return Err(err)
+    }
+    if x.input_at > 0 {
+        x.input = x.input.slice(x.input_at, x.input.len())
+        x.input_at = 0
+    }
+    Ok()
+}
+
+/// Takes one frame of the server's.
+priv h2_frame_take: fn(x: &H2Exchange, kind: Int, flags: Int, stream: Int, payload: [U8]) H2Error! {
+    if x.block_stream != 0 && (kind != H2_CONTINUATION || stream != x.block_stream) {
+        return Err(h2_fail("the server interrupted a header block with a frame of type {kind}"))
+    }
+    if kind == H2_DATA -> return h2_data(x, flags, stream, payload)
+    if kind == H2_HEADERS -> return h2_headers_take(x, flags, stream, payload)
+    if kind == H2_CONTINUATION {
+        if x.block_stream == 0 {
+            return Err(h2_fail("the server sent a CONTINUATION frame that continues no header block"))
+        }
+        x.block.extend(payload.copy())
+        if flags.bit_and(H2_END_HEADERS) != 0 -> return h2_block_end(x)
+        return Ok()
+    }
+    if kind == H2_RST_STREAM {
+        if stream == 0 || payload.len() != 4 {
+            return Err(h2_fail("the server sent a malformed RST_STREAM frame"))
+        }
+        if stream == H2_STREAM && !x.done {
+            return Err(h2_fail("the server reset the stream (error code {h2_u32(payload, 0)})"))
+        }
+        return Ok()
+    }
+    if kind == H2_SETTINGS -> return h2_settings(x, flags, stream, payload)
+    if kind == H2_PUSH_PROMISE {
+        return Err(h2_fail("the server sent PUSH_PROMISE, which the client turned off"))
+    }
+    if kind == H2_PING {
+        if stream != 0 || payload.len() != 8 {
+            return Err(h2_fail("the server sent a malformed PING frame"))
+        }
+        if flags.bit_and(H2_ACK) == 0 -> h2_frame(x.out, H2_PING, H2_ACK, 0, payload)
+        return Ok()
+    }
+    if kind == H2_GOAWAY {
+        if stream != 0 || payload.len() < 8 {
+            return Err(h2_fail("the server sent a malformed GOAWAY frame"))
+        }
+        last: h2_u32(payload, 0).bit_and(H2_MAX_WINDOW)
+        if last < H2_STREAM && !x.done {
+            return Err(h2_fail("the server went away before the stream (error code {h2_u32(payload, 4)})"))
+        }
+        return Ok()
+    }
+    if kind == H2_WINDOW_UPDATE -> return h2_window_update(x, stream, payload)
+    // PRIORITY, and the frame types of extensions, change nothing here.
+    Ok()
+}
+
+/// A DATA frame: its data joins the body, and the windows it used open
+/// again.
+priv h2_data: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
+    if stream != H2_STREAM {
+        return Err(h2_fail("the server sent DATA on stream {stream}, which the client never opened"))
+    }
+    if x.status == 0 {
+        return Err(h2_fail("the server sent DATA before the response's header fields"))
+    }
+    data: h2_unpad(flags, payload, 0) ?? return Err(err)
+    if x.body.len() + data.len() > H2_BODY_MAX {
+        return Err(h2_fail("the response body is longer than {H2_BODY_MAX} bytes"))
+    }
+    x.body.extend(data)
+    if flags.bit_and(H2_END_STREAM) != 0 {
+        x.done = true
+        return Ok()
+    }
+    if payload.len() > 0 {
+        increment := [U8]{}
+        h2_put_u32(increment, payload.len())
+        h2_frame(x.out, H2_WINDOW_UPDATE, 0, 0, increment)
+        h2_frame(x.out, H2_WINDOW_UPDATE, 0, H2_STREAM, increment)
+    }
+    Ok()
+}
+
+/// A HEADERS frame: the start of a header block, whole when it ends the
+/// headers.
+priv h2_headers_take: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
+    if stream != H2_STREAM {
+        return Err(h2_fail("the server sent HEADERS on stream {stream}, which the client never opened"))
+    }
+    skip: if flags.bit_and(H2_PRIORITY) != 0 -> 5 else -> 0
+    fragment: h2_unpad(flags, payload, skip) ?? return Err(err)
+    x.block_stream = stream
+    x.block = fragment
+    x.block_ends = flags.bit_and(H2_END_STREAM) != 0
+    if flags.bit_and(H2_END_HEADERS) != 0 -> return h2_block_end(x)
+    Ok()
+}
+
+/// A whole header block: the response's head (after any informational
+/// ones) or its trailers.
+priv h2_block_end: fn(x: &H2Exchange) H2Error! {
+    x.block_bytes += x.block.len()
+    if x.block_bytes > H2_HEADER_BLOCK_MAX {
+        return Err(h2_fail("the response's header fields are longer than {H2_HEADER_BLOCK_MAX} bytes"))
+    }
+    fields: hpack_decode(x.decoder, x.block) ?? return Err(err)
+    x.block_stream = 0
+    x.block = [U8]{}
+    if x.status == 0 {
+        status := 0
+        loop field in fields {
+            if field.name == ":status" -> status = h2_status(field.value) ?? return Err(err)
+        }
+        if status == 0 -> return Err(h2_fail("the server's response has no :status"))
+        // An informational head (1xx) comes before the final one.
+        if status < 200 {
+            if x.block_ends {
+                return Err(h2_fail("the server ended the stream after an informational response"))
+            }
+            return Ok()
+        }
+        x.status = status
+        loop field in fields {
+            if !field.name.starts_with(":") -> x.headers.push(field.copy())
+        }
+    } else if !x.block_ends {
+        return Err(h2_fail("the server sent trailers that do not end the stream"))
+    }
+    if x.block_ends -> x.done = true
+    Ok()
+}
+
+/// A SETTINGS frame: the server's limits, acked.
+priv h2_settings: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
+    if stream != 0 -> return Err(h2_fail("the server sent SETTINGS on stream {stream}"))
+    if flags.bit_and(H2_ACK) != 0 {
+        if payload.len() != 0 -> return Err(h2_fail("the server acked SETTINGS with a payload"))
+        return Ok()
+    }
+    if payload.len() %% 6 != 0 {
+        return Err(h2_fail("the server sent SETTINGS of {payload.len()} bytes, no multiple of 6"))
+    }
+    at := 0
+    loop at < payload.len() {
+        id: Int{payload[at]} * 256 + Int{payload[at + 1]}
+        value: h2_u32(payload, at + 2)
+        at += 6
+        if id == H2_SETTING_INITIAL_WINDOW_SIZE {
+            if value > H2_MAX_WINDOW {
+                return Err(h2_fail("the server set a stream window of {value}, more than 2^31 - 1"))
+            }
+            x.stream_window += value - x.initial_window
+            x.initial_window = value
+        } else if id == H2_SETTING_MAX_FRAME_SIZE {
+            if value < H2_INITIAL_FRAME || value > H2_MAX_FRAME {
+                return Err(h2_fail("the server set a largest frame of {value} bytes"))
+            }
+            x.max_frame = value
+        } else if id == H2_SETTING_ENABLE_PUSH && value > 1 {
+            return Err(h2_fail("the server set ENABLE_PUSH to {value}"))
+        }
+    }
+    h2_frame(x.out, H2_SETTINGS, H2_ACK, 0, [U8]{})
+    h2_send_body(x)
+    Ok()
+}
+
+/// A WINDOW_UPDATE frame: a window opens, and more of the body may go.
+priv h2_window_update: fn(x: &H2Exchange, stream: Int, payload: [U8]) H2Error! {
+    if payload.len() != 4 -> return Err(h2_fail("the server sent a malformed WINDOW_UPDATE frame"))
+    increment: h2_u32(payload, 0).bit_and(H2_MAX_WINDOW)
+    if increment == 0 -> return Err(h2_fail("the server opened a window by 0"))
+    if stream == 0 {
+        if x.connection_window + increment > H2_MAX_WINDOW {
+            return Err(h2_fail("the server opened the connection's window past 2^31 - 1"))
+        }
+        x.connection_window += increment
+    } else if stream == H2_STREAM {
+        if x.stream_window + increment > H2_MAX_WINDOW {
+            return Err(h2_fail("the server opened the stream's window past 2^31 - 1"))
+        }
+        x.stream_window += increment
+    }
+    h2_send_body(x)
+    Ok()
+}
+
+/// Queues as much of the request body as the windows and the largest
+/// frame allow; the last DATA frame ends the stream.
+priv h2_send_body: fn(x: &H2Exchange) Never! {
+    total: x.request_body.len()
+    loop x.sent < total && x.connection_window > 0 && x.stream_window > 0 {
+        size := total - x.sent
+        if size > x.connection_window -> size = x.connection_window
+        if size > x.stream_window -> size = x.stream_window
+        if size > x.max_frame -> size = x.max_frame
+        end: x.sent + size
+        h2_frame(x.out, H2_DATA, if end == total -> H2_END_STREAM else -> 0, H2_STREAM, x.request_body.slice(x.sent, end))
+        x.sent = end
+        x.connection_window -= size
+        x.stream_window -= size
+    }
+}
+
+/// A frame's payload without its padding and the `skip` bytes before the
+/// block (a HEADERS frame's priority fields).
+priv h2_unpad: fn(flags: Int, payload: [U8], skip: Int) -> [U8] H2Error! {
+    if flags.bit_and(H2_PADDED) == 0 {
+        if payload.len() < skip {
+            return Err(h2_fail("the server sent a frame shorter than its fields"))
+        }
+        return Ok(payload.slice(skip, payload.len()))
+    }
+    if payload.len() < 1 + skip {
+        return Err(h2_fail("the server sent a padded frame with no pad length"))
+    }
+    pad: Int{payload[0]}
+    if 1 + skip + pad > payload.len() {
+        return Err(h2_fail("the server sent more padding than its frame holds"))
+    }
+    Ok(payload.slice(1 + skip, payload.len() - pad))
+}
+
+/// The status code of a `:status` value: three digits.
+priv h2_status: fn(value: String) -> Int H2Error! {
+    raw: value.bytes()
+    if raw.len() != 3 -> return Err(h2_fail("the server sent the :status `{value}`"))
+    status := 0
+    loop byte in raw {
+        digit: Int{byte} - 48
+        if digit < 0 || digit > 9 -> return Err(h2_fail("the server sent the :status `{value}`"))
+        status = status * 10 + digit
+    }
+    if status < 100 -> return Err(h2_fail("the server sent the :status `{value}`"))
+    Ok(status)
+}
+
+/// Appends a frame: its 9-byte head and `payload`.
+h2_frame: fn(out: &[U8], kind: Int, flags: Int, stream: Int, payload: [U8]) Never! {
+    size: payload.len()
+    out.push(U8{(size >> 16).bit_and(255)})
+    out.push(U8{(size >> 8).bit_and(255)})
+    out.push(U8{size.bit_and(255)})
+    out.push(U8{kind})
+    out.push(U8{flags})
+    h2_put_u32(out, stream)
+    out.extend(payload.copy())
+}
+
+/// Appends a header block as a HEADERS frame and the CONTINUATION frames
+/// that carry what does not fit in `max_frame` bytes.
+h2_headers: fn(out: &[U8], stream: Int, block: [U8], end_stream: Bool, max_frame: Int) Never! {
+    end: if end_stream -> H2_END_STREAM else -> 0
+    if block.len() <= max_frame {
+        h2_frame(out, H2_HEADERS, end + H2_END_HEADERS, stream, block)
+        return
+    }
+    h2_frame(out, H2_HEADERS, end, stream, block.slice(0, max_frame))
+    at := max_frame
+    loop at < block.len() {
+        next: if block.len() - at > max_frame -> at + max_frame else -> block.len()
+        h2_frame(out, H2_CONTINUATION, if next == block.len() -> H2_END_HEADERS else -> 0, stream, block.slice(at, next))
+        at = next
+    }
+}
+
+/// Appends one setting: its 16-bit id and 32-bit value.
+h2_setting: fn(out: &[U8], id: Int, value: Int) Never! {
+    out.push(U8{(id >> 8).bit_and(255)})
+    out.push(U8{id.bit_and(255)})
+    h2_put_u32(out, value)
+}
+
+priv h2_put_u32: fn(out: &[U8], value: Int) Never! {
+    out.push(U8{(value >> 24).bit_and(255)})
+    out.push(U8{(value >> 16).bit_and(255)})
+    out.push(U8{(value >> 8).bit_and(255)})
+    out.push(U8{value.bit_and(255)})
+}
+
+priv h2_u32: fn(raw: [U8], at: Int) -> Int Never! {
+    Int{raw[at]} * 16777216 + Int{raw[at + 1]} * 65536 + Int{raw[at + 2]} * 256 + Int{raw[at + 3]}
+}
+
+priv h2_lower: fn(text: String) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        n: Int{byte}
+        out.push(if n >= 65 && n <= 90 -> U8{n + 32} else -> byte)
+    }
+    String.from_bytes(out) ?? text.copy()
+}
+
+/// Whether HTTP/2 has no place for the request field `name` (RFC 9113
+/// section 8.2.2): a connection-specific field, or `host`, which
+/// `:authority` replaces.
+priv h2_connection_field: fn(name: String) -> Bool Never! {
+    name == "connection" || name == "keep-alive" || name == "proxy-connection" || name == "transfer-encoding" || name == "upgrade" || name == "host"
+}
+
+priv h2_fail: fn(reason: String) -> H2Error Never! { H2Error{reason: reason} }
+
+/// The header block of `fields`: each a literal field that is never
+/// indexed, with a literal name (RFC 7541 section 6.2.2), so the block
+/// never changes the peer's dynamic table.
+hpack_encode: fn(fields: [H2Header]) -> [U8] Never! {
+    out := [U8]{}
+    loop field in fields {
+        out.push(U8{16})
+        hpack_string(out, field.name.bytes())
+        hpack_string(out, field.value.bytes())
+    }
+    out
+}
+
+/// Appends a string literal without Huffman coding.
+priv hpack_string: fn(out: &[U8], raw: [U8]) Never! {
+    hpack_integer(out, 0, 7, raw.len())
+    out.extend(raw.copy())
+}
+
+/// Appends `value` as an HPACK integer with an `prefix`-bit prefix, the
+/// first byte's high bits being `high` (RFC 7541 section 5.1).
+hpack_integer: fn(out: &[U8], high: Int, prefix: Int, value: Int) Never! {
+    mask: (1 << prefix) - 1
+    if value < mask {
+        out.push(U8{high + value})
+        return
+    }
+    out.push(U8{high + mask})
+    rest := value - mask
+    loop rest >= 128 {
+        out.push(U8{rest.bit_and(127) + 128})
+        rest = rest >> 7
+    }
+    out.push(U8{rest})
+}
+
+/// A decoder whose dynamic table may grow to `limit` bytes.
+hpack_decoder: fn(limit: Int) -> HpackDecoder Never! {
+    HpackDecoder{statics: hpack_static_table(), dynamic: [H2Header]{}, size: 0, max: limit, limit: limit, huffman: hpack_huffman()}
+}
+
+/// The header fields of the header block `block`, read in order; the
+/// dynamic table changes as the block says.
+hpack_decode: fn(d: &HpackDecoder, block: [U8]) -> [H2Header] H2Error! {
+    fields := [H2Header]{}
+    at := 0
+    loop at < block.len() {
+        first: Int{block[at]}
+        if first >= 128 {
+            index: hpack_read_integer(block, at, 7) ?? return Err(err)
+            at = index.next
+            fields.push(hpack_entry(d, index.value) ?? return Err(err))
+        } else if first >= 64 {
+            field: hpack_literal(d, block, at, 6) ?? return Err(err)
+            at = field.next
+            hpack_add(d, field.field)
+            fields.push(field.field.copy())
+        } else if first >= 32 {
+            if fields.len() > 0 {
+                return Err(h2_fail("a header block changed its table size after a field"))
+            }
+            size: hpack_read_integer(block, at, 5) ?? return Err(err)
+            at = size.next
+            if size.value > d.limit {
+                return Err(h2_fail("a header block set its table size to {size.value}, more than {d.limit}"))
+            }
+            d.max = size.value
+            hpack_evict(d, 0)
+        } else {
+            field: hpack_literal(d, block, at, 4) ?? return Err(err)
+            at = field.next
+            fields.push(field.field.copy())
+        }
+    }
+    Ok(fields)
+}
+
+/// An integer read from a block and the index after it.
+priv HpackInteger: struct {
+    value: Int
+    next: Int
+}
+
+/// A literal field read from a block and the index after it.
+priv HpackLiteral: struct {
+    field: H2Header
+    next: Int
+}
+
+/// A string read from a block and the index after it.
+priv HpackString: struct {
+    text: String
+    next: Int
+}
+
+/// Reads the integer with a `prefix`-bit prefix at `at`.
+priv hpack_read_integer: fn(block: [U8], at: Int, prefix: Int) -> HpackInteger H2Error! {
+    mask: (1 << prefix) - 1
+    value := Int{block[at]}.bit_and(mask)
+    next := at + 1
+    if value < mask -> return Ok(HpackInteger{value: value, next: next})
+    shift := 0
+    loop {
+        if next >= block.len() -> return Err(h2_fail("a header block ends inside an integer"))
+        if shift > 21 -> return Err(h2_fail("a header block has an integer past 2^28"))
+        byte: Int{block[next]}
+        next += 1
+        value += byte.bit_and(127) << shift
+        shift += 7
+        if byte < 128 -> return Ok(HpackInteger{value: value, next: next})
+    }
+}
+
+/// Reads the literal field at `at` whose index has a `prefix`-bit prefix:
+/// a name from the tables (index above 0) or a literal one, then a value.
+priv hpack_literal: fn(d: &HpackDecoder, block: [U8], at: Int, prefix: Int) -> HpackLiteral H2Error! {
+    index: hpack_read_integer(block, at, prefix) ?? return Err(err)
+    next := index.next
+    name := ""
+    if index.value == 0 {
+        literal: hpack_read_string(d, block, next) ?? return Err(err)
+        name = literal.text
+        next = literal.next
+    } else { name = (hpack_entry(d, index.value) ?? return Err(err)).name }
+    value: hpack_read_string(d, block, next) ?? return Err(err)
+    Ok(HpackLiteral{field: H2Header{name: name, value: value.text}, next: value.next})
+}
+
+/// Reads the string literal at `at`, Huffman-decoded when it says so.
+priv hpack_read_string: fn(d: &HpackDecoder, block: [U8], at: Int) -> HpackString H2Error! {
+    if at >= block.len() -> return Err(h2_fail("a header block ends before a string"))
+    huffman: Int{block[at]} >= 128
+    length: hpack_read_integer(block, at, 7) ?? return Err(err)
+    end: length.next + length.value
+    if end > block.len() -> return Err(h2_fail("a header block ends inside a string"))
+    raw: block.slice(length.next, end)
+    bytes := raw
+    if huffman -> bytes = hpack_huffman_decode(d.huffman, raw) ?? return Err(err)
+    text: String.from_bytes(bytes) ?? return Err(h2_fail("a header block has a string that is not UTF-8"))
+    Ok(HpackString{text: text, next: end})
+}
+
+/// The field at `index` of the static table (1 to 61) or the dynamic one
+/// (62 on, newest first).
+priv hpack_entry: fn(d: HpackDecoder, index: Int) -> H2Header H2Error! {
+    if index >= 1 && index <= d.statics.len() -> return Ok(d.statics[index - 1].copy())
+    dynamic: index - d.statics.len() - 1
+    if index < 1 || dynamic >= d.dynamic.len() {
+        return Err(h2_fail("a header block names the table entry {index}, which does not exist"))
+    }
+    Ok(d.dynamic[d.dynamic.len() - 1 - dynamic].copy())
+}
+
+/// Adds `field` to the dynamic table, evicting the oldest entries it needs
+/// room from; a field larger than the table empties it.
+priv hpack_add: fn(d: &HpackDecoder, field: H2Header) Never! {
+    size: hpack_size(field)
+    hpack_evict(d, size)
+    if size <= d.max {
+        d.dynamic.push(field.copy())
+        d.size += size
+    }
+}
+
+/// Evicts the oldest entries until `room` bytes fit within the table's
+/// maximum size.
+priv hpack_evict: fn(d: &HpackDecoder, room: Int) Never! {
+    drop := 0
+    loop drop < d.dynamic.len() && d.size + room > d.max {
+        d.size -= hpack_size(d.dynamic[drop])
+        drop += 1
+    }
+    if drop > 0 -> d.dynamic = d.dynamic.slice(drop, d.dynamic.len())
+}
+
+priv hpack_size: fn(field: H2Header) -> Int Never! { field.name.len() + field.value.len() + 32 }
+
+/// The canonical Huffman code that HPACK_HUFFMAN_BITS gives.
+priv hpack_huffman: fn() -> HpackHuffman Never! {
+    first := [Int]{}
+    count := [Int]{}
+    at := [Int]{}
+    symbols := [Int]{}
+    code := 0
+    loop length in 0..<HPACK_HUFFMAN_LONGEST + 1 {
+        first.push(code)
+        at.push(symbols.len())
+        loop symbol in 0..<HPACK_HUFFMAN_BITS.len() {
+            if HPACK_HUFFMAN_BITS[symbol] == length -> symbols.push(symbol)
+        }
+        count.push(symbols.len() - at[length])
+        code = (code + count[length]) << 1
+    }
+    HpackHuffman{first: first, count: count, at: at, symbols: symbols}
+}
+
+/// The bytes of the Huffman-coded string `raw` (RFC 7541 section 5.2):
+/// its padding is under 8 bits, all ones, and it holds no EOS.
+hpack_huffman_decode: fn(h: HpackHuffman, raw: [U8]) -> [U8] H2Error! {
+    out := [U8]{}
+    code := 0
+    length := 0
+    ones := true
+    loop byte in raw {
+        loop bit in 0..<8 {
+            set: (Int{byte} >> (7 - bit)).bit_and(1)
+            code = code * 2 + set
+            length += 1
+            ones = ones && set == 1
+            if length > HPACK_HUFFMAN_LONGEST {
+                return Err(h2_fail("a Huffman string has a code longer than 30 bits"))
+            }
+            offset: code - h.first[length]
+            if offset >= 0 && offset < h.count[length] {
+                symbol: h.symbols[h.at[length] + offset]
+                if symbol == HPACK_EOS -> return Err(h2_fail("a Huffman string holds EOS"))
+                out.push(U8{symbol})
+                code = 0
+                length = 0
+                ones = true
+            }
+        }
+    }
+    if length > 7 || !ones {
+        return Err(h2_fail("a Huffman string ends with padding that is not under 8 one bits"))
+    }
+    Ok(out)
+}
+
+/// The static table (RFC 7541 Appendix A), entry 1 first.
+priv hpack_static_table: fn() -> [H2Header] Never! {
+    names: [String]{
+        ":authority",
+        ":method",
+        ":method",
+        ":path",
+        ":path",
+        ":scheme",
+        ":scheme",
+        ":status",
+        ":status",
+        ":status",
+        ":status",
+        ":status",
+        ":status",
+        ":status",
+        "accept-charset",
+        "accept-encoding",
+        "accept-language",
+        "accept-ranges",
+        "accept",
+        "access-control-allow-origin",
+        "age",
+        "allow",
+        "authorization",
+        "cache-control",
+        "content-disposition",
+        "content-encoding",
+        "content-language",
+        "content-length",
+        "content-location",
+        "content-range",
+        "content-type",
+        "cookie",
+        "date",
+        "etag",
+        "expect",
+        "expires",
+        "from",
+        "host",
+        "if-match",
+        "if-modified-since",
+        "if-none-match",
+        "if-range",
+        "if-unmodified-since",
+        "last-modified",
+        "link",
+        "location",
+        "max-forwards",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "range",
+        "referer",
+        "refresh",
+        "retry-after",
+        "server",
+        "set-cookie",
+        "strict-transport-security",
+        "transfer-encoding",
+        "user-agent",
+        "vary",
+        "via",
+        "www-authenticate",
+    }
+    values: [String]{
+        "",
+        "GET",
+        "POST",
+        "/",
+        "/index.html",
+        "http",
+        "https",
+        "200",
+        "204",
+        "206",
+        "304",
+        "400",
+        "404",
+        "500",
+        "",
+        "gzip, deflate",
+    }
+    table := [H2Header]{}
+    loop index in 0..<names.len() {
+        value: if index < values.len() -> values[index].copy() else -> ""
+        table.push(H2Header{name: names[index].copy(), value: value})
+    }
+    table
+}
+
+priv h2_test_hex: fn(text: String) -> [U8] Never! {
+    out := [U8]{}
+    raw: text.bytes()
+    loop at in 0..<raw.len() /% 2 {
+        out.push(U8{h2_test_nibble(Int{raw[2 * at]}) * 16 + h2_test_nibble(Int{raw[2 * at + 1]})})
+    }
+    out
+}
+
+priv h2_test_nibble: fn(n: Int) -> Int Never! { if n >= 97 -> n - 87 else -> n - 48 }
+
+priv h2_test_fields: fn(fields: [H2Header]) -> String Never! {
+    out := ""
+    loop field in fields -> out += "{field.name}: {field.value}\n"
+    out
+}
+
+/// The frames of `bytes` after `skip` bytes, as `type flags stream size`
+/// lines.
+priv h2_test_frames: fn(bytes: [U8], skip: Int) -> String Never! {
+    out := ""
+    at := skip
+    loop at + 9 <= bytes.len() {
+        size: Int{bytes[at]} * 65536 + Int{bytes[at + 1]} * 256 + Int{bytes[at + 2]}
+        out += "{Int{bytes[at + 3]}} {Int{bytes[at + 4]}} {h2_u32(bytes, at + 5)} {size}\n"
+        at += 9 + size
+    }
+    out
+}
+
+/// A server's response head and body as frames on stream 1.
+priv h2_test_response: fn(status: String, body: String) -> [U8] Never! {
+    out := [U8]{}
+    h2_frame(out, H2_SETTINGS, 0, 0, [U8]{})
+    block: hpack_encode([H2Header]{H2Header{name: ":status", value: status}, H2Header{name: "apns-id", value: "a-1"}})
+    h2_frame(out, H2_HEADERS, H2_END_HEADERS, H2_STREAM, block)
+    h2_frame(out, H2_DATA, H2_END_STREAM, H2_STREAM, body.bytes())
+    out
+}
+
+#Test("HPACK decodes the requests of RFC 7541 C.3 and C.4 into the same fields and table") {
+    plain := hpack_decoder(H2_TABLE_SIZE)
+    coded := hpack_decoder(H2_TABLE_SIZE)
+    first: ":method: GET\n:scheme: http\n:path: /\n:authority: www.example.com\n"
+    assert_eq(h2_test_fields(hpack_decode(plain, h2_test_hex("828684410f7777772e6578616d706c652e636f6d")) ?? panic("C.3.1")), first)
+    assert_eq(h2_test_fields(hpack_decode(coded, h2_test_hex("828684418cf1e3c2e5f23a6ba0ab90f4ff")) ?? panic("C.4.1")), first)
+    second: "{first}cache-control: no-cache\n"
+    assert_eq(h2_test_fields(hpack_decode(plain, h2_test_hex("828684be58086e6f2d6361636865")) ?? panic("C.3.2")), second)
+    assert_eq(h2_test_fields(hpack_decode(coded, h2_test_hex("828684be5886a8eb10649cbf")) ?? panic("C.4.2")), second)
+    third: ":method: GET\n:scheme: https\n:path: /index.html\n:authority: www.example.com\ncustom-key: custom-value\n"
+    assert_eq(h2_test_fields(hpack_decode(plain, h2_test_hex("828785bf400a637573746f6d2d6b65790c637573746f6d2d76616c7565")) ?? panic("C.3.3")), third)
+    assert_eq(h2_test_fields(hpack_decode(coded, h2_test_hex("828785bf408825a849e95ba97d7f8925a849e95bb8e8b4bf")) ?? panic("C.4.3")), third)
+    assert_eq(plain.size, 164)
+    assert_eq(coded.size, 164)
+    assert_eq(h2_test_fields(coded.dynamic), ":authority: www.example.com\ncache-control: no-cache\ncustom-key: custom-value\n")
+}
+
+#Test("HPACK decodes the responses of RFC 7541 C.6, evicting the oldest entries of a 256-byte table") {
+    d := hpack_decoder(256)
+    first: hpack_decode(d, h2_test_hex("488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a62d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3")) ?? panic("C.6.1")
+    assert_eq(h2_test_fields(first), ":status: 302\ncache-control: private\ndate: Mon, 21 Oct 2013 20:13:21 GMT\nlocation: https://www.example.com\n")
+    assert_eq(d.size, 222)
+    second: hpack_decode(d, h2_test_hex("4883640effc1c0bf")) ?? panic("C.6.2")
+    assert_eq(h2_test_fields(second), ":status: 307\ncache-control: private\ndate: Mon, 21 Oct 2013 20:13:21 GMT\nlocation: https://www.example.com\n")
+    assert_eq(d.size, 222)
+    third: hpack_decode(d, h2_test_hex("88c16196d07abe941054d444a8200595040b8166e084a62d1bffc05a839bd9ab77ad94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1ab270fb5291f9587316065c003ed4ee5b1063d5007")) ?? panic("C.6.3")
+    assert_eq(h2_test_fields(third), ":status: 200\ncache-control: private\ndate: Mon, 21 Oct 2013 20:13:22 GMT\nlocation: https://www.example.com\ncontent-encoding: gzip\nset-cookie: foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1\n")
+    assert_eq(d.size, 215)
+    assert_eq(d.dynamic.len(), 3)
+}
+
+#Test("HPACK integers and literals round-trip, and malformed blocks fail") {
+    small := [U8]{}
+    hpack_integer(small, 0, 5, 10)
+    assert_eq(small, [U8]{U8{10}})
+    large := [U8]{}
+    hpack_integer(large, 0, 5, 1337)
+    assert_eq(large, [U8]{U8{31}, U8{154}, U8{10}})
+    assert_eq((hpack_read_integer(large, 0, 5) ?? panic("1337")).value, 1337)
+    fields: [H2Header]{H2Header{name: "apns-topic", value: "com.example.app"}, H2Header{name: "x-empty", value: ""}}
+    d := hpack_decoder(H2_TABLE_SIZE)
+    assert_eq(h2_test_fields(hpack_decode(d, hpack_encode(fields)) ?? panic("round trip")), "apns-topic: com.example.app\nx-empty: \n")
+    assert_eq(d.size, 0)
+    if hpack_decode(d, [U8]{U8{128}}) == .Ok(_) -> panic("index 0 names no entry")
+    if hpack_decode(d, [U8]{U8{190}}) == .Ok(_) -> panic("an empty dynamic table has no entry 62")
+    if hpack_decode(d, [U8]{U8{16}, U8{5}, U8{97}}) == .Ok(_) -> panic("a string past the block")
+    if hpack_decode(d, [U8]{U8{63}, U8{226}, U8{31}}) == .Ok(_) {
+        panic("a table size past the limit")
+    }
+    // EOS spelled out, and padding that is not all ones.
+    if hpack_huffman_decode(d.huffman, [U8]{U8{255}, U8{255}, U8{255}, U8{252}}) == .Ok(_) {
+        panic("EOS")
+    }
+    if hpack_huffman_decode(d.huffman, [U8]{U8{0}}) == .Ok(_) -> panic("zero padding")
+    assert_eq(hpack_huffman_decode(d.huffman, h2_test_hex("f1e3c2e5f23a6ba0ab90f4ff")) ?? panic("www.example.com"), "www.example.com".bytes())
+}
+
+#Test("an exchange sends its preface, settings and request, acks the server's settings and gathers the response") {
+    x := h2_start("GET", "https", "api.example.com", "/3/device/abc", [H2Header]{H2Header{name: "Apns-Topic", value: "com.example"}, H2Header{name: "Connection", value: "close"}}, [U8]{})
+    preface: H2_PREFACE.bytes()
+    assert_eq(x.out.slice(0, preface.len()), preface)
+    assert_eq(h2_test_frames(x.out, preface.len()), "4 0 0 6\n1 5 1 {x.out.len() - preface.len() - 15 - 9}\n")
+    block: x.out.slice(preface.len() + 15 + 9, x.out.len())
+    server := hpack_decoder(H2_TABLE_SIZE)
+    assert_eq(h2_test_fields(hpack_decode(server, block) ?? panic("the request block")), ":method: GET\n:scheme: https\n:authority: api.example.com\n:path: /3/device/abc\napns-topic: com.example\n")
+    x.out = [U8]{}
+    response: h2_test_response("200", "ok")
+    // The bytes come in two pieces that split a frame.
+    _: h2_feed(x, response.slice(0, 20)) ?? panic("the first piece")
+    assert(!x.done)
+    _: h2_feed(x, response.slice(20, response.len())) ?? panic("the rest")
+    assert(x.done)
+    assert_eq(x.status, 200)
+    assert_eq(h2_test_fields(x.headers), "apns-id: a-1\n")
+    assert_eq(x.body, "ok".bytes())
+    assert_eq(h2_test_frames(x.out, 0), "4 1 0 0\n")
+}
+
+#Test("an exchange sends its body within the windows, and the rest once they open") {
+    body := [U8]{}
+    loop _ in 0..<70000 -> body.push(U8{120})
+    x := h2_start("POST", "http", "127.0.0.1:9", "/v1/send", [H2Header]{}, body)
+    preface: H2_PREFACE.bytes().len()
+    assert_eq(h2_test_frames(x.out, preface).split("\n").len(), 7)
+    assert_eq(x.sent, 65535)
+    x.out = [U8]{}
+    open := [U8]{}
+    h2_frame(open, H2_WINDOW_UPDATE, 0, 0, [U8]{U8{0}, U8{0}, U8{39}, U8{16}})
+    _: h2_feed(x, open) ?? panic("the connection's window")
+    assert_eq(x.out.len(), 0)
+    stream := [U8]{}
+    h2_frame(stream, H2_WINDOW_UPDATE, 0, H2_STREAM, [U8]{U8{0}, U8{0}, U8{39}, U8{16}})
+    _: h2_feed(x, stream) ?? panic("the stream's window")
+    assert_eq(h2_test_frames(x.out, 0), "0 1 1 4465\n")
+    assert_eq(x.sent, 70000)
+}
+
+#Test("an exchange answers a PING and fails on a reset, an early GOAWAY, a push and a frame too large") {
+    x := h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
+    x.out = [U8]{}
+    ping := [U8]{}
+    h2_frame(ping, H2_PING, 0, 0, "12345678".bytes())
+    _: h2_feed(x, ping) ?? panic("ping")
+    assert_eq(h2_test_frames(x.out, 0), "6 1 0 8\n")
+    reset := [U8]{}
+    h2_frame(reset, H2_RST_STREAM, 0, H2_STREAM, [U8]{U8{0}, U8{0}, U8{0}, U8{7}})
+    if h2_feed(x, reset) == .Err(failure) {
+        assert_eq(failure.reason, "the server reset the stream (error code 7)")
+    } else { panic("a reset stream fails") }
+    gone := h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
+    away := [U8]{}
+    h2_frame(away, H2_GOAWAY, 0, 0, [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{2}})
+    if h2_feed(gone, away) == .Ok(_) -> panic("a GOAWAY before the stream fails")
+    pushed := h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
+    promise := [U8]{}
+    h2_frame(promise, H2_PUSH_PROMISE, H2_END_HEADERS, H2_STREAM, [U8]{U8{0}, U8{0}, U8{0}, U8{2}})
+    if h2_feed(pushed, promise) == .Ok(_) -> panic("a push fails")
+    large := h2_start("GET", "http", "h", "/", [H2Header]{}, [U8]{})
+    if h2_feed(large, [U8]{U8{0}, U8{64}, U8{1}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{1}}) == .Ok(_) {
+        panic("a frame past 16384 bytes fails")
+    }
+}
