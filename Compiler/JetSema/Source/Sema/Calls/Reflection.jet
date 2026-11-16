@@ -32,8 +32,15 @@ sema_call_reflection_leaf_name: fn(name: String) -> String Never! {
 // (sema_call_reflection_level_args): its stored struct fields and enum cases
 // as a preorder tree. None, with its E0112 reported at `value_span`, when a
 // stored field or case payload can't be captured, or the value holds what a
-// capture can't copy: a capture holds the whole value or refuses it.
+// capture can't copy: a capture holds the whole value or refuses it. A field
+// the capture can't hold is named first, since it says more than the whole
+// value's copy gate (a secret-bearing field also makes its value one owner's).
 sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [TExpr]? {
+    args := [TExpr]{}
+    sema_call_reflection_names(ty, span, environment, program, args)
+    if !sema_call_reflection_level_args(ty, span, value_span, environment, program, scopes, [String]{}, args, diagnostics) {
+        return None
+    }
     held := ""
     facts: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, environment.generic_params, false)
     if facts.holds_resource -> held = "resource state, which has one owner"
@@ -43,11 +50,6 @@ sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, envir
     }
     if held != "" {
         diagnostics.push(sema_error("E0112", value_span, "`reflect.of` can't capture {sema_type_show(ty)}", "a capture keeps its own copy of the whole value, and {sema_type_show(ty)} holds {held}", "reflect the parts of the value that hold plain data instead"))
-        return None
-    }
-    args := [TExpr]{}
-    sema_call_reflection_names(ty, span, environment, program, args)
-    if !sema_call_reflection_level_args(ty, span, value_span, environment, program, scopes, [String]{}, args, diagnostics) {
         return None
     }
     Val(args)
