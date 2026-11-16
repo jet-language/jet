@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6979,
-    "rev": 108332,
+    "nextNum": 6980,
+    "rev": 108339,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97311,6 +97311,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner 2026-11-15: folder TitleCase done \"as soon as we can reasonably do it\"; exceptions only where another language or tool requires the casing. Main owns the cutover (c1-c3 together, one stack), landed at the precompiled-Core to G6 hand-off so no in-flight agent patch is broken by the renames."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "Owner: 'That is a hard requirement.' Starts after the post-a0_042 held-SUB batch lands, so the renames don't conflict with the held stacks."
@@ -97337,12 +97342,12 @@
         },
         {
           "n": 3,
-          "text": "OWNER 2026-11-09: every folder in the repository is TitleCase with acronyms in capitals, top level included: tests/ becomes Tests/ and every lowercase folder under it (cases, guards, fixtures, ui, ...) and elsewhere follows. The only exceptions are names a tool requires (.git, .agents, .jet, src/ where ratified), each listed with the code that requires it. The AGENTS.md line 'tests/ keeps its lowercase name' is replaced in the same cutover, and the guard from c1 also refuses lowercase folders. Proof: the c1 guard also refuses lowercase folders, and `git ls-files` lists no lowercase folder outside the named exceptions.",
+          "text": "OWNER 2026-11-09, restated 2026-11-15 (\"as soon as we can reasonably do it\"): every folder in the repository is TitleCase with acronyms in capitals, top level included: tests/ becomes Tests/ and every lowercase folder under it (cases, guards, fixtures, ui, ...) and elsewhere follows. The ONLY exceptions are names another language or tool REQUIRES (for example .git, and Tower or Rust/node files where their tool fixes the casing), each listed in the guard with the code or tool rule that requires it. The AGENTS.md line 'tests/ keeps its lowercase name' is replaced in the same cutover, and the guard from c1 also refuses lowercase folders. Scheduled ahead of the goal chain by owner order: Main writes the rename codemod now and lands the whole cutover as one stack at the first point with no agent patch in flight (the precompiled-Core to G6 hand-off). Proof: the c1 guard also refuses lowercase folders, and `git ls-files` lists no lowercase folder outside the named exceptions.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:25:03.051Z"
+          "at": "2026-11-16T01:44:52.915Z"
         }
       ],
       "refs": [],
@@ -97353,8 +97358,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-15T04:25:03.051Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T01:44:53.909Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -120575,6 +120580,74 @@
       "updated": "2026-11-16T01:33:06.314Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0hjzhes",
+      "num": 6979,
+      "title": "#Inline(Always) is a guarantee, not a hint: every direct call is inlined on every tier, or sema refuses it",
+      "body": "Owner order 2026-11-15: \"#Inline(Always) must be a guarantee not a hint\". Today (dev d304f826ac) it is honored only at O1/O2 and only when the inliner agrees: OptInline.jet runs at O1 and O2 only, so O0 (jet run, jet dev, compile-time code) never inlines a marked call; the `inline: off` build option and `--inline=off` drop marked inlines too; and the inliner silently keeps a marked call when the callee writes a parameter, is a last-owner routine, reads context.trace, has stops in another file, or reveals a fixed value to a public result. Sema refuses only recursion (E0917), address-taking (E0918) and size (E0919). Nothing proves that zero marked calls remain.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every direct call to an `#Inline(Always)` function is inlined on every tier: O0 (jet run, jet dev and compile-time code), O1, O2 and web where applicable. No build option removes a marked inline: `inline: off` and `--inline=off` cover only unmarked calls. Proof: a census after inlining on each tier counts zero Call ops whose callee is marked over Examples, Core and Compiler, run by a committed test; an example with golden output on O0/O1/O2 whose `jet inspect choices` lists every marked site as inlined.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T01:44:36.470Z"
+        },
+        {
+          "n": 2,
+          "text": "The inliner never quietly leaves a marked call: each reason it refuses a site today (a written parameter, a last-owner routine, a context.trace read, stops in another file, a fixed value revealed to a public result, and any other) is either handled by the inliner for marked callees or refused by sema with a registered diagnostic (what/why/fix and a UI snapshot), so a marked call that reaches codegen uninlined is an internal compiler error (exit 101), never a silent call. Proof: one UI snapshot per new diagnostic and one test per former refusal reason.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T01:44:37.548Z"
+        },
+        {
+          "n": 3,
+          "text": "Marked bodies cross module, package and precompiled-Core boundaries: a program that calls a Core or another package's `#Inline(Always)` function (for example core.math abs) gets the body inlined, with no call to it in the image on O0/O1/O2. Proof: `jet inspect choices` and an image symbol census for that program on each tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T01:44:38.658Z"
+        },
+        {
+          "n": 4,
+          "text": "The marker's reference text and its diagnostics say guarantee: the Markers spec and E0917-E0919 state that every direct call is inlined on every tier or the program is refused, with the full list of refusals. Proof: the spec text and the UI snapshots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T01:44:39.714Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-16T01:44:26.232Z",
+      "updated": "2026-11-16T01:44:39.714Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -224598,6 +224671,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T01:44:53.910Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07k91t6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T01:44:52.915Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07k91t6",
+      "note": "#3: owner restated 2026-11-15 with priority; was: OWNER 2026-11-09: every folder in the repository is TitleCase with acronyms in capitals, top level included: tests/ becomes Tests/ and every lowercase folder under it (cases, guards, fixtures, ui, ..."
+    },
+    {
+      "at": "2026-11-16T01:44:39.714Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hjzhes",
+      "note": "#4 The marker's reference text and its diagnostics say guarante"
+    },
+    {
+      "at": "2026-11-16T01:44:38.658Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hjzhes",
+      "note": "#3 Marked bodies cross module, package and precompiled-Core bou"
+    },
+    {
+      "at": "2026-11-16T01:44:37.548Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hjzhes",
+      "note": "#2 The inliner never quietly leaves a marked call: each reason "
+    },
+    {
+      "at": "2026-11-16T01:44:36.470Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hjzhes",
+      "note": "#1 Every direct call to an `#Inline(Always)` function is inline"
+    },
+    {
+      "at": "2026-11-16T01:44:26.232Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0hjzhes",
+      "note": "#Inline(Always) is a guarantee, not a hint: every direct call is inlined on every tier, or sema refuses it"
+    },
     {
       "at": "2026-11-16T01:41:43.352Z",
       "by": "Main",
