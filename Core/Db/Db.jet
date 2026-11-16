@@ -18,6 +18,7 @@ use {
     api: __core_db_vdbeapi
     conn: __core_db_conn
     base: __core_db_base
+    os: __core_db_os
     math: core.math
     time: core.time
     rt: jet.runtime.time
@@ -1464,7 +1465,7 @@ priv db_end: fn(state: Shared<DBState>, commit: Bool) -> Bool Never! {
 priv db_outbox: fn(state: Shared<DBState>, store: String) -> app.CallOutbox Never! {
     app.CallOutbox{
         store: store.copy(),
-        now: fn() { db_job_now(state) },
+        now: fn() { db_job_now() },
         keep: fn(job: String, args: String, until: Int) { db_job_keep(state, job, args, until) },
         done: fn(key: String) { db_job_done(state, key) },
         failed: fn(key: String, runs: Int, error: String, until: Int) { db_job_failed(state, key, runs, error, until) },
@@ -1473,13 +1474,9 @@ priv db_outbox: fn(state: Shared<DBState>, store: String) -> app.CallOutbox Neve
     }
 }
 
-// The time it is by the database's clock, in Unix milliseconds; 0 once the
-// store has closed.
-priv db_job_now: fn(state: Shared<DBState>) -> Int Never! {
-    guard := state.guard_edit()
-    found: __driver_query_one(guard.value.driver, "SELECT CAST((julianday('now') - 2440587.5) * 86400000.0 AS INTEGER) AS now", [DBValue]{}) ?? return 0
-    row_int(found, "now") ?? 0
-}
+// The time it is by the store's clock, the one SQLite's `'now'` reads, in
+// Unix milliseconds.
+priv db_job_now: fn() -> Int Never! { os.os_unix_ms() }
 
 // Keeps job `job` with its encoded arguments, taken until `until`, in the
 // transaction the call running on this task has open on the store; its
@@ -1739,7 +1736,7 @@ priv db_jobs_kept: fn(store: Store) -> String {
     assert_eq(never_ran.value, 0)
 }
 
-#Test("a store's outbox gives each row no server holds to one take, which holds it until its time; a closed store gives None") {
+#Test("a store's outbox gives each row no server holds to one take, which holds it until its time by the store's clock; a closed store gives None") {
     store: open_memory()
     counts: call_counts(store)
     _: counts.put(CallCount{id: 1, count: 0}) ?? panic("the first row")
@@ -1750,6 +1747,8 @@ priv db_jobs_kept: fn(store: Store) -> String {
     key: outbox.keep("db.Test.add", "[]", 100)
     assert(app.transactions.end(call, true))
     assert_eq(key.len(), 32)
+    // The store's clock is the wall clock: a time after September 2020.
+    assert(outbox.now() > 1600000000000)
     assert_eq((outbox.take(names, 99, 1000) ?? panic("the store is open")).len(), 0)
     taken: outbox.take(names, 100, 1000) ?? panic("the store is open")
     assert_eq(taken.len(), 1)

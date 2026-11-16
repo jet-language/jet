@@ -96,6 +96,13 @@ delivery_receipt_show: fn(receipt: DeliveryReceipt) -> String Never! {
     "DeliveryReceipt(id={receipt.id}, state={state}, attempts={receipt.attempts}, retention_until={receipt.retention_until}, deadline={receipt.deadline}, key={receipt.idempotency_key}, duplicate={receipt.duplicate}, authority={receipt.authority}, generation={receipt.generation}, signature={receipt.signature})"
 }
 
+// The runtime's workflow provider reads and writes a status by position.
+TaskStatus: enum {
+    Running
+    Paused
+    CancelRequested
+}
+
 TaskOutcome: enum {
     Finished
     Panicked(String)

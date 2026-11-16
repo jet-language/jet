@@ -3,8 +3,17 @@
 // the one evaluator, in the same dependency order with the same provenance,
 // and a permuted copy of the revision plans identically (#4276 c39).
 use {
-    jet_env_model.[FleetPlan, OptionPlan, envmodel_evaluate_env, envmodel_evaluate_source, envmodel_find_jet_binary]
-    jet_foundation.[CtValue]
+    jet_env_model.[
+        ENVMODEL_ENVIRONMENT_SCHEMA,
+        FleetPlan,
+        OptionPlan,
+        envmodel_evaluate_env,
+        envmodel_evaluate_source,
+        envmodel_find_jet_binary,
+        envmodel_parse_program,
+        module_values_evaluate,
+    ]
+    jet_foundation.[CtValue, ast_comptime_value_show]
     jet_pkg_model.[EntryContribution, FactValue]
     files: core.files
     process: core.process
@@ -271,4 +280,53 @@ module_value_refusal_matches_the_program: fn(declarations: String, slug: String)
     head: module_value_refusal_matches_the_program("counted: fn() -> Int {{\n    print(\"counting\")\n    3\n}}\n\nTOTAL: counted()\n", "module-value-not-built-parity")
     assert(head.contains("jet.ModuleValueNotBuilt"), head)
     assert(head.contains("--> main.jet:6:8"), head)
+}
+
+// The field names of a checked record, in order.
+module_value_field_names: fn(value: CtValue) -> [String] {
+    if value == .Struct(_, fields) -> return loop field in fields -> field.name
+    panic("not a record: {ast_comptime_value_show(value)}")
+}
+
+SCHEMA_VALUES: "PROMPT: Prompt{{ label: \"x\", path: .Short }}\nLANGS: [\"rust\": Lang{{ enable: true, channel: .Stable }}]\n"
+
+#Test("environment_schema_types_the_programs_values") {
+    printed: module_values_as_the_program_prints_them("{SCHEMA_VALUES}\nrun: fn() {{ print(\"{{PROMPT.label ?? \"\"}} {{LANGS.len()}} {{PROMPT.strip == None}}\") }}\n\n{ENVMODEL_ENVIRONMENT_SCHEMA}")
+    assert_eq(printed, "x 1 true")
+}
+
+#Test("module_value_of_a_schema_type_is_its_written_fields") {
+    dir: envmodel_test_oci_base_dir("module-value-schema")
+    program: envmodel_parse_program(SCHEMA_VALUES) ?? panic("the values parse: {err.diagnostic.what}")
+    outcome: module_values_evaluate(program.items, SCHEMA_VALUES, dir, [String:CtValue]{}) ?? panic("the compiler answers: {err.detail}")
+    files.remove_all(dir) ?? panic("remove the directory")
+    computed := [String:CtValue]{}
+    if outcome == {
+        .Values(values, unreadable) -> {
+            assert_eq(unreadable, [String]{})
+            loop named in values -> computed[named.name] = named.value
+        }
+        .Refused(diagnostic) -> panic("the values are refused: {diagnostic.what}")
+    }
+    prompt: computed.get("PROMPT") ?? panic("PROMPT is computed")
+    assert_eq(module_value_field_names(prompt), [String]{"label", "path"})
+    assert(ast_comptime_value_show(prompt).contains("Short"), ast_comptime_value_show(prompt))
+    languages: computed.get("LANGS") ?? panic("LANGS is computed")
+    if languages == .Map(entries) {
+        assert_eq(entries.len(), 1)
+        assert_eq(module_value_field_names(entries[0].value), [String]{"enable", "channel"})
+        assert(ast_comptime_value_show(entries[0].value).contains("Stable"), ast_comptime_value_show(entries[0].value))
+    } else { panic("LANGS is a map: {ast_comptime_value_show(languages)}") }
+}
+
+#Test("module_value_of_a_schema_type_is_refused_at_the_value_as_the_program_is") {
+    declarations: "PROMPT: Prompt{{ label: 5 }}\n"
+    expected: module_values_as_the_program_refuses_them("{declarations}\nrun: fn() {{}}\n\n{ENVMODEL_ENVIRONMENT_SCHEMA}")
+    source: "{declarations}\nimage.server: module {{ from: packages.app }}\n"
+    dir: envmodel_test_oci_base_dir("module-value-schema-refusal")
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+    files.remove_all(dir) ?? panic("remove the environment")
+    head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
+    assert_eq(head, expected)
+    assert(head.contains("--> main.jet:1:"), head)
 }

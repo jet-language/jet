@@ -504,3 +504,12 @@ field schemas. The package model owns manifest and lock facts, the environment
 model owns typed environment projections, and Jetpack owns realization,
 process supervision, Hangar lifecycle, and transport boundaries. A tool should
 consume those facts rather than parse a second package or environment grammar.
+
+The environment's typed records (`Prompt`, `Lang`, `Preset`, `Dotenv`, `File`,
+`Hook`, `Reload` and their enums) are Jet declarations,
+[`Environment.jet.schema`](../../../Jetpack/EnvModel/Source/ModuleEval/Schema/Environment.jet.schema).
+The compiler checks the source's module values against them, so a value such
+as `PROMPT: Prompt{ label: 5 }` is refused with the compiler's own type error
+at the `5`.
+A field left unwritten stays out of the checked record, and the
+environment applies its own default for it.

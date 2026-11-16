@@ -11,7 +11,47 @@ package: {
 
 use {
     core: core
-    core.event.[Event, EventConfigError]
+    core.event.[Event]
+}
+
+// The runtime's event provider reports and reads these cases by position,
+// so each enum keeps the provider's order.
+
+/// What an async event does when its queue is full.
+Overflow: enum {
+    Block
+    DropNewest
+    DropOldest
+}
+
+/// How an async event treats a handler's failure.
+FailurePolicy: enum {
+    StopFirst
+    Collect
+    Log
+    Ignore
+}
+
+/// How a decision hook combines its handlers' decisions.
+HookPolicy: enum {
+    FirstCancelElseTransform
+}
+
+/// What became of one dispatched event.
+DispatchState: enum {
+    Delivered
+    HandlerFailed
+    DroppedNewest
+    DroppedOldest
+    Closed
+    Cancelled
+    DeadlineExceeded
+}
+
+/// Why an async event could not be built: its capacity is not positive.
+#Error
+EventConfigError: enum {
+    InvalidCapacity
 }
 
 // The provider owns listener cells, lifecycle and scheduler identities.

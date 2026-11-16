@@ -2791,6 +2791,15 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     stem: ".test_{jet_cli_stem(file)}.{cli_process.current_pid()}"
     binary: "{build_dir}/{stem}"
     plan: inputs.move() ?? return jet_cli_ice("the Jet compiler finished tests without their checked functions")
+    // A law test the compiler could not make (JetSema TraitLaws.jet) stops
+    // when it runs; every other test still runs, then the run ends as an
+    // internal compiler error (jet_cli_test_faulted).
+    law_faults := [JetDriverIceRow]{}
+    loop test in plan.tests {
+        if test.compiler_fault == .Val(fault) {
+            jet_driver_ice_record(law_faults, "{test.name} [{test.key}]", "sema.laws", "reparse", "{fault}")
+        }
+    }
     selected: jet_cli_native_test_selection(plan.tests, plan.functions, options.filter, options.shuffle_seed) ?? return jet_cli_ice("the test harness of `{file}` can't build:\n{err.message}")
     // `--docs` runs the doctest claims alone and `--measure` the measured
     // claims alone, without the output checks. A code suite's child
@@ -3020,16 +3029,37 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
         // Under `--json` the status line (and coverage's) is the whole stdout;
         // the report moves to stderr, and E2942 rides in the status's `reports`.
         if options.json {
-            return JetDriverVerbOutput{stdout: "{outcome.status}\n{covered_report}", stderr: "{stdout}{stderr}{notice}", exit_code: floor_exit}
+            return jet_cli_test_faulted(JetDriverVerbOutput{stdout: "{outcome.status}\n{covered_report}", stderr: "{stdout}{stderr}{notice}", exit_code: floor_exit}, law_faults)
         }
-        return JetDriverVerbOutput{stdout: "{stdout}{covered_report}", stderr: "{stderr}{notice}{below}", exit_code: floor_exit}
+        return jet_cli_test_faulted(JetDriverVerbOutput{stdout: "{stdout}{covered_report}", stderr: "{stderr}{notice}{below}", exit_code: floor_exit}, law_faults)
     }
     rendered: (loop record in records -> jet_cli_measure_render(record, options.json)).join("")
     // Under `--json` the record lines are the whole stdout; the report moves to stderr.
     if options.json {
-        return JetDriverVerbOutput{stdout: "{rendered}{covered_report}", stderr: "{stdout}{stderr}", exit_code: exit_code}
+        return jet_cli_test_faulted(JetDriverVerbOutput{stdout: "{rendered}{covered_report}", stderr: "{stdout}{stderr}", exit_code: exit_code}, law_faults)
     }
-    JetDriverVerbOutput{stdout: "{stdout}{rendered}{covered_report}", stderr: stderr, exit_code: exit_code}
+    jet_cli_test_faulted(JetDriverVerbOutput{stdout: "{stdout}{rendered}{covered_report}", stderr: stderr, exit_code: exit_code}, law_faults)
+}
+
+// The test run's `output`, ended as an internal compiler error (exit 101)
+// when the compiler could not make some of its tests (`faults`): every test's
+// row stays in the report, and the faults follow it.
+jet_cli_test_faulted: fn(output: &&JetDriverVerbOutput, faults: [JetDriverIceRow]) -[FS, Env, Exec.Args]> JetDriverVerbOutput Never! {
+    if faults.len() == 0 -> return output
+    ice: jet_cli_ice_report("the Jet compiler could not make every test", faults)
+    JetDriverVerbOutput{stdout: output.stdout, stderr: "{output.stderr}{ice.stderr}\n", exit_code: ice.exit_code}
+}
+
+#Test("a test the compiler could not make ends the run as an internal compiler error") {
+    faults := [JetDriverIceRow]{}
+    jet_driver_ice_record(faults, "Equatable.reflexive for Price [law@3..4]", "sema.laws", "reparse", "the law `reflexive` of `Equatable` for `Price` does not reparse: expected a value")
+    ran: "Equatable.reflexive for Price: FAIL\nEquatable.symmetric for Price: ok\n"
+    faulted: jet_cli_test_faulted(JetDriverVerbOutput{stdout: ran, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}, faults)
+    assert_eq(faulted.exit_code, JET_CLI_EXIT_ICE)
+    assert_eq(faulted.stdout, ran)
+    assert(faulted.stderr.contains("sema.laws reparse: Equatable.reflexive for Price [law@3..4]: the law `reflexive` of `Equatable` for `Price` does not reparse: expected a value"))
+    clean: jet_cli_test_faulted(JetDriverVerbOutput{stdout: ran, stderr: "", exit_code: JET_DRIVER_EXIT_OK}, [JetDriverIceRow]{})
+    assert_eq(clean.exit_code, JET_DRIVER_EXIT_OK)
 }
 
 // The tests of shard I of N (the `shard` setting): from the I-th of them in

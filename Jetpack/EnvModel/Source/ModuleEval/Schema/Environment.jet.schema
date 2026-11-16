@@ -1,0 +1,94 @@
+// The typed records of the environment surface (env.jet, image.jet,
+// system.jet), as Jet declarations. EnvModel appends this text to the
+// program the compiler checks for a source's values (module_values_evaluate),
+// so `Prompt{ … }`, `Lang{ … }` or `.Watch{ … }` in a value is typed by the
+// compiler against these declarations, with their field defaults and enum
+// cases. A field EnvModel reads only when it is written is optional with no
+// value (`?{None}`), and the checked record leaves such a field out, so it
+// holds exactly the written fields. The open records (`Env`, a service, a
+// host override) and the names EnvModel resolves (packages, sources, hook
+// jobs, platforms) are not here.
+
+// `prompt: Prompt{ label:, path: .Short|.Full, strip: .On|.Off }`.
+Prompt: struct {
+    label: String?{None}
+    path: PromptPath?{None}
+    strip: PromptStrip?{None}
+}
+
+PromptPath: enum {
+    Short
+    Full
+}
+
+PromptStrip: enum {
+    On
+    Off
+}
+
+// One language-pack selection: `languages: ["rust": Lang{ enable: true }]`.
+Lang: struct {
+    name: String?{None}
+    enable: Bool
+    version: String?{None}
+    channel: LangChannel?{None}
+    venv: Bool?{None}
+    extra: [String]?{None}
+    extras: [String]?{None}
+    packages: [String]?{None}
+}
+
+LangChannel: enum {
+    Stable
+    Beta
+    Nightly
+}
+
+// One environment preset: `presets: ["dev": { packages: ["tool@jetpack"] }]`.
+Preset: struct {
+    name: String?{None}
+    extends: [String]?{None}
+    packages: [String]?{None}
+    variables: [String:String]?{None}
+    hostname: String?{None}
+    user: String?{None}
+}
+
+// `dotenv: [Dotenv{ file: ".env", allow: ["PORT"], secrets: ["TOKEN"] }]`.
+Dotenv: struct {
+    file: String
+    allow: [String]?{None}
+    secrets: [String]?{None}
+}
+
+// One managed file: `files: ["config/app.toml": File{ content: "…", mode: .Copy }]`.
+File: struct {
+    destination: String?{None}
+    source: String?{None}
+    content: String?{None}
+    mode: FileMode?{None}
+    permissions: Int?{None}
+    sensitive: Bool?{None}
+    generation: String?{None}
+}
+
+FileMode: enum {
+    Symlink
+    Seed
+    Copy
+}
+
+// One trusted command hook: `checks: [{ name: "lint", command: "…", trusted: true }]`.
+Hook: struct {
+    name: String?{None}
+    command: String
+    cwd: String?{None}
+    trusted: Bool?{None}
+}
+
+// `reload: .Never`, `.Prompt`, or `.Watch{ watch: ["src"], debounce: 250 }`.
+Reload: enum {
+    Never
+    Prompt
+    Watch(watch: [String], debounce: Int)
+}

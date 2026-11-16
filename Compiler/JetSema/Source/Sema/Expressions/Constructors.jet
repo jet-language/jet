@@ -2519,25 +2519,29 @@ sema_expression_variant_head: fn(head: Type, environment: SemaScopeEnvironment, 
         .Named(name) | .Apply(name, _) -> name
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
     }
-    // The variant is the last dotted part; the enum part is `Enum` or the
-    // module-alias-qualified `alias.Enum`, cut in place with no part list.
+    // The enum part is `Enum` or the module-alias-qualified `alias.Enum`; the
+    // rest is the variant, a grouped case keeping its group (`Paint.Stroke`).
+    // Each dot is tried from the left, cut in place with no part list.
     // spec.md:334-335: "An unshadowed module alias can qualify a declared enum
     // and its variants"; spec.md:518-519: labeled payloads use `Type.Variant{label: value}`.
-    separator: path.rfind(".")
-    if separator <= 0 -> return None
-    enum_name: foundation_byte_text(path.bytes(), 0, separator)
-    variant: foundation_byte_text(path.bytes(), separator + 1, path.count_bytes())
-    head_value: SemaExpressionVariantHead{enum_name: enum_name, variant: variant}
-    owner: sema_expression_type_symbol(scopes, environment, program, enum_name)
-    if owner == .Val(symbol) {
-        if sema_scope_declaration_enum_declares(environment, program, symbol.id, variant) {
+    bytes: path.bytes()
+    loop separator in 1..<bytes.len() {
+        if (Int{bytes[separator]}) != 46 -> next
+        head_value: SemaExpressionVariantHead{enum_name: foundation_byte_text(bytes, 0, separator), variant: foundation_byte_text(bytes, separator + 1, bytes.len())}
+        owner: sema_expression_type_symbol(scopes, environment, program, head_value.enum_name)
+        if owner == .Val(symbol) {
+            if sema_scope_declaration_enum_declares(environment, program, symbol.id, head_value.variant) {
+                return Val(head_value)
+            }
+            if sema_expression_core_export_variants(environment, program, symbol) == None -> next
+        }
+        // A compiler-owned Core enum (`PluginError`) has no declaration; its
+        // named-payload case comes from the generated Core enum payload rows.
+        if core_enum_variant_labels(head_value.enum_name, head_value.variant) != None {
             return Val(head_value)
         }
-        if sema_expression_core_export_variants(environment, program, symbol) == None -> return None
     }
-    // A compiler-owned Core enum (`PluginError`) has no declaration; its
-    // named-payload case comes from the generated Core enum payload rows.
-    if core_enum_variant_labels(enum_name, variant) != None -> Val(head_value) else -> None
+    None
 }
 
 // A record field written as the bare shorthand `{name}`: the parser gives its

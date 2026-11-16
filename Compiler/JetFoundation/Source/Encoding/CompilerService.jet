@@ -132,6 +132,55 @@ jet_config_literal: fn(value: CtValue) -> String? Never! {
     }
 }
 
+// A checked module value as config data: a record field or enum payload that
+// is an optional holding no value is left out, as a field that is not
+// written is, and an optional holding a value is that value.
+jet_config_data_value: fn(value: &&CtValue) -> CtValue Never! {
+    if value == {
+        .List(values) -> {
+            items := [CtValue]{}
+            loop item in values -> items.push(jet_config_data_value(item))
+            CtValue.List{values: items}
+        }
+        .Map(entries) -> {
+            items := [CtMapEntry]{}
+            loop entry in entries {
+                items.push(CtMapEntry{key: entry.key, value: jet_config_data_value(entry.value)})
+            }
+            CtValue.Map{entries: items}
+        }
+        .Struct(type_name, fields) -> {
+            kept := [NamedCtValue]{}
+            loop field in fields {
+                if jet_config_value_absent(field.value) -> next
+                kept.push(NamedCtValue{name: field.name, value: jet_config_data_value(field.value)})
+            }
+            CtValue.Struct{type_name: type_name, fields: kept}
+        }
+        .Enum(type_name, variant, args) -> {
+            kept := [CtEnumArg]{}
+            loop argument in args {
+                if jet_config_value_absent(argument.value) -> next
+                kept.push(CtEnumArg{label: argument.label, value: jet_config_data_value(argument.value)})
+            }
+            CtValue.Enum{type_name: type_name, variant: variant, args: kept}
+        }
+        .Present(inner) -> jet_config_data_value(inner)
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .Failed(_) | .Unit | .Closure(_) -> value
+    }
+}
+
+// An optional that holds no value.
+jet_config_value_absent: fn(value: CtValue) -> Bool Never! {
+    if value == {
+        .Failed(report) -> if report == {
+            .Clean(_) -> true
+            .Told(_) -> false
+        }
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Unit | .Closure(_) -> false
+    }
+}
+
 // A string literal body: `\`, `"`, and line breaks escaped, and literal
 // braces doubled so they are not interpolation holes.
 jet_config_string_escape: fn(text: String) -> String Never! {

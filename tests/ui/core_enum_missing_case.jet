@@ -1,0 +1,15 @@
+// A match over a Core enum names every case its Core declaration lists: the
+// table below leaves out `Offline`, so the check asks for it.
+use core.web.query
+
+describe: fn(status: query.WebQueryStatus) -> String {
+    if status == {
+        .Pending -> "pending"
+        .Fresh -> "fresh"
+        .Stale -> "stale"
+        .Fetching -> "fetching"
+        .Error -> "error"
+    }
+}
+
+run: fn() { print(describe(query.WebQueryStatus.Fresh)) }

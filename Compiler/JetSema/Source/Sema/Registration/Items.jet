@@ -1009,6 +1009,10 @@ SemaRegistrationGraph: struct {
     // Test mode (Rust `CompileMode::Test`/`TestOverride`), set by the driver:
     // named `#Test` bodies are checked and lowered as synthetic functions.
     test_mode: Bool{false}
+    // Test mode: each law test the compiler could not make (TraitLaws.jet),
+    // by its test key, with why. The test fails and the run ends as an
+    // internal compiler error.
+    law_faults: [String:String]{[String:String]{}}
     // Check mode (`jet check`), set by the driver: named `#Test` bodies are
     // checked for their diagnostics only; nothing is lowered or registered,
     // so no "not built yet" E2104 applies (sema_refuses_unbuilt).

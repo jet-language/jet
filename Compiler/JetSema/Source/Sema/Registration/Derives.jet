@@ -782,9 +782,12 @@ sema_derive_is_variant: fn(value: CtValue) -> Bool Never! {
     sema_derive_named_type(value) == "CaseInfo"
 }
 
-sema_derive_reflected_variant_name: fn(value: CtValue) -> String? Never! {
+// The name a reflected case's payload locals carry: its spelling in the enum
+// (`Net.Packet` for a grouped case), so an arm's bindings and its field reads
+// agree and two groups' leaves of one name stay apart.
+sema_derive_reflected_variant_name: fn(expansion: SemaDeriveExpansion, value: CtValue) -> String? Never! {
     if !sema_derive_is_variant(value) -> return None
-    sema_derive_reflected_name(value)
+    sema_derive_case_spelling(expansion, value)
 }
 
 // A case's payload fields as a template reads them (`left.reflect().fields`):
@@ -874,10 +877,8 @@ sema_derive_variant_payload_fields: fn(expansion: SemaDeriveExpansion, variant: 
 sema_derive_payload_binding_owner: fn(expansion: SemaDeriveExpansion, variant: String) -> String Never! {
     key: sema_derive_bare(variant)
     loop entry in expansion.scope {
-        name: sema_derive_reflected_variant_name(entry.value) ?? next
-        if entry.name == key || (sema_derive_case_spelling(expansion, entry.value) ?? "") == key {
-            return "{entry.name}_{name}"
-        }
+        name: sema_derive_reflected_variant_name(expansion, entry.value) ?? next
+        if entry.name == key || name == key -> return "{entry.name}_{name}"
     }
     key
 }
@@ -900,10 +901,10 @@ sema_derive_side_payload_owner: fn(expansion: SemaDeriveExpansion, side: String,
     left := String?{None}
     right := String?{None}
     if sema_derive_scope_value(expansion, "left") == .Val(value) {
-        left = sema_derive_reflected_variant_name(value)
+        left = sema_derive_reflected_variant_name(expansion, value)
     }
     if sema_derive_scope_value(expansion, "right") == .Val(value) {
-        right = sema_derive_reflected_variant_name(value)
+        right = sema_derive_reflected_variant_name(expansion, value)
     }
     if side == "left" {
         if left == .Val(name) -> return "left_{name}"
@@ -949,11 +950,11 @@ sema_derive_fill_variant_bindings: fn(expansion: SemaDeriveExpansion, variant: S
 sema_derive_field_payload_owner: fn(expansion: SemaDeriveExpansion, binding: String?) -> String? Never! {
     name: binding ?? return None
     left_value: sema_derive_scope_value(expansion, "left") ?? return None
-    left: sema_derive_reflected_variant_name(left_value) ?? return None
+    left: sema_derive_reflected_variant_name(expansion, left_value) ?? return None
     if name == "self" -> return Val("left_{left}")
     if name != "rhs" -> return None
     if sema_derive_scope_value(expansion, "right") == .Val(right_value) {
-        if sema_derive_reflected_variant_name(right_value) == .Val(right) {
+        if sema_derive_reflected_variant_name(expansion, right_value) == .Val(right) {
             return Val("right_{left}_{right}")
         }
     }

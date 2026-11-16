@@ -1,0 +1,639 @@
+// Private Core source part: the wire forms of a push notification. A push
+// goes to APNs, to FCM or to a browser's push service (Web Push), as one
+// HTTP POST each. A Web Push payload is encrypted to the browser's
+// subscription (RFC 8291, the aes128gcm content coding of RFC 8188), and the
+// application server proves who sends it with a VAPID token (RFC 8292). APNs
+// takes an ES256 provider token, and FCM an OAuth 2.0 access token that a
+// service account's RS256 assertion buys (RFC 7523). Each push carries a
+// collapse key, so a repeated run replaces the push it sent before.
+use {
+    core
+    bn: __core_crypto_bignum
+    __core_crypto_bignum.[RNG]
+    cipher: __core_crypto_cipher
+    aead: __core_crypto_aead
+    hashes: __core_crypto_md
+    drbg: __core_crypto_drbg
+    ecp: __core_crypto_ecp
+    ecdh: __core_crypto_ecdh
+    ecdsa: __core_crypto_ecdsa
+    pk: __core_crypto_pk
+    pkparse: __core_crypto_pkparse
+    base64: core.encoding.base64
+}
+
+/// The record size of an encrypted push: one record holds the whole
+/// payload (RFC 8291 section 4).
+PUSH_RECORD_SIZE: 4096
+
+/// The longest payload one push carries: the record less the header (86
+/// bytes), the padding delimiter and the 16-byte tag (RFC 8291 section 4).
+PUSH_PAYLOAD_MAX: 3993
+
+/// The longest a VAPID token may stay valid: 24 hours (RFC 8292 section 2).
+PUSH_VAPID_MAX_SECONDS: 86400
+
+/// How long a push service keeps a Web Push it cannot deliver yet: a day.
+PUSH_WEB_TTL_SECONDS: 86400
+
+/// The OAuth 2.0 scope an FCM access token needs.
+PUSH_FCM_SCOPE: "https://www.googleapis.com/auth/firebase.messaging"
+
+/// Why a push could not be sealed or signed: a key or a secret has the
+/// wrong length or form, the payload is longer than one push record holds,
+/// or the system entropy source failed.
+#Error
+PushError: struct {
+    reason: String
+
+    impl Display {
+        display: fn(self) -> String { self.reason }
+    }
+}
+
+/// An application server's P-256 key pair: the 32-byte private scalar and
+/// the 65-byte uncompressed public point.
+PushKeyPair: struct {
+    #Redact private: [U8]
+    public: [U8]
+}
+
+/// A browser's push subscription: the push service's `endpoint` URL, its
+/// P-256 public key (65 bytes) and its authentication secret (16 bytes).
+PushSubscription: struct {
+    endpoint: String
+    public: [U8]
+    auth_secret: [U8]
+}
+
+/// One HTTP request of a push: a POST of `body` to `url`.
+PushRequest: struct {
+    url: String
+    headers: [PushHeader]
+    body: [U8]
+}
+
+PushHeader: struct {
+    name: String
+    value: String
+}
+
+/// A random generator seeded from the system entropy source, for the keys
+/// and the salt of each push.
+push_rng: fn() -> drbg.HMACDrbg PushError! {
+    seed := core.net.tls.__host_entropy(48) ?? return Err(push_fail("the system entropy source failed"))
+    if seed.len() != 48 {
+        core.crypto.wipe(seed)
+        return Err(push_fail("the system entropy source failed"))
+    }
+    rng := drbg.hmac_drbg_new(.SHA256)
+    drbg.hmac_drbg_seed_buf(rng, seed)
+    core.crypto.wipe(seed)
+    Ok(rng)
+}
+
+/// The key pair whose private scalar is `private` (32 bytes).
+push_key_pair: fn<R: RNG>(private: [U8], rng: &R) -> PushKeyPair PushError! {
+    grp: push_group() ?? return Err(err)
+    d: push_scalar(grp, private) ?? return Err(err)
+    q: ecp.ecp_mul(grp, d, grp.g, rng) ?? return Err(push_fail("the private key gives no public point"))
+    public: ecp.point_write_binary(grp, q, .Uncompressed, 65) ?? return Err(push_fail("the public point does not encode"))
+    Ok(PushKeyPair{private: private.copy(), public: public})
+}
+
+/// A fresh key pair drawn from `rng`.
+push_key_pair_new: fn<R: RNG>(rng: &R) -> PushKeyPair PushError! {
+    grp: push_group() ?? return Err(err)
+    d: ecp.gen_privkey(grp, rng) ?? return Err(push_fail("no private key could be drawn"))
+    private: bn.write_binary(d, 32) ?? return Err(push_fail("the private key does not encode"))
+    push_key_pair(private, rng)
+}
+
+/// The P-256 private scalar (32 bytes) of the PEM or DER key `key`: an APNs
+/// signing key (`.p8`, PKCS#8) or a SEC1 EC key.
+push_ec_private: fn<R: RNG>(key: String, rng: &R) -> [U8] PushError! {
+    parsed: pkparse.pk_parse_key(key.bytes(), None, rng) ?? return Err(push_fail("the key does not parse"))
+    if parsed.kind != .Val(.ECKey) && parsed.kind != .Val(.ECDSA) {
+        return Err(push_fail("the key is no EC key"))
+    }
+    if pk.pk_get_ec_group_id(parsed) != .Secp256r1 {
+        return Err(push_fail("the key is not on P-256"))
+    }
+    private: bn.write_binary(parsed.ec.d, 32) ?? return Err(push_fail("the private key does not encode"))
+    Ok(private)
+}
+
+/// The key of one push: a fixed-length hash of the key of the run that
+/// sends it, its recipient and the state a tap opens, so a repeated run
+/// replaces the push it sent before and two pushes of one run never replace
+/// each other. It is 32 base64url characters (24 bytes of SHA-256), within
+/// APNs's 64-byte `apns-collapse-id` and Web Push's 32-character `Topic`
+/// (RFC 8030 section 5.4). Each part is length-prefixed, so no two triples
+/// hash the same input.
+push_collapse_key: fn(run_key: String, to: String, open: String) -> String Never! {
+    data := [U8]{}
+    loop part in ([String]{run_key, to, open}) {
+        bytes: part.bytes()
+        data.extend("{bytes.len()}:".bytes())
+        data.extend(bytes)
+    }
+    base64.encode_url(cipher.bytes_of(hashes.hash(.SHA256, data), 0, 24))
+}
+
+/// The aes128gcm body of a push of `plain` to the subscription whose
+/// public key is `ua_public` (65 bytes) and whose authentication secret is
+/// `auth_secret` (16 bytes), sealed with a fresh key pair and salt from
+/// `rng` (RFC 8291 section 3).
+push_web_seal: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], rng: &R) -> [U8] PushError! {
+    sender: push_key_pair_new(rng) ?? return Err(err)
+    salt := cipher.zero_bytes(16)
+    if !rng.fill(salt) -> return Err(push_fail("the system entropy source failed"))
+    push_web_encrypt(plain, ua_public, auth_secret, sender, salt, rng)
+}
+
+/// The aes128gcm body of a push of `plain` to the subscription whose
+/// public key is `ua_public` and whose authentication secret is
+/// `auth_secret`, sealed with the key pair `sender` and `salt` (16 bytes):
+/// `salt || rs || idlen || keyid || ciphertext` (RFC 8188 section 2.1),
+/// with `sender`'s public key as the key ID. `rng` blinds the key
+/// agreement.
+push_web_encrypt: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], sender: PushKeyPair, salt: [U8], rng: &R) -> [U8] PushError! {
+    if plain.len() > PUSH_PAYLOAD_MAX {
+        return Err(push_fail("a push payload is at most {PUSH_PAYLOAD_MAX} bytes, not {plain.len()}"))
+    }
+    if ua_public.len() != 65 {
+        return Err(push_fail("a subscription's public key is 65 bytes, not {ua_public.len()}"))
+    }
+    if auth_secret.len() != 16 {
+        return Err(push_fail("a subscription's authentication secret is 16 bytes, not {auth_secret.len()}"))
+    }
+    if salt.len() != 16 -> return Err(push_fail("a push's salt is 16 bytes, not {salt.len()}"))
+    grp: push_group() ?? return Err(err)
+    ua: ecp.point_read_binary(grp, ua_public) ?? return Err(push_fail("a subscription's public key is no P-256 point"))
+    ecp.check_pubkey(grp, ua) ?? return Err(push_fail("a subscription's public key is not on P-256"))
+    d: push_scalar(grp, sender.private) ?? return Err(err)
+    shared: ecdh.ecdh_compute_shared(grp, ua, d, rng) ?? return Err(push_fail("the key agreement failed"))
+    ecdh_secret := bn.write_binary(shared, 32) ?? return Err(push_fail("the shared secret does not encode"))
+    // IKM = HKDF(auth_secret, ecdh_secret, "WebPush: info" 0 ua_public
+    // as_public, 32) (RFC 8291 section 3.4).
+    key_info := push_label("WebPush: info")
+    key_info.extend(ua_public.copy())
+    key_info.extend(sender.public.copy())
+    ikm := push_hkdf(auth_secret, ecdh_secret, key_info, 32)
+    core.crypto.wipe(ecdh_secret)
+    cek := push_hkdf(salt, ikm, push_label("Content-Encoding: aes128gcm"), 16)
+    nonce: push_hkdf(salt, ikm, push_label("Content-Encoding: nonce"), 12)
+    core.crypto.wipe(ikm)
+    // One record: the payload, then the last record's delimiter 2.
+    record := plain.copy()
+    record.push(U8{2})
+    key: aead.gcm_key(cipher.aes_key(cek, false) ?? panic("a content-encryption key is 16 bytes"))
+    core.crypto.wipe(cek)
+    sealed: aead.gcm_encrypt(key, nonce, [U8]{}, record, 16) ?? panic("one push record seals")
+    core.crypto.wipe(record)
+    body := salt.copy()
+    body.push(U8{0})
+    body.push(U8{0})
+    body.push(U8{PUSH_RECORD_SIZE /% 256})
+    body.push(U8{PUSH_RECORD_SIZE %% 256})
+    body.push(U8{65})
+    body.extend(sender.public.copy())
+    body.extend(sealed)
+    Ok(body)
+}
+
+/// The `Authorization` header of a push to the push service at `audience`
+/// (the endpoint's origin, `https://host`): `vapid t=JWT, k=key` (RFC 8292
+/// section 3). The JWT claims `aud` `audience`, `exp` `expires` (Unix
+/// seconds) and `sub` `contact` (a `mailto:` or `https:` URL), and is
+/// signed ES256 by `sender` with an RFC 6979 nonce; `rng` blinds the
+/// signing. `now` (Unix seconds) bounds `expires` to 24 hours ahead.
+push_vapid_authorization: fn<R: RNG>(audience: String, contact: String, now: Int, expires: Int, sender: PushKeyPair, rng: &R) -> String PushError! {
+    if expires <= now || expires - now > PUSH_VAPID_MAX_SECONDS {
+        return Err(push_fail("a VAPID token expires within 24 hours, not in {expires - now} seconds"))
+    }
+    claims: "{{\"aud\":{push_json_text(audience)},\"exp\":{expires},\"sub\":{push_json_text(contact)}}}"
+    token: push_jwt_es256("{{\"typ\":\"JWT\",\"alg\":\"ES256\"}}", claims, sender.private, rng) ?? return Err(err)
+    Ok("vapid t={token}, k={base64.encode_url(sender.public)}")
+}
+
+/// The Web Push request (RFC 8030 section 5) of a notification to the
+/// subscription `to`, from the application server `sender` whose contact
+/// is `contact`. The payload, the JSON of `title`, `body`, `tag` `key` and
+/// `open` (the JSON of the state a tap opens), is sealed to the
+/// subscription (RFC 8291). `key` is also the `Topic`, which replaces a
+/// push still waiting at the push service. `now` is Unix seconds; the VAPID
+/// token is good for 12 hours.
+push_web_request: fn<R: RNG>(to: PushSubscription, sender: PushKeyPair, contact: String, now: Int, key: String, title: String, body: String, open: String, rng: &R) -> PushRequest PushError! {
+    audience: push_origin(to.endpoint) ?? return Err(push_fail("a subscription's endpoint is no http or https URL: {to.endpoint}"))
+    payload: "{{\"title\":{push_json_text(title)},\"body\":{push_json_text(body)},\"tag\":{push_json_text(key)},\"open\":{push_json_text(open)}}}"
+    sealed: push_web_seal(payload.bytes(), to.public, to.auth_secret, rng) ?? return Err(err)
+    authorization: push_vapid_authorization(audience, contact, now, now + PUSH_VAPID_MAX_SECONDS /% 2, sender, rng) ?? return Err(err)
+    headers: [PushHeader]{
+        PushHeader{name: "authorization", value: authorization},
+        PushHeader{name: "ttl", value: "{PUSH_WEB_TTL_SECONDS}"},
+        PushHeader{name: "topic", value: key},
+        PushHeader{name: "urgency", value: "normal"},
+        PushHeader{name: "content-encoding", value: "aes128gcm"},
+        PushHeader{name: "content-type", value: "application/octet-stream"},
+    }
+    Ok(PushRequest{url: to.endpoint.copy(), headers: headers, body: sealed})
+}
+
+/// The provider token of APNs's token-based authentication: an ES256 JWT
+/// whose header names the signing key `key_id` and whose claims are `iss`
+/// the team ID and `iat` `now` (Unix seconds), signed by the P-256 scalar
+/// `private`. APNs takes one for up to an hour.
+push_apns_token: fn<R: RNG>(team_id: String, key_id: String, now: Int, private: [U8], rng: &R) -> String PushError! {
+    header: "{{\"alg\":\"ES256\",\"kid\":{push_json_text(key_id)}}}"
+    push_jwt_es256(header, "{{\"iss\":{push_json_text(team_id)},\"iat\":{now}}}", private, rng)
+}
+
+/// The APNs request of an alert to the device `device_token`, from the app
+/// `topic` (its bundle ID), at the APNs `origin` (`https://api.push.apple.com`
+/// or a local fake). `key` is the push's collapse key and `open` the JSON of
+/// the state a tap opens.
+push_apns_request: fn(origin: String, device_token: String, topic: String, provider_token: String, key: String, title: String, body: String, open: String) -> PushRequest Never! {
+    alert: "{{\"title\":{push_json_text(title)},\"body\":{push_json_text(body)}}}"
+    PushRequest{
+        url: "{origin}/3/device/{device_token}",
+        headers: [PushHeader]{
+            PushHeader{name: "authorization", value: "bearer {provider_token}"},
+            PushHeader{name: "apns-topic", value: topic},
+            PushHeader{name: "apns-push-type", value: "alert"},
+            PushHeader{name: "apns-priority", value: "10"},
+            PushHeader{name: "apns-collapse-id", value: key},
+            PushHeader{name: "content-type", value: "application/json"},
+        },
+        body: "{{\"aps\":{{\"alert\":{alert}}},\"open\":{push_json_text(open)}}}".bytes(),
+    }
+}
+
+/// The request that trades a service account's signed assertion for an
+/// FCM access token at `token_uri` (RFC 7523 section 2.1): an RS256 JWT
+/// with `iss` the account's `client_email`, the messaging scope, `aud`
+/// `token_uri`, `iat` `now` and `exp` an hour later, signed by the
+/// account's RSA key `key` (PEM).
+push_fcm_token_request: fn<R: RNG>(client_email: String, token_uri: String, now: Int, key: String, rng: &R) -> PushRequest PushError! {
+    parsed := pkparse.pk_parse_key(key.bytes(), None, rng) ?? return Err(push_fail("the service account's key does not parse"))
+    if parsed.kind != .Val(.RSA) -> return Err(push_fail("the service account's key is no RSA key"))
+    claims: "{{\"iss\":{push_json_text(client_email)},\"scope\":\"{PUSH_FCM_SCOPE}\",\"aud\":{push_json_text(token_uri)},\"iat\":{now},\"exp\":{now + 3600}}}"
+    signing_input: "{base64.encode_url("{{\"alg\":\"RS256\",\"typ\":\"JWT\"}}".bytes())}.{base64.encode_url(claims.bytes())}"
+    signature: pk.pk_sign(parsed, .SHA256, hashes.hash(.SHA256, signing_input.bytes()), pk.PK_SIGNATURE_MAX_SIZE, rng) ?? return Err(push_fail("the assertion's signature failed"))
+    body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={signing_input}.{base64.encode_url(signature)}"
+    Ok(PushRequest{url: token_uri, headers: [PushHeader]{PushHeader{name: "content-type", value: "application/x-www-form-urlencoded"}}, body: body.bytes()})
+}
+
+/// The FCM HTTP v1 request of a notification to the device `device_token`
+/// of the Firebase project `project`, at the FCM `origin`
+/// (`https://fcm.googleapis.com` or a local fake). The message is
+/// non-collapsible: FCM keeps at most four collapse keys per device, so
+/// `key` goes in `android.notification.tag`, which replaces a shown
+/// notification with the same tag. `open` is the JSON of the state a tap
+/// opens.
+push_fcm_request: fn(origin: String, project: String, access_token: String, device_token: String, key: String, title: String, body: String, open: String) -> PushRequest Never! {
+    notification: "{{\"title\":{push_json_text(title)},\"body\":{push_json_text(body)}}}"
+    android: "{{\"notification\":{{\"tag\":{push_json_text(key)}}}}}"
+    message: "{{\"token\":{push_json_text(device_token)},\"notification\":{notification},\"android\":{android},\"data\":{{\"open\":{push_json_text(open)}}}}}"
+    PushRequest{
+        url: "{origin}/v1/projects/{project}/messages:send",
+        headers: [PushHeader]{
+            PushHeader{name: "authorization", value: "Bearer {access_token}"},
+            PushHeader{name: "content-type", value: "application/json"},
+        },
+        body: "{{\"message\":{message}}}".bytes(),
+    }
+}
+
+/// The compact JWT of the JSON `header` and `claims`, signed ES256 by the
+/// private scalar `private` (RFC 7515 section 7.1).
+push_jwt_es256: fn<R: RNG>(header: String, claims: String, private: [U8], rng: &R) -> String PushError! {
+    signing_input: "{base64.encode_url(header.bytes())}.{base64.encode_url(claims.bytes())}"
+    signature: push_es256(private, signing_input.bytes(), rng) ?? return Err(err)
+    Ok("{signing_input}.{base64.encode_url(signature)}")
+}
+
+/// The ES256 signature of `data` by the private scalar `private`: `r || s`,
+/// 32 bytes each (RFC 7518 section 3.4), with the RFC 6979 nonce.
+push_es256: fn<R: RNG>(private: [U8], data: [U8], rng: &R) -> [U8] PushError! {
+    grp: push_group() ?? return Err(err)
+    d: push_scalar(grp, private) ?? return Err(err)
+    hash: hashes.hash(.SHA256, data)
+    sig: ecdsa.ecdsa_sign_det(grp, d, hash, .SHA256, rng) ?? return Err(push_fail("the signature failed"))
+    out := bn.write_binary(sig.r, 32) ?? return Err(push_fail("the signature does not encode"))
+    out.extend(bn.write_binary(sig.s, 32) ?? return Err(push_fail("the signature does not encode")))
+    Ok(out)
+}
+
+/// The origin (`scheme://authority`) of the http or https URL `url`.
+push_origin: fn(url: String) -> String? Never! {
+    start: if url.starts_with("https://") -> 8 else if url.starts_with("http://") -> 7 else -> {
+        return None
+    }
+    bytes: url.bytes()
+    slash: U8{47}
+    end := start
+    loop end < bytes.len() && bytes[end] != slash -> end += 1
+    if end == start -> return None
+    origin: String.from_bytes(cipher.bytes_of(bytes, 0, end)) ?? return None
+    origin
+}
+
+priv push_fail: fn(reason: String) -> PushError Never! { PushError{reason: reason} }
+
+// P-256.
+priv push_group: fn() -> ecp.EcpGroup PushError! {
+    grp: ecp.group_load(.Secp256r1) ?? return Err(push_fail("P-256 does not load"))
+    Ok(grp)
+}
+
+// The private scalar `private` (32 bytes) of a key on `grp`.
+priv push_scalar: fn(grp: ecp.EcpGroup, private: [U8]) -> bn.Mpi PushError! {
+    if private.len() != 32 {
+        return Err(push_fail("a P-256 private key is 32 bytes, not {private.len()}"))
+    }
+    d: bn.read_binary(private) ?? return Err(push_fail("the private key does not decode"))
+    ecp.check_privkey(grp, d) ?? return Err(push_fail("the private key is not a P-256 scalar"))
+    Ok(d)
+}
+
+// `label`, then a zero byte: an HKDF info of RFC 8291 and RFC 8188.
+priv push_label: fn(label: String) -> [U8] Never! {
+    out := label.bytes()
+    out.push(U8{0})
+    out
+}
+
+// HKDF-SHA-256 of `ikm` with `salt` and `info`, `len` bytes.
+priv push_hkdf: fn(salt: [U8], ikm: [U8], info: [U8], len: Int) -> [U8] Never! {
+    hashes.hkdf_with(hashes.SHA256Hash{}, .SHA256, salt, ikm, info, len) ?? panic("HKDF-SHA-256 gives up to 8160 bytes")
+}
+
+// `text` as a JSON string.
+priv push_json_text: fn(text: String) -> String Never! {
+    digits: "0123456789abcdef".bytes()
+    quote: U8{34}
+    backslash: U8{92}
+    space: U8{32}
+    out := [U8]{quote}
+    loop b in text.bytes() {
+        if b == quote || b == backslash {
+            out.push(backslash)
+            out.push(b)
+        } else if b < space {
+            out.extend("\\u00".bytes())
+            out.push(digits[Int{b} /% 16])
+            out.push(digits[Int{b} %% 16])
+        } else { out.push(b) }
+    }
+    out.push(quote)
+    String.from_bytes(out) ?? panic("JSON-quoted UTF-8 stays UTF-8")
+}
+
+// A generator that only blinds: the tests' results do not depend on it.
+priv push_test_rng: fn() -> drbg.HMACDrbg Never! {
+    rng := drbg.hmac_drbg_new(.SHA256)
+    drbg.hmac_drbg_seed_buf(rng, "Jet push test blinding".bytes())
+    rng
+}
+
+priv push_b64: fn(text: String) -> [U8] Never! {
+    base64.decode_url(text) ?? panic("test base64url: {text}")
+}
+
+// The browser's side of RFC 8291 section 3.4: the record of the aes128gcm
+// `body`, opened with the subscription's key pair `ua` and `auth_secret`.
+priv push_test_open: fn(body: [U8], ua: PushKeyPair, auth_secret: [U8]) -> [U8] Never! {
+    rng := push_test_rng()
+    grp: push_group() ?? panic("P-256")
+    sender_public: cipher.bytes_of(body, 21, 65)
+    sender: ecp.point_read_binary(grp, sender_public) ?? panic("the key ID is a P-256 point")
+    shared: ecdh.ecdh_compute_shared(grp, sender, push_scalar(grp, ua.private) ?? panic("scalar"), rng) ?? panic("agree")
+    key_info := push_label("WebPush: info")
+    key_info.extend(ua.public.copy())
+    key_info.extend(sender_public)
+    ikm: push_hkdf(auth_secret, bn.write_binary(shared, 32) ?? panic("secret"), key_info, 32)
+    salt: cipher.bytes_of(body, 0, 16)
+    cek: push_hkdf(salt, ikm, push_label("Content-Encoding: aes128gcm"), 16)
+    nonce: push_hkdf(salt, ikm, push_label("Content-Encoding: nonce"), 12)
+    key: aead.gcm_key(cipher.aes_key(cek, false) ?? panic("AES key"))
+    aead.gcm_decrypt(key, nonce, [U8]{}, cipher.bytes_of(body, 86, body.len() - 86), 16) ?? panic("the push opens")
+}
+
+// The claims of the ES256 JWT `token`, which must verify with the P-256
+// public key `public`; the header must be `header`.
+priv push_test_jwt_claims: fn(token: String, header: String, public: [U8]) -> String Never! {
+    parts: token.split(".").to_list()
+    assert_eq(parts.len(), 3)
+    assert_eq(String.from_bytes(push_b64(parts[0])) ?? panic("header text"), header)
+    grp: push_group() ?? panic("P-256")
+    signature: push_b64(parts[2])
+    assert_eq(signature.len(), 64)
+    q: ecp.point_read_binary(grp, public) ?? panic("the public key")
+    hash: hashes.hash(.SHA256, "{parts[0]}.{parts[1]}".bytes())
+    r: bn.read_binary(cipher.bytes_of(signature, 0, 32)) ?? panic("r")
+    s: bn.read_binary(cipher.bytes_of(signature, 32, 32)) ?? panic("s")
+    ecdsa.ecdsa_verify(grp, hash, q, r, s) ?? panic("the token's signature verifies")
+    String.from_bytes(push_b64(parts[1])) ?? panic("claims text")
+}
+
+priv push_test_header: fn(request: PushRequest, name: String) -> String Never! {
+    loop header in request.headers {
+        if header.name == name -> return header.value.copy()
+    }
+    panic("the request has no `{name}` header")
+}
+
+// The APNs signing key of the tests: a P-256 key in PKCS#8, as a `.p8`.
+priv push_test_apns_key: fn() -> String Never! {
+    key := "-----BEGIN PRIVATE KEY-----\n"
+    key += "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgb1/LfsVROP2MEAEY\n"
+    key += "jvl9UHRLWHgMAnIw7Puts6zaqCqhRANCAAQsDjHjpjwneoxuNL5MrFBau348HXHX\n"
+    key += "wkYP4QxtLseQNZesKMN/VGg8GTJIovUILcMaWWEPIMsj2B08qX6yMsLJ\n"
+    key += "-----END PRIVATE KEY-----\n"
+    key
+}
+
+// The service account key of the tests: RSA-2048 in PKCS#8.
+priv push_test_fcm_key: fn() -> String Never! {
+    key := "-----BEGIN PRIVATE KEY-----\n"
+    key += "MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQCcfKxtknOKIkoJ\n"
+    key += "ncTlatZGHI1opb5rm1EPo6r6DCSVC+zWYgiTKDL0fqMPsOVv3T5ExpqCaY/wAeag\n"
+    key += "Kui/SJCsi2a4G+zuNyoSS66cQLbizSxAOQAQnpuWV5XRM05NlJkgyj60xoo7XCzv\n"
+    key += "sQ4izCYGfraKXFcNHHlOimTZj9yEQU1fIoMJ0DnQzWfn5SrjfCp5FIgEEek86aNW\n"
+    key += "IQC40LUOnlCqDUeCXf6ut5ir0WljxfMNYkx6UzB0tu8DS2/Su/1nz3+M7n2S80QB\n"
+    key += "Cgfdd/2ZL5WcmT305Tp/4hIUuuiqLaozKt28VE32s3bwW4gEe513OF/LSMrmcMRj\n"
+    key += "sni2R0ftAgMBAAECggEAHn7PTWUaXgNzoS8dNUYeLriWuBuAodC5Oc5/3c2q/V6/\n"
+    key += "D0I4gJD3aR0aos6qz6NyZI29g4eV1MRSEMl75Pb7tpxN7rgGcp/Oc5VLGEkmOsmY\n"
+    key += "A4X4JMT79g7oc8XHTygTtUekc68zNgEvAqDi69YT3PUplooLLtNrMmqW360A4MbZ\n"
+    key += "DakLHK6CAlA4TYnAcXVMHrbDWuOZTNKGQk0Cuwv3ZPmuLh+Jm7vIQ1528NHYXZFb\n"
+    key += "nW+yBZgdKS4sJxkw0C3bnNFydqG9rlwccxakLYSpg/PtRkpL6r7vESeRO707vKo+\n"
+    key += "8nJJb4TzFruPwLB+9z9HF7UaJFty8CPk0m9fdOd2cwKBgQDJXBIxSdyTXPU2soTW\n"
+    key += "MHE6Qd9v0qkqucMfLsB+Xf2udx56Y7YQNnUnYX6KLOQbGMalPLv/ViDYvxIskAIq\n"
+    key += "q+UfCwpiKMCAf23fvTPghMwnJBEnmv2rAXPKMYJ9Y1T6rtOIf2OzTZKKhnRNXk+N\n"
+    key += "1axHtt3ceTMEw6fc0s8/tKFWywKBgQDG82q+xy96x2LMaz7BqGTqyIiHZcbUc+Zm\n"
+    key += "30LSjVznZ0zwyaih9WYrjmS3t4b7+z7IGfd2f2gyiniGQDnEcp/pEAxHEpLoMp/d\n"
+    key += "Slv3YFn+rLvdntYcNzoeiEUDkE4d+IGOpBagAiCXqEdKcEvyVJv0KhXIb3LYZQ5C\n"
+    key += "felUFMhNJwKBgQCy4nbPDt1ElXrLYwEb/+E3bjn/79iVun4b/77HBN1P10deV6Lw\n"
+    key += "+FBP8g8m1ga4A+TF+xTRHEUGCYktyaoDGr7sOzS4S5fpEEweTsn9ljyAMUyEMO9W\n"
+    key += "sm2ZnS5eEpb2NcZ7JyD9s9aR9izwZu6qBL+O3mhva8TlYKSKS0YPRHtozQKBgQCj\n"
+    key += "EZ+b8b2MAGONtBXDO9hDzMyDVjurpbfi9/pYhD/y9+vLrS7IWVE+QD9zij1cymmC\n"
+    key += "MC5ydSmdy3vQZlIzH9TMfjfiBWpeYihAhJNu5w28vi5aD7fldqrvnbgbnKs6y5a9\n"
+    key += "qOdWjYfTZr3QWM0XOpx9fAVQvXC/x8zxWSznmwU2nwKBgQC5IzkhziGh6sUi6uoX\n"
+    key += "tHaZD1XBLuIbcEUgIWBTaHk4JJbdRurLYNh3rI1fDTmaJE2a0ChRQ7UjefIbv3yU\n"
+    key += "QO1qe38SapzngEy251ot65nkMnsV4jgeqPW2QVFQ/zrqr8qlIqFhH7PpyuWcGQKJ\n"
+    key += "oewbQh5hZMPnM923Rl1ZnbBxzw==\n"
+    key += "-----END PRIVATE KEY-----\n"
+    key
+}
+
+#Test("RFC 8291 Appendix A: the example push encrypts to the example body") {
+    rng := push_test_rng()
+    sender: push_key_pair(push_b64("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), rng) ?? panic("the sender's key")
+    assert(sender.public == push_b64("BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8"))
+    ua_public: push_b64("BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4")
+    auth_secret: push_b64("BTBZMqHH6r4Tts7J_aSIgg")
+    salt: push_b64("DGv6ra1nlYgDCS1FRnbzlw")
+    body: push_web_encrypt("When I grow up, I want to be a watermelon".bytes(), ua_public, auth_secret, sender, salt, rng) ?? panic("the example push seals")
+    assert_eq(base64.encode_url(body), "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN")
+}
+
+#Test("A push opens with the subscription's key, and a fresh seal differs each time") {
+    rng := push_test_rng()
+    ua: push_key_pair(push_b64("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"), rng) ?? panic("the subscription's key")
+    auth_secret: push_b64("BTBZMqHH6r4Tts7J_aSIgg")
+    first: push_web_seal("ping".bytes(), ua.public, auth_secret, rng) ?? panic("the first push seals")
+    second: push_web_seal("ping".bytes(), ua.public, auth_secret, rng) ?? panic("the second push seals")
+    assert(first != second)
+    assert_eq(first.len(), 16 + 4 + 1 + 65 + 4 + 1 + 16)
+    want := "ping".bytes()
+    want.push(U8{2})
+    assert_eq(push_test_open(first, ua, auth_secret), want)
+}
+
+#Test("A payload longer than one record, and keys of the wrong size, are refused") {
+    rng := push_test_rng()
+    ua: push_key_pair(push_b64("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"), rng) ?? panic("the subscription's key")
+    auth_secret: push_b64("BTBZMqHH6r4Tts7J_aSIgg")
+    long := [U8]{}
+    loop _ in 0..<(PUSH_PAYLOAD_MAX + 1) -> long.push(U8{120})
+    too_long: if push_web_seal(long, ua.public, auth_secret, rng) == {
+        .Ok(_) -> ""
+        .Err(e) -> e.reason
+    }
+    assert_eq(too_long, "a push payload is at most 3993 bytes, not 3994")
+    _: long.pop()
+    assert(push_web_seal(long, ua.public, auth_secret, rng) == .Ok(_))
+    short_key: if push_web_seal("ping".bytes(), cipher.bytes_of(ua.public, 0, 64), auth_secret, rng) == {
+        .Ok(_) -> ""
+        .Err(e) -> e.reason
+    }
+    assert_eq(short_key, "a subscription's public key is 65 bytes, not 64")
+}
+
+#Test("RFC 6979 A.2.5: ES256 of \"sample\" is the example's r and s") {
+    rng := push_test_rng()
+    private: bn.write_binary(bn.read_string(16, "C9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721") ?? panic("x"), 32) ?? panic("x bytes")
+    got: push_es256(private, "sample".bytes(), rng) ?? panic("sign")
+    r: bn.write_binary(bn.read_string(16, "EFD48B2AACB6A8FD1140DD9CD45E81D69D2C877B56AAF991C34D0EA84EAF3716") ?? panic("r"), 32) ?? panic("r bytes")
+    s: bn.write_binary(bn.read_string(16, "F7CB1C942D657C41D436C7A1B6E29F65F3E900DBB9AFF4064DC4AB2F843ACDA8") ?? panic("s"), 32) ?? panic("s bytes")
+    want := r.copy()
+    want.extend(s)
+    assert_eq(got, want)
+}
+
+#Test("A VAPID header carries a token its key verifies, with the push service's origin") {
+    rng := push_test_rng()
+    sender: push_key_pair(push_b64("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), rng) ?? panic("the sender's key")
+    header: push_vapid_authorization("https://push.example.net", "mailto:push@example.com", 1700000000, 1700043200, sender, rng) ?? panic("the header signs")
+    key_part: ", k={base64.encode_url(sender.public)}"
+    assert(header.starts_with("vapid t="))
+    assert(header.ends_with(key_part))
+    token: String.from_bytes(cipher.bytes_of(header.bytes(), 8, header.len() - 8 - key_part.len())) ?? panic("token text")
+    claims: push_test_jwt_claims(token, "{{\"typ\":\"JWT\",\"alg\":\"ES256\"}}", sender.public)
+    assert_eq(claims, "{{\"aud\":\"https://push.example.net\",\"exp\":1700043200,\"sub\":\"mailto:push@example.com\"}}")
+    late: if push_vapid_authorization("https://push.example.net", "mailto:push@example.com", 1700000000, 1700000000 + PUSH_VAPID_MAX_SECONDS + 1, sender, rng) == {
+        .Ok(_) -> ""
+        .Err(e) -> e.reason
+    }
+    assert_eq(late, "a VAPID token expires within 24 hours, not in 86401 seconds")
+}
+
+#Test("Generators seeded from the system entropy source draw different keys") {
+    first_rng := push_rng() ?? panic("the system entropy source")
+    second_rng := push_rng() ?? panic("the system entropy source")
+    first: push_key_pair_new(first_rng) ?? panic("the first key")
+    second: push_key_pair_new(second_rng) ?? panic("the second key")
+    assert(first.public != second.public)
+    assert_eq(first.public.len(), 65)
+}
+
+#Test("A collapse key is 32 base64url characters of its run, recipient and state") {
+    key: push_collapse_key("Crew.remind_due_today@29170080", "acct_ann", "{{\"TaskView\":{{\"id\":7}}}}")
+    assert_eq(key, "pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC")
+    assert(push_collapse_key("Crew.remind_due_today@29170080", "acct_ann", "{{\"TaskView\":{{\"id\":8}}}}") != key)
+    assert(push_collapse_key("Crew.remind_due_today@29170140", "acct_ann", "{{\"TaskView\":{{\"id\":7}}}}") != key)
+    // The parts are length-prefixed: moving a byte between them changes it.
+    assert_eq(push_collapse_key("ab", "c", ""), "EYqH7y1LOewmi9aeInkSJU9tmdHxP4ZM")
+    assert_eq(push_collapse_key("a", "bc", ""), "jc5kwA44pgiD66SQRk6rk0Fx2n4S1HSY")
+}
+
+#Test("An APNs push carries a provider token its .p8 key verifies, and the collapse key") {
+    rng := push_test_rng()
+    private: push_ec_private(push_test_apns_key(), rng) ?? panic("the .p8 key")
+    sender: push_key_pair(private, rng) ?? panic("the key pair")
+    token: push_apns_token("TEAM123456", "KEY1234567", 1700000000, private, rng) ?? panic("the provider token signs")
+    assert_eq(push_test_jwt_claims(token, "{{\"alg\":\"ES256\",\"kid\":\"KEY1234567\"}}", sender.public), "{{\"iss\":\"TEAM123456\",\"iat\":1700000000}}")
+    request: push_apns_request("https://api.push.apple.com", "a1b2c3", "com.example.crew", token, "pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC", "Due \"today\"", "Ship v2", "{{\"TaskView\":{{\"id\":7}}}}")
+    assert_eq(request.url, "https://api.push.apple.com/3/device/a1b2c3")
+    assert_eq(push_test_header(request, "authorization"), "bearer {token}")
+    assert_eq(push_test_header(request, "apns-topic"), "com.example.crew")
+    assert_eq(push_test_header(request, "apns-push-type"), "alert")
+    assert_eq(push_test_header(request, "apns-collapse-id"), "pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC")
+    body: String.from_bytes(request.body) ?? panic("body text")
+    assert_eq(body, "{{\"aps\":{{\"alert\":{{\"title\":\"Due \\\"today\\\"\",\"body\":\"Ship v2\"}}}},\"open\":\"{{\\\"TaskView\\\":{{\\\"id\\\":7}}}}\"}}")
+    rsa: if push_ec_private(push_test_fcm_key(), rng) == {
+        .Ok(_) -> ""
+        .Err(e) -> e.reason
+    }
+    assert_eq(rsa, "the key is no EC key")
+}
+
+#Test("An FCM push trades an RS256 assertion for a token, and tags the notification with the collapse key") {
+    rng := push_test_rng()
+    exchange: push_fcm_token_request("push@crew-test.iam.gserviceaccount.com", "https://oauth2.googleapis.com/token", 1700000000, push_test_fcm_key(), rng) ?? panic("the assertion signs")
+    assert_eq(exchange.url, "https://oauth2.googleapis.com/token")
+    assert_eq(push_test_header(exchange, "content-type"), "application/x-www-form-urlencoded")
+    // RSASSA-PKCS1-v1_5 is deterministic: `openssl dgst -sha256 -sign` of the
+    // signing input with the test key gives this assertion.
+    assertion: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJwdXNoQGNyZXctdGVzdC5pYW0uZ3NlcnZpY2VhY2NvdW50LmNvbSIsInNjb3BlIjoiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vYXV0aC9maXJlYmFzZS5tZXNzYWdpbmciLCJhdWQiOiJodHRwczovL29hdXRoMi5nb29nbGVhcGlzLmNvbS90b2tlbiIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.IPr9LmHwt0FxWx2bqQe3Pq_Th9CwoYJyX1cftU5tfvW993CfUBRfEa8l8yCfE8fF1GYRbw-fjgIh57MofCuJlf-U9CoS7rE67I-jRPpFy1o0WBVF3EUbh__yLxi1CpmzQsIGIgaQptjpCVycF5KVovj4PgdaNi4bHot71lOA8eaNiWHsWMNn197rf3BlvTr8-9diHBdLKsQeMuN5UaPBw-09ngIqAHwbwD_SQq2KiGtNquF6TYCwweAVMFWdmtaDtJARU8DLZmyPDCrrRFsCOnK4nSLFlBXGE1WZpE2WWULB2uZbuG-cSRiXYxkL3ftXm-vRJDOKspdwpilvhA-jVQ"
+    assert_eq(String.from_bytes(exchange.body) ?? panic("form text"), "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={assertion}")
+    request: push_fcm_request("https://fcm.googleapis.com", "crew-test", "ya29.token", "dev-1", "pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC", "Due today", "Ship v2", "{{\"TaskView\":{{\"id\":7}}}}")
+    assert_eq(request.url, "https://fcm.googleapis.com/v1/projects/crew-test/messages:send")
+    assert_eq(push_test_header(request, "authorization"), "Bearer ya29.token")
+    body: String.from_bytes(request.body) ?? panic("body text")
+    assert_eq(body, "{{\"message\":{{\"token\":\"dev-1\",\"notification\":{{\"title\":\"Due today\",\"body\":\"Ship v2\"}},\"android\":{{\"notification\":{{\"tag\":\"pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC\"}}}},\"data\":{{\"open\":\"{{\\\"TaskView\\\":{{\\\"id\\\":7}}}}\"}}}}}}")
+}
+
+#Test("A Web Push request is sealed to the subscription, signed for its origin and topped with the collapse key") {
+    rng := push_test_rng()
+    ua: push_key_pair(push_b64("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"), rng) ?? panic("the subscription's key")
+    sender: push_key_pair(push_b64("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), rng) ?? panic("the sender's key")
+    to: PushSubscription{endpoint: "https://push.example.net:8443/wpush/v2/abc", public: ua.public.copy(), auth_secret: push_b64("BTBZMqHH6r4Tts7J_aSIgg")}
+    request: push_web_request(to, sender, "mailto:push@example.com", 1700000000, "pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC", "Due today", "Ship v2", "{{\"TaskView\":{{\"id\":7}}}}", rng) ?? panic("the push seals")
+    assert_eq(request.url, "https://push.example.net:8443/wpush/v2/abc")
+    assert_eq(push_test_header(request, "topic"), "pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC")
+    assert_eq(push_test_header(request, "ttl"), "86400")
+    assert_eq(push_test_header(request, "content-encoding"), "aes128gcm")
+    authorization: push_test_header(request, "authorization")
+    key_part: ", k={base64.encode_url(sender.public)}"
+    token: String.from_bytes(cipher.bytes_of(authorization.bytes(), 8, authorization.len() - 8 - key_part.len())) ?? panic("token text")
+    assert_eq(push_test_jwt_claims(token, "{{\"typ\":\"JWT\",\"alg\":\"ES256\"}}", sender.public), "{{\"aud\":\"https://push.example.net:8443\",\"exp\":1700043200,\"sub\":\"mailto:push@example.com\"}}")
+    want := "{{\"title\":\"Due today\",\"body\":\"Ship v2\",\"tag\":\"pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC\",\"open\":\"{{\\\"TaskView\\\":{{\\\"id\\\":7}}}}\"}}".bytes()
+    want.push(U8{2})
+    assert_eq(push_test_open(request.body, ua, to.auth_secret), want)
+    assert_eq(push_origin("http://127.0.0.1:9000/push/1"), .Val("http://127.0.0.1:9000"))
+    assert_eq(push_origin("https://push.example.net"), .Val("https://push.example.net"))
+    assert_eq(push_origin("ftp://push.example.net/x"), None)
+    assert_eq(push_origin("https:///x"), None)
+}
