@@ -195,6 +195,20 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     assert(core_declarations_source_problems(copied, core_declarations_sources(copied)).any(fn(problem) { problem.contains("Core type leaf JetDataPlotAggregate of core.data.plot is declared by none of its sources") }))
 }
 
+#Test("error_types lists every exported type its source marks #Error and nothing else") {
+    source: core_declarations_core()
+    assert(CORE_DECLARATIONS.error_types.contains("NetError") && CORE_DECLARATIONS.error_types.contains("TaskFailure"))
+    dropped_source: source.replace("ModError, NetError, MIMEError", "ModError, MIMEError")
+    assert(dropped_source != source)
+    dropped: core_declarations_fixture(dropped_source) ?? panic("the dropped error type was refused early: {err.message}")
+    assert(core_declarations_source_problems(dropped, core_declarations_sources(dropped)).any(fn(problem) { problem.contains("Core type leaf NetError of core.net is declared #Error by its sources") }))
+    stray_source: source.replace("error_types {{ AppError, ", "error_types {{ AppError, NetErrorDetail, ")
+    assert(stray_source != source)
+    stray: core_declarations_fixture(stray_source) ?? panic("the stray error type was refused early: {err.message}")
+    assert(core_declarations_source_problems(stray, core_declarations_sources(stray)).any(fn(problem) { problem.contains("error_types lists NetErrorDetail") }))
+    assert(core_declarations_error(source.replace("error_types {{ AppError, ", "error_types {{ AppError, AppError, ")).contains("Core error_types declarations contain a duplicate: AppError"))
+}
+
 #Test("dispatcher row expressions evaluate to their CoreCallRecord facts") {
     none: [String:String]{}
     shortcut: (core_decl_call_record("CoreCallRecord::source_owned(\"core.ui.host\", \"shortcut\", &[false, false]).with_ui_capabilities(&[\"UI.Shortcuts\"])", "source-owned constructor fixture", none) ?? panic("the source-owned constructor was refused: {err.message}")).record
