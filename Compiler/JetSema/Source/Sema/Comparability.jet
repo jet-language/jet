@@ -25,6 +25,9 @@ use jet_foundation.[
     diagnostic_registry_with_edit_grade,
     owned_trait_implies,
     owned_trait_requested,
+    core_enum_cases,
+    core_enum_payload_variants,
+    core_enum_variant_payload,
     module_is_core,
 ]
 
@@ -546,6 +549,7 @@ sema_type_equatable: fn(environment: SemaScopeEnvironment, program: SemaProgramT
             }
             // Compiler fact enums compare by variant; codegen folds the test.
             if sema_fact_enum_menu(ty, environment, program) != None -> return true
+            if sema_comparability_bare_core_enum(environment, program, name) == .Val(equatable) -> return equatable
             sema_comparability_implements(environment, program, ty, "Equatable")
         }
         .Apply(name, args) -> {
@@ -572,6 +576,28 @@ sema_type_equatable: fn(environment: SemaScopeEnvironment, program: SemaProgramT
         }
         .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Quantity(_, _) | .Measure(_) -> false
     }
+}
+
+// A Core enum named bare without its module in scope (`Key` with no `use
+// core.term`): it compares as its Core declaration does, by case and then by
+// payload, so it is equatable when every payload type is. None when the name
+// is no Core enum, or names a declaration in scope.
+sema_comparability_bare_core_enum: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Bool? Never! {
+    leaf: sema_serde_named_leaf(name)
+    cases: core_enum_cases(leaf) ?? core_enum_payload_variants(leaf) ?? return None
+    if program.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) == .Val(row) {
+            if !graph.modules[row.module_index].nominals[row.row].compiler_owned -> return None
+        }
+    }
+    loop case_name in cases {
+        payload: core_enum_variant_payload(leaf, case_name) ?? return Val(false)
+        loop ty in payload {
+            if ty == .Named(inner) && sema_serde_named_leaf(inner) == leaf -> next
+            if !sema_type_equatable(environment, program, ty) -> return Val(false)
+        }
+    }
+    Val(true)
 }
 
 // Operands whose comparisons the scalar operator path already types, including
