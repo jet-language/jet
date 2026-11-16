@@ -5122,6 +5122,7 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `node_color(label: String, width: Float, height: Float, color: Color) -> UINode` | node | Construct a node filled with a `core.color` color. |
 | `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
 | `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
+| `asset(path: String) -> UIAsset` | asset | Name a file the program ships, by its path from the calling file's directory. |
 
 Both backends have the same methods. `measure(tree, constraint) -> Size` is a
 box's widest child by its children's summed heights, any other node its own
@@ -5138,6 +5139,16 @@ latest mount drew: `fill(rect, color)` for each leaf but a text, then
 terminal cells: `frame_lines() -> [String]` gives its rows without trailing
 white space and `render_count() -> Int` counts its paints. In a web build the
 page shows each paint.
+
+`UIAsset` is `{path: String}`: a file the program ships with it, such as an
+image, a font or an icon. Its path is resolved as `embed_bytes` resolves its
+path, from the calling file's own directory, so `asset("brand/logo.svg")`
+called in `Screens/home.jet` names `Screens/brand/logo.svg`. The compiler
+checks a path written as a string literal while the program builds. One that
+is absolute or has a `..` part is E0957, as for `embed_bytes`; one that names
+no file, a directory among them, is E2822 (`jet.MissingAsset`), which names
+the path it resolved to. Both are reported at the path. A path built at run
+time is not checked.
 
 `UIPreviewViewport` is `{device: UIPreviewDevice, width: Int, height: Int,
 scale: Int}` and `UIPreview` is `{kind: UIPreviewKind, name: String, viewport:

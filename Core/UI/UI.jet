@@ -309,6 +309,17 @@ node_shortcut: fn(n: UINode, shortcut: UIShortcut) -> UINode Never! {
     result
 }
 
+// A file the program ships with it, such as an image, a font or an icon,
+// named by its path from the calling file's own directory, as `embed_bytes`
+// names one: `asset("brand/logo.svg")` beside `Screens/home.jet` is
+// `Screens/brand/logo.svg`. The compiler checks a written path while the
+// program builds, and a path that names no file there is an error (E2822).
+UIAsset: struct {
+    path: String
+}
+
+asset: fn(path: String) -> UIAsset Never! { UIAsset{path: path} }
+
 preview_registry: fn(entries: &&[UIPreview]) -> UIPreviewRegistry UIPreviewError! {
     if entries.len() > 64 -> return Err(UIPreviewError.TooManyPreviews)
     loop (index, entry) in entries {
@@ -2122,4 +2133,10 @@ priv html_name: fn(tree: UINode) -> String Never! {
         html.node(tree),
         "<div><p>Tom &amp; Jerry&#x27;s &quot;plan&quot;</p><button type=\"button\" aria-label=\"Save the &lt;draft&gt;\">Save</button><button type=\"button\" data-jet-click=\"7\">Go</button><input type=\"text\" value=\"a&lt;b\"><div style=\"color:#ff0000\">hot</div><div>free</div></div>",
     )
+}
+
+#Test("an asset is named by its path from the calling file") {
+    logo: asset("brand/logo.svg")
+    assert_eq(logo.path, "brand/logo.svg")
+    assert(logo == UIAsset{path: "brand/logo.svg"})
 }

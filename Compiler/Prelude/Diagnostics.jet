@@ -22771,6 +22771,31 @@ StateWithoutScreen: struct {
     }
 }
 
+MissingAsset: struct {
+    path: String
+    resolved: String
+
+    impl Diagnostic {
+        code: "E2822"
+        safety_class: .Soundness
+        safety_reason: "An asset path that names no file would ship an image, a font or an icon that points at nothing on every target the program builds."
+        expert_path: "none: putting the file at the path the call resolves to, or naming a file that is there, gives every target the asset"
+        stage: [.Compile]
+        meaning: "A `ui.asset` path that names no file, resolved from the calling file's own directory as `embed_bytes` resolves its path"
+        detail: true
+
+        what: fn(self) -> String { "`ui.asset(\"{self.path}\")` names `{self.resolved}`, and there is no file there." }
+
+        why: fn(self) -> String {
+            "An asset path names a file from the calling file's own directory, as `embed_bytes` names one, and every target ships that file with the program; the path is checked while the program builds, so a path with no file would leave the image, font or icon missing on every target."
+        }
+
+        fix: fn(self) -> String {
+            "Put the file at `{self.resolved}`, or name a file that is there, relative to this file's directory."
+        }
+    }
+}
+
 AppFeatureNotOnTarget: struct {
     feature: String
     required: String

@@ -15,6 +15,9 @@ use jet_foundation.[
     SymbolKind,
     Type,
     core_identity_is,
+    diagnostic_registry_row,
+    expr_span,
+    foundation_byte_text,
     type_name,
 ]
 
@@ -319,10 +322,60 @@ sema_ui_handle_mount: fn(args: [CallArg], span: Span, expected: Type?, environme
     SemaDirectSpecialCheck{handled: true, value: sema_check_expression(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
 }
 
+// `ui.asset(path)` names a file as `embed_bytes` does, from the calling file's
+// own directory: a literal path that breaks that path law is E0957, and one
+// the driver found no file for (Program.app_missing_assets) is E2822 naming
+// the path it resolved to, both at the path, and the call is checked no
+// further.
+sema_ui_asset_refused: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+    if args.len() != 1 -> return false
+    path: sema_ui_asset_literal(args[0].expr) ?? return false
+    named: sema_comptime_input_named(path)
+    if sema_comptime_input_path_law(named) == .Val(problem) {
+        diagnostics.push(sema_comptime_input_path_error("ui.asset", problem, expr_span(args[0].expr)))
+        return true
+    }
+    graph: program.registration_graph ?? return false
+    row: sema_app_module_row(environment, graph)
+    if row < 0 || !graph.modules[row].program.app_missing_assets.contains(path) -> return false
+    file: graph.modules[row].source_file
+    cut: file.rfind("/")
+    resolved: if cut < 0 -> named.copy() else -> "{foundation_byte_text(file.bytes(), 0, cut)}/{named}"
+    entry: diagnostic_registry_row("E2822") ?? panic("E2822 must have a registry row")
+    diagnostics.push(sema_error("E2822", expr_span(args[0].expr), sema_ui_asset_text(entry.what, path, resolved), sema_ui_asset_text(entry.why, path, resolved), sema_ui_asset_text(entry.fix, path, resolved)))
+    true
+}
+
+sema_ui_asset_text: fn(text: String, path: String, resolved: String) -> String Never! {
+    text.replace("{{path}}", path).replace("{{resolved}}", resolved)
+}
+
+// The path written as string literal parts, as the driver reads it.
+sema_ui_asset_literal: fn(expression: Expr) -> String? Never! {
+    if expression == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == .Lit(value) -> text = "{text}{value}" else -> return None
+        }
+        return Val(text)
+    }
+    None
+}
+
 // `ui.mount`, `ui.button`, `ui.text_input` and `ui.reactive_render` have no
 // Core registry row, so (like `scope.guard`) they resolve through the import
-// before the registry route.
+// before the registry route. `ui.asset` has its path checked first
+// (sema_ui_asset_refused) and otherwise goes on to its registry row.
 sema_call_try_ui_core_call: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if module_name == "core.ui" && member == "asset" {
+        if !sema_ui_asset_refused(args, environment, program, diagnostics) {
+            return SemaDirectSpecialCheck{handled: false, value: None}
+        }
+        if sema_call_core_import_target(environment, program, alias) == .Val(imported) {
+            _: sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, context)
+        }
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
     if module_name != "core.ui" || (member != "mount" && member != "button" && member != "text_input" && member != "reactive_render") {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }

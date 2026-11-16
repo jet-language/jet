@@ -65,9 +65,9 @@ sema_comptime_input_noun: fn(builtin: String) -> String Never! {
     if builtin == "find" -> "glob" else -> "path"
 }
 
-// `embed_path_err` (E0957) for a literal, word for word.
-sema_comptime_input_path_error: fn(builtin: String, problem: String, call: Call) -> Diagnostic {
-    span: call.name_span
+// `embed_path_err` (E0957) for a literal at `span`, word for word; `ui.asset`
+// names its file by the same law.
+sema_comptime_input_path_error: fn(builtin: String, problem: String, span: Span) -> Diagnostic {
     noun: sema_comptime_input_noun(builtin)
     if problem == "absolute" {
         return sema_error("E0957", span, "`{builtin}` {noun} must be relative", "an absolute {noun} reaches outside the project", "use a {noun} relative to this file's own directory")
@@ -113,7 +113,7 @@ sema_comptime_input_path_value: fn(call: Call, environment: SemaScopeEnvironment
     if sema_comptime_input_literal(call.args[0].expr) == .Val(literal) {
         named: sema_comptime_input_named(literal)
         if sema_comptime_input_path_law(named) == .Val(problem) {
-            diagnostics.push(sema_comptime_input_path_error(builtin, problem, call))
+            diagnostics.push(sema_comptime_input_path_error(builtin, problem, call.name_span))
             return None
         }
         return Val(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: named}}}, call.args[0].span))

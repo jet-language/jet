@@ -54,6 +54,10 @@ Program: struct {
     // Every `.routes(from:)` root this file names, as the driver read it
     // from the authorized snapshot, so sema checks the convention files.
     app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
+    // Each literal path this file passes to an `asset` call that names no
+    // file, read from the file's own directory as `embed_bytes` reads its
+    // path, so sema reports the `ui.asset` call (E2822).
+    app_missing_assets: [String]{[String]{}}
     // An `#FX(…)` written at the head of the file, above a `use` line: a cap
     // on every function in the file. Sema names it after the file.
     file_cap: ModuleCap?{None}
