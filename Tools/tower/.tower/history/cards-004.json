@@ -103266,6 +103266,56 @@
       "completedAt": "2026-11-13T11:18:48.185Z",
       "questions": [],
       "retiredAt": "2026-11-16T11:22:25.648Z"
+    },
+    {
+      "id": "c0ipht83",
+      "num": 6785,
+      "title": "A build that reflects over a program with a user E0956 now ends in an internal compiler error",
+      "body": "Found by G11Speed-5 on 2026-11-13. dev d19cdb77fd (G6Meta-ice2, \"A build that fails internally is an internal compiler error, not a staged report\") made BuildQueries raise an ICE when the keep-going staging compile fails internally. A program whose own derive has an E0956 binding (an incomplete registration) now reaches the program reflection with an incomplete registration graph, and the build ends in the ICE \"reflection snapshot is incomplete: the registration graph is incomplete\" instead of the user error E0956. That breaks I2: a user error must stay a user diagnostic. It reproduces in Examples Reflect.jet at O1 and O2 with any jet that has d19cdb77fd (the g11-core-a jet included), and in a 20-line repro: a build: fn reading b.program plus a derive with an E0956 binding. The g5-fold6 jet (base fca00acc6d) prints E0956.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c1 met by e90053e60e."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A program whose own code has a user error that leaves the registration graph incomplete (such as E0956) gets that user diagnostic, with exit code 1 and no ICE, when a build: fn reflects over the program. A real internal failure of the build still reports as an ICE with exit 101, as d19cdb77fd intended. Proof: a ui snapshot of the 20-line repro, the Reflect.jet golden at O1 and O2 matching its O0 output, and the InspectBuild test from d19cdb77fd still passing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e90053e60e (G6Meta-6785a), landed by Lander5 on 2026-11-13 on top of b047dd8c4b. With the g6-cut3b jet: Reflect at o1/o2 exits 1 with jet.ComptimeConstructNotSupported (More: E0956), no ICE; the 6785a ui case passes; jet check of JetDriver rc 0. The other g6-cut3b reds match bare dev 78d3db56d8 or belong to l0503.",
+          "at": "2026-11-13T12:55:52.854Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T11:55:27.408Z",
+      "updated": "2026-11-13T12:55:56.906Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-13T12:55:56.906Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T12:55:57.498Z"
     }
   ]
 }

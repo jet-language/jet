@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 108775,
+    "rev": 108800,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51199,12 +51199,12 @@
         },
         {
           "n": 5,
-          "text": "A decimal literal next to a Complex adopts Float the way an expected Float parameter does (D-LITCARRIER1), so `2.0 + 3.0i` prints a Complex instead of E0109. Proof: `jet test Compiler --profile cases --filter math/decimal_literal_with_complex`.",
+          "text": "A decimal literal next to a Complex adopts Float the way an expected Float parameter does (D-LITCARRIER1), so `2.0 + 3.0i` prints a Complex instead of E0109. Proof: `jet test Compiler --profile cases --filter Math/decimal_literal_with_complex`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:46:11.288Z"
+          "at": "2026-11-16T12:55:38.024Z"
         },
         {
           "n": 6,
@@ -51231,7 +51231,7 @@
       "parentId": "c0spgl2u",
       "needsAcceptance": false,
       "created": "2026-10-07T13:09:23.321Z",
-      "updated": "2026-11-16T12:55:36.705Z",
+      "updated": "2026-11-16T12:55:38.024Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -51339,39 +51339,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "D-LINK-SIBLING1=A eligibility: a link field of type @T or [@T] has the sibling fields of type T or [T] as candidates (a String field also qualifies for @String, and a type-parameter field counts); one candidate infers the tie, two or more require `#Within(field)` (an error naming both otherwise), none means untied; a construction in the module that stores links from outside the tied field is an error naming the constructor, while an empty list and untied records follow the ordinary stored-link rules. Proof: `jet test Compiler --profile cases --filter memory/link_sibling_tie_` and `jet test Compiler --profile ui --filter link_sibling_`.",
+          "text": "D-LINK-SIBLING1=A eligibility: a link field of type @T or [@T] has the sibling fields of type T or [T] as candidates (a String field also qualifies for @String, and a type-parameter field counts); one candidate infers the tie, two or more require `#Within(field)` (an error naming both otherwise), none means untied; a construction in the module that stores links from outside the tied field is an error naming the constructor, while an empty list and untied records follow the ordinary stored-link rules. Proof: `jet test Compiler --profile cases --filter Memory/link_sibling_tie_` and `jet test Compiler --profile ui --filter link_sibling_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:44:59.393Z"
+          "at": "2026-11-16T12:55:39.001Z"
         },
         {
           "n": 2,
-          "text": "A tied record's source field stays frozen while any link taken from it is alive, including links kept past an escape or a move-apart, and a copy of the record shares the frozen source without retargeting its links. Proof: `jet test Compiler --profile cases --filter memory/link_sibling_frozen_source_` on O0, O1 and O2, with a UI snapshot for the write refused while frozen.",
+          "text": "A tied record's source field stays frozen while any link taken from it is alive, including links kept past an escape or a move-apart, and a copy of the record shares the frozen source without retargeting its links. Proof: `jet test Compiler --profile cases --filter Memory/link_sibling_frozen_source_` on O0, O1 and O2, with a UI snapshot for the write refused while frozen.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:44:48.162Z"
+          "at": "2026-11-16T12:55:39.989Z"
         },
         {
           "n": 3,
-          "text": "Only a tied, frozen sibling list is exempt from D-LINK-ITEM1, and a tied record may derive Encode but a derived Decode is refused with a registered error. Proof: `jet test Compiler --profile cases --filter memory/link_sibling_item_exemption` and `jet test Compiler --profile ui --filter link_sibling_decode_refused`.",
+          "text": "Only a tied, frozen sibling list is exempt from D-LINK-ITEM1, and a tied record may derive Encode but a derived Decode is refused with a registered error. Proof: `jet test Compiler --profile cases --filter Memory/link_sibling_item_exemption` and `jet test Compiler --profile ui --filter link_sibling_decode_refused`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:44:49.359Z"
+          "at": "2026-11-16T12:55:40.950Z"
         },
         {
           "n": 4,
-          "text": "The tie is published as a fact like inferred link sources, and hover and `jet inspect` show which field a link field is tied to. Proof: `jet test Compiler --profile cases --filter cli_inspect/link_sibling_tie_fact`.",
+          "text": "The tie is published as a fact like inferred link sources, and hover and `jet inspect` show which field a link field is tied to. Proof: `jet test Compiler --profile cases --filter CLIInspect/link_sibling_tie_fact`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:44:50.535Z"
+          "at": "2026-11-16T12:55:41.941Z"
         }
       ],
       "refs": [
@@ -51385,8 +51385,8 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-07T21:06:44.439Z",
-      "updated": "2026-11-15T04:45:20.781Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:55:41.941Z",
+      "updatedBy": "Main",
       "goals": [
         "G10"
       ],
@@ -51434,12 +51434,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A module `STORE: Shared{…}` holder works (D-CORE-GLOBAL-STATE1=A): a `name: value` declaration whose handle is always present and cannot be reassigned (`#Persist` only for hot-reload retention), a closed, pure, non-suspending, infallible initializer checked under the Shared crossing rules, once-only publication under contention with no take/set gap, and the existing Shared lock, transaction and cleanup law; cyclic initialization is refused, not hung. Proof: `jet test Compiler --profile cases --filter globals/shared_holder_` on O0, O1 and O2 and `jet test Compiler --profile ui --filter shared_holder_initializer_not_closed`.",
+          "text": "A module `STORE: Shared{…}` holder works (D-CORE-GLOBAL-STATE1=A): a `name: value` declaration whose handle is always present and cannot be reassigned (`#Persist` only for hot-reload retention), a closed, pure, non-suspending, infallible initializer checked under the Shared crossing rules, once-only publication under contention with no take/set gap, and the existing Shared lock, transaction and cleanup law; cyclic initialization is refused, not hung. Proof: `jet test Compiler --profile cases --filter Globals/shared_holder_` on O0, O1 and O2 and `jet test Compiler --profile ui --filter shared_holder_initializer_not_closed`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:42:16.109Z"
+          "at": "2026-11-16T12:55:42.893Z"
         },
         {
           "n": 2,
@@ -51461,21 +51461,21 @@
         },
         {
           "n": 4,
-          "text": "Hot reload of a module Shared holder whose body and initializer stay compatible keeps its values, and the identity, layout and migration reports are correct. Proof: `jet test Compiler --profile cases --filter globals/shared_holder_reload_keeps_values`.",
+          "text": "Hot reload of a module Shared holder whose body and initializer stay compatible keeps its values, and the identity, layout and migration reports are correct. Proof: `jet test Compiler --profile cases --filter Globals/shared_holder_reload_keeps_values`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:42:11.224Z"
+          "at": "2026-11-16T12:55:43.830Z"
         },
         {
           "n": 5,
-          "text": "RNG, environment overlay, fault, auth and native storage state each has one Jet owner (a Jet runtime cell such as LogicalEnvironment.jet as the process default, or a Core Shared holder), with no second copy and browser semantics kept; independent worlds and their descendant providers never clear or use the process default. Proof: `jet test Compiler --profile cases --filter globals/one_owner_per_state_kind`.",
+          "text": "RNG, environment overlay, fault, auth and native storage state each has one Jet owner (a Jet runtime cell such as LogicalEnvironment.jet as the process default, or a Core Shared holder), with no second copy and browser semantics kept; independent worlds and their descendant providers never clear or use the process default. Proof: `jet test Compiler --profile cases --filter Globals/one_owner_per_state_kind`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:42:12.262Z"
+          "at": "2026-11-16T12:55:44.810Z"
         }
       ],
       "refs": [
@@ -51489,8 +51489,8 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-07T21:06:58.270Z",
-      "updated": "2026-11-15T03:42:43.925Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:55:44.810Z",
+      "updatedBy": "Main",
       "goals": [
         "G3"
       ],
@@ -51721,12 +51721,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Mechanism (D-CORE-PRIVATE-SEAM1=A, ratified 2026-11-01). `priv(toolchain) module` parses only in a toolchain package, meaning one whose source root lies inside the Jet distribution root that supplied Core (Core, Compiler/*, Jetpack/*); package names play no part. In any other package it is E0414, whose registry text becomes \"only `priv(package)` exists outside the toolchain\". A `use` or qualified path into a toolchain-private module from a non-toolchain package is E0605 (\"`core.files.toolchain` is private to the Jet toolchain\"). LSP completion and the generated reference never list such a module. Proof: new UI snapshots tests/ui/priv_toolchain_in_user_package.{jet,stderr} (E0414) and tests/ui/core_files_toolchain_user_use.{jet,stderr} (E0605). The ballot probe (a user `run()` calling the held-folder seam, today `jet check` clean) becomes E0605. A JetLSP completion test shows `core.files.` does not offer `toolchain`.",
+          "text": "Mechanism (D-CORE-PRIVATE-SEAM1=A, ratified 2026-11-01). `priv(toolchain) module` parses only in a toolchain package, meaning one whose source root lies inside the Jet distribution root that supplied Core (Core, Compiler/*, Jetpack/*); package names play no part. In any other package it is E0414, whose registry text becomes \"only `priv(package)` exists outside the toolchain\". A `use` or qualified path into a toolchain-private module from a non-toolchain package is E0605 (\"`core.files.toolchain` is private to the Jet toolchain\"). LSP completion and the generated reference never list such a module. Proof: new UI snapshots Tests/UI/priv_toolchain_in_user_package.{jet,stderr} (E0414) and Tests/UI/core_files_toolchain_user_use.{jet,stderr} (E0605). The ballot probe (a user `run()` calling the held-folder seam, today `jet check` clean) becomes E0605. A JetLSP completion test shows `core.files.` does not offer `toolchain`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T19:05:04.514Z"
+          "at": "2026-11-16T12:55:45.862Z"
         },
         {
           "n": 2,
@@ -51739,12 +51739,12 @@
         },
         {
           "n": 3,
-          "text": "Compiler-generated calls pass. A call the compiler lowers into a toolchain-private module is admitted, while the same name written in user source is E0605. Proof via seam 4: user `list.sort_by(f)` lowers to the Core collections sort kernel, now moved into a `priv(toolchain) module`. Examples golden collections sort rows pass on o0/o1/o2, and tests/ui/sort_kernel_user_call.{jet,stderr} shows E0605.",
+          "text": "Compiler-generated calls pass. A call the compiler lowers into a toolchain-private module is admitted, while the same name written in user source is E0605. Proof via seam 4: user `list.sort_by(f)` lowers to the Core collections sort kernel, now moved into a `priv(toolchain) module`. Examples golden collections sort rows pass on o0/o1/o2, and Tests/UI/sort_kernel_user_call.{jet,stderr} shows E0605.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T19:05:09.189Z"
+          "at": "2026-11-16T12:55:46.814Z"
         },
         {
           "n": 4,
@@ -51757,12 +51757,12 @@
         },
         {
           "n": 5,
-          "text": "Seam 5 under D-CORE-PRIVATE-SEAM1=A: the compiler's build-receipt producer reads Core/build's session and key state (keys factory, session plan, target storage) through a `priv(toolchain)` reader instead of module-private access; the receipt is unchanged and a user `use` of the reader is E0605. Proof: `jet test Compiler --profile cases --filter core_seams/build_receipt_reader` and `jet test Compiler --profile ui --filter E0605_toolchain_reader`.",
+          "text": "Seam 5 under D-CORE-PRIVATE-SEAM1=A: the compiler's build-receipt producer reads Core/build's session and key state (keys factory, session plan, target storage) through a `priv(toolchain)` reader instead of module-private access; the receipt is unchanged and a user `use` of the reader is E0605. Proof: `jet test Compiler --profile cases --filter CoreSeams/build_receipt_reader` and `jet test Compiler --profile ui --filter E0605_toolchain_reader`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:11:54.008Z"
+          "at": "2026-11-16T12:55:47.746Z"
         },
         {
           "n": 6,
@@ -51786,7 +51786,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-10-08T11:29:02.821Z",
-      "updated": "2026-11-16T01:11:04.157Z",
+      "updated": "2026-11-16T12:55:47.746Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -52037,84 +52037,84 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`jet --help | wc -l` prints at most 50: the common commands, one line each (419 lines on 2026-10-28). Proof: `jet test Compiler --profile cases --filter cli_parts_surface/top_help_is_short`.",
+          "text": "`jet --help | wc -l` prints at most 50: the common commands, one line each (419 lines on 2026-10-28). Proof: `jet test Compiler --profile cases --filter CLIPartsSurface/top_help_is_short`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:51.156Z"
+          "at": "2026-11-16T12:55:48.692Z"
         },
         {
           "n": 2,
-          "text": "`jet help <command>` prints only that command's flags, and `jet help --all` prints the full table, all from the one option table. Proof: `jet test Compiler --profile cases --filter cli_parts_surface/help_command_and_all`.",
+          "text": "`jet help <command>` prints only that command's flags, and `jet help --all` prints the full table, all from the one option table. Proof: `jet test Compiler --profile cases --filter CLIPartsSurface/help_command_and_all`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:52.176Z"
+          "at": "2026-11-16T12:55:49.657Z"
         },
         {
           "n": 3,
-          "text": "No help summary line wraps mid-word at 80 columns. Proof: `jet test tests/guards --filter help_lines_fit_80_columns`.",
+          "text": "No help summary line wraps mid-word at 80 columns. Proof: `jet test Tests/Guards --filter help_lines_fit_80_columns`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:53.339Z"
+          "at": "2026-11-16T12:55:50.663Z"
         },
         {
           "n": 4,
-          "text": "D-JET-HOME1=A is carried out as one verified cutover that keeps keys, trust and retention records. After any jet command on a clean home directory, only ~/.config/jet/ and ~/.cache/jet/ exist (honouring XDG_CONFIG_HOME and XDG_CACHE_HOME), and ~/.jet and ~/.local/share/jet are never created. The same work sits on frozen #4573. Proof: `jet test Compiler --profile cases --filter cli_home/clean_home_creates_only_config_and_cache`.",
+          "text": "D-JET-HOME1=A is carried out as one verified cutover that keeps keys, trust and retention records. After any jet command on a clean home directory, only ~/.config/jet/ and ~/.cache/jet/ exist (honouring XDG_CONFIG_HOME and XDG_CACHE_HOME), and ~/.jet and ~/.local/share/jet are never created. The same work sits on frozen #4573. Proof: `jet test Compiler --profile cases --filter CLIHome/clean_home_creates_only_config_and_cache`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:54.729Z"
+          "at": "2026-11-16T12:55:51.659Z"
         },
         {
           "n": 5,
-          "text": "No two registry flags share a meaning: of each pair the Jet CLI accepts today (--route/--path, --cook/--cook-mode, --force-clean/--clean in Compiler/JetCli/Source/Cli/Commands.jet), one spelling is kept, and a removed spelling gets the ordinary unknown-flag error with its normal suggestion. Which spelling of each pair is kept is on Main's ballot list (2026-11-15). Proof: `jet test tests/guards --filter cli_flag_meanings_unique`.",
+          "text": "No two registry flags share a meaning: of each pair the Jet CLI accepts today (--route/--path, --cook/--cook-mode, --force-clean/--clean in Compiler/JetCLI/Source/CLI/Commands.jet), one spelling is kept, and a removed spelling gets the ordinary unknown-flag error with its normal suggestion. Which spelling of each pair is kept is on Main's ballot list (2026-11-15). Proof: `jet test Tests/Guards --filter cli_flag_meanings_unique`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T11:33:34.073Z"
+          "at": "2026-11-16T12:55:52.642Z"
         },
         {
           "n": 6,
-          "text": "Help, completion and CLI snapshots are regenerated, and in-repo callers use the kept spellings. Proof: `jet test Compiler --profile cases --filter cli_parts_surface/` passes, and git grep finds no removed spelling outside tests that pin its rejection.",
+          "text": "Help, completion and CLI snapshots are regenerated, and in-repo callers use the kept spellings. Proof: `jet test Compiler --profile cases --filter CLIPartsSurface/` passes, and git grep finds no removed spelling outside tests that pin its rejection.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:56.963Z"
+          "at": "2026-11-16T12:55:53.606Z"
         },
         {
           "n": 7,
-          "text": "Build profile names have one home, the stock-profile table beside JET_BUILD_OPTIONS (census F29). Inspect.jet and Front.jet derive from it (Inspect.jet also knew `hardened` and `ci`; Front.jet did not), and a gate guard fails on any copy that differs. Proof: `jet test tests/guards --filter single_source_build_profiles`.",
+          "text": "Build profile names have one home, the stock-profile table beside JET_BUILD_OPTIONS (census F29). Inspect.jet and Front.jet derive from it (Inspect.jet also knew `hardened` and `ci`; Front.jet did not), and a gate guard fails on any copy that differs. Proof: `jet test Tests/Guards --filter single_source_build_profiles`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:58.149Z"
+          "at": "2026-11-16T12:55:54.544Z"
         },
         {
           "n": 8,
-          "text": "Every flag of check, build, run, test and dev has a build-config key, and every build-config key has a flag, both generated from the one option table beside JET_BUILD_OPTIONS (owner rule 2026-10-09). Proof: `jet test tests/guards --filter cli_config_parity`.",
+          "text": "Every flag of check, build, run, test and dev has a build-config key, and every build-config key has a flag, both generated from the one option table beside JET_BUILD_OPTIONS (owner rule 2026-10-09). Proof: `jet test Tests/Guards --filter cli_config_parity`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:18:27.567Z"
+          "at": "2026-11-16T12:55:55.495Z"
         },
         {
           "n": 9,
-          "text": "CLI flag ownership derives from the compiler's command declarations, while application command schemas and output-envelope contracts stay distinct. Proof: `jet test tests/guards --filter cli_flags_from_command_declarations`. (was #3186 c6)",
+          "text": "CLI flag ownership derives from the compiler's command declarations, while application command schemas and output-envelope contracts stay distinct. Proof: `jet test Tests/Guards --filter cli_flags_from_command_declarations`. (was #3186 c6)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:05.148Z"
+          "at": "2026-11-16T12:55:56.410Z"
         },
         {
           "n": 10,
@@ -52127,48 +52127,48 @@
         },
         {
           "n": 11,
-          "text": "`jet test Compiler --profile golden --filter cli/args_reference` passes, and a Jet test validates the man, ReST, Markdown and YAML output with real consumers (man, a ReST parser, a CommonMark renderer and an independent YAML reader), reporting a missing consumer as SKIP-HOST. Proof: those two commands. (was #3242 c31)",
+          "text": "`jet test Compiler --profile golden --filter CLI/ArgsReference` passes, and a Jet test validates the man, ReST, Markdown and YAML output with real consumers (man, a ReST parser, a CommonMark renderer and an independent YAML reader), reporting a missing consumer as SKIP-HOST. Proof: those two commands. (was #3242 c31)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:07.273Z"
+          "at": "2026-11-16T12:55:57.330Z"
         },
         {
           "n": 12,
-          "text": "Nested, inherited and repeated flags, aliases, grouping, cardinality, double-dash, dynamic completion, hooks and lifecycle errors have conformance goldens. Proof: `jet test Compiler --profile golden --filter cli/conformance_`. (was #3242 c36)",
+          "text": "Nested, inherited and repeated flags, aliases, grouping, cardinality, double-dash, dynamic completion, hooks and lifecycle errors have conformance goldens. Proof: `jet test Compiler --profile golden --filter CLI/Conformance`. (was #3242 c36)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:08.260Z"
+          "at": "2026-11-16T12:55:58.674Z"
         },
         {
           "n": 13,
-          "text": "Run, build, dev and test overrides and argument forwarding keep the launcher's and the application's namespaces apart, and an absent override behaves as stock. Proof: `jet test Compiler --profile cases --filter cli_parts_commands/override_namespaces`. (was #3242 c37)",
+          "text": "Run, build, dev and test overrides and argument forwarding keep the launcher's and the application's namespaces apart, and an absent override behaves as stock. Proof: `jet test Compiler --profile cases --filter CLIPartsCommands/override_namespaces`. (was #3242 c37)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:09.266Z"
+          "at": "2026-11-16T12:55:59.612Z"
         },
         {
           "n": 14,
-          "text": "Builders still support runtime-defined schemas through the same Core parser, with no second semantic parser and no compiler-CLI DSL migration. Proof: `jet test Compiler --profile golden --filter cli/runtime_schema_builder`. (was #3242 c38)",
+          "text": "Builders still support runtime-defined schemas through the same Core parser, with no second semantic parser and no compiler-CLI DSL migration. Proof: `jet test Compiler --profile golden --filter CLI/RuntimeSchemaBuilder`. (was #3242 c38)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:10.293Z"
+          "at": "2026-11-16T12:56:00.552Z"
         },
         {
           "n": 15,
-          "text": "Equivalent #CLI and builder grammars produce identical values, help, errors and completion on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter cli/marker_builder_pair`. (was #3242 c40)",
+          "text": "Equivalent #CLI and builder grammars produce identical values, help, errors and completion on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter CLI/MarkerBuilderPair`. (was #3242 c40)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:11.316Z"
+          "at": "2026-11-16T12:56:01.467Z"
         },
         {
           "n": 16,
@@ -52262,7 +52262,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T15:49:16.817Z",
-      "updated": "2026-11-16T01:11:20.717Z",
+      "updated": "2026-11-16T12:56:01.467Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -98213,54 +98213,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 1,
       "completedAt": "2026-11-14T01:33:05.082Z"
-    },
-    {
-      "id": "c0ipht83",
-      "num": 6785,
-      "title": "A build that reflects over a program with a user E0956 now ends in an internal compiler error",
-      "body": "Found by G11Speed-5 on 2026-11-13. dev d19cdb77fd (G6Meta-ice2, \"A build that fails internally is an internal compiler error, not a staged report\") made BuildQueries raise an ICE when the keep-going staging compile fails internally. A program whose own derive has an E0956 binding (an incomplete registration) now reaches the program reflection with an incomplete registration graph, and the build ends in the ICE \"reflection snapshot is incomplete: the registration graph is incomplete\" instead of the user error E0956. That breaks I2: a user error must stay a user diagnostic. It reproduces in Examples Reflect.jet at O1 and O2 with any jet that has d19cdb77fd (the g11-core-a jet included), and in a 20-line repro: a build: fn reading b.program plus a derive with an E0956 binding. The g5-fold6 jet (base fca00acc6d) prints E0956.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c1 met by e90053e60e."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A program whose own code has a user error that leaves the registration graph incomplete (such as E0956) gets that user diagnostic, with exit code 1 and no ICE, when a build: fn reflects over the program. A real internal failure of the build still reports as an ICE with exit 101, as d19cdb77fd intended. Proof: a ui snapshot of the 20-line repro, the Reflect.jet golden at O1 and O2 matching its O0 output, and the InspectBuild test from d19cdb77fd still passing.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev e90053e60e (G6Meta-6785a), landed by Lander5 on 2026-11-13 on top of b047dd8c4b. With the g6-cut3b jet: Reflect at o1/o2 exits 1 with jet.ComptimeConstructNotSupported (More: E0956), no ICE; the 6785a ui case passes; jet check of JetDriver rc 0. The other g6-cut3b reds match bare dev 78d3db56d8 or belong to l0503.",
-          "at": "2026-11-13T12:55:52.854Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G6"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-13T11:55:27.408Z",
-      "updated": "2026-11-13T12:55:56.906Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-13T12:55:56.906Z"
     },
     {
       "id": "c0tg9tcf",
@@ -220031,6 +219983,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T12:56:01.467Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#15: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Equivalent #CLI and builder grammars produce identical values, help, errors and completion on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter cli/marker_builder_pair`. (was #3242 c4"
+    },
+    {
+      "at": "2026-11-16T12:56:00.552Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#14: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Builders still support runtime-defined schemas through the same Core parser, with no second semantic parser and no compiler-CLI DSL migration. Proof: `jet test Compiler --profile golden --filter cli/r"
+    },
+    {
+      "at": "2026-11-16T12:55:59.612Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#13: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Run, build, dev and test overrides and argument forwarding keep the launcher's and the application's namespaces apart, and an absent override behaves as stock. Proof: `jet test Compiler --profile case"
+    },
+    {
+      "at": "2026-11-16T12:55:58.674Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#12: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Nested, inherited and repeated flags, aliases, grouping, cardinality, double-dash, dynamic completion, hooks and lifecycle errors have conformance goldens. Proof: `jet test Compiler --profile golden -"
+    },
+    {
+      "at": "2026-11-16T12:55:57.330Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `jet test Compiler --profile golden --filter cli/args_reference` passes, and a Jet test validates the man, ReST, Markdown and YAML output with real consumers (man, a ReST parser, a CommonMark renderer"
+    },
+    {
+      "at": "2026-11-16T12:55:56.410Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: CLI flag ownership derives from the compiler's command declarations, while application command schemas and output-envelope contracts stay distinct. Proof: `jet test tests/guards --filter cli_flags_fro"
+    },
+    {
+      "at": "2026-11-16T12:55:55.495Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#8: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every flag of check, build, run, test and dev has a build-config key, and every build-config key has a flag, both generated from the one option table beside JET_BUILD_OPTIONS (owner rule 2026-10-09). "
+    },
+    {
+      "at": "2026-11-16T12:55:54.544Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Build profile names have one home, the stock-profile table beside JET_BUILD_OPTIONS (census F29). Inspect.jet and Front.jet derive from it (Inspect.jet also knew `hardened` and `ci`; Front.jet did not"
+    },
+    {
+      "at": "2026-11-16T12:55:53.606Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Help, completion and CLI snapshots are regenerated, and in-repo callers use the kept spellings. Proof: `jet test Compiler --profile cases --filter cli_parts_surface/` passes, and git grep finds no rem"
+    },
+    {
+      "at": "2026-11-16T12:55:52.642Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: No two registry flags share a meaning: of each pair the Jet CLI accepts today (--route/--path, --cook/--cook-mode, --force-clean/--clean in Compiler/JetCli/Source/Cli/Commands.jet), one spelling is ke"
+    },
+    {
+      "at": "2026-11-16T12:55:51.659Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-JET-HOME1=A is carried out as one verified cutover that keeps keys, trust and retention records. After any jet command on a clean home directory, only ~/.config/jet/ and ~/.cache/jet/ exist (honouri"
+    },
+    {
+      "at": "2026-11-16T12:55:50.663Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: No help summary line wraps mid-word at 80 columns. Proof: `jet test tests/guards --filter help_lines_fit_80_columns`."
+    },
+    {
+      "at": "2026-11-16T12:55:49.657Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `jet help <command>` prints only that command's flags, and `jet help --all` prints the full table, all from the one option table. Proof: `jet test Compiler --profile cases --filter cli_parts_surface/h"
+    },
+    {
+      "at": "2026-11-16T12:55:48.692Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dp5efn",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `jet --help | wc -l` prints at most 50: the common commands, one line each (419 lines on 2026-10-28). Proof: `jet test Compiler --profile cases --filter cli_parts_surface/top_help_is_short`."
+    },
+    {
+      "at": "2026-11-16T12:55:47.746Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r8y1nt",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Seam 5 under D-CORE-PRIVATE-SEAM1=A: the compiler's build-receipt producer reads Core/build's session and key state (keys factory, session plan, target storage) through a `priv(toolchain)` reader inst"
+    },
+    {
+      "at": "2026-11-16T12:55:46.814Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r8y1nt",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Compiler-generated calls pass. A call the compiler lowers into a toolchain-private module is admitted, while the same name written in user source is E0605. Proof via seam 4: user `list.sort_by(f)` low"
+    },
+    {
+      "at": "2026-11-16T12:55:45.862Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r8y1nt",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Mechanism (D-CORE-PRIVATE-SEAM1=A, ratified 2026-11-01). `priv(toolchain) module` parses only in a toolchain package, meaning one whose source root lies inside the Jet distribution root that supplied "
+    },
+    {
+      "at": "2026-11-16T12:55:44.810Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0tr523z",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: RNG, environment overlay, fault, auth and native storage state each has one Jet owner (a Jet runtime cell such as LogicalEnvironment.jet as the process default, or a Core Shared holder), with no secon"
+    },
+    {
+      "at": "2026-11-16T12:55:43.830Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0tr523z",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Hot reload of a module Shared holder whose body and initializer stay compatible keeps its values, and the identity, layout and migration reports are correct. Proof: `jet test Compiler --profile cases "
+    },
+    {
+      "at": "2026-11-16T12:55:42.893Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0tr523z",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A module `STORE: Shared{…}` holder works (D-CORE-GLOBAL-STATE1=A): a `name: value` declaration whose handle is always present and cannot be reassigned (`#Persist` only for hot-reload retention), a clo"
+    },
+    {
+      "at": "2026-11-16T12:55:41.941Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0h063eg",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The tie is published as a fact like inferred link sources, and hover and `jet inspect` show which field a link field is tied to. Proof: `jet test Compiler --profile cases --filter cli_inspect/link_sib"
+    },
+    {
+      "at": "2026-11-16T12:55:40.950Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0h063eg",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Only a tied, frozen sibling list is exempt from D-LINK-ITEM1, and a tied record may derive Encode but a derived Decode is refused with a registered error. Proof: `jet test Compiler --profile cases --f"
+    },
+    {
+      "at": "2026-11-16T12:55:39.989Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0h063eg",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A tied record's source field stays frozen while any link taken from it is alive, including links kept past an escape or a move-apart, and a copy of the record shares the frozen source without retarget"
+    },
+    {
+      "at": "2026-11-16T12:55:39.001Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0h063eg",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-LINK-SIBLING1=A eligibility: a link field of type @T or [@T] has the sibling fields of type T or [T] as candidates (a String field also qualifies for @String, and a type-parameter field counts); one"
+    },
+    {
+      "at": "2026-11-16T12:55:38.024Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0x9xmde",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A decimal literal next to a Complex adopts Float the way an expected Float parameter does (D-LITCARRIER1), so `2.0 + 3.0i` prints a Complex instead of E0109. Proof: `jet test Compiler --profile cases "
+    },
     {
       "at": "2026-11-16T12:55:36.705Z",
       "by": "Main",
