@@ -92,6 +92,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `T{expr}` | field default |
 | `Name{"…"}` | checked text head |
 | `{ … }` | typed anonymous value |
+| `loop x in xs -> item / Head{loop x in xs -> item}` | yielding loop: in value position a finite loop yields one item per accepted pass, in loop order; a bare one builds a List and ignores the expected type; a typed set or map head holding one loop in place of its items builds that collection, a map loop yielding `key: value` where a later key replaces an earlier one; items beside a loop in one head are a build error |
 | <code>`</code> | raw ordinary String fence |
 | `"""` | multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted) |
 | `\u{H}` | Unicode scalar escape in quoted text and character literals, beside `\n`, `\r`, `\t`, `\"` and `\\`: one to six hexadecimal digits up to 10FFFF, never a surrogate (D800-DFFF); byte literals have none and write `\xNN` |
@@ -868,7 +869,7 @@ An `else if` link can use either body shape; expression arm bodies are separate.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
 D-LOOPEVAL1=A, D-COMPREHENSION1=A, D-LOOP-COMMA1=A, amended by
-D-LOOP-IN1=A, ratified 2026-07-30, card #1336)*:
+D-LOOP-IN1=A and D-COMPREHEND1=A, ratified 2026-07-30, card #1336)*:
 
 ```jet
 loop { … }                        // infinite
@@ -914,9 +915,24 @@ names: loop users if .active -> .name   // bindingless subject, D-LOOP-SUBJECT1
 ```
 
 Multiple source clauses nest left to right and yield one flat List. An inner
-collecting loop preserves nesting. `next` omits the current item. Maps, Sets,
-and lazy iteration use ordinary Map construction, `Set.from(...)`, and the
-existing iterator adapters.
+collecting loop preserves nesting. `next` omits the current item. Lazy
+iteration uses the existing iterator adapters.
+
+**D-COMPREHEND1=A — Typed heads take a loop** *(ratified 2026-11-10)*: a bare
+yielding loop stays a List and ignores the expected type. A typed set or map
+head may hold one loop in place of its items, and builds that collection from
+the loop's items in loop order. A map loop yields the head's own `key: value`
+form, and a later key replaces an earlier one. A typed list head holds its
+loop's List. Items beside a loop in one head are refused with E0445; build the
+two apart and join them. A struct literal never starts with `loop`, so the two
+can't be confused. The other collection types build from the loop's List
+through their constructors (`Tally.from(loop …)`).
+
+```jet
+unique: Set<String>{loop w in words -> w}
+sizes: [String:Int]{loop w in words if w != "" -> w: w.len()}
+evens: loop x in xs if x % 2 == 0 -> x   // a List
+```
 
 Every statement-position loop header may use `-> statement`; the statement's
 value is discarded. A finite loop in value position keeps the collection arrow.

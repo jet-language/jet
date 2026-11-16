@@ -6,7 +6,7 @@ An error refuses a program for one of two reasons. A soundness error stops a mem
 
 Each row states its class in `safety_class` and why in `safety_reason`. A soundness row also states its `expert_path`: the opt-in that reaches the same program, or `none:` and why nothing can.
 
-Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 853 active error rows: 730 soundness and 123 opinion. The other ranges hold 0 active error rows with no class yet.
+Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 854 active error rows: 730 soundness and 124 opinion. The other ranges hold 0 active error rows with no class yet.
 
 ## Sealed floors
 
@@ -38,7 +38,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0073 | CollectingLoopMissingItem | Compiler/JetSema/Source/Sema/Expressions/Lambdas.jet:2508 | each iteration's item is the loop's value |
 | E0074 | CollectingLoopItemMismatch | Compiler/JetSema/Source/Sema/Expressions/Control.jet:3039 | no opt-in gives one List two element types |
 | E0075 | CollectingLoopBreakPayload | Compiler/JetSema/Source/Sema/Statements.jet:291 | the exit has one value |
-| E0076 | LoopResultMismatch | Compiler/JetSema/Source/Sema/Expressions/LoopValues.jet:27 | every exit must give the loop's value |
+| E0076 | LoopResultMismatch | Compiler/JetSema/Source/Sema/Expressions/LoopValues.jet:43 | every exit must give the loop's value |
 | E0078 | MissingExhaustionRoute | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1532 | the exhausted loop needs a written value |
 | E0081 | MissingFunctionBody | Compiler/JetParser/Source/Formatter/Formatter.jet:1910 | host and foreign functions are declared with `#Import` or `#FFI` and their body forms |
 | E0083 | UnclosedDelimiter | Compiler/JetParser/Source/Parser/State.jet:780 | no opt-in decides where an unclosed delimiter ends |
@@ -114,7 +114,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0337 | PatchableFunctionField | Compiler/JetSema/Source/Sema/Registration/Checked.jet:2526 | store a callable handle type, which a patch can hold |
 | E0338 | ComputedFieldCycle | Compiler/JetSema/Source/Sema/CheckProgram.jet:10246 | no opt-in gives a cyclic formula a value |
 | E0339 | ComputedFieldAssigned | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:734 | write the stored fields the formula reads |
-| E0343 | SwitchOffAsExpression | Compiler/JetParser/Source/Parser/Expressions.jet:1164 | `#Off` applies to whole statements |
+| E0343 | SwitchOffAsExpression | Compiler/JetParser/Source/Parser/Expressions.jet:1191 | `#Off` applies to whole statements |
 | E0344 | DuplicateSwitchOff | Compiler/JetParser/Source/Parser/Statements.jet:2298 | one statement has one switch |
 | E0353 | InvalidValidateRule | Compiler/JetSema/Source/Sema/Registration/Validate.jet:119 | each rule is a `check` with `at:` and a message |
 | E0354 | UnknownValidateField | Compiler/JetSema/Source/Sema/Registration/Validate.jet:123 | `at:` names a declared field |
@@ -263,7 +263,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0910 | BreakingSchemaChange | Compiler/JetSema/Source/Sema/SchemaMigration.jet:231 | a migration bridges the old shape |
 | E0911 | UnknownMigrationVerb | Compiler/JetParser/Source/Parser/Declarations/Migrations.jet:98 | migrations use `rename`, `add`, `remove` and `change` |
 | E0913 | MissingAssociatedType | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3258 | the impl gives every associated type |
-| E0914 | UnknownInterpolationSelector | Compiler/JetParser/Source/Parser/Expressions.jet:1387 | the selector is one the interpolation knows |
+| E0914 | UnknownInterpolationSelector | Compiler/JetParser/Source/Parser/Expressions.jet:1414 | the selector is one the interpolation knows |
 | E0915 | MissingDisplay | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1618 | the type implements `Display`, or a field with one is printed |
 | E0917 | RecursiveInlineAlways | Compiler/JetSema/Source/Sema/MarkerRules.jet:2218 | a recursive function is not `#Inline(Always)` |
 | E0918 | InlineAlwaysAddressTaken | Compiler/JetSema/Source/Sema/MarkerRules.jet:2363 | a function whose address is taken is not `#Inline(Always)` |
@@ -325,7 +325,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0998 | InvalidOverlayPolicy | Jetpack/CLI/Source/Commands/ExplainCommand.jet:85 | the overlay policy is written in its declared form |
 | E1001 | UnknownCoreModule | Compiler/JetDriver/Source/Driver/Loader.jet:5246 | Core's runtime units are imported only by Core sources |
 | E1002 | ReservedRootShadowed | Compiler/JetDriver/Source/Driver/Loader.jet:3559 | a local module takes a name outside the reserved roots |
-| E1003 | IntegerOutOfRange | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:3031 | the value fits the width, or stays an exact `Int` |
+| E1003 | IntegerOutOfRange | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:3035 | the value fits the width, or stays an exact `Int` |
 | E1004 | UnknownCoreItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:545 | no opt-in imports an item the module does not define |
 | E1005 | InvalidOverflowOptIn | Compiler/JetSema/Source/Sema/Calls/Direct.jet:51 | the opt-in wraps exactly one integer operation or narrowing conversion |
 | E1006 | RuntimeCeilingExceeded | Compiler/JetSema/Source/Sema/CheckProgram.jet:10392 | the ceiling is raised where the package declares it |
@@ -357,7 +357,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1113 | FrozenValueWrite | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:7287 | write a copy, not the frozen value |
 | E1114 | FreezeNotSnapshotable | Compiler/JetSema/Source/Sema/Calls/Direct.jet:2174 | `freeze` takes owned, cloneable values |
 | E1116 | UnknownSharedMethod | Compiler/JetSema/Source/Sema/Calls/Methods.jet:69 | a shared value is read and written like a value |
-| E1117 | MixedTaskBranches | Compiler/JetParser/Source/Parser/Expressions.jet:1705 | the branches are all named or all positional |
+| E1117 | MixedTaskBranches | Compiler/JetParser/Source/Parser/Expressions.jet:1732 | the branches are all named or all positional |
 | E1119 | InvalidAlignment | Compiler/JetSema/Source/Sema/Registration/Checked.jet:2422 | the alignment is a supported power of two |
 | E1120 | PayloadCaseWithIntBacking | Compiler/JetSema/Source/Sema/Registration/EnumNumbers.jet:110 | a payload enum keeps the default layout |
 | E1121 | CaseNumberOutOfRange | Compiler/JetSema/Source/Sema/Registration/EnumNumbers.jet:132 | the case numbers fit the backing type |
@@ -988,6 +988,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E0442 | HoleHeaderEffect | opinion | The header runs once for each arm tried, so the program is defined, and Jet refuses an effect or a change there because it would repeat once per arm without the code saying so. |
 | E0443 | UnderscoreHole | opinion | The old `_` hole has one reading, and Jet keeps one spelling so that `_` always means a value thrown away. |
 | E0444 | HoleHeaderInPipeStep | soundness | Inside a pipe step `<>` is the step's value, so the table header has no hole for its arms to fill. |
+| E0445 | CollectionLiteralMixesItemsAndLoop | opinion | Either reading would build a collection, and Jet refuses the literal so its shape says which one it builds. |
 | E0501 | UntypedEmptyList | soundness | With no element type, `[]` has no layout for the code that reads its elements. |
 | E0502 | InvalidMapKeyType | soundness | A key type without a stable equality and hash, such as Float or a view, would let one key find another key's entry, or none. |
 | E0503 | StringIndex | soundness | An index into UTF-8 text can land inside a character, so `s[i]` has no one character to give. |

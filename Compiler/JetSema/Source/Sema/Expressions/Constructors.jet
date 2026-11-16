@@ -2655,6 +2655,10 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
         return None
     })
     result_head := sema_expr_expected_type(sema_expr_unwrap_tag(written_head), environment, program)
+    if sema_loop_value_typed_head(result_head, body, span) == .Val(value_loop) {
+        checked_loop: sema_check_expression(value_loop, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        return sema_expr_expected_owned(checked_loop, expected, environment, program, diagnostics)
+    }
     checked_text := sema_expression_checked_text_literal(result_head, head, body, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if checked_text.handled -> return checked_text.value
 

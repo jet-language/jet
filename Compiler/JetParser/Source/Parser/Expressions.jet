@@ -789,10 +789,37 @@ parser_parse_typed_literal_body: fn(state: &JetParserState, head: Type?, start: 
         else -> TypedLitBody.Value{value: first.expr.move()}
     }
     state.head_text_at = saved_head
+    if parser_typed_literal_mixed_loop(body) == .Val(loop_span) {
+        parser_add_error_code(state, "E0445", loop_span, "this collection literal mixes items with a loop", "A typed head holds either its items or one loop that builds them, so a reader sees at once what makes the collection", "Build the items and the loop's collection apart, then join them, such as `[0].concat(loop x in xs -> x)`")
+    }
     parser_literal_close_terminators(state)
     close := parser_expect(state, TOKEN_RBRACE, "`}}` to close a typed literal")
     span := parser_cover(start, close.span)
     ParsedExpr{expr: Expr.TypedLit{head: head, body: body.move(), span: span, id: parser_node_id(state)}, span: span}
+}
+
+// The span of a collecting loop written beside other items or entries in a
+// typed literal's body, which a head never takes. A lone loop builds the
+// head's collection; a loop as a map key is the loop's own `key: value` item.
+parser_typed_literal_mixed_loop: fn(body: TypedLitBody) -> Span? Never! {
+    if body == {
+        .Elements(elements) -> {
+            if elements.len() < 2 -> return None
+            loop element in elements {
+                if parser_expression_is_collecting_loop(element) -> return Val(expr_span(element))
+            }
+        }
+        .Entries(entries) -> {
+            if entries.len() < 2 -> return None
+            loop entry in entries {
+                if parser_expression_is_collecting_loop(entry.key) {
+                    return Val(expr_span(entry.key))
+                }
+            }
+        }
+        .Fields(_) | .Value(_) | .ByteText(_) | .Empty -> {}
+    }
+    None
 }
 
 // The `{value}` default after a parameter, field or constant type. The body

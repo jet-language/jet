@@ -688,8 +688,11 @@ map keeps its key-value pair.
 A source loop may use `-> expression` or a braced value body. Each accepted
 iteration yields one non-unit value. The eager result is a `List` in iteration
 order; a guard or `next` omits an item. Multiple source clauses produce one flat
-list. An explicitly nested collecting loop preserves nesting. Maps and sets use
-explicit terminals; lazy work uses iterator adapters. In statement position,
+list. An explicitly nested collecting loop preserves nesting. A bare loop stays
+a `List` whatever type is expected; a typed set or map head holding one loop in
+place of its items builds that collection, a map loop yielding `key: value`
+with a later key replacing an earlier one, and items beside the loop are E0445
+(D-COMPREHEND1). Lazy work uses iterator adapters. In statement position,
 a finite source, infinite, condition-only, or mutable-state loop may use
 `-> statement`; its value is discarded. A discarded non-unit value earns the
 registered lint. Bind a collecting loop with `:`, or use a write handle for an

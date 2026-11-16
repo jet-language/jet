@@ -7291,6 +7291,29 @@ FailureMarkRequired: struct {
     }
 }
 
+CollectionLiteralMixesItemsAndLoop: struct {
+    impl Diagnostic {
+        code: "E0445"
+        safety_class: .Opinion
+        safety_reason: "Either reading would build a collection, and Jet refuses the literal so its shape says which one it builds."
+        stage: [.Parse]
+        meaning: "A typed collection literal holds items and a loop together"
+        detail: true
+        no_fix: .Behavior
+        fix_next: "Build the items and the loop's collection apart, then join them."
+
+        what: fn(self) -> String { "This collection literal mixes items with a loop" }
+
+        why: fn(self) -> String {
+            "A typed head holds either its items or one loop that builds them, so a reader sees at once what makes the collection"
+        }
+
+        fix: fn(self) -> String {
+            "Build the items and the loop's collection apart, then join them, such as `[0].concat(loop x in xs -> x)`"
+        }
+    }
+}
+
 UntypedEmptyList: struct {
     impl Diagnostic {
         code: "E0501"

@@ -693,10 +693,19 @@ don't change. That fix edits every file it names together or not at all. A
 direct call of `equal`, or rewrites that overlap each other, leave the type
 for a hand edit.
 
-A finite `loop ... -> value` evaluates immediately to a list. An expected type
-does not change collection choice or evaluation time. The naming law in
-[`stdlib-api-laws.md`](../stdlib-api-laws.md) owns verb choices; this table
-records the shipped surface without adding aliases:
+A finite bare `loop ... -> value` evaluates immediately to a list, and an
+expected type does not change collection choice or evaluation time. A typed
+set or map head may hold one loop in place of its items (D-COMPREHEND1=A):
+`Set<String>{loop w in words -> w}` builds the Set, and
+`[String:Int]{loop w in words -> w: w.len()}` the Map, from the loop's items
+in loop order. A map loop yields `key: value`, and a later key replaces an
+earlier one. A typed list head holds its loop's list. A head holding items
+beside a loop is E0445: build the two apart and join them, as in
+`[0].concat(loop x in xs -> x)`. The other collection types build from the
+loop's list through their constructors, such as `Tally.from(loop …)`.
+
+The naming law in [`stdlib-api-laws.md`](../stdlib-api-laws.md) owns verb
+choices; this table records the shipped surface without adding aliases:
 
 | Type | Constructors | Description |
 | --- | --- | --- |
