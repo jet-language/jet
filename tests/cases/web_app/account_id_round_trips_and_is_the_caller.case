@@ -1,0 +1,19 @@
+# An `auth.AccountID` column of a typed table round-trips through the store:
+# the caller's account goes in as a task's owner and comes back equal to
+# `app.caller()`, which gives that account while `app.as_caller` acts for it,
+# and not equal to another account. Outside a call no one acts. At every
+# optimization level.
+fixture: account_id_round_trips_and_is_the_caller.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "caller: ann\nstored owner: ann\nowner is the caller: true\nowner is ben: false\noutside a call: no one\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "caller: ann\nstored owner: ann\nowner is the caller: true\nowner is ben: false\noutside a call: no one\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "caller: ann\nstored owner: ann\nowner is the caller: true\nowner is ben: false\noutside a call: no one\n"

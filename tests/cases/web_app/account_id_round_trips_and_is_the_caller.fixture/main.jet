@@ -1,0 +1,52 @@
+// A task's owner is an `auth.AccountID` column. It goes into the store as the
+// caller's account and comes back the same account, and `app.caller()` gives
+// that account while the call acts for it.
+use {
+    app
+    auth: core.auth
+    db: core.db
+}
+
+#Codable
+Task: struct {
+    id: Int
+    owner: auth.AccountID
+    title: String
+}
+
+// The store's tasks, by id.
+tasks_in: fn(store: db.Store) -> db.Table<Int, Task> {
+    store.table("tasks", key: fn(task: Task) { task.id })
+}
+
+// Stores task `id`, owned by the caller.
+claim: fn(store: db.Store, id: Int, title: String) db.DBError! -[DB.Read, DB.Write]> {
+    _: tasks_in(store).put(Task{id: id, owner: app.caller(), title: title}) ?? return Err(err)
+    Ok()
+}
+
+// Who the call acts for, if anyone.
+acting: fn() -> String {
+    if app.maybe_caller() == .Val(account) -> return account.raw()
+    "no one"
+}
+
+run: fn() {
+    store: db.open_memory()
+    ann: auth.AccountID.from_string("ann")
+    caller: app.as_caller(ann.copy(), fn() { app.caller() })
+    print("caller: {caller}")
+    // A lambda owns what it captures, so the claim gets its own handle.
+    claiming: store.copy()
+    app.as_caller(ann.copy(), fn() { claim(claiming, 1, "write the case") ?? panic("the task stores") })
+    if tasks_in(store).get(1) == {
+        .Val(task) -> {
+            print("stored owner: {task.owner}")
+            print("owner is the caller: {task.owner == caller}")
+            print("owner is ben: {task.owner == auth.AccountID.from_string("ben")}")
+        }
+        .None -> { print("no task") }
+        .Err(failure) -> print("read failed: {failure.message()}")
+    }
+    print("outside a call: {acting()}")
+}
