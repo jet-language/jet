@@ -945,10 +945,13 @@ sema_app_mount_answer: fn(value_name: String, method: Func, method_module: Modul
     declared_return: sema_type_resolve_declared(graph, method.return_type ?? Type.Named{name: "Unit"}, method_module)
     // A method that can fail replies with its error: `value: method(...) ??
     // return Ok(args.__reply_err<E>(err))`; then `Ok(args.__reply_value<R>(value))`.
+    // A method that can't fail (`T Never!`) has no error to encode, so its
+    // fallback, which never runs, is `__failed`.
     replied: "{args_name}_value"
     reply_type: if {
         declared_return == .Result(ok, err) -> {
-            failed: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__reply_err", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{err}, args: [CallArg]{sema_http_mount_arg(sema_app_remote_ident("err", span), span)}, id: AST_NODE_GENERATED}
+            reply: if err == (Type.Named{name: "Never"}) -> "__failed" else -> "__reply_err"
+            failed: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: reply, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{err}, args: [CallArg]{sema_http_mount_arg(sema_app_remote_ident("err", span), span)}, id: AST_NODE_GENERATED}
             settled: Expr.OrFallback{value: invocation, fallback: OrFallback.Return{value: Val(Expr.Ok{value: failed, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: false, span: span, id: AST_NODE_GENERATED}
             statements.push(Stmt.Val{binding: ast_binding(replied, span, false, settled, None)})
             ok

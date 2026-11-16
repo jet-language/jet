@@ -266,7 +266,8 @@ jet_eval_native_bind: fn(session: JetEvalNativeSession, object: &&[U8]) -> X64Bi
 
 jet_eval_native_bind_image: fn(image: &JetEvalNativeImage, object: &&[U8]) -> X64BindResult? Never! {
     jet_eval_native_image_read(image)
-    runtime: image.bytes.remove(0, .Slot) ?? return None
+    // The cell holds the image alone, or nothing when it can't be read.
+    runtime: image.bytes.pop() ?? return None
     bound := x64_bind_runtime_image("jet-comptime", object.move(), runtime, image.file, image.stamp.copy(), image.at, image.gap_at, image.gap, true)
     if bound.errors.len() > 0 {
         image.bytes.push(bound.executable.image.move())
@@ -293,7 +294,7 @@ jet_eval_native_bind_image: fn(image: &JetEvalNativeImage, object: &&[U8]) -> X6
 jet_eval_native_bind_batch: fn(session: JetEvalNativeSession, built: &&IRX64Program, base: Int) -> X64BindResult? Never! {
     permit := session.image.guard_edit()
     jet_eval_native_image_read(permit.value)
-    runtime: permit.value.bytes.remove(0, .Slot) ?? return None
+    runtime: permit.value.bytes.pop() ?? return None
     bound := x64_bind_functions_at("jet-comptime", built.program.move(), built.functions.move(), built.debug.move(), built.threads, runtime, base, permit.value.gap_at, permit.value.gap)
     permit.value.bytes.push(bound.executable.image.move())
     bound.executable.image = [U8]{}

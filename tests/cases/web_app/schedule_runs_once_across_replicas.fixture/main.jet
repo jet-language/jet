@@ -42,12 +42,17 @@ Board: struct {
     // was dropped.
     tries: Shared<Int>
 
-    // Counts a run, at midnight UTC on each leap day.
+    // Counts a run, at midnight UTC on each leap day. The try counts first,
+    // as a dropped run fails its read and returns at once.
     #App.Every(cron: "0 0 29 2 *") leap_day: fn(self) -> Int BoardError! {
-        counted: self.count_run()
+        self.tried()
+        self.count_run()
+    }
+
+    // Counts this replica's try.
+    tried: fn(self) {
         tried := self.tries.guard_edit()
         tried.value += 1
-        counted
     }
 
     // Counts a run, and gives the count.

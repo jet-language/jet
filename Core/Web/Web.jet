@@ -1507,14 +1507,26 @@ priv AppSchedule: struct {
     run: fn(RemoteArgs) -> String [FieldError]!
 }
 
-// Starts the schedules `waiting` holds (`calls.schedules`), each once: it
-// takes each out, so a later start finds none.
+// Starts the schedules `waiting` holds (`calls.schedules`), each once, in
+// the order they were left: it takes each out, so a later start finds none,
+// and starts them after letting `waiting` go.
 priv app_schedules_start: fn(waiting: Shared<[AppSchedule]>) Never! {
-    guard := waiting.guard_edit()
+    schedules := app_schedules_taken(waiting)
     loop {
-        schedule: guard.value.remove(0, .Slot) ?? return
+        schedule: schedules.pop() ?? return
         calls.schedules.start(schedule.name, schedule.cron, schedule.run)
     }
+}
+
+// Takes the schedules `waiting` holds, last first, and leaves none.
+priv app_schedules_taken: fn(waiting: Shared<[AppSchedule]>) -> [AppSchedule] Never! {
+    guard := waiting.guard_edit()
+    taken := [AppSchedule]{}
+    loop {
+        schedule: guard.value.pop() ?? break
+        taken.push(schedule)
+    }
+    taken
 }
 
 // An endpoint's method: the last segment of its row's path.

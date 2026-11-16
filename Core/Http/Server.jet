@@ -714,13 +714,27 @@ __on_serve: fn(mux: HTTPMux, start: &&fn() -[Time]> Never!) Never! {
     guard.value.starts.push(start.move())
 }
 
-// Runs, and drops, what `__on_serve` left on `mux`.
+// Runs, and drops, what `__on_serve` left on `mux`, in the order it was
+// left. They run after the table's guard is let go, so a start may use the
+// table.
 priv mux_serving: fn(mux: HTTPMux) Never! -[Time]> {
-    guard := mux.__state.guard_edit()
+    starts := mux_starts_taken(mux)
     loop {
-        start: guard.value.starts.remove(0, .Slot) ?? return
+        start: starts.pop() ?? return
         start()
     }
+}
+
+// Takes what `__on_serve` left on `mux`, last first, and leaves none, so a
+// later server starts nothing.
+priv mux_starts_taken: fn(mux: HTTPMux) -> [fn() -[Time]> Never!] Never! {
+    guard := mux.__state.guard_edit()
+    taken := [fn() -[Time]> Never!]{}
+    loop {
+        start: guard.value.starts.pop() ?? break
+        taken.push(start)
+    }
+    taken
 }
 
 // Answer one connection the listener accepts (`app.serve_once(listener)`).
