@@ -1,0 +1,424 @@
+// The values EnvModel spells for the compiler itself: each value written in
+// an environment field becomes one generated module value,
+// `ENVMODEL_VALUE_<n>: <expression>`, appended to the module-values program
+// after the source (module_values_program). The expression is copied from
+// the source. A read of a sibling field is respelled to that field's
+// generated name, a `$NAME` read to the literal it holds, and an EnvModel
+// literal the schema reads in another form (`max_age(90d)`) to that form. A
+// headless record whose type its field gives (`prompt: { label: "x" }`) is
+// passed through that type's `envmodel_expect_*` function from the schema.
+// Every piece of the generated text keeps the source span it stands for, so
+// a diagnostic the compiler gives inside it is placed back in the source.
+//
+// EnvModel's own syntax stays EnvModel's: a record of bare names
+// (`presets: { dev: { … } }`) or a headless enum case (`.Rust`) is walked
+// here, and only the values inside it go to the compiler.
+use {
+    jet_foundation.[
+        CtEnumArg,
+        CtMapEntry,
+        CtValue,
+        Diagnostic,
+        Expr,
+        NamedCtValue,
+        Span,
+        ast_comptime_key_from_value,
+        comptime_walk_identifiers,
+        diagnostic_from_registry,
+        expr_span,
+        expr_source_start,
+        jet_config_eval_diagnostic,
+        jet_config_literal,
+        jet_config_plain_literal,
+    ]
+    jet_lexer.[TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, Token, lex_config, lexer_without_comments]
+    jet_pkg_model.[pkg_bytes_text]
+}
+
+// The schema's identity function a list or map literal that would read as a
+// type passes through (envmodel_value_reads_as_type).
+ENVMODEL_VALUE_WHOLE: "envmodel_value"
+
+// One run of the generated text and the source bytes it stands for. A copy
+// maps byte for byte; any other text stands for the whole span.
+EnvValueSegment: struct {
+    start: Int
+    end: Int
+    source: Span
+    copied: Bool
+}
+
+// The generated declarations for one source, and what each one computes.
+EnvValueProgram: struct {
+    source: [U8]
+    // The source's tokens, which place the end of a call's arguments.
+    tokens: [Token]
+    environment: [String:CtValue]
+    prefix: String
+    parts: [String]
+    length: Int
+    segments: [EnvValueSegment]
+    count: Int
+    // The generated name computing the expression that starts at an offset.
+    leaves: [Int:String]
+    // The source text each generated name stands for.
+    labels: [String:String]
+    // A value known without the compiler, by its expression's start.
+    known: [Int:CtValue]
+    // Source text the program spells differently, by its span.
+    respelled: [(span: Span, text: String)]
+    // Whether some generated value needs the compiler.
+    needed: Bool
+    // The span the first generated value stands for.
+    first: Span?
+}
+
+envmodel_value_program: fn(source: String, environment: [String:CtValue]) -> EnvValueProgram Never! {
+    prefix := "ENVMODEL_VALUE_"
+    tries := 0
+    loop source.contains(prefix) {
+        tries += 1
+        prefix = "ENVMODEL_VALUE{tries}_"
+    }
+    EnvValueProgram{
+        source: source.bytes(),
+        tokens: lexer_without_comments(lex_config(source.bytes()).tokens),
+        environment: environment,
+        prefix: prefix,
+        parts: [String]{},
+        length: 0,
+        segments: [EnvValueSegment]{},
+        count: 0,
+        leaves: [Int:String]{},
+        labels: [String:String]{},
+        known: [Int:CtValue]{},
+        respelled: [(span: Span, text: String)]{},
+        needed: false,
+        first: None,
+    }
+}
+
+// A fresh generated name.
+envmodel_value_name: fn(plan: &EnvValueProgram) -> String Never! {
+    name: "{plan.prefix}{plan.count}"
+    plan.count += 1
+    name
+}
+
+// Append generated text standing for the whole of `source`.
+envmodel_value_append: fn(plan: &EnvValueProgram, text: &&String, source: Span) Never! {
+    size: text.count_bytes()
+    if size == 0 {
+        return
+    }
+    plan.segments.push(EnvValueSegment{start: plan.length, end: plan.length + size, source: source, copied: false})
+    plan.parts.push(text)
+    plan.length += size
+}
+
+// Append a copy of the source bytes from `start` to `end`.
+envmodel_value_copy: fn(plan: &EnvValueProgram, start: Int, end: Int) Never! {
+    if end <= start {
+        return
+    }
+    plan.segments.push(EnvValueSegment{start: plan.length, end: plan.length + end - start, source: Span{start: start, end: end}, copied: true})
+    plan.parts.push(pkg_bytes_text(plan.source, start, end))
+    plan.length += end - start
+}
+
+// Whether `expr` is a headless record (`{ … }`, no type name).
+envmodel_value_headless_record: fn(expr: Expr) -> Bool Never! {
+    if envmodel_unparen(expr) == .StructLit(type_name, _, _, _, _, _, _, _) {
+        return type_name == ""
+    }
+    false
+}
+
+// Whether `expr` is EnvModel syntax the compiler can't type on its own: a
+// headless record or enum case, or a list or map literal holding one.
+envmodel_value_structural: fn(expr: Expr) -> Bool Never! {
+    current: envmodel_unparen(expr)
+    if current == .StructLit(type_name, _, _, _, _, _, _, _) -> return type_name == ""
+    if current == .EnumLit(type_name, _, _, _, leading_dot, _, _) {
+        return leading_dot || type_name == ""
+    }
+    if current == .ListLit(values, _, _) {
+        loop value in values {
+            if envmodel_value_structural(value) -> return true
+        }
+    }
+    if current == .MapLit(entries, _, _) {
+        loop entry in entries {
+            if envmodel_value_structural(entry.key) || envmodel_value_structural(entry.value) {
+                return true
+            }
+        }
+    }
+    false
+}
+
+// Plan a value at a position with no type of its own: EnvModel syntax is
+// walked, and each value inside it (or the whole value) is one generated
+// value. `siblings` names the generated value of each sibling field ("" for
+// a field written in EnvModel syntax, which no value can read).
+envmodel_value_plan: fn(plan: &EnvValueProgram, expr: Expr, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
+    current: envmodel_unparen(expr)
+    if !envmodel_value_structural(current) {
+        extent: envmodel_value_extent(plan, current)
+        envmodel_value_leaf(plan, current, "", "", extent, siblings, globals)
+        return
+    }
+    if current == .StructLit(_, _, _, _, fields, _, _, _) {
+        loop field in fields -> envmodel_value_plan(plan, field.value, siblings, globals)
+    }
+    if current == .EnumLit(_, _, _, args, _, _, _) {
+        loop arg in args {
+            if arg == {
+                .Positional(value) -> { envmodel_value_plan(plan, value, siblings, globals) }
+                .Named(_, value) -> envmodel_value_plan(plan, value, siblings, globals)
+            }
+        }
+    }
+    if current == .ListLit(values, _, _) {
+        loop value in values -> envmodel_value_plan(plan, value, siblings, globals)
+    }
+    if current == .MapLit(entries, _, _) {
+        loop entry in entries {
+            envmodel_value_plan(plan, entry.key, siblings, globals)
+            envmodel_value_plan(plan, entry.value, siblings, globals)
+        }
+    }
+}
+
+// Plan a value at a position whose records have one type: a headless
+// record in it, alone or as a list, map or bare-name entry, is passed
+// through `expect`, the type's `envmodel_expect_*` function.
+envmodel_value_plan_typed: fn(plan: &EnvValueProgram, expr: Expr, expect: String, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
+    current: envmodel_unparen(expr)
+    if !envmodel_value_structural(current) {
+        extent: envmodel_value_extent(plan, current)
+        envmodel_value_leaf(plan, current, "", "", extent, siblings, globals)
+        return
+    }
+    if current == .StructLit(_, _, _, _, fields, _, _, _) {
+        loop field in fields {
+            envmodel_value_plan_element(plan, field.value, expect, siblings, globals)
+        }
+        return
+    }
+    if current == .ListLit(values, _, _) {
+        loop value in values -> envmodel_value_plan_element(plan, value, expect, siblings, globals)
+        return
+    }
+    if current == .MapLit(entries, _, _) {
+        loop entry in entries {
+            envmodel_value_plan(plan, entry.key, siblings, globals)
+            envmodel_value_plan_element(plan, entry.value, expect, siblings, globals)
+        }
+        return
+    }
+    envmodel_value_plan(plan, current, siblings, globals)
+}
+
+// One element of a typed position: a headless record is passed through
+// `expect`; anything else is planned as written.
+envmodel_value_plan_element: fn(plan: &EnvValueProgram, expr: Expr, expect: String, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
+    current: envmodel_unparen(expr)
+    if envmodel_value_headless_record(current) {
+        extent: envmodel_value_extent(plan, current)
+        envmodel_value_leaf(plan, current, expect, "", extent, siblings, globals)
+        return
+    }
+    envmodel_value_plan(plan, current, siblings, globals)
+}
+
+// The value of `expr` when no program is needed for it: a plain literal, a
+// `$NAME` read, or a read of a module value already known.
+envmodel_value_known: fn(plan: EnvValueProgram, expr: Expr, siblings: [String:String], globals: [String:CtValue]) -> CtValue? Never! {
+    if jet_config_plain_literal(expr) == .Val(value) -> return Val(value)
+    if expr == .Ident(name, _, _) {
+        if siblings.get(name) != None -> return None
+        if name.starts_with("$") -> return Val(plan.environment.get(name) ?? CtValue.Str{value: ""})
+        return globals.get(name)
+    }
+    None
+}
+
+// The source text `expr` is written as. The syntax tree spans a call or a
+// method call by its name and a member path by its last name, so the text
+// runs from the receiver's start through the argument lists or indexes
+// right after the expression's own span.
+envmodel_value_extent: fn(plan: EnvValueProgram, expr: Expr) -> Span Never! {
+    start: expr_source_start(expr)
+    end := expr_span(expr).end
+    low := 0
+    high := plan.tokens.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if {
+            plan.tokens[middle].span.start < end -> low = middle + 1
+            else -> high = middle
+        }
+    }
+    depth := 0
+    loop index in low..<plan.tokens.len() {
+        kind: plan.tokens[index].kind
+        if depth == 0 && kind != TOKEN_LPAREN && kind != TOKEN_LBRACKET {
+            return Span{start: start, end: end}
+        }
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> depth -= 1
+        end = plan.tokens[index].span.end
+    }
+    Span{start: start, end: end}
+}
+
+// Whether `expr`, copied after a module-level `NAME: `, would read as a type
+// alias: a name or path, or a one-element list or one-entry map of them
+// (`[PORT]`, `[KEY: VALUE]`).
+envmodel_value_reads_as_type: fn(expr: Expr) -> Bool Never! {
+    if expr == .Ident(name, _, _) -> return !name.starts_with("$")
+    if expr == .Field(base, _, _, _) -> return envmodel_value_reads_as_type(base)
+    if expr == .ListLit(values, _, _) {
+        return values.len() == 1 && envmodel_value_reads_as_type(values[0])
+    }
+    if expr == .MapLit(entries, _, _) {
+        return entries.len() == 1 && envmodel_value_reads_as_type(entries[0].key) && envmodel_value_reads_as_type(entries[0].value)
+    }
+    false
+}
+
+// One generated value computing `expr`, passed through `expect` unless it is
+// empty. `name` is the generated name a sibling field reads ("" for a fresh
+// one), and `label_span` the span its declaration stands for.
+envmodel_value_leaf: fn(plan: &EnvValueProgram, expr: Expr, expect: String, name: String, label_span: Span, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
+    span: expr_span(expr)
+    extent: envmodel_value_extent(plan, expr)
+    known := CtValue?{None}
+    if expect == "" -> known = envmodel_value_known(plan, expr, siblings, globals)
+    if known == {
+        .Val(value) -> { plan.known[span.start] = value }
+        .None -> plan.needed = true
+    }
+    generated: if name == "" -> envmodel_value_name(plan) else -> name
+    wrap := expect
+    if wrap == "" && (expr == .ListLit(_, _, _) || expr == .MapLit(_, _, _)) && envmodel_value_reads_as_type(expr) {
+        wrap = ENVMODEL_VALUE_WHOLE
+    }
+    head: if wrap == "" -> "{generated}: " else -> "{generated}: {wrap}("
+    envmodel_value_append(plan, head, label_span)
+    sites := [(span: Span, text: String)]{}
+    loop site in comptime_walk_identifiers(expr) {
+        if site.name.starts_with("$") {
+            value: plan.environment.get(site.name) ?? CtValue.Str{value: ""}
+            literal: jet_config_literal(value) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(site.span), "the environment read `{site.name}` holds a value the module values' program can't spell")})
+            sites.push((span: site.span, text: literal))
+            next
+        }
+        sibling: siblings.get(site.name) ?? next
+        if sibling == "" {
+            return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(site.span), "`{site.name}` is written in environment syntax, so another field can't read its value")})
+        }
+        sites.push((span: site.span, text: sibling))
+    }
+    loop respelling in plan.respelled {
+        if respelling.span.start >= extent.start && respelling.span.end <= extent.end {
+            sites.push((span: respelling.span, text: respelling.text))
+        }
+    }
+    sites.sort_by(fn(site) { site.span.start })
+    cursor := extent.start
+    loop site in sites {
+        envmodel_value_copy(plan, cursor, site.span.start)
+        envmodel_value_append(plan, site.text, site.span)
+        cursor = site.span.end
+    }
+    envmodel_value_copy(plan, cursor, extent.end)
+    tail: if wrap == "" -> "\n" else -> ")\n"
+    envmodel_value_append(plan, tail, extent)
+    plan.leaves[span.start] = generated
+    plan.labels[generated] = pkg_bytes_text(plan.source, label_span.start, label_span.end)
+    if plan.first == None -> plan.first = Val(label_span)
+}
+
+// The source span a span of the generated text stands for.
+envmodel_value_place: fn(plan: EnvValueProgram, span: Span) -> Span? Never! {
+    start := -1
+    end := -1
+    last: if span.end > span.start -> span.end - 1 else -> span.end
+    loop segment in plan.segments {
+        if span.start >= segment.start && span.start < segment.end {
+            start = if segment.copied -> segment.source.start + span.start - segment.start else -> segment.source.start
+        }
+        if last >= segment.start && last < segment.end {
+            end = if segment.copied -> segment.source.start + span.end - segment.start else -> segment.source.end
+        }
+    }
+    if start < 0 || end < start -> return None
+    Val(Span{start: start, end: end})
+}
+
+// `diagnostic` from the program, placed at `span`, with each generated name
+// in its text replaced by the source text it stands for.
+envmodel_value_diagnostic: fn(plan: EnvValueProgram, diagnostic: Diagnostic, span: Span) -> Diagnostic Never! {
+    what := diagnostic.what
+    why := diagnostic.why
+    fix := diagnostic.fix
+    // The longest names first, so `…_1` doesn't cut `…_12`.
+    index := plan.count - 1
+    loop index >= 0 {
+        generated: "{plan.prefix}{index}"
+        label: plan.labels.get(generated) ?? generated
+        what = what.replace(generated, label)
+        why = why.replace(generated, label)
+        fix = fix.replace(generated, label)
+        index -= 1
+    }
+    diagnostic_from_registry(diagnostic.code, Val(span), what, why, fix)
+}
+
+// The value of `expr`, as the compiler (or the literal itself) computed it,
+// with EnvModel syntax around it assembled here.
+envmodel_value_of: fn(expr: Expr, scope: ModuleEvalScope) -> CtValue EnvModelEvalError! {
+    current: envmodel_unparen(expr)
+    span: expr_span(current)
+    if scope.values.get(span.start) == .Val(value) -> return Ok(value)
+    if current == .StructLit(type_name, _, _, _, fields, _, _, _) {
+        lowered := [NamedCtValue]{}
+        loop field in fields {
+            lowered.push(NamedCtValue{name: field.name, value: envmodel_value_of(field.value, scope)})
+        }
+        return Ok(CtValue.Struct{type_name: type_name, fields: lowered})
+    }
+    if current == .EnumLit(type_name, variant, _, args, _, _, _) {
+        lowered := [CtEnumArg]{}
+        loop arg in args {
+            if arg == {
+                .Positional(value) -> {
+                    lowered.push(CtEnumArg{label: None, value: envmodel_value_of(value, scope)})
+                }
+                .Named(label, value) -> {
+                    lowered.push(CtEnumArg{label: Val(label), value: envmodel_value_of(value, scope)})
+                }
+            }
+        }
+        return Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
+    }
+    if current == .ListLit(values, _, _) {
+        items := [CtValue]{}
+        loop value in values -> items.push(envmodel_value_of(value, scope))
+        return Ok(CtValue.List{values: items})
+    }
+    if current == .MapLit(entries, _, _) {
+        lowered := [CtMapEntry]{}
+        loop entry in entries {
+            key_value: envmodel_value_of(entry.key, scope)
+            key: ast_comptime_key_from_value(key_value) ?? return Err(envmodel_error("E1333", "module map keys must be deterministic scalar values", "named module facts become stable plan keys", "use a string, integer, boolean, or character key", Val(expr_span(entry.key))))
+            if !envmodel_ct_map_insert(lowered, key, envmodel_value_of(entry.value, scope)) {
+                return Err(envmodel_error("E1333", "module map contains a duplicate key", "one module fact cannot silently choose between two values for the same key", "remove the duplicate key or merge its values", Val(expr_span(entry.key))))
+            }
+        }
+        return Ok(CtValue.Map{entries: lowered})
+    }
+    Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(span), "this value was not computed with the environment's values")})
+}

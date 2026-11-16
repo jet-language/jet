@@ -12912,28 +12912,21 @@ ImpureCallInPureContext: struct {
     }
 }
 
-AmbientIoInPackageBuild: struct {
-    call: String
-
+RetiredAmbientIoInPackageBuild: struct {
     impl Diagnostic {
         code: "E3402"
-        safety_class: .Soundness
-        safety_reason: "Package builds run without ambient I/O, so the call would reach outside the sandbox."
-        expert_path: "none: declared build inputs"
-        meaning: "Package build attempted ambient I/O or network (names the call)"
-        detail: true
+        status: .Retired
+        no_fix: None
 
         what: fn(self) -> String {
-            "`{self.call}` is not allowed during a sandboxed package build."
+            "*Retired* (was: package build attempted ambient I/O; the compiler computes every module value now and refuses ambient I/O with E0643)"
         }
 
         why: fn(self) -> String {
-            "Package builds run with ambient I/O and network access disabled."
+            "Jet no longer reports this code; its row stays so an older reference to it still explains"
         }
 
-        fix: fn(self) -> String {
-            "Compute this value at compile time or pass it in as a parameter."
-        }
+        fix: fn(self) -> String { "Follow the guidance for E0643" }
     }
 }
 
@@ -13627,7 +13620,7 @@ RecursiveInlineAlways: struct {
         }
 
         why: fn(self) -> String {
-            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and a body that calls itself would be copied without end. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016) and a read of `context.trace` (E1017)"
+            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and a body that calls itself would be copied without end. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)"
         }
 
         fix: fn(self) -> String {
@@ -13649,7 +13642,7 @@ InlineAlwaysAddressTaken: struct {
         }
 
         why: fn(self) -> String {
-            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and a function value has no call site to copy into. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016) and a read of `context.trace` (E1017)"
+            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and a function value has no call site to copy into. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)"
         }
 
         fix: fn(self) -> String {
@@ -13670,7 +13663,7 @@ InlineAlwaysTooLarge: struct {
         }
 
         why: fn(self) -> String {
-            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and copying a large body into every call grows the program. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016) and a read of `context.trace` (E1017)"
+            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and copying a large body into every call grows the program. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)"
         }
 
         fix: fn(self) -> String {
@@ -15272,7 +15265,7 @@ InlineAlwaysScrub: struct {
         what: fn(self) -> String { "`#Inline(Always) fn` is `#Scrub`, and a `#Scrub` routine stays a call" }
 
         why: fn(self) -> String {
-            "A `#Scrub` routine reveals a fixed value as a public result, and only its own call keeps the value fixed up to that result"
+            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and a `#Scrub` routine reveals a fixed value as a public result: only its own call keeps the value fixed up to that result. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)"
         }
 
         fix: fn(self) -> String { "Drop `#Inline(Always)` from the `#Scrub` routine." }
@@ -15290,7 +15283,7 @@ InlineAlwaysReadsTrace: struct {
         what: fn(self) -> String { "`#Inline(Always) fn` reads `context.trace`, which names the reading function's own frame" }
 
         why: fn(self) -> String {
-            "`context.trace` starts at the frame of the function that reads it, and an inlined copy runs in its caller's frame"
+            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and `context.trace` starts at the frame of the function that reads it, while an inlined copy runs in its caller's frame. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)"
         }
 
         fix: fn(self) -> String { "Drop `#Inline(Always)`, or read `context.trace` in the function's caller." }
@@ -15368,6 +15361,24 @@ ComptimeValueIsComputedFunction: struct {
         fix: fn(self) -> String {
             "Name the function in the value (`F: double`), or keep the data the function needs as the compile-time value and pass it to a named function."
         }
+    }
+}
+
+InlineAlwaysForeign: struct {
+    impl Diagnostic {
+        code: "E1021"
+        safety_class: .Soundness
+        safety_reason: "A function with a foreign body has no Jet body to copy, so each call goes to the foreign code and no call of it can be inlined."
+        expert_path: "none: a function with a foreign body is not `#Inline(Always)`"
+        meaning: "An `#Inline(Always)` function whose body is foreign: `#FFI(c)`, `#FFI(asm)` or `#Import(c)`"
+
+        what: fn(self) -> String { "`#Inline(Always) fn` has a foreign body, and a function with a foreign body stays a call" }
+
+        why: fn(self) -> String {
+            "`#Inline(Always)` guarantees every direct call is inlined on every tier, and the body of an `#FFI` or `#Import(c)` function is foreign code with no Jet body to copy into the caller. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)"
+        }
+
+        fix: fn(self) -> String { "Drop `#Inline(Always)` from the function with the foreign body." }
     }
 }
 

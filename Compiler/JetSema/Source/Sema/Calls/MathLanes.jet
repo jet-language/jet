@@ -11,6 +11,7 @@ use jet_foundation.[
     Measure,
     Span,
     Type,
+    core_enum_cases,
     expr_span,
     type_identity_equal,
     type_name,
@@ -18,8 +19,6 @@ use jet_foundation.[
 ]
 
 SEMA_MATH_REDUCE_OP_TYPE: "ReduceOp"
-
-SEMA_MATH_REDUCE_OP_VALUES: [String]{"Add", "Mul", "Min", "Max", "Avg"}
 
 sema_call_math_is_lane: fn(name: String) -> Bool Never! { type_simd_lane_arity(name) != None }
 
@@ -94,7 +93,7 @@ sema_call_math_reduce_error: fn(span: Span, what: String, why: String, fix: Stri
 }
 
 // `v.reduce(.Op)` on a SIMD lane takes one Core `ReduceOp`
-// value. A written value that names no `ReduceOp` variant is E2510 before the
+// value. A written value that names no `ReduceOp` case is E2510 before the
 // Core `reduce` method checks the call; true when it was.
 sema_call_math_lane_reduce_rejected: fn(receiver: Type, method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool Never! {
     if method != "reduce" || args.len() != 1 || sema_call_math_lane_name(receiver) == None {
@@ -102,10 +101,14 @@ sema_call_math_lane_reduce_rejected: fn(receiver: Type, method: String, args: [C
     }
     if args[0].expr == {
         .EnumLit(enum_type, variant, _, payload, _, value_span, _) -> {
-            if (enum_type == "" || enum_type == SEMA_MATH_REDUCE_OP_TYPE) && payload.len() == 0 && SEMA_MATH_REDUCE_OP_VALUES.contains(variant) {
+            cases: core_enum_cases(SEMA_MATH_REDUCE_OP_TYPE) ?? [String]{}
+            if (enum_type == "" || enum_type == SEMA_MATH_REDUCE_OP_TYPE) && payload.len() == 0 && cases.contains(variant) {
                 return false
             }
-            diagnostics.push(sema_call_math_reduce_error(value_span, "this value is not a `ReduceOp`", "`reduce` accepts `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`", "use a Core `ReduceOp` value"))
+            spelled := loop case_name in cases -> "`.{case_name}`"
+            last: spelled.pop() ?? ""
+            menu: if spelled.len() == 0 -> last else -> "{spelled.join(", ")}, or {last}"
+            diagnostics.push(sema_call_math_reduce_error(value_span, "this value is not a `ReduceOp`", "`reduce` accepts {menu}", "use a Core `ReduceOp` value"))
             return true
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}

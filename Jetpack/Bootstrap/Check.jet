@@ -7,7 +7,7 @@
 //   JET=<native jet> $JET Jetpack/Bootstrap/Check.jet              # jet check, one unit of every area
 //   JETPACK_WORKER=<name> ... Check.jet --area PackageModel             # one area + its declared deps
 //   ... Check.jet --area PackageModel --deps-from-head                  # the deps as HEAD has them
-//   ... Check.jet --each                                                # every area as its own unit
+//   ... Check.jet --each                                                # `Assemble.jet listed`, then every area as its own unit
 //   JETPACK_WORKER=<name> ... Check.jet --areas Foundation,PackageModel # an explicit section list
 //   ... Check.jet --syntax [selection]                                  # the parser only
 //   ... Check.jet --hosted                                              # native `jetpack` engine binary
@@ -534,6 +534,14 @@ each_area: fn(repo: String, state: String, jet: String) -> Int {
     if status_of(listed) != 0 {
         term.eprint(listed.errors.removesuffix("\n"))
         return status_of(listed)
+    }
+    // Each area's unit leaves its dependency areas' unlisted files out as
+    // another writer's work in progress, so the whole tree is held to the
+    // lists once, first.
+    held: process.cmd([String]{jet, "{repo}/{ASSEMBLER}", "listed"}).cwd(state).env("JETPACK_BOOTSTRAP_SOURCE_ROOT", source).output_limit(OUTPUT_LIMIT).run() ?? fail(1, "{jet} could not run {ASSEMBLER}: {err}")
+    if status_of(held) != 0 {
+        term.eprint(held.errors.removesuffix("\n"))
+        return status_of(held)
     }
     areas := [String]{}
     loop line in listed.output.split("\n") {

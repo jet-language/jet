@@ -513,3 +513,47 @@ as `PROMPT: Prompt{ label: 5 }` is refused with the compiler's own type error
 at the `5`.
 A field left unwritten stays out of the checked record, and the
 environment applies its own default for it.
+
+The values written in an environment's fields are checked the same way. Each
+value is computed by the compiler as a module value of the source, so a field
+may read a sibling field in any order, and a cycle or type error is reported
+at the field in the source. A headless record takes the type its field gives
+it: `prompt: { label: "dev" }` is a `Prompt`, and each entry of
+`presets: ["dev": { … }]` is a `Preset`. The names a field holds
+(`presets: { dev: … }`, `.Rust`, `packages.app`, the jobs in
+`on_enter: [prepare]`, a `secrets:` map and its `compose(…)` templates) stay
+environment syntax; only the values inside them go to the compiler, so
+`git_hooks_path: "{HOOKS}/githooks"` reads the module's values. A secret's
+`max_age(…)` and `random(…)` are schema functions the compiler calls:
+`random(length: LENGTH * 2)` is a `SecretRandom`, and `max_age(90d)` (a count
+with a `d`/`day`/`days`, `h`/`hour`/`hours`, `m`/`min`/`minute`/`minutes` or
+`s`/`sec`/`second`/`seconds` suffix) is a `SecretMaxAge` of that many
+seconds, saturating at the largest `Int`.
+
+An image's field values are computed the same way: `expose: ports()`,
+`env_vars: ["PORT": "{PORT}"]`, `health:`, `entrypoint:`, `user:`, `files:`
+and `services:` are module values of the source, and so is the reference in
+`base: oci("debian:{DEBIAN}")`. `kind: .Oci`, `from:`, `format:` and
+`target:` stay names. A value of the wrong shape (`expose: "8080"`) is still
+E1269 at the field.
+
+So are a system's service field values and the `options:` values that read
+a module value (`tuning.port: PORT * 2`); an option that reads none keeps
+its spelling (`network.hostName: laptop`, `.Default`). A fleet or vmtest
+host's override record (`system.web{ offset: 10, services: { … } }`) is
+computed the same way, its own fields read by name from the record's other
+fields in any order.
+
+A dev service's field values (`ports: [PORT]`) and the arguments of its
+readiness probe (`ready: tcp(port_of(PORT))`), a package generation's
+`extends:`, and the argument values of an integration import
+(`env.platform.android(api: 30 + 5)`) are computed too. A bare name in an
+integration argument (`[dev_certificate]`, `mcp: [repo_server]`) stays a
+name, and a secret input that is not a named reference is refused without
+ever being computed.
+
+A workspace index's `members:` value (`members: PKGS`,
+`[member("hello")]`) is computed the same way, with the index file's own
+module values and `fn`s; `find("./dir")` and `[]` are read as written, and a
+value that reads a build-time input (`embed_file`, `find`, `fetch`) is still
+E2104.

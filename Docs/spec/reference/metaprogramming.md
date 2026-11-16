@@ -69,6 +69,19 @@ program calls at run time
 The program makes each function value where it reads the module value, so
 such a value is never placed in static data.
 
+Compile-time code runs as native O0 code over the program's own runtime, so
+what a run does works the same while building: Shared cells, tasks and
+`task.all`, a select over channels, runtime kernels such as Core math and
+SHA-256, and allocation in a fixed backing
+([`native_o0_shared_tasks_select`](../../../tests/cases/comptime/native_o0_shared_tasks_select.case)).
+A foreign (`#FFI`) function is not linked into compile-time code, so a call
+of one while building stops the build (E3010). The closures Core keeps for
+later run the same way: scope guards, transaction commit and rollback hooks,
+reactive derived values and effects, and UI click handlers and render
+bodies. The typed-text heads (`HTML`, `Sh`, `URL`, `Path`, `DateTime`,
+`SQL`) escape their holes while building as they do at run time
+([`native_o0_closure_kinds`](../../../tests/cases/comptime/native_o0_closure_kinds.case)).
+
 A compile-time value must be data: the build keeps it and hands it to later
 compile-time code and to the program. A runtime handle such as a
 [reader](../vocabulary.md#reader) or a [stream](../vocabulary.md#stream) lives
@@ -637,8 +650,10 @@ name, so `Point` declared in the inline module `geo` of `app.jet` is
 ([`ReflectPaths`](../../../Examples/Metaprogramming/Reflection/ReflectPaths.jet)).
 An erased trait value (`[Shape]{Square{side: 2}}[0]`) reflects as the concrete
 value its box holds: its `type_name` and `path` name the declared type whose
-payload key the box carries. The key is a hash of the type's identity alone,
-so it does not change in a build that adds a module. A value of a builtin or
+payload key the box carries. The key is a hash of the type's identity; a type
+whose hash another implementer's key already holds takes its next hash, so no
+two types share a key. A build that adds a module keeps each key unless a type
+it adds held it first. A value of a builtin or
 generic implementer keeps the trait's own names. `fields()` is populated for
 a struct and is empty for a non-struct value. A struct field's `value()`
 lists that struct's own fields, so `.fields()[i].value()` walks a nested value

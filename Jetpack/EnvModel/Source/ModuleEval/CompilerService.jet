@@ -1,30 +1,22 @@
 // The jetpack side of the first-party compiler service (JetFoundation
-// CompilerService.jet): jetpack links only the front end, so a config value
-// that needs the comptime stage, or a project entry that needs the checker,
-// is answered by the sibling `jet` through `jet __jetpack <op>` (one
-// evaluator, one checker; I8). Jetpack-only: inside `jet` the environment
-// model's `comptime_evaluate` is the in-process one (JetCli ConfigEval.jet).
+// CompilerService.jet): jetpack links only the front end, so a source's
+// module values, or a project entry that needs the checker, are answered by
+// the sibling `jet` through `jet __jetpack <op>` (one evaluator, one checker;
+// I8).
 use {
     jetpack_foundation.[BINARY_NAME]
     jet_foundation.[
         ComptimeEvalError,
         CtValue,
-        Expr,
-        Func,
         Item,
-        JET_COMPILER_SERVICE_COMPTIME_EVALUATE,
         JET_COMPILER_SERVICE_MODULE_VALUES,
         JET_COMPILER_SERVICE_VERB,
         JetModuleValuesOutcome,
-        compiler_service_comptime_outcome,
         compiler_service_comptime_request,
         compiler_service_module_values_outcome,
         foundation_parse_protocol_json,
-        jet_config_eval_error,
-        jet_config_eval_placed,
-        jet_config_plain_literal,
     ]
-    jet_parser.[jet_config_module_values_program, jet_config_program]
+    jet_parser.[jet_config_module_values_program]
     sys: core.sys
     files: core.files
     process: core.process
@@ -74,37 +66,30 @@ envmodel_compiler_service: fn(op: String, request: String) -[FS, Env, Exec, Time
     Ok(response)
 }
 
-// Evaluate `expr` (spelled in `source`) with `funcs` callable and `globals`
-// readable: a plain literal is already its value; every other expression is
-// the config-value program the sibling compiler evaluates (JetCli
-// `jet_config_evaluate_program`), and its refusal is placed on `expr`.
-comptime_evaluate: fn(expr: Expr, source: String, funcs: [String:Func], base_dir: String, globals: [String:CtValue]) -[FS, Env, Exec, Time.Wait]> CtValue ComptimeEvalError! {
-    if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
-    program: jet_config_program(expr, source, funcs, globals) ?? return Err(err)
-    // copy: the request owns its base directory; `base_dir` is a read parameter the caller keeps.
-    response: envmodel_compiler_service(JET_COMPILER_SERVICE_COMPTIME_EVALUATE, compiler_service_comptime_request(program, base_dir.copy())) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: {err.detail}"))
-    outcome: compiler_service_comptime_outcome(response) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: the compiler's answer is not a config value"))
-    if outcome == {
-        .Value(value) -> Ok(value)
-        .Refused(diagnostic) -> Err(jet_config_eval_placed(expr, diagnostic))
-    }
-}
-
 // The typed records of the environment surface, as Jet declarations
 // (`Prompt`, `Lang`, `Reload`, …). Every module-values program ends with
 // them, so the source's values are typed against them.
 ENVMODEL_ENVIRONMENT_SCHEMA: #run embed_file("Schema/Environment.jet.schema")
 
-// Every module value of `source` (parsed as `items`), computed by the
-// sibling compiler in one request (JetCli `jet_config_module_values`): the
-// source's own declarations and the environment schema are checked as one
-// program that keeps the source's offsets, so a refusal's span inside the
-// source is a span of `source`, and one past its end lies in the schema or
-// the program's own lines. `environment` holds the value of each `$NAME`
-// the source reads.
-module_values_evaluate: fn(items: [Item], source: String, base_dir: String, environment: [String:CtValue]) -[FS, Env, Exec, Time.Wait]> JetModuleValuesOutcome CompilerServiceError! {
-    values: jet_config_module_values_program(items, source, environment) ?? return Ok(JetModuleValuesOutcome.Refused{diagnostic: err.diagnostic})
-    program: "{values}\n{ENVMODEL_ENVIRONMENT_SCHEMA}"
+// The module-values program for `source` (parsed as `items`): the source's
+// own declarations, kept at their offsets so a span inside the source is a
+// span of `source`; then `generated`, the values EnvModel spells itself
+// (ValueProgram.jet), from offset `generated_at`; then the environment
+// schema. `environment` holds the value of each `$NAME` the source reads.
+ModuleValuesProgram: struct {
+    text: String
+    generated_at: Int
+}
+
+module_values_program: fn(items: [Item], source: String, environment: [String:CtValue], generated: String) -> ModuleValuesProgram ComptimeEvalError! {
+    values: jet_config_module_values_program(items, source, environment) ?? return Err(err)
+    Ok(ModuleValuesProgram{text: "{values}\n{generated}\n{ENVMODEL_ENVIRONMENT_SCHEMA}", generated_at: values.count_bytes() + 1})
+}
+
+// Every module value of `program`, computed by the sibling compiler in one
+// request (JetCli `jet_config_module_values`), or the first diagnostic of
+// its check, at its span in the program.
+module_values_evaluate: fn(program: &&String, base_dir: String) -[FS, Env, Exec, Time.Wait]> JetModuleValuesOutcome CompilerServiceError! {
     // copy: the request owns its base directory; `base_dir` is a read parameter the caller keeps.
     response: envmodel_compiler_service(JET_COMPILER_SERVICE_MODULE_VALUES, compiler_service_comptime_request(program, base_dir.copy())) ?? return Err(err)
     outcome: compiler_service_module_values_outcome(response) ?? return Err(CompilerServiceError{detail: "the compiler's answer is not a module-values response"})

@@ -13,6 +13,7 @@ use {
     build_tls: core.net.tls
     client_gzip: core.archive.gzip
     rt: jet.runtime.time
+    h2: __core_http_h2
 }
 
 C_MAX_BODY_BYTES: 1048576
@@ -1778,9 +1779,16 @@ priv live_attach: fn(pending: &&LiveBody?, tcp: &&TCPStream?, tls: &&build_tls.T
     Val(body)
 }
 
-// The live hop. Each dial failure leaves its stage and portable name on the
-// wire for a capture to record.
+// The live hop.
 priv client_dial_exchange: fn(wire: &BuildWire, method: String, url: ClientURL, fields: [http.Header], body: [U8]?, phases: ClientPhases, proxy: ClientURL?) -[Net, Time.Wait]> ClientReply HTTPError! {
+    _: client_dial(wire, url, phases, proxy, build_tls.ClientConfig.default()) ?? return Err(err)
+    client_exchange(wire, method, url, fields, body, phases, proxy != None)
+}
+
+// Connects the wire to `url`, through `proxy` when there is one, with TLS
+// configured by `tls` for an https URL. Each dial failure leaves its stage
+// and portable name on the wire for a capture to record.
+priv client_dial: fn(wire: &BuildWire, url: ClientURL, phases: ClientPhases, proxy: ClientURL?, tls: build_tls.ClientConfig) HTTPError! -[Net, Time.Wait]> {
     destination: proxy ?? url
     connect_end: client_until(phases.connect_ns, phases.end_ns)
     if connect_end <= rt.clock_mono_ns() {
@@ -1828,7 +1836,7 @@ priv client_dial_exchange: fn(wire: &BuildWire, method: String, url: ClientURL, 
             wire.ending = "timed_out"
             return Err(.Timeout{phase: "transport"})
         }
-        stream := build_tls.__client_deadline_entry(tcp, url.host, Duration{ns: remaining}) ?? {
+        stream := build_tls.__client_config_deadline_entry(tcp, url.host, tls, Duration{ns: remaining}) ?? {
             if rt.clock_mono_ns() >= tls_end {
                 wire.ending = "timed_out"
                 return Err(.Timeout{phase: "transport"})
@@ -1840,7 +1848,54 @@ priv client_dial_exchange: fn(wire: &BuildWire, method: String, url: ClientURL, 
         wire.tls = Val(stream)
     } else { wire.tcp = Val(tcp) }
     wire.stage = C_CLIENT_STAGE_EXCHANGE
-    client_exchange(wire, method, url, fields, body, phases, proxy != None)
+    Ok()
+}
+
+// The HTTP/2 send behind the framework's pushes, as APNs takes requests
+// only over HTTP/2: one request on a connection of its own, over TLS that
+// negotiated `h2` for an https URL, or over cleartext with prior knowledge
+// (h2c) for an http one. It follows no redirects, takes no proxy, decodes
+// no body and is not recorded by `jet prove`. `timeout_ms` bounds the
+// whole send. A server that breaks HTTP/2, resets the stream or goes away
+// before answering it is Protocol `HTTP/2`.
+__h2_request: fn(method: String, url: String, fields: [http.Header], body: [U8], timeout_ms: Int) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    if method == "" || !valid_method(method) -> return Err(.InvalidHeader)
+    if timeout_ms < 0 -> return Err(.Timeout{phase: "transport"})
+    parsed: client_url(url) ?? return Err(err)
+    loop field in fields -> _: client_check_header(field.name, field.value) ?? return Err(err)
+    end_ns: client_deadline(rt.clock_mono_ns(), timeout_ms)
+    phases: ClientPhases{connect_ns: C_BUILD_INT_MAX, tls_ns: C_BUILD_INT_MAX, write_ns: C_BUILD_INT_MAX, first_byte_ns: C_BUILD_INT_MAX, read_ns: C_BUILD_INT_MAX, end_ns: end_ns}
+    wire := BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: end_ns, idle_ns: 0, prove: 0, taped: [U8]{}, sends: 0, ending: "", stage: C_CLIENT_STAGE_RESOLVE, addresses: [[U8]]{}}
+    result: client_h2_send(wire, method, parsed, fields, body, phases)
+    client_close(wire)
+    result
+}
+
+// Dials `url` and moves the exchange's frames over the wire until the
+// response has ended. The server's SETTINGS and PINGs are acked, and the
+// rest of the body goes out as its windows open, before each read.
+priv client_h2_send: fn(wire: &BuildWire, method: String, url: ClientURL, fields: [http.Header], body: [U8], phases: ClientPhases) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    _: client_dial(wire, url, phases, None, build_tls.with_alpn(build_tls.config(url.host), "h2")) ?? return Err(err)
+    headers := [h2.H2Header]{}
+    loop field in fields {
+        headers.push(h2.H2Header{name: field.name.copy(), value: field.value.copy()})
+    }
+    exchange := h2.h2_start(method, url.scheme, url.authority, url.target, headers, body)
+    loop !exchange.done {
+        if exchange.out.len() > 0 {
+            _: build_send(wire, exchange.out) ?? return Err(client_wire_error(wire, err))
+            exchange.out.clear()
+        }
+        read: build_fill(wire) ?? return Err(client_wire_error(wire, err))
+        // The server closed the connection before the response ended.
+        if read == 0 -> return Err(.IO{operation: "transport"})
+        _: h2.h2_feed(exchange, wire.buffer) ?? return Err(.Protocol{version: "HTTP/2"})
+    }
+    response := [http.Header]{}
+    loop field in exchange.headers {
+        response.push(http.Header{name: field.name.copy(), value: field.value.copy()})
+    }
+    Ok(http.client_response(exchange.status, http.body_bytes(exchange.body.move()), http.Headers{fields: response}, [String]{}, [Int]{}, false, None, None))
 }
 
 // Moves a proxy tunnel's progress onto the hop's wire: the unread bytes and
@@ -2243,4 +2298,62 @@ priv build_slice_text: fn(text: String, start: Int, end: Int) -> String Never! {
     rt.sleep_ns(5000000)
     second: client_until(0, C_BUILD_INT_MAX)
     assert(second - first >= 5000000)
+}
+
+// A fake HTTP/2 server for the test below: takes one connection on
+// `listener`, reads the client's preface and frames until its request
+// ends, and answers 200 with an `apns-id` and the body `sent`. Gives the
+// request's header fields as `name: value` lines, then its body.
+priv client_test_h2_serve: fn(listener: build_net.TCPListener) -[Net, Time.Wait]> String Never! {
+    stream := build_net.tcp_accept(listener) ?? panic("accept: {err}")
+    deadline: Duration{ns: 10000000000}
+    input := [U8]{}
+    buffer := [U8]{}
+    decoder := h2.hpack_decoder(h2.H2_TABLE_SIZE)
+    request := ""
+    body := [U8]{}
+    at := h2.H2_PREFACE.bytes().len()
+    ended := false
+    loop !ended {
+        buffer.clear()
+        read: stream.read_into(buffer, C_BUILD_READ_BYTES, deadline: deadline) ?? panic("read: {err}")
+        if read == 0 -> panic("the client closed before its request ended")
+        input.extend(buffer.copy())
+        loop !ended && at + 9 <= input.len() {
+            size: Int{input[at]} * 65536 + Int{input[at + 1]} * 256 + Int{input[at + 2]}
+            if at + 9 + size > input.len() -> break
+            kind: Int{input[at + 3]}
+            flags: Int{input[at + 4]}
+            payload: input.slice(at + 9, at + 9 + size)
+            at += 9 + size
+            if kind == h2.H2_HEADERS {
+                fields: h2.hpack_decode(decoder, payload) ?? panic("the request's header block")
+                loop field in fields -> request += "{field.name}: {field.value}\n"
+            } else if kind == h2.H2_DATA { body.extend(payload) }
+            ended = (kind == h2.H2_HEADERS || kind == h2.H2_DATA) && flags.bit_and(h2.H2_END_STREAM) != 0
+        }
+    }
+    reply := [U8]{}
+    h2.h2_frame(reply, h2.H2_SETTINGS, 0, 0, [U8]{})
+    head: [h2.H2Header]{h2.H2Header{name: ":status", value: "200"}, h2.H2Header{name: "apns-id", value: "a-1"}}
+    h2.h2_frame(reply, h2.H2_HEADERS, h2.H2_END_HEADERS, 1, h2.hpack_encode(head))
+    h2.h2_frame(reply, h2.H2_DATA, h2.H2_END_STREAM, 1, "sent".bytes())
+    sent := 0
+    loop sent < reply.len() {
+        sent += stream.write_some(reply.slice(sent, reply.len()), deadline: deadline) ?? panic("write: {err}")
+    }
+    "{request}{String.from_bytes(body) ?? ""}"
+}
+
+#Test("An HTTP/2 send over cleartext posts its request and reads the response") {
+    listener := build_net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
+    addr: build_net.listener_local_socket_addr(listener) ?? panic("listen address: {err}")
+    server: task { client_test_h2_serve(listener) }
+    fields: [http.Header]{http.Header{name: "Apns-Topic", value: "com.example"}}
+    response: __h2_request("POST", "http://127.0.0.1:{addr.port}/3/device/abc", fields, "{{\"aps\":1}}".bytes(), 10000) ?? panic("send: {err}")
+    assert_eq(response.status, 200)
+    assert_eq(response.header("apns-id"), String?{Val("a-1")})
+    assert_eq(response.text() ?? panic("body: {err}"), "sent")
+    seen: server.join() ?? panic("the server failed")
+    assert_eq(seen, ":method: POST\n:scheme: http\n:authority: 127.0.0.1:{addr.port}\n:path: /3/device/abc\napns-topic: com.example\n{{\"aps\":1}}")
 }

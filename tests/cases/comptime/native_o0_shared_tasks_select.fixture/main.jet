@@ -1,0 +1,87 @@
+use {
+    core.mem
+    crypto: core.crypto
+    math: core.math
+}
+
+Counter: struct {
+    n: Int
+}
+
+// Two handles to one Shared cell: a write through either is the other's.
+shared_total: fn() -> Int {
+    cell: Shared{Counter{n: 1}}
+    other: cell
+    other.n += 41
+    cell.n
+}
+
+sum_range: fn(first: Int, last: Int) -> Int {
+    total := 0
+    loop n in first..last -> total += n
+    total
+}
+
+tasks_total: fn() -> Int {
+    halves: task.all {sum_range(1, 25), sum_range(26, 50)} ?? panic("task.all failed")
+    helper: task sum_range(51, 100)
+    rest: helper.join() ?? panic("helper task failed")
+    halves[0] + halves[1] + rest
+}
+
+pick: fn(ready: Receiver<Int>, idle: Receiver<Int>) -> Int {
+    if {
+        job, ready -> { return job }
+        other, idle -> { return other * 100 }
+    }
+    0
+}
+
+select_value: fn() -> Int {
+    { sender: sender, receiver: ready }: channel<Int>()
+    { sender: _idle_sender, receiver: idle }: channel<Int>()
+    sender.send(11)
+    pick(ready, idle)
+}
+
+// Runtime kernels: Core math and the SHA-256 digest.
+native_value: fn() -> String {
+    digest: crypto.sha256("jet")
+    "{math.sqrt(2.0)} {digest.bytes[0]} {digest.bytes[31]}"
+}
+
+// Int allocations that fit a 128-byte fixed backing: 8 payload bytes plus a
+// 32-byte header each, so 3, and the same 3 again after a reset.
+fixed_count: fn() -> Int {
+    bytes := [U8#128]{ uninit }
+    fixed: mem.Fixed.over(bytes)
+    counts := [Int]{}
+    loop counts.len() < 2 {
+        count := 0
+        loop {
+            if fixed.try_alloc(count) == {
+                .Ok(_) -> { count += 1 }
+                .Err(_) -> { break }
+            }
+        }
+        counts.push(count)
+        fixed.reset()
+    }
+    close(fixed)
+    counts[0] * 10 + counts[1]
+}
+
+SHARED: #run shared_total()
+
+TASKS: #run tasks_total()
+
+SELECTED: #run select_value()
+
+NATIVE: #run native_value()
+
+FIXED: #run fixed_count()
+
+run: fn() {
+    print("built {SHARED} {TASKS} {SELECTED} {NATIVE} {FIXED}")
+    print("run {shared_total()} {tasks_total()} {select_value()} {native_value()} {fixed_count()}")
+}

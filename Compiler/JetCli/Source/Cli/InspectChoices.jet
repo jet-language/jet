@@ -8,8 +8,9 @@
 // - Inlining: each call site the optimizer inlined as `jet build` optimizes
 //   the program (jet_cli_decisions: the profile's level and the build option
 //   flags), with why it was taken (JetIR OptInline.jet). `#Inline(Always)`
-//   locks a callee inlined: a change that makes it recursive, address-taken
-//   or too large fails the build naming it (E0917-E0919).
+//   locks a callee inlined: a change that makes it recursive, address-taken,
+//   too large, `#Scrub`, a reader of `context.trace` or foreign fails the
+//   build naming it (E0917-E0919, E1016, E1017, E1021).
 // - Collection: under `#Policy(gc)`, a binding whose returned heap graph
 //   needs identity beyond its lexical owner is kept by the policy scope's
 //   collector, and a binding that takes such a value from its call holds it

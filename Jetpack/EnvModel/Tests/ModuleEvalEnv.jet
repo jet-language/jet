@@ -9,6 +9,7 @@ use {
         ModuleEntryKey,
         PromptPathMode,
         PromptStripMode,
+        ReadyProbe,
         RestartPolicy,
         ShutdownPolicy,
         envmodel_evaluate_env,
@@ -90,6 +91,12 @@ use {
     assert_eq(plan.packages[0].provider, "nix")
     assert_eq(plan.packages[0].declared_by, [String]{"base"})
     assert_eq(plan.collisions.get("bin/editor"), Val("fd@default"))
+}
+
+#Test("package generation extends is the compilers value") {
+    source: "BASE: \"base\"\nprofile.base: module {{\n    packages: [default.ripgrep]\n}}\nprofile.dev: module {{\n    extends: [BASE],\n    packages: [default.fd],\n}}\n"
+    plan: envmodel_evaluate_package_profile(source, envmodel_test_base_dir(), "dev") ?? panic("the generation plans: {err.diagnostic.what}")
+    assert_eq(plan.applied, [String]{"base", "dev"})
 }
 
 #Test("package profile provider facts preserve selector and provenance") {
@@ -186,14 +193,24 @@ use {
     envmodel_test_check_snapshot("E0966", envmodel_test_render("env.jet", src, error))
 }
 
-#Test("ambient io in build is e3402") {
+#Test("ambient io in a dev service is the compilers refusal at the call") {
+    src: "\nenv.dev: module {{\n    services: {{ db: {{ ready: read_file(\"/etc/hostname\") }} }}\n}}\n"
+    error: envmodel_test_source_error(envmodel_evaluate_source(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0643")
+    rendered: envmodel_test_render("env.jet", src, error)
+    assert(rendered.contains("can't be computed while building"), rendered)
+    assert(!rendered.contains("ENVMODEL_VALUE"), rendered)
+    assert(rendered.contains("--> env.jet:3:30"), rendered)
+}
+
+#Test("ambient io in an env field is the compilers refusal at the call") {
     src: "\ndev: module {{\n    env.dev: Env{{\n        prompt: read_file(\"/etc/hostname\"),\n    }}\n}}\n"
     error: envmodel_test_source_error(envmodel_evaluate_source(src, envmodel_test_base_dir()))
-    assert_eq(error.code, "E3402")
+    assert_eq(error.code, "E0643")
     rendered: envmodel_test_render("env.jet", src, error)
-    assert(rendered.contains("`read_file` is not allowed during a sandboxed package build"))
-    assert(rendered.contains("Package builds run with ambient I/O and network access disabled"))
-    envmodel_test_check_snapshot("E3402", rendered)
+    assert(rendered.contains("can't be computed while building"), rendered)
+    assert(!rendered.contains("ENVMODEL_VALUE"), rendered)
+    assert(rendered.contains("--> env.jet:4:17"), rendered)
 }
 
 #Test("evaluate env builds plan from typed surface") {
@@ -428,6 +445,24 @@ use {
     assert_eq(editor.providers, [String]{"nixpkgs"})
 }
 
+#Test("integration argument values are the compilers and secret inputs are never computed") {
+    src: "NDK: \"27\"\nhost_of: fn(n: Int) -> String {{ \"127.0.0.{{n}}\" }}\nenv.dev: module {{\n    imports: [\n        env.platform.android(api: 30 + 5, ndk: \"{{NDK}}.1\", build_tools: tools),\n        env.network.hosts([\"api.local\": host_of(1)]),\n    ]\n}}\n"
+    plan: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the integrations plan: {err.diagnostic.what}")
+    android: envmodel_test_integration(plan, IntegrationKind.Android)
+    assert_eq(android.options.get("api"), Val("35"))
+    assert_eq(android.options.get("ndk"), Val("27.1"))
+    // A bare name stays a name.
+    assert_eq(android.options.get("build_tools"), Val("tools"))
+    hosts: envmodel_test_integration(plan, IntegrationKind.Hosts)
+    assert_eq(hosts.options.get("host.api.local"), Val("127.0.0.1"))
+    // An unknown name in a secret input would be the compiler's error if the
+    // input were computed; it is refused as a lossy secret instead.
+    secret: "env.dev: module {{ imports: [env.security.vault(UNDEFINED_SECRET + \"x\")] }}"
+    error: envmodel_test_env_error(envmodel_evaluate_env(secret, envmodel_test_base_dir()))
+    assert_eq(error.code, "E1335")
+    assert(error.why.contains("secret input must be a named reference"))
+}
+
 #Test("typed integration loss is reported before plan persistence") {
     src: "\nenv.dev: module {{\n            imports: [env.security.certificates(42)]\n}}\n"
     error: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
@@ -494,6 +529,16 @@ use {
     worker: plan.dev_services[1]
     assert_eq(worker.name, "worker")
     assert(!worker.enable)
+}
+
+#Test("dev service values and readiness probe arguments are the compilers") {
+    src: "PORT: 6380\nport_of: fn(n: Int) -> Int {{ n + 1 }}\nenv.dev: module {{\n    services: {{\n        redis: {{ ports: [PORT, port_of(PORT)], run: [\"redis-server\", \"--port\", \"{{PORT}}\"], ready: tcp(port_of(PORT)), prot: PORT * 2 }},\n    }}\n}}\n"
+    plan: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the dev services plan: {err.diagnostic.what}")
+    redis: plan.dev_services[0]
+    assert_eq(redis.ports, [Int]{6380, 6381})
+    assert_eq(redis.run, Val([String]{"redis-server", "--port", "6380"}))
+    assert(redis.ready_probe == Val(ReadyProbe.TCP{host: "127.0.0.1", port: 6381}))
+    assert_eq(redis.extra, [DevServiceExtra]{DevServiceExtra{name: "prot", value: "12760"}})
 }
 
 #Test("dev service unrecognized field lands in extra") {
@@ -603,7 +648,7 @@ use {
 
 // Ordinary System capture is unchanged.
 #Test("fleet host fields shadow globals without changing the system") {
-    src: "base: #run 100\nsystem.web: module {{ target: linux.x64, options: [tuning.retries: 9] }}\nfleet.prod: module {{ hosts: {{ web1: system.web{{ options: [tuning.retries: base + 1], base: 4 }}, web2: system.web }} }}\n"
+    src: "BASE: #run 100\nsystem.web: module {{ target: linux.x64, options: [tuning.retries: 9] }}\nfleet.prod: module {{ hosts: {{ web1: system.web{{ options: [tuning.retries: BASE + 1], BASE: 4 }}, web2: system.web }} }}\n"
     plan: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("fleet override evaluates")
     assert_eq(plan.systems[0].options[0].value, "9")
     fleets: envmodel_test_host_groups(src, false)
@@ -617,6 +662,32 @@ use {
     assert_eq(override_plan.fields[1].value, HostOverrideValue.Value{value: CtValue.Int{value: 4}})
     assert(fleets[0].hosts[1].overrides == None)
     assert(fleets[0].hosts[1].override_source == None)
+}
+
+#Test("system service and option values are the compilers") {
+    src: "PORT: 8000\nENABLED: 2 > 1\nport_of: fn(n: Int) -> Int {{ n + 1 }}\nsystem.web: module {{ target: linux.x64, services: {{ api: {{ enable: ENABLED, port: port_of(PORT) }} }}, options: [tuning.port: PORT * 2, network.hostName: laptop] }}\nfleet.prod: module {{ hosts: {{ web1: system.web{{ services: {{ api: {{ enable: !ENABLED, port: PORT + offset }} }}, offset: port_of(9) }} }} }}\n"
+    plan: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the system plans: {err.diagnostic.what}")
+    service: plan.systems[0].services[0]
+    assert(service.enable)
+    assert_eq(service.extra[0].value, "8001")
+    assert_eq(plan.systems[0].options[0].value, "16000")
+    assert_eq(plan.systems[0].options[1].value, "laptop")
+    override_plan: envmodel_test_host_groups(src, false)[0].hosts[0].overrides ?? panic("the host has typed overrides")
+    services: if override_plan.fields[0].value == {
+        .Services(values) -> values
+        .Platform(_) | .Packages(_) | .Options(_) | .Value(_) -> panic("the first field is services")
+    }
+    assert(!services[0].enable)
+    assert_eq(services[0].extra[0].value, "8010")
+    assert_eq(override_plan.fields[1].value, HostOverrideValue.Value{value: CtValue.Int{value: 10}})
+}
+
+#Test("system option value errors are at their line") {
+    src: "PORT: 8000\nsystem.web: module {{\n    target: linux.x64,\n    options: [tuning.port: PORT + \"x\"],\n}}\n"
+    error: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    rendered: envmodel_test_render("system.jet", src, error)
+    assert(rendered.contains("--> system.jet:4:"), rendered)
+    assert(!rendered.contains("ENVMODEL_VALUE"), rendered)
 }
 
 #Test("fleet host service override rejects non boolean enable") {

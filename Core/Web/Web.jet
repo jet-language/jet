@@ -13,6 +13,7 @@ use {
     core
     core.http.[HTTPError, HTTPRequest, HTTPResponse, HTTPRouter]
     core.image.[ImageError, ImageFormat, Limits]
+    auth: core.auth
     codec: core.image
     crypto: core.crypto
     web_http: core.http
@@ -594,12 +595,14 @@ App: struct {
     // A failed bind is the caller's error to handle.
     bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError! {
         app_image_route(self)
+        app_push_route(self)
         http_server.server_bind(address, app_table(self), tls, deadline)
     }
 
     // Answer the one connection `listener` accepts next.
     serve_once: fn(self, listener: TCPListener) HTTPError! -[Net, FS.Read, Time]> {
         app_image_route(self)
+        app_push_route(self)
         http_server.server_serve_once(listener, app_table(self))
     }
 }
@@ -740,6 +743,7 @@ priv app_serve: fn(app: App, chosen: AppPort) Never! -[Env, IO, Net, FS.Read, Ti
     table: app_table(app)
     if dev -> app_dev_reload(table)
     app_image_route(app)
+    app_push_route(app)
     if !app_has_root_catch_all(table) {
         fallback: app.copy()
         http_server.route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(app_not_found_response(fallback, request)) }), "", #here)
@@ -892,6 +896,63 @@ priv app_image_route: fn(app: App) Never! {
     if guard.value.image_handler == .Val(handler) {
         http_server.route_add(table, "GET", "{C_IMAGE_PREFIX}*jet_image", handler.copy(), "", #here)
     }
+}
+
+// The address a device of the signed-in caller registers at for pushes.
+priv C_APP_PUSH_DEVICES: "/__jet/push/devices"
+
+// Registers POST `/__jet/push/devices` (app_push_register) unless the app
+// did this before.
+priv app_push_route: fn(app: App) Never! {
+    table: app_table(app)
+    loop route in http_server.mux_routes(table) {
+        if route.method == "POST" && route.pattern == C_APP_PUSH_DEVICES {
+            return
+        }
+    }
+    http_server.route_add(table, "POST", C_APP_PUSH_DEVICES, http_server.__handler(fn(request: HTTPRequest) { Ok(app_push_register(request)) }), "", #here)
+}
+
+// The body of a device's registration: its push service (`apns`, `fcm` or
+// `web`) and the service's token for it; for Web Push, the subscription's
+// endpoint as the token, and its `p256dh` key and `auth` secret.
+#Codable
+priv AppPushDevice: struct {
+    service: String
+    token: String
+    key: String?
+    auth: String?
+}
+
+// The longest token a registration holds, in bytes: a Web Push endpoint
+// is a URL.
+priv C_APP_PUSH_TOKEN_MAX: 4096
+
+// Registers the device the body names for the signed-in caller, so
+// `app.notify` reaches it: 204 once a store keeps it, 401 with no caller,
+// 400 for a body that names no device and 503 when no store takes it. An
+// App has no sign-in yet, so a request names no caller, and each one is
+// refused with 401 until sign-in names an account.
+priv app_push_register: fn(request: HTTPRequest) -[Net]> HTTPResponse Never! {
+    account: calls.maybe_caller() ?? return app_json(401, app_error_json("`{C_APP_PUSH_DEVICES}` needs a signed-in caller"))
+    body: request.json<AppPushDevice>() ?? return app_json(400, app_error_json("the device's registration is no JSON object of service, token, key and auth"))
+    if body.service != "apns" && body.service != "fcm" && body.service != "web" {
+        return app_json(400, app_error_json("a device's service is apns, fcm or web"))
+    }
+    if body.token == "" || body.token.len() > C_APP_PUSH_TOKEN_MAX {
+        return app_json(400, app_error_json("a device's token is 1 to {C_APP_PUSH_TOKEN_MAX} bytes"))
+    }
+    key: body.key ?? ""
+    auth: body.auth ?? ""
+    endpoint: body.token.starts_with("https://") || body.token.starts_with("http://")
+    if body.service == "web" && (!endpoint || key == "" || auth == "") {
+        return app_json(400, app_error_json("a Web Push device's token is its endpoint URL, with its key and auth"))
+    }
+    device: calls.PushDevice{account: account.raw(), service: body.service.copy(), token: body.token.copy(), key: key, auth: auth}
+    if !calls.push.register(device) {
+        return app_json(503, app_error_json("no store took the device"))
+    }
+    http_server.response_body(204, core.http.body_text(""), core.http.headers())
 }
 
 // The handler app_image_route adds. Only a page places an image, so
@@ -2749,6 +2810,63 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
     request := web_http.server_request("POST", "/hooks/{project}", web_http.body_text(body), fields)
     request.__params = [web_http.Header]{web_http.Header{name: "project", value: project}}
     app_webhook_response(hook, request).status
+}
+
+#Test("a device registers for pushes only for a signed-in caller, with a body that names it") {
+    kept: Shared{[calls.PushDevice]{}}
+    devices: calls.PushDevices{
+        store: "web.Test push devices",
+        add: fn(device: calls.PushDevice) {
+            held := kept.guard_edit()
+            held.value.push(device.copy())
+            true
+        },
+        of: fn(_: String) { None },
+        forget: fn(_: String, _: String) { true },
+    }
+    calls.push.store(devices)
+    apns: "{{\"service\":\"apns\",\"token\":\"a1b2\"}}"
+    assert_eq(app_push_test_status(apns), 401)
+    ann: auth.AccountID.from_string("acct_ann")
+    statuses: calls.as_caller(ann, fn() {
+        [Int]{
+            app_push_test_status(apns),
+            app_push_test_status("{{\"service\":\"sms\",\"token\":\"a1b2\"}}"),
+            app_push_test_status("{{\"service\":\"fcm\",\"token\":\"\"}}"),
+            app_push_test_status("{{\"service\":\"web\",\"token\":\"https://push.example.net/1\"}}"),
+            app_push_test_status("{{\"service\":\"web\",\"token\":\"push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
+            app_push_test_status("{{\"service\":\"web\",\"token\":\"https://push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
+            app_push_test_status("[1]"),
+        }
+    })
+    assert_eq(statuses, [Int]{204, 400, 400, 400, 400, 204, 400})
+    held: kept.guard_read()
+    assert_eq(held.value.len(), 2)
+    assert_eq("{held.value[0].account} {held.value[0].service} {held.value[0].token}", "acct_ann apns a1b2")
+    assert_eq("{held.value[1].service} {held.value[1].token} {held.value[1].key} {held.value[1].auth}", "web https://push.example.net/1 BKey secret")
+}
+
+#Test("a push to a device whose push service is not set up is skipped, and kept with its service, account and reason") {
+    devices: calls.PushDevices{
+        store: "web.Test unsent pushes",
+        add: fn(_: calls.PushDevice) { false },
+        of: fn(account: String) {
+            if account != "acct_unset" -> return Val([calls.PushDevice]{})
+            Val([calls.PushDevice]{calls.PushDevice{account: "acct_unset", service: "fcm", token: "f-1", key: "", auth: ""}})
+        },
+        forget: fn(_: String, _: String) { true },
+    }
+    calls.push.store(devices)
+    calls.__notify(auth.AccountID.from_string("acct_unset"), "Due today", "Ship v2", "{{\"TaskView\":{{\"id\":7}}}}")
+    notes: calls.push.outcomes()
+    assert(notes.len() > 0)
+    assert_eq(notes[notes.len() - 1], "skipped fcm acct_unset: no FCM settings")
+}
+
+// The status a registration of `body` at `/__jet/push/devices` answers.
+priv app_push_test_status: fn(body: String) -[Net]> Int Never! {
+    request: web_http.server_request("POST", C_APP_PUSH_DEVICES, web_http.body_text(body), web_http.headers())
+    app_push_register(request).status
 }
 
 #Test("trace settings follow the OpenTelemetry SDK variables") {

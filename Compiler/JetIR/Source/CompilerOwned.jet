@@ -404,8 +404,6 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "Key", variants: [String]{"Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Up", "Down", "Left", "Right", "F", "Ctrl", "Unknown"}},
     {name: "IOOperation", variants: [String]{"Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec"}},
     {name: "ProcessResourceLimit", variants: [String]{"WallTime", "CpuTime", "Memory", "OpenFiles", "Output"}},
-    {name: "ProcessStreamMode", variants: [String]{"Stream", "Inherit", "Capture", "Stdout"}},
-    {name: "TerminalMode", variants: [String]{"Raw", "Cooked"}},
     {name: "DurationUnit", variants: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}},
     {name: "DataLoaderKind", variants: [String]{"File", "URL", "Database", "Value"}},
     {name: "DataErrorKind", variants: [String]{"Decode", "Limit", "IO", "Empty", "InvalidArgument", "NonFinite", "Overflow", "State", "Bridge", "Unsupported", "DuplicateKey", "MissingKey", "WrongOwner", "StaleRevision", "InvalidValue"}},
@@ -419,17 +417,9 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "PluginError", variants: [String]{"Guest", "Denied", "Budget", "Defect"}},
     {name: "NetDNSError", variants: [String]{"NotFound", "Failure"}},
     {name: "NetError", variants: [String]{"InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"}},
-    {name: "NetShutdown", variants: [String]{"Read", "Write", "Both"}},
     {name: "WatchDomain", variants: [String]{"File", "Process", "Port"}},
     {name: "WatchKind", variants: [String]{"Created", "Modified", "Removed", "Error", "Exited", "Ready"}},
-    {name: "NetReadyInterest", variants: [String]{"Read", "Write", "ReadWrite"}},
     {name: "WsError", variants: [String]{"InvalidURL", "InvalidHandshake", "Protocol", "Timeout", "Closed", "Cancelled", "UnsupportedTarget", "MessageTooLarge", "IO"}},
-    // The Core lane-reduction enum sema reads from the Core
-    // enum payload rows (no Core.rows declaration, no Rust COMPILER_OWNED_ENUMS
-    // row: Rust lowers `v.reduce(.Op)` as a marker and never compiles Core
-    // math's `reduce(op)`). The runtime pack does, so its `op == .Add` test,
-    // its `.Add` literals and its `ReduceOp` parameters need this canonical row.
-    {name: "ReduceOp", variants: [String]{"Add", "Mul", "Min", "Max", "Avg"}},
     // The closed reflection detail menus sema types fact reads with
     // (sema_fact_enum_variants): a read `EXACTNESS.kind` or
     // `OBLIGATION.param_contract[0].zone` is a runtime value of these rows.
@@ -445,11 +435,11 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "UnitScaleProvenanceKind", variants: [String]{"Rational", "SymbolicPi", "Conventional", "Measured"}},
     // A reflected compile-time value; its payloads are the Core enum rows.
     {name: "PreparedValue", variants: [String]{"Int", "Float", "Bool", "Char", "String", "Enum", "List", "Struct", "Unit"}},
-    // A reflected enum case's payload; its payloads are the Core enum rows.
-    {name: "CasePayload", variants: [String]{"Unit", "Single", "Named"}},
 } }
 
-// The payload of one compiler-owned enum variant.
+// The payload of one compiler-owned enum variant. A copy of `CasePayload` in
+// Core/Reflect/Reflect.jet, in its order (the closed-list mirror ledger):
+// edit `CasePayload`, then copy it here.
 IRCompilerOwnedPayload: enum {
     Unit
     Single(ty: Type)
@@ -522,9 +512,8 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         return ir_compiler_owned_single(Type.Named{name: "PluginFault"})
     }
     // The canonical twelve DataEvent payloads are the generated Core payload
-    // rows (data_event_payload), as are a reflected PreparedValue's and a
-    // reflected case's CasePayload.
-    if name == "DataEvent" || name == "PreparedValue" || name == "CasePayload" {
+    // rows (data_event_payload), as are a reflected PreparedValue's.
+    if name == "DataEvent" || name == "PreparedValue" {
         payload: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
         if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])
         return IRCompilerOwnedPayload.Unit

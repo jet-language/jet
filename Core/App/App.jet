@@ -27,6 +27,8 @@ use {
     rt: jet.runtime.time
     rt_web: jet.runtime.web
     world_rt: jet.runtime.testing
+    log_rt: jet.runtime.log
+    push_wire: __core_app_push
 }
 
 SYNC_MAX_SESSION: 256
@@ -732,7 +734,8 @@ priv(package) callers: module {
     seen: as_caller<String>(ann, fn() {
         assert(as_system(fn() { callers.system() }))
         assert_eq(as_system(fn() { maybe_caller() }), auth.AccountID?{None})
-        assert_eq(as_caller(ben, fn() { maybe_caller() }), Val(ben))
+        nested: auth.AccountID.from_string("ben")
+        assert_eq(as_caller(nested, fn() { maybe_caller() }), Val(nested))
         spawned: task { (maybe_caller() ?? auth.AccountID.from_string("no one")).raw() }
         assert_eq(spawned.join() ?? panic("the spawned task runs"), "no one")
         assert(!callers.system())
@@ -740,7 +743,7 @@ priv(package) callers: module {
     })
     assert_eq(seen, "ann")
     assert_eq(maybe_caller(), auth.AccountID?{None})
-    as_caller(ben, fn() {
+    as_caller(ben.copy(), fn() {
         assert_eq(maybe_caller(), Val(ben))
         assert_eq(caller(), ben)
         assert(!callers.system())
@@ -1048,6 +1051,199 @@ priv calls_take: fn(call: Int) -> CallRun? Never! {
         if runs.value.runs[index].id == call -> return runs.value.runs.remove(index, .Slot)
     }
     None
+}
+
+// A device an account registered for pushes: its push service (`apns`,
+// `fcm` or `web`), the service's token for it (for Web Push, the
+// subscription's endpoint URL) and, for Web Push only, the subscription's
+// P-256 public key and authentication secret, base64url.
+priv PushDevice: struct {
+    account: String
+    service: String
+    token: String
+    key: String
+    auth: String
+}
+
+// One store's push devices, which core.db keeps in the table
+// `__jet_push_devices` and names as the store opens (`push.store`). A
+// device is found by its service and token.
+priv PushDevices: struct {
+    // Names the store among the open ones, as CallOutbox.store does.
+    store: String
+    // Registers a device in place of the one with its service and token;
+    // false when the store couldn't.
+    add: fn(PushDevice) -[]> Bool Never!
+    // The devices the account registered; None when the store couldn't
+    // read them, as once it has closed.
+    of: fn(String) -[]> [PushDevice]? Never!
+    // Forgets the device of a service and a token; false when the store
+    // couldn't.
+    forget: fn(String, String) -[]> Bool Never!
+}
+
+priv PushRegistry: struct {
+    stores: [Shared<PushDevices>]
+}
+
+priv PUSH_REGISTRY: Shared{PushRegistry{stores: [Shared<PushDevices>]{}}}
+
+// The devices accounts register for pushes. core.db names each database
+// file as it opens (`store`). A device registers in the first store named
+// that takes it, which is the app's first store still open; a push goes to
+// the devices any named store holds.
+priv(package) push: module {
+    // Names a store; a store named again replaces the one of its name.
+    store: fn(devices: &&PushDevices) Never! {
+        registry := PUSH_REGISTRY.guard_edit()
+        loop index in 0..<registry.value.stores.len() {
+            if push_store_name(registry.value.stores[index]) == devices.store {
+                registry.value.stores[index] = Shared{devices.move()}
+                return
+            }
+        }
+        registry.value.stores.push(Shared{devices.move()})
+    }
+
+    // Registers `device` in the first named store that takes it; false
+    // when none does.
+    register: fn(device: PushDevice) -> Bool Never! {
+        loop devices in push_stores() {
+            held: devices.guard_read()
+            if held.value.add(device.copy()) -> return true
+        }
+        false
+    }
+
+    // The devices the account `account` registered, each once.
+    devices: fn(account: String) -> [PushDevice] Never! {
+        found := [PushDevice]{}
+        loop devices in push_stores() {
+            held: devices.guard_read()
+            listed: held.value.of(account.copy()) ?? next
+            loop device in listed {
+                if !push_device_listed(found, device) -> found.push(device.copy())
+            }
+        }
+        found
+    }
+
+    // Forgets the device of `service` and `token` in each named store, as
+    // its push service says it is gone.
+    forget: fn(service: String, token: String) Never! {
+        loop devices in push_stores() {
+            held: devices.guard_read()
+            _: held.value.forget(service.copy(), token.copy())
+        }
+    }
+
+    // Sets up the push services `settings` names, in place of the ones set
+    // up before.
+    configure: fn(settings: push_wire.PushSettings) push_wire.PushError! -[FS.Read, Net]> {
+        push_wire.push_configure(settings)
+    }
+
+    // The last pushes skipped or failed, oldest first: `skipped <service>
+    // <account>: <reason>` or `failed …`.
+    outcomes: fn() -> [String] Never! {
+        held: PUSH_NOTES.guard_read()
+        held.value.last.copy()
+    }
+}
+
+// The pushes skipped and failed since the process started, and the last
+// C_PUSH_NOTES_KEPT of them.
+priv PushNotes: struct {
+    skipped: Int
+    failed: Int
+    last: [String]
+}
+
+priv PUSH_NOTES: Shared{PushNotes{skipped: 0, failed: 0, last: [String]{}}}
+
+priv C_PUSH_NOTES_KEPT: 32
+
+// A push to each device the account `to` registered, as the compiler lowers
+// `app.notify(to:, title:, body:, open:)`: `open` is the wire form of the
+// state a tap opens. Inside a job, a webhook's call or a scheduled run, each
+// push's key is made from the run's key, `to` and `open`, so a run that
+// runs again replaces the pushes it sent; outside one, each push has a
+// fresh key. A device whose push service is not set up is skipped. A push
+// its service refuses is dropped, and when the service says the device is
+// gone, the device is forgotten. Each skip and failure is counted
+// (`jet.push.skipped`, `jet.push.failed`) and kept with its service,
+// account and reason (`push.outcomes`): the published signature declares
+// only Net, so no log record can carry them.
+__notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) Never! -[Net]> {
+    account: to.raw()
+    devices: push.devices(account)
+    if devices.len() == 0 {
+        return
+    }
+    run: push_run_key()
+    key: if run != "" -> push_wire.push_collapse_key(run, account, open_route) else -> {
+        push_wire.push_fresh_key() ?? {
+            loop device in devices -> push_note(false, device.service, account, err.reason)
+            return
+        }
+    }
+    now: push_wire.push_now()
+    loop device in devices {
+        if !push_wire.push_configured(device.service) {
+            push_note(true, device.service, account, "no {push_wire.push_service_label(device.service)} settings")
+            next
+        }
+        outcome: push_wire.push_deliver(device.service, device.token, device.key, device.auth, key, title, body, open_route, now)
+        if outcome.reason == "" -> next
+        if outcome.gone {
+            push.forget(device.service, device.token)
+            push_note(false, device.service, account, "{outcome.reason}; the device is forgotten")
+        } else { push_note(false, device.service, account, outcome.reason) }
+    }
+}
+
+// The key of the run this task is in: its delivery's ID for a job or a
+// webhook's call, `<schedule>@<due>` for a scheduled run, and "" outside
+// a run.
+priv push_run_key: fn() -> String Never! {
+    call: transactions.current() ?? return ""
+    if transactions.delivery(call) == .Val(delivery) -> return delivery.id.copy()
+    if transactions.tick(call) == .Val(tick) -> return "{tick.schedule}@{tick.due}"
+    ""
+}
+
+// Counts a skipped (`skipped`) or failed push to a device of `service` of
+// `account`, and keeps why.
+priv push_note: fn(skipped: Bool, service: String, account: String, reason: String) Never! {
+    kind: if skipped -> "skipped" else -> "failed"
+    held := PUSH_NOTES.guard_edit()
+    if held.value.last.len() == C_PUSH_NOTES_KEPT -> _: held.value.last.remove(0, .Slot)
+    held.value.last.push("{kind} {service} {account}: {reason}")
+    if skipped {
+        held.value.skipped += 1
+        log_rt.metric_publish("jet.push.skipped", held.value.skipped)
+    } else {
+        held.value.failed += 1
+        log_rt.metric_publish("jet.push.failed", held.value.failed)
+    }
+}
+
+// The named stores, copied out so no store runs under the registry's lock.
+priv push_stores: fn() -> [Shared<PushDevices>] Never! {
+    registry: PUSH_REGISTRY.guard_read()
+    registry.value.stores.copy()
+}
+
+priv push_store_name: fn(devices: Shared<PushDevices>) -> String Never! {
+    held: devices.guard_read()
+    held.value.store.copy()
+}
+
+priv push_device_listed: fn(found: [PushDevice], device: PushDevice) -> Bool Never! {
+    loop known in found {
+        if known.service == device.service && known.token == device.token -> return true
+    }
+    false
 }
 
 // The arguments of a mounted method's call or of a job, decoded from their

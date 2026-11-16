@@ -3414,7 +3414,7 @@ matching lane types (D-SIMD1/D-SIMD2/D-SIMD3).
 
 Each lane operator is the scalar operator applied lane by lane, so integer
 lanes overflow and divide (truncating toward zero) as their scalar type does. The reductions `sum`, `product`,
-`min`, `max`, and `reduce(op)` with a `ReduceOp` (`.Add`, `.Mul`, `.Min`,
+`min`, `max`, and `reduce(op)` with a `math.ReduceOp` (`.Add`, `.Mul`, `.Min`,
 `.Max`, `.Avg`) are the scalar left-to-right fold over the lanes, so a float
 reduction is bit-exact with writing `((l0 + l1) + l2) + l3`. Float `min` and
 `max` skip NaN lanes as `min_float`/`max_float` do; `.Avg` is `sum` divided

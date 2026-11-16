@@ -1,0 +1,24 @@
+use core.mem
+
+// E1021: a function with a foreign body stays a call, so `#Inline(Always)`
+// cannot expand it.
+#[Inline(Always), Unsafe("register-only increment"), FFI(asm)]
+increment: fn(value: Int) -> Int {
+    """add {value}, 1 ; -> return"""
+}
+
+#[Inline(Always), Unsafe("the scalar ABI contract matches the C definition"), FFI(c)]
+add: fn(a: Int, b: Int) -> Int {
+    """int64_t add(int64_t a, int64_t b) { return a + b; }"""
+}
+
+#[Inline(Always), Import(c), Unsafe("this program owns the exit status it passes")]
+raw_exit: fn(code: I64) = "jet_rt_process_exit"
+
+run: fn() {
+    #Unsafe("call the audited foreign contracts") {
+        print(increment(41))
+        print(add(1, 2))
+        raw_exit(I64{0})
+    }
+}

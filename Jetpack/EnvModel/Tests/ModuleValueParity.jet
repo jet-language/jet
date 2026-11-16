@@ -7,11 +7,16 @@ use {
         ENVMODEL_ENVIRONMENT_SCHEMA,
         FleetPlan,
         OptionPlan,
+        PromptPathMode,
+        ReloadPolicy,
+        SecretGenerator,
+        SecretRotationPolicy,
         envmodel_evaluate_env,
         envmodel_evaluate_source,
         envmodel_find_jet_binary,
         envmodel_parse_program,
         module_values_evaluate,
+        module_values_program,
     ]
     jet_foundation.[CtValue, ast_comptime_value_show]
     jet_pkg_model.[EntryContribution, FactValue]
@@ -298,7 +303,8 @@ SCHEMA_VALUES: "PROMPT: Prompt{{ label: \"x\", path: .Short }}\nLANGS: [\"rust\"
 #Test("module_value_of_a_schema_type_is_its_written_fields") {
     dir: envmodel_test_oci_base_dir("module-value-schema")
     program: envmodel_parse_program(SCHEMA_VALUES) ?? panic("the values parse: {err.diagnostic.what}")
-    outcome: module_values_evaluate(program.items, SCHEMA_VALUES, dir, [String:CtValue]{}) ?? panic("the compiler answers: {err.detail}")
+    values_program: module_values_program(program.items, SCHEMA_VALUES, [String:CtValue]{}, "") ?? panic("the program builds: {err.diagnostic.what}")
+    outcome: module_values_evaluate(values_program.text, dir) ?? panic("the compiler answers: {err.detail}")
     files.remove_all(dir) ?? panic("remove the directory")
     computed := [String:CtValue]{}
     if outcome == {
@@ -329,4 +335,184 @@ SCHEMA_VALUES: "PROMPT: Prompt{{ label: \"x\", path: .Short }}\nLANGS: [\"rust\"
     head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
     assert_eq(head, expected)
     assert(head.contains("--> main.jet:1:"), head)
+}
+
+// Environment fields the compiler computes: a sibling read before its field,
+// a headless prompt record typed as a `Prompt`, and a map of headless preset
+// records typed as `Preset`s.
+ENV_FIELD_VALUES: `
+BASE: 8000
+
+dev: module {
+    env.dev: Env{
+        url: "http://localhost:{port}",
+        port: BASE + 1,
+        prompt: { label: "dev-{port}", path: .Full },
+        presets: ["ambient": { hostname: "host-{port}", extends: ["base"] }, "base": { variables: ["MODE": "dev"] }],
+    }
+}
+`
+
+#Test("env_field_values_are_the_compilers_in_any_order") {
+    dir: envmodel_test_oci_base_dir("env-field-values")
+    plan: envmodel_evaluate_env(ENV_FIELD_VALUES, dir) ?? panic("the revision plans: {err.diagnostic.what}")
+    assert_eq(plan.prompt, Val("dev-8001"))
+    assert_eq(plan.prompt_path, PromptPathMode.Full)
+    assert_eq(plan.presets.len(), 2)
+    loop preset in plan.presets {
+        if preset.name == "ambient" {
+            assert_eq(preset.hostname, Val("host-8001"))
+            assert_eq(preset.extends, [String]{"base"})
+        }
+        if preset.name == "base" -> assert_eq(preset.variables.get("MODE"), Val("dev"))
+    }
+    modules: envmodel_evaluate_source(ENV_FIELD_VALUES, dir) ?? panic("the revision evaluates")
+    entry: modules[0].entries[0].entry
+    assert_eq(envmodel_test_setting_value(entry, "url"), Val(FactValue.Text{value: "http://localhost:8001"}))
+    assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text{value: "8001"}))
+    files.remove_all(dir) ?? return
+}
+
+// A call and a method call are computed whole: the syntax tree spans each by
+// its name, but the value is the name with its receiver and arguments.
+ENV_FIELD_CALLS: `
+BASE: 8000
+
+port_of: fn(base: Int) -> Int { base + 2 }
+
+dev: module {
+    env.dev: Env{
+        port: port_of(BASE),
+        size: "dev-{port}".len(),
+    }
+}
+`
+
+#Test("env_field_calls_are_computed_whole") {
+    dir: envmodel_test_oci_base_dir("env-field-calls")
+    modules: envmodel_evaluate_source(ENV_FIELD_CALLS, dir) ?? panic("the revision evaluates")
+    files.remove_all(dir) ?? panic("remove the environment")
+    entry: modules[0].entries[0].entry
+    assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text{value: "8002"}))
+    assert_eq(envmodel_test_setting_value(entry, "size"), Val(FactValue.Text{value: "8"}))
+}
+
+#Test("env_field_cycle_names_the_fields_at_the_field") {
+    source: "dev: module {{\n    env.dev: Env{{\n        port: label.len(),\n        label: \"x{{port}}\",\n    }}\n}}\n"
+    dir: envmodel_test_oci_base_dir("env-field-cycle")
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+    files.remove_all(dir) ?? panic("remove the environment")
+    head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
+    assert_eq(error.code, "E0338")
+    assert(error.what.contains("port -> label -> port") || error.what.contains("label -> port -> label"), error.what)
+    assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
+    assert(head.contains("--> main.jet:3:") || head.contains("--> main.jet:4:"), head)
+}
+
+#Test("env_field_error_inside_a_nested_record_is_at_its_line") {
+    source: "dev: module {{\n    env.dev: Env{{\n        presets: [\n            \"ambient\": {{ user: \"me\" }},\n            \"web\": {{ hostname: 5 }},\n        ],\n    }}\n}}\n"
+    dir: envmodel_test_oci_base_dir("env-field-nested-error")
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+    files.remove_all(dir) ?? panic("remove the environment")
+    head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
+    assert(head.contains("jet.BindingTypeMismatch"), head)
+    assert(head.contains("--> main.jet:5:32"), head)
+    assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
+}
+
+// Lifecycle and secret values the compiler computes, inside the EnvModel
+// syntax (job names, `.Watch{ … }`, `random(…)`, the secret map) that stays
+// around them.
+ENV_LIFECYCLE_SECRET_VALUES: `
+HOOKS: "scripts"
+LENGTH: 16
+APP: "app"
+TOKEN: "TOKEN"
+
+dev: module {
+    env.dev: Env{
+        git_hooks_path: "{HOOKS}/githooks",
+        unset: ["OLD_{TOKEN}"],
+        reload: .Watch{ watch: ["src/{APP}"], debounce: 100 * 2 },
+        secrets: {
+            API_KEY: { required: false, description: "key for {HOOKS}", generate: random(length: LENGTH * 2) },
+        },
+    }
+}
+`
+
+#Test("lifecycle_and_secret_values_are_the_compilers") {
+    dir: envmodel_test_oci_base_dir("env-lifecycle-secret-values")
+    plan: envmodel_evaluate_env(ENV_LIFECYCLE_SECRET_VALUES, dir) ?? panic("the revision plans: {err.diagnostic.what}")
+    files.remove_all(dir) ?? panic("remove the environment")
+    assert_eq(plan.lifecycle.git_hooks_path, Val("scripts/githooks"))
+    assert_eq(plan.lifecycle.unset, [String]{"OLD_TOKEN"})
+    assert_eq(plan.lifecycle.reload, ReloadPolicy.Watch{paths: [String]{"src/app"}, debounce_ms: 200})
+    assert_eq(plan.secrets.len(), 1)
+    assert_eq(plan.secrets[0].description, Val("key for scripts"))
+    assert(!plan.secrets[0].required)
+    assert_eq(plan.secrets[0].generate, SecretGenerator.Random{length: 32})
+}
+
+#Test("lifecycle_and_secret_value_errors_are_at_their_line") {
+    lifecycle: "dev: module {{\n    env.dev: Env{{\n        unset: [\"A\"],\n        git_hooks_path: \"a\" + 1,\n    }}\n}}\n"
+    secret: "dev: module {{\n    env.dev: Env{{\n        secrets: {{\n            API_KEY: {{ required: false, generate: random(length: \"x\" * 2) }},\n        }},\n    }}\n}}\n"
+    sources: [String]{lifecycle, secret}
+    loop source in sources {
+        dir: envmodel_test_oci_base_dir("env-lifecycle-secret-error")
+        error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+        files.remove_all(dir) ?? panic("remove the environment")
+        head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
+        assert(head.contains("--> main.jet:4:"), head)
+        assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
+    }
+}
+
+// `max_age(…)` and `random(…)` are the schema's functions: the compiler
+// computes the age in seconds from the duration as written, saturating at
+// Int's largest, and the generator's length.
+ENV_SECRET_POLICY_CALLS: `
+DAYS: 45
+
+dev: module {
+    env.dev: Env{
+        secrets: {
+            DAILY: { required: false, rotation: max_age(90d), generate: random(length: DAYS - 13) },
+            HOURLY: { required: false, rotation: max_age(2hours) },
+            MINUTELY: { required: false, rotation: max_age(30m) },
+            SECONDLY: { required: false, rotation: max_age(45sec) },
+            FOREVER: { required: false, rotation: max_age(9223372036854775807d) },
+        },
+    }
+}
+`
+
+#Test("secret_policy_calls_are_the_schemas") {
+    dir: envmodel_test_oci_base_dir("env-secret-policy-calls")
+    plan: envmodel_evaluate_env(ENV_SECRET_POLICY_CALLS, dir) ?? panic("the revision plans: {err.diagnostic.what}")
+    files.remove_all(dir) ?? panic("remove the environment")
+    ages := [String:SecretRotationPolicy]{}
+    loop secret in plan.secrets {
+        ages[secret.name] = secret.rotation
+        if secret.name == "DAILY" -> assert_eq(secret.generate, SecretGenerator.Random{length: 32})
+    }
+    assert_eq(ages.get("DAILY"), Val(SecretRotationPolicy.MaxAge{seconds: 7776000}))
+    assert_eq(ages.get("HOURLY"), Val(SecretRotationPolicy.MaxAge{seconds: 7200}))
+    assert_eq(ages.get("MINUTELY"), Val(SecretRotationPolicy.MaxAge{seconds: 1800}))
+    assert_eq(ages.get("SECONDLY"), Val(SecretRotationPolicy.MaxAge{seconds: 45}))
+    assert_eq(ages.get("FOREVER"), Val(SecretRotationPolicy.MaxAge{seconds: 9223372036854775807}))
+}
+
+#Test("secret_policy_call_errors_are_at_their_line") {
+    age: "dev: module {{\n    env.dev: Env{{\n        secrets: {{\n            API_KEY: {{ required: false, rotation: max_age(90, 1) }},\n        }},\n    }}\n}}\n"
+    length: "dev: module {{\n    env.dev: Env{{\n        secrets: {{\n            API_KEY: {{ required: false, generate: random(size: 32) }},\n        }},\n    }}\n}}\n"
+    sources: [String]{age, length}
+    loop source in sources {
+        dir: envmodel_test_oci_base_dir("env-secret-policy-error")
+        error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+        files.remove_all(dir) ?? panic("remove the environment")
+        head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
+        assert(head.contains("--> main.jet:4:"), head)
+        assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
+    }
 }

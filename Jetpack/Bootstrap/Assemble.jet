@@ -7,6 +7,7 @@
 //   jet Jetpack/Bootstrap/Assemble.jet [check|aot|hosted]
 //   jet Jetpack/Bootstrap/Assemble.jet areas closure AREA|sources AREA|populated
 //   jet Jetpack/Bootstrap/Assemble.jet slice
+//   jet Jetpack/Bootstrap/Assemble.jet listed
 //
 // Modes:
 //   check  implementation + tests as `#Test` claims, for `jet check` (tests are
@@ -57,6 +58,13 @@
 // in a compiler package outside the slice is drift too: Jetpack must not
 // reach past the front end.
 //
+// `listed` holds every area to the lists, as no assembly does: each
+// Jetpack/<Area>/Source and Tests `.jet` file must be in sources.list or
+// tests.list, and each listed path must be a file. An assembly that proves one
+// area leaves its dependency areas' unlisted files out of the unit as another
+// writer's work in progress, so a whole tree (a gate, `Check.jet --each`) runs
+// this first. It writes nothing and runs no compiler.
+//
 // Exit: 0 done; 1 refused, printed; 64 usage.
 use {
     crypto: core.crypto
@@ -75,6 +83,9 @@ PROJECT_NAMES: [String]{".jet", "package.jet", "src"}
 
 // The trees of an area folder whose files the inventory holds to the manifests.
 TREE_KINDS: [String]{"Source", "Tests"}
+
+// The lists that order every Jetpack source and test file, in Jetpack/Bootstrap.
+MANIFESTS: [String]{"sources.list", "tests.list"}
 
 // Shared dependencies reference canonical Compiler/ sources in this checkout.
 ALLOWED_PREFIXES: [String]{"Jetpack/", "Compiler/"}
@@ -133,6 +144,15 @@ run: fn() {
         print("compiler-slice: the Jetpack compiler slice is closed under the compiler's packages")
         return
     }
+    if args.len() > 0 && args[0] == "listed" {
+        if args.len() != 1 -> usage()
+        problems: listed_problems(root) ?? refuse_as("jetpack-listed", err.message)
+        if problems.len() > 0 {
+            process.fail(1, problems.map(fn(problem) { "jetpack-listed: {problem}" }).join("\n"))
+        }
+        print("jetpack-listed: every Jetpack source and test file is listed, and every listed file exists")
+        return
+    }
     if args.len() > 1 -> usage()
     mode: if args.len() == 1 -> args[0] else -> "check"
     config: env_config(mode, root, cwd) ?? refuse_as("jetpack-bootstrap", err.message)
@@ -146,7 +166,7 @@ run: fn() {
 }
 
 usage: fn() -> Never {
-    process.fail(64, "usage: jet Jetpack/Bootstrap/Assemble.jet [check|aot|hosted]\n       jet Jetpack/Bootstrap/Assemble.jet areas closure AREA|sources AREA|populated\n       jet Jetpack/Bootstrap/Assemble.jet slice")
+    process.fail(64, "usage: jet Jetpack/Bootstrap/Assemble.jet [check|aot|hosted]\n       jet Jetpack/Bootstrap/Assemble.jet areas closure AREA|sources AREA|populated\n       jet Jetpack/Bootstrap/Assemble.jet slice\n       jet Jetpack/Bootstrap/Assemble.jet listed")
 }
 
 // `message` after `prefix: ` on stderr, then exit 1.
@@ -205,7 +225,7 @@ env_config: fn(mode: String, root: String, cwd: String) -> Config Err! {
         mode: mode,
         root: root,
         areas: areas,
-        own: process.env_get("JETPACK_BOOTSTRAP_OWN_AREA"),
+        own: process.env_nonempty("JETPACK_BOOTSTRAP_OWN_AREA"),
         test_sections: test_sections,
         deps_from_head: (process.env_get("JETPACK_BOOTSTRAP_DEPS_FROM_HEAD") ?? "") == "1",
         scratch: resolve_path(base, mode),
@@ -321,7 +341,7 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
     // fail this proof.
     blocking := [String]{}
     skipped := 0
-    loop found in inventory(config) {
+    loop found in inventory(config.root, config.areas) {
         if seen.get(found.path) ?? false -> next
         if config.own == .Val(own) && found.area != own {
             skipped += 1
@@ -555,20 +575,48 @@ Inventoried: struct {
 }
 
 // Every `.jet` file (but package.jet) under Jetpack/<Area>/Source and Tests of
-// each selected area folder but Bootstrap.
-inventory: fn(config: Config) -> [Inventoried] {
+// each area folder but Bootstrap, of the `areas` given (None: every one).
+inventory: fn(root: String, areas: [String]?) -> [Inventoried] {
     out := [Inventoried]{}
-    listed: files.list_dir("{config.root}/Jetpack") ?? return out
+    listed: files.list_dir("{root}/Jetpack") ?? return out
     loop area in listed {
         if !area.is_dir || area.name == "Bootstrap" -> next
-        if config.areas == .Val(selected) && !has(selected, area.name) -> next
+        if areas == .Val(selected) && !has(selected, area.name) -> next
         loop kind in TREE_KINDS {
-            loop path in jet_files_under(config.root, "Jetpack/{area.name}/{kind}") {
+            loop path in jet_files_under(root, "Jetpack/{area.name}/{kind}") {
                 out.push(Inventoried{area: area.name.copy(), path: path})  // copy: every file of the area records it
             }
         }
     }
     out
+}
+
+// Why the lists don't name exactly the tree's Jetpack files: each file of
+// every area's inventory that neither MANIFESTS names, then each listed path
+// that is not a file, at its line.
+listed_problems: fn(root: String) -> [String] Err! {
+    seen := [String:Bool]{}
+    problems := [String]{}
+    loop name in MANIFESTS {
+        label: "Jetpack/Bootstrap/{name}"
+        text: files.read("{root}/{label}") ?? return Err("cannot read {label}: {err}")
+        loop (index, line) in split_lines(text) {
+            path: line.trim()
+            if path == "" || path.starts_with("#") -> next
+            seen[path] = true
+            if !files.is_file("{root}/{path}") {
+                problems.push("{label}:{index + 1}: {path} is listed but is not a file")
+            }
+        }
+    }
+    unlisted := [String]{}
+    loop found in inventory(root, None) {
+        if !(seen.get(found.path) ?? false) {
+            unlisted.push("{found.path} is in neither {MANIFESTS.join(" nor ")}; add it in explicit order")
+        }
+    }
+    unlisted.extend(problems)
+    Ok(unlisted)
 }
 
 // The `.jet` files under `directory` (repository-relative), depth first in
@@ -1971,6 +2019,19 @@ read_map: fn(root: String, mode: String) -> Dyn {
     }
     done: assemble(fixture_config(root, "check", Val("Engine"), None), [String]{}) ?? panic(err.message)
     assert_eq(done.skipped, 1)
+    files.remove_all(root) ?? ()
+}
+
+#Test("listed holds every area to the lists, which name only files") {
+    root: area_fixture()
+    assert_eq(listed_problems(root) ?? panic(err.message), [String]{})
+    put(root, "Jetpack/Foundation/Source/Extra.jet", "extra: fn() {{}}\n")
+    put(root, "Jetpack/Bootstrap/tests.list", "# == Engine (folders: Store) ==\nJetpack/Store/Tests/Fixture.jet\nJetpack/Store/Tests/Gone.jet\n")
+    want: [String]{
+        "Jetpack/Foundation/Source/Extra.jet is in neither sources.list nor tests.list; add it in explicit order",
+        "Jetpack/Bootstrap/tests.list:3: Jetpack/Store/Tests/Gone.jet is listed but is not a file",
+    }
+    assert_eq(listed_problems(root) ?? panic(err.message), want)
     files.remove_all(root) ?? ()
 }
 

@@ -67,6 +67,30 @@ use {
     files.remove_all(dir) ?? return
 }
 
+#Test("image field values are the compilers") {
+    dir: envmodel_test_oci_base_dir("image-field-values")
+    src: "\nPORT: 8000\nNAME: \"app\"\nDEBIAN: 12\nports: fn() -> [Int] {{ [PORT + 1, PORT] }}\nimage.server: module {{\n    from: packages.app,\n    expose: ports(),\n    env_vars: [\"PORT\": \"{{PORT + 1}}\"],\n    files: [\"{{NAME}}.toml\"],\n    base: oci(\"debian:{{DEBIAN}}\"),\n    health: \"curl localhost:{{PORT}}\",\n    user: 1000 + 1,\n}}\n"
+    plan: envmodel_evaluate_env(src, dir) ?? panic("the image plans: {err.diagnostic.what}")
+    files.remove_all(dir) ?? panic("remove the environment")
+    image: plan.images[0]
+    assert_eq(image.expose, [Int]{8000, 8001})
+    assert_eq(image.env_vars, [ImageEnvVar]{ImageEnvVar{key: "PORT", value: "8001"}})
+    assert_eq(image.files, [String]{"app.toml"})
+    assert_eq(image.base, Val("debian:12"))
+    assert_eq(image.health, Val("curl localhost:8000"))
+    assert_eq(image.user, Val(1001))
+}
+
+#Test("image field value errors are at their line") {
+    dir: envmodel_test_oci_base_dir("image-field-error")
+    src: "image.server: module {{\n    from: packages.app,\n    expose: [8080],\n    user: \"x\" * 2,\n}}\n"
+    error: envmodel_test_env_error(envmodel_evaluate_env(src, dir))
+    files.remove_all(dir) ?? panic("remove the environment")
+    rendered: envmodel_test_render("config.jet", src, error)
+    assert(rendered.contains("--> config.jet:4:"), rendered)
+    assert(!rendered.contains("ENVMODEL_VALUE"), rendered)
+}
+
 #Test("oci kind is inferred when omitted") {
     dir: envmodel_test_oci_base_dir("inferred-kind")
     plan: envmodel_evaluate_env("image.server: module {{ from: packages.app }}", dir) ?? panic("the image plans")

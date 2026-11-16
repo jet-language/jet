@@ -1,6 +1,6 @@
 // The typed records of the environment surface (env.jet, image.jet,
 // system.jet), as Jet declarations. EnvModel appends this text to the
-// program the compiler checks for a source's values (module_values_evaluate),
+// program the compiler checks for a source's values (module_values_program),
 // so `Prompt{ … }`, `Lang{ … }` or `.Watch{ … }` in a value is typed by the
 // compiler against these declarations, with their field defaults and enum
 // cases. A field EnvModel reads only when it is written is optional with no
@@ -8,6 +8,21 @@
 // holds exactly the written fields. The open records (`Env`, a service, a
 // host override) and the names EnvModel resolves (packages, sources, hook
 // jobs, platforms) are not here.
+
+// The type a field gives a headless record written in it: EnvModel passes
+// `prompt: { label: "x" }` to the compiler as
+// `envmodel_expect_prompt({ label: "x" })`, so the record is a `Prompt`.
+envmodel_expect_prompt: fn(value: &&Prompt) -> Prompt { value }
+
+envmodel_expect_lang: fn(value: &&Lang) -> Lang { value }
+
+envmodel_expect_preset: fn(value: &&Preset) -> Preset { value }
+
+envmodel_expect_file: fn(value: &&File) -> File { value }
+
+// A list or map literal no field types and that would read as a type
+// (`[PORT]` after a module-level `NAME: `) is passed whole through this.
+envmodel_value: fn<T>(value: &&T) -> T { value }
 
 // `prompt: Prompt{ label:, path: .Short|.Full, strip: .On|.Off }`.
 Prompt: struct {
@@ -92,3 +107,31 @@ Reload: enum {
     Prompt
     Watch(watch: [String], debounce: Int)
 }
+
+// A secret's rotation policy, `rotation: max_age(90d)`. EnvModel passes the
+// duration literal's whole amount and its unit, so the program reads
+// `max_age(90, "d")`. The age is in seconds, at most Int's largest; a unit
+// other than days, hours, minutes or seconds is no age (0).
+SecretMaxAge: struct {
+    seconds: Int
+}
+
+max_age: fn(amount: Int, unit: String) -> SecretMaxAge {
+    factor: if unit == {
+        "d" | "day" | "days" -> 86400
+        "h" | "hour" | "hours" -> 3600
+        "m" | "min" | "minute" | "minutes" -> 60
+        "s" | "sec" | "second" | "seconds" -> 1
+        else -> 0
+    }
+    if factor == 0 || amount <= 0 -> return SecretMaxAge{seconds: 0}
+    if amount > 9223372036854775807 /% factor -> return SecretMaxAge{seconds: 9223372036854775807}
+    SecretMaxAge{seconds: amount * factor}
+}
+
+// A secret's generator, `generate: random(length: 32)`.
+SecretRandom: struct {
+    length: Int
+}
+
+random: fn(*, length: Int) -> SecretRandom { SecretRandom{length: length} }

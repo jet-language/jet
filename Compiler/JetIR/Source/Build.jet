@@ -513,6 +513,10 @@ IRProgram: struct {
     impl_slots: [String:Int]
     impl_traits: [[String]]
     impl_methods: [IRImplMethod]
+    // The payload key of each type a trait implementation is declared for
+    // (ir_trait_key_table, read by ir_trait_key), found once by
+    // ir_program_declared.
+    trait_keys: IRTraitKeys{IRTraitKeys{keys: [String:Int]{}, held: [Int:Bool]{}}}
     // The checked source files' bytes and line starts by row, and each
     // path's row: a source location reads the file in place.
     source_bytes: [[U8]]
@@ -825,8 +829,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         if implementation.target_os == .Val(os) {
             if os != .Linux -> next
         }
-        plain: ir_untag(implementation.self_type)
-        owner: if plain == .Named(_) -> ir_render_type_key(type_rows, types, plain) else -> type_carrier_identity(plain)
+        owner: ir_type_identity(type_rows, types, implementation.self_type)
         loop constant in implementation.constants {
             defs.push(TConstantDef{module_identity: implementation.module_identity, key: ir_trait_constant_key(ir_short_name(trait_name), owner, constant.name), name: "{owner}.{constant.name}", span: constant.span, visibility: TVisibility.Public, ty: constant.ty.copy(), is_comptime: true, is_storage: false, value: constant.value.copy()})
         }
@@ -844,13 +847,19 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     // The Display, Printable, Close and KeyBy implementations of the host
     // target, and the user Comparable ones (a derived Comparable orders
     // structurally). Every trait implementation of the host target also names
-    // its methods' traits for ir_trait_methods.
+    // its methods' traits for ir_trait_methods, and every trait
+    // implementation's type, with the first candidate payload key of its
+    // identity, is one of `implementers` (ir_trait_key_table).
     impl_slots := [String:Int]{}
     impl_traits := [[String]]{}
     impl_methods := [IRImplMethod]{}
+    implementers := [(identity: String, first: Int)]{}
     loop implementation in impls {
         trait_name: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
         if trait_name == "" -> next
+        identity := ir_type_identity(type_rows, types, implementation.self_type)
+        first: ir_trait_key_hash(identity, 0)
+        implementers.push((identity: identity.move(), first: first))
         if implementation.target_os == .Val(os) {
             if os != .Linux -> next
         }
@@ -877,7 +886,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         if method == "" -> next
         impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
-    IRProgram{functions: [FnBody]{}, rows: name_rows(), symbols: symbols.move(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    IRProgram{functions: [FnBody]{}, rows: name_rows(), symbols: symbols.move(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, trait_keys: ir_trait_key_table(implementers), source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,
