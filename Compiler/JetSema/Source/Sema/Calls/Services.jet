@@ -7,7 +7,6 @@ use jet_foundation.[
     CallArg,
     CoreCallRecord,
     Diagnostic,
-    EffectRowEntry,
     Expr,
     FunctionDefaultRef,
     NodeKind,
@@ -158,11 +157,6 @@ sema_services_apply_access: fn(value: TExpr, access: AccessConvention) -> TExpr 
     // copy: the converted value is a new owned TExpr. For a plain access it equals `value`, the
     // caller's checked argument (a read parameter), which the caller keeps.
     value.copy()
-}
-
-sema_services_record_direct_effect: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, effect_name: String, api: String, span: Span, diagnostics: &[Diagnostic]) Never! {
-    row := [EffectRowEntry]{EffectRowEntry{name: effect_name, span: span}}
-    _ := sema_effect_record_intrinsic_effects(environment, program, scopes, context, api, span, row, diagnostics)
 }
 
 // `resolved_accesses` marks `fallback_accesses` as the call's final accesses
@@ -806,7 +800,6 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
         if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
             return failed
         }
-        sema_services_record_direct_effect(environment, program, scopes, context, "Time", "JobQueue.{method}", span, diagnostics)
         value: sema_call_core_tree(record, normalized, span, [Type]{payload_type}, [Bool]{}, result_type, failure, expected, environment, program, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: value}
     } else { return failed }
