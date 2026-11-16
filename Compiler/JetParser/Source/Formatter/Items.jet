@@ -2722,6 +2722,13 @@ jfmt_fmt_impl: fn(f: &JetFmt, i: ImplDef) {
         jfmt_write(f, field)
         return
     }
+    // An empty `impl Name.Effect` block beside its type prints as the
+    // in-body `impl Effect {}` does (jfmt_fmt_effect_impl).
+    empty: i.methods.len() == 0 && i.assoc_type_impls.len() == 0 && i.constants.len() == 0 && i.markers.len() == 0
+    if empty && (i.trait_name ?? "") == "Effect" {
+        jfmt_write(f, " {{}}")
+        return
+    }
     jfmt_write(f, " {{")
     jfmt_newline(f)
     f.indent += 1

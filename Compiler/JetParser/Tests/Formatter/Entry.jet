@@ -480,3 +480,17 @@ pick: fn(found: Int?, light: Light) -> Bool {
 `
     assert_eq(fmt_core_stable(source), source)
 }
+
+// An empty `impl Name.Effect` block beside its type prints on one line, as
+// the in-body `impl Effect {}` does.
+#Test("empty_effect_impl_beside_its_type_stays_on_one_line") {
+    source: `Bucket: struct {
+    name: String
+}
+
+impl Bucket.Effect {}
+
+upload: fn() -[Bucket{name: "photos"}]> {}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
