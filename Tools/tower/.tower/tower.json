@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108508,
+    "rev": 108509,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54932,83 +54932,6 @@
       "criteriaLastN": 5
     },
     {
-      "id": "c0jlyc69",
-      "num": 5023,
-      "title": "Code values, insertion and macros (Jai #code, #insert, #expand, backtick, #caller_code)",
-      "body": "## Outcome\n\nDecision D-JAI-CODE1. Jai treats code as data: `#code` values, `#insert`, `#expand` macros, caller-scope access, tree walks and code-to-code transforms. Jet ratified first-class `code { }` values for experts (owner comment on D-META-CODE1: 'Both option A and b') but the spec still bans user macros universally (D-META-RECONCILE1 universal limits, D-METAMUTATE1, S26). Audit rows: B01-B14, B21, B23, B29, G15.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "abb2fd795c: git grep -n 'CODE_VALUE: \"#code\"' -- Compiler/JetFoundation/Data/Syntax/CoreSurface.jet ; git grep -n '#code' -- Compiler/JetFoundation/Data/Syntax/Spellings.jet -> Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:154:CODE_VALUE: \"#code\"\nCompiler/JetFoundation/Data/Syntax/Spellings.jet:43:    { spelling: CODE_VALUE, meaning: \"`Code` value: `#code {{ items }}` holds the items written in its block, ...\" }\nCompiler/JetFoundation/Data/Syntax/Spellings.jet:46:    { spelling: \"meta.add(code, scope: name)\", ... }\nCompiler/JetFoundation/Data/Syntax/Spellings.jet:48",
-          "at": "2026-11-13T02:02:10.051Z"
-        },
-        {
-          "n": 2,
-          "text": "syntax-decisions.md log entry",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G6Meta-37 eef4513c1e: syntax-decisions.md log entries for D-JAI-CODE1, D-PRE-COMPILE1 and D-JAI-GENERIC1. Reproved by Lander3 on dev 9ecdaf509e with batch compiler b4: tests/guards/syntax_reconciliation.jet, decisions.jet and truthfulness.jet all pass (3/3), after G6Meta-52 fixed the closed_lists base red.",
-          "at": "2026-11-11T20:31:38.229Z"
-        },
-        {
-          "n": 3,
-          "text": "jet devtools grammars regenerated",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Holds on dev 8e0521995a. Lander5 on seed-b14: `jet self devtools grammars && git diff --exit-code -- Tools/editors` exits rc 0 after \"regenerated editor grammar sections\", with no diff. Found by the G6Meta-4 sweep.",
-          "at": "2026-11-13T08:46:34.843Z"
-        }
-      ],
-      "refs": [
-        "Docs/audits/jai-parity-2026-10-16.md",
-        "#5021"
-      ],
-      "tags": [
-        "mining-2026-10-16",
-        "jai-vs-jet",
-        "jai-parity",
-        "meta",
-        "syntax",
-        "needs-owner",
-        "wayfinder:decision"
-      ],
-      "parentId": "c02y3vkg",
-      "needsAcceptance": false,
-      "created": "2026-10-16T10:54:41.365Z",
-      "updated": "2026-11-13T08:46:36.615Z",
-      "updatedBy": "Main",
-      "goals": [
-        "G6"
-      ],
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-13T08:46:36.615Z"
-    },
-    {
       "id": "c0ygtwb9",
       "num": 5024,
       "title": "Per-call generic control (Jai #modify, #bake_constants, #bake_arguments, $$ auto-bake, duck typing)",
@@ -85744,6 +85667,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Clarification (Main, 2026-11-16): this card is done only as a container. TowerKeeper-1's board cleanup moved its open criteria to the cards that own the work, and none of them was built when it closed: routes went to #6864, endpoints to #6865, browser tests to #6866, forms, tables and views to #6821, and the parity audit, the one-runtime suite and the one-app proofs to #6445 c12-c18. Only c3, c9, c14, c30, c33 and c38 were met by proof here. The Jet web framework is NOT finished. The open work lives on those cards (all G9)."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "core.reactive over-notifies and glitches; this blocks c37 (found by GoalsB-5 while measuring reactive_observable, 2026-11-15). An autorun reading n, doubled(n) and plus_one(doubled) re-runs 3 times per n.set(5), and 3 times for n.set(1) when n is already 1 (no same-value suppression). In a diamond (left = a+1, right = a*10, sum = left+right) the effect sees the glitch value 13 before settling. Solid, Vue and Preact signals run once, with no glitch. Fix: a topological or height-ordered propagation, plus same-value suppression in core.reactive. Full notes: the GoalsB-5-16 SUB message."
@@ -86098,7 +86026,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T00:55:19.476Z",
-      "updated": "2026-11-16T05:55:14.267Z",
+      "updated": "2026-11-16T08:50:24.914Z",
       "updatedBy": "Main",
       "criteriaLastN": 39,
       "completedAt": "2026-11-16T05:55:14.267Z"
@@ -96431,48 +96359,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 4,
       "completedAt": "2026-11-15T01:11:01.670Z"
-    },
-    {
-      "id": "c027ynbk",
-      "num": 6732,
-      "title": "sema accepts a &&self implementation of a trait method declared self; calling it twice through a trait value hangs",
-      "body": "Found by ReplMem (#6727): a trait method declared with a borrowed self receiver accepts an implementation whose receiver is &&self (consuming). Called twice through a trait value, the program hangs on s12. The trait method's declared receiver must bind its implementations: sema rejects a receiver mismatch with a registered diagnostic (what/why/fix and a UI snapshot), and the IR then never has to guess ownership from the implementations.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Sema rejects an implementation whose receiver differs from the trait method's declared receiver, with a registered diagnostic and a UI snapshot; a case proves a call through a trait value twice no longer hangs.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "d9c9b7ebea: jet test Compiler --profile ui --filter trait_impl_receiver_must_match_the_trait -> PASS 1; cases nested_impls/impl_receiver_follows_the_trait_declaration -> PASS 1 (Lander holdsweep $JET_SCRATCH_ROOT/lanes/Lander/holds/5-6732-c1.out)",
-          "at": "2026-11-13T02:24:31.576Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G10"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T15:52:44.613Z",
-      "updated": "2026-11-13T08:42:15.642Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-13T08:42:15.642Z"
     },
     {
       "id": "c07k91t6",
@@ -157605,213 +157491,6 @@
       "ratifiedAt": "2026-10-20"
     },
     {
-      "id": "D-JAI-CODE1",
-      "cardId": "c0jlyc69",
-      "group": "architecture",
-      "title": "Code values and macros that paste code at the call site",
-      "situation": "A macro is a function whose body is pasted where it is called, so it can wrap your code, time it or loop around it. Jai has macros and lets build code pass pieces of code around as values. Jet has neither in everyday code, and its rules still forbid macros forever, so ported Jai code needs awkward rewrites. The vote decides whether Jet adds checked macros and code values; we recommend adding them for everyone, with text-to-code only for experts.",
-      "gist": "Should Jet add Jai-style macros and code values, and who may use them?",
-      "lesson": "A code value is a piece of source held before it runs. Pasting puts it somewhere. A macro is a function whose body is pasted at each call. Jai is a game language that uses macros widely. Whichever option wins, pasted code is checked like code you typed, and errors point at your line.",
-      "explainer": "",
-      "story": "Mei ports a Jai profiler that wraps any block in timing code, and a renderer that loops over visible entities with custom loop logic. Both use macros that paste code into the caller and change the caller's variables. Jet gives her closures, which can do neither.",
-      "inWild": "timed :: (label: string, body: Code) #expand {\n    start := current_time_monotonic();\n    #insert body;\n    print(\"%: %\\n\", label, current_time_monotonic() - start);\n}\ntimed(\"load\", #code { load_all(); });",
-      "detail": "Audit rows refer to Docs/audits/jai-parity-2026-10-16.md. Spellings use today's `prep` keyword and `$` fact mark (D-COMPILER-NS1=A, shipped 2026-09-30). The open ballots D-COMPTIME-WORD1 (prep to comptime) and D-META-HASH1 ($ reads to ##) would respell them mechanically. No choice here changes with those outcomes. Words used here. Jai is a systems programming language by Jonathan Blow, built for games, with no guardrails by default. `prep { }` runs Jet code while compiling.\n\nA `$` word such as `T.$fields` reads a fact the compiler knows. A `#Name` marker attaches a rule to the code below it. `package.jet` is a package's settings file. The main package is the one you build directly.\n\nDESIGN UNDER A. (1) Code values: `code { ... }` and `code(expr)` hold parsed, not yet checked, source. D-META-CODE1 is recorded as A, with the owner's ratification comment 'Both option A and b. A is the simple case, b is the expert case'. This ballot builds option B on that comment and asks the owner to confirm it. Code values are unbuilt, and `Syntax.rs:119-122` still says no code values exist.\n\nTemplate bodies in derive and b.generate are code values written in place, so there is one concept. (2) `paste c` pastes a code value at a statement, item or expression position (Jai #insert). The word is `paste` because D-API-STORE1 retired `insert`. Names in a code value resolve where it was written (hygiene). `paste c with [i]` lets the pasted code see listed macro names (Jai #insert,scope()). (3) `#Expand fn` is a macro (Jai #expand).\n\nParameters of type Code receive caller code unevaluated, written `code { }` at the call. No trailing-block syntax is added, so D-TRAILBLOCK2 stands. Other parameters are evaluated once, in order. Macro-local names never clash with the caller's. (4) Caller variables (Jai backtick): `#Expand(uses: [total])` lists caller variables the macro may read or write. The pasted code is checked at the call as if written there, so moves and borrows of those variables follow the caller's ordinary rules.\n\n`defines: [name]` declares new caller names, and an existing name of that spelling is a registered error. `exits` allows return, break and next to leave the caller (Jai's backtick return). Such a macro is called as `timed!(...)`, so control flow stays visible. Inside a macro, `$caller.code` is the call as a Code value (Jai #caller_code). D-JAI-SITE1 defines `$caller`, and if SITE1 loses, this ballot adds `$caller.code` alone.\n\n(5) `c.nodes()` gives a typed, read-only tree with kinds, children, locations and, after checking, types (Jai compiler_get_nodes). `c.map(f)` builds new code from a transform. Compiler nodes are never mutable. (6) Jai for_expansion maps to `Iterable` (D-ITER-HOOK), which stays the one loop protocol. A macro pastes code and defines no loop protocol. Inside pasted code, `?` and `defer` behave as if written at the call.\n\n(7) Limits and tools: 100 nested expansions by default, raised by `#ExpandLimit(n)`. Errors name the call, the macro line and the pasted line. `jet inspect expand` prints any expansion. The debugger steps through macro lines unless the macro carries `#NoDebug` (Jai #no_debug). (8) The raw_code power (D-JAI-EXPERT1) adds two things. `parse(text)` turns text into a Code value in prep and macros (Jai #insert of a string).\n\n`uses: *` lets a macro touch any caller name (Jai backtick). Every new word is registered in Syntax.rs under this decision (I7).\n\nLAWS AMENDED. S26 'Rejected forever: token/AST/attribute macros'. D-METAMUTATE1 'user macros are rejected'. D-METADEPTH2 'no macros'. D-META-GATE1 'token or tree macros'. The D-META-RECONCILE1 universal limit on user macros. D-METHODMACRO1's decline of call-site expansion. D-META-CONTROL2 and D-META-OPTIN2, which place code capture and insertion in advanced sessions (pasting moves to standard mode). And, for raw_code only, the D-META-CODE1 and D-METADERIVE1 rule that generated code never re-lexes text.\n\nKEPT. The closed grammar (macros add no syntax), checking of every expansion (I3), no mutable compiler nodes, and D-META-CONTROL2 change sets for rewriting written code.\n\nREGRETS DESIGNED OUT. Backtick clumsiness (OAIqCpqszVw 00:34:34) becomes a checked list. Macro errors without the call site (6qkL_DmHOuo 00:35:04) get three locations. Missing macro debug info (QX46eLqq1ps 00:59:00) is fixed. Blow's Lisp-list versus typed-tree question (pg_Wk2GBZDw 00:22:00) is answered with typed trees.\n\nEVIDENCE. Jai #expand, #insert, #code, backtick and for_expansion (Blow QX46eLqq1ps 00:13:12-01:24:24, 6qkL_DmHOuo. The Way to Jai Appendix C and book/26C:139-268). Nim templates and Racket hygiene show hygiene-by-default with explicit escapes works. Rust's `!` shows a visible call mark. C text macros show the failure mode.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Checked macros for all",
-          "detail": "Everyone gets code values, pasting and macros. Pasted code is checked at the paste site like hand-written code. A macro lists the caller variables it reads or writes, and a macro that can return or break out of the caller is called with a visible `!`. Turning text into code needs the raw_code expert power.",
-          "technical": "Type `Code`. Literal `code { ... }` (D-META-CODE1's option B, per the owner's comment) and `code(expr)`. Statement `paste c` at statement, item and expression positions. `paste c with [names]` exposes listed macro-local names. Marker `#Expand` with `uses: [names]`, `defines: [names]` and `exits`. A macro declaring `exits` is called as `name!(...)`, checked by sema. Read-only typed tree `c.nodes()`. Transform `c.map(f) -> Code`. Depth limit 100, raised by `#ExpandLimit(n)`. `#NoDebug` skips macro lines in the debugger.\n\nExpert: `parse(text) -> Code` and `uses: *` under the raw_code power.",
-          "code": "#Expand fn timed(label: String, body: Code) {\n    start :: time.now()\n    paste body\n    print(\"{label}: {time.since(start)}\")\n}\ntimed(\"load\", code { assets.load_all() })"
-        },
-        {
-          "key": "B",
-          "name": "Experts only",
-          "detail": "The design of A, but every macro, code value and paste needs a `macros` power in the main package, including macros from libraries.",
-          "technical": "As A, gated by a D-JAI-EXPERT1 power `macros`. A dependency declaring a macro builds only if the main package lists that power.",
-          "code": "// package.jet of the main package\npolicy: .{ powers: [.macros(\"ports our Jai profiler\")] }\n// without it, a macro is an error naming the power\n#Expand fn timed(label: String, body: Code) { … }"
-        },
-        {
-          "key": "C",
-          "name": "No macros",
-          "detail": "Keep today's universal macro ban. Jai macros map to closures, `#Inline` hints, `Iterable`, derive templates and the advanced change-set API. A closure cannot change the caller's variables or leave the caller.",
-          "technical": "No change. S26, D-METAMUTATE1, D-METHODMACRO1 and the D-META-RECONCILE1 universal limit stay.",
-          "code": "#Inline fn timed(label: String, body: fn() -> Unit) {\n    start :: time.now()\n    body()\n    print(\"{label}: {time.since(start)}\")\n}\ntimed(\"load\", () -> { assets.load_all() })"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Nim",
-          "note": "Templates are hygienic by default; {.inject.} deliberately exposes a name to the caller, like `uses:`.",
-          "code": "template withLock(l, body) =\n  acquire(l)\n  body\n  release(l)"
-        },
-        {
-          "lang": "Rust",
-          "note": "Macros are called with `!`, so a reader knows the call may expand to anything.",
-          "code": "macro_rules! timed { ($l:expr, $b:block) => {{ let s = Instant::now(); $b; println!(\"{}: {:?}\", $l, s.elapsed()) }} }"
-        },
-        {
-          "lang": "Jai",
-          "note": "Backtick reaches caller names; Blow calls it clumsy and plans a version 2 (Q&A, December 2022, 00:34:34).",
-          "code": "add_to_total :: (x: int) #expand { `total += x; }"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Macros are a core Jai tool. Checking every expansion and listing the caller variables it touches makes them safe enough for everyone.",
-        "gains": [
-          "Jai macro power, with text-to-code for experts.",
-          "Errors point at both the call and the macro."
-        ],
-        "losses": [
-          {
-            "loss": "A macro call can hide pasted control flow.",
-            "mitigation": "A macro that can leave the caller must be called with `!`, so the call site shows it."
-          },
-          {
-            "loss": "Functions and macros overlap for simple cases.",
-            "mitigation": "A lint suggests a plain function when a macro takes no code and touches no caller variables."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B keeps beginners away from macros but makes every user of a macro library opt in, unlike Jai."
-          },
-          {
-            "key": "C",
-            "reason": "C is simplest but cannot paste code, so many Jai designs have no direct Jet form."
-          }
-        ],
-        "tradeoff": "One new concept, macros, in exchange for Jai's code-as-data toolkit with checked expansions."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": {
-        "beginner": "Fresh agent: BegCode. Skill: rli5. The beginner pass tested the complete ballot. The reader could not tell a macro from a closure, so the lesson now defines code values, pasting and macros before the vote.",
-        "adversarial": "Author model family: claude-opus. Adversarial model family: claude-haiku. Fresh agent: AdvCode. The adversarial review attacked the recommendation. It found a retired trailing-block form, the retired word insert, hidden caller exits and unlisted amended rules; all four were replaced and a repair check confirmed them."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should Jet add Jai-style macros and code values, and who may use them?",
-        "lesson": "A code value is a piece of source held before it runs. Pasting puts it somewhere. A macro is a function whose body is pasted at each call. Jai is a game language that uses macros widely. Whichever option wins, pasted code is checked like code you typed, and errors point at your line.",
-        "trio": {
-          "current": {
-            "note": "Today you pass a closure, which runs as a call; nothing is pasted into the caller.",
-            "code": "fn timed(label: String, body: fn() -> Unit) {\n    start :: time.now()\n    body()\n    print(\"{label}: {time.since(start)}\")\n}\ntimed(\"load\", () -> { assets.load_all() })"
-          },
-          "wild": {
-            "lang": "Jai",
-            "note": "A Jai macro takes code and pastes it with #insert (Blow, 'Compiler Demo: Macros and Iteration', 2019).",
-            "code": "timed :: (label: string, body: Code) #expand {\n    start := current_time_monotonic();\n    #insert body;\n    print(\"%: %\\n\", label, current_time_monotonic() - start);\n}\ntimed(\"load\", #code { load_all(); });"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Checked macros for all",
-            "gist": "Macros and code values for everyone; turning text into code needs an expert power.",
-            "gains": [
-              "Ported Jai macros keep their shape.",
-              "Names inside a macro never clash with yours.",
-              "Caller variables a macro touches are listed."
-            ],
-            "losses": [
-              "A macro call can hide pasted control flow."
-            ],
-            "proposed": {
-              "code": "#Expand fn timed(label: String, body: Code) {\n    start :: time.now()\n    paste body\n    print(\"{label}: {time.since(start)}\")\n}\ntimed(\"load\", code { assets.load_all() })"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Experts only",
-            "gist": "The same features, but only behind the expert opt-in.",
-            "gains": [
-              "Beginners never meet macros.",
-              "Smallest everyday surface."
-            ],
-            "losses": [
-              "Every project using a macro library needs the power."
-            ],
-            "proposed": {
-              "code": "// package.jet of the main package\npolicy: .{ powers: [.macros(\"ports our Jai profiler\")] }\n// without it, a macro is an error naming the power\n#Expand fn timed(label: String, body: Code) { … }"
-            }
-          },
-          {
-            "key": "C",
-            "name": "No macros",
-            "gist": "Keep the ban; use closures, inline functions, iterators and templates.",
-            "gains": [
-              "Every call means a call.",
-              "Nothing new to learn."
-            ],
-            "losses": [
-              "Jai designs relying on macros need redesign.",
-              "Nothing can paste code into the caller."
-            ],
-            "proposed": {
-              "code": "#Inline fn timed(label: String, body: fn() -> Unit) {\n    start :: time.now()\n    body()\n    print(\"{label}: {time.since(start)}\")\n}\ntimed(\"load\", () -> { assets.load_all() })"
-            }
-          }
-        ],
-        "recommendation": {
-          "why": "Macros are a core Jai tool. Checking every expansion and listing the caller variables it touches makes them safe enough for everyone.",
-          "gains": [
-            "Jai macro power, with text-to-code for experts.",
-            "Errors point at both the call and the macro."
-          ],
-          "losses": [
-            {
-              "loss": "A macro call can hide pasted control flow.",
-              "mitigation": "A macro that can leave the caller must be called with `!`, so the call site shows it."
-            },
-            {
-              "loss": "Functions and macros overlap for simple cases.",
-              "mitigation": "A lint suggests a plain function when a macro takes no code and touches no caller variables."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B keeps beginners away from macros but makes every user of a macro library opt in, unlike Jai."
-            },
-            {
-              "key": "C",
-              "reason": "C is simplest but cannot paste code, so many Jai designs have no direct Jet form."
-            }
-          ],
-          "tradeoff": "One new concept, macros, in exchange for Jai's code-as-data toolkit with checked expansions.",
-          "rec": "A"
-        }
-      },
-      "designAway": [
-        {
-          "loss": "Pasted control flow hidden at the call.",
-          "attempts": [
-            "Mark every macro call; rejected, Jai and Nim calls look like calls.",
-            "Mark only calls to macros that can leave the caller, with `!`, checked by sema."
-          ],
-          "result": "Removed for control flow: a call that can return or break always shows `!`."
-        },
-        {
-          "loss": "Overlap with functions.",
-          "attempts": [
-            "Lint for macros that need no macro powers."
-          ],
-          "result": "Negligible."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-16T11:39:44.472Z",
-      "outcome": "A",
-      "comment": "Needs a more idiomatic jet handling than this, create a new ballot with idiomatic cohesive jet syntax and semantics",
-      "ratifiedAt": "2026-10-17"
-    },
-    {
       "id": "D-JAI-EVENTS1",
       "cardId": "c0gmf0y4",
       "group": "architecture",
@@ -161867,197 +161546,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-10-22T09:15:39.824Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-22"
-    },
-    {
-      "id": "D-META-COMPILER1",
-      "cardId": "c0jlyc69",
-      "group": "syntax",
-      "title": "One Compiler value and one event stream for compile-time control",
-      "situation": "Ratified Jet rules let an opted-in build provider rewrite function bodies through checked change sets, but none of that is built. Today no build can change a written function or watch the compiler work, so a team that wants tracing on every marked function copies the same lines into each one. This ballot replaces that unbuilt design and decides who may hold compiler control and how it runs. Under every option macros stay removed, code is quoted with #code and values are spliced in with $. The recommendation is one value that only the application's own source can create and must pass on by hand, which watches compiler events and can add code or rewrite checked function bodies.",
-      "gist": "How should a build program control the compiler: one passed value with event handlers, hooks only, or a package-wide grant?",
-      "lesson": "A compile-time program is Jet code the compiler runs while it builds. A function is checked once the compiler has confirmed its names, types and effects. Jai lets compile-time code watch every checked function and replace its body. Jet's hooks, functions the compiler calls at fixed stages, can only read, report and add code. A marker such as `#Traced` only tags a declaration. Under every option macros stay removed and code is quoted as `#code { }`.",
-      "explainer": "",
-      "story": "Ines runs a web service with forty route functions marked `#Traced`. Each starts with the same two tracing lines, written by hand, and new routes keep forgetting them. Her package file names compiler control with `authority: { holds: { allow: [Meta.Code] } }`. Under option A her build creates one compiler value and hands it to the tracing library, which wraps every marked function. She deletes the hand-written lines. `jet inspect expand --facts meta` prints each function's final code. Libraries she never handed the value to cannot touch her code.",
-      "inWild": "Jai: the build program loops on `compiler_wait_for_message()` and may replace a checked procedure with `compiler_modify_procedure`. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai\n\nRust: procedural macros rewrite token streams before type checking, and any dependency may define one. Source: https://doc.rust-lang.org/reference/procedural-macros.html\n\nZig: compile-time code computes values and types but cannot change another function's body. Source: https://ziglang.org/documentation/master/#comptime",
-      "detail": "For maintainers. Provenance: the owner approved the proposal on build programs and compiler events (Docs/proposals/build-programs-and-compiler-events-2026-10-22.md) and set this question's direction to A. The owner ruled out macros: markers plus compile-time functions cover them, and the goal is full Jai power. The owner named the losing directions: hooks only, and a Jai-style loop with no value to hold.\n\nShared by every option. Macros stay removed, by owner ruling, and code values are quoted `#code { }` with `$` splices. This answers the owner's comment on D-JAI-CODE1=A, which asked for idiomatic, cohesive syntax. `paste`, `#Expand`, `name!()` calls, the `uses:`, `defines:` and `exits` clauses, `#ExpandLimit` and `#NoDebug` are removed. The `Code` type, `c.nodes()` and `c.map` survive; `code(expr)` becomes `#code { expr }`.\n\nWhat replaces each macro use. Wrapping a declaration becomes a marker plus `rewrite_body`. Timing a block, D-JAI-CODE1's own example, becomes a closure plus `defer`: `timed(\"load\", () -> assets.load_all())`. Generating declarations becomes `b.generate` or `meta.add`. Changing the caller's own variables has no replacement; that is an accepted loss under the owner's ruling.\n\nSplicing. D-NAME-SPLICE1=B is extended: `$name` splices a compile-time binding inside `#code` as it does in templates, so Jet keeps one splice sigil. The retired `#( )` spelling stays retired. D-META-HASH1, still open, proposes `#` for values Jet supplies while `$` keeps splicing; `#code` fits it, and another outcome is a mechanical respelling.\n\nReplaces D-META-CONTROL2=A's API: the advanced session, change sets, `commit` and the `register`, `register_expansion` and `register_specialization` providers. Call-site expansion leaves with macros. Specialization control is left to D-JAI-GENERIC1, which is open. Signature replacement is not carried over. Compared with change sets, A gives up order-free merges and per-item caching of a stateless provider. A keeps CONTROL2's atomic re-check of affected callers.\n\nReplaces the read-only `stages()` view of D-COMPILER-EVENT1=A and D-JAI-EVENTS1=A with `meta.events(watch:)`. The one `compiler.Event` type stays and gains the loop kinds `Checked`, `Stuck`, `Error` and `Done`. Settled becomes `Stuck` and finished becomes `Done`. Parsed, imported and declared stay hook stages and are not loop events. The session wire uses the same four kind names.\n\nAmends D-HOOK-STAGES1=A. Its rejection of a full message loop with in-place rewriting is reversed for `Compiler` holders. Its rule that stages run once and never return to declared is kept, and extended: a rewrite produces no new event. Its rule that overlapping edits are an error still binds hooks; `Compiler` holders instead stack in registration order. Hooks still only read, report and add.\n\nKeeps D-HOOK-ONE1 and D-JAI-CONFIG1. Keeps D-EXPANDCLI1: final code lives in `jet inspect expand --facts meta`, a new lens, not in a new `jet expand` command as the proposal wrote. Keeps D-FRONTENDAPI1: the shipped `core.compiler.parse` makes code from text, so there is no second parser; inserting that code is what `Meta.Code.Raw` gates.\n\nAmends D-MARKER-LAW1=A: built-in derives move from compiler code to Core library code over the read-and-add view, as the owner directed. The user derive form of D-METADERIVE1 is unchanged.\n\nAmends D-JAI-EXPERT1=A. The `Meta.Paste` leaf is removed with macros. `Meta.Code` gates creating a value; `Rewrite`, `Raw` and `Types` gate `rewrite_body`, adding code made from text, and adding type declarations. Passing the value is the grant to a library, so `grants:` no longer applies to `Meta.Code` leaves under A. Default holding is D-META-HOLD1.\n\nInterplay. Until D-META-CROSSPKG1 rules, rewrites may touch only the application's own package. D-META-OPTIN2's target records stand until then. The story assumes D-META-HOLD1=A, so Ines's package file names `Meta.Code`; without that line `b.compiler` stops with an error printing it.\n\nAmends D-META-OPTIN2=A and D-META-RECONCILE1=A. Under RECONCILE1 the older refusals already yielded for opted-in projects. Opted in now means a build that created a `Compiler` value. That covers D-METAMUTATE1, S26's value-only rule, D-METADEPTH1 and D-META-GATE1. The ban on user macros in D-METAMUTATE1 and S26 returns to full force for everyone.\n\nEffects. D-EFFECT-OMIT1=A infers effects for functions with no written bound, so a rewrite can change a function's effects. A therefore checks affected callers again at round end, and a rewrite past an explicit bound is an error. The step budget is D-PREP-FUEL1's.\n\nResearch: Docs/audits/2026-10-07-ast-metaprogramming-report.md recommends a typed code model with quotes and checked insertion, not exposing the compiler's internal trees. A follows it. Docs/audits/jai-parity-2026-10-16.md lists the message loop and procedure rewrite as the main Jai gap.\n\nProfile: full, because A changes quote syntax and removes ratified macro syntax. Two fresh readers reviewed this ballot, and their findings are repaired here.",
-      "options": [
-        {
-          "key": "A",
-          "name": "One passed Compiler value",
-          "detail": "Only the application's own source can create a `Compiler` value, with `b.compiler(app)`, one value per program being built. A library gets compiler control only when the application passes it the value. The first hand-off is one visible line, and the `meta` lens lists every later hand-off and every function touched.\n\nA holder registers handlers with `meta.events(watch:)`. The call returns at once, and the handlers run while the program compiles, after `fn build` returns. A handler can add code or rewrite the body of a checked function. Several holders stack in the order they were registered.\n\nThe compiler checks every added or rewritten piece of code again, like written code. If a rewrite changes a function's effects, every caller affected is checked again too. The editor marks rewritten functions, and `jet inspect expand --facts meta` prints final code and who changed it.",
-          "technical": "Creation. `Compiler` is a Core type. `b.compiler(output)` must be written in the root package's own source. A call written in any dependency is an error, even when that dependency's function holds the root's `b`. Creating the value performs `Meta.Code`. Whether the application holds `Meta.Code` by default is D-META-HOLD1.\n\nEvents. `meta.events(watch:, handler)` registers a handler and returns at once. Compiling starts after `fn build` returns. `watch:` filters by declaration kind and marker, and only watched declarations wait for handlers. Each declaration's event goes once to each handler, in registration order. A rewrite never produces a new event, so a rewritten function is never delivered to any holder again.\n\nKinds. `compiler.Event` gains four loop kinds. `Checked` means one declaration passed checking. `Stuck` means the compiler cannot continue until someone adds names it is waiting for. `Error` carries a diagnostic, and `Done` ends compilation. A round is one pass of adding code and checking it again. Round 17 is a registered error naming what still waits, as the ratified event rules already say.\n\nActions. `meta.add(code)` adds declarations; adding a type declaration needs `Meta.Code.Types`. `meta.rewrite_body(f, code)` replaces a checked body and needs `Meta.Code.Rewrite`. Text becomes code through the shipped `core.compiler.parse`; adding code that came from text needs `Meta.Code.Raw`. Until D-META-CROSSPKG1 rules, rewrites may touch only the application's own package.\n\nRe-checking. A rewrite goes through parse and check like written code. Its effect facts are inferred again. Every caller whose facts change is checked again, all at once at the end of the round, and the public API snapshot records the new facts. A rewrite that widens effects past an explicit bound is an error at the `rewrite_body` call that names the bound.\n\nComposition. Holders stack in registration order. In a handler, `f.body` is the current body, including earlier holders' rewrites in this round. Read-only consumers such as `#On` hooks, `b.program()` queries and derives see a watched function only after the round's rewrites.\n\nQuotes. `#code { ... }` is a value of type `Code`. Inside it, `$name` splices a compile-time binding, as `$` already does in templates. Names in a quote resolve where the quote is written, and spliced code keeps its own scope. A local named `trace` in `load_user` cannot capture the quote's `trace`.\n\nEverywhere. Rewrites apply to every compilation of the output's modules: build, run, test, dev, check and the language server, which runs the same handlers. Handlers record what they read, so an unchanged function replays its recorded rewrite. The compile-time step budget stops a runaway handler.\n\nProvenance. Each added or rewritten item records the build line and library function that changed it. `jet inspect expand --facts meta` prints final code with that record, and lists each value created and every hand-off. This uses a lens, not a new command, as the transparency-command ruling requires.",
-          "code": "// package.jet\nauthority: { holds: { allow: [Meta.Code] } }\n\n// @build.jet: the application's own source makes the value\nfn build(b: Build) {\n    app :: b.add_executable(\"app\", find(\"Source/**/*.jet\"))\n    meta :: b.compiler(app)                // one value for the program app\n    trace.install(meta, marked: Traced)    // Traced is the marker written #Traced\n    profile.install(meta, marked: Hot)     // registered second, so it wraps outside trace\n    b.default(app)\n}   // compiling starts after fn build returns; the handlers run then\n\n// trace library: ordinary Jet; events() registers a handler and returns at once\nfn install(meta: Compiler, marked: Marker) {\n    meta.events(watch: .Functions(marked: marked), (event) -> {\n        // == against a pattern tests the event and binds f\n        if event == .Checked(.Function(f)) -> {\n            name :: f.name\n            body :: f.body                 // the current body, after earlier rewrites\n            meta.rewrite_body(f, #code {\n                trace.enter($name)\n                defer trace.exit($name)    // defer: runs when the function exits\n                $body\n            })\n        }\n    })\n}\n\n// a dependency handed the root's b still cannot make one\nfn add_step(b: Build, out: Output) { meta :: b.compiler(out) }\n// error: `b.compiler` must be written in the application's own source; package shaders cannot create a Compiler value\n//   fix: create the value in @build.jet and pass it to shaders\n\n// forgetting $ inside a quote\nmeta.rewrite_body(f, #code { trace.enter(name) })\n// error: `name` is a compile-time binding and does not exist in `load_user`\n//   fix: splice it with `$name`\n\n$ jet inspect expand --facts meta Source/routes.jet\n#Traced #Hot\nfn load_user(id: Int) -> User {    // rewritten by trace.install (@build.jet:4), then profile.install (@build.jet:5)\n    profile.start(\"load_user\")\n    defer profile.stop(\"load_user\")\n    trace.enter(\"load_user\")\n    defer trace.exit(\"load_user\")\n    db.find_user(id)\n}"
-        },
-        {
-          "key": "B",
-          "name": "Hooks only",
-          "detail": "Compile-time code matches what is built today. Hooks and markers see each declaration and may report problems or add new code. Nothing may change a function that is already written, so the ratified but unbuilt change-set rewrites are dropped. Tracing can be checked but not added; a hook can only ask the author to write the lines.",
-          "technical": "Keeps the hook stages and the read-only stage view. Drops the change-set session of the compiler-control ruling and its body rewrites. Macros stay removed and code values use the same `#code { }` quote with `$` splices as A, for code that hooks add.",
-          "code": "#On(compiler.declared)    // a hook: the compiler calls it for each declaration\nfn need_trace(d: compiler.Declaration) -> [compiler.Finding] {\n    if d.markers.contains(\"Traced\") && !d.calls.contains(\"trace.enter\") {\n        return [compiler.finding(d, \"#Traced function never calls trace.enter\")]\n    }\n    return []\n}\n// the author still writes trace.enter and defer trace.exit by hand"
-        },
-        {
-          "key": "C",
-          "name": "Package-wide grant, no value",
-          "detail": "The application's package file grants rewriting to a whole dependency. That package's compile-time code opens the event loop itself, as in Jai, with no value to create or pass. The grant is visible in the package file, but the build cannot say which call or which functions it covers.",
-          "technical": "Uses the ratified expert-power grants: the main package names `Meta.Code.Rewrite` for a dependency with `grants:`. Event registration and rewrite are free functions in `core.compiler`. Stacking, re-checking, quotes and provenance follow the same rules as A. Macros stay removed.",
-          "code": "// app's package.jet\nauthority: { holds: { allow: [Meta.Code] }, grants: { \"trace\": [Meta.Code.Rewrite] } }\n\n// trace library: no value; it opens the loop itself\ncomptime {    // comptime: runs while building\n    compiler.events(watch: .Functions(marked: Traced), (event) -> {\n        if event == .Checked(.Function(f)) -> {\n            name :: f.name\n            body :: f.body\n            compiler.rewrite_body(f, #code { trace.enter($name); defer trace.exit($name); $body })\n        }\n    })\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Jai",
-          "note": "The build program intercepts a workspace, waits on messages and may modify a checked procedure. Any metaprogram that runs can do this. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai",
-          "code": "w := compiler_create_workspace(\"app\");\ncompiler_begin_intercept(w);\nadd_build_file(\"main.jai\", w);\nwhile true {\n    msg := compiler_wait_for_message();\n    if msg.kind == .TYPECHECKED { /* inspect; compiler_modify_procedure(...) */ }\n    if msg.kind == .COMPLETE break;\n}\ncompiler_end_intercept(w);"
-        },
-        {
-          "lang": "Rust",
-          "note": "An attribute macro rewrites tokens before type checking, so it sees no types. Any dependency can ship one. Source: https://doc.rust-lang.org/reference/procedural-macros.html",
-          "code": "#[proc_macro_attribute]\npub fn traced(_attr: TokenStream, item: TokenStream) -> TokenStream {\n    // parse tokens, wrap the body, return new tokens\n    item\n}"
-        },
-        {
-          "lang": "Zig",
-          "note": "Compile-time code computes values and types, but it cannot change a body written elsewhere. Source: https://ziglang.org/documentation/master/#comptime",
-          "code": "fn traced(comptime f: anytype) @TypeOf(f) {\n    // can wrap f in a new function, cannot rewrite f itself\n    return f;\n}"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A gives Jai's full control and keeps the first grant visible: one value, created only in the application's source and passed by hand. Every change is checked again, including affected callers.",
-        "gains": [
-          "Full control without hidden power in dependencies.",
-          "One event stream serves hooks, tools and build programs."
-        ],
-        "losses": [
-          {
-            "loss": "A rewritten body differs from the source on screen.",
-            "mitigation": "The editor marks rewritten functions, and the expand meta lens prints final code and who changed it."
-          },
-          {
-            "loss": "Watched functions and their callers wait for handlers.",
-            "mitigation": "Only watched functions wait, unchanged ones replay recorded rewrites, and a step budget stops runaway handlers."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B drops the ratified rewrites, so tracing can only be checked, not added, and Jai build programs cannot be ported."
-          },
-          {
-            "key": "C",
-            "reason": "C grants rewriting to a whole package; the build cannot say which call or functions, and any code there may use it."
-          }
-        ],
-        "tradeoff": "Power over written code, in exchange for one passed value, slower watched builds and a final-code view."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": {
-        "beginner": "Fresh agent: BallotBeginner1-2. Skill: rli5. The beginner pass tested the complete ballot. It flagged the pattern binding, loop timing, macro scope and weak B and C examples, and each is now commented, defined, stated or rewritten.",
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotAdversary1-2. The adversarial review attacked the recommendation. It attacked caller re-checks, loop stacking, re-delivery, the root-only bypass, the splice sigil and macro scope, and the ballot now repairs each one."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should one passed value let a build watch compiler events, add code and rewrite checked function bodies?",
-        "lesson": "A compile-time program is Jet code the compiler runs while it builds. A function is checked once the compiler confirms its names and types. Jai lets compile-time code watch every checked function and replace its body. Jet's hooks, functions the compiler calls at fixed stages, can only read, report and add code. Under every option, macros stay removed and code is quoted as `#code { }`.",
-        "trio": {
-          "current": {
-            "note": "Ratified rewrite rules are not built. Today nothing can wrap a written body, so tracing is copied by hand.",
-            "code": "#Traced\nfn load_user(id: Int) -> User {\n    trace.enter(\"load_user\")        // copied into every traced function\n    defer trace.exit(\"load_user\")   // defer: runs when the function exits\n    db.find_user(id)\n}"
-          },
-          "wild": {
-            "lang": "Jai",
-            "note": "Jai's build loops on compiler messages and may replace a checked procedure. Source: The Way to Jai, chapter 30.",
-            "code": "while true {\n    msg := compiler_wait_for_message();\n    if msg.kind == .TYPECHECKED { /* compiler_modify_procedure(...) */ }\n    if msg.kind == .COMPLETE break;\n}"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "One passed Compiler value",
-            "gist": "Only the application's source makes the value; a library acts only when handed it.",
-            "gains": [
-              "Watch events, add code and rewrite checked bodies, as in Jai.",
-              "The first hand-off is one visible line; a lens lists the rest.",
-              "Callers are checked again when a rewrite changes effects."
-            ],
-            "losses": [
-              "A rewritten body differs from the source you read.",
-              "Watched functions and their callers wait for handlers.",
-              "A library handed the value can use all of it."
-            ],
-            "proposed": {
-              "code": "fn install(meta: Compiler, marked: Marker) {\n    meta.events(watch: .Functions(marked: marked), (event) -> {   // returns at once\n        if event == .Checked(.Function(f)) -> {   // == on a pattern binds f\n            name :: f.name; body :: f.body        // body: the current body\n            meta.rewrite_body(f, #code { trace.enter($name); defer trace.exit($name); $body })\n        }\n    })\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Hooks only",
-            "gist": "Hooks read, report and add code; the unbuilt rewrite rules are dropped.",
-            "gains": [
-              "The source you read is the code that runs.",
-              "Matches what is built today."
-            ],
-            "losses": [
-              "Tracing can be checked, not added.",
-              "Jai build programs cannot be ported."
-            ],
-            "proposed": {
-              "code": "#On(compiler.declared)   // a hook: called for each declaration\nfn need_trace(d: compiler.Declaration) -> [compiler.Finding] {\n    if d.markers.contains(\"Traced\") && !d.calls.contains(\"trace.enter\") {\n        return [compiler.finding(d, \"#Traced function never calls trace.enter\")]\n    }\n    return []\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Package-wide grant, no value",
-            "gist": "The package file grants rewriting to a dependency, which opens the loop itself.",
-            "gains": [
-              "Closest to Jai; nothing to pass around.",
-              "The grant still shows in the package file."
-            ],
-            "losses": [
-              "The grant covers a whole package, not one call.",
-              "Any code in that package may rewrite."
-            ],
-            "proposed": {
-              "code": "// package.jet: grants: { \"trace\": [Meta.Code.Rewrite] }\ncomptime {   // runs while building; no value needed\n    compiler.events(watch: .Functions(marked: Traced), (event) -> {\n        if event == .Checked(.Function(f)) -> wrap(f)   // same body as A\n    })\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A gives Jai's full control and keeps the first grant visible: one value, created only in the application's source and passed by hand. Every change is checked again, including affected callers.",
-          "gains": [
-            "Full control without hidden power in dependencies."
-          ],
-          "losses": [
-            {
-              "loss": "A rewritten body differs from the source on screen.",
-              "mitigation": "The editor marks rewritten functions, and the expand meta lens prints final code and who changed it."
-            },
-            {
-              "loss": "Watched functions and their callers wait for handlers.",
-              "mitigation": "Only watched functions wait, unchanged ones replay recorded rewrites, and a step budget stops runaway handlers."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B drops the ratified rewrites, so tracing can only be checked, not added."
-            },
-            {
-              "key": "C",
-              "reason": "C grants a whole package; the build cannot say which call or functions, and any code there may rewrite."
-            }
-          ],
-          "tradeoff": "Power over written code, for one passed value, slower watched builds and a final-code view."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-22T15:29:05.051Z",
       "outcome": "A",
       "ratifiedAt": "2026-10-22"
     },
@@ -221033,6 +220521,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T08:50:24.914Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vxf4u0",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-16T08:40:07.898Z",
       "by": "Main",

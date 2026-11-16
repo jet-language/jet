@@ -102434,6 +102434,129 @@
       "completedAt": "2026-11-13T07:39:02.444Z",
       "questions": [],
       "retiredAt": "2026-11-16T07:39:59.295Z"
+    },
+    {
+      "id": "c0jlyc69",
+      "num": 5023,
+      "title": "Code values, insertion and macros (Jai #code, #insert, #expand, backtick, #caller_code)",
+      "body": "## Outcome\n\nDecision D-JAI-CODE1. Jai treats code as data: `#code` values, `#insert`, `#expand` macros, caller-scope access, tree walks and code-to-code transforms. Jet ratified first-class `code { }` values for experts (owner comment on D-META-CODE1: 'Both option A and b') but the spec still bans user macros universally (D-META-RECONCILE1 universal limits, D-METAMUTATE1, S26). Audit rows: B01-B14, B21, B23, B29, G15.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "abb2fd795c: git grep -n 'CODE_VALUE: \"#code\"' -- Compiler/JetFoundation/Data/Syntax/CoreSurface.jet ; git grep -n '#code' -- Compiler/JetFoundation/Data/Syntax/Spellings.jet -> Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:154:CODE_VALUE: \"#code\"\nCompiler/JetFoundation/Data/Syntax/Spellings.jet:43:    { spelling: CODE_VALUE, meaning: \"`Code` value: `#code {{ items }}` holds the items written in its block, ...\" }\nCompiler/JetFoundation/Data/Syntax/Spellings.jet:46:    { spelling: \"meta.add(code, scope: name)\", ... }\nCompiler/JetFoundation/Data/Syntax/Spellings.jet:48",
+          "at": "2026-11-13T02:02:10.051Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Meta-37 eef4513c1e: syntax-decisions.md log entries for D-JAI-CODE1, D-PRE-COMPILE1 and D-JAI-GENERIC1. Reproved by Lander3 on dev 9ecdaf509e with batch compiler b4: tests/guards/syntax_reconciliation.jet, decisions.jet and truthfulness.jet all pass (3/3), after G6Meta-52 fixed the closed_lists base red.",
+          "at": "2026-11-11T20:31:38.229Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 8e0521995a. Lander5 on seed-b14: `jet self devtools grammars && git diff --exit-code -- Tools/editors` exits rc 0 after \"regenerated editor grammar sections\", with no diff. Found by the G6Meta-4 sweep.",
+          "at": "2026-11-13T08:46:34.843Z"
+        }
+      ],
+      "refs": [
+        "Docs/audits/jai-parity-2026-10-16.md",
+        "#5021"
+      ],
+      "tags": [
+        "mining-2026-10-16",
+        "jai-vs-jet",
+        "jai-parity",
+        "meta",
+        "syntax",
+        "needs-owner",
+        "wayfinder:decision"
+      ],
+      "parentId": "c02y3vkg",
+      "needsAcceptance": false,
+      "created": "2026-10-16T10:54:41.365Z",
+      "updated": "2026-11-13T08:46:36.615Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G6"
+      ],
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-13T08:46:36.615Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T08:50:25.068Z"
+    },
+    {
+      "id": "c027ynbk",
+      "num": 6732,
+      "title": "sema accepts a &&self implementation of a trait method declared self; calling it twice through a trait value hangs",
+      "body": "Found by ReplMem (#6727): a trait method declared with a borrowed self receiver accepts an implementation whose receiver is &&self (consuming). Called twice through a trait value, the program hangs on s12. The trait method's declared receiver must bind its implementations: sema rejects a receiver mismatch with a registered diagnostic (what/why/fix and a UI snapshot), and the IR then never has to guess ownership from the implementations.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Sema rejects an implementation whose receiver differs from the trait method's declared receiver, with a registered diagnostic and a UI snapshot; a case proves a call through a trait value twice no longer hangs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "d9c9b7ebea: jet test Compiler --profile ui --filter trait_impl_receiver_must_match_the_trait -> PASS 1; cases nested_impls/impl_receiver_follows_the_trait_declaration -> PASS 1 (Lander holdsweep $JET_SCRATCH_ROOT/lanes/Lander/holds/5-6732-c1.out)",
+          "at": "2026-11-13T02:24:31.576Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:52:44.613Z",
+      "updated": "2026-11-13T08:42:15.642Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-13T08:42:15.642Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T08:50:25.069Z"
     }
   ]
 }
