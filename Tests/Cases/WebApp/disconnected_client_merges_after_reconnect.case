@@ -1,0 +1,21 @@
+# The test host disconnects a client and restores it mid-test, with no
+# network fault. The phone and the desk share one notes document
+# (`app.sync`). The phone publishes a draft, then `app.disconnect("phone")`
+# cuts it off: it writes an offline edit, and its publish fails
+# `CallError.Unreachable` without running on the server (the server's run
+# count stays 1). The desk, still connected, writes and publishes. After
+# `app.reconnect("phone")` the phone's next publish merges both sides' writes,
+# and the desk reads the same merged document. Same output on o0/o1/o2.
+fixture: DisconnectedClientMergesAfterReconnect.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = disconnected_client_merges_after_reconnect.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

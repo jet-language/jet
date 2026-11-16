@@ -210,16 +210,20 @@ priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: S
 // the call is one transaction on each store it uses, as a served call is
 // (`transactions`), and the call's error type takes a `CallError`: a method
 // that fails with `E` needs `impl CallError -> E`, and one that can't fail
-// answers `R CallError!`.
+// answers `R CallError!`. A Remote made for a named client fails each call
+// `.Unreachable`, running nothing, while a test has that client cut off
+// (`disconnect`).
 Remote: struct<S> {
     priv service: S?
     priv address: String
+    priv client: String
 
     // A call of the endpoint method `method` of `S`, which can fail with
     // `E`. The compiler lowers each such call here: `direct` runs it on the
     // service the Remote holds; otherwise `args`, the encoded arguments, go to
     // the server, and `fail` gives a `CallError` as the method's own error.
     __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time.Wait]> R E! {
+        if links_cut(self.client) -> return fail(links_unreachable(self.client, method))
         if self.service == .Val(service) {
             loop _ in 0..<transactions.attempts() {
                 call: transactions.begin() ?? return direct(service)
@@ -243,6 +247,7 @@ Remote: struct<S> {
 
     // A call of the endpoint method `method` of `S`, which can't fail.
     __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time.Wait]> R CallError! {
+        if links_cut(self.client) -> return Err(links_unreachable(self.client, method))
         if self.service == .Val(service) {
             loop _ in 0..<transactions.attempts() {
                 call: transactions.begin() ?? return Ok(direct(service))
@@ -328,13 +333,108 @@ new_id: fn() -[Rand, Time]> String Never! {
 REMOTE_MAX_REPLY: 16777216
 
 // The Remote of a service the server holds: each call through it runs the
-// marked method on `service` directly.
-remote: fn<S>(service: &&S) -> Remote<S> Never! { Remote<S>{service: Val(service), address: ""} }
+// marked method on `service` directly. `client` names the client that holds
+// it, which a test can cut off (`disconnect`); "" names none.
+remote: fn<S>(service: &&S, client: String{""}) -> Remote<S> Never! {
+    Remote<S>{service: Val(service), address: "", client: client}
+}
 
 // The Remote of a service a server mounts at `address`, its mount prefix
 // (`http://127.0.0.1:8080/api`): each call posts its JSON arguments to
-// `{address}/{method}`.
-remote_at: fn<S>(address: String) -> Remote<S> Never! { Remote<S>{service: None, address: address} }
+// `{address}/{method}`. `client` is as for `remote`.
+remote_at: fn<S>(address: String, client: String{""}) -> Remote<S> Never! {
+    Remote<S>{service: None, address: address, client: client}
+}
+
+// The test host's link between each client and the servers. `disconnect`
+// cuts client `client` off: until `reconnect`, each call through a Remote made
+// for it (`remote(service, client: …)`, `remote_at`) fails `.Unreachable`,
+// naming the client and the method, and runs nothing on the server. Nothing
+// touches the network: the cut is one recorded fact, so an offline, catch-up
+// or replay case runs the same each time. The servers, and every other
+// client, go on; writes made on either side while cut off merge when the
+// client calls again (`sync`). Inside a deterministic world (`testing.world`)
+// the links are the World's own, so each world starts with every client
+// connected. A client name is not blank and has no control character.
+disconnect: fn(client: String) Never! { links_set(client, true) }
+
+// Restores the link `disconnect` cut: the client's next call reaches the
+// server again.
+reconnect: fn(client: String) Never! { links_set(client, false) }
+
+// The clients a test cut off, one name a line, sorted, in one process-wide
+// cell; inside a deterministic world, the World's own cell `app.links`.
+priv LINKS_CELL: Shared{LiveCell{bytes: [U8]{}}}
+
+priv links_load: fn() -> [U8] Never! {
+    if world_rt.world_store_load("app.links") == .Val(bytes) -> return bytes
+    LINKS_CELL.bytes
+}
+
+priv links_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
+    if world_rt.world_store_replace("app.links", expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    cell := LINKS_CELL.guard_edit()
+    if cell.value.bytes != expected -> return false
+    cell.value.bytes = replacement.move()
+    true
+}
+
+priv links_names: fn(raw: [U8]) -> [String] Never! {
+    text: String.from_bytes(raw) ?? return [String]{}
+    if text == "" -> return [String]{}
+    text.split("\n").to_list()
+}
+
+// Whether a test cut client `client` off; a Remote of no client never is.
+priv links_cut: fn(client: String) -> Bool Never! {
+    if client == "" -> return false
+    loop name in links_names(links_load()) {
+        if name == client -> return true
+    }
+    false
+}
+
+priv links_set: fn(client: String, cut: Bool) Never! {
+    if client.trim() == "" || unicode.has_control(client) {
+        panic("app.disconnect: `{client}` is no client name: a name is not blank and has no control character")
+    }
+    loop {
+        seen: links_load()
+        names := [String]{}
+        loop name in links_names(seen) {
+            if name != client -> names.push(name)
+        }
+        if cut -> names.push(client.copy())
+        names.sort()
+        if links_replace(seen, names.join("\n").bytes()) {
+            return
+        }
+    }
+}
+
+priv links_unreachable: fn(client: String, method: String) -> CallError Never! {
+    .Unreachable("client `{client}` is disconnected, so `{method}` did not reach the server")
+}
+
+#Test("the test host cuts one client off until it reconnects, and leaves every other client and the unnamed one connected") {
+    assert(!links_cut("phone"))
+    disconnect("phone")
+    disconnect("phone")
+    disconnect("tablet")
+    assert(links_cut("phone"))
+    assert(!links_cut("desk"))
+    assert(!links_cut(""))
+    assert_eq(links_names(links_load()).join(","), "phone,tablet")
+    assert_eq(links_unreachable("phone", "save"), CallError.Unreachable("client `phone` is disconnected, so `save` did not reach the server"))
+    reconnect("phone")
+    assert(!links_cut("phone"))
+    assert(links_cut("tablet"))
+    reconnect("phone")
+    reconnect("tablet")
+    assert_eq(links_names(links_load()).len(), 0)
+}
 
 // The times a remote call is sent, in all, while its reply is lost: each
 // send carries the call's one request key, so a server that ran the call
