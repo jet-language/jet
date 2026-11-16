@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 108650,
+    "rev": 108675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32128,12 +32128,12 @@
         },
         {
           "n": 2,
-          "text": "An ordinary standalone Jet installation includes Nixpkgs translation and mixes native Jet packages with Nixpkgs packages in one env without installing or configuring Nix or an extra provider. Proof: `jet test Compiler --profile cases --filter jetpack_nix/mixed_native_and_nixpkgs_env` run with Nix absent.",
+          "text": "An ordinary standalone Jet installation includes Nixpkgs translation and mixes native Jet packages with Nixpkgs packages in one env without installing or configuring Nix or an extra provider. Proof: `jet test Compiler --profile cases --filter JetpackNix/mixed_native_and_nixpkgs_env` run with Nix absent.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:05:21.860Z"
+          "at": "2026-11-16T12:53:38.050Z"
         },
         {
           "n": 3,
@@ -32146,12 +32146,12 @@
         },
         {
           "n": 4,
-          "text": "Only Hangar stores realized artifacts and closures: no /nix/store tree, mounted compatibility store, alternate Nix store, Nix profile, Nix daemon or runtime Nix-store path is needed. Proof: `jet test Compiler --profile cases --filter jetpack_nix/mixed_native_and_nixpkgs_env` asserts no /nix path in the realized closure.",
+          "text": "Only Hangar stores realized artifacts and closures: no /nix/store tree, mounted compatibility store, alternate Nix store, Nix profile, Nix daemon or runtime Nix-store path is needed. Proof: `jet test Compiler --profile cases --filter JetpackNix/mixed_native_and_nixpkgs_env` asserts no /nix path in the realized closure.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:05:24.759Z"
+          "at": "2026-11-16T12:53:38.983Z"
         },
         {
           "n": 5,
@@ -32191,21 +32191,21 @@
         },
         {
           "n": 10,
-          "text": "Jet-owned code stays MIT, incorporated permissive dependencies keep their required notices, managed packages keep their own licenses, and no incompatible Nix implementation code is imported or relicensed. Proof: `jet test tests/guards --filter license_notices`.",
+          "text": "Jet-owned code stays MIT, incorporated permissive dependencies keep their required notices, managed packages keep their own licenses, and no incompatible Nix implementation code is imported or relicensed. Proof: `jet test Tests/Guards --filter license_notices`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:05:32.069Z"
+          "at": "2026-11-16T12:53:39.931Z"
         },
         {
           "n": 11,
-          "text": "The mixed native and Nixpkgs env realizes, runs, updates and removes through the Jet-built jetpack on O0, O1 and O2, and the E1272 postgres@nixpkgs hole in tests/fixtures/jetpack-project/env.jet becomes a real native realization. Proof: `jet test Compiler --profile packages --filter NixTranslate` and `jet test Compiler --profile cases --filter jetpack_nix/postgres_nixpkgs_realizes`.",
+          "text": "The mixed native and Nixpkgs env realizes, runs, updates and removes through the Jet-built jetpack on O0, O1 and O2, and the E1272 postgres@nixpkgs hole in Tests/Fixtures/JetpackProject/env.jet becomes a real native realization. Proof: `jet test Compiler --profile packages --filter NixTranslate` and `jet test Compiler --profile cases --filter JetpackNix/postgres_nixpkgs_realizes`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:05:33.351Z"
+          "at": "2026-11-16T12:53:40.836Z"
         },
         {
           "n": 12,
@@ -32267,8 +32267,8 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-09-13T11:40:48.925Z",
-      "updated": "2026-11-15T05:05:34.649Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T12:53:40.836Z",
+      "updatedBy": "Main",
       "goals": [
         "G7"
       ],
@@ -32453,30 +32453,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The trust prompt follows the owner rule of 2026-10-01: one prompt with Always trust, Once and Cancel. Once runs and asks again next run, Always records trust and never asks again for that target, Cancel runs nothing, and a prompt-skipping CLI flag (such as --trusted) counts as Once and never records Always. Proof: `jet test Compiler --profile cases --filter authority/trust_prompt_` on `jet run` and on a built program.",
+          "text": "The trust prompt follows the owner rule of 2026-10-01: one prompt with Always trust, Once and Cancel. Once runs and asks again next run, Always records trust and never asks again for that target, Cancel runs nothing, and a prompt-skipping CLI flag (such as --trusted) counts as Once and never records Always. Proof: `jet test Compiler --profile cases --filter Authority/trust_prompt_` on `jet run` and on a built program.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:13.331Z"
+          "at": "2026-11-16T12:53:41.760Z"
         },
         {
           "n": 2,
-          "text": "An unchanged program runs without prompting again after Always trust, and is admitted or refused correctly under restricted policy. Proof: `jet test Compiler --profile cases --filter authority/trusted_rerun_and_restricted_policy`.",
+          "text": "An unchanged program runs without prompting again after Always trust, and is admitted or refused correctly under restricted policy. Proof: `jet test Compiler --profile cases --filter Authority/trusted_rerun_and_restricted_policy`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:14.617Z"
+          "at": "2026-11-16T12:53:42.678Z"
         },
         {
           "n": 3,
-          "text": "Effects stay inferred and explainable without annotations, and transitive, generated, callback and opaque-call cases never become falsely pure. Proof: `jet test Compiler --profile cases --filter effects/inferred_never_falsely_pure_`.",
+          "text": "Effects stay inferred and explainable without annotations, and transitive, generated, callback and opaque-call cases never become falsely pure. Proof: `jet test Compiler --profile cases --filter Effects/inferred_never_falsely_pure_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:15.684Z"
+          "at": "2026-11-16T12:53:43.589Z"
         },
         {
           "n": 4,
@@ -32489,48 +32489,48 @@
         },
         {
           "n": 5,
-          "text": "An approved enclosing budget covers inferred helpers, while inner declarations, trusted callers and dependencies cannot silently bypass a higher restriction or a third-party boundary. Proof: `jet test Compiler --profile cases --filter effects/budget_no_bypass_`.",
+          "text": "An approved enclosing budget covers inferred helpers, while inner declarations, trusted callers and dependencies cannot silently bypass a higher restriction or a third-party boundary. Proof: `jet test Compiler --profile cases --filter Effects/budget_no_bypass_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:17.622Z"
+          "at": "2026-11-16T12:53:44.511Z"
         },
         {
           "n": 6,
-          "text": "Every execution path and phase (run, dev, test, prep and AOT build) uses the same effect facts and authority law, with separate provenance for prep, AOT build and application execution. Proof: `jet test Compiler --profile cases --filter authority/same_law_every_phase`.",
+          "text": "Every execution path and phase (run, dev, test, prep and AOT build) uses the same effect facts and authority law, with separate provenance for prep, AOT build and application execution. Proof: `jet test Compiler --profile cases --filter Authority/same_law_every_phase`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:18.622Z"
+          "at": "2026-11-16T12:53:45.432Z"
         },
         {
           "n": 7,
-          "text": "Prep is available without running a build, AOT preparation results survive into artifacts, and build stays the entry for executables, libraries and objects. Proof: `jet test Compiler --profile cases --filter authority/prep_results_survive_build`.",
+          "text": "Prep is available without running a build, AOT preparation results survive into artifacts, and build stays the entry for executables, libraries and objects. Proof: `jet test Compiler --profile cases --filter Authority/prep_results_survive_build`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:19.678Z"
+          "at": "2026-11-16T12:53:46.364Z"
         },
         {
           "n": 8,
-          "text": "Policy changes, cache reuse, dev revisions and child execution keep the applicable authority and required receipts, and caching never hides an observable effect of a logical invocation. Proof: `jet test Compiler --profile cases --filter authority/cache_keeps_authority_and_effects`.",
+          "text": "Policy changes, cache reuse, dev revisions and child execution keep the applicable authority and required receipts, and caching never hides an observable effect of a logical invocation. Proof: `jet test Compiler --profile cases --filter Authority/cache_keeps_authority_and_effects`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:20.716Z"
+          "at": "2026-11-16T12:53:47.299Z"
         },
         {
           "n": 9,
-          "text": "Effect trust cannot bypass type and memory safety, audited Unsafe, sensitive consent, or independent package, environment and toolchain trust. Proof: `jet test Compiler --profile cases --filter authority/effect_trust_no_bypass_`.",
+          "text": "Effect trust cannot bypass type and memory safety, audited Unsafe, sensitive consent, or independent package, environment and toolchain trust. Proof: `jet test Compiler --profile cases --filter Authority/effect_trust_no_bypass_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:21.752Z"
+          "at": "2026-11-16T12:53:48.244Z"
         },
         {
           "n": 10,
@@ -32543,102 +32543,102 @@
         },
         {
           "n": 11,
-          "text": "One qualified-right grammar (`FS.Read:/dir`, `Net.Connect:host`) is used in #Caps and the manifest and enforced at run time: a program granted one host fails with a typed authority failure on another host, on a cross-host redirect and on a path outside its directory, on every level. Proof: `jet test Compiler --profile cases --filter authority/qualified_right_`.",
+          "text": "One qualified-right grammar (`FS.Read:/dir`, `Net.Connect:host`) is used in #Caps and the manifest and enforced at run time: a program granted one host fails with a typed authority failure on another host, on a cross-host redirect and on a path outside its directory, on every level. Proof: `jet test Compiler --profile cases --filter Authority/qualified_right_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:23.885Z"
+          "at": "2026-11-16T12:53:49.176Z"
         },
         {
           "n": 12,
-          "text": "A test replaces Net.HTTP.Get with a typed fake inside a scope while the same program uses the real network outside it, on every level, and provider lookup is eliminated when release policy denies providers. Proof: `jet test Compiler --profile cases --filter authority/scoped_provider_fake`.",
+          "text": "A test replaces Net.HTTP.Get with a typed fake inside a scope while the same program uses the real network outside it, on every level, and provider lookup is eliminated when release policy denies providers. Proof: `jet test Compiler --profile cases --filter Authority/scoped_provider_fake`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:24.893Z"
+          "at": "2026-11-16T12:53:50.105Z"
         },
         {
           "n": 16,
-          "text": "One package policy block sets effect ceilings, unsafe allowance by path, expert-surface ceilings, dependency allow and deny rules, and errors-by-class. Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/package_team_policy_rejects_unsafe_expert_and_dependency_violations` (exits 1).",
+          "text": "One package policy block sets effect ceilings, unsafe allowance by path, expert-surface ceilings, dependency allow and deny rules, and errors-by-class. Proof: `jet test Compiler --profile cases --filter CLIPartsInspect/package_team_policy_rejects_unsafe_expert_and_dependency_violations` (exits 1).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:25.848Z"
+          "at": "2026-11-16T12:53:51.042Z"
         },
         {
           "n": 17,
-          "text": "Sema and `jet lint` enforce the effective package policy with registered errors and snapshots, and an absent policy block adds no ceremony for a beginner. Proof: `jet test Compiler --profile ui --filter package_policy_` and `jet test Compiler --profile cases --filter cli_parts_inspect/no_policy_block_no_ceremony`.",
+          "text": "Sema and `jet lint` enforce the effective package policy with registered errors and snapshots, and an absent policy block adds no ceremony for a beginner. Proof: `jet test Compiler --profile ui --filter package_policy_` and `jet test Compiler --profile cases --filter CLIPartsInspect/no_policy_block_no_ceremony`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:26.891Z"
+          "at": "2026-11-16T12:53:51.966Z"
         },
         {
           "n": 18,
-          "text": "`jet inspect guarantees` shows every effective policy rule and grant, including inherited package settings, with deterministic output. Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/guarantees_lists_inherited_policy`.",
+          "text": "`jet inspect guarantees` shows every effective policy rule and grant, including inherited package settings, with deterministic output. Proof: `jet test Compiler --profile cases --filter CLIPartsInspect/guarantees_lists_inherited_policy`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:41:27.870Z"
+          "at": "2026-11-16T12:53:52.890Z"
         },
         {
           "n": 19,
-          "text": "Direct and transitive callers get the same rights and failure facts, and summaries are never stale: a pure-looking helper that gains an outward operation updates its callers' explanations or gets the registered error. Concurrency and foreign edges state whether they are checked or trusted. Proof: `jet test Compiler --profile golden --filter effects/outward_chain` and `jet test Compiler --profile ui --filter big_f11_`. (was #3186 c13)",
+          "text": "Direct and transitive callers get the same rights and failure facts, and summaries are never stale: a pure-looking helper that gains an outward operation updates its callers' explanations or gets the registered error. Concurrency and foreign edges state whether they are checked or trusted. Proof: `jet test Compiler --profile golden --filter Effects/OutwardChain` and `jet test Compiler --profile ui --filter big_f11_`. (was #3186 c13)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:10:37.767Z"
+          "at": "2026-11-16T12:53:53.851Z"
         },
         {
           "n": 20,
-          "text": "Every blocking function in core.tasks declares its waiting leaf (`Time.Wait`), and sema infers the same leaf for it. Proof: `jet test Compiler --profile cases --filter effects/tasks_blocking_leaf_time_wait`. (was #3239 c81)",
+          "text": "Every blocking function in core.tasks declares its waiting leaf (`Time.Wait`), and sema infers the same leaf for it. Proof: `jet test Compiler --profile cases --filter Effects/tasks_blocking_leaf_time_wait`. (was #3239 c81)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:10:38.752Z"
+          "at": "2026-11-16T12:53:54.802Z"
         },
         {
           "n": 21,
-          "text": "A block granted only `Time.Wait` can call `tasks.recv`, and the existing task examples pass unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter effects/time_wait_grant_allows_recv` and `jet test Compiler --profile golden --filter Concurrency/`. (was #3239 c82)",
+          "text": "A block granted only `Time.Wait` can call `tasks.recv`, and the existing task examples pass unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter Effects/time_wait_grant_allows_recv` and `jet test Compiler --profile golden --filter Concurrency/`. (was #3239 c82)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:10:39.696Z"
+          "at": "2026-11-16T12:53:55.733Z"
         },
         {
           "n": 22,
-          "text": "D-NOPANIC1=A: the `-[!Panic]>` denial row is enforced transitively, a positive Panic grant is refused, and an unknown call edge cannot discharge the prohibition. Proof: `jet test Compiler --profile cases --filter authority/d_nopanic1_contract` and `jet test Compiler --profile ui --filter panic_deny_`. (was #4268 c6)",
+          "text": "D-NOPANIC1=A: the `-[!Panic]>` denial row is enforced transitively, a positive Panic grant is refused, and an unknown call edge cannot discharge the prohibition. Proof: `jet test Compiler --profile cases --filter Authority/d_nopanic1_contract` and `jet test Compiler --profile ui --filter panic_deny_`. (was #4268 c6)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:10:40.648Z"
+          "at": "2026-11-16T12:53:56.643Z"
         },
         {
           "n": 23,
-          "text": "D-ONCE-GATE1=A: one policy surface names every audited escape with the same five scopes and modes; the one-off `--allow-impure` flag is replaced by one family flag that the org policy file can refuse, and a solo script needs no policy file. Proof: `jet test Compiler --profile cases --filter authority/d_once_gate1_contract` covers all five scopes and modes and an org refusal defeating the CLI flag. (was #4268 c7)",
+          "text": "D-ONCE-GATE1=A: one policy surface names every audited escape with the same five scopes and modes; the one-off `--allow-impure` flag is replaced by one family flag that the org policy file can refuse, and a solo script needs no policy file. Proof: `jet test Compiler --profile cases --filter Authority/d_once_gate1_contract` covers all five scopes and modes and an org refusal defeating the CLI flag. (was #4268 c7)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:10:41.593Z"
+          "at": "2026-11-16T12:53:57.988Z"
         },
         {
           "n": 24,
-          "text": "Sema effects, the foundation policy, the package effect budget, build effects, both purity checkers and the REPL authorizer read the one effect-root table and hold no private copy of it. Proof: `jet test tests/guards --filter single_effect_root_table`. (was #4268 c29)",
+          "text": "Sema effects, the foundation policy, the package effect budget, build effects, both purity checkers and the REPL authorizer read the one effect-root table and hold no private copy of it. Proof: `jet test Tests/Guards --filter single_effect_root_table`. (was #4268 c29)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:10:42.612Z"
+          "at": "2026-11-16T12:53:58.977Z"
         },
         {
           "n": 25,
@@ -32651,21 +32651,21 @@
         },
         {
           "n": 26,
-          "text": "`contain` and `harden` are package-only keys (D-PACKAGE-POLICY-SCOPE1 amendment): `harden: true` means sentries in release and every dependency contained (no TRUSTED rows), single files are excluded (R9), and freestanding runs print an honest limits line. Proof: `jet test Compiler --profile cases --filter cli_parts_inspect/hardened_release_sentry_reaches_a_foreign_dependency`. (was #4268 c54)",
+          "text": "`contain` and `harden` are package-only keys (D-PACKAGE-POLICY-SCOPE1 amendment): `harden: true` means sentries in release and every dependency contained (no TRUSTED rows), single files are excluded (R9), and freestanding runs print an honest limits line. Proof: `jet test Compiler --profile cases --filter CLIPartsInspect/hardened_release_sentry_reaches_a_foreign_dependency`. (was #4268 c54)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:10:44.568Z"
+          "at": "2026-11-16T12:53:59.902Z"
         },
         {
           "n": 27,
-          "text": "`contain` and `harden` parse only in package.jet, a source-policy spelling of them is a registered error with a UI snapshot, and the keys are monotonic (a dependency cannot loosen them). Proof: `jet test Compiler --profile ui --filter harden_in_source_refused` and `jet test Compiler --profile cases --filter cli_parts_inspect/harden_monotonic`. (was #4268 c55)",
+          "text": "`contain` and `harden` parse only in package.jet, a source-policy spelling of them is a registered error with a UI snapshot, and the keys are monotonic (a dependency cannot loosen them). Proof: `jet test Compiler --profile ui --filter harden_in_source_refused` and `jet test Compiler --profile cases --filter CLIPartsInspect/harden_monotonic`. (was #4268 c55)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:10:45.536Z"
+          "at": "2026-11-16T12:54:00.866Z"
         },
         {
           "n": 28,
@@ -32761,7 +32761,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-09-15T00:27:21.584Z",
-      "updated": "2026-11-16T01:10:52.762Z",
+      "updated": "2026-11-16T12:54:00.866Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -220032,6 +220032,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T12:54:00.866Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#27: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `contain` and `harden` parse only in package.jet, a source-policy spelling of them is a registered error with a UI snapshot, and the keys are monotonic (a dependency cannot loosen them). Proof: `jet t"
+    },
+    {
+      "at": "2026-11-16T12:53:59.902Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#26: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `contain` and `harden` are package-only keys (D-PACKAGE-POLICY-SCOPE1 amendment): `harden: true` means sentries in release and every dependency contained (no TRUSTED rows), single files are excluded ("
+    },
+    {
+      "at": "2026-11-16T12:53:58.977Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#24: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Sema effects, the foundation policy, the package effect budget, build effects, both purity checkers and the REPL authorizer read the one effect-root table and hold no private copy of it. Proof: `jet t"
+    },
+    {
+      "at": "2026-11-16T12:53:57.988Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#23: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-ONCE-GATE1=A: one policy surface names every audited escape with the same five scopes and modes; the one-off `--allow-impure` flag is replaced by one family flag that the org policy file can refuse,"
+    },
+    {
+      "at": "2026-11-16T12:53:56.643Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#22: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-NOPANIC1=A: the `-[!Panic]>` denial row is enforced transitively, a positive Panic grant is refused, and an unknown call edge cannot discharge the prohibition. Proof: `jet test Compiler --profile ca"
+    },
+    {
+      "at": "2026-11-16T12:53:55.733Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#21: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A block granted only `Time.Wait` can call `tasks.recv`, and the existing task examples pass unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter effects/time_wait_grant_allow"
+    },
+    {
+      "at": "2026-11-16T12:53:54.802Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#20: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every blocking function in core.tasks declares its waiting leaf (`Time.Wait`), and sema infers the same leaf for it. Proof: `jet test Compiler --profile cases --filter effects/tasks_blocking_leaf_time"
+    },
+    {
+      "at": "2026-11-16T12:53:53.851Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#19: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Direct and transitive callers get the same rights and failure facts, and summaries are never stale: a pure-looking helper that gains an outward operation updates its callers' explanations or gets the "
+    },
+    {
+      "at": "2026-11-16T12:53:52.890Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#18: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `jet inspect guarantees` shows every effective policy rule and grant, including inherited package settings, with deterministic output. Proof: `jet test Compiler --profile cases --filter cli_parts_insp"
+    },
+    {
+      "at": "2026-11-16T12:53:51.966Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#17: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Sema and `jet lint` enforce the effective package policy with registered errors and snapshots, and an absent policy block adds no ceremony for a beginner. Proof: `jet test Compiler --profile ui --filt"
+    },
+    {
+      "at": "2026-11-16T12:53:51.042Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#16: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: One package policy block sets effect ceilings, unsafe allowance by path, expert-surface ceilings, dependency allow and deny rules, and errors-by-class. Proof: `jet test Compiler --profile cases --filt"
+    },
+    {
+      "at": "2026-11-16T12:53:50.105Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#12: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A test replaces Net.HTTP.Get with a typed fake inside a scope while the same program uses the real network outside it, on every level, and provider lookup is eliminated when release policy denies prov"
+    },
+    {
+      "at": "2026-11-16T12:53:49.177Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: One qualified-right grammar (`FS.Read:/dir`, `Net.Connect:host`) is used in #Caps and the manifest and enforced at run time: a program granted one host fails with a typed authority failure on another "
+    },
+    {
+      "at": "2026-11-16T12:53:48.244Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Effect trust cannot bypass type and memory safety, audited Unsafe, sensitive consent, or independent package, environment and toolchain trust. Proof: `jet test Compiler --profile cases --filter author"
+    },
+    {
+      "at": "2026-11-16T12:53:47.300Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#8: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Policy changes, cache reuse, dev revisions and child execution keep the applicable authority and required receipts, and caching never hides an observable effect of a logical invocation. Proof: `jet te"
+    },
+    {
+      "at": "2026-11-16T12:53:46.364Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Prep is available without running a build, AOT preparation results survive into artifacts, and build stays the entry for executables, libraries and objects. Proof: `jet test Compiler --profile cases -"
+    },
+    {
+      "at": "2026-11-16T12:53:45.432Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every execution path and phase (run, dev, test, prep and AOT build) uses the same effect facts and authority law, with separate provenance for prep, AOT build and application execution. Proof: `jet te"
+    },
+    {
+      "at": "2026-11-16T12:53:44.511Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: An approved enclosing budget covers inferred helpers, while inner declarations, trusted callers and dependencies cannot silently bypass a higher restriction or a third-party boundary. Proof: `jet test"
+    },
+    {
+      "at": "2026-11-16T12:53:43.589Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Effects stay inferred and explainable without annotations, and transitive, generated, callback and opaque-call cases never become falsely pure. Proof: `jet test Compiler --profile cases --filter effec"
+    },
+    {
+      "at": "2026-11-16T12:53:42.678Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: An unchanged program runs without prompting again after Always trust, and is admitted or refused correctly under restricted policy. Proof: `jet test Compiler --profile cases --filter authority/trusted"
+    },
+    {
+      "at": "2026-11-16T12:53:41.761Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05efrmn",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The trust prompt follows the owner rule of 2026-10-01: one prompt with Always trust, Once and Cancel. Once runs and asks again next run, Always records trust and never asks again for that target, Canc"
+    },
+    {
+      "at": "2026-11-16T12:53:40.836Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The mixed native and Nixpkgs env realizes, runs, updates and removes through the Jet-built jetpack on O0, O1 and O2, and the E1272 postgres@nixpkgs hole in tests/fixtures/jetpack-project/env.jet becom"
+    },
+    {
+      "at": "2026-11-16T12:53:39.932Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Jet-owned code stays MIT, incorporated permissive dependencies keep their required notices, managed packages keep their own licenses, and no incompatible Nix implementation code is imported or relicen"
+    },
+    {
+      "at": "2026-11-16T12:53:38.983Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Only Hangar stores realized artifacts and closures: no /nix/store tree, mounted compatibility store, alternate Nix store, Nix profile, Nix daemon or runtime Nix-store path is needed. Proof: `jet test "
+    },
+    {
+      "at": "2026-11-16T12:53:38.050Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: An ordinary standalone Jet installation includes Nixpkgs translation and mixes native Jet packages with Nixpkgs packages in one env without installing or configuring Nix or an extra provider. Proof: `"
+    },
+    {
       "at": "2026-11-16T12:53:36.682Z",
       "by": "Main",
       "action": "card.criteria-edit",
@@ -223383,713 +223558,6 @@
       "action": "card.criteria-edit",
       "ref": "c0dbs1yh",
       "note": "#22: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3317 c45)"
-    },
-    {
-      "at": "2026-11-16T01:18:13.542Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#21: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c85)"
-    },
-    {
-      "at": "2026-11-16T01:18:12.513Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#20: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c84)"
-    },
-    {
-      "at": "2026-11-16T01:18:11.524Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#19: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c80)"
-    },
-    {
-      "at": "2026-11-16T01:18:10.436Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#18: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c79)"
-    },
-    {
-      "at": "2026-11-16T01:18:09.277Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#17: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c62)"
-    },
-    {
-      "at": "2026-11-16T01:18:07.753Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#16: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c61)"
-    },
-    {
-      "at": "2026-11-16T01:18:06.655Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#15: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c11)"
-    },
-    {
-      "at": "2026-11-16T01:18:05.578Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#14: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c10)"
-    },
-    {
-      "at": "2026-11-16T01:18:04.537Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c6)"
-    },
-    {
-      "at": "2026-11-16T01:18:03.542Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dbs1yh",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c5)"
-    },
-    {
-      "at": "2026-11-16T01:18:02.570Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0sttk1s",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6748 c6)"
-    },
-    {
-      "at": "2026-11-16T01:18:01.588Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0sttk1s",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6748 c4)"
-    },
-    {
-      "at": "2026-11-16T01:18:00.563Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0sttk1s",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6748 c3)"
-    },
-    {
-      "at": "2026-11-16T01:17:59.547Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0sttk1s",
-      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6748 c2)"
-    },
-    {
-      "at": "2026-11-16T01:17:58.562Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0sttk1s",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6748 c1)"
-    },
-    {
-      "at": "2026-11-16T01:17:57.384Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0rw1zt7",
-      "note": "#4: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5989 c17)"
-    },
-    {
-      "at": "2026-11-16T01:17:56.414Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0rw1zt7",
-      "note": "#3: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5989 c5)"
-    },
-    {
-      "at": "2026-11-16T01:17:55.375Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0d4kf8m",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5989 c21)"
-    },
-    {
-      "at": "2026-11-16T01:17:54.155Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vtg2ov",
-      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6619 c9)"
-    },
-    {
-      "at": "2026-11-16T01:17:52.734Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vtg2ov",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6619 c8)"
-    },
-    {
-      "at": "2026-11-16T01:17:51.535Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vtg2ov",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6619 c7)"
-    },
-    {
-      "at": "2026-11-16T01:17:49.993Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vtg2ov",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6619 c6)"
-    },
-    {
-      "at": "2026-11-16T01:17:48.775Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vtg2ov",
-      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6619 c5)"
-    },
-    {
-      "at": "2026-11-16T01:17:47.525Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vtg2ov",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6619 c4)"
-    },
-    {
-      "at": "2026-11-16T01:17:46.485Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vtg2ov",
-      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6619 c3)"
-    },
-    {
-      "at": "2026-11-16T01:17:45.411Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vtg2ov",
-      "note": "#6: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6619 c2)"
-    },
-    {
-      "at": "2026-11-16T01:17:44.376Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vtg2ov",
-      "note": "#5: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6619 c1)"
-    },
-    {
-      "at": "2026-11-16T01:17:43.400Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#17: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c18)"
-    },
-    {
-      "at": "2026-11-16T01:17:42.410Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#16: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c17)"
-    },
-    {
-      "at": "2026-11-16T01:17:41.329Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#15: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c8)"
-    },
-    {
-      "at": "2026-11-16T01:17:40.370Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#14: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c7)"
-    },
-    {
-      "at": "2026-11-16T01:17:39.321Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c6)"
-    },
-    {
-      "at": "2026-11-16T01:17:38.312Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c5)"
-    },
-    {
-      "at": "2026-11-16T01:17:37.151Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c4)"
-    },
-    {
-      "at": "2026-11-16T01:17:35.994Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c3)"
-    },
-    {
-      "at": "2026-11-16T01:17:34.920Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c2)"
-    },
-    {
-      "at": "2026-11-16T01:17:33.864Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ozqnbt",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6630 c1)"
-    },
-    {
-      "at": "2026-11-16T01:17:32.732Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#19: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c27)"
-    },
-    {
-      "at": "2026-11-16T01:17:31.689Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#18: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c26)"
-    },
-    {
-      "at": "2026-11-16T01:17:30.718Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#17: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c25)"
-    },
-    {
-      "at": "2026-11-16T01:17:29.732Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#16: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c24)"
-    },
-    {
-      "at": "2026-11-16T01:17:28.676Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#15: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c13)"
-    },
-    {
-      "at": "2026-11-16T01:17:27.649Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#14: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c12)"
-    },
-    {
-      "at": "2026-11-16T01:17:26.528Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c11)"
-    },
-    {
-      "at": "2026-11-16T01:17:25.525Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c9)"
-    },
-    {
-      "at": "2026-11-16T01:17:24.534Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06lmp17",
-      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6730 c30)"
-    },
-    {
-      "at": "2026-11-16T01:17:22.964Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06lmp17",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6730 c28)"
-    },
-    {
-      "at": "2026-11-16T01:17:21.894Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06lmp17",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6730 c25)"
-    },
-    {
-      "at": "2026-11-16T01:17:20.709Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06lmp17",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6730 c23)"
-    },
-    {
-      "at": "2026-11-16T01:17:19.432Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06lmp17",
-      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6730 c14)"
-    },
-    {
-      "at": "2026-11-16T01:17:18.185Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06lmp17",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6730 c13)"
-    },
-    {
-      "at": "2026-11-16T01:17:17.039Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06lmp17",
-      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6730 c10)"
-    },
-    {
-      "at": "2026-11-16T01:17:15.885Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0rn7rnu",
-      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6730 c21)"
-    },
-    {
-      "at": "2026-11-16T01:17:14.678Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0zlqnvv",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3239 c63)"
-    },
-    {
-      "at": "2026-11-16T01:17:13.468Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0yljhgc",
-      "note": "#6: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6618 c44)"
-    },
-    {
-      "at": "2026-11-16T01:17:12.507Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0jk9aer",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6618 c66)"
-    },
-    {
-      "at": "2026-11-16T01:17:11.523Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0jk9aer",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6618 c43)"
-    },
-    {
-      "at": "2026-11-16T01:17:10.430Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qetodj",
-      "note": "#14: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6618 c64)"
-    },
-    {
-      "at": "2026-11-16T01:17:09.405Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qetodj",
-      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6618 c63)"
-    },
-    {
-      "at": "2026-11-16T01:17:08.348Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qetodj",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6618 c57)"
-    },
-    {
-      "at": "2026-11-16T01:17:07.234Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qetodj",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6618 c56)"
-    },
-    {
-      "at": "2026-11-16T01:17:06.240Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qetodj",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6618 c55)"
-    },
-    {
-      "at": "2026-11-16T01:17:05.130Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0xbfhbt",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6730 c20)"
-    },
-    {
-      "at": "2026-11-16T01:17:04.113Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0wowe4m",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6418 c37)"
-    },
-    {
-      "at": "2026-11-16T01:17:02.931Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0wowe4m",
-      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6418 c35)"
-    },
-    {
-      "at": "2026-11-16T01:17:01.779Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c01q17ls",
-      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c71)"
-    },
-    {
-      "at": "2026-11-16T01:17:00.681Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c01q17ls",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c7)"
-    },
-    {
-      "at": "2026-11-16T01:16:59.541Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c01q17ls",
-      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3186 c8)"
-    },
-    {
-      "at": "2026-11-16T01:16:58.301Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c01q17ls",
-      "note": "#6: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3186 c4)"
-    },
-    {
-      "at": "2026-11-16T01:16:57.264Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mbiq9g",
-      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c66)"
-    },
-    {
-      "at": "2026-11-16T01:16:56.320Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mbiq9g",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c62)"
-    },
-    {
-      "at": "2026-11-16T01:16:54.989Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mbiq9g",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c30)"
-    },
-    {
-      "at": "2026-11-16T01:16:53.895Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mbiq9g",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c8)"
-    },
-    {
-      "at": "2026-11-16T01:16:52.697Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mbiq9g",
-      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c4)"
-    },
-    {
-      "at": "2026-11-16T01:16:51.677Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mbiq9g",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c2)"
-    },
-    {
-      "at": "2026-11-16T01:16:50.690Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06tzcrf",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3720 c13)"
-    },
-    {
-      "at": "2026-11-16T01:16:49.499Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0s1vode",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c63)"
-    },
-    {
-      "at": "2026-11-16T01:16:48.408Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0s1vode",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4917 c3)"
-    },
-    {
-      "at": "2026-11-16T01:16:46.944Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0aha21c",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6637 c20)"
-    },
-    {
-      "at": "2026-11-16T01:16:45.746Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0aha21c",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6637 c17)"
-    },
-    {
-      "at": "2026-11-16T01:16:44.661Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0aha21c",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6637 c14)"
-    },
-    {
-      "at": "2026-11-16T01:16:43.402Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0aha21c",
-      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6418 c150)"
-    },
-    {
-      "at": "2026-11-16T01:16:42.405Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0aha21c",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #2199 c26)"
-    },
-    {
-      "at": "2026-11-16T01:16:41.433Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t5gnhs",
-      "note": "#18: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6566 c8)"
-    },
-    {
-      "at": "2026-11-16T01:16:40.494Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t5gnhs",
-      "note": "#17: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6566 c3)"
-    },
-    {
-      "at": "2026-11-16T01:16:39.548Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t5gnhs",
-      "note": "#16: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6566 c2)"
-    },
-    {
-      "at": "2026-11-16T01:16:38.578Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c00gioxt",
-      "note": "#4: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6637 c9)"
-    },
-    {
-      "at": "2026-11-16T01:16:37.440Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0gxq09x",
-      "note": "#4: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6448 c1)"
-    },
-    {
-      "at": "2026-11-16T01:16:36.076Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t3qh8f",
-      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3327 c16)"
-    },
-    {
-      "at": "2026-11-16T01:16:34.596Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t3qh8f",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3327 c15)"
-    },
-    {
-      "at": "2026-11-16T01:16:33.613Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t3qh8f",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3327 c8)"
-    },
-    {
-      "at": "2026-11-16T01:16:32.579Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t3qh8f",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3327 c7)"
-    },
-    {
-      "at": "2026-11-16T01:16:31.529Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t3qh8f",
-      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3327 c6)"
-    },
-    {
-      "at": "2026-11-16T01:16:30.416Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t3qh8f",
-      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3327 c5)"
-    },
-    {
-      "at": "2026-11-16T01:16:29.461Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0t3qh8f",
-      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3327 c4)"
-    },
-    {
-      "at": "2026-11-16T01:16:28.397Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ujz0kr",
-      "note": "#14: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6386 c131)"
-    },
-    {
-      "at": "2026-11-16T01:16:27.113Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ujz0kr",
-      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6386 c130)"
-    },
-    {
-      "at": "2026-11-16T01:16:25.986Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ujz0kr",
-      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6386 c129)"
-    },
-    {
-      "at": "2026-11-16T01:16:24.684Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ujz0kr",
-      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6386 c128)"
-    },
-    {
-      "at": "2026-11-16T01:16:22.864Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ujz0kr",
-      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6386 c1)"
-    },
-    {
-      "at": "2026-11-16T01:16:21.891Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c087ot9q",
-      "note": "#24: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4632 c4)"
     }
   ],
   "nextNum": 368,
