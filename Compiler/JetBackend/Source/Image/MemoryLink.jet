@@ -297,6 +297,19 @@ link_bind_layout: fn(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! 
 // `main` places bound to `target`. Returns the image's ELF header naming
 // the combined program header table, for link_bind_sections to finish.
 link_bind_write: fn(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
+    out := [U8]{}
+    elf := link_bind_header(c, exe, out, view, l, target)
+    in_place := link_no_pieces()
+    link_write_contents(c, out, l, view.program_base, in_place)
+    exe.tail = out
+    elf
+}
+
+// The image's ELF header naming the combined program header table of
+// layout `l`, which goes to the end of `out` (the program part's start), and
+// the patches of the image part's `main` places bound to `target` in `exe`;
+// a place outside the image's loaded bytes or out of range is reported on `c`.
+link_bind_header: fn(c: &LinkContext, exe: &X64Executable, out: &[U8], view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
     elf := c.bufs[1][0..<LINK_EHDR_SIZE]
     link_put64(elf, 32, view.program_base - c.base)
     elf[56] = U8{l.phnum.bit_and(255)}
@@ -324,7 +337,6 @@ link_bind_write: fn(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l
         exe.patch_at.push(at)
         exe.patch_bytes.push(bytes)
     }
-    out := [U8]{}
     loop k in 0..<view.phnum {
         at: view.phoff + LINK_PHDR_SIZE * k
         if link_u32(c.bufs, 1, at) == 1 -> out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
@@ -339,9 +351,6 @@ link_bind_write: fn(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l
         at: view.phoff + LINK_PHDR_SIZE * k
         if link_u32(c.bufs, 1, at) != 1 -> out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
     }
-    in_place := link_no_pieces()
-    link_write_contents(c, out, l, view.program_base, in_place)
-    exe.tail = out
     elf
 }
 
@@ -351,43 +360,17 @@ link_bind_write: fn(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l
 // `image_symbols`) and the program's (locals first), and the section
 // headers, which `elf` names.
 link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImageView, l: LinkLayout, debug: LinkDebug, elf: &[U8], image_symbols: Bool) Never! {
-    headers := [LinkSectionHeader]{}
-    loop k in 1..<view.alloc_headers + 1 {
-        h: view.shoff + 64 * k
-        headers.push(
-            LinkSectionHeader{
-                name: link_cstr(c.bufs, 1, view.names_at + link_u32(c.bufs, 1, h)),
-                kind: link_u32(c.bufs, 1, h + 4),
-                flags: link_s64(c.bufs, 1, h + 8),
-                addr: link_s64(c.bufs, 1, h + 16),
-                offset: link_s64(c.bufs, 1, h + 24),
-                size: link_s64(c.bufs, 1, h + 32),
-                link: link_u32(c.bufs, 1, h + 40),
-                info: link_u32(c.bufs, 1, h + 44),
-                align: link_s64(c.bufs, 1, h + 48),
-                entry_size: link_s64(c.bufs, 1, h + 56),
-            },
-        )
-    }
-    class_headers := [Int]{}
-    loop _ in 0..<LINK_CLASSES -> class_headers.push(-1)
-    names: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
-    kinds: [Int]{LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS, LINK_SHT_PREINIT_ARRAY, LINK_SHT_INIT_ARRAY, LINK_SHT_FINI_ARRAY, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS}
-    flags: [Int]{2, 2, 6, 0x403, 0x403, 3, 3, 3, 3, 3, 3}
+    headers := link_bind_image_headers(c, view)
+    extents := [[Int]]{}
     loop class in 0..<LINK_CLASSES {
         extent := link_class_extent(c, l, class)
         if class == LINK_EH -> extent = [Int]{c.eh_start, c.eh_start + c.eh_size}
         if class == LINK_BSS {
             extent = if l.has_rw -> [Int]{l.bss_start, l.mem_end} else -> [Int]{0, 0}
         }
-        if extent[1] > extent[0] {
-            class_headers[class] = headers.len() + 1
-            headers.push(LinkSectionHeader{name: names[class], kind: kinds[class], flags: flags[class], addr: extent[0], offset: extent[0] - c.base, size: extent[1] - extent[0], link: 0, info: 0, align: if class == LINK_TEXT -> 16 else -> 8, entry_size: 0})
-        }
-        if class == LINK_RELRO && c.got_keys.len() > 0 {
-            headers.push(LinkSectionHeader{name: ".got", kind: LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: c.got_start - c.base, size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
-        }
+        extents.push(extent)
     }
+    class_headers: link_bind_class_headers(headers, extents, c.got_start, c.got_keys.len(), c.base)
     in_place := link_no_pieces()
     sections: link_debug_bytes(c, debug, in_place, l.text_start, l.text_end)
     loop (group, name) in debug.names {
@@ -429,6 +412,63 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
         kind: if c.live_class[c.live[s]] == LINK_TEXT -> 2 else -> 1
         link_image_symbol(globals, symbol_names, names_base, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
     }
+    link_bind_symbols(c, out, origin, view, headers, locals, globals, symbol_names, image_symbols, elf)
+}
+
+// The image's headers of its loaded sections, as they are.
+link_bind_image_headers: fn(c: LinkContext, view: LinkImageView) -> [LinkSectionHeader] Never! {
+    headers := [LinkSectionHeader]{}
+    loop k in 1..<view.alloc_headers + 1 {
+        h: view.shoff + 64 * k
+        headers.push(
+            LinkSectionHeader{
+                name: link_cstr(c.bufs, 1, view.names_at + link_u32(c.bufs, 1, h)),
+                kind: link_u32(c.bufs, 1, h + 4),
+                flags: link_s64(c.bufs, 1, h + 8),
+                addr: link_s64(c.bufs, 1, h + 16),
+                offset: link_s64(c.bufs, 1, h + 24),
+                size: link_s64(c.bufs, 1, h + 32),
+                link: link_u32(c.bufs, 1, h + 40),
+                info: link_u32(c.bufs, 1, h + 44),
+                align: link_s64(c.bufs, 1, h + 48),
+                entry_size: link_s64(c.bufs, 1, h + 56),
+            },
+        )
+    }
+    headers
+}
+
+// A header per layout class whose address range `extents[class]` is not
+// empty, and `.got` after the read-only-after-relocation data when it has
+// `got_slots` slots from `got_start`, appended to `headers`; returns per
+// class its header's index (-1: none). File offsets are addresses less `base`.
+link_bind_class_headers: fn(headers: &[LinkSectionHeader], extents: [[Int]], got_start: Int, got_slots: Int, base: Int) -> [Int] Never! {
+    class_headers := [Int]{}
+    loop _ in 0..<LINK_CLASSES -> class_headers.push(-1)
+    names: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
+    kinds: [Int]{LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS, LINK_SHT_PREINIT_ARRAY, LINK_SHT_INIT_ARRAY, LINK_SHT_FINI_ARRAY, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS}
+    flags: [Int]{2, 2, 6, 0x403, 0x403, 3, 3, 3, 3, 3, 3}
+    loop class in 0..<LINK_CLASSES {
+        extent: extents[class]
+        if extent[1] > extent[0] {
+            class_headers[class] = headers.len() + 1
+            headers.push(LinkSectionHeader{name: names[class], kind: kinds[class], flags: flags[class], addr: extent[0], offset: extent[0] - base, size: extent[1] - extent[0], link: 0, info: 0, align: if class == LINK_TEXT -> 16 else -> 8, entry_size: 0})
+        }
+        if class == LINK_RELRO && got_slots > 0 {
+            headers.push(LinkSectionHeader{name: ".got", kind: LINK_SHT_PROGBITS, flags: 3, addr: got_start, offset: got_start - base, size: 8 * got_slots, link: 0, info: 0, align: 8, entry_size: 8})
+        }
+    }
+    class_headers
+}
+
+// The end of the debug tail `out`, the program part from file offset
+// `origin`: `.symtab` (the image's locals under `image_symbols`, else the
+// null symbol, then the program's `locals`, the image's globals and the
+// program's `globals`) and `.strtab` (the image's names, else the empty
+// name, then `symbol_names`), then the section headers, `headers` and
+// theirs, which `elf` names.
+link_bind_symbols: fn(c: LinkContext, out: &[U8], origin: Int, view: LinkImageView, headers: &[LinkSectionHeader], locals: &&[U8], globals: &&[U8], symbol_names: &&[U8], image_symbols: Bool, elf: &[U8]) Never! {
+    names_base: if image_symbols -> view.strtab_size else -> 1
     image_locals: if image_symbols -> 24 * view.first_global else -> 24
     image_globals: if image_symbols -> 24 * (view.symtab_count - view.first_global) else -> 0
     // The padding, both tables, then the section names and headers
@@ -538,10 +578,13 @@ x64_executable_bytes: fn(exe: &&X64Executable) -> [U8] Never! {
     out
 }
 
-// A bound executable, else (errors not empty) why the program can't be bound.
+// A bound executable, else (errors not empty) why the program can't be
+// bound: with `unwritten`, why its object can't be written
+// (x64_bind_functions_at).
 X64BindResult: struct {
     executable: X64Executable
     errors: [String]
+    unwritten: Bool{false}
 }
 
 // Bind the program object `program` (named `name` in reports) to the

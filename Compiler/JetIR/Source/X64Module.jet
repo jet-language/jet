@@ -609,26 +609,11 @@ ir_x64_take_inputs: fn(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
 // DWARF sections empty.
 ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
-    if owned.errors.len() > 0 {
-        return X64ExecutableResult{bytes: [U8]{}, errors: owned.errors.move()}
-    }
-    entry: owned.program.entry
-    if entry < 0 || entry >= owned.program.functions.len() {
-        return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry} is not in the module"}}
-    }
-    if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 {
-        return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}}
-    }
-    owned_main: owned.program.owned_main
-    owned_attach: owned.program.owned_attach
-    kept: owned.program.kept.copy()
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    errors := ir_x64_main_rows(owned, functions, debug)
+    if errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: errors.move()}
     program: ir_x64_object_module(owned)
-    main: x64_object_main(X64FunctionID{value: entry}, owned_main, owned_attach)
-    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
-    debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
-    functions := [X64CompiledFunction]{main.move()}
-    functions.extend(compiler_take_rows<X64CompiledFunction>(owned.functions))
-    ir_x64_reached_only(functions, debug, kept)
     threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
     exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
     // What is left of the compile (its IR module above all) is read no more.
@@ -650,6 +635,57 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableRes
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     objects.pop() ?? panic("the object writer lost its object")
+}
+
+// What ir_x64_object writes without debug info, unwritten: the data of the
+// module (the object reads no debug file, type or source then), `main` and
+// the functions it or a kept root reaches with their debug rows, for a bind
+// straight from them (JetBackend Image/DirectBind.jet
+// x64_bind_functions_at); else `errors`, ir_x64_object's.
+IRX64Program: struct {
+    program: X64ObjectModule
+    functions: [X64CompiledFunction]
+    debug: [X64FunctionDebug]
+    threads: CompilerThreads
+    errors: [String]
+}
+
+// The program of `compiled` (moved in, its rows moved on; the rest drops
+// here).
+ir_x64_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
+    owned := compiled.move()
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    errors := ir_x64_main_rows(owned, functions, debug)
+    IRX64Program{
+        program: X64ObjectModule{data: compiler_take_rows<X64Data>(owned.tables.data), debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{}},
+        functions: functions.move(),
+        debug: debug.move(),
+        threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available},
+        errors: errors.move(),
+    }
+}
+
+// The object's functions of `owned` into `functions`, with their debug rows
+// into `debug`: `main` for its entry function (x64_object_main), then the
+// compiled functions it or a kept root reaches (ir_x64_reached_only). Else
+// why there are none: the compile's errors, or an entry `main` can't run.
+ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) -> [String] Never! {
+    if owned.errors.len() > 0 -> return compiler_take_rows<String>(owned.errors)
+    entry: owned.program.entry
+    if entry < 0 || entry >= owned.program.functions.len() {
+        return [String]{"entry function {entry} is not in the module"}
+    }
+    if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 {
+        return [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}
+    }
+    main: x64_object_main(X64FunctionID{value: entry}, owned.program.owned_main, owned.program.owned_attach)
+    debug.push(x64_object_main_debug(main))
+    debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
+    functions.push(main.move())
+    functions.extend(compiler_take_rows<X64CompiledFunction>(owned.functions))
+    ir_x64_reached_only(functions, debug, owned.program.kept)
+    [String]{}
 }
 
 // Keeps the rows of `functions` (with their `debug` rows) whose function the

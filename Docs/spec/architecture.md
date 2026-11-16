@@ -339,7 +339,11 @@ run base. `jet run` and the comptime session read only the image's first
 page and the bytes after its loaded segments for that bind (a jet that
 carries its runtime lends its image part instead), and map the segments
 from the file (`Image/Loader.jet`); a comptime batch binds to the session's
-one read, never a copy. The step runs no C compiler or archiver, and the pack
+one read, never a copy, and straight from its compiled functions
+(`Image/DirectBind.jet` `x64_bind_functions_at`): it writes the executable
+the batch's object would bind to, byte for byte, with no object in between,
+and takes the object route only when that route would report an error.
+The step runs no C compiler or archiver, and the pack
 packages no C platform archives, which a program with C takes from jet's C
 toolchain pack (foreign C, below). The key (`jet-native-runtime/v5`) hashes
 the source inventory, checked ABI, thread receipt, lifecycle and backend

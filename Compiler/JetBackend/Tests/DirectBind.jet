@@ -1,0 +1,190 @@
+// A compile-time batch binds straight from its functions (Image/
+// DirectBind.jet x64_bind_functions_at) to the executable the object route
+// makes, byte for byte: the object x64_object_functions_threads writes of
+// the same functions (no own sections, the one export `main`, no debug
+// info) bound by x64_bind_runtime_image_at. Programs that call each other,
+// call the runtime, and read `.rodata` and `.data` (whose words point into
+// both) bind alike, to the whole image and to the image read without its
+// loaded segments; a program the object route refuses gets that route's
+// errors, and the image goes back unchanged either way.
+use {
+    jet_backend.[
+        LinkContext,
+        LINK_RUN_BASE,
+        X64BindResult,
+        X64CompiledFunction,
+        X64Data,
+        X64DataExport,
+        X64DataID,
+        X64DataReloc,
+        X64DebugType,
+        X64FunctionDebug,
+        X64FunctionID,
+        X64FunctionSource,
+        X64LineRow,
+        X64ModuleDebug,
+        X64ObjectModule,
+        X64Reloc,
+        X64RelocTarget,
+        X64RuntimeExport,
+        X64VariableRange,
+        link_context,
+        link_direct_bind,
+        link_image_view,
+        x64_bind_functions_at,
+        x64_bind_runtime_image_at,
+        x64_executable_whole,
+        x64_image_file_read,
+        x64_object_functions_threads,
+        x64_object_main,
+        x64_object_main_debug,
+    ]
+    jet_foundation.[compiler_threads_single]
+    direct_files: core.files
+    direct_process: core.process
+    direct_sys: core.sys
+}
+
+// The runtime image of the compiler under test, never this test binary's.
+direct_bind_image_path: fn() -> String {
+    jet: direct_sys.get("JET") ?? (direct_process.which("jet") ?? panic("set JET to the compiler under test"))
+    parts := jet.split("/").to_list()
+    _ := parts.pop()
+    "{parts.join("/")}/jet-runtime/jet_runtime.image"
+}
+
+direct_bind_read: fn(path: String) -> [U8] {
+    direct_files.read_bytes(path) ?? panic("the compiler under test has no runtime image at {path}")
+}
+
+// One test program: its functions (`main` first), their unwind rows and
+// its data.
+DirectBindProgram: struct {
+    functions: [X64CompiledFunction]
+    debug: [X64FunctionDebug]
+    data: [X64Data]
+}
+
+direct_bind_debug: fn() -> X64FunctionDebug Never! {
+    X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}}
+}
+
+direct_bind_code: fn(bytes: [Int]) -> [U8] Never! {
+    loop byte in bytes -> U8{byte}
+}
+
+// `shape` 0: the entry calls a helper and `runtime` and loads the addresses
+// of a `.rodata` string and a `.data` table of pointers into `.rodata` and
+// `.data`; 1: it loads only the string; 2: it only calls the helper; 3: it
+// calls a function the program lacks.
+direct_bind_program: fn(shape: Int, runtime: String) -> DirectBindProgram Never! {
+    main: x64_object_main(X64FunctionID{value: 0}, false, false)
+    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
+    functions := [X64CompiledFunction]{main.move()}
+    // call helper; lea rax, [rip + string]; lea rcx, [rip + table];
+    // call runtime; ret
+    code: direct_bind_code([Int]{0xe8, 0, 0, 0, 0, 0x48, 0x8d, 0x05, 0, 0, 0, 0, 0x48, 0x8d, 0x0d, 0, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xc3})
+    relocs := [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: if shape == 3 -> 7 else -> 1}}}}
+    if shape <= 1 {
+        relocs.push(X64Reloc{at: 8, target: X64RelocTarget.Data{id: X64DataID{value: 0}}})
+    }
+    if shape == 0 {
+        relocs.push(X64Reloc{at: 15, target: X64RelocTarget.Data{id: X64DataID{value: 1}}})
+        relocs.push(X64Reloc{at: 20, target: X64RelocTarget.Runtime{symbol: runtime}})
+    }
+    functions.push(X64CompiledFunction{id: X64FunctionID{value: 0}, name: "entry", code: code, relocs: relocs, align: 16})
+    debug.push(direct_bind_debug())
+    functions.push(X64CompiledFunction{id: X64FunctionID{value: 1}, name: "helper", code: direct_bind_code([Int]{0x31, 0xc0, 0xc3}), relocs: [X64Reloc]{}, align: 64})
+    debug.push(direct_bind_debug())
+    functions.push(X64CompiledFunction{id: X64FunctionID{value: 2}, name: "", code: direct_bind_code([Int]{0xc3}), relocs: [X64Reloc]{}, align: 16})
+    debug.push(direct_bind_debug())
+    data: [X64Data]{
+        X64Data{id: X64DataID{value: 0}, bytes: direct_bind_code([Int]{104, 101, 108, 108, 111}), align: 1, relocs: [X64DataReloc]{}, read_only: true},
+        X64Data{id: X64DataID{value: 1}, bytes: direct_bind_code([Int]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7}), align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: 0}, addend: 2}, X64DataReloc{offset: 8, target: X64DataID{value: 2}, addend: 0}}},
+        X64Data{id: X64DataID{value: 2}, bytes: direct_bind_code([Int]{1, 2, 3, 4, 5, 6, 7, 8}), align: 16, relocs: [X64DataReloc]{}},
+        X64Data{id: X64DataID{value: 3}, bytes: direct_bind_code([Int]{9}), align: 1, relocs: [X64DataReloc]{}},
+    }
+    DirectBindProgram{functions: functions.move(), debug: debug.move(), data: data}
+}
+
+direct_bind_module: fn(data: &&[X64Data]) -> X64ObjectModule Never! {
+    X64ObjectModule{data: data.move(), debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{}}
+}
+
+// The object route: the program's object, bound.
+direct_bind_by_object: fn(shape: Int, runtime: String, image: &&[U8], base: Int, gap_at: Int, gap: Int) -> X64BindResult {
+    built := direct_bind_program(shape, runtime)
+    exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
+    object := x64_object_functions_threads(direct_bind_module(built.data.move()), built.functions.move(), built.debug.move(), exports, [X64DataExport]{}, compiler_threads_single(), false, false)
+    assert(object.errors.len() == 0, "the object route writes program {shape}: {object.errors.join("; ")}")
+    x64_bind_runtime_image_at("direct", object.bytes.move(), image.move(), base, gap_at, gap)
+}
+
+direct_bind_straight: fn(shape: Int, runtime: String, image: &&[U8], base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
+    built := direct_bind_program(shape, runtime)
+    x64_bind_functions_at("direct", direct_bind_module(built.data.move()), built.functions.move(), built.debug.move(), compiler_threads_single(), image.move(), base, gap_at, gap)
+}
+
+// Binds program `shape` both ways to `image` (read without its bytes
+// [gap_at, gap_at + gap)), `reference.bufs[1]` as read, and asserts the
+// executables are the same; returns the image, given back unchanged.
+direct_bind_compare: fn(shape: Int, runtime: String, image: &&[U8], reference: &LinkContext, gap_at: Int, gap: Int) -> [U8] {
+    view: link_image_view(reference, 1, gap_at, gap)
+    assert(reference.errors.len() == 0, "the runtime image has a program base")
+    // Two pages up, as a later batch's part goes.
+    base: view.program_base + 8192
+    expected := direct_bind_by_object(shape, runtime, image.move(), base, gap_at, gap)
+    assert(expected.executable.image == reference.bufs[1], "the object route gives the image back unchanged")
+    bound := direct_bind_straight(shape, runtime, expected.executable.image.move(), base, gap_at, gap)
+    expected.executable.image = [U8]{}
+    given := bound.executable.image.move()
+    bound.executable.image = [U8]{}
+    assert(given == reference.bufs[1], "the direct bind gives the image back unchanged")
+    assert(bound.errors == expected.errors && !bound.unwritten, "program {shape} binds or fails alike: {bound.errors.join("; ")} / {expected.errors.join("; ")}")
+    if expected.errors.len() > 0 -> return given.move()
+    mine: bound.executable
+    theirs: expected.executable
+    assert(mine.image_end == theirs.image_end && mine.image_gap_at == theirs.image_gap_at && mine.image_gap == theirs.image_gap && mine.tail_at == theirs.tail_at, "program {shape} has the object route's image part and place")
+    assert(mine.patch_at == theirs.patch_at && mine.patch_bytes == theirs.patch_bytes, "program {shape} patches the image as the object route does")
+    assert(mine.tail.len() == theirs.tail.len(), "program {shape}'s part is {mine.tail.len()} bytes, the object route's {theirs.tail.len()}")
+    loop k in 0..<mine.tail.len() {
+        assert(mine.tail[k] == theirs.tail[k], "program {shape}'s part differs from the object route's at byte {k}")
+    }
+    // The executable is the direct writer's own, not the object route's.
+    c := link_context([[U8]]{[U8]{}, given.move()}, LINK_RUN_BASE)
+    exe := x64_executable_whole([U8]{})
+    built := direct_bind_program(shape, runtime)
+    held: direct_bind_module(built.data.move())
+    assert(link_direct_bind(c, exe, held, built.functions, built.debug, base, gap_at, gap), "program {shape} binds with no object")
+    assert(exe.tail == theirs.tail, "the direct writer gives program {shape} the object route's part")
+    c.bufs.remove(1, .Slot) ?? [U8]{}
+}
+
+#Test("a batch bound straight from its functions is the object route's executable") {
+    path: direct_bind_image_path()
+    whole := link_context([[U8]]{[U8]{}, direct_bind_read(path)}, LINK_RUN_BASE)
+    image := direct_bind_read(path)
+    loop shape in 0..<3 {
+        image = direct_bind_compare(shape, "jet_rt_alloc", image.move(), whole, 0, 0)
+    }
+    read: x64_image_file_read(path)
+    again: x64_image_file_read(path)
+    assert(read.failure == "" && read.gap > 0 && again.failure == "", "the image file is read without its loaded segments: {read.failure}")
+    gapped := link_context([[U8]]{[U8]{}, again.bytes.move()}, LINK_RUN_BASE)
+    held := read.bytes.move()
+    loop shape in 0..<3 {
+        held = direct_bind_compare(shape, "jet_rt_alloc", held.move(), gapped, read.gap_at, read.gap)
+    }
+}
+
+#Test("a batch the object route can't bind or write gets that route's report") {
+    path: direct_bind_image_path()
+    reference := link_context([[U8]]{[U8]{}, direct_bind_read(path)}, LINK_RUN_BASE)
+    // An import the image does not define: the bind's report.
+    image := direct_bind_compare(0, "no_such_runtime_symbol", direct_bind_read(path), reference, 0, 0)
+    view: link_image_view(reference, 1, 0, 0)
+    // A call to a function the program lacks: the object writer's report.
+    failed: direct_bind_straight(3, "jet_rt_alloc", image.move(), view.program_base, 0, 0)
+    assert(failed.unwritten && failed.errors.len() == 1 && failed.errors[0].contains("not in the object"), "a call to a missing function is the object writer's error: {failed.errors.join("; ")}")
+    assert(failed.executable.image == reference.bufs[1], "the image goes back unchanged")
+}
