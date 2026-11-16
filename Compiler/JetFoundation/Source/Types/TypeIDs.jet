@@ -317,9 +317,7 @@ type_kind_of_code: fn(code: U8) -> TypeKind Never! {
     }
 }
 
-type_hash_word: fn(hash: U32, word: U32) -> U32 Never! {
-    wrapping((hash.bit_xor(word)) * U32{0x01000193})
-}
+type_hash_word: fn(hash: U32, word: U32) -> U32 Never! { wrapping((hash ~ word) * U32{0x01000193}) }
 
 type_row_hash: fn(kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> Int Never! {
     hash := type_hash_word(U32{0x811c9dc5}, U32{type_kind_code(kind)})
@@ -348,12 +346,12 @@ type_row_equal: fn(table: TypeColumns, row: Int, hash: Int, kind: TypeKind, a: U
 // one holding it, or the empty one a new row takes.
 type_slot: fn(table: TypeColumns, hash: Int, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> Int Never! {
     mask: table.slots.len() - 1
-    slot := hash.bit_and(mask)
+    slot := hash & mask
     loop table.slots[slot] != 0 {
         if type_row_equal(table, table.slots[slot] - 1, hash, kind, a, b, side, children) {
             return slot
         }
-        slot = (slot + 1).bit_and(mask)
+        slot = (slot + 1) & mask
     }
     slot
 }
@@ -391,8 +389,8 @@ type_columns_grow: fn(table: &TypeColumns) Never! {
     slots := [Int]{}
     loop _ in 0..<capacity -> slots.push(0)
     loop row in 1..<table.kind.len() {
-        slot := table.hashes[row].bit_and(mask)
-        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slot := table.hashes[row] & mask
+        loop slots[slot] != 0 -> slot = (slot + 1) & mask
         slots[slot] = row + 1
     }
     table.slots = slots.move()
@@ -402,11 +400,11 @@ type_columns_grow: fn(table: &TypeColumns) Never! {
 // the one holding its row, or the empty one a new row takes.
 type_sides_slot: fn<T: Equatable>(sides: TypeSides<T>, value: T, hash: Int) -> Int Never! {
     mask: sides.slots.len() - 1
-    slot := hash.bit_and(mask)
+    slot := hash & mask
     loop sides.slots[slot] != 0 {
         row: sides.slots[slot] - 1
         if sides.hashes[row] == hash && sides.rows[row] == value -> return slot
-        slot = (slot + 1).bit_and(mask)
+        slot = (slot + 1) & mask
     }
     slot
 }
@@ -435,14 +433,14 @@ type_sides_grow: fn<T>(sides: &TypeSides<T>) Never! {
     slots := [Int]{}
     loop _ in 0..<capacity -> slots.push(0)
     loop row in 0..<sides.rows.len() {
-        slot := sides.hashes[row].bit_and(mask)
-        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slot := sides.hashes[row] & mask
+        loop slots[slot] != 0 -> slot = (slot + 1) & mask
         slots[slot] = row + 1
     }
     sides.slots = slots.move()
 }
 
-type_text_hash: fn(text: String) -> Int Never! { Int{text.hash().bit_and(U64{0x3fffffff})} }
+type_text_hash: fn(text: String) -> Int Never! { Int{text.hash() & U64{0x3fffffff}} }
 
 // A hash of Fn type `ty`'s metadata, read from its names.
 type_fn_side_hash: fn(ty: Type) -> Int Never! {

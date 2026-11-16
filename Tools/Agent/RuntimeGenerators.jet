@@ -1245,10 +1245,10 @@ i64_parameter_name: fn(item: String) -> String Never! {
     name
 }
 
-// Whether `code[from..<to]` holds `name.bit_and(I64{mask})` (any spacing) with
+// Whether `code[from..<to]` holds `name & I64{mask}` (any spacing) with
 // `name` starting a word.
 has_mask: fn(code: [U8], from: Int, to: Int, name: String, mask: Int) -> Bool Never! {
-    words: [String]{".", "bit_and", "(", "I64", "{{", "{mask}", "}}", ")"}
+    words: [String]{"&", "I64", "{{", "{mask}", "}}"}
     loop start in from..<to {
         if start > from && is_name_byte(Int{code[start - 1]}) -> next
         if !bytes_at(code, start, name) -> next
@@ -1465,15 +1465,15 @@ render_lifecycle_list: fn() -[FS]> String GeneratorError! {
 }
 
 #Test("a reviewed masked parameter needs its low-bit mask in the export body") {
-    masked: "#Export(c) jet_net_raw_resolve_ordered: fn(host: I64, port: I64) -> I64 {{\n    port . bit_and( I64{{ 65535 }} )\n}}\n"
+    masked: "#Export(c) jet_net_raw_resolve_ordered: fn(host: I64, port: I64) -> I64 {{\n    port &  I64{{ 65535 }}\n}}\n"
     assert_eq(runtime_exports(masked, "M.jet").problems.len(), 0)
-    commented: "#Export(c) jet_net_raw_resolve_ordered: fn(host: I64, port: I64) -> I64 {{\n    // port.bit_and(I64{{65535}})\n    sport.bit_and(I64{{65535}})\n}}\n"
+    commented: "#Export(c) jet_net_raw_resolve_ordered: fn(host: I64, port: I64) -> I64 {{\n    // port & I64{{65535}}\n    sport & I64{{65535}}\n}}\n"
     assert_eq(runtime_exports(commented, "M.jet").problems.join("|"), "M.jet: jet_net_raw_resolve_ordered parameter 1 requires the reviewed low-16-bit mask")
     narrow: "#Export(c) jet_rt_record_new_jet_resolve_error: fn(kind: I64, flag: U8) -> I64 {{ kind }}\n"
     assert_eq(runtime_exports(narrow, "M.jet").problems.len(), 0)
-    unmasked: "#Export(c) jet_rt_record_new_jet_resolve_error: fn(kind: I64, flag: I64) -> I64 {{\n    // flag.bit_and(I64{{255}})\n    flag\n}}\n"
+    unmasked: "#Export(c) jet_rt_record_new_jet_resolve_error: fn(kind: I64, flag: I64) -> I64 {{\n    // flag & I64{{255}}\n    flag\n}}\n"
     assert_eq(runtime_exports(unmasked, "M.jet").problems.join("|"), "M.jet: jet_rt_record_new_jet_resolve_error parameter 1 requires the reviewed low-8-bit mask")
-    open: "#Export(c) jet_net_raw_resolve_ordered: fn(host: I64, port: I64) -> I64 {{\n    port.bit_and(I64{{65535}})\n"
+    open: "#Export(c) jet_net_raw_resolve_ordered: fn(host: I64, port: I64) -> I64 {{\n    port & I64{{65535}}\n"
     assert_eq(runtime_exports(open, "M.jet").problems.join("|"), "M.jet: unterminated masked export jet_net_raw_resolve_ordered")
 }
 
@@ -1741,7 +1741,7 @@ range_records: fn(rows: [TextRange]) -> String Never! {
     out := [U8]{}
     loop row in rows {
         loop value in ([Int]{row.lo, row.hi}) {
-            loop at in 0..<4 -> out.push(range_digit((value >> (6 * at)).bit_and(63)))
+            loop at in 0..<4 -> out.push(range_digit((value >> (6 * at)) & 63))
         }
     }
     String.from_bytes_lossy(out)
@@ -2468,7 +2468,7 @@ closure_text: fn(source: String) -> String Never! {
 }
 
 #Test("shift and less-or-equal operators cannot open generic call arguments") {
-    source: "\nrotate: fn(word: I64, shift: I64) -> I64 {{\n    (word << shift).bit_or(word >> (I64{{32}} - shift)).bit_and(I64{{0xffffffff}})\n}}\n#Export(c) ordinary: fn(word: I64) -> I64 {{ rotate(word, I64{{7}}) }}\n#Export(c) checked: fn(word: I64, limit: I64) {{\n    if word <= (limit) -> rt_task_panic_publish(word, word, word)\n}}\n"
+    source: "\nrotate: fn(word: I64, shift: I64) -> I64 {{\n    ((word << shift) | word >> (I64{{32}} - shift)) & I64{{0xffffffff}}\n}}\n#Export(c) ordinary: fn(word: I64) -> I64 {{ rotate(word, I64{{7}}) }}\n#Export(c) checked: fn(word: I64, limit: I64) {{\n    if word <= (limit) -> rt_task_panic_publish(word, word, word)\n}}\n"
     assert_eq(closure_text(source), "checked")
 }
 

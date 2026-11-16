@@ -123,7 +123,7 @@ context_scratch_drop: fn(record: I64) {
 CONTEXT_BLOCK_HEADER: I64{16}
 
 #Export(c) jet_ctx_allocator_take: fn(size: I64, align: I64) -> I64 {
-    if (size < I64{0} || align <= I64{0} || align.bit_and(wrapping(align - I64{1})) != I64{0}) {
+    if (size < I64{0} || align <= I64{0} || align & wrapping(align - I64{1}) != I64{0}) {
         return I64{0}
     }
     carrier: context_user_carrier()
@@ -134,7 +134,7 @@ CONTEXT_BLOCK_HEADER: I64{16}
     total: wrapping(size + slack)
     value: jet_rt_alloc_value_try(total, I64{8})
     if (value == I64{0}) { return I64{0} }
-    address: wrapping(wrapping(value + CONTEXT_BLOCK_HEADER) + wrapping(alignment - I64{1})).bit_and(wrapping(I64{0} - alignment))
+    address: wrapping(wrapping(value + CONTEXT_BLOCK_HEADER) + wrapping(alignment - I64{1})) & wrapping(I64{0} - alignment)
     sync_store(wrapping(address - I64{16}), total)
     sync_store(wrapping(address - I64{8}), value)
     address
@@ -177,7 +177,7 @@ context_user_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
     block: alloc_user_call(carrier, ALLOC_USER_TAKE, size, align)
     if (block == I64{0}) { return I64{0} }
     last: wrapping(block + (if (size == I64{0}) -> I64{0} else -> wrapping(size - I64{1})))
-    record: if (block.bit_and(wrapping(align - I64{1})) != I64{0}) -> I64{0} else -> alloc_page_region(block)
+    record: if (block & wrapping(align - I64{1}) != I64{0}) -> I64{0} else -> alloc_page_region(block)
     if (record == I64{0} || alloc_page_region(last) != record) {
         _: alloc_user_call(carrier, ALLOC_USER_GIVE, size, block)
         return I64{0}

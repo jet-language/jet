@@ -94,9 +94,9 @@ column_corrupt: fn(v: conn.Vdbe, r: &Run) -> Int Never! {
 column_placeholder: fn(t: Int, enc: Int) -> base.Mem Never! {
     if t >= 12 {
         n: (t - 12) >> 1
-        if t.bit_and(1) == 1 -> return base.mem_text(pager.zeros(n), enc)
+        if t & 1 == 1 -> return base.mem_text(pager.zeros(n), enc)
         m := base.mem_blob([U8]{})
-        m.flags = MEM_BLOB.bit_or(MEM_ZERO)
+        m.flags = MEM_BLOB | MEM_ZERO
         m.i = n
         return m
     }
@@ -107,11 +107,11 @@ column_placeholder: fn(t: Int, enc: Int) -> base.Mem Never! {
 // fits the 6-byte form, else the REAL.
 real_of_int: fn(m: &base.Mem, clear_str: Bool) Never! {
     if m.i <= 140737488355327 && m.i >= -140737488355328 {
-        m.flags = clear_bits(m.flags.bit_or(MEM_INT_REAL), MEM_INT)
+        m.flags = clear_bits(m.flags | MEM_INT_REAL, MEM_INT)
     } else {
         m.r = util.int_to_double(m.i)
-        clr: if clear_str -> MEM_INT.bit_or(MEM_STR) else -> MEM_INT
-        m.flags = clear_bits(m.flags.bit_or(MEM_REAL), clr)
+        clr: if clear_str -> MEM_INT | MEM_STR else -> MEM_INT
+        m.flags = clear_bits(m.flags | MEM_REAL, clr)
     }
 }
 
@@ -216,7 +216,7 @@ op_column: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
                     v.csr[ci].types[i] = t
                     off += record.serial_len(t)
                     i += 1
-                    v.csr[ci].offsets[i] = off.bit_and(os.U32_MASK)
+                    v.csr[ci].offsets[i] = off & os.U32_MASK
                     if i > p2 || zh >= ze -> break
                 }
                 ps: v.csr[ci].payload_size
@@ -247,8 +247,8 @@ op_column: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
             return GO_NEXT
         }
         len: record.serial_len(t)
-        p5: r.p5.bit_and(conn.OPFLAG_BYTELENARG)
-        if (p5 != 0 && (p5 == conn.OPFLAG_TYPEOFARG || (t >= 12 && (t.bit_and(1) == 0 || p5 == conn.OPFLAG_BYTELENARG)))) || len == 0 {
+        p5: r.p5 & conn.OPFLAG_BYTELENARG
+        if (p5 != 0 && (p5 == conn.OPFLAG_TYPEOFARG || (t >= 12 && (t & 1 == 0 || p5 == conn.OPFLAG_BYTELENARG)))) || len == 0 {
             v.mem[dest] = column_placeholder(t, r.enc)
             return GO_NEXT
         }
@@ -273,8 +273,8 @@ op_type_check: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     i := v.mem_base + r.p1
     loop k in 0..<db.tables[tab].cols.len() {
         cf: db.tables[tab].cols[k].col_flags
-        if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
-            if cf.bit_and(conn.COLFLAG_VIRTUAL) != 0 -> next
+        if cf & conn.COLFLAG_GENERATED != 0 {
+            if cf & conn.COLFLAG_VIRTUAL != 0 -> next
             if r.p3 != 0 {
                 i += 1
                 next
@@ -282,14 +282,14 @@ op_type_check: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
         }
         mem.apply_affinity(v.mem[i], db.tables[tab].cols[k].affinity, r.enc)
         f: v.mem[i].flags
-        if f.bit_and(MEM_NULL) == 0 {
+        if f & MEM_NULL == 0 {
             ct: db.tables[tab].cols[k].ctype
             bad := false
-            if ct == conn.COLTYPE_BLOB -> bad = f.bit_and(MEM_BLOB) == 0 else if ct == conn.COLTYPE_INTEGER || ct == conn.COLTYPE_INT {
-                bad = f.bit_and(MEM_INT) == 0
-            } else if ct == conn.COLTYPE_TEXT { bad = f.bit_and(MEM_STR) == 0 } else if ct == conn.COLTYPE_REAL {
-                if f.bit_and(MEM_INT) != 0 -> real_of_int(v.mem[i], false) else {
-                    bad = f.bit_and(MEM_REAL.bit_or(MEM_INT_REAL)) == 0
+            if ct == conn.COLTYPE_BLOB -> bad = f & MEM_BLOB == 0 else if ct == conn.COLTYPE_INTEGER || ct == conn.COLTYPE_INT {
+                bad = f & MEM_INT == 0
+            } else if ct == conn.COLTYPE_TEXT { bad = f & MEM_STR == 0 } else if ct == conn.COLTYPE_REAL {
+                if f & MEM_INT != 0 -> real_of_int(v.mem[i], false) else {
+                    bad = f & (MEM_REAL | MEM_INT_REAL) == 0
                 }
             }
             if bad {
@@ -316,7 +316,7 @@ op_affinity: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
         a: Int{aff[k]}
         if a == 0 -> break
         mem.apply_affinity(v.mem[i], a, r.enc)
-        if a == base.AFF_REAL && v.mem[i].flags.bit_and(MEM_INT) != 0 -> real_of_int(v.mem[i], true)
+        if a == base.AFF_REAL && v.mem[i].flags & MEM_INT != 0 -> real_of_int(v.mem[i], true)
         i += 1
     }
     GO_NEXT
@@ -334,8 +334,8 @@ op_make_record: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
             if a == 0 -> break
             i: first + k
             mem.apply_affinity(v.mem[i], a, r.enc)
-            if a == base.AFF_REAL && v.mem[i].flags.bit_and(MEM_INT) != 0 {
-                v.mem[i].flags = clear_bits(v.mem[i].flags.bit_or(MEM_INT_REAL), MEM_INT)
+            if a == base.AFF_REAL && v.mem[i].flags & MEM_INT != 0 {
+                v.mem[i].flags = clear_bits(v.mem[i].flags | MEM_INT_REAL, MEM_INT)
             }
         }
     }
@@ -350,13 +350,13 @@ op_make_record: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     loop k >= 0 {
         i: first + k
         t := record.serial_type(v.mem[i], v.min_write_file_format)
-        if t == 7 && v.mem[i].flags.bit_and(MEM_INT_REAL) != 0 {
+        if t == 7 && v.mem[i].flags & MEM_INT_REAL != 0 {
             // An IntReal that needs all 8 bytes is stored as the REAL.
             v.mem[i].r = util.int_to_double(v.mem[i].i)
-            v.mem[i].flags = clear_bits(v.mem[i].flags, MEM_INT_REAL).bit_or(MEM_REAL)
+            v.mem[i].flags = clear_bits(v.mem[i].flags, MEM_INT_REAL) | MEM_REAL
         }
         f: v.mem[i].flags
-        if t >= 12 && f.bit_and(MEM_ZERO) != 0 {
+        if t >= 12 && f & MEM_ZERO != 0 {
             if n_data > 0 {
                 mem.expand_blob(v.mem[i])
                 n_data += v.mem[i].z.len()
@@ -390,7 +390,7 @@ op_make_record: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     run.release_dyn(v, o)
     m := base.mem_blob(out)
     if n_zero > 0 {
-        m.flags = MEM_BLOB.bit_or(MEM_ZERO)
+        m.flags = MEM_BLOB | MEM_ZERO
         m.i = n_zero
     }
     v.mem[o] = m
@@ -474,7 +474,7 @@ op_savepoint: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
                 i_sp = db.n_savepoint - i_savepoint - 1
                 is_schema_change := false
                 if p1 == base.SAVEPOINT_ROLLBACK {
-                    is_schema_change = db.m_db_flags.bit_and(conn.DBFLAG_SCHEMA_CHANGE) != 0
+                    is_schema_change = db.m_db_flags & conn.DBFLAG_SCHEMA_CHANGE != 0
                     loop ii in 0..<db.dbs.len() {
                         bt: db.dbs[ii].bt
                         if bt < 0 -> next
@@ -491,7 +491,7 @@ op_savepoint: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
                 if is_schema_change {
                     conn.expire_prepared_statements(db, 0)
                     conn.reset_all_schemas(db)
-                    db.m_db_flags = db.m_db_flags.bit_or(conn.DBFLAG_SCHEMA_CHANGE)
+                    db.m_db_flags |= conn.DBFLAG_SCHEMA_CHANGE
                 }
             }
             if rc != base.OK -> return fail(r, rc)
@@ -565,8 +565,8 @@ op_auto_commit: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]
 // transaction on database P1; with P5, a schema cookie other than P3 or a
 // schema generation other than P4 expires the statement.
 op_transaction: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
-    if r.p2 != 0 && db.flags.bit_and(conn.SQLITE_QUERY_ONLY.bit_or(conn.SQLITE_CORRUPT_RD_ONLY)) != 0 {
-        if db.flags.bit_and(conn.SQLITE_QUERY_ONLY) != 0 -> return fail(r, base.READONLY)
+    if r.p2 != 0 && db.flags & (conn.SQLITE_QUERY_ONLY | conn.SQLITE_CORRUPT_RD_ONLY) != 0 {
+        if db.flags & conn.SQLITE_QUERY_ONLY != 0 -> return fail(r, base.READONLY)
         return fail(r, base.CORRUPT)
     }
     bt: db.dbs[r.p1].bt
@@ -576,7 +576,7 @@ op_transaction: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]
         conn.sync_btrees(db)
         rc = btree.btree_begin_trans(db.btrees[bt], r.p2, i_meta)
         if rc != base.OK {
-            if rc.bit_and(255) == base.BUSY {
+            if rc & 255 == base.BUSY {
                 v.pc = r.pc
                 v.rc = rc
                 r.rc = rc
@@ -624,8 +624,8 @@ op_set_cookie: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     rc: btree.btree_update_meta(db.btrees[db.dbs[r.p1].bt], r.p2, r.p3)
     s: db.dbs[r.p1].schema
     if r.p2 == btree.BTREE_SCHEMA_VERSION {
-        db.schemas[s].schema_cookie = (r.p3 - r.p5).bit_and(os.U32_MASK)
-        db.m_db_flags = db.m_db_flags.bit_or(conn.DBFLAG_SCHEMA_CHANGE)
+        db.schemas[s].schema_cookie = (r.p3 - r.p5) & os.U32_MASK
+        db.m_db_flags |= conn.DBFLAG_SCHEMA_CHANGE
         conn.fk_clear_trigger_cache(db, r.p1)
     } else if r.p2 == btree.BTREE_FILE_FORMAT { db.schemas[s].file_format = r.p3 }
     if r.p1 == 1 {
@@ -645,7 +645,7 @@ op_set_cookie: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 // when P4 is its KeyInfo, else a table of P4 columns.
 op_open_read: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     ci0: v.csr_base + r.p1
-    hints: r.p5.bit_and(conn.OPFLAG_BULKCSR.bit_or(conn.OPFLAG_SEEKEQ))
+    hints: r.p5 & (conn.OPFLAG_BULKCSR | conn.OPFLAG_SEEKEQ)
     if r.op == opc.OP_REOPEN_IDX && v.csr[ci0].live && v.csr[ci0].pgno_root == r.p2 {
         btree.btree_clear_cursor(db.btrees[v.csr[ci0].bt], v.csr[ci0].btc)
         btree.btree_cursor_hint_flags(db.btrees[v.csr[ci0].bt], v.csr[ci0].btc, hints)
@@ -657,11 +657,11 @@ op_open_read: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
     bt: db.dbs[i_db].bt
     wr_flag := 0
     if r.op == opc.OP_OPEN_WRITE {
-        wr_flag = btree.BTREE_WRCSR.bit_or(r.p5.bit_and(conn.OPFLAG_FORDELETE))
+        wr_flag = btree.BTREE_WRCSR | r.p5 & conn.OPFLAG_FORDELETE
         ff: db.schemas[db.dbs[i_db].schema].file_format
         if ff < v.min_write_file_format -> v.min_write_file_format = ff
     }
-    if r.p5.bit_and(conn.OPFLAG_P2ISREG) != 0 {
+    if r.p5 & conn.OPFLAG_P2ISREG != 0 {
         i2: v.mem_base + p2
         mem.integerify(v.mem[i2])
         p2 = v.mem[i2].i
@@ -732,8 +732,8 @@ op_open_ephemeral: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[
         v.csr[ci].is_ephemeral = true
         slot: conn.btree_slot_new(db)
         v.csr[ci].bt = slot
-        vfs_flags: os.OPEN_READWRITE.bit_or(os.OPEN_CREATE).bit_or(os.OPEN_EXCLUSIVE).bit_or(os.OPEN_DELETEONCLOSE).bit_or(os.OPEN_TRANSIENT_DB)
-        flags: btree.BTREE_OMIT_JOURNAL.bit_or(btree.BTREE_SINGLE).bit_or(r.p5)
+        vfs_flags: os.OPEN_READWRITE | os.OPEN_CREATE | os.OPEN_EXCLUSIVE | os.OPEN_DELETEONCLOSE | os.OPEN_TRANSIENT_DB
+        flags: btree.BTREE_OMIT_JOURNAL | btree.BTREE_SINGLE | r.p5
         owner: conn.bt_db_of(db)
         rc = btree.btree_open(db.btrees[slot], None, owner, flags, vfs_flags, false, false, false, false)
         if rc == base.OK {
@@ -745,7 +745,7 @@ op_open_ephemeral: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[
                     v.csr[ci].key_info = Val(k.copy())
                     v.csr[ci].is_table = false
                     root := 0
-                    rc = btree.btree_create_table(db.btrees[slot], root, btree.BTREE_BLOBKEY.bit_or(r.p5))
+                    rc = btree.btree_create_table(db.btrees[slot], root, btree.BTREE_BLOBKEY | r.p5)
                     if rc == base.OK {
                         v.csr[ci].pgno_root = root
                         rc = btree.btree_cursor(db.btrees[slot], root, btree.BTREE_WRCSR, v.csr[ci].key_info, btc)
@@ -829,25 +829,25 @@ op_seek: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     if v.csr[ci].is_table {
         i3: v.mem_base + r.p3
         flags3: v.mem[i3].flags
-        if flags3.bit_and(MEM_INT.bit_or(MEM_REAL).bit_or(MEM_INT_REAL).bit_or(MEM_STR)) == MEM_STR {
+        if flags3 & (MEM_INT | MEM_REAL | MEM_INT_REAL | MEM_STR) == MEM_STR {
             mem.apply_numeric_affinity(v.mem[i3], false)
         }
         i_key: mem.int_value(v.mem[i3])
         new_type: v.mem[i3].flags
         v.mem[i3].flags = flags3
-        if new_type.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) == 0 {
-            if new_type.bit_and(MEM_REAL) == 0 {
+        if new_type & (MEM_INT | MEM_INT_REAL) == 0 {
+            if new_type & MEM_REAL == 0 {
                 // A NULL or non-numeric key matches nothing.
-                if new_type.bit_and(MEM_NULL) != 0 || oc >= opc.OP_SEEK_GE -> return GO_JUMP
+                if new_type & MEM_NULL != 0 || oc >= opc.OP_SEEK_GE -> return GO_JUMP
                 rc = btree.btree_last(db.btrees[bt], btc, res)
                 if rc != base.OK -> return fail(r, rc)
                 found = false
             } else {
                 c: record.int_float_compare(i_key, v.mem[i3].r)
                 if c > 0 {
-                    if oc.bit_and(1) == opc.OP_SEEK_GT.bit_and(1) -> oc -= 1
+                    if oc & 1 == opc.OP_SEEK_GT & 1 -> oc -= 1
                 } else if c < 0 {
-                    if oc.bit_and(1) == opc.OP_SEEK_LT.bit_and(1) -> oc += 1
+                    if oc & 1 == opc.OP_SEEK_LT & 1 -> oc += 1
                 }
             }
         }
@@ -859,7 +859,7 @@ op_seek: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     } else {
         if btree.btree_cursor_has_hint(db.btrees[bt], btc, btree.BTREE_SEEK_EQ) -> eq_only = true
         key := regs_key(v, ci, v.mem_base + r.p3, run.p4_int(v, r.pc))
-        key.default_rc = if (oc - opc.OP_SEEK_LT).bit_and(1) != 0 -> -1 else -> 1
+        key.default_rc = if (oc - opc.OP_SEEK_LT) & 1 != 0 -> -1 else -> 1
         rc = btree.btree_index_moveto(db.btrees[bt], btc, key, res)
         if rc != base.OK -> return fail(r, rc)
         if eq_only && !key.eq_seen -> found = false
@@ -977,7 +977,7 @@ op_found: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     if !exists -> return GO_JUMP
     if r.op == opc.OP_NO_CONFLICT {
         loop k in 0..<n_field {
-            if v.mem[first + k].flags.bit_and(MEM_NULL) != 0 -> return GO_JUMP
+            if v.mem[first + k].flags & MEM_NULL != 0 -> return GO_JUMP
         }
     }
     if r.op == opc.OP_IF_NO_HOPE -> v.csr[ci].seek_hit = n_field
@@ -990,10 +990,10 @@ op_found: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 op_seek_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     i3: v.mem_base + r.p3
     i_key := v.mem[i3].i
-    if r.op == opc.OP_SEEK_ROWID && v.mem[i3].flags.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) == 0 {
+    if r.op == opc.OP_SEEK_ROWID && v.mem[i3].flags & (MEM_INT | MEM_INT_REAL) == 0 {
         x := v.mem[i3].copy()
         mem.apply_affinity(x, base.AFF_NUMERIC, r.enc)
-        if x.flags.bit_and(MEM_INT) == 0 -> return GO_JUMP
+        if x.flags & MEM_INT == 0 -> return GO_JUMP
         i_key = x.i
     }
     ci: v.csr_base + r.p1
@@ -1059,8 +1059,8 @@ op_new_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
         loop going {
             bytes: os.os_random_bytes(8)
             x := 0
-            loop k in 0..<8 -> x = x.bit_or(Int{bytes[k]} << (8 * k))
-            val = x.bit_and(max_rowid >> 1) + 1
+            loop k in 0..<8 -> x |= Int{bytes[k]} << (8 * k)
+            val = (x & max_rowid >> 1) + 1
             rc = btree.btree_table_moveto(db.btrees[bt], btc, val, false, res)
             cnt += 1
             going = rc == base.OK && res == 0 && cnt < 100
@@ -1085,20 +1085,20 @@ op_insert: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int
     if v.ops[r.pc].p4 == .Table(t) {
         if h.has_update_hook(db) -> tab = t
     }
-    if r.p5.bit_and(conn.OPFLAG_NCHANGE) != 0 {
+    if r.p5 & conn.OPFLAG_NCHANGE != 0 {
         v.n_change += 1
-        if r.p5.bit_and(conn.OPFLAG_LASTROWID) != 0 -> db.last_rowid = n_key
+        if r.p5 & conn.OPFLAG_LASTROWID != 0 -> db.last_rowid = n_key
     }
-    seek_result: if r.p5.bit_and(conn.OPFLAG_USESEEKRESULT) != 0 -> v.csr[ci].seek_result else -> 0
-    n_zero: if v.mem[di].flags.bit_and(MEM_ZERO) != 0 -> v.mem[di].i else -> 0
+    seek_result: if r.p5 & conn.OPFLAG_USESEEKRESULT != 0 -> v.csr[ci].seek_result else -> 0
+    n_zero: if v.mem[di].flags & MEM_ZERO != 0 -> v.mem[di].i else -> 0
     x: btree.BtreePayload{key: [U8]{}, n_key: n_key, data: v.mem[di].z, n_data: v.mem[di].z.len(), n_zero: n_zero, mem: [base.Mem]{}}
-    flags: r.p5.bit_and(conn.OPFLAG_APPEND.bit_or(conn.OPFLAG_SAVEPOSITION).bit_or(conn.OPFLAG_PREFORMAT))
+    flags: r.p5 & (conn.OPFLAG_APPEND | conn.OPFLAG_SAVEPOSITION | conn.OPFLAG_PREFORMAT)
     rc: btree.btree_insert(db.btrees[v.csr[ci].bt], v.csr[ci].btc, x, flags, seek_result)
     v.csr[ci].deferred_moveto = false
     v.csr[ci].cache_status = conn.CACHE_STALE
     if rc != base.OK -> return fail(r, rc)
     if tab >= 0 {
-        op: if r.p5.bit_and(conn.OPFLAG_ISUPDATE) != 0 -> conn.AUTH_UPDATE else -> conn.AUTH_INSERT
+        op: if r.p5 & conn.OPFLAG_ISUPDATE != 0 -> conn.AUTH_UPDATE else -> conn.AUTH_INSERT
         schema: db.dbs[v.csr[ci].i_db].name.copy()
         name: db.tables[tab].name.copy()
         h.update_hook(db, op, schema, name, n_key)
@@ -1132,7 +1132,7 @@ op_delete: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int
     if v.ops[r.pc].p4 == .Table(t) {
         if h.has_update_hook(db) {
             tab = t
-            if r.p5.bit_and(conn.OPFLAG_SAVEPOSITION) != 0 && v.csr[ci].is_table {
+            if r.p5 & conn.OPFLAG_SAVEPOSITION != 0 && v.csr[ci].is_table {
                 v.csr[ci].moveto_target = btree.btree_integer_key(db.btrees[bt], btc)
             }
         }
@@ -1141,9 +1141,9 @@ op_delete: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int
     v.csr[ci].cache_status = conn.CACHE_STALE
     v.csr[ci].seek_result = 0
     if rc != base.OK -> return fail(r, rc)
-    if r.p2.bit_and(conn.OPFLAG_NCHANGE) != 0 {
+    if r.p2 & conn.OPFLAG_NCHANGE != 0 {
         v.n_change += 1
-        if tab >= 0 && db.tables[tab].tab_flags.bit_and(ast.TF_WITHOUT_ROWID) == 0 {
+        if tab >= 0 && db.tables[tab].tab_flags & ast.TF_WITHOUT_ROWID == 0 {
             schema: db.dbs[v.csr[ci].i_db].name.copy()
             name: db.tables[tab].name.copy()
             h.update_hook(db, conn.AUTH_DELETE, schema, name, v.csr[ci].moveto_target)
@@ -1338,11 +1338,11 @@ op_next: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 op_idx_insert: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     i2: v.mem_base + r.p2
-    if r.p5.bit_and(conn.OPFLAG_NCHANGE) != 0 -> v.n_change += 1
+    if r.p5 & conn.OPFLAG_NCHANGE != 0 -> v.n_change += 1
     mem.expand_blob(v.mem[i2])
     x: btree.BtreePayload{key: v.mem[i2].z, n_key: v.mem[i2].z.len(), data: [U8]{}, n_data: 0, n_zero: 0, mem: regs(v, v.mem_base + r.p3, run.p4_int(v, r.pc))}
-    seek_result: if r.p5.bit_and(conn.OPFLAG_USESEEKRESULT) != 0 -> v.csr[ci].seek_result else -> 0
-    flags: r.p5.bit_and(conn.OPFLAG_APPEND.bit_or(conn.OPFLAG_SAVEPOSITION).bit_or(conn.OPFLAG_PREFORMAT))
+    seek_result: if r.p5 & conn.OPFLAG_USESEEKRESULT != 0 -> v.csr[ci].seek_result else -> 0
+    flags: r.p5 & (conn.OPFLAG_APPEND | conn.OPFLAG_SAVEPOSITION | conn.OPFLAG_PREFORMAT)
     rc: btree.btree_insert(db.btrees[v.csr[ci].bt], v.csr[ci].btc, x, flags, seek_result)
     v.csr[ci].cache_status = conn.CACHE_STALE
     if rc != base.OK -> return fail(r, rc)
@@ -1373,7 +1373,7 @@ op_idx_delete: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     if res == 0 {
         rc = btree.btree_delete(db.btrees[bt], btc, btree.BTREE_AUXDELETE)
         if rc != base.OK -> return fail(r, rc)
-    } else if r.p5 != 0 && db.flags.bit_and(btree.SQLITE_WRITE_SCHEMA) == 0 {
+    } else if r.p5 != 0 && db.flags & btree.SQLITE_WRITE_SCHEMA == 0 {
         return fail(r, base.CORRUPT_INDEX)
     }
     v.csr[ci].cache_status = conn.CACHE_STALE
@@ -1431,7 +1431,7 @@ op_idx_compare: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     res := 0
     rc: aux.idx_key_compare(db, v.csr[ci].bt, v.csr[ci].btc, key, res)
     if rc != base.OK -> return fail(r, rc)
-    if r.op.bit_and(1) == opc.OP_IDX_LT.bit_and(1) -> res = -res else -> res += 1
+    if r.op & 1 == opc.OP_IDX_LT & 1 -> res = -res else -> res += 1
     if res > 0 -> return GO_JUMP
     GO_NEXT
 }
@@ -1447,11 +1447,11 @@ op_idx_compare: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     v.ops.push(test_op(opc.OP_MAKE_RECORD, conn.P4.NotUsed))
     aff := test_run(v, 0, 0, 0, 0)
     assert_eq(op_affinity(v, aff), GO_NEXT)
-    assert(v.mem[0].flags.bit_and(MEM_INT) != 0 && v.mem[0].i == 12)
+    assert(v.mem[0].flags & MEM_INT != 0 && v.mem[0].i == 12)
     mk := test_run(v, 1, 0, 3, 3)
     assert_eq(op_make_record(db, v, mk), GO_NEXT)
     back := record.decode_record(v.mem[3].z, base.UTF8) ?? panic("decode")
-    assert(back.len() == 3 && back[0].i == 12 && back[1].z == "ab".bytes() && back[2].flags.bit_and(MEM_NULL) != 0)
+    assert(back.len() == 3 && back[0].i == 12 && back[1].z == "ab".bytes() && back[2].flags & MEM_NULL != 0)
 }
 
 #Test("a cursor's sequence counts up and its first test jumps") {

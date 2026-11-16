@@ -170,7 +170,7 @@ dns_u16: fn(packet: I64, at: I64, what: I64, error: I64) -> I64 {
         _ := dns_fail(error, dns_named(rt_static_text("network protocol error: truncated DNS "), what, rt_static_text("")))
         return I64{-1}
     }
-    (dns_u8(packet, at) << I64{8}).bit_or(dns_u8(packet, at + I64{1}))
+    (dns_u8(packet, at) << I64{8}) | dns_u8(packet, at + I64{1})
 }
 
 dns_protocol: fn(error: I64, message: I64) -> I64 {
@@ -203,12 +203,12 @@ dns_read_name: fn(packet: I64, position: I64, error: I64) -> I64 {
         }
         rt_text_put(wrapping(seen + p), I64{1})
         length: dns_u8(packet, p)
-        if (length.bit_and(I64{192}) == I64{192}) {
+        if (length & I64{192} == I64{192}) {
             if (p + I64{1} >= size) {
                 failure = dns_protocol(error, rt_static_text("truncated DNS compression pointer")) + I64{1}
                 break
             }
-            pointer: ((length.bit_and(I64{63})) << I64{8}).bit_or(dns_u8(packet, p + I64{1}))
+            pointer: ((length & I64{63}) << I64{8}) | dns_u8(packet, p + I64{1})
             if (pointer >= size) {
                 failure = dns_protocol(error, rt_static_text("DNS compression pointer is out of bounds")) + I64{1}
                 break
@@ -222,7 +222,7 @@ dns_read_name: fn(packet: I64, position: I64, error: I64) -> I64 {
             jumped = true
             next
         }
-        if (length.bit_and(I64{192}) != I64{0}) {
+        if (length & I64{192} != I64{0}) {
             failure = dns_protocol(error, rt_static_text("reserved DNS label encoding")) + I64{1}
             break
         }
@@ -284,16 +284,16 @@ dns_parse_response: fn(packet: I64, txid: I64, name: I64, qtype: I64, records_ou
         return dns_protocol(error, rt_static_text("DNS transaction ID mismatch"))
     }
     flags: dns_u16(packet, I64{2}, rt_static_text("flags"), error)
-    if (flags.bit_and(I64{32768}) == I64{0}) {
+    if (flags & I64{32768} == I64{0}) {
         return dns_protocol(error, rt_static_text("DNS packet is not a response"))
     }
-    if (flags.bit_and(I64{30720}) != I64{0}) {
+    if (flags & I64{30720} != I64{0}) {
         return dns_protocol(error, rt_static_text("unsupported DNS opcode"))
     }
-    if (flags.bit_and(I64{64}) != I64{0}) {
+    if (flags & I64{64} != I64{0}) {
         return dns_protocol(error, rt_static_text("reserved DNS header bit is set"))
     }
-    rcode: flags.bit_and(I64{15})
+    rcode: flags & I64{15}
     if (rcode == I64{3}) {
         return dns_fail(error, dns_named(rt_static_text("DNS name not found: `"), name, rt_static_text("`")))
     }
@@ -333,7 +333,7 @@ dns_parse_response: fn(packet: I64, txid: I64, name: I64, qtype: I64, records_ou
         jet_rt_free(position, I64{8}, I64{8})
         return dns_protocol(error, rt_static_text("DNS question echo mismatch"))
     }
-    if (flags.bit_and(I64{512}) != I64{0}) {
+    if (flags & I64{512} != I64{0}) {
         jet_rt_free(position, I64{8}, I64{8})
         return I64{-1}
     }
@@ -499,7 +499,7 @@ dns_tcp_exchange: fn(server: I64, request: I64, deadline: I64, name: I64, error:
     framed: jet_rt_string_builder_new()
     prefix: jet_rt_alloc(I64{8}, I64{8})
     rt_text_put(prefix, length >> I64{8})
-    rt_text_put(wrapping(prefix + I64{1}), length.bit_and(I64{255}))
+    rt_text_put(wrapping(prefix + I64{1}), length & I64{255})
     rt_text_append(framed, prefix, I64{2})
     rt_text_append(framed, rt_text_data(request), length)
     written := I64{0}
@@ -568,7 +568,7 @@ dns_tcp_read: fn(state: I64, deadline: I64, name: I64, prefix: I64, scratch: I64
     if !dns_tcp_fill(state, prefix, I64{2}, deadline, name, scratch, rt_static_text("DNS TCP connection closed before response length"), rt_static_text("DNS TCP response length failed: "), error) {
         return I64{0}
     }
-    length: (rt_text_byte(prefix) << I64{8}).bit_or(rt_text_byte(wrapping(prefix + I64{1})))
+    length: (rt_text_byte(prefix) << I64{8}) | rt_text_byte(wrapping(prefix + I64{1}))
     if (length < I64{12}) {
         return dns_protocol(error, rt_static_text("invalid DNS TCP response length"))
     }
@@ -614,11 +614,11 @@ dns_query: fn(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out:
         if (rt_crypto_entropy_fill(random, I64{2}) != I64{0}) {
             failure = jet_rt_string_clone(rt_static_text("DNS transaction ID needs operating-system cryptographic randomness"))
         } else {
-            txid = (rt_text_byte(random) << I64{8}).bit_or(rt_text_byte(wrapping(random + I64{1})))
+            txid = (rt_text_byte(random) << I64{8}) | rt_text_byte(wrapping(random + I64{1}))
             header: jet_rt_alloc(I64{16}, I64{8})
             thread_zero(header, I64{16})
             rt_text_put(header, txid >> I64{8})
-            rt_text_put(wrapping(header + I64{1}), txid.bit_and(I64{255}))
+            rt_text_put(wrapping(header + I64{1}), txid & I64{255})
             rt_text_put(wrapping(header + I64{2}), I64{1})
             rt_text_put(wrapping(header + I64{5}), I64{1})
             rt_text_append(request, header, I64{12})
@@ -643,7 +643,7 @@ dns_query: fn(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out:
     tail: jet_rt_alloc(I64{8}, I64{8})
     thread_zero(tail, I64{8})
     rt_text_put(tail, qtype >> I64{8})
-    rt_text_put(wrapping(tail + I64{1}), qtype.bit_and(I64{255}))
+    rt_text_put(wrapping(tail + I64{1}), qtype & I64{255})
     rt_text_put(wrapping(tail + I64{3}), I64{1})
     rt_text_append(request, tail, I64{4})
     jet_rt_free(tail, I64{8}, I64{8})
@@ -1044,9 +1044,9 @@ dns_srv_at: fn(server: I64, name: I64, milliseconds: I64, data_out: I64, length_
             _ := dns_protocol(error, rt_static_text("truncated DNS SRV record"))
             break
         }
-        priority: (dns_u8(answer.packet, start) << I64{8}).bit_or(dns_u8(answer.packet, start + I64{1}))
-        weight: (dns_u8(answer.packet, start + I64{2}) << I64{8}).bit_or(dns_u8(answer.packet, start + I64{3}))
-        port: (dns_u8(answer.packet, start + I64{4}) << I64{8}).bit_or(dns_u8(answer.packet, start + I64{5}))
+        priority: (dns_u8(answer.packet, start) << I64{8}) | dns_u8(answer.packet, start + I64{1})
+        weight: (dns_u8(answer.packet, start + I64{2}) << I64{8}) | dns_u8(answer.packet, start + I64{3})
+        port: (dns_u8(answer.packet, start + I64{4}) << I64{8}) | dns_u8(answer.packet, start + I64{5})
         trap_store(position, start + I64{6})
         target: dns_read_name(answer.packet, position, error)
         if (target == I64{0}) { break }

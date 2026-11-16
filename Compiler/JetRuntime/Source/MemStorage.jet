@@ -54,7 +54,7 @@ storage_copy: fn(source: I64, target: I64, bytes: I64) {
 }
 
 storage_u_less: fn(left: I64, right: I64) -> Bool Never! {
-    (left.bit_xor(I64{-9223372036854775808})) < (right.bit_xor(I64{-9223372036854775808}))
+    (left ~ I64{-9223372036854775808}) < (right ~ I64{-9223372036854775808})
 }
 
 storage_saturating_add: fn(left: I64, right: I64) -> I64 Never! {
@@ -478,7 +478,7 @@ storage_fixed_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64,
     }
     metadata := I64{-1}
     if (boundary >= I64{32}) {
-        header_address: (base + boundary - I64{32}).bit_and(I64{-8})
+        header_address: (base + boundary - I64{32}) & I64{-8}
         if (header_address >= base) { metadata = header_address - base }
     }
     if (metadata < I64{0} || storage_u_less(metadata, end)) {

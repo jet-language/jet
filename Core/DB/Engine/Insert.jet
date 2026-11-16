@@ -44,7 +44,7 @@ CORRUPT_SEQUENCE: 523
 table_affinity_str: fn(db: conn.Conn, t: Int) -> [U8] Never! {
     z := [U8]{}
     loop i in 0..<db.tables[t].cols.len() {
-        if db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_VIRTUAL) == 0 {
+        if db.tables[t].cols[i].col_flags & conn.COLFLAG_VIRTUAL == 0 {
             z.push(U8{db.tables[t].cols[i].affinity})
         }
     }
@@ -57,7 +57,7 @@ table_affinity_str: fn(db: conn.Conn, t: Int) -> [U8] Never! {
 // OP_MakeRecord just coded. A STRICT table gets an OP_TypeCheck instead,
 // ahead of that OP_MakeRecord when i_reg is 0.
 table_affinity: fn(p: &cg.Parse, t: Int, i_reg: Int) Never! {
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_STRICT) != 0 {
+    if p.db.tables[t].tab_flags & ast.TF_STRICT != 0 {
         if i_reg == 0 {
             cg.v_append_p4(p, conn.P4.Table(t))
             last: cg.v_last_addr(p)
@@ -115,7 +115,7 @@ ColumnFlagWalker: struct {
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
             if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].icolumn >= 0 {
-                self.e_code = self.e_code.bit_or(self.col_flags[a.exprs[e].icolumn])
+                self.e_code |= self.col_flags[a.exprs[e].icolumn]
             }
             ast.WRC_CONTINUE
         }
@@ -137,7 +137,7 @@ ColumnFlagWalker: struct {
 // each after the generated columns it uses.
 compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: Int) -[DB]> Never! {
     table_affinity(p, t, i_reg_store)
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_STORED) != 0 {
+    if p.db.tables[t].tab_flags & ast.TF_HAS_STORED != 0 {
         last: cg.v_last_addr(p)
         if last >= 0 {
             op: p.f.v.ops[last].opcode
@@ -151,8 +151,8 @@ compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: In
                     loop jj < z.len() {
                         cf: p.db.tables[t].cols[ii].col_flags
                         ii += 1
-                        if cf.bit_and(conn.COLFLAG_VIRTUAL) != 0 -> next
-                        if cf.bit_and(conn.COLFLAG_STORED) != 0 -> z[jj] = U8{base.AFF_NONE}
+                        if cf & conn.COLFLAG_VIRTUAL != 0 -> next
+                        if cf & conn.COLFLAG_STORED != 0 -> z[jj] = U8{base.AFF_NONE}
                         jj += 1
                     }
                     p.f.v.ops[last].p4 = conn.P4.Text(z)
@@ -167,8 +167,8 @@ compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: In
     n_col: p.db.tables[t].cols.len()
     loop i in 0..<n_col {
         cf: p.db.tables[t].cols[i].col_flags
-        if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
-            p.db.tables[t].cols[i].col_flags = cf.bit_or(conn.COLFLAG_NOTAVAIL)
+        if cf & conn.COLFLAG_GENERATED != 0 {
+            p.db.tables[t].cols[i].col_flags = cf | conn.COLFLAG_NOTAVAIL
         }
     }
     w := ColumnFlagWalker{col_flags: [Int]{}, e_code: 0}
@@ -179,15 +179,15 @@ compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: In
         redo = -1
         loop i in 0..<n_col {
             cf: p.db.tables[t].cols[i].col_flags
-            if cf.bit_and(conn.COLFLAG_NOTAVAIL) == 0 -> next
-            p.db.tables[t].cols[i].col_flags = cf.bit_or(conn.COLFLAG_BUSY)
+            if cf & conn.COLFLAG_NOTAVAIL == 0 -> next
+            p.db.tables[t].cols[i].col_flags = cf | conn.COLFLAG_BUSY
             w.col_flags = [Int]{}
             loop c in 0..<n_col -> w.col_flags.push(p.db.tables[t].cols[c].col_flags)
             w.e_code = 0
             ce: cat.column_expr(p.db, a, t, i)
             _: ast.walk_expr<ColumnFlagWalker>(w, a, ce)
             p.db.tables[t].cols[i].col_flags = util.clear_bits(p.db.tables[t].cols[i].col_flags, conn.COLFLAG_BUSY)
-            if w.e_code.bit_and(conn.COLFLAG_NOTAVAIL) != 0 {
+            if w.e_code & conn.COLFLAG_NOTAVAIL != 0 {
                 redo = i
                 next
             }
@@ -210,7 +210,7 @@ compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: In
 // Four registers: the table name, the largest rowid (the one returned),
 // its sqlite_sequence rowid and its value there.
 autoinc_begin: fn(p: &cg.Parse, a: &ast.AST, i_db: Int, t: Int) -> Int Never! {
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_AUTOINCREMENT) == 0 || p.db.m_db_flags.bit_and(conn.DBFLAG_VACUUM) != 0 {
+    if p.db.tables[t].tab_flags & ast.TF_AUTOINCREMENT == 0 || p.db.m_db_flags & conn.DBFLAG_VACUUM != 0 {
         return 0
     }
     seq: p.db.schemas[p.db.dbs[i_db].schema].seq_tab
@@ -283,8 +283,8 @@ CheckConstraintWalker: struct {
             if a.exprs[e].op == tk.TK_COLUMN {
                 c: a.exprs[e].icolumn
                 if c >= 0 {
-                    if self.ai_col[c] >= 0 -> self.e_code = self.e_code.bit_or(1)
-                } else { self.e_code = self.e_code.bit_or(2) }
+                    if self.ai_col[c] >= 0 -> self.e_code |= 1
+                } else { self.e_code |= 2 }
             }
             ast.WRC_CONTINUE
         }
@@ -337,7 +337,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
 
     // The NOT NULL constraints, in two passes when generated columns or
     // ON CONFLICT REPLACE defaults are involved.
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_NOT_NULL) != 0 {
+    if p.db.tables[t].tab_flags & ast.TF_HAS_NOT_NULL != 0 {
         b2nd_pass := false
         n_seen_replace := 0
         n_generated := 0
@@ -346,7 +346,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
                 on_error := p.db.tables[t].cols[i].not_null
                 if on_error == ast.OE_NONE -> next
                 if i == p.db.tables[t].ipkey -> next
-                is_generated: p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0
+                is_generated: p.db.tables[t].cols[i].col_flags & conn.COLFLAG_GENERATED != 0
                 if is_generated && !b2nd_pass {
                     n_generated += 1
                     next
@@ -378,7 +378,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
             if n_generated == 0 && n_seen_replace == 0 -> break
             if b2nd_pass -> break
             b2nd_pass = true
-            if n_seen_replace > 0 && p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+            if n_seen_replace > 0 && p.db.tables[t].tab_flags & ast.TF_HAS_GENERATED != 0 {
                 // A REPLACE default may change what generated columns compute.
                 compute_generated_columns(p, a, reg_new_data + 1, t)
             }
@@ -387,7 +387,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
 
     // The CHECK constraints.
     chk: p.db.tables[t].check
-    if chk >= 0 && p.db.flags.bit_and(conn.SQLITE_IGNORE_CHECKS) == 0 {
+    if chk >= 0 && p.db.flags & conn.SQLITE_IGNORE_CHECKS == 0 {
         p.f.i_self_tab = -(reg_new_data + 1)
         on_error := if override_error != ast.OE_DEFAULT -> override_error else -> ast.OE_ABORT
         loop i in 0..<ast.list_len(a, chk) {
@@ -610,7 +610,7 @@ complete_insertion: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx
         }
         pik := if use_seek -> conn.OPFLAG_USESEEKRESULT else -> 0
         if p.db.indexes[cur].idx_type == ast.IDXTYPE_PRIMARYKEY && !has_rowid {
-            pik = pik.bit_or(conn.OPFLAG_NCHANGE).bit_or(update_flags.bit_and(conn.OPFLAG_SAVEPOSITION))
+            pik = pik | conn.OPFLAG_NCHANGE | update_flags & conn.OPFLAG_SAVEPOSITION
         }
         n: if p.db.indexes[cur].uniq_not_null -> p.db.indexes[cur].n_key_col else -> p.db.indexes[cur].n_column
         _: cg.op4_int(p, opc.OP_IDX_INSERT, i_idx_cur + k, a_reg_idx[k], a_reg_idx[k] + 1, n)
@@ -621,10 +621,10 @@ complete_insertion: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx
     }
     pik := 0
     if a.ctx.nested == 0 {
-        pik = conn.OPFLAG_NCHANGE.bit_or(if update_flags != 0 -> update_flags else -> conn.OPFLAG_LASTROWID)
+        pik = conn.OPFLAG_NCHANGE | (if update_flags != 0 -> update_flags else -> conn.OPFLAG_LASTROWID)
     }
-    if append_bias -> pik = pik.bit_or(conn.OPFLAG_APPEND)
-    if use_seek -> pik = pik.bit_or(conn.OPFLAG_USESEEKRESULT)
+    if append_bias -> pik |= conn.OPFLAG_APPEND
+    if use_seek -> pik |= conn.OPFLAG_USESEEKRESULT
     _: cg.op3(p, opc.OP_INSERT, i_data_cur, a_reg_idx[i], reg_new_data)
     if a.ctx.nested == 0 -> cg.v_append_p4(p, conn.P4.Table(t))
     cg.v_change_p5(p, pik)
@@ -641,7 +641,7 @@ insert: fn(p: &cg.Parse, a: &ast.AST, src: Int, select0: Int, column: Int, on_er
     list := -1
     if cg.n_err(a) == 0 {
         // A single-row VALUES clause is kept as its expression list.
-        if select >= 0 && a.selects[select].sel_flags.bit_and(ast.SF_VALUES) != 0 && a.selects[select].prior < 0 {
+        if select >= 0 && a.selects[select].sel_flags & ast.SF_VALUES != 0 && a.selects[select].prior < 0 {
             list = a.selects[select].elist
             a.selects[select].elist = -1
             ast.select_delete(a, select)
@@ -694,7 +694,7 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
     // INTEGER PRIMARY KEY is in it. b_id_list_in_order says the columns come
     // in storage order, so the SELECT can write straight into place.
     ipk_column := -1
-    b_id_list_in_order := tflags.bit_and(ast.TF_OOO_HIDDEN.bit_or(ast.TF_HAS_STORED)) == 0
+    b_id_list_in_order := tflags & (ast.TF_OOO_HIDDEN | ast.TF_HAS_STORED) == 0
     n_id: if column >= 0 -> a.idlists[column].items.len() else -> 0
     if column >= 0 {
         a.idlists[column].eu4 = ast.EU4_IDX
@@ -707,7 +707,7 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
                     a.idlists[column].items[i].u4 = j
                     if i != j -> b_id_list_in_order = false
                     if j == p.db.tables[t].ipkey -> ipk_column = i
-                    if p.db.tables[t].cols[j].col_flags.bit_and(conn.COLFLAG_STORED.bit_or(conn.COLFLAG_VIRTUAL)) != 0 {
+                    if p.db.tables[t].cols[j].col_flags & (conn.COLFLAG_STORED | conn.COLFLAG_VIRTUAL) != 0 {
                         ast.error(a, "cannot INSERT into generated column \"{ast.text(p.db.tables[t].cols[j].name)}\"")
                         return
                     }
@@ -788,21 +788,17 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
     // counting the columns the data supplies.
     if column < 0 && n_column > 0 {
         ipk_column = p.db.tables[t].ipkey
-        if ipk_column >= 0 && tflags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+        if ipk_column >= 0 && tflags & ast.TF_HAS_GENERATED != 0 {
             i := ipk_column - 1
             loop i >= 0 {
-                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 {
-                    ipk_column -= 1
-                }
+                if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_GENERATED != 0 -> ipk_column -= 1
                 i -= 1
             }
         }
         n_hidden := 0
-        if tflags.bit_and(ast.TF_HAS_GENERATED.bit_or(ast.TF_HAS_HIDDEN)) != 0 {
+        if tflags & (ast.TF_HAS_GENERATED | ast.TF_HAS_HIDDEN) != 0 {
             loop i in 0..<n_col {
-                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_NOINSERT) != 0 {
-                    n_hidden += 1
-                }
+                if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_NOINSERT != 0 -> n_hidden += 1
             }
         }
         if n_column != n_col - n_hidden {
@@ -818,7 +814,7 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
 
     // The count of rows inserted.
     reg_row_count := 0
-    if p.db.flags.bit_and(conn.SQLITE_COUNT_ROWS) != 0 && a.ctx.nested == 0 && p.f.trigger_tab < 0 && !p.f.b_returning {
+    if p.db.flags & conn.SQLITE_COUNT_ROWS != 0 && a.ctx.nested == 0 && p.f.trigger_tab < 0 && !p.f.b_returning {
         p.f.n_mem += 1
         reg_row_count = p.f.n_mem
         _: cg.op2(p, opc.OP_INTEGER, 0, reg_row_count)
@@ -871,13 +867,13 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
             next
         }
         col_flags: p.db.tables[t].cols[i].col_flags
-        if col_flags.bit_and(conn.COLFLAG_NOINSERT) != 0 {
+        if col_flags & conn.COLFLAG_NOINSERT != 0 {
             n_hidden += 1
-            if col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 {
+            if col_flags & conn.COLFLAG_VIRTUAL != 0 {
                 // A VIRTUAL column has no slot in the record.
                 i_reg_store -= 1
                 next
-            } else if col_flags.bit_and(conn.COLFLAG_STORED) != 0 { next } else if column < 0 {
+            } else if col_flags & conn.COLFLAG_STORED != 0 { next } else if column < 0 {
                 // A hidden column not named gets its default.
                 dflt: cat.column_expr(p.db, a, t, i)
                 ex.expr_code_factorable(p, a, dflt, store)
@@ -939,9 +935,7 @@ insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, col
     if reg_autoinc > 0 -> _: cg.op2(p, opc.OP_MEM_MAX, reg_autoinc, reg_rowid)
 
     // The generated columns, which may use the rowid.
-    if tflags.bit_and(ast.TF_HAS_GENERATED) != 0 {
-        compute_generated_columns(p, a, reg_rowid + 1, t)
-    }
+    if tflags & ast.TF_HAS_GENERATED != 0 -> compute_generated_columns(p, a, reg_rowid + 1, t)
 
     // Check the constraints and write the row.
     is_replace: generate_constraint_checks(p, a, t, a_reg_idx, i_data_cur, i_idx_cur, reg_ins, 0, ipk_column >= 0, on_error, end_of_loop, None)

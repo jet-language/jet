@@ -342,7 +342,7 @@ ssl_tls13_write_identities_of_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, b
         md: ssl_tls13_get_ciphersuite_hash_alg(ssl.spool[sn].ciphersuite)
         identity: ssl.spool[sn].ticket ?? return Err(.InternalError)
         now: ssldefs.ssl_ms_time()
-        obfuscated_ticket_age: (now - ssl.spool[sn].ticket_reception_time + ssl.spool[sn].ticket_age_add).bit_and(0xFFFFFFFF)
+        obfuscated_ticket_age: (now - ssl.spool[sn].ticket_reception_time + ssl.spool[sn].ticket_age_add) & 0xFFFFFFFF
         p += ssl_tls13_write_identity(ssl, p, end, identity, obfuscated_ticket_age) ?? return Err(err)
         l_binders_len += 1 + ssl_tls13_hash_length(md)
     }
@@ -657,12 +657,12 @@ ssl_tls13_postprocess_server_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R
 ssl_tls13_postprocess_server_hello_keys: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
     psk_mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PRE_SHARED_KEY)
     key_share_mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_KEY_SHARE)
-    received: ssl.handshake.received_extensions.bit_and(psk_mask.bit_or(key_share_mask))
+    received: ssl.handshake.received_extensions & (psk_mask | key_share_mask)
     if received == psk_mask {
         ssl.handshake.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK
     } else if received == key_share_mask {
         ssl.handshake.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL
-    } else if received == psk_mask.bit_or(key_share_mask) {
+    } else if received == psk_mask | key_share_mask {
         ssl.handshake.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL
     } else { return Err(.HandshakeFailure) }
     if !ssltls.ssl_conf_tls13_is_kex_mode_enabled(ssl, ssl.handshake.key_exchange_mode) {
@@ -745,7 +745,7 @@ ssl_tls13_parse_encrypted_extensions: fn(ssl: &ssldefs.SSLContext, buf: Int, end
     }
     record_size_limit_mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_RECORD_SIZE_LIMIT)
     max_fragment_length_mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_MAX_FRAGMENT_LENGTH)
-    if ssl.handshake.received_extensions.bit_and(record_size_limit_mask) != 0 && ssl.handshake.received_extensions.bit_and(max_fragment_length_mask) != 0 {
+    if ssl.handshake.received_extensions & record_size_limit_mask != 0 && ssl.handshake.received_extensions & max_fragment_length_mask != 0 {
         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
         return Err(.IllegalParameter)
     }
@@ -810,7 +810,7 @@ ssl_tls13_parse_certificate_request: fn(ssl: &ssldefs.SSLContext, buf: Int, end:
         // Other extensions are ignored.
         p += extension_data_len
     }
-    if p != end || ssl.handshake.received_extensions.bit_and(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SIG_ALG)) == 0 {
+    if p != end || ssl.handshake.received_extensions & ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SIG_ALG) == 0 {
         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError)
         return Err(.DecodeError)
     }

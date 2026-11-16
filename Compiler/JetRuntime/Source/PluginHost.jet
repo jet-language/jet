@@ -150,14 +150,14 @@ pg_store: fn(address: I64, value: I64) { dyn_store(address, value) }
 pg_desc: fn(desc: I64, index: I64) -> I64 { dyn_word(wrapping(desc + index * I64{8})) }
 
 pg_u32: fn(address: I64) -> I64 {
-    rt_text_byte(address).bit_or(rt_text_byte(wrapping(address + I64{1})) << I64{8}).bit_or(rt_text_byte(wrapping(address + I64{2})) << I64{16}).bit_or(rt_text_byte(wrapping(address + I64{3})) << I64{24})
+    rt_text_byte(address) | rt_text_byte(wrapping(address + I64{1})) << I64{8} | rt_text_byte(wrapping(address + I64{2})) << I64{16} | rt_text_byte(wrapping(address + I64{3})) << I64{24}
 }
 
 pg_put_u32: fn(address: I64, value: I64) {
-    rt_text_put(address, value.bit_and(I64{255}))
-    rt_text_put(wrapping(address + I64{1}), (value >> I64{8}).bit_and(I64{255}))
-    rt_text_put(wrapping(address + I64{2}), (value >> I64{16}).bit_and(I64{255}))
-    rt_text_put(wrapping(address + I64{3}), (value >> I64{24}).bit_and(I64{255}))
+    rt_text_put(address, value & I64{255})
+    rt_text_put(wrapping(address + I64{1}), (value >> I64{8}) & I64{255})
+    rt_text_put(wrapping(address + I64{2}), (value >> I64{16}) & I64{255})
+    rt_text_put(wrapping(address + I64{3}), (value >> I64{24}) & I64{255})
 }
 
 // A guest's linear memory or table: `bytes` of fresh zeroed pages, or 0.
@@ -322,7 +322,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 #Export(c) jet_plugin_memory_grow: fn(instance: I64, index: I64, delta: I64, fid: I64, offset: I64) -> I64 {
     memory: pg_memory(instance, index)
     pages: pg_word(wrapping(memory + I64{8})) /% PG_PAGE
-    more: delta.bit_and(PG_U32)
+    more: delta & PG_U32
     wanted: pages + more
     maximum: pg_word(wrapping(memory + I64{16}))
     if (maximum >= I64{0} && wanted > maximum) { return I64{-1} }
@@ -337,14 +337,14 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 
 #Export(c) jet_plugin_memory_fill: fn(instance: I64, index: I64, target: I64, value: I64, count: I64, fid: I64, offset: I64) {
     memory: pg_memory(instance, index)
-    start: target.bit_and(PG_U32)
-    length: count.bit_and(PG_U32)
+    start: target & PG_U32
+    length: count & PG_U32
     if !pg_in_bounds(start, length, pg_word(wrapping(memory + I64{8}))) {
         _: pg_trap_at(instance, I64{1}, fid, offset)
         return
     }
     base: wrapping(pg_word(memory) + start)
-    byte: value.bit_and(I64{255})
+    byte: value & I64{255}
     at := I64{0}
     loop at < length {
         rt_text_put(wrapping(base + at), byte)
@@ -355,9 +355,9 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 #Export(c) jet_plugin_memory_copy: fn(instance: I64, target_memory: I64, source_memory: I64, target: I64, source: I64, count: I64, fid: I64, offset: I64) {
     to: pg_memory(instance, target_memory)
     from: pg_memory(instance, source_memory)
-    start: target.bit_and(PG_U32)
-    origin: source.bit_and(PG_U32)
-    length: count.bit_and(PG_U32)
+    start: target & PG_U32
+    origin: source & PG_U32
+    length: count & PG_U32
     if (!pg_in_bounds(start, length, pg_word(wrapping(to + I64{8}))) || !pg_in_bounds(origin, length, pg_word(wrapping(from + I64{8})))) {
         _: pg_trap_at(instance, I64{1}, fid, offset)
         return
@@ -371,9 +371,9 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     dropped: rt_text_byte(wrapping(pg_word(wrapping(instance + PG_INST_DATA_DROPPED)) + segment)) != I64{0}
     available: if dropped -> I64{0} else -> pg_word(wrapping(record + I64{32}))
     memory: pg_memory(instance, index)
-    start: target.bit_and(PG_U32)
-    origin: source.bit_and(PG_U32)
-    length: count.bit_and(PG_U32)
+    start: target & PG_U32
+    origin: source & PG_U32
+    length: count & PG_U32
     if (!pg_in_bounds(start, length, pg_word(wrapping(memory + I64{8}))) || !pg_in_bounds(origin, length, available)) {
         _: pg_trap_at(instance, I64{1}, fid, offset)
         return
@@ -392,7 +392,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 #Export(c) jet_plugin_table_grow: fn(instance: I64, index: I64, value: I64, delta: I64, fid: I64, offset: I64) -> I64 {
     table: pg_table(instance, index)
     size: pg_word(wrapping(table + I64{8}))
-    wanted: size + delta.bit_and(PG_U32)
+    wanted: size + (delta & PG_U32)
     maximum: pg_word(wrapping(table + I64{16}))
     if (maximum >= I64{0} && wanted > maximum) { return I64{-1} }
     if (wanted > PG_MAX_TABLE) {
@@ -412,7 +412,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 
 #Export(c) jet_plugin_table_get: fn(instance: I64, index: I64, slot: I64, fid: I64, offset: I64) -> I64 {
     table: pg_table(instance, index)
-    at: slot.bit_and(PG_U32)
+    at: slot & PG_U32
     if (at >= pg_word(wrapping(table + I64{8}))) {
         return pg_trap_at(instance, I64{10}, fid, offset)
     }
@@ -421,7 +421,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 
 #Export(c) jet_plugin_table_set: fn(instance: I64, index: I64, slot: I64, value: I64, fid: I64, offset: I64) {
     table: pg_table(instance, index)
-    at: slot.bit_and(PG_U32)
+    at: slot & PG_U32
     if (at >= pg_word(wrapping(table + I64{8}))) {
         _: pg_trap_at(instance, I64{10}, fid, offset)
         return
@@ -431,8 +431,8 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 
 #Export(c) jet_plugin_table_fill: fn(instance: I64, index: I64, slot: I64, value: I64, count: I64, fid: I64, offset: I64) {
     table: pg_table(instance, index)
-    start: slot.bit_and(PG_U32)
-    length: count.bit_and(PG_U32)
+    start: slot & PG_U32
+    length: count & PG_U32
     if !pg_in_bounds(start, length, pg_word(wrapping(table + I64{8}))) {
         _: pg_trap_at(instance, I64{10}, fid, offset)
         return
@@ -447,9 +447,9 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 #Export(c) jet_plugin_table_copy: fn(instance: I64, target_table: I64, source_table: I64, target: I64, source: I64, count: I64, fid: I64, offset: I64) {
     to: pg_table(instance, target_table)
     from: pg_table(instance, source_table)
-    start: target.bit_and(PG_U32)
-    origin: source.bit_and(PG_U32)
-    length: count.bit_and(PG_U32)
+    start: target & PG_U32
+    origin: source & PG_U32
+    length: count & PG_U32
     if (!pg_in_bounds(start, length, pg_word(wrapping(to + I64{8}))) || !pg_in_bounds(origin, length, pg_word(wrapping(from + I64{8})))) {
         _: pg_trap_at(instance, I64{10}, fid, offset)
         return
@@ -463,9 +463,9 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     dropped: rt_text_byte(wrapping(pg_word(wrapping(instance + PG_INST_ELEM_DROPPED)) + segment)) != I64{0}
     available: if dropped -> I64{0} else -> pg_word(wrapping(record + I64{32}))
     table: pg_table(instance, index)
-    start: target.bit_and(PG_U32)
-    origin: source.bit_and(PG_U32)
-    length: count.bit_and(PG_U32)
+    start: target & PG_U32
+    origin: source & PG_U32
+    length: count & PG_U32
     if (!pg_in_bounds(start, length, pg_word(wrapping(table + I64{8}))) || !pg_in_bounds(origin, length, available)) {
         _: pg_trap_at(instance, I64{10}, fid, offset)
         return
@@ -481,7 +481,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 // (the caller tests the trap word before using the result).
 #Export(c) jet_plugin_table_fid: fn(instance: I64, index: I64, slot: I64, signature: I64, fid: I64, offset: I64) -> I64 {
     table: pg_table(instance, index)
-    at: slot.bit_and(PG_U32)
+    at: slot & PG_U32
     if (at >= pg_word(wrapping(table + I64{8}))) {
         return pg_trap_at(instance, I64{5}, fid, offset)
     }
@@ -500,7 +500,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 #Export(c) jet_plugin_clz: fn(value: I64, width: I64) -> I64 {
     count := I64{0}
     bit := width - I64{1}
-    loop bit >= (I64{0}) && (value >> bit).bit_and(I64{1}) == (I64{0}) {
+    loop bit >= (I64{0}) && (value >> bit) & (I64{1}) == (I64{0}) {
         count += I64{1}
         bit -= I64{1}
     }
@@ -509,7 +509,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 
 #Export(c) jet_plugin_ctz: fn(value: I64, width: I64) -> I64 {
     count := I64{0}
-    loop count < width && (value >> count).bit_and(I64{1}) == (I64{0}) -> count += I64{1}
+    loop count < width && (value >> count) & (I64{1}) == (I64{0}) -> count += I64{1}
     count
 }
 
@@ -517,7 +517,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     count := I64{0}
     bit := I64{0}
     loop bit < width {
-        count += (value >> bit).bit_and(I64{1})
+        count += (value >> bit) & I64{1}
         bit += I64{1}
     }
     count
@@ -527,12 +527,12 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 // target, 4 saturating. A non-saturating NaN or out-of-range input traps.
 #Export(c) jet_plugin_trunc: fn(instance: I64, value: Float, mode: I64, fid: I64, offset: I64) -> I64 {
     bits: rt_f64_bits(value)
-    unsigned: mode.bit_and(I64{1}) != I64{0}
-    wide: mode.bit_and(I64{2}) != I64{0}
-    saturating: mode.bit_and(I64{4}) != I64{0}
+    unsigned: mode & I64{1} != I64{0}
+    wide: mode & I64{2} != I64{0}
+    saturating: mode & I64{4} != I64{0}
     negative: bits < I64{0}
-    exponent: (bits >> I64{52}).bit_and(I64{2047})
-    fraction: bits.bit_and(I64{4503599627370495})
+    exponent: (bits >> I64{52}) & I64{2047}
+    fraction: bits & I64{4503599627370495}
     if (exponent == I64{2047} && fraction != I64{0}) {
         if saturating -> return I64{0}
         return pg_trap_at(instance, I64{4}, fid, offset)
@@ -547,7 +547,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     }
     magnitude := I64{0}
     if (!overflow && power >= I64{0}) {
-        mantissa: fraction.bit_or(I64{4503599627370496})
+        mantissa: fraction | I64{4503599627370496}
         magnitude = if (power >= I64{52}) -> mantissa << (power - I64{52}) else -> mantissa >> (I64{52} - power)
     }
     if (unsigned && negative && magnitude != I64{0}) { overflow = true }
@@ -571,10 +571,10 @@ pg_round_magnitude: fn(magnitude: I64, digits: I64) -> Float {
     // `shift` drops the bits below the kept `digits`: a set top bit is bit 63.
     shift := if (magnitude < I64{0}) -> I64{64} - digits else -> I64{1}
     loop magnitude >= (I64{0}) && (magnitude >> (digits + shift)) != (I64{0}) -> shift += I64{1}
-    kept := (magnitude >> shift).bit_and(I64{9223372036854775807} >> (shift - I64{1}))
-    rest: magnitude.bit_and((I64{1} << shift) - I64{1})
+    kept := (magnitude >> shift) & I64{9223372036854775807} >> (shift - I64{1})
+    rest: magnitude & (I64{1} << shift) - I64{1}
     half: I64{1} << (shift - I64{1})
-    if (rest > half || (rest == half && kept.bit_and(I64{1}) != I64{0})) { kept += I64{1} }
+    if (rest > half || (rest == half && kept & I64{1} != I64{0})) { kept += I64{1} }
     Float{kept} * Float{I64{1} << shift}
 }
 
@@ -603,16 +603,16 @@ pg_round_magnitude: fn(magnitude: I64, digits: I64) -> Float {
 }
 
 #Export(c) jet_plugin_f64_copysign: fn(magnitude: Float, sign: Float) -> Float {
-    bits: rt_f64_bits(magnitude).bit_and(I64{9223372036854775807})
-    rt_f64_from_bits(bits.bit_or(rt_f64_bits(sign).bit_and(I64{-9223372036854775807} - I64{1})))
+    bits: rt_f64_bits(magnitude) & I64{9223372036854775807}
+    rt_f64_from_bits(bits | rt_f64_bits(sign) & I64{-9223372036854775807} - I64{1})
 }
 
 #Export(c) jet_plugin_f64_abs: fn(value: Float) -> Float {
-    rt_f64_from_bits(rt_f64_bits(value).bit_and(I64{9223372036854775807}))
+    rt_f64_from_bits(rt_f64_bits(value) & I64{9223372036854775807})
 }
 
 #Export(c) jet_plugin_f64_neg: fn(value: Float) -> Float {
-    rt_f64_from_bits(rt_f64_bits(value).bit_xor(I64{-9223372036854775807} - I64{1}))
+    rt_f64_from_bits(rt_f64_bits(value) ~ I64{-9223372036854775807} - I64{1})
 }
 
 #Export(c) jet_plugin_f64_nearest: fn(value: Float) -> Float {
@@ -785,7 +785,7 @@ pg_close: fn(fd: I64) {
 pg_open_dir: fn(path: I64) -> I64 {
     fd := I64{-4}
     loop fd == (I64{-4}) {
-        fd = trap_syscall(I64{257}, I64{-100}, path, PG_O_DIRECTORY.bit_or(PG_O_CLOEXEC), I64{0}, I64{0}, I64{0})
+        fd = trap_syscall(I64{257}, I64{-100}, path, PG_O_DIRECTORY | PG_O_CLOEXEC, I64{0}, I64{0}, I64{0})
     }
     fd
 }
@@ -793,7 +793,7 @@ pg_open_dir: fn(path: I64) -> I64 {
 // openat2(2) of `name` below `dir`, read-only, refusing every symlink and
 // any escape from `dir`. `how` is 24 writable scratch bytes.
 pg_open_beneath: fn(dir: I64, name: I64, how: I64) -> I64 {
-    rt_text_store(how, PG_O_NOFOLLOW.bit_or(PG_O_CLOEXEC))
+    rt_text_store(how, PG_O_NOFOLLOW | PG_O_CLOEXEC)
     rt_text_store(wrapping(how + I64{8}), I64{0})
     rt_text_store(wrapping(how + I64{16}), PG_RESOLVE_BENEATH_NO_SYMLINKS)
     trap_syscall(I64{437}, dir, name, how, I64{24}, I64{0}, I64{0})
@@ -1090,7 +1090,7 @@ pg_instantiate: fn(plugin: I64, desc: I64, path: I64) -> I64 {
         record: desc + pg_desc(desc, I64{18}) + at * I64{40}
         if (pg_word(record) == I64{1}) {
             memory: pg_memory(instance, pg_word(wrapping(record + I64{8})))
-            start: pg_word(wrapping(record + I64{16})).bit_and(PG_U32)
+            start: pg_word(wrapping(record + I64{16})) & PG_U32
             length: pg_word(wrapping(record + I64{32}))
             if !pg_in_bounds(start, length, pg_word(wrapping(memory + I64{8}))) {
                 return pg_instantiate_failure(PLUGIN_ERROR_GUEST, I64{0}, path, rt_static_text("out of bounds memory access"))
@@ -1106,7 +1106,7 @@ pg_instantiate: fn(plugin: I64, desc: I64, path: I64) -> I64 {
         mode: pg_word(record)
         if (mode == I64{0}) {
             table: pg_table(instance, pg_word(wrapping(record + I64{8})))
-            start: pg_word(wrapping(record + I64{16})).bit_and(PG_U32)
+            start: pg_word(wrapping(record + I64{16})) & PG_U32
             length: pg_word(wrapping(record + I64{32}))
             if !pg_in_bounds(start, length, pg_word(wrapping(table + I64{8}))) {
                 return pg_instantiate_failure(PLUGIN_ERROR_GUEST, I64{0}, path, rt_static_text("out of bounds table access"))
@@ -1530,7 +1530,7 @@ pg_invoke_loaded: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
     value := pg_lift_flat(result_code, raw)
     if (result_code == PG_VALUE_STRING || result_code == PG_VALUE_TUPLE) {
         if (result_code == PG_VALUE_STRING) {
-            length: pg_text_result_length(instance, pg_word(wrapping(record + I64{64})), raw.bit_and(PG_U32))
+            length: pg_text_result_length(instance, pg_word(wrapping(record + I64{64})), raw & PG_U32)
             if (length > PG_MAX_WIRE) {
                 pg_store(wrapping(plugin + PG_PLUGIN_ACTIVE), I64{0})
                 detail: jet_rt_string_builder_new()
@@ -1539,7 +1539,7 @@ pg_invoke_loaded: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
                 return I64{0}
             }
         }
-        lifted: if (result_code == PG_VALUE_STRING) -> pg_lift_text(instance, pg_word(wrapping(record + I64{64})), raw.bit_and(PG_U32)) else -> pg_lift_fields(instance, record, desc, raw)
+        lifted: if (result_code == PG_VALUE_STRING) -> pg_lift_text(instance, pg_word(wrapping(record + I64{64})), raw & PG_U32) else -> pg_lift_fields(instance, record, desc, raw)
         if (lifted == I64{0}) {
             detail: jet_rt_string_builder_new()
             jet_rt_string_builder_push(detail, rt_static_text("returned an unsupported Component Model value ("))
@@ -1593,7 +1593,7 @@ pg_lower_text: fn(plugin: I64, record: I64, text: I64) -> I64 {
     pg_store(wrapping(area + I64{24}), length)
     _: pg_guest(plugin, realloc)
     if (pg_word(wrapping(instance + PG_INST_TRAP)) != I64{0}) { return I64{-1} }
-    pointer: pg_word(area).bit_and(PG_U32)
+    pointer: pg_word(area) & PG_U32
     memory: pg_memory(instance, memory_index)
     if !pg_in_bounds(pointer, length, pg_word(wrapping(memory + I64{8}))) {
         pg_set_trap(instance, PG_TRAP_USER, jet_rt_string_clone(rt_static_text("realloc returned an out-of-bounds string buffer")))
@@ -1641,13 +1641,13 @@ pg_lift_text: fn(instance: I64, memory_index: I64, at: I64) -> I64 {
 // Scalar `code`'s value from its core word: an integer sign- or zero-extended
 // from its width, a bool 0 or 1, anything else the word itself.
 pg_lift_flat: fn(code: I64, raw: I64) -> I64 {
-    if (code == I64{0}) { return if (raw.bit_and(PG_U32) != I64{0}) -> I64{1} else -> I64{0} }
+    if (code == I64{0}) { return if (raw & PG_U32 != I64{0}) -> I64{1} else -> I64{0} }
     if (code == I64{1}) { return ((raw << I64{56}) >> I64{56}) }
-    if (code == I64{2}) { return raw.bit_and(I64{255}) }
+    if (code == I64{2}) { return raw & I64{255} }
     if (code == I64{3}) { return ((raw << I64{48}) >> I64{48}) }
-    if (code == I64{4}) { return raw.bit_and(I64{65535}) }
+    if (code == I64{4}) { return raw & I64{65535} }
     if (code == I64{5}) { return ((raw << I64{32}) >> I64{32}) }
-    if (code == I64{6}) { return raw.bit_and(PG_U32) }
+    if (code == I64{6}) { return raw & PG_U32 }
     raw
 }
 
@@ -1685,8 +1685,8 @@ pg_lift_fields: fn(instance: I64, record: I64, desc: I64, raw: I64) -> I64 {
         return buffer
     }
     memory_index: pg_word(wrapping(record + I64{64}))
-    area: raw.bit_and(PG_U32)
-    if (memory_index < I64{0} || area.bit_and(align - I64{1}) != I64{0}) {
+    area: raw & PG_U32
+    if (memory_index < I64{0} || area & align - I64{1} != I64{0}) {
         jet_rt_free(buffer, count * I64{8}, I64{8})
         return I64{0}
     }
@@ -1698,7 +1698,7 @@ pg_lift_fields: fn(instance: I64, record: I64, desc: I64, raw: I64) -> I64 {
     loop at < count {
         code: pg_word(wrapping(codes + at * I64{8}))
         field_align: pg_field_align(code)
-        offset = (offset + field_align - I64{1}).bit_and(I64{0} - field_align)
+        offset = (offset + field_align - I64{1}) & I64{0} - field_align
         width: if (code == PG_VALUE_STRING) -> I64{8} else -> field_align
         start: area + offset
         target: wrapping(buffer + at * I64{8})
@@ -1709,7 +1709,7 @@ pg_lift_fields: fn(instance: I64, record: I64, desc: I64, raw: I64) -> I64 {
             pg_store(target, text)
         } else if fits {
             field: wrapping(base + start)
-            loaded: if (width == I64{1}) -> rt_text_byte(field) else if (width == I64{2}) -> rt_text_byte(field).bit_or(rt_text_byte(wrapping(field + I64{1})) << I64{8}) else if (width == I64{4}) -> pg_u32(field) else -> pg_word(field)
+            loaded: if (width == I64{1}) -> rt_text_byte(field) else if (width == I64{2}) -> rt_text_byte(field) | rt_text_byte(wrapping(field + I64{1})) << I64{8} else if (width == I64{4}) -> pg_u32(field) else -> pg_word(field)
             pg_store(target, if (code == I64{9}) -> rt_f64_bits(jet_std_math_from_bits_f32(loaded)) else -> pg_lift_flat(code, loaded))
         }
         if !fits {
@@ -1782,7 +1782,7 @@ pg_finish: fn(status: I64, slot: I64, ok: I64, err: I64) -> I64 {
 }
 
 pg_int_u64: fn(raw: I64) -> I64 {
-    low: jet_int_owned_from_i64(raw.bit_and(I64{9223372036854775807}))
+    low: jet_int_owned_from_i64(raw & I64{9223372036854775807})
     half: jet_int_owned_from_i64(I64{4611686018427387904})
     high: jet_int_add(half, half)
     jet_int_add(low, high)
@@ -1868,8 +1868,8 @@ pg_host_import: fn(plugin: I64, instance: I64, record: I64, name: I64, right: I6
         return pg_import_refusal(instance, PG_TRAP_USER, name, rt_static_text("` requires a Text path"), rt_static_text(""), rt_static_text(""))
     }
     memory: pg_memory(instance, memory_index)
-    pointer: pg_word(area).bit_and(PG_U32)
-    length: pg_word(wrapping(area + I64{8})).bit_and(PG_U32)
+    pointer: pg_word(area) & PG_U32
+    length: pg_word(wrapping(area + I64{8})) & PG_U32
     if (!pg_in_bounds(pointer, length, pg_word(wrapping(memory + I64{8}))) || !env_utf8(wrapping(pg_word(memory) + pointer), length)) {
         return pg_import_refusal(instance, PG_TRAP_USER, name, rt_static_text("` requires a Text path"), rt_static_text(""), rt_static_text(""))
     }
@@ -1902,14 +1902,14 @@ pg_host_import: fn(plugin: I64, instance: I64, record: I64, name: I64, right: I6
         jet_rt_string_drop(bytes)
         return pg_import_refusal(instance, PG_TRAP_USER, name, rt_static_text("` returned non-UTF-8 data for Text"), rt_static_text(""), rt_static_text(""))
     }
-    retptr: pg_word(wrapping(area + I64{16})).bit_and(PG_U32)
+    retptr: pg_word(wrapping(area + I64{16})) & PG_U32
     scratch: jet_rt_alloc(I64{32}, I64{8})
     pg_store(scratch, I64{0})
     pg_store(wrapping(scratch + I64{8}), I64{0})
     pg_store(wrapping(scratch + I64{16}), I64{1})
     pg_store(wrapping(scratch + I64{24}), rt_text_len(bytes))
     _: pg_call(pg_word(wrapping(plugin + PG_PLUGIN_GUEST)), realloc, instance, scratch)
-    target: pg_word(scratch).bit_and(PG_U32)
+    target: pg_word(scratch) & PG_U32
     jet_rt_free(scratch, I64{32}, I64{8})
     if (pg_word(wrapping(instance + PG_INST_TRAP)) != I64{0}) {
         jet_rt_string_drop(bytes)

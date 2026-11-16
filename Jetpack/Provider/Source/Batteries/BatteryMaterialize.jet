@@ -151,7 +151,7 @@ env_battery_verify_directory: fn(directory: String, relative: String, package: B
         if bytes != file.bytes {
             return Err(ProviderReason{message: "embedded battery cache bytes do not match bundled `{file.path}`"})
         }
-        mode: if sys.is_windows() -> BATTERIES_FILE_MODE else -> (info.mode).bit_and(0o7777)
+        mode: if sys.is_windows() -> BATTERIES_FILE_MODE else -> (info.mode) & 0o7777
         if mode != file.mode {
             return Err(ProviderReason{message: "embedded battery cache mode does not match bundled `{file.path}`"})
         }

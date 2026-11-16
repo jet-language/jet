@@ -207,9 +207,9 @@ rsa_check_context: fn(ctx: RSAContext, is_priv: Bool{false}) -> Bool Never! {
     if bn.cmp_int(ctx.n, 0) <= 0 || bn.get_bit(ctx.n, 0) == 0 -> return false
     if bn.cmp_int(ctx.e, 0) <= 0 -> return false
     if !is_priv -> return true
-    ok := positive_ct(ctx.p).bit_and(bn.limb_bit(ctx.p, 0))
-    ok = ok.bit_and(positive_ct(ctx.q)).bit_and(bn.limb_bit(ctx.q, 0))
-    ok = ok.bit_and(positive_ct(ctx.dp)).bit_and(positive_ct(ctx.dq)).bit_and(positive_ct(ctx.qp))
+    ok := positive_ct(ctx.p) & bn.limb_bit(ctx.p, 0)
+    ok = ok & positive_ct(ctx.q) & bn.limb_bit(ctx.q, 0)
+    ok = ok & positive_ct(ctx.dp) & positive_ct(ctx.dq) & positive_ct(ctx.qp)
     ok == U64{1}
 }
 
@@ -375,7 +375,7 @@ rsa_deduce_primes: fn(n: bn.Mpi, e: bn.Mpi, d: bn.Mpi) -> (p: bn.Mpi, q: bn.Mpi)
     bn.shift_r(t, order)
     // n = 1 mod 8 makes 2 a square mod both primes: it never splits n.
     attempt := 0
-    if n.p[0].bit_and(U64{7}) == (U64{1}) -> attempt = 1
+    if n.p[0] & (U64{7}) == (U64{1}) -> attempt = 1
     rr := bn.mpi()
     loop attempt < DEDUCE_PRIMES.len() {
         base: bn.from_int(DEDUCE_PRIMES[attempt])
@@ -653,8 +653,8 @@ apply_crt: fn(tp: bn.Mpi, tq: bn.Mpi, ctx: &RSAContext) -> bn.Mpi bn.MpiError! {
 gcd_is_one: fn(g: bn.Mpi) -> Bool Never! {
     if g.s < 0 || g.p.len() == 0 -> return false
     rest := U64{0}
-    loop i in 1..<g.p.len() -> rest = rest.bit_or(g.p[i])
-    g.p[0].bit_xor(U64{1}).bit_or(rest) == U64{0}
+    loop i in 1..<g.p.len() -> rest |= g.p[i]
+    g.p[0] ~ U64{1} | rest == U64{0}
 }
 
 /// A random a invertible mod n and b = a^-1 mod n (rsa_gen_rand_with_inverse):
@@ -810,7 +810,7 @@ fault_check_passes: fn(check: bn.Mpi, t: bn.Mpi, limbs: Int) -> Bool Never! {
     a := bn.limbs_of(check, limbs)
     b := bn.limbs_of(t, limbs)
     diff := U64{0}
-    loop i in 0..<limbs -> diff = diff.bit_or(a[i].bit_xor(b[i]))
+    loop i in 0..<limbs -> diff |= a[i] ~ b[i]
     cipher.wipe_words(a)
     cipher.wipe_words(b)
     diff == U64{0}
@@ -834,7 +834,7 @@ mgf_mask: fn(dst: &[U8], off: Int, len: Int, src: [U8], md: hashes.Md) Never! {
         hashes.hash_update(h, src)
         hashes.hash_update(h, counter)
         mask := hashes.hash_finish(h)
-        loop i in 0..<use_len -> dst[at + i] = dst[at + i].bit_xor(mask[i])
+        loop i in 0..<use_len -> dst[at + i] = dst[at + i] ~ mask[i]
         core.crypto.wipe(mask)
         counter[3] = next_byte(counter[3])
         at += use_len
@@ -1215,7 +1215,7 @@ pss_sign_core: fn<R: RNG>(ctx: &RSAContext, rng: &R, md: hashes.Md?, hash: [U8],
     // With msb a multiple of 8 the encoding starts one byte in.
     offset: if msb %% 8 == 0 -> 1 else -> 0
     mgf_mask(sig, offset, olen - hlen - 1 - offset, h, hash_id)
-    sig[0] = sig[0].bit_and(U8{0xFF >> (olen * 8 - msb)})
+    sig[0] = sig[0] & U8{0xFF >> (olen * 8 - msb)}
     p += hlen
     sig[p] = U8{0xBC}
     signed: rsa_private(ctx, rng, sig) ?? {
@@ -1278,7 +1278,7 @@ rsassa_pkcs1_v15_encode: fn(md: hashes.Md?, hash: [U8], dst_len: Int) -> [U8] RS
     dst.push(U8{0})
     if md != None {
         // SEQUENCE { SEQUENCE { OID, NULL }, OCTET STRING hash }.
-        seq: asn1.ASN1_SEQUENCE.bit_or(asn1.ASN1_CONSTRUCTED)
+        seq: asn1.ASN1_SEQUENCE | asn1.ASN1_CONSTRUCTED
         dst.push(U8{seq})
         dst.push(U8{0x08 + oid.len() + hashlen})
         dst.push(U8{seq})
@@ -1340,7 +1340,7 @@ rsa_rsassa_pss_verify_ext: fn(ctx: &RSAContext, md: hashes.Md?, hash: [U8], mgf1
     hash_start: p + siglen - hlen - 1
     h_part := cipher.bytes_of(buf, hash_start, hlen)
     mgf_mask(buf, p, siglen - hlen - 1, h_part, mgf)
-    buf[0] = buf[0].bit_and(U8{0xFF >> (siglen * 8 - msb)})
+    buf[0] = buf[0] & U8{0xFF >> (siglen * 8 - msb)}
     loop p < hash_start - 1 && buf[p] == (U8{0}) -> p += 1
     if buf[p] != (U8{0x01}) -> return Err(.InvalidPadding)
     p += 1
@@ -1399,7 +1399,7 @@ rsa_parse_key: fn(key: [U8]) -> RSAContext RSAError! {
     ctx := rsa_new()
     p := 0
     end: key.len()
-    len: asn1.get_tag(key, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    len: asn1.get_tag(key, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
     if end != p + len -> return Err(.BadInput(None))
     version: asn1.get_int(key, p, end) ?? return Err(.Asn1(err))
     if version != 0 -> return Err(.BadInput(None))
@@ -1435,7 +1435,7 @@ rsa_parse_pubkey: fn(key: [U8]) -> RSAContext RSAError! {
     ctx := rsa_new()
     p := 0
     end: key.len()
-    len := asn1.get_tag(key, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    len := asn1.get_tag(key, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
     if end != p + len -> return Err(.BadInput(None))
     len = asn1.get_tag(key, p, end, asn1.ASN1_INTEGER) ?? return Err(.Asn1(err))
     rsa_import_raw(ctx, .N, cipher.bytes_of(key, p, len)) ?? return Err(.BadInput(None))
@@ -1468,7 +1468,7 @@ rsa_write_key: fn(ctx: RSAContext, buf: &[U8], p: &Int, start: Int) -> Int RSAEr
     len += write_int_mpi(buf, p, start, ctx.e)
     len += write_int_mpi(buf, p, start, ctx.n)
     len += asn1.write_int(buf, p, start, 0) ?? return Err(.Asn1(err))
-    total := asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    total := asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
     Ok(total)
 }
 
@@ -1477,7 +1477,7 @@ rsa_write_key: fn(ctx: RSAContext, buf: &[U8], p: &Int, start: Int) -> Int RSAEr
 rsa_write_pubkey: fn(ctx: RSAContext, buf: &[U8], p: &Int, start: Int) -> Int RSAError! {
     len := write_int_mpi(buf, p, start, ctx.e)
     len += write_int_mpi(buf, p, start, ctx.n)
-    total := asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.Asn1(err))
+    total := asn1.write_len_and_tag(buf, p, start, len, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.Asn1(err))
     Ok(total)
 }
 

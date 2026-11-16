@@ -2882,7 +2882,7 @@ migrate: fn(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DB
 priv fnv_offset: fn() -> U64 Never! { U64{14695981039346656037} }
 
 priv fnv_byte: fn(hash: U64, byte: Int) -> U64 Never! {
-    wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
+    wrapping((hash ~ U64{byte}) * U64{1099511628211})
 }
 
 priv hash_field: fn(hash: U64, value: String) -> U64 Never! {
@@ -2890,7 +2890,7 @@ priv hash_field: fn(hash: U64, value: String) -> U64 Never! {
     out := hash
     length := bytes.len()
     loop _ in 0..<8 {
-        out = fnv_byte(out, length.bit_and(255))
+        out = fnv_byte(out, length & 255)
         length = length >> 8
     }
     loop byte in bytes -> out = fnv_byte(out, Int{byte})
@@ -2930,7 +2930,7 @@ priv hex16: fn(hash: U64) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<16 {
-        nibble: Int{(hash >> (60 - index * 4)).bit_and(U64{15})}
+        nibble: Int{(hash >> (60 - index * 4)) & U64{15}}
         out.push(digits[nibble])
     }
     String.from_bytes(out) ?? ""
@@ -3456,7 +3456,7 @@ prepare: fn(driver: &DBDriver, sql: String) -> CachedStatement DBError! {
     prepared: prep.prepare_v3(driver.database, text, 1)
     if prepared.rc != base.OK {
         failure := error(driver)
-        primary: prepared.rc.bit_and(255)
+        primary: prepared.rc & 255
         // rusqlite: only Unknown primary errors (outside 2..26) acquire
         // modern_sqlite's SQL/offset diagnostic suffix.
         if primary < 2 || primary > 26 {

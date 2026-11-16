@@ -526,7 +526,7 @@ keccak_pad_with: fn<H: HashFamily>(family: H, md: Md, ctx: &HashCtx, used: Int) 
     block: ctx.buf.len()
     loop i in used..<block -> ctx.buf[i] = U8{0}
     ctx.buf[used] = U8{0x06}
-    ctx.buf[block - 1] = ctx.buf[block - 1].bit_or(U8{0x80})
+    ctx.buf[block - 1] = ctx.buf[block - 1] | U8{0x80}
     family.compress(md, ctx.s32, ctx.s64, ctx.buf, 0, 1)
 }
 
@@ -684,9 +684,9 @@ hash_with: fn<H: HashFamily>(family: H, md: Md, data: [U8]) -> [U8] Never! {
 
 /// Little-endian 64-bit word at `bytes[off]`.
 le64: fn(bytes: [U8], off: Int) -> U64 Never! {
-    lo: U64{bytes[off]}.bit_or(U64{bytes[off + 1]} << 8).bit_or(U64{bytes[off + 2]} << 16).bit_or(U64{bytes[off + 3]} << 24)
-    hi: U64{bytes[off + 4]}.bit_or(U64{bytes[off + 5]} << 8).bit_or(U64{bytes[off + 6]} << 16).bit_or(U64{bytes[off + 7]} << 24)
-    (hi << 32).bit_or(lo)
+    lo: U64{bytes[off]} | U64{bytes[off + 1]} << 8 | U64{bytes[off + 2]} << 16 | U64{bytes[off + 3]} << 24
+    hi: U64{bytes[off + 4]} | U64{bytes[off + 5]} << 8 | U64{bytes[off + 6]} << 16 | U64{bytes[off + 7]} << 24
+    (hi << 32) | lo
 }
 
 // --- SHA-1 (FIPS 180-4 section 6.1.2) ------------------------------------
@@ -697,7 +697,7 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
         base: off + n * 64
         loop t in 0..<16 {
             p: base + t * 4
-            w[t] = (U32{msg[p]} << 24).bit_or(U32{msg[p + 1]} << 16).bit_or(U32{msg[p + 2]} << 8).bit_or(U32{msg[p + 3]})
+            w[t] = (U32{msg[p]} << 24) | U32{msg[p + 1]} << 16 | U32{msg[p + 2]} << 8 | U32{msg[p + 3]}
         }
         a := s[0]
         b := s[1]
@@ -706,33 +706,33 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
         e := s[4]
         loop t in 0..<80 {
             if t >= 16 {
-                x: w[(t - 3).bit_and(15)].bit_xor(w[(t - 8).bit_and(15)]).bit_xor(w[(t - 14).bit_and(15)]).bit_xor(w[t.bit_and(15)])
-                w[t.bit_and(15)] = (x << 1).bit_or(x >> 31)
+                x: w[(t - 3) & 15] ~ w[(t - 8) & 15] ~ w[(t - 14) & 15] ~ w[t & 15]
+                w[t & 15] = (x << 1) | x >> 31
             }
             f := U32{0}
             k := U32{0}
             if {
                 t < 20 -> {
-                    f = d.bit_xor(b.bit_and(c.bit_xor(d)))
+                    f = d ~ b & (c ~ d)
                     k = U32{0x5a827999}
                 }
                 t < 40 -> {
-                    f = b.bit_xor(c).bit_xor(d)
+                    f = b ~ c ~ d
                     k = U32{0x6ed9eba1}
                 }
                 t < 60 -> {
-                    f = b.bit_and(c).bit_or(d.bit_and(b.bit_or(c)))
+                    f = b & c | d & (b | c)
                     k = U32{0x8f1bbcdc}
                 }
                 else -> {
-                    f = b.bit_xor(c).bit_xor(d)
+                    f = b ~ c ~ d
                     k = U32{0xca62c1d6}
                 }
             }
-            temp: (a << 5).bit_or(a >> 27) + f + e + k + w[t.bit_and(15)]
+            temp: ((a << 5) | a >> 27) + f + e + k + w[t & 15]
             e = d
             d = c
-            c = (b << 30).bit_or(b >> 2)
+            c = (b << 30) | b >> 2
             b = a
             a = temp
         }
@@ -755,7 +755,7 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
         base: off + n * 64
         loop t in 0..<16 {
             p: base + t * 4
-            w[t] = (U32{msg[p]} << 24).bit_or(U32{msg[p + 1]} << 16).bit_or(U32{msg[p + 2]} << 8).bit_or(U32{msg[p + 3]})
+            w[t] = (U32{msg[p]} << 24) | U32{msg[p + 1]} << 16 | U32{msg[p + 2]} << 8 | U32{msg[p + 3]}
         }
         a := s[0]
         b := s[1]
@@ -767,17 +767,17 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
         h := s[7]
         loop t in 0..<64 {
             if t >= 16 {
-                x: w[(t - 15).bit_and(15)]
-                y: w[(t - 2).bit_and(15)]
-                s0: (x >> 7).bit_or(x << 25).bit_xor((x >> 18).bit_or(x << 14)).bit_xor(x >> 3)
-                s1: (y >> 17).bit_or(y << 15).bit_xor((y >> 19).bit_or(y << 13)).bit_xor(y >> 10)
-                w[t.bit_and(15)] = w[t.bit_and(15)] + s0 + w[(t - 7).bit_and(15)] + s1
+                x: w[(t - 15) & 15]
+                y: w[(t - 2) & 15]
+                s0: ((x >> 7) | x << 25) ~ ((x >> 18) | x << 14) ~ x >> 3
+                s1: ((y >> 17) | y << 15) ~ ((y >> 19) | y << 13) ~ y >> 10
+                w[t & 15] = w[t & 15] + s0 + w[(t - 7) & 15] + s1
             }
-            big1: (e >> 6).bit_or(e << 26).bit_xor((e >> 11).bit_or(e << 21)).bit_xor((e >> 25).bit_or(e << 7))
-            ch: g.bit_xor(e.bit_and(f.bit_xor(g)))
-            t1: h + big1 + ch + C_SHA256_K[t] + w[t.bit_and(15)]
-            big0: (a >> 2).bit_or(a << 30).bit_xor((a >> 13).bit_or(a << 19)).bit_xor((a >> 22).bit_or(a << 10))
-            maj: a.bit_and(b).bit_or(c.bit_and(a.bit_or(b)))
+            big1: ((e >> 6) | e << 26) ~ ((e >> 11) | e << 21) ~ ((e >> 25) | e << 7)
+            ch: g ~ e & (f ~ g)
+            t1: h + big1 + ch + C_SHA256_K[t] + w[t & 15]
+            big0: ((a >> 2) | a << 30) ~ ((a >> 13) | a << 19) ~ ((a >> 22) | a << 10)
+            maj: a & b | c & (a | b)
             h = g
             g = f
             f = e
@@ -806,9 +806,9 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
         base: off + n * 128
         loop t in 0..<16 {
             p: base + t * 8
-            hi: (U32{msg[p]} << 24).bit_or(U32{msg[p + 1]} << 16).bit_or(U32{msg[p + 2]} << 8).bit_or(U32{msg[p + 3]})
-            lo: (U32{msg[p + 4]} << 24).bit_or(U32{msg[p + 5]} << 16).bit_or(U32{msg[p + 6]} << 8).bit_or(U32{msg[p + 7]})
-            w[t] = (U64{hi} << 32).bit_or(U64{lo})
+            hi: (U32{msg[p]} << 24) | U32{msg[p + 1]} << 16 | U32{msg[p + 2]} << 8 | U32{msg[p + 3]}
+            lo: (U32{msg[p + 4]} << 24) | U32{msg[p + 5]} << 16 | U32{msg[p + 6]} << 8 | U32{msg[p + 7]}
+            w[t] = (U64{hi} << 32) | U64{lo}
         }
         a := s[0]
         b := s[1]
@@ -820,17 +820,17 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
         h := s[7]
         loop t in 0..<80 {
             if t >= 16 {
-                x: w[(t - 15).bit_and(15)]
-                y: w[(t - 2).bit_and(15)]
-                s0: (x >> 1).bit_or(x << 63).bit_xor((x >> 8).bit_or(x << 56)).bit_xor(x >> 7)
-                s1: (y >> 19).bit_or(y << 45).bit_xor((y >> 61).bit_or(y << 3)).bit_xor(y >> 6)
-                w[t.bit_and(15)] = w[t.bit_and(15)] + s0 + w[(t - 7).bit_and(15)] + s1
+                x: w[(t - 15) & 15]
+                y: w[(t - 2) & 15]
+                s0: ((x >> 1) | x << 63) ~ ((x >> 8) | x << 56) ~ x >> 7
+                s1: ((y >> 19) | y << 45) ~ ((y >> 61) | y << 3) ~ y >> 6
+                w[t & 15] = w[t & 15] + s0 + w[(t - 7) & 15] + s1
             }
-            big1: (e >> 14).bit_or(e << 50).bit_xor((e >> 18).bit_or(e << 46)).bit_xor((e >> 41).bit_or(e << 23))
-            ch: g.bit_xor(e.bit_and(f.bit_xor(g)))
-            t1: h + big1 + ch + C_SHA512_K[t] + w[t.bit_and(15)]
-            big0: (a >> 28).bit_or(a << 36).bit_xor((a >> 34).bit_or(a << 30)).bit_xor((a >> 39).bit_or(a << 25))
-            maj: a.bit_and(b).bit_or(c.bit_and(a.bit_or(b)))
+            big1: ((e >> 14) | e << 50) ~ ((e >> 18) | e << 46) ~ ((e >> 41) | e << 23)
+            ch: g ~ e & (f ~ g)
+            t1: h + big1 + ch + C_SHA512_K[t] + w[t & 15]
+            big0: ((a >> 28) | a << 36) ~ ((a >> 34) | a << 30) ~ ((a >> 39) | a << 25)
+            maj: a & b | c & (a | b)
             h = g
             g = f
             f = e
@@ -858,7 +858,7 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
 keccak_absorb: fn(lanes: &[U64], msg: [U8], off: Int, count: Int, rate: Int) Never! {
     loop n in 0..<count {
         base: off + n * rate
-        loop i in 0..<rate /% 8 -> lanes[i] = lanes[i].bit_xor(le64(msg, base + i * 8))
+        loop i in 0..<rate /% 8 -> lanes[i] = lanes[i] ~ le64(msg, base + i * 8)
         keccak_f1600(lanes)
     }
 }
@@ -869,24 +869,22 @@ keccak_absorb: fn(lanes: &[U64], msg: [U8], off: Int, count: Int, rate: Int) Nev
     c := [U64#5]{0, 0, 0, 0, 0}
     loop i in 0..<25 -> a[i] = lanes[i]
     loop round in 0..<24 {
-        loop x in 0..<5 {
-            c[x] = a[x].bit_xor(a[x + 5]).bit_xor(a[x + 10]).bit_xor(a[x + 15]).bit_xor(a[x + 20])
-        }
+        loop x in 0..<5 -> c[x] = a[x] ~ a[x + 5] ~ a[x + 10] ~ a[x + 15] ~ a[x + 20]
         loop x in 0..<5 {
             right: c[(x + 1) %% 5]
-            d: c[(x + 4) %% 5].bit_xor((right << 1).bit_or(right >> 63))
-            a[x] = a[x].bit_xor(d)
-            a[x + 5] = a[x + 5].bit_xor(d)
-            a[x + 10] = a[x + 10].bit_xor(d)
-            a[x + 15] = a[x + 15].bit_xor(d)
-            a[x + 20] = a[x + 20].bit_xor(d)
+            d: c[(x + 4) %% 5] ~ ((right << 1) | right >> 63)
+            a[x] = a[x] ~ d
+            a[x + 5] = a[x + 5] ~ d
+            a[x + 10] = a[x + 10] ~ d
+            a[x + 15] = a[x + 15] ~ d
+            a[x + 20] = a[x + 20] ~ d
         }
         carry := a[1]
         loop j in 0..<24 {
             to: C_KECCAK_PI[j]
             r: C_KECCAK_RHO[j]
             next: a[to]
-            a[to] = (carry << r).bit_or(carry >> (U64{64} - r))
+            a[to] = (carry << r) | carry >> (U64{64} - r)
             carry = next
         }
         loop y in 0..<5 {
@@ -896,13 +894,13 @@ keccak_absorb: fn(lanes: &[U64], msg: [U8], off: Int, count: Int, rate: Int) Nev
             c2: a[row + 2]
             c3: a[row + 3]
             c4: a[row + 4]
-            a[row] = c0.bit_xor(c1.bit_not().bit_and(c2))
-            a[row + 1] = c1.bit_xor(c2.bit_not().bit_and(c3))
-            a[row + 2] = c2.bit_xor(c3.bit_not().bit_and(c4))
-            a[row + 3] = c3.bit_xor(c4.bit_not().bit_and(c0))
-            a[row + 4] = c4.bit_xor(c0.bit_not().bit_and(c1))
+            a[row] = c0 ~ ~c1 & c2
+            a[row + 1] = c1 ~ ~c2 & c3
+            a[row + 2] = c2 ~ ~c3 & c4
+            a[row + 3] = c3 ~ ~c4 & c0
+            a[row + 4] = c4 ~ ~c0 & c1
         }
-        a[0] = a[0].bit_xor(C_KECCAK_RC[round])
+        a[0] = a[0] ~ C_KECCAK_RC[round]
     }
     loop i in 0..<25 -> lanes[i] = a[i]
 }
@@ -925,12 +923,12 @@ hmac_key_with: fn<H: HashFamily>(family: H, md: Md, key: [#Secret U8]) -> HMACKe
     // Section 2 of RFC 2104: a key longer than the block is hashed first.
     k := if key.len() > block -> hash_with(family, md, key) else -> key.copy()
     pad := [U8]{}
-    loop i in 0..<block -> pad.push(if i < k.len() -> k[i].bit_xor(U8{0x36}) else -> U8{0x36})
+    loop i in 0..<block -> pad.push(if i < k.len() -> k[i] ~ U8{0x36} else -> U8{0x36})
     core.crypto.wipe(k)
     inner := family.start(md)
     hash_update_with(family, inner, pad)
     // ipad 0x36 xor opad 0x5c is 0x6a.
-    loop i in 0..<block -> pad[i] = pad[i].bit_xor(U8{0x6a})
+    loop i in 0..<block -> pad[i] = pad[i] ~ U8{0x6a}
     outer := family.start(md)
     hash_update_with(family, outer, pad)
     core.crypto.wipe(pad)
@@ -1108,7 +1106,7 @@ pbkdf2_with: fn<H: HashFamily>(family: H, md: Md, password: [#Secret U8], salt: 
                 loop i in 0..<s64.len() -> s64[i] = key.outer.s64[i]
                 family.compress(md, s32, s64, ob, 0, 1)
                 state_digest(md, s32, s64, ib, size)
-                loop i in 0..<size -> acc[i] = acc[i].bit_xor(ib[i])
+                loop i in 0..<size -> acc[i] = acc[i] ~ ib[i]
             }
         } else {
             loop _ in 1..<iterations {
@@ -1116,7 +1114,7 @@ pbkdf2_with: fn<H: HashFamily>(family: H, md: Md, password: [#Secret U8], salt: 
                 hash_update_with(family, next, u)
                 core.crypto.wipe(u)
                 u = hmac_finish_with(family, key, next)
-                loop i in 0..<size -> acc[i] = acc[i].bit_xor(u[i])
+                loop i in 0..<size -> acc[i] = acc[i] ~ u[i]
             }
         }
         loop i in 0..<size {
@@ -1143,10 +1141,10 @@ pbkdf2_with: fn<H: HashFamily>(family: H, md: Md, password: [#Secret U8], salt: 
 
 /// Little-endian 32-bit word at `b[off]`.
 le32_word: fn(b: [U8], off: Int) -> U32 Never! {
-    U32{b[off]}.bit_or(U32{b[off + 1]} << 8).bit_or(U32{b[off + 2]} << 16).bit_or(U32{b[off + 3]} << 24)
+    U32{b[off]} | U32{b[off + 1]} << 8 | U32{b[off + 2]} << 16 | U32{b[off + 3]} << 24
 }
 
-rotl: fn(x: U32, n: Int) -> U32 Never! { (x << n).bit_or(x >> (32 - n)) }
+rotl: fn(x: U32, n: Int) -> U32 Never! { (x << n) | x >> (32 - n) }
 
 /// The `count` 64-byte blocks of `msg` from `off` folded into the MD5 state
 /// (RFC 1321 section 3.4).
@@ -1233,19 +1231,19 @@ rotl: fn(x: U32, n: Int) -> U32 Never! { (x << n).bit_or(x >> (32 - n)) }
             k := 0
             if round == {
                 0 -> {
-                    f = b.bit_and(c).bit_or(b.bit_not().bit_and(d))
+                    f = b & c | ~b & d
                     k = i
                 }
                 1 -> {
-                    f = b.bit_and(d).bit_or(c.bit_and(d.bit_not()))
+                    f = b & d | c &~ d
                     k = (5 * i + 1) %% 16
                 }
                 2 -> {
-                    f = b.bit_xor(c).bit_xor(d)
+                    f = b ~ c ~ d
                     k = (3 * i + 5) %% 16
                 }
                 else -> {
-                    f = c.bit_xor(b.bit_or(d.bit_not()))
+                    f = c ~ (b | ~d)
                     k = (7 * i) %% 16
                 }
             }
@@ -1266,11 +1264,11 @@ rotl: fn(x: U32, n: Int) -> U32 Never! { (x << n).bit_or(x >> (32 - n)) }
 /// The RIPEMD-160 boolean function of step group `g` (0 to 4).
 ripemd_f: fn(g: Int, x: U32, y: U32, z: U32) -> U32 Never! {
     if g == {
-        0 -> x.bit_xor(y).bit_xor(z)
-        1 -> x.bit_and(y).bit_or(x.bit_not().bit_and(z))
-        2 -> x.bit_or(y.bit_not()).bit_xor(z)
-        3 -> x.bit_and(z).bit_or(y.bit_and(z.bit_not()))
-        else -> x.bit_xor(y.bit_or(z.bit_not()))
+        0 -> x ~ y ~ z
+        1 -> x & y | ~x & z
+        2 -> (x | ~y) ~ z
+        3 -> x & z | y &~ z
+        else -> x ~ (y | ~z)
     }
 }
 

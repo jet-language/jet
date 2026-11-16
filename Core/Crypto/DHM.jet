@@ -122,7 +122,7 @@ dhm_get_value: fn(ctx: DHMContext, param: DHMParam) -> bn.Mpi Never! {
 // One ServerKeyExchange number: a 2-byte big-endian length and its bytes.
 read_bignum: fn(data: [U8], p: &Int, end: Int) -> bn.Mpi DHMError! {
     if end - p < 2 -> return Err(.BadInput)
-    n: (Int{data[p]} << 8).bit_or(Int{data[p + 1]})
+    n: (Int{data[p]} << 8) | Int{data[p + 1]}
     p += 2
     if end - p < n -> return Err(.BadInput)
     x: bn.read_binary(cipher.bytes_of(data, p, n)) ?? return Err(.ReadParamsFailed(err))
@@ -185,8 +185,8 @@ make_common: fn<R: RNG>(ctx: &DHMContext, x_size: Int, rng: &R) DHMError! {
 // A number as its 2-byte length and its bytes without leading zeros.
 push_number: fn(out: &[U8], x: bn.Mpi) bn.MpiError! {
     n: bn.size(x)
-    out.push(U8{(n >> 8).bit_and(0xFF)})
-    out.push(U8{n.bit_and(0xFF)})
+    out.push(U8{(n >> 8) & 0xFF})
+    out.push(U8{n & 0xFF})
     bytes: bn.write_binary(x, n)
     out.extend(bytes)
 }
@@ -291,7 +291,7 @@ dhm_calc_secret: fn<R: RNG>(ctx: &DHMContext, rng: &R) -> [U8] DHMError! {
 dhm_parse_der: fn(der: [U8]) -> DHMContext DHMError! {
     ctx := dhm_new()
     p := 0
-    len: asn1.get_tag(der, p, der.len(), asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.InvalidFormat(err))
+    len: asn1.get_tag(der, p, der.len(), asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.InvalidFormat(err))
     end: p + len
     prime: asn1.get_mpi(der, p, end) ?? return Err(.InvalidFormat(err))
     bn.set_mpi(ctx.p, prime)

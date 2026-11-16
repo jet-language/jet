@@ -135,7 +135,7 @@ watch_snapshot: fn(root: I64, snapshot: I64, error: I64) -> Bool {
             failed = true
             break
         }
-        mode: trap_word(wrapping(facts + I64{16})).bit_and(I64{61440})
+        mode: trap_word(wrapping(facts + I64{16})) & I64{61440}
         seconds: trap_word(wrapping(facts + I64{80}))
         modified: if (seconds < I64{0}) -> I64{0} else -> seconds * I64{1000} + trap_word(wrapping(facts + I64{88})) /% I64{1000000}
         directory: mode == I64{16384}
@@ -160,7 +160,7 @@ watch_snapshot: fn(root: I64, snapshot: I64, error: I64) -> Bool {
                     at := I64{0}
                     loop at < count {
                         record: wrapping(buffer + at)
-                        at += rt_text_byte(wrapping(record + I64{16})).bit_or((rt_text_byte(wrapping(record + I64{17})) << I64{8}))
+                        at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
                         entry: wrapping(record + I64{19})
                         if files_dot_entry(entry) -> next
                         if (depth == stack_capacity) {

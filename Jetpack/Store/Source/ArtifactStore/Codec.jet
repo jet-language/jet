@@ -39,7 +39,7 @@ store_artifact_magic: fn(label: String) -> [U8] Never! {
 store_artifact_push_le64: fn(out: &[U8], value: Int) Never! {
     shift := 0
     loop shift < 64 {
-        out.push(U8{((value >> shift)).bit_and(255)})
+        out.push(U8{((value >> shift)) & 255})
         shift += 8
     }
 }
@@ -47,7 +47,7 @@ store_artifact_push_le64: fn(out: &[U8], value: Int) Never! {
 // The little-endian u64 at `bytes[start..<start + 8]`.
 store_artifact_read_le64: fn(bytes: [U8], start: Int) -> Int Never! {
     value := 0
-    loop offset in 0..<8 -> value = (value).bit_or((Int{bytes[start + offset]} << (offset * 8)))
+    loop offset in 0..<8 -> value = (value) | (Int{bytes[start + offset]} << (offset * 8))
     value
 }
 
@@ -145,9 +145,7 @@ store_artifact_io_invalid: fn(error: IOError) -> Bool Never! {
     }
 }
 
-store_artifact_is_executable: fn(info: files.Stat) -> Bool Never! {
-    ((info.mode).bit_and(0o111)) != 0
-}
+store_artifact_is_executable: fn(info: files.Stat) -> Bool Never! { ((info.mode) & 0o111) != 0 }
 
 // The outcome of reading one store entry.
 ArtifactRawRead: enum {
@@ -244,7 +242,7 @@ store_artifact_replace_with: fn(temporary: String, path: String, parent: String,
 store_artifact_set_executable: fn(path: String, executable: Bool) -[FS]> ArtifactStoreError! {
     info: files.stat(path)
     mode: info.mode
-    updated_mode: if executable -> (mode).bit_or(0o111) else -> mode - ((mode).bit_and(0o111))
+    updated_mode: if executable -> (mode) | 0o111 else -> mode - ((mode) & 0o111)
     files.set_mode(path, updated_mode)
 }
 

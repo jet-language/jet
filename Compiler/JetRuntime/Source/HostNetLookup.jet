@@ -113,7 +113,7 @@ lk_digit: fn(c: I64) -> Bool { c >= I64{48} && c <= I64{57} }
 
 lk_digit_value: fn(c: I64) -> I64 {
     if (c >= I64{48} && c <= I64{57}) { return c - I64{48} }
-    lower: c.bit_or(I64{32})
+    lower: c | I64{32}
     if (lower >= I64{97} && lower <= I64{122}) { return lower - I64{87} }
     I64{99}
 }
@@ -185,7 +185,7 @@ lk_strtoul: fn(look: I64, text: I64, any_base: Bool) -> LkScan {
     if (negative || rt_text_byte(at) == I64{43}) { at = wrapping(at + I64{1}) }
     base := I64{10}
     if (any_base && rt_text_byte(at) == I64{48}) {
-        if (rt_text_byte(wrapping(at + I64{1})).bit_or(I64{32}) == I64{120}) {
+        if (rt_text_byte(wrapping(at + I64{1})) | I64{32} == I64{120}) {
             // "0x" without a hex digit scans as the lone 0.
             if (lk_digit_value(rt_text_byte(wrapping(at + I64{2}))) >= I64{16}) {
                 return LkScan{value: I64{0}, end: wrapping(at + I64{1})}
@@ -245,15 +245,15 @@ lk_inet_aton: fn(look: I64, text: I64, output: I64) -> Bool {
     // A part past 2^63 fails the byte check whatever shift it takes.
     if (a0 < I64{0} || a1 < I64{0} || a2 < I64{0} || a3 < I64{0}) { return false }
     if (index == I64{0}) {
-        a1 = a0.bit_and(I64{16777215})
+        a1 = a0 & I64{16777215}
         a0 = a0 >> I64{24}
     }
     if (index <= I64{1}) {
-        a2 = a1.bit_and(I64{65535})
+        a2 = a1 & I64{65535}
         a1 = a1 >> I64{16}
     }
     if (index <= I64{2}) {
-        a3 = a2.bit_and(I64{255})
+        a3 = a2 & I64{255}
         a2 = a2 >> I64{8}
     }
     if (a0 > I64{255} || a1 > I64{255} || a2 > I64{255} || a3 > I64{255}) { return false }
@@ -329,8 +329,8 @@ lk_ipliteral: fn(look: I64, name: I64, row: I64) -> I64 {
     if (rt_text_byte(stop) != I64{0}) {
         b0: rt_text_byte(wrapping(row + I64{8}))
         b1: rt_text_byte(wrapping(row + I64{9}))
-        link_local: b0 == I64{254} && b1.bit_and(I64{192}) == I64{128}
-        multicast_link_local: b0 == I64{255} && b1.bit_and(I64{15}) == I64{2}
+        link_local: b0 == I64{254} && b1 & I64{192} == I64{128}
+        multicast_link_local: b0 == I64{255} && b1 & I64{15} == I64{2}
         if (!link_local && !multicast_link_local) { return LK_NONAME }
         scope = lk_if_index(look, p)
         if (scope == I64{0}) { return LK_NONAME }
@@ -586,11 +586,11 @@ lk_mkquery: fn(name: I64, kind: I64, query: I64) -> I64 {
         sync_clock_read(I64{0}, clock)
         nanoseconds: net_word(clock, I64{8})
         jet_rt_free(clock, I64{16}, I64{8})
-        id = (nanoseconds + nanoseconds /% I64{65536}).bit_and(I64{65535})
+        id = (nanoseconds + nanoseconds /% I64{65536}) & I64{65535}
     }
     jet_rt_free(random, I64{8}, I64{8})
     rt_text_put(query, id >> I64{8})
-    rt_text_put(wrapping(query + I64{1}), id.bit_and(I64{255}))
+    rt_text_put(wrapping(query + I64{1}), id & I64{255})
     size
 }
 
@@ -693,7 +693,7 @@ dq_set: fn(queries: I64, base: I64, index: I64, value: I64) {
 // case (label lengths stay below 'A'), then the same type and class.
 lk_reply_for: fn(reply: I64, length: I64, query: I64, qlength: I64) -> Bool {
     if (length < I64{12} || length < qlength) { return false }
-    if (rt_text_byte(wrapping(reply + I64{2})).bit_and(I64{128}) == I64{0}) { return false }
+    if (rt_text_byte(wrapping(reply + I64{2})) & I64{128} == I64{0}) { return false }
     if (rt_text_byte(reply) != rt_text_byte(query) || rt_text_byte(wrapping(reply + I64{1})) != rt_text_byte(wrapping(query + I64{1}))) {
         return false
     }
@@ -721,7 +721,7 @@ lk_tcp_start: fn(look: I64, queries: I64, index: I64, family: I64, server: I64) 
     length: dq_get(queries, DQ_QLEN, index)
     frame: wrapping(wrapping(queries + DQ_FRAME) + index * LK_FRAME)
     rt_text_put(frame, length >> I64{8})
-    rt_text_put(wrapping(frame + I64{1}), length.bit_and(I64{255}))
+    rt_text_put(wrapping(frame + I64{1}), length & I64{255})
     rt_text_bytes_copy(wrapping(frame + I64{2}), dq_query(queries, index), length)
     error: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(error, I64{32})
@@ -967,7 +967,7 @@ lk_msend: fn(look: I64, queries: I64, count: I64) -> I64 {
             }
             if (index == count) { next }
             if (dq_get(queries, DQ_ALEN, index) != I64{0}) { next }
-            code: rt_text_byte(wrapping(buffer + I64{3})).bit_and(I64{15})
+            code: rt_text_byte(wrapping(buffer + I64{3})) & I64{15}
             if (code == I64{2}) {
                 if (servfail != I64{0}) {
                     servfail -= I64{1}
@@ -981,10 +981,10 @@ lk_msend: fn(look: I64, queries: I64, count: I64) -> I64 {
                 loop head < count && dq_get(queries, DQ_ALEN, head) != (I64{0}) -> head += I64{1}
             } else { rt_text_bytes_copy(dq_answer(queries, index), buffer, length) }
             if (head == count) { listening = false }
-            if (rt_text_byte(wrapping(dq_answer(queries, index) + I64{2})).bit_and(I64{2}) != I64{0} || truncated) {
+            if (rt_text_byte(wrapping(dq_answer(queries, index) + I64{2})) & I64{2} != I64{0} || truncated) {
                 dq_set(queries, DQ_ALEN, index, I64{-1})
                 lk_tcp_start(look, queries, index, family, wrapping(servers + server * LK_ROW))
-                fresh = fresh.bit_or(I64{1} << index)
+                fresh |= I64{1} << index
             }
         }
         // Streams started above, and those still sending, wait for the next
@@ -994,8 +994,8 @@ lk_msend: fn(look: I64, queries: I64, count: I64) -> I64 {
         i = I64{0}
         loop i < count {
             stream: dq_get(queries, DQ_TCP, i)
-            if (stream != I64{0} && fresh.bit_and(I64{1} << i) == I64{0} && dq_get(queries, DQ_SENT, i) < dq_get(queries, DQ_QLEN, i) + I64{2}) {
-                sending = sending.bit_or(I64{1} << i)
+            if (stream != I64{0} && fresh & I64{1} << i == I64{0} && dq_get(queries, DQ_SENT, i) < dq_get(queries, DQ_QLEN, i) + I64{2}) {
+                sending |= I64{1} << i
                 if !lk_tcp_send(look, queries, i, stream) {
                     failed = true
                     break
@@ -1007,7 +1007,7 @@ lk_msend: fn(look: I64, queries: I64, count: I64) -> I64 {
         i = I64{0}
         loop i < count {
             stream: dq_get(queries, DQ_TCP, i)
-            if (stream != I64{0} && sending.bit_and(I64{1} << i) == I64{0} && !lk_tcp_receive(look, queries, i, stream)) {
+            if (stream != I64{0} && sending & I64{1} << i == I64{0} && !lk_tcp_receive(look, queries, i, stream)) {
                 failed = true
                 break
             }
@@ -1084,7 +1084,7 @@ lk_skip_name: fn(packet: I64, at: I64, length: I64) -> I64 {
 // records before the fault stand, as Go's goLookupIPCNAMEOrder keeps them.
 lk_parse: fn(look: I64, packet: I64, length: I64, wanted: I64) -> Bool {
     if (length < I64{12}) { return false }
-    if (rt_text_byte(wrapping(packet + I64{3})).bit_and(I64{15}) != I64{0}) { return true }
+    if (rt_text_byte(wrapping(packet + I64{3})) & I64{15} != I64{0}) { return true }
     at := I64{12}
     questions := rt_text_byte(wrapping(packet + I64{4})) * I64{256} + rt_text_byte(wrapping(packet + I64{5}))
     answers := rt_text_byte(wrapping(packet + I64{6})) * I64{256} + rt_text_byte(wrapping(packet + I64{7}))
@@ -1116,7 +1116,7 @@ lk_parse: fn(look: I64, packet: I64, length: I64, wanted: I64) -> Bool {
 lk_outcome: fn(queries: I64, index: I64) -> I64 {
     if (dq_get(queries, DQ_ALEN, index) == DQ_INVALID) { return LK_FAIL }
     if (dq_get(queries, DQ_ALEN, index) < I64{12}) { return LK_AGAIN }
-    code: rt_text_byte(wrapping(dq_answer(queries, index) + I64{3})).bit_and(I64{15})
+    code: rt_text_byte(wrapping(dq_answer(queries, index) + I64{3})) & I64{15}
     if (code == I64{0}) { return I64{0} }
     if (code == I64{2}) { return LK_AGAIN }
     if (code == I64{3}) { return LK_NONAME }
@@ -1156,7 +1156,7 @@ lk_dns: fn(look: I64, name: I64) -> I64 {
         // No AD flag; distinct query ids.
         rt_text_put(wrapping(query + I64{3}), I64{0})
         if (i == I64{1} && rt_text_byte(query) == rt_text_byte(queries)) {
-            rt_text_put(query, (rt_text_byte(query) + I64{1}).bit_and(I64{255}))
+            rt_text_put(query, (rt_text_byte(query) + I64{1}) & I64{255})
         }
         i += I64{1}
     }
@@ -1200,7 +1200,7 @@ lk_onion: fn(name: I64) -> Bool {
     word: rt_static_text("onion")
     at := I64{0}
     loop at < (I64{5}) {
-        if (rt_text_byte(wrapping(wrapping(tail + I64{1}) + at)).bit_or(I64{32}) != rt_text_byte(wrapping(rt_text_data(word) + at))) {
+        if (rt_text_byte(wrapping(wrapping(tail + I64{1}) + at)) | I64{32} != rt_text_byte(wrapping(rt_text_data(word) + at))) {
             return false
         }
         at += I64{1}
@@ -1308,19 +1308,17 @@ lk_policy: fn(address: I64) -> I64 {
         return I64{50} << I64{8}
     }
     if (lk_zero(address, I64{10}) && rt_text_byte(wrapping(address + I64{10})) == I64{255} && rt_text_byte(wrapping(address + I64{11})) == I64{255}) {
-        return (I64{35} << I64{8}).bit_or(I64{4})
+        return (I64{35} << I64{8}) | I64{4}
     }
-    if (lk_zero(address, I64{12})) { return (I64{1} << I64{8}).bit_or(I64{3}) }
-    if (b0 == I64{32} && b1 == I64{2}) { return (I64{30} << I64{8}).bit_or(I64{2}) }
+    if (lk_zero(address, I64{12})) { return (I64{1} << I64{8}) | I64{3} }
+    if (b0 == I64{32} && b1 == I64{2}) { return (I64{30} << I64{8}) | I64{2} }
     if (b0 == I64{32} && b1 == I64{1} && rt_text_byte(wrapping(address + I64{2})) == I64{0} && rt_text_byte(wrapping(address + I64{3})) == I64{0}) {
-        return (I64{5} << I64{8}).bit_or(I64{5})
+        return (I64{5} << I64{8}) | I64{5}
     }
-    if (b0 == I64{63} && b1 == I64{254}) { return (I64{1} << I64{8}).bit_or(I64{12}) }
-    if (b0 == I64{254} && b1.bit_and(I64{192}) == I64{192}) {
-        return (I64{1} << I64{8}).bit_or(I64{11})
-    }
-    if (b0.bit_and(I64{254}) == I64{252}) { return (I64{3} << I64{8}).bit_or(I64{13}) }
-    (I64{40} << I64{8}).bit_or(I64{1})
+    if (b0 == I64{63} && b1 == I64{254}) { return (I64{1} << I64{8}) | I64{12} }
+    if (b0 == I64{254} && b1 & I64{192} == I64{192}) { return (I64{1} << I64{8}) | I64{11} }
+    if (b0 & I64{254} == I64{252}) { return (I64{3} << I64{8}) | I64{13} }
+    (I64{40} << I64{8}) | I64{1}
 }
 
 // RFC 6724 3.2 scope: IPv4 loopback (127/8) and link-local (169.254/16)
@@ -1337,20 +1335,20 @@ lk_scope: fn(address: I64) -> I64 {
         }
         return I64{14}
     }
-    if (b0 == I64{255}) { return b1.bit_and(I64{15}) }
-    if (b0 == I64{254} && b1.bit_and(I64{192}) == I64{128}) { return I64{2} }
+    if (b0 == I64{255}) { return b1 & I64{15} }
+    if (b0 == I64{254} && b1 & I64{192} == I64{128}) { return I64{2} }
     if (lk_zero(address, I64{15}) && rt_text_byte(wrapping(address + I64{15})) == I64{1}) {
         return I64{2}
     }
-    if (b0 == I64{254} && b1.bit_and(I64{192}) == I64{192}) { return I64{5} }
+    if (b0 == I64{254} && b1 & I64{192} == I64{192}) { return I64{5} }
     I64{14}
 }
 
 lk_common_bits: fn(left: I64, right: I64) -> I64 {
     bit := I64{0}
     loop bit < (I64{128}) {
-        mask: I64{128} >> (bit.bit_and(I64{7}))
-        if ((rt_text_byte(wrapping(left + (bit >> I64{3}))).bit_xor(rt_text_byte(wrapping(right + (bit >> I64{3}))))).bit_and(mask) != I64{0}) {
+        mask: I64{128} >> (bit & I64{7})
+        if ((rt_text_byte(wrapping(left + (bit >> I64{3}))) ~ rt_text_byte(wrapping(right + (bit >> I64{3})))) & mask != I64{0}) {
             break
         }
         bit += I64{1}
@@ -1396,23 +1394,21 @@ lk_sort: fn(rows: I64, count: I64) -> I64 {
             net_put(target, I64{24}, I64{65535})
             if (family == I64{6}) { net_put(target, I64{40}, net_word(row, I64{40})) }
             if (jet_socket_connect_raw(probe, target, error) >= I64{0}) {
-                key = key.bit_or(I64{1073741824})
+                key |= I64{1073741824}
                 if (jet_socket_address_raw(probe, false, local, error) >= I64{0}) {
                     if (family == I64{6}) {
                         rt_text_bytes_copy(source, wrapping(local + I64{8}), I64{16})
                     } else {
                         rt_text_bytes_copy(wrapping(source + I64{12}), wrapping(local + I64{8}), I64{4})
                     }
-                    if (scope == lk_scope(source)) { key = key.bit_or(I64{536870912}) }
-                    if (policy.bit_and(I64{255}) == lk_policy(source).bit_and(I64{255})) {
-                        key = key.bit_or(I64{268435456})
-                    }
+                    if (scope == lk_scope(source)) { key |= I64{536870912} }
+                    if (policy & I64{255} == lk_policy(source) & I64{255}) { key |= I64{268435456} }
                     if (family == I64{6}) { prefix = lk_common_bits(source, destination) }
                 }
             }
             jet_fd_drop_raw(probe)
         }
-        key = key.bit_or((policy >> I64{8}) << I64{20}).bit_or((I64{15} - scope) << I64{16}).bit_or(prefix << I64{8}).bit_or(LK_ADDRESSES - i)
+        key = key | (policy >> I64{8}) << I64{20} | (I64{15} - scope) << I64{16} | prefix << I64{8} | LK_ADDRESSES - i
         net_put(row, I64{48}, key)
         i += I64{1}
     }

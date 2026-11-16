@@ -25,7 +25,7 @@ run: fn() {
                 high: (if shift < 0 -> FROM else -> to) + size + 8
                 expected := [Int]{}
                 loop at in low..<high {
-                    byte: (at * 31 + size + step).bit_and(255)
+                    byte: (at * 31 + size + step) & 255
                     mem.volatile_write<U8>(block.byte_offset(at), U8{byte})
                     expected.push(byte)
                 }

@@ -22,7 +22,7 @@
 }
 
 realtime_ring_slot: fn(ring: I64, sequence: I64) -> I64 {
-    sync_load(wrapping(ring + (if ((sequence.bit_and(I64{1})) == I64{0}) -> RT_RING_FIRST else -> RT_RING_SECOND)))
+    sync_load(wrapping(ring + (if ((sequence & I64{1}) == I64{0}) -> RT_RING_FIRST else -> RT_RING_SECOND)))
 }
 
 realtime_ring_publish: fn(ring: I64, data: I64, length: I64, zeroed: Bool) -> Bool {

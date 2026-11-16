@@ -123,9 +123,7 @@ ir_static_put: fn(s: &IRStaticBuild, object: Int, offset: Int, value: IRStaticWo
         s.relocs[object].push(IRStaticReloc{offset: offset, target: value.target, addend: value.addend, local: value.local, text: value.text})
         return
     }
-    loop byte in 0..<size {
-        s.bytes[object][offset + byte] = U8{(value.word >> (8 * byte)).bit_and(255)}
-    }
+    loop byte in 0..<size -> s.bytes[object][offset + byte] = U8{(value.word >> (8 * byte)) & 255}
 }
 
 // The static object of module constant `key` read as type `ty`: its data

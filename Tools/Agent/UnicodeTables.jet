@@ -549,7 +549,7 @@ table_digits: fn(out: &[U8], value: Int, width: Int) TableError! {
         return Err(fail("table field {value} exceeds {width} digits"))
     }
     loop at in 0..<width {
-        digit: (value >> (6 * at)).bit_and(63)
+        digit: (value >> (6 * at)) & 63
         out.push(U8{if digit < 57 -> 35 + digit else -> 36 + digit})
     }
     Ok()
@@ -637,7 +637,7 @@ mapping_table: fn(mapping: Mapping) -> MappingTable TableError! {
             if scalar <= 0 || scalar > MAX_SCALAR {
                 return Err(fail("mapping cannot fit the Jet scalar lanes: {entry.cp}"))
             }
-            packed = packed.bit_or(scalar << (lane * 21))
+            packed |= scalar << (lane * 21)
         }
         if entry.seq.len() > 1 {
             leaves.push(Leaf{lo: entry.cp, hi: entry.cp, value: POOL_FLAG + pool.len()})
@@ -745,7 +745,7 @@ runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
     pairs: compose_pairs(ucd)
     compose := [Leaf]{}
     loop at in 0..<pairs.len() /% 3 {
-        key: (pairs[at * 3] << 21).bit_or(pairs[at * 3 + 1])
+        key: (pairs[at * 3] << 21) | pairs[at * 3 + 1]
         compose.push(Leaf{lo: key, hi: key, value: pairs[at * 3 + 2]})
     }
     ccc := [Leaf]{}
@@ -758,7 +758,7 @@ runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
         "\n",
         value_lookup("unicode_normal_compose_key: fn(cp: I64) -> I64 Never! {{\n", compose, -1, false),
         "\n",
-        "unicode_normal_compose: fn(a: I64, b: I64) -> I64 Never! {{\n    unicode_normal_compose_key((a << I64{{21}}).bit_or(b))\n}}\n",
+        "unicode_normal_compose: fn(a: I64, b: I64) -> I64 Never! {{\n    unicode_normal_compose_key((a << I64{{21}}) | b)\n}}\n",
     }.join("")
     // Native text-method lookups, packed in order into UnicodeText<n>.jet units
     // each within the UnicodeTables.jet size.
@@ -814,7 +814,7 @@ push_le: fn(out: &[U8], value: Int, width: Int) TableError! {
     if value < 0 || value >= 1 << (8 * width) {
         return Err(fail("asset field overflow: {value}/{width}"))
     }
-    loop at in 0..<width -> out.push(U8{(value >> (8 * at)).bit_and(Int{255})})
+    loop at in 0..<width -> out.push(U8{(value >> (8 * at)) & Int{255}})
     Ok()
 }
 

@@ -91,9 +91,7 @@ no_sort: fn() -> SortCtx Never! {
 }
 
 // IsHiddenColumn.
-is_hidden_column: fn(col: conn.Column) -> Bool Never! {
-    col.col_flags.bit_and(conn.COLFLAG_HIDDEN) != 0
-}
+is_hidden_column: fn(col: conn.Column) -> Bool Never! { col.col_flags & conn.COLFLAG_HIDDEN != 0 }
 
 // findRightmost: the right-most SELECT of the compound s belongs to.
 find_rightmost: fn(a: ast.AST, s0: Int) -> Int Never! {
@@ -128,7 +126,7 @@ unset_join_expr: fn(a: &ast.AST, e0: Int, i_table: Int, nullable: Bool) Never! {
     e := e0
     loop e >= 0 {
         if i_table < 0 || (ast.has(a, e, ast.EP_OUTER_ON) && a.exprs[e].w == i_table) {
-            ast.clear_flags(a, e, ast.EP_OUTER_ON.bit_or(ast.EP_INNER_ON))
+            ast.clear_flags(a, e, ast.EP_OUTER_ON | ast.EP_INNER_ON)
             if i_table >= 0 -> ast.set_flags(a, e, ast.EP_INNER_ON)
         }
         if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].itable == i_table && !nullable {
@@ -169,8 +167,8 @@ process_join: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Int Never! {
         sr: ast.src_item(a, src, i + 1)
         right_tab: a.items[sr].tab
         if a.items[sl].tab < 0 || right_tab < 0 -> next
-        join_type: if a.items[sr].jointype.bit_and(ast.JT_OUTER) != 0 -> ast.EP_OUTER_ON else -> ast.EP_INNER_ON
-        if a.items[sr].jointype.bit_and(ast.JT_NATURAL) != 0 {
+        join_type: if a.items[sr].jointype & ast.JT_OUTER != 0 -> ast.EP_OUTER_ON else -> ast.EP_INNER_ON
+        if a.items[sr].jointype & ast.JT_NATURAL != 0 {
             if a.items[sr].is_using || a.items[sr].u3 >= 0 {
                 ast.error(a, "a NATURAL join may not have an ON or USING clause")
                 return 1
@@ -212,7 +210,7 @@ process_join: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Int Never! {
                 si_left: ast.src_item(a, src, i_left)
                 rs.src_item_column_used(a, si_left, i_left_col)
                 si0: ast.src_item(a, src, 0)
-                if a.items[si0].jointype.bit_and(ast.JT_LTORJ) != 0 {
+                if a.items[si0].jointype & ast.JT_LTORJ != 0 {
                     func_args := -1
                     loop {
                         more: table_and_column_index(p.db, a, src, i_left + 1, i, z, synth, true)
@@ -281,7 +279,7 @@ make_sorter_record: fn(p: &cg.Parse, a: &ast.AST, sort: SortCtx, s: Int, reg_bas
 // of it, else 0; n_prefix_reg the registers before reg_data free for the
 // sort key.
 push_onto_sorter: fn(p: &cg.Parse, a: &ast.AST, sort: &SortCtx, s: Int, reg_data: Int, reg_orig_data: Int, n_data: Int, n_prefix_reg: Int) -[DB]> Never! {
-    b_seq: if sort.sort_flags.bit_and(SORTFLAG_USE_SORTER) == 0 -> 1 else -> 0
+    b_seq: if sort.sort_flags & SORTFLAG_USE_SORTER == 0 -> 1 else -> 0
     ob: sort.order_by
     n_expr: ast.list_len(a, ob)
     n_base: n_expr + b_seq + n_data
@@ -296,7 +294,7 @@ push_onto_sorter: fn(p: &cg.Parse, a: &ast.AST, sort: &SortCtx, s: Int, reg_data
     i_limit: if a.selects[s].ioffset != 0 -> a.selects[s].ioffset + 1 else -> a.selects[s].ilimit
     sort.label_done = cg.v_make_label(p)
     ref: if reg_orig_data != 0 -> cg.ECEL_REF else -> 0
-    _: ex.expr_code_expr_list(p, a, ob, reg_base, reg_orig_data, cg.ECEL_DUP.bit_or(ref))
+    _: ex.expr_code_expr_list(p, a, ob, reg_base, reg_orig_data, cg.ECEL_DUP | ref)
     if b_seq != 0 -> _: cg.op2(p, opc.OP_SEQUENCE, sort.i_ecursor, reg_base + n_expr)
     if n_prefix_reg == 0 && n_data > 0 {
         ex.expr_code_move(p, reg_data, reg_base + n_expr + b_seq, n_data)
@@ -348,7 +346,7 @@ push_onto_sorter: fn(p: &cg.Parse, a: &ast.AST, sort: &SortCtx, s: Int, reg_data
         _: cg.op1(p, opc.OP_DELETE, i_csr)
     }
     if reg_record == 0 -> reg_record = make_sorter_record(p, a, sort, s, reg_base, n_base)
-    op: if sort.sort_flags.bit_and(SORTFLAG_USE_SORTER) != 0 -> opc.OP_SORTER_INSERT else -> opc.OP_IDX_INSERT
+    op: if sort.sort_flags & SORTFLAG_USE_SORTER != 0 -> opc.OP_SORTER_INSERT else -> opc.OP_IDX_INSERT
     _: cg.op4_int(p, op, sort.i_ecursor, reg_record, reg_base + n_ob_sat, n_base - n_ob_sat)
     if i_skip != 0 {
         tgt: if sort.label_ob_lopt != 0 -> sort.label_ob_lopt else -> cg.v_current_addr(p)
@@ -426,7 +424,7 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
     if dest.i_sdst == 0 {
         if has_sort {
             n_prefix_reg = ast.list_len(a, sort.order_by)
-            if sort.sort_flags.bit_and(SORTFLAG_USE_SORTER) == 0 -> n_prefix_reg += 1
+            if sort.sort_flags & SORTFLAG_USE_SORTER == 0 -> n_prefix_reg += 1
             p.f.n_mem += n_prefix_reg
         }
         dest.i_sdst = p.f.n_mem + 1
@@ -444,7 +442,7 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
         if has_sort && has_distinct == 0 && e_dest != cg.SRT_EPHEM_TAB && e_dest != cg.SRT_TABLE {
             // A result column that is also an ORDER BY term is read back
             // from the sort key rather than stored twice.
-            ecel_flags = ecel_flags.bit_or(cg.ECEL_OMITREF.bit_or(cg.ECEL_REF))
+            ecel_flags |= cg.ECEL_OMITREF | cg.ECEL_REF
             ob: sort.order_by
             loop i in sort.n_ob_sat..<ast.list_len(a, ob) {
                 j: a.lists[ob].items[i].order_by_col
@@ -457,7 +455,7 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
                 }
             }
         }
-        if a.selects[s].ilimit != 0 && ecel_flags.bit_and(cg.ECEL_OMITREF) != 0 && n_prefix_reg > 0 {
+        if a.selects[s].ilimit != 0 && ecel_flags & cg.ECEL_OMITREF != 0 && n_prefix_reg > 0 {
             sort.deferred = true
             sort.deferred_reg = reg_result
             sort.deferred_flags = ecel_flags
@@ -596,7 +594,7 @@ generate_sort_tail: fn(p: &cg.Parse, a: &ast.AST, s: Int, sort: &SortCtx, n_colu
         } else { reg_row = cg.get_temp_range(p, n_column) }
     }
     n_key: ast.list_len(a, ob) - sort.n_ob_sat
-    use_sorter: sort.sort_flags.bit_and(SORTFLAG_USE_SORTER) != 0
+    use_sorter: sort.sort_flags & SORTFLAG_USE_SORTER != 0
     addr := 0
     i_sort_tab := 0
     b_seq := 0
@@ -723,7 +721,7 @@ column_type_impl: fn(p: cg.Parse, a: ast.AST, srcs: [Int], e: Int) -> ColumnOrig
         } else {
             col: p.db.tables[t].cols[ic]
             out.col = Val(col.name.copy())
-            if col.col_flags.bit_and(conn.COLFLAG_HASTYPE) != 0 -> out.typ = Val(col.typ.copy())
+            if col.col_flags & conn.COLFLAG_HASTYPE != 0 -> out.typ = Val(col.typ.copy())
         }
         out.tab = Val(p.db.tables[t].name.copy())
         schema: p.db.tables[t].schema
@@ -767,8 +765,8 @@ generate_column_names: fn(p: &cg.Parse, a: &ast.AST, s0: Int) Never! {
     src: a.selects[s].src
     elist: a.selects[s].elist
     p.f.col_names_set = true
-    full_name: p.db.flags.bit_and(conn.SQLITE_FULL_COL_NAMES) != 0
-    src_name: p.db.flags.bit_and(conn.SQLITE_SHORT_COL_NAMES) != 0 || full_name
+    full_name: p.db.flags & conn.SQLITE_FULL_COL_NAMES != 0
+    src_name: p.db.flags & conn.SQLITE_SHORT_COL_NAMES != 0 || full_name
     n: ast.list_len(a, elist)
     cg.v_set_num_cols(p, n)
     loop i in 0..<n {
@@ -836,9 +834,7 @@ columns_from_expr_list: fn(p: &cg.Parse, a: &ast.AST, elist: Int) -[DB]> [conn.C
         loop {
             hit: conn.hash_find(ht, name)
             if hit < 0 -> break
-            if a.lists[elist].items[hit].using_term {
-                col_flags = col_flags.bit_or(conn.COLFLAG_NOEXPAND)
-            }
+            if a.lists[elist].items[hit].using_term -> col_flags |= conn.COLFLAG_NOEXPAND
             n_name := name.len()
             if n_name > 0 {
                 j := n_name - 1
@@ -852,7 +848,7 @@ columns_from_expr_list: fn(p: &cg.Parse, a: &ast.AST, elist: Int) -[DB]> [conn.C
                 cnt = Int{r[0]} + (Int{r[1]} << 8) + (Int{r[2]} << 16) + (Int{r[3]} << 24)
             }
         }
-        if x.no_expand -> col_flags = col_flags.bit_or(conn.COLFLAG_NOEXPAND)
+        if x.no_expand -> col_flags |= conn.COLFLAG_NOEXPAND
         h: util.str_ihash(name)
         _: conn.hash_insert(ht, name, i)
         cols.push(conn.Column{name: name, typ: [U8]{}, coll: [U8]{}, not_null: 0, ctype: 0, affinity: 0, sz_est: 0, h_name: h, i_dflt: 0, col_flags: col_flags})
@@ -883,7 +879,7 @@ subquery_column_types: fn(p: &cg.Parse, a: &ast.AST, t: Int, s0: Int, aff: Int) 
     elist: a.selects[s].elist
     srcs: [Int]{a.selects[s].src}
     loop i in 0..<p.db.tables[t].cols.len() {
-        p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_NOINSERT))
+        p.db.tables[t].tab_flags = p.db.tables[t].tab_flags | p.db.tables[t].cols[i].col_flags & conn.COLFLAG_NOINSERT
         e: ast.list_expr(a, elist, i)
         caff := ex.expr_affinity(p.db, a, e)
         if caff <= base.AFF_NONE -> caff = aff
@@ -892,10 +888,10 @@ subquery_column_types: fn(p: &cg.Parse, a: &ast.AST, t: Int, s0: Int, aff: Int) 
             s2 := a.selects[s].next_sel
             loop s2 >= 0 {
                 e2: ast.list_expr(a, a.selects[s2].elist, i)
-                m = m.bit_or(ex.expr_data_type(p.db, a, e2))
+                m |= ex.expr_data_type(p.db, a, e2)
                 s2 = a.selects[s2].next_sel
             }
-            if caff == base.AFF_TEXT && m.bit_and(1) != 0 -> caff = base.AFF_BLOB else if caff >= base.AFF_NUMERIC && m.bit_and(2) != 0 {
+            if caff == base.AFF_TEXT && m & 1 != 0 -> caff = base.AFF_BLOB else if caff >= base.AFF_NUMERIC && m & 2 != 0 {
                 caff = base.AFF_BLOB
             }
             if caff >= base.AFF_NUMERIC && a.exprs[e].op == tk.TK_CAST -> caff = base.AFF_FLEXNUM
@@ -908,9 +904,9 @@ subquery_column_types: fn(p: &cg.Parse, a: &ast.AST, t: Int, s0: Int, aff: Int) 
             }
         }
         if z_type == .Val(zt) {
-            f: util.clear_bits(p.db.tables[t].cols[i].col_flags, conn.COLFLAG_HASTYPE.bit_or(conn.COLFLAG_HASCOLL))
+            f: util.clear_bits(p.db.tables[t].cols[i].col_flags, conn.COLFLAG_HASTYPE | conn.COLFLAG_HASCOLL)
             p.db.tables[t].cols[i].typ = zt
-            p.db.tables[t].cols[i].col_flags = f.bit_or(conn.COLFLAG_HASTYPE)
+            p.db.tables[t].cols[i].col_flags = f | conn.COLFLAG_HASTYPE
         }
         coll: ex.expr_coll_seq(p, a, e)
         if coll >= 0 {
@@ -925,7 +921,7 @@ subquery_column_types: fn(p: &cg.Parse, a: &ast.AST, t: Int, s0: Int, aff: Int) 
 // of SELECT s0 with default affinity aff; -1 on error.
 result_set_of_select: fn(p: &cg.Parse, a: &ast.AST, s0: Int, aff: Int) -[DB]> Int Never! {
     saved: p.db.flags
-    p.db.flags = util.clear_bits(p.db.flags, conn.SQLITE_FULL_COL_NAMES).bit_or(conn.SQLITE_SHORT_COL_NAMES)
+    p.db.flags = util.clear_bits(p.db.flags, conn.SQLITE_FULL_COL_NAMES) | conn.SQLITE_SHORT_COL_NAMES
     select_prep(p, a, s0, -1)
     p.db.flags = saved
     if cg.n_err(a) > 0 -> return -1
@@ -969,7 +965,7 @@ compute_limit_registers: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_break: Int) -[D
         _: cg.op2(p, opc.OP_INTEGER, n, i_limit)
         if n == 0 -> _: cg.goto(p, i_break) else if n >= 0 && a.selects[s].nselect_row > util.log_est(n) {
             a.selects[s].nselect_row = util.log_est(n)
-            a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_FIXED_LIMIT)
+            a.selects[s].sel_flags = a.selects[s].sel_flags | ast.SF_FIXED_LIMIT
         }
     } else {
         ex.expr_code(p, a, left, i_limit)
@@ -1077,7 +1073,7 @@ generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.S
     } else { _: cg.op2(p, opc.OP_OPEN_EPHEMERAL, i_queue, n_col) }
     if i_distinct != 0 {
         a.selects[s].addr_open_ephm0 = cg.op2(p, opc.OP_OPEN_EPHEMERAL, i_distinct, 0)
-        a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_USES_EPHEMERAL)
+        a.selects[s].sel_flags = a.selects[s].sel_flags | ast.SF_USES_EPHEMERAL
     }
     a.selects[s].order_by = -1
     // The recursive terms, made UNION ALL (the Distinct table does the
@@ -1085,14 +1081,14 @@ generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.S
     first_rec := s
     ok := true
     loop {
-        if a.selects[first_rec].sel_flags.bit_and(ast.SF_AGGREGATE) != 0 {
+        if a.selects[first_rec].sel_flags & ast.SF_AGGREGATE != 0 {
             ast.error(a, "recursive aggregate queries not supported")
             ok = false
             break
         }
         a.selects[first_rec].op = tk.TK_ALL
         prior: a.selects[first_rec].prior
-        if a.selects[prior].sel_flags.bit_and(ast.SF_RECURSIVE) == 0 -> break
+        if a.selects[prior].sel_flags & ast.SF_RECURSIVE == 0 -> break
         first_rec = prior
     }
     if ok {
@@ -1155,7 +1151,7 @@ multi_select_values: fn(p: &cg.Parse, a: &ast.AST, s0: Int, dest: &cg.SelectDest
 // hasAnchor: whether recursive SELECT s still has its anchor terms.
 has_anchor: fn(a: ast.AST, s0: Int) -> Bool Never! {
     s := s0
-    loop s >= 0 && a.selects[s].sel_flags.bit_and(ast.SF_RECURSIVE) != 0 -> s = a.selects[s].prior
+    loop s >= 0 && a.selects[s].sel_flags & ast.SF_RECURSIVE != 0 -> s = a.selects[s].prior
     s >= 0
 }
 
@@ -1208,7 +1204,7 @@ multi_select_union: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end
         p.f.n_tab += 1
         a.selects[s].addr_open_ephm0 = cg.op2(p, opc.OP_OPEN_EPHEMERAL, union_tab, 0)
         rm: find_rightmost(a, s)
-        a.selects[rm].sel_flags = a.selects[rm].sel_flags.bit_or(ast.SF_USES_EPHEMERAL)
+        a.selects[rm].sel_flags = a.selects[rm].sel_flags | ast.SF_USES_EPHEMERAL
     }
     uniondest := ex.select_dest_init(prior_op, union_tab)
     rc := select(p, a, prior, uniondest)
@@ -1257,7 +1253,7 @@ multi_select_intersect: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest,
     p.f.n_tab += 2
     a.selects[s].addr_open_ephm0 = cg.op2(p, opc.OP_OPEN_EPHEMERAL, tab1, 0)
     rm: find_rightmost(a, s)
-    a.selects[rm].sel_flags = a.selects[rm].sel_flags.bit_or(ast.SF_USES_EPHEMERAL)
+    a.selects[rm].sel_flags = a.selects[rm].sel_flags | ast.SF_USES_EPHEMERAL
     intersectdest := ex.select_dest_init(cg.SRT_UNION, tab1)
     rc := select(p, a, prior, intersectdest)
     if rc != 0 {
@@ -1308,12 +1304,12 @@ multi_select: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]>
         d.e_dest = cg.SRT_TABLE
     }
     end := false
-    if a.selects[s].sel_flags.bit_and(ast.SF_MULTI_VALUE) != 0 {
+    if a.selects[s].sel_flags & ast.SF_MULTI_VALUE != 0 {
         rc = multi_select_values(p, a, s, d)
         if rc >= 0 -> end = true else -> rc = base.OK
     }
     if !end {
-        if a.selects[s].sel_flags.bit_and(ast.SF_RECURSIVE) != 0 && has_anchor(a, s) {
+        if a.selects[s].sel_flags & ast.SF_RECURSIVE != 0 && has_anchor(a, s) {
             generate_with_recursive_query(p, a, s, d)
         } else if a.selects[s].order_by >= 0 { return multi_select_order_by(p, a, s, dest) } else {
             if a.selects[prior].prior < 0 {
@@ -1327,7 +1323,7 @@ multi_select: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]>
             if !end && a.selects[s].next_sel < 0 -> cg.explain_pop(p)
         }
     }
-    if !end && cg.n_err(a) == 0 && a.selects[s].sel_flags.bit_and(ast.SF_USES_EPHEMERAL) != 0 {
+    if !end && cg.n_err(a) == 0 && a.selects[s].sel_flags & ast.SF_USES_EPHEMERAL != 0 {
         // The right-most SELECT gives every temporary table of the
         // compound its KeyInfo.
         n_col: ast.list_len(a, a.selects[s].elist)
@@ -1604,7 +1600,7 @@ SubstContext: struct {
 // substExpr: e with the substitution made; the expression to keep.
 subst_expr: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, e: Int) -> Int Never! {
     if e < 0 -> return -1
-    both_on: ast.EP_OUTER_ON.bit_or(ast.EP_INNER_ON)
+    both_on: ast.EP_OUTER_ON | ast.EP_INNER_ON
     if ast.has(a, e, both_on) && a.exprs[e].w == sc.i_table -> a.exprs[e].w = sc.i_new_table
     if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].itable == sc.i_table && !ast.has(a, e, ast.EP_FIXED_COL) {
         i_column: a.exprs[e].icolumn
@@ -1627,7 +1623,7 @@ subst_expr: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, e: Int) -> Int Never
         if p.db.malloc_failed -> return e
         if sc.is_outer_join -> ast.set_flags(a, nw, ast.EP_CAN_BE_NULL)
         if ast.has(a, e, both_on) {
-            we.set_join_expr(a, nw, a.exprs[e].w, a.exprs[e].flags.bit_and(both_on))
+            we.set_join_expr(a, nw, a.exprs[e].w, a.exprs[e].flags & both_on)
         }
         ast.expr_delete(a, e)
         if a.exprs[nw].op == tk.TK_TRUEFALSE {
@@ -1734,7 +1730,7 @@ recompute_columns_used: fn(p: &cg.Parse, a: &ast.AST, s: Int, si: Int) Never! {
     w := ColUsedWalker{cursor: a.items[si].cursor, hits: [Int]{}}
     _: ast.walk_select<ColUsedWalker>(w, a, s)
     m := 0
-    loop e in w.hits -> m = m.bit_or(rs.expr_col_used(p.db, a, e))
+    loop e in w.hits -> m |= rs.expr_col_used(p.db, a, e)
     a.items[si].col_used = m
 }
 
@@ -1841,28 +1837,28 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
     sub_src: a.selects[sub].src
     sub_lim: a.selects[sub].limit
     s_flags: a.selects[s].sel_flags
-    s_distinct: s_flags.bit_and(ast.SF_DISTINCT) != 0
+    s_distinct: s_flags & ast.SF_DISTINCT != 0
     if sub_lim >= 0 && a.selects[s].limit >= 0 -> return false
     if sub_lim >= 0 && a.exprs[sub_lim].right >= 0 -> return false
-    if s_flags.bit_and(ast.SF_COMPOUND) != 0 && sub_lim >= 0 -> return false
+    if s_flags & ast.SF_COMPOUND != 0 && sub_lim >= 0 -> return false
     if ast.src_len(a, sub_src) == 0 -> return false
-    if a.selects[sub].sel_flags.bit_and(ast.SF_DISTINCT) != 0 -> return false
+    if a.selects[sub].sel_flags & ast.SF_DISTINCT != 0 -> return false
     if sub_lim >= 0 && (ast.src_len(a, src) > 1 || is_agg) -> return false
     if a.selects[s].order_by >= 0 && a.selects[sub].order_by >= 0 -> return false
     if is_agg && a.selects[sub].order_by >= 0 -> return false
     if sub_lim >= 0 && a.selects[s].where_expr >= 0 -> return false
     if sub_lim >= 0 && s_distinct -> return false
-    if a.selects[sub].sel_flags.bit_and(ast.SF_RECURSIVE) != 0 -> return false
+    if a.selects[sub].sel_flags & ast.SF_RECURSIVE != 0 -> return false
     is_outer_join := false
     jt: a.items[sub_item].jointype
     sub_first: ast.src_item(a, sub_src, 0)
-    if jt.bit_and(ast.JT_OUTER.bit_or(ast.JT_LTORJ)) != 0 {
-        if ast.src_len(a, sub_src) > 1 || ex.is_virtual(p.db, a.items[sub_first].tab) || s_distinct || jt.bit_and(ast.JT_RIGHT) != 0 {
+    if jt & (ast.JT_OUTER | ast.JT_LTORJ) != 0 {
+        if ast.src_len(a, sub_src) > 1 || ex.is_virtual(p.db, a.items[sub_first].tab) || s_distinct || jt & ast.JT_RIGHT != 0 {
             return false
         }
         is_outer_join = true
     }
-    if i_from > 0 && a.items[sub_first].jointype.bit_and(ast.JT_LTORJ) != 0 -> return false
+    if i_from > 0 && a.items[sub_first].jointype & ast.JT_LTORJ != 0 -> return false
     csr_map := [Int]{}
     if a.selects[sub].prior >= 0 {
         if a.selects[sub].order_by >= 0 -> return false
@@ -1870,10 +1866,10 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
         s1 := sub
         loop s1 >= 0 {
             f1: a.selects[s1].sel_flags
-            if f1.bit_and(ast.SF_DISTINCT.bit_or(ast.SF_AGGREGATE)) != 0 || (a.selects[s1].prior >= 0 && a.selects[s1].op != tk.TK_ALL) || ast.src_len(a, a.selects[s1].src) < 1 || a.selects[s1].win >= 0 {
+            if f1 & (ast.SF_DISTINCT | ast.SF_AGGREGATE) != 0 || (a.selects[s1].prior >= 0 && a.selects[s1].op != tk.TK_ALL) || ast.src_len(a, a.selects[s1].src) < 1 || a.selects[s1].win >= 0 {
                 return false
             }
-            if i_from > 0 && a.items[ast.src_item(a, a.selects[s1].src, 0)].jointype.bit_and(ast.JT_LTORJ) != 0 {
+            if i_from > 0 && a.items[ast.src_item(a, a.selects[s1].src, 0)].jointype & ast.JT_LTORJ != 0 {
                 return false
             }
             s1 = a.selects[s1].prior
@@ -1882,7 +1878,7 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
         loop ii in 0..<ast.list_len(a, ob) {
             if a.lists[ob].items[ii].order_by_col == 0 -> return false
         }
-        if s_flags.bit_and(ast.SF_RECURSIVE) != 0 -> return false
+        if s_flags & ast.SF_RECURSIVE != 0 -> return false
         if compound_has_different_affinities(p, a, sub) -> return false
         if ast.src_len(a, src) > 1 {
             if a.ctx.nselect > 500 -> return false
@@ -1943,7 +1939,7 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
     sc = sub1
     parent := s
     loop parent >= 0 {
-        ltorj: a.items[ast.src_item(a, src, i_from)].jointype.bit_and(ast.JT_LTORJ)
+        ltorj: a.items[ast.src_item(a, src, i_from)].jointype & ast.JT_LTORJ
         sub_src_c: a.selects[sc].src
         n_sub_src: ast.src_len(a, sub_src_c)
         src = a.selects[parent].src
@@ -1957,14 +1953,14 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
             dst: ast.src_item(a, src, i + i_from)
             from: ast.src_item(a, sub_src_c, i)
             a.items[dst] = a.items[from].copy()
-            a.items[dst].jointype = a.items[dst].jointype.bit_or(ltorj)
+            a.items[dst].jointype = a.items[dst].jointype | ltorj
             i_new_parent = a.items[from].cursor
             a.items[from] = ast.new_src_item()
         }
         first: ast.src_item(a, src, i_from)
-        a.items[first].jointype = a.items[first].jointype.bit_and(ast.JT_LTORJ).bit_or(jointype).bit_or(ltorj)
+        a.items[first].jointype = a.items[first].jointype & ast.JT_LTORJ | jointype | ltorj
         sob: a.selects[sc].order_by
-        if sob >= 0 && a.selects[parent].sel_flags.bit_and(ast.SF_NOOP_ORDER_BY) == 0 {
+        if sob >= 0 && a.selects[parent].sel_flags & ast.SF_NOOP_ORDER_BY == 0 {
             // Its ORDER BY column numbers are the subquery's, not the
             // outer query's.
             loop i in 0..<ast.list_len(a, sob) -> a.lists[sob].items[i].order_by_col = 0
@@ -1987,7 +1983,7 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
             x: SubstContext{i_table: i_parent, i_new_table: i_new_parent, is_outer_join: is_outer_join, elist: a.selects[sc].elist, clist: cl}
             subst_select(p, a, x, parent, false)
         }
-        a.selects[parent].sel_flags = a.selects[parent].sel_flags.bit_or(a.selects[sc].sel_flags.bit_and(ast.SF_COMPOUND))
+        a.selects[parent].sel_flags = a.selects[parent].sel_flags | a.selects[sc].sel_flags & ast.SF_COMPOUND
         if a.selects[sc].limit >= 0 {
             a.selects[parent].limit = a.selects[sc].limit
             a.selects[sc].limit = -1
@@ -2066,7 +2062,7 @@ find_const_in_where: fn(p: &cg.Parse, a: &ast.AST, t: Int, e: Int) Never! {
 propagate_constant_rewrite_one: fn(p: &cg.Parse, a: &ast.AST, t: Int, e: Int, ignore_aff_blob: Bool) -> Int Never! {
     if p.db.malloc_failed -> return ast.WRC_PRUNE
     if a.exprs[e].op != tk.TK_COLUMN -> return ast.WRC_CONTINUE
-    if ast.has(a, e, ast.EP_FIXED_COL.bit_or(p.walks[t].u)) -> return ast.WRC_CONTINUE
+    if ast.has(a, e, ast.EP_FIXED_COL | p.walks[t].u) -> return ast.WRC_CONTINUE
     n: p.walks[t].ints.len()
     i := 0
     loop i < n {
@@ -2131,8 +2127,8 @@ propagate_constants: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
         t: cg.walk_top(p)
         src: a.selects[s].src
         exclude := ast.EP_OUTER_ON
-        if ast.src_len(a, src) > 0 && a.items[ast.src_item(a, src, 0)].jointype.bit_and(ast.JT_LTORJ) != 0 {
-            exclude = ast.EP_INNER_ON.bit_or(ast.EP_OUTER_ON)
+        if ast.src_len(a, src) > 0 && a.items[ast.src_item(a, src, 0)].jointype & ast.JT_LTORJ != 0 {
+            exclude = ast.EP_INNER_ON | ast.EP_OUTER_ON
         }
         p.walks[t].u = exclude
         p.walks[t].u2 = 0
@@ -2155,8 +2151,8 @@ propagate_constants: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
 push_down_where_terms: fn(p: &cg.Parse, a: &ast.AST, sub: Int, wh0: Int, src_list: Int, i_src: Int) -[DB]> Int Never! {
     if wh0 < 0 -> return 0
     si: ast.src_item(a, src_list, i_src)
-    if a.selects[sub].sel_flags.bit_and(ast.SF_RECURSIVE.bit_or(ast.SF_MULTI_PART)) != 0 -> return 0
-    if a.items[si].jointype.bit_and(ast.JT_LTORJ.bit_or(ast.JT_RIGHT)) != 0 -> return 0
+    if a.selects[sub].sel_flags & (ast.SF_RECURSIVE | ast.SF_MULTI_PART) != 0 -> return 0
+    if a.items[si].jointype & (ast.JT_LTORJ | ast.JT_RIGHT) != 0 -> return 0
     if a.selects[sub].prior >= 0 {
         not_union_all := false
         sel := sub
@@ -2190,7 +2186,7 @@ push_down_where_terms: fn(p: &cg.Parse, a: &ast.AST, sub: Int, wh0: Int, src_lis
     }
     if ex.expr_is_single_table_constraint(a, wh, src_list, i_src) {
         n_chng += 1
-        a.selects[sub].sel_flags = a.selects[sub].sel_flags.bit_or(ast.SF_PUSH_DOWN)
+        a.selects[sub].sel_flags = a.selects[sub].sel_flags | ast.SF_PUSH_DOWN
         sq := sub
         cur: a.items[si].cursor
         loop sq >= 0 {
@@ -2206,7 +2202,7 @@ push_down_where_terms: fn(p: &cg.Parse, a: &ast.AST, sub: Int, wh0: Int, src_lis
                 n_chng -= 1
                 break
             }
-            if a.selects[sq].sel_flags.bit_and(ast.SF_AGGREGATE) != 0 {
+            if a.selects[sq].sel_flags & ast.SF_AGGREGATE != 0 {
                 h: ast.expr_and(a, a.selects[sq].having, nw)
                 a.selects[sq].having = h
             } else {
@@ -2227,7 +2223,7 @@ disable_unused_subquery_result_columns: fn(p: &cg.Parse, a: &ast.AST, si: Int) -
     sub: a.items[si].select
     x := sub
     loop x >= 0 {
-        if a.selects[x].sel_flags.bit_and(ast.SF_DISTINCT.bit_or(ast.SF_AGGREGATE)) != 0 -> return 0
+        if a.selects[x].sel_flags & (ast.SF_DISTINCT | ast.SF_AGGREGATE) != 0 -> return 0
         if a.selects[x].prior >= 0 && a.selects[x].op != tk.TK_ALL -> return 0
         if a.selects[x].win >= 0 -> return 0
         x = a.selects[x].prior
@@ -2239,21 +2235,21 @@ disable_unused_subquery_result_columns: fn(p: &cg.Parse, a: &ast.AST, si: Int) -
         if i_col > 0 {
             i_col -= 1
             if i_col >= rs.BMS -> i_col = rs.BMS - 1
-            col_used = col_used.bit_or(1 << i_col)
+            col_used |= 1 << i_col
         }
     }
     n_chng := 0
     n_col: p.db.tables[t].cols.len()
     loop j in 0..<n_col {
         m: if j < rs.BMS - 1 -> 1 << j else -> 1 << (rs.BMS - 1)
-        if m.bit_and(col_used) != 0 -> next
+        if m & col_used != 0 -> next
         x = sub
         loop x >= 0 {
             y: ast.list_expr(a, a.selects[x].elist, j)
             if a.exprs[y].op != tk.TK_NULL {
                 a.exprs[y].op = tk.TK_NULL
-                ast.clear_flags(a, y, ast.EP_SKIP.bit_or(ast.EP_UNLIKELY))
-                a.selects[x].sel_flags = a.selects[x].sel_flags.bit_or(ast.SF_PUSH_DOWN)
+                ast.clear_flags(a, y, ast.EP_SKIP | ast.EP_UNLIKELY)
+                a.selects[x].sel_flags = a.selects[x].sel_flags | ast.SF_PUSH_DOWN
                 n_chng += 1
             }
             x = a.selects[x].prior
@@ -2302,8 +2298,8 @@ is_simple_count: fn(p: cg.Parse, a: ast.AST, s: Int, ai: Int) -> Int Never! {
     e: ast.list_expr(a, a.selects[s].elist, 0)
     if a.exprs[e].op != tk.TK_AGG_FUNCTION -> return -1
     if a.exprs[e].agg_info != ai -> return -1
-    if p.aggs[ai].funcs[0].func.flags.bit_and(conn.FUNC_COUNT) == 0 -> return -1
-    if ast.has(a, e, ast.EP_DISTINCT.bit_or(ast.EP_WIN_FUNC)) -> return -1
+    if p.aggs[ai].funcs[0].func.flags & conn.FUNC_COUNT == 0 -> return -1
+    if ast.has(a, e, ast.EP_DISTINCT | ast.EP_WIN_FUNC) -> return -1
     t
 }
 
@@ -2381,7 +2377,7 @@ convert_compound_select_to_subquery: fn(a: &ast.AST, s: Int) -> Int Never! {
     a.selects[s].next_sel = -1
     a.selects[s].with_clause = -1
     a.selects[s].win_defn = -1
-    a.selects[s].sel_flags = util.clear_bits(a.selects[s].sel_flags, ast.SF_COMPOUND).bit_or(ast.SF_CONVERTED)
+    a.selects[s].sel_flags = util.clear_bits(a.selects[s].sel_flags, ast.SF_COMPOUND) | ast.SF_CONVERTED
     a.selects[a.selects[nw].prior].next_sel = nw
     a.selects[nw].limit = -1
     ast.WRC_CONTINUE
@@ -2439,11 +2435,11 @@ resolve_from_term_to_cte: fn(p: &cg.Parse, a: &ast.AST, si: Int) -[DB]> Int Neve
     }
     a.items[si].tab = tb
     p.db.tables[tb].name = name.copy()
-    p.db.tables[tb].tab_flags = p.db.tables[tb].tab_flags.bit_or(ast.TF_EPHEMERAL.bit_or(ast.TF_NO_VISIBLE_ROWID))
+    p.db.tables[tb].tab_flags = p.db.tables[tb].tab_flags | (ast.TF_EPHEMERAL | ast.TF_NO_VISIBLE_ROWID)
     sel: ast.select_dup(a, a.ctes[cte].select, 0)
     a.items[si].select = sel
     if p.db.malloc_failed -> return 2
-    a.selects[sel].sel_flags = a.selects[sel].sel_flags.bit_or(ast.SF_COPY_CTE)
+    a.selects[sel].sel_flags = a.selects[sel].sel_flags | ast.SF_COPY_CTE
     if a.items[si].is_indexed_by {
         ast.error(a, "no such index: \"{ast.text(a.items[si].indexed_by ?? [U8]{})}\"")
         return 2
@@ -2463,11 +2459,11 @@ resolve_from_term_to_cte: fn(p: &cg.Parse, a: &ast.AST, si: Int) -[DB]> Int Neve
                 a.items[ri].tab = tb
                 ast.tab_ref(a, tb)
                 a.items[ri].is_recursive = true
-                if a.selects[rec_term].sel_flags.bit_and(ast.SF_RECURSIVE) != 0 {
+                if a.selects[rec_term].sel_flags & ast.SF_RECURSIVE != 0 {
                     ast.error(a, "multiple references to recursive table: {ast.text(name)}")
                     return 2
                 }
-                a.selects[rec_term].sel_flags = a.selects[rec_term].sel_flags.bit_or(ast.SF_RECURSIVE)
+                a.selects[rec_term].sel_flags = a.selects[rec_term].sel_flags | ast.SF_RECURSIVE
                 if i_rec_tab < 0 {
                     i_rec_tab = p.f.n_tab
                     p.f.n_tab += 1
@@ -2475,13 +2471,13 @@ resolve_from_term_to_cte: fn(p: &cg.Parse, a: &ast.AST, si: Int) -[DB]> Int Neve
                 a.items[ri].cursor = i_rec_tab
             }
         }
-        if a.selects[rec_term].sel_flags.bit_and(ast.SF_RECURSIVE) == 0 -> break
+        if a.selects[rec_term].sel_flags & ast.SF_RECURSIVE == 0 -> break
         rec_term = a.selects[rec_term].prior
     }
     a.ctes[cte].cte_err = Val("circular reference: ")
     saved_with: a.ctx.cur_with
     a.ctx.cur_with = with
-    if a.selects[sel].sel_flags.bit_and(ast.SF_RECURSIVE) != 0 {
+    if a.selects[sel].sel_flags & ast.SF_RECURSIVE != 0 {
         a.selects[rec_term].with_clause = a.selects[sel].with_clause
         rc: cg.pwalk_select(p, a, rec_term)
         a.selects[rec_term].with_clause = -1
@@ -2511,7 +2507,7 @@ resolve_from_term_to_cte: fn(p: &cg.Parse, a: &ast.AST, si: Int) -[DB]> Int Neve
     tcols: columns_from_expr_list(p, a, elist)
     p.db.tables[tb].cols = tcols
     if may_recursive {
-        if a.selects[sel].sel_flags.bit_and(ast.SF_RECURSIVE) != 0 {
+        if a.selects[sel].sel_flags & ast.SF_RECURSIVE != 0 {
             a.ctes[cte].cte_err = Val("multiple recursive references: ")
         } else { a.ctes[cte].cte_err = Val("recursive reference in a subquery: ") }
         _: cg.pwalk_select(p, a, sel)
@@ -2541,7 +2537,7 @@ expand_subquery: fn(p: &cg.Parse, a: &ast.AST, si: Int) -[DB]> Int Never! {
     loop a.selects[sel].prior >= 0 -> sel = a.selects[sel].prior
     cols: columns_from_expr_list(p, a, a.selects[sel].elist)
     p.db.tables[tb].cols = cols
-    p.db.tables[tb].tab_flags = p.db.tables[tb].tab_flags.bit_or(ast.TF_EPHEMERAL.bit_or(ast.TF_NO_VISIBLE_ROWID))
+    p.db.tables[tb].tab_flags = p.db.tables[tb].tab_flags | (ast.TF_EPHEMERAL | ast.TF_NO_VISIBLE_ROWID)
     if cg.n_err(a) != 0 -> base.ERROR else -> base.OK
 }
 
@@ -2572,16 +2568,16 @@ join_bytes: fn(parts: [[U8]], sep: U8) -> [U8] Never! {
 // The walk's e_code renumbers selId (a view's copy).
 select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
     sel_flags: a.selects[s].sel_flags
-    a.selects[s].sel_flags = sel_flags.bit_or(ast.SF_EXPANDED)
+    a.selects[s].sel_flags = sel_flags | ast.SF_EXPANDED
     if p.db.malloc_failed -> return ast.WRC_ABORT
-    if sel_flags.bit_and(ast.SF_EXPANDED) != 0 -> return ast.WRC_PRUNE
+    if sel_flags & ast.SF_EXPANDED != 0 -> return ast.WRC_PRUNE
     t: cg.walk_top(p)
     if p.walks[t].e_code != 0 {
         a.ctx.nselect += 1
         a.selects[s].sel_id = a.ctx.nselect
     }
     tab_list: a.selects[s].src
-    if a.ctx.cur_with >= 0 && sel_flags.bit_and(ast.SF_VIEW) != 0 {
+    if a.ctx.cur_with >= 0 && sel_flags & ast.SF_VIEW != 0 {
         if a.selects[s].with_clause < 0 {
             a.withs.push(ast.SQLWith{ctes: [Int]{}, bview: false, outer: -1})
             a.selects[s].with_clause = a.withs.len() - 1
@@ -2619,13 +2615,13 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                     g := p.up
                     if g.view_get_column_names(p, a, tb) != 0 -> return ast.WRC_ABORT
                     if p.db.tables[tb].tab_type == conn.TABTYP_VIEW {
-                        if p.db.flags.bit_and(conn.SQLITE_ENABLE_VIEW) == 0 && p.db.tables[tb].schema != p.db.dbs[1].schema {
+                        if p.db.flags & conn.SQLITE_ENABLE_VIEW == 0 && p.db.tables[tb].schema != p.db.dbs[1].schema {
                             ast.error(a, "access to view \"{ast.text(p.db.tables[tb].name)}\" prohibited")
                         }
                         vs: ast.select_dup(a, p.db.tables[tb].select, 0)
                         a.items[si].select = vs
                     } else if a.items[si].from_ddl && p.db.tables[tb].vtab >= 0 {
-                        trusted: if p.db.flags.bit_and(conn.SQLITE_TRUSTED_SCHEMA) != 0 -> 1 else -> 0
+                        trusted: if p.db.flags & conn.SQLITE_TRUSTED_SCHEMA != 0 -> 1 else -> 0
                         if p.db.vtables[p.db.tables[tb].vtab].e_vtab_risk > trusted {
                             ast.error(a, "unsafe use of virtual table \"{ast.text(p.db.tables[tb].name)}\"")
                         }
@@ -2651,18 +2647,18 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
         e: ast.list_expr(a, elist, k)
         if a.exprs[e].op == tk.TK_ASTERISK -> break
         if a.exprs[e].op == tk.TK_DOT && a.exprs[a.exprs[e].right].op == tk.TK_ASTERISK -> break
-        elist_flags = elist_flags.bit_or(a.exprs[e].flags)
+        elist_flags |= a.exprs[e].flags
         k += 1
     }
     if k < n_el {
         nw := -1
         flags: p.db.flags
-        long_names: flags.bit_and(conn.SQLITE_FULL_COL_NAMES) != 0 && flags.bit_and(conn.SQLITE_SHORT_COL_NAMES) == 0
-        nested: sel_flags.bit_and(ast.SF_NESTED_FROM) != 0
+        long_names: flags & conn.SQLITE_FULL_COL_NAMES != 0 && flags & conn.SQLITE_SHORT_COL_NAMES == 0
+        nested: sel_flags & ast.SF_NESTED_FROM != 0
         loop kk in 0..<n_el {
             item: a.lists[elist].items[kk].copy()
             e: item.expr
-            elist_flags = elist_flags.bit_or(a.exprs[e].flags)
+            elist_flags |= a.exprs[e].flags
             right: a.exprs[e].right
             if a.exprs[e].op != tk.TK_ASTERISK && (a.exprs[e].op != tk.TK_DOT || a.exprs[right].op != tk.TK_ASTERISK) {
                 // Not to expand: it moves to the new list.
@@ -2726,10 +2722,10 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                         if z_tname != None && nested_from >= 0 && rs.match_ename(a.lists[nested_from].items[j], None, z_tname, None, false) == 0 {
                             next
                         }
-                        if a.selects[s].sel_flags.bit_and(ast.SF_INCLUDE_HIDDEN) == 0 && is_hidden_column(col) {
+                        if a.selects[s].sel_flags & ast.SF_INCLUDE_HIDDEN == 0 && is_hidden_column(col) {
                             next
                         }
-                        if col.col_flags.bit_and(conn.COLFLAG_NOEXPAND) != 0 && z_tname == None && !nested {
+                        if col.col_flags & conn.COLFLAG_NOEXPAND != 0 && z_tname == None && !nested {
                             next
                         }
                     }
@@ -2740,7 +2736,7 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                     }
                     r: ast.expr_alloc(a, tk.TK_ID, Val(z_name), false)
                     pe := r
-                    if (n_src > 1 && (a.items[si].jointype.bit_and(ast.JT_LTORJ) == 0 || nested || !in_any_using_clause(a, z_name, tab_list, i, n_src - i - 1))) || ast.in_rename(a) {
+                    if (n_src > 1 && (a.items[si].jointype & ast.JT_LTORJ == 0 || nested || !in_any_using_clause(a, z_name, tab_list, i, n_src - i - 1))) || ast.in_rename(a) {
                         l: ast.expr_alloc(a, tk.TK_ID, Val(z_tab_name), false)
                         pe = ast.pexpr(a, tk.TK_DOT, l, r)
                         if ast.in_rename(a) && a.exprs[e].left >= 0 {
@@ -2763,7 +2759,7 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
                         a.lists[nw].items[last].eename = if j == n_col -> ast.ENAME_ROWID else -> ast.ENAME_TAB
                         in_using: a.items[si].is_using && ast.id_list_index(a, a.items[si].u3, z_name) >= 0
                         in_next_using: using >= 0 && ast.id_list_index(a, using, z_name) >= 0
-                        no_expand_col: j < n_col && p.db.tables[tb].cols[j].col_flags.bit_and(conn.COLFLAG_NOEXPAND) != 0
+                        no_expand_col: j < n_col && p.db.tables[tb].cols[j].col_flags & conn.COLFLAG_NOEXPAND != 0
                         if in_using || in_next_using || no_expand_col {
                             a.lists[nw].items[last].no_expand = true
                         }
@@ -2791,8 +2787,8 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
             ast.error(a, "too many columns in result set")
             return ast.WRC_ABORT
         }
-        if elist_flags.bit_and(ast.EP_HAS_FUNC.bit_or(ast.EP_SUBQUERY)) != 0 {
-            a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_COMPLEX_RESULT)
+        if elist_flags & (ast.EP_HAS_FUNC | ast.EP_SUBQUERY) != 0 {
+            a.selects[s].sel_flags = a.selects[s].sel_flags | ast.SF_COMPLEX_RESULT
         }
     }
     ast.WRC_CONTINUE
@@ -2860,15 +2856,15 @@ TypeInfoWalker: struct {
 // selectAddSubqueryTypeInfo: the column types of the FROM subqueries'
 // tables of s, once name resolution is done.
 select_add_subquery_type_info: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
-    if a.selects[s].sel_flags.bit_and(ast.SF_HAS_TYPE_INFO) != 0 {
+    if a.selects[s].sel_flags & ast.SF_HAS_TYPE_INFO != 0 {
         return
     }
-    a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_HAS_TYPE_INFO)
+    a.selects[s].sel_flags = a.selects[s].sel_flags | ast.SF_HAS_TYPE_INFO
     src: a.selects[s].src
     loop i in 0..<ast.src_len(a, src) {
         si: ast.src_item(a, src, i)
         tb: a.items[si].tab
-        if p.db.tables[tb].tab_flags.bit_and(ast.TF_EPHEMERAL) != 0 {
+        if p.db.tables[tb].tab_flags & ast.TF_EPHEMERAL != 0 {
             sel: a.items[si].select
             if sel >= 0 -> subquery_column_types(p, a, tb, sel, base.AFF_NONE)
         }
@@ -2881,7 +2877,7 @@ select_prep: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! 
     if p.db.malloc_failed {
         return
     }
-    if a.selects[s].sel_flags.bit_and(ast.SF_HAS_TYPE_INFO) != 0 {
+    if a.selects[s].sel_flags & ast.SF_HAS_TYPE_INFO != 0 {
         return
     }
     select_expand(p, a, s)
@@ -2904,7 +2900,7 @@ select_prep: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! 
 // analyzeAggFuncArgs: the columns the arguments (and ORDER BY and FILTER)
 // of the aggregate functions of AggInfo ai use, under NameContext nc.
 analyze_agg_func_args: fn(p: &cg.Parse, a: &ast.AST, ai: Int, nc: Int) -[DB]> Never! {
-    p.ncs[nc].nc_flags = p.ncs[nc].nc_flags.bit_or(ast.NC_IN_AGG_FUNC)
+    p.ncs[nc].nc_flags = p.ncs[nc].nc_flags | ast.NC_IN_AGG_FUNC
     loop i in 0..<p.aggs[ai].funcs.len() {
         e: p.aggs[ai].funcs[i].f_expr
         ex.expr_analyze_agg_list(p, a, nc, a.exprs[e].x)
@@ -2953,7 +2949,7 @@ IdxEprRefWalker: struct {
             a.exprs[e].op = tk.TK_AGG_COLUMN
             a.exprs[e].itable = col.itable
             a.exprs[e].icolumn = col.icolumn
-            ast.clear_flags(a, e, ast.EP_SKIP.bit_or(ast.EP_COLLATE).bit_or(ast.EP_UNLIKELY))
+            ast.clear_flags(a, e, ast.EP_SKIP | ast.EP_COLLATE | ast.EP_UNLIKELY)
             ast.WRC_PRUNE
         }
 
@@ -3069,7 +3065,7 @@ finalize_agg_functions: fn(p: &cg.Parse, a: &ast.AST, ai: Int) -[DB]> Never! {
             }
             _: cg.op3(p, opc.OP_AGG_STEP, 0, reg_agg, func_reg)
             cg.v_append_p4(p, conn.P4.FuncDef(f.func))
-            cg.v_change_p5(p, n_arg.bit_and(255))
+            cg.v_change_p5(p, n_arg & 255)
             _: cg.op2(p, opc.OP_NEXT, f.i_ob_tab, i_top + 1)
             cg.v_jump_here(p, i_top)
             cg.release_temp_range(p, reg_agg, n_arg)
@@ -3101,7 +3097,7 @@ update_accumulator: fn(p: &cg.Parse, a: &ast.AST, reg_acc: Int, ai: Int, e_disti
         reg_distinct := 0
         if ast.has(a, fe, ast.EP_WIN_FUNC) {
             filter: a.windows[a.exprs[fe].y].filter
-            if n_acc != 0 && f.func.flags.bit_and(conn.FUNC_NEEDCOLL) != 0 && reg_acc != 0 {
+            if n_acc != 0 && f.func.flags & conn.FUNC_NEEDCOLL != 0 && reg_acc != 0 {
                 if reg_hit == 0 {
                     p.f.n_mem += 1
                     reg_hit = p.f.n_mem
@@ -3156,7 +3152,7 @@ update_accumulator: fn(p: &cg.Parse, a: &ast.AST, reg_acc: Int, ai: Int, e_disti
             _: cg.op4_int(p, opc.OP_IDX_INSERT, f.i_ob_tab, reg_agg + reg_agg_sz - 1, reg_agg, reg_agg_sz - 1)
             cg.release_temp_range(p, reg_agg, reg_agg_sz)
         } else {
-            if f.func.flags.bit_and(conn.FUNC_NEEDCOLL) != 0 {
+            if f.func.flags & conn.FUNC_NEEDCOLL != 0 {
                 coll := -1
                 j := 0
                 loop coll < 0 && j < n_arg {
@@ -3173,7 +3169,7 @@ update_accumulator: fn(p: &cg.Parse, a: &ast.AST, reg_acc: Int, ai: Int, e_disti
             }
             _: cg.op3(p, opc.OP_AGG_STEP, 0, reg_agg, p.aggs[ai].i_first_reg + p.aggs[ai].cols.len() + i)
             cg.v_append_p4(p, conn.P4.FuncDef(f.func))
-            cg.v_change_p5(p, n_arg.bit_and(255))
+            cg.v_change_p5(p, n_arg & 255)
             cg.release_temp_range(p, reg_agg, n_arg)
         }
         if addr_next != 0 -> cg.v_resolve_label(p, addr_next)
@@ -3251,7 +3247,7 @@ having_to_where: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
 // tab_list) that is the same view as item this_si, or -1.
 is_self_join_view: fn(db: conn.Conn, a: ast.AST, tab_list: Int, this_si: Int, i_first: Int, i_end: Int) -> Int Never! {
     this_sel: a.items[this_si].select
-    if a.selects[this_sel].sel_flags.bit_and(ast.SF_PUSH_DOWN) != 0 -> return -1
+    if a.selects[this_sel].sel_flags & ast.SF_PUSH_DOWN != 0 -> return -1
     this_schema: db.tables[a.items[this_si].tab].schema
     loop k in i_first..<i_end {
         ki: ast.src_item(a, tab_list, k)
@@ -3262,7 +3258,7 @@ is_self_join_view: fn(db: conn.Conn, a: ast.AST, tab_list: Int, this_si: Int, i_
         if util.str_icmp_opt(a.items[ki].name, a.items[this_si].name) != 0 -> next
         // The flattener left two CTE tables of the one name.
         if schema < 0 && a.selects[this_sel].sel_id != a.selects[s1].sel_id -> next
-        if a.selects[s1].sel_flags.bit_and(ast.SF_PUSH_DOWN) != 0 -> next
+        if a.selects[s1].sel_flags & ast.SF_PUSH_DOWN != 0 -> next
         return ki
     }
     -1
@@ -3272,7 +3268,7 @@ is_self_join_view: fn(db: conn.Conn, a: ast.AST, tab_list: Int, this_si: Int, i_
 // becomes "SELECT (SELECT count(*) FROM a) + (SELECT count(*) FROM b) ..";
 // whether it did.
 count_of_view_optimization: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Bool Never! {
-    if a.selects[s].sel_flags.bit_and(ast.SF_AGGREGATE) == 0 -> return false
+    if a.selects[s].sel_flags & ast.SF_AGGREGATE == 0 -> return false
     elist: a.selects[s].elist
     if ast.list_len(a, elist) != 1 -> return false
     if a.selects[s].where_expr >= 0 || a.selects[s].having >= 0 || a.selects[s].group_by >= 0 || a.selects[s].order_by >= 0 {
@@ -3289,12 +3285,12 @@ count_of_view_optimization: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Bool Never!
     sub0: a.items[si].select
     if sub0 < 0 -> return false
     if a.selects[sub0].prior < 0 -> return false
-    if a.selects[sub0].sel_flags.bit_and(ast.SF_COPY_CTE) != 0 -> return false
+    if a.selects[sub0].sel_flags & ast.SF_COPY_CTE != 0 -> return false
     sub := sub0
     loop sub >= 0 {
         if a.selects[sub].op != tk.TK_ALL && a.selects[sub].prior >= 0 -> return false
         if a.selects[sub].where_expr >= 0 || a.selects[sub].limit >= 0 -> return false
-        if a.selects[sub].sel_flags.bit_and(ast.SF_AGGREGATE) != 0 -> return false
+        if a.selects[sub].sel_flags & ast.SF_AGGREGATE != 0 -> return false
         sub = a.selects[sub].prior
     }
     a.items[si].select = -1
@@ -3306,7 +3302,7 @@ count_of_view_optimization: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Bool Never!
         prior: a.selects[sub].prior
         a.selects[sub].prior = -1
         a.selects[sub].next_sel = -1
-        a.selects[sub].sel_flags = util.clear_bits(a.selects[sub].sel_flags.bit_or(ast.SF_AGGREGATE), ast.SF_COMPOUND)
+        a.selects[sub].sel_flags = util.clear_bits(a.selects[sub].sel_flags | ast.SF_AGGREGATE, ast.SF_COMPOUND)
         a.selects[sub].nselect_row = 0
         term0: if prior >= 0 -> ast.expr_dup(a, count, 0) else -> count
         el: ast.expr_list_append(a, -1, term0)
@@ -3331,7 +3327,7 @@ same_src_alias: fn(a: ast.AST, si0: Int, src: Int) -> Bool Never! {
             return true
         }
         s1: a.items[si1].select
-        if s1 >= 0 && a.selects[s1].sel_flags.bit_and(ast.SF_NESTED_FROM) != 0 && same_src_alias(a, si0, a.selects[s1].src) {
+        if s1 >= 0 && a.selects[s1].sel_flags & ast.SF_NESTED_FROM != 0 && same_src_alias(a, si0, a.selects[s1].src) {
             return true
         }
     }
@@ -3347,21 +3343,21 @@ from_clause_term_can_be_coroutine: fn(p: cg.Parse, a: ast.AST, tab_list: Int, i0
         if cu.m10d == ast.M10D_YES -> return false
         if cu.nuse >= 2 && cu.m10d != ast.M10D_NO -> return false
     }
-    if a.items[ast.src_item(a, tab_list, 0)].jointype.bit_and(ast.JT_LTORJ) != 0 -> return false
+    if a.items[ast.src_item(a, tab_list, 0)].jointype & ast.JT_LTORJ != 0 -> return false
     if cg.opt_disabled(p, cg.OPT_COROUTINES) -> return false
     n_src: ast.src_len(a, tab_list)
     if is_self_join_view(p.db, a, tab_list, si, i0 + 1, n_src) >= 0 -> return false
     if i0 == 0 {
         if n_src == 1 -> return true
-        if a.items[ast.src_item(a, tab_list, 1)].jointype.bit_and(ast.JT_CROSS) != 0 -> return true
-        if sel_flags.bit_and(ast.SF_UPDATE_FROM) != 0 -> return false
+        if a.items[ast.src_item(a, tab_list, 1)].jointype & ast.JT_CROSS != 0 -> return true
+        if sel_flags & ast.SF_UPDATE_FROM != 0 -> return false
         return true
     }
-    if sel_flags.bit_and(ast.SF_UPDATE_FROM) != 0 -> return false
+    if sel_flags & ast.SF_UPDATE_FROM != 0 -> return false
     i := i0
     loop {
         ti: ast.src_item(a, tab_list, i)
-        if a.items[ti].jointype.bit_and(ast.JT_OUTER.bit_or(ast.JT_CROSS)) != 0 -> return false
+        if a.items[ti].jointype & (ast.JT_OUTER | ast.JT_CROSS) != 0 -> return false
         if i == 0 -> break
         i -= 1
         if a.items[ast.src_item(a, tab_list, i)].select >= 0 -> return false
@@ -3383,22 +3379,22 @@ simplify_join: fn(a: &ast.AST, s: Int, i: Int) Never! {
     w: a.selects[s].where_expr
     si: ast.src_item(a, tab_list, i)
     jt: a.items[si].jointype
-    if jt.bit_and(ast.JT_LEFT) != 0 {
-        if jt.bit_and(ast.JT_RIGHT) != 0 -> a.items[si].jointype = util.clear_bits(jt, ast.JT_LEFT) else {
-            a.items[si].jointype = util.clear_bits(jt, ast.JT_LEFT.bit_or(ast.JT_OUTER))
+    if jt & ast.JT_LEFT != 0 {
+        if jt & ast.JT_RIGHT != 0 -> a.items[si].jointype = util.clear_bits(jt, ast.JT_LEFT) else {
+            a.items[si].jointype = util.clear_bits(jt, ast.JT_LEFT | ast.JT_OUTER)
             unset_join_expr(a, w, a.items[si].cursor, false)
         }
     }
-    if jt.bit_and(ast.JT_LTORJ) == 0 {
+    if jt & ast.JT_LTORJ == 0 {
         return
     }
     n: ast.src_len(a, tab_list)
     loop j in (i + 1)..<n {
         sj: ast.src_item(a, tab_list, j)
         jj: a.items[sj].jointype
-        if jj.bit_and(ast.JT_RIGHT) == 0 -> next
-        if jj.bit_and(ast.JT_LEFT) != 0 -> a.items[sj].jointype = util.clear_bits(jj, ast.JT_RIGHT) else {
-            a.items[sj].jointype = util.clear_bits(jj, ast.JT_RIGHT.bit_or(ast.JT_OUTER))
+        if jj & ast.JT_RIGHT == 0 -> next
+        if jj & ast.JT_LEFT != 0 -> a.items[sj].jointype = util.clear_bits(jj, ast.JT_RIGHT) else {
+            a.items[sj].jointype = util.clear_bits(jj, ast.JT_RIGHT | ast.JT_OUTER)
             unset_join_expr(a, w, a.items[sj].cursor, true)
         }
     }
@@ -3406,7 +3402,7 @@ simplify_join: fn(a: &ast.AST, s: Int, i: Int) Never! {
     loop j >= 0 {
         sj: ast.src_item(a, tab_list, j)
         a.items[sj].jointype = util.clear_bits(a.items[sj].jointype, ast.JT_LTORJ)
-        if a.items[sj].jointype.bit_and(ast.JT_RIGHT) != 0 -> break
+        if a.items[sj].jointype & ast.JT_RIGHT != 0 -> break
         j -= 1
     }
 }
@@ -3419,10 +3415,10 @@ simplify_from_term: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, is_agg: Bool, 
     tab_list: a.selects[s].src
     si: ast.src_item(a, tab_list, i)
     jt: a.items[si].jointype
-    if jt.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ)) != 0 {
+    if jt & (ast.JT_LEFT | ast.JT_LTORJ) != 0 {
         cursor: a.items[si].cursor
         w: a.selects[s].where_expr
-        non_null: ex.expr_implies_non_null_row(p, a, w, cursor, jt.bit_and(ast.JT_LTORJ) != 0)
+        non_null: ex.expr_implies_non_null_row(p, a, w, cursor, jt & ast.JT_LTORJ != 0)
         if non_null && cg.opt_enabled(p, cg.OPT_SIMPLIFY_JOIN) -> simplify_join(a, s, i)
     }
     sub: a.items[si].select
@@ -3435,14 +3431,14 @@ simplify_from_term: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, is_agg: Bool, 
         return 0 - 1
     }
     if a.items[si].is_cte && a.cte_uses[a.items[si].u2].m10d == ast.M10D_YES -> return i + 1
-    if a.selects[sub].sel_flags.bit_and(ast.SF_AGGREGATE) != 0 -> return i + 1
+    if a.selects[sub].sel_flags & ast.SF_AGGREGATE != 0 -> return i + 1
     sel_flags: a.selects[s].sel_flags
     n_src: ast.src_len(a, tab_list)
-    if a.selects[sub].order_by >= 0 && (a.selects[s].order_by >= 0 || n_src > 1) && a.selects[sub].limit < 0 && a.selects[sub].sel_flags.bit_and(ast.SF_ORDER_BY_REQD) == 0 && sel_flags.bit_and(ast.SF_ORDER_BY_REQD) == 0 && cg.opt_enabled(p, cg.OPT_OMIT_ORDER_BY) {
+    if a.selects[sub].order_by >= 0 && (a.selects[s].order_by >= 0 || n_src > 1) && a.selects[sub].limit < 0 && a.selects[sub].sel_flags & ast.SF_ORDER_BY_REQD == 0 && sel_flags & ast.SF_ORDER_BY_REQD == 0 && cg.opt_enabled(p, cg.OPT_OMIT_ORDER_BY) {
         a.selects[sub].order_by = -1
     }
-    if a.selects[sub].order_by >= 0 && i == 0 && sel_flags.bit_and(ast.SF_COMPLEX_RESULT) != 0 {
-        if n_src == 1 || a.items[ast.src_item(a, tab_list, 1)].jointype.bit_and(ast.JT_OUTER.bit_or(ast.JT_CROSS)) != 0 {
+    if a.selects[sub].order_by >= 0 && i == 0 && sel_flags & ast.SF_COMPLEX_RESULT != 0 {
+        if n_src == 1 || a.items[ast.src_item(a, tab_list, 1)].jointype & (ast.JT_OUTER | ast.JT_CROSS) != 0 {
             return i + 1
         }
     }
@@ -3576,7 +3572,7 @@ select_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, sor
             e0: ast.expr_dup(a, arg0, 0)
             d0: ast.expr_list_dup(a, group_by, 0)
             p_distinct = ast.expr_list_append(a, d0, e0)
-            if p_distinct >= 0 -> dist_flag = cg.WHERE_WANT_DISTINCT.bit_or(cg.WHERE_AGG_DISTINCT)
+            if p_distinct >= 0 -> dist_flag = cg.WHERE_WANT_DISTINCT | cg.WHERE_AGG_DISTINCT
         }
     }
     p.aggs[ai].sorting_idx = p.f.n_tab
@@ -3599,7 +3595,7 @@ select_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, sor
     _: cg.op2(p, opc.OP_GOSUB, reg_reset, addr_reset)
     by: if distinct.is_tnct == 2 -> cg.WHERE_DISTINCTBY else -> cg.WHERE_GROUPBY
     grp: if order_by_grp -> cg.WHERE_SORTBYGROUP else -> 0
-    wr := wh.where_begin(p, a, tab_list, where_e, group_by, p_distinct, s, by.bit_or(grp).bit_or(dist_flag), 0)
+    wr := wh.where_begin(p, a, tab_list, where_e, group_by, p_distinct, s, by | grp | dist_flag, 0)
     if wr == .Val(wi0) {
         wi := wi0
         if p.f.idx_epr >= 0 -> optimize_aggregate_use_of_indexed_expr(p, a, s, ai, nc)
@@ -3610,7 +3606,7 @@ select_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, sor
         sort_out := 0
         if wh.where_is_ordered(wi) != n_gb {
             if a.ctx.explain == 2 {
-                what: if distinct.is_tnct != 0 && a.selects[s].sel_flags.bit_and(ast.SF_DISTINCT) == 0 -> "DISTINCT" else -> "GROUP BY"
+                what: if distinct.is_tnct != 0 && a.selects[s].sel_flags & ast.SF_DISTINCT == 0 -> "DISTINCT" else -> "GROUP BY"
                 _: cg.explain(p, a, false, "USE TEMP B-TREE FOR {what}")
             }
             group_by_sort = true
@@ -3748,7 +3744,7 @@ select_agg_no_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDe
             i := 0
             loop i < n_func {
                 fe: p.aggs[ai].funcs[i].f_expr
-                if !ast.has(a, fe, ast.EP_WIN_FUNC) && p.aggs[ai].funcs[i].func.flags.bit_and(conn.FUNC_NEEDCOLL) != 0 {
+                if !ast.has(a, fe, ast.EP_WIN_FUNC) && p.aggs[ai].funcs[i].func.flags & conn.FUNC_NEEDCOLL != 0 {
                     break
                 }
                 i += 1
@@ -3760,11 +3756,11 @@ select_agg_no_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDe
             }
         } else if n_func == 1 && p.aggs[ai].funcs[0].i_distinct >= 0 {
             p_distinct = a.exprs[p.aggs[ai].funcs[0].f_expr].x
-            if p_distinct >= 0 -> dist_flag = cg.WHERE_WANT_DISTINCT.bit_or(cg.WHERE_AGG_DISTINCT)
+            if p_distinct >= 0 -> dist_flag = cg.WHERE_WANT_DISTINCT | cg.WHERE_AGG_DISTINCT
         }
         assign_aggregate_registers(p, ai)
         reset_accumulator(p, a, ai)
-        wr := wh.where_begin(p, a, tab_list, where_e, min_max_ob, p_distinct, s, min_max_flag.bit_or(dist_flag), 0)
+        wr := wh.where_begin(p, a, tab_list, where_e, min_max_ob, p_distinct, s, min_max_flag | dist_flag, 0)
         if wr == .Val(wi0) {
             wi := wi0
             e_dist: wh.where_is_distinct(wi)
@@ -3802,7 +3798,7 @@ select_aggregate: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, so
         ob: sort.order_by
         if ob >= 0 && n_gb == ast.list_len(a, ob) {
             loop ii in 0..<n_gb {
-                a.lists[group_by].items[ii].sort_flags = a.lists[ob].items[ii].sort_flags.bit_and(base.KEYINFO_ORDER_DESC)
+                a.lists[group_by].items[ii].sort_flags = a.lists[ob].items[ii].sort_flags & base.KEYINFO_ORDER_DESC
             }
             if ast.expr_list_compare(a, group_by, ob, -1) == 0 -> order_by_grp = true
         }
@@ -3850,7 +3846,7 @@ select_aggregate: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, so
 // The body of sqlite3Select after sqlite3SelectPrep: its result code, and
 // whether the caller pops the EXPLAIN QUERY PLAN level (see above).
 select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> (rc: Int, pop: Bool) Never! {
-    if a.selects[s].sel_flags.bit_and(ast.SF_UF_SRC_CHECK) != 0 {
+    if a.selects[s].sel_flags & ast.SF_UF_SRC_CHECK != 0 {
         src: a.selects[s].src
         p0: ast.src_item(a, src, 0)
         if same_src_alias(a, p0, src) {
@@ -3862,7 +3858,7 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
     }
     if dest.e_dest == cg.SRT_OUTPUT -> generate_column_names(p, a, s)
     if wn.window_rewrite(p, a, s) != 0 -> return (rc: 1, pop: true)
-    is_agg: a.selects[s].sel_flags.bit_and(ast.SF_AGGREGATE) != 0
+    is_agg: a.selects[s].sel_flags & ast.SF_AGGREGATE != 0
     sort := no_sort()
     sort.order_by = a.selects[s].order_by
     if a.selects[s].prior < 0 {
@@ -3880,17 +3876,17 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
     if w0 >= 0 && a.exprs[w0].op == tk.TK_AND && cg.opt_enabled(p, cg.OPT_PROPAGATE_CONST) {
         _: propagate_constants(p, a, s)
     }
-    if cg.opt_enabled(p, cg.OPT_QUERY_FLATTENER.bit_or(cg.OPT_COUNT_OF_VIEW)) && count_of_view_optimization(p, a, s) {
+    if cg.opt_enabled(p, cg.OPT_QUERY_FLATTENER | cg.OPT_COUNT_OF_VIEW) && count_of_view_optimization(p, a, s) {
         if p.db.malloc_failed -> return (rc: 1, pop: true)
     }
     if code_from_subqueries(p, a, s) -> return (rc: 1, pop: true)
     tab_list: a.selects[s].src
     elist: a.selects[s].elist
     distinct := no_distinct()
-    if a.selects[s].sel_flags.bit_and(ast.SF_DISTINCT) != 0 -> distinct.is_tnct = 1
+    if a.selects[s].sel_flags & ast.SF_DISTINCT != 0 -> distinct.is_tnct = 1
     sf: a.selects[s].sel_flags
-    if sf.bit_and(ast.SF_DISTINCT.bit_or(ast.SF_AGGREGATE)) == ast.SF_DISTINCT && ast.expr_list_compare(a, sort.order_by, elist, -1) == 0 && a.selects[s].win < 0 {
-        a.selects[s].sel_flags = util.clear_bits(sf, ast.SF_DISTINCT).bit_or(ast.SF_AGGREGATE)
+    if sf & (ast.SF_DISTINCT | ast.SF_AGGREGATE) == ast.SF_DISTINCT && ast.expr_list_compare(a, sort.order_by, elist, -1) == 0 && a.selects[s].win < 0 {
+        a.selects[s].sel_flags = util.clear_bits(sf, ast.SF_DISTINCT) | ast.SF_AGGREGATE
         a.selects[s].group_by = ast.expr_list_dup(a, elist, 0)
         distinct.is_tnct = 2
     }
@@ -3903,7 +3899,7 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
     } else { sort.addr_sort_index = -1 }
     if dest.e_dest == cg.SRT_EPHEM_TAB {
         _: cg.op2(p, opc.OP_OPEN_EPHEMERAL, dest.i_sd_parm, n_elist)
-        if a.selects[s].sel_flags.bit_and(ast.SF_NESTED_FROM) != 0 {
+        if a.selects[s].sel_flags & ast.SF_NESTED_FROM != 0 {
             ii := n_elist - 1
             loop ii > 0 && !a.lists[elist].items[ii].used {
                 ast.expr_delete(a, a.lists[elist].items[ii].expr)
@@ -3918,13 +3914,13 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
         }
     }
     i_end: cg.v_make_label(p)
-    if a.selects[s].sel_flags.bit_and(ast.SF_FIXED_LIMIT) == 0 -> a.selects[s].nselect_row = 320
+    if a.selects[s].sel_flags & ast.SF_FIXED_LIMIT == 0 -> a.selects[s].nselect_row = 320
     if a.selects[s].limit >= 0 -> compute_limit_registers(p, a, s, i_end)
     if a.selects[s].ilimit == 0 && sort.addr_sort_index >= 0 {
         cg.v_change_opcode(p, sort.addr_sort_index, opc.OP_SORTER_OPEN)
-        sort.sort_flags = sort.sort_flags.bit_or(SORTFLAG_USE_SORTER)
+        sort.sort_flags |= SORTFLAG_USE_SORTER
     }
-    if a.selects[s].sel_flags.bit_and(ast.SF_DISTINCT) != 0 {
+    if a.selects[s].sel_flags & ast.SF_DISTINCT != 0 {
         distinct.tab_tnct = p.f.n_tab
         p.f.n_tab += 1
         ki: wn.key_info_from_expr_list(p, a, a.selects[s].elist, 0, 0)
@@ -3933,7 +3929,7 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
         distinct.e_tnct_type = cg.WHERE_DISTINCT_UNORDERED
     } else { distinct.e_tnct_type = cg.WHERE_DISTINCT_NOOP }
     if !is_agg && a.selects[s].group_by < 0 {
-        wctrl: (if distinct.is_tnct != 0 -> cg.WHERE_WANT_DISTINCT else -> 0).bit_or(a.selects[s].sel_flags.bit_and(ast.SF_FIXED_LIMIT))
+        wctrl: (if distinct.is_tnct != 0 -> cg.WHERE_WANT_DISTINCT else -> 0) | a.selects[s].sel_flags & ast.SF_FIXED_LIMIT
         win: a.selects[s].win
         if win >= 0 -> wn.window_code_init(p, a, s)
         wr := wh.where_begin(p, a, tab_list, a.selects[s].where_expr, sort.order_by, a.selects[s].elist, s, wctrl, a.selects[s].nselect_row)
@@ -3994,7 +3990,7 @@ select: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int N
     if cg.auth_check(p, a, conn.AUTH_SELECT, None, None, None) != 0 -> return 1
     if dest.e_dest <= cg.SRT_DIST_QUEUE {
         a.selects[s].order_by = -1
-        a.selects[s].sel_flags = util.clear_bits(a.selects[s].sel_flags, ast.SF_DISTINCT).bit_or(ast.SF_NOOP_ORDER_BY)
+        a.selects[s].sel_flags = util.clear_bits(a.selects[s].sel_flags, ast.SF_DISTINCT) | ast.SF_NOOP_ORDER_BY
     }
     select_prep(p, a, s, -1)
     if cg.n_err(a) != 0 {
@@ -4054,7 +4050,7 @@ select_test_one: fn(a: &ast.AST) -> Int Never! {
     s: ast.select_new(a, -1, src, -1, -1, -1, -1, 0, -1)
     si: ast.src_item(a, src, 1)
     a.items[si].cursor = 1
-    a.items[si].jointype = ast.JT_LEFT.bit_or(ast.JT_OUTER)
+    a.items[si].jointype = ast.JT_LEFT | ast.JT_OUTER
     col: ast.expr(a, tk.TK_COLUMN, [U8]{})
     a.exprs[col].itable = 1
     ast.set_flags(a, col, ast.EP_OUTER_ON)
@@ -4063,9 +4059,9 @@ select_test_one: fn(a: &ast.AST) -> Int Never! {
     simplify_join(a, s, 1)
     assert(a.items[si].jointype == 0)
     assert(!ast.has(a, col, ast.EP_OUTER_ON) && ast.has(a, col, ast.EP_INNER_ON))
-    a.items[si].jointype = ast.JT_LEFT.bit_or(ast.JT_RIGHT).bit_or(ast.JT_OUTER)
+    a.items[si].jointype = ast.JT_LEFT | ast.JT_RIGHT | ast.JT_OUTER
     simplify_join(a, s, 1)
-    assert(a.items[si].jointype == ast.JT_RIGHT.bit_or(ast.JT_OUTER))
+    assert(a.items[si].jointype == ast.JT_RIGHT | ast.JT_OUTER)
 }
 
 #Test("SELECT 1 codes one result row") {
@@ -4085,10 +4081,10 @@ select_test_one: fn(a: &ast.AST) -> Int Never! {
     s: select_test_one(a)
     two: ast.expr(a, tk.TK_INTEGER, "2".bytes())
     a.selects[s].order_by = ast.expr_list_append(a, -1, two)
-    a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_DISTINCT)
+    a.selects[s].sel_flags = a.selects[s].sel_flags | ast.SF_DISTINCT
     d := ex.select_dest_init(cg.SRT_DISCARD, 0)
     assert(select(p, a, s, d) == 0)
     assert(a.selects[s].order_by < 0)
-    assert(a.selects[s].sel_flags.bit_and(ast.SF_DISTINCT) == 0 && a.selects[s].sel_flags.bit_and(ast.SF_NOOP_ORDER_BY) != 0)
+    assert(a.selects[s].sel_flags & ast.SF_DISTINCT == 0 && a.selects[s].sel_flags & ast.SF_NOOP_ORDER_BY != 0)
     assert(!select_test_has_op(p, opc.OP_OPEN_EPHEMERAL) && !select_test_has_op(p, opc.OP_RESULT_ROW))
 }

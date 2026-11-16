@@ -61,10 +61,10 @@ lsp_definition_class: fn(kind: SemKind) -> LSPNameClass Never! {
         .Module -> LSPNameClass{kind: LSP_TOKEN_NAMESPACE, modifiers: LSP_MODIFIER_DECLARATION}
         .Function(_) -> LSPNameClass{kind: LSP_TOKEN_FUNCTION, modifiers: LSP_MODIFIER_DECLARATION}
         .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) -> LSPNameClass{kind: LSP_TOKEN_TYPE, modifiers: LSP_MODIFIER_DECLARATION}
-        .Const -> LSPNameClass{kind: LSP_TOKEN_VARIABLE, modifiers: LSP_MODIFIER_DECLARATION.bit_or(LSP_MODIFIER_READONLY)}
+        .Const -> LSPNameClass{kind: LSP_TOKEN_VARIABLE, modifiers: LSP_MODIFIER_DECLARATION | LSP_MODIFIER_READONLY}
         .EnumVariant(_) -> LSPNameClass{kind: LSP_TOKEN_ENUM_MEMBER, modifiers: LSP_MODIFIER_DECLARATION}
         .Field(_, _) -> LSPNameClass{kind: LSP_TOKEN_PROPERTY, modifiers: LSP_MODIFIER_DECLARATION}
-        .Local(mutable, _) -> LSPNameClass{kind: LSP_TOKEN_VARIABLE, modifiers: if mutable -> LSP_MODIFIER_DECLARATION else -> LSP_MODIFIER_DECLARATION.bit_or(LSP_MODIFIER_READONLY)}
+        .Local(mutable, _) -> LSPNameClass{kind: LSP_TOKEN_VARIABLE, modifiers: if mutable -> LSP_MODIFIER_DECLARATION else -> LSP_MODIFIER_DECLARATION | LSP_MODIFIER_READONLY}
         .Param(_) -> LSPNameClass{kind: LSP_TOKEN_PARAMETER, modifiers: LSP_MODIFIER_DECLARATION}
     }
 }

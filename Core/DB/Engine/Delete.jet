@@ -60,7 +60,7 @@ code_change_count: fn(p: &cg.Parse, reg: Int, name: String) Never! {
 // sqlite3ReadOnlyShadowTables (build.c): whether shadow tables are
 // read-only, as they are in defensive mode for a top-level statement.
 read_only_shadow_tables: fn(db: conn.Conn) -> Bool Never! {
-    db.flags.bit_and(btree.SQLITE_DEFENSIVE) != 0 && db.n_vdbe_exec == 0 && !db.vtab_in_sync
+    db.flags & btree.SQLITE_DEFENSIVE != 0 && db.n_vdbe_exec == 0 && !db.vtab_in_sync
 }
 
 // tabIsReadOnly: a virtual table (this build has no module with xUpdate),
@@ -69,10 +69,8 @@ read_only_shadow_tables: fn(db: conn.Conn) -> Bool Never! {
 tab_is_read_only: fn(p: &cg.Parse, a: &ast.AST, t: Int) -> Bool Never! {
     if ex.is_virtual(p.db, t) -> return true
     flags: p.db.tables[t].tab_flags
-    if flags.bit_and(ast.TF_READONLY.bit_or(ast.TF_SHADOW)) == 0 -> return false
-    if flags.bit_and(ast.TF_READONLY) != 0 {
-        return !cat.conn_writable_schema(p.db) && a.ctx.nested == 0
-    }
+    if flags & (ast.TF_READONLY | ast.TF_SHADOW) == 0 -> return false
+    if flags & ast.TF_READONLY != 0 -> return !cat.conn_writable_schema(p.db) && a.ctx.nested == 0
     read_only_shadow_tables(p.db)
 }
 
@@ -280,7 +278,7 @@ delete_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) -[DB]> Nev
 
     // The counter of the rows deleted, when counting rows.
     mem_cnt := 0
-    if p.db.flags.bit_and(conn.SQLITE_COUNT_ROWS) != 0 && a.ctx.nested == 0 && p.f.trigger_tab < 0 && !p.f.b_returning {
+    if p.db.flags & conn.SQLITE_COUNT_ROWS != 0 && a.ctx.nested == 0 && p.f.trigger_tab < 0 && !p.f.b_returning {
         p.f.n_mem += 1
         mem_cnt = p.f.n_mem
         _: cg.op2(p, opc.OP_INTEGER, 0, mem_cnt)
@@ -302,9 +300,9 @@ delete_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) -[DB]> Nev
             jx = p.db.indexes[jx].next
         }
     } else {
-        wcf := cg.WHERE_ONEPASS_DESIRED.bit_or(cg.WHERE_DUPLICATES_OK)
-        if nc_flags.bit_and(ast.NC_SUBQUERY) != 0 -> b_complex = true
-        if !b_complex -> wcf = wcf.bit_or(cg.WHERE_ONEPASS_MULTIROW)
+        wcf := cg.WHERE_ONEPASS_DESIRED | cg.WHERE_DUPLICATES_OK
+        if nc_flags & ast.NC_SUBQUERY != 0 -> b_complex = true
+        if !b_complex -> wcf |= cg.WHERE_ONEPASS_MULTIROW
         pk := -1
         i_pk := 0
         n_pk := 1

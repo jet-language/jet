@@ -168,7 +168,7 @@ ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
         start: if end - 9 > first -> end - 9 else -> first
         limb := 0
         loop at in start..<end -> limb = limb * 10 + bytes[at] - 48
-        loop shift in 0..<4 -> limbs.push(U8{(limb >> (8 * shift)).bit_and(255)})
+        loop shift in 0..<4 -> limbs.push(U8{(limb >> (8 * shift)) & 255})
         count += 1
         end = start
     }
@@ -179,7 +179,7 @@ ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
     words: [Int]{4611686018427387904, 0, if negative -> 1 else -> 0, 0, count, count}
     carrier := [U8]{}
     loop word in words {
-        loop shift in 0..<8 -> carrier.push(U8{(word >> (8 * shift)).bit_and(255)})
+        loop shift in 0..<8 -> carrier.push(U8{(word >> (8 * shift)) & 255})
     }
     carrier_row: tables.data.len()
     tables.lengths.push(48)
@@ -603,7 +603,7 @@ ir_x64_text_header: fn(tables: &IRX64Tables, row: Int) -> Int Never! {
     loop _ in 0..<24 -> bytes.push(U8{0})
     length := tables.lengths[row]
     loop index in 0..<8 {
-        bytes[8 + index] = U8{length.bit_and(255)}
+        bytes[8 + index] = U8{length & 255}
         length = length >> 8
     }
     tables.data.push(X64Data{id: X64DataID{value: header}, bytes: bytes, align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: row}, addend: 0}}})

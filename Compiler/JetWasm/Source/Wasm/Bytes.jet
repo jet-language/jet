@@ -86,9 +86,9 @@ WasmReader: struct {
         shift := 0
         loop shift < bits {
             b: self.byte() ?? return Err(WasmError.new("unexpected end of LEB128 integer", start))
-            result = result.bit_or((b.bit_and(0x7f)) << shift)
+            result |= (b & 0x7f) << shift
             shift += 7
-            if b.bit_and(0x80) == 0 {
+            if b & 0x80 == 0 {
                 if result >= (1 << bits) -> return Err(WasmError.new("integer too large", start))
                 return Ok(result)
             }
@@ -103,10 +103,10 @@ WasmReader: struct {
         shift := 0
         loop shift < bits {
             b: self.byte() ?? return Err(WasmError.new("unexpected end of LEB128 integer", start))
-            result = result.bit_or((b.bit_and(0x7f)) << shift)
+            result |= (b & 0x7f) << shift
             shift += 7
-            if b.bit_and(0x80) == 0 {
-                if b.bit_and(0x40) != 0 -> result -= 1 << shift
+            if b & 0x80 == 0 {
+                if b & 0x40 != 0 -> result -= 1 << shift
                 low: 0 - (1 << (bits - 1))
                 high: 1 << (bits - 1)
                 if result < low || result >= high {
@@ -126,7 +126,7 @@ WasmReader: struct {
             return Err(WasmError.new("unexpected end of fixed-width value", self.at))
         }
         value := 0
-        loop k in 0..<count -> value = value.bit_or(Int{self.bytes[self.at + k]} << (8 * k))
+        loop k in 0..<count -> value |= Int{self.bytes[self.at + k]} << (8 * k)
         self.at += count
         Ok(value)
     }
@@ -153,10 +153,10 @@ wasm_put_unsigned: fn(out: &[U8], value: Int) Never! {
     rest := value
     more := true
     loop more {
-        b: rest.bit_and(0x7f)
+        b: rest & 0x7f
         rest >>= 7
         more = rest != 0
-        out.push(U8{if more -> b.bit_or(0x80) else -> b})
+        out.push(U8{if more -> b | 0x80 else -> b})
     }
 }
 
@@ -164,14 +164,14 @@ wasm_put_signed: fn(out: &[U8], value: Int) Never! {
     rest := value
     more := true
     loop more {
-        b: rest.bit_and(0x7f)
+        b: rest & 0x7f
         rest >>= 7
-        more = !((rest == 0 && b.bit_and(0x40) == 0) || (rest == -1 && b.bit_and(0x40) != 0))
-        out.push(U8{if more -> b.bit_or(0x80) else -> b})
+        more = !((rest == 0 && b & 0x40 == 0) || (rest == -1 && b & 0x40 != 0))
+        out.push(U8{if more -> b | 0x80 else -> b})
     }
 }
 
 wasm_put_fixed: fn(out: &[U8], value: Int, count: Int) Never! {
     pattern: wasm_unsigned(value, 8 * count)
-    loop k in 0..<count -> out.push(U8{(pattern >> (8 * k)).bit_and(255)})
+    loop k in 0..<count -> out.push(U8{(pattern >> (8 * k)) & 255})
 }

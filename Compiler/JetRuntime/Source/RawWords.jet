@@ -101,7 +101,7 @@ RT_FILL_CHUNK: I64{16384}
             lane := I64{0}
             loop lane < (I64{8}) {
                 byte: os_load_u8(wrapping(source + lane % period))
-                word = word.bit_or(byte << (lane << I64{3}))
+                word |= byte << (lane << I64{3})
                 lane += I64{1}
             }
             words: total >> I64{3}
@@ -110,7 +110,7 @@ RT_FILL_CHUNK: I64{16384}
             at := words << I64{3}
             shift := I64{0}
             loop at < total {
-                os_store_u8(wrapping(target + at), (word >> shift).bit_and(I64{255}))
+                os_store_u8(wrapping(target + at), (word >> shift) & I64{255})
                 at += I64{1}
                 shift += I64{8}
             }
@@ -143,7 +143,7 @@ RT_FILL_STRING_FROM: I64{2048}
 #Export(c) priv jet_rt_mem_fill_bytes: fn(target: I64, value: I64, count: I64) {
     #Unsafe("native lowering owns count writable bytes at target; each leaf stores only inside its class's count") {
         // The byte in all eight lanes of a word.
-        word: wrapping(value.bit_and(I64{255}) * I64{72340172838076673})
+        word: wrapping((value & I64{255}) * I64{72340172838076673})
         if (count <= I64{16}) {
             if (count >= I64{8}) { os_fill_8_16_i64(target, word, count) } else if (count >= I64{4}) {
                 os_fill_4_7_i64(target, word, count)
@@ -155,7 +155,7 @@ RT_FILL_STRING_FROM: I64{2048}
         } else {
             os_fill_64_i64(target, word)
             last: wrapping(target + count - I64{64})
-            to := wrapping(target + I64{64}).bit_and(I64{-64})
+            to := wrapping(target + I64{64}) & I64{-64}
             loop to < last {
                 os_fill_64_i64(to, word)
                 to = wrapping(to + I64{64})

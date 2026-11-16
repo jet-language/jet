@@ -68,9 +68,7 @@ CLIRecordCursor: struct {
             return Err(RecordDecodeError.Malformed{why: "truncated payload"})
         }
         value := 0
-        loop index in 0..<4 {
-            value = value.bit_or((Int{self.bytes[self.at + index]} << (8 * index)))
-        }
+        loop index in 0..<4 -> value |= (Int{self.bytes[self.at + index]} << (8 * index))
         self.at += 4
         Ok(value)
     }
@@ -110,12 +108,12 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
     if record.len() < 46 || !cli_schema_bytes_start(record, CLI_SCHEMA_MAGIC) {
         return Err(RecordDecodeError.Malformed{why: "bad record header"})
     }
-    version: U16{Int{record[8]}.bit_or((Int{record[9]} << 8))}
+    version: U16{Int{record[8]} | (Int{record[9]} << 8)}
     if version != RECORD_VERSION {
         return Err(RecordDecodeError.UnsupportedVersion{version: version})
     }
     length := 0
-    loop index in 0..<4 -> length = length.bit_or((Int{record[10 + index]} << (8 * index)))
+    loop index in 0..<4 -> length |= (Int{record[10 + index]} << (8 * index))
     if length > CLI_SCHEMA_MAX_RECORD_BYTES || record.len() - 46 != length {
         return Err(RecordDecodeError.Malformed{why: "invalid record length"})
     }
@@ -329,7 +327,7 @@ cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact RecordDecodeError
 }
 
 cli_schema_put_u32: fn(out: &[U8], value: Int) Never! {
-    loop index in 0..<4 -> out.push(U8{(value >> (index * 8)).bit_and(255)})
+    loop index in 0..<4 -> out.push(U8{(value >> (index * 8)) & 255})
 }
 
 cli_schema_put_string: fn(out: &[U8], value: String) Never! {
@@ -473,7 +471,7 @@ encode_record: fn(schema: CLICommandSchema) -> [U8] Never! {
     record := [U8]{}
     record.try_reserve(46 + payload.len()) ?? panic("CLI metadata record allocation failed")
     record.extend(CLI_SCHEMA_MAGIC)
-    record.push(U8{Int{RECORD_VERSION}.bit_and(255)})
+    record.push(U8{Int{RECORD_VERSION} & 255})
     record.push(U8{Int{RECORD_VERSION} >> 8})
     cli_schema_put_u32(record, payload.len())
     record.extend(sha256_bytes(payload[0..<payload.len()]))

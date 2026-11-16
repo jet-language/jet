@@ -561,12 +561,12 @@ bitmap_text: fn(frame: ui.Frame, text: String, x: Int, y: Int, scale: Int, color
             bits: FONT5X7[glyph * 5 + column]
             row := 0
             loop row < 7 {
-                if (bits >> row).bit_and(1) == 0 {
+                if (bits >> row) & 1 == 0 {
                     row += 1
                     next
                 }
                 start: row
-                loop row < 7 && (bits >> row).bit_and(1) != 0 -> row += 1
+                loop row < 7 && (bits >> row) & 1 != 0 -> row += 1
                 frame.draw_rectangle(pen + column * scale, y + start * scale, scale, (row - start) * scale, color)
             }
         }

@@ -13,7 +13,7 @@ pick: fn(k: #Key U64, a: U64, b: U64) -> U64 { if k == (U64{1}) -> a else -> b }
 order: fn(k: #Key U64, a: U64, b: U64) -> U64 {
     low := a
     high := b
-    if k.bit_and(U64{1}) == (U64{1}) {
+    if k & (U64{1}) == (U64{1}) {
         low = b
         high = a
     }
@@ -34,7 +34,7 @@ grade: fn(k: #Key U64) -> U64 {
     r
 }
 
-small: fn(k: #Key U8) -> U8 { if k < (U8{128}) -> k.bit_xor(U8{255}) else -> k }
+small: fn(k: #Key U8) -> U8 { if k < (U8{128}) -> k ~ U8{255} else -> k }
 
 run: fn() {
     print("pick {reveal(pick(#Key U64{1}, U64{7}, U64{9}))} {reveal(pick(#Key U64{2}, U64{7}, U64{9}))}")

@@ -141,13 +141,13 @@ ssl_tls13_is_supported_versions_ext_present_in_exts: fn(ssl: &ssldefs.SSLContext
 /// RFC 8446 4.2).
 ssl_tls13_check_received_extension: fn(ssl: &ssldefs.SSLContext, hs_msg_type: Int, received_extension_type: Int, hs_msg_allowed_extensions_mask: Int) ssldefs.SSLError! {
     extension_mask: ssltls.ssl_get_extension_mask(received_extension_type)
-    if extension_mask.bit_and(hs_msg_allowed_extensions_mask) == 0 {
+    if extension_mask & hs_msg_allowed_extensions_mask == 0 {
         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
         return Err(.IllegalParameter)
     }
-    ssl.handshake.received_extensions = ssl.handshake.received_extensions.bit_or(extension_mask)
+    ssl.handshake.received_extensions |= extension_mask
     is_response: hs_msg_type == ssldefs.SSL_HS_SERVER_HELLO || hs_msg_type == ssldefs.SSL_TLS1_3_HS_HELLO_RETRY_REQUEST || hs_msg_type == ssldefs.SSL_HS_ENCRYPTED_EXTENSIONS || hs_msg_type == ssldefs.SSL_HS_CERTIFICATE
-    if !is_response || ssl.handshake.sent_extensions.bit_and(extension_mask) != 0 {
+    if !is_response || ssl.handshake.sent_extensions & extension_mask != 0 {
         return
     }
     sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_UNSUPPORTED_EXT, .UnsupportedExtension)

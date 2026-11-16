@@ -492,9 +492,9 @@ header: fn(p: &Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
                 at: kit_offset(p.kits[slot], col, row, width, p.kits[slot].box_height)
                 loop k in 0..<4 -> pixels.push(p.kits[slot].pixels[at + k])
             } else {
-                pixels.push(U8{back.bit_and(255)})
-                pixels.push(U8{(back >> 8).bit_and(255)})
-                pixels.push(U8{(back >> 16).bit_and(255)})
+                pixels.push(U8{back & 255})
+                pixels.push(U8{(back >> 8) & 255})
+                pixels.push(U8{(back >> 16) & 255})
                 pixels.push(U8{255})
             }
         }
@@ -594,7 +594,7 @@ fit_title: fn(p: &Painter, title: String, size: Float, room: Float) -> String {
 // a pixel where that keeps it exactly centered in a `side`-pixel square.
 glyph_side: fn(side: Int, scale120: Int) -> Int {
     g: px(GLYPH, scale120)
-    if (side - g).bit_and(1) == 1 -> g - 1 else -> g
+    if (side - g) & 1 == 1 -> g - 1 else -> g
 }
 
 // A button glyph's stroke in pixels at `scale120`: one unit, at least one
@@ -916,9 +916,9 @@ min_int: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
 
 max_int: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
 
-alpha_of: fn(color: Int) -> Int { (color >> 24).bit_and(255) }
+alpha_of: fn(color: Int) -> Int { (color >> 24) & 255 }
 
-with_alpha: fn(color: Int, alpha: Int) -> Int { color.bit_and(16777215) + (alpha << 24) }
+with_alpha: fn(color: Int, alpha: Int) -> Int { (color & 16777215) + (alpha << 24) }
 
 // `top` (0xAARRGGBB, straight alpha) laid over the opaque `bottom`, in
 // sRGB bytes as the header's buttons are seen.
@@ -927,8 +927,8 @@ over: fn(top: Int, bottom: Int) -> Int {
     out := 0xFF000000
     shifts: [Int]{0, 8, 16}
     loop shift in shifts {
-        t: (top >> shift).bit_and(255)
-        b: (bottom >> shift).bit_and(255)
+        t: (top >> shift) & 255
+        b: (bottom >> shift) & 255
         out += ((t * a + b * (255 - a) + 127) /% 255) << shift
     }
     out
@@ -947,7 +947,7 @@ luminance: fn(color: Int) -> Float {
 
 // The low byte of `channel`, an sRGB value, in linear light.
 linear: fn(channel: Int) -> Float {
-    c: Float{channel.bit_and(255)} / 255.0
+    c: Float{channel & 255} / 255.0
     if c <= 0.04045 -> return c / 12.92
     math.exp(math.ln((c + 0.055) / 1.055) * 2.4)
 }

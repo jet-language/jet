@@ -501,9 +501,7 @@ zip_files: fn(archive: [U8]) -> [ZipFile] ArchiveError! {
         nlen: u16(archive, i + 26)
         elen: u16(archive, i + 28)
         if flags != 0 && flags != 2048 -> return Err(ArchiveError.Unsupported)
-        if ((flags).bit_and(1)) != 0 || ((flags).bit_and(8)) != 0 {
-            return Err(ArchiveError.Unsupported)
-        }
+        if ((flags) & 1) != 0 || ((flags) & 8) != 0 -> return Err(ArchiveError.Unsupported)
         if method != 0 && method != 8 -> return Err(ArchiveError.Unsupported)
         if csz > C_MAX_OUTPUT -> return Err(ArchiveError.Unsupported)
         if usz > C_MAX_OUTPUT || usz > C_MAX_OUTPUT - total -> return Err(ArchiveError.Unsupported)
@@ -597,10 +595,10 @@ put32: fn(out: &[U8], n: Int) Never! {
     out.push(wrapping(U8{n >> 24}))
 }
 
-u16: fn(data: [U8], i: Int) -> Int Never! { (u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8)) }
+u16: fn(data: [U8], i: Int) -> Int Never! { (u8_int(data[i])) | (u8_int(data[i + 1]) << 8) }
 
 u32: fn(data: [U8], i: Int) -> Int Never! {
-    (((u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8))).bit_or((u8_int(data[i + 2]) << 16))).bit_or((u8_int(data[i + 3]) << 24))
+    (((u8_int(data[i])) | (u8_int(data[i + 1]) << 8)) | (u8_int(data[i + 2]) << 16)) | (u8_int(data[i + 3]) << 24)
 }
 
 cut: fn(data: [U8], a: Int, b: Int) -> [U8] Never! {
@@ -667,7 +665,7 @@ write_octal: fn(hdr: &[U8], off: Int, width: Int, value: Int) Never! {
     i := off + width - 2
     hdr[off + width - 1] = (U8{0})
     loop i >= off {
-        hdr[i] = wrapping(U8{48 + ((n).bit_and(7))})
+        hdr[i] = wrapping(U8{48 + ((n) & 7)})
         n = n >> 3
         i -= 1
     }
@@ -865,7 +863,7 @@ json_escape: fn(value: String) -> String ArchiveError! {
             out.push(U8{48})
             out.push(U8{48})
             out.push(hex_digit(n >> 4))
-            out.push(hex_digit((n).bit_and(15)))
+            out.push(hex_digit((n) & 15))
         } else { out.push(b) }
     }
     String.from_bytes(out) ?? return Err(ArchiveError.Malformed)

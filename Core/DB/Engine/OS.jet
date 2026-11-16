@@ -307,13 +307,13 @@ os_file_lock: fn(fd: Int, kind: Int, start: Int, len: Int) -[DB]> Int Never! {
 // filename. The temporary-file name uses `temp_dir` (sqlite3_temp_directory)
 // first.
 os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None}, readonly_shm: Bool{false}) -[DB]> DBFile SQLError! {
-    flags := flags_in.bit_and(OPEN_VFS_MASK)
-    e_type: flags.bit_and(OPEN_TYPE_MASK)
-    is_exclusive: flags.bit_and(OPEN_EXCLUSIVE) != 0
-    is_delete: flags.bit_and(OPEN_DELETEONCLOSE) != 0
-    is_create: flags.bit_and(OPEN_CREATE) != 0
-    is_readonly := flags.bit_and(OPEN_READONLY) != 0
-    is_readwrite: flags.bit_and(OPEN_READWRITE) != 0
+    flags := flags_in & OPEN_VFS_MASK
+    e_type: flags & OPEN_TYPE_MASK
+    is_exclusive: flags & OPEN_EXCLUSIVE != 0
+    is_delete: flags & OPEN_DELETEONCLOSE != 0
+    is_create: flags & OPEN_CREATE != 0
+    is_readonly := flags & OPEN_READONLY != 0
+    is_readwrite: flags & OPEN_READWRITE != 0
     // A new super journal, main journal or WAL file syncs its directory on
     // the first xSync.
     is_new_jrnl: is_create && (e_type == OPEN_SUPER_JOURNAL || e_type == OPEN_MAIN_JOURNAL || e_type == OPEN_WAL)
@@ -323,16 +323,16 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
         .None -> name = os_get_tempname() ?? return Err(err)
     }
     open_flags := 0
-    if is_readonly -> open_flags = open_flags.bit_or(OS_O_RDONLY)
-    if is_readwrite -> open_flags = open_flags.bit_or(OS_O_RDWR)
-    if is_create -> open_flags = open_flags.bit_or(OS_O_CREAT)
-    if is_exclusive -> open_flags = open_flags.bit_or(OS_O_EXCL).bit_or(OS_O_NOFOLLOW)
-    open_flags = open_flags.bit_or(OS_O_NOFOLLOW)
+    if is_readonly -> open_flags |= OS_O_RDONLY
+    if is_readwrite -> open_flags |= OS_O_RDWR
+    if is_create -> open_flags |= OS_O_CREAT
+    if is_exclusive -> open_flags = open_flags | OS_O_EXCL | OS_O_NOFOLLOW
+    open_flags |= OS_O_NOFOLLOW
     // findCreateFileMode: a journal or WAL file takes its database's
     // permissions (and, for root, its owner); a delete-on-close file is 0600.
     open_mode := 0
     owner_of := ""
-    if flags.bit_and(OPEN_WAL.bit_or(OPEN_MAIN_JOURNAL)) != 0 {
+    if flags & (OPEN_WAL | OPEN_MAIN_JOURNAL) != 0 {
         bytes: name.bytes()
         n := bytes.len() - 1
         loop n > 0 && bytes[n] != OS_DOT {
@@ -346,7 +346,7 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
             }
             n -= 1
         }
-    } else if is_delete { open_mode = 384 } else if flags.bit_and(OPEN_URI) != 0 {
+    } else if is_delete { open_mode = 384 } else if flags & OPEN_URI != 0 {
         if modeof == .Val(source) {
             mode: core.db.__vfs_mode(source)
             if mode < 0 -> return Err(base.fail(base.IOERR_FSTAT))
@@ -362,8 +362,8 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
             rc = base.READONLY_DIRECTORY
         } else if errno != OS_EISDIR && is_readwrite {
             // Failed to open for read/write access: try read-only.
-            flags = flags.bit_and(OPEN_READWRITE.bit_or(OPEN_CREATE).bit_xor(U32_MASK)).bit_or(OPEN_READONLY)
-            open_flags = open_flags.bit_and(OS_O_RDWR.bit_or(OS_O_CREAT).bit_xor(U32_MASK)).bit_or(OS_O_RDONLY)
+            flags = flags & ((OPEN_READWRITE | OPEN_CREATE) ~ U32_MASK) | OPEN_READONLY
+            open_flags = open_flags & ((OS_O_RDWR | OS_O_CREAT) ~ U32_MASK) | OS_O_RDONLY
             is_readonly = true
             fd = core.db.__vfs_open(name, open_flags, open_mode)
         }
@@ -372,20 +372,20 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
         if rc == base.OK -> rc = base.CANTOPEN
         return Err(base.fail(rc))
     }
-    if open_mode != 0 && flags.bit_and(OPEN_WAL.bit_or(OPEN_MAIN_JOURNAL)) != 0 {
+    if open_mode != 0 && flags & (OPEN_WAL | OPEN_MAIN_JOURNAL) != 0 {
         // robustFchown: a root process gives the journal its database's owner.
         _: core.db.__vfs_chown_like(fd, owner_of)
     }
     if is_delete -> _: core.db.__vfs_unlink(name)
     ctrl := 0
-    if is_delete -> ctrl = ctrl.bit_or(UNIXFILE_DELETE)
-    if is_readonly -> ctrl = ctrl.bit_or(UNIXFILE_RDONLY)
+    if is_delete -> ctrl |= UNIXFILE_DELETE
+    if is_readonly -> ctrl |= UNIXFILE_RDONLY
     no_lock: e_type != OPEN_MAIN_DB
-    if no_lock -> ctrl = ctrl.bit_or(UNIXFILE_NOLOCK)
-    if is_new_jrnl -> ctrl = ctrl.bit_or(UNIXFILE_DIRSYNC)
-    if flags.bit_and(OPEN_URI) != 0 -> ctrl = ctrl.bit_or(UNIXFILE_URI)
+    if no_lock -> ctrl |= UNIXFILE_NOLOCK
+    if is_new_jrnl -> ctrl |= UNIXFILE_DIRSYNC
+    if flags & OPEN_URI != 0 -> ctrl |= UNIXFILE_URI
     // fillInUnixFile.
-    if psow -> ctrl = ctrl.bit_or(UNIXFILE_PSOW)
+    if psow -> ctrl |= UNIXFILE_PSOW
     file := os_closed_file()
     file.fd = fd
     file.path = path ?? ""
@@ -477,13 +477,13 @@ os_sync: fn(file: &DBFile, flags: Int) -[DB]> SQLError! {
         file.last_errno = 0 - got
         return Err(base.fail(base.IOERR_FSYNC))
     }
-    if file.ctrl.bit_and(UNIXFILE_DIRSYNC) != 0 {
+    if file.ctrl & UNIXFILE_DIRSYNC != 0 {
         dirfd: os_open_directory(file.path)
         if dirfd >= 0 {
             _: core.db.__vfs_sync(dirfd)
             _: core.db.__vfs_close(dirfd)
         }
-        file.ctrl = file.ctrl.bit_and(UNIXFILE_DIRSYNC.bit_xor(255))
+        file.ctrl &= UNIXFILE_DIRSYNC ~ 255
     }
     Ok()
 }
@@ -525,7 +525,7 @@ os_file_size: fn(file: &DBFile) -[DB]> Int SQLError! {
 // PENDING byte (the file is then PENDING) and then the SHARED range; if
 // that fails the file stays PENDING.
 os_lock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
-    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok()
+    if file.ctrl & UNIXFILE_NOLOCK != 0 -> return Ok()
     if file.lock >= level -> return Ok()
     if level == LOCK_SHARED || (level == LOCK_EXCLUSIVE && file.lock == LOCK_RESERVED) {
         kind: if level == LOCK_SHARED -> OS_F_RDLCK else -> OS_F_WRLCK
@@ -574,7 +574,7 @@ os_lock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
 // SHARED range again and unlocks the PENDING and RESERVED bytes; going to
 // NONE unlocks the whole file.
 os_unlock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
-    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok()
+    if file.ctrl & UNIXFILE_NOLOCK != 0 -> return Ok()
     if file.lock <= level -> return Ok()
     if file.lock > LOCK_SHARED {
         if level == LOCK_SHARED {
@@ -608,7 +608,7 @@ os_unlock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
 // holds more than SHARED, or another descriptor holds the RESERVED byte;
 // false on a file without locking (nolockCheckReservedLock).
 os_check_reserved_lock: fn(file: &DBFile) -[DB]> Bool SQLError! {
-    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok(false)
+    if file.ctrl & UNIXFILE_NOLOCK != 0 -> return Ok(false)
     if file.lock > LOCK_SHARED -> return Ok(true)
     got: core.db.__vfs_lock(file.fd, OS_F_OFD_GETLK, OS_F_WRLCK, RESERVED_BYTE, 1)
     if got < 0 {
@@ -651,12 +651,10 @@ os_size_hint: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
 // and any other value sets it. The answer, or `arg`.
 os_mode_bit: fn(file: &DBFile, mask: Int, arg: Int) -> Int Never! {
     if arg < 0 {
-        if file.ctrl.bit_and(mask) != 0 -> return 1
+        if file.ctrl & mask != 0 -> return 1
         return 0
     }
-    if arg == 0 -> file.ctrl = file.ctrl.bit_and(mask.bit_xor(255)) else {
-        file.ctrl = file.ctrl.bit_or(mask)
-    }
+    if arg == 0 -> file.ctrl = file.ctrl & (mask ~ 255) else -> file.ctrl |= mask
     arg
 }
 
@@ -701,9 +699,7 @@ os_device_setup: fn(file: &DBFile) Never! {
     if file.sector_size != 0 {
         return
     }
-    if file.ctrl.bit_and(UNIXFILE_PSOW) != 0 {
-        file.device = file.device.bit_or(IOCAP_POWERSAFE_OVERWRITE)
-    }
+    if file.ctrl & UNIXFILE_PSOW != 0 -> file.device |= IOCAP_POWERSAFE_OVERWRITE
     file.sector_size = DEFAULT_SECTOR_SIZE
 }
 
@@ -789,7 +785,7 @@ os_path_append_one: fn(p: &DBPath, name: [U8]) -[DB]> Never! {
         if 0 - mode != OS_ENOENT -> p.rc = base.CANTOPEN
         return
     }
-    if mode.bit_and(OS_S_IFMT) != OS_S_IFLNK {
+    if mode & OS_S_IFMT != OS_S_IFLNK {
         return
     }
     if p.symlinks > MAX_SYMLINK {
@@ -938,10 +934,10 @@ os_shm_open: fn(file: &DBFile) -[DB]> Int Never! {
     fd := -1
     readonly := false
     if !file.readonly_shm {
-        fd = core.db.__vfs_open(name, OS_O_RDWR.bit_or(OS_O_CREAT).bit_or(OS_O_NOFOLLOW), mode)
+        fd = core.db.__vfs_open(name, OS_O_RDWR | OS_O_CREAT | OS_O_NOFOLLOW, mode)
     }
     if fd < 0 {
-        fd = core.db.__vfs_open(name, OS_O_RDONLY.bit_or(OS_O_NOFOLLOW), mode)
+        fd = core.db.__vfs_open(name, OS_O_RDONLY | OS_O_NOFOLLOW, mode)
         if fd < 0 -> return base.CANTOPEN
         readonly = true
     }
@@ -1021,27 +1017,27 @@ os_shm_write: fn(file: &DBFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]>
 os_shm_lock: fn(file: &DBFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! {
     if !file.shm.open -> return base.IOERR_SHMLOCK
     mask: (1 << (ofst + n)) - (1 << ofst)
-    held: file.shm.excl_mask.bit_or(file.shm.shared_mask)
-    unlock: flags.bit_and(SHM_UNLOCK) != 0
-    work: (unlock && held.bit_and(mask) != 0) || (flags == SHM_SHARED.bit_or(SHM_LOCK) && file.shm.shared_mask.bit_and(mask) == 0) || flags == SHM_EXCLUSIVE.bit_or(SHM_LOCK)
+    held: file.shm.excl_mask | file.shm.shared_mask
+    unlock: flags & SHM_UNLOCK != 0
+    work: (unlock && held & mask != 0) || (flags == SHM_SHARED | SHM_LOCK && file.shm.shared_mask & mask == 0) || flags == SHM_EXCLUSIVE | SHM_LOCK
     if !work -> return base.OK
-    keep: mask.bit_xor(65535)
+    keep: mask ~ 65535
     if unlock {
         rc: os_shm_system_lock(file, OS_F_UNLCK, ofst + SHM_BASE, n)
         if rc == base.OK {
-            file.shm.shared_mask = file.shm.shared_mask.bit_and(keep)
-            file.shm.excl_mask = file.shm.excl_mask.bit_and(keep)
+            file.shm.shared_mask &= keep
+            file.shm.excl_mask &= keep
         }
         return rc
     }
-    if flags.bit_and(SHM_SHARED) != 0 {
+    if flags & SHM_SHARED != 0 {
         rc: os_shm_system_lock(file, OS_F_RDLCK, ofst + SHM_BASE, n)
-        if rc == base.OK -> file.shm.shared_mask = file.shm.shared_mask.bit_or(mask)
+        if rc == base.OK -> file.shm.shared_mask |= mask
         return rc
     }
-    if file.shm.shared_mask.bit_and(mask) != 0 -> return base.BUSY
+    if file.shm.shared_mask & mask != 0 -> return base.BUSY
     rc: os_shm_system_lock(file, OS_F_WRLCK, ofst + SHM_BASE, n)
-    if rc == base.OK -> file.shm.excl_mask = file.shm.excl_mask.bit_or(mask)
+    if rc == base.OK -> file.shm.excl_mask |= mask
     rc
 }
 
@@ -1067,7 +1063,7 @@ os_randomness: fn(n: Int) -[DB]> [U8] Never! {
     loop i in 0..<n -> buf[i] = U8{0}
     t := core.db.__vfs_now_ms() /% 1000
     loop i in 0..<8 {
-        if i < n -> buf[i] = U8{t.bit_and(255)}
+        if i < n -> buf[i] = U8{t & 255}
         t = t >> 8
     }
     buf
@@ -1135,7 +1131,7 @@ os_get_tempname: fn() -[DB]> String SQLError! {
         loop i in 0..<8 {
             b: Int{r[7 - i]}
             loop half in 0..<2 {
-                digit: if half == 0 -> b >> 4 else -> b.bit_and(15)
+                digit: if half == 0 -> b >> 4 else -> b & 15
                 if digit != 0 || hex.len() > 0 || (i == 7 && half == 1) -> hex.push(digits[digit])
             }
         }
@@ -1183,7 +1179,7 @@ os_random_bytes: fn(n: Int) -[DB]> [U8] Never! {
         guard.value.s[3] = 1797285236
         loop w in 0..<11 {
             at: w * 4
-            guard.value.s[4 + w] = Int{seed[at]}.bit_or(Int{seed[at + 1]} << 8).bit_or(Int{seed[at + 2]} << 16).bit_or(Int{seed[at + 3]} << 24)
+            guard.value.s[4 + w] = Int{seed[at]} | Int{seed[at + 1]} << 8 | Int{seed[at + 2]} << 16 | Int{seed[at + 3]} << 24
         }
         guard.value.s[15] = guard.value.s[12]
         guard.value.s[12] = 0
@@ -1201,7 +1197,7 @@ os_random_bytes: fn(n: Int) -[DB]> [U8] Never! {
             loop i in 0..<guard.value.n -> result.push(guard.value.out[i])
             need -= guard.value.n
         }
-        guard.value.s[12] = (guard.value.s[12] + 1).bit_and(U32_MASK)
+        guard.value.s[12] = (guard.value.s[12] + 1) & U32_MASK
         guard.value.out = chacha_block(guard.value.s)
         guard.value.n = 64
     }
@@ -1225,35 +1221,35 @@ chacha_block: fn(input: [Int]) -> [U8] Never! {
     }
     out := [U8]{}
     loop i in 0..<16 {
-        w: (x[i] + input[i]).bit_and(U32_MASK)
-        out.push(U8{w.bit_and(255)})
-        out.push(U8{(w >> 8).bit_and(255)})
-        out.push(U8{(w >> 16).bit_and(255)})
-        out.push(U8{(w >> 24).bit_and(255)})
+        w: (x[i] + input[i]) & U32_MASK
+        out.push(U8{w & 255})
+        out.push(U8{(w >> 8) & 255})
+        out.push(U8{(w >> 16) & 255})
+        out.push(U8{(w >> 24) & 255})
     }
     out
 }
 
 // random.c QR(a, b, c, d): one ChaCha quarter round on 32-bit words.
 chacha_qr: fn(x: &[Int], a: Int, b: Int, c: Int, d: Int) Never! {
-    x[a] = (x[a] + x[b]).bit_and(U32_MASK)
-    x[d] = chacha_rotl(x[d].bit_xor(x[a]), 16)
-    x[c] = (x[c] + x[d]).bit_and(U32_MASK)
-    x[b] = chacha_rotl(x[b].bit_xor(x[c]), 12)
-    x[a] = (x[a] + x[b]).bit_and(U32_MASK)
-    x[d] = chacha_rotl(x[d].bit_xor(x[a]), 8)
-    x[c] = (x[c] + x[d]).bit_and(U32_MASK)
-    x[b] = chacha_rotl(x[b].bit_xor(x[c]), 7)
+    x[a] = (x[a] + x[b]) & U32_MASK
+    x[d] = chacha_rotl(x[d] ~ x[a], 16)
+    x[c] = (x[c] + x[d]) & U32_MASK
+    x[b] = chacha_rotl(x[b] ~ x[c], 12)
+    x[a] = (x[a] + x[b]) & U32_MASK
+    x[d] = chacha_rotl(x[d] ~ x[a], 8)
+    x[c] = (x[c] + x[d]) & U32_MASK
+    x[b] = chacha_rotl(x[b] ~ x[c], 7)
 }
 
 // random.c ROTL on a 32-bit word.
-chacha_rotl: fn(v: Int, n: Int) -> Int Never! { ((v << n).bit_or(v >> (32 - n))).bit_and(U32_MASK) }
+chacha_rotl: fn(v: Int, n: Int) -> Int Never! { ((v << n) | v >> (32 - n)) & U32_MASK }
 
 #Test("chacha_block matches the RFC 7539 2.3.2 test vector") {
     state := [Int]{1634760805, 857760878, 2036477234, 1797285236}
     loop w in 0..<8 {
         k: w * 4
-        state.push(k.bit_or((k + 1) << 8).bit_or((k + 2) << 16).bit_or((k + 3) << 24))
+        state.push(k | (k + 1) << 8 | (k + 2) << 16 | (k + 3) << 24)
     }
     state.push(1)
     state.push(150994944)

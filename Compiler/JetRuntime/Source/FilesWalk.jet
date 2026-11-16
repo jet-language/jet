@@ -487,7 +487,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
         failure = if (mode < I64{0}) -> mode else -> I64{0}
     }
     walk_leave(context)
-    bits: mode.bit_and(I64{61440})
+    bits: mode & I64{61440}
     walk_out_flag(directory, failure == I64{0} && bits == I64{16384})
     walk_out_flag(symlink, failure == I64{0} && bits == I64{40960})
     walk_out_error(failure, kind, code_tag, code, cause_tag, cause)
@@ -599,7 +599,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
         mode: files_lstat_c(path)
         if (mode < I64{0}) {
             if (mode != I64{-2}) { failure = mode }
-        } else if ((mode.bit_and(I64{61440})) == I64{32768}) {
+        } else if ((mode & I64{61440}) == I64{32768}) {
             failure = walk_read_file(path, scratch)
             if (failure == I64{0}) {
                 text: rt_text_lossy(rt_text_word(scratch), rt_text_word(wrapping(scratch + I64{8})))
@@ -705,7 +705,7 @@ walk_stream_next: fn(stream: I64) -> I64 {
             next
         }
         record: wrapping(buffer + position)
-        rt_text_store(wrapping(stream + I64{24}), position + rt_text_byte(wrapping(record + I64{16})).bit_or((rt_text_byte(wrapping(record + I64{17})) << I64{8})))
+        rt_text_store(wrapping(stream + I64{24}), position + (rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})))
         if !files_dot_entry(wrapping(record + I64{19})) -> return record
     }
 }
@@ -762,7 +762,7 @@ walk_stream_next: fn(stream: I64) -> I64 {
         else -> files_lstat_c(child_path)
     }
     if (mode < I64{0}) { mode = I64{0} }
-    bits: mode.bit_and(I64{61440})
+    bits: mode & I64{61440}
     shown: rt_text_lossy(child_path, child_length)
     rest: walk_relative(child_path, child_length, rt_text_word(wrapping(context + I64{8})), rt_text_word(wrapping(context + I64{16})))
     ignore: rt_text_word(wrapping(context + I64{24}))
@@ -803,12 +803,12 @@ path_walk_valid: fn(data: I64, length: I64) -> Bool {
             prefix: walk_bytes_new(data, cut)
             current: files_lstat_c(prefix)
             jet_rt_free(prefix, cut + I64{1}, I64{1})
-            if (current < I64{0} || current.bit_and(I64{61440}) == I64{40960}) { return false }
+            if (current < I64{0} || current & I64{61440} == I64{40960}) { return false }
             if (cut == length) { mode = current }
         }
         cut = walk_parent_length(data, cut)
     }
-    mode.bit_and(I64{61440}) == I64{16384}
+    mode & I64{61440} == I64{16384}
 }
 
 // Adds the canonical bytes (owned, length+1) to the byte-ordered visited
@@ -898,7 +898,7 @@ path_walk_canonical: fn(data: I64, size: I64) -> I64 {
             at := I64{0}
             loop at < count {
                 record: wrapping(buffer + at)
-                at += rt_text_byte(wrapping(record + I64{16})).bit_or((rt_text_byte(wrapping(record + I64{17})) << I64{8}))
+                at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
                 name: wrapping(record + I64{19})
                 if files_dot_entry(name) -> next
                 child_length: walk_join(directory, directory_length, name, files_c_len(name), size)
@@ -910,7 +910,7 @@ path_walk_canonical: fn(data: I64, size: I64) -> I64 {
                 is_directory := entry_type == I64{4}
                 if (entry_type == I64{0}) {
                     mode: files_lstat_c(child)
-                    is_directory = mode >= I64{0} && mode.bit_and(I64{61440}) == I64{16384}
+                    is_directory = mode >= I64{0} && mode & I64{61440} == I64{16384}
                 }
                 if is_directory {
                     files_words_push(stack, child)

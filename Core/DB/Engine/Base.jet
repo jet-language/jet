@@ -187,7 +187,7 @@ error_string: fn(code: Int) -> String Never! {
     if code == ROW -> return "another row available"
     if code == DONE -> return "no more rows available"
     if code == ABORT_ROLLBACK -> return "abort due to ROLLBACK"
-    primary: code.bit_and(255)
+    primary: code & 255
     if primary == OK -> return "not an error"
     if primary == ERROR -> return "SQL logic error"
     if primary == PERM -> return "access permission denied"
@@ -374,10 +374,10 @@ KEYINFO_ORDER_BIGNULL: 2
 // sqlite3_value_type: the datatype of a value. This is the rule the aType[]
 // table encodes (its SQLITE_DEBUG cross-check).
 value_type: fn(m: Mem) -> Int Never! {
-    if m.flags.bit_and(MEM_NULL) != 0 -> return SQL_NULL
-    if m.flags.bit_and(MEM_REAL.bit_or(MEM_INT_REAL)) != 0 -> return SQL_FLOAT
-    if m.flags.bit_and(MEM_INT) != 0 -> return SQL_INTEGER
-    if m.flags.bit_and(MEM_STR) != 0 -> return SQL_TEXT
+    if m.flags & MEM_NULL != 0 -> return SQL_NULL
+    if m.flags & (MEM_REAL | MEM_INT_REAL) != 0 -> return SQL_FLOAT
+    if m.flags & MEM_INT != 0 -> return SQL_INTEGER
+    if m.flags & MEM_STR != 0 -> return SQL_TEXT
     SQL_BLOB
 }
 
@@ -387,7 +387,7 @@ value_type: fn(m: Mem) -> Int Never! {
     assert_eq(value_type(mem_real(2.5)), 2)
     assert_eq(value_type(mem_text("x".bytes(), UTF8)), 3)
     assert_eq(value_type(mem_blob([U8]{1})), 4)
-    assert_eq(value_type(mem_init(MEM_INT.bit_or(MEM_STR))), 1)
+    assert_eq(value_type(mem_init(MEM_INT | MEM_STR)), 1)
     assert_eq(value_type(mem_init(MEM_INT_REAL)), 2)
     nan: Float{0} / Float{0}
     assert_eq(value_type(mem_real(nan)), 5)

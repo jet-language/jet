@@ -8,5 +8,5 @@ run: fn() {
     path: process.args()[0]
     s: files.stat(path.copy()) ?? panic("stat {path}: {err}")
     // Add the owner write bit (0o200).
-    files.set_mode(path.copy(), s.mode.bit_or(128)) ?? panic("chmod {path}: {err}")
+    files.set_mode(path.copy(), s.mode | 128) ?? panic("chmod {path}: {err}")
 }

@@ -23,7 +23,7 @@ numeric_trim_end: fn(text: I64, start: I64) -> I64 {
         at := end - I64{1}
         byte: rt_text_byte(wrapping(data + at))
         if (byte > I64{32} && byte < I64{127}) { break }
-        loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) {
+        loop at > start && (rt_text_byte(wrapping(data + at)) & I64{192}) == (I64{128}) {
             at -= I64{1}
         }
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break

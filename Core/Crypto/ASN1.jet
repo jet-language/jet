@@ -118,9 +118,8 @@ NamedData: struct {
 /// (MBEDTLS_ASN1_IS_STRING_TAG).
 is_string_tag: fn(tag_id: Int) -> Bool Never! {
     if tag_id < 0 || tag_id >= 32 -> return false
-    strings: (1 << ASN1_BMP_STRING).bit_or(1 << ASN1_UTF8_STRING).bit_or(1 << ASN1_T61_STRING)
-        .bit_or(1 << ASN1_IA5_STRING).bit_or(1 << ASN1_UNIVERSAL_STRING).bit_or(1 << ASN1_PRINTABLE_STRING)
-    (1 << tag_id).bit_and(strings) != 0
+    strings: (1 << ASN1_BMP_STRING) | 1 << ASN1_UTF8_STRING | 1 << ASN1_T61_STRING | 1 << ASN1_IA5_STRING | 1 << ASN1_UNIVERSAL_STRING | 1 << ASN1_PRINTABLE_STRING
+    (1 << tag_id) & strings != 0
 }
 
 /// Whether the content of `buf` in `data` is the encoded OID `oid`
@@ -150,16 +149,16 @@ get_len: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
     if end - p < 1 -> return Err(.OutOfData)
     first: Int{layout_byte(data, p)}
     len := 0
-    if first.bit_and(0x80) == 0 {
+    if first & 0x80 == 0 {
         len = first
         p += 1
     } else {
-        n: first.bit_and(0x7F)
+        n: first & 0x7F
         if n == 0 || n > 4 -> return Err(.InvalidLength)
         if end - p <= n -> return Err(.OutOfData)
         p += 1
         loop _ in 0..<n {
-            len = (len << 8).bit_or(Int{layout_byte(data, p)})
+            len = (len << 8) | Int{layout_byte(data, p)}
             p += 1
         }
     }
@@ -191,16 +190,16 @@ get_tagged_int: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> Int ASN1Error!
     len := get_tag(data, p, end, tag_id)
     // An empty content is malformed: zero is 020100.
     if len == 0 -> return Err(.InvalidLength)
-    if layout_byte(data, p).bit_and(U8{0x80}) != (U8{0}) -> return Err(.InvalidLength)
+    if layout_byte(data, p) & (U8{0x80}) != (U8{0}) -> return Err(.InvalidLength)
     loop len > 0 && layout_byte(data, p) == (U8{0}) {
         p += 1
         len -= 1
     }
     if len > 4 -> return Err(.InvalidLength)
-    if len == 4 && layout_byte(data, p).bit_and(U8{0x80}) != (U8{0}) -> return Err(.InvalidLength)
+    if len == 4 && layout_byte(data, p) & (U8{0x80}) != (U8{0}) -> return Err(.InvalidLength)
     val := 0
     loop _ in 0..<len {
-        val = (val << 8).bit_or(Int{layout_byte(data, p)})
+        val = (val << 8) | Int{layout_byte(data, p)}
         p += 1
     }
     Ok(val)
@@ -265,14 +264,14 @@ SequenceVisitor: trait {
 /// tag & must_mask == must_val; `visitor` sees the entries whose tag
 /// satisfies tag & may_mask == may_val (mbedtls_asn1_traverse_sequence_of).
 traverse_sequence_of: fn<V: SequenceVisitor>(data: [U8], p: &Int, end: Int, must_mask: Int, must_val: Int, may_mask: Int, may_val: Int, visitor: &V) ASN1Error! {
-    len := get_tag(data, p, end, ASN1_CONSTRUCTED.bit_or(ASN1_SEQUENCE))
+    len := get_tag(data, p, end, ASN1_CONSTRUCTED | ASN1_SEQUENCE)
     if p + len != end -> return Err(.LengthMismatch)
     loop p < end {
         tag_id: Int{layout_byte(data, p)}
         p += 1
-        if tag_id.bit_and(must_mask) != must_val -> return Err(.UnexpectedTag)
+        if tag_id & must_mask != must_val -> return Err(.UnexpectedTag)
         len = get_len(data, p, end)
-        if tag_id.bit_and(may_mask) == may_val {
+        if tag_id & may_mask == may_val {
             code: visitor.visit(tag_id, p, len)
             if code != 0 -> return Err(.Stopped(code))
         }
@@ -303,7 +302,7 @@ get_sequence_of: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> [ASN1Buf] ASN
 /// An AlgorithmIdentifier: the OID, and the parameters, asn1_none() when there
 /// are none (mbedtls_asn1_get_alg).
 get_alg: fn(data: [U8], p: &Int, end: Int) -> (alg: ASN1Buf, params: ASN1Buf) ASN1Error! {
-    len: get_tag(data, p, end, ASN1_CONSTRUCTED.bit_or(ASN1_SEQUENCE))
+    len: get_tag(data, p, end, ASN1_CONSTRUCTED | ASN1_SEQUENCE)
     if end - p < 1 -> return Err(.OutOfData)
     alg_tag: Int{layout_byte(data, p)}
     seq_end: p + len
@@ -356,11 +355,11 @@ write_len: fn(buf: &[U8], p: &Int, start: Int, len: Int) -> Int ASN1Error! {
     if required > p - start -> return Err(.BufTooSmall)
     v := len
     p -= 1
-    buf[p] = U8{v.bit_and(0xFF)}
+    buf[p] = U8{v & 0xFF}
     v >>= 8
     loop v != 0 {
         p -= 1
-        buf[p] = U8{v.bit_and(0xFF)}
+        buf[p] = U8{v & 0xFF}
         v >>= 8
     }
     if required > 1 {
@@ -374,7 +373,7 @@ write_len: fn(buf: &[U8], p: &Int, start: Int, len: Int) -> Int ASN1Error! {
 write_tag: fn(buf: &[U8], p: &Int, start: Int, tag_id: Int) -> Int ASN1Error! {
     if p - start < 1 -> return Err(.BufTooSmall)
     p -= 1
-    buf[p] = U8{tag_id.bit_and(0xFF)}
+    buf[p] = U8{tag_id & 0xFF}
     Ok(1)
 }
 
@@ -402,7 +401,7 @@ write_mpi: fn(buf: &[U8], p: &Int, start: Int, x: bn.Mpi) -> Int ASN1Error! {
     bytes: bn.write_binary(x, len)
     p -= len
     loop i in 0..<len -> buf[p + i] = bytes[i]
-    if x.s == 1 && buf[p].bit_and(U8{0x80}) != (U8{0}) {
+    if x.s == 1 && buf[p] & (U8{0x80}) != (U8{0}) {
         if p - start < 1 -> return Err(.BufTooSmall)
         p -= 1
         buf[p] = U8{0}
@@ -434,7 +433,7 @@ write_algorithm_identifier_ext: fn(buf: &[U8], p: &Int, start: Int, oid: [U8], p
         if par_len == 0 -> len += write_null(buf, p, start) else -> len += par_len
     }
     len += write_oid(buf, p, start, oid)
-    total: write_len_and_tag(buf, p, start, len, ASN1_CONSTRUCTED.bit_or(ASN1_SEQUENCE))
+    total: write_len_and_tag(buf, p, start, len, ASN1_CONSTRUCTED | ASN1_SEQUENCE)
     Ok(total)
 }
 
@@ -461,16 +460,16 @@ write_tagged_int: fn(buf: &[U8], p: &Int, start: Int, value: Int, tag_id: Int) -
     if p - start < 1 -> return Err(.BufTooSmall)
     len += 1
     p -= 1
-    buf[p] = U8{v.bit_and(0xFF)}
+    buf[p] = U8{v & 0xFF}
     v >>= 8
     loop v > 0 {
         if p - start < 1 -> return Err(.BufTooSmall)
         len += 1
         p -= 1
-        buf[p] = U8{v.bit_and(0xFF)}
+        buf[p] = U8{v & 0xFF}
         v >>= 8
     }
-    if buf[p].bit_and(U8{0x80}) != (U8{0}) {
+    if buf[p] & (U8{0x80}) != (U8{0}) {
         if p - start < 1 -> return Err(.BufTooSmall)
         p -= 1
         buf[p] = U8{0}
@@ -527,7 +526,7 @@ write_named_bitstring: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8], bits: In
         cur := byte_len - 1
         shifted := bytes[cur] >> unused_bits
         loop {
-            bit: shifted.bit_and(U8{1})
+            bit: shifted & U8{1}
             shifted >>= 1
             if bit != (U8{0}) -> break
             n -= 1
@@ -552,7 +551,7 @@ write_bitstring: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8], bits: Int) -> 
     if byte_len > 0 {
         byte_len -= 1
         p -= 1
-        buf[p] = bytes[byte_len].bit_and(((U8{1} << unused_bits) - U8{1}).bit_not())
+        buf[p] = bytes[byte_len] &~ ((U8{1} << unused_bits) - U8{1})
         p -= byte_len
         loop i in 0..<byte_len -> buf[p + i] = bytes[i]
     }

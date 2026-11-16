@@ -21,16 +21,12 @@
 
 codec_encode_word: fn(value: I64) -> I64 { dyn_new(DYN_INT, jet_int_owned_from_i64(value)) }
 
-#Export(c) jet_rt_codec_encode_u8: fn(value: I64) -> I64 {
-    codec_encode_word(value.bit_and(I64{255}))
-}
+#Export(c) jet_rt_codec_encode_u8: fn(value: I64) -> I64 { codec_encode_word(value & I64{255}) }
 
-#Export(c) jet_rt_codec_encode_u16: fn(value: I64) -> I64 {
-    codec_encode_word(value.bit_and(I64{65535}))
-}
+#Export(c) jet_rt_codec_encode_u16: fn(value: I64) -> I64 { codec_encode_word(value & I64{65535}) }
 
 #Export(c) jet_rt_codec_encode_u32: fn(value: I64) -> I64 {
-    codec_encode_word(value.bit_and(I64{4294967295}))
+    codec_encode_word(value & I64{4294967295})
 }
 
 #Export(c) jet_rt_codec_encode_u64: fn(value: I64) -> I64 {
@@ -38,7 +34,7 @@ codec_encode_word: fn(value: I64) -> I64 { dyn_new(DYN_INT, jet_int_owned_from_i
     // The C word carries unsigned bits, not a signed value or an exact-Int tag.
     // Build its positive base-1e9 magnitude without text or a second Int owner.
     node: int_new(I64{3})
-    half := (value >> I64{1}).bit_and(I64{9223372036854775807})
+    half := (value >> I64{1}) & I64{9223372036854775807}
     at := I64{0}
     loop half != (I64{0}) {
         int_set(node, at, half % I64{1000000000})
@@ -46,12 +42,12 @@ codec_encode_word: fn(value: I64) -> I64 { dyn_new(DYN_INT, jet_int_owned_from_i
         at += I64{1}
     }
     int_store(wrapping(node + I64{32}), at)
-    int_scale(node, I64{2}, value.bit_and(I64{1}))
+    int_scale(node, I64{2}, value & I64{1})
     dyn_new(DYN_INT, int_tag(node))
 }
 
 codec_signed_word: fn(value: I64, mask: I64, sign: I64) -> I64 {
-    low: value.bit_and(mask)
+    low: value & mask
     codec_encode_word(if (low >= sign) -> low - mask - I64{1} else -> low)
 }
 
@@ -425,8 +421,8 @@ CodecWhole: struct {
 }
 
 codec_float_whole: fn(bits: I64) -> CodecWhole {
-    exponent: ((bits >> I64{52}).bit_and(I64{2047})) - I64{1023}
-    fraction: bits.bit_and(I64{4503599627370495})
+    exponent: ((bits >> I64{52}) & I64{2047}) - I64{1023}
+    fraction: bits & I64{4503599627370495}
     negative: bits < I64{0}
     if (exponent == I64{-1023} && fraction == I64{0}) {
         return CodecWhole{integral: true, value: I64{0}}
@@ -437,10 +433,10 @@ codec_float_whole: fn(bits: I64) -> CodecWhole {
     if (exponent == I64{63}) {
         return CodecWhole{integral: negative && fraction == I64{0}, value: I64{-9223372036854775808}}
     }
-    significand: fraction.bit_or(I64{4503599627370496})
+    significand: fraction | I64{4503599627370496}
     if (exponent < I64{52}) {
         shift: I64{52} - exponent
-        if (significand.bit_and((I64{1} << shift) - I64{1}) != I64{0}) {
+        if (significand & (I64{1} << shift) - I64{1} != I64{0}) {
             return CodecWhole{integral: false, value: I64{0}}
         }
         magnitude: significand >> shift
@@ -547,7 +543,7 @@ codec_decode_integer: fn(tree: I64, kind: I64, range: I64, ok: I64, err: I64, er
     codec_decode_integer(tree, I64{7}, rt_static_text("expected U64, found out-of-range Int"), ok, err, err_len)
 }
 
-codec_finite: fn(bits: I64) -> Bool { ((bits >> I64{52}).bit_and(I64{2047})) != I64{2047} }
+codec_finite: fn(bits: I64) -> Bool { ((bits >> I64{52}) & I64{2047}) != I64{2047} }
 
 // A Number lexeme is :570-580 decode_finite_lexeme. Lexemes carry no
 // whitespace, so jet_float_parse's trim is Rust's untrimmed str::parse::<f64>

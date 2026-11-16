@@ -50,14 +50,14 @@ select sccache. Generator freshness checks use `--check`
 without rewriting their outputs; diagnostic row generation follows this same
 contract.
 
-Jet-emitting generators must use the current `.bit_and`, `.bit_or`, `.bit_xor`
+Jet-emitting generators must use the current bit sigils (`&`, `|`, `~`, `&~`)
 and `.copy()` forms in their emitted bodies. Keep JavaScript bit operations,
 foreign bodies, and deliberate retired-syntax diagnostic inputs unchanged.
 Fix stale output at its template, regenerate canonically, and run the read-only
 checks; editing a generated Jet file alone is not a generator repair.
 The D-SIGIL-ALGEBRA1=B cutover removes `core.math.pow` and `core.math.xor`,
 including catalog/signature rows, dispatcher exports, evaluator aliases and
-runtime C wrappers. Numeric `.pow()` and `.bit_xor()` remain the single routes;
+runtime C wrappers. Numeric `.pow()` and the `~` sigil remain the single routes;
 do not restore retired wrappers to make a fresh ABI census pass.
 
 Core metadata distinguishes source-owned nominals (`source_module … types { … }`)
@@ -76,7 +76,7 @@ nothing and transfer no owner. Source-owned record fields require their exact
 native provider; never reinterpret a host/port record as a socket56 carrier.
 Reviewed narrow-parameter widening (`masked_word_parameters` in
 `Tools/Agent/RuntimeGenerators.jet`) is symbol/position
-specific and requires that parameter's current `.bit_and` mask in the export
+specific and requires that parameter's current `& I64{mask}` in the export
 body. Comments, strings and unrelated functions are not mask evidence. Return
 values, output slots and every unlisted symbol keep the strict physical ABI.
 Closed native enum metadata must retain the current declaration's complete case
@@ -126,7 +126,7 @@ target before its build starts, and remove old pins only after their consumers
 have switched or stopped. Debug and RC producers use separate atomic plans so
 one concurrent producer cannot overwrite the other's input lifetime.
 Retired arithmetic entry points have no internal compatibility exemption:
-Core implementations and tests use numeric `.pow()` / `.bit_xor()` receivers,
+Core implementations and tests use numeric `.pow()` receivers and the `~` sigil,
 with explicit `Float` receivers for floating literal bases. Sweep both Core
 and Runtime sources before the final embedded-Core bake; preserve `Dyn` in
 user-facing codec diagnostics instead of teaching retired dynamic-tree names.

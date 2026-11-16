@@ -2022,7 +2022,7 @@ look_pass: fn(re: Regex, text: [U8], look: Int, looks: &[Bool]) -> Int Never! {
 /// ```
 prev_boundary: fn(text: [U8], pos: Int) -> Int Never! {
     at := pos - 1
-    loop at > 0 && (Int{text[at]}).bit_and(192) == 128 -> at -= 1
+    loop at > 0 && (Int{text[at]}) & 192 == 128 -> at -= 1
     at
 }
 
@@ -2261,9 +2261,9 @@ backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool,
         loop {
             cell: pc * width + pos
             word: visited[cell >> 5]
-            bit: 1 << cell.bit_and(31)
-            if word.bit_and(bit) != 0 -> break
-            visited[cell >> 5] = word.bit_or(bit)
+            bit: 1 << (cell & 31)
+            if word & bit != 0 -> break
+            visited[cell >> 5] = word | bit
             op: re.ops[pc]
             if op == OP_SPLIT {
                 push_pair(jobs, re.ys[pc], pos)
@@ -2391,17 +2391,17 @@ simple_upper: fn(cp: Int) -> Int Never! {
 scalar_text: fn(cp: Int) -> String Never! {
     out := [U8]{}
     if cp < 128 -> out.push(U8{cp}) else if cp < 2048 {
-        out.push(U8{Int{192}.bit_or(cp >> 6)})
-        out.push(U8{Int{128}.bit_or(cp.bit_and(63))})
+        out.push(U8{Int{192} | cp >> 6})
+        out.push(U8{Int{128} | cp & 63})
     } else if cp < 65536 {
-        out.push(U8{Int{224}.bit_or(cp >> 12)})
-        out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(63))})
-        out.push(U8{Int{128}.bit_or(cp.bit_and(63))})
+        out.push(U8{Int{224} | cp >> 12})
+        out.push(U8{Int{128} | (cp >> 6) & 63})
+        out.push(U8{Int{128} | cp & 63})
     } else {
-        out.push(U8{Int{240}.bit_or(cp >> 18)})
-        out.push(U8{Int{128}.bit_or((cp >> 12).bit_and(63))})
-        out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(63))})
-        out.push(U8{Int{128}.bit_or(cp.bit_and(63))})
+        out.push(U8{Int{240} | cp >> 18})
+        out.push(U8{Int{128} | (cp >> 12) & 63})
+        out.push(U8{Int{128} | (cp >> 6) & 63})
+        out.push(U8{Int{128} | cp & 63})
     }
     String.from_bytes(out) ?? ""
 }
@@ -2419,12 +2419,12 @@ decode_at: fn(raw: [U8], i: Int) -> Int Never! {
     first: Int{raw[i]}
     if first < 128 -> return first
     width: lead_width(raw[i])
-    cp := first.bit_and(7)
-    if width == 2 -> cp = first.bit_and(31)
-    if width == 3 -> cp = first.bit_and(15)
+    cp := first & 7
+    if width == 2 -> cp = first & 31
+    if width == 3 -> cp = first & 15
     k := 1
     loop k < width && i + k < raw.len() {
-        cp = (cp << 6).bit_or(Int{raw[i + k]}.bit_and(63))
+        cp = (cp << 6) | Int{raw[i + k]} & 63
         k += 1
     }
     cp

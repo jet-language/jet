@@ -3,9 +3,7 @@
 // Rust 1.90 library/std/src/sys/net/connection/socket.rs LookupHost: zeroed hints with
 // SOCK_STREAM, null service; apply the requested port after ordered copying.
 // library/std/src/sys/net/connection/socket/unix.rs cvt_gai: EAI_SYSTEM preserves errno; others prefix gai text.
-net_i32: fn(value: I64) -> I64 {
-    ((value.bit_and(I64{4294967295})).bit_xor(I64{2147483648})) - I64{2147483648}
-}
+net_i32: fn(value: I64) -> I64 { ((value & I64{4294967295}) ~ I64{2147483648}) - I64{2147483648} }
 
 net_os_kind: fn(errno: I64) -> I64 {
     if (errno == I64{22} || errno == I64{84}) { return I64{1} }
@@ -63,7 +61,7 @@ net_resolve_rows: fn(host: I64, port: I64, rows_out: I64, length_out: I64, error
     rt_text_bytes_copy(name, rt_text_data(host), length)
     rt_text_put(wrapping(name + length), I64{0})
     errno: jet_rt_alloc(I64{8}, I64{8})
-    status: net_lookup(name, length, port.bit_and(I64{65535}), false, I64{-1}, rows_out, length_out, errno)
+    status: net_lookup(name, length, port & I64{65535}, false, I64{-1}, rows_out, length_out, errno)
     code: net_word(errno, I64{0})
     jet_rt_free(errno, I64{8}, I64{8})
     jet_rt_free(name, length + I64{1}, I64{1})
@@ -87,7 +85,7 @@ net_resolve_rows: fn(host: I64, port: I64, rows_out: I64, length_out: I64, error
 // the List drop glue drops each handle and frees count*8).
 #Export(c) jet_net_raw_resolve_ordered: fn(host: I64, port: I64, rows_out: I64, length_out: I64, error_out: I64) -> I64 {
     // Reviewed u16 boundary (Tools/Agent/RuntimeGenerators.jet masked_word_parameters).
-    if (net_resolve_rows(host, port.bit_and(I64{65535}), rows_out, length_out, error_out) == I64{0}) {
+    if (net_resolve_rows(host, port & I64{65535}, rows_out, length_out, error_out) == I64{0}) {
         return I64{0}
     }
     rows: net_word(rows_out, I64{0})

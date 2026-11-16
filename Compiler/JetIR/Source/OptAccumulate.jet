@@ -649,7 +649,7 @@ ir_accumulate_test_run: fn(m: &&IRModule, g: &&IRFunction, sum: Int, drops: [Int
     }
 }
 
-// g(n - 1).bit_and/bit_or/bit_xor(n * 3): x is computed after the call, by
+// g(n - 1) & (n * 3), with `|` and `~` too: x is computed after the call, by
 // code that cannot stop.
 #Test("An exact Int bit operation of a self call and a value computed after it becomes a loop") {
     ops: [IROp]{IROp.BitAnd, IROp.BitOr, IROp.BitXor}
@@ -669,7 +669,7 @@ ir_accumulate_test_run: fn(m: &&IRModule, g: &&IRFunction, sum: Int, drops: [Int
     }
 }
 
-// wrapping(n + g(n - 1)), wrapping(n * g(n - 1)), n.bit_and(g(n - 1)) over
+// wrapping(n + g(n - 1)), wrapping(n * g(n - 1)), n & g(n - 1) over
 // I64 words.
 #Test("A wrapping word sum or product, or a signed word bit operation, of a self call becomes a loop") {
     ops: [IROp]{IROp.Add, IROp.Mul, IROp.BitAnd}

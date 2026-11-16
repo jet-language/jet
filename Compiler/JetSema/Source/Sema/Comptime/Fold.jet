@@ -558,9 +558,9 @@ sema_comptime_fold_binary: fn(op: TBinaryOp, ty: Type, left: TComptimeValue, rig
                 .Add -> return sema_comptime_fold_int(a + b, ty)
                 .Sub -> return sema_comptime_fold_int(a - b, ty)
                 .Mul -> return sema_comptime_fold_int(a * b, ty)
-                .BitAnd -> return sema_comptime_fold_int(a.bit_and(b), ty)
-                .BitOr -> return sema_comptime_fold_int(a.bit_or(b), ty)
-                .BitXor -> return sema_comptime_fold_int(a.bit_xor(b), ty)
+                .BitAnd -> return sema_comptime_fold_int(a & b, ty)
+                .BitOr -> return sema_comptime_fold_int(a | b, ty)
+                .BitXor -> return sema_comptime_fold_int(a ~ b, ty)
                 // A non-negative value shifted by less than its width; the
                 // result must still fit the checked type.
                 .Shl -> {

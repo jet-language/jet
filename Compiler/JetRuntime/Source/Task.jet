@@ -501,7 +501,7 @@ task_panic_message: fn(message: I64) -> I64 {
 }
 
 task_should_flatten: fn(child: I64, flatten: Bool) -> Bool {
-    flatten && (sync_load(wrapping(sync_load(wrapping(child + I64{40})) + I64{48})).bit_and(I64{255})) == I64{8}
+    flatten && (sync_load(wrapping(sync_load(wrapping(child + I64{40})) + I64{48})) & I64{255}) == I64{8}
 }
 
 // Converts one owned ready Task into the route result. Success moves only
@@ -558,7 +558,7 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
         task_drop(child)
         return I64{0}
     }
-    task_take_outcome(child, (flatten.bit_and(I64{255})) != I64{0}, out)
+    task_take_outcome(child, (flatten & I64{255}) != I64{0}, out)
 }
 
 #Export(c) jet_task_join_result: fn(child: I64, out: I64) -> I64 {

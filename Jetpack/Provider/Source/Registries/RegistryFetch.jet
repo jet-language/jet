@@ -1066,7 +1066,7 @@ provider_registry_extract_tar: fn(path: String, gzipped: Bool, destination: Stri
         entry: member.entry
         prepared: provider_registry_prepare_entry(entry.name, entry.kind, destination)
         target: prepared ?? next
-        out := if files.create(target, if_exists: .Replace, mode: (member.mode).bit_and(0o777)) == {
+        out := if files.create(target, if_exists: .Replace, mode: (member.mode) & 0o777) == {
             .Ok(writer) -> writer
             .Err(error) -> {
                 return Err(RegistryError.Reason("could not create `{entry.name}`: {error}"))

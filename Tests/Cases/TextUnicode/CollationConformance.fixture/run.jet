@@ -11,17 +11,17 @@ use {
 
 collation_scalar: fn(out: &[U8], cp: Int) Never! {
     if cp < 128 -> out.push(U8{cp}) else if cp < 2048 {
-        out.push(U8{Int{192}.bit_or(cp >> 6)})
-        out.push(U8{Int{128}.bit_or(cp.bit_and(Int{63}))})
+        out.push(U8{Int{192} | cp >> 6})
+        out.push(U8{Int{128} | cp & Int{63}})
     } else if cp < 65536 {
-        out.push(U8{Int{224}.bit_or(cp >> 12)})
-        out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(Int{63}))})
-        out.push(U8{Int{128}.bit_or(cp.bit_and(Int{63}))})
+        out.push(U8{Int{224} | cp >> 12})
+        out.push(U8{Int{128} | (cp >> 6) & Int{63}})
+        out.push(U8{Int{128} | cp & Int{63}})
     } else {
-        out.push(U8{Int{240}.bit_or(cp >> 18)})
-        out.push(U8{Int{128}.bit_or((cp >> 12).bit_and(Int{63}))})
-        out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(Int{63}))})
-        out.push(U8{Int{128}.bit_or(cp.bit_and(Int{63}))})
+        out.push(U8{Int{240} | cp >> 18})
+        out.push(U8{Int{128} | (cp >> 12) & Int{63}})
+        out.push(U8{Int{128} | (cp >> 6) & Int{63}})
+        out.push(U8{Int{128} | cp & Int{63}})
     }
 }
 

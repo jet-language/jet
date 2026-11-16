@@ -56,7 +56,7 @@ ui_event_size_eq: fn(a: I64, b: I64) -> Bool {
             }
             if (kind == I64{4}) { first = ui_carrier_bool(wrapping(value + UI_EVENT_FIRST)) }
             if (kind == I64{0}) {
-                second = ui_carrier_word(wrapping(value + UI_EVENT_SECOND)).bit_and(I64{255})
+                second = ui_carrier_word(wrapping(value + UI_EVENT_SECOND)) & I64{255}
             }
             if (kind == I64{2}) { second = ui_carrier_word(wrapping(value + UI_EVENT_SECOND)) }
             if (kind == I64{3}) {
@@ -108,7 +108,7 @@ ui_event_bytes_eq: fn(a: I64, b: I64) -> Bool {
         return false
     }
     if (kind == I64{0}) {
-        return (ui_carrier_word(wrapping(a + UI_EVENT_SECOND)).bit_and(I64{255})) == (ui_carrier_word(wrapping(b + UI_EVENT_SECOND)).bit_and(I64{255}))
+        return (ui_carrier_word(wrapping(a + UI_EVENT_SECOND)) & I64{255}) == (ui_carrier_word(wrapping(b + UI_EVENT_SECOND)) & I64{255})
     }
     if (kind == I64{2}) {
         return ui_carrier_word(wrapping(a + UI_EVENT_SECOND)) == ui_carrier_word(wrapping(b + UI_EVENT_SECOND))

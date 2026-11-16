@@ -136,7 +136,7 @@ jet_receipt_hex: fn(value: String) -> String Never! {
     loop byte in value.bytes() {
         code: Int{byte}
         out.push(digits[code >> 4])
-        out.push(digits[(code).bit_and(15)])
+        out.push(digits[(code) & 15])
     }
     String.from_bytes(out) ?? ""
 }
@@ -146,7 +146,7 @@ jet_receipt_frame: fn(out: &[U8], value: String) Never! {
     bytes: value.bytes()
     shift := 56
     loop shift >= 0 {
-        out.push(U8{((bytes.len() >> shift)).bit_and(255)})
+        out.push(U8{((bytes.len() >> shift)) & 255})
         shift -= 8
     }
     loop byte in bytes -> out.push(byte)

@@ -94,7 +94,7 @@ atom_name: fn(tree: Dyn) -> String? Never! {
 scalar_count: fn(text: String) -> Int Never! {
     count := 0
     loop b in text.bytes() {
-        if (Int{b}).bit_and(192) != 128 -> count += 1
+        if (Int{b}) & 192 != 128 -> count += 1
     }
     count
 }
@@ -188,7 +188,7 @@ etf_error: fn(kind: EncodingErrorKind, offset: Int, path: String, reason: String
 }
 
 u32_at: fn(bytes: [U8], at: Int) -> Int Never! {
-    (Int{bytes[at]} << 24).bit_or((Int{bytes[at + 1]} << 16)).bit_or((Int{bytes[at + 2]} << 8)).bit_or(Int{bytes[at + 3]})
+    (Int{bytes[at]} << 24) | (Int{bytes[at + 1]} << 16) | (Int{bytes[at + 2]} << 8) | Int{bytes[at + 3]}
 }
 
 slice: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
@@ -289,7 +289,7 @@ TermReader: struct {
     take_u16: fn(&self) -> Int Never! {
         high: self.byte()
         low: self.byte()
-        (high << 8).bit_or(low)
+        (high << 8) | low
     }
 
     take_u32: fn(&self) -> Int Never! {
@@ -587,7 +587,7 @@ TermWriter: struct {
     byte_arrays: ByteEncoding
     limits: EncodingLimits
 
-    put: fn(&self, value: Int) Never! { self.out.push(U8{value.bit_and(255)}) }
+    put: fn(&self, value: Int) Never! { self.out.push(U8{value & 255}) }
 
     put_u16: fn(&self, value: Int) Never! {
         self.put(value >> 8)
@@ -705,7 +705,7 @@ TermWriter: struct {
         }
         if value >= -2147483648 && value <= 2147483647 {
             self.put(98)
-            self.put_u32(value.bit_and(4294967295))
+            self.put_u32(value & 4294967295)
             return
         }
         digits := [U8]{}
@@ -769,16 +769,16 @@ TermWriter: struct {
 append_scalar: fn(out: &[U8], scalar: Int) Never! {
     if scalar < 128 -> out.push(U8{scalar}) else if scalar < 2048 {
         out.push(U8{192 + (scalar >> 6)})
-        out.push(U8{128 + scalar.bit_and(63)})
+        out.push(U8{128 + (scalar & 63)})
     } else if scalar < 65536 {
         out.push(U8{224 + (scalar >> 12)})
-        out.push(U8{128 + (scalar >> 6).bit_and(63)})
-        out.push(U8{128 + scalar.bit_and(63)})
+        out.push(U8{128 + ((scalar >> 6) & 63)})
+        out.push(U8{128 + (scalar & 63)})
     } else {
         out.push(U8{240 + (scalar >> 18)})
-        out.push(U8{128 + (scalar >> 12).bit_and(63)})
-        out.push(U8{128 + (scalar >> 6).bit_and(63)})
-        out.push(U8{128 + scalar.bit_and(63)})
+        out.push(U8{128 + ((scalar >> 12) & 63)})
+        out.push(U8{128 + ((scalar >> 6) & 63)})
+        out.push(U8{128 + (scalar & 63)})
     }
 }
 

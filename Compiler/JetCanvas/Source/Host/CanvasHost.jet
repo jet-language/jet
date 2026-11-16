@@ -417,12 +417,12 @@ canvas_host_url_host: fn(host: String) -> String Never! {
 canvas_host_same_secret: fn(left: String, right: String) -> Bool Never! {
     a: left.bytes()
     b: right.bytes()
-    difference := a.len().bit_xor(b.len())
+    difference := a.len() ~ b.len()
     longest: if a.len() > b.len() -> a.len() else -> b.len()
     loop index in 0..<longest {
         x: if index < a.len() -> Int{a[index]} else -> 0
         y: if index < b.len() -> Int{b[index]} else -> 0
-        difference = difference.bit_or(x.bit_xor(y))
+        difference |= x ~ y
     }
     difference == 0
 }

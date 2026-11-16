@@ -234,28 +234,28 @@ wal_zeros: fn(n: Int) -> [U8] Never! {
 
 // A little-endian (native) 32-bit word.
 le_get4: fn(b: [U8], at: Int) -> Int Never! {
-    Int{b[at]}.bit_or(Int{b[at + 1]} << 8).bit_or(Int{b[at + 2]} << 16).bit_or(Int{b[at + 3]} << 24)
+    Int{b[at]} | Int{b[at + 1]} << 8 | Int{b[at + 2]} << 16 | Int{b[at + 3]} << 24
 }
 
 le_put4: fn(b: &[U8], at: Int, v: Int) Never! {
-    b[at] = U8{v.bit_and(255)}
-    b[at + 1] = U8{(v >> 8).bit_and(255)}
-    b[at + 2] = U8{(v >> 16).bit_and(255)}
-    b[at + 3] = U8{(v >> 24).bit_and(255)}
+    b[at] = U8{v & 255}
+    b[at + 1] = U8{(v >> 8) & 255}
+    b[at + 2] = U8{(v >> 16) & 255}
+    b[at + 3] = U8{(v >> 24) & 255}
 }
 
 // A little-endian (native) 16-bit word.
-le_get2: fn(b: [U8], at: Int) -> Int Never! { Int{b[at]}.bit_or(Int{b[at + 1]} << 8) }
+le_get2: fn(b: [U8], at: Int) -> Int Never! { Int{b[at]} | Int{b[at + 1]} << 8 }
 
 le_put2: fn(b: &[U8], at: Int, v: Int) Never! {
-    b[at] = U8{v.bit_and(255)}
-    b[at + 1] = U8{(v >> 8).bit_and(255)}
+    b[at] = U8{v & 255}
+    b[at + 1] = U8{(v >> 8) & 255}
 }
 
 // A field of the snapshot header.
 hdr_get: fn(w: Wal, off: Int) -> Int Never! { le_get4(w.hdr, off) }
 
-hdr_set: fn(w: &Wal, off: Int, v: Int) Never! { le_put4(w.hdr, off, v.bit_and(os.U32_MASK)) }
+hdr_set: fn(w: &Wal, off: Int, v: Int) Never! { le_put4(w.hdr, off, v & os.U32_MASK) }
 
 // pWal->hdr.mxFrame.
 wal_mx_frame: fn(w: Wal) -> Int Never! { le_get4(w.hdr, HDR_MXFRAME) }
@@ -264,9 +264,9 @@ wal_mx_frame: fn(w: Wal) -> Int Never! { le_get4(w.hdr, HDR_MXFRAME) }
 read_lock: fn(i: Int) -> Int Never! { 3 + i }
 
 // WAL_SYNC_FLAGS and CKPT_SYNC_FLAGS.
-wal_sync_flags: fn(f: Int) -> Int Never! { f.bit_and(3) }
+wal_sync_flags: fn(f: Int) -> Int Never! { f & 3 }
 
-ckpt_sync_flags: fn(f: Int) -> Int Never! { (f >> 2).bit_and(3) }
+ckpt_sync_flags: fn(f: Int) -> Int Never! { (f >> 2) & 3 }
 
 // walFrameOffset.
 wal_frame_offset: fn(frame: Int, sz_page: Int) -> Int Never! {
@@ -329,7 +329,7 @@ wi_get4: fn(w: &Wal, db: &file.SQLFile, offset: Int) -[DB]> Int Never! {
 
 wi_set4: fn(w: &Wal, db: &file.SQLFile, offset: Int, v: Int) -[DB]> Never! {
     b := wal_zeros(4)
-    le_put4(b, 0, v.bit_and(os.U32_MASK))
+    le_put4(b, 0, v & os.U32_MASK)
     wi_write(w, db, offset, b, 0, 4)
 }
 
@@ -443,8 +443,8 @@ wal_index_page: fn(w: &Wal, db: &file.SQLFile, i: Int, present: &Bool) -[DB]> In
     }
     mapped := false
     rc := file.file_shm_map(db, i, WALINDEX_PGSZ, w.write_lock, mapped)
-    if rc != base.OK && rc.bit_and(255) == base.READONLY {
-        w.read_only = w.read_only.bit_or(WAL_SHM_RDONLY)
+    if rc != base.OK && rc & 255 == base.READONLY {
+        w.read_only |= WAL_SHM_RDONLY
         if rc == base.READONLY -> rc = base.OK
     }
     if !mapped {
@@ -481,14 +481,14 @@ wal_checksum: fn(native: Bool, a: [U8], at: Int, n: Int, s1_in: Int, s2_in: Int)
     end: at + n
     if native {
         loop i < end {
-            s1 = (s1 + le_get4(a, i) + s2).bit_and(m)
-            s2 = (s2 + le_get4(a, i + 4) + s1).bit_and(m)
+            s1 = (s1 + le_get4(a, i) + s2) & m
+            s2 = (s2 + le_get4(a, i + 4) + s1) & m
             i += 8
         }
     } else {
         loop i < end {
-            s1 = (s1 + util.get4(a, i) + s2).bit_and(m)
-            s2 = (s2 + util.get4(a, i + 4) + s1).bit_and(m)
+            s1 = (s1 + util.get4(a, i) + s2) & m
+            s2 = (s2 + util.get4(a, i + 4) + s1) & m
             i += 8
         }
     }
@@ -551,32 +551,32 @@ wal_decode_frame: fn(w: &Wal, frame: [U8], pgno: &Int, n_truncate: &Int) -> Bool
 // no-ops in exclusive mode.
 wal_lock_shared: fn(w: &Wal, db: &file.SQLFile, idx: Int) -[DB]> Int Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE -> return base.OK
-    file.file_shm_lock(db, idx, 1, os.SHM_LOCK.bit_or(os.SHM_SHARED))
+    file.file_shm_lock(db, idx, 1, os.SHM_LOCK | os.SHM_SHARED)
 }
 
 wal_unlock_shared: fn(w: &Wal, db: &file.SQLFile, idx: Int) -[DB]> Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE {
         return
     }
-    _: file.file_shm_lock(db, idx, 1, os.SHM_UNLOCK.bit_or(os.SHM_SHARED))
+    _: file.file_shm_lock(db, idx, 1, os.SHM_UNLOCK | os.SHM_SHARED)
 }
 
 wal_lock_exclusive: fn(w: &Wal, db: &file.SQLFile, idx: Int, n: Int) -[DB]> Int Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE -> return base.OK
-    file.file_shm_lock(db, idx, n, os.SHM_LOCK.bit_or(os.SHM_EXCLUSIVE))
+    file.file_shm_lock(db, idx, n, os.SHM_LOCK | os.SHM_EXCLUSIVE)
 }
 
 wal_unlock_exclusive: fn(w: &Wal, db: &file.SQLFile, idx: Int, n: Int) -[DB]> Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE {
         return
     }
-    _: file.file_shm_lock(db, idx, n, os.SHM_UNLOCK.bit_or(os.SHM_EXCLUSIVE))
+    _: file.file_shm_lock(db, idx, n, os.SHM_UNLOCK | os.SHM_EXCLUSIVE)
 }
 
 // walHash and walNextHash.
-wal_hash: fn(pgno: Int) -> Int Never! { (pgno * HASHTABLE_HASH_1).bit_and(HASHTABLE_NSLOT - 1) }
+wal_hash: fn(pgno: Int) -> Int Never! { (pgno * HASHTABLE_HASH_1) & HASHTABLE_NSLOT - 1 }
 
-wal_next_hash: fn(k: Int) -> Int Never! { (k + 1).bit_and(HASHTABLE_NSLOT - 1) }
+wal_next_hash: fn(k: Int) -> Int Never! { (k + 1) & HASHTABLE_NSLOT - 1 }
 
 // walFramePage: the hash table (region) of a frame.
 wal_frame_page: fn(frame: Int) -> Int Never! {
@@ -683,7 +683,7 @@ recover_region: fn(w: &Wal, db: &file.SQLFile, first: Int, last: Int, sz_page: I
         if n_truncate != 0 {
             hdr_set(w, HDR_MXFRAME, f)
             hdr_set(w, HDR_NPAGE, n_truncate)
-            le_put2(w.hdr, HDR_SZPAGE, sz_page.bit_and(65280).bit_or(sz_page >> 16))
+            le_put2(w.hdr, HDR_SZPAGE, sz_page & 65280 | sz_page >> 16)
             saved.s1 = hdr_get(w, HDR_FRAME_CKSUM)
             saved.s2 = hdr_get(w, HDR_FRAME_CKSUM + 4)
         }
@@ -702,14 +702,14 @@ recover_log: fn(w: &Wal, db: &file.SQLFile, saved: &WalCksum) -[DB]> Int Never! 
     if rc != base.OK -> return rc
     magic: util.get4(buf, 0)
     sz_page: util.get4(buf, 8)
-    if util.clear_bits(magic, 1) != WAL_MAGIC || sz_page.bit_and(sz_page - 1) != 0 || sz_page > WAL_MAX_PAGE_SIZE || sz_page < 512 {
+    if util.clear_bits(magic, 1) != WAL_MAGIC || sz_page & sz_page - 1 != 0 || sz_page > WAL_MAX_PAGE_SIZE || sz_page < 512 {
         return base.OK
     }
-    w.hdr[HDR_BIGEND] = U8{magic.bit_and(1)}
+    w.hdr[HDR_BIGEND] = U8{magic & 1}
     w.sz_page = sz_page
     w.n_ckpt = util.get4(buf, 12)
     loop k in 0..<8 -> w.hdr[HDR_SALT + k] = buf[16 + k]
-    ck: wal_checksum(magic.bit_and(1) == 0, buf, 0, WAL_HDRSIZE - 8, 0, 0)
+    ck: wal_checksum(magic & 1 == 0, buf, 0, WAL_HDRSIZE - 8, 0, 0)
     hdr_set(w, HDR_FRAME_CKSUM, ck.s1)
     hdr_set(w, HDR_FRAME_CKSUM + 4, ck.s2)
     if ck.s1 != util.get4(buf, 24) || ck.s2 != util.get4(buf, 28) -> return base.OK
@@ -785,7 +785,7 @@ wal_open: fn(w: &Wal, db: &file.SQLFile, name: String, no_shm: Bool, mx_wal_size
     w.sync_header = true
     w.pad_to_sector_boundary = true
     w.exclusive_mode = if no_shm -> WAL_HEAPMEMORY_MODE else -> WAL_NORMAL_MODE
-    flags: os.OPEN_READWRITE.bit_or(os.OPEN_CREATE).bit_or(os.OPEN_WAL)
+    flags: os.OPEN_READWRITE | os.OPEN_CREATE | os.OPEN_WAL
     rc: file.file_open(w.fd, name, flags)
     if rc != base.OK {
         wal_index_close(w, db, false)
@@ -793,10 +793,10 @@ wal_open: fn(w: &Wal, db: &file.SQLFile, name: String, no_shm: Bool, mx_wal_size
         w = wal_closed()
         return rc
     }
-    if w.fd.os.flags.bit_and(os.OPEN_READONLY) != 0 -> w.read_only = WAL_RDONLY
+    if w.fd.os.flags & os.OPEN_READONLY != 0 -> w.read_only = WAL_RDONLY
     dc: file.file_device_characteristics(db)
-    if dc.bit_and(os.IOCAP_SEQUENTIAL) != 0 -> w.sync_header = false
-    if dc.bit_and(os.IOCAP_POWERSAFE_OVERWRITE) != 0 -> w.pad_to_sector_boundary = false
+    if dc & os.IOCAP_SEQUENTIAL != 0 -> w.sync_header = false
+    if dc & os.IOCAP_POWERSAFE_OVERWRITE != 0 -> w.pad_to_sector_boundary = false
     w.open = true
     base.OK
 }
@@ -836,7 +836,7 @@ wal_iterator_init: fn(w: &Wal, db: &file.SQLFile, n_backfill: Int, iter: &WalIte
         pg: keys[k] >> 32
         if k + 1 < n && (keys[k + 1] >> 32) == pg -> next
         iter.pages.push(pg)
-        iter.frames.push(keys[k].bit_and(os.U32_MASK))
+        iter.frames.push(keys[k] & os.U32_MASK)
     }
     base.OK
 }
@@ -851,7 +851,7 @@ wal_busy_lock: fn(w: &Wal, db: &file.SQLFile, busy: &BusyHandler, use_busy: Bool
 // walPagesize.
 wal_pagesize: fn(w: Wal) -> Int Never! {
     v: le_get2(w.hdr, HDR_SZPAGE)
-    v.bit_and(65024) + (v.bit_and(1) << 16)
+    (v & 65024) + ((v & 1) << 16)
 }
 
 // walRestartHdr: start the log over with salt1 as the second salt.
@@ -860,7 +860,7 @@ wal_restart_hdr: fn(w: &Wal, db: &file.SQLFile, salt1: [U8]) -[DB]> Never! {
     hdr_set(w, HDR_MXFRAME, 0)
     // C reads aSalt[0] big-endian and stores the sum as a native word.
     salt: util.get4(w.hdr, HDR_SALT) + 1
-    le_put4(w.hdr, HDR_SALT, salt.bit_and(os.U32_MASK))
+    le_put4(w.hdr, HDR_SALT, salt & os.U32_MASK)
     loop k in 0..<4 -> w.hdr[HDR_SALT + 4 + k] = salt1[k]
     wal_index_write_hdr(w, db)
     wi_set4(w, db, CKPT_NBACKFILL, 0)
@@ -1032,7 +1032,7 @@ wal_index_read_hdr: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Int Ne
     bad := true
     if present -> bad = wal_index_try_hdr(w, db, changed)
     if bad {
-        if !w.shm_unreliable && w.read_only.bit_and(WAL_SHM_RDONLY) != 0 {
+        if !w.shm_unreliable && w.read_only & WAL_SHM_RDONLY != 0 {
             rc = wal_lock_shared(w, db, WAL_WRITE_LOCK)
             if rc == base.OK {
                 wal_unlock_shared(w, db, WAL_WRITE_LOCK)
@@ -1182,7 +1182,7 @@ wal_try_begin_read: fn(w: &Wal, db: &file.SQLFile, changed: &Bool, use_wal: Bool
             mx_i = i
         }
     }
-    if w.read_only.bit_and(WAL_SHM_RDONLY) == 0 && (mx_read_mark < mx || mx_i == 0) {
+    if w.read_only & WAL_SHM_RDONLY == 0 && (mx_read_mark < mx || mx_i == 0) {
         loop i in 1..<WAL_NREADER {
             rc = wal_lock_exclusive(w, db, read_lock(i), 1)
             if rc == base.OK {
@@ -1196,7 +1196,7 @@ wal_try_begin_read: fn(w: &Wal, db: &file.SQLFile, changed: &Bool, use_wal: Bool
     }
     if mx_i == 0 -> return if rc == base.BUSY -> WAL_RETRY else -> base.READONLY_CANTINIT
     rc = wal_lock_shared(w, db, read_lock(mx_i))
-    if rc != base.OK -> return if rc.bit_and(255) == base.BUSY -> WAL_RETRY else -> rc
+    if rc != base.OK -> return if rc & 255 == base.BUSY -> WAL_RETRY else -> rc
     w.min_frame = wi_get4(w, db, CKPT_NBACKFILL) + 1
     if wi_get4(w, db, CKPT_READMARK + 4 * mx_i) != mx_read_mark || wi_live_hdr(w, db) != w.hdr {
         wal_unlock_shared(w, db, read_lock(mx_i))
@@ -1490,7 +1490,7 @@ wal_frames_in: fn(w: &Wal, db: &file.SQLFile, pc: &cache.PCache, sz_page: Int, l
         if rc != base.OK -> return rc
         last = s
         offset += sz_frame
-        pc.pages[s].flags = pc.pages[s].flags.bit_or(cache.PGHDR_WAL_APPEND)
+        pc.pages[s].flags = pc.pages[s].flags | cache.PGHDR_WAL_APPEND
     }
     if is_commit && w.re_cksum != 0 {
         rc = wal_rewrite_checksums(w, frame)
@@ -1523,7 +1523,7 @@ wal_frames_in: fn(w: &Wal, db: &file.SQLFile, pc: &cache.PCache, sz_page: Int, l
     loop k in 0..<n {
         if rc != base.OK -> break
         s: list[k]
-        if pc.pages[s].flags.bit_and(cache.PGHDR_WAL_APPEND) == 0 -> next
+        if pc.pages[s].flags & cache.PGHDR_WAL_APPEND == 0 -> next
         frame += 1
         rc = wal_index_append(w, db, frame, pc.pages[s].pgno)
     }
@@ -1533,7 +1533,7 @@ wal_frames_in: fn(w: &Wal, db: &file.SQLFile, pc: &cache.PCache, sz_page: Int, l
         rc = wal_index_append(w, db, frame, pc.pages[last].pgno)
     }
     if rc == base.OK {
-        le_put2(w.hdr, HDR_SZPAGE, sz_page.bit_and(65280).bit_or(sz_page >> 16))
+        le_put2(w.hdr, HDR_SZPAGE, sz_page & 65280 | sz_page >> 16)
         hdr_set(w, HDR_MXFRAME, frame)
         if is_commit {
             change: hdr_get(w, HDR_CHANGE) + 1
@@ -1639,7 +1639,7 @@ wal_heap_memory: fn(w: Wal) -> Bool Never! { w.open && w.exclusive_mode == WAL_H
     salt: [U8]{1, 2, 3, 4, 5, 6, 7, 8}
     loop k in 0..<8 -> w.hdr[HDR_SALT + k] = salt[k]
     data := wal_zeros(512)
-    loop k in 0..<512 -> data[k] = U8{(k * 7).bit_and(255)}
+    loop k in 0..<512 -> data[k] = U8{(k * 7) & 255}
     frame := wal_zeros(WAL_FRAME_HDRSIZE)
     wal_encode_frame(w, 5, 9, data, 0, frame)
     after: [Int]{hdr_get(w, HDR_FRAME_CKSUM), hdr_get(w, HDR_FRAME_CKSUM + 4)}
@@ -1654,7 +1654,7 @@ wal_heap_memory: fn(w: Wal) -> Bool Never! { w.open && w.exclusive_mode == WAL_H
     assert(pgno == 5 && n_truncate == 9)
     assert(hdr_get(r, HDR_FRAME_CKSUM) == after[0] && hdr_get(r, HDR_FRAME_CKSUM + 4) == after[1])
     // A changed byte or another salt is not a frame of this log.
-    whole[100] = U8{Int{whole[100]}.bit_xor(1)}
+    whole[100] = U8{Int{whole[100]} ~ 1}
     r2 := wal_closed()
     r2.sz_page = 512
     loop k in 0..<8 -> r2.hdr[HDR_SALT + k] = salt[k]
@@ -1669,8 +1669,8 @@ wal_heap_memory: fn(w: Wal) -> Bool Never! { w.open && w.exclusive_mode == WAL_H
     assert(wal_hash(1) == 383 && wal_next_hash(HASHTABLE_NSLOT - 1) == 0)
     assert(wal_frame_offset(1, 4096) == 32 && wal_frame_offset(3, 4096) == 32 + 2 * 4120)
     w := wal_closed()
-    le_put2(w.hdr, HDR_SZPAGE, 65536.bit_and(65280).bit_or(65536 >> 16))
+    le_put2(w.hdr, HDR_SZPAGE, 65536 & 65280 | 65536 >> 16)
     assert(wal_pagesize(w) == 65536)
-    le_put2(w.hdr, HDR_SZPAGE, 4096.bit_and(65280).bit_or(4096 >> 16))
+    le_put2(w.hdr, HDR_SZPAGE, 4096 & 65280 | 4096 >> 16)
     assert(wal_pagesize(w) == 4096)
 }

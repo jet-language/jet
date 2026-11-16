@@ -28,13 +28,13 @@ coverage_root := I64{0}
 #Export(c) jet_rt_coverage_function: fn(line: I64) {
     if (coverage_root != I64{0} && line >= I64{0} && line < COVERAGE_LINES) {
         word: wrapping(coverage_root + (line >> I64{6}) * I64{8})
-        bit: I64{1} << line.bit_and(I64{63})
+        bit: I64{1} << (line & I64{63})
         loop {
             seen: sync_load(word)
-            if (seen.bit_and(bit) != I64{0}) {
+            if (seen & bit != I64{0}) {
                 return
             }
-            if (sync_cas(word, seen, seen.bit_or(bit)) == seen) { break }
+            if (sync_cas(word, seen, seen | bit) == seen) { break }
         }
     }
     coverage_append(line)

@@ -102,14 +102,14 @@ lms_code: fn(kind: LMSType) -> Int Never! {
 }
 
 push_u32_be: fn(out: &[U8], v: Int) Never! {
-    out.push(U8{(v >> 24).bit_and(0xFF)})
-    out.push(U8{(v >> 16).bit_and(0xFF)})
-    out.push(U8{(v >> 8).bit_and(0xFF)})
-    out.push(U8{v.bit_and(0xFF)})
+    out.push(U8{(v >> 24) & 0xFF})
+    out.push(U8{(v >> 16) & 0xFF})
+    out.push(U8{(v >> 8) & 0xFF})
+    out.push(U8{v & 0xFF})
 }
 
 get_u32_be: fn(data: [U8], at: Int) -> Int Never! {
-    (Int{data[at]} << 24).bit_or(Int{data[at + 1]} << 16).bit_or(Int{data[at + 2]} << 8).bit_or(Int{data[at + 3]})
+    (Int{data[at]} << 24) | Int{data[at + 1]} << 16 | Int{data[at + 2]} << 8 | Int{data[at + 3]}
 }
 
 u32_bytes: fn(v: Int) -> [U8] Never! {
@@ -171,8 +171,8 @@ digit_array: fn(params: LMOTSParams, msg: [U8], sig: [U8], c_at: Int) -> [U8] Ne
     out := hashes.hash_finish(ctx)
     sum := 0
     loop i in 0..<N_HASH_LEN -> sum += DIGIT_MAX - (Int{out[i]})
-    out.push(U8{(sum >> 8).bit_and(0xFF)})
-    out.push(U8{sum.bit_and(0xFF)})
+    out.push(U8{(sum >> 8) & 0xFF})
+    out.push(U8{sum & 0xFF})
     out
 }
 
@@ -188,8 +188,8 @@ hash_chains: fn(params: LMOTSParams, x: [U8], x_at: Int, min: [U8]?, max: [U8]?)
     loop _ in 0..<(3 + N_HASH_LEN) -> block.push(U8{0})
     loop i in 0..<P_DIGITS {
         loop k in 0..<N_HASH_LEN -> block[prefix + 3 + k] = x[x_at + i * N_HASH_LEN + k]
-        block[prefix] = U8{(i >> 8).bit_and(0xFF)}
-        block[prefix + 1] = U8{i.bit_and(0xFF)}
+        block[prefix] = U8{(i >> 8) & 0xFF}
+        block[prefix + 1] = U8{i & 0xFF}
         lo: if min == .Val(m) -> (Int{m[i]}) else -> 0
         hi: if max == .Val(m) -> (Int{m[i]}) else -> DIGIT_MAX
         loop j in lo..<hi {
@@ -267,8 +267,8 @@ lmots_generate_private_key: fn(kind: LMOTSType, key_id: [U8], leaf: Int, seed: [
         ctx := hashes.hash_start(.SHA256)
         hashes.hash_update(ctx, params.key_id)
         hashes.hash_update(ctx, params.leaf_id)
-        hashes.hash_update_byte(ctx, U8{(i >> 8).bit_and(0xFF)})
-        hashes.hash_update_byte(ctx, U8{i.bit_and(0xFF)})
+        hashes.hash_update_byte(ctx, U8{(i >> 8) & 0xFF})
+        hashes.hash_update_byte(ctx, U8{i & 0xFF})
         hashes.hash_update_byte(ctx, U8{0xFF})
         hashes.hash_update(ctx, seed)
         keys.push(hashes.hash_finish(ctx))
@@ -402,7 +402,7 @@ lms_verify: fn(ctx: LMSPublic, msg: [U8], sig: [U8]) LMSError! {
     loop height in 0..<TREE_HEIGHT {
         sibling: cipher.bytes_of(sig, path_at + height * M_NODE_LEN, M_NODE_LEN)
         parent: node >> 1
-        t = if node.bit_and(1) == 1 -> merkle_internal(ctx.params.key_id, sibling, t, parent) else -> merkle_internal(ctx.params.key_id, t, sibling, parent)
+        t = if node & 1 == 1 -> merkle_internal(ctx.params.key_id, sibling, t, parent) else -> merkle_internal(ctx.params.key_id, t, sibling, parent)
         node = parent
     }
     if t != ctx.root -> return Err(.VerifyFailed)
@@ -460,7 +460,7 @@ lms_sign: fn<R: RNG>(ctx: &LMSPrivate, rng: &R, msg: [U8]) -> [U8] LMSError! {
     tree: merkle_tree(ctx)
     node := LEAF_COUNT + q
     loop _ in 0..<TREE_HEIGHT {
-        put_all(sig, tree[node.bit_xor(1)])
+        put_all(sig, tree[node ~ 1])
         node >>= 1
     }
     Ok(sig)

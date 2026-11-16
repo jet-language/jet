@@ -540,7 +540,7 @@ provider_copy_held_file: fn(source: Directory, source_name: String, destination:
             if !store_io_is_not_found(error) -> return Err(error)
         }
     }
-    mode: (before.mode).bit_and(0o7777)
+    mode: (before.mode) & 0o7777
     temporary := provider_create_temp_file_name(destination, mode)
     if provider_fill_temp_file(reader, before, destination, temporary.name, temporary.writer, mode, destination_name) == {
         .Ok(_) -> {}

@@ -6,8 +6,8 @@
 bytes: fn(count: Int, flip: Int) -> [U8] {
     out := [U8]{}
     loop i in 0..<count {
-        value: (i * 37 + 11).bit_and(255)
-        out.push(U8{if i == flip -> value.bit_xor(1) else -> value})
+        value: (i * 37 + 11) & 255
+        out.push(U8{if i == flip -> value ~ 1 else -> value})
     }
     out
 }

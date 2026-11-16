@@ -19,7 +19,7 @@ HyperLogLog: struct {
 
     add: fn(&self, key: String) Never! {
         hash: sketch.__fnv1a64(key, U64{14695981039346656037})
-        index: Int{hash.bit_and(U64{255})}
+        index: Int{hash & U64{255}}
         rest: hash >> 8
         zeros: if rest == (U64{0}) -> 57 else -> rest.leading_zeros() + 1
         if zeros > (Int{self.registers[index]}) -> self.registers[index] = (U8{zeros})

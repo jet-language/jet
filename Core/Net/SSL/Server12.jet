@@ -439,7 +439,7 @@ ssl_srv12_parse_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssld
         } else if ext_id == ssldefs.TLS_EXT_SUPPORTED_GROUPS {
             ssl_srv12_parse_supported_groups_ext(ssl, data, ext_size, rng) ?? return Err(err)
         } else if ext_id == ssldefs.TLS_EXT_SUPPORTED_POINT_FORMATS {
-            ssl.handshake.cli_exts = ssl.handshake.cli_exts.bit_or(ssldefs.TLS_EXT_SUPPORTED_POINT_FORMATS_PRESENT)
+            ssl.handshake.cli_exts |= ssldefs.TLS_EXT_SUPPORTED_POINT_FORMATS_PRESENT
             ssl_srv12_parse_supported_point_formats(ssl, data, ext_size, rng) ?? return Err(err)
         } else if ext_id == ssldefs.TLS_EXT_MAX_FRAGMENT_LENGTH {
             ssl_srv12_parse_max_fragment_length_ext(ssl, data, ext_size, rng) ?? return Err(err)
@@ -643,9 +643,7 @@ ssl_srv12_write_max_fragment_length_ext: fn(ssl: &ssldefs.SSLContext, p: Int) ->
 // ec_point_formats: uncompressed only, when the client sent the extension
 // (ssl_write_supported_point_formats_ext).
 ssl_srv12_write_supported_point_formats_ext: fn(ssl: &ssldefs.SSLContext, p: Int) -> Int Never! {
-    if ssl.handshake.cli_exts.bit_and(ssldefs.TLS_EXT_SUPPORTED_POINT_FORMATS_PRESENT) == 0 {
-        return 0
-    }
+    if ssl.handshake.cli_exts & ssldefs.TLS_EXT_SUPPORTED_POINT_FORMATS_PRESENT == 0 -> return 0
     ssldefs.ssl_put_u16(ssl.out_buf, p, ssldefs.TLS_EXT_SUPPORTED_POINT_FORMATS)
     ssldefs.ssl_put_u16(ssl.out_buf, p + 2, 2)
     ssl.out_buf[p + 4] = U8{1}
@@ -867,7 +865,7 @@ ssl_srv12_write_certificate_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &
     if sig_algs.len() == 0 -> return Err(.BadConfig)
     sa_len := 0
     loop sig_alg in sig_algs {
-        if !ssltls.ssl_set_calc_verify_md(ssl, (sig_alg >> 8).bit_and(0xFF)) -> next
+        if !ssltls.ssl_set_calc_verify_md(ssl, (sig_alg >> 8) & 0xFF) -> next
         if !ssltls.ssl_sig_alg_is_supported(ssl, sig_alg) -> next
         sa_len += 2
         ssldefs.ssl_put_u16(ssl.out_buf, p + sa_len, sig_alg)

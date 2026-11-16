@@ -225,7 +225,7 @@ jet_target_machine_bare_metal: fn(name: String, triple: String, package_version:
 }
 
 jet_target_append_u64: fn(bytes: &[U8], value: Int) Never! {
-    loop index in 0..<8 -> bytes.push(U8{((value >> (8 * index))).bit_and(255)})
+    loop index in 0..<8 -> bytes.push(U8{((value >> (8 * index))) & 255})
 }
 
 jet_target_append_frame: fn(bytes: &[U8], label: String, value: String) Never! {
@@ -253,7 +253,7 @@ jet_target_json_quote: fn(value: String) -> String Never! {
             10 -> "\\n"
             13 -> "\\r"
             9 -> "\\t"
-            else -> if byte < 32 -> "\\u00{jet_target_json_hex(((byte >> 4)).bit_and(15))}{jet_target_json_hex((byte).bit_and(15))}" else -> ""
+            else -> if byte < 32 -> "\\u00{jet_target_json_hex(((byte >> 4)) & 15)}{jet_target_json_hex((byte) & 15)}" else -> ""
         }
         if {
             escape.len() > 0 -> {

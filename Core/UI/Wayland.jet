@@ -1063,11 +1063,11 @@ new_id: fn(c: &Connection) -> Int {
 }
 
 put32: fn(out: &[U8], value: Int) {
-    v: value.bit_and(4294967295)
-    out.push(U8{v.bit_and(255)})
-    out.push(U8{(v >> 8).bit_and(255)})
-    out.push(U8{(v >> 16).bit_and(255)})
-    out.push(U8{(v >> 24).bit_and(255)})
+    v: value & 4294967295
+    out.push(U8{v & 255})
+    out.push(U8{(v >> 8) & 255})
+    out.push(U8{(v >> 16) & 255})
+    out.push(U8{(v >> 24) & 255})
 }
 
 words: fn(values: [Int]) -> [U8] {
@@ -1188,7 +1188,7 @@ dispatch: fn(c: &Connection) -[Env, Time]> {
             return
         }
         if c.inbox.len() - at < size -> break
-        event(c, object, word.bit_and(65535), c.inbox[(at + 8)..<(at + size)].copy())
+        event(c, object, word & 65535, c.inbox[(at + 8)..<(at + size)].copy())
         at += size
     }
     if at > 0 -> c.inbox = c.inbox[at..<c.inbox.len()].copy()
@@ -1237,7 +1237,7 @@ event: fn(c: &Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
     }
     if output_index(c, object) >= 0 {
         // mode: the current one's refresh, in mHz (the first output's).
-        if object == c.output && opcode == 1 && u32_at(body, 0).bit_and(1) != 0 && i32_at(body, 12) > 0 {
+        if object == c.output && opcode == 1 && u32_at(body, 0) & 1 != 0 && i32_at(body, 12) > 0 {
             c.output_refresh_ns = 1000000000000 /% i32_at(body, 12)
         }
         if opcode == 3 -> c.outputs[output_index(c, object)].scale = max_int(i32_at(body, 0), 1)
@@ -1542,7 +1542,7 @@ presented: fn(c: &Connection, object: Int, body: [U8]) -[Time]> {
     }
     if sent.input_ms >= 0 {
         // Input times are ms on the same clock, wrapped to 32 bits.
-        since: ((stamp /% 1000000) - sent.input_ms).bit_and(4294967295)
+        since: ((stamp /% 1000000) - sent.input_ms) & 4294967295
         keep(c.latencies, c.latency_at, since * 1000000 + stamp %% 1000000)
         c.latency_at = (c.latency_at + 1) %% SAMPLES_KEPT
     }
@@ -1555,17 +1555,17 @@ keep: fn(samples: &[Int], at: Int, value: Int) {
 }
 
 capabilities: fn(c: &Connection, mask: Int) {
-    if mask.bit_and(1) != 0 && c.pointer == 0 {
+    if mask & 1 != 0 && c.pointer == 0 {
         c.pointer = new_id(c)
         request(c, c.seat, 0, words([Int]{c.pointer}))
         cursor_device(c)
     }
-    if mask.bit_and(2) != 0 && c.keyboard == 0 {
+    if mask & 2 != 0 && c.keyboard == 0 {
         c.keyboard = new_id(c)
         request(c, c.seat, 1, words([Int]{c.keyboard}))
     }
     // A finger works the frame.
-    if mask.bit_and(4) != 0 && c.touch == 0 && c.subcompositor != 0 {
+    if mask & 4 != 0 && c.touch == 0 && c.subcompositor != 0 {
         c.touch = new_id(c)
         request(c, c.seat, 2, words([Int]{c.touch}))
     }
@@ -1602,7 +1602,7 @@ keyboard: fn(c: &Connection, opcode: Int, body: [U8]) -[Env, Time]> {
         depressed: u32_at(body, 4)
         latched: u32_at(body, 8)
         locked: u32_at(body, 12)
-        c.modifiers = depressed.bit_or(latched).bit_or(locked)
+        c.modifiers = depressed | latched | locked
         map := c.keymap.pop() ?? return
         map.modifiers(depressed, latched, locked, u32_at(body, 16))
         c.keymap.push(map)
@@ -2092,7 +2092,7 @@ preedit_composition: fn(text: String, begin: Int, end: Int) -> UIIMEComposition 
 characters: fn(bytes: [U8], count: Int) -> Int {
     total := 0
     loop index in 0..<count {
-        if (Int{bytes[index]}).bit_and(192) != 128 -> total += 1
+        if (Int{bytes[index]}) & 192 != 128 -> total += 1
     }
     total
 }
@@ -2834,7 +2834,7 @@ frame_press: fn(c: &Connection, serial: Int, time: Int) {
         return
     }
     if place == .Title {
-        if c.title_press_ms >= 0 && (time - c.title_press_ms).bit_and(4294967295) < frame.DOUBLE_CLICK_MS {
+        if c.title_press_ms >= 0 && (time - c.title_press_ms) & 4294967295 < frame.DOUBLE_CLICK_MS {
             c.title_press_ms = -1
             set_maximized(c, !c.look.maximized)
             return
@@ -2955,7 +2955,7 @@ window_menu: fn(c: &Connection, serial: Int) {
 // compositor's modifier state.
 held_modifier: fn(c: Connection, name: String, mask: Int) -> Bool {
     if c.keymap.len() > 0 -> return c.keymap[0].active(name)
-    c.modifiers.bit_and(mask) != 0
+    c.modifiers & mask != 0
 }
 
 // The n of F`n`, else 0.
@@ -3024,11 +3024,11 @@ evdev_key: fn(code: Int) -> Key {
 // shifted by the Lock modifier (mask 2); nothing while Control (4) or Alt (8) is held.
 evdev_text: fn(code: Int, modifiers: Int) -> String {
     if code == 57 -> return " "
-    if modifiers.bit_and(12) != 0 -> return ""
+    if modifiers & 12 != 0 -> return ""
     plain: evdev_symbol(code, false)
-    shift: modifiers.bit_and(1) != 0
+    shift: modifiers & 1 != 0
     letter: plain.len() == 1 && plain >= "a" && plain <= "z"
-    upper: if letter -> shift != (modifiers.bit_and(2) != 0) else -> shift
+    upper: if letter -> shift != (modifiers & 2 != 0) else -> shift
     evdev_symbol(code, upper)
 }
 

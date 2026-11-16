@@ -25,9 +25,9 @@ ReservoirSampler: struct {
             return
         }
         state := self.state.rng
-        state = state.bit_xor((state << 13))
-        state = state.bit_xor((state >> 7))
-        state = state.bit_xor((state << 17))
+        state ~= (state << 13)
+        state ~= (state >> 7)
+        state ~= (state << 17)
         self.state.rng = state
         index: state %% self.state.count
         if index < (U64{self.state.capacity}) -> self.state.items[Int{index}] = item

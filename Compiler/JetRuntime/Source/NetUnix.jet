@@ -212,7 +212,7 @@ net_unix_write_all: fn(stream: I64, data: I64, length: I64, error: I64) -> I64 {
 // The reference marks the stream closed before shutdown(Both), so a failed
 // shutdown still leaves it closed; NotConnected is not a failure.
 #Export(c) jet_net_unix_close: fn(stream: I64, error: I64) -> I64 {
-    if (jet_socket_stream_flags_raw(stream).bit_and(I64{1}) != I64{0}) { return I64{1} }
+    if (jet_socket_stream_flags_raw(stream) & I64{1} != I64{0}) { return I64{1} }
     scratch: jet_rt_alloc(I64{32}, I64{8})
     result: jet_socket_shutdown_raw(jet_socket_stream_fd_raw(stream), I64{2}, scratch)
     code: net_word(scratch, I64{8})
@@ -241,7 +241,7 @@ NET_UNIX_MAX_FDS: I64{253}
 NET_UNIX_FD_SCRATCH: I64{1112}
 
 // CMSG_SPACE of `count` descriptors: the 16B header and the ints rounded to 8.
-net_unix_fd_space: fn(count: I64) -> I64 { I64{16} + (count * I64{4} + I64{7}).bit_and(I64{-8}) }
+net_unix_fd_space: fn(count: I64) -> I64 { I64{16} + ((count * I64{4} + I64{7}) & I64{-8}) }
 
 // sendmsg of `length` bytes from `data` with the `count` descriptors named
 // by the core.sys tokens of `fds` (exact Int words) attached, retried on WouldBlock/Interrupted after a
@@ -359,7 +359,7 @@ net_unix_send_fds_once: fn(stream: I64, data: I64, length: I64, fds: I64, count:
         count: net_socket_call(jet_socket_stream_fd_raw(stream), I64{47}, scratch, I64{1073741824}, I64{0}, I64{0}, I64{0})
         if (count >= I64{0}) {
             // MSG_CTRUNC: the kernel dropped descriptors that did not fit.
-            truncated: net_word(scratch, I64{48}).bit_and(I64{8}) != I64{0}
+            truncated: net_word(scratch, I64{48}) & I64{8} != I64{0}
             total := count
             fds := I64{0}
             refused := false
@@ -386,7 +386,7 @@ net_unix_send_fds_once: fn(stream: I64, data: I64, length: I64, fds: I64, count:
                         index += I64{1}
                     }
                 }
-                at = wrapping(at + (size + I64{7}).bit_and(I64{-8}))
+                at = wrapping(at + ((size + I64{7}) & I64{-8}))
             }
             if (truncated || refused) {
                 // Retire the tokens already filed for this message too.
@@ -455,7 +455,7 @@ net_unix_fd_option: fn(descriptor: I64, option: I64) -> I64 {
     status := host_call(I64{72}, descriptor, I64{2}, I64{1})
     if (status >= I64{0}) {
         flags: host_call(I64{72}, descriptor, I64{3}, I64{0})
-        status = if (flags < I64{0}) -> flags else -> host_call(I64{72}, descriptor, I64{4}, flags.bit_or(I64{2048}))
+        status = if (flags < I64{0}) -> flags else -> host_call(I64{72}, descriptor, I64{4}, flags | I64{2048})
     }
     if (status < I64{0}) { return net_route_errno(operation, I64{0}, -status, error) }
     net_put(output, I64{0}, jet_socket_listener_from_fd_raw(jet_fd_adopt_unbuffered_raw(descriptor, I64{0})))
@@ -525,7 +525,7 @@ net_unix_peer_field: fn(stream: I64, offset: I64, output: I64, error: I64) -> I6
         ready := I64{-9}
         if (fd_word(state, I64{16}) == I64{0}) {
             // struct pollfd {fd, events: POLLIN} with revents cleared.
-            net_put(scratch, I64{0}, fd_word(state, I64{8}).bit_and(I64{4294967295}).bit_or(I64{1} << I64{32}))
+            net_put(scratch, I64{0}, fd_word(state, I64{8}) & I64{4294967295} | I64{1} << I64{32})
             #Unsafe("the FD72 lock keeps the descriptor live and unreused for the whole ppoll; scratch lends the pollfd and timespec") {
                 ready = os_syscall_i64(I64{271}, scratch, I64{1}, if (left < I64{0}) -> I64{0} else -> wrapping(scratch + I64{8}), I64{0}, I64{8}, I64{0})
             }

@@ -155,7 +155,7 @@ compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64
     facts: jet_rt_alloc(I64{144}, I64{8})
     if (host_call(I64{5}, fd, facts, I64{0}) == I64{0}) {
         size: rt_text_word(wrapping(facts + I64{48}))
-        if (rt_text_word(wrapping(facts + I64{24})).bit_and(I64{61440}) == I64{32768} && size > I64{0}) {
+        if (rt_text_word(wrapping(facts + I64{24})) & I64{61440} == I64{32768} && size > I64{0}) {
             capacity = size
         }
     }
@@ -257,7 +257,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
         // create_dir_all accepts existing directories, not existing files.
         #Unsafe("the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes") {
             stat: os_stat_facts_i64(I64{4}, name, scratch)
-            if (stat >= I64{0} && (rt_text_word(wrapping(scratch + I64{16})).bit_and(I64{61440})) == I64{16384}) {
+            if (stat >= I64{0} && (rt_text_word(wrapping(scratch + I64{16})) & I64{61440}) == I64{16384}) {
                 result = I64{0}
             }
         }
@@ -278,7 +278,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     scratch: jet_rt_alloc(I64{128}, I64{8})
     present := false
     #Unsafe("name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes") {
-        present = os_stat_facts_i64(I64{4}, name, scratch) >= I64{0} && (rt_text_word(wrapping(scratch + I64{16})).bit_and(I64{61440})) == I64{16384}
+        present = os_stat_facts_i64(I64{4}, name, scratch) >= I64{0} && (rt_text_word(wrapping(scratch + I64{16})) & I64{61440}) == I64{16384}
     }
     result := I64{1}
     if !present {
@@ -414,7 +414,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     rt_host_u8_list_room(header, limit + I64{40})
     length: rt_text_word(header)
     into: wrapping(rt_text_word(wrapping(header + I64{16})) + length * RT_HOST_U8_STRIDE)
-    scratch: wrapping(into + limit * RT_HOST_U8_STRIDE + I64{7}).bit_and(I64{-8})
+    scratch: wrapping(into + limit * RT_HOST_U8_STRIDE + I64{7}) & I64{-8}
     count := I64{0}
     loop {
         count = jet_fd_read_raw(reader, into, limit, scratch)
@@ -470,7 +470,7 @@ compiler_fs_time_ns: fn(seconds: I64, nanos: I64) -> I64 {
 // created present, created_ns. Shared by every stat.
 compiler_fs_stat_row: fn(facts: I64, birth: I64, output: I64, len: I64) {
     mode: rt_text_word(wrapping(facts + I64{16}))
-    bits: mode.bit_and(I64{61440})
+    bits: mode & I64{61440}
     kind: if {
         (bits == I64{32768}) -> I64{0}
         (bits == I64{16384}) -> I64{1}
@@ -484,8 +484,8 @@ compiler_fs_stat_row: fn(facts: I64, birth: I64, output: I64, len: I64) {
     row: jet_rt_alloc(I64{104}, I64{8})
     rt_text_store(row, kind)
     rt_text_store(wrapping(row + I64{8}), rt_text_word(wrapping(facts + I64{56})))
-    rt_text_store(wrapping(row + I64{16}), mode.bit_and(I64{4095}))
-    rt_text_store(wrapping(row + I64{24}), if ((mode.bit_and(I64{146})) == I64{0}) -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(row + I64{16}), mode & I64{4095})
+    rt_text_store(wrapping(row + I64{24}), if ((mode & I64{146}) == I64{0}) -> I64{1} else -> I64{0})
     rt_text_store(wrapping(row + I64{32}), rt_text_word(facts))
     rt_text_store(wrapping(row + I64{40}), rt_text_word(wrapping(facts + I64{8})))
     rt_text_store(wrapping(row + I64{48}), rt_text_word(wrapping(facts + I64{24})))

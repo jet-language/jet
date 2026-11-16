@@ -143,7 +143,7 @@ priv ZBits: struct {
     count: Int
 
     put: fn(&self, out: &[U8], value: Int, n: Int) Never! {
-        self.acc = self.acc.bit_or(value << self.count)
+        self.acc |= value << self.count
         self.count += n
         loop self.count >= 8 {
             out.push(wrapping(U8{self.acc}))
@@ -160,14 +160,14 @@ priv ZBits: struct {
 }
 
 priv zenc_header: fn(out: &[U8], size: Int, kind: Int, last: Int) Never! {
-    header: (size << 3).bit_or(kind << 1).bit_or(last)
+    header: (size << 3) | kind << 1 | last
     out.push(wrapping(U8{header}))
     out.push(wrapping(U8{header >> 8}))
     out.push(wrapping(U8{header >> 16}))
 }
 
 priv zhash4: fn(data: [U8], at: Int) -> Int Never! {
-    ((read_u32le(data, at) * 506832829) >> 45).bit_and(C_HASH_SIZE - 1)
+    ((read_u32le(data, at) * 506832829) >> 45) & C_HASH_SIZE - 1
 }
 
 // One block of `data[start..<end]` onto `out`: RLE when it repeats one byte,
@@ -251,10 +251,10 @@ priv zenc_compressed: fn(data: [U8], start: Int, end: Int, heads: &[Int], tables
 // The raw literals section header (RFC 8878 3.1.1.3.1.1).
 priv zenc_literals: fn(out: &[U8], size: Int) Never! {
     if size < 32 -> out.push(wrapping(U8{size << 3})) else if size < 4096 {
-        out.push(wrapping(U8{(size << 4).bit_or(4)}))
+        out.push(wrapping(U8{(size << 4) | 4}))
         out.push(wrapping(U8{size >> 4}))
     } else {
-        out.push(wrapping(U8{(size << 4).bit_or(12)}))
+        out.push(wrapping(U8{(size << 4) | 12}))
         out.push(wrapping(U8{size >> 4}))
         out.push(wrapping(U8{size >> 12}))
     }
@@ -481,9 +481,9 @@ ZFrame: struct {
 zframe_header: fn(data: [U8], start: Int) -> ZFrame? ZstdFileError! {
     if start >= data.len() -> return Ok(None)
     descriptor: u8_int(data[start])
-    if descriptor.bit_and(8) != 0 -> return Err(ZstdFileError.Malformed)
-    single: descriptor.bit_and(32) != 0
-    dictionary_flag: descriptor.bit_and(3)
+    if descriptor & 8 != 0 -> return Err(ZstdFileError.Malformed)
+    single: descriptor & 32 != 0
+    dictionary_flag: descriptor & 3
     content_flag: descriptor >> 6
     dictionary_bytes := 0
     if dictionary_flag == 1 -> dictionary_bytes = 1
@@ -503,23 +503,23 @@ zframe_header: fn(data: [U8], start: Int) -> ZFrame? ZstdFileError! {
     if !single {
         descriptor_byte: u8_int(data[i])
         base: 1 << (10 + (descriptor_byte >> 3))
-        window = base + (base >> 3) * descriptor_byte.bit_and(7)
+        window = base + (base >> 3) * (descriptor_byte & 7)
         i += 1
     }
     dictionary := 0
-    loop k in 0..<dictionary_bytes -> dictionary = dictionary.bit_or(u8_int(data[i + k]) << (8 * k))
+    loop k in 0..<dictionary_bytes -> dictionary |= u8_int(data[i + k]) << (8 * k)
     if dictionary != 0 -> return Err(ZstdFileError.Unsupported)
     i += dictionary_bytes
     content := -1
     if content_bytes > 0 {
         if content_bytes == 8 && u8_int(data[i + 7]) >= 128 -> return Err(ZstdFileError.Unsupported)
         content = 0
-        loop k in 0..<content_bytes -> content = content.bit_or(u8_int(data[i + k]) << (8 * k))
+        loop k in 0..<content_bytes -> content |= u8_int(data[i + k]) << (8 * k)
         if content_bytes == 2 -> content += 256
     }
     if single -> window = content
     if window > C_WINDOW_MAX || content > C_OUTPUT_MAX -> return Err(ZstdFileError.Unsupported)
-    Ok(Val(ZFrame{size: size, content: content, window: window, checksum: descriptor.bit_and(4) != 0}))
+    Ok(Val(ZFrame{size: size, content: content, window: window, checksum: descriptor & 4 != 0}))
 }
 
 ZBlock: struct {
@@ -542,9 +542,9 @@ ZState: struct {
     // Decode the block at `data[start..]` onto `out`.
     next_block: fn(&self, data: [U8], start: Int, window: Int) -> ZBlock ZstdFileError! {
         if start + 3 > data.len() -> return Ok(ZBlock{after: -1, last: false})
-        header: u8_int(data[start]).bit_or(u8_int(data[start + 1]) << 8).bit_or(u8_int(data[start + 2]) << 16)
-        last: header.bit_and(1) != 0
-        kind: (header >> 1).bit_and(3)
+        header: u8_int(data[start]) | u8_int(data[start + 1]) << 8 | u8_int(data[start + 2]) << 16
+        last: header & 1 != 0
+        kind: (header >> 1) & 3
         size: header >> 3
         limit: zmin(window, C_BLOCK_MAX)
         if kind == 3 || size > limit -> return Err(ZstdFileError.Malformed)
@@ -594,18 +594,18 @@ ZState: struct {
         if p >= end -> return Err(ZstdFileError.Malformed)
         modes: u8_int(data[p])
         p += 1
-        if modes.bit_and(3) != 0 -> return Err(ZstdFileError.Malformed)
+        if modes & 3 != 0 -> return Err(ZstdFileError.Malformed)
         ll: zseq_table(data, p, end, modes >> 6, 0)
         p += ll.size
         if ll.log == -2 {
             if self.ll.log < 0 -> return Err(ZstdFileError.Malformed)
         } else { self.ll = ll }
-        of: zseq_table(data, p, end, (modes >> 4).bit_and(3), 1)
+        of: zseq_table(data, p, end, (modes >> 4) & 3, 1)
         p += of.size
         if of.log == -2 {
             if self.of.log < 0 -> return Err(ZstdFileError.Malformed)
         } else { self.of = of }
-        ml: zseq_table(data, p, end, (modes >> 2).bit_and(3), 2)
+        ml: zseq_table(data, p, end, (modes >> 2) & 3, 2)
         p += ml.size
         if ml.log == -2 {
             if self.ml.log < 0 -> return Err(ZstdFileError.Malformed)
@@ -659,8 +659,8 @@ ZState: struct {
     literals: fn(&self, data: [U8], start: Int, end: Int, literals: &[U8]) -> Int ZstdFileError! {
         if start >= end -> return Err(ZstdFileError.Malformed)
         first: u8_int(data[start])
-        kind: first.bit_and(3)
-        format: (first >> 2).bit_and(3)
+        kind: first & 3
+        format: (first >> 2) & 3
         if kind <= 1 {
             header := 1
             size := first >> 3
@@ -690,18 +690,18 @@ ZState: struct {
         if format == 3 -> header = 5
         if start + header > end -> return Err(ZstdFileError.Malformed)
         bits := 0
-        loop k in 0..<header -> bits = bits.bit_or(u8_int(data[start + k]) << (8 * k))
+        loop k in 0..<header -> bits |= u8_int(data[start + k]) << (8 * k)
         size := 0
         compressed := 0
         if format <= 1 {
-            size = (bits >> 4).bit_and(1023)
-            compressed = (bits >> 14).bit_and(1023)
+            size = (bits >> 4) & 1023
+            compressed = (bits >> 14) & 1023
         } else if format == 2 {
-            size = (bits >> 4).bit_and(16383)
-            compressed = (bits >> 18).bit_and(16383)
+            size = (bits >> 4) & 16383
+            compressed = (bits >> 18) & 16383
         } else {
-            size = (bits >> 4).bit_and(262143)
-            compressed = (bits >> 22).bit_and(262143)
+            size = (bits >> 4) & 262143
+            compressed = (bits >> 22) & 262143
         }
         if size > C_BLOCK_MAX -> return Err(ZstdFileError.Malformed)
         p := start + header
@@ -746,14 +746,14 @@ zbits: fn(data: [U8], start: Int, end: Int, pos: Int, n: Int) -> Int Never! {
         return zbits(data, start, end, 0, n + pos) << (0 - pos)
     }
     first: start + (pos >> 3)
-    shift: pos.bit_and(7)
+    shift: pos & 7
     count: (shift + n + 7) >> 3
     acc := 0
     loop k in 0..<count {
         at: first + k
-        if at < end -> acc = acc.bit_or(u8_int(data[at]) << (8 * k))
+        if at < end -> acc |= u8_int(data[at]) << (8 * k)
     }
-    (acc >> shift).bit_and((1 << n) - 1)
+    (acc >> shift) & (1 << n) - 1
 }
 
 // A backward bit stream (RFC 8878 4.1): read from the end toward the start.
@@ -835,8 +835,8 @@ zfse_build: fn(counts: [Int], log: Int, description: Int) -> ZFse ZstdFileError!
         following[s] = counts[s]
         loop _ in 0..<counts[s] {
             symbols[position] = s
-            position = (position + step).bit_and(mask)
-            loop position > high -> position = (position + step).bit_and(mask)
+            position = (position + step) & mask
+            loop position > high -> position = (position + step) & mask
         }
     }
     if position != 0 -> return Err(ZstdFileError.Malformed)
@@ -866,9 +866,9 @@ zfse_read: fn(data: [U8], start: Int, end: Int, max_log: Int, max_symbols: Int) 
         pos += width
         low_mask: (1 << (width - 1)) - 1
         threshold: (1 << width) - 1 - (remaining + 1)
-        if value.bit_and(low_mask) < threshold {
+        if value & low_mask < threshold {
             pos -= 1
-            value = value.bit_and(low_mask)
+            value &= low_mask
         } else if value > low_mask { value -= threshold }
         count: value - 1
         if count < 0 -> remaining += count else -> remaining -= count
@@ -971,7 +971,7 @@ zhuf_read: fn(data: [U8], start: Int, end: Int) -> ZHuf ZstdFileError! {
         if start + 1 + bytes > end -> return Err(ZstdFileError.Malformed)
         loop i in 0..<count {
             byte: u8_int(data[start + 1 + (i >> 1)])
-            if i.bit_and(1) == 0 -> weights.push(byte >> 4) else -> weights.push(byte.bit_and(15))
+            if i & 1 == 0 -> weights.push(byte >> 4) else -> weights.push(byte & 15)
         }
         size = 1 + bytes
     } else {
@@ -995,7 +995,7 @@ zhuf_build: fn(weights: [Int], description: Int) -> ZHuf ZstdFileError! {
     max_bits: zhigh(total) + 1
     if max_bits > 11 -> return Err(ZstdFileError.Malformed)
     left: (1 << max_bits) - total
-    if left.bit_and(left - 1) != 0 -> return Err(ZstdFileError.Malformed)
+    if left & left - 1 != 0 -> return Err(ZstdFileError.Malformed)
     lengths := [Int]{}
     loop weight in weights {
         if weight > 0 -> lengths.push(max_bits + 1 - weight) else -> lengths.push(0)
@@ -1035,7 +1035,7 @@ zhuf_stream: fn(data: [U8], start: Int, end: Int, table: ZHuf, count: Int, out: 
     loop _ in 0..<count {
         out.push(U8{table.symbols[state]})
         width: table.bits[state]
-        state = ((state << width) + stream.read(data, width)).bit_and(mask)
+        state = ((state << width) + stream.read(data, width)) & mask
     }
     if stream.offset != 0 - table.max_bits -> return Err(ZstdFileError.Malformed)
 }
@@ -1098,27 +1098,27 @@ ZHash: struct {
         n: data.len()
         i := 0
         loop i + 8 <= n {
-            h = wrapping(wrapping(rotl64((h).bit_xor(xxh_round(U64{0}, read_u64le(data, i))), 27) * xxh_p1()) + xxh_p4())
+            h = wrapping(wrapping(rotl64((h) ~ xxh_round(U64{0}, read_u64le(data, i)), 27) * xxh_p1()) + xxh_p4())
             i += 8
         }
         if i + 4 <= n {
             lane: checked(U64{read_u32le(data, i)}) ?? U64{0}
-            h = wrapping(wrapping(rotl64((h).bit_xor(wrapping(lane * xxh_p1())), 23) * xxh_p2()) + xxh_p3())
+            h = wrapping(wrapping(rotl64((h) ~ wrapping(lane * xxh_p1()), 23) * xxh_p2()) + xxh_p3())
             i += 4
         }
         loop i < n {
-            h = wrapping(rotl64((h).bit_xor(wrapping(U64{data[i]} * xxh_p5())), 11) * xxh_p1())
+            h = wrapping(rotl64((h) ~ wrapping(U64{data[i]} * xxh_p5()), 11) * xxh_p1())
             i += 1
         }
-        h = (h).bit_xor((h >> 33))
+        h = (h) ~ (h >> 33)
         h = wrapping(h * xxh_p2())
-        h = (h).bit_xor((h >> 29))
+        h = (h) ~ (h >> 29)
         h = wrapping(h * xxh_p3())
-        (h).bit_xor((h >> 32))
+        (h) ~ (h >> 32)
     }
 
     // The low 32 bits Zstandard stores.
-    digest: fn(self) -> Int Never! { Int{(self.value()).bit_and(U64{4294967295})} }
+    digest: fn(self) -> Int Never! { Int{(self.value()) & U64{4294967295}} }
 }
 
 zhash: fn() -> ZHash Never! {
@@ -1133,7 +1133,7 @@ xxh64: fn(data: [U8]) -> U64 Never! {
     hash.value()
 }
 
-xxh64_low32: fn(data: [U8]) -> Int Never! { Int{(xxh64(data)).bit_and(U64{4294967295})} }
+xxh64_low32: fn(data: [U8]) -> Int Never! { Int{(xxh64(data)) & U64{4294967295}} }
 
 put32: fn(out: &[U8], n: Int) Never! {
     out.push(wrapping(U8{n}))
@@ -1144,12 +1144,10 @@ put32: fn(out: &[U8], n: Int) Never! {
 
 u8_int: fn(b: U8) -> Int Never! { Int{b} }
 
-read_u16le: fn(data: [U8], i: Int) -> Int Never! {
-    (u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8))
-}
+read_u16le: fn(data: [U8], i: Int) -> Int Never! { (u8_int(data[i])) | (u8_int(data[i + 1]) << 8) }
 
 read_u32le: fn(data: [U8], i: Int) -> Int Never! {
-    (((u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8))).bit_or((u8_int(data[i + 2]) << 16))).bit_or((u8_int(data[i + 3]) << 24))
+    (((u8_int(data[i])) | (u8_int(data[i + 1]) << 8)) | (u8_int(data[i + 2]) << 16)) | (u8_int(data[i + 3]) << 24)
 }
 
 read_u64le: fn(data: [U8], i: Int) -> U64 Never! {
@@ -1164,14 +1162,14 @@ read_u64le: fn(data: [U8], i: Int) -> U64 Never! {
 
 // Rotation as wrapping multiply plus shift: `wrapping(x * 2^r)` drops the
 // high bits exactly like a 64-bit left shift, so no step can overflow.
-rotl64: fn(x: U64, r: Int) -> U64 Never! { (wrapping(x * (U64{1} << r))).bit_or((x >> (64 - r))) }
+rotl64: fn(x: U64, r: Int) -> U64 Never! { (wrapping(x * (U64{1} << r))) | (x >> (64 - r)) }
 
 xxh_round: fn(acc: U64, input: U64) -> U64 Never! {
     wrapping(rotl64(wrapping(acc + wrapping(input * xxh_p2())), 31) * xxh_p1())
 }
 
 xxh_merge_round: fn(acc: U64, value: U64) -> U64 Never! {
-    wrapping(wrapping(((acc).bit_xor(xxh_round(U64{0}, value))) * xxh_p1()) + xxh_p4())
+    wrapping(wrapping(((acc) ~ xxh_round(U64{0}, value)) * xxh_p1()) + xxh_p4())
 }
 
 is_zstd: fn(data: [U8]) -> Bool Never! {

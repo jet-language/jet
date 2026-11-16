@@ -48,7 +48,7 @@ terminal_process_invalid_size: fn(cols: I64, rows: I64) -> I64 {
         return host_io_other_take(HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("process terminal")), terminal_process_invalid_size(cols, rows), error)
     }
     child: jet_terminal_session_child_raw(session)
-    winsize: rows.bit_or(cols << I64{16})
+    winsize: rows | cols << I64{16}
     sync_mutex_lock(child)
     master: fd_word(child, I64{56})
     result := I64{-9}

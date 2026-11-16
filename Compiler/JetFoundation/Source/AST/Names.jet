@@ -60,9 +60,7 @@ name_start: fn(table: NameTable, id: Int) -> Int Never! {
 
 name_hash: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     hash := U32{0x811c9dc5}
-    loop index in start..<end {
-        hash = wrapping((hash.bit_xor(U32{bytes[index]})) * U32{0x01000193})
-    }
+    loop index in start..<end -> hash = wrapping((hash ~ U32{bytes[index]}) * U32{0x01000193})
     Int{hash}
 }
 
@@ -80,10 +78,10 @@ name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: I
 // The slot of `bytes[start..<end]` (whose `name_hash` is `hash`) in
 // `table`: the one holding its id, or the empty one a new id takes.
 name_slot: fn(table: NameTable, hash: Int, bytes: [U8], start: Int, end: Int) -> Int Never! {
-    slot := hash.bit_and(table.mask)
+    slot := hash & table.mask
     loop table.slots[slot] != 0 {
         if name_bytes_equal(table, table.slots[slot] - 1, hash, bytes, start, end) -> return slot
-        slot = (slot + 1).bit_and(table.mask)
+        slot = (slot + 1) & table.mask
     }
     slot
 }
@@ -135,8 +133,8 @@ name_table_grow: fn(table: &NameTable) Never! {
     slots := [Int]{}
     loop _ in 0..<capacity -> slots.push(0)
     loop id in 0..<table.texts.len() {
-        slot := table.hashes[id].bit_and(mask)
-        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slot := table.hashes[id] & mask
+        loop slots[slot] != 0 -> slot = (slot + 1) & mask
         slots[slot] = id + 1
     }
     table.slots = slots.move()
@@ -290,16 +288,14 @@ module_none: fn() -> ModuleID Never! { ModuleID{id: U32{0}} }
 module_is_none: fn(module_id: ModuleID) -> Bool Never! { module_id.id == U32{0} }
 
 // The table row of `module_id`: 0 for no module, below `module_count`.
-module_index: fn(module_id: ModuleID) -> Int Never! { Int{module_id.id.bit_and(MODULE_ROW_BITS)} }
+module_index: fn(module_id: ModuleID) -> Int Never! { Int{module_id.id & MODULE_ROW_BITS} }
 
 module_count: fn(table: ModuleTable) -> Int Never! { name_count(table.identities) }
 
-module_is_core: fn(module_id: ModuleID) -> Bool Never! {
-    module_id.id.bit_and(MODULE_CORE_BIT) != U32{0}
-}
+module_is_core: fn(module_id: ModuleID) -> Bool Never! { module_id.id & MODULE_CORE_BIT != U32{0} }
 
 module_id_of: fn(name: Name, text: String) -> ModuleID Never! {
-    if text.starts_with(MODULE_CORE_PREFIX) -> return ModuleID{id: name.id.bit_or(MODULE_CORE_BIT)}
+    if text.starts_with(MODULE_CORE_PREFIX) -> return ModuleID{id: name.id | MODULE_CORE_BIT}
     ModuleID{id: name.id}
 }
 
@@ -321,7 +317,7 @@ module_text: fn(table: ModuleTable, module_id: ModuleID) -> String Never! {
 // The low 30 bits of `text.hash()`: a small Int whose low bits index slots.
 // A lookup computes it once (in place, no byte copy) and passes it with the
 // spelling to every `NameRows` it visits.
-name_rows_hash: fn(text: String) -> Int Never! { Int{text.hash().bit_and(U64{0x3fffffff})} }
+name_rows_hash: fn(text: String) -> Int Never! { Int{text.hash() & U64{0x3fffffff}} }
 
 // A String -> Int map (A1): open addressing over each key's `s.hash()`.
 // A lookup hashes its key once and compares one candidate instead of
@@ -347,11 +343,11 @@ name_rows: fn() -> NameRows Never! {
 // The key index of `text` (whose name_rows_hash is `hash`), if the map ever
 // held it.
 name_rows_key: fn(map: NameRows, text: String, hash: Int) -> Int? Never! {
-    slot := hash.bit_and(map.mask)
+    slot := hash & map.mask
     loop map.slots[slot] != 0 {
         key: map.slots[slot] - 1
         if map.hashes[key] == hash && map.texts[key] == text -> return Val(key)
-        slot = (slot + 1).bit_and(map.mask)
+        slot = (slot + 1) & map.mask
     }
     None
 }
@@ -393,8 +389,8 @@ name_rows_append: fn(map: &NameRows, text: String, hash: Int, row: Int) Never! {
         name_rows_grow(map)
         return
     }
-    slot := hash.bit_and(map.mask)
-    loop map.slots[slot] != 0 -> slot = (slot + 1).bit_and(map.mask)
+    slot := hash & map.mask
+    loop map.slots[slot] != 0 -> slot = (slot + 1) & map.mask
     map.slots[slot] = key + 1
 }
 
@@ -405,8 +401,8 @@ name_rows_grow: fn(map: &NameRows) Never! {
     slots := [Int]{}
     loop _ in 0..<capacity -> slots.push(0)
     loop key in 0..<map.texts.len() {
-        slot := map.hashes[key].bit_and(mask)
-        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slot := map.hashes[key] & mask
+        loop slots[slot] != 0 -> slot = (slot + 1) & mask
         slots[slot] = key + 1
     }
     map.slots = slots.move()

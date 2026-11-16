@@ -220,7 +220,7 @@ x509_crt_get_authority_key_id: fn(data: [U8], p: &Int, end: Int) -> X509Authorit
     if p < end {
         len = asn1.get_tag(data, p, end, x509.x509_explicit(1)) ?? return Err(.InvalidExtensions(Val(err)))
         out.authority_cert_issuer = x509.x509_get_subject_alt_name_ext(data, p, p + len)
-        len = asn1.get_tag(data, p, end, asn1.ASN1_CONTEXT_SPECIFIC.bit_or(2)) ?? return Err(.InvalidExtensions(Val(err)))
+        len = asn1.get_tag(data, p, end, asn1.ASN1_CONTEXT_SPECIFIC | 2) ?? return Err(.InvalidExtensions(Val(err)))
         out.authority_cert_serial_number = asn1.ASN1Buf{tag_id: asn1.ASN1_INTEGER, p: p, len: len}
         p += len
     }
@@ -301,8 +301,8 @@ x509_crt_get_ext: fn(crt: &X509Crt, data: [U8], p: &Int, end: Int, cb: X509ExtCa
             p = end_ext_octet
             next
         }
-        if crt.ext_types.bit_and(ext_type) != 0 -> return Err(.InvalidExtensions(None))
-        crt.ext_types = crt.ext_types.bit_or(ext_type)
+        if crt.ext_types & ext_type != 0 -> return Err(.InvalidExtensions(None))
+        crt.ext_types |= ext_type
         if {
             ext_type == oids.X509_EXT_BASIC_CONSTRAINTS -> {
                 got: x509_crt_get_basic_constraints(data, p, end_ext_octet)
@@ -472,17 +472,13 @@ x509_crt_parse: fn(chain: &[X509Crt], buf: [U8]) -> Int x509.X509Error! {
 /// Whether the certificate's basicConstraints say cA; InvalidExtensions
 /// when it has none (mbedtls_x509_crt_get_ca_istrue).
 x509_crt_get_ca_istrue: fn(crt: X509Crt) -> Bool x509.X509Error! {
-    if crt.ext_types.bit_and(oids.X509_EXT_BASIC_CONSTRAINTS) == 0 {
-        return Err(.InvalidExtensions(None))
-    }
+    if crt.ext_types & oids.X509_EXT_BASIC_CONSTRAINTS == 0 -> return Err(.InvalidExtensions(None))
     Ok(crt.ca_istrue)
 }
 
 /// The bits of `ext_type` among the extensions the certificate holds
 /// (mbedtls_x509_crt_has_ext_type).
-x509_crt_has_ext_type: fn(crt: X509Crt, ext_type: Int) -> Int Never! {
-    crt.ext_types.bit_and(ext_type)
-}
+x509_crt_has_ext_type: fn(crt: X509Crt, ext_type: Int) -> Int Never! { crt.ext_types & ext_type }
 
 // The descriptions of a list of OIDs, "???" for one the table lacks
 // (x509_info_ext_key_usage and x509_info_cert_policies).
@@ -521,28 +517,28 @@ x509_crt_info: fn(prefix: String, crt: X509Crt) -> [U8] x509.X509Error! {
     key_size := x509.x509_key_size_helper(pk.pk_get_name(crt.pk))
     loop key_size.len() < 18 -> key_size = "{key_size} "
     out.extend("\n{prefix}{key_size}: {pk.pk_get_bitlen(crt.pk)} bits".bytes())
-    if crt.ext_types.bit_and(oids.X509_EXT_BASIC_CONSTRAINTS) != 0 {
+    if crt.ext_types & oids.X509_EXT_BASIC_CONSTRAINTS != 0 {
         ca_text: if crt.ca_istrue -> "true" else -> "false"
         out.extend("\n{prefix}basic constraints : CA={ca_text}".bytes())
         if crt.max_pathlen > 0 -> out.extend(", max_pathlen={crt.max_pathlen - 1}".bytes())
     }
-    if crt.ext_types.bit_and(oids.X509_EXT_SUBJECT_ALT_NAME) != 0 {
+    if crt.ext_types & oids.X509_EXT_SUBJECT_ALT_NAME != 0 {
         out.extend("\n{prefix}subject alt name  :".bytes())
         x509.x509_info_subject_alt_name(out, data, crt.subject_alt_names, prefix)
     }
-    if crt.ext_types.bit_and(oids.X509_EXT_NS_CERT_TYPE) != 0 {
+    if crt.ext_types & oids.X509_EXT_NS_CERT_TYPE != 0 {
         out.extend("\n{prefix}cert. type        : ".bytes())
         x509.x509_info_cert_type(out, crt.ns_cert_type)
     }
-    if crt.ext_types.bit_and(oids.X509_EXT_KEY_USAGE) != 0 {
+    if crt.ext_types & oids.X509_EXT_KEY_USAGE != 0 {
         out.extend("\n{prefix}key usage         : ".bytes())
         x509.x509_info_key_usage(out, crt.key_usage)
     }
-    if crt.ext_types.bit_and(oids.X509_EXT_EXTENDED_KEY_USAGE) != 0 {
+    if crt.ext_types & oids.X509_EXT_EXTENDED_KEY_USAGE != 0 {
         out.extend("\n{prefix}ext key usage     : ".bytes())
         x509_crt_info_oids(out, data, crt.ext_key_usage, false)
     }
-    if crt.ext_types.bit_and(oids.X509_EXT_CERTIFICATE_POLICIES) != 0 {
+    if crt.ext_types & oids.X509_EXT_CERTIFICATE_POLICIES != 0 {
         out.extend("\n{prefix}certificate policies : ".bytes())
         x509_crt_info_oids(out, data, crt.certificate_policies, true)
     }
@@ -554,22 +550,22 @@ x509_crt_info: fn(prefix: String, crt: X509Crt) -> [U8] x509.X509Error! {
 /// encipherOnly and decipherOnly bits only when asked for; a certificate
 /// without keyUsage allows all (mbedtls_x509_crt_check_key_usage).
 x509_crt_check_key_usage: fn(crt: X509Crt, usage: Int) x509.X509Error! {
-    if crt.ext_types.bit_and(oids.X509_EXT_KEY_USAGE) == 0 {
+    if crt.ext_types & oids.X509_EXT_KEY_USAGE == 0 {
         return
     }
-    may_mask: x509.X509_KU_ENCIPHER_ONLY.bit_or(x509.X509_KU_DECIPHER_ONLY)
-    usage_must: usage - usage.bit_and(may_mask)
-    held_must: crt.key_usage - crt.key_usage.bit_and(may_mask)
-    if held_must.bit_and(usage_must) != usage_must -> return Err(.BadInput)
-    usage_may: usage.bit_and(may_mask)
-    if crt.key_usage.bit_and(may_mask).bit_or(usage_may) != usage_may -> return Err(.BadInput)
+    may_mask: x509.X509_KU_ENCIPHER_ONLY | x509.X509_KU_DECIPHER_ONLY
+    usage_must: usage - (usage & may_mask)
+    held_must: crt.key_usage - (crt.key_usage & may_mask)
+    if held_must & usage_must != usage_must -> return Err(.BadInput)
+    usage_may: usage & may_mask
+    if crt.key_usage & may_mask | usage_may != usage_may -> return Err(.BadInput)
 }
 
 /// BadInput unless the certificate's extendedKeyUsage lists `usage_oid` or
 /// anyExtendedKeyUsage; a certificate without the extension allows all
 /// (mbedtls_x509_crt_check_extended_key_usage).
 x509_crt_check_extended_key_usage: fn(crt: X509Crt, usage_oid: [U8]) x509.X509Error! {
-    if crt.ext_types.bit_and(oids.X509_EXT_EXTENDED_KEY_USAGE) == 0 {
+    if crt.ext_types & oids.X509_EXT_EXTENDED_KEY_USAGE == 0 {
         return
     }
     loop item in crt.ext_key_usage {
@@ -660,20 +656,19 @@ x509_curve_flag: fn(id: ecp.GroupID) -> Int Never! { x509_id_flag(x509_curve_num
 // The curves of 128-bit security and above that both the default and the
 // next profile allow.
 x509_curves_128: fn() -> Int Never! {
-    x509_curve_flag(.Secp256r1).bit_or(x509_curve_flag(.Secp384r1)).bit_or(x509_curve_flag(.Secp521r1))
-        .bit_or(x509_curve_flag(.Bp256r1)).bit_or(x509_curve_flag(.Bp384r1)).bit_or(x509_curve_flag(.Bp512r1))
+    x509_curve_flag(.Secp256r1) | x509_curve_flag(.Secp384r1) | x509_curve_flag(.Secp521r1) | x509_curve_flag(.Bp256r1) | x509_curve_flag(.Bp384r1) | x509_curve_flag(.Bp512r1)
 }
 
 // SHA-256, SHA-384 and SHA-512.
 x509_mds_sha2: fn() -> Int Never! {
-    x509_md_flag(.SHA256).bit_or(x509_md_flag(.SHA384)).bit_or(x509_md_flag(.SHA512))
+    x509_md_flag(.SHA256) | x509_md_flag(.SHA384) | x509_md_flag(.SHA512)
 }
 
 /// The default profile (mbedtls_x509_crt_profile_default): SHA-2 and SHA-3
 /// of 256 bits and more, any key type, the curves of 128-bit security and
 /// above, RSA keys of 2048 bits and more.
 x509_crt_profile_default: fn() -> X509CrtProfile Never! {
-    mds: x509_mds_sha2().bit_or(x509_md_flag(.SHA3x256)).bit_or(x509_md_flag(.SHA3x384)).bit_or(x509_md_flag(.SHA3x512))
+    mds: x509_mds_sha2() | x509_md_flag(.SHA3x256) | x509_md_flag(.SHA3x384) | x509_md_flag(.SHA3x512)
     X509CrtProfile{allowed_mds: mds, allowed_pks: 0xFFFFFFF, allowed_curves: x509_curves_128(), rsa_min_bitlen: 2048}
 }
 
@@ -682,7 +677,7 @@ x509_crt_profile_default: fn() -> X509CrtProfile Never! {
 /// type, the default's curves and secp256k1, RSA keys of 2048 bits and
 /// more.
 x509_crt_profile_next: fn() -> X509CrtProfile Never! {
-    curves: x509_curves_128().bit_or(x509_curve_flag(.Secp256k1))
+    curves: x509_curves_128() | x509_curve_flag(.Secp256k1)
     X509CrtProfile{allowed_mds: x509_mds_sha2(), allowed_pks: 0xFFFFFFF, allowed_curves: curves, rsa_min_bitlen: 2048}
 }
 
@@ -690,9 +685,9 @@ x509_crt_profile_next: fn() -> X509CrtProfile Never! {
 /// SHA-384 with ECDSA on P-256 or P-384 only.
 x509_crt_profile_suiteb: fn() -> X509CrtProfile Never! {
     X509CrtProfile{
-        allowed_mds: x509_md_flag(.SHA256).bit_or(x509_md_flag(.SHA384)),
-        allowed_pks: x509_pk_flag(.ECDSA).bit_or(x509_pk_flag(.ECKey)),
-        allowed_curves: x509_curve_flag(.Secp256r1).bit_or(x509_curve_flag(.Secp384r1)),
+        allowed_mds: x509_md_flag(.SHA256) | x509_md_flag(.SHA384),
+        allowed_pks: x509_pk_flag(.ECDSA) | x509_pk_flag(.ECKey),
+        allowed_curves: x509_curve_flag(.Secp256r1) | x509_curve_flag(.Secp384r1),
         rsa_min_bitlen: 0,
     }
 }
@@ -705,13 +700,13 @@ x509_crt_profile_none: fn() -> X509CrtProfile Never! {
 // x509_profile_check_md_alg: the profile allows the digest; no digest never.
 x509_profile_check_md_alg: fn(profile: X509CrtProfile, md: hashes.Md?) -> Bool Never! {
     given: md ?? return false
-    profile.allowed_mds.bit_and(x509_md_flag(given)) != 0
+    profile.allowed_mds & x509_md_flag(given) != 0
 }
 
 // x509_profile_check_pk_alg: the profile allows the key type; none never.
 x509_profile_check_pk_alg: fn(profile: X509CrtProfile, kind: oids.PKType?) -> Bool Never! {
     given: kind ?? return false
-    profile.allowed_pks.bit_and(x509_pk_flag(given)) != 0
+    profile.allowed_pks & x509_pk_flag(given) != 0
 }
 
 // x509_profile_check_key: an RSA key long enough, or an EC key on an
@@ -721,7 +716,7 @@ x509_profile_check_key: fn(profile: X509CrtProfile, key: pk.PKContext) -> Bool N
     if kind == .RSA || kind == .RSASSAPSS -> return pk.pk_get_bitlen(key) >= profile.rsa_min_bitlen
     if kind != .ECDSA && kind != .ECKey && kind != .ECKeyDH -> return false
     gid: pk.pk_get_ec_group_id(key)
-    gid != .Unknown && profile.allowed_curves.bit_and(x509_curve_flag(gid)) != 0
+    gid != .Unknown && profile.allowed_curves & x509_curve_flag(gid) != 0
 }
 
 // x509_memcasecmp: a[a_at..] and b[b_at..] agree over len bytes, ASCII
@@ -729,7 +724,7 @@ x509_profile_check_key: fn(profile: X509CrtProfile, key: pk.PKContext) -> Bool N
 x509_memcasecmp: fn(a: [U8], a_at: Int, b: [U8], b_at: Int, len: Int) -> Bool Never! {
     loop i in 0..<len {
         x: a[a_at + i]
-        diff: Int{x.bit_xor(b[b_at + i])}
+        diff: Int{x ~ b[b_at + i]}
         if diff == 0 -> next
         c: Int{x}
         letter: (c >= 97 && c <= 122) || (c >= 65 && c <= 90)
@@ -807,9 +802,9 @@ x509_crt_verify_info: fn(prefix: String, flags: Int) -> [U8] Never! {
     rest := flags
     loop bit in 0..<X509_CRT_VERIFY_STRINGS.len() {
         code: 1 << bit
-        if rest.bit_and(code) == 0 -> next
+        if rest & code == 0 -> next
         out.extend("{prefix}{X509_CRT_VERIFY_STRINGS[bit]}\n".bytes())
-        rest = rest.bit_xor(code)
+        rest ~= code
     }
     if rest != 0 -> out.extend("{prefix}Unknown reason (this should not happen)\n".bytes())
     out
@@ -922,7 +917,7 @@ x509_inet_pton_ipv6: fn(src: [U8]) -> [U8]? Never! {
     out := [U8]{}
     loop g in groups {
         out.push(U8{g >> 8})
-        out.push(U8{g.bit_and(0xFF)})
+        out.push(U8{g & 0xFF})
     }
     Val(out)
 }
@@ -949,9 +944,7 @@ x509_crt_san_bytes: fn(crt: X509Crt, san: asn1.ASN1Buf) -> [U8] Never! {
 }
 
 // The GeneralName number of a subjectAltName entry.
-x509_crt_san_type: fn(san: asn1.ASN1Buf) -> Int Never! {
-    san.tag_id.bit_and(asn1.ASN1_TAG_VALUE_MASK)
-}
+x509_crt_san_type: fn(san: asn1.ASN1Buf) -> Int Never! { san.tag_id & asn1.ASN1_TAG_VALUE_MASK }
 
 // x509_crt_check_san_ip: `cn` is an IP address that an iPAddress entry
 // holds.
@@ -997,7 +990,7 @@ x509_crt_check_san: fn(crt: X509Crt, cn: [U8]) -> Bool Never! {
 // x509_crt_verify_name: CN_MISMATCH unless the subjectAltName, or without
 // one a subject CN, matches `cn`.
 x509_crt_verify_name: fn(crt: X509Crt, cn: [U8]) -> Int Never! {
-    if crt.ext_types.bit_and(oids.X509_EXT_SUBJECT_ALT_NAME) != 0 {
+    if crt.ext_types & oids.X509_EXT_SUBJECT_ALT_NAME != 0 {
         if x509_crt_check_san(crt, cn) -> return 0
         return x509.X509_BADCERT_CN_MISMATCH
     }
@@ -1059,37 +1052,27 @@ x509_crt_verifycrl: fn(serial: [U8], ca: &X509Crt, crls: [x509crl.X509Crl], prof
     loop i in 0..<crls.len() {
         if crls[i].version == 0 || !x509_name_cmp(crls[i].issuer, ca.subject) -> next
         if x509_crt_key_usage_ok(ca, x509.X509_KU_CRL_SIGN) == false {
-            flags = flags.bit_or(x509.X509_BADCRL_NOT_TRUSTED)
+            flags |= x509.X509_BADCRL_NOT_TRUSTED
             break
         }
-        if !x509_profile_check_md_alg(profile, crls[i].sig_md) {
-            flags = flags.bit_or(x509.X509_BADCRL_BAD_MD)
-        }
-        if !x509_profile_check_pk_alg(profile, crls[i].sig_pk) {
-            flags = flags.bit_or(x509.X509_BADCRL_BAD_PK)
-        }
+        if !x509_profile_check_md_alg(profile, crls[i].sig_md) -> flags |= x509.X509_BADCRL_BAD_MD
+        if !x509_profile_check_pk_alg(profile, crls[i].sig_pk) -> flags |= x509.X509_BADCRL_BAD_PK
         tbs: cipher.bytes_of(crls[i].raw, crls[i].tbs.p, crls[i].tbs.len)
         sig: cipher.bytes_of(crls[i].raw, crls[i].sig.p, crls[i].sig.len)
         signed: X509Signed{hash: x509_crt_digest(crls[i].sig_md, tbs), md: crls[i].sig_md, kind: crls[i].sig_pk, opts: crls[i].sig_opts, sig: sig}
         if signed.hash == None {
-            flags = flags.bit_or(x509.X509_BADCRL_NOT_TRUSTED)
+            flags |= x509.X509_BADCRL_NOT_TRUSTED
             break
         }
-        if !x509_profile_check_key(profile, ca.pk) {
-            flags = flags.bit_or(x509.X509_BADCERT_BAD_KEY)
-        }
+        if !x509_profile_check_key(profile, ca.pk) -> flags |= x509.X509_BADCERT_BAD_KEY
         if !x509_crt_check_signature(signed, ca) {
-            flags = flags.bit_or(x509.X509_BADCRL_NOT_TRUSTED)
+            flags |= x509.X509_BADCRL_NOT_TRUSTED
             break
         }
-        if x509.x509_time_cmp(crls[i].next_update, now) < 0 {
-            flags = flags.bit_or(x509.X509_BADCRL_EXPIRED)
-        }
-        if x509.x509_time_cmp(crls[i].this_update, now) > 0 {
-            flags = flags.bit_or(x509.X509_BADCRL_FUTURE)
-        }
+        if x509.x509_time_cmp(crls[i].next_update, now) < 0 -> flags |= x509.X509_BADCRL_EXPIRED
+        if x509.x509_time_cmp(crls[i].this_update, now) > 0 -> flags |= x509.X509_BADCRL_FUTURE
         if x509_crt_is_revoked(serial, crls[i]) {
-            flags = flags.bit_or(x509.X509_BADCERT_REVOKED)
+            flags |= x509.X509_BADCERT_REVOKED
             break
         }
     }
@@ -1171,8 +1154,8 @@ x509_crt_check_ee_locally_trusted: fn(crt: X509Crt, trust_ca: [X509Crt]) -> Bool
 // The validity flags of a certificate at `now`.
 x509_crt_time_flags: fn(crt: X509Crt, now: x509.X509Time) -> Int Never! {
     flags := 0
-    if x509.x509_time_cmp(crt.valid_to, now) < 0 -> flags = flags.bit_or(x509.X509_BADCERT_EXPIRED)
-    if x509.x509_time_cmp(crt.valid_from, now) > 0 -> flags = flags.bit_or(x509.X509_BADCERT_FUTURE)
+    if x509.x509_time_cmp(crt.valid_to, now) < 0 -> flags |= x509.X509_BADCERT_EXPIRED
+    if x509.x509_time_cmp(crt.valid_from, now) > 0 -> flags |= x509.X509_BADCERT_FUTURE
     flags
 }
 
@@ -1200,10 +1183,10 @@ x509_crt_verify_chain: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509
         }
         flags := x509_crt_time_flags(chain[child], now)
         if !x509_profile_check_md_alg(profile, chain[child].sig_md) {
-            flags = flags.bit_or(x509.X509_BADCERT_BAD_MD)
+            flags |= x509.X509_BADCERT_BAD_MD
         }
         if !x509_profile_check_pk_alg(profile, chain[child].sig_pk) {
-            flags = flags.bit_or(x509.X509_BADCERT_BAD_PK)
+            flags |= x509.X509_BADCERT_BAD_PK
         }
         if items.len() == 0 && x509_crt_check_ee_locally_trusted(chain[child], trust_ca) {
             items.push(X509ChainItem{trusted: false, index: child, flags: flags})
@@ -1211,7 +1194,7 @@ x509_crt_verify_chain: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509
         }
         found: x509_crt_find_parent(chain, trust_ca, child, items.len(), self_cnt, now)
         parent: found ?? {
-            items.push(X509ChainItem{trusted: false, index: child, flags: flags.bit_or(x509.X509_BADCERT_NOT_TRUSTED)})
+            items.push(X509ChainItem{trusted: false, index: child, flags: flags | x509.X509_BADCERT_NOT_TRUSTED})
             return Ok(items)
         }
         if items.len() != 0 && x509_name_cmp(chain[child].issuer, chain[child].subject) {
@@ -1220,9 +1203,9 @@ x509_crt_verify_chain: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509
         if !parent.trusted && items.len() + 1 > x509.X509_MAX_INTERMEDIATE_CA {
             return Err(.FatalError)
         }
-        if !parent.signature_is_good -> flags = flags.bit_or(x509.X509_BADCERT_NOT_TRUSTED)
+        if !parent.signature_is_good -> flags |= x509.X509_BADCERT_NOT_TRUSTED
         serial: cipher.bytes_of(chain[child].raw, chain[child].serial.p, chain[child].serial.len)
-        flags = flags.bit_or(x509_crt_parent_flags(chain, trust_ca, parent, serial, ca_crl, profile, now))
+        flags |= x509_crt_parent_flags(chain, trust_ca, parent, serial, ca_crl, profile, now)
         items.push(X509ChainItem{trusted: false, index: child, flags: flags})
         child = parent.index
         child_trusted = parent.trusted
@@ -1242,7 +1225,7 @@ x509_crt_parent_flags: fn(chain: &[X509Crt], trust_ca: &[X509Crt], parent: X509P
 x509_crt_signer_flags: fn(list: &[X509Crt], at: Int, serial: [U8], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, now: x509.X509Time) -> Int Never! {
     flags := 0
     if !x509_profile_check_key(profile, list[at].pk) -> flags = x509.X509_BADCERT_BAD_KEY
-    flags.bit_or(x509_crt_verifycrl(serial, list[at], ca_crl, profile, now))
+    flags | x509_crt_verifycrl(serial, list[at], ca_crl, profile, now)
 }
 
 /// A verification callback (the f_vrfy of mbedtls_x509_crt_verify): `call`
@@ -1276,13 +1259,11 @@ x509_crt_verify_items: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509
         .None -> {}
     }
     if !x509_profile_check_pk_alg(profile, pk.pk_get_type(chain[0].pk)) {
-        ee_flags = ee_flags.bit_or(x509.X509_BADCERT_BAD_PK)
+        ee_flags |= x509.X509_BADCERT_BAD_PK
     }
-    if !x509_profile_check_key(profile, chain[0].pk) {
-        ee_flags = ee_flags.bit_or(x509.X509_BADCERT_BAD_KEY)
-    }
+    if !x509_profile_check_key(profile, chain[0].pk) -> ee_flags |= x509.X509_BADCERT_BAD_KEY
     items := x509_crt_verify_chain(chain, trust_ca, ca_crl, profile, now)
-    items[0].flags = items[0].flags.bit_or(ee_flags)
+    items[0].flags = items[0].flags | ee_flags
     Ok(items)
 }
 
@@ -1314,7 +1295,7 @@ x509_crt_verify_with_profile_at: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_
             }
             .None -> {}
         }
-        flags = flags.bit_or(cur)
+        flags |= cur
     }
     if flags != 0 -> return Err(.CertVerifyFailed(flags))
 }

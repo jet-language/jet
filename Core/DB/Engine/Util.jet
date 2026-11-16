@@ -64,7 +64,7 @@ hex_to_blob: fn(z: [U8]) -> [U8] Never! {
     out := [U8]{}
     i := 0
     loop i + 1 < z.len() {
-        out.push(U8{(hex_to_int(Int{z[i]}) << 4).bit_or(hex_to_int(Int{z[i + 1]}))})
+        out.push(U8{(hex_to_int(Int{z[i]}) << 4) | hex_to_int(Int{z[i + 1]})})
         i += 2
     }
     out
@@ -156,7 +156,7 @@ str_ihash: fn(z: [U8]) -> Int Never! {
     loop b in z {
         c: Int{b}
         if c == 0 -> break
-        h = (h + lower_byte(c)).bit_and(255)
+        h = (h + lower_byte(c)) & 255
     }
     h
 }
@@ -184,7 +184,7 @@ wrap_i64: fn(v: Int) -> Int Never! {
 as_u64: fn(v: Int) -> Int Never! { if v < 0 -> v + 18446744073709551616 else -> v }
 
 // v & ~m, the C idiom for clearing flag bits.
-clear_bits: fn(v: Int, m: Int) -> Int Never! { v - v.bit_and(m) }
+clear_bits: fn(v: Int, m: Int) -> Int Never! { v - (v & m) }
 
 // sqlite3AddInt64: a + b, or None when the sum leaves the 64-bit range.
 add_int64: fn(a: Int, b: Int) -> Int? Never! {
@@ -217,23 +217,23 @@ abs_int32: fn(x: Int) -> Int Never! {
 // fileformat2.html sections 1.3 and 1.6).
 
 // A big-endian unsigned 16-bit field.
-get2: fn(buf: [U8], at: Int) -> Int Never! { (Int{buf[at]} << 8).bit_or(Int{buf[at + 1]}) }
+get2: fn(buf: [U8], at: Int) -> Int Never! { (Int{buf[at]} << 8) | Int{buf[at + 1]} }
 
 // A big-endian unsigned 32-bit field.
 get4: fn(buf: [U8], at: Int) -> Int Never! {
-    (Int{buf[at]} << 24).bit_or((Int{buf[at + 1]} << 16)).bit_or((Int{buf[at + 2]} << 8)).bit_or(Int{buf[at + 3]})
+    (Int{buf[at]} << 24) | (Int{buf[at + 1]} << 16) | (Int{buf[at + 2]} << 8) | Int{buf[at + 3]}
 }
 
 put2: fn(buf: &[U8], at: Int, value: Int) Never! {
-    buf[at] = U8{(value >> 8).bit_and(255)}
-    buf[at + 1] = U8{value.bit_and(255)}
+    buf[at] = U8{(value >> 8) & 255}
+    buf[at + 1] = U8{value & 255}
 }
 
 put4: fn(buf: &[U8], at: Int, value: Int) Never! {
-    buf[at] = U8{(value >> 24).bit_and(255)}
-    buf[at + 1] = U8{(value >> 16).bit_and(255)}
-    buf[at + 2] = U8{(value >> 8).bit_and(255)}
-    buf[at + 3] = U8{value.bit_and(255)}
+    buf[at] = U8{(value >> 24) & 255}
+    buf[at + 1] = U8{(value >> 16) & 255}
+    buf[at + 2] = U8{(value >> 8) & 255}
+    buf[at + 3] = U8{value & 255}
 }
 
 // A decoded varint: its signed 64-bit value and its length in bytes.
@@ -248,18 +248,18 @@ Varint: struct {
 get_varint: fn(buf: [U8], at: Int) -> Varint Never! {
     first: Int{buf[at]}
     if first < 128 -> return Varint{value: first, len: 1}
-    value := first.bit_and(127)
+    value := first & 127
     i := 1
     loop i < 8 {
         b: Int{buf[at + i]}
-        value = (value << 7).bit_or(b.bit_and(127))
+        value = (value << 7) | b & 127
         if b < 128 -> return Varint{value: value, len: i + 1}
         i += 1
     }
     // Eight continuation bytes carried 56 bits; the ninth adds a full byte.
     // Sign the 56-bit prefix first so the result stays a 64-bit integer.
     if value >= 36028797018963968 -> value -= 72057594037927936
-    Varint{value: (value << 8).bit_or(Int{buf[at + 8]}), len: 9}
+    Varint{value: (value << 8) | Int{buf[at + 8]}, len: 9}
 }
 
 // sqlite3GetVarint32 for a value known to be small and non-negative (header
@@ -297,18 +297,18 @@ put_varint: fn(out: &[U8], value: Int) Never! {
         high := v >> 8
         groups := [U8]{}
         loop _i in 0..<8 {
-            groups.push(U8{high.bit_and(127)})
+            groups.push(U8{high & 127})
             high >>= 7
         }
-        loop i in 0..<8 -> out.push(U8{Int{groups[7 - i]}.bit_or(128)})
-        out.push(U8{v.bit_and(255)})
+        loop i in 0..<8 -> out.push(U8{Int{groups[7 - i]} | 128})
+        out.push(U8{v & 255})
         return
     }
     n: varint_len(v)
     loop i in 0..<n {
         shift: 7 * (n - 1 - i)
-        part: (v >> shift).bit_and(127)
-        out.push(U8{if i < n - 1 -> part.bit_or(128) else -> part})
+        part: (v >> shift) & 127
+        out.push(U8{if i < n - 1 -> part | 128 else -> part})
     }
 }
 
@@ -397,11 +397,11 @@ utf8_read: fn(z: [U8], at: Int, term: Int) -> UTFChar Never! {
     i := at + 1
     if c >= 192 {
         c = UTF8_TRANS1[c - 192]
-        loop i < term && (Int{z[i]}).bit_and(192) == 128 {
-            c = ((c << 6) + Int{z[i]}.bit_and(63)).bit_and(4294967295)
+        loop i < term && (Int{z[i]}) & 192 == 128 {
+            c = ((c << 6) + (Int{z[i]} & 63)) & 4294967295
             i += 1
         }
-        if c < 128 || c.bit_and(4294965248) == 55296 || c.bit_and(4294967294) == 65534 -> c = 65533
+        if c < 128 || c & 4294965248 == 55296 || c & 4294967294 == 65534 -> c = 65533
     }
     UTFChar{c: c, next: i}
 }
@@ -414,8 +414,8 @@ utf8_read_limited: fn(z: [U8], at: Int, n_in: Int) -> UTFChar Never! {
     if c >= 192 {
         c = UTF8_TRANS1[c - 192]
         n: if n_in > 4 -> 4 else -> n_in
-        loop i < n && (Int{z[at + i]}).bit_and(192) == 128 {
-            c = (c << 6) + Int{z[at + i]}.bit_and(63)
+        loop i < n && (Int{z[at + i]}) & 192 == 128 {
+            c = (c << 6) + (Int{z[at + i]} & 63)
             i += 1
         }
     }
@@ -424,26 +424,26 @@ utf8_read_limited: fn(z: [U8], at: Int, n_in: Int) -> UTFChar Never! {
 
 // WRITE_UTF8.
 write_utf8: fn(out: &[U8], c: Int) Never! {
-    if c < 128 -> out.push(U8{c.bit_and(255)}) else if c < 2048 {
-        out.push(U8{192 + (c >> 6).bit_and(31)})
-        out.push(U8{128 + c.bit_and(63)})
+    if c < 128 -> out.push(U8{c & 255}) else if c < 2048 {
+        out.push(U8{192 + ((c >> 6) & 31)})
+        out.push(U8{128 + (c & 63)})
     } else if c < 65536 {
-        out.push(U8{224 + (c >> 12).bit_and(15)})
-        out.push(U8{128 + (c >> 6).bit_and(63)})
-        out.push(U8{128 + c.bit_and(63)})
+        out.push(U8{224 + ((c >> 12) & 15)})
+        out.push(U8{128 + ((c >> 6) & 63)})
+        out.push(U8{128 + (c & 63)})
     } else {
-        out.push(U8{240 + (c >> 18).bit_and(7)})
-        out.push(U8{128 + (c >> 12).bit_and(63)})
-        out.push(U8{128 + (c >> 6).bit_and(63)})
-        out.push(U8{128 + c.bit_and(63)})
+        out.push(U8{240 + ((c >> 18) & 7)})
+        out.push(U8{128 + ((c >> 12) & 63)})
+        out.push(U8{128 + ((c >> 6) & 63)})
+        out.push(U8{128 + (c & 63)})
     }
 }
 
 // WRITE_UTF16LE / WRITE_UTF16BE.
 write_utf16: fn(out: &[U8], c: Int, enc: Int) Never! {
     if c <= 65535 {
-        lo: c.bit_and(255)
-        hi: (c >> 8).bit_and(255)
+        lo: c & 255
+        hi: (c >> 8) & 255
         if enc == base.UTF16LE {
             out.push(U8{lo})
             out.push(U8{hi})
@@ -453,10 +453,10 @@ write_utf16: fn(out: &[U8], c: Int, enc: Int) Never! {
         }
         return
     }
-    w1lo: ((c >> 10).bit_and(63) + ((c - 65536) >> 10).bit_and(192)).bit_and(255)
-    w1hi: 216 + ((c - 65536) >> 18).bit_and(3)
-    w2lo: c.bit_and(255)
-    w2hi: 220 + (c >> 8).bit_and(3)
+    w1lo: (((c >> 10) & 63) + (((c - 65536) >> 10) & 192)) & 255
+    w1hi: 216 + (((c - 65536) >> 18) & 3)
+    w2lo: c & 255
+    w2hi: 220 + ((c >> 8) & 3)
     if enc == base.UTF16LE {
         out.push(U8{w1lo})
         out.push(U8{w1hi})
@@ -478,7 +478,7 @@ write_utf16: fn(out: &[U8], c: Int, enc: Int) Never! {
 translate: fn(z: [U8], from: Int, to: Int) -> [U8] Never! {
     out := [U8]{}
     if from != base.UTF8 && to != base.UTF8 {
-        n: z.len() - z.len().bit_and(1)
+        n: z.len() - (z.len() & 1)
         i := 0
         loop i < n {
             out.push(z[i + 1])
@@ -497,7 +497,7 @@ translate: fn(z: [U8], from: Int, to: Int) -> [U8] Never! {
         }
         return out
     }
-    term: z.len() - z.len().bit_and(1)
+    term: z.len() - (z.len() & 1)
     at := 0
     loop at < term {
         c := utf16_unit(z, at, from)
@@ -505,7 +505,7 @@ translate: fn(z: [U8], from: Int, to: Int) -> [U8] Never! {
         if c >= 55296 && c < 57344 && at < term {
             c2: utf16_unit(z, at, from)
             at += 2
-            c = c2.bit_and(1023) + (c.bit_and(63) << 10) + ((c.bit_and(960) + 64) << 10)
+            c = (c2 & 1023) + ((c & 63) << 10) + (((c & 960) + 64) << 10)
         }
         write_utf8(out, c)
     }
@@ -529,7 +529,7 @@ utf8_char_len: fn(z: [U8], n: Int) -> Int Never! {
         lead: Int{z[i]}
         i += 1
         if lead >= 192 {
-            loop i < z.len() && (Int{z[i]}).bit_and(192) == 128 -> i += 1
+            loop i < z.len() && (Int{z[i]}) & 192 == 128 -> i += 1
         }
         r += 1
     }
@@ -592,7 +592,7 @@ shift_round: fn(p: Int, sh: Int) -> Int Never! {
     q: p >> sh
     r: p - (q << sh)
     half: 1 << (sh - 1)
-    if r > half || (r == half && q.bit_and(1) == 1) -> return q + 1
+    if r > half || (r == half && q & 1 == 1) -> return q + 1
     q
 }
 
@@ -617,8 +617,8 @@ ext_from_int: fn(s: Int) -> Ext Never! {
 // (LONGDOUBLE_TYPE)r for a finite r >= 0: exact.
 ext_from_float: fn(r: Float) -> Ext Never! {
     bits: as_u64(math.to_bits(r))
-    e: (bits >> 52).bit_and(2047)
-    frac: bits.bit_and(TWO_52 - 1)
+    e: (bits >> 52) & 2047
+    frac: bits & TWO_52 - 1
     if e == 0 {
         if frac == 0 -> return Ext{mant: 0, exp: 0}
         return ext_norm(frac, -1074)
@@ -729,12 +729,12 @@ atof: fn(z: [U8], enc: Int) -> AtoF Never! {
     etype := 1
     if enc != base.UTF8 {
         incr = 2
-        length -= length.bit_and(1)
+        length -= length & 1
         i := 3 - enc
         loop i < length && z[i] == (U8{0}) -> i += 2
         if i < length -> etype = -100
-        end = i.bit_xor(1)
-        at = enc.bit_and(1)
+        end = i ~ 1
+        at = enc & 1
     }
     loop at < end && is_space(zb(z, at)) -> at += incr
     if at >= end -> return AtoF{value: 0.0, kind: 0}
@@ -870,12 +870,12 @@ atoi64: fn(z: [U8], enc: Int) -> AtoI Never! {
     non_num := false
     if enc != base.UTF8 {
         incr = 2
-        length -= length.bit_and(1)
+        length -= length & 1
         i := 3 - enc
         loop i < length && z[i] == (U8{0}) -> i += 2
         non_num = i < length
-        end = i.bit_xor(1)
-        at = enc.bit_and(1)
+        end = i ~ 1
+        at = enc & 1
     }
     loop at < end && is_space(zb(z, at)) -> at += incr
     neg := false
@@ -934,7 +934,7 @@ dec_or_hex_to_i64: fn(z: [U8]) -> AtoI Never! {
         loop sql_byte(z, i) == 48 -> i += 1
         k := i
         loop is_xdigit(sql_byte(z, k)) {
-            u = (u * 16 + hex_to_int(sql_byte(z, k))).bit_and(TWO_64 - 1)
+            u = (u * 16 + hex_to_int(sql_byte(z, k))) & TWO_64 - 1
             k += 1
         }
         v: if u >= TWO_63 -> u - TWO_64 else -> u
@@ -1036,7 +1036,7 @@ fp_decode: fn(r_in: Float, round_in: Int, mx_round: Int) -> FpDecode Never! {
         return p
     }
     bits: as_u64(math.to_bits(r))
-    if (bits >> 52).bit_and(2047) == 2047 {
+    if (bits >> 52) & 2047 == 2047 {
         p.is_special = if bits == 9218868437227405312 -> 1 else -> 2
         return p
     }
@@ -1154,7 +1154,7 @@ log_est: fn(x_in: Int) -> Int Never! {
         y += i * 10
         x >>= i
     }
-    LOG_EST_FRAC[x.bit_and(7)] + y - 10
+    LOG_EST_FRAC[x & 7] + y - 10
 }
 
 // sqlite3LogEstFromDouble.
@@ -1171,7 +1171,7 @@ log_est_to_int: fn(x_in: Int) -> Int Never! {
     x: c_div(x_in, 10)
     if n >= 5 -> n -= 2 else if n >= 1 -> n -= 1
     if x > 60 -> return base.I64_MAX
-    if x >= 3 -> return ((n + 8) << (x - 3)).bit_and(TWO_64 - 1)
+    if x >= 3 -> return ((n + 8) << (x - 3)) & TWO_64 - 1
     if 3 - x >= 64 -> return 0
     (n + 8) >> (3 - x)
 }

@@ -146,8 +146,8 @@ net_udp_wait: fn(state: I64, reading: Bool, operation: I64, scratch: I64, error:
     jet_rt_free(scratch, I64{48}, I64{8})
     if (ready == I64{0}) { return I64{0} }
     result: jet_rt_alloc(I64{16}, I64{8})
-    net_put(result, I64{0}, if (ready.bit_and(I64{1}) != I64{0}) -> I64{1} else -> I64{0})
-    net_put(result, I64{8}, if (ready.bit_and(I64{4}) != I64{0}) -> I64{1} else -> I64{0})
+    net_put(result, I64{0}, if (ready & I64{1} != I64{0}) -> I64{1} else -> I64{0})
+    net_put(result, I64{8}, if (ready & I64{4} != I64{0}) -> I64{1} else -> I64{0})
     net_put(output, I64{0}, result)
     I64{1}
 }

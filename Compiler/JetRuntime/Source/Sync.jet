@@ -139,8 +139,8 @@ sync_vdso_lookup: fn() -> I64 {
     loop at < total {
         symbol: wrapping(symbols + at * I64{24})
         info: net_load_uint(wrapping(symbol + I64{4}), I64{1})
-        typed: (I64{1} << info.bit_and(I64{15})).bit_and(I64{39}) != I64{0}
-        bound: (I64{1} << (info >> I64{4})).bit_and(I64{1030}) != I64{0}
+        typed: (I64{1} << (info & I64{15})) & I64{39} != I64{0}
+        bound: (I64{1} << (info >> I64{4})) & I64{1030} != I64{0}
         defined: net_load_uint(wrapping(symbol + I64{6}), I64{2}) != I64{0}
         if (typed && bound && defined && sync_vdso_name(wrapping(strings + net_load_uint(symbol, I64{4})), name)) {
             return wrapping(bias + sync_word(symbol, I64{8}))

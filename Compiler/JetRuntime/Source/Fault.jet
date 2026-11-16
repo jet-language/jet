@@ -346,7 +346,7 @@ priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, with_functio
                 section: wrapping(sections + wrapping(index * entry))
                 name: wrapping(names + trace_u32(section))
                 // ".debug_jetline\0", little-endian.
-                if (os_load_i64(name) == I64{7664958844667520046} && os_load_i64(wrapping(name + I64{8})).bit_and(I64{72057594037927935}) == I64{111524889523301}) {
+                if (os_load_i64(name) == I64{7664958844667520046} && os_load_i64(wrapping(name + I64{8})) & I64{72057594037927935} == I64{111524889523301}) {
                     table = wrapping(image + os_load_i64(wrapping(section + I64{24})))
                     table_end = wrapping(table + os_load_i64(wrapping(section + I64{32})))
                     break
@@ -358,7 +358,7 @@ priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, with_functio
     if (table == I64{0}) { return false }
     frame := start
     steps := I64{0}
-    loop frame != (I64{0}) && frame.bit_and(I64{7}) == (I64{0}) && steps < (I64{4096}) {
+    loop frame != (I64{0}) && frame & (I64{7}) == (I64{0}) && steps < (I64{4096}) {
         address := I64{0}
         above := I64{0}
         #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB") {
@@ -471,9 +471,9 @@ priv trace_u8: fn(at: I64) -> I64 {
     byte
 }
 
-trace_u16: fn(at: I64) -> I64 { trace_u8(at).bit_or(trace_u8(wrapping(at + I64{1})) << I64{8}) }
+trace_u16: fn(at: I64) -> I64 { trace_u8(at) | trace_u8(wrapping(at + I64{1})) << I64{8} }
 
-trace_u32: fn(at: I64) -> I64 { trace_u16(at).bit_or(trace_u16(wrapping(at + I64{2})) << I64{16}) }
+trace_u32: fn(at: I64) -> I64 { trace_u16(at) | trace_u16(wrapping(at + I64{2})) << I64{16} }
 
 // The unsigned LEB128 at `at`.
 trace_uleb: fn(at: I64) -> I64 {
@@ -482,7 +482,7 @@ trace_uleb: fn(at: I64) -> I64 {
     cursor := at
     loop shift < (I64{70}) {
         byte: trace_u8(cursor)
-        if (shift < I64{63}) { value = value.bit_or(byte.bit_and(I64{127}) << shift) }
+        if (shift < I64{63}) { value |= (byte & I64{127}) << shift }
         shift = wrapping(shift + I64{7})
         cursor = wrapping(cursor + I64{1})
         if (byte < I64{128}) { return value }
@@ -497,11 +497,11 @@ trace_sleb: fn(at: I64) -> I64 {
     cursor := at
     loop shift < (I64{70}) {
         byte: trace_u8(cursor)
-        if (shift < I64{63}) { value = value.bit_or(byte.bit_and(I64{127}) << shift) }
+        if (shift < I64{63}) { value |= (byte & I64{127}) << shift }
         shift = wrapping(shift + I64{7})
         cursor = wrapping(cursor + I64{1})
         if (byte < I64{128}) {
-            if (byte.bit_and(I64{64}) != I64{0} && shift < I64{63}) {
+            if (byte & I64{64} != I64{0} && shift < I64{63}) {
                 value = wrapping(value - (I64{1} << shift))
             }
             return value

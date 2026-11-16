@@ -8,5 +8,5 @@ run: fn() {
     path: process.args()[0]
     mode: (files.stat(path.copy()) ?? panic("stat {path}: {err}")).mode
     // Clear the write bits (0o222), keeping every other bit.
-    files.set_mode(path.copy(), mode - mode.bit_and(146)) ?? panic("chmod {path}: {err}")
+    files.set_mode(path.copy(), mode - (mode & 146)) ?? panic("chmod {path}: {err}")
 }

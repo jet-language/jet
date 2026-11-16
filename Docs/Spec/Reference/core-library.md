@@ -3205,20 +3205,20 @@ run: fn() {
 }
 ```
 
-Numeric arithmetic methods need no import (D-SIGIL-ALGEBRA1=B):
+Numeric power is a method that needs no import (D-SIGIL-ALGEBRA1=B):
 
 | Method | Receiver | Description |
 | --- | --- | --- |
-| `value.bit_and(other)` | Int and each fixed-width integer | Keep shared bits; the usual integer join determines the width. |
-| `value.bit_or(other)` | Int and each fixed-width integer | Keep bits set in either operand. |
-| `value.bit_xor(other)` | Int and each fixed-width integer | Keep bits set in exactly one operand. |
-| `value.bit_not()` | Int and each fixed-width integer | Flip every bit, keeping the width; exact Int returns `-value - 1`. |
 | `value.pow(exponent)` | Int and Float | Numeric power with the existing exactness and negative-exponent rules. A written negative Int exponent produces Fraction; a dynamic negative Int exponent stops with the existing arithmetic fault. On Float and F32 it is C23 `pow`, correctly rounded, so every tier returns the same bits: 1 for `x^0` and `1^y` (even at a quiet NaN), the IEEE 754 zeros and infinities for a zero or infinite operand, a negative `x` to a whole `y` signed by `y`'s parity, and NaN for a negative `x` to a fractional `y`. |
 
-These intrinsic methods lower to the ordinary typed numeric operations, not
-user function calls, so every tier computes the same bits; Float and F32
+This intrinsic method lowers to the ordinary typed numeric operation, not a
+user function call, so every tier computes the same bits; Float and F32
 `pow` call Core's correctly rounded power.
-An update writes `value = value.bit_xor(other)`. `!value` is Boolean
+Integer bits are sigils (D-BIT-SIGILS1=A): `a & b`, `a | b`, `a ~ b`
+(exclusive-or), `a &~ b` (and-not) and the complement `~a`, on Int and each
+fixed-width integer. The usual integer join determines the width, the
+complement keeps its operand's width, and an exact Int complement is
+`-value - 1`. The updates are `&=`, `|=`, `~=` and `&~=`. `!value` is Boolean
 negation only. Shifts retain `<<` and `>>`.
 
 Floating classifiers such as `math.is_nan` require Float or F32, not Int.
@@ -6526,7 +6526,7 @@ wrapper (**E1003**, whose fix names the value the wrapper would give).
 Integer types expose `MIN`, `MAX`, `count_ones`,
 `count_zeros`, `leading_zeros`, and `trailing_zeros`. Float types expose
 `INFINITY`, `NEG_INFINITY`, `NAN`, and `EPSILON`, plus `is_nan`, `is_infinite`,
-and `is_finite`. Named bit methods preserve operand width. A shift keeps its
+and `is_finite`. The bit sigils preserve operand width. A shift keeps its
 left operand's width, and its count may be any integer width (`U64{byte} << n`
 with `n: U8`); a count past the value's width traps rather than leaking a
 host-language panic.

@@ -181,7 +181,7 @@ production_receipt_hex: fn(buffer: I64, at: I64, data: I64, length: I64) -> I64 
 
 production_receipt_hex_byte: fn(buffer: I64, at: I64, byte: I64) -> I64 {
     high: byte >> I64{4}
-    low: byte.bit_and(I64{15})
+    low: byte & I64{15}
     cursor: production_receipt_put_byte(buffer, at, if (high < I64{10}) -> high + I64{48} else -> high + I64{87})
     production_receipt_put_byte(buffer, cursor, if (low < I64{10}) -> low + I64{48} else -> low + I64{87})
 }

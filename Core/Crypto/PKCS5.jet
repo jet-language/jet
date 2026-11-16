@@ -84,7 +84,7 @@ pbes2_cipher: fn(data: [U8], buf: asn1.ASN1Buf) -> layer.CipherInfo? Never! {
 /// ignored, as PBES2 takes the cipher's key length; the PRF defaults to
 /// HMAC-SHA-1.
 parse_pbkdf2_params: fn(data: [U8], params: asn1.ASN1Buf) -> PBKDF2Params PBEError! {
-    if params.tag_id != asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE) {
+    if params.tag_id != asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE {
         return Err(.InvalidFormat(Val(.UnexpectedTag)))
     }
     p := params.p
@@ -123,7 +123,7 @@ pbkdf2_hmac: fn(md: hashes.Md, password: [U8], salt: [U8], iterations: Int, key_
 /// `password` with the PBES2-params `params` in `data`. A cipher failure,
 /// bad padding on decryption above all, is PasswordMismatch.
 pbes2: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperation, password: [U8], input: [U8]) -> [U8] PBEError! {
-    if params.tag_id != asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE) {
+    if params.tag_id != asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE {
         return Err(.InvalidFormat(Val(.UnexpectedTag)))
     }
     p := params.p
@@ -226,7 +226,7 @@ pbes2: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperation, pa
         0x49,
         0x10,
     }
-    params: asn1.ASN1Buf{tag_id: asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE), p: 0, len: der.len()}
+    params: asn1.ASN1Buf{tag_id: asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE, p: 0, len: der.len()}
     message: "seven or eight bytes".bytes()
     sealed: pbes2(der, params, .Encrypt, "password".bytes(), message) ?? panic("PBES2 encrypt")
     assert(sealed.len() == 24)

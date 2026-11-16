@@ -238,7 +238,7 @@ priv internal: module {
         }
         access: if opening -> UIFSAccess.Read else -> UIFSAccess.Write
         needed: if opening -> U8{1} else -> U8{2}
-        granted: request.grant.rights.bits.bit_and(needed) != U8{0}
+        granted: request.grant.rights.bits & needed != U8{0}
         dialog: if opening -> "Open" else -> "Save"
         right: if opening -> "Read" else -> "Write"
         if !granted {

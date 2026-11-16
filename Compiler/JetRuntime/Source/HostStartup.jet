@@ -91,7 +91,7 @@ host_environment_split: fn(bytes: I64) -> I64 {
 host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart: Bool) {
     // libc main's argc is a nonnegative int32. Explicit hosts use that same
     // range; discard unspecified upper register bits before any other use.
-    count: argc.bit_and(I64{4294967295})
+    count: argc & I64{4294967295}
     if (host_argc != I64{-1} && !restart) {
         if !(host_argc == count && host_argv == argv && host_envp == envp) {
             host_arguments_refused()
@@ -106,7 +106,7 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
     capture: host_env_capture_code
     if (capture != I64{0}) {
         // The envp array is word aligned: bit 0 tells capture it is a main's.
-        _ := coll_call1(capture, if main -> envp.bit_or(I64{1}) else -> envp)
+        _ := coll_call1(capture, if main -> envp | I64{1} else -> envp)
     }
     rt_test_reads_arm(envp, main)
     #Unsafe("host argument registration is single-threaded and precedes user code") {
@@ -120,7 +120,7 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
 // a main's pointer array is copied, to be indexed by the first reader
 // (host_environment_require).
 #Export(c) jet_rt_host_env_capture: fn(startup: I64) -> I64 {
-    envp: startup.bit_and(I64{-2})
+    envp: startup & I64{-2}
     logical_environment_startup()
     raw_count := I64{0}
     // `startup` lends the immutable, null-terminated envp pointer array and its
@@ -132,7 +132,7 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
             raw_count = wrapping(raw_count + I64{1})
         }
     }
-    if (startup.bit_and(I64{1}) == I64{0} || raw_count == I64{0}) {
+    if (startup & I64{1} == I64{0} || raw_count == I64{0}) {
         host_environment_index(envp, raw_count)
         return I64{0}
     }

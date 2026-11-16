@@ -52,7 +52,7 @@ rt_net_poller_worker_address: fn() -> I64 {
 // Fibonacci hashing: FD72 states share their allocation alignment, so their
 // low address bits alone would leave most shards idle.
 net_state_index: fn(state: I64) -> I64 {
-    (wrapping(state * I64{-7046029254386353131}) >> I64{54}).bit_and(I64{1023})
+    (wrapping(state * I64{-7046029254386353131}) >> I64{54}) & I64{1023}
 }
 
 net_state_bucket: fn(root: I64, state: I64) -> I64 {
@@ -60,11 +60,11 @@ net_state_bucket: fn(root: I64, state: I64) -> I64 {
 }
 
 net_id_bucket: fn(root: I64, id: I64) -> I64 {
-    wrapping(net_word(root, I64{32}) + (id.bit_and(I64{1023})) * I64{8})
+    wrapping(net_word(root, I64{32}) + (id & I64{1023}) * I64{8})
 }
 
 net_shard: fn(root: I64, index: I64) -> I64 {
-    wrapping(net_word(root, I64{16}) + (index.bit_and(I64{15})) * I64{64})
+    wrapping(net_word(root, I64{16}) + (index & I64{15}) * I64{64})
 }
 
 net_node_for_state: fn(root: I64, state: I64) -> I64 {
@@ -90,7 +90,7 @@ net_node_interest: fn(node: I64) -> I64 {
     waiter := net_word(node, I64{32})
     loop waiter != (I64{0}) {
         if (net_word(waiter, I64{32}) == I64{0} && net_word(waiter, I64{40}) == I64{0}) {
-            interest = interest.bit_or(net_word(waiter, I64{24}))
+            interest |= net_word(waiter, I64{24})
         }
         waiter = net_word(waiter, I64{0})
     }
@@ -99,7 +99,7 @@ net_node_interest: fn(node: I64) -> I64 {
 
 net_epoll_ctl: fn(root: I64, shard: I64, node: I64, operation: I64, interest: I64) -> I64 {
     event: wrapping(shard + I64{16})
-    net_store_uint(event, I64{4}, interest.bit_or(I64{1073741824}).bit_or(I64{8192}))
+    net_store_uint(event, I64{4}, interest | I64{1073741824} | I64{8192})
     net_store_uint(wrapping(event + I64{4}), I64{8}, net_word(node, I64{16}))
     #Unsafe("the shard lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call") {
         return os_syscall_i64(I64{233}, net_word(root, I64{8}), operation, net_word(net_word(node, I64{24}), I64{8}), event, I64{0}, I64{0})
@@ -174,7 +174,7 @@ net_node_rearm: fn(root: I64, shard: I64, node: I64) {
                 loop waiter != (I64{0}) {
                     // HUP/ERR satisfy every interest; the subsequent socket
                     // syscall supplies EOF or the real SO_ERROR/errno fact.
-                    ready: (bits.bit_and(net_word(waiter, I64{24}))).bit_or((if ((bits.bit_and(I64{8216})) != I64{0}) -> net_word(waiter, I64{24}) else -> I64{0}))
+                    ready: (bits & net_word(waiter, I64{24})) | (if ((bits & I64{8216}) != I64{0}) -> net_word(waiter, I64{24}) else -> I64{0})
                     if (ready != I64{0}) {
                         net_put(waiter, I64{32}, ready)
                         slot: net_word(waiter, I64{16})
@@ -323,7 +323,7 @@ host_net_ready: fn(state: I64, interest: I64, timeout_ns: I64, wait_kind: I64, e
         counter: net_word(shard, I64{8})
         if (counter == I64{576460752303423487}) { host_record_index_refused() }
         net_put(shard, I64{8}, counter + I64{1})
-        id: (counter << I64{4}).bit_or(net_state_index(state).bit_and(I64{15}))
+        id: (counter << I64{4}) | net_state_index(state) & I64{15}
         node = jet_rt_alloc(I64{64}, I64{8})
         thread_zero(node, I64{64})
         net_put(node, I64{16}, id)
@@ -340,11 +340,11 @@ host_net_ready: fn(state: I64, interest: I64, timeout_ns: I64, wait_kind: I64, e
     net_put(waiter, I64{0}, net_word(node, I64{32}))
     net_put(waiter, I64{8}, node)
     net_put(waiter, I64{16}, sync_park_new())
-    net_put(waiter, I64{24}, interest.bit_and(I64{5}))
+    net_put(waiter, I64{24}, interest & I64{5})
     net_put(node, I64{32}, waiter)
     fd_put(state, I64{64}, fd_word(state, I64{64}) + I64{1})
     if fresh {
-        added: net_epoll_ctl(root, shard, node, I64{1}, interest.bit_and(I64{5}))
+        added: net_epoll_ctl(root, shard, node, I64{1}, interest & I64{5})
         if (added < I64{0}) { net_node_fail(node, added) }
     } else { net_node_rearm(root, shard, node) }
     sync_mutex_unlock(shard)

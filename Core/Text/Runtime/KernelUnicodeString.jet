@@ -76,10 +76,10 @@ final_sigma: fn(chars: [Int], at: Int, cased: [U8], ignorable: [U8]) -> Bool Nev
 scalar_at: fn(raw: [U8], at: Int) -> Int Never! {
     width: utf8_width_at(raw, at)
     cp := Int{raw[at]}
-    if width == 2 -> cp = cp.bit_and(31)
-    if width == 3 -> cp = cp.bit_and(15)
-    if width == 4 -> cp = cp.bit_and(7)
-    loop k in 1..<width -> cp = (cp << 6).bit_or((Int{raw[at + k]}.bit_and(63)))
+    if width == 2 -> cp &= 31
+    if width == 3 -> cp &= 15
+    if width == 4 -> cp &= 7
+    loop k in 1..<width -> cp = (cp << 6) | (Int{raw[at + k]} & 63)
     cp
 }
 
@@ -639,16 +639,16 @@ append_cp: fn(out: &[U8], cp: Int) Never! {
     n := cp
     if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
     if n < 128 -> out.push(U8{n}) else if n < 2048 {
-        out.push(U8{Int{192}.bit_or((n >> 6))})
-        out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
+        out.push(U8{Int{192} | (n >> 6)})
+        out.push(U8{Int{128} | (n & Int{63})})
     } else if n < 65536 {
-        out.push(U8{Int{224}.bit_or((n >> 12))})
-        out.push(U8{Int{128}.bit_or(((n >> 6).bit_and(Int{63})))})
-        out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
+        out.push(U8{Int{224} | (n >> 12)})
+        out.push(U8{Int{128} | ((n >> 6) & Int{63})})
+        out.push(U8{Int{128} | (n & Int{63})})
     } else {
-        out.push(U8{Int{240}.bit_or((n >> 18))})
-        out.push(U8{Int{128}.bit_or(((n >> 12).bit_and(Int{63})))})
-        out.push(U8{Int{128}.bit_or(((n >> 6).bit_and(Int{63})))})
-        out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
+        out.push(U8{Int{240} | (n >> 18)})
+        out.push(U8{Int{128} | ((n >> 12) & Int{63})})
+        out.push(U8{Int{128} | ((n >> 6) & Int{63})})
+        out.push(U8{Int{128} | (n & Int{63})})
     }
 }

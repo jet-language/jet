@@ -17,7 +17,7 @@ host_native_int: fn(value: I64) -> I64 { jet_int_owned_to_i64(value) }
 host_i32: fn(value: I64) -> I64 {
     native: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    low: native.bit_and(I64{4294967295})
+    low: native & I64{4294967295}
     if (low >= I64{2147483648}) -> wrapping(low - I64{4294967296}) else -> low
 }
 
@@ -125,7 +125,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    host_sample_out(thread_setxid(I64{105}, native.bit_and(I64{4294967295}), I64{0}, I64{0}), available, value, errno)
+    host_sample_out(thread_setxid(I64{105}, native & I64{4294967295}, I64{0}, I64{0}), available, value, errno)
 }
 
 #Export(c) jet_sys_setgid_raw: fn(gid: I64, available: I64, value: I64, errno: I64) {
@@ -133,7 +133,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    host_sample_out(thread_setxid(I64{106}, native.bit_and(I64{4294967295}), I64{0}, I64{0}), available, value, errno)
+    host_sample_out(thread_setxid(I64{106}, native & I64{4294967295}, I64{0}, I64{0}), available, value, errno)
 }
 
 #Export(c) jet_sys_setpgid_raw: fn(pid: I64, pgid: I64, available: I64, value: I64, errno: I64) {
@@ -187,7 +187,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    result: host_call(I64{140}, I64{0}, native.bit_and(I64{4294967295}), I64{0})
+    result: host_call(I64{140}, I64{0}, native & I64{4294967295}, I64{0})
     // getpriority can legitimately return negative nice values on success.
     if (result < I64{0}) { host_sample_out(result, available, value, errno) } else {
         host_sample_fields(wrapping(I64{20} - result), I64{0}, available, value, errno)
@@ -203,7 +203,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    host_sample_out(host_call(I64{141}, I64{0}, native_who.bit_and(I64{4294967295}), native_priority), available, value, errno)
+    host_sample_out(host_call(I64{141}, I64{0}, native_who & I64{4294967295}, native_priority), available, value, errno)
 }
 
 // prlimit64(0, resource, NULL, old): this program's (soft, hard) limit.
@@ -275,7 +275,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
 #Export(c) jet_sys_umask_raw: fn(mask: I64, some: I64) -> I64 {
     native: host_native_int(mask)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    result: host_call(I64{95}, native.bit_and(I64{4294967295}), I64{0}, I64{0})
+    result: host_call(I64{95}, native & I64{4294967295}, I64{0}, I64{0})
     // `some` lends a writable C-ABI Option success word.
     rt_text_store(some, result)
     I64{1}
@@ -308,7 +308,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     rt_text_store(read_fd, I64{0})
     result: host_call(I64{22}, read_fd, I64{0}, I64{0})
     packed: rt_text_word(read_fd)
-    rt_text_store(read_fd, packed.bit_and(I64{4294967295}))
-    rt_text_store(write_fd, (packed >> I64{32}).bit_and(I64{4294967295}))
+    rt_text_store(read_fd, packed & I64{4294967295})
+    rt_text_store(write_fd, (packed >> I64{32}) & I64{4294967295})
     host_sample_out(result, available, value, errno)
 }

@@ -75,7 +75,7 @@ link_debug_bytes: fn(c: &LinkContext, debug: LinkDebug, pieces: &LinkPieces, tex
 link_debug_le: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
     if at < 0 || at + width > bytes.len() -> return -1
     value := 0
-    loop k in 0..<width -> value = value.bit_or(Int{bytes[at + k]} << (8 * k))
+    loop k in 0..<width -> value |= Int{bytes[at + k]} << (8 * k)
     value
 }
 
@@ -94,7 +94,7 @@ link_debug_uleb: fn(bytes: [U8], at: &Int) -> Int Never! {
     loop at < bytes.len() {
         byte: Int{bytes[at]}
         at += 1
-        if shift < 56 -> value = value.bit_or(byte.bit_and(127) << shift)
+        if shift < 56 -> value |= (byte & 127) << shift
         shift += 7
         if byte < 128 -> return value
     }

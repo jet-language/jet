@@ -38,7 +38,7 @@ timing_host_probe: fn() -> I64 {
         top: os_cpuid_eax_i64(I64{0}, I64{0})
         intel: os_cpuid_ebx_i64(I64{0}, I64{0}) == I64{1970169159} && os_cpuid_edx_i64(I64{0}, I64{0}) == I64{1231384169} && os_cpuid_ecx_i64(I64{0}, I64{0}) == I64{1818588270}
         if (!intel) { return TIMING_HOST_NO_STATEMENT }
-        if (top >= I64{7} && os_cpuid_edx_i64(I64{7}, I64{0}).bit_and(I64{536870912}) != I64{0}) {
+        if (top >= I64{7} && os_cpuid_edx_i64(I64{7}, I64{0}) & I64{536870912} != I64{0}) {
             return TIMING_HOST_INTEL_DOITM
         }
     }

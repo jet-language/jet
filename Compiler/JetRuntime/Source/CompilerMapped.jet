@@ -276,9 +276,7 @@ compiler_mapped_munmap: fn(pointer: I64, length: I64) {
 }
 
 // `length` rounded up to whole 4 KiB pages, as the system maps them.
-compiler_mapped_pages: fn(length: I64) -> I64 Never! {
-    wrapping(length + I64{4095}).bit_and(I64{-4096})
-}
+compiler_mapped_pages: fn(length: I64) -> I64 Never! { wrapping(length + I64{4095}) & I64{-4096} }
 
 compiler_mapped_close: fn(fd: I64) {
     #Unsafe("closes a temp-file descriptor this map alone owns") {
@@ -304,7 +302,7 @@ compiler_mapped_unwritable: fn(fd: I64, scratch: I64) -> Bool {
         status = os_syscall_i64(I64{138}, fd, scratch, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (status < I64{0}) { return false }
-    magic: rt_text_word(scratch).bit_and(I64{4294967295})
+    magic: rt_text_word(scratch) & I64{4294967295}
     magic == I64{1936814952} || magic == I64{3774210530}
 }
 
@@ -340,7 +338,7 @@ compiler_mapped_spare: fn(path: I64) -> I64 {
 
 // openat(AT_FDCWD, directory, O_RDWR|O_TMPFILE|O_CLOEXEC, 0o600).
 compiler_mapped_tmpfile: fn(directory: I64) -> I64 {
-    host_call4(I64{257}, I64{-100}, directory, I64{2}.bit_or(JETC_O_TMPFILE).bit_or(JETC_O_CLOEXEC), I64{384})
+    host_call4(I64{257}, I64{-100}, directory, I64{2} | JETC_O_TMPFILE | JETC_O_CLOEXEC, I64{384})
 }
 
 // Whether ioctl FICLONE made the empty `spare` share every block of `fd`'s
@@ -482,7 +480,7 @@ rt_mapped_lease_break_address: fn() -> I64 {
 #Export(c) jet_rt_mapped_lease_break: fn(_signal: I64, info: I64, _context: I64) -> I64 {
     table: compiler_mapped_leases
     if (table == I64{0} || info == I64{0}) { return I64{0} }
-    fd: rt_text_word(wrapping(info + I64{24})).bit_and(I64{4294967295})
+    fd: rt_text_word(wrapping(info + I64{24})) & I64{4294967295}
     index := I64{0}
     loop index < MAPPED_LEASE_SLOTS {
         slot: wrapping(table + index * I64{64})

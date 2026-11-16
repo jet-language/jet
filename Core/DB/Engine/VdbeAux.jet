@@ -195,7 +195,7 @@ api_exit: fn(db: &conn.Conn, rc: Int) -> Int Never! {
         sql_error(db, base.NOMEM)
         return base.NOMEM
     }
-    rc.bit_and(db.err_mask)
+    rc & db.err_mask
 }
 
 // sqlite3SystemError: record the OS error behind an I/O or open failure
@@ -205,7 +205,7 @@ system_error: fn(db: &conn.Conn, rc: Int) Never! {
     if rc == base.IOERR_NOMEM {
         return
     }
-    primary: rc.bit_and(255)
+    primary: rc & 255
     if primary != base.CANTOPEN && primary != base.IOERR {
         return
     }
@@ -265,7 +265,7 @@ commit_internal_changes: fn(db: &conn.Conn) Never! {
 // open cursors with trip_code.
 rollback_all: fn<H: Host>(h: &H, db: &conn.Conn, trip_code: Int) -[DB]> Never! {
     conn.sync_btrees(db)
-    schema_change: db.m_db_flags.bit_and(conn.DBFLAG_SCHEMA_CHANGE) != 0 && !db.init.busy
+    schema_change: db.m_db_flags & conn.DBFLAG_SCHEMA_CHANGE != 0 && !db.init.busy
     in_trans := false
     loop i in 0..<db.dbs.len() {
         b: db.dbs[i].bt
@@ -280,7 +280,7 @@ rollback_all: fn<H: Host>(h: &H, db: &conn.Conn, trip_code: Int) -[DB]> Never! {
     }
     db.n_deferred_cons = 0
     db.n_deferred_imm_cons = 0
-    db.flags = util.clear_bits(db.flags, conn.SQLITE_DEFER_FKS.bit_or(conn.SQLITE_CORRUPT_RD_ONLY))
+    db.flags = util.clear_bits(db.flags, conn.SQLITE_DEFER_FKS | conn.SQLITE_CORRUPT_RD_ONLY)
     conn.sync_btrees(db)
     if in_trans || !db.auto_commit -> h.rollback_hook(db)
 }
@@ -379,11 +379,11 @@ vtab_savepoint: fn<H: Host>(h: &H, db: &conn.Conn, op: Int, i_savepoint: Int) -[
             db.vtables[vt].i_savepoint = i_savepoint + 1
         } else if op == base.SAVEPOINT_ROLLBACK { method = VT_ROLLBACK_TO }
         if h.vtab_has(db, vt, method) && db.vtables[vt].i_savepoint > i_savepoint {
-            saved: db.flags.bit_and(btree.SQLITE_DEFENSIVE)
+            saved: db.flags & btree.SQLITE_DEFENSIVE
             db.flags = util.clear_bits(db.flags, btree.SQLITE_DEFENSIVE)
             conn.sync_btrees(db)
             rc = h.vtab_call(db, vt, method, i_savepoint)
-            db.flags = db.flags.bit_or(saved)
+            db.flags |= saved
             conn.sync_btrees(db)
         }
         conn.vtab_unlock(db, vt)
@@ -408,7 +408,7 @@ vdbe_create: fn(db: &conn.Conn) -> conn.Vdbe Never! {
 // sqlite3VdbeSetSql.
 set_sql: fn(v: &conn.Vdbe, z: [U8], prep_flags: Int) Never! {
     v.prep_flags = prep_flags
-    if prep_flags.bit_and(conn.PREPARE_SAVESQL) == 0 -> v.expmask = 0
+    if prep_flags & conn.PREPARE_SAVESQL == 0 -> v.expmask = 0
     v.sql = z
 }
 
@@ -476,7 +476,7 @@ load_string: fn(db: &conn.Conn, v: &conn.Vdbe, dest: Int, z: [U8]) -> Int Never!
 multi_load: fn(db: &conn.Conn, v: &conn.Vdbe, dest: Int, vals: [base.Mem], result_row: Bool) Never! {
     loop i in 0..<vals.len() {
         m: vals[i]
-        if m.flags.bit_and(base.MEM_INT) != 0 -> _: add_op2(db, v, opc.OP_INTEGER, m.i, dest + i) else if m.flags.bit_and(base.MEM_STR) != 0 {
+        if m.flags & base.MEM_INT != 0 -> _: add_op2(db, v, opc.OP_INTEGER, m.i, dest + i) else if m.flags & base.MEM_STR != 0 {
             _: load_string(db, v, dest + i, m.z)
         } else { _: add_op3(db, v, opc.OP_NULL, 0, dest + i, 0) }
     }
@@ -499,7 +499,7 @@ add_op_list: fn(db: &conn.Conn, v: &conn.Vdbe, list: [VdbeOpList]) -> Int Never!
     first: v.ops.len()
     loop o in list {
         p2 := o.p2
-        if o.p2 > 0 && opc.OP_PROPERTIES[o.opcode].bit_and(opc.OPFLG_JUMP) != 0 -> p2 += first
+        if o.p2 > 0 && opc.OP_PROPERTIES[o.opcode] & opc.OPFLG_JUMP != 0 -> p2 += first
         v.ops.push(conn.VdbeOp{opcode: o.opcode, p1: o.p1, p2: p2, p3: o.p3, p4: conn.P4.NotUsed, p5: 0})
     }
     first
@@ -646,7 +646,7 @@ typeof_column: fn(db: conn.Conn, v: &conn.Vdbe, dest: Int) Never! {
         return
     }
     if v.ops[n - 1].p3 == dest && v.ops[n - 1].opcode == opc.OP_COLUMN {
-        v.ops[n - 1].p5 = v.ops[n - 1].p5.bit_or(conn.OPFLAG_TYPEOFARG)
+        v.ops[n - 1].p5 = v.ops[n - 1].p5 | conn.OPFLAG_TYPEOFARG
     }
 }
 
@@ -709,7 +709,7 @@ delete_prior_opcode: fn(db: &conn.Conn, v: &conn.Vdbe, opcode: Int) -> Bool Neve
 }
 
 // sqlite3VdbeUsesBtree.
-uses_btree: fn(v: &conn.Vdbe, i: Int) Never! { v.btree_mask = v.btree_mask.bit_or(1 << i) }
+uses_btree: fn(v: &conn.Vdbe, i: Int) Never! { v.btree_mask |= 1 << i }
 
 // sqlite3VdbeCountChanges.
 count_changes: fn(v: &conn.Vdbe) Never! { v.change_cnt_on = true }
@@ -718,14 +718,14 @@ count_changes: fn(v: &conn.Vdbe) Never! { v.change_cnt_on = true }
 // statement.
 set_varmask: fn(v: &conn.Vdbe, i_var: Int) Never! {
     bit: if i_var >= 32 -> 2147483648 else -> 1 << (i_var - 1)
-    v.expmask = v.expmask.bit_or(bit)
+    v.expmask |= bit
 }
 
 // sqlite3VdbeGetBoundValue: a copy of parameter i_var with affinity aff,
 // None while it is NULL.
 get_bound_value: fn(v: conn.Vdbe, i_var: Int, aff: Int) -> base.Mem? Never! {
     m: v.vars[i_var - 1]
-    if m.flags.bit_and(base.MEM_NULL) != 0 -> return None
+    if m.flags & base.MEM_NULL != 0 -> return None
     out := mem.mem_copy(m)
     mem.apply_affinity(out, aff, base.UTF8)
     Val(out)
@@ -775,8 +775,8 @@ display_p4: fn(db: conn.Conn, p4: conn.P4) -> [U8]? Never! {
             loop j in 0..<k.n_key_field {
                 out.push(U8{44})
                 f: k.sort_flags[j]
-                if f.bit_and(base.KEYINFO_ORDER_DESC) != 0 -> out.push(U8{45})
-                if f.bit_and(base.KEYINFO_ORDER_BIGNULL) != 0 -> append_bytes(out, "N.".bytes())
+                if f & base.KEYINFO_ORDER_DESC != 0 -> out.push(U8{45})
+                if f & base.KEYINFO_ORDER_BIGNULL != 0 -> append_bytes(out, "N.".bytes())
                 c: k.colls[j]
                 if c != record.COLL_NONE {
                     name: conn.coll_name(db, c)
@@ -809,9 +809,9 @@ display_p4: fn(db: conn.Conn, p4: conn.P4) -> [U8]? Never! {
         .Int32(i) -> { append_bytes(out, "{i}".bytes()) }
         .Real(r) -> { append_bytes(out, real_text(r)) }
         .Mem(m) -> {
-            if m.flags.bit_and(base.MEM_STR) != 0 -> append_c_string(out, m.z) else if m.flags.bit_and(base.MEM_INT.bit_or(base.MEM_INT_REAL)) != 0 {
+            if m.flags & base.MEM_STR != 0 -> append_c_string(out, m.z) else if m.flags & (base.MEM_INT | base.MEM_INT_REAL) != 0 {
                 append_bytes(out, "{m.i}".bytes())
-            } else if m.flags.bit_and(base.MEM_REAL) != 0 { append_bytes(out, real_text(m.r)) } else if m.flags.bit_and(base.MEM_NULL) != 0 {
+            } else if m.flags & base.MEM_REAL != 0 { append_bytes(out, real_text(m.r)) } else if m.flags & base.MEM_NULL != 0 {
                 append_bytes(out, "NULL".bytes())
             } else { append_bytes(out, "(blob)".bytes()) }
         }
@@ -852,7 +852,7 @@ list: fn(db: &conn.Conn, v: &conn.Vdbe) -> Int Never! {
         oom_fault(db)
         return base.ERROR
     }
-    list_subs: v.explain == 1 || db.flags.bit_and(conn.SQLITE_TRIGGER_EQP) != 0
+    list_subs: v.explain == 1 || db.flags & conn.SQLITE_TRIGGER_EQP != 0
     // sqlite3VdbeNextOpcode.
     n_row := v.ops.len()
     if list_subs {
@@ -990,11 +990,11 @@ make_ready: fn(db: &conn.Conn, v: &conn.Vdbe, n_var: Int, n_mem_in: Int, n_curso
 // pending aggregate's xFinalize here, which only frees its context.
 release_object: fn(v: &conn.Vdbe, i: Int) Never! {
     f: v.mem[i].flags
-    if f.bit_and(base.MEM_AGG) != 0 {
+    if f & base.MEM_AGG != 0 {
         k: v.mem[i].i
         v.aggs[k] = conn.agg_state_new()
         v.agg_free.push(k)
-    } else if f.bit_and(conn.MEM_DYN) != 0 && v.mem[i].subtype == conn.DYN_ROWSET {
+    } else if f & conn.MEM_DYN != 0 && v.mem[i].subtype == conn.DYN_ROWSET {
         k: v.mem[i].i
         v.rowsets[k] = rowset.rowset_new()
         v.rowset_free.push(k)
@@ -1086,7 +1086,7 @@ delete_aux_data: fn(v: &conn.Vdbe, i_op: Int, mask: Int) Never! {
     depth: v.frames.len()
     kept := [conn.AuxData]{}
     loop a in v.aux {
-        gone: a.depth == depth && (i_op < 0 || (a.i_aux_op == i_op && a.i_aux_arg >= 0 && (a.i_aux_arg > 31 || mask.bit_and(1 << a.i_aux_arg) == 0)))
+        gone: a.depth == depth && (i_op < 0 || (a.i_aux_op == i_op && a.i_aux_arg >= 0 && (a.i_aux_arg > 31 || mask & 1 << a.i_aux_arg == 0)))
         if !gone -> kept.push(a.copy())
     }
     v.aux = kept
@@ -1238,12 +1238,12 @@ commit: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
         retry += 1
         r: os.os_random_bytes(4)
         random: Int{r[0]} + (Int{r[1]} << 8) + (Int{r[2]} << 16) + (Int{r[3]} << 24)
-        tail: printf.snprintf(13, "-mj%06X9%02X".bytes(), [base.Mem]{base.mem_int((random >> 8).bit_and(16777215)), base.mem_int(random.bit_and(255))})
+        tail: printf.snprintf(13, "-mj%06X9%02X".bytes(), [base.Mem]{base.mem_int((random >> 8) & 16777215), base.mem_int(random & 255)})
         super = "{main_file}{String.from_bytes(tail) ?? ""}"
         if !file.file_exists(super) -> break
     }
     sj := file.file_closed()
-    rc = file.file_open(sj, super, os.OPEN_READWRITE.bit_or(os.OPEN_CREATE).bit_or(os.OPEN_EXCLUSIVE).bit_or(os.OPEN_SUPER_JOURNAL))
+    rc = file.file_open(sj, super, os.OPEN_READWRITE | os.OPEN_CREATE | os.OPEN_EXCLUSIVE | os.OPEN_SUPER_JOURNAL)
     if rc != base.OK -> return rc
     // Write the name of each journal into it.
     offset := 0
@@ -1263,7 +1263,7 @@ commit: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
         }
     }
     // Sync it, unless the device writes in order.
-    if file.file_device_characteristics(sj).bit_and(os.IOCAP_SEQUENTIAL) == 0 {
+    if file.file_device_characteristics(sj) & os.IOCAP_SEQUENTIAL == 0 {
         rc = file.file_sync(sj, os.SYNC_NORMAL)
         if rc != base.OK {
             file.file_close(sj)
@@ -1333,7 +1333,7 @@ check_fk: fn(db: conn.Conn, v: &conn.Vdbe, deferred: Bool) -> Int Never! {
     v.rc = base.CONSTRAINT_FOREIGNKEY
     v.error_action = ast.OE_ABORT
     vdbe_error(v, "FOREIGN KEY constraint failed".bytes())
-    if v.prep_flags.bit_and(conn.PREPARE_SAVESQL) == 0 -> return base.ERROR
+    if v.prep_flags & conn.PREPARE_SAVESQL == 0 -> return base.ERROR
     base.CONSTRAINT_FOREIGNKEY
 }
 
@@ -1355,7 +1355,7 @@ halt: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
     close_all_cursors<H>(h, db, v)
     if v.is_reader {
         stmt_op := 0
-        mrc: if v.rc != base.OK -> v.rc.bit_and(255) else -> 0
+        mrc: if v.rc != base.OK -> v.rc & 255 else -> 0
         special: mrc == base.NOMEM || mrc == base.IOERR || mrc == base.INTERRUPT || mrc == base.FULL
         if special && (!v.read_only || mrc != base.INTERRUPT) {
             if (mrc == base.NOMEM || mrc == base.FULL) && v.uses_stmt_journal {
@@ -1372,7 +1372,7 @@ halt: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
                 if rc != base.OK {
                     if v.read_only -> return base.ERROR
                     rc = base.CONSTRAINT_FOREIGNKEY
-                } else if db.flags.bit_and(conn.SQLITE_CORRUPT_RD_ONLY) != 0 {
+                } else if db.flags & conn.SQLITE_CORRUPT_RD_ONLY != 0 {
                     rc = base.CORRUPT
                     db.flags = util.clear_bits(db.flags, conn.SQLITE_CORRUPT_RD_ONLY)
                     conn.sync_btrees(db)
@@ -1403,7 +1403,7 @@ halt: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
         if stmt_op != 0 {
             rc: close_statement<H>(h, db, v, stmt_op)
             if rc != base.OK {
-                if v.rc == base.OK || v.rc.bit_and(255) == base.CONSTRAINT {
+                if v.rc == base.OK || v.rc & 255 == base.CONSTRAINT {
                     v.rc = rc
                     v.err_msg = None
                 }
@@ -1451,7 +1451,7 @@ reset: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
     }
     v.err_msg = None
     v.result_row = -1
-    v.rc.bit_and(db.err_mask)
+    v.rc & db.err_mask
 }
 
 // sqlite3VdbeDelete: free a statement, dropping the references its ops

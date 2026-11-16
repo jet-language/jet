@@ -275,7 +275,7 @@ token_expr: fn(a: &ast.AST, op: Int, t: ast.SQLTok) -> Int Never! {
     e.flags = ast.EP_LEAF
     e.w = t.z
     if z.len() > 0 && is_quote(Int{z[0]}) {
-        e.flags = e.flags.bit_or(if z[0] == (U8{34}) -> ast.EP_QUOTED.bit_or(ast.EP_DBL_QUOTED) else -> ast.EP_QUOTED)
+        e.flags |= (if z[0] == (U8{34}) -> ast.EP_QUOTED | ast.EP_DBL_QUOTED else -> ast.EP_QUOTED)
         e.token = Val(dequote(z))
     } else { e.token = Val(z) }
     e.height = 1
@@ -293,7 +293,7 @@ double_link_select: fn(a: &ast.AST, p: Int) Never! {
     cnt := 1
     loop {
         a.selects[lp].next_sel = nxt
-        a.selects[lp].sel_flags = a.selects[lp].sel_flags.bit_or(ast.SF_COMPOUND)
+        a.selects[lp].sel_flags = a.selects[lp].sel_flags | ast.SF_COMPOUND
         nxt = lp
         lp = a.selects[lp].prior
         if lp < 0 -> break
@@ -306,7 +306,7 @@ double_link_select: fn(a: &ast.AST, p: Int) Never! {
         }
     }
     mx: a.limits[ast.LIMIT_COMPOUND_SELECT]
-    if a.selects[p].sel_flags.bit_and(ast.SF_MULTI_VALUE) == 0 && mx > 0 && cnt > mx {
+    if a.selects[p].sel_flags & ast.SF_MULTI_VALUE == 0 && mx > 0 && cnt > mx {
         ast.error(a, "too many terms in compound SELECT")
     }
 }
@@ -430,12 +430,12 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
         // table_option_set ::=
         21 -> tv(0)
         // table_option_set ::= table_option_set COMMA table_option
-        22 -> tv(sv(s, m - 2).bit_or(sv(s, m)))
+        22 -> tv(sv(s, m - 2) | sv(s, m))
         // table_option ::= WITHOUT nm
         23 -> {
             t: st(s, m)
             if ast.tok_is(a, t, "rowid".bytes()) {
-                return tv(ast.TF_WITHOUT_ROWID.bit_or(ast.TF_NO_VISIBLE_ROWID))
+                return tv(ast.TF_WITHOUT_ROWID | ast.TF_NO_VISIBLE_ROWID)
             }
             txt: span_text(a, t)
             ast.error(a, "unknown table option: {txt}")
@@ -565,7 +565,7 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
         // refargs ::=
         49 -> tv(ast.OE_NONE * 257)
         // refargs ::= refargs refarg
-        50 -> tv(util.clear_bits(sv(s, m - 1), st(s, m).n).bit_or(sv(s, m)))
+        50 -> tv(util.clear_bits(sv(s, m - 1), st(s, m).n) | sv(s, m))
         // refarg ::= MATCH nm, refarg ::= ON INSERT refact
         51 | 52 -> ast.SQLTok{z: 0, n: 0}
         // refarg ::= ON DELETE refact
@@ -697,7 +697,7 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
         // values ::= values COMMA LP nexprlist RP
         95 -> {
             left: sv(s, m - 4)
-            right: ast.select_new(a, sv(s, m - 1), -1, -1, -1, -1, -1, ast.SF_VALUES.bit_or(ast.SF_MULTI_VALUE), -1)
+            right: ast.select_new(a, sv(s, m - 1), -1, -1, -1, -1, -1, ast.SF_VALUES | ast.SF_MULTI_VALUE, -1)
             if left >= 0 {
                 a.selects[left].sel_flags = util.clear_bits(a.selects[left].sel_flags, ast.SF_MULTI_VALUE)
             }
@@ -1017,7 +1017,7 @@ nested_from_term: fn(a: &ast.AST, s: [SQLStackEntry], m: Int) -> ast.SQLTok Neve
             a.items[nw].database = a.items[old].database
             a.items[nw].select = a.items[old].select
             sub: a.items[nw].select
-            if sub >= 0 && a.selects[sub].sel_flags.bit_and(ast.SF_NESTED_FROM) != 0 {
+            if sub >= 0 && a.selects[sub].sel_flags & ast.SF_NESTED_FROM != 0 {
                 a.items[nw].is_nested_from = true
             }
             if a.items[old].is_tab_func {
@@ -1142,7 +1142,7 @@ actions_expr: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, 
             if ast.list_len(a, l) > 0 {
                 first: ast.list_expr(a, l, 0)
                 ff: a.exprs[first].flags
-                ast.set_flags(a, e, ff.bit_and(ast.EP_PROPAGATE))
+                ast.set_flags(a, e, ff & ast.EP_PROPAGATE)
             }
             tv(e)
         }
@@ -1154,12 +1154,12 @@ actions_expr: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, 
         // likeop ::= NOT LIKE_KW|MATCH
         203 -> {
             t: st(s, m)
-            ast.SQLTok{z: t.z, n: t.n.bit_or(LIKE_NOT_BIT)}
+            ast.SQLTok{z: t.z, n: t.n | LIKE_NOT_BIT}
         }
         // expr ::= expr likeop expr
         204 -> {
             op: st(s, m - 1)
-            not: op.n.bit_and(LIKE_NOT_BIT) != 0
+            not: op.n & LIKE_NOT_BIT != 0
             name: ast.SQLTok{z: op.z, n: util.clear_bits(op.n, LIKE_NOT_BIT)}
             l1: ast.expr_list_append(a, -1, sv(s, m))
             l: ast.expr_list_append(a, l1, sv(s, m - 2))
@@ -1171,7 +1171,7 @@ actions_expr: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, 
         // expr ::= expr likeop expr ESCAPE expr
         205 -> {
             op: st(s, m - 3)
-            not: op.n.bit_and(LIKE_NOT_BIT) != 0
+            not: op.n & LIKE_NOT_BIT != 0
             name: ast.SQLTok{z: op.z, n: util.clear_bits(op.n, LIKE_NOT_BIT)}
             l1: ast.expr_list_append(a, -1, sv(s, m - 2))
             l2: ast.expr_list_append(a, l1, sv(s, m - 4))
@@ -2022,7 +2022,7 @@ parse_with: fn(a: &ast.AST, r: &SQLRecorder, sql: String) -> Int Never! {
     a := ast.new_ast()
     r := new_recorder()
     assert(parse_with(a, r, "CREATE TABLE IF NOT EXISTS t(a INTEGER PRIMARY KEY DESC, b VARCHAR(10) NOT NULL DEFAULT 'x', c CHECK(c > 0), UNIQUE(b)) WITHOUT ROWID, STRICT") == 0)
-    opts: ast.TF_WITHOUT_ROWID.bit_or(ast.TF_NO_VISIBLE_ROWID).bit_or(ast.TF_STRICT)
+    opts: ast.TF_WITHOUT_ROWID | ast.TF_NO_VISIBLE_ROWID | ast.TF_STRICT
     dflt: ast.OE_DEFAULT
     assert(r.log == [String]{"start_table t| temp=0 view=0 virtual=0 noerr=1", "column a INTEGER", "primary_key list=-1 onerr={dflt} autoinc=0 order=1", "column b VARCHAR(10)", "not_null {dflt}", "default 'x'", "column c ", "check (c > 0", "create_index  cols=1 onerr={dflt} type=1", "end_table ) opts={opts} select=-1", "finish"})
     assert(parse_with(a, r, "CREATE TABLE t(a) WITHOUT oid") == 1)
@@ -2043,8 +2043,8 @@ parse_with: fn(a: &ast.AST, r: &SQLRecorder, sql: String) -> Int Never! {
     assert(parse_with(a, r, "VALUES (1), (2), (3)") == 0)
     v: r.sel
     assert(a.selects[v].op == tk.TK_ALL)
-    assert(a.selects[v].sel_flags.bit_and(ast.SF_MULTI_VALUE) != 0)
-    assert(a.selects[a.selects[v].prior].sel_flags.bit_and(ast.SF_MULTI_VALUE) == 0)
+    assert(a.selects[v].sel_flags & ast.SF_MULTI_VALUE != 0)
+    assert(a.selects[a.selects[v].prior].sel_flags & ast.SF_MULTI_VALUE == 0)
 }
 
 #Test("IN lists simplify as parse.y does") {

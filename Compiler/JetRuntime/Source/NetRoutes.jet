@@ -99,20 +99,20 @@ net_route_inet4: fn(text: I64, output: I64) -> I64 {
 
 net_route_hex: fn(byte: I64) -> I64 {
     if (byte >= I64{48} && byte <= I64{57}) { return byte - I64{48} }
-    lower: byte.bit_or(I64{32})
+    lower: byte | I64{32}
     if (lower >= I64{97} && lower <= I64{102}) { return lower - I64{87} }
     I64{-1}
 }
 
 net_route_group: fn(output: I64, index: I64) -> I64 {
     at: wrapping(output + index * I64{2})
-    (rt_text_byte(at) << I64{8}).bit_or(rt_text_byte(wrapping(at + I64{1})))
+    (rt_text_byte(at) << I64{8}) | rt_text_byte(wrapping(at + I64{1}))
 }
 
 net_route_group_put: fn(output: I64, index: I64, value: I64) {
     at: wrapping(output + index * I64{2})
-    net_store_uint(at, I64{1}, (value >> I64{8}).bit_and(I64{255}))
-    net_store_uint(wrapping(at + I64{1}), I64{1}, value.bit_and(I64{255}))
+    net_store_uint(at, I64{1}, (value >> I64{8}) & I64{255})
+    net_store_uint(wrapping(at + I64{1}), I64{1}, value & I64{255})
 }
 
 net_route_detail_take: fn(operation: I64, address: I64, message: I64, code: I64) -> I64 {
@@ -574,7 +574,7 @@ net_route_connect_one: fn(address: I64, output: I64, error: I64) -> I64 {
 }
 
 net_route_stream_open: fn(stream: I64, operation: I64, error: I64) -> Bool {
-    if ((jet_socket_stream_flags_raw(stream).bit_and(I64{1})) == I64{0}) { return true }
+    if ((jet_socket_stream_flags_raw(stream) & I64{1}) == I64{0}) { return true }
     _ := net_route_fail_take(NET_ERROR_CLOSED, operation, I64{0}, net_route_message(operation, rt_static_text(" failed: socket is closed")), I64{0}, error)
     false
 }
@@ -633,8 +633,8 @@ net_route_set_timeout: fn(stream: I64, milliseconds: I64, directions: I64, opera
     }
     mutex: wrapping(stream + I64{48})
     sync_mutex_lock(mutex)
-    if (directions.bit_and(I64{1}) != I64{0}) { net_put(stream, I64{32}, milliseconds) }
-    if (directions.bit_and(I64{2}) != I64{0}) { net_put(stream, I64{40}, milliseconds) }
+    if (directions & I64{1} != I64{0}) { net_put(stream, I64{32}, milliseconds) }
+    if (directions & I64{2} != I64{0}) { net_put(stream, I64{40}, milliseconds) }
     sync_mutex_unlock(mutex)
     I64{1}
 }

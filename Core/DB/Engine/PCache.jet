@@ -251,7 +251,7 @@ p1_cachesize: fn(c: &PCache, max: Int) Never! {
     if !c.purgeable {
         return
     }
-    n := max.bit_and(4294967295)
+    n := max & 4294967295
     if n > PCACHE1_MAX_PAGES - c.group_max_page + c.nmax {
         n = PCACHE1_MAX_PAGES - c.group_max_page + c.nmax
     }
@@ -380,7 +380,7 @@ DIRTYLIST_FRONT: 3
 
 // pcacheManageDirtyList.
 manage_dirty_list: fn(c: &PCache, s: Int, add_remove: Int) Never! {
-    if add_remove.bit_and(DIRTYLIST_REMOVE) != 0 {
+    if add_remove & DIRTYLIST_REMOVE != 0 {
         if c.synced == s -> c.synced = c.pages[s].dirty_prev
         next: c.pages[s].dirty_next
         prev: c.pages[s].dirty_prev
@@ -390,7 +390,7 @@ manage_dirty_list: fn(c: &PCache, s: Int, add_remove: Int) Never! {
             if c.dirty == NO_PAGE -> c.create = 2
         }
     }
-    if add_remove.bit_and(DIRTYLIST_ADD) != 0 {
+    if add_remove & DIRTYLIST_ADD != 0 {
         c.pages[s].dirty_prev = NO_PAGE
         c.pages[s].dirty_next = c.dirty
         if c.dirty != NO_PAGE -> c.pages[c.dirty].dirty_prev = s else {
@@ -398,7 +398,7 @@ manage_dirty_list: fn(c: &PCache, s: Int, add_remove: Int) Never! {
             if c.purgeable -> c.create = 1
         }
         c.dirty = s
-        if c.synced == NO_PAGE && c.pages[s].flags.bit_and(PGHDR_NEED_SYNC) == 0 -> c.synced = s
+        if c.synced == NO_PAGE && c.pages[s].flags & PGHDR_NEED_SYNC == 0 -> c.synced = s
     }
 }
 
@@ -449,7 +449,7 @@ pcache_set_page_size: fn(c: &PCache, sz_page: Int) Never! {
 // sqlite3PcacheFetch: the slot of page pgno, or -1. createFlag 3 creates
 // as far as eCreate allows.
 pcache_fetch: fn(c: &PCache, pgno: Int, create_flag: Int) -> Int Never! {
-    create: create_flag.bit_and(c.create)
+    create: create_flag & c.create
     p1_fetch(c, pgno, create)
 }
 
@@ -459,7 +459,7 @@ pcache_stress_victim: fn(c: &PCache) -> Int Never! {
     if c.create == 2 -> return NO_PAGE
     if c.npage <= c.sz_spill -> return NO_PAGE
     p := c.synced
-    loop p != NO_PAGE && (c.pages[p].nref > 0 || c.pages[p].flags.bit_and(PGHDR_NEED_SYNC) != 0) {
+    loop p != NO_PAGE && (c.pages[p].nref > 0 || c.pages[p].flags & PGHDR_NEED_SYNC != 0) {
         p = c.pages[p].dirty_prev
     }
     c.synced = p
@@ -496,7 +496,7 @@ pcache_release: fn(c: &PCache, s: Int) Never! {
     c.nref_sum -= 1
     c.pages[s].nref -= 1
     if c.pages[s].nref == 0 {
-        if c.pages[s].flags.bit_and(PGHDR_CLEAN) != 0 -> pcache_unpin(c, s) else {
+        if c.pages[s].flags & PGHDR_CLEAN != 0 -> pcache_unpin(c, s) else {
             manage_dirty_list(c, s, DIRTYLIST_FRONT)
         }
     }
@@ -510,7 +510,7 @@ pcache_ref: fn(c: &PCache, s: Int) Never! {
 
 // sqlite3PcacheDrop: discard a page with one reference.
 pcache_drop: fn(c: &PCache, s: Int) Never! {
-    if c.pages[s].flags.bit_and(PGHDR_DIRTY) != 0 -> manage_dirty_list(c, s, DIRTYLIST_REMOVE)
+    if c.pages[s].flags & PGHDR_DIRTY != 0 -> manage_dirty_list(c, s, DIRTYLIST_REMOVE)
     c.nref_sum -= 1
     p1_unpin(c, s, true)
 }
@@ -518,12 +518,12 @@ pcache_drop: fn(c: &PCache, s: Int) Never! {
 // sqlite3PcacheMakeDirty.
 pcache_make_dirty: fn(c: &PCache, s: Int) Never! {
     flags: c.pages[s].flags
-    if flags.bit_and(PGHDR_CLEAN.bit_or(PGHDR_DONT_WRITE)) == 0 {
+    if flags & (PGHDR_CLEAN | PGHDR_DONT_WRITE) == 0 {
         return
     }
-    f := flags.bit_and(PGHDR_DONT_WRITE.bit_not())
-    if f.bit_and(PGHDR_CLEAN) != 0 {
-        c.pages[s].flags = f.bit_xor(PGHDR_DIRTY.bit_or(PGHDR_CLEAN))
+    f := flags &~ PGHDR_DONT_WRITE
+    if f & PGHDR_CLEAN != 0 {
+        c.pages[s].flags = f ~ (PGHDR_DIRTY | PGHDR_CLEAN)
         manage_dirty_list(c, s, DIRTYLIST_ADD)
         return
     }
@@ -533,7 +533,7 @@ pcache_make_dirty: fn(c: &PCache, s: Int) Never! {
 // sqlite3PcacheMakeClean.
 pcache_make_clean: fn(c: &PCache, s: Int) Never! {
     manage_dirty_list(c, s, DIRTYLIST_REMOVE)
-    c.pages[s].flags = c.pages[s].flags.bit_and(PGHDR_DIRTY.bit_or(PGHDR_NEED_SYNC).bit_or(PGHDR_WRITEABLE).bit_not()).bit_or(PGHDR_CLEAN)
+    c.pages[s].flags = c.pages[s].flags &~ (PGHDR_DIRTY | PGHDR_NEED_SYNC | PGHDR_WRITEABLE) | PGHDR_CLEAN
     if c.pages[s].nref == 0 -> pcache_unpin(c, s)
 }
 
@@ -546,7 +546,7 @@ pcache_clean_all: fn(c: &PCache) Never! {
 pcache_clear_writable: fn(c: &PCache) Never! {
     p := c.dirty
     loop p != NO_PAGE {
-        c.pages[p].flags = c.pages[p].flags.bit_and(PGHDR_NEED_SYNC.bit_or(PGHDR_WRITEABLE).bit_not())
+        c.pages[p].flags = c.pages[p].flags &~ (PGHDR_NEED_SYNC | PGHDR_WRITEABLE)
         p = c.pages[p].dirty_next
     }
     c.synced = c.dirty_tail
@@ -556,7 +556,7 @@ pcache_clear_writable: fn(c: &PCache) Never! {
 pcache_clear_sync_flags: fn(c: &PCache) Never! {
     p := c.dirty
     loop p != NO_PAGE {
-        c.pages[p].flags = c.pages[p].flags.bit_and(PGHDR_NEED_SYNC.bit_not())
+        c.pages[p].flags = c.pages[p].flags &~ PGHDR_NEED_SYNC
         p = c.pages[p].dirty_next
     }
     c.synced = c.dirty_tail
@@ -573,7 +573,7 @@ pcache_move: fn(c: &PCache, s: Int, new_pgno: Int) Never! {
     }
     p1_rekey(c, s, new_pgno)
     c.pages[s].pgno = new_pgno
-    if c.pages[s].flags.bit_and(PGHDR_DIRTY) != 0 && c.pages[s].flags.bit_and(PGHDR_NEED_SYNC) != 0 {
+    if c.pages[s].flags & PGHDR_DIRTY != 0 && c.pages[s].flags & PGHDR_NEED_SYNC != 0 {
         manage_dirty_list(c, s, DIRTYLIST_FRONT)
     }
 }

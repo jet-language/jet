@@ -401,7 +401,7 @@ list_state_offset: fn(state: TUIListState, offset: Int) -> TUIListState Never! {
 key_event: fn(code: String) -> TUIEvent Never! { TUIEvent.Key{code: code, modifiers: 0} }
 
 key_event_modifiers: fn(code: String, modifiers: Int) -> TUIEvent Never! {
-    TUIEvent.Key{code: code, modifiers: modifiers.bit_and(255)}
+    TUIEvent.Key{code: code, modifiers: modifiers & 255}
 }
 
 resize_event: fn(width: Float, height: Float) -> TUIEvent Never! {
@@ -440,7 +440,7 @@ color_words: fn(color: TUIColor?) -> ColorWords Never! {
             .ANSI256(index) -> return ColorWords{kind: 2, word: clamp_int(index, 255)}
             .RGB(rgb) -> return ColorWords{
                 kind: 3,
-                word: (Int{rgb.r} << 16).bit_or((Int{rgb.g} << 8)).bit_or(Int{rgb.b}),
+                word: (Int{rgb.r} << 16) | (Int{rgb.g} << 8) | Int{rgb.b},
             }
         }
     }
@@ -449,9 +449,9 @@ color_words: fn(color: TUIColor?) -> ColorWords Never! {
 
 style_words: fn(value: TUIStyle) -> StyleWords Never! {
     flags := 0
-    if value.bold -> flags = flags.bit_or(1)
-    if value.dim -> flags = flags.bit_or(2)
-    if value.underline -> flags = flags.bit_or(4)
+    if value.bold -> flags |= 1
+    if value.dim -> flags |= 2
+    if value.underline -> flags |= 4
     StyleWords{foreground: color_words(value.foreground), background: color_words(value.background), flags: flags}
 }
 
@@ -536,9 +536,9 @@ rgb_ansi16: fn(red: Int, green: Int, blue: Int) -> Int Never! {
     brightest := red
     if green > brightest -> brightest = green
     if blue > brightest -> brightest = blue
-    if red > 96 -> index = index.bit_or(1)
-    if green > 96 -> index = index.bit_or(2)
-    if blue > 96 -> index = index.bit_or(4)
+    if red > 96 -> index |= 1
+    if green > 96 -> index |= 2
+    if blue > 96 -> index |= 4
     if index == 0 && brightest > 48 -> index = 7
     if brightest > 170 -> index += 8
     index
@@ -588,10 +588,10 @@ utf8_width: fn(byte: U8) -> Int Never! {
 scalar_at: fn(raw: [U8], offset: Int, width: Int) -> Int Never! {
     value := Int{raw[offset]}
     if width == 1 -> return value
-    value = value.bit_and(((1 << (7 - width)) - 1))
+    value &= ((1 << (7 - width)) - 1)
     i := 1
     loop i < width {
-        value = (value << 6).bit_or((Int{raw[offset + i]}.bit_and(63)))
+        value = (value << 6) | (Int{raw[offset + i]} & 63)
         i += 1
     }
     value

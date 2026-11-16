@@ -315,7 +315,7 @@ sema_core_bodies_bytes: fn(bodies: &&[SemaCoreBody], context: String) -> [U8] Ne
 sema_core_bodies_put_offset: fn(out: &BodyCodecOut, at: Int) Never! {
     offset: out.bytes.len()
     loop byte in 0..<SEMA_CORE_BODIES_OFFSET_BYTES {
-        out.bytes[at + byte] = U8{(offset >> (8 * byte)).bit_and(255)}
+        out.bytes[at + byte] = U8{(offset >> (8 * byte)) & 255}
     }
 }
 
@@ -401,9 +401,7 @@ sema_core_bodies_offset: fn(bytes: [U8], head: SemaCoreBodiesHead, position: Int
 // The table offset at byte `at`.
 sema_core_bodies_word: fn(bytes: [U8], at: Int) -> Int Never! {
     offset := 0
-    loop byte in 0..<SEMA_CORE_BODIES_OFFSET_BYTES {
-        offset = offset.bit_or(Int{bytes[at + byte]} << (8 * byte))
-    }
+    loop byte in 0..<SEMA_CORE_BODIES_OFFSET_BYTES -> offset |= Int{bytes[at + byte]} << (8 * byte)
     offset
 }
 
@@ -468,7 +466,7 @@ sema_core_bodies_key_order: fn(bytes: [U8], at: Int, wanted: [U8]) -> Int Never!
     loop {
         byte: Int{bytes[start]}
         start += 1
-        size = size.bit_or(byte.bit_and(127) << shift)
+        size |= (byte & 127) << shift
         if byte < 128 -> break
         shift += 7
     }

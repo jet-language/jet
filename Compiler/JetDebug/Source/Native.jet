@@ -455,10 +455,10 @@ NativeSession: struct {
             if site.address == address -> return true
         }
         word: x64_trace_peek(self.trace, address) ?? return false
-        if !x64_trace_poke(self.trace, address, word.bit_and(I64{-256}).bit_or(I64{NATIVE_DEBUG_TRAP})) {
+        if !x64_trace_poke(self.trace, address, word & I64{-256} | I64{NATIVE_DEBUG_TRAP}) {
             return false
         }
-        self.sites.push(NativeSite{address: address, byte: Int{word.bit_and(I64{255})}})
+        self.sites.push(NativeSite{address: address, byte: Int{word & I64{255}}})
         true
     }
 
@@ -471,7 +471,7 @@ NativeSession: struct {
                 next
             }
             if x64_trace_peek(self.trace, address) == .Val(word) {
-                _ := x64_trace_poke(self.trace, address, word.bit_and(I64{-256}).bit_or(I64{site.byte}))
+                _ := x64_trace_poke(self.trace, address, word & I64{-256} | I64{site.byte})
             }
         }
         self.sites = kept
@@ -530,12 +530,12 @@ NativeSession: struct {
                 if site.address == pc -> byte = site.byte
             }
             if x64_trace_peek(self.trace, pc) == .Val(word) {
-                _ := x64_trace_poke(self.trace, pc, word.bit_and(I64{-256}).bit_or(I64{byte}))
+                _ := x64_trace_poke(self.trace, pc, word & I64{-256} | I64{byte})
             }
             stepped: self.resume(X64TraceResume.Step) ?? return Err(err)
             if stepped.kind != NativeStopKind.Paused -> return Ok(stepped)
             if x64_trace_peek(self.trace, pc) == .Val(word) {
-                _ := x64_trace_poke(self.trace, pc, word.bit_and(I64{-256}).bit_or(I64{NATIVE_DEBUG_TRAP}))
+                _ := x64_trace_poke(self.trace, pc, word & I64{-256} | I64{NATIVE_DEBUG_TRAP})
             }
             if how == X64TraceResume.Step -> return Ok(stepped)
         }
@@ -554,15 +554,15 @@ NativeSession: struct {
             if status < 0 {
                 return Err(NativeDebugError{detail: "waiting for the program failed (errno {-status})"})
             }
-            if status.bit_and(0x7f) == 0 {
+            if status & 0x7f == 0 {
                 self.ended()
-                return Ok(NativeEvent{kind: NativeStopKind.Exited, code: (status >> 8).bit_and(0xff)})
+                return Ok(NativeEvent{kind: NativeStopKind.Exited, code: (status >> 8) & 0xff})
             }
-            if status.bit_and(0xff) != 0x7f {
+            if status & 0xff != 0x7f {
                 self.ended()
-                return Ok(NativeEvent{kind: NativeStopKind.Signaled, code: status.bit_and(0x7f)})
+                return Ok(NativeEvent{kind: NativeStopKind.Signaled, code: status & 0x7f})
             }
-            stopped: (status >> 8).bit_and(0xff)
+            stopped: (status >> 8) & 0xff
             if stopped == NATIVE_DEBUG_SIGTRAP {
                 return Ok(NativeEvent{kind: NativeStopKind.Paused, code: 0})
             }
@@ -943,7 +943,7 @@ native_debug_hex: fn(value: Int) -> String Never! {
     digits := [U8]{}
     rest := value
     loop {
-        digit: rest.bit_and(15)
+        digit: rest & 15
         digits.insert(0, U8{if digit < 10 -> 48 + digit else -> 87 + digit})
         rest = rest >> 4
         if rest <= 0 -> break
@@ -1160,7 +1160,7 @@ native_register_value: fn(frame: NativeUnwound, register: Int) -> Int? Never! {
 
 // The 8 little-endian bytes of `word`.
 native_word_bytes: fn(word: Int) -> [U8] Never! {
-    loop k in 0..<8 -> U8{(word >> (8 * k)).bit_and(255)}
+    loop k in 0..<8 -> U8{(word >> (8 * k)) & 255}
 }
 
 // The number of `size` little-endian bytes of `bytes` from `at`, signed as
@@ -1240,7 +1240,7 @@ native_render: fn(image: NativeImage, memory: NativeMemory, ty: Int, bytes: [U8]
             else -> native_render(image, memory, found.target, bytes, at, depth)
         }
         found.tag == NATIVE_TAG_BASE -> if found.encoding == {
-            .Bool -> Val(if word.bit_and(255) != 0 -> "true" else -> "false")
+            .Bool -> Val(if word & 255 != 0 -> "true" else -> "false")
             .Signed | .Unsigned -> Val("{native_number(bytes, at, found.size, found.encoding)}")
             .Float -> {
                 if found.size == 4 {
@@ -1315,9 +1315,9 @@ native_debug_char: fn(code: Int) -> String? Never! {
     if code < 0 || code > 0x10ffff -> return None
     bytes: if {
         code < 0x80 -> [U8]{U8{code}}
-        code < 0x800 -> [U8]{U8{0xc0 + (code >> 6)}, U8{0x80 + code.bit_and(63)}}
-        code < 0x10000 -> [U8]{U8{0xe0 + (code >> 12)}, U8{0x80 + (code >> 6).bit_and(63)}, U8{0x80 + code.bit_and(63)}}
-        else -> [U8]{U8{0xf0 + (code >> 18)}, U8{0x80 + (code >> 12).bit_and(63)}, U8{0x80 + (code >> 6).bit_and(63)}, U8{0x80 + code.bit_and(63)}}
+        code < 0x800 -> [U8]{U8{0xc0 + (code >> 6)}, U8{0x80 + (code & 63)}}
+        code < 0x10000 -> [U8]{U8{0xe0 + (code >> 12)}, U8{0x80 + ((code >> 6) & 63)}, U8{0x80 + (code & 63)}}
+        else -> [U8]{U8{0xf0 + (code >> 18)}, U8{0x80 + ((code >> 12) & 63)}, U8{0x80 + ((code >> 6) & 63)}, U8{0x80 + (code & 63)}}
     }
     text: String.from_bytes(bytes) ?? return None
     Val("'{text}'")

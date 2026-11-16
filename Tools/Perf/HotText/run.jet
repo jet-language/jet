@@ -470,7 +470,7 @@ function_symbols: fn(bytes: [U8], path: String) -> [Symbol] Err! {
         loop entry in 0..<(table[2] + 23) /% 24 {
             // st_name, st_info, st_value and st_size.
             symbol: fields(bytes, table[1] + 24 * entry, "<IB3xQQ", path)
-            if symbol[1].bit_and(15) != 2 || symbol[3] == 0 -> next
+            if symbol[1] & 15 != 2 || symbol[3] == 0 -> next
             symbols.push(Symbol{value: symbol[2], name: c_string(bytes, strings[0] + symbol[0])})
         }
     }

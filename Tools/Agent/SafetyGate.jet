@@ -221,15 +221,15 @@ seed_state: fn(key: String) -> Int Never! {
     Int{bytes[0]} + Int{bytes[1]} * 256 + Int{bytes[2]} * 65536 + Int{bytes[3]} * 16777216
 }
 
-imul: fn(a: Int, b: Int) -> Int Never! { (a * b).bit_and(MASK) }
+imul: fn(a: Int, b: Int) -> Int Never! { (a * b) & MASK }
 
 // The next 32-bit draw; a draw `u` stands for the double u / 2^32.
 draw: fn(g: &Gen) -> Int Never! {
-    g.state = (g.state + 1831565813).bit_and(MASK)
+    g.state = (g.state + 1831565813) & MASK
     t := g.state
-    t = imul(t.bit_xor(t >> 15), t.bit_or(1))
-    t = t.bit_xor((t + imul(t.bit_xor(t >> 7), t.bit_or(61))).bit_and(MASK))
-    t.bit_xor(t >> 14)
+    t = imul(t ~ t >> 15, t | 1)
+    t ~= (t + imul(t ~ t >> 7, t | 61)) & MASK
+    t ~ t >> 14
 }
 
 // floor(r * n): the product of a 32-bit draw and a small n is exact.
@@ -508,7 +508,7 @@ int_expr: fn(g: &Gen, depth: Int) -> Int Never! {
             return bin(g, op, left, right)
         }
         "bit" -> {
-            op: pick_text(g, [String]{"&", "|", "~|"})
+            op: pick_text(g, [String]{"&", "|", "~"})
             return pair(g, op, d)
         }
         "shift" -> {
@@ -1042,7 +1042,7 @@ recursive: fn(g: &Gen, index: Int) -> Fun Never! {
 }
 
 recursive_tail: fn(g: &Gen, stepped: Int) -> Int Never! {
-    op: pick_text(g, [String]{"+", "-", "~|"})
+    op: pick_text(g, [String]{"+", "-", "~"})
     right: int_expr(g, 1)
     bin(g, op, stepped, right)
 }
@@ -1094,22 +1094,13 @@ precedence: fn(op: String) -> Int Never! {
         "||" -> 1
         "&&" -> 2
         "|" -> 4
-        "~|" -> 5
+        "~" -> 5
         "&" -> 6
         "<<" -> 7
         ">>" -> 7
         "+" -> 8
         "-" -> 8
         else -> if COMPARE.contains(op) -> 3 else -> 9
-    }
-}
-
-bit_method: fn(op: String) -> String Never! {
-    if op == {
-        "&" -> "bit_and"
-        "|" -> "bit_or"
-        "~|" -> "bit_xor"
-        else -> ""
     }
 }
 
@@ -1135,8 +1126,6 @@ render: fn(g: Gen, at: Int) -> Rendered Never! {
 }
 
 render_bin: fn(g: Gen, e: Expr) -> Rendered Never! {
-    method: bit_method(e.op)
-    if method != "" -> return atom("{grouped(g, e.l)}.{method}({expr(g, e.r)})")
     p: precedence(e.op)
     l: render(g, e.l)
     r: render(g, e.r)
@@ -1388,9 +1377,9 @@ arith: fn(op: String, a: Value, b: Value) -> Value Reject! {
         // i64::MIN by -1 overflows in the remainder too.
         "%" -> remainder(op, x, y)
         "%%" -> remainder(op, x, y)
-        "&" -> Ok(int_value(x.bit_and(y)))
-        "|" -> Ok(int_value(x.bit_or(y)))
-        "~|" -> Ok(int_value(x.bit_xor(y)))
+        "&" -> Ok(int_value(x & y))
+        "|" -> Ok(int_value(x | y))
+        "~" -> Ok(int_value(x ~ y))
         "<<" -> checked_int(x << y)
         ">>" -> Ok(int_value(x >> y))
         else -> Ok(compared(op, x <=> y))

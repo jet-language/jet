@@ -66,7 +66,7 @@ recipe_toolchain_from_object: fn(dir: String) -[FS, Env]> CargoToolchain? Never!
     if !recipe_toolchain_is_regular_file(cargo) -> return None
     if !sys.is_windows() {
         cargo_info: files.stat(cargo) ?? return None
-        if (cargo_info.mode).bit_and(0o111) == 0 -> return None
+        if (cargo_info.mode) & 0o111 == 0 -> return None
     }
     version_path: files.join(dir, "version")
     version := ""

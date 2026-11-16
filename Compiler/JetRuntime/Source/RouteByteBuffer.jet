@@ -88,7 +88,7 @@ byte_buffer_put_word: fn(buffer: I64, bits: I64, width: I64, little: Bool) {
     at := I64{0}
     loop at < width {
         shift: if little -> at * I64{8} else -> (width - I64{1} - at) * I64{8}
-        host_u8_put(target, at, (bits >> shift).bit_and(I64{255}))
+        host_u8_put(target, at, (bits >> shift) & I64{255})
         at += I64{1}
     }
     byte_buffer_commit(buffer, width)
@@ -126,20 +126,20 @@ byte_buffer_index: fn(carrier: I64) -> I64 {
 // The IEEE single-precision bits of `value`, which holds an F32 exactly.
 byte_buffer_f32_bits: fn(value: Float) -> I64 {
     bits: rt_f64_bits(value)
-    sign: (bits >> I64{63}).bit_and(I64{1}) << I64{31}
-    exponent: (bits >> I64{52}).bit_and(I64{2047})
-    mantissa: bits.bit_and(I64{4503599627370495})
+    sign: ((bits >> I64{63}) & I64{1}) << I64{31}
+    exponent: (bits >> I64{52}) & I64{2047}
+    mantissa: bits & I64{4503599627370495}
     if (exponent == I64{2047}) {
         payload: mantissa >> I64{29}
         quiet: if (mantissa != I64{0} && payload == I64{0}) -> I64{1} else -> payload
-        return sign.bit_or(I64{2139095040}).bit_or(quiet)
+        return sign | I64{2139095040} | quiet
     }
     if (exponent == I64{0}) { return sign }
     biased: exponent - I64{896}
-    if (biased >= I64{1}) { return sign.bit_or(biased << I64{23}).bit_or(mantissa >> I64{29}) }
+    if (biased >= I64{1}) { return sign | biased << I64{23} | mantissa >> I64{29} }
     shift: I64{30} - biased
     if (shift > I64{53}) { return sign }
-    sign.bit_or(mantissa.bit_or(I64{4503599627370496}) >> shift)
+    sign | (mantissa | I64{4503599627370496}) >> shift
 }
 
 // An Option<U8> payload: the byte at `at` written to `some`, or absent.

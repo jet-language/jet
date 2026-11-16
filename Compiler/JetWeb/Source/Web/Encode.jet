@@ -34,9 +34,9 @@ WEB_PADDED: 5
 web_patch_padded: fn(out: &[U8], at: Int, value: Int) Never! {
     rest := value
     loop k in 0..<WEB_PADDED {
-        b: rest.bit_and(0x7f)
+        b: rest & 0x7f
         rest >>= 7
-        out[at + k] = U8{if k + 1 < WEB_PADDED -> b.bit_or(0x80) else -> b}
+        out[at + k] = U8{if k + 1 < WEB_PADDED -> b | 0x80 else -> b}
     }
 }
 

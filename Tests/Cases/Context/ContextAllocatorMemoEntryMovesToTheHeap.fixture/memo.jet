@@ -12,7 +12,7 @@ impl Reuser.mem.Allocator {
     allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
         self.taken += 1
         loop i in 0..<self.kept.len() {
-            if self.kept[i].size() >= size && self.kept[i].address().bit_and(align - 1) == 0 {
+            if self.kept[i].size() >= size && self.kept[i].address() & align - 1 == 0 {
                 return Ok(self.kept.remove(i, .Slot) ?? panic("kept block"))
             }
         }

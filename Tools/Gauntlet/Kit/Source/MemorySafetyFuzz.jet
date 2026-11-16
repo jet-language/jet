@@ -174,10 +174,10 @@ RunnerOutcome: struct {
 }
 
 xorshift32: fn(value: Int) -> Int {
-    state := value.bit_and(WORD_MASK)
-    state = state.bit_xor((state << 13).bit_and(WORD_MASK))
-    state = state.bit_xor(state >> 17)
-    state.bit_xor((state << 5).bit_and(WORD_MASK))
+    state := value & WORD_MASK
+    state ~= (state << 13) & WORD_MASK
+    state ~= state >> 17
+    state ~ (state << 5) & WORD_MASK
 }
 
 // A set value as a whole number (refused for another value), or `fallback`
@@ -217,7 +217,7 @@ generate_corpus: fn(spec: Dyn) -> Corpus Err! {
     state := corpus.seed
     loop _ in 0..<(corpus.case_count * corpus.bytes_per_case) {
         state = xorshift32(state)
-        data.push(U8{state.bit_and(255)})
+        data.push(U8{state & 255})
     }
     out_of_bounds: if 255 - payload > 1 -> 255 - payload else -> 1
     loop index in 0..<corpus.case_count {
@@ -241,8 +241,8 @@ generate_corpus: fn(spec: Dyn) -> Corpus Err! {
             }
         }
         data[offset] = U8{kind}
-        data[offset + 1] = U8{read.declared.bit_and(255)}
-        data[offset + 2] = U8{read.requested.bit_and(255)}
+        data[offset + 1] = U8{read.declared & 255}
+        data[offset + 2] = U8{read.requested & 255}
         data[offset + 3] = U8{160 + kind}
     }
     corpus.sha256 = crypto.sha256(data).hex()
@@ -271,15 +271,15 @@ record_summary: fn(corpus: Corpus) -> CorpusSummary {
         safe: if requested < payload -> requested else -> payload
         start: offset + corpus.metadata_bytes
         value: if {
-            kind == CASE_VALID || kind == CASE_OOB -> data.slice(start, start + bounded).map(fn(byte) { Int{byte} }).sum().bit_and(WORD_MASK)
+            kind == CASE_VALID || kind == CASE_OOB -> data.slice(start, start + bounded).map(fn(byte) { Int{byte} }).sum() & WORD_MASK
             requested >= payload -> 0
-            kind == CASE_WRONG_OUTPUT -> byte_at(data, start + requested).bit_xor(165)
+            kind == CASE_WRONG_OUTPUT -> byte_at(data, start + requested) ~ 165
             else -> byte_at(data, start + requested)
         }
-        semantic = (semantic + value + (kind + 1) * 257 + bounded + safe).bit_and(WORD_MASK)
+        semantic = (semantic + value + (kind + 1) * 257 + bounded + safe) & WORD_MASK
         records.push(CaseRecord{index: index, kind: kind, declared_length: declared, requested_index: requested, offset: offset})
     }
-    CorpusSummary{counts: counts, checksum: data.map(fn(byte) { Int{byte} }).sum().bit_and(WORD_MASK), semantic: semantic, records: records}
+    CorpusSummary{counts: counts, checksum: data.map(fn(byte) { Int{byte} }).sum() & WORD_MASK, semantic: semantic, records: records}
 }
 
 expected_output: fn(summary: CorpusSummary, corpus: Corpus) -> String {

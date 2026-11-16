@@ -128,7 +128,7 @@ wipe_words: fn(w: &[U64]) Never! {
 }
 
 le32: fn(b: [U8], off: Int) -> U64 Never! {
-    U64{b[off]}.bit_or(U64{b[off + 1]} << 8).bit_or(U64{b[off + 2]} << 16).bit_or(U64{b[off + 3]} << 24)
+    U64{b[off]} | U64{b[off + 1]} << 8 | U64{b[off + 2]} << 16 | U64{b[off + 3]} << 24
 }
 
 // The low byte of `x` (wrapping): no test of the value.
@@ -141,8 +141,8 @@ low_byte: fn(x: U64) -> U8 Never! { wrapping(U8{x}) }
 swap_planes: fn(q: &[U64], a: Int, b: Int, low: U64, high: U64, shift: Int) Never! {
     x: q[a]
     y: q[b]
-    q[a] = x.bit_and(low).bit_or(y.bit_and(low) << shift)
-    q[b] = (x.bit_and(high) >> shift).bit_or(y.bit_and(high))
+    q[a] = x & low | (y & low) << shift
+    q[b] = ((x & high) >> shift) | y & high
 }
 
 /// The bit-matrix transpose between byte-interleaved blocks and bit planes;
@@ -169,14 +169,14 @@ ortho: fn(q: &[U64]) Never! {
 }
 
 spread: fn(x: U64) -> U64 Never! {
-    a: x.bit_or(x << 16).bit_and(U64{0x0000ffff0000ffff})
-    a.bit_or(a << 8).bit_and(U64{0x00ff00ff00ff00ff})
+    a: (x | x << 16) & U64{0x0000ffff0000ffff}
+    (a | a << 8) & U64{0x00ff00ff00ff00ff}
 }
 
 gather: fn(x: U64) -> U64 Never! {
-    a: x.bit_and(U64{0x00ff00ff00ff00ff})
-    b: a.bit_or(a >> 8).bit_and(U64{0x0000ffff0000ffff})
-    b.bit_or(b >> 16).bit_and(U64{0xffffffff})
+    a: x & U64{0x00ff00ff00ff00ff}
+    b: (a | a >> 8) & U64{0x0000ffff0000ffff}
+    (b | b >> 16) & U64{0xffffffff}
 }
 
 /// Block `slot`'s four little-endian words into q[slot] and q[slot + 4].
@@ -185,8 +185,8 @@ interleave_in: fn(q: &[U64], slot: Int, b: [U8], off: Int) Never! {
     x1: spread(le32(b, off + 4))
     x2: spread(le32(b, off + 8))
     x3: spread(le32(b, off + 12))
-    q[slot] = x0.bit_or(x2 << 8)
-    q[slot + 4] = x1.bit_or(x3 << 8)
+    q[slot] = x0 | x2 << 8
+    q[slot + 4] = x1 | x3 << 8
 }
 
 put_word: fn(out: &[U8], at: Int, w: U64) Never! {
@@ -218,121 +218,121 @@ sbox: fn(q: &[U64]) Never! {
     x5: q[2]
     x6: q[1]
     x7: q[0]
-    y14: x3.bit_xor(x5)
-    y13: x0.bit_xor(x6)
-    y9: x0.bit_xor(x3)
-    y8: x0.bit_xor(x5)
-    t0: x1.bit_xor(x2)
-    y1: t0.bit_xor(x7)
-    y4: y1.bit_xor(x3)
-    y12: y13.bit_xor(y14)
-    y2: y1.bit_xor(x0)
-    y5: y1.bit_xor(x6)
-    y3: y5.bit_xor(y8)
-    t1: x4.bit_xor(y12)
-    y15: t1.bit_xor(x5)
-    y20: t1.bit_xor(x1)
-    y6: y15.bit_xor(x7)
-    y10: y15.bit_xor(t0)
-    y11: y20.bit_xor(y9)
-    y7: x7.bit_xor(y11)
-    y17: y10.bit_xor(y11)
-    y19: y10.bit_xor(y8)
-    y16: t0.bit_xor(y11)
-    y21: y13.bit_xor(y16)
-    y18: x0.bit_xor(y16)
-    t2: y12.bit_and(y15)
-    t3: y3.bit_and(y6)
-    t4: t3.bit_xor(t2)
-    t5: y4.bit_and(x7)
-    t6: t5.bit_xor(t2)
-    t7: y13.bit_and(y16)
-    t8: y5.bit_and(y1)
-    t9: t8.bit_xor(t7)
-    t10: y2.bit_and(y7)
-    t11: t10.bit_xor(t7)
-    t12: y9.bit_and(y11)
-    t13: y14.bit_and(y17)
-    t14: t13.bit_xor(t12)
-    t15: y8.bit_and(y10)
-    t16: t15.bit_xor(t12)
-    t17: t4.bit_xor(t14)
-    t18: t6.bit_xor(t16)
-    t19: t9.bit_xor(t14)
-    t20: t11.bit_xor(t16)
-    t21: t17.bit_xor(y20)
-    t22: t18.bit_xor(y19)
-    t23: t19.bit_xor(y21)
-    t24: t20.bit_xor(y18)
-    t25: t21.bit_xor(t22)
-    t26: t21.bit_and(t23)
-    t27: t24.bit_xor(t26)
-    t28: t25.bit_and(t27)
-    t29: t28.bit_xor(t22)
-    t30: t23.bit_xor(t24)
-    t31: t22.bit_xor(t26)
-    t32: t31.bit_and(t30)
-    t33: t32.bit_xor(t24)
-    t34: t23.bit_xor(t33)
-    t35: t27.bit_xor(t33)
-    t36: t24.bit_and(t35)
-    t37: t36.bit_xor(t34)
-    t38: t27.bit_xor(t36)
-    t39: t29.bit_and(t38)
-    t40: t25.bit_xor(t39)
-    t41: t40.bit_xor(t37)
-    t42: t29.bit_xor(t33)
-    t43: t29.bit_xor(t40)
-    t44: t33.bit_xor(t37)
-    t45: t42.bit_xor(t41)
-    z0: t44.bit_and(y15)
-    z1: t37.bit_and(y6)
-    z2: t33.bit_and(x7)
-    z3: t43.bit_and(y16)
-    z4: t40.bit_and(y1)
-    z5: t29.bit_and(y7)
-    z6: t42.bit_and(y11)
-    z7: t45.bit_and(y17)
-    z8: t41.bit_and(y10)
-    z9: t44.bit_and(y12)
-    z10: t37.bit_and(y3)
-    z11: t33.bit_and(y4)
-    z12: t43.bit_and(y13)
-    z13: t40.bit_and(y5)
-    z14: t29.bit_and(y2)
-    z15: t42.bit_and(y9)
-    z16: t45.bit_and(y14)
-    z17: t41.bit_and(y8)
-    t46: z15.bit_xor(z16)
-    t47: z10.bit_xor(z11)
-    t48: z5.bit_xor(z13)
-    t49: z9.bit_xor(z10)
-    t50: z2.bit_xor(z12)
-    t51: z2.bit_xor(z5)
-    t52: z7.bit_xor(z8)
-    t53: z0.bit_xor(z3)
-    t54: z6.bit_xor(z7)
-    t55: z16.bit_xor(z17)
-    t56: z12.bit_xor(t48)
-    t57: t50.bit_xor(t53)
-    t58: z4.bit_xor(t46)
-    t59: z3.bit_xor(t54)
-    t60: t46.bit_xor(t57)
-    t61: z14.bit_xor(t57)
-    t62: t52.bit_xor(t58)
-    t63: t49.bit_xor(t58)
-    t64: z4.bit_xor(t59)
-    t65: t61.bit_xor(t62)
-    t66: z1.bit_xor(t63)
-    s0: t59.bit_xor(t63)
-    s6: t56.bit_xor(t62.bit_not())
-    s7: t48.bit_xor(t60.bit_not())
-    t67: t64.bit_xor(t65)
-    s3: t53.bit_xor(t66)
-    s4: t51.bit_xor(t66)
-    s5: t47.bit_xor(t65)
-    s1: t64.bit_xor(s3.bit_not())
-    s2: t55.bit_xor(t67.bit_not())
+    y14: x3 ~ x5
+    y13: x0 ~ x6
+    y9: x0 ~ x3
+    y8: x0 ~ x5
+    t0: x1 ~ x2
+    y1: t0 ~ x7
+    y4: y1 ~ x3
+    y12: y13 ~ y14
+    y2: y1 ~ x0
+    y5: y1 ~ x6
+    y3: y5 ~ y8
+    t1: x4 ~ y12
+    y15: t1 ~ x5
+    y20: t1 ~ x1
+    y6: y15 ~ x7
+    y10: y15 ~ t0
+    y11: y20 ~ y9
+    y7: x7 ~ y11
+    y17: y10 ~ y11
+    y19: y10 ~ y8
+    y16: t0 ~ y11
+    y21: y13 ~ y16
+    y18: x0 ~ y16
+    t2: y12 & y15
+    t3: y3 & y6
+    t4: t3 ~ t2
+    t5: y4 & x7
+    t6: t5 ~ t2
+    t7: y13 & y16
+    t8: y5 & y1
+    t9: t8 ~ t7
+    t10: y2 & y7
+    t11: t10 ~ t7
+    t12: y9 & y11
+    t13: y14 & y17
+    t14: t13 ~ t12
+    t15: y8 & y10
+    t16: t15 ~ t12
+    t17: t4 ~ t14
+    t18: t6 ~ t16
+    t19: t9 ~ t14
+    t20: t11 ~ t16
+    t21: t17 ~ y20
+    t22: t18 ~ y19
+    t23: t19 ~ y21
+    t24: t20 ~ y18
+    t25: t21 ~ t22
+    t26: t21 & t23
+    t27: t24 ~ t26
+    t28: t25 & t27
+    t29: t28 ~ t22
+    t30: t23 ~ t24
+    t31: t22 ~ t26
+    t32: t31 & t30
+    t33: t32 ~ t24
+    t34: t23 ~ t33
+    t35: t27 ~ t33
+    t36: t24 & t35
+    t37: t36 ~ t34
+    t38: t27 ~ t36
+    t39: t29 & t38
+    t40: t25 ~ t39
+    t41: t40 ~ t37
+    t42: t29 ~ t33
+    t43: t29 ~ t40
+    t44: t33 ~ t37
+    t45: t42 ~ t41
+    z0: t44 & y15
+    z1: t37 & y6
+    z2: t33 & x7
+    z3: t43 & y16
+    z4: t40 & y1
+    z5: t29 & y7
+    z6: t42 & y11
+    z7: t45 & y17
+    z8: t41 & y10
+    z9: t44 & y12
+    z10: t37 & y3
+    z11: t33 & y4
+    z12: t43 & y13
+    z13: t40 & y5
+    z14: t29 & y2
+    z15: t42 & y9
+    z16: t45 & y14
+    z17: t41 & y8
+    t46: z15 ~ z16
+    t47: z10 ~ z11
+    t48: z5 ~ z13
+    t49: z9 ~ z10
+    t50: z2 ~ z12
+    t51: z2 ~ z5
+    t52: z7 ~ z8
+    t53: z0 ~ z3
+    t54: z6 ~ z7
+    t55: z16 ~ z17
+    t56: z12 ~ t48
+    t57: t50 ~ t53
+    t58: z4 ~ t46
+    t59: z3 ~ t54
+    t60: t46 ~ t57
+    t61: z14 ~ t57
+    t62: t52 ~ t58
+    t63: t49 ~ t58
+    t64: z4 ~ t59
+    t65: t61 ~ t62
+    t66: z1 ~ t63
+    s0: t59 ~ t63
+    s6: t56 ~ ~t62
+    s7: t48 ~ ~t60
+    t67: t64 ~ t65
+    s3: t53 ~ t66
+    s4: t51 ~ t66
+    s5: t47 ~ t65
+    s1: t64 ~ ~s3
+    s2: t55 ~ ~t67
     q[7] = s0
     q[6] = s1
     q[5] = s2
@@ -346,22 +346,22 @@ sbox: fn(q: &[U64]) Never! {
 /// The affine map T(y) = A^-1(y + 0x63) on the planes. It is an involution
 /// with S^-1 = T . S . T, since S(x) = A(x^-1) + 0x63.
 inv_affine: fn(q: &[U64]) Never! {
-    q0: q[0].bit_not()
-    q1: q[1].bit_not()
+    q0: ~q[0]
+    q1: ~q[1]
     q2: q[2]
     q3: q[3]
     q4: q[4]
-    q5: q[5].bit_not()
-    q6: q[6].bit_not()
+    q5: ~q[5]
+    q6: ~q[6]
     q7: q[7]
-    q[7] = q1.bit_xor(q4).bit_xor(q6)
-    q[6] = q0.bit_xor(q3).bit_xor(q5)
-    q[5] = q7.bit_xor(q2).bit_xor(q4)
-    q[4] = q6.bit_xor(q1).bit_xor(q3)
-    q[3] = q5.bit_xor(q0).bit_xor(q2)
-    q[2] = q4.bit_xor(q7).bit_xor(q1)
-    q[1] = q3.bit_xor(q6).bit_xor(q0)
-    q[0] = q2.bit_xor(q5).bit_xor(q7)
+    q[7] = q1 ~ q4 ~ q6
+    q[6] = q0 ~ q3 ~ q5
+    q[5] = q7 ~ q2 ~ q4
+    q[4] = q6 ~ q1 ~ q3
+    q[3] = q5 ~ q0 ~ q2
+    q[2] = q4 ~ q7 ~ q1
+    q[1] = q3 ~ q6 ~ q0
+    q[0] = q2 ~ q5 ~ q7
 }
 
 inv_sbox: fn(q: &[U64]) Never! {
@@ -374,22 +374,22 @@ inv_sbox: fn(q: &[U64]) Never! {
 shift_rows: fn(q: &[U64]) Never! {
     loop i in 0..<8 {
         x: q[i]
-        q[i] = x.bit_and(U64{0x000000000000ffff}).bit_or(x.bit_and(U64{0x00000000fff00000}) >> 4).bit_or(x.bit_and(U64{0x00000000000f0000}) << 12).bit_or(x.bit_and(U64{0x0000ff0000000000}) >> 8).bit_or(x.bit_and(U64{0x000000ff00000000}) << 8).bit_or(x.bit_and(U64{0xf000000000000000}) >> 12).bit_or(x.bit_and(U64{0x0fff000000000000}) << 4)
+        q[i] = x & U64{0x000000000000ffff} | (x & U64{0x00000000fff00000}) >> 4 | (x & U64{0x00000000000f0000}) << 12 | (x & U64{0x0000ff0000000000}) >> 8 | (x & U64{0x000000ff00000000}) << 8 | (x & U64{0xf000000000000000}) >> 12 | (x & U64{0x0fff000000000000}) << 4
     }
 }
 
 inv_shift_rows: fn(q: &[U64]) Never! {
     loop i in 0..<8 {
         x: q[i]
-        q[i] = x.bit_and(U64{0x000000000000ffff}).bit_or(x.bit_and(U64{0x000000000fff0000}) << 4).bit_or(x.bit_and(U64{0x00000000f0000000}) >> 12).bit_or(x.bit_and(U64{0x000000ff00000000}) << 8).bit_or(x.bit_and(U64{0x0000ff0000000000}) >> 8).bit_or(x.bit_and(U64{0x000f000000000000}) << 12).bit_or(x.bit_and(U64{0xfff0000000000000}) >> 4)
+        q[i] = x & U64{0x000000000000ffff} | (x & U64{0x000000000fff0000}) << 4 | (x & U64{0x00000000f0000000}) >> 12 | (x & U64{0x000000ff00000000}) << 8 | (x & U64{0x0000ff0000000000}) >> 8 | (x & U64{0x000f000000000000}) << 12 | (x & U64{0xfff0000000000000}) >> 4
     }
 }
 
 /// The next row of the same column.
-row_next: fn(x: U64) -> U64 Never! { (x >> 16).bit_or(x << 48) }
+row_next: fn(x: U64) -> U64 Never! { (x >> 16) | x << 48 }
 
 /// The row two below in the same column.
-row_opposite: fn(x: U64) -> U64 Never! { (x << 32).bit_or(x >> 32) }
+row_opposite: fn(x: U64) -> U64 Never! { (x << 32) | x >> 32 }
 
 /// MixColumns: a0' = 2(a0 + a1) + a1 + a2 + a3 for every column, where
 /// doubling moves plane j to j + 1 and folds plane 7 into planes 0, 1, 3
@@ -411,43 +411,43 @@ mix_columns: fn(q: &[U64]) Never! {
     r5: row_next(q5)
     r6: row_next(q6)
     r7: row_next(q7)
-    q[0] = q7.bit_xor(r7).bit_xor(r0).bit_xor(row_opposite(q0.bit_xor(r0)))
-    q[1] = q0.bit_xor(r0).bit_xor(q7).bit_xor(r7).bit_xor(r1).bit_xor(row_opposite(q1.bit_xor(r1)))
-    q[2] = q1.bit_xor(r1).bit_xor(r2).bit_xor(row_opposite(q2.bit_xor(r2)))
-    q[3] = q2.bit_xor(r2).bit_xor(q7).bit_xor(r7).bit_xor(r3).bit_xor(row_opposite(q3.bit_xor(r3)))
-    q[4] = q3.bit_xor(r3).bit_xor(q7).bit_xor(r7).bit_xor(r4).bit_xor(row_opposite(q4.bit_xor(r4)))
-    q[5] = q4.bit_xor(r4).bit_xor(r5).bit_xor(row_opposite(q5.bit_xor(r5)))
-    q[6] = q5.bit_xor(r5).bit_xor(r6).bit_xor(row_opposite(q6.bit_xor(r6)))
-    q[7] = q6.bit_xor(r6).bit_xor(r7).bit_xor(row_opposite(q7.bit_xor(r7)))
+    q[0] = q7 ~ r7 ~ r0 ~ row_opposite(q0 ~ r0)
+    q[1] = q0 ~ r0 ~ q7 ~ r7 ~ r1 ~ row_opposite(q1 ~ r1)
+    q[2] = q1 ~ r1 ~ r2 ~ row_opposite(q2 ~ r2)
+    q[3] = q2 ~ r2 ~ q7 ~ r7 ~ r3 ~ row_opposite(q3 ~ r3)
+    q[4] = q3 ~ r3 ~ q7 ~ r7 ~ r4 ~ row_opposite(q4 ~ r4)
+    q[5] = q4 ~ r4 ~ r5 ~ row_opposite(q5 ~ r5)
+    q[6] = q5 ~ r5 ~ r6 ~ row_opposite(q6 ~ r6)
+    q[7] = q6 ~ r6 ~ r7 ~ row_opposite(q7 ~ r7)
 }
 
 /// InvMixColumns as MixColumns after the circulant (05, 00, 04, 00):
 /// circ(0e, 0b, 0d, 09) = circ(02, 03, 01, 01) * circ(05, 00, 04, 00), so
 /// a_r' = a_r + 4 (a_r + a_{r+2}) and then MixColumns.
 inv_mix_columns: fn(q: &[U64]) Never! {
-    w0: q[0].bit_xor(row_opposite(q[0]))
-    w1: q[1].bit_xor(row_opposite(q[1]))
-    w2: q[2].bit_xor(row_opposite(q[2]))
-    w3: q[3].bit_xor(row_opposite(q[3]))
-    w4: q[4].bit_xor(row_opposite(q[4]))
-    w5: q[5].bit_xor(row_opposite(q[5]))
-    w6: q[6].bit_xor(row_opposite(q[6]))
-    w7: q[7].bit_xor(row_opposite(q[7]))
+    w0: q[0] ~ row_opposite(q[0])
+    w1: q[1] ~ row_opposite(q[1])
+    w2: q[2] ~ row_opposite(q[2])
+    w3: q[3] ~ row_opposite(q[3])
+    w4: q[4] ~ row_opposite(q[4])
+    w5: q[5] ~ row_opposite(q[5])
+    w6: q[6] ~ row_opposite(q[6])
+    w7: q[7] ~ row_opposite(q[7])
     // Planes of 4w: doubling twice.
-    q[0] = q[0].bit_xor(w6)
-    q[1] = q[1].bit_xor(w6).bit_xor(w7)
-    q[2] = q[2].bit_xor(w0).bit_xor(w7)
-    q[3] = q[3].bit_xor(w1).bit_xor(w6)
-    q[4] = q[4].bit_xor(w2).bit_xor(w6).bit_xor(w7)
-    q[5] = q[5].bit_xor(w3).bit_xor(w7)
-    q[6] = q[6].bit_xor(w4)
-    q[7] = q[7].bit_xor(w5)
+    q[0] = q[0] ~ w6
+    q[1] = q[1] ~ w6 ~ w7
+    q[2] = q[2] ~ w0 ~ w7
+    q[3] = q[3] ~ w1 ~ w6
+    q[4] = q[4] ~ w2 ~ w6 ~ w7
+    q[5] = q[5] ~ w3 ~ w7
+    q[6] = q[6] ~ w4
+    q[7] = q[7] ~ w5
     mix_columns(q)
 }
 
 add_round_key: fn(q: &[U64], sk: [U64], round: Int) Never! {
     base: round * 8
-    loop i in 0..<8 -> q[i] = q[i].bit_xor(sk[base + i])
+    loop i in 0..<8 -> q[i] = q[i] ~ sk[base + i]
 }
 
 /// FIPS 197 section 5.1 Cipher on the four blocks in q.
@@ -502,13 +502,11 @@ sub_word: fn(q: &[U64], x: U64) -> U64 Never! {
     ortho(q)
     sbox(q)
     ortho(q)
-    q[0].bit_and(U64{0xffffffff})
+    q[0] & U64{0xffffffff}
 }
 
 // GF(2^8) doubling modulo x^8 + x^4 + x^3 + x + 1, without a branch.
-#Overflow(.Wrapping) xtime: fn(a: U8) -> U8 Never! {
-    (a << 1).bit_xor(U8{0x1b}.bit_and(U8{0} - (a >> 7)))
-}
+#Overflow(.Wrapping) xtime: fn(a: U8) -> U8 Never! { (a << 1) ~ U8{0x1b} & U8{0} - (a >> 7) }
 
 /// InvMixColumns of the round key at rk[off..<off + 16] into out[at..].
 inv_mix_key: fn(rk: [U8], off: Int, out: &[U8], at: Int) Never! {
@@ -531,28 +529,28 @@ inv_mix_key: fn(rk: [U8], off: Int, out: &[U8], at: Int) Never! {
         d1: xtime(c1)
         d2: xtime(c2)
         d3: xtime(c3)
-        e0: d0.bit_xor(c0).bit_xor(b0)
-        e1: d1.bit_xor(c1).bit_xor(b1)
-        e2: d2.bit_xor(c2).bit_xor(b2)
-        e3: d3.bit_xor(c3).bit_xor(b3)
-        n0: d0.bit_xor(a0)
-        n1: d1.bit_xor(a1)
-        n2: d2.bit_xor(a2)
-        n3: d3.bit_xor(a3)
-        l0: d0.bit_xor(b0).bit_xor(a0)
-        l1: d1.bit_xor(b1).bit_xor(a1)
-        l2: d2.bit_xor(b2).bit_xor(a2)
-        l3: d3.bit_xor(b3).bit_xor(a3)
-        h0: d0.bit_xor(c0).bit_xor(a0)
-        h1: d1.bit_xor(c1).bit_xor(a1)
-        h2: d2.bit_xor(c2).bit_xor(a2)
-        h3: d3.bit_xor(c3).bit_xor(a3)
+        e0: d0 ~ c0 ~ b0
+        e1: d1 ~ c1 ~ b1
+        e2: d2 ~ c2 ~ b2
+        e3: d3 ~ c3 ~ b3
+        n0: d0 ~ a0
+        n1: d1 ~ a1
+        n2: d2 ~ a2
+        n3: d3 ~ a3
+        l0: d0 ~ b0 ~ a0
+        l1: d1 ~ b1 ~ a1
+        l2: d2 ~ b2 ~ a2
+        l3: d3 ~ b3 ~ a3
+        h0: d0 ~ c0 ~ a0
+        h1: d1 ~ c1 ~ a1
+        h2: d2 ~ c2 ~ a2
+        h3: d3 ~ c3 ~ a3
         // [0e 0b 0d 09] circulant.
         o: at + 4 * c
-        out[o] = e0.bit_xor(l1).bit_xor(h2).bit_xor(n3)
-        out[o + 1] = n0.bit_xor(e1).bit_xor(l2).bit_xor(h3)
-        out[o + 2] = h0.bit_xor(n1).bit_xor(e2).bit_xor(l3)
-        out[o + 3] = l0.bit_xor(h1).bit_xor(n2).bit_xor(e3)
+        out[o] = e0 ~ l1 ~ h2 ~ n3
+        out[o + 1] = n0 ~ e1 ~ l2 ~ h3
+        out[o + 2] = h0 ~ n1 ~ e2 ~ l3
+        out[o + 3] = l0 ~ h1 ~ n2 ~ e3
     }
 }
 
@@ -593,11 +591,11 @@ aes_expand: fn(key: [#Secret U8], rounds: Int, decrypt: Bool) -> AESKey Never! {
         tmp := w[i - 1]
         if j == 0 {
             // RotWord on a little-endian word, SubWord, then Rcon.
-            tmp = ((tmp << 24).bit_or(tmp >> 8)).bit_and(U64{0xffffffff})
-            tmp = sub_word(q, tmp).bit_xor(rcon)
+            tmp = ((tmp << 24) | tmp >> 8) & U64{0xffffffff}
+            tmp = sub_word(q, tmp) ~ rcon
             rcon = U64{xtime(low_byte(rcon))}
         } else if nk > 6 && j == 4 { tmp = sub_word(q, tmp) }
-        w[i] = tmp.bit_xor(w[i - nk])
+        w[i] = tmp ~ w[i - nk]
         j += 1
         if j == nk -> j = 0
     }
@@ -633,7 +631,7 @@ aes_expand: fn(key: [#Secret U8], rounds: Int, decrypt: Bool) -> AESKey Never! {
 // Block operations.
 
 xor_into: fn(dst: &[U8], at: Int, a: [U8], a_off: Int, b: [U8], b_off: Int, count: Int) Never! {
-    loop i in 0..<count -> dst[at + i] = a[a_off + i].bit_xor(b[b_off + i])
+    loop i in 0..<count -> dst[at + i] = a[a_off + i] ~ b[b_off + i]
 }
 
 /// Add one to the 16-byte counter as a big-endian integer of its last
@@ -654,11 +652,11 @@ increment: fn(ctr: &[U8], width: Int) Never! {
     a := U64{0}
     b := U64{0}
     loop i in 0..<8 {
-        a = a.bit_or(U64{t[i]} << (8 * i))
-        b = b.bit_or(U64{t[8 + i]} << (8 * i))
+        a |= U64{t[i]} << (8 * i)
+        b |= U64{t[8 + i]} << (8 * i)
     }
-    ra: (a << 1).bit_xor(U64{0x87}.bit_and(U64{0} - (b >> 63)))
-    rb: (a >> 63).bit_or(b << 1)
+    ra: (a << 1) ~ U64{0x87} & U64{0} - (b >> 63)
+    rb: (a >> 63) | b << 1
     loop i in 0..<8 {
         t[i] = low_byte(ra >> (8 * i))
         t[8 + i] = low_byte(rb >> (8 * i))
@@ -752,7 +750,7 @@ blocks_portable: fn(k: AESKey, op: Int, iv: &[U8], src: [#Secret U8], off: Int, 
             } else {
                 crypt4(k, false, q, iv, 0, 1, buf, 0)
                 loop i in 0..<16 {
-                    c: buf[i].bit_xor(src[at + i])
+                    c: buf[i] ~ src[at + i]
                     out[o + i] = c
                     iv[i] = if op == CFB_ENC -> c else if op == CFB_DEC -> src[at + i] else -> buf[i]
                 }
@@ -824,7 +822,7 @@ ctr: fn(k: AESKey, offset: Int, counter: &[U8], stream: &[U8], src: [U8], off: I
     end: off + len
     reserve(out, len)
     loop n != 0 && at < end {
-        out.push(src[at].bit_xor(stream[n]))
+        out.push(src[at] ~ stream[n])
         n = (n + 1) %% 16
         at += 1
     }
@@ -840,7 +838,7 @@ ctr: fn(k: AESKey, offset: Int, counter: &[U8], stream: &[U8], src: [U8], off: I
             encrypt_block(k, counter, 0, stream, 0)
             increment(counter, 16)
         }
-        out.push(src[at].bit_xor(stream[n]))
+        out.push(src[at] ~ stream[n])
         n = (n + 1) %% 16
         at += 1
     }
@@ -855,8 +853,8 @@ cfb128: fn(k: AESKey, decrypt: Bool, offset: Int, iv: &[U8], src: [U8], off: Int
     end: off + len
     reserve(out, len)
     loop n != 0 && at < end {
-        c: if decrypt -> src[at] else -> src[at].bit_xor(iv[n])
-        out.push(src[at].bit_xor(iv[n]))
+        c: if decrypt -> src[at] else -> src[at] ~ iv[n]
+        out.push(src[at] ~ iv[n])
         iv[n] = c
         n = (n + 1) %% 16
         at += 1
@@ -867,8 +865,8 @@ cfb128: fn(k: AESKey, decrypt: Bool, offset: Int, iv: &[U8], src: [U8], off: Int
     if at < end {
         encrypt_in_place(k, iv)
         loop at < end {
-            c: if decrypt -> src[at] else -> src[at].bit_xor(iv[n])
-            out.push(src[at].bit_xor(iv[n]))
+            c: if decrypt -> src[at] else -> src[at] ~ iv[n]
+            out.push(src[at] ~ iv[n])
             iv[n] = c
             n += 1
             at += 1
@@ -885,7 +883,7 @@ cfb8: fn(k: AESKey, decrypt: Bool, iv: &[U8], src: [U8], off: Int, len: Int, out
     loop i in 0..<len {
         encrypt_block(k, iv, 0, ks, 0)
         b: src[off + i]
-        c: ks[0].bit_xor(b)
+        c: ks[0] ~ b
         out.push(c)
         loop j in 0..<15 -> iv[j] = iv[j + 1]
         iv[15] = if decrypt -> b else -> c
@@ -900,7 +898,7 @@ ofb: fn(k: AESKey, offset: Int, iv: &[U8], src: [U8], off: Int, len: Int, out: &
     end: off + len
     reserve(out, len)
     loop n != 0 && at < end {
-        out.push(src[at].bit_xor(iv[n]))
+        out.push(src[at] ~ iv[n])
         n = (n + 1) %% 16
         at += 1
     }
@@ -910,7 +908,7 @@ ofb: fn(k: AESKey, offset: Int, iv: &[U8], src: [U8], off: Int, len: Int, out: &
     if at < end {
         encrypt_in_place(k, iv)
         loop at < end {
-            out.push(src[at].bit_xor(iv[n]))
+            out.push(src[at] ~ iv[n])
             n += 1
             at += 1
         }
@@ -972,13 +970,13 @@ xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: In
     last: base + 16 * (len /% 16 - 1)
     tail := zero_bytes(16)
     loop i in 0..<leftover {
-        tail[i] = src[off + 16 * (len /% 16) + i].bit_xor(steal[i])
+        tail[i] = src[off + 16 * (len /% 16) + i] ~ steal[i]
         out.push(out[last + i])
     }
-    loop i in leftover..<16 -> tail[i] = out[last + i].bit_xor(steal[i])
+    loop i in leftover..<16 -> tail[i] = out[last + i] ~ steal[i]
     one := [U8]{}
     blocks(xk.crypt, if decrypt -> ECB_DEC else -> ECB_ENC, zero_bytes(16), tail, 0, 1, one)
-    loop i in 0..<16 -> out[last + i] = one[i].bit_xor(steal[i])
+    loop i in 0..<16 -> out[last + i] = one[i] ~ steal[i]
     core.crypto.wipe(one)
     core.crypto.wipe(tail)
     core.crypto.wipe(steal)
@@ -994,8 +992,8 @@ xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: In
 /// out bit was set, without a branch on it.
 #Overflow(.Wrapping) cmac_double: fn(b: &[U8]) Never! {
     carry: U8{0} - (b[0] >> 7)
-    loop i in 0..<15 -> b[i] = (b[i] << 1).bit_or(b[i + 1] >> 7)
-    b[15] = (b[15] << 1).bit_xor(U8{0x87}.bit_and(carry))
+    loop i in 0..<15 -> b[i] = (b[i] << 1) | b[i + 1] >> 7
+    b[15] = (b[15] << 1) ~ U8{0x87} & carry
 }
 
 /// The AES-CMAC of `msg` (SP 800-38B section 6.2), 16 bytes.
@@ -1013,7 +1011,7 @@ cmac: fn(k: AESKey, msg: [U8]) -> [U8] Never! {
     loop i in 0..<16 {
         at: start + i
         m: if at < msg.len() -> msg[at] else if at == msg.len() -> U8{0x80} else -> U8{0}
-        last[i] = m.bit_xor(sub[i])
+        last[i] = m ~ sub[i]
     }
     x := zero_bytes(16)
     chain := [U8]{}
@@ -1071,7 +1069,7 @@ kw_w: fn(k: AESKey, buf: &[U8]) Never! {
             }
             encrypt_block(k, block, 0, one, 0)
             loop b in 0..<8 {
-                buf[b] = one[b].bit_xor(low_byte(U64{t} >> (56 - 8 * b)))
+                buf[b] = one[b] ~ low_byte(U64{t} >> (56 - 8 * b))
                 buf[8 * i + b] = one[8 + b]
             }
             t += 1
@@ -1091,7 +1089,7 @@ kw_w_inverse: fn(k: AESKey, buf: &[U8]) Never! {
         i := n
         loop i >= 1 {
             loop b in 0..<8 {
-                block[b] = buf[b].bit_xor(low_byte(U64{t} >> (56 - 8 * b)))
+                block[b] = buf[b] ~ low_byte(U64{t} >> (56 - 8 * b))
                 block[8 + b] = buf[8 * i + b]
             }
             one = [U8]{}
@@ -1155,25 +1153,25 @@ kw_unwrap: fn(k: AESKey, padded: Bool, wrapped: [U8]) -> [U8] CipherError! {
     diff := U64{0}
     plen := U64{len - 8}
     if padded {
-        loop i in 0..<4 -> diff = diff.bit_or(U64{buf[i].bit_xor(KWP_ICV2[i])})
+        loop i in 0..<4 -> diff |= U64{buf[i] ~ KWP_ICV2[i]}
         mli := U64{0}
-        loop i in 0..<4 -> mli = (mli << 8).bit_or(U64{buf[4 + i]})
+        loop i in 0..<4 -> mli = (mli << 8) | U64{buf[4 + i]}
         // The padding is len - 8 - MLI bytes: 0 to 7, and all zero. An MLI
         // past len - 8 fails, and is capped there, without a branch.
         room: U64{len - 8}
         over: ct_gt(mli, room)
-        capped: mli.bit_and(over.bit_not()).bit_or(room.bit_and(over))
+        capped: mli &~ over | room & over
         padding: wrapping(room - capped)
-        diff = diff.bit_or(over).bit_or(ct_gt(padding, U64{7}))
-        zeros: padding.bit_and(U64{7})
+        diff = diff | over | ct_gt(padding, U64{7})
+        zeros: padding & U64{7}
         loop i in 0..<8 {
             // Byte 8 + (len - 16) + i is padding when i >= 8 - zeros.
             inside: ct_gt(U64{i + 1}, wrapping(U64{8} - zeros))
-            diff = diff.bit_or(inside.bit_and(U64{buf[len - 8 + i]}))
+            diff |= inside & U64{buf[len - 8 + i]}
         }
         plen = capped
     } else {
-        loop i in 0..<8 -> diff = diff.bit_or(U64{buf[i].bit_xor(U8{KW_ICV1})})
+        loop i in 0..<8 -> diff |= U64{buf[i] ~ U8{KW_ICV1}}
     }
     if !kw_unwrap_ok(diff) {
         core.crypto.wipe(buf)
@@ -1244,9 +1242,7 @@ CBCPaddingCheck: struct {
 }
 
 /// All ones when x is not zero, else zero, without a branch.
-#Overflow(.Wrapping) ct_nonzero: fn(x: U64) -> U64 Never! {
-    U64{0} - ((x.bit_or(U64{0} - x)) >> 63)
-}
+#Overflow(.Wrapping) ct_nonzero: fn(x: U64) -> U64 Never! { U64{0} - ((x | U64{0} - x) >> 63) }
 
 /// The padding of the `len`-byte block at input[off] (mbedtls's
 /// get_*_padding). Every byte is read and the result built from masks,
@@ -1262,31 +1258,31 @@ CBCPaddingCheck: struct {
         .Unpadded -> CBCPaddingCheck{data_len: total, bad: U64{0}}
         .PKCS7 | .ZerosAndLen -> {
             n: U64{input[off + len - 1]}
-            bad := ct_gt(n, total).bit_or(ct_nonzero(n).bit_not())
+            bad := ct_gt(n, total) | ~ct_nonzero(n)
             pad_idx: total - n
             want: if mode == .PKCS7 -> n else -> U64{0}
             checked: if mode == .PKCS7 -> len else -> len - 1
             loop i in 0..<checked {
                 inside: ct_gt(U64{i + 1}, pad_idx)
-                bad = bad.bit_or(inside.bit_and(ct_nonzero(U64{input[off + i]}.bit_xor(want))))
+                bad |= inside & ct_nonzero(U64{input[off + i]} ~ want)
             }
-            CBCPaddingCheck{data_len: pad_idx.bit_and(bad.bit_not()), bad: bad}
+            CBCPaddingCheck{data_len: pad_idx &~ bad, bad: bad}
         }
         .OneAndZeros -> {
-            in_padding := U64{0}.bit_not()
-            bad := U64{0}.bit_not()
+            in_padding := ~U64{0}
+            bad := ~U64{0}
             at := U64{0}
             i := len - 1
             loop i >= 0 {
                 b: U64{input[off + i]}
                 nonzero: ct_nonzero(b)
-                hit: nonzero.bit_and(in_padding)
-                at = U64{i}.bit_and(hit).bit_or(at.bit_and(hit.bit_not()))
-                bad = ct_nonzero(b.bit_xor(U64{0x80})).bit_and(hit).bit_or(bad.bit_and(hit.bit_not()))
-                in_padding = in_padding.bit_and(nonzero.bit_not())
+                hit: nonzero & in_padding
+                at = U64{i} & hit | at &~ hit
+                bad = ct_nonzero(b ~ U64{0x80}) & hit | bad &~ hit
+                in_padding &~= nonzero
                 i -= 1
             }
-            CBCPaddingCheck{data_len: at.bit_and(bad.bit_not()), bad: bad}
+            CBCPaddingCheck{data_len: at &~ bad, bad: bad}
         }
         .Zeros -> {
             done := U64{0}
@@ -1294,9 +1290,9 @@ CBCPaddingCheck: struct {
             i := len
             loop i > 0 {
                 was: done
-                done = done.bit_or(ct_nonzero(U64{input[off + i - 1]}))
-                turned: done.bit_xor(was)
-                at = U64{i}.bit_and(turned).bit_or(at.bit_and(turned.bit_not()))
+                done |= ct_nonzero(U64{input[off + i - 1]})
+                turned: done ~ was
+                at = U64{i} & turned | at &~ turned
                 i -= 1
             }
             CBCPaddingCheck{data_len: at, bad: U64{0}}
@@ -1366,7 +1362,7 @@ CBCPaddingCheck: struct {
     assert(wrapped == [U8]{0x1f, 0xa6, 0x8b, 0x0a, 0x81, 0x12, 0xb4, 0x47, 0xae, 0xf3, 0x4b, 0xd8, 0xfb, 0x5a, 0x7b, 0x82, 0x9d, 0x3e, 0x86, 0x23, 0x71, 0xd2, 0xcf, 0xe5})
     assert((kw_unwrap(wrap_key, false, wrapped) ?? panic("unwrap")) == data)
     forged := wrapped.copy()
-    forged[3] = forged[3].bit_xor(U8{1})
+    forged[3] = forged[3] ~ U8{1}
     refused: if kw_unwrap(wrap_key, false, forged) == {
         .Ok(_) -> false
         .Err(e) -> e == .Auth

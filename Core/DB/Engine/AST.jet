@@ -780,7 +780,7 @@ error: fn(a: &AST, msg: String) Never! { error_at(a, msg, -1) }
 // is not part of an ON clause and has a positive offset.
 expr_offset: fn(a: AST, e0: Int) -> Int Never! {
     e := e0
-    loop e >= 0 && (has(a, e, EP_OUTER_ON.bit_or(EP_INNER_ON)) || a.exprs[e].w <= 0) {
+    loop e >= 0 && (has(a, e, EP_OUTER_ON | EP_INNER_ON) || a.exprs[e].w <= 0) {
         e = a.exprs[e].left
     }
     if e < 0 -> return -1
@@ -798,7 +798,7 @@ expr_set_error_offset: fn(a: &AST, e: Int, offset: Int) Never! {
     if e < 0 {
         return
     }
-    if has(a, e, EP_OUTER_ON.bit_or(EP_INNER_ON)) {
+    if has(a, e, EP_OUTER_ON | EP_INNER_ON) {
         return
     }
     a.exprs[e].w = offset
@@ -807,9 +807,9 @@ expr_set_error_offset: fn(a: &AST, e: Int, offset: Int) Never! {
 // ---------------------------------------------------------------------------
 // Expressions (expr.c).
 
-has: fn(a: AST, e: Int, f: Int) -> Bool Never! { a.exprs[e].flags.bit_and(f) != 0 }
+has: fn(a: AST, e: Int, f: Int) -> Bool Never! { a.exprs[e].flags & f != 0 }
 
-set_flags: fn(a: &AST, e: Int, f: Int) Never! { a.exprs[e].flags = a.exprs[e].flags.bit_or(f) }
+set_flags: fn(a: &AST, e: Int, f: Int) Never! { a.exprs[e].flags = a.exprs[e].flags | f }
 
 clear_flags: fn(a: &AST, e: Int, f: Int) Never! {
     a.exprs[e].flags = clear_bits(a.exprs[e].flags, f)
@@ -840,10 +840,10 @@ expr_alloc: fn(a: &AST, op: Int, tok: [U8]?, dequote_it: Bool) -> Int Never! {
     if tok == .Val(t) {
         iv: if op == tk.TK_INTEGER -> get_int32(t) else -> None
         if iv == .Val(v) {
-            e.flags = EP_INT_VALUE.bit_or(EP_LEAF).bit_or(if v != 0 -> EP_IS_TRUE else -> EP_IS_FALSE)
+            e.flags = EP_INT_VALUE | EP_LEAF | (if v != 0 -> EP_IS_TRUE else -> EP_IS_FALSE)
             e.ivalue = v
         } else if dequote_it && t.len() > 0 && is_quote(Int{t[0]}) {
-            e.flags = if t[0] == (U8{34}) -> EP_QUOTED.bit_or(EP_DBL_QUOTED) else -> EP_QUOTED
+            e.flags = if t[0] == (U8{34}) -> EP_QUOTED | EP_DBL_QUOTED else -> EP_QUOTED
             e.token = Val(dequote(t))
         } else { e.token = Val(t) }
     }
@@ -864,13 +864,13 @@ attach_subtrees: fn(a: &AST, root: Int, left: Int, right: Int) Never! {
     if right >= 0 {
         a.exprs[root].right = right
         rf: a.exprs[right].flags
-        set_flags(a, root, EP_PROPAGATE.bit_and(rf))
+        set_flags(a, root, EP_PROPAGATE & rf)
         a.exprs[root].height = a.exprs[right].height + 1
     } else { a.exprs[root].height = 1 }
     if left >= 0 {
         a.exprs[root].left = left
         lf: a.exprs[left].flags
-        set_flags(a, root, EP_PROPAGATE.bit_and(lf))
+        set_flags(a, root, EP_PROPAGATE & lf)
         if a.exprs[left].height >= a.exprs[root].height {
             a.exprs[root].height = a.exprs[left].height + 1
         }
@@ -921,7 +921,7 @@ expr_set_height: fn(a: &AST, e: Int) Never! {
     if has(a, e, EP_X_IS_SELECT) -> h = height_of_select(a, a.exprs[e].x, h) else if a.exprs[e].x >= 0 {
         h = height_of_list(a, a.exprs[e].x, h)
         lflags: expr_list_flags(a, a.exprs[e].x)
-        set_flags(a, e, EP_PROPAGATE.bit_and(lflags))
+        set_flags(a, e, EP_PROPAGATE & lflags)
     }
     a.exprs[e].height = h + 1
 }
@@ -937,7 +937,7 @@ set_height_and_flags: fn(a: &AST, e: Int) Never! {
 
 // sqlite3PExpr: an interior node over two subtrees.
 pexpr: fn(a: &AST, op: Int, left: Int, right: Int) -> Int Never! {
-    e: push_expr(a, zero_expr(op.bit_and(255)))
+    e: push_expr(a, zero_expr(op & 255))
     attach_subtrees(a, e, left, right)
     _ := check_height(a, a.exprs[e].height)
     e
@@ -950,7 +950,7 @@ pexpr_add_select: fn(a: &AST, e: Int, sel: Int) Never! {
         return
     }
     a.exprs[e].x = sel
-    set_flags(a, e, EP_X_IS_SELECT.bit_or(EP_SUBQUERY))
+    set_flags(a, e, EP_X_IS_SELECT | EP_SUBQUERY)
     set_height_and_flags(a, e)
 }
 
@@ -975,7 +975,7 @@ expr_list_to_values: fn(a: &AST, nelem: Int, list: Int) -> Int Never! {
         ret = sel
     }
     if ret >= 0 && a.selects[ret].prior >= 0 {
-        a.selects[ret].sel_flags = a.selects[ret].sel_flags.bit_or(SF_MULTI_VALUE)
+        a.selects[ret].sel_flags = a.selects[ret].sel_flags | SF_MULTI_VALUE
     }
     expr_list_delete(a, list)
     ret
@@ -986,8 +986,8 @@ expr_list_to_values: fn(a: &AST, nelem: Int, list: Int) -> Int Never! {
 expr_and: fn(a: &AST, left: Int, right: Int) -> Int Never! {
     if left < 0 -> return right
     if right < 0 -> return left
-    f: a.exprs[left].flags.bit_or(a.exprs[right].flags)
-    if f.bit_and(EP_OUTER_ON.bit_or(EP_INNER_ON).bit_or(EP_IS_FALSE)) == EP_IS_FALSE && !in_rename(a) {
+    f: a.exprs[left].flags | a.exprs[right].flags
+    if f & (EP_OUTER_ON | EP_INNER_ON | EP_IS_FALSE) == EP_IS_FALSE && !in_rename(a) {
         // sqlite3ExprDeferredDelete: both sides are deleted with the parse.
         return expr(a, tk.TK_INTEGER, "0".bytes())
     }
@@ -1049,7 +1049,7 @@ expr_add_function_order_by: fn(a: &AST, e: Int, order_by: Int) Never! {
 }
 
 // The value of a ynVar (an i16 when SQLITE_MAX_VARIABLE_NUMBER <= 32767).
-to_i16: fn(v: Int) -> Int Never! { (v + 32768).bit_and(65535) - 32768 }
+to_i16: fn(v: Int) -> Int Never! { ((v + 32768) & 65535) - 32768 }
 
 vlist_num_to_name: fn(a: AST, num: Int) -> [U8]? Never! {
     loop v in a.ctx.vlist {
@@ -1114,7 +1114,7 @@ expr_delete: fn(a: &AST, e: Int) Never! {
     if e < 0 {
         return
     }
-    if has(a, e, EP_TOKEN_ONLY.bit_or(EP_LEAF)) {
+    if has(a, e, EP_TOKEN_ONLY | EP_LEAF) {
         return
     }
     if a.exprs[e].left >= 0 && a.exprs[e].op != tk.TK_SELECT_COLUMN {
@@ -1245,9 +1245,7 @@ expr_list_set_sort_order: fn(a: &AST, list: Int, order0: Int, nulls: Int) Never!
     a.lists[list].items[i].sort_flags = order
     if nulls != SO_UNDEFINED {
         a.lists[list].items[i].nulls = true
-        if order != nulls {
-            a.lists[list].items[i].sort_flags = order.bit_or(base.KEYINFO_ORDER_BIGNULL)
-        }
+        if order != nulls -> a.lists[list].items[i].sort_flags = order | base.KEYINFO_ORDER_BIGNULL
     }
 }
 
@@ -1292,7 +1290,7 @@ expr_list_delete: fn(a: &AST, list: Int) Never! {
 // sqlite3ExprListFlags.
 expr_list_flags: fn(a: AST, list: Int) -> Int Never! {
     m := 0
-    loop i in 0..<list_len(a, list) -> m = m.bit_or(a.exprs[list_expr(a, list, i)].flags)
+    loop i in 0..<list_len(a, list) -> m |= a.exprs[list_expr(a, list, i)].flags
     m
 }
 
@@ -1302,7 +1300,7 @@ expr_add_collate_token: fn(a: &AST, e: Int, name: [U8], dequote_it: Bool) -> Int
     if name.len() == 0 -> return e
     c: expr_alloc(a, tk.TK_COLLATE, Val(name), dequote_it)
     a.exprs[c].left = e
-    set_flags(a, c, EP_COLLATE.bit_or(EP_SKIP))
+    set_flags(a, c, EP_COLLATE | EP_SKIP)
     c
 }
 
@@ -1321,7 +1319,7 @@ skip_collate: fn(a: AST, e0: Int) -> Int Never! {
 // sqlite3ExprSkipCollateAndLikely.
 skip_collate_and_likely: fn(a: AST, e0: Int) -> Int Never! {
     e := e0
-    loop e >= 0 && has(a, e, EP_SKIP.bit_or(EP_UNLIKELY)) {
+    loop e >= 0 && has(a, e, EP_SKIP | EP_UNLIKELY) {
         if has(a, e, EP_UNLIKELY) -> e = list_expr(a, a.exprs[e].x, 0) else -> e = a.exprs[e].left
     }
     e
@@ -1337,7 +1335,7 @@ is_true_or_false: fn(z: [U8]) -> Int Never! {
 // sqlite3ExprIdToTrueFalse: turn an unquoted TRUE or FALSE identifier into
 // a TK_TRUEFALSE node.
 expr_id_to_true_false: fn(a: &AST, e: Int) -> Bool Never! {
-    if has(a, e, EP_QUOTED.bit_or(EP_INT_VALUE)) -> return false
+    if has(a, e, EP_QUOTED | EP_INT_VALUE) -> return false
     v: is_true_or_false(a.exprs[e].token ?? [U8]{})
     if v == 0 -> return false
     a.exprs[e].op = tk.TK_TRUEFALSE
@@ -1353,11 +1351,11 @@ expr_truth_value: fn(a: AST, e0: Int) -> Bool Never! {
 
 // ExprAlwaysTrue / ExprAlwaysFalse (sqliteInt.h).
 always_true: fn(a: AST, e: Int) -> Bool Never! {
-    a.exprs[e].flags.bit_and(EP_OUTER_ON.bit_or(EP_IS_TRUE)) == EP_IS_TRUE
+    a.exprs[e].flags & (EP_OUTER_ON | EP_IS_TRUE) == EP_IS_TRUE
 }
 
 always_false: fn(a: AST, e: Int) -> Bool Never! {
-    a.exprs[e].flags.bit_and(EP_OUTER_ON.bit_or(EP_IS_FALSE)) == EP_IS_FALSE
+    a.exprs[e].flags & (EP_OUTER_ON | EP_IS_FALSE) == EP_IS_FALSE
 }
 
 // sqlite3ExprSimplifiedAndOr.
@@ -1429,17 +1427,17 @@ expr_dup_node: fn(a: &AST, p: Int, flags: Int, in_buf: Bool) -> Int Never! {
     size: duped_struct_size(a, p, flags)
     n := src.copy()
     cut_to_size(n, if flags != 0 -> size else -> expr_struct_size(a, p))
-    fl := clear_bits(n.flags, EP_REDUCED.bit_or(EP_TOKEN_ONLY).bit_or(EP_STATIC))
-    if size == SIZE_REDUCED -> fl = fl.bit_or(EP_REDUCED)
-    if size == SIZE_TOKEN_ONLY -> fl = fl.bit_or(EP_TOKEN_ONLY)
-    if in_buf -> fl = fl.bit_or(EP_STATIC)
+    fl := clear_bits(n.flags, EP_REDUCED | EP_TOKEN_ONLY | EP_STATIC)
+    if size == SIZE_REDUCED -> fl |= EP_REDUCED
+    if size == SIZE_TOKEN_ONLY -> fl |= EP_TOKEN_ONLY
+    if in_buf -> fl |= EP_STATIC
     n.flags = fl
     id: push_expr(a, n)
-    if src.flags.bit_or(fl).bit_and(EP_TOKEN_ONLY.bit_or(EP_LEAF)) != 0 -> return id
-    if src.flags.bit_and(EP_X_IS_SELECT) != 0 -> a.exprs[id].x = select_dup(a, src.x, flags) else {
+    if (src.flags | fl) & (EP_TOKEN_ONLY | EP_LEAF) != 0 -> return id
+    if src.flags & EP_X_IS_SELECT != 0 -> a.exprs[id].x = select_dup(a, src.x, flags) else {
         a.exprs[id].x = expr_list_dup(a, src.x, if src.op != tk.TK_ORDER -> flags else -> 0)
     }
-    if src.flags.bit_and(EP_WIN_FUNC) != 0 -> a.exprs[id].y = window_dup(a, id, src.y)
+    if src.flags & EP_WIN_FUNC != 0 -> a.exprs[id].y = window_dup(a, id, src.y)
     if flags != 0 {
         if src.op == tk.TK_SELECT_COLUMN -> a.exprs[id].left = src.left else {
             a.exprs[id].left = if src.left >= 0 -> expr_dup_node(a, src.left, EXPRDUP_REDUCE, true) else -> -1
@@ -1689,11 +1687,9 @@ expr_compare_with: fn<M: SQLVarMatch>(m: &M, a: &AST, pa: Int, pb: Int, itab: In
     if a.exprs[pa].op == tk.TK_VARIABLE && m.var_match(a, pa, pb) -> return 0
     fa: a.exprs[pa].flags
     fb: a.exprs[pb].flags
-    combined: fa.bit_or(fb)
-    if combined.bit_and(EP_INT_VALUE) != 0 {
-        if fa.bit_and(fb).bit_and(EP_INT_VALUE) != 0 && a.exprs[pa].ivalue == a.exprs[pb].ivalue {
-            return 0
-        }
+    combined: fa | fb
+    if combined & EP_INT_VALUE != 0 {
+        if fa & fb & EP_INT_VALUE != 0 && a.exprs[pa].ivalue == a.exprs[pb].ivalue -> return 0
         return 2
     }
     opa: a.exprs[pa].op
@@ -1723,16 +1719,16 @@ expr_compare_with: fn<M: SQLVarMatch>(m: &M, a: &AST, pa: Int, pb: Int, itab: In
             return 2
         }
     }
-    dc: EP_DISTINCT.bit_or(EP_COMMUTED)
-    if fa.bit_and(dc) != fb.bit_and(dc) -> return 2
-    if combined.bit_and(EP_TOKEN_ONLY) == 0 {
-        if combined.bit_and(EP_X_IS_SELECT) != 0 -> return 2
-        if combined.bit_and(EP_FIXED_COL) == 0 && expr_compare_with<M>(m, a, a.exprs[pa].left, a.exprs[pb].left, itab) != 0 {
+    dc: EP_DISTINCT | EP_COMMUTED
+    if fa & dc != fb & dc -> return 2
+    if combined & EP_TOKEN_ONLY == 0 {
+        if combined & EP_X_IS_SELECT != 0 -> return 2
+        if combined & EP_FIXED_COL == 0 && expr_compare_with<M>(m, a, a.exprs[pa].left, a.exprs[pb].left, itab) != 0 {
             return 2
         }
         if expr_compare_with<M>(m, a, a.exprs[pa].right, a.exprs[pb].right, itab) != 0 -> return 2
         if expr_list_compare(a, a.exprs[pa].x, a.exprs[pb].x, itab) != 0 -> return 2
-        if opa != tk.TK_STRING && opa != tk.TK_TRUEFALSE && combined.bit_and(EP_REDUCED) == 0 {
+        if opa != tk.TK_STRING && opa != tk.TK_TRUEFALSE && combined & EP_REDUCED == 0 {
             if a.exprs[pa].icolumn != a.exprs[pb].icolumn -> return 2
             if a.exprs[pa].op2 != a.exprs[pb].op2 && opa == tk.TK_TRUTH -> return 2
             if opa != tk.TK_IN && a.exprs[pa].itable != a.exprs[pb].itable && a.exprs[pa].itable != itab {
@@ -1839,8 +1835,8 @@ walk_expr: fn<W: SQLWalker>(w: &W, a: &AST, e0: Int) -> Int Never! {
     e := e0
     loop {
         rc: w.walk_expr_cb(a, e)
-        if rc != 0 -> return rc.bit_and(WRC_ABORT)
-        if !has(a, e, EP_TOKEN_ONLY.bit_or(EP_LEAF)) {
+        if rc != 0 -> return rc & WRC_ABORT
+        if !has(a, e, EP_TOKEN_ONLY | EP_LEAF) {
             if a.exprs[e].left >= 0 && walk_expr<W>(w, a, a.exprs[e].left) != 0 -> return WRC_ABORT
             if a.exprs[e].right >= 0 {
                 e = a.exprs[e].right
@@ -1909,7 +1905,7 @@ walk_select: fn<W: SQLWalker>(w: &W, a: &AST, s0: Int) -> Int Never! {
     s := s0
     loop s >= 0 {
         rc: w.walk_select_cb(a, s)
-        if rc != 0 -> return rc.bit_and(WRC_ABORT)
+        if rc != 0 -> return rc & WRC_ABORT
         if walk_select_expr<W>(w, a, s) != 0 || walk_select_from<W>(w, a, s) != 0 {
             return WRC_ABORT
         }
@@ -2072,7 +2068,7 @@ tok_is: fn(a: AST, t: SQLTok, kw: [U8]) -> Bool Never! {
 // `pb` and `pc` have z -1 when absent.
 join_type: fn(a: &AST, pa: SQLTok, pb: SQLTok, pc: SQLTok) -> Int Never! {
     words: [String]{"natural", "left", "outer", "right", "full", "inner", "cross"}
-    codes: [Int]{JT_NATURAL, JT_LEFT.bit_or(JT_OUTER), JT_OUTER, JT_RIGHT.bit_or(JT_OUTER), JT_LEFT.bit_or(JT_RIGHT).bit_or(JT_OUTER), JT_INNER, JT_INNER.bit_or(JT_CROSS)}
+    codes: [Int]{JT_NATURAL, JT_LEFT | JT_OUTER, JT_OUTER, JT_RIGHT | JT_OUTER, JT_LEFT | JT_RIGHT | JT_OUTER, JT_INNER, JT_INNER | JT_CROSS}
     all: [SQLTok]{pa, pb, pc}
     jt := 0
     loop i in 0..<3 {
@@ -2080,17 +2076,17 @@ join_type: fn(a: &AST, pa: SQLTok, pb: SQLTok, pc: SQLTok) -> Int Never! {
         j := 0
         loop j < 7 {
             if tok_is(a, all[i], words[j].bytes()) {
-                jt = jt.bit_or(codes[j])
+                jt |= codes[j]
                 break
             }
             j += 1
         }
         if j >= 7 {
-            jt = jt.bit_or(JT_ERROR)
+            jt |= JT_ERROR
             break
         }
     }
-    if jt.bit_and(JT_INNER.bit_or(JT_OUTER)) == JT_INNER.bit_or(JT_OUTER) || jt.bit_and(JT_ERROR) != 0 || jt.bit_and(JT_OUTER.bit_or(JT_LEFT).bit_or(JT_RIGHT)) == JT_OUTER {
+    if jt & (JT_INNER | JT_OUTER) == JT_INNER | JT_OUTER || jt & JT_ERROR != 0 || jt & (JT_OUTER | JT_LEFT | JT_RIGHT) == JT_OUTER {
         sp1: if pb.z < 0 -> "" else -> " "
         sp2: if pc.z < 0 -> "" else -> " "
         ta: tok_text(a, pa)
@@ -2222,9 +2218,7 @@ src_list_append_from_term: fn(a: &AST, p: Int, table: [U8]?, database: [U8]?, al
     if alias.len() > 0 -> a.items[si].alias = Val(dequote(alias))
     if sub >= 0 {
         a.items[si].select = sub
-        if a.selects[sub].sel_flags.bit_and(SF_NESTED_FROM) != 0 {
-            a.items[si].is_nested_from = true
-        }
+        if a.selects[sub].sel_flags & SF_NESTED_FROM != 0 -> a.items[si].is_nested_from = true
     }
     if using >= 0 {
         a.items[si].is_using = true
@@ -2258,7 +2252,7 @@ src_list_append_list: fn(a: &AST, p1: Int, p2: Int) -> Int Never! {
     loop i in 0..<n2 -> a.srclists[p1].items[1 + i] = a.srclists[p2].items[i]
     first: a.srclists[p1].items[0]
     second: a.srclists[p1].items[1]
-    a.items[first].jointype = a.items[first].jointype.bit_or(JT_LTORJ.bit_and(a.items[second].jointype))
+    a.items[first].jointype = a.items[first].jointype | JT_LTORJ & a.items[second].jointype
     p1
 }
 
@@ -2286,17 +2280,17 @@ src_list_shift_join_type: fn(a: &AST, s: Int) Never! {
     loop i > 0 {
         jt: a.items[src_item(a, s, i - 1)].jointype
         a.items[src_item(a, s, i)].jointype = jt
-        all = all.bit_or(jt)
+        all |= jt
         i -= 1
     }
     a.items[src_item(a, s, 0)].jointype = 0
-    if all.bit_and(JT_RIGHT) != 0 {
+    if all & JT_RIGHT != 0 {
         i = n - 1
-        loop i > 0 && a.items[src_item(a, s, i)].jointype.bit_and(JT_RIGHT) == 0 -> i -= 1
+        loop i > 0 && a.items[src_item(a, s, i)].jointype & JT_RIGHT == 0 -> i -= 1
         i -= 1
         loop i >= 0 {
             si: src_item(a, s, i)
-            a.items[si].jointype = a.items[si].jointype.bit_or(JT_LTORJ)
+            a.items[si].jointype = a.items[si].jointype | JT_LTORJ
             i -= 1
         }
     }
@@ -2460,7 +2454,7 @@ window_alloc: fn(a: &AST, frm_type: Int, start_type: Int, start_expr: Int, end_t
     w.start_type = start_type
     w.end_type = end_type
     exclude := exclude0
-    if exclude == 0 && a.opt_flags.bit_and(OPT_WINDOW_FUNC) != 0 -> exclude = tk.TK_NO
+    if exclude == 0 && a.opt_flags & OPT_WINDOW_FUNC != 0 -> exclude = tk.TK_NO
     w.exclude = exclude
     w.implicit_frame = implicit
     a.windows.push(w)
@@ -2527,7 +2521,7 @@ window_attach: fn(a: &AST, e: Int, w: Int) Never! {
         return
     }
     a.exprs[e].y = w
-    set_flags(a, e, EP_WIN_FUNC.bit_or(EP_FULL_SIZE))
+    set_flags(a, e, EP_WIN_FUNC | EP_FULL_SIZE)
     a.windows[w].owner = e
     if has(a, e, EP_DISTINCT) && a.windows[w].frm_type != tk.TK_FILTER {
         error(a, "DISTINCT is not supported for window functions")
@@ -2552,7 +2546,7 @@ window_link: fn(a: &AST, sel: Int, w: Int) Never! {
         a.windows[w].this_kind = THIS_SELECT
         a.windows[w].this_ref = sel
     } else if expr_list_compare(a, a.windows[w].partition, a.windows[head].partition, -1) != 0 {
-        a.selects[sel].sel_flags = a.selects[sel].sel_flags.bit_or(SF_MULTI_PART)
+        a.selects[sel].sel_flags = a.selects[sel].sel_flags | SF_MULTI_PART
     }
 }
 
@@ -2758,7 +2752,7 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
     t_outer: tok_of(a, "outer")
     t_inner: tok_of(a, "inner")
     t_bogus: tok_of(a, "bogus")
-    assert(join_type(a, t_natural, t_left, t_outer) == JT_NATURAL.bit_or(JT_LEFT).bit_or(JT_OUTER))
+    assert(join_type(a, t_natural, t_left, t_outer) == JT_NATURAL | JT_LEFT | JT_OUTER)
     assert(a.ctx.nerr == 0)
     assert(join_type(a, t_inner, t_outer, none) == JT_INNER)
     assert(a.ctx.errmsg == Val("unknown join type: inner outer"))
@@ -2780,14 +2774,14 @@ tok_of: fn(a: AST, word: String) -> SQLTok Never! {
 #Test("join operators move to their right operand") {
     a := stmt_ast("")
     s := src_list_append(a, -1, Val("a".bytes()), None)
-    a.items[src_item(a, s, 0)].jointype = JT_LEFT.bit_or(JT_OUTER)
+    a.items[src_item(a, s, 0)].jointype = JT_LEFT | JT_OUTER
     s = src_list_append(a, s, Val("b".bytes()), None)
-    a.items[src_item(a, s, 1)].jointype = JT_RIGHT.bit_or(JT_OUTER)
+    a.items[src_item(a, s, 1)].jointype = JT_RIGHT | JT_OUTER
     s = src_list_append(a, s, Val("c".bytes()), None)
     src_list_shift_join_type(a, s)
     assert(a.items[src_item(a, s, 0)].jointype == JT_LTORJ)
-    assert(a.items[src_item(a, s, 1)].jointype == JT_LEFT.bit_or(JT_OUTER).bit_or(JT_LTORJ))
-    assert(a.items[src_item(a, s, 2)].jointype == JT_RIGHT.bit_or(JT_OUTER))
+    assert(a.items[src_item(a, s, 1)].jointype == JT_LEFT | JT_OUTER | JT_LTORJ)
+    assert(a.items[src_item(a, s, 2)].jointype == JT_RIGHT | JT_OUTER)
 }
 
 #Test("windows link into and out of their SELECT") {

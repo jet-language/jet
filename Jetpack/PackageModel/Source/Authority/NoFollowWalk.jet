@@ -102,7 +102,7 @@ pkg_authority_has_candidate: fn(root: String) -[FS, Env]> Bool AuthorityError! {
 // A world-writable directory is shared discovery space, never an authority.
 pkg_authority_is_shared_directory: fn(info: files.Stat) -[Env]> Bool Never! {
     if !sys.is_unix() -> return false
-    ((info.mode).bit_and(0o002)) != 0
+    ((info.mode) & 0o002) != 0
 }
 
 pkg_authority_is_shared_directory_path: fn(path: String) -[FS, Env]> Bool Never! {

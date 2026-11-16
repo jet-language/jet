@@ -295,7 +295,7 @@ signal_hub_ensure: fn() -> I64 {
     bit: I64{1} << (number - I64{1})
     loop {
         pending: sync_load(hub)
-        if (sync_cas(hub, pending, pending.bit_or(bit)) == pending) { break }
+        if (sync_cas(hub, pending, pending | bit) == pending) { break }
     }
     I64{0}
 }
@@ -408,11 +408,11 @@ signal_hub_dispatch: fn(hub: I64) {
     at := I64{0}
     loop at < sync_load(subscriptions) {
         sub: sync_load(wrapping(sync_load(wrapping(subscriptions + I64{16})) + at * I64{8}))
-        delivered: taken.bit_and(sync_load(wrapping(sub + I64{8})))
+        delivered: taken & sync_load(wrapping(sub + I64{8}))
         if (delivered != I64{0}) {
             index := I64{0}
             loop index < (I64{64}) {
-                if (delivered.bit_and(I64{1} << index) != I64{0}) {
+                if (delivered & I64{1} << index != I64{0}) {
                     signal_hub_send(sync_load(wrapping(sub + I64{16})), sync_load(wrapping(sync_load(wrapping(sub + I64{32})) + index * I64{8})), meta)
                 }
                 index += I64{1}
@@ -443,7 +443,7 @@ signal_hub_dispatch: fn(hub: I64) {
 // yet, with its own unbounded channel; its id. An on_signal subscription
 // (cancels_root) looks up the root task control here, on the subscriber.
 #Export(c) jet_process_signal_open_raw: fn(cancels_root: I64) -> I64 {
-    cancels: cancels_root.bit_and(I64{255}) != I64{0}
+    cancels: cancels_root & I64{255} != I64{0}
     if cancels -> scheduler_control_drop(scheduler_root_task_control())
     hub: signal_hub_ensure()
     channel: channel_new(I64{-1}, I64{0}, I64{0})
@@ -486,13 +486,13 @@ signal_hub_dispatch: fn(hub: I64) {
     sub: signal_hub_find(hub, native_id)
     status := if (sub == I64{0}) -> I64{-22} else -> I64{0}
     bit: I64{1} << (native - I64{1})
-    if (sub != I64{0} && sync_load(wrapping(sub + I64{8})).bit_and(bit) == I64{0}) {
+    if (sub != I64{0} && sync_load(wrapping(sub + I64{8})) & bit == I64{0}) {
         holders: wrapping(sync_load(wrapping(hub + I64{40})) + (native - I64{1}) * I64{8})
         if (sync_load(holders) == I64{0}) { status = signal_hub_install(hub, native) }
         if (status >= I64{0}) {
             sync_store(holders, sync_load(holders) + I64{1})
             sync_store(wrapping(sync_load(wrapping(sub + I64{32})) + (native - I64{1}) * I64{8}), signal)
-            sync_store(wrapping(sub + I64{8}), sync_load(wrapping(sub + I64{8})).bit_or(bit))
+            sync_store(wrapping(sub + I64{8}), sync_load(wrapping(sub + I64{8})) | bit)
         }
     }
     sync_mutex_unlock(wrapping(hub + I64{8}))
@@ -552,7 +552,7 @@ signal_hub_dispatch: fn(hub: I64) {
         held: sync_load(wrapping(sub + I64{8}))
         number := I64{1}
         loop number <= (I64{64}) {
-            if (held.bit_and(I64{1} << (number - I64{1})) != I64{0}) {
+            if (held & I64{1} << (number - I64{1}) != I64{0}) {
                 holders: wrapping(sync_load(wrapping(hub + I64{40})) + (number - I64{1}) * I64{8})
                 left: sync_load(holders) - I64{1}
                 sync_store(holders, left)
@@ -584,7 +584,7 @@ signal_hub_dispatch: fn(hub: I64) {
         host_sample_out(I64{-22}, available, value, errno)
         return
     }
-    handler: if (ignore.bit_and(I64{255}) != I64{0}) -> I64{1} else -> I64{0}
+    handler: if (ignore & I64{255} != I64{0}) -> I64{1} else -> I64{0}
     hub: signal_hub_ensure()
     sync_mutex_lock(wrapping(hub + I64{8}))
     status := I64{-16}

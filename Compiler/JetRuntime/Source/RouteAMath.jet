@@ -17,10 +17,10 @@ random_state_key := I64{0}
     }
 }
 
-random_thread_state: fn() -> I64 { jet_rt_tls_get(random_state_key).bit_xor(RANDOM_DEFAULT_STATE) }
+random_thread_state: fn() -> I64 { jet_rt_tls_get(random_state_key) ~ RANDOM_DEFAULT_STATE }
 
 random_thread_store: fn(value: I64) {
-    jet_rt_tls_set(random_state_key, value.bit_xor(RANDOM_DEFAULT_STATE))
+    jet_rt_tls_set(random_state_key, value ~ RANDOM_DEFAULT_STATE)
 }
 
 // The raw u64 bits, not an exact Int.

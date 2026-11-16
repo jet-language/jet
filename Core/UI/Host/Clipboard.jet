@@ -24,7 +24,7 @@ write_text: fn(text: String) -[IO]> UIClipboardWrite UIHostError! {
     }
     characters := 0
     loop byte in text.bytes() {
-        if (Int{byte}).bit_and(192) != 128 -> characters += 1
+        if (Int{byte}) & 192 != 128 -> characters += 1
     }
     Ok(UIClipboardWrite{characters: characters})
 }

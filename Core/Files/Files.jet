@@ -88,7 +88,7 @@ path_component_encode: fn(component: String) -> String Never! {
         if keep -> out.push(byte) else {
             out.push(U8{37})
             out.push(hex[Int{byte} >> 4])
-            out.push(hex[Int{byte}.bit_and(15)])
+            out.push(hex[Int{byte} & 15])
         }
     }
     String.from_bytes(out) ?? panic("percent-encoded path text is ASCII")
@@ -1255,7 +1255,7 @@ is_fifo: fn(path: String | Path) -[FS.Read]> Bool IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     mode: core.files.__stat_mode_raw(text)
-    Ok((mode.bit_and(61440)) == 4096)
+    Ok((mode & 61440) == 4096)
 }
 
 files8_u32: fn(value: Int) -> Bool Never! { value >= 0 && value <= 4294967295 }
@@ -1731,7 +1731,7 @@ is_socket: fn(path: String | Path) -[FS.Read]> Bool IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     mode: core.files.__stat_mode_raw(text)
-    Ok((mode.bit_and(61440)) == 49152)
+    Ok((mode & 61440) == 49152)
 }
 
 read_link: fn(path: String | Path) -[FS.Read]> String IOError! {
@@ -3100,9 +3100,9 @@ trim_file_line: fn(bytes: &[U8]) Never! {
     assert(files8_u32(0))
     assert(files8_u32(4294967295))
     assert(!files8_u32(4294967296))
-    assert(((4096).bit_and(61440)) == 4096)
-    assert(((8192).bit_and(61440)) != 4096)
-    assert(((32768).bit_and(61440)) != 4096)
+    assert(((4096) & 61440) == 4096)
+    assert(((8192) & 61440) != 4096)
+    assert(((32768) & 61440) != 4096)
 }
 
 #Test("walk owns zero-based depth, path sorting and inherited ignore rules") {

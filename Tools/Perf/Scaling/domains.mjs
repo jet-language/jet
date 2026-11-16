@@ -423,9 +423,9 @@ const gui = [
 // ------------------------------------------------------------- embedded
 
 const embeddedCommon = [
-  'set_bit: fn(value: Int, bit: Int) -> Int { value.bit_or(1 << bit) }', '',
-  'clear_bit: fn(value: Int, bit: Int) -> Int { value.bit_and(65535 - (1 << bit)) }', '',
-  'read_field: fn(value: Int, shift: Int, mask: Int) -> Int { (value >> shift).bit_and(mask) }', '',
+  'set_bit: fn(value: Int, bit: Int) -> Int { value | 1 << bit }', '',
+  'clear_bit: fn(value: Int, bit: Int) -> Int { value & 65535 - (1 << bit) }', '',
+  'read_field: fn(value: Int, shift: Int, mask: Int) -> Int { (value >> shift) & mask }', '',
 ];
 
 const embedded = [
@@ -433,8 +433,8 @@ const embedded = [
     entry: `regs${i}_main`, helpers: [`regs${i}_mask`],
     lines: [
       `REG${i}_CTRL: ${r.int(16, 255)}`, `REG${i}_STATUS: ${r.int(16, 255)}`, `REG${i}_DATA: ${r.int(256, 4095)}`, '',
-      `regs${i}_mask: fn(x: Int) -> Int { x.bit_and(${r.int(15, 255)}) }`, '',
-      `regs${i}_configure: fn(ctrl: Int, speed: Int) -> Int {`, '    value := set_bit(ctrl, 0)', '    value = clear_bit(value, 3)', '    value = value.bit_or(speed.bit_and(7) << 4)', '    value.bit_and(65535)', '}', '',
+      `regs${i}_mask: fn(x: Int) -> Int { x & ${r.int(15, 255)} }`, '',
+      `regs${i}_configure: fn(ctrl: Int, speed: Int) -> Int {`, '    value := set_bit(ctrl, 0)', '    value = clear_bit(value, 3)', '    value |= (speed & 7) << 4', '    value & 65535', '}', '',
       `regs${i}_main: fn(seed: Int) -> Int {`, `    ctrl: regs${i}_configure(REG${i}_CTRL, seed % 8)`, `    ready: read_field(REG${i}_STATUS, 2, 3)`,
       `    (ctrl + ready + regs${i}_mask(REG${i}_DATA + seed) + ${helper('ctrl')}) % ${M}`, '}',
     ],
@@ -455,9 +455,9 @@ const embedded = [
       entry: `crc${i}_main`, helpers: [`crc${i}_byte`],
       lines: [
         `crc${i}_table: fn() -> [Int] {`, '    [Int]{', ...[0, 16, 32, 48].map(start => `        ${table.slice(start, start + 16).join(', ')},`), '    }', '}', '',
-        `crc${i}_byte: fn(x: Int) -> Int { crc${i}_table()[x.bit_and(63)] }`, '',
-        `crc${i}_update: fn(crc: Int, bytes: [Int]) -> Int {`, '    value := crc', `    table: crc${i}_table()`, '    loop byte in bytes -> value = ((value >> 4) + table[(value + byte).bit_and(63)]).bit_and(65535)', '    value', '}', '',
-        `crc${i}_main: fn(seed: Int) -> Int {`, '    bytes := [Int]{}', '    loop k in 0..<12 -> &bytes.push((seed * 7 + k).bit_and(255))', `    (crc${i}_update(${r.int(0, 65535)}, bytes) + ${helper('seed')}) % ${M}`, '}',
+        `crc${i}_byte: fn(x: Int) -> Int { crc${i}_table()[x & 63] }`, '',
+        `crc${i}_update: fn(crc: Int, bytes: [Int]) -> Int {`, '    value := crc', `    table: crc${i}_table()`, '    loop byte in bytes -> value = ((value >> 4) + table[(value + byte) & 63]) & 65535', '    value', '}', '',
+        `crc${i}_main: fn(seed: Int) -> Int {`, '    bytes := [Int]{}', '    loop k in 0..<12 -> &bytes.push((seed * 7 + k) & 255)', `    (crc${i}_update(${r.int(0, 65535)}, bytes) + ${helper('seed')}) % ${M}`, '}',
       ],
     };
   },
@@ -466,9 +466,9 @@ const embedded = [
     lines: [
       `Frame${i}: enum {`, '    Sync', '    Header(Int)', '    Payload(remaining: Int, sum: Int)', '    Done(Int)', '}', '',
       `frame${i}_step: fn(state: Frame${i}, byte: Int) -> Frame${i} {`, '    if state == {', `        .Sync -> if byte == ${r.int(120, 130)} -> Frame${i}.Header(0) else -> Frame${i}.Sync`,
-      `        .Header(_) -> Frame${i}.Payload{remaining: byte.bit_and(7), sum: 0}`, `        .Payload(remaining, sum) -> if remaining <= 1 -> Frame${i}.Done(sum + byte) else -> Frame${i}.Payload{remaining: remaining - 1, sum: sum + byte}`,
+      `        .Header(_) -> Frame${i}.Payload{remaining: byte & 7, sum: 0}`, `        .Payload(remaining, sum) -> if remaining <= 1 -> Frame${i}.Done(sum + byte) else -> Frame${i}.Payload{remaining: remaining - 1, sum: sum + byte}`,
       '        .Done(sum) -> if byte == 0 -> state else -> Frame' + i + '.Sync', '    }', '}', '',
-      `frame${i}_main: fn(seed: Int) -> Int {`, `    state := Frame${i}.Sync`, '    done := 0', '    loop k in 0..<24 {', `        state = frame${i}_step(state, (seed + k * 31).bit_and(255))`,
+      `frame${i}_main: fn(seed: Int) -> Int {`, `    state := Frame${i}.Sync`, '    done := 0', '    loop k in 0..<24 {', `        state = frame${i}_step(state, (seed + k * 31) & 255)`,
       '        if state == .Done(sum) -> done += sum', '    }', `    (done + ${helper('done')}) % ${M}`, '}',
     ],
   }),

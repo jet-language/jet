@@ -37,7 +37,7 @@ store_test_set_mtime: fn(path: String, seconds: Int) Never! {
 
 store_test_make_writable: fn(path: String) Never! {
     info: files.stat(path) ?? panic("stat")
-    files.set_mode(path, (info.mode).bit_or(128)) ?? panic("chmod")
+    files.set_mode(path, (info.mode) | 128) ?? panic("chmod")
 }
 
 #Test("store native admission seals after shared cas hardlinking") {

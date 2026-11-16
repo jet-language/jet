@@ -131,7 +131,7 @@ OverlayAuthority: struct {
             .None -> false
         }
         if !unchanged -> return Err(OverlayError.IO("{label} `{path}` changed while it was read"))
-        Ok(OverlayHeldFile{path: path, parent: parent.move(), name: name, handle: handle.move(), identity: identity, mode: (info.mode).bit_and(0o7777), bytes: bytes})
+        Ok(OverlayHeldFile{path: path, parent: parent.move(), name: name, handle: handle.move(), identity: identity, mode: (info.mode) & 0o7777, bytes: bytes})
     }
 }
 

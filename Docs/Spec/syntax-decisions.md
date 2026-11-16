@@ -1376,7 +1376,9 @@ silently. Bool logic keeps `!`, `&&`, `||` and `!=`; the mixups are E0398:
 names `!=`, each with an edit. The `bit-sigils1` migration plan
 (`jet run Compiler/Migrations/Migrate.jet -- bit-sigils1 --write PATH...`)
 rewrites `bit_and`, `bit_or`, `bit_xor` and `bit_not` calls into the sigils,
-adding parentheses only where precedence needs them.
+adding parentheses only where precedence needs them and around a typed literal
+in an `if` or `loop` header. The four methods are gone; a call of one is an
+unknown method.
 Example: `Tests/Run/BitwiseNot/BitSigilsFollowTheirPrecedence.jet`.
 
 **D-CHAINCMP1 — Chained comparisons**: `0 <= sev < 10` desugars to

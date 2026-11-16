@@ -47,7 +47,7 @@ host_descriptor_entry_at: fn(index: I64) -> I64 {
 // The entry a live token names, or 0. The caller holds the table mutex.
 host_descriptor_find: fn(token: I64) -> I64 {
     if (token <= I64{0}) { return I64{0} }
-    index: token.bit_and(HOST_DESCRIPTOR_INDEX_MASK)
+    index: token & HOST_DESCRIPTOR_INDEX_MASK
     if (index >= net_word(host_descriptor_table, I64{24})) { return I64{0} }
     entry: host_descriptor_entry_at(index)
     if (net_word(entry, I64{0}) < I64{0}) { return I64{0} }
@@ -91,7 +91,7 @@ host_descriptor_insert: fn(descriptor: I64, address: I64, size: I64) -> I64 {
     net_put(entry, I64{16}, size)
     net_put(entry, I64{24}, generation)
     sync_mutex_unlock(host_descriptor_table)
-    (generation << HOST_DESCRIPTOR_INDEX_BITS).bit_or(index)
+    (generation << HOST_DESCRIPTOR_INDEX_BITS) | index
 }
 
 // Copies the live entry of `token` into the three words at `out`
@@ -369,7 +369,7 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
             net_put(scratch, I64{16}, left %% I64{1000000000})
         }
         // struct pollfd {fd, events} with revents cleared.
-        net_put(scratch, I64{0}, descriptor.bit_and(I64{4294967295}).bit_or(events << I64{32}))
+        net_put(scratch, I64{0}, descriptor & I64{4294967295} | events << I64{32})
         #Unsafe("scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open") {
             ready = os_syscall_i64(I64{271}, scratch, I64{1}, if (left < I64{0}) -> I64{0} else -> wrapping(scratch + I64{8}), I64{0}, I64{8}, I64{0})
         }
@@ -538,7 +538,7 @@ host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
     height: host_native_int(rows)
     layout: host_native_int(order)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    if (layout < I64{0} || layout > I64{1} || row_bytes <= I64{0} || row_bytes.bit_and(I64{3}) != I64{0} || row_bytes > HOST_SHARED_MAX) {
+    if (layout < I64{0} || layout > I64{1} || row_bytes <= I64{0} || row_bytes & I64{3} != I64{0} || row_bytes > HOST_SHARED_MAX) {
         return host_descriptor_range(HOST_IO_OP_WRITE, error)
     }
     if (x < I64{0} || y < I64{0} || width < I64{0} || height < I64{0} || width > row_bytes /% I64{4} - x || height > HOST_SHARED_MAX /% row_bytes - y) {
@@ -561,7 +561,7 @@ host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
             index += I64{8}
         }
         if (index < span) {
-            net_store_uint(wrapping(base + start + index), I64{4}, host_pixels_padded(net_load_uint(wrapping(data + start + index), I64{4}), layout).bit_and(I64{4294967295}))
+            net_store_uint(wrapping(base + start + index), I64{4}, host_pixels_padded(net_load_uint(wrapping(data + start + index), I64{4}), layout) & I64{4294967295})
         }
         row += I64{1}
     }
@@ -572,12 +572,12 @@ host_shared_span: fn(token: I64, offset: I64, count: I64) -> I64 {
 host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
     // 0xFF000000FF000000: both padding bytes.
     padding: I64{-72057589759737856}
-    if (layout == I64{1}) { return pair.bit_or(padding) }
+    if (layout == I64{1}) { return pair | padding }
     // 0x000000FF000000FF and 0x0000FF000000FF00.
     red_blue: I64{1095216660735}
     green: I64{280375465148160}
-    swapped: (pair.bit_and(red_blue) << I64{16}).bit_or(pair.bit_and(green)).bit_or((pair >> I64{16}).bit_and(red_blue))
-    swapped.bit_or(padding)
+    swapped: ((pair & red_blue) << I64{16}) | pair & green | (pair >> I64{16}) & red_blue
+    swapped | padding
 }
 
 #Export(c) jet_sys_shared_read_raw: fn(token: I64, offset: I64, count: I64, output: I64, length: I64, error: I64) -> I64 {
@@ -604,14 +604,14 @@ host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
     native: host_native_int(token)
     at: host_native_int(offset)
     total: host_native_int(count)
-    pixel: host_native_int(value).bit_and(I64{4294967295})
+    pixel: host_native_int(value) & I64{4294967295}
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if (total < I64{0} || total > HOST_SHARED_MAX) {
         return host_descriptor_range(HOST_IO_OP_WRITE, error)
     }
     base: host_shared_span(native, at, total * I64{4})
     if (base == I64{0}) { return host_descriptor_range(HOST_IO_OP_WRITE, error) }
-    pair: pixel.bit_or(pixel << I64{32})
+    pair: pixel | pixel << I64{32}
     index := I64{0}
     // host_shared_span proved count * 4 bytes from `base` lie inside the live
     // mapping.
@@ -627,7 +627,7 @@ host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
 // `offset` is a multiple of 8 and the word lies inside it, else 0. The
 // mapping is page-aligned, so the word is aligned for the atomic mappings.
 host_shared_word: fn(token: I64, offset: I64) -> I64 {
-    if (offset.bit_and(I64{7}) != I64{0}) { return I64{0} }
+    if (offset & I64{7} != I64{0}) { return I64{0} }
     host_shared_span(token, offset, I64{8})
 }
 

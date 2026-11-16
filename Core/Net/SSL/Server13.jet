@@ -94,7 +94,7 @@ ssl_srv13_suite_suits_psk: fn(info: suites.SSLCiphersuite, id: Int, psk_ciphersu
 // the list's length is odd (ssl_tls13_select_ciphersuite). A PSK hash of
 // None is C's PSA_ALG_NONE.
 ssl_srv13_select_ciphersuite: fn(ssl: ssldefs.SSLContext, cipher_suites: Int, cipher_suites_end: Int, psk_ciphersuite_id: Int, psk_hash_alg: hashes.Md?) -> suites.SSLCiphersuite? Never! {
-    if (cipher_suites_end - cipher_suites).bit_and(1) != 0 -> return None
+    if (cipher_suites_end - cipher_suites) & 1 != 0 -> return None
     p := cipher_suites
     loop p < cipher_suites_end {
         id: ssldefs.ssl_get_u16(ssl.in_buf, p)
@@ -133,9 +133,9 @@ ssl_srv13_parse_key_exchange_modes_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, e
         mode: ssldefs.ssl_u8(ssl.in_buf, p)
         p += 1
         if mode == ssldefs.SSL_TLS1_3_PSK_MODE_PURE {
-            ke_modes = ke_modes.bit_or(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK)
+            ke_modes |= ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK
         } else if mode == ssldefs.SSL_TLS1_3_PSK_MODE_ECDHE {
-            ke_modes = ke_modes.bit_or(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL)
+            ke_modes |= ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL
         } else {
             sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
             return Err(.IllegalParameter)
@@ -163,7 +163,7 @@ ssl_srv13_ticket_usable: fn(session: ssldefs.SSLSession, obfuscated_ticket_age: 
     if server_age > ssldefs.SSL_TLS1_3_MAX_ALLOWED_TICKET_LIFETIME * 1000 -> return false
     // The client's age is in milliseconds, offset by ticket_age_add modulo
     // 2^32.
-    client_age: (obfuscated_ticket_age - session.ticket_age_add).bit_and(0xFFFFFFFF)
+    client_age: (obfuscated_ticket_age - session.ticket_age_add) & 0xFFFFFFFF
     age_diff: server_age - client_age
     age_diff >= -ssldefs.SSL_TLS1_3_TICKET_AGE_TOLERANCE && age_diff <= ssldefs.SSL_TLS1_3_TICKET_AGE_TOLERANCE
 }
@@ -344,12 +344,12 @@ ssl_srv13_parse_pre_shared_key_ext: fn(ssl: &ssldefs.SSLContext, pre_shared_key_
             psk_ciphersuite_id = session.ciphersuite
             // The ticket's flags say the key exchange modes it allows.
             ssl.spool[sn].ticket_flags = session.ticket_flags
-            allowed_key_exchange_modes = session.ticket_flags.bit_and(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL)
+            allowed_key_exchange_modes = session.ticket_flags & ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL
         } else { return Err(.InternalError) }
         psk.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_NONE
-        if allowed_key_exchange_modes.bit_and(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL) != 0 && ssl_srv13_key_exchange_is_psk_ephemeral_available(ssl) {
+        if allowed_key_exchange_modes & ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL != 0 && ssl_srv13_key_exchange_is_psk_ephemeral_available(ssl) {
             psk.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL
-        } else if allowed_key_exchange_modes.bit_and(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK) != 0 && ssl_srv13_key_exchange_is_psk_available(ssl) {
+        } else if allowed_key_exchange_modes & ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK != 0 && ssl_srv13_key_exchange_is_psk_available(ssl) {
             psk.key_exchange_mode = ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK
         }
         if psk.key_exchange_mode == ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_NONE -> next
@@ -492,27 +492,27 @@ ssl_srv13_parse_key_shares_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int)
 // Whether the ClientHello had every extension of a mask
 // (ssl_tls13_client_hello_has_exts).
 ssl_srv13_client_hello_has_exts: fn(ssl: ssldefs.SSLContext, exts_mask: Int) -> Bool Never! {
-    ssl.handshake.received_extensions.bit_and(exts_mask) == exts_mask
+    ssl.handshake.received_extensions & exts_mask == exts_mask
 }
 
 // The extensions an ephemeral key exchange needs
 // (ssl_tls13_client_hello_has_exts_for_ephemeral_key_exchange).
 ssl_srv13_client_hello_has_exts_for_ephemeral_key_exchange: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
-    mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SUPPORTED_GROUPS).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_KEY_SHARE)).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SIG_ALG))
+    mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SUPPORTED_GROUPS) | ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_KEY_SHARE) | ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SIG_ALG)
     ssl_srv13_client_hello_has_exts(ssl, mask)
 }
 
 // The extensions a PSK key exchange needs
 // (ssl_tls13_client_hello_has_exts_for_psk_key_exchange).
 ssl_srv13_client_hello_has_exts_for_psk_key_exchange: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
-    mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PRE_SHARED_KEY).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES))
+    mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PRE_SHARED_KEY) | ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES)
     ssl_srv13_client_hello_has_exts(ssl, mask)
 }
 
 // The extensions a PSK key exchange with an ephemeral key needs
 // (ssl_tls13_client_hello_has_exts_for_psk_ephemeral_key_exchange).
 ssl_srv13_client_hello_has_exts_for_psk_ephemeral_key_exchange: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
-    mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SUPPORTED_GROUPS).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_KEY_SHARE)).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PRE_SHARED_KEY)).bit_or(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES))
+    mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_SUPPORTED_GROUPS) | ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_KEY_SHARE) | ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PRE_SHARED_KEY) | ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES)
     ssl_srv13_client_hello_has_exts(ssl, mask)
 }
 
@@ -597,7 +597,7 @@ ssl_srv13_parse_client_hello: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -
     p += legacy_session_id_len
     cipher_suites_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
     p += 2
-    if cipher_suites_len.bit_and(1) != 0 {
+    if cipher_suites_len & 1 != 0 {
         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError)
         return Err(.DecodeError)
     }
@@ -655,7 +655,7 @@ ssl_srv13_parse_client_hello: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -
     psk_mask: ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PRE_SHARED_KEY)
     loop p < extensions_end {
         // pre_shared_key must be the last extension (RFC 8446 4.2.11).
-        if ssl.handshake.received_extensions.bit_and(psk_mask) != 0 {
+        if ssl.handshake.received_extensions & psk_mask != 0 {
             sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
             return Err(.IllegalParameter)
         }
@@ -683,7 +683,7 @@ ssl_srv13_parse_client_hello: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -
             ssl_srv13_parse_key_exchange_modes_ext(ssl, p, extension_data_end) ?? return Err(err)
         } else if extension_type == ssldefs.TLS_EXT_PRE_SHARED_KEY {
             // psk_key_exchange_modes must come with it (RFC 8446 4.2.9).
-            if ssl.handshake.received_extensions.bit_and(ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES)) == 0 {
+            if ssl.handshake.received_extensions & ssltls.ssl_get_extension_mask(ssldefs.TLS_EXT_PSK_KEY_EXCHANGE_MODES) == 0 {
                 sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
                 return Err(.IllegalParameter)
             }
@@ -702,7 +702,7 @@ ssl_srv13_parse_client_hello: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -
     ssltls.ssl_add_hs_hdr_to_checksum(ssl.handshake, ssldefs.SSL_HS_CLIENT_HELLO, p - buf)
     got_psk := false
     psk := SSLTLS13PskAttributes{}
-    if ssl.handshake.received_extensions.bit_and(psk_mask) != 0 {
+    if ssl.handshake.received_extensions & psk_mask != 0 {
         // The ClientHello up to pre_shared_key; parsing it adds the rest.
         ssltls.ssl_update_checksum(ssl.handshake, ssl.in_buf, buf, pre_shared_key_ext - buf)
         if ssl_srv13_parse_pre_shared_key_ext(ssl, pre_shared_key_ext, pre_shared_key_ext_end, cipher_suites, cipher_suites_end) == {

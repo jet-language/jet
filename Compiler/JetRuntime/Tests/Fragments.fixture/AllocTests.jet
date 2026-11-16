@@ -21,8 +21,8 @@ priv alloc_test_payload: fn(size: I64, align: I64) {
     second: jet_rt_alloc(size, align)
     count: if (size == I64{0}) -> I64{1} else -> size
     alloc_test_require(first != I64{0} && second != I64{0} && first != second)
-    alloc_test_require((first.bit_and(wrapping(align - I64{1}))) == I64{0})
-    alloc_test_require((second.bit_and(wrapping(align - I64{1}))) == I64{0})
+    alloc_test_require((first & wrapping(align - I64{1})) == I64{0})
+    alloc_test_require((second & wrapping(align - I64{1})) == I64{0})
     alloc_test_require(wrapping(first + count) <= second || wrapping(second + count) <= first)
     #Unsafe("both allocations own count bytes; touching their endpoints must not alias each other or their metadata") {
         os_store_u8(first, I64{17})
@@ -296,7 +296,7 @@ alloc_test_nullable: fn() {
     alloc_test_require(small != I64{0})
     jet_rt_free(small, I64{8}, I64{8})
     aligned: alloc_try(I64{0}, I64{8192})
-    alloc_test_require(aligned != I64{0} && (aligned.bit_and(I64{8191})) == I64{0})
+    alloc_test_require(aligned != I64{0} && (aligned & I64{8191}) == I64{0})
     jet_rt_free(aligned, I64{0}, I64{8192})
 }
 
@@ -323,7 +323,7 @@ alloc_test_counts: fn() {
     alloc_test_count(I64{4000})
     alloc_test_count(I64{65537})
     over: jet_rt_alloc(I64{40}, I64{64})
-    alloc_test_require(jet_rt_block_unique(over) && over.bit_and(I64{63}) == I64{0})
+    alloc_test_require(jet_rt_block_unique(over) && over & I64{63} == I64{0})
     jet_rt_free(over, I64{40}, I64{64})
 }
 
@@ -344,7 +344,7 @@ priv alloc_test_zero_mark: fn(size: I64, entry_8: Bool) {
     jet_rt_block_mark_zero(pointer)
     jet_rt_block_mark_zero(pointer)
     #Unsafe("the test holds both owners of this block and its count word") {
-        alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == RC_ZERO_MARK.bit_or(I64{2}))
+        alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == RC_ZERO_MARK | I64{2})
     }
     alloc_test_require(!jet_rt_block_unique(pointer))
     alloc_test_require(!jet_rt_block_release(pointer))
@@ -375,7 +375,7 @@ alloc_test_zero_inherit: fn() {
     }
     jet_rt_block_inherit_zero(marked, inherited)
     #Unsafe("the test owns these fresh align-8 blocks and their count words") {
-        alloc_test_require(os_load_i64(wrapping(inherited - I64{24})) == RC_ZERO_MARK.bit_or(I64{1}))
+        alloc_test_require(os_load_i64(wrapping(inherited - I64{24})) == RC_ZERO_MARK | I64{1})
     }
     alloc_test_require(jet_rt_block_unique(inherited) && jet_rt_block_release(inherited))
     jet_rt_free(inherited, I64{40}, I64{8})
@@ -447,7 +447,7 @@ priv alloc_test_row_count: fn(width: I64) -> I64 {
 // header words, one block out of the class `width` row: the count that row
 // holds now.
 priv alloc_test_row_taken: fn(width: I64, pointer: I64) -> I64 {
-    alloc_test_require(pointer != I64{0} && pointer.bit_and(I64{7}) == I64{0})
+    alloc_test_require(pointer != I64{0} && pointer & I64{7} == I64{0})
     #Unsafe("the test owns this fresh align-8 block and its header words") {
         alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == I64{1})
         alloc_test_require(os_load_i64(wrapping(pointer - I64{8})) == wrapping(pointer - I64{24}))
@@ -507,7 +507,7 @@ alloc_test_window: fn() {
     window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
     end: wrapping(window + ALLOC_WINDOW_BYTES)
     alloc_test_require(first != I64{0} && window != I64{0} && first >= window && first < end)
-    alloc_test_require(first.bit_and(wrapping(ALLOC_PAGE_UNIT - I64{1})) == I64{0} && alloc_page_region(first) != I64{0})
+    alloc_test_require(first & wrapping(ALLOC_PAGE_UNIT - I64{1}) == I64{0} && alloc_page_region(first) != I64{0})
     records: wrapping(window + ALLOC_WINDOW_RECORDS)
     alloc_test_require(alloc_page_region(first) == wrapping(records + wrapping(alloc_test_unit(window, first) * ALLOC_REGION_RECORD_BYTES)))
     #Unsafe("the region owns its 64 KiB until its release below") {
@@ -585,8 +585,8 @@ alloc_test_window_rows: fn() {
         last_kept: os_load_i64(wrapping(runs + wrapping(wrapping(ALLOC_WINDOW_ROW_LIMIT - I64{1}) * I64{8})))
         spilled: os_load_i64(wrapping(runs + wrapping(ALLOC_WINDOW_ROW_LIMIT * I64{8})))
         kept: sync_load(row)
-        alloc_test_require(kept >> I64{20} == ALLOC_WINDOW_ROW_LIMIT && kept.bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, last_kept))
-        alloc_test_require(sync_load(stack).bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, spilled))
+        alloc_test_require(kept >> I64{20} == ALLOC_WINDOW_ROW_LIMIT && kept & ALLOC_WINDOW_INDEX == alloc_test_unit(window, last_kept))
+        alloc_test_require(sync_load(stack) & ALLOC_WINDOW_INDEX == alloc_test_unit(window, spilled))
         again: jet_rt_mem_region_reserve(I64{65536})
         alloc_test_require(again == last_kept && sync_load(row) >> I64{20} == wrapping(ALLOC_WINDOW_ROW_LIMIT - I64{1}))
         jet_rt_mem_region_release(again, I64{65536})
@@ -600,11 +600,11 @@ alloc_test_window_rows: fn() {
         jet_rt_mem_region_release(held, I64{65536})
         alloc_window_rows_move(fiber_tcb, tcb)
         first: os_load_i64(runs)
-        alloc_test_require(sync_load(wrapping(fiber_tcb + ALLOC_WINDOW_ROWS)) == I64{0} && sync_load(row).bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, held))
-        alloc_test_require(sync_load(stack).bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, first))
+        alloc_test_require(sync_load(wrapping(fiber_tcb + ALLOC_WINDOW_ROWS)) == I64{0} && sync_load(row) & ALLOC_WINDOW_INDEX == alloc_test_unit(window, held))
+        alloc_test_require(sync_load(stack) & ALLOC_WINDOW_INDEX == alloc_test_unit(window, first))
         jet_rt_free(fiber_tcb, context_tcb_bytes(), I64{64})
         alloc_window_rows_flush()
-        alloc_test_require(sync_load(row) == I64{0} && sync_load(stack).bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, held))
+        alloc_test_require(sync_load(row) == I64{0} && sync_load(stack) & ALLOC_WINDOW_INDEX == alloc_test_unit(window, held))
         jet_rt_free(runs, wrapping(count * I64{8}), I64{8})
     }
 }

@@ -377,5 +377,5 @@ nix_builder_make_tree_writable: fn(path: String) -[FS]> Never! {
         entries: files.list_dir(path) ?? [DirEntry]{}
         loop entry in entries -> nix_builder_make_tree_writable(entry.path)
     }
-    files.set_mode(path, (info.mode).bit_or(0o700)).drop("an unwritable node is left for the scratch sweep")
+    files.set_mode(path, (info.mode) | 0o700).drop("an unwritable node is left for the scratch sweep")
 }

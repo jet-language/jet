@@ -575,8 +575,8 @@ is_toplevel: fn(p: Parse) -> Bool Never! { p.outer.len() == 0 }
 
 top_set_write_mask: fn(p: &Parse, i_db: Int) Never! {
     bit: 1 << i_db
-    if p.outer.len() > 0 -> p.outer[0].write_mask = p.outer[0].write_mask.bit_or(bit) else {
-        p.f.write_mask = p.f.write_mask.bit_or(bit)
+    if p.outer.len() > 0 -> p.outer[0].write_mask = p.outer[0].write_mask | bit else {
+        p.f.write_mask |= bit
     }
 }
 
@@ -670,9 +670,9 @@ sql_mprintf: fn(p: Parse, fmt: String, args: [base.Mem]) -> [U8] Never! {
 }
 
 // OptimizationEnabled / OptimizationDisabled.
-opt_enabled: fn(p: Parse, mask: Int) -> Bool Never! { p.db.db_opt_flags.bit_and(mask) == 0 }
+opt_enabled: fn(p: Parse, mask: Int) -> Bool Never! { p.db.db_opt_flags & mask == 0 }
 
-opt_disabled: fn(p: Parse, mask: Int) -> Bool Never! { p.db.db_opt_flags.bit_and(mask) != 0 }
+opt_disabled: fn(p: Parse, mask: Int) -> Bool Never! { p.db.db_opt_flags & mask != 0 }
 
 // ---------------------------------------------------------------------------
 // The statement under construction: the sqlite3Vdbe* calls on pParse->pVdbe.
@@ -887,7 +887,7 @@ open_temp_database: fn(p: &Parse, a: &ast.AST) -[DB]> Bool Never! {
     if p.db.dbs[1].bt >= 0 || a.ctx.explain != 0 -> return false
     slot: conn.btree_slot_new(p.db)
     owner: conn.bt_db_of(p.db)
-    vfs_flags: os.OPEN_READWRITE.bit_or(os.OPEN_CREATE).bit_or(os.OPEN_EXCLUSIVE).bit_or(os.OPEN_DELETEONCLOSE).bit_or(os.OPEN_TEMP_DB)
+    vfs_flags: os.OPEN_READWRITE | os.OPEN_CREATE | os.OPEN_EXCLUSIVE | os.OPEN_DELETEONCLOSE | os.OPEN_TEMP_DB
     rc: btree.btree_open(p.db.btrees[slot], None, owner, 0, vfs_flags, false, false, false, false)
     if rc != base.OK {
         conn.btree_slot_free(p.db, slot)
@@ -908,10 +908,10 @@ open_temp_database: fn(p: &Parse, a: &ast.AST) -[DB]> Bool Never! {
 code_verify_schema: fn(p: &Parse, a: &ast.AST, i_db: Int) -[DB]> Never! {
     mask: top_cookie_mask(p)
     bit: 1 << i_db
-    if mask.bit_and(bit) != 0 {
+    if mask & bit != 0 {
         return
     }
-    top_set_cookie_mask(p, mask.bit_or(bit))
+    top_set_cookie_mask(p, mask | bit)
     // sqlite3OpenTempDatabase(pToplevel): the toplevel's EXPLAIN is the
     // shared statement's.
     if i_db == 1 -> _: open_temp_database(p, a)
@@ -1095,8 +1095,8 @@ pwalk_expr: fn(p: &Parse, a: &ast.AST, e0: Int) -[DB]> Int Never! {
     loop {
         cb: p.walks[walk_top(p)].cb
         rc: cb.on_expr(p, a, e)
-        if rc != 0 -> return rc.bit_and(ast.WRC_ABORT)
-        if !ast.has(a, e, ast.EP_TOKEN_ONLY.bit_or(ast.EP_LEAF)) {
+        if rc != 0 -> return rc & ast.WRC_ABORT
+        if !ast.has(a, e, ast.EP_TOKEN_ONLY | ast.EP_LEAF) {
             if a.exprs[e].left >= 0 && pwalk_expr(p, a, a.exprs[e].left) != 0 {
                 return ast.WRC_ABORT
             }
@@ -1184,7 +1184,7 @@ pwalk_select: fn(p: &Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
     s := s0
     loop s >= 0 {
         rc: cb.on_select(p, a, s)
-        if rc != 0 -> return rc.bit_and(ast.WRC_ABORT)
+        if rc != 0 -> return rc & ast.WRC_ABORT
         if pwalk_select_expr(p, a, s) != 0 || pwalk_select_from(p, a, s) != 0 {
             return ast.WRC_ABORT
         }

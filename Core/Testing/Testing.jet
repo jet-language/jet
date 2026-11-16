@@ -265,7 +265,7 @@ fake_rng: fn(seed: Int) -> random.RNG Never! { random.rng(seed) }
 
 /// Deterministic fake data uses the same source SplitMix64 stream as RNG.
 fake_data: fn(seed: Int) -> Fake Never! {
-    Fake{state: U64{Int{I64{seed}}.bit_and(18446744073709551615)}, locale_code: 0}
+    Fake{state: U64{Int{I64{seed}} & 18446744073709551615}, locale_code: 0}
 }
 
 Fake: struct {
@@ -285,7 +285,7 @@ Fake: struct {
 
     locale: fn(self, locale: String) -> Fake Never! {
         code: if locale == "en" -> 0 else if locale == "de" -> 1 else -> panic("unsupported fake-data locale `{locale}`; supported locales: en, de")
-        Fake{state: self.state.bit_xor(wrapping(U64{code} * U64{15111065706836454659})), locale_code: code}
+        Fake{state: self.state ~ wrapping(U64{code} * U64{15111065706836454659}), locale_code: code}
     }
 
     name: fn(&self) -> String Never! {
@@ -503,9 +503,9 @@ priv history_rng_draw: fn(rng: HistoryRNG) -> U64 Never! {
     guard := rng.__state.guard_edit()
     guard.value.word = wrapping(guard.value.word + U64{11400714819323198485})
     value := guard.value.word
-    value = wrapping((value.bit_xor(value >> U64{30})) * U64{13787848793156543929})
-    value = wrapping((value.bit_xor(value >> U64{27})) * U64{10723151780598845931})
-    value.bit_xor(value >> U64{31})
+    value = wrapping((value ~ value >> U64{30}) * U64{13787848793156543929})
+    value = wrapping((value ~ value >> U64{27}) * U64{10723151780598845931})
+    value ~ value >> U64{31}
 }
 
 priv history_rng_next: fn(rng: HistoryRNG) -> Int Never! { Int{history_rng_draw(rng)} }

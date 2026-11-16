@@ -3,6 +3,8 @@ Flags: struct {
     bits: Int
 }
 
+SIGN: 8
+
 low: fn(value: Int) -> Int { value.bit_and(3) }
 
 run: fn() {
@@ -47,6 +49,51 @@ run: fn() {
     flags := Flags{bits: 1}
     flags.bits = flags.bits.bit_or(2)
     print(flags.bits)
+    slots := [Int]{1, 2}
+    slots[1] = slots[1].bit_or(4)
+    print(slots[1])
+    byte: U8{200}
+    if byte.bit_and(U8{192}) == (U8{192}) -> print("top bits")
+    print(a.bit_not().bit_not())
+    m: #run (255).bit_and(15)
+    print(m)
+    print(a.bit_xor(SIGN) < b.bit_xor(SIGN))
+    // The call as the left and the right operand of each binary operator.
+    print(a.bit_or(b) + c)
+    print(c + a.bit_or(b))
+    print(a.bit_or(b) - c)
+    print(c - a.bit_or(b))
+    print(a.bit_or(b) * c)
+    print(c * a.bit_or(b))
+    print(a.bit_or(b) / c)
+    print(100 / a.bit_or(b))
+    print(a.bit_or(b) % c)
+    print(100 % a.bit_or(b))
+    print(a.bit_or(b) << 1)
+    print(c << b.bit_and(3))
+    print(a.bit_or(b) >> 1)
+    print(100 >> b.bit_and(3))
+    print(a.bit_or(b) & c)
+    print(c & a.bit_or(b))
+    print(a.bit_and(b) & c)
+    print(c & a.bit_and(b))
+    print(c &~ a.bit_or(b))
+    print(a.bit_xor(b) | c)
+    print(c | a.bit_xor(b))
+    print(a.bit_or(b) | c)
+    print(c | a.bit_or(b))
+    print(a.bit_or(b) ~ c)
+    print(c ~ a.bit_or(b))
+    print(a.bit_xor(b) ~ c)
+    print(c ~ a.bit_xor(b))
+    print(a.bit_or(b) == 14)
+    print(14 == a.bit_or(b))
+    print(a.bit_or(b) < c)
+    print(c < a.bit_or(b))
+    print(~a.bit_or(b))
+    // A typed literal's `}` ends the left operand of the `+` before the call.
+    n: U32{3}
+    print(n + U32{48} + ((U32{9} - n) >> 8).bit_and(U32{39}))
     source: `total: 6.bit_or(1)`
     print(source)
     print("write `a.bit_and(b)` to keep the shared bits")

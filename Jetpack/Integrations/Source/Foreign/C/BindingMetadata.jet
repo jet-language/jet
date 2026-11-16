@@ -255,7 +255,7 @@ pkg_cffi_metadata_unescape: fn(value: String) -> String ForeignBridgeError! {
         if index + 2 >= bytes.len() -> return Err(pkg_bridge_error("truncated percent escape"))
         high: pkg_cffi_hex_value(Int{bytes[index + 1]}) ?? return Err(pkg_bridge_error("invalid percent escape"))
         low: pkg_cffi_hex_value(Int{bytes[index + 2]}) ?? return Err(pkg_bridge_error("invalid percent escape"))
-        out.push(U8{((high << 4)).bit_or(low)})
+        out.push(U8{((high << 4)) | low})
         index += 3
     }
     text: String.from_bytes(out) ?? return Err(pkg_bridge_error("metadata contains invalid UTF-8"))

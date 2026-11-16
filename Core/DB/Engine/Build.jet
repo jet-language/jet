@@ -286,7 +286,7 @@ open_schema_table: fn(p: &cg.Parse, i_db: Int) Never! {
 // sqlite3ChangeCookie: code the schema-version bump of database i_db.
 change_cookie: fn(p: &cg.Parse, i_db: Int) Never! {
     s: p.db.dbs[i_db].schema
-    x := (p.db.schemas[s].schema_cookie + 1).bit_and(4294967295)
+    x := (p.db.schemas[s].schema_cookie + 1) & 4294967295
     if x >= 2147483648 -> x -= 4294967296
     _: cg.op3(p, opc.OP_SET_COOKIE, i_db, btree.BTREE_SCHEMA_VERSION, x)
 }
@@ -396,7 +396,7 @@ start_table: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok,
         _: cg.op3(p, opc.OP_READ_COOKIE, i_db, reg3, btree.BTREE_FILE_FORMAT)
         cg.v_uses_btree(p, i_db)
         addr1: cg.op1(p, opc.OP_IF, reg3)
-        file_format: if p.db.flags.bit_and(conn.SQLITE_LEGACY_FILE_FMT) != 0 -> 1 else -> MAX_FILE_FORMAT
+        file_format: if p.db.flags & conn.SQLITE_LEGACY_FILE_FMT != 0 -> 1 else -> MAX_FILE_FORMAT
         _: cg.op3(p, opc.OP_SET_COOKIE, i_db, btree.BTREE_FILE_FORMAT, file_format)
         _: cg.op3(p, opc.OP_SET_COOKIE, i_db, btree.BTREE_TEXT_ENCODING, p.db.enc)
         cg.v_jump_here(p, addr1)
@@ -477,7 +477,7 @@ add_column: fn(p: &cg.Parse, a: &ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) N
         col.typ = ztype
         col.affinity = r.aff
         col.sz_est = r.sz_est
-        col.col_flags = col.col_flags.bit_or(conn.COLFLAG_HASTYPE)
+        col.col_flags |= conn.COLFLAG_HASTYPE
     }
     p.db.tables[t].cols.push(col)
     p.db.tables[t].n_nv_col += 1
@@ -492,8 +492,8 @@ add_not_null: fn(p: &cg.Parse, a: &ast.AST, on_error: Int) Never! {
     }
     last: p.db.tables[t].cols.len() - 1
     p.db.tables[t].cols[last].not_null = on_error
-    p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_HAS_NOT_NULL)
-    if p.db.tables[t].cols[last].col_flags.bit_and(conn.COLFLAG_UNIQUE) != 0 {
+    p.db.tables[t].tab_flags = p.db.tables[t].tab_flags | ast.TF_HAS_NOT_NULL
+    if p.db.tables[t].cols[last].col_flags & conn.COLFLAG_UNIQUE != 0 {
         ix := p.db.tables[t].index
         loop ix >= 0 {
             if p.db.indexes[ix].ai_column[0] == last -> p.db.indexes[ix].uniq_not_null = true
@@ -511,7 +511,7 @@ add_default_value: fn(p: &cg.Parse, a: &ast.AST, e: Int, start: Int, end: Int) -
         i: p.db.tables[t].cols.len() - 1
         if !ast.expr_is_constant_or_function(a, e, is_init) {
             ast.error(a, "default value of column [{ast.text(p.db.tables[t].cols[i].name)}] is not constant")
-        } else if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 {
+        } else if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_GENERATED != 0 {
             ast.error(a, "cannot use DEFAULT on a generated column")
         } else {
             x := ast.zero_expr(tk.TK_SPAN)
@@ -536,8 +536,8 @@ string_to_id: fn(a: &ast.AST, e: Int) Never! {
 
 // makeColumnPartOfPrimaryKey.
 make_column_part_of_primary_key: fn(p: &cg.Parse, a: &ast.AST, t: Int, i: Int) Never! {
-    p.db.tables[t].cols[i].col_flags = p.db.tables[t].cols[i].col_flags.bit_or(conn.COLFLAG_PRIMKEY)
-    if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 {
+    p.db.tables[t].cols[i].col_flags = p.db.tables[t].cols[i].col_flags | conn.COLFLAG_PRIMKEY
+    if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_GENERATED != 0 {
         ast.error(a, "generated columns cannot be part of the PRIMARY KEY")
     }
 }
@@ -553,12 +553,12 @@ add_primary_key: fn(p: &cg.Parse, a: &ast.AST, list: Int, on_error: Int, auto_in
         ast.expr_list_delete(a, ilist)
         return
     }
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_PRIMARY_KEY) != 0 {
+    if p.db.tables[t].tab_flags & ast.TF_HAS_PRIMARY_KEY != 0 {
         ast.error(a, "table \"{ast.text(p.db.tables[t].name)}\" has more than one primary key")
         ast.expr_list_delete(a, ilist)
         return
     }
-    p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_HAS_PRIMARY_KEY)
+    p.db.tables[t].tab_flags = p.db.tables[t].tab_flags | ast.TF_HAS_PRIMARY_KEY
     if ilist < 0 {
         i_col = p.db.tables[t].cols.len() - 1
         make_column_part_of_primary_key(p, a, t, i_col)
@@ -584,9 +584,7 @@ add_primary_key: fn(p: &cg.Parse, a: &ast.AST, list: Int, on_error: Int, auto_in
     if n_term == 1 && i_col >= 0 && ctype == conn.COLTYPE_INTEGER && sort_order != ast.SO_DESC {
         p.db.tables[t].ipkey = i_col
         p.db.tables[t].key_conf = on_error
-        if auto_inc {
-            p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_AUTOINCREMENT)
-        }
+        if auto_inc -> p.db.tables[t].tab_flags = p.db.tables[t].tab_flags | ast.TF_AUTOINCREMENT
         if ilist >= 0 -> p.f.i_pk_sort_order = a.lists[ilist].items[0].sort_flags
     } else if auto_inc { ast.error(a, "AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY") } else {
         create_index(p, a, ast.SQLTok{z: -1, n: 0}, ast.SQLTok{z: -1, n: 0}, -1, ilist, on_error, ast.SQLTok{z: -1, n: 0}, -1, sort_order, false, ast.IDXTYPE_PRIMARYKEY)
@@ -669,9 +667,9 @@ add_generated: fn(p: &cg.Parse, a: &ast.AST, e0: Int, typ: ast.SQLTok) Never! {
         }
     }
     if e_type == conn.COLFLAG_VIRTUAL -> p.db.tables[t].n_nv_col -= 1
-    p.db.tables[t].cols[i].col_flags = p.db.tables[t].cols[i].col_flags.bit_or(e_type)
-    p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(e_type)
-    if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_PRIMKEY) != 0 {
+    p.db.tables[t].cols[i].col_flags = p.db.tables[t].cols[i].col_flags | e_type
+    p.db.tables[t].tab_flags = p.db.tables[t].tab_flags | e_type
+    if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_PRIMKEY != 0 {
         make_column_part_of_primary_key(p, a, t, i)
     }
     if e >= 0 && a.exprs[e].op == tk.TK_ID -> e = ast.pexpr(a, tk.TK_UPLUS, e, -1)
@@ -725,16 +723,16 @@ end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
         }
         p.db.tables[t].tnum = p.db.init.new_tnum
         if p.db.tables[t].tnum == 1 {
-            p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_READONLY)
+            p.db.tables[t].tab_flags = p.db.tables[t].tab_flags | ast.TF_READONLY
         }
     }
     tname: p.db.tables[t].name.copy()
-    if tab_opts.bit_and(ast.TF_STRICT) != 0 {
-        p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_STRICT)
+    if tab_opts & ast.TF_STRICT != 0 {
+        p.db.tables[t].tab_flags = p.db.tables[t].tab_flags | ast.TF_STRICT
         loop ii in 0..<p.db.tables[t].cols.len() {
             col: p.db.tables[t].cols[ii]
             if col.ctype == conn.COLTYPE_CUSTOM {
-                if col.col_flags.bit_and(conn.COLFLAG_HASTYPE) != 0 {
+                if col.col_flags & conn.COLFLAG_HASTYPE != 0 {
                     ast.error(a, "unknown datatype for {ast.text(tname)}.{ast.text(col.name)}: \"{ast.text(col.typ)}\"")
                 } else {
                     ast.error(a, "missing datatype for {ast.text(tname)}.{ast.text(col.name)}")
@@ -743,18 +741,18 @@ end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
             } else if col.ctype == conn.COLTYPE_ANY {
                 p.db.tables[t].cols[ii].affinity = base.AFF_BLOB
             }
-            if col.col_flags.bit_and(conn.COLFLAG_PRIMKEY) != 0 && p.db.tables[t].ipkey != ii && col.not_null == ast.OE_NONE {
+            if col.col_flags & conn.COLFLAG_PRIMKEY != 0 && p.db.tables[t].ipkey != ii && col.not_null == ast.OE_NONE {
                 p.db.tables[t].cols[ii].not_null = ast.OE_ABORT
-                p.db.tables[t].tab_flags = p.db.tables[t].tab_flags.bit_or(ast.TF_HAS_NOT_NULL)
+                p.db.tables[t].tab_flags = p.db.tables[t].tab_flags | ast.TF_HAS_NOT_NULL
             }
         }
     }
-    if tab_opts.bit_and(ast.TF_WITHOUT_ROWID) != 0 {
-        if p.db.tables[t].tab_flags.bit_and(ast.TF_AUTOINCREMENT) != 0 {
+    if tab_opts & ast.TF_WITHOUT_ROWID != 0 {
+        if p.db.tables[t].tab_flags & ast.TF_AUTOINCREMENT != 0 {
             ast.error(a, "AUTOINCREMENT not allowed on WITHOUT ROWID tables")
             return
         }
-        if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_PRIMARY_KEY) == 0 {
+        if p.db.tables[t].tab_flags & ast.TF_HAS_PRIMARY_KEY == 0 {
             ast.error(a, "PRIMARY KEY missing on table {ast.text(tname)}")
             return
         }
@@ -770,10 +768,10 @@ end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
             p.db.tables[t].check = -1
         }
     }
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+    if p.db.tables[t].tab_flags & ast.TF_HAS_GENERATED != 0 {
         n_ng := 0
         loop ii in 0..<p.db.tables[t].cols.len() {
-            if p.db.tables[t].cols[ii].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 {
+            if p.db.tables[t].cols[ii].col_flags & conn.COLFLAG_GENERATED != 0 {
                 x: cat.column_expr(p.db, a, t, ii)
                 if rs.resolve_self_reference(p, a, t, ast.NC_GEN_COL, x, -1) != 0 {
                     null_e: ast.expr_alloc(a, tk.TK_NULL, None, false)
@@ -807,7 +805,7 @@ end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
         upd: [base.Mem]{pf.txt(z_db), pf.txt(z_type.bytes()), pf.txt(tname), pf.txt(tname), base.mem_int(p.f.reg_root), pf.txt(z_stmt), base.mem_int(p.f.reg_rowid)}
         nested_parse(p, a, "UPDATE %Q.sqlite_master SET type='%s', name=%Q, tbl_name=%Q, rootpage=#%d, sql=%Q WHERE rowid=#%d", upd)
         change_cookie(p, i_db)
-        if p.db.tables[t].tab_flags.bit_and(ast.TF_AUTOINCREMENT) != 0 && !cg.in_special_parse(a) {
+        if p.db.tables[t].tab_flags & ast.TF_AUTOINCREMENT != 0 && !cg.in_special_parse(a) {
             if p.db.schemas[p.db.dbs[i_db].schema].seq_tab < 0 {
                 nested_parse(p, a, "CREATE TABLE %Q.sqlite_sequence(name,seq)", [base.Mem]{pf.txt(z_db)})
             }
@@ -815,7 +813,7 @@ end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
         mx: p.db.limits[ast.LIMIT_LENGTH]
         z_where: pf.mprintf("tbl_name='%q' AND type!='trigger'".bytes(), [base.Mem]{pf.txt(tname)}, mx) ?? [U8]{}
         add_parse_schema_op(p, i_db, z_where, 0)
-        if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+        if p.db.tables[t].tab_flags & ast.TF_HAS_GENERATED != 0 {
             z_sel: pf.mprintf("SELECT*FROM\"%w\".\"%w\"".bytes(), [base.Mem]{pf.txt(z_db), pf.txt(tname)}, mx) ?? [U8]{}
             _: cg.op4_text(p, opc.OP_SQL_EXEC, 1, 0, 0, z_sel)
         }
@@ -826,7 +824,7 @@ end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
         s: p.db.tables[t].schema
         _: conn.hash_insert(p.db.schemas[s].tbl_hash, tname, t)
         p.f.new_table = -1
-        p.db.m_db_flags = p.db.m_db_flags.bit_or(conn.DBFLAG_SCHEMA_CHANGE)
+        p.db.m_db_flags |= conn.DBFLAG_SCHEMA_CHANGE
         if util.str_cmp(tname, "sqlite_sequence".bytes()) == 0 -> p.db.schemas[s].seq_tab = t
     }
     if p.db.tables[t].tab_type == conn.TABTYP_NORM {
@@ -864,8 +862,8 @@ recompute_columns_not_indexed: fn(db: &conn.Conn, ix: Int) Never! {
     j := db.indexes[ix].n_column - 1
     loop j >= 0 {
         x: db.indexes[ix].ai_column[j]
-        if x >= 0 && db.tables[t].cols[x].col_flags.bit_and(conn.COLFLAG_VIRTUAL) == 0 {
-            if x < rs.BMS - 1 -> m = m.bit_or(1 << x)
+        if x >= 0 && db.tables[t].cols[x].col_flags & conn.COLFLAG_VIRTUAL == 0 {
+            if x < rs.BMS - 1 -> m |= 1 << x
         }
         j -= 1
     }
@@ -1008,7 +1006,7 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
     if cg.auth_check(p, a, code, Val(z_name), Val(tname), Val(z_db)) != base.OK -> return -1
     if s.list < 0 {
         last: p.db.tables[tab].cols.len() - 1
-        p.db.tables[tab].cols[last].col_flags = p.db.tables[tab].cols[last].col_flags.bit_or(conn.COLFLAG_UNIQUE)
+        p.db.tables[tab].cols[last].col_flags = p.db.tables[tab].cols[last].col_flags | conn.COLFLAG_UNIQUE
         e: ast.expr_alloc(a, tk.TK_ID, Val(p.db.tables[tab].cols[last].name.copy()), false)
         s.list = ast.expr_list_append(a, -1, e)
         ast.expr_list_set_sort_order(a, s.list, sort_order, ast.SO_UNDEFINED)
@@ -1058,7 +1056,7 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
                 if p.db.tables[tab].cols[j].not_null == ast.OE_NONE {
                     p.db.indexes[ix].uniq_not_null = false
                 }
-                if p.db.tables[tab].cols[j].col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 {
+                if p.db.tables[tab].cols[j].col_flags & conn.COLFLAG_VIRTUAL != 0 {
                     p.db.indexes[ix].b_has_vcol = true
                     p.db.indexes[ix].b_has_expr = true
                 }
@@ -1071,7 +1069,7 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
         }
         if !p.db.init.busy && cat.locate_coll_seq(p, a, z_coll) < 0 -> return ix
         p.db.indexes[ix].coll[i] = z_coll
-        p.db.indexes[ix].sort_order[i] = a.lists[lst].items[i].sort_flags.bit_and(sort_mask)
+        p.db.indexes[ix].sort_order[i] = a.lists[lst].items[i].sort_flags & sort_mask
     }
     p.db.indexes[ix].ai_column[n_key] = conn.XN_ROWID
     p.db.indexes[ix].coll[n_key] = "BINARY".bytes()
@@ -1126,7 +1124,7 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
             }
         }
         _: conn.hash_insert(p.db.schemas[p.db.indexes[ix].schema].idx_hash, p.db.indexes[ix].name, ix)
-        p.db.m_db_flags = p.db.m_db_flags.bit_or(conn.DBFLAG_SCHEMA_CHANGE)
+        p.db.m_db_flags |= conn.DBFLAG_SCHEMA_CHANGE
     } else {
         p.f.n_mem += 1
         i_mem: p.f.n_mem
@@ -1192,7 +1190,7 @@ refill_index: fn(p: &cg.Parse, a: &ast.AST, ix: Int, mem_root_page: Int) -[DB]> 
     _: cg.op2(p, opc.OP_NEXT, i_tab, addr1 + 1)
     cg.v_jump_here(p, addr1)
     _: cg.op4(p, opc.OP_OPEN_WRITE, i_idx, mem_root_page, i_db, conn.P4.KeyInfo(key.copy()))
-    cg.v_change_p5(p, conn.OPFLAG_BULKCSR.bit_or(conn.OPFLAG_P2ISREG))
+    cg.v_change_p5(p, conn.OPFLAG_BULKCSR | conn.OPFLAG_P2ISREG)
     addr1 = cg.op2(p, opc.OP_SORTER_SORT, i_sorter, 0)
     addr2 := 0
     if p.db.indexes[ix].on_error != ast.OE_NONE {
@@ -1274,7 +1272,7 @@ code_drop_table: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_db: Int, is_view: Bool)
     cg.begin_write_operation(p, a, true, i_db)
     z_db: p.db.dbs[i_db].name.copy()
     tname: p.db.tables[t].name.copy()
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_AUTOINCREMENT) != 0 {
+    if p.db.tables[t].tab_flags & ast.TF_AUTOINCREMENT != 0 {
         nested_parse(p, a, "DELETE FROM %Q.sqlite_sequence WHERE name=%Q", [base.Mem]{pf.txt(z_db), pf.txt(tname)})
     }
     nested_parse(p, a, "DELETE FROM %Q.sqlite_master WHERE tbl_name=%Q and type!='trigger'", [base.Mem]{pf.txt(z_db), pf.txt(tname)})
@@ -1292,7 +1290,7 @@ table_may_not_be_dropped: fn(db: conn.Conn, t: Int) -> Bool Never! {
         if rest.len() >= 10 && util.str_nicmp(rest, "parameters".bytes(), 10) == 0 -> return false
         return true
     }
-    db.tables[t].tab_flags.bit_and(ast.TF_EPONYMOUS) != 0
+    db.tables[t].tab_flags & ast.TF_EPONYMOUS != 0
 }
 
 // sqlite3DropTable: DROP TABLE or DROP VIEW of the one-item SrcList

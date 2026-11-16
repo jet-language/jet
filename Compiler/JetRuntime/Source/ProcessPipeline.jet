@@ -31,7 +31,7 @@ pipeline_nonblocking: fn(number: I64) {
         return
     }
     flags: host_call(I64{72}, number, I64{3}, I64{0})
-    if (flags >= I64{0}) { _ := host_call(I64{72}, number, I64{4}, flags.bit_or(I64{2048})) }
+    if (flags >= I64{0}) { _ := host_call(I64{72}, number, I64{4}, flags | I64{2048}) }
 }
 
 pipeline_close: fn(slot: I64) {
@@ -239,7 +239,7 @@ pipeline_finish_io: fn(top: I64, rows: I64, idle: I64) {
 
 // SIGXCPU under a declared CPU limit.
 pipeline_status_limit: fn(status: I64, spec: I64) -> I64 {
-    if (fd_word(spec, PROCESS_SPEC_CPU_TIME_LIMIT) != I64{0} && status.bit_and(I64{127}) == I64{24}) {
+    if (fd_word(spec, PROCESS_SPEC_CPU_TIME_LIMIT) != I64{0} && status & I64{127} == I64{24}) {
         return PROCESS_RESOURCE_CPU_TIME
     }
     I64{-1}
@@ -502,7 +502,7 @@ pipeline_text: fn(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_
                     pipeline_stop_after_wait(row)
                     if (status != I64{0}) {
                         success = false
-                        code = if (status.bit_and(I64{127}) == I64{0}) -> (status >> I64{8}).bit_and(I64{255}) else -> I64{-1}
+                        code = if (status & I64{127} == I64{0}) -> (status >> I64{8}) & I64{255} else -> I64{-1}
                     }
                 }
                 if direct -> break

@@ -571,8 +571,8 @@ numeric_string: fn(data: [U8], buf: asn1.ASN1Buf) -> String asn1.ASN1Error! {
         b: Int{data[buf.p + i]}
         if value > (SUBID_MAX >> 7) -> return Err(.InvalidData)
         if value == 0 && b == 0x80 -> return Err(.InvalidData)
-        value = (value << 7).bit_or(b.bit_and(0x7F))
-        if b.bit_and(0x80) == 0 {
+        value = (value << 7) | b & 0x7F
+        if b & 0x80 == 0 {
             if out.len() == 0 {
                 first := 0
                 second := value
@@ -621,8 +621,8 @@ push_subidentifier: fn(out: &[U8], value: Int) {
     }
     loop k in 0..<count {
         shift: (count - 1 - k) * 7
-        group := (value >> shift).bit_and(0x7F)
-        if k < count - 1 -> group = group.bit_or(0x80)
+        group := (value >> shift) & 0x7F
+        if k < count - 1 -> group |= 0x80
         out.push(U8{group})
     }
 }

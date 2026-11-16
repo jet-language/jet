@@ -196,7 +196,7 @@ op_parse_schema: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB
         conn.schema_clear(db, db.dbs[r.p1].schema)
         db.m_db_flags = clear_bits(db.m_db_flags, conn.DBFLAG_SCHEMA_KNOWN_OK)
         rc = h.init_one(db, r.p1, r.p5, msg)
-        db.m_db_flags = db.m_db_flags.bit_or(conn.DBFLAG_SCHEMA_CHANGE)
+        db.m_db_flags |= conn.DBFLAG_SCHEMA_CHANGE
         set_expired(db, v, 0)
     }
     if msg == .Val(e) -> v.err_msg = Val(e)
@@ -254,7 +254,7 @@ op_integrity_ck: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 // DYN_ROWSET, its i the Vdbe.rowsets slot.
 
 is_rowset: fn(v: conn.Vdbe, i: Int) -> Bool Never! {
-    v.mem[i].flags.bit_and(conn.MEM_DYN) != 0 && v.mem[i].subtype == conn.DYN_ROWSET
+    v.mem[i].flags & conn.MEM_DYN != 0 && v.mem[i].subtype == conn.DYN_ROWSET
 }
 
 // The Vdbe.rowsets slot of register i's RowSet, giving it an empty one
@@ -267,7 +267,7 @@ rowset_of: fn(v: &conn.Vdbe, i: Int) -> Int Never! {
         v.rowsets.push(rowset.rowset_new())
         k = v.rowsets.len() - 1
     }
-    m := base.mem_init(MEM_BLOB.bit_or(conn.MEM_DYN))
+    m := base.mem_init(MEM_BLOB | conn.MEM_DYN)
     m.subtype = conn.DYN_ROWSET
     m.i = k
     v.mem[i] = m
@@ -359,7 +359,7 @@ op_param: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // connection, immediate ones on the statement; with SQLITE_DeferFKs all of
 // them are deferred to the commit.
 op_fk_counter: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
-    if db.flags.bit_and(conn.SQLITE_DEFER_FKS) != 0 -> db.n_deferred_imm_cons += r.p2 else if r.p1 != 0 {
+    if db.flags & conn.SQLITE_DEFER_FKS != 0 -> db.n_deferred_imm_cons += r.p2 else if r.p1 != 0 {
         db.n_deferred_cons += r.p2
     } else { v.n_fk_constraint += r.p2 }
     GO_NEXT
@@ -713,7 +713,7 @@ op_vcheck: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int
 op_vinit_in: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
-    m := base.mem_init(MEM_NULL.bit_or(conn.MEM_DYN).bit_or(MEM_SUBTYPE))
+    m := base.mem_init(MEM_NULL | conn.MEM_DYN | MEM_SUBTYPE)
     m.subtype = conn.DYN_POINTER
     m.z = "ValueList".bytes()
     m.i = r.pc
@@ -757,9 +757,9 @@ op_vcolumn: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> In
     c.i_op = r.pc
     v.fctx = c
     run.release_dyn(v, dest)
-    if r.p5.bit_and(conn.OPFLAG_NOCHNG) != 0 {
+    if r.p5 & conn.OPFLAG_NOCHNG != 0 {
         mem.set_null(v.mem[dest])
-        v.mem[dest].flags = MEM_NULL.bit_or(MEM_ZERO)
+        v.mem[dest].flags = MEM_NULL | MEM_ZERO
         v.mem[dest].i = 0
     } else { mem.set_type_flag(v.mem[dest], MEM_NULL) }
     vt: v.csr[ci].vtab
@@ -793,8 +793,8 @@ op_vnext: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int 
 op_vrename: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
     vt: p4_vtab(v, r.pc)
     i: v.mem_base + r.p1
-    legacy: db.flags.bit_and(conn.SQLITE_LEGACY_ALTER) != 0
-    db.flags = db.flags.bit_or(conn.SQLITE_LEGACY_ALTER)
+    legacy: db.flags & conn.SQLITE_LEGACY_ALTER != 0
+    db.flags |= conn.SQLITE_LEGACY_ALTER
     mem.change_encoding(v.mem[i], base.UTF8)
     rc: h.vtab_rename(db, vt, v.mem[i].z.copy())
     if !legacy -> db.flags = clear_bits(db.flags, conn.SQLITE_LEGACY_ALTER)
@@ -818,7 +818,7 @@ op_vupdate: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> In
     db.vtab_on_conflict = on_conflict
     aux.vtab_import_errmsg<H>(h, db, v, vt)
     if rc == base.OK && r.p1 != 0 -> db.last_rowid = rowid
-    if rc.bit_and(255) == base.CONSTRAINT && db.vtables[vt].b_constraint {
+    if rc & 255 == base.CONSTRAINT && db.vtables[vt].b_constraint {
         if r.p5 == ast.OE_IGNORE -> rc = base.OK else {
             v.error_action = if r.p5 == ast.OE_REPLACE -> ast.OE_ABORT else -> r.p5
         }
@@ -864,16 +864,14 @@ op_subtype: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     }
     o: v.mem_base + r.p2
     if r.op == opc.OP_GET_SUBTYPE {
-        if v.mem[i].flags.bit_and(MEM_SUBTYPE) != 0 -> run.reg_int(v, o, v.mem[i].subtype) else {
+        if v.mem[i].flags & MEM_SUBTYPE != 0 -> run.reg_int(v, o, v.mem[i].subtype) else {
             run.reg_null(v, o)
         }
         return GO_NEXT
     }
-    if v.mem[i].flags.bit_and(MEM_NULL) != 0 {
-        v.mem[o].flags = clear_bits(v.mem[o].flags, MEM_SUBTYPE)
-    } else {
-        v.mem[o].flags = v.mem[o].flags.bit_or(MEM_SUBTYPE)
-        v.mem[o].subtype = v.mem[i].i.bit_and(255)
+    if v.mem[i].flags & MEM_NULL != 0 -> v.mem[o].flags = clear_bits(v.mem[o].flags, MEM_SUBTYPE) else {
+        v.mem[o].flags = v.mem[o].flags | MEM_SUBTYPE
+        v.mem[o].subtype = v.mem[i].i & 255
     }
     GO_NEXT
 }
@@ -889,7 +887,7 @@ op_filter_add: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p1
     b: filter_bit(v, r, i)
     at: b >> 3
-    v.mem[i].z[at] = U8{Int{v.mem[i].z[at]}.bit_or(1 << b.bit_and(7))}
+    v.mem[i].z[at] = U8{Int{v.mem[i].z[at]} | 1 << (b & 7)}
     GO_NEXT
 }
 
@@ -898,7 +896,7 @@ op_filter_add: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 op_filter: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p1
     b: filter_bit(v, r, i)
-    if (Int{v.mem[i].z[b >> 3]}).bit_and(1 << b.bit_and(7)) == 0 {
+    if (Int{v.mem[i].z[b >> 3]}) & 1 << (b & 7) == 0 {
         v.counters[conn.STMTSTATUS_FILTER_HIT] = v.counters[conn.STMTSTATUS_FILTER_HIT] + 1
         return GO_JUMP
     }
@@ -914,7 +912,7 @@ ONCE_RESET_THRESHOLD: 2147483646
 // trace callback, count the run and jump to P2. OP_Init's P1 counts the
 // runs, the value OP_Once compares its P1 with.
 op_init: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
-    if db.m_trace.bit_and(conn.TRACE_STMT) != 0 && v.min_write_file_format != 254 {
+    if db.m_trace & conn.TRACE_STMT != 0 && v.min_write_file_format != 254 {
         z: run.p4_text(v, r.pc) ?? v.sql.copy()
         if z.len() > 0 {
             text := if db.n_vdbe_exec > 1 -> "-- ".bytes() else -> [U8]{}
@@ -1005,13 +1003,13 @@ op_init: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int N
     v.ops.push(test_op(opc.OP_CLR_SUBTYPE, conn.P4.NotUsed))
     set := test_run(v, 0, 0, 1, 0)
     _: op_subtype(v, set)
-    assert(v.mem[1].flags.bit_and(MEM_SUBTYPE) != 0 && v.mem[1].subtype == 74)
+    assert(v.mem[1].flags & MEM_SUBTYPE != 0 && v.mem[1].subtype == 74)
     get := test_run(v, 1, 1, 0, 0)
     _: op_subtype(v, get)
     assert_eq(v.mem[0].i, 74)
     clr := test_run(v, 2, 1, 0, 0)
     _: op_subtype(v, clr)
-    assert(v.mem[1].flags.bit_and(MEM_SUBTYPE) == 0)
+    assert(v.mem[1].flags & MEM_SUBTYPE == 0)
 }
 
 #Test("a trigger program runs on registers of its own and reads its caller's") {

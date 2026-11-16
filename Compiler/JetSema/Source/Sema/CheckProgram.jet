@@ -6468,7 +6468,7 @@ sema_name_reference_keys: fn() -> SemaNameReferenceKeys Never! {
 // themselves, so a negative span bound folds onto its positive twin's slot.
 sema_name_reference_hash_mix: fn(hash: U64, part: Int) -> U64 Never! {
     magnitude: if part < 0 -> 0 - part else -> part
-    wrapping((hash.bit_xor(U64{magnitude})) * U64{0x100000001b3})
+    wrapping((hash ~ U64{magnitude}) * U64{0x100000001b3})
 }
 
 // FNV-1a over the six key parts, as a slot index under `mask`.
@@ -6480,7 +6480,7 @@ sema_name_reference_slot: fn(mask: Int, path: Int, kind: Int, start: Int, end: I
     hash = sema_name_reference_hash_mix(hash, end)
     hash = sema_name_reference_hash_mix(hash, identity)
     hash = sema_name_reference_hash_mix(hash, member)
-    Int{hash.bit_and(U64{mask})}
+    Int{hash & U64{mask}}
 }
 
 sema_name_reference_keys_grow: fn(keys: &SemaNameReferenceKeys) Never! {
@@ -6490,7 +6490,7 @@ sema_name_reference_keys_grow: fn(keys: &SemaNameReferenceKeys) Never! {
     loop _ in 0..<capacity -> slots.push(0)
     loop row in 0..<keys.path.len() {
         slot := sema_name_reference_slot(mask, keys.path[row], keys.kind[row], keys.start[row], keys.end[row], keys.identity[row], keys.member[row])
-        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        loop slots[slot] != 0 -> slot = (slot + 1) & mask
         slots[slot] = row + 1
     }
     keys.slots = slots.move()
@@ -6505,7 +6505,7 @@ sema_name_reference_seen: fn(keys: &SemaNameReferenceKeys, path: Int, kind: Int,
         if keys.path[row] == path && keys.kind[row] == kind && keys.start[row] == start && keys.end[row] == end && keys.identity[row] == identity && keys.member[row] == member {
             return true
         }
-        slot = (slot + 1).bit_and(keys.mask)
+        slot = (slot + 1) & keys.mask
     }
     row: keys.path.len()
     keys.path.push(path)

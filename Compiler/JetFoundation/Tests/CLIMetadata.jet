@@ -33,7 +33,7 @@ cli_metadata_copy: fn(out: &[U8], at: Int, bytes: [U8]) Never! {
 cli_metadata_number: fn(out: &[U8], at: Int, width: Int, value: U64, little: Bool) Never! {
     loop index in 0..<width {
         shift: if little -> index * 8 else -> (width - index - 1) * 8
-        out[at + index] = U8{(value >> shift).bit_and(U64{255})}
+        out[at + index] = U8{(value >> shift) & U64{255}}
     }
 }
 
@@ -127,9 +127,9 @@ cli_metadata_fat: fn(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8
 cli_metadata_leb: fn(out: &[U8], value: Int) Never! {
     rest := value
     loop {
-        byte := U8{rest.bit_and(127)}
+        byte := U8{rest & 127}
         rest >>= 7
-        if rest != 0 -> byte = byte.bit_or(U8{128})
+        if rest != 0 -> byte |= U8{128}
         out.push(byte)
         if rest == 0 -> break
     }
@@ -198,7 +198,7 @@ cli_metadata_refuse: fn(bytes: [U8], expected: RecordDecodeError, maximum: U64) 
     unsupported[8] = U8{6}
     cli_metadata_refuse(cli_metadata_wasm(unsupported, 1), RecordDecodeError.UnsupportedVersion{version: U16{6}}, max)
     corrupt := record.copy()
-    corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1].bit_xor(U8{1})
+    corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1] ~ U8{1}
     cli_metadata_refuse(cli_metadata_wasm(corrupt, 1), RecordDecodeError.Malformed{why: "digest mismatch"}, max)
     disagreement: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(corrupt, true), false, false)
     cli_metadata_refuse(disagreement, RecordDecodeError.Malformed{why: "universal Mach-O slices disagree"}, max)

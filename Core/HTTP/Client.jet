@@ -2330,7 +2330,7 @@ priv client_test_h2_serve: fn(listener: build_net.TCPListener) -[Net, Time.Wait]
                 fields: h2.hpack_decode(decoder, payload) ?? panic("the request's header block")
                 loop field in fields -> request += "{field.name}: {field.value}\n"
             } else if kind == h2.H2_DATA { body.extend(payload) }
-            ended = (kind == h2.H2_HEADERS || kind == h2.H2_DATA) && flags.bit_and(h2.H2_END_STREAM) != 0
+            ended = (kind == h2.H2_HEADERS || kind == h2.H2_DATA) && flags & h2.H2_END_STREAM != 0
         }
     }
     reply := [U8]{}

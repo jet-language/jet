@@ -152,8 +152,8 @@ jet_driver_core_interface_bytes_hash: fn(bytes: [U8]) -> U64 Never! {
     prime: U64{0x100000001b3}
     // The offset basis 0xcbf29ce484222325, built from two halves that each
     // fit an Int literal (JetFoundation Hash/StableID.jet).
-    hash := (wrapping(U64{0xcbf29ce4} * U64{0x100000000})).bit_xor(U64{0x84222325})
-    loop byte in bytes -> hash = wrapping((hash.bit_xor(U64{byte})) * prime)
+    hash := (wrapping(U64{0xcbf29ce4} * U64{0x100000000})) ~ U64{0x84222325}
+    loop byte in bytes -> hash = wrapping((hash ~ U64{byte}) * prime)
     hash
 }
 
@@ -771,7 +771,7 @@ jet_driver_core_body_push: fn(spans: &[Span], braces: [Int], opens: [Bool], name
 }
 
 jet_driver_core_interface_put: fn(out: &[U8], value: Int) Never! {
-    loop index in 0..<4 -> out.push(U8{(value >> (index * 8)).bit_and(255)})
+    loop index in 0..<4 -> out.push(U8{(value >> (index * 8)) & 255})
 }
 
 jet_driver_core_interface_put_flag: fn(out: &[U8], value: Bool) Never! {
@@ -840,8 +840,8 @@ jet_driver_core_interface_unit_bytes: fn(unit: JetDriverCoreInterfaceUnit) -> [U
     jet_driver_core_interface_put_string(out, unit.path)
     jet_driver_core_interface_put_string(out, unit.module_name)
     jet_driver_core_interface_put(out, unit.text_bytes)
-    jet_driver_core_interface_put(out, Int{unit.text_hash.bit_and(U64{4294967295})})
-    jet_driver_core_interface_put(out, Int{(unit.text_hash >> 32).bit_and(U64{4294967295})})
+    jet_driver_core_interface_put(out, Int{unit.text_hash & U64{4294967295}})
+    jet_driver_core_interface_put(out, Int{(unit.text_hash >> 32) & U64{4294967295}})
     jet_driver_core_interface_put(out, unit.lines)
     jet_driver_core_interface_put_demand(out, unit.demand)
     jet_driver_core_interface_put_words(out, unit.words)
@@ -946,7 +946,7 @@ jet_driver_core_interface_u32: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceCu
         return 0
     }
     cursor.at = at + 4
-    Int{bytes[at]}.bit_or(Int{bytes[at + 1]} << 8).bit_or(Int{bytes[at + 2]} << 16).bit_or(Int{bytes[at + 3]} << 24)
+    Int{bytes[at]} | Int{bytes[at + 1]} << 8 | Int{bytes[at + 2]} << 16 | Int{bytes[at + 3]} << 24
 }
 
 jet_driver_core_interface_int: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceCursor) -> Int Never! {
@@ -1195,7 +1195,7 @@ jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEnt
         path: path,
         module_name: module_name,
         text_bytes: text_bytes,
-        text_hash: (U64{high} << 32).bit_or(U64{low}),
+        text_hash: (U64{high} << 32) | U64{low},
         lines: lines,
         demand: demand,
         words: words,

@@ -40,7 +40,7 @@ masks: fn(name: String, face: font.Face) {
     loop quarter in 0..<4 {
         loop id in 0..<face.glyph_count() {
             mask: face.raster(id, 13.0, Float{quarter} / 4.0)
-            h = mix(h, [U8]{U8{mask.width.bit_and(255)}, U8{mask.height.bit_and(255)}, U8{(mask.left + 128).bit_and(255)}, U8{(mask.top + 128).bit_and(255)}})
+            h = mix(h, [U8]{U8{mask.width & 255}, U8{mask.height & 255}, U8{(mask.left + 128) & 255}, U8{(mask.top + 128) & 255}})
             h = mix(h, mask.coverage)
             loop c in mask.coverage {
                 if (Int{c}) != 0 -> inked += 1

@@ -3009,8 +3009,8 @@ sema_derive_memo_hash: fn(key: [U8]) -> U64 Never! {
     prime: U64{0x100000001b3}
     // The offset basis 0xcbf29ce484222325, built from two halves that each
     // fit an Int literal (JetFoundation Hash/StableID.jet).
-    hash := (wrapping(U64{0xcbf29ce4} * U64{0x100000000})).bit_xor(U64{0x84222325})
-    loop byte in key -> hash = wrapping((hash.bit_xor(U64{byte})) * prime)
+    hash := (wrapping(U64{0xcbf29ce4} * U64{0x100000000})) ~ U64{0x84222325}
+    loop byte in key -> hash = wrapping((hash ~ U64{byte}) * prime)
     hash
 }
 

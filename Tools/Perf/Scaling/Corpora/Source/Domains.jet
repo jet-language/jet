@@ -1184,11 +1184,11 @@ gui: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
 // ------------------------------------------------------------- embedded
 
 EMBEDDED_COMMON: """
-set_bit: fn(value: Int, bit: Int) -> Int {{ value.bit_or(1 << bit) }}
+set_bit: fn(value: Int, bit: Int) -> Int {{ value | 1 << bit }}
 
-clear_bit: fn(value: Int, bit: Int) -> Int {{ value.bit_and(65535 - (1 << bit)) }}
+clear_bit: fn(value: Int, bit: Int) -> Int {{ value & 65535 - (1 << bit) }}
 
-read_field: fn(value: Int, shift: Int, mask: Int) -> Int {{ (value >> shift).bit_and(mask) }}
+read_field: fn(value: Int, shift: Int, mask: Int) -> Int {{ (value >> shift) & mask }}
 
 """
 
@@ -1203,13 +1203,13 @@ embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 REG{i}_STATUS: {r.int(16, 255)}
                 REG{i}_DATA: {r.int(256, 4095)}
 
-                regs{i}_mask: fn(x: Int) -> Int {{ x.bit_and({r.int(15, 255)}) }}
+                regs{i}_mask: fn(x: Int) -> Int {{ x & {r.int(15, 255)} }}
 
                 regs{i}_configure: fn(ctrl: Int, speed: Int) -> Int {{
                     value := set_bit(ctrl, 0)
                     value = clear_bit(value, 3)
-                    value = value.bit_or(speed.bit_and(7) << 4)
-                    value.bit_and(65535)
+                    value |= (speed & 7) << 4
+                    value & 65535
                 }}
 
                 regs{i}_main: fn(seed: Int) -> Int {{
@@ -1264,18 +1264,18 @@ embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                     }}
                 }}
 
-                crc{i}_byte: fn(x: Int) -> Int {{ crc{i}_table()[x.bit_and(63)] }}
+                crc{i}_byte: fn(x: Int) -> Int {{ crc{i}_table()[x & 63] }}
 
                 crc{i}_update: fn(crc: Int, bytes: [Int]) -> Int {{
                     value := crc
                     table: crc{i}_table()
-                    loop byte in bytes -> value = ((value >> 4) + table[(value + byte).bit_and(63)]).bit_and(65535)
+                    loop byte in bytes -> value = ((value >> 4) + table[(value + byte) & 63]) & 65535
                     value
                 }}
 
                 crc{i}_main: fn(seed: Int) -> Int {{
                     bytes := [Int]{{}}
-                    loop k in 0..<12 -> &bytes.push((seed * 7 + k).bit_and(255))
+                    loop k in 0..<12 -> &bytes.push((seed * 7 + k) & 255)
                     (crc{i}_update({r.int(0, 65535)}, bytes) + {call(r, h, "seed")}) % {M}
                 }}
                 """,
@@ -1296,7 +1296,7 @@ embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 frame{i}_step: fn(state: Frame{i}, byte: Int) -> Frame{i} {{
                     if state == {{
                         .Sync -> if byte == {r.int(120, 130)} -> Frame{i}.Header(0) else -> Frame{i}.Sync
-                        .Header(_) -> Frame{i}.Payload{{remaining: byte.bit_and(7), sum: 0}}
+                        .Header(_) -> Frame{i}.Payload{{remaining: byte & 7, sum: 0}}
                         .Payload(remaining, sum) -> if remaining <= 1 -> Frame{i}.Done(sum + byte) else -> Frame{i}.Payload{{remaining: remaining - 1, sum: sum + byte}}
                         .Done(sum) -> if byte == 0 -> state else -> Frame{i}.Sync
                     }}
@@ -1306,7 +1306,7 @@ embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                     state := Frame{i}.Sync
                     done := 0
                     loop k in 0..<24 {{
-                        state = frame{i}_step(state, (seed + k * 31).bit_and(255))
+                        state = frame{i}_step(state, (seed + k * 31) & 255)
                         if state == .Done(sum) -> done += sum
                     }}
                     (done + {call(r, h, "done")}) % {M}

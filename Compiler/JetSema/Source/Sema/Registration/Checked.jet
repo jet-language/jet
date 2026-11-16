@@ -2412,7 +2412,7 @@ sema_checked_validate_layout: fn(definition: StructDef, diagnostics: &[Diagnosti
         if layout == .CAligned(alignment, target_mode) {
             reason: if {
                 alignment <= 0 -> "the value is not positive"
-                (alignment).bit_and((alignment - 1)) != 0 -> "the value is not a power of two"
+                (alignment) & (alignment - 1) != 0 -> "the value is not a power of two"
                 !target_mode && alignment > 1048576 -> "the value is larger than the portable baseline of 1048576 bytes"
                 else -> ""
             }

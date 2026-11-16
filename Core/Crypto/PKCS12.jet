@@ -133,7 +133,7 @@ PBEParams: struct {
 }
 
 parse_pbe_params: fn(data: [U8], params: asn1.ASN1Buf) -> PBEParams pkcs5.PBEError! {
-    if params.tag_id != asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE) {
+    if params.tag_id != asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE {
         return Err(.InvalidFormat(Val(.UnexpectedTag)))
     }
     p := params.p
@@ -248,7 +248,7 @@ pkcs12_pbe: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperatio
     assert(pkcs12_derivation(.MD5, secret, secret, PKCS12_DERIVE_KEY, 3, 129) == .Err(.BadInput))
     // "PBE Encrypt, pad = 7 (OK)": SEQUENCE { salt 9 bytes of 0xCC, 10 } without its tag.
     der: [U8]{0x04, 0x09, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0x02, 0x01, 0x0A}
-    params: asn1.ASN1Buf{tag_id: asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE), p: 0, len: der.len()}
+    params: asn1.ASN1Buf{tag_id: asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE, p: 0, len: der.len()}
     alg_der: oids.OID_PKCS12_PBE_SHA1_DES3_EDE_CBC
     alg: pbe_alg(alg_der, asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: 0, len: alg_der.len()}) ?? panic("PBE OID")
     password: [U8]{0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB}

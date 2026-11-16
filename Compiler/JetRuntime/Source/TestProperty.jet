@@ -39,15 +39,15 @@ PROPERTY_RUN_BYTES: I64{24}
 PROPERTY_SEED_LIMIT: I64{9223372036854775807}
 
 property_shr: fn(value: I64, shift: I64) -> I64 {
-    (value >> shift).bit_and((I64{1} << (I64{64} - shift)) - I64{1})
+    (value >> shift) & (I64{1} << (I64{64} - shift)) - I64{1}
 }
 
 property_next: fn(ctx: I64) -> I64 {
     state: wrapping(trap_word(wrapping(ctx + I64{48})) + I64{-7046029254386353131})
     trap_store(wrapping(ctx + I64{48}), state)
-    mixed := wrapping(state.bit_xor(property_shr(state, I64{30})) * I64{-4658895280553007687})
-    mixed = wrapping(mixed.bit_xor(property_shr(mixed, I64{27})) * I64{-7723592293110705685})
-    mixed.bit_xor(property_shr(mixed, I64{31}))
+    mixed := wrapping((state ~ property_shr(state, I64{30})) * I64{-4658895280553007687})
+    mixed = wrapping((mixed ~ property_shr(mixed, I64{27})) * I64{-7723592293110705685})
+    mixed ~ property_shr(mixed, I64{31})
 }
 
 property_words_get: fn(list: I64, index: I64) -> I64 {
@@ -111,9 +111,7 @@ property_simpler: fn(left: I64, right: I64) -> Bool {
             value = trap_word(wrapping(trap_word(wrapping(ctx + I64{24})) + at * I64{8}))
         }
         trap_store(wrapping(ctx + I64{40}), at + I64{1})
-    } else if (bound > I64{1}) {
-        value = property_next(ctx).bit_and(I64{9223372036854775807}) % bound
-    }
+    } else if (bound > I64{1}) { value = (property_next(ctx) & I64{9223372036854775807}) % bound }
     if (value >= bound) { value = if (bound > I64{0}) -> bound - I64{1} else -> I64{0} }
     property_words_push(ctx, value)
     value
@@ -305,7 +303,7 @@ property_seed: fn(ctx: I64) -> I64 {
     if (rt_crypto_entropy_fill(wrapping(ctx + I64{48}), I64{8}) != I64{0}) {
         return jet_rt_string_clone(rt_static_text("the property test could not read entropy for its seed; set JET_PROP_SEED"))
     }
-    trap_store(wrapping(ctx + I64{48}), trap_word(wrapping(ctx + I64{48})).bit_and(PROPERTY_SEED_LIMIT))
+    trap_store(wrapping(ctx + I64{48}), trap_word(wrapping(ctx + I64{48})) & PROPERTY_SEED_LIMIT)
     I64{0}
 }
 

@@ -1573,11 +1573,11 @@ browser_id: fn(value: Dyn) -> Int? Never! {
 // text it already holds without the text ever being kept.
 fact_hash: fn(value: String) -> String Never! {
     hash := U64{14695981039346656037}
-    loop byte in value.bytes() -> hash = wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
+    loop byte in value.bytes() -> hash = wrapping((hash ~ U64{byte}) * U64{1099511628211})
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<16 {
-        nibble: Int{(hash >> (60 - index * 4)).bit_and(U64{15})}
+        nibble: Int{(hash >> (60 - index * 4)) & U64{15}}
         out.push(digits[nibble])
     }
     String.from_bytes(out) ?? ""

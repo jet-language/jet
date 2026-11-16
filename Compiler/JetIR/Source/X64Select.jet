@@ -1348,7 +1348,7 @@ ir_x64_located_cold: fn(e: &IRX64Emitter, f: IRFunction, at: Int, symbol: String
     e.colds.push(cold)
 }
 
-// Exact Int `bit_and` / `bit_or` / `bit_xor` (Int.jet int_bitwise): two
+// Exact Int `&` / `|` / `~` (Int.jet int_bitwise): two
 // inline operands combine natively and the result is inline too (bits 63
 // and 62 agree in both operands, so they agree in the result); a big operand
 // takes the runtime route in a slow path, which also runs the operand drops
@@ -1912,7 +1912,7 @@ ir_x64_magic_divisor: fn(al: IRX64Allocation, slot: Int) -> Int Never! {
     if slot < 0 || !al.consts[slot] -> return 0
     d: al.values[slot]
     size: if d < 0 -> 0 - d else -> d
-    if size < 3 || size >= (1 << 62) || size.bit_and(size - 1) == 0 -> return 0
+    if size < 3 || size >= (1 << 62) || size & size - 1 == 0 -> return 0
     d
 }
 
@@ -2710,9 +2710,7 @@ ir_x64_selectable: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) 
         ir_x64_reads_into(f, k, reads)
         loop read in reads {
             if read < 0 || al.consts[read] || (k > test && read == f.dst[test]) -> next
-            if al.regs[read] >= 0 && (1 << al.regs[read]).bit_and(IR_X64_PICK_SCRATCH) != 0 {
-                return -1
-            }
+            if al.regs[read] >= 0 && (1 << al.regs[read]) & IR_X64_PICK_SCRATCH != 0 -> return -1
             loop j in (at + 1)..<end {
                 written: ir_x64_write(f, j)
                 if written >= 0 && !al.consts[written] && ir_x64_same_place(al, written, read) {
@@ -5586,7 +5584,7 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
 ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     if code[at] == 0x0f {
         rel := 0
-        loop k in 0..<4 -> rel = rel.bit_or(Int{code[at + 2 + k]} << (8 * k))
+        loop k in 0..<4 -> rel |= Int{code[at + 2 + k]} << (8 * k)
         if rel >= 2147483648 -> rel -= 4294967296
         return at + 6 + rel
     }
@@ -6013,7 +6011,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert_eq(ir_x64_scratch(m, twice, no_consts, no_values, at_add), IR_X64_QUIET_SCRATCH)
     assert_eq(ir_x64_scratch(m, twice, no_consts, no_values, at_mul), IR_X64_QUIET_SCRATCH + 0x4)
     assert_eq(ir_x64_scratch(m, twice, no_consts, no_values, at_tail), IR_X64_TAIL_SCRATCH)
-    assert_eq(IR_X64_TAIL_SCRATCH.bit_and(IR_X64_LEAF_OPEN_MASK), 0)
+    assert_eq(IR_X64_TAIL_SCRATCH & IR_X64_LEAF_OPEN_MASK, 0)
     al: ir_x64_allocate(m, twice)
     assert_eq(al.saved.len(), 0)
     assert(al.regs[a] == X64_RSI || al.regs[a] == X64_RDI)
@@ -6156,7 +6154,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert_eq(limbs.len(), 16)
     loop (index, limb) in expected {
         value := 0
-        loop k in 0..<4 -> value = value.bit_or(Int{limbs[4 * index + k]} << (8 * k))
+        loop k in 0..<4 -> value |= Int{limbs[4 * index + k]} << (8 * k)
         assert_eq(value, limb)
     }
 }

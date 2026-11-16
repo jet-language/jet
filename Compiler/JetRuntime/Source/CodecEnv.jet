@@ -122,7 +122,7 @@ env_dotenv_value: fn(value: I64) -> I64 {
 // Whether the scalar ending at byte `end` is White_Space (str::trim_end).
 numeric_is_trailing_space: fn(data: I64, end: I64) -> Bool {
     start := end - I64{1}
-    loop start > (I64{0}) && (rt_text_byte(wrapping(data + start)).bit_and(I64{192})) == (I64{128}) {
+    loop start > (I64{0}) && (rt_text_byte(wrapping(data + start)) & I64{192}) == (I64{128}) {
         start -= I64{1}
     }
     unicode_is_white_space(rt_text_decode(wrapping(data + start)))
@@ -130,7 +130,7 @@ numeric_is_trailing_space: fn(data: I64, end: I64) -> Bool {
 
 rt_text_width_before: fn(data: I64, end: I64) -> I64 {
     start := end - I64{1}
-    loop start > (I64{0}) && (rt_text_byte(wrapping(data + start)).bit_and(I64{192})) == (I64{128}) {
+    loop start > (I64{0}) && (rt_text_byte(wrapping(data + start)) & I64{192}) == (I64{128}) {
         start -= I64{1}
     }
     end - start
@@ -509,7 +509,7 @@ env_fail: fn(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64
         data: rt_text_data(name)
         length: rt_text_len(name)
         // name.get(prefix.len()..): a char boundary, folded prefix, non-empty rest.
-        if (plen > length || (plen < length && (rt_text_byte(wrapping(data + plen)).bit_and(I64{192})) == I64{128})) {
+        if (plen > length || (plen < length && (rt_text_byte(wrapping(data + plen)) & I64{192}) == I64{128})) {
             next
         }
         if !env_fold_equal(data, plen, rt_text_data(prefix), plen) -> next

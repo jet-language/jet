@@ -83,31 +83,31 @@ DwarfSectionRows: struct {
 // ---------------------------------------------------------------------------
 // Encoding.
 
-dwarf_u8: fn(bytes: &[U8], value: Int) Never! { bytes.push(U8{value.bit_and(255)}) }
+dwarf_u8: fn(bytes: &[U8], value: Int) Never! { bytes.push(U8{value & 255}) }
 
 dwarf_uleb: fn(bytes: &[U8], value: Int) Never! {
     rest := value
     loop {
-        low: rest.bit_and(0x7f)
+        low: rest & 0x7f
         rest = rest >> 7
         if rest == 0 {
             bytes.push(U8{low})
             return
         }
-        bytes.push(U8{low.bit_or(0x80)})
+        bytes.push(U8{low | 0x80})
     }
 }
 
 dwarf_sleb: fn(bytes: &[U8], value: Int) Never! {
     rest := value
     loop {
-        low: rest.bit_and(0x7f)
+        low: rest & 0x7f
         rest = rest >> 7
-        if (rest == 0 && (low.bit_and(0x40)) == 0) || (rest == -1 && (low.bit_and(0x40)) != 0) {
+        if (rest == 0 && (low & 0x40) == 0) || (rest == -1 && (low & 0x40) != 0) {
             bytes.push(U8{low})
             return
         }
-        bytes.push(U8{low.bit_or(0x80)})
+        bytes.push(U8{low | 0x80})
     }
 }
 
@@ -117,10 +117,10 @@ dwarf_string: fn(bytes: &[U8], text: String) Never! {
 }
 
 dwarf_patch_u32: fn(bytes: &[U8], at: Int, value: Int) Never! {
-    bytes[at] = U8{value.bit_and(255)}
-    bytes[at + 1] = U8{(value >> 8).bit_and(255)}
-    bytes[at + 2] = U8{(value >> 16).bit_and(255)}
-    bytes[at + 3] = U8{(value >> 24).bit_and(255)}
+    bytes[at] = U8{value & 255}
+    bytes[at + 1] = U8{(value >> 8) & 255}
+    bytes[at + 2] = U8{(value >> 16) & 255}
+    bytes[at + 3] = U8{(value >> 24) & 255}
 }
 
 // The 4-byte length field at `at`: the bytes after it, to the end.
@@ -138,7 +138,7 @@ dwarf_cfa_advance: fn(cfi: &[U8], from: Int, to: Int) Never! {
         return
     }
     if {
-        delta < 64 -> dwarf_u8(cfi, (0x40).bit_or(delta))
+        delta < 64 -> dwarf_u8(cfi, (0x40) | delta)
         delta < 256 -> {
             dwarf_u8(cfi, 0x02)
             dwarf_u8(cfi, delta)
@@ -173,7 +173,7 @@ dwarf_cfa_def_cfa_offset: fn(cfi: &[U8], offset: Int) Never! {
 // `reg` is saved at CFA - 8 * `factored`.
 dwarf_cfa_offset: fn(cfi: &[U8], reg: Int, factored: Int) Never! {
     if {
-        reg < 64 -> dwarf_u8(cfi, (0x80).bit_or(reg))
+        reg < 64 -> dwarf_u8(cfi, (0x80) | reg)
         else -> {
             dwarf_u8(cfi, 0x05)
             dwarf_uleb(cfi, reg)

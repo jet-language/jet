@@ -532,8 +532,8 @@ str_hash: fn(z: [U8]) -> Int Never! {
     loop b in z {
         c: Int{b}
         if c == 0 -> break
-        h = (h + util.lower_byte(c)).bit_and(4294967295)
-        h = (h * 2654435761).bit_and(4294967295)
+        h = (h + util.lower_byte(c)) & 4294967295
+        h = (h * 2654435761) & 4294967295
     }
     h
 }
@@ -1740,7 +1740,7 @@ find_table: fn(db: Conn, name: [U8], db_name: [U8]?) -> Int Never! {
 // sqlite3FindIndex.
 find_index: fn(db: Conn, name: [U8], db_name: [U8]?) -> Int Never! {
     loop k in 0..<db.dbs.len() {
-        j: if k < 2 -> k.bit_xor(1) else -> k
+        j: if k < 2 -> k ~ 1 else -> k
         if db.dbs[j].schema < 0 -> next
         if db_name == .Val(zdb) {
             if util.str_icmp(zdb, db.dbs[j].name) != 0 -> next
@@ -1902,7 +1902,7 @@ unlink_and_delete_table: fn(db: &Conn, i_db: Int, name: [U8]) Never! {
     s: db.dbs[i_db].schema
     tab: hash_insert(db.schemas[s].tbl_hash, name, -1)
     delete_table(db, tab)
-    db.m_db_flags = db.m_db_flags.bit_or(DBFLAG_SCHEMA_CHANGE)
+    db.m_db_flags |= DBFLAG_SCHEMA_CHANGE
 }
 
 // sqlite3UnlinkAndDeleteIndex.
@@ -1918,7 +1918,7 @@ unlink_and_delete_index: fn(db: &Conn, i_db: Int, name: [U8]) Never! {
         }
         free_index(db, idx)
     }
-    db.m_db_flags = db.m_db_flags.bit_or(DBFLAG_SCHEMA_CHANGE)
+    db.m_db_flags |= DBFLAG_SCHEMA_CHANGE
 }
 
 // tableOfTrigger: the table trigger t fires on, or -1.
@@ -1944,7 +1944,7 @@ unlink_and_delete_trigger: fn(db: &Conn, i_db: Int, name: [U8]) Never! {
             }
         }
         free_trigger(db, t)
-        db.m_db_flags = db.m_db_flags.bit_or(DBFLAG_SCHEMA_CHANGE)
+        db.m_db_flags |= DBFLAG_SCHEMA_CHANGE
     }
 }
 
@@ -1960,8 +1960,8 @@ schema_clear: fn(db: &Conn, s: Int) Never! {
     db.schemas[s].fkey_hash = hash_new()
     loop tab in tabs -> delete_table(db, tab)
     db.schemas[s].seq_tab = -1
-    if db.schemas[s].schema_flags.bit_and(DB_SCHEMA_LOADED) != 0 -> db.schemas[s].generation += 1
-    db.schemas[s].schema_flags = util.clear_bits(db.schemas[s].schema_flags, DB_SCHEMA_LOADED.bit_or(DB_RESET_WANTED))
+    if db.schemas[s].schema_flags & DB_SCHEMA_LOADED != 0 -> db.schemas[s].generation += 1
+    db.schemas[s].schema_flags = util.clear_bits(db.schemas[s].schema_flags, DB_SCHEMA_LOADED | DB_RESET_WANTED)
 }
 
 // sqlite3ResetOneSchema: clear database i_db's schema (and TEMP's), or
@@ -1969,17 +1969,15 @@ schema_clear: fn(db: &Conn, s: Int) Never! {
 reset_one_schema: fn(db: &Conn, i_db: Int) Never! {
     if i_db >= 0 {
         s: db.dbs[i_db].schema
-        db.schemas[s].schema_flags = db.schemas[s].schema_flags.bit_or(DB_RESET_WANTED)
+        db.schemas[s].schema_flags = db.schemas[s].schema_flags | DB_RESET_WANTED
         t: db.dbs[DB_TEMP].schema
-        db.schemas[t].schema_flags = db.schemas[t].schema_flags.bit_or(DB_RESET_WANTED)
+        db.schemas[t].schema_flags = db.schemas[t].schema_flags | DB_RESET_WANTED
         db.m_db_flags = util.clear_bits(db.m_db_flags, DBFLAG_SCHEMA_KNOWN_OK)
     }
     if db.n_schema_lock == 0 {
         loop i in 0..<db.dbs.len() {
             s: db.dbs[i].schema
-            if s >= 0 && db.schemas[s].schema_flags.bit_and(DB_RESET_WANTED) != 0 {
-                schema_clear(db, s)
-            }
+            if s >= 0 && db.schemas[s].schema_flags & DB_RESET_WANTED != 0 -> schema_clear(db, s)
         }
     }
 }
@@ -1990,10 +1988,10 @@ reset_all_schemas: fn(db: &Conn) Never! {
         s: db.dbs[i].schema
         if s < 0 -> next
         if db.n_schema_lock == 0 -> schema_clear(db, s) else {
-            db.schemas[s].schema_flags = db.schemas[s].schema_flags.bit_or(DB_RESET_WANTED)
+            db.schemas[s].schema_flags = db.schemas[s].schema_flags | DB_RESET_WANTED
         }
     }
-    db.m_db_flags = util.clear_bits(db.m_db_flags, DBFLAG_SCHEMA_CHANGE.bit_or(DBFLAG_SCHEMA_KNOWN_OK))
+    db.m_db_flags = util.clear_bits(db.m_db_flags, DBFLAG_SCHEMA_CHANGE | DBFLAG_SCHEMA_KNOWN_OK)
     vtab_unlock_list(db)
     if db.n_schema_lock == 0 -> collapse_database_array(db)
 }

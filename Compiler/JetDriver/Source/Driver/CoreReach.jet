@@ -1163,7 +1163,7 @@ jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: Str
     loop (row, position) in words.items {
         name: Int{name_intern(reach.names, words.names[row]).id}
         spells := [Int]{}
-        loop spell in words.spells[row] -> spells.push(ids[spell >> 2] * 4 + spell.bit_and(3))
+        loop spell in words.spells[row] -> spells.push(ids[spell >> 2] * 4 + (spell & 3))
         index: reach.items.len()
         owner: if words.owners[row] >= 0 -> base + words.owners[row] else -> -1
         lazy_impl: if words.traits[row] == "" -> -1 else -> jet_driver_reach_impl(reach, module_name, words.names[row], words.traits[row], imports)
@@ -1189,7 +1189,7 @@ jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: Str
     if words.spells.len() > 0 {
         last: words.spells.len() - 1
         loop spell in words.spells[last] {
-            jet_driver_reach_mark(reach, unit, ids[spell >> 2] * 4 + spell.bit_and(3))
+            jet_driver_reach_mark(reach, unit, ids[spell >> 2] * 4 + (spell & 3))
         }
     }
     jet_driver_reach_drain(reach)
@@ -1379,11 +1379,11 @@ jet_driver_reach_bodies: fn(functions: [Func]) -> Int Never! {
 
 jet_driver_reach_mark: fn(reach: &JetDriverReach, unit: Int, spell: Int) {
     id: spell >> 2
-    kind: spell.bit_and(3)
-    if reach.units[unit].open || kind.bit_and(1) == 1 -> jet_driver_reach_global(reach, id) else {
+    kind: spell & 3
+    if reach.units[unit].open || kind & 1 == 1 -> jet_driver_reach_global(reach, id) else {
         jet_driver_reach_local(reach, unit, id)
     }
-    if kind.bit_and(1) == 1 -> reach.units[unit].dotted[id] = true
+    if kind & 1 == 1 -> reach.units[unit].dotted[id] = true
     if kind == 2 -> reach.units[unit].heads[id] = true
 }
 
@@ -1806,10 +1806,10 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
             hit := false
             loop spell in reach.items[index].spells {
                 id: spell >> 2
-                kind: spell.bit_and(3)
+                kind: spell & 3
                 if kind == 2 && jet_driver_reach_has(dead[unit], id) -> hit = true
-                if kind.bit_and(1) == 0 && jet_driver_reach_has(local_gone[unit], id) -> hit = true
-                if kind.bit_and(1) == 1 && (jet_driver_reach_has(global_gone, id) || jet_driver_reach_has(waiting_dotted[unit], id)) {
+                if kind & 1 == 0 && jet_driver_reach_has(local_gone[unit], id) -> hit = true
+                if kind & 1 == 1 && (jet_driver_reach_has(global_gone, id) || jet_driver_reach_has(waiting_dotted[unit], id)) {
                     hit = true
                 }
                 if jet_driver_reach_has(waiting_spelled[unit], id) -> hit = true

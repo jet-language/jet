@@ -121,7 +121,7 @@ BitPacker: struct {
 
     put: fn(&self, value: Int, count: Int) {
         loop k in 0..<count {
-            self.acc = (self.acc).bit_or(((((value >> k)).bit_and(1)) << self.n))
+            self.acc = (self.acc) | ((((value >> k)) & 1) << self.n)
             self.n += 1
             if self.n == 8 {
                 self.out.push(byte(self.acc))
@@ -133,7 +133,7 @@ BitPacker: struct {
 
     // Huffman codes are packed most-significant bit first.
     code: fn(&self, value: Int, count: Int) {
-        loop k in 0..<count -> self.put(((value >> (count - 1 - k))).bit_and(1), 1)
+        loop k in 0..<count -> self.put(((value >> (count - 1 - k))) & 1, 1)
     }
 
     finish: fn(&self) {
@@ -158,7 +158,7 @@ deflate_repeat: fn(literal: Bool, matches: Int) -> [U8] {
 }
 
 byte: fn(n: Int) -> U8 {
-    v: (n).bit_and(255)
+    v: (n) & 255
     U8{v}
 }
 
@@ -196,7 +196,7 @@ zip_entries: fn(count: Int) -> [U8] {
     out := local.copy()
     loop b in central -> out.push(b)
     push32(out, 0x06054b50)
-    loop v in ([Int]{0, 0, (count).bit_and(65535), (count).bit_and(65535)}) -> push16(out, v)
+    loop v in ([Int]{0, 0, (count) & 65535, (count) & 65535}) -> push16(out, v)
     push32(out, central.len())
     push32(out, local.len())
     push16(out, 0)
@@ -230,7 +230,7 @@ fix_tar_checksum: fn(data: [U8]) -> [U8] {
     loop k in 0..<512 {
         if k >= 148 && k < 156 -> sum += 32 else -> sum += (Int{out[k]})
     }
-    loop k in 0..<6 -> out[148 + k] = byte(48 + (((sum >> (3 * (5 - k)))).bit_and(7)))
+    loop k in 0..<6 -> out[148 + k] = byte(48 + (((sum >> (3 * (5 - k)))) & 7))
     out[154] = U8{0}
     out[155] = U8{32}
     out
@@ -253,7 +253,7 @@ run: fn() {
     gzip_case("roundtrip", good_gz)
     gzip_case("truncated", good_gz[0..<(good_gz.len() - 5)])
     bad_crc := good_gz.copy()
-    bad_crc[good_gz.len() - 8] = bad_crc[good_gz.len() - 8].bit_xor((U8{255}))
+    bad_crc[good_gz.len() - 8] = bad_crc[good_gz.len() - 8] ~ (U8{255})
     gzip_case("bad crc", bad_crc)
     bad_isize := good_gz.copy()
     bad_isize[good_gz.len() - 1] = U8{127}
@@ -285,7 +285,7 @@ run: fn() {
     zip_case("roundtrip", good_zip)
     zip_case("truncated", good_zip[0..<(good_zip.len() - 10)])
     bad_zip_crc := good_zip.copy()
-    bad_zip_crc[14] = bad_zip_crc[14].bit_xor((U8{255}))
+    bad_zip_crc[14] = bad_zip_crc[14] ~ (U8{255})
     zip_case("bad crc", bad_zip_crc)
     zip_bomb := good_zip.copy()
     loop k in 0..<4 -> zip_bomb[22 + k] = byte(0x04000001 >> (8 * k))

@@ -46,9 +46,9 @@
         return
     }
     state := iter_unsigned(dyn_word(wrapping(value + RESERVOIR_RNG)))
-    state = state.bit_xor(state << U64{13})
-    state = state.bit_xor(state >> U64{7})
-    state = state.bit_xor(state << U64{17})
+    state ~= state << U64{13}
+    state ~= state >> U64{7}
+    state ~= state << U64{17}
     dyn_store(wrapping(value + RESERVOIR_RNG), iter_signed(state))
     index: state % count
     if (index < wrapping(U64{limit})) {

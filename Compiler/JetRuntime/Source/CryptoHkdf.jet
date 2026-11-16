@@ -16,7 +16,7 @@ rt_crypto_hmac3: fn(key: I64, key_len: I64, left: I64, left_len: I64, right: I64
     i := I64{0}
     loop {
         if (i >= I64{64}) { break }
-        rt_text_put(wrapping(pad + i), rt_text_byte(wrapping(pad + i)).bit_xor(I64{0x36}))
+        rt_text_put(wrapping(pad + i), rt_text_byte(wrapping(pad + i)) ~ I64{0x36})
         i += I64{1}
     }
     rt_crypto_hmac_pads3(pad, I64{0}, left, left_len, right, right_len, third, third_len, output, scratch)
@@ -36,7 +36,7 @@ rt_crypto_hmac_pads3: fn(inner_pad: I64, outer_pad: I64, left: I64, left_len: I6
         outer = inner_pad
         i := I64{0}
         loop i < (I64{64}) {
-            rt_text_put(wrapping(outer + i), rt_text_byte(wrapping(outer + i)).bit_xor(I64{0x36}).bit_xor(I64{0x5c}))
+            rt_text_put(wrapping(outer + i), rt_text_byte(wrapping(outer + i)) ~ I64{0x36} ~ I64{0x5c})
             i += I64{1}
         }
     }

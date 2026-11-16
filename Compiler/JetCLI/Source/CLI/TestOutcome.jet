@@ -318,9 +318,9 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         claim: if index < tests.len() -> tests[index].copy() else -> JetCLITestClaim{kind: 0, file: file.copy(), line: U32{0}, mismatch: None}
         // `ok` is the runtime's verdict against the expectation: an
         // expected-fail test is ok when it fails and not ok when it passes.
-        ok: parts.flags.bit_and(1) != 0
-        expected_failure: parts.flags.bit_and(2) != 0
-        skipped: parts.flags.bit_and(4) != 0
+        ok: parts.flags & 1 != 0
+        expected_failure: parts.flags & 2 != 0
+        skipped: parts.flags & 4 != 0
         ran_failed: if expected_failure -> ok else -> !ok
         if skipped -> tally.skipped += 1 else if expected_failure && ok {
             tally.expected_failures += 1
@@ -369,7 +369,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
             // other stop (flag 8) ended the test at a runtime stop.
             caught: if {
                 claim.kind == 3 -> "property_case"
-                parts.flags.bit_and(8) == 0 -> "assertion"
+                parts.flags & 8 == 0 -> "assertion"
                 else -> ""
             }
             if caught != "" {

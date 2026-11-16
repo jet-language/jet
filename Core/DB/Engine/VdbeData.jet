@@ -33,7 +33,7 @@ op_gosub: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_Return: back past the OP_Gosub whose address P1 holds.
 op_return: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p1
-    if v.mem[i].flags.bit_and(MEM_INT) != 0 -> r.pc = v.mem[i].i
+    if v.mem[i].flags & MEM_INT != 0 -> r.pc = v.mem[i].i
     GO_NEXT
 }
 
@@ -104,7 +104,7 @@ op_halt: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int N
 
 // OP_HaltIfNull.
 op_halt_if_null: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
-    if v.mem[v.mem_base + r.p3].flags.bit_and(MEM_NULL) == 0 -> return GO_NEXT
+    if v.mem[v.mem_base + r.p3].flags & MEM_NULL == 0 -> return GO_NEXT
     op_halt<H>(h, db, v, r)
 }
 
@@ -178,7 +178,7 @@ op_string: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 op_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
-    null_flag: if r.p1 != 0 -> MEM_NULL.bit_or(MEM_CLEARED) else -> MEM_NULL
+    null_flag: if r.p1 != 0 -> MEM_NULL | MEM_CLEARED else -> MEM_NULL
     v.mem[i].flags = null_flag
     v.mem[i].z = [U8]{}
     loop k in i + 1..<v.mem_base + r.p3 + 1 {
@@ -191,7 +191,7 @@ op_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_SoftNull.
 op_soft_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p1
-    v.mem[i].flags = clear_bits(v.mem[i].flags, base.MEM_AFF_MASK).bit_or(MEM_NULL)
+    v.mem[i].flags = clear_bits(v.mem[i].flags, base.MEM_AFF_MASK) | MEM_NULL
     GO_NEXT
 }
 
@@ -212,7 +212,7 @@ op_variable: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     if mem.too_big(v.vars[r.p1 - 1], db.limits[ast.LIMIT_LENGTH]) -> return GO_TOO_BIG
     i: v.mem_base + r.p2
     m := v.vars[r.p1 - 1].copy()
-    m.flags = m.flags.bit_or(MEM_FROM_BIND)
+    m.flags |= MEM_FROM_BIND
     run.reg_set(v, i, m)
     GO_NEXT
 }
@@ -239,7 +239,7 @@ op_copy: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     to: v.mem_base + r.p2
     loop k in 0..<r.p3 + 1 {
         run.reg_copy(v, to + k, from + k)
-        if v.mem[to + k].flags.bit_and(MEM_SUBTYPE) != 0 && r.p5.bit_and(2) != 0 {
+        if v.mem[to + k].flags & MEM_SUBTYPE != 0 && r.p5 & 2 != 0 {
             v.mem[to + k].flags = clear_bits(v.mem[to + k].flags, MEM_SUBTYPE)
         }
     }
@@ -267,10 +267,10 @@ op_fk_check: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_ResultRow: registers P1..P1+P2-1 are a row of the result.
 op_result_row: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
-    v.cache_ctr = (v.cache_ctr + 2).bit_or(1)
+    v.cache_ctr = (v.cache_ctr + 2) | 1
     v.result_row = v.mem_base + r.p1
     if db.malloc_failed -> return GO_NO_MEM
-    if db.m_trace.bit_and(conn.TRACE_ROW) != 0 -> h.trace(db, v, conn.TRACE_ROW, [U8]{})
+    if db.m_trace & conn.TRACE_ROW != 0 -> h.trace(db, v, conn.TRACE_ROW, [U8]{})
     v.pc = r.pc + 1
     r.rc = base.ROW
     GO_RETURN
@@ -283,22 +283,22 @@ op_concat: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     i2: v.mem_base + r.p2
     out: v.mem_base + r.p3
     flags1 := v.mem[i1].flags
-    if flags1.bit_or(v.mem[i2].flags).bit_and(MEM_NULL) != 0 {
+    if (flags1 | v.mem[i2].flags) & MEM_NULL != 0 {
         run.reg_null(v, out)
         return GO_NEXT
     }
-    if flags1.bit_and(MEM_STR.bit_or(MEM_BLOB)) == 0 {
+    if flags1 & (MEM_STR | MEM_BLOB) == 0 {
         mem.stringify(v.mem[i1], r.enc, false)
         flags1 = clear_bits(v.mem[i1].flags, MEM_STR)
-    } else if flags1.bit_and(MEM_ZERO) != 0 {
+    } else if flags1 & MEM_ZERO != 0 {
         mem.expand_blob(v.mem[i1])
         flags1 = clear_bits(v.mem[i1].flags, MEM_STR)
     }
     flags2 := v.mem[i2].flags
-    if flags2.bit_and(MEM_STR.bit_or(MEM_BLOB)) == 0 {
+    if flags2 & (MEM_STR | MEM_BLOB) == 0 {
         mem.stringify(v.mem[i2], r.enc, false)
         flags2 = clear_bits(v.mem[i2].flags, MEM_STR)
-    } else if flags2.bit_and(MEM_ZERO) != 0 {
+    } else if flags2 & MEM_ZERO != 0 {
         mem.expand_blob(v.mem[i2])
         flags2 = clear_bits(v.mem[i2].flags, MEM_STR)
     }
@@ -306,7 +306,7 @@ op_concat: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     if n_byte > db.limits[ast.LIMIT_LENGTH] -> return GO_TOO_BIG
     z := v.mem[i2].z.copy()
     loop b in v.mem[i1].z -> z.push(b)
-    if r.enc > base.UTF8 && n_byte.bit_and(1) == 1 -> _: z.pop()
+    if r.enc > base.UTF8 && n_byte & 1 == 1 -> _: z.pop()
     if out != i2 -> v.mem[i2].flags = flags2
     v.mem[i1].flags = flags1
     run.release_dyn(v, out)
@@ -329,13 +329,13 @@ op_arith: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     type1 := v.mem[i1].flags
     type2 := v.mem[i2].flags
     int_math := false
-    if type1.bit_and(type2).bit_and(MEM_INT) != 0 -> int_math = true else if type1.bit_or(type2).bit_and(MEM_NULL) != 0 {
+    if type1 & type2 & MEM_INT != 0 -> int_math = true else if (type1 | type2) & MEM_NULL != 0 {
         run.reg_null(v, out)
         return GO_NEXT
     } else {
         type1 = mem.numeric_type(v.mem[i1])
         type2 = mem.numeric_type(v.mem[i2])
-        int_math = type1.bit_and(type2).bit_and(MEM_INT) != 0
+        int_math = type1 & type2 & MEM_INT != 0
     }
     if int_math {
         a := v.mem[i1].i
@@ -408,23 +408,23 @@ op_bits: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i1: v.mem_base + r.p1
     i2: v.mem_base + r.p2
     out: v.mem_base + r.p3
-    if v.mem[i1].flags.bit_or(v.mem[i2].flags).bit_and(MEM_NULL) != 0 {
+    if (v.mem[i1].flags | v.mem[i2].flags) & MEM_NULL != 0 {
         run.reg_null(v, out)
         return GO_NEXT
     }
     a := mem.int_value(v.mem[i2])
     b := mem.int_value(v.mem[i1])
     op := r.op
-    if op == opc.OP_BIT_AND -> a = a.bit_and(b) else if op == opc.OP_BIT_OR -> a = a.bit_or(b) else if b != 0 {
+    if op == opc.OP_BIT_AND -> a = a & b else if op == opc.OP_BIT_OR -> a = a | b else if b != 0 {
         if b < 0 {
             op = 2 * opc.OP_SHIFT_LEFT + 1 - op
             b = if b > -64 -> -b else -> 64
         }
         if b >= 64 -> a = if a >= 0 || op == opc.OP_SHIFT_LEFT -> 0 else -> -1 else {
             ua := util.as_u64(a)
-            if op == opc.OP_SHIFT_LEFT -> ua = (ua << b).bit_and(U64_MASK) else {
+            if op == opc.OP_SHIFT_LEFT -> ua = (ua << b) & U64_MASK else {
                 ua >>= b
-                if a < 0 -> ua = ua.bit_or((U64_MASK << (64 - b)).bit_and(U64_MASK))
+                if a < 0 -> ua |= (U64_MASK << (64 - b)) & U64_MASK
             }
             a = util.wrap_i64(ua)
         }
@@ -448,9 +448,9 @@ op_add_imm: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // SQLITE_MISMATCH when P2 is 0).
 op_must_be_int: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p1
-    if v.mem[i].flags.bit_and(MEM_INT) == 0 {
+    if v.mem[i].flags & MEM_INT == 0 {
         mem.apply_affinity(v.mem[i], base.AFF_NUMERIC, r.enc)
-        if v.mem[i].flags.bit_and(MEM_INT) == 0 {
+        if v.mem[i].flags & MEM_INT == 0 {
             if r.p2 == 0 {
                 r.rc = base.MISMATCH
                 return GO_ERROR
@@ -465,7 +465,7 @@ op_must_be_int: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_RealAffinity.
 op_real_affinity: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p1
-    if v.mem[i].flags.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) != 0 -> mem.realify(v.mem[i])
+    if v.mem[i].flags & (MEM_INT | MEM_INT_REAL) != 0 -> mem.realify(v.mem[i])
     GO_NEXT
 }
 
@@ -491,7 +491,7 @@ CMP_GT_JUMPS: 37
 
 cmp_jumps: fn(op: Int, res: Int) -> Bool Never! {
     mask: if res < 0 -> CMP_LT_JUMPS else if res == 0 -> CMP_EQ_JUMPS else -> CMP_GT_JUMPS
-    (mask >> (op - opc.OP_NE)).bit_and(1) == 1
+    (mask >> (op - opc.OP_NE)) & 1 == 1
 }
 
 // OP_Eq, OP_Ne, OP_Lt, OP_Le, OP_Gt, OP_Ge: compare P3 with P1 under the
@@ -504,7 +504,7 @@ op_compare_jump: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i3: v.mem_base + r.p3
     flags1 := v.mem[i1].flags
     flags3 := v.mem[i3].flags
-    if flags1.bit_and(flags3).bit_and(MEM_INT) != 0 {
+    if flags1 & flags3 & MEM_INT != 0 {
         x: v.mem[i3].i
         y: v.mem[i1].i
         res: if x > y -> 1 else if x < y -> -1 else -> 0
@@ -513,38 +513,38 @@ op_compare_jump: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
         return GO_NEXT
     }
     res := 0
-    if flags1.bit_or(flags3).bit_and(MEM_NULL) != 0 {
-        if r.p5.bit_and(conn.CMP_NULLEQ) != 0 {
-            if flags1.bit_and(flags3).bit_and(MEM_NULL) != 0 && flags3.bit_and(MEM_CLEARED) == 0 {
-                res = 0
-            } else { res = if flags3.bit_and(MEM_NULL) != 0 -> -1 else -> 1 }
+    if (flags1 | flags3) & MEM_NULL != 0 {
+        if r.p5 & conn.CMP_NULLEQ != 0 {
+            if flags1 & flags3 & MEM_NULL != 0 && flags3 & MEM_CLEARED == 0 -> res = 0 else {
+                res = if flags3 & MEM_NULL != 0 -> -1 else -> 1
+            }
         } else {
-            if r.p5.bit_and(conn.CMP_JUMPIFNULL) != 0 -> return GO_JUMP
+            if r.p5 & conn.CMP_JUMPIFNULL != 0 -> return GO_JUMP
             r.i_compare = 1
             return GO_NEXT
         }
     } else {
-        affinity: r.p5.bit_and(conn.CMP_AFF_MASK)
-        nums: MEM_INT.bit_or(MEM_INT_REAL).bit_or(MEM_REAL)
+        affinity: r.p5 & conn.CMP_AFF_MASK
+        nums: MEM_INT | MEM_INT_REAL | MEM_REAL
         if affinity >= base.AFF_NUMERIC {
-            if flags1.bit_or(flags3).bit_and(MEM_STR) != 0 {
-                if flags1.bit_and(nums.bit_or(MEM_STR)) == MEM_STR {
+            if (flags1 | flags3) & MEM_STR != 0 {
+                if flags1 & (nums | MEM_STR) == MEM_STR {
                     mem.apply_numeric_affinity(v.mem[i1], false)
                     flags3 = v.mem[i3].flags
                 }
-                if flags3.bit_and(nums.bit_or(MEM_STR)) == MEM_STR {
+                if flags3 & (nums | MEM_STR) == MEM_STR {
                     mem.apply_numeric_affinity(v.mem[i3], false)
                 }
             }
-        } else if affinity == base.AFF_TEXT && flags1.bit_or(flags3).bit_and(MEM_STR) != 0 {
-            if flags1.bit_and(MEM_STR) == 0 && flags1.bit_and(nums) != 0 {
+        } else if affinity == base.AFF_TEXT && (flags1 | flags3) & MEM_STR != 0 {
+            if flags1 & MEM_STR == 0 && flags1 & nums != 0 {
                 mem.stringify(v.mem[i1], r.enc, true)
-                flags1 = clear_bits(v.mem[i1].flags, MEM_TYPE_MASK).bit_or(flags1.bit_and(MEM_TYPE_MASK))
-                if i1 == i3 -> flags3 = flags1.bit_or(MEM_STR)
+                flags1 = clear_bits(v.mem[i1].flags, MEM_TYPE_MASK) | flags1 & MEM_TYPE_MASK
+                if i1 == i3 -> flags3 = flags1 | MEM_STR
             }
-            if flags3.bit_and(MEM_STR) == 0 && flags3.bit_and(nums) != 0 {
+            if flags3 & MEM_STR == 0 && flags3 & nums != 0 {
                 mem.stringify(v.mem[i3], r.enc, true)
-                flags3 = clear_bits(v.mem[i3].flags, MEM_TYPE_MASK).bit_or(flags3.bit_and(MEM_TYPE_MASK))
+                flags3 = clear_bits(v.mem[i3].flags, MEM_TYPE_MASK) | flags3 & MEM_TYPE_MASK
             }
         }
         res = record.mem_compare(v.mem[i3], v.mem[i1], run.p4_coll(v, r.pc))
@@ -569,7 +569,7 @@ op_else_eq: fn(r: &Run) -> Int Never! {
 // before when P5 has OPFLAG_PERMUTE.
 op_compare: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     permute := [Int]{}
-    use_permute: r.p5.bit_and(conn.OPFLAG_PERMUTE) != 0
+    use_permute: r.p5 & conn.OPFLAG_PERMUTE != 0
     if use_permute {
         if v.ops[r.pc - 1].p4 == .IntArray(ai) {
             loop k in 1..<ai.len() -> permute.push(ai[k])
@@ -584,10 +584,10 @@ op_compare: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
             r.i_compare = c
             if c != 0 {
                 sf: record.sort_flags_of(info, i)
-                if sf.bit_and(base.KEYINFO_ORDER_BIGNULL) != 0 && (v.mem[p1 + idx].flags.bit_and(MEM_NULL) != 0 || v.mem[p2 + idx].flags.bit_and(MEM_NULL) != 0) {
+                if sf & base.KEYINFO_ORDER_BIGNULL != 0 && (v.mem[p1 + idx].flags & MEM_NULL != 0 || v.mem[p2 + idx].flags & MEM_NULL != 0) {
                     c = -c
                 }
-                if sf.bit_and(base.KEYINFO_ORDER_DESC) != 0 -> c = -c
+                if sf & base.KEYINFO_ORDER_DESC != 0 -> c = -c
                 r.i_compare = c
                 break
             }
@@ -613,9 +613,7 @@ OR_LOGIC: [0, 1, 2, 1, 1, 1, 2, 1, 2]
 
 // The truth value of register i: 0, 1, or 2 for NULL.
 truth: fn(v: conn.Vdbe, i: Int) -> Int Never! {
-    if v.mem[i].flags.bit_and(MEM_NULL) != 0 && v.mem[i].flags.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) == 0 {
-        return 2
-    }
+    if v.mem[i].flags & MEM_NULL != 0 && v.mem[i].flags & (MEM_INT | MEM_INT_REAL) == 0 -> return 2
     if mem.boolean_value(v.mem[i], false) -> 1 else -> 0
 }
 
@@ -638,7 +636,7 @@ op_is_true: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     b: mem.boolean_value(v.mem[v.mem_base + r.p1], r.p3 != 0)
     x: if b -> 1 else -> 0
     mask: run.p4_int(v, r.pc)
-    run.reg_int(v, v.mem_base + r.p2, x.bit_xor(mask))
+    run.reg_int(v, v.mem_base + r.p2, x ~ mask)
     GO_NEXT
 }
 
@@ -646,7 +644,7 @@ op_is_true: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 op_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i1: v.mem_base + r.p1
     out: v.mem_base + r.p2
-    if v.mem[i1].flags.bit_and(MEM_NULL) == 0 {
+    if v.mem[i1].flags & MEM_NULL == 0 {
         x: if mem.boolean_value(v.mem[i1], false) -> 0 else -> 1
         run.reg_int(v, out, x)
     } else { run.reg_null(v, out) }
@@ -657,7 +655,7 @@ op_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 op_bit_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i1: v.mem_base + r.p1
     out: v.mem_base + r.p2
-    null: v.mem[i1].flags.bit_and(MEM_NULL) != 0
+    null: v.mem[i1].flags & MEM_NULL != 0
     x: if null -> 0 else -> -mem.int_value(v.mem[i1]) - 1
     run.reg_null(v, out)
     if !null {
@@ -696,7 +694,7 @@ op_if_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_IsNull.
 op_is_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
-    if v.mem[v.mem_base + r.p1].flags.bit_and(MEM_NULL) != 0 -> return GO_JUMP
+    if v.mem[v.mem_base + r.p1].flags & MEM_NULL != 0 -> return GO_JUMP
     GO_NEXT
 }
 
@@ -712,23 +710,23 @@ op_is_type: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
         ci: v.csr_base + r.p1
         if r.p3 < v.csr[ci].n_hdr_parsed {
             t: v.csr[ci].types[r.p3]
-            if t >= 12 -> mask = if t.bit_and(1) == 1 -> 4 else -> 8 else -> mask = IS_TYPE_MASKS[t]
+            if t >= 12 -> mask = if t & 1 == 1 -> 4 else -> 8 else -> mask = IS_TYPE_MASKS[t]
         } else { mask = 1 << (run.p4_int(v, r.pc) - 1) }
     } else { mask = 1 << (base.value_type(v.mem[v.mem_base + r.p3]) - 1) }
-    if mask.bit_and(r.p5) != 0 -> return GO_JUMP
+    if mask & r.p5 != 0 -> return GO_JUMP
     GO_NEXT
 }
 
 // OP_NotNull.
 op_not_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
-    if v.mem[v.mem_base + r.p1].flags.bit_and(MEM_NULL) == 0 -> return GO_JUMP
+    if v.mem[v.mem_base + r.p1].flags & MEM_NULL == 0 -> return GO_JUMP
     GO_NEXT
 }
 
 // OP_ZeroOrNull: P2 = NULL when P1 or P3 is NULL, 0 otherwise.
 op_zero_or_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     out: v.mem_base + r.p2
-    if v.mem[v.mem_base + r.p1].flags.bit_and(MEM_NULL) != 0 || v.mem[v.mem_base + r.p3].flags.bit_and(MEM_NULL) != 0 {
+    if v.mem[v.mem_base + r.p1].flags & MEM_NULL != 0 || v.mem[v.mem_base + r.p3].flags & MEM_NULL != 0 {
         run.reg_null(v, out)
     } else { run.reg_int(v, out, 0) }
     GO_NEXT
@@ -744,19 +742,19 @@ op_zero_or_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     v.ops.push(test_op(opc.OP_REMAINDER, conn.P4.NotUsed))
     add := test_run(v, 0, 0, 0, 2)
     assert_eq(op_arith(v, add), GO_NEXT)
-    assert(v.mem[2].flags.bit_and(MEM_INT) != 0 && v.mem[2].i == 6)
+    assert(v.mem[2].flags & MEM_INT != 0 && v.mem[2].i == 6)
     big := test_run(v, 0, 0, 1, 2)
     _: op_arith(v, big)
-    assert(v.mem[2].flags.bit_and(MEM_REAL) != 0)
+    assert(v.mem[2].flags & MEM_REAL != 0)
     v.mem[0] = base.mem_int(0)
     div := test_run(v, 1, 0, 1, 2)
     _: op_arith(v, div)
-    assert(v.mem[2].flags.bit_and(MEM_NULL) != 0)
+    assert(v.mem[2].flags & MEM_NULL != 0)
     v.mem[0] = base.mem_int(-5)
     v.mem[1] = base.mem_int(17)
     rem := test_run(v, 2, 0, 1, 2)
     _: op_arith(v, rem)
-    assert(v.mem[2].flags.bit_and(MEM_INT) != 0 && v.mem[2].i == 2)
+    assert(v.mem[2].flags & MEM_INT != 0 && v.mem[2].i == 2)
 }
 
 #Test("comparisons jump as vdbe.c's tables say and NULLs compare by P5") {
@@ -790,10 +788,10 @@ op_zero_or_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     v.ops.push(test_op(opc.OP_RETURN, conn.P4.NotUsed))
     both := test_run(v, 0, 0, 1, 2)
     _: op_and_or(v, both)
-    assert(v.mem[2].flags.bit_and(MEM_INT) != 0 && v.mem[2].i == 0)
+    assert(v.mem[2].flags & MEM_INT != 0 && v.mem[2].i == 0)
     either := test_run(v, 1, 0, 1, 2)
     _: op_and_or(v, either)
-    assert(v.mem[2].flags.bit_and(MEM_NULL) != 0)
+    assert(v.mem[2].flags & MEM_NULL != 0)
     call := test_run(v, 2, 2, 0, 0)
     assert_eq(op_gosub(v, call), GO_JUMP_CHECK)
     back := test_run(v, 3, 2, 0, 0)
@@ -810,6 +808,6 @@ op_zero_or_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     v.ops.push(test_op(opc.OP_CONCAT, conn.P4.NotUsed))
     cat := test_run(v, 0, 0, 1, 2)
     assert_eq(op_concat(db, v, cat), GO_NEXT)
-    assert(v.mem[2].flags.bit_and(MEM_STR) != 0 && v.mem[2].z == "x42".bytes())
-    assert(v.mem[0].flags.bit_and(MEM_STR) == 0)
+    assert(v.mem[2].flags & MEM_STR != 0 && v.mem[2].z == "x42".bytes())
+    assert(v.mem[0].flags & MEM_STR == 0)
 }

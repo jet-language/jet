@@ -189,10 +189,10 @@ jet_cli_native_test_records: fn(output: String, incomplete: Bool, contracts: &[J
         if cursor.bytes[end] != (U8{10}) -> return Err("native test outcome terminator is absent")
         name_end: cursor.at + name_length
         stdout_end: name_end + stdout_length
-        if name_end < end && (Int{cursor.bytes[name_end]}.bit_and(192)) == 128 {
+        if name_end < end && (Int{cursor.bytes[name_end]} & 192) == 128 {
             return Err("native test name boundary is not UTF-8")
         }
-        if stdout_end < end && (Int{cursor.bytes[stdout_end]}.bit_and(192)) == 128 {
+        if stdout_end < end && (Int{cursor.bytes[stdout_end]} & 192) == 128 {
             return Err("native test stdout boundary is not UTF-8")
         }
         wire: String.from_bytes(cursor.bytes.slice(start, end)) ?? return Err("native test outcome payload is not UTF-8")
@@ -207,9 +207,9 @@ jet_cli_native_test_records: fn(output: String, incomplete: Bool, contracts: &[J
 jet_native_test_shuffle_next: fn(state: &U64) -> U64 Never! {
     state = wrapping(state + U64{0x9E3779B97F4A7C15})
     mixed := state
-    mixed = wrapping((mixed.bit_xor((mixed >> 30))) * U64{0xBF58476D1CE4E5B9})
-    mixed = wrapping((mixed.bit_xor((mixed >> 27))) * U64{0x94D049BB133111EB})
-    mixed.bit_xor((mixed >> 31))
+    mixed = wrapping((mixed ~ (mixed >> 30)) * U64{0xBF58476D1CE4E5B9})
+    mixed = wrapping((mixed ~ (mixed >> 27)) * U64{0x94D049BB133111EB})
+    mixed ~ (mixed >> 31)
 }
 
 // The order the run sorts selected tests by: module, then source offset.

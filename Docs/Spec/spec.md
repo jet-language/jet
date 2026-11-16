@@ -462,7 +462,7 @@ that fact as `value.reflect().origin -> OriginInfo?`; there is no runtime origin
 projection (D-TRACK-ORIGIN1=A).
 
 Arithmetic `+`, `-`, `*`, and the numeric division operations use the registered
-numeric widening law. `%`, `%%`, `<<`, `>>` and the bit methods are integer-only.
+numeric widening law. `%`, `%%`, `<<`, `>>` and the bit sigils are integer-only.
 `+` on `String` is a teaching error that points to interpolation. Compound
 assignment follows the corresponding binary operator. Comparisons use the same
 numeric widening law and return `Bool`; nonnumeric operands must have matching
@@ -1104,8 +1104,8 @@ carry (D-SECRET-CT1).
 
 A branch on a `.Fixed` value whose arms are total is masked, not refused. A
 total arm only binds names, assigns to local names, and reads literals, names
-and fields. It may use operators that cannot stop (bitwise operators,
-comparisons, a shift by a literal, wrapping arithmetic), the bit methods, the
+and fields. It may use operators that cannot stop (the bit sigils,
+comparisons, a shift by a literal, wrapping arithmetic), the
 wrapping methods, `len()` and `is_empty()`, and nested total branches. No
 arm breaks, calls, stops or writes memory, and an arm returns only as an
 early return (below). Both arms run. Each local

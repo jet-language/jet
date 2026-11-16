@@ -65,13 +65,13 @@ BodyCodecIn: struct {
 body_codec_put_uvarint: fn(out: &BodyCodecOut, value: Int) Never! {
     rest := value
     loop {
-        low: rest.bit_and(127)
+        low: rest & 127
         rest = rest >> 7
         if rest == 0 {
             out.bytes.push(U8{low})
             return
         }
-        out.bytes.push(U8{low.bit_or(128)})
+        out.bytes.push(U8{low | 128})
     }
 }
 
@@ -86,7 +86,7 @@ body_codec_get_uvarint: fn(bytes: [U8], input: &BodyCodecIn) -> Int Never! {
         }
         byte: Int{bytes[input.at]}
         input.at += 1
-        value = value.bit_or(byte.bit_and(127) << shift)
+        value |= (byte & 127) << shift
         if byte < 128 -> return value
         shift += 7
     }
@@ -134,7 +134,7 @@ body_codec_put_int: fn(out: &BodyCodecOut, value: Int) Never! {
 
 body_codec_get_int: fn(bytes: [U8], input: &BodyCodecIn) -> Int Never! {
     value: body_codec_get_uvarint(bytes, input)
-    if value.bit_and(1) == 0 -> value >> 1 else -> 0 - (value >> 1) - 1
+    if value & 1 == 0 -> value >> 1 else -> 0 - (value >> 1) - 1
 }
 
 body_codec_put_bool: fn(out: &BodyCodecOut, value: Bool) Never! {
@@ -296,7 +296,7 @@ body_codec_get_i64: fn(bytes: [U8], input: &BodyCodecIn) -> I64 Never! {
 // A symbol: a local one (SYMBOL_LOCAL_BIT) and id 0 as `id * 2 + 1`, any
 // other as its position in `out.symbols` times 2.
 body_codec_put_symbolid: fn(out: &BodyCodecOut, value: SymbolID) Never! {
-    if value.id == 0 || value.id.bit_and(SYMBOL_LOCAL_BIT) != 0 {
+    if value.id == 0 || value.id & SYMBOL_LOCAL_BIT != 0 {
         body_codec_put_uvarint(out, Int{value.id} * 2 + 1)
         return
     }
@@ -312,7 +312,7 @@ body_codec_put_symbolid: fn(out: &BodyCodecOut, value: SymbolID) Never! {
 
 body_codec_get_symbolid: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolID Never! {
     value: body_codec_get_uvarint(bytes, input)
-    if value.bit_and(1) == 1 -> return SymbolID{id: body_codec_get_u32_of(value >> 1, input)}
+    if value & 1 == 1 -> return SymbolID{id: body_codec_get_u32_of(value >> 1, input)}
     at: value >> 1
     if at >= input.symbols.len() {
         input.failed = true

@@ -113,8 +113,8 @@ sci: fn(n: Float, frac: Int) -> String Never! {
     bits: math.to_bits(n)
     sign: if bits < 0 -> "-" else -> ""
     if n == 0.0 -> return "{scaled_decimal(0, precision)}e0"
-    binary_exponent: (bits >> 52).bit_and(2047)
-    numerator := bits.bit_and(4503599627370495)
+    binary_exponent: (bits >> 52) & 2047
+    numerator := bits & 4503599627370495
     shift := -1074
     if binary_exponent != 0 {
         numerator += 4503599627370496
@@ -380,8 +380,8 @@ float_fixed: fn(n: Float, frac: Int) -> String Never! {
         }
     }
     bits: math.to_bits(n)
-    binary_exponent: (bits >> 52).bit_and(2047)
-    numerator := bits.bit_and(4503599627370495)
+    binary_exponent: (bits >> 52) & 2047
+    numerator := bits & 4503599627370495
     shift := -1074
     if binary_exponent != 0 {
         numerator += 4503599627370496

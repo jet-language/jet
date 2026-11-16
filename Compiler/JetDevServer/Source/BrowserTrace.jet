@@ -152,7 +152,7 @@ browser_trace_secure_read: fn(path: String, limit: Int, label: String) -> String
     reader := browser_trace_files.open(path, links: .Refuse) ?? return Err(browser_trace_error("cannot securely open {label}"))
     metadata: reader.stat() ?? return Err(browser_trace_error("cannot inspect {label}"))
     if browser_trace_sys.is_unix() {
-        if metadata.mode.bit_and(0o077) != 0 -> return Err(browser_trace_error("{label} permissions expose session data"))
+        if metadata.mode & 0o077 != 0 -> return Err(browser_trace_error("{label} permissions expose session data"))
         if metadata.owner != Val(browser_trace_sys.getuid()) -> return Err(browser_trace_error("{label} belongs to another user"))
     }
     if !metadata.is_file || metadata.size > limit -> return Err(browser_trace_error("{label} is not bounded"))

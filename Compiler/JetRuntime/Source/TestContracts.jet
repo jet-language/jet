@@ -60,7 +60,7 @@ test_contract_entry: fn(root: I64, key: I64) -> I64 {
     }
     sites: trap_word(wrapping(root + I64{16}))
     mask: trap_word(wrapping(root + I64{24})) - I64{1}
-    index := test_contract_hash(key).bit_and(mask)
+    index := test_contract_hash(key) & mask
     loop {
         entry: wrapping(sites + index * I64{16})
         found: trap_word(entry)
@@ -71,15 +71,15 @@ test_contract_entry: fn(root: I64, key: I64) -> I64 {
             trap_store(wrapping(root + I64{32}), trap_word(wrapping(root + I64{32})) + I64{1})
             return entry
         }
-        index = (index + I64{1}).bit_and(mask)
+        index = (index + I64{1}) & mask
     }
     I64{0}
 }
 
 test_contract_hash: fn(key: I64) -> I64 {
     // Static data addresses are 8-aligned; fold the high bits into the low.
-    mixed: key.bit_xor(key >> I64{17})
-    (mixed >> I64{3}).bit_and(I64{9223372036854775807})
+    mixed: key ~ key >> I64{17}
+    (mixed >> I64{3}) & I64{9223372036854775807}
 }
 
 test_contract_grow: fn(root: I64) {
@@ -94,10 +94,10 @@ test_contract_grow: fn(root: I64) {
         old: wrapping(old_sites + at * I64{16})
         key: trap_word(old)
         if (key != I64{0}) {
-            index := test_contract_hash(key).bit_and(mask)
+            index := test_contract_hash(key) & mask
             loop {
                 if (trap_word(wrapping(sites + index * I64{16})) == I64{0}) { break }
-                index = (index + I64{1}).bit_and(mask)
+                index = (index + I64{1}) & mask
             }
             entry: wrapping(sites + index * I64{16})
             trap_store(entry, key)

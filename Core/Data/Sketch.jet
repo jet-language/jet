@@ -100,6 +100,6 @@ c_int_max: fn() -> Int Never! { 9223372036854775807 }
 /// Internal seeded FNV-1a kernel shared by the shipped HLL and CMS algorithms.
 __fnv1a64: fn(key: String, seed: U64) -> U64 Never! {
     hash := seed
-    loop byte in key.bytes() -> hash = wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
+    loop byte in key.bytes() -> hash = wrapping((hash ~ U64{byte}) * U64{1099511628211})
     hash
 }

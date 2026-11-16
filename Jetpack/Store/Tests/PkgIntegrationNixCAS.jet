@@ -31,7 +31,7 @@ S3CASReader: struct {
     number: fn(&self, size: Int) -> Int {
         bytes: self.take_bytes(size)
         value := 0
-        loop i in 0..<size -> value = value.bit_or(Int{bytes[i]} << (8 * i))
+        loop i in 0..<size -> value |= Int{bytes[i]} << (8 * i)
         value
     }
 
@@ -61,7 +61,7 @@ s3cas_add: fn(out: &[U8], bytes: [U8]) {
 }
 
 s3cas_number: fn(out: &[U8], value: Int, size: Int) {
-    loop i in 0..<size -> out.push(U8{(value >> (8 * i)).bit_and(255)})
+    loop i in 0..<size -> out.push(U8{(value >> (8 * i)) & 255})
 }
 
 s3cas_field: fn(out: &[U8], bytes: [U8]) {

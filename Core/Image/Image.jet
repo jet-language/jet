@@ -346,7 +346,7 @@ priv png_unfilter: fn(raw: [U8], offset: Int, row_bytes: Int, step: Int, previou
             4 -> paeth(left, up, corner)
             else -> 0
         }
-        value: (byte_at(raw, offset + 1 + i) + predictor).bit_and(255)
+        value: (byte_at(raw, offset + 1 + i) + predictor) & 255
         line.push(U8{value})
     }
     Val(line)
@@ -369,9 +369,9 @@ priv paeth: fn(left: Int, up: Int, corner: Int) -> Int {
 
 priv put_rgba: fn(pixels: &[U8], at: Int, rgba: Int) {
     pixels[at] = U8{rgba >> 24}
-    pixels[at + 1] = U8{(rgba >> 16).bit_and(255)}
-    pixels[at + 2] = U8{(rgba >> 8).bit_and(255)}
-    pixels[at + 3] = U8{rgba.bit_and(255)}
+    pixels[at + 1] = U8{(rgba >> 16) & 255}
+    pixels[at + 2] = U8{(rgba >> 8) & 255}
+    pixels[at + 3] = U8{rgba & 255}
 }
 
 priv png_rgba: fn(red: Int, green: Int, blue: Int, alpha: Int) -> Int {
@@ -379,7 +379,7 @@ priv png_rgba: fn(red: Int, green: Int, blue: Int, alpha: Int) -> Int {
 }
 
 priv push_be32: fn(out: &[U8], value: Int) {
-    loop shift in ([Int]{24, 16, 8, 0}) -> out.push(U8{(value >> shift).bit_and(255)})
+    loop shift in ([Int]{24, 16, 8, 0}) -> out.push(U8{(value >> shift) & 255})
 }
 
 // Appends a chunk: its length, its type and body, and their CRC-32.
@@ -406,7 +406,7 @@ priv png_filtered: fn(line: [U8], previous: [U8], at: Int, channels: Int, filter
         3 -> (left + up) >> 1
         else -> paeth(left, up, corner)
     }
-    (byte_at(line, at) - predicted).bit_and(255)
+    (byte_at(line, at) - predicted) & 255
 }
 
 // A PNG of `image`, which `encode` has checked.
@@ -487,7 +487,7 @@ priv png_sample: fn(line: [U8], column: Int, header: PNGHeader, palette: [U8], k
     depth: header.depth
     if depth < 8 {
         bit: column * depth
-        value: (byte_at(line, bit /% 8) >> (8 - depth - bit % 8)).bit_and((1 << depth) - 1)
+        value: (byte_at(line, bit /% 8) >> (8 - depth - bit % 8)) & (1 << depth) - 1
         if header.color_type == 3 -> return png_palette(palette, key, value)
         gray: value * (255 /% ((1 << depth) - 1))
         alpha: if key.len() == 2 && png_key_match(key, 0, value) -> 0 else -> 255
@@ -624,12 +624,12 @@ priv jpeg_frame_header: fn(data: [U8], segment: JPEGSegment, limits: Limits) -> 
         at: start + 6 + index * 3
         sampling: byte_at(data, at + 1)
         table: byte_at(data, at + 2)
-        if sampling < 0x11 || sampling > 0x44 || sampling.bit_and(15) < 1 || sampling.bit_and(15) > 4 || table > 3 {
+        if sampling < 0x11 || sampling > 0x44 || sampling & 15 < 1 || sampling & 15 > 4 || table > 3 {
             return Err(.Malformed)
         }
         frame.ids.push(byte_at(data, at))
         frame.hs.push(if count == 1 -> 1 else -> sampling >> 4)
-        frame.vs.push(if count == 1 -> 1 else -> sampling.bit_and(15))
+        frame.vs.push(if count == 1 -> 1 else -> sampling & 15)
         frame.tables.push(table)
     }
     Ok(frame)
@@ -664,7 +664,7 @@ priv jpeg_read_huffman: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables
     at := segment.start
     loop at < segment.end {
         class: byte_at(data, at) >> 4
-        slot: byte_at(data, at).bit_and(15)
+        slot: byte_at(data, at) & 15
         if class > 1 || slot > 3 || at + 17 > segment.end -> return Err(.Malformed)
         total := 0
         loop index in 0..<16 -> total += byte_at(data, at + 1 + index)
@@ -681,7 +681,7 @@ priv jpeg_read_quant: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) 
     at := segment.start
     loop at < segment.end {
         wide: byte_at(data, at) >> 4
-        slot: byte_at(data, at).bit_and(15)
+        slot: byte_at(data, at) & 15
         size: if wide == 1 -> 128 else -> 64
         if wide > 1 || slot > 3 || at + 1 + size > segment.end -> return Err(.Malformed)
         loop index in 0..<64 {
@@ -714,7 +714,7 @@ priv jpeg_bit: fn(data: [U8], bits: &JPEGBits) -> Int {
         bits.count = 8
     }
     bits.count -= 1
-    (bits.buffer >> bits.count).bit_and(1)
+    (bits.buffer >> bits.count) & 1
 }
 
 // The next `size` bits as a signed coefficient: values below half the range
@@ -751,7 +751,7 @@ priv jpeg_block: fn(data: [U8], bits: &JPEGBits, dc: JPEGHuffman, ac: JPEGHuffma
     loop at < 64 {
         symbol: jpeg_symbol(data, bits, ac) ?? return Err(err)
         run: symbol >> 4
-        bits_size: symbol.bit_and(15)
+        bits_size: symbol & 15
         if bits_size == 0 && run != 15 -> break
         if {
             bits_size == 0 -> { at += 16 }
@@ -818,7 +818,7 @@ priv jpeg_idct: fn(coef: [Int], work: &[Int], rows: &[Int], samples: &[U8], at: 
     loop column in 0..<8 -> jpeg_idct_pass(coef, work, column, column, 8, 11)
     loop row in 0..<8 -> jpeg_idct_pass(work, rows, row * 8, row * 8, 1, 18)
     loop index in 0..<64 {
-        samples[at + (index >> 3) * stride + index.bit_and(7)] = clamp_byte(rows[index] + 128)
+        samples[at + (index >> 3) * stride + (index & 7)] = clamp_byte(rows[index] + 128)
     }
 }
 
@@ -864,12 +864,12 @@ priv jpeg_scan_header: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, dc
         loop (position, frame_id) in frame.ids {
             if frame_id == id -> component = position
         }
-        if component < 0 || order.contains(component) || tables >> 4 > 3 || tables.bit_and(15) > 3 {
+        if component < 0 || order.contains(component) || tables >> 4 > 3 || tables & 15 > 3 {
             return Err(.Malformed)
         }
         order.push(component)
         dc[component] = tables >> 4
-        ac[component] = tables.bit_and(15)
+        ac[component] = tables & 15
     }
     tail: start + 1 + count * 2
     if byte_at(data, tail) != 0 || byte_at(data, tail + 1) != 63 || byte_at(data, tail + 2) != 0 {
@@ -1426,7 +1426,7 @@ JPEGCodes: struct {
 
 priv jpeg_put: fn(bits: &JPEGWriter, value: Int, size: Int) {
     loop index in 0..<size {
-        bits.pending = (bits.pending << 1) + (value >> (size - 1 - index)).bit_and(1)
+        bits.pending = (bits.pending << 1) + ((value >> (size - 1 - index)) & 1)
         bits.count += 1
         if bits.count == 8 {
             bits.out.push(U8{bits.pending})
@@ -1568,7 +1568,7 @@ priv push_marker: fn(out: &[U8], marker: Int, body: [U8]) {
     out.push(U8{0xFF})
     out.push(U8{marker})
     out.push(U8{(body.len() + 2) >> 8})
-    out.push(U8{(body.len() + 2).bit_and(255)})
+    out.push(U8{(body.len() + 2) & 255})
     loop byte in body -> out.push(byte)
 }
 
@@ -1611,7 +1611,7 @@ priv jpeg_encode: fn(image: Image, quality: Int, limits: Limits) -> [U8] ImageEr
     }
     frame := [U8]{8}
     loop value in
-        ([Int]{image.height >> 8, image.height.bit_and(255), image.width >> 8, image.width.bit_and(255), count}) {
+        ([Int]{image.height >> 8, image.height & 255, image.width >> 8, image.width & 255, count}) {
         frame.push(U8{value})
     }
     loop component in 0..<count {
@@ -1644,7 +1644,7 @@ priv jpeg_encode: fn(image: Image, quality: Int, limits: Limits) -> [U8] ImageEr
             loop component in 0..<count {
                 // Edge blocks repeat the last column and row.
                 loop index in 0..<64 {
-                    x: at_most(block_x * 8 + index.bit_and(7), image.width - 1)
+                    x: at_most(block_x * 8 + (index & 7), image.width - 1)
                     y: at_most(block_y * 8 + (index >> 3), image.height - 1)
                     samples[index] = ycc[(y * image.width + x) * 3 + component] - 128
                 }
@@ -1883,7 +1883,7 @@ priv test_coefficients: fn(pairs: [Int]) -> [Int] {
 
 priv push_be16: fn(out: &[U8], value: Int) {
     out.push(U8{value >> 8})
-    out.push(U8{value.bit_and(255)})
+    out.push(U8{value & 255})
 }
 
 priv push_segment: fn(out: &[U8], marker: Int, body: [U8]) {
@@ -1935,7 +1935,7 @@ priv test_jpeg: fn(width: Int, height: Int, sof: Int, sampling: [Int], blocks: [
     push_segment(out, C_JPEG_SOS, scan)
     per_mcu := 0
     loop factors in sampling {
-        per_mcu += if sampling.len() == 1 -> 1 else -> (factors >> 4) * factors.bit_and(15)
+        per_mcu += if sampling.len() == 1 -> 1 else -> (factors >> 4) * (factors & 15)
     }
     bits := JPEGWriter{out: out, pending: 0, count: 0}
     predictors := zeros(sampling.len())
@@ -1949,8 +1949,8 @@ priv test_jpeg: fn(width: Int, height: Int, sof: Int, sampling: [Int], blocks: [
         }
         component := 0
         offset := at % per_mcu
-        loop offset >= (if sampling.len() == 1 -> 1 else -> (sampling[component] >> 4) * sampling[component].bit_and(15)) {
-            offset -= if sampling.len() == 1 -> 1 else -> (sampling[component] >> 4) * sampling[component].bit_and(15)
+        loop offset >= (if sampling.len() == 1 -> 1 else -> (sampling[component] >> 4) * (sampling[component] & 15)) {
+            offset -= if sampling.len() == 1 -> 1 else -> (sampling[component] >> 4) * (sampling[component] & 15)
             component += 1
         }
         test_block(bits, zigzag, predictors[component])
@@ -3984,7 +3984,7 @@ priv resize_error: fn(image: Image, width: Int, height: Int, filter: ResizeFilte
 priv pixel_image: fn(width: Int, height: Int, words: [Int]) -> Image {
     pixels := [U8]{}
     loop word in words {
-        loop shift in ([Int]{24, 16, 8, 0}) -> pixels.push(U8{(word >> shift).bit_and(255)})
+        loop shift in ([Int]{24, 16, 8, 0}) -> pixels.push(U8{(word >> shift) & 255})
     }
     Image{width: width, height: height, pixels: pixels}
 }

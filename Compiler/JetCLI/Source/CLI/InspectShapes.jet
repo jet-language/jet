@@ -318,7 +318,7 @@ jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) 
         if declared == {
             .C -> { layout = "c" }
             .CAligned(value, _) -> {
-                if value <= 0 || value.bit_and((value - 1)) != 0 {
+                if value <= 0 || value & (value - 1) != 0 {
                     return JetCLIShapeBuild.Invalid{error: "invalid shape layout alignment {value}"}
                 }
                 layout = "c"

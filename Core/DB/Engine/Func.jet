@@ -186,7 +186,7 @@ read_utf8: fn(z: [U8], at: Int) -> UTFChar Never! {
 skip_utf8: fn(z: [U8], at: Int) -> Int Never! {
     i := at + 1
     if util.sql_byte(z, at) >= 192 {
-        loop util.sql_byte(z, i).bit_and(192) == 128 -> i += 1
+        loop util.sql_byte(z, i) & 192 == 128 -> i += 1
     }
     i
 }
@@ -251,7 +251,7 @@ length_func: fn(v: &conn.Vdbe) Never! {
             c: Int{z[i]}
             i += 1
             if c >= 192 {
-                loop i < z.len() && (Int{z[i]}).bit_and(192) == 128 -> i += 1
+                loop i < z.len() && (Int{z[i]}) & 192 == 128 -> i += 1
             }
             n += 1
         }
@@ -332,7 +332,7 @@ instr_func: fn(v: &conn.Vdbe) Never! {
             loop {
                 n_h -= 1
                 at += 1
-                if !(is_text && util.sql_byte(h, at).bit_and(192) == 128) -> break
+                if !(is_text && util.sql_byte(h, at) & 192 == 128) -> break
             }
         }
         if n_n > n_h -> found = 0
@@ -733,8 +733,8 @@ quote_value: fn(acc: &printf.StrAccum, m: &Mem) Never! {
             acc.text.push(U8{39})
             loop b in blob {
                 c: Int{b}
-                acc.text.push(digits[(c >> 4).bit_and(15)])
-                acc.text.push(digits[c.bit_and(15)])
+                acc.text.push(digits[(c >> 4) & 15])
+                acc.text.push(digits[c & 15])
             }
             acc.text.push(U8{39})
         }
@@ -770,19 +770,19 @@ char_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
     loop i in 0..<v.fctx.argc {
         x := arg_int64(v, i)
         if x < 0 || x > 1114111 -> x = 65533
-        c: x.bit_and(2097151)
+        c: x & 2097151
         if c < 128 -> out.push(U8{c}) else if c < 2048 {
-            out.push(U8{192 + (c >> 6).bit_and(31)})
-            out.push(U8{128 + c.bit_and(63)})
+            out.push(U8{192 + ((c >> 6) & 31)})
+            out.push(U8{128 + (c & 63)})
         } else if c < 65536 {
-            out.push(U8{224 + (c >> 12).bit_and(15)})
-            out.push(U8{128 + (c >> 6).bit_and(63)})
-            out.push(U8{128 + c.bit_and(63)})
+            out.push(U8{224 + ((c >> 12) & 15)})
+            out.push(U8{128 + ((c >> 6) & 63)})
+            out.push(U8{128 + (c & 63)})
         } else {
-            out.push(U8{240 + (c >> 18).bit_and(7)})
-            out.push(U8{128 + (c >> 12).bit_and(63)})
-            out.push(U8{128 + (c >> 6).bit_and(63)})
-            out.push(U8{128 + c.bit_and(63)})
+            out.push(U8{240 + ((c >> 18) & 7)})
+            out.push(U8{128 + ((c >> 12) & 63)})
+            out.push(U8{128 + ((c >> 6) & 63)})
+            out.push(U8{128 + (c & 63)})
         }
     }
     api.result_text64(db, v, out, out.len(), base.UTF8)
@@ -801,8 +801,8 @@ hex_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
     out := [U8]{}
     loop b in blob {
         c: Int{b}
-        out.push(digits[(c >> 4).bit_and(15)])
-        out.push(digits[c.bit_and(15)])
+        out.push(digits[(c >> 4) & 15])
+        out.push(digits[c & 15])
     }
     api.result_text64(db, v, out, out.len(), base.UTF8)
 }
@@ -837,7 +837,7 @@ unhex_decode: fn(hex: [U8], pass: [U8]) -> [U8]? Never! {
         d: util.sql_byte(hex, at)
         at += 1
         if !util.is_xdigit(d) -> return None
-        out.push(U8{(util.hex_to_int(c) << 4).bit_or(util.hex_to_int(d))})
+        out.push(U8{(util.hex_to_int(c) << 4) | util.hex_to_int(d)})
     }
     Val(out)
 }
@@ -929,7 +929,7 @@ trim_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
     n := z.len()
     if starts.len() > 0 {
         flags: v.fctx.user_data
-        if flags.bit_and(1) != 0 {
+        if flags & 1 != 0 {
             loop n > 0 {
                 len := -1
                 loop ci in 0..<starts.len() {
@@ -944,7 +944,7 @@ trim_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
                 n -= len
             }
         }
-        if flags.bit_and(2) != 0 {
+        if flags & 2 != 0 {
             loop n > 0 {
                 len := -1
                 loop ci in 0..<starts.len() {
@@ -1119,10 +1119,10 @@ soundex_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
         api.result_text(db, v, "?000".bytes(), 4)
         return
     }
-    prev := codes[util.sql_byte(z, i).bit_and(127)]
+    prev := codes[util.sql_byte(z, i) & 127]
     out := [U8]{U8{util.upper_byte(util.sql_byte(z, i))}}
     loop out.len() < 4 && util.sql_byte(z, i) != 0 {
-        code: codes[util.sql_byte(z, i).bit_and(127)]
+        code: codes[util.sql_byte(z, i) & 127]
         if code > 0 {
             if code != prev {
                 prev = code
@@ -1139,13 +1139,13 @@ soundex_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
 // set; the build has no shared libraries to open, so a load fails as
 // sqlite3LoadExtension's does when no file can be opened.
 load_ext: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
-    if db.flags.bit_and(conn.SQLITE_LOAD_EXT_FUNC) == 0 {
+    if db.flags & conn.SQLITE_LOAD_EXT_FUNC == 0 {
         api.result_error(db, v, "not authorized".bytes(), -1)
         return
     }
     file: arg_text(v, 0) ?? return
     if v.fctx.argc == 2 -> _: arg_text(v, 1)
-    if db.flags.bit_and(conn.SQLITE_LOAD_EXTENSION) == 0 {
+    if db.flags & conn.SQLITE_LOAD_EXTENSION == 0 {
         api.result_error(db, v, "not authorized".bytes(), -1)
         return
     }
@@ -1504,10 +1504,10 @@ group_concat_value: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
 // it then changes nothing.
 register_like_functions: fn(db: &conn.Conn, case_sensitive: Bool) Never! {
     info: if case_sensitive -> cat.LIKE_INFO_ALT else -> cat.LIKE_INFO_NORM
-    extra: if case_sensitive -> conn.FUNC_LIKE.bit_or(conn.FUNC_CASE) else -> conn.FUNC_LIKE
+    extra: if case_sensitive -> conn.FUNC_LIKE | conn.FUNC_CASE else -> conn.FUNC_LIKE
     loop n_arg in 2..<4 {
         if cat.find_function(db, "like".bytes(), n_arg, base.UTF8) == .Val(old) {
-            if old.flags.bit_and(conn.FUNC_ENCMASK) == base.UTF8 && old.n_arg == n_arg {
+            if old.flags & conn.FUNC_ENCMASK == base.UTF8 && old.n_arg == n_arg {
                 if db.n_vdbe_active > 0 {
                     aux.error_with_msg(db, base.BUSY, "unable to delete/modify user-function due to active statements".bytes())
                     return
@@ -1517,7 +1517,7 @@ register_like_functions: fn(db: &conn.Conn, case_sensitive: Bool) Never! {
         }
         slot: cat.find_or_create_function(db, "like".bytes(), n_arg, base.UTF8)
         db.funcs[slot].n_arg = n_arg
-        db.funcs[slot].flags = base.UTF8.bit_or(extra)
+        db.funcs[slot].flags = base.UTF8 | extra
         db.funcs[slot].user_data = info
         db.funcs[slot].impl_id = cat.FI_LIKE
         db.funcs[slot].has_sfunc = true
@@ -1687,19 +1687,19 @@ json5_whitespace: fn(z: [U8], at: Int) -> Int Never! {
 // The type-and-size header of a JSONB node (jsonBlobAppendNode with no
 // payload): the payload follows it.
 json_blob_append_header: fn(p: &JSONParse, e_type: Int, sz: Int) Never! {
-    if sz <= 11 -> p.blob.push(U8{e_type.bit_or(sz << 4)}) else if sz <= 255 {
-        p.blob.push(U8{e_type.bit_or(192)})
+    if sz <= 11 -> p.blob.push(U8{e_type | sz << 4}) else if sz <= 255 {
+        p.blob.push(U8{e_type | 192})
         p.blob.push(U8{sz})
     } else if sz <= 65535 {
-        p.blob.push(U8{e_type.bit_or(208)})
-        p.blob.push(U8{(sz >> 8).bit_and(255)})
-        p.blob.push(U8{sz.bit_and(255)})
+        p.blob.push(U8{e_type | 208})
+        p.blob.push(U8{(sz >> 8) & 255})
+        p.blob.push(U8{sz & 255})
     } else {
-        p.blob.push(U8{e_type.bit_or(224)})
-        p.blob.push(U8{(sz >> 24).bit_and(255)})
-        p.blob.push(U8{(sz >> 16).bit_and(255)})
-        p.blob.push(U8{(sz >> 8).bit_and(255)})
-        p.blob.push(U8{sz.bit_and(255)})
+        p.blob.push(U8{e_type | 224})
+        p.blob.push(U8{(sz >> 24) & 255})
+        p.blob.push(U8{(sz >> 16) & 255})
+        p.blob.push(U8{(sz >> 8) & 255})
+        p.blob.push(U8{sz & 255})
     }
 }
 
@@ -1740,20 +1740,20 @@ json_blob_change_payload_size: fn(p: &JSONParse, i: Int, sz: Int) Never! {
         }
         p.blob = out
     }
-    low: Int{p.blob[i]}.bit_and(15)
-    if n_needed == 0 -> p.blob[i] = U8{low.bit_or(sz << 4)} else if n_needed == 1 {
-        p.blob[i] = U8{low.bit_or(192)}
-        p.blob[i + 1] = U8{sz.bit_and(255)}
+    low: Int{p.blob[i]} & 15
+    if n_needed == 0 -> p.blob[i] = U8{low | sz << 4} else if n_needed == 1 {
+        p.blob[i] = U8{low | 192}
+        p.blob[i + 1] = U8{sz & 255}
     } else if n_needed == 2 {
-        p.blob[i] = U8{low.bit_or(208)}
-        p.blob[i + 1] = U8{(sz >> 8).bit_and(255)}
-        p.blob[i + 2] = U8{sz.bit_and(255)}
+        p.blob[i] = U8{low | 208}
+        p.blob[i + 1] = U8{(sz >> 8) & 255}
+        p.blob[i + 2] = U8{sz & 255}
     } else {
-        p.blob[i] = U8{low.bit_or(224)}
-        p.blob[i + 1] = U8{(sz >> 24).bit_and(255)}
-        p.blob[i + 2] = U8{(sz >> 16).bit_and(255)}
-        p.blob[i + 3] = U8{(sz >> 8).bit_and(255)}
-        p.blob[i + 4] = U8{sz.bit_and(255)}
+        p.blob[i] = U8{low | 224}
+        p.blob[i + 1] = U8{(sz >> 24) & 255}
+        p.blob[i + 2] = U8{(sz >> 16) & 255}
+        p.blob[i + 3] = U8{(sz >> 8) & 255}
+        p.blob[i + 4] = U8{sz & 255}
     }
 }
 
@@ -1856,7 +1856,7 @@ json_parse_object: fn(p: &JSONParse, i: Int) -> Int Never! {
             p.has_nonstd = true
             x = k
         }
-        t: Int{p.blob[i_blob]}.bit_and(15)
+        t: Int{p.blob[i_blob]} & 15
         if t < JSONB_TEXT || t > JSONB_TEXTRAW {
             p.i_err = j
             return -1
@@ -2067,7 +2067,7 @@ json_parse_number: fn(p: &JSONParse, i_in: Int) -> Int Never! {
             }
             if c1 == 46 {
                 p.has_nonstd = true
-                t = t.bit_or(1)
+                t |= 1
                 stage = 2
             } else {
                 p.i_err = i
@@ -2081,7 +2081,7 @@ json_parse_number: fn(p: &JSONParse, i_in: Int) -> Int Never! {
             }
             if (c2 == 120 || c2 == 88) && util.is_xdigit(json_byte(p, i + 3)) {
                 p.has_nonstd = true
-                t = t.bit_or(1)
+                t |= 1
                 j = i + 4
                 loop util.is_xdigit(json_byte(p, j)) -> j += 1
                 stage = 3
@@ -2097,11 +2097,11 @@ json_parse_number: fn(p: &JSONParse, i_in: Int) -> Int Never! {
                 next
             }
             if c == 46 {
-                if t.bit_and(2) != 0 {
+                if t & 2 != 0 {
                     p.i_err = j
                     return -1
                 }
-                t = t.bit_or(2)
+                t |= 2
                 j += 1
                 next
             }
@@ -2109,7 +2109,7 @@ json_parse_number: fn(p: &JSONParse, i_in: Int) -> Int Never! {
                 if json_byte(p, j - 1) < 48 {
                     if json_byte(p, j - 1) == 46 && j - 2 >= i && util.is_digit(json_byte(p, j - 2)) {
                         p.has_nonstd = true
-                        t = t.bit_or(1)
+                        t |= 1
                     } else {
                         p.i_err = j
                         return -1
@@ -2119,7 +2119,7 @@ json_parse_number: fn(p: &JSONParse, i_in: Int) -> Int Never! {
                     p.i_err = j
                     return -1
                 }
-                t = t.bit_or(2)
+                t |= 2
                 seen_e = true
                 c = json_byte(p, j + 1)
                 if c == 43 || c == 45 {
@@ -2138,7 +2138,7 @@ json_parse_number: fn(p: &JSONParse, i_in: Int) -> Int Never! {
         if json_byte(p, j - 1) < 48 {
             if json_byte(p, j - 1) == 46 && j - 2 >= i && util.is_digit(json_byte(p, j - 2)) {
                 p.has_nonstd = true
-                t = t.bit_or(1)
+                t |= 1
             } else {
                 p.i_err = j
                 return -1
@@ -2258,7 +2258,7 @@ json_append_string: fn(out: &JSONString, a: [U8], from: Int, n: Int) Never! {
                 hex: "0123456789abcdef".bytes()
                 json_append_lit(out, "u00")
                 out.buf.push(hex[c >> 4])
-                out.buf.push(hex[c.bit_and(15)])
+                out.buf.push(hex[c & 15])
             }
         }
     }
@@ -2273,11 +2273,11 @@ json_translate_blob_to_text: fn(a: [U8], i: Int, out: &JSONString) -> Int Never!
     n: r.n
     sz: r.sz
     if n == 0 {
-        out.err = out.err.bit_or(JSTRING_MALFORMED)
+        out.err |= JSTRING_MALFORMED
         return a.len() + 1
     }
     at: i + n
-    typ: Int{a[i]}.bit_and(15)
+    typ: Int{a[i]} & 15
     if typ == JSONB_NULL {
         json_append_lit(out, "null")
         return i + 1
@@ -2303,7 +2303,7 @@ json_translate_blob_to_text: fn(a: [U8], i: Int, out: &JSONString) -> Int Never!
         loop k < sz {
             d: util.sql_byte(a, at + k)
             if !util.is_xdigit(d) {
-                out.err = out.err.bit_or(JSTRING_MALFORMED)
+                out.err |= JSTRING_MALFORMED
                 break
             } else if (u >> 60) != 0 { overflow = true } else { u = u * 16 + util.hex_to_int(d) }
             k += 1
@@ -2348,13 +2348,13 @@ json_translate_blob_to_text: fn(a: [U8], i: Int, out: &JSONString) -> Int Never!
         i_end: at + sz
         loop j < i_end {
             j = json_translate_blob_to_text(a, j, out)
-            out.buf.push(U8{if x.bit_and(1) != 0 -> 44 else -> 58})
+            out.buf.push(U8{if x & 1 != 0 -> 44 else -> 58})
             x += 1
         }
-        if x.bit_and(1) != 0 -> out.err = out.err.bit_or(JSTRING_MALFORMED)
+        if x & 1 != 0 -> out.err |= JSTRING_MALFORMED
         if sz > 0 -> _: out.buf.pop()
         out.buf.push(U8{125})
-    } else { out.err = out.err.bit_or(JSTRING_MALFORMED) }
+    } else { out.err |= JSTRING_MALFORMED }
     at + sz
 }
 
@@ -2380,13 +2380,13 @@ json_text5_to_text: fn(a: [U8], from: Int, sz: Int, out: &JSONString) Never! {
             next
         }
         if sz2 < 2 {
-            out.err = out.err.bit_or(JSTRING_MALFORMED)
+            out.err |= JSTRING_MALFORMED
             break
         }
         e: Int{a[at + 1]}
         if e == 39 -> out.buf.push(U8{39}) else if e == 118 -> json_append_lit(out, "\\u0009") else if e == 120 {
             if sz2 < 4 {
-                out.err = out.err.bit_or(JSTRING_MALFORMED)
+                out.err |= JSTRING_MALFORMED
                 sz2 = 2
             } else {
                 json_append_lit(out, "\\u00")
@@ -2405,7 +2405,7 @@ json_text5_to_text: fn(a: [U8], from: Int, sz: Int, out: &JSONString) Never! {
         e == 226 {
             // '\\' then U+2028 or U+2029 is whitespace.
             if sz2 < 4 || a[at + 2] != (U8{128}) || (a[at + 3] != (U8{168}) && a[at + 3] != (U8{169})) {
-                out.err = out.err.bit_or(JSTRING_MALFORMED)
+                out.err |= JSTRING_MALFORMED
                 sz2 = 2
             } else {
                 at += 2
@@ -2426,10 +2426,10 @@ json_parse_func_arg: fn(db: &conn.Conn, v: &conn.Vdbe, i: Int) -> [U8]? Never! {
     if e_type == base.SQL_NULL -> return None
     if e_type == base.SQL_BLOB {
         blob: arg_blob(v, i) ?? [U8]{}
-        ok := blob.len() > 0 && Int{blob[0]}.bit_and(15) <= JSONB_OBJECT
+        ok := blob.len() > 0 && Int{blob[0]} & 15 <= JSONB_OBJECT
         if ok {
             r: jsonb_payload_size(blob, 0)
-            ok = r.n != 0 && r.sz + r.n == blob.len() && !(Int{blob[0]}.bit_and(15) <= JSONB_FALSE && r.sz > 0)
+            ok = r.n != 0 && r.sz + r.n == blob.len() && !(Int{blob[0]} & 15 <= JSONB_FALSE && r.sz > 0)
         }
         if !ok {
             api.result_error(db, v, "malformed JSON".bytes(), -1)
@@ -2451,13 +2451,13 @@ json_parse_func_arg: fn(db: &conn.Conn, v: &conn.Vdbe, i: Int) -> [U8]? Never! {
 // (JSON_BLOB set in the user data), else its JSON text with subtype
 // JSON_SUBTYPE (jsonReturnString).
 json_return_parse: fn(db: &conn.Conn, v: &conn.Vdbe, blob: [U8]) Never! {
-    if api.user_data(v).bit_and(cat.JSON_BLOB) != 0 {
+    if api.user_data(v) & cat.JSON_BLOB != 0 {
         api.result_blob(db, v, blob, blob.len())
         return
     }
     out := JSONString{buf: [U8]{}, err: 0}
     _: json_translate_blob_to_text(blob, 0, out)
-    if out.err == 0 -> api.result_text64(db, v, out.buf, out.buf.len(), base.UTF8) else if out.err.bit_and(JSTRING_MALFORMED) != 0 {
+    if out.err == 0 -> api.result_text64(db, v, out.buf, out.buf.len(), base.UTF8) else if out.err & JSTRING_MALFORMED != 0 {
         api.result_error(db, v, "malformed JSON".bytes(), -1)
     }
     api.result_subtype(v, JSON_SUBTYPE)
@@ -2644,21 +2644,21 @@ pragma_table_info: fn(p: &cg.Parse, a: &ast.AST, table_name: [U8], z_db: [U8]?, 
     loop i in 0..<n_tab_col {
         col: p.db.tables[t].cols[i]
         is_hidden := 0
-        if col.col_flags.bit_and(conn.COLFLAG_NOINSERT) != 0 {
+        if col.col_flags & conn.COLFLAG_NOINSERT != 0 {
             if i_arg == 0 {
                 n_hidden += 1
                 next
             }
-            if col.col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 {
+            if col.col_flags & conn.COLFLAG_VIRTUAL != 0 {
                 // GENERATED ALWAYS AS ... VIRTUAL.
                 is_hidden = 2
-            } else if col.col_flags.bit_and(conn.COLFLAG_STORED) != 0 {
+            } else if col.col_flags & conn.COLFLAG_STORED != 0 {
                 // GENERATED ALWAYS AS ... STORED.
                 is_hidden = 3
             } else { is_hidden = 1 }
         }
         k := 0
-        if col.col_flags.bit_and(conn.COLFLAG_PRIMKEY) != 0 {
+        if col.col_flags & conn.COLFLAG_PRIMKEY != 0 {
             k = 1
             if pk >= 0 {
                 ai: p.db.indexes[pk].ai_column
@@ -2867,12 +2867,12 @@ agg_run: fn(db: &conn.Conn, id: Int, user_data: Int, rows: [[Mem]], last: Int) -
     register_like_functions(db, true)
     def: cat.find_function(db, "like".bytes(), 2, base.UTF8) ?? panic("like() is missing")
     assert_eq(def.user_data, cat.LIKE_INFO_ALT)
-    assert(def.flags.bit_and(conn.FUNC_CASE) != 0)
-    assert(def.flags.bit_and(conn.FUNC_UNSAFE) == 0)
+    assert(def.flags & conn.FUNC_CASE != 0)
+    assert(def.flags & conn.FUNC_UNSAFE == 0)
     register_like_functions(db, false)
     back: cat.find_function(db, "like".bytes(), 3, base.UTF8) ?? panic("like() is missing")
     assert_eq(back.user_data, cat.LIKE_INFO_NORM)
-    assert(back.flags.bit_and(conn.FUNC_CASE) == 0)
+    assert(back.flags & conn.FUNC_CASE == 0)
 }
 
 // The hex of the result of jsonb() on JSON text s.
@@ -2885,7 +2885,7 @@ jsonb_test_hex: fn(s: String) -[DB]> String Never! {
     loop b in v.mem[0].z {
         c: Int{b}
         out.push(digits[c >> 4])
-        out.push(digits[c.bit_and(15)])
+        out.push(digits[c & 15])
     }
     String.from_bytes(out) ?? ""
 }
@@ -2998,7 +2998,7 @@ pragma_test_rows: fn(v: conn.Vdbe) -> String Never! {
     t.name = "t".bytes()
     t.schema = main
     t.ipkey = 0
-    t.cols.push(pragma_test_col("id", "INTEGER", 0, conn.COLFLAG_PRIMKEY.bit_or(conn.COLFLAG_HASTYPE)))
+    t.cols.push(pragma_test_col("id", "INTEGER", 0, conn.COLFLAG_PRIMKEY | conn.COLFLAG_HASTYPE))
     t.cols.push(pragma_test_col("name", "TEXT", 1, conn.COLFLAG_HASTYPE))
     t.cols.push(pragma_test_col("v", "", 0, 0))
     db.tables.push(t)

@@ -504,7 +504,7 @@ part_image: fn(name: String, payload: [U8]) -> [U8] Never! {
 }
 
 put_le: fn(bytes: &[U8], at: Int, value: Int, count: Int) Never! {
-    loop k in 0..<count -> bytes[at + k] = U8{(value >> (8 * k)).bit_and(255)}
+    loop k in 0..<count -> bytes[at + k] = U8{(value >> (8 * k)) & 255}
 }
 
 #Test("a jet's identity digest is the sha256 of its bytes with its identity part zeroed") {

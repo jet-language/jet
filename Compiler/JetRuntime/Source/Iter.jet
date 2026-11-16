@@ -955,7 +955,7 @@ iter_release_callback: fn(node: I64) {
 
 #Export(c) jet_rt_native_iter_filter_map: fn(source: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     node: iter_callback(I64{26}, source, env, invoke, release, meta, trap_word(wrapping(meta + I64{56})))
-    if ((trap_word(wrapping(meta + I64{48})).bit_and(I64{4294967295})) != I64{7}) {
+    if ((trap_word(wrapping(meta + I64{48})) & I64{4294967295}) != I64{7}) {
         trap_store(wrapping(node + I64{120}), coll_slot_new(trap_word(wrapping(meta + I64{64}))))
     }
     node
@@ -968,10 +968,10 @@ iter_release_callback: fn(node: I64) {
 iter_unbox: fn(carrier_slot: I64, carrier: I64, target: I64, error: I64) -> Bool {
     raw: trap_word(carrier_slot)
     kind: trap_word(wrapping(carrier + I64{48}))
-    optional: kind.bit_and(I64{4294967295}) == I64{7}
+    optional: kind & I64{4294967295} == I64{7}
     ok: trap_word(wrapping(carrier + I64{56}))
     if optional {
-        if (kind.bit_and(ITER_INLINE_OPTION) != I64{0}) {
+        if (kind & ITER_INLINE_OPTION != I64{0}) {
             if (raw == INT_OPTION_NONE) { return false }
             trap_store(target, raw)
             return true
@@ -1010,7 +1010,7 @@ iter_pull_filter_map: fn(node: I64, output: I64) -> Bool {
     input: trap_word(wrapping(node + I64{80}))
     result: trap_word(wrapping(node + I64{88}))
     carrier: trap_word(wrapping(node + I64{72}))
-    optional: (trap_word(wrapping(carrier + I64{48})).bit_and(I64{4294967295})) == I64{7}
+    optional: (trap_word(wrapping(carrier + I64{48})) & I64{4294967295}) == I64{7}
     error_meta: trap_word(wrapping(carrier + I64{64}))
     error: trap_word(wrapping(node + I64{120}))
     loop iter_pull(source, input) {
@@ -1070,8 +1070,8 @@ iter_pull_zip: fn(node: I64, output: I64) -> Bool {
         if !b_present -> coll_slot_clone(trap_word(wrapping(context + I64{8})), y, iter_meta(b))
     }
     moved: iter_binary(node, x, y, output)
-    if ((moved.bit_and(I64{1})) == I64{0}) { coll_slot_drop(x, iter_meta(a)) }
-    if ((moved.bit_and(I64{2})) == I64{0}) { coll_slot_drop(y, iter_meta(b)) }
+    if ((moved & I64{1}) == I64{0}) { coll_slot_drop(x, iter_meta(a)) }
+    if ((moved & I64{2}) == I64{0}) { coll_slot_drop(y, iter_meta(b)) }
     jet_rt_session_propagate() == I64{0}
 }
 
@@ -1114,7 +1114,7 @@ iter_try_callback: fn(source: I64, env: I64, invoke: I64, release: I64, carrier:
     node: iter_callback(I64{6}, source, env, invoke, release, carrier, carrier)
     input_meta: iter_meta(source)
     output_meta: if filter -> input_meta else -> trap_word(wrapping(carrier + I64{56}))
-    optional: (trap_word(wrapping(carrier + I64{48})).bit_and(I64{4294967295})) == I64{7}
+    optional: (trap_word(wrapping(carrier + I64{48})) & I64{4294967295}) == I64{7}
     error_meta: trap_word(wrapping(carrier + I64{64}))
     input: trap_word(wrapping(node + I64{80}))
     raw_result: trap_word(wrapping(node + I64{88}))
@@ -1367,7 +1367,7 @@ iter_zip_stop: fn(context: I64) {
     file: trap_word(wrapping(context + I64{8}))
     function: trap_word(wrapping(context + I64{24}))
     source: trap_word(wrapping(context + I64{32}))
-    trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_word(wrapping(context + I64{16})).bit_and(I64{4294967295}), trap_word(function), trap_word(wrapping(function + I64{8})), trap_word(source), trap_word(wrapping(source + I64{8})), trap_word(wrapping(context + I64{40})).bit_and(I64{4294967295}), trap_word(wrapping(context + I64{48})).bit_and(I64{4294967295}))
+    trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_word(wrapping(context + I64{16})) & I64{4294967295}, trap_word(function), trap_word(wrapping(function + I64{8})), trap_word(source), trap_word(wrapping(source + I64{8})), trap_word(wrapping(context + I64{40})) & I64{4294967295}, trap_word(wrapping(context + I64{48})) & I64{4294967295})
     trap_footer_e0128()
     trap_exit(EXIT_RUNTIME_PANIC)
 }

@@ -637,7 +637,7 @@ provider_cc_pack_untar: fn(file: &&files.FileReader, destination: String) -[FS]>
         if target == {
             .Val(path) -> {
                 stream.copy_to(path, size)
-                files.set_mode(path, mode.bit_and(0o755)) ?? return Err(CcToolchainError.Invalid("set the mode of `{name}`: {err}"))
+                files.set_mode(path, mode & 0o755) ?? return Err(CcToolchainError.Invalid("set the mode of `{name}`: {err}"))
             }
             .None -> stream.skip(size)
         }
@@ -800,7 +800,7 @@ provider_cc_pack_copy_tree: fn(source: String, destination: String) -[FS]> CcToo
         return Err(CcToolchainError.Invalid("C toolchain pack contains unsupported node `{source}`"))
     }
     files.copy2(source, destination) ?? return Err(CcToolchainError.Invalid("copy C toolchain pack file `{source}`: {err}"))
-    files.set_mode(destination, (metadata.mode).bit_or(0o200).bit_and(0o755)) ?? return Err(CcToolchainError.Invalid("set the mode of `{destination}`: {err}"))
+    files.set_mode(destination, ((metadata.mode) | 0o200) & 0o755) ?? return Err(CcToolchainError.Invalid("set the mode of `{destination}`: {err}"))
 }
 
 // Build musl's libc.a and crt objects for `target` into `usr/lib` with the

@@ -55,7 +55,7 @@ text_test_search: fn() {
         loop bits < (I64{1} << len) {
             at := I64{0}
             loop at < len {
-                rt_text_put(data + at, I64{97} + ((bits >> at).bit_and(I64{1})))
+                rt_text_put(data + at, I64{97} + ((bits >> at) & I64{1}))
                 at += I64{1}
             }
             n := I64{0}
@@ -64,7 +64,7 @@ text_test_search: fn() {
                 loop needle_bits < (I64{1} << n) {
                     at = I64{0}
                     loop at < n {
-                        rt_text_put(pattern + at, I64{97} + ((needle_bits >> at).bit_and(I64{1})))
+                        rt_text_put(pattern + at, I64{97} + ((needle_bits >> at) & I64{1}))
                         at += I64{1}
                     }
                     start := I64{0}

@@ -92,19 +92,19 @@ precise_gcd: fn(left: I64, right: I64) -> I64 {
 
 // The IEEE fields of a finite nonzero binary64: significand and power of two.
 precise_float_significand: fn(bits: I64) -> I64 {
-    exponent: (bits >> I64{52}).bit_and(I64{2047})
-    fraction: bits.bit_and(I64{4503599627370495})
+    exponent: (bits >> I64{52}) & I64{2047}
+    fraction: bits & I64{4503599627370495}
     if (exponent == I64{0}) { return fraction }
-    fraction.bit_or(I64{4503599627370496})
+    fraction | I64{4503599627370496}
 }
 
 precise_float_power: fn(bits: I64) -> I64 {
-    exponent: (bits >> I64{52}).bit_and(I64{2047})
+    exponent: (bits >> I64{52}) & I64{2047}
     if (exponent == I64{0}) { return I64{-1074} }
     exponent - I64{1075}
 }
 
-precise_float_finite: fn(bits: I64) -> Bool { (bits >> I64{52}).bit_and(I64{2047}) != I64{2047} }
+precise_float_finite: fn(bits: I64) -> Bool { (bits >> I64{52}) & I64{2047} != I64{2047} }
 
 // ---- Fraction --------------------------------------------------------------
 

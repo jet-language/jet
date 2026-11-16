@@ -321,7 +321,7 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
         slot: f.args[position]
         class: ir_x64_slot_class(m, f, slot)
         if class == .Float -> floats += 1 else if class != .Empty -> general += 1
-        own: ownable[callee].bit_and(bit) != 0 && !handed.contains(slot)
+        own: ownable[callee] & bit != 0 && !handed.contains(slot)
         param_owned: slot < f.param_count && ir_tail_has(owned, slot)
         if own && (dropped.contains(slot) || param_owned) {
             mask += bit
@@ -361,7 +361,7 @@ ir_tail_bit: fn(index: Int) -> Int Never! {
 }
 
 // Whether `mask` has bit `index`.
-ir_tail_has: fn(mask: Int, index: Int) -> Bool Never! { mask.bit_and(ir_tail_bit(index)) != 0 }
+ir_tail_has: fn(mask: Int, index: Int) -> Bool Never! { mask & ir_tail_bit(index) != 0 }
 
 // Whether the If at `opener` (its End at `end`) is the stop poll after a
 // call: `call s <- poll`, `if s`, Drops (inside the runtime cleanup scope

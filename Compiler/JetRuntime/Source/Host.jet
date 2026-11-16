@@ -185,7 +185,7 @@ host_is_tty: fn(fd: I64) -> Bool {
 
 // Runtime-private host fact for TUI capability sampling: raw native fd, not Int.
 #Export(c) jet_rt_host_is_tty: fn(fd: I64) -> I64 {
-    if host_is_tty(fd.bit_and(I64{4294967295})) -> I64{1} else -> I64{0}
+    if host_is_tty(fd & I64{4294967295}) -> I64{1} else -> I64{0}
 }
 
 // core.term.jet_term_is_terminal_raw: only stdin, stdout and stderr are

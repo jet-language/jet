@@ -145,7 +145,7 @@ MemList: struct {
             if self.used >= self.args.len() -> return 0
             self.used += 1
             m: self.args[self.used - 1]
-            if m.flags.bit_and(MEM_INT) != 0 -> return m.i
+            if m.flags & MEM_INT != 0 -> return m.i
             0
         }
 
@@ -153,8 +153,8 @@ MemList: struct {
             if self.used >= self.args.len() -> return Float{0}
             self.used += 1
             m: self.args[self.used - 1]
-            if m.flags.bit_and(MEM_REAL) != 0 -> return m.r
-            if m.flags.bit_and(MEM_INT) != 0 -> return util.int_to_double(m.i)
+            if m.flags & MEM_REAL != 0 -> return m.r
+            if m.flags & MEM_INT != 0 -> return util.int_to_double(m.i)
             Float{0}
         }
 
@@ -162,7 +162,7 @@ MemList: struct {
             if self.used >= self.args.len() -> return false
             self.used += 1
             m: self.args[self.used - 1]
-            if m.flags.bit_and(MEM_STR) == 0 -> return false
+            if m.flags & MEM_STR == 0 -> return false
             out.clear()
             loop b in m.z -> out.push(b)
             true
@@ -209,7 +209,7 @@ str_accum_set_error: fn(p: &StrAccum, e: Int) Never! {
 
 // sqlite3_str_reset.
 str_reset: fn(p: &StrAccum) Never! {
-    p.printf_flags = p.printf_flags.bit_and(PRINTF_MALLOCED.bit_xor(255))
+    p.printf_flags &= PRINTF_MALLOCED ~ 255
     p.n_alloc = 0
     p.text = [U8]{}
 }
@@ -230,7 +230,7 @@ str_accum_enlarge: fn(p: &StrAccum, n: Int) -> Int Never! {
         return 0
     }
     p.n_alloc = sz
-    p.printf_flags = p.printf_flags.bit_or(PRINTF_MALLOCED)
+    p.printf_flags |= PRINTF_MALLOCED
     n
 }
 
@@ -284,14 +284,14 @@ temp_buf_ok: fn(p: &StrAccum, n: Int) -> Bool Never! {
 
 // A C `int` from a wider value, as va_arg(ap,int) and (int) casts read it.
 to_c_int: fn(v: Int) -> Int Never! {
-    u: util.as_u64(v).bit_and(4294967295)
+    u: util.as_u64(v) & 4294967295
     if u >= 2147483648 -> return u - 4294967296
     u
 }
 
 // sqlite3_str_vappendf: the format fmt rendered into p.
 str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
-    arg_list: p.printf_flags.bit_and(PRINTF_SQLFUNC) != 0
+    arg_list: p.printf_flags & PRINTF_SQLFUNC != 0
     at := 0
     loop at < fmt.len() && fmt[at] != (U8{0}) {
         c := sql_byte(fmt, at)
@@ -338,11 +338,11 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                 at += 1
                 c = sql_byte(fmt, at)
                 loop c >= 48 && c <= 57 {
-                    wx = (wx * 10 + c - 48).bit_and(4294967295)
+                    wx = (wx * 10 + c - 48) & 4294967295
                     at += 1
                     c = sql_byte(fmt, at)
                 }
-                width = wx.bit_and(2147483647)
+                width = wx & 2147483647
                 if c != 46 && c != 108 -> done = true else -> at -= 1
             } else if c == 42 {
                 width = to_c_int(args.int_arg())
@@ -369,11 +369,11 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                 } else {
                     px := 0
                     loop c >= 48 && c <= 57 {
-                        px = (px * 10 + c - 48).bit_and(4294967295)
+                        px = (px * 10 + c - 48) & 4294967295
                         at += 1
                         c = sql_byte(fmt, at)
                     }
-                    precision = px.bit_and(2147483647)
+                    precision = px & 2147483647
                 }
                 if c == 108 -> at -= 1 else -> done = true
             } else { done = true }
@@ -418,15 +418,15 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                 if args.next_text(z) {
                     first: sql_byte(z, 0)
                     out.push(U8{first})
-                    if first.bit_and(192) == 192 {
+                    if first & 192 == 192 {
                         k := 1
-                        loop out.len() < 4 && sql_byte(z, k).bit_and(192) == 128 {
+                        loop out.len() < 4 && sql_byte(z, k) & 192 == 128 {
                             out.push(z[k])
                             k += 1
                         }
                     }
                 } else { out.push(U8{0}) }
-            } else { util.write_utf8(out, util.as_u64(args.int_arg()).bit_and(4294967295)) }
+            } else { util.write_utf8(out, util.as_u64(args.int_arg()) & 4294967295) }
             if precision > 1 {
                 width -= precision - 1
                 if width > 1 && !flag_leftjustify {
@@ -449,7 +449,7 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
                         lead: sql_byte(z, length)
                         length += 1
                         if lead >= 192 {
-                            loop sql_byte(z, length).bit_and(192) == 128 -> length += 1
+                            loop sql_byte(z, length) & 192 == 128 -> length += 1
                         }
                     }
                 } else {
@@ -469,8 +469,8 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
             loop k != 0 && sql_byte(esc, i) != 0 {
                 ch: sql_byte(esc, i)
                 if ch == q -> nq += 1
-                if flag_altform2 && ch.bit_and(192) == 192 {
-                    loop sql_byte(esc, i + 1).bit_and(192) == 128 -> i += 1
+                if flag_altform2 && ch & 192 == 192 {
+                    loop sql_byte(esc, i + 1) & 192 == 128 -> i += 1
                 }
                 i += 1
                 k -= 1
@@ -489,7 +489,7 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
         // adjust_width_for_utf8: width counts characters under "!".
         if flag_altform2 && width > 0 && (xtype == ET_CHARX || xtype == ET_STRING || xtype == ET_DYNSTRING || xtype == ET_SQLESCAPE || xtype == ET_SQLESCAPE2 || xtype == ET_SQLESCAPE3) {
             loop k in 0..<out.len() {
-                if (Int{out[k]}).bit_and(192) == 128 -> width += 1
+                if (Int{out[k]}) & 192 == 128 -> width += 1
             }
         }
         width -= out.len()
@@ -507,7 +507,7 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
 render_int: fn<A: PrintfArgs>(p: &StrAccum, args: &A, arg_list: Bool, info: PrintfInfo, xtype: Int, flag_long: Int, flag_prefix: Int, alt_in: Bool, flag_zeropad: Bool, thousand: Int, width: Int, precision_in: Int, out: &[U8]) -> Bool Never! {
     longvalue := 0
     prefix := 0
-    if info.flags.bit_and(FLAG_SIGNED) != 0 {
+    if info.flags & FLAG_SIGNED != 0 {
         v := args.int_arg()
         if !arg_list && flag_long == 0 -> v = to_c_int(v)
         if v < 0 {
@@ -519,7 +519,7 @@ render_int: fn<A: PrintfArgs>(p: &StrAccum, args: &A, arg_list: Bool, info: Prin
         }
     } else {
         v: args.int_arg()
-        longvalue = if !arg_list && flag_long == 0 -> util.as_u64(v).bit_and(4294967295) else -> util.as_u64(v)
+        longvalue = if !arg_list && flag_long == 0 -> util.as_u64(v) & 4294967295 else -> util.as_u64(v)
     }
     flag_alternateform := alt_in
     if longvalue == 0 -> flag_alternateform = false

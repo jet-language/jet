@@ -22,7 +22,7 @@ fs_text_has_nul: fn(path: I64) -> Bool {
     jet_fs_stat_raw(path, true, scratch, wrapping(scratch + I64{128}))
     failed: rt_text_word(wrapping(scratch + I64{128})) != I64{0}
     code: rt_text_word(wrapping(scratch + I64{136}))
-    directory: (rt_text_word(wrapping(scratch + I64{16})).bit_and(I64{61440})) == I64{16384}
+    directory: (rt_text_word(wrapping(scratch + I64{16})) & I64{61440}) == I64{16384}
     jet_rt_free(scratch, I64{160}, I64{8})
     if failed {
         rt_text_store(error, host_errno_cause(code))

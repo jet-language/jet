@@ -199,7 +199,7 @@ process_scope_remove_tree: fn(parent: I64, name: I64) -> I64 {
         at := I64{0}
         loop at < count {
             record: wrapping(buffer + at)
-            at += rt_text_byte(wrapping(record + I64{16})).bit_or((rt_text_byte(wrapping(record + I64{17})) << I64{8}))
+            at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
             entry: wrapping(record + I64{19})
             if files_dot_entry(entry) -> next
             if (rt_text_byte(wrapping(record + I64{18})) != I64{4}) { next }

@@ -109,11 +109,11 @@ hex_word: fn(word: Int) -> String {
     String.from_bytes(out) ?? ""
 }
 
-is_nan_word: fn(word: Int) -> Bool { word >= 0 && word.bit_and(0x7FFF_FFFF) > 0x7F80_0000 }
+is_nan_word: fn(word: Int) -> Bool { word >= 0 && word & 0x7FFF_FFFF > 0x7F80_0000 }
 
 // The binary32 value of `bits`, negated for a set sign bit.
 f32_of: fn(bits: Int) -> F32 {
-    value: f32_magnitude(bits.bit_and(0x7FFF_FFFF))
+    value: f32_magnitude(bits & 0x7FFF_FFFF)
     if bits >= 0x8000_0000 -> return -value
     value
 }
@@ -124,12 +124,12 @@ f32_of: fn(bits: Int) -> F32 {
 f32_magnitude: fn(magnitude: Int) -> F32 {
     if magnitude == 0x7F80_0000 -> return F32{1.0} / F32{0.0}
     if magnitude > 0x7F80_0000 {
-        payload: F32{Float{magnitude.bit_and(0x3F_FFFF)}}
-        made: if magnitude.bit_and(0x40_0000) != 0 -> math.set_payload(payload) else -> math.set_payload_signaling(payload)
-        return made ?? panic("no NaN of payload {magnitude.bit_and(0x3F_FFFF)}")
+        payload: F32{Float{magnitude & 0x3F_FFFF}}
+        made: if magnitude & 0x40_0000 != 0 -> math.set_payload(payload) else -> math.set_payload_signaling(payload)
+        return made ?? panic("no NaN of payload {magnitude & 0x3F_FFFF}")
     }
     exponent: magnitude >> 23
-    fraction: magnitude.bit_and(0x7F_FFFF)
+    fraction: magnitude & 0x7F_FFFF
     if exponent == 0 -> return F32{math.ldexp(Float{fraction}, -149)}
     F32{math.ldexp(Float{fraction + 0x80_0000}, exponent - 150)}
 }
@@ -195,11 +195,11 @@ value: fn(name: String, w: [Int]) -> Int {
 results: fn(name: String, w: [Int]) -> [Int] {
     if name == "rem_quo" {
         split: math.rem_quo(f32_of(w[0]), f32_of(w[1]))
-        return [Int]{bits(split.rem), split.quo.bit_and(0xFFFF_FFFF)}
+        return [Int]{bits(split.rem), split.quo & 0xFFFF_FFFF}
     }
     if name == "frexp" {
         parts: math.frexp(f32_of(w[0]))
-        return [Int]{bits(parts.frac), parts.exp.bit_and(0xFFFF_FFFF)}
+        return [Int]{bits(parts.frac), parts.exp & 0xFFFF_FFFF}
     }
     if name == "modf" {
         parts: math.modf(f32_of(w[0]))

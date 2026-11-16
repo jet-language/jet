@@ -333,7 +333,7 @@ set_aside: fn(c: &DbusConnection, m: DbusMessage) -[Net, Time]> DbusError! {
         c.queued.push(m.copy())
         return Ok()
     }
-    if m.kind != .Call || m.flags.bit_and(NO_REPLY_EXPECTED) != 0 -> return Ok()
+    if m.kind != .Call || m.flags & NO_REPLY_EXPECTED != 0 -> return Ok()
     reply := blank(DbusKind.Error)
     reply.flags = NO_REPLY_EXPECTED
     reply.reply_serial = m.serial
@@ -433,7 +433,7 @@ encode: fn(message: DbusMessage, serial: Int) -> [U8] DbusError! {
     }
     if message.sender != "" -> fields.push(header_field(7, DbusValue.Text(message.sender.copy())))
     if signature != "" -> fields.push(header_field(8, DbusValue.Signature(signature)))
-    out := [U8]{U8{108}, U8{message.kind.to_int()}, U8{message.flags.bit_and(255)}, U8{1}}
+    out := [U8]{U8{108}, U8{message.kind.to_int()}, U8{message.flags & 255}, U8{1}}
     put_word(out, body.len(), 4)
     put_word(out, serial, 4)
     marshal(out, DbusValue.Array{signature: "(yv)", items: fields})
@@ -479,7 +479,7 @@ signature_of: fn(value: DbusValue) -> String {
 // message's first byte, which `out` starts at.
 marshal: fn(out: &[U8], value: DbusValue) {
     if value == {
-        .Byte(n) -> { out.push(U8{n.bit_and(255)}) }
+        .Byte(n) -> { out.push(U8{n & 255}) }
         .Bool(flag) -> {
             pad(out, 4)
             bit: if flag -> 1 else -> 0
@@ -508,7 +508,7 @@ marshal: fn(out: &[U8], value: DbusValue) {
             start: out.len()
             loop item in items -> marshal(out, item)
             length: out.len() - start
-            loop i in 0..<4 -> out[length_at + i] = U8{(length >> (8 * i)).bit_and(255)}
+            loop i in 0..<4 -> out[length_at + i] = U8{(length >> (8 * i)) & 255}
         }
         .Struct(fields) -> {
             pad(out, 8)
@@ -530,7 +530,7 @@ put_aligned: fn(out: &[U8], value: Int, size: Int) {
 // `size` little-endian bytes of `value`, two's complement when negative.
 put_word: fn(out: &[U8], value: Int, size: Int) {
     v: if value < 0 -> value + 18446744073709551616 else -> value
-    loop i in 0..<size -> out.push(U8{(v >> (8 * i)).bit_and(255)})
+    loop i in 0..<size -> out.push(U8{(v >> (8 * i)) & 255})
 }
 
 put_text: fn(out: &[U8], text: String) {
@@ -542,7 +542,7 @@ put_text: fn(out: &[U8], text: String) {
 
 put_signature: fn(out: &[U8], text: String) {
     bytes: text.bytes()
-    out.push(U8{bytes.len().bit_and(255)})
+    out.push(U8{bytes.len() & 255})
     loop b in bytes -> out.push(b)
     out.push(U8{0})
 }
@@ -952,7 +952,7 @@ hex_text: fn(text: String) -> String {
     loop b in text.bytes() {
         n: Int{b}
         out.push(digits[n >> 4])
-        out.push(digits[n.bit_and(15)])
+        out.push(digits[n & 15])
     }
     String.from_bytes(out) ?? ""
 }

@@ -33,7 +33,7 @@ BULK_BLOCKS: 256
 
 load_be64: fn(b: [U8], off: Int) -> U64 Never! {
     x := U64{0}
-    loop i in 0..<8 -> x = (x << 8).bit_or(U64{b[off + i]})
+    loop i in 0..<8 -> x = (x << 8) | U64{b[off + i]}
     x
 }
 
@@ -45,7 +45,7 @@ store_be64: fn(b: &[U8], off: Int, x: U64) Never! {
 /// `b` agree, from the OR of their differences only. The verdict is public.
 #Scrub(Secret) tags_equal: fn(a: [#Secret U8], b: [#Secret U8], n: Int) -> Bool Never! {
     diff := U8{0}
-    loop i in 0..<n -> diff = diff.bit_or(a[i].bit_xor(b[i]))
+    loop i in 0..<n -> diff |= a[i] ~ b[i]
     diff == (U8{0})
 }
 
@@ -64,30 +64,30 @@ min_int: fn(a: Int, b: Int) -> Int Never! { if a < b -> a else -> b }
     m2: U64{0x2222222222222222}
     m4: U64{0x4444444444444444}
     m8: U64{0x8888888888888888}
-    x0: x.bit_and(m1)
-    x1: x.bit_and(m2)
-    x2: x.bit_and(m4)
-    x3: x.bit_and(m8)
-    y0: y.bit_and(m1)
-    y1: y.bit_and(m2)
-    y2: y.bit_and(m4)
-    y3: y.bit_and(m8)
-    z0: (x0 * y0).bit_xor(x1 * y3).bit_xor(x2 * y2).bit_xor(x3 * y1).bit_and(m1)
-    z1: (x0 * y1).bit_xor(x1 * y0).bit_xor(x2 * y3).bit_xor(x3 * y2).bit_and(m2)
-    z2: (x0 * y2).bit_xor(x1 * y1).bit_xor(x2 * y0).bit_xor(x3 * y3).bit_and(m4)
-    z3: (x0 * y3).bit_xor(x1 * y2).bit_xor(x2 * y1).bit_xor(x3 * y0).bit_and(m8)
-    z0.bit_or(z1).bit_or(z2).bit_or(z3)
+    x0: x & m1
+    x1: x & m2
+    x2: x & m4
+    x3: x & m8
+    y0: y & m1
+    y1: y & m2
+    y2: y & m4
+    y3: y & m8
+    z0: ((x0 * y0) ~ x1 * y3 ~ x2 * y2 ~ x3 * y1) & m1
+    z1: ((x0 * y1) ~ x1 * y0 ~ x2 * y3 ~ x3 * y2) & m2
+    z2: ((x0 * y2) ~ x1 * y1 ~ x2 * y0 ~ x3 * y3) & m4
+    z3: ((x0 * y3) ~ x1 * y2 ~ x2 * y1 ~ x3 * y0) & m8
+    z0 | z1 | z2 | z3
 }
 
 /// The bits of x in reverse order.
 rev64: fn(v: U64) -> U64 Never! {
     x := v
-    x = (x.bit_and(U64{0x5555555555555555}) << 1).bit_or((x >> 1).bit_and(U64{0x5555555555555555}))
-    x = (x.bit_and(U64{0x3333333333333333}) << 2).bit_or((x >> 2).bit_and(U64{0x3333333333333333}))
-    x = (x.bit_and(U64{0x0f0f0f0f0f0f0f0f}) << 4).bit_or((x >> 4).bit_and(U64{0x0f0f0f0f0f0f0f0f}))
-    x = (x.bit_and(U64{0x00ff00ff00ff00ff}) << 8).bit_or((x >> 8).bit_and(U64{0x00ff00ff00ff00ff}))
-    x = (x.bit_and(U64{0x0000ffff0000ffff}) << 16).bit_or((x >> 16).bit_and(U64{0x0000ffff0000ffff}))
-    (x << 32).bit_or(x >> 32)
+    x = ((x & U64{0x5555555555555555}) << 1) | (x >> 1) & U64{0x5555555555555555}
+    x = ((x & U64{0x3333333333333333}) << 2) | (x >> 2) & U64{0x3333333333333333}
+    x = ((x & U64{0x0f0f0f0f0f0f0f0f}) << 4) | (x >> 4) & U64{0x0f0f0f0f0f0f0f0f}
+    x = ((x & U64{0x00ff00ff00ff00ff}) << 8) | (x >> 8) & U64{0x00ff00ff00ff00ff}
+    x = ((x & U64{0x0000ffff0000ffff}) << 16) | (x >> 16) & U64{0x0000ffff0000ffff}
+    (x << 32) | x >> 32
 }
 
 /// A GHASH key: the hash subkey H = CIPH_K(0^128) (SP 800-38D section 7.1,
@@ -125,10 +125,10 @@ gcm_key: fn<K: ForwardBlock>(c: K) -> GCMKey<K> Never! {
     hw := cipher.words(6)
     hw[0] = h0
     hw[1] = h1
-    hw[2] = h0.bit_xor(h1)
+    hw[2] = h0 ~ h1
     hw[3] = h0r
     hw[4] = h1r
-    hw[5] = h0r.bit_xor(h1r)
+    hw[5] = h0r ~ h1r
     GCMKey<K>{c: c, g: GHASHKey{h: h, hw: hw}}
 }
 
@@ -160,35 +160,35 @@ ghash: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
     y0 := load_be64(y, 8)
     at := off
     loop _ in 0..<count {
-        y1 = y1.bit_xor(load_be64(data, at))
-        y0 = y0.bit_xor(load_be64(data, at + 8))
+        y1 ~= load_be64(data, at)
+        y0 ~= load_be64(data, at + 8)
         y0r: rev64(y0)
         y1r: rev64(y1)
-        y2: y0.bit_xor(y1)
-        y2r: y0r.bit_xor(y1r)
+        y2: y0 ~ y1
+        y2r: y0r ~ y1r
         // Karatsuba: the low and high halves of the 128x128 product.
         z0: bmul64(y0, h0)
         z1: bmul64(y1, h1)
-        z2: bmul64(y2, h2).bit_xor(z0).bit_xor(z1)
+        z2: bmul64(y2, h2) ~ z0 ~ z1
         a0: bmul64(y0r, h0r)
         a1: bmul64(y1r, h1r)
         z0h: rev64(a0) >> 1
         z1h: rev64(a1) >> 1
-        z2h: rev64(bmul64(y2r, h2r).bit_xor(a0).bit_xor(a1)) >> 1
+        z2h: rev64(bmul64(y2r, h2r) ~ a0 ~ a1) >> 1
         v0 := z0
-        v1 := z0h.bit_xor(z2)
-        v2 := z1.bit_xor(z2h)
+        v1 := z0h ~ z2
+        v2 := z1 ~ z2h
         v3 := z1h
         // The bit-reflected product, shifted left by one.
-        v3 = (v3 << 1).bit_or(v2 >> 63)
-        v2 = (v2 << 1).bit_or(v1 >> 63)
-        v1 = (v1 << 1).bit_or(v0 >> 63)
+        v3 = (v3 << 1) | v2 >> 63
+        v2 = (v2 << 1) | v1 >> 63
+        v1 = (v1 << 1) | v0 >> 63
         v0 = v0 << 1
         // Reduction modulo x^128 + x^7 + x^2 + x + 1.
-        v2 = v2.bit_xor(v0).bit_xor(v0 >> 1).bit_xor(v0 >> 2).bit_xor(v0 >> 7)
-        v1 = v1.bit_xor(v0 << 63).bit_xor(v0 << 62).bit_xor(v0 << 57)
-        v3 = v3.bit_xor(v1).bit_xor(v1 >> 1).bit_xor(v1 >> 2).bit_xor(v1 >> 7)
-        v2 = v2.bit_xor(v1 << 63).bit_xor(v1 << 62).bit_xor(v1 << 57)
+        v2 = v2 ~ v0 ~ v0 >> 1 ~ v0 >> 2 ~ v0 >> 7
+        v1 = v1 ~ v0 << 63 ~ v0 << 62 ~ v0 << 57
+        v3 = v3 ~ v1 ~ v1 >> 1 ~ v1 >> 2 ~ v1 >> 7
+        v2 = v2 ~ v1 << 63 ~ v1 << 62 ~ v1 << 57
         y0 = v2
         y1 = v3
         at += 16
@@ -279,14 +279,14 @@ gcm_update_ad: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, aad: [U8]) -> Bool Ne
     fill: st.ad_len %% 16
     if fill != 0 {
         chunk: min_int(16 - fill, aad.len())
-        loop i in 0..<chunk -> st.acc[fill + i] = st.acc[fill + i].bit_xor(aad[i])
+        loop i in 0..<chunk -> st.acc[fill + i] = st.acc[fill + i] ~ aad[i]
         if fill + chunk == 16 -> ghash_acc(k.g, st.acc)
         at = chunk
     }
     whole: (aad.len() - at) /% 16
     ghash(k.g, st.acc, aad, at, whole)
     at += whole * 16
-    loop i in at..<aad.len() -> st.acc[i - at] = st.acc[i - at].bit_xor(aad[i])
+    loop i in at..<aad.len() -> st.acc[i - at] = st.acc[i - at] ~ aad[i]
     st.ad_len += aad.len()
     true
 }
@@ -306,8 +306,8 @@ gcm_update: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, src: [U8], off: Int, len
     if n != 0 {
         loop at < end && n < 16 {
             c: src[at]
-            o: c.bit_xor(st.stream[n])
-            st.acc[n] = st.acc[n].bit_xor(if st.decrypt -> c else -> o)
+            o: c ~ st.stream[n]
+            st.acc[n] = st.acc[n] ~ (if st.decrypt -> c else -> o)
             out.push(o)
             n += 1
             at += 1
@@ -332,8 +332,8 @@ gcm_update: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, src: [U8], off: Int, len
         i := 0
         loop at < end {
             c: src[at]
-            o: c.bit_xor(st.stream[i])
-            st.acc[i] = st.acc[i].bit_xor(if st.decrypt -> c else -> o)
+            o: c ~ st.stream[i]
+            st.acc[i] = st.acc[i] ~ (if st.decrypt -> c else -> o)
             out.push(o)
             i += 1
             at += 1
@@ -354,7 +354,7 @@ gcm_finish: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, tag_len: Int) -> [U8]? N
     store_be64(lengths, 8, U64{st.len} << 3)
     ghash(k.g, st.acc, lengths, 0, 1)
     out := cipher.zero_bytes(tag_len)
-    loop i in 0..<tag_len -> out[i] = st.base[i].bit_xor(st.acc[i])
+    loop i in 0..<tag_len -> out[i] = st.base[i] ~ st.acc[i]
     Val(out)
 }
 
@@ -479,7 +479,7 @@ ccm_first_block: fn<K: ForwardBlock>(k: K, st: &CCM) -> Bool Never! {
     }
     flags := (st.tag_len - 2) /% 2 * 8 + st.q - 1
     if st.ad_len > 0 -> flags += 64
-    st.y[0] = st.y[0].bit_or(U8{flags})
+    st.y[0] = st.y[0] | U8{flags}
     left := st.plain_len
     loop i in 0..<st.q {
         st.y[15 - i] = U8{left %% 256}
@@ -532,15 +532,15 @@ ccm_update_ad: fn<K: ForwardBlock>(k: K, st: &CCM, aad: [U8]) -> Bool Never! {
     if has_bit(st.state, CCM_AUTH_DATA_FINISHED) -> return false
     if !has_bit(st.state, CCM_AUTH_DATA_STARTED) {
         if aad.len() > st.ad_len -> return false
-        st.y[0] = st.y[0].bit_xor(U8{(st.ad_len /% 256) %% 256})
-        st.y[1] = st.y[1].bit_xor(U8{st.ad_len %% 256})
+        st.y[0] = st.y[0] ~ U8{(st.ad_len /% 256) %% 256}
+        st.y[1] = st.y[1] ~ U8{st.ad_len %% 256}
         st.state = with_bit(st.state, CCM_AUTH_DATA_STARTED)
     } else if st.processed + aad.len() > st.ad_len { return false }
     at := 0
     loop at < aad.len() {
         offset: (st.processed + 2) %% 16
         chunk: min_int(16 - offset, aad.len() - at)
-        loop i in 0..<chunk -> st.y[offset + i] = st.y[offset + i].bit_xor(aad[at + i])
+        loop i in 0..<chunk -> st.y[offset + i] = st.y[offset + i] ~ aad[at + i]
         st.processed += chunk
         at += chunk
         if chunk + offset == 16 || st.processed == st.ad_len -> k.encrypt_one(st.y)
@@ -594,8 +594,8 @@ ccm_update: fn<K: ForwardBlock>(k: K, st: &CCM, src: [U8], off: Int, len: Int, o
             last: chunk + offset == 16 || st.processed == st.plain_len
             loop i in 0..<chunk {
                 c: src[at + i]
-                p: c.bit_xor(ks[offset + i])
-                st.y[offset + i] = st.y[offset + i].bit_xor(if decrypt -> p else -> c)
+                p: c ~ ks[offset + i]
+                st.y[offset + i] = st.y[offset + i] ~ (if decrypt -> p else -> c)
                 out.push(p)
             }
             if last {
@@ -624,7 +624,7 @@ ccm_finish: fn<K: ForwardBlock>(k: K, st: &CCM, tag_len: Int) -> [U8]? Never! {
     s0 := st.ctr.copy()
     k.encrypt_one(s0)
     mac := cipher.zero_bytes(tag_len)
-    loop i in 0..<tag_len -> mac[i] = st.y[i].bit_xor(s0[i])
+    loop i in 0..<tag_len -> mac[i] = st.y[i] ~ s0[i]
     core.crypto.wipe(s0)
     st.state = 0
     loop i in 0..<16 {
@@ -675,7 +675,7 @@ ccm_decrypt: fn<K: ForwardBlock>(k: K, star: Bool, iv: [U8], aad: [U8], sealed: 
 // ChaCha20 (RFC 8439 section 2.3 and 2.4; mbedtls chacha20.c).
 
 word32: fn(b: [U8], off: Int) -> U32 Never! {
-    U32{b[off]}.bit_or(U32{b[off + 1]} << 8).bit_or(U32{b[off + 2]} << 16).bit_or(U32{b[off + 3]} << 24)
+    U32{b[off]} | U32{b[off + 1]} << 8 | U32{b[off + 2]} << 16 | U32{b[off + 3]} << 24
 }
 
 // Little-endian, each byte the word's low bits (wrapping): no test of the
@@ -711,76 +711,76 @@ put_word32: fn(out: &[U8], at: Int, w: U32) Never! {
     loop _ in 0..<10 {
         // QUARTERROUND(0, 4, 8, 12)
         x0 += x4
-        x12 = x12.bit_xor(x0).rotate_left(16)
+        x12 = (x12 ~ x0).rotate_left(16)
         x8 += x12
-        x4 = x4.bit_xor(x8).rotate_left(12)
+        x4 = (x4 ~ x8).rotate_left(12)
         x0 += x4
-        x12 = x12.bit_xor(x0).rotate_left(8)
+        x12 = (x12 ~ x0).rotate_left(8)
         x8 += x12
-        x4 = x4.bit_xor(x8).rotate_left(7)
+        x4 = (x4 ~ x8).rotate_left(7)
         // QUARTERROUND(1, 5, 9, 13)
         x1 += x5
-        x13 = x13.bit_xor(x1).rotate_left(16)
+        x13 = (x13 ~ x1).rotate_left(16)
         x9 += x13
-        x5 = x5.bit_xor(x9).rotate_left(12)
+        x5 = (x5 ~ x9).rotate_left(12)
         x1 += x5
-        x13 = x13.bit_xor(x1).rotate_left(8)
+        x13 = (x13 ~ x1).rotate_left(8)
         x9 += x13
-        x5 = x5.bit_xor(x9).rotate_left(7)
+        x5 = (x5 ~ x9).rotate_left(7)
         // QUARTERROUND(2, 6, 10, 14)
         x2 += x6
-        x14 = x14.bit_xor(x2).rotate_left(16)
+        x14 = (x14 ~ x2).rotate_left(16)
         x10 += x14
-        x6 = x6.bit_xor(x10).rotate_left(12)
+        x6 = (x6 ~ x10).rotate_left(12)
         x2 += x6
-        x14 = x14.bit_xor(x2).rotate_left(8)
+        x14 = (x14 ~ x2).rotate_left(8)
         x10 += x14
-        x6 = x6.bit_xor(x10).rotate_left(7)
+        x6 = (x6 ~ x10).rotate_left(7)
         // QUARTERROUND(3, 7, 11, 15)
         x3 += x7
-        x15 = x15.bit_xor(x3).rotate_left(16)
+        x15 = (x15 ~ x3).rotate_left(16)
         x11 += x15
-        x7 = x7.bit_xor(x11).rotate_left(12)
+        x7 = (x7 ~ x11).rotate_left(12)
         x3 += x7
-        x15 = x15.bit_xor(x3).rotate_left(8)
+        x15 = (x15 ~ x3).rotate_left(8)
         x11 += x15
-        x7 = x7.bit_xor(x11).rotate_left(7)
+        x7 = (x7 ~ x11).rotate_left(7)
         // QUARTERROUND(0, 5, 10, 15)
         x0 += x5
-        x15 = x15.bit_xor(x0).rotate_left(16)
+        x15 = (x15 ~ x0).rotate_left(16)
         x10 += x15
-        x5 = x5.bit_xor(x10).rotate_left(12)
+        x5 = (x5 ~ x10).rotate_left(12)
         x0 += x5
-        x15 = x15.bit_xor(x0).rotate_left(8)
+        x15 = (x15 ~ x0).rotate_left(8)
         x10 += x15
-        x5 = x5.bit_xor(x10).rotate_left(7)
+        x5 = (x5 ~ x10).rotate_left(7)
         // QUARTERROUND(1, 6, 11, 12)
         x1 += x6
-        x12 = x12.bit_xor(x1).rotate_left(16)
+        x12 = (x12 ~ x1).rotate_left(16)
         x11 += x12
-        x6 = x6.bit_xor(x11).rotate_left(12)
+        x6 = (x6 ~ x11).rotate_left(12)
         x1 += x6
-        x12 = x12.bit_xor(x1).rotate_left(8)
+        x12 = (x12 ~ x1).rotate_left(8)
         x11 += x12
-        x6 = x6.bit_xor(x11).rotate_left(7)
+        x6 = (x6 ~ x11).rotate_left(7)
         // QUARTERROUND(2, 7, 8, 13)
         x2 += x7
-        x13 = x13.bit_xor(x2).rotate_left(16)
+        x13 = (x13 ~ x2).rotate_left(16)
         x8 += x13
-        x7 = x7.bit_xor(x8).rotate_left(12)
+        x7 = (x7 ~ x8).rotate_left(12)
         x2 += x7
-        x13 = x13.bit_xor(x2).rotate_left(8)
+        x13 = (x13 ~ x2).rotate_left(8)
         x8 += x13
-        x7 = x7.bit_xor(x8).rotate_left(7)
+        x7 = (x7 ~ x8).rotate_left(7)
         // QUARTERROUND(3, 4, 9, 14)
         x3 += x4
-        x14 = x14.bit_xor(x3).rotate_left(16)
+        x14 = (x14 ~ x3).rotate_left(16)
         x9 += x14
-        x4 = x4.bit_xor(x9).rotate_left(12)
+        x4 = (x4 ~ x9).rotate_left(12)
         x3 += x4
-        x14 = x14.bit_xor(x3).rotate_left(8)
+        x14 = (x14 ~ x3).rotate_left(8)
         x9 += x14
-        x4 = x4.bit_xor(x9).rotate_left(7)
+        x4 = (x4 ~ x9).rotate_left(7)
     }
     if feed {
         x0 += s[0]
@@ -901,19 +901,19 @@ chacha20_update: fn(c: &ChaCha20, src: [U8], off: Int, len: Int, out: &[U8]) -> 
     at := off
     end: off + len
     loop at < end && c.used < 64 {
-        out.push(src[at].bit_xor(c.stream[c.used]))
+        out.push(src[at] ~ c.stream[c.used])
         c.used += 1
         at += 1
     }
     loop end - at >= 64 {
         chacha20_next(c)
-        loop i in 0..<64 -> out.push(src[at + i].bit_xor(c.stream[i]))
+        loop i in 0..<64 -> out.push(src[at + i] ~ c.stream[i])
         at += 64
     }
     if at < end {
         chacha20_next(c)
         c.used = end - at
-        loop i in 0..<end - at -> out.push(src[at + i].bit_xor(c.stream[i]))
+        loop i in 0..<end - at -> out.push(src[at + i] ~ c.stream[i])
     }
     true
 }
@@ -988,11 +988,11 @@ poly1305_key: fn(key: [#Secret U8]) -> Poly1305? Never! {
 /// caller holding a secret key needs no `??` on it.
 #Overflow(.Wrapping) poly1305_context: fn(key: [#Secret U8]) -> Poly1305 Never! {
     r := cipher.words(9)
-    r[0] = cipher.le32(key, 0).bit_and(U64{0x3ffffff})
-    r[1] = (cipher.le32(key, 3) >> 2).bit_and(U64{0x3ffff03})
-    r[2] = (cipher.le32(key, 6) >> 4).bit_and(U64{0x3ffc0ff})
-    r[3] = (cipher.le32(key, 9) >> 6).bit_and(U64{0x3f03fff})
-    r[4] = (cipher.le32(key, 12) >> 8).bit_and(U64{0x00fffff})
+    r[0] = cipher.le32(key, 0) & U64{0x3ffffff}
+    r[1] = (cipher.le32(key, 3) >> 2) & U64{0x3ffff03}
+    r[2] = (cipher.le32(key, 6) >> 4) & U64{0x3ffc0ff}
+    r[3] = (cipher.le32(key, 9) >> 6) & U64{0x3f03fff}
+    r[4] = (cipher.le32(key, 12) >> 8) & U64{0x00fffff}
     loop i in 1..<5 -> r[4 + i] = r[i] * U64{5}
     pad := cipher.words(4)
     loop i in 0..<4 -> pad[i] = cipher.le32(key, 16 + 4 * i)
@@ -1021,11 +1021,11 @@ poly1305_key: fn(key: [#Secret U8]) -> Poly1305? Never! {
     h4 := h[4]
     at := off
     loop _ in 0..<count {
-        h0 += cipher.le32(m, at).bit_and(mask)
-        h1 += (cipher.le32(m, at + 3) >> 2).bit_and(mask)
-        h2 += (cipher.le32(m, at + 6) >> 4).bit_and(mask)
-        h3 += (cipher.le32(m, at + 9) >> 6).bit_and(mask)
-        h4 += (cipher.le32(m, at + 12) >> 8).bit_or(hibit)
+        h0 += cipher.le32(m, at) & mask
+        h1 += (cipher.le32(m, at + 3) >> 2) & mask
+        h2 += (cipher.le32(m, at + 6) >> 4) & mask
+        h3 += (cipher.le32(m, at + 9) >> 6) & mask
+        h4 += (cipher.le32(m, at + 12) >> 8) | hibit
         d0: h0 * r0 + h1 * s4 + h2 * s3 + h3 * s2 + h4 * s1
         d1: h0 * r1 + h1 * r0 + h2 * s4 + h3 * s3 + h4 * s2
         d2: h0 * r2 + h1 * r1 + h2 * r0 + h3 * s4 + h4 * s3
@@ -1035,12 +1035,12 @@ poly1305_key: fn(key: [#Secret U8]) -> Poly1305? Never! {
         e2: d2 + (e1 >> 26)
         e3: d3 + (e2 >> 26)
         e4: d4 + (e3 >> 26)
-        h0 = d0.bit_and(mask) + (e4 >> 26) * five
-        h1 = e1.bit_and(mask) + (h0 >> 26)
-        h0 = h0.bit_and(mask)
-        h2 = e2.bit_and(mask)
-        h3 = e3.bit_and(mask)
-        h4 = e4.bit_and(mask)
+        h0 = (d0 & mask) + (e4 >> 26) * five
+        h1 = (e1 & mask) + (h0 >> 26)
+        h0 &= mask
+        h2 = e2 & mask
+        h3 = e3 & mask
+        h4 = e4 & mask
         at += 16
     }
     h[0] = h0
@@ -1102,46 +1102,46 @@ poly1305_update: fn(p: &Poly1305, m: [U8], off: Int, len: Int) Never! {
     h3 := p.h[3]
     h4 := p.h[4]
     c := h1 >> 26
-    h1 = h1.bit_and(mask)
+    h1 &= mask
     h2 += c
     c = h2 >> 26
-    h2 = h2.bit_and(mask)
+    h2 &= mask
     h3 += c
     c = h3 >> 26
-    h3 = h3.bit_and(mask)
+    h3 &= mask
     h4 += c
     c = h4 >> 26
-    h4 = h4.bit_and(mask)
+    h4 &= mask
     h0 += c * U64{5}
     c = h0 >> 26
-    h0 = h0.bit_and(mask)
+    h0 &= mask
     h1 += c
     // g = h + 5 - 2^130; h >= p exactly when g does not borrow.
     g0 := h0 + U64{5}
     c = g0 >> 26
-    g0 = g0.bit_and(mask)
+    g0 &= mask
     g1 := h1 + c
     c = g1 >> 26
-    g1 = g1.bit_and(mask)
+    g1 &= mask
     g2 := h2 + c
     c = g2 >> 26
-    g2 = g2.bit_and(mask)
+    g2 &= mask
     g3 := h3 + c
     c = g3 >> 26
-    g3 = g3.bit_and(mask)
+    g3 &= mask
     g4: h4 + c - (U64{1} << 26)
     take_g: (g4 >> 63) - U64{1}
-    keep_h: take_g.bit_not()
-    h0 = h0.bit_and(keep_h).bit_or(g0.bit_and(take_g))
-    h1 = h1.bit_and(keep_h).bit_or(g1.bit_and(take_g))
-    h2 = h2.bit_and(keep_h).bit_or(g2.bit_and(take_g))
-    h3 = h3.bit_and(keep_h).bit_or(g3.bit_and(take_g))
-    h4 = h4.bit_and(keep_h).bit_or(g4.bit_and(take_g))
+    keep_h: ~take_g
+    h0 = h0 & keep_h | g0 & take_g
+    h1 = h1 & keep_h | g1 & take_g
+    h2 = h2 & keep_h | g2 & take_g
+    h3 = h3 & keep_h | g3 & take_g
+    h4 = h4 & keep_h | g4 & take_g
     low: U64{0xffffffff}
-    w0: h0.bit_or(h1 << 26).bit_and(low)
-    w1: (h1 >> 6).bit_or(h2 << 20).bit_and(low)
-    w2: (h2 >> 12).bit_or(h3 << 14).bit_and(low)
-    w3: (h3 >> 18).bit_or(h4 << 8).bit_and(low)
+    w0: (h0 | h1 << 26) & low
+    w1: ((h1 >> 6) | h2 << 20) & low
+    w2: ((h2 >> 12) | h3 << 14) & low
+    w3: ((h3 >> 18) | h4 << 8) & low
     mac := cipher.zero_bytes(16)
     f := w0 + p.pad[0]
     cipher.put_word(mac, 0, f)
@@ -1313,7 +1313,7 @@ chachapoly_decrypt: fn(key: [U8], nonce: [U8], aad: [U8], sealed: [U8]) -> [U8] 
     assert(got == want)
     assert((gcm_decrypt(k, iv, aad, want, 16) ?? panic("open")) == plain)
     forged := want.copy()
-    forged[70] = forged[70].bit_xor(U8{1})
+    forged[70] = forged[70] ~ U8{1}
     refused: if gcm_decrypt(k, iv, aad, forged, 16) == {
         .Ok(_) -> false
         .Err(e) -> e == .Auth
@@ -1341,7 +1341,7 @@ chachapoly_decrypt: fn(key: [U8], nonce: [U8], aad: [U8], sealed: [U8]) -> [U8] 
     assert(sealed == want)
     assert((chachapoly_decrypt(key, iv, aad, want) ?? panic("open")) == plain)
     forged := want.copy()
-    forged[0] = forged[0].bit_xor(U8{0x80})
+    forged[0] = forged[0] ~ U8{0x80}
     refused: if chachapoly_decrypt(key, iv, aad, forged) == {
         .Ok(_) -> false
         .Err(e) -> e == .Auth

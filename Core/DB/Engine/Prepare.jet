@@ -142,13 +142,13 @@ concat: fn(a: [U8], b: [U8]) -> [U8] Never! {
 // Whether database i_db's schema has property DB_* `prop` (DbHasProperty).
 db_has_property: fn(db: conn.Conn, i_db: Int, prop: Int) -> Bool Never! {
     s: db.dbs[i_db].schema
-    s >= 0 && db.schemas[s].schema_flags.bit_and(prop) == prop
+    s >= 0 && db.schemas[s].schema_flags & prop == prop
 }
 
 // DbSetProperty.
 db_set_property: fn(db: &conn.Conn, i_db: Int, prop: Int) Never! {
     s: db.dbs[i_db].schema
-    if s >= 0 -> db.schemas[s].schema_flags = db.schemas[s].schema_flags.bit_or(prop)
+    if s >= 0 -> db.schemas[s].schema_flags = db.schemas[s].schema_flags | prop
 }
 
 // Move the Parse out of `p`, leaving an empty one, for a builder to own.
@@ -193,10 +193,10 @@ finish_coding: fn(p: &cg.Parse, a: &ast.AST) -[DB]> Never! {
     cg.v_jump_here(p, 0)
     loop i_db in 0..<p.db.dbs.len() {
         bit: 1 << i_db
-        if p.f.cookie_mask.bit_and(bit) == 0 -> next
+        if p.f.cookie_mask & bit == 0 -> next
         cg.v_uses_btree(p, i_db)
         s: p.db.dbs[i_db].schema
-        write: if p.f.write_mask.bit_and(bit) != 0 -> 1 else -> 0
+        write: if p.f.write_mask & bit != 0 -> 1 else -> 0
         _: cg.op4_int(p, opc.OP_TRANSACTION, i_db, write, p.db.schemas[s].schema_cookie, p.db.schemas[s].generation)
         if !p.db.init.busy -> cg.v_change_p5(p, 1)
     }
@@ -445,7 +445,7 @@ EngineGen: struct {
                 if err == .Val(m) -> a.ctx.errmsg = Val(ast.text(m))
             } else {
                 // db->noSharedCache: no Btree is shared in this build.
-                db.m_db_flags = db.m_db_flags.bit_or(conn.DBFLAG_SCHEMA_KNOWN_OK)
+                db.m_db_flags |= conn.DBFLAG_SCHEMA_KNOWN_OK
             }
             p.db = db
             rc
@@ -502,7 +502,7 @@ EngineGen: struct {
             p.f.s_arg = ast.SQLTok{z: -1, n: 0}
             p.f.rename = -1
             saved_flags: p.db.m_db_flags
-            p.db.m_db_flags = p.db.m_db_flags.bit_or(conn.DBFLAG_PREFER_BUILTIN)
+            p.db.m_db_flags |= conn.DBFLAG_PREFER_BUILTIN
             b := EngineBuilder{p: take_parse(p)}
             _: parse.run_parser<EngineBuilder>(b, a)
             p = b.p
@@ -739,12 +739,12 @@ corrupt_schema: fn(db: conn.Conn, data: &InitData, obj_type: [U8]?, obj_name: [U
     if db.malloc_failed -> data.rc = base.NOMEM else if data.err != None {
 
     } else if // An error message has already been generated.
-    data.init_flags.bit_and(INITFLAG_ALTER_MASK) != 0 {
-        kind: data.init_flags.bit_and(INITFLAG_ALTER_MASK)
+    data.init_flags & INITFLAG_ALTER_MASK != 0 {
+        kind: data.init_flags & INITFLAG_ALTER_MASK
         alter: if kind == 1 -> "rename" else if kind == 2 -> "drop column" else -> "add column"
         data.err = Val("error in {ast.text(obj_type ?? [U8]{})} {ast.text(obj_name ?? [U8]{})} after {alter}: {ast.text(extra ?? [U8]{})}".bytes())
         data.rc = base.ERROR
-    } else if db.flags.bit_and(btree.SQLITE_WRITE_SCHEMA) != 0 { data.rc = base.CORRUPT } else {
+    } else if db.flags & btree.SQLITE_WRITE_SCHEMA != 0 { data.rc = base.CORRUPT } else {
         obj: obj_name ?? "?".bytes()
         z := "malformed database schema ({ast.text(obj)})"
         if extra == .Val(x) && x.len() > 0 -> z = "{z} - {ast.text(x)}"
@@ -758,7 +758,7 @@ corrupt_schema: fn(db: conn.Conn, data: &InitData, obj_type: [U8]?, obj_name: [U
 // empty-result call SQLITE_NullCallback makes. Nonzero to abort.
 init_callback: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, data: &InitData, argv0: [[U8]?]?) -[DB]> Int Never! {
     i_db: data.i_db
-    db.m_db_flags = db.m_db_flags.bit_or(conn.DBFLAG_ENCODING_FIXED)
+    db.m_db_flags |= conn.DBFLAG_ENCODING_FIXED
     if argv0 == None -> return 0
     argv: argv0
     data.n_init_row += 1
@@ -788,7 +788,7 @@ init_callback: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, data: &InitDa
         if rc != base.OK {
             if !db.init.orphan_trigger {
                 if rc > data.rc -> data.rc = rc
-                if rc == base.NOMEM -> aux.oom_fault(db) else if rc != base.INTERRUPT && rc.bit_and(255) != base.LOCKED {
+                if rc == base.NOMEM -> aux.oom_fault(db) else if rc != base.INTERRUPT && rc & 255 != base.LOCKED {
                     corrupt_schema(db, data, argv[0], argv[1], Val(errmsg(db).bytes()))
                 }
             }
@@ -814,14 +814,14 @@ init_callback: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, data: &InitDa
 
 // sqlite3InitOne: read the schema of database i_db.
 init_one: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, i_db: Int, err: &[U8]?, flags: Int) -[DB]> Int Never! {
-    mask: db.m_db_flags.bit_and(conn.DBFLAG_ENCODING_FIXED).bit_or(util.clear_bits(-1, conn.DBFLAG_ENCODING_FIXED))
+    mask: db.m_db_flags & conn.DBFLAG_ENCODING_FIXED | util.clear_bits(-1, conn.DBFLAG_ENCODING_FIXED)
     db.init.busy = true
     // The schema table itself, by the parser, as row 1 of a schema.
     schema_name: bld.schema_table(i_db).bytes()
     data := init_data_new(i_db, flags)
     args := [[U8]?]{Val("table".bytes()), Val(schema_name), Val(schema_name), Val("1".bytes()), Val(SCHEMA_TABLE_SQL.bytes())}
     _: init_callback<H>(h, db, a, data, Val(args))
-    db.m_db_flags = db.m_db_flags.bit_and(mask)
+    db.m_db_flags &= mask
     if data.err != None -> err = data.err
     rc := data.rc
     opened := false
@@ -858,19 +858,19 @@ init_one_read: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, i_db: Int, er
     // root page and text encoding.
     meta := [Int]{}
     loop i in 0..<5 -> meta.push(btree.btree_get_meta(db.btrees[bt], i + 1))
-    if db.flags.bit_and(btree.SQLITE_RESET_DATABASE) != 0 {
+    if db.flags & btree.SQLITE_RESET_DATABASE != 0 {
         loop i in 0..<5 -> meta[i] = 0
     }
     db.schemas[s].schema_cookie = meta[btree.BTREE_SCHEMA_VERSION - 1]
     if meta[btree.BTREE_TEXT_ENCODING - 1] != 0 {
-        if i_db == 0 && db.m_db_flags.bit_and(conn.DBFLAG_ENCODING_FIXED) == 0 {
-            encoding := meta[btree.BTREE_TEXT_ENCODING - 1].bit_and(3)
+        if i_db == 0 && db.m_db_flags & conn.DBFLAG_ENCODING_FIXED == 0 {
+            encoding := meta[btree.BTREE_TEXT_ENCODING - 1] & 3
             if encoding == 0 -> encoding = base.UTF8
-            if db.n_vdbe_active > 0 && encoding != db.enc && db.m_db_flags.bit_and(conn.DBFLAG_VACUUM) == 0 {
+            if db.n_vdbe_active > 0 && encoding != db.enc && db.m_db_flags & conn.DBFLAG_VACUUM == 0 {
                 return base.LOCKED
             }
             cat.set_text_encoding(db, encoding)
-        } else if meta[btree.BTREE_TEXT_ENCODING - 1].bit_and(3) != db.enc {
+        } else if meta[btree.BTREE_TEXT_ENCODING - 1] & 3 != db.enc {
             err = Val("attached databases must use the same text encoding as main database".bytes())
             return base.ERROR
         }
@@ -883,7 +883,7 @@ init_one_read: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, i_db: Int, er
         db.schemas[s].cache_size = size
         btree.btree_set_cache_size(db.btrees[bt], size)
     }
-    db.schemas[s].file_format = meta[btree.BTREE_FILE_FORMAT - 1].bit_and(255)
+    db.schemas[s].file_format = meta[btree.BTREE_FILE_FORMAT - 1] & 255
     if db.schemas[s].file_format == 0 -> db.schemas[s].file_format = 1
     if db.schemas[s].file_format > bld.MAX_FILE_FORMAT {
         err = Val("unsupported file format".bytes())
@@ -908,7 +908,7 @@ init_one_read: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, i_db: Int, er
     if db.malloc_failed {
         rc = base.NOMEM
         conn.reset_all_schemas(db)
-    } else if rc == base.OK || (db.flags.bit_and(conn.SQLITE_NO_SCHEMA_ERROR) != 0 && rc != base.NOMEM) {
+    } else if rc == base.OK || (db.flags & conn.SQLITE_NO_SCHEMA_ERROR != 0 && rc != base.NOMEM) {
         // With SQLITE_NoSchemaError the schema counts as loaded even after
         // an error other than OOM.
         db_set_property(db, i_db, conn.DB_SCHEMA_LOADED)
@@ -920,7 +920,7 @@ init_one_read: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, i_db: Int, er
 // sqlite3Init: load the schema of every database, main first and temp
 // last.
 init: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, err: &[U8]?) -[DB]> Int Never! {
-    commit_internal: db.m_db_flags.bit_and(conn.DBFLAG_SCHEMA_CHANGE) == 0
+    commit_internal: db.m_db_flags & conn.DBFLAG_SCHEMA_CHANGE == 0
     db.enc = db.schemas[db.dbs[0].schema].enc
     if !db_has_property(db, 0, conn.DB_SCHEMA_LOADED) {
         rc: init_one<H>(h, db, a, 0, err, 0)
@@ -990,7 +990,7 @@ prepare_in: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, sql0: [U8], n_by
         db = cg.take_conn(p.db)
         return out
     }
-    p.f.prep_flags = prep_flags.bit_and(255)
+    p.f.prep_flags = prep_flags & 255
     // The schema lock check is shared-cache only (sqlite3BtreeSchemaLocked
     // is 0 without it).
     if p.db.disconnect >= 0 -> conn.vtab_unlock_list(p.db)
@@ -1158,7 +1158,7 @@ exec_in: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, sql0: [U8], cb: Boo
         failed := false
         loop {
             rc = api.stmt_step<H>(h, db, s)
-            if cb && (rc == base.ROW || (rc == base.DONE && !callback_is_init && db.flags.bit_and(conn.SQLITE_NULL_CALLBACK) != 0)) {
+            if cb && (rc == base.ROW || (rc == base.DONE && !callback_is_init && db.flags & conn.SQLITE_NULL_CALLBACK != 0)) {
                 // The column names, azCols, go only to the callback, which
                 // sqlite3InitCallback ignores.
                 if !callback_is_init {
@@ -1223,25 +1223,23 @@ open_v2: fn(path: String, flags_in: Int) -[DB]> (rc: Int, db: conn.Conn) Never! 
     flags := flags_in
     // SQLITE_OPEN_PRIVATECACHE drops SHAREDCACHE; shared cache is not
     // enabled globally. Then the bits sqlite3_open_v2 does not take go.
-    if flags.bit_and(os.OPEN_PRIVATECACHE) != 0 {
-        flags = util.clear_bits(flags, os.OPEN_SHAREDCACHE)
-    }
-    harmful: os.OPEN_DELETEONCLOSE.bit_or(os.OPEN_EXCLUSIVE).bit_or(os.OPEN_MAIN_DB).bit_or(os.OPEN_TEMP_DB).bit_or(os.OPEN_TRANSIENT_DB).bit_or(os.OPEN_MAIN_JOURNAL).bit_or(os.OPEN_TEMP_JOURNAL).bit_or(os.OPEN_SUBJOURNAL).bit_or(os.OPEN_SUPER_JOURNAL).bit_or(os.OPEN_NOMUTEX).bit_or(os.OPEN_FULLMUTEX).bit_or(os.OPEN_WAL)
+    if flags & os.OPEN_PRIVATECACHE != 0 -> flags = util.clear_bits(flags, os.OPEN_SHAREDCACHE)
+    harmful: os.OPEN_DELETEONCLOSE | os.OPEN_EXCLUSIVE | os.OPEN_MAIN_DB | os.OPEN_TEMP_DB | os.OPEN_TRANSIENT_DB | os.OPEN_MAIN_JOURNAL | os.OPEN_TEMP_JOURNAL | os.OPEN_SUBJOURNAL | os.OPEN_SUPER_JOURNAL | os.OPEN_NOMUTEX | os.OPEN_FULLMUTEX | os.OPEN_WAL
     flags = util.clear_bits(flags, harmful)
-    db.err_mask = if flags.bit_and(os.OPEN_EXRESCODE) != 0 -> 4294967295 else -> 255
+    db.err_mask = if flags & os.OPEN_EXRESCODE != 0 -> 4294967295 else -> 255
     db.open_state = conn.STATE_BUSY
     db.auto_commit = true
     db.next_autovac = -1
     db.next_pagesize = 0
     // The default flags of a 3.45.0 build with no SQLITE_* options.
-    db.flags = db.flags.bit_or(conn.SQLITE_SHORT_COL_NAMES).bit_or(conn.SQLITE_ENABLE_TRIGGER).bit_or(conn.SQLITE_ENABLE_VIEW).bit_or(conn.SQLITE_CACHE_SPILL).bit_or(conn.SQLITE_TRUSTED_SCHEMA).bit_or(conn.SQLITE_DQS_DML).bit_or(conn.SQLITE_DQS_DDL).bit_or(conn.SQLITE_AUTO_INDEX)
+    db.flags = db.flags | conn.SQLITE_SHORT_COL_NAMES | conn.SQLITE_ENABLE_TRIGGER | conn.SQLITE_ENABLE_VIEW | conn.SQLITE_CACHE_SPILL | conn.SQLITE_TRUSTED_SCHEMA | conn.SQLITE_DQS_DML | conn.SQLITE_DQS_DDL | conn.SQLITE_AUTO_INDEX
     db.open_flags = flags
     // Only READONLY, READWRITE and READWRITE|CREATE make sense.
     rc := base.OK
-    if (1 << flags.bit_and(7)).bit_and(70) == 0 {
+    if (1 << (flags & 7)) & 70 == 0 {
         rc = base.MISUSE
         aux.sql_error(db, rc)
-    } else if flags.bit_and(os.OPEN_URI) != 0 && path.starts_with("file:") {
+    } else if flags & os.OPEN_URI != 0 && path.starts_with("file:") {
         // sqlite3ParseUri's URI branch.
         rc = base.ERROR
         aux.error_with_msg(db, rc, "URI filenames are not supported in this build".bytes())
@@ -1263,7 +1261,7 @@ open_main: fn(db: &conn.Conn, path: String, flags: Int) -[DB]> Int Never! {
     }
     bt: conn.btree_slot_new(db)
     bd: conn.bt_db_of(db)
-    rc := btree.btree_open(db.btrees[bt], Val(path), bd, 0, flags.bit_or(os.OPEN_MAIN_DB), true, false, false, false)
+    rc := btree.btree_open(db.btrees[bt], Val(path), bd, 0, flags | os.OPEN_MAIN_DB, true, false, false, false)
     if rc != base.OK {
         conn.btree_slot_free(db, bt)
         if rc == base.IOERR_NOMEM -> rc = base.NOMEM
@@ -1366,7 +1364,7 @@ changes: fn(db: conn.Conn) -> Int Never! { db.n_change }
 prepare_v3: fn(db: &conn.Conn, sql: [U8], flags: Int) -[DB]> (rc: Int, stmt: Int, tail: Int) Never! {
     h := EngineHost{unused: 0}
     a := cg.take_ast(db)
-    r: lock_and_prepare<EngineHost>(h, db, a, sql, sql.len(), conn.PREPARE_SAVESQL.bit_or(flags.bit_and(conn.PREPARE_MASK)), None)
+    r: lock_and_prepare<EngineHost>(h, db, a, sql, sql.len(), conn.PREPARE_SAVESQL | flags & conn.PREPARE_MASK, None)
     db.ast = a
     (rc: r.rc, stmt: r.stmt, tail: r.tail)
 }

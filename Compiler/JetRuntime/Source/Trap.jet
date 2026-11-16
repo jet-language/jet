@@ -42,7 +42,7 @@ trap_unmap: fn(address: I64, bytes: I64) {
 }
 
 // `bytes` rounded up to whole 4 KiB pages, as the system maps them.
-trap_pages: fn(bytes: I64) -> I64 Never! { wrapping(bytes + I64{4095}).bit_and(I64{-4096}) }
+trap_pages: fn(bytes: I64) -> I64 Never! { wrapping(bytes + I64{4095}) & I64{-4096} }
 
 // The stop rail's root half (Scheduler.jet jet_rt_trap_root): a code word
 // that every control's creation installs (scheduler_control_new). Only a
@@ -518,7 +518,7 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
     word := I64{0}
     at := I64{0}
     loop at < word_length {
-        word = word.bit_or(host_u8_get(code_data, at) << (at * I64{8}))
+        word |= host_u8_get(code_data, at) << (at * I64{8})
         at += I64{1}
     }
     test_scope_record_raw_stop(word, word_length, data, length)
@@ -763,7 +763,7 @@ trap_build_msg_list_noun: fn(builder: I64, len: I64) {
 
 // The little-endian 32-bit field at `address` of a static descriptor.
 trap_u32: fn(address: I64) -> I64 {
-    trap_byte(address).bit_or(trap_byte(wrapping(address + I64{1})) << I64{8}).bit_or(trap_byte(wrapping(address + I64{2})) << I64{16}).bit_or(trap_byte(wrapping(address + I64{3})) << I64{24})
+    trap_byte(address) | trap_byte(wrapping(address + I64{1})) << I64{8} | trap_byte(wrapping(address + I64{2})) << I64{16} | trap_byte(wrapping(address + I64{3})) << I64{24}
 }
 
 // A list bounds stop's `locals:` line. `labels` holds a row per local word:
@@ -791,7 +791,7 @@ trap_bounds_locals: fn(area: I64, first: I64, second: I64, third: I64, labels: I
         }
         text: if {
             kind == (I64{102}) -> jet_rt_float_debug(rt_f64_from_bits(word))
-            kind == (I64{98}) -> jet_rt_bool_to_string(if (word.bit_and(I64{255}) != I64{0}) -> U8{1} else -> U8{0})
+            kind == (I64{98}) -> jet_rt_bool_to_string(if (word & I64{255} != I64{0}) -> U8{1} else -> U8{0})
             else -> jet_rt_int_to_string(word)
         }
         trap_write_handle(text)
@@ -864,9 +864,9 @@ rt_seq_capacity_overflow_stop: fn() {
 rt_seq_index_oob_stop: fn(length: I64, index: I64) {
     // Unsigned index = 2 * half + lowBit. Both the decimal quotient and last
     // digit fit signed I64; no MIN negation or unsigned cast is used.
-    half: (index >> I64{1}).bit_and(I64{9223372036854775807})
+    half: (index >> I64{1}) & I64{9223372036854775807}
     quotient: half /% I64{5}
-    last: (half % I64{5}) * I64{2} + (index.bit_and(I64{1}))
+    last: (half % I64{5}) * I64{2} + (index & I64{1})
     reason: jet_rt_string_builder_new()
     rt_text_push_word(reason, I64{8462017926321696361}, I64{8})
     rt_text_push_word(reason, I64{8462090116149485684}, I64{8})
@@ -1148,16 +1148,16 @@ TrapScalar: struct {
 trap_scalar: fn(address: I64) -> TrapScalar {
     first: trap_byte(address)
     if (first < I64{128}) { return TrapScalar{code: first, width: I64{1}} }
-    second: trap_byte(wrapping(address + I64{1})).bit_and(I64{63})
+    second: trap_byte(wrapping(address + I64{1})) & I64{63}
     if (first < I64{224}) {
-        return TrapScalar{code: (first.bit_and(I64{31})) * I64{64} + second, width: I64{2}}
+        return TrapScalar{code: (first & I64{31}) * I64{64} + second, width: I64{2}}
     }
-    third: trap_byte(wrapping(address + I64{2})).bit_and(I64{63})
+    third: trap_byte(wrapping(address + I64{2})) & I64{63}
     if (first < I64{240}) {
-        return TrapScalar{code: (first.bit_and(I64{15})) * I64{4096} + second * I64{64} + third, width: I64{3}}
+        return TrapScalar{code: (first & I64{15}) * I64{4096} + second * I64{64} + third, width: I64{3}}
     }
-    fourth: trap_byte(wrapping(address + I64{3})).bit_and(I64{63})
-    TrapScalar{code: (first.bit_and(I64{7})) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
+    fourth: trap_byte(wrapping(address + I64{3})) & I64{63}
+    TrapScalar{code: (first & I64{7}) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
 }
 
 // NUL uses the generic \u{0} escape, CR uses \r, and

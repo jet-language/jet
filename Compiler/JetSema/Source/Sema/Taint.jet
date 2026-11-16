@@ -8,7 +8,6 @@ use jet_foundation.[
     authority_grantable_roots,
     BinOp,
     BindPattern,
-    BUILTIN_METHOD_ROWS,
     Call,
     CallArg,
     Diagnostic,
@@ -1610,8 +1609,8 @@ sema_taint_check_operator: fn(state: &SemaTaintFlowState, op: BinOp, left: Strin
 // it is no E0737, and its span goes to `state.masked`, which reaches the
 // function's FnBody.masked. A total arm binds names and assigns to local
 // names. It reads literals, names and fields, and uses only operators that
-// cannot stop, the bit methods, the wrapping methods, `len()`, `is_empty()`
-// and nested total branches.
+// cannot stop, the wrapping methods, `len()`, `is_empty()` and nested total
+// branches.
 sema_taint_mask_branch: fn(state: &SemaTaintFlowState, tag_value: String, total: Bool, span: Span, test_span: Span) {
     if !total {
         sema_taint_e0737(state, tag_value, "a branch that can't be masked (an arm returns, breaks, calls, can stop or writes memory)", test_span)
@@ -1726,24 +1725,9 @@ sema_taint_total_operator: fn(state: SemaTaintFlowState, op: BinOp, right: Expr)
 }
 
 // Whether a call of `method` with `count` arguments cannot stop and does not
-// branch: a list's or a string's length query, or a built-in method whose
-// registry row (BUILTIN_METHOD_ROWS) of that name and arity lowers to `&`,
-// `|`, `~` or a complement, or to a wrapping `+`, `-` or `*`.
+// branch: a list's or a string's length query.
 sema_taint_total_method: fn(method: String, count: Int) -> Bool Never! {
-    if count == 0 && (method == "len" || method == "is_empty") -> return true
-    loop row in BUILTIN_METHOD_ROWS {
-        if row.name != method || row.parameters.len() != count -> next
-        if row.lowering == {
-            .Arithmetic(operation) -> {
-                if operation == .BitAnd || operation == .BitOr || operation == .BitXor {
-                    return true
-                }
-            }
-            .BitNot -> return true
-            .Builtin(_) | .StringSlice | .StringRangeSlice | .StringSplitOnce | .StringCutLast | .IntToRadix | .Show | .Predicate | .BitCount | .Euclidean(_) | .Overflow(_, _) | .Atomic | .CoreSource(_, _) -> {}
-        }
-    }
-    false
+    count == 0 && (method == "len" || method == "is_empty")
 }
 
 sema_taint_total_expr: fn(state: SemaTaintFlowState, value: Expr) -> Bool Never! {

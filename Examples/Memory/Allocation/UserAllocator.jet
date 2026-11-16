@@ -17,7 +17,7 @@ impl FreeList.mem.Allocator {
     allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
         if self.free.len() > 0 {
             last: self.free.len() - 1
-            if self.free[last].size() >= size && self.free[last].address().bit_and(align - 1) == 0 {
+            if self.free[last].size() >= size && self.free[last].address() & align - 1 == 0 {
                 return Ok(self.free.pop() ?? panic("the free list is not empty"))
             }
         }
