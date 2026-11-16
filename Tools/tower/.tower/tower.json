@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108475,
+    "rev": 108477,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -103316,12 +103316,12 @@
         },
         {
           "n": 46,
-          "text": "A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or through trait dispatch) carries a pointer into the owner's payload, with no new cell, no byte copy and no retain, on O0, O1 and O2. Two cases must stay safe first: (a) an argument converted at the call (a Point passed where a union is expected) lives in a temporary cell that is released right after the call (op 16 in the IR, probe z04), so the loan must keep that temporary alive for the result's life, or the call is refused; (b) a body that returns a fresh value, or a copy of another parameter, on some path under from item (probe z05) has no owner to point into, so that path either stays a copy that jet audit reports or is refused. Today the from form and the same function without from emit identical IR at O0 (a 24-byte optional cell, a byte copy and a retain), and jet audit counts only the one without from (p207-p209; D-PRIM-ANY1 reviews 6 and 7, probes y12_from_val_copy_audit.jet with its .ir.out in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes, z01, z01b, z04 and z05 in $JET_SCRATCH_ROOT/lanes/AnyReview7/probes). Proof: a cases row whose IR or jet audit shows no copy for each form, a case or UI row for (a) and for (b), and a paired size/speed cell against the copy form. Before lowering, two more cases must be checked (D-PRIM-ANY1 review 8): a view captured by a lambda (c50) and a view of a Shared field written through any handle (c51); c46 lands only after both.",
+          "text": "A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or through trait dispatch) carries a pointer into the owner's payload, with no new cell, no byte copy and no retain, on O0, O1 and O2. Two cases must stay safe first: (a) an argument converted at the call (a Point passed where a union is expected) lives in a temporary cell that is released right after the call (op 16 in the IR, probe z04), so the loan must keep that temporary alive for the result's life, or the call is refused; (b) a body that returns a fresh value, or a copy of another parameter, on some path under from item (probe z05) has no owner to point into, so that path either stays a copy that jet audit reports or is refused. Today the from form and the same function without from emit identical IR at O0 (a 24-byte optional cell, a byte copy and a retain), and jet audit counts only the one without from (p207-p209; D-PRIM-ANY1 reviews 6 and 7, probes y12_from_val_copy_audit.jet with its .ir.out in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes, z01, z01b, z04 and z05 in $JET_SCRATCH_ROOT/lanes/AnyReview7/probes). Proof: a cases row whose IR or jet audit shows no copy for each form, a case or UI row for (a) and for (b), and a paired size/speed cell against the copy form. Before lowering, two more cases must be checked (D-PRIM-ANY1 review 8): a view captured by a lambda (c50) and a view of a Shared field written through any handle (c51); c46 lands only after both. Review 9 found more carriers: c46 also lands only after c54 (struct field, enum payload, list, defer, method value, Shared to task).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T07:17:49.017Z"
+          "at": "2026-11-16T07:40:17.001Z"
         },
         {
           "n": 47,
@@ -103352,12 +103352,12 @@
         },
         {
           "n": 50,
-          "text": "A from view captured by a lambda keeps its loan: moving or writing the owner while the lambda that holds the view lives is E0212, as it is without the lambda (spec.md:2055-2056: captures keep the view fact). Today the lambda form lets the owner move with no error (p209; D-PRIM-ANY1 review 8, probe a01 against a01b in $JET_SCRATCH_ROOT/lanes/AnyReview8/probes). Safe today only because the view is a copy; once #6839 c46 lowers views to pointers this reads freed memory. Proof: a UI snapshot of the refusal and a cases row of the legal capture.",
+          "text": "A from view captured by a lambda keeps its loan: moving or writing the owner while the lambda that holds the view lives is E0212, as it is without the lambda (spec.md:2055-2056: captures keep the view fact). Today the lambda form lets the owner move with no error (p209; D-PRIM-ANY1 review 8, probe a01 against a01b in $JET_SCRATCH_ROOT/lanes/AnyReview8/probes). Safe today only because the view is a copy; once #6839 c46 lowers views to pointers this reads freed memory. Proof: a UI snapshot of the refusal and a cases row of the legal capture. Also stored and returned lambdas that capture a view outlive the owner's move today (review 9, probes e02 and e03 in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes). Stored lambdas clone their captures, so either the capture stays a loan with E0212 on the owner's move, or the clone is a written, audited copy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T07:17:44.191Z"
+          "at": "2026-11-16T07:40:13.965Z"
         },
         {
           "n": 51,
@@ -103413,7 +103413,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T07:40:09.286Z",
+      "updated": "2026-11-16T07:40:17.001Z",
       "updatedBy": "Main",
       "criteriaLastN": 55
     },
@@ -220947,6 +220947,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T07:40:17.001Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#46: D-PRIM-ANY1 review 9: every carrier must be checked first; was: A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or throug"
+    },
+    {
+      "at": "2026-11-16T07:40:13.965Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#50: D-PRIM-ANY1 review 9: stored and returned lambdas too; was: A from view captured by a lambda keeps its loan: moving or writing the owner while the lambda that holds the view lives is E0212, as it is without the lambda (spec.md:2055-2056: captures keep the view"
+    },
     {
       "at": "2026-11-16T07:40:09.286Z",
       "by": "Main",
