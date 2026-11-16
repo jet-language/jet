@@ -614,8 +614,7 @@ render_dictionary_rows: fn(source_text: String) -> String OwnedTraitRowsError! {
     markers.sort()
     rows := [String]{}
     loop marker in markers {
-        query: marker.lower()
-        rows.push("    {{token: \"{marker}\", query: \"{query}\", display_query: \"#{query}\", registry_name: \"{REGISTRY_NAME}\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{position: \"\", text: \"{marker_text(marker, traits)}\", example: \"#{marker} …\", afterwards: \"\", related_codes: [String]{{}}}}}}}},\n")
+        rows.push("    {{token: \"{marker}\", query: \"{marker.lower()}\", registry_name: \"{REGISTRY_NAME}\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{position: \"\", text: \"{marker_text(marker, traits)}\", example: \"#{marker} …\", afterwards: \"\", related_codes: [String]{{}}}}}}}},\n")
     }
     Ok("{DICTIONARY_OPEN}\n{rows.join("")}{DICTIONARY_CLOSE}\n")
 }
@@ -699,7 +698,7 @@ MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}}\n    ope
     assert(rendered.contains("auto_derive: true, auto_derive_family: Val(\"Bundle\"),"))
     assert(rendered.contains("OwnedTrait{{name: \"Literal.Int\", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Literal{{source: Type.Int}},"))
     block: render_dictionary_rows(MINIMAL_TRAITS) ?? panic(err.message)
-    assert(block.contains("{{token: \"Bundle\", query: \"bundle\", display_query: \"#bundle\", registry_name: \"OWNED_TRAITS\","))
+    assert(block.contains("{{token: \"Bundle\", query: \"bundle\", registry_name: \"OWNED_TRAITS\","))
     assert(block.contains("text: \"On a struct or enum, derives `Driver` from its fields; `#!Bundle` refuses it.\""))
 }
 

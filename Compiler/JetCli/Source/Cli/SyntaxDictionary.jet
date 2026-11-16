@@ -45,10 +45,21 @@ jet_cli_syntax_lookup: fn(query: String) -> Int? Never! {
         if trimmed == jet_cli_syntax_display(row) -> return Val(index)
     }
     wanted: jet_cli_ascii_lower(trimmed)
+    // A marker row also answers its query behind the `#` sigil.
+    marker: wanted.removeprefix("#")
+    sigil: marker.len() != wanted.len()
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
-        if wanted == row.query || wanted == row.display_query -> return Val(index)
+        if wanted == row.query || (sigil && row.kind == JetCLISyntaxKind.Marker && marker == row.query) {
+            return Val(index)
+        }
     }
     None
+}
+
+// A row's display, ASCII case-folded: the spelling the nearest-token
+// suggestion measures a query against.
+jet_cli_syntax_folded: fn(row: JetCLISyntaxRow) -> String Never! {
+    if row.kind == JetCLISyntaxKind.Marker -> "#{row.query}" else -> row.query
 }
 
 jet_cli_syntax_display: fn(row: JetCLISyntaxRow) -> String Never! {
@@ -152,7 +163,7 @@ jet_cli_syntax_nearest: fn(query: String) -> String Never! {
     best := -1
     closest := -1
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
-        distance: jet_cli_edit_distance(wanted, row.display_query)
+        distance: jet_cli_edit_distance(wanted, jet_cli_syntax_folded(row))
         if best < 0 || distance < best {
             best = distance
             closest = index

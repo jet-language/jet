@@ -1170,7 +1170,7 @@
       color = colorForType(hoverPin.type || "Value");
     }
     wireStatus.style.setProperty("--wire-color", color);
-    wireStatus.innerHTML = `<span id="wire-status-dot"></span><b>${escapeHtml(title)}</b><span>${escapeHtml(detail)}</span>`;
+    wireStatus.innerHTML = `<span id="hover-status-dot"></span><b>${escapeHtml(title)}</b><span>${escapeHtml(detail)}</span>`;
   }
 
   function graphRailSummary(graph) {

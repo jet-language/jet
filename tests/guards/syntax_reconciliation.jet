@@ -45,8 +45,7 @@ s2_syntax_ident_byte: fn(ch: Int) -> Bool {
 
 // A needle counts only as its own token: never as the tail of a longer name
 // (`BTreeMap<`, `SyncMap<`), never as the head of one (`#context-menu`,
-// `LayoutHandles`), never as a marker's dotted key (`#test.`), and never as a
-// case-folded `display_query` lookup key.
+// `LayoutHandles`), and never as a marker's dotted key (`#test.`).
 s2_syntax_forbidden: fn(line: String, needle: String) -> Bool {
     offset := 0
     raw: line.bytes()
@@ -58,7 +57,6 @@ s2_syntax_forbidden: fn(line: String, needle: String) -> Bool {
         if index < 0 -> return false
         offset = index + width
         if index > 0 && s2_syntax_ident_byte(Int{raw[index - 1]}) -> next
-        if index >= 16 && policy_slice_bytes(line, index - 16, index) == "display_query: \"" -> next
         if offset < raw.len() {
             after: Int{raw[offset]}
             if s2_syntax_ident_byte(last) && (s2_syntax_ident_byte(after) || after == 45) -> next

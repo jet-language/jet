@@ -37,7 +37,7 @@
   const graphSelect = document.getElementById("graph-select");
   const graphStrip = document.getElementById("graph-strip");
   const graphCount = document.getElementById("graph-count");
-  const wireStatus = document.getElementById("wire-status");
+  const wireStatus = document.getElementById("hover-status");
   const graphOverview = document.getElementById("graph-overview");
   const leftDrawer = document.getElementById("left-drawer");
   const rightDrawer = document.getElementById("right-drawer");

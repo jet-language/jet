@@ -207,9 +207,9 @@ block_tokens: fn(block: String) -> [String] Never! {
     tokens
 }
 
-render_row: fn(token: String, display: String, registry: String, kind: String, meanings: [String:String]) -> String Never! {
+render_row: fn(token: String, registry: String, kind: String, meanings: [String:String]) -> String Never! {
     written: meanings.get(row_key(token, kind == "Marker")) ?? NO_MEANINGS
-    "{ROW_OPEN}{token}\", query: \"{token.lower()}\", display_query: \"{display}\", registry_name: \"{registry}\", kind: JetCLISyntaxKind.{kind}{MEANINGS_FIELD}{written}\n"
+    "{ROW_OPEN}{token}\", query: \"{token.lower()}\", registry_name: \"{registry}\", kind: JetCLISyntaxKind.{kind}{MEANINGS_FIELD}{written}\n"
 }
 
 // `dictionary` without the rows outside its generated blocks whose key is in
@@ -254,7 +254,7 @@ render_dictionary: fn(registry: [String], markers_text: String, dictionary: Stri
         if kind == "Keyword" && markers.contains(spelling) -> next
         if generated.get(spelling) != None -> next
         generated[spelling] = 1
-        token_rows = "{token_rows}{render_row(spelling, spelling.lower(), row.name, kind, meanings)}"
+        token_rows = "{token_rows}{render_row(spelling, row.name, kind, meanings)}"
     }
     traits: block_tokens(block_of(dictionary, TRAITS_OPEN, TRAITS_CLOSE) ?? return Err(err))
     markers.sort()
@@ -262,7 +262,7 @@ render_dictionary: fn(registry: [String], markers_text: String, dictionary: Stri
     loop name in markers {
         if traits.contains(name) -> next
         generated[row_key(name, true)] = 1
-        marker_rows = "{marker_rows}{render_row(name, "#{name.lower()}", MARKER_REGISTRY, "Marker", meanings)}"
+        marker_rows = "{marker_rows}{render_row(name, MARKER_REGISTRY, "Marker", meanings)}"
     }
     with_tokens: replace_block(dictionary, TOKENS_OPEN, TOKENS_CLOSE, token_rows) ?? return Err(err)
     with_markers: replace_block(with_tokens, MARKERS_OPEN, MARKERS_CLOSE, marker_rows) ?? return Err(err)
@@ -310,7 +310,7 @@ MINIMAL_REGISTRY: "KW_FN: \"fn\" // a function\nKW_UNSAFE: \"Unsafe\"\nOP_AND: \
 
 MINIMAL_MARKERS: "Unsafe: struct {{\n}}\n\n// Hidden: struct {{ }}\nShared: struct {{\n}}\nCodable: struct {{\n}}\nAs: struct {{\n    impl Marker {{ sites: [.Field] }}\n}}\n"
 
-MINIMAL_DICTIONARY: "ROWS: [Row]{{\n{TOKENS_OPEN}\n    {{token: \"fn\", query: \"fn\", display_query: \"fn\", registry_name: \"KW_FN\", kind: JetCLISyntaxKind.Keyword, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{text: \"Declares a function.\"}}}}}},\n{TOKENS_CLOSE}\n    {{token: \"&&\", query: \"&&\", display_query: \"&&\", registry_name: \"OP_AND\", kind: JetCLISyntaxKind.Operator, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{text: \"Both.\"}}}}}},\n    {{token: \"after\"}},\n{MARKERS_OPEN}\n{MARKERS_CLOSE}\n{TRAITS_OPEN}\n    {{token: \"Codable\", query: \"codable\"}},\n{TRAITS_CLOSE}\n}}\n"
+MINIMAL_DICTIONARY: "ROWS: [Row]{{\n{TOKENS_OPEN}\n    {{token: \"fn\", query: \"fn\", registry_name: \"KW_FN\", kind: JetCLISyntaxKind.Keyword, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{text: \"Declares a function.\"}}}}}},\n{TOKENS_CLOSE}\n    {{token: \"&&\", query: \"&&\", registry_name: \"OP_AND\", kind: JetCLISyntaxKind.Operator, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{text: \"Both.\"}}}}}},\n    {{token: \"after\"}},\n{MARKERS_OPEN}\n{MARKERS_CLOSE}\n{TRAITS_OPEN}\n    {{token: \"Codable\", query: \"codable\"}},\n{TRAITS_CLOSE}\n}}\n"
 
 // The error text render_dictionary reports, or "" when it renders.
 render_error: fn(registry: String, markers: String, dictionary: String) -> String Never! {
@@ -326,9 +326,9 @@ render_error: fn(registry: String, markers: String, dictionary: String) -> Strin
 
 #Test("a token row keeps its meanings, a shared spelling is one row, and a keyword spelled as a marker is a marker row") {
     rendered: render_dictionary([String]{MINIMAL_REGISTRY}, MINIMAL_MARKERS, MINIMAL_DICTIONARY) ?? panic(err.message)
-    tokens: "{TOKENS_OPEN}\n    {{token: \"fn\", query: \"fn\", display_query: \"fn\", registry_name: \"KW_FN\", kind: JetCLISyntaxKind.Keyword, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{text: \"Declares a function.\"}}}}}},\n    {{token: \"&&\", query: \"&&\", display_query: \"&&\", registry_name: \"OP_AND\", kind: JetCLISyntaxKind.Operator, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{text: \"Both.\"}}}}}},\n    {{token: \"Shared\", query: \"shared\", display_query: \"shared\", registry_name: \"TYPE_SHARED\", kind: JetCLISyntaxKind.Type, meanings: [JetCLISyntaxMeaning]{{}}}},\n{TOKENS_CLOSE}\n    {{token: \"after\"}},\n"
+    tokens: "{TOKENS_OPEN}\n    {{token: \"fn\", query: \"fn\", registry_name: \"KW_FN\", kind: JetCLISyntaxKind.Keyword, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{text: \"Declares a function.\"}}}}}},\n    {{token: \"&&\", query: \"&&\", registry_name: \"OP_AND\", kind: JetCLISyntaxKind.Operator, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{text: \"Both.\"}}}}}},\n    {{token: \"Shared\", query: \"shared\", registry_name: \"TYPE_SHARED\", kind: JetCLISyntaxKind.Type, meanings: [JetCLISyntaxMeaning]{{}}}},\n{TOKENS_CLOSE}\n    {{token: \"after\"}},\n"
     assert(rendered.contains(tokens), rendered)
-    markers: "{MARKERS_OPEN}\n    {{token: \"As\", query: \"as\", display_query: \"#as\", registry_name: \"MARKER_SOURCE\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{}}}},\n    {{token: \"Shared\", query: \"shared\", display_query: \"#shared\", registry_name: \"MARKER_SOURCE\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{}}}},\n    {{token: \"Unsafe\", query: \"unsafe\", display_query: \"#unsafe\", registry_name: \"MARKER_SOURCE\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{}}}},\n{MARKERS_CLOSE}\n{TRAITS_OPEN}\n    {{token: \"Codable\", query: \"codable\"}},\n"
+    markers: "{MARKERS_OPEN}\n    {{token: \"As\", query: \"as\", registry_name: \"MARKER_SOURCE\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{}}}},\n    {{token: \"Shared\", query: \"shared\", registry_name: \"MARKER_SOURCE\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{}}}},\n    {{token: \"Unsafe\", query: \"unsafe\", registry_name: \"MARKER_SOURCE\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{}}}},\n{MARKERS_CLOSE}\n{TRAITS_OPEN}\n    {{token: \"Codable\", query: \"codable\"}},\n"
     assert(rendered.contains(markers), rendered)
     // The hand-written `&&` row moved into the block; rendering twice changes nothing.
     assert(!rendered.contains("{TOKENS_CLOSE}\n    {{token: \"&&\""), rendered)
