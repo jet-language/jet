@@ -546,11 +546,17 @@ run: fn() {
 
 `reflect.of(value)` is legal where value interpolation is legal. Its
 `type_name`, `path`, and `display` operations are always available; `path`
-is the type's identity, the same text as `T.reflect().identity`. `fields()`
-is populated for a struct and is empty for a non-struct value. A struct
-field's `value()` lists that struct's own fields, so `.fields()[i].value()`
-walks a nested value level by level. A generic reflection value retains the
-substituted field type, as the same example shows for `Box<Int>`.
+is the type's identity, the same text as `T.reflect().identity`. An erased
+trait value (`[Shape]{Square{side: 2}}[0]`) reflects as the concrete value its
+box holds: its `type_name` and `path` name the declared type whose payload key
+the box carries, so `path` equals that type's `T.reflect().identity`. The key
+is a hash of the type's identity alone, so it does not change in a build that
+adds a module. A value of a builtin or generic implementer keeps the trait's
+own names. `fields()` is populated for a struct and is empty for a
+non-struct value. A struct field's `value()` lists that struct's own fields,
+so `.fields()[i].value()` walks a nested value level by level. A generic
+reflection value retains the substituted field type, as the same example
+shows for `Box<Int>`.
 
 A `Value` keeps the captured value typed, not only its display text:
 `int()`, `float()`, `bool()`, `char()` and `string()` return `Some` with the

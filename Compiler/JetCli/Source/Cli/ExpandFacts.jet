@@ -245,10 +245,21 @@ jet_cli_expand_reflect_text: fn(tree: BodyTree, id: Int) -> String Never! {
     text
 }
 
+// The index after a `reflect.of` value's names at `names`, as sema laid them
+// out (sema_call_reflection_names): its type name and path, then a count of
+// declared types and each one's checked key, type name and path.
+jet_cli_expand_reflect_names_end: fn(tree: BodyTree, args: [Int], names: Int) -> Int Never! {
+    count := 0
+    if names + 2 < args.len() {
+        if body_node(tree, args[names + 2]).kind == .IntLit(value, _) -> count = value
+    }
+    names + 3 + count * 3
+}
+
 // One level of the field tree a checked `reflect.of` call retains, read from
 // its arguments at `at` as sema laid it out (sema_call_reflection_field_args):
-// a field count, then each field's name, type name and path followed by its
-// own level. The level as text and JSON, and the argument index after it.
+// a field count, then each field's name and names followed by its own level.
+// The level as text and JSON, and the argument index after it.
 jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> (text: String, value: JetCLIStatusValue, next: Int) Never! {
     count := 0
     if at < args.len() {
@@ -258,10 +269,10 @@ jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> (text:
     texts := [String]{}
     values := [JetCLIStatusValue]{}
     loop _ in 0..<count {
-        if next + 2 >= args.len() -> break
+        if next + 3 >= args.len() -> break
         name: jet_cli_expand_reflect_text(tree, args[next])
         path: jet_cli_expand_reflect_text(tree, args[next + 2])
-        nested: jet_cli_expand_reflect_level(tree, args, next + 3)
+        nested: jet_cli_expand_reflect_level(tree, args, jet_cli_expand_reflect_names_end(tree, args, next + 1))
         texts.push(if nested.text == "" -> "{name}: {path}" else -> "{name}: {path} {nested.text}")
         values.push(
             jet_cli_status_object(
@@ -293,7 +304,7 @@ jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: In
                 }
             }
             if !known {
-                level: jet_cli_expand_reflect_level(tree, args, 3)
+                level: jet_cli_expand_reflect_level(tree, args, jet_cli_expand_reflect_names_end(tree, args, 1))
                 line: diagnostic_line_at(unit.source, span.start)
                 column: diagnostic_column_at(unit.source, span.start)
                 retained: if level.text == "" -> path else -> "{path} {level.text}"

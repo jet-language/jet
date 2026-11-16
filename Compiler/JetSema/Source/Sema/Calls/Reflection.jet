@@ -26,26 +26,63 @@ sema_call_reflection_leaf_name: fn(name: String) -> String Never! {
 }
 
 // `reflect.of(x)` carries its checked names to the IR as text after the
-// value: the type name and canonical path (`module.Type`, the ledger
-// `T.reflect()` reads), then the value's stored struct fields as a preorder
-// tree (sema_call_reflection_field_args). None, with its E0112 reported at
-// `value_span`, when a stored field can't be captured: a capture holds every
-// field or refuses the value.
+// value (sema_call_reflection_names), then the value's stored struct fields
+// as a preorder tree (sema_call_reflection_field_args). None, with its E0112
+// reported at `value_span`, when a stored field can't be captured: a capture
+// holds every field or refuses the value.
 sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [TExpr]? {
-    names: sema_call_reflection_type_names(ty, environment, program)
-    args := [TExpr]{sema_call_reflection_text(names.type_name, span), sema_call_reflection_text(names.path, span)}
+    args := [TExpr]{}
+    sema_call_reflection_names(ty, span, environment, program, args)
     if !sema_call_reflection_field_args(ty, span, value_span, environment, program, scopes, [String]{}, args, diagnostics) {
         return None
     }
     Val(args)
 }
 
+// The names a reflected value of `ty` carries: its type name and canonical
+// path (`module.Type`, the identity of the TypeId `T.reflect()` reads), then
+// the count of the declared types an erased trait value of `ty` may hold and
+// each one's checked key (TTypeDef.key), type name and path, so the IR names
+// a trait value by the type whose payload key its box holds
+// (ir_trait_reflect_text). Any other type holds none.
+sema_call_reflection_names: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, args: &[TExpr]) {
+    names: sema_call_reflection_type_names(ty, environment, program)
+    args.push(sema_call_reflection_text(names.type_name, span))
+    args.push(sema_call_reflection_text(names.path, span))
+    count_at: args.len()
+    args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
+    if ty == .TraitObject(bounds) {
+        count: sema_call_reflection_declared_impls(bounds, span, program, args)
+        args[count_at] = sema_tree_node(Type.Int, TExprKind.IntLit{value: count, width: None}, span)
+    }
+}
+
+// Each declared type with an impl of the single trait `bounds` (an
+// `impl Owner.Trait` or an `impl` block in the type's own body), as its
+// checked key, type name and path pushed onto `args`; how many.
+sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: SemaProgramTables, args: &[TExpr]) -> Int {
+    graph: program.registration_graph ?? return 0
+    holders: sema_call_reflection_trait_holders(graph, bounds) ?? return 0
+    rows := [SemaRegistrationRowRef]{}
+    loop reference in holders.impls {
+        rows.push(sema_type_resolve_nominal_row_at(graph, graph.modules[reference.module_index].impls[reference.row].target_type, reference.module_index) ?? next)
+    }
+    rows.extend(holders.nominals)
+    loop row in rows {
+        concrete: sema_call_reflection_row_names(graph, row)
+        args.push(sema_call_reflection_text(sema_checked_nominal_key(graph, graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row]), span))
+        args.push(sema_call_reflection_text(concrete.type_name, span))
+        args.push(sema_call_reflection_text(concrete.path, span))
+    }
+    rows.len()
+}
+
 // One level of the field tree: the count of `ty`'s stored struct fields, then
-// each field's name, type name and path followed by its own level, so a
-// nested struct field reflects its fields too. A type already open on the
-// way down lists no fields again. False after reporting the first stored
-// field whose type is unknown or can't be reflected the way the value itself
-// is (sema_call_reflection_validate_value).
+// each field's name, its names (sema_call_reflection_names) and its own
+// level, so a nested struct field reflects its fields too. A type already
+// open on the way down lists no fields again. False after reporting the first
+// stored field whose type is unknown or can't be reflected the way the value
+// itself is (sema_call_reflection_validate_value).
 sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, open: [String], args: &[TExpr], diagnostics: &[Diagnostic]) -> Bool {
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
@@ -69,10 +106,8 @@ sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, envi
             diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} holds {sema_type_show(field_ty)}, which can't be reflected", "`reflect.of` captures every stored field of the value or refuses the value, and each field must show the way `\"{{x}}\"` interpolation does", "implement `Display` for the field's type, or reflect the fields that show instead"))
             return false
         }
-        field_names: sema_call_reflection_type_names(field_ty, environment, program)
         args.push(sema_call_reflection_text(field.name, span))
-        args.push(sema_call_reflection_text(field_names.type_name, span))
-        args.push(sema_call_reflection_text(field_names.path, span))
+        sema_call_reflection_names(field_ty, span, environment, program, args)
         if !sema_call_reflection_field_args(field_ty, span, value_span, environment, program, scopes, inner, args, diagnostics) {
             return false
         }
@@ -90,21 +125,25 @@ sema_call_reflection_field_capturable: fn(ty: Type, environment: SemaScopeEnviro
     false
 }
 
-// A nominal type reflects as its declared name and `module.Name` path (the
-// module path as an identifier: `reflect-value.jet` is `reflect_value`); any
-// other type as its written spelling for both.
+// A nominal type reflects as its declared name and `module.Name` path
+// (sema_call_reflection_row_names); any other type as its written spelling
+// for both.
 sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> (type_name: String, path: String) {
     if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == .Val(row) {
-            name: graph.modules[row.module_index].nominals[row.row].symbol.name
-            if graph.modules[row.module_index].module_path == "" {
-                return (type_name: name, path: name)
-            }
-            return (type_name: name, path: "{graph.modules[row.module_index].module_path.replace("-", "_")}.{name}")
+            return sema_call_reflection_row_names(graph, row)
         }
     }
     shown: type_name(ty)
     (type_name: shown, path: shown)
+}
+
+// The nominal at `row` reflects as its declared name and `module.Name` path
+// (the module path as an identifier: `reflect-value.jet` is `reflect_value`).
+sema_call_reflection_row_names: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> (type_name: String, path: String) Never! {
+    name: graph.modules[row.module_index].nominals[row.row].symbol.name
+    if graph.modules[row.module_index].module_path == "" -> return (type_name: name, path: name)
+    (type_name: name, path: "{graph.modules[row.module_index].module_path.replace("-", "_")}.{name}")
 }
 
 sema_call_reflection_text: fn(text: String, span: Span) -> TExpr Never! {
