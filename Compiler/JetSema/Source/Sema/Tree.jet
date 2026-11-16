@@ -472,7 +472,6 @@ THostCall: enum {
 
 TCoreClosureKind: enum {
     Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda)
-    Realtime(rate: TExpr, frames: TExpr, executable: TLambda)
     Guard(executable: TLambda)
     OnCommit(handle_name: String, executable: TLambda)
     OnRollback(handle_name: String, executable: TLambda)
@@ -1163,11 +1162,6 @@ tree_each_core_closure_child: fn(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.
     if kind == {
         .Spawn(group, _, _, executable) -> {
             if group == Val(group_value) -> visit(group_value)
-            tree_each_lambda_child(executable, visit)
-        }
-        .Realtime(rate, frames, executable) -> {
-            visit(rate)
-            visit(frames)
             tree_each_lambda_child(executable, visit)
         }
         .Guard(executable) -> tree_each_lambda_child(executable, visit)

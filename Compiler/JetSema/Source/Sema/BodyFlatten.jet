@@ -670,7 +670,6 @@ body_flat_host_call: fn(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never
 body_flat_core_closure_kind: fn(value: TCoreClosureKind, flat: &BodyFlat) -> BodyCoreClosureKind Never! {
     if value == {
         .Spawn(f_group, f_site, f_label, f_executable) -> BodyCoreClosureKind.Spawn{group: body_flat_opt_expr(f_group, flat), site: f_site, label: f_label, executable: body_flat_lambda(f_executable, flat)}
-        .Realtime(f_rate, f_frames, f_executable) -> BodyCoreClosureKind.Realtime{rate: body_flat_expr(f_rate, flat), frames: body_flat_expr(f_frames, flat), executable: body_flat_lambda(f_executable, flat)}
         .Guard(f_executable) -> BodyCoreClosureKind.Guard{executable: body_flat_lambda(f_executable, flat)}
         .OnCommit(f_handle_name, f_executable) -> BodyCoreClosureKind.OnCommit{handle_name: f_handle_name, executable: body_flat_lambda(f_executable, flat)}
         .OnRollback(f_handle_name, f_executable) -> BodyCoreClosureKind.OnRollback{handle_name: f_handle_name, executable: body_flat_lambda(f_executable, flat)}
@@ -1550,7 +1549,6 @@ body_copy_host_call: fn(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Ne
 body_copy_core_closure_kind: fn(value: BodyCoreClosureKind, flat: &BodyFlat) -> BodyCoreClosureKind Never! {
     if value == {
         .Spawn(f_group, f_site, f_label, f_executable) -> BodyCoreClosureKind.Spawn{group: body_copy_opt_expr(f_group, flat), site: f_site, label: f_label, executable: body_copy_lambda(f_executable, flat)}
-        .Realtime(f_rate, f_frames, f_executable) -> BodyCoreClosureKind.Realtime{rate: body_copy_expr(f_rate, flat), frames: body_copy_expr(f_frames, flat), executable: body_copy_lambda(f_executable, flat)}
         .Guard(f_executable) -> BodyCoreClosureKind.Guard{executable: body_copy_lambda(f_executable, flat)}
         .OnCommit(f_handle_name, f_executable) -> BodyCoreClosureKind.OnCommit{handle_name: f_handle_name, executable: body_copy_lambda(f_executable, flat)}
         .OnRollback(f_handle_name, f_executable) -> BodyCoreClosureKind.OnRollback{handle_name: f_handle_name, executable: body_copy_lambda(f_executable, flat)}

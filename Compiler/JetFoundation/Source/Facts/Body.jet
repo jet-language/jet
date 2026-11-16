@@ -448,7 +448,6 @@ JET_COMPTIME_TOOLCHAIN_PREFIX: "toolchain:"
 
 BodyCoreClosureKind: enum {
     Spawn(group: Int?, site: Int, label: String?, executable: BodyLambda)
-    Realtime(rate: Int, frames: Int, executable: BodyLambda)
     Guard(executable: BodyLambda)
     OnCommit(handle_name: String, executable: BodyLambda)
     OnRollback(handle_name: String, executable: BodyLambda)
@@ -1466,11 +1465,6 @@ body_each_core_closure_kind_child: fn(tree: BodyTree, value: BodyCoreClosureKind
         .Spawn(f0, _, _, f3) -> {
             if f0 == .Val(inner) -> visit(inner)
             body_each_lambda_child(tree, f3, visit)
-        }
-        .Realtime(f0, f1, f2) -> {
-            visit(f0)
-            visit(f1)
-            body_each_lambda_child(tree, f2, visit)
         }
         .Guard(f0) -> { body_each_lambda_child(tree, f0, visit) }
         .OnCommit(_, f1) -> { body_each_lambda_child(tree, f1, visit) }

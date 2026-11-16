@@ -253,18 +253,7 @@ ir_core_closure_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ki
         .UIReactiveRender(executable) -> return ir_reactive_rooted(m, p, b, executable, span)
         .UIClickSlot(executable) -> return ir_ui_slot(m, p, b, ty, executable, "jet_ui_click_slot", "callback", span)
         .UIDropSlot(executable) -> return ir_ui_slot(m, p, b, ty, executable, "jet_ui_drop_slot", "ui_drop", span)
-        .Realtime(_, _, _) -> return ir_fail_slot(b, span, "Core closure call {ir_core_closure_name(kind)}")
     }
-}
-
-ir_core_closure_name: fn(kind: BodyCoreClosureKind) -> String Never! {
-    text := "{kind}"
-    separators: [String]{"(", "{{", " "}
-    loop separator in separators {
-        parts: text.split(separator).to_list()
-        text = parts[0]
-    }
-    text
 }
 
 // `task body` / `group.spawn(body)`: the body becomes a zero-parameter
