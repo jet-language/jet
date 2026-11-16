@@ -263,7 +263,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
         diagnostics.push(sema_app_screen_error(path, "`{handler.name}` gives {sema_type_show_quoted(shown)}, which doesn't derive `Encode`, and a screen shows its view's result", positional[1].span))
         return rejected
     }
-    text: if node -> Type?{None} else -> Val(shown)
+    text: if node -> [Type]{} else -> [Type]{shown}
     opener: sema_app_screen_callback(sema_app_screen_opener(positional[1].expr, services, states[0], text, found, graph, span), sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 4, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return rejected
     query := [Expr]{}
     loop field in found.query -> query.push(sema_app_text(field, span))
@@ -283,7 +283,8 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     }
     candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, SEMA_APP_SCREEN, [Type]{}, [Type]{}, span, environment, program, diagnostics)
     registered: candidates.pop() ?? panic("App.{SEMA_APP_SCREEN} is not registered")
-    built: sema_tree_node(receiver_value.ty.copy(), TExprKind.MethodCall{receiver: receiver_value, method: registered.method, type_args: [Type]{viewed}, args: registration}, span)
+    result_type: sema_call_resolved_type(sema_call_signature_return(registered.signature) ?? panic("App.{SEMA_APP_SCREEN} has no result"), environment, program)
+    built: sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver_value, method: registered.method, type_args: [Type]{viewed}, args: registration}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
 }
 
@@ -384,7 +385,7 @@ sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg]
         texts.push(Expr.MethodCall{receiver: Expr.Ident{name: graph_name, span: span, id: AST_NODE_GENERATED}, method: SEMA_APP_ADDRESS_TEXT, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{sema_app_arg(read, AccessConvention.Read, span)}, id: AST_NODE_GENERATED})
     }
     params: [LambdaParam]{
-        LambdaParam{name: graph_name, name_span: span, ty: Val(receiver_value.ty.copy()), ty_span: None, convention: AccessConvention.Read},
+        LambdaParam{name: graph_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read},
         LambdaParam{name: state_name, name_span: span, ty: Val(listed.copy()), ty_span: None, convention: AccessConvention.Read},
     }
     address: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: Expr.ListLit{elements: texts, span: span, id: AST_NODE_GENERATED}}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
@@ -465,15 +466,15 @@ sema_app_remote_service: fn(graph: SemaRegistrationGraph, ty: Type, module_ident
 }
 
 // A screen's opener, as `App.__screen` takes it:
-// `fn(graph, fields) { graph.__opened<V>(made, fn(state: V) { shown }) }`,
+// `fn(graph, fields) { graph.__opened<V>(made, fn(state) { shown }) }`,
 // where `made` is the state `V` made from the address's field texts
 // `fields` (`sema_app_state_made`), and `shown` the HTML of what the view
-// gives: `view(…).__html()` when it gives a node tree (`text` None), else
-// `graph.__view_html<N>(view(…))`, `N` what it gives (`text`). `view` is the
-// written view, called with its parameters in order, each Remote one the
-// graph's Remote of its service (`services`, `App.__remote<S>`) and the
-// state one the state.
-sema_app_screen_opener: fn(view: Expr, services: [(ty: Type, key: String)?], state_ty: Type, text: Type?, found: SemaAppState, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
+// gives: `view(…).__html()` when it gives a node tree (`text` empty), else
+// `graph.__view_html<N>(view(…))`, `N` what it gives (`text`'s one type).
+// `view` is the written view, called with its parameters in order, each
+// Remote one the graph's Remote of its service (`services`,
+// `App.__remote<S>`) and the state one the state.
+sema_app_screen_opener: fn(view: Expr, services: [(ty: Type, key: String)?], state_ty: Type, text: [Type], found: SemaAppState, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
     graph_name: "__jet_app_graph_{span.start}"
     fields_name: "__jet_app_fields_{span.start}"
     state_name: "__jet_app_state_{span.start}"
@@ -487,8 +488,8 @@ sema_app_screen_opener: fn(view: Expr, services: [(ty: Type, key: String)?], sta
         view == .Field(base, member, _, _) -> sema_app_member_call(base, member, [Type]{}, view_args, span)
         else -> Expr.CallValue{callee: view.copy(), args: view_args, span: span, id: AST_NODE_GENERATED}  // copy: the written argument keeps its expression
     }
-    shown: if text == .Val(given) -> sema_app_member_call(sema_app_ident(graph_name, span), "__view_html", [Type]{given.copy()}, [CallArg]{sema_app_arg(called, AccessConvention.Read, span)}, span) else -> sema_app_member_call(called, "__html", [Type]{}, [CallArg]{}, span)  // copy: the matched type stays the parameter's
-    run: sema_app_lambda([LambdaParam]{sema_app_lambda_param(state_name, Val(state_ty.copy()), span)}, shown, span)
+    shown: if text.len() == 0 -> sema_app_member_call(called, "__html", [Type]{}, [CallArg]{}, span) else -> sema_app_member_call(sema_app_ident(graph_name, span), "__view_html", text, [CallArg]{sema_app_arg(called, AccessConvention.Read, span)}, span)
+    run: sema_app_lambda([LambdaParam]{sema_app_lambda_param(state_name, None, span)}, shown, span)
     made: sema_app_state_made(sema_app_ident(graph_name, span), found, state_ty.copy(), fields_name, graph, span)
     opened: sema_app_member_call(sema_app_ident(graph_name, span), "__opened", [Type]{state_ty}, [CallArg]{sema_app_arg(made, AccessConvention.Read, span), sema_app_arg(run, AccessConvention.Read, span)}, span)
     sema_app_lambda([LambdaParam]{sema_app_lambda_param(graph_name, None, span), sema_app_lambda_param(fields_name, None, span)}, opened, span)
