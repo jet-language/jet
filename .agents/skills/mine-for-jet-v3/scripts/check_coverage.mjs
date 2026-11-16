@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Depth gate for a mine-for-jet-v2 run directory: bounded segments, a mapped concept
+// Depth gate for a mine-for-jet-v3 run directory: bounded segments, a mapped concept
 // ledger per segment, a full segment x lane matrix, densities, the recall audit, and a
 // prior-art registry row for every mined source.
 // Exit 0 only when nothing is missing; 1 on any gap; 2 on usage errors.
@@ -14,9 +14,9 @@ const SCRIPTS = dirname(fileURLToPath(import.meta.url));
 export const REGISTRY = join(SCRIPTS, '..', '..', '..', '..', 'Docs', 'spec', 'reference', 'prior-art.md');
 
 export const SCHEMAS = {
-  coverage: 'mine-for-jet-v2/coverage@1',
-  ledger: 'mine-for-jet-v2/ledger@1',
-  audit: 'mine-for-jet-v2/recall-audit@1',
+  coverage: 'mine-for-jet-v3/coverage@1',
+  ledger: 'mine-for-jet-v3/ledger@1',
+  audit: 'mine-for-jet-v3/recall-audit@1',
 };
 export const LANES = ['mechanism-and-architecture', 'default-common-job', 'semantic-obligations', 'expert-descent',
   'cost-and-measurement', 'proven-experience', 'interop-and-portability', 'audience-corrections', 'reuse-and-anti-lessons'];
@@ -40,6 +40,9 @@ export const ENUMS = {
   work: ['none', 'planning', 'ready', 'building-verify', 'frozen', 'done', 'proposal-only', 'open-ballot', 'draft-ballot', 'unknown'],
   review_disposition: ['keep', 'attach-existing', 'redesign', 'reject-conflict', 'evidence-gap', 'undecided'],
 };
+// Where each claim ends at publication. rejected and gap carry a reason; the others a ref.
+export const OUTCOMES = ['criterion', 'card', 'ballot', 'evidence', 'rejected', 'gap'];
+const REASONED_OUTCOMES = new Set(['rejected', 'gap']);
 const CLAIM_TEXT = ['id', 'topic', 'claim', 'source_id', 'locator', 'workload', 'incremental_contribution'];
 const SEGMENT_SOURCED = new Set(['primary', 'audience', 'linked-source']);
 
@@ -387,6 +390,29 @@ export function check({ coverage, ledger, claims, audit }, { requireAudit = fals
     }
   }
 
+  // Distillation, at publication: every claim ends in exactly one outcome, and a new mechanism names
+  // the existing Jet mechanism it extends, or says why none can carry the job.
+  if (requireAudit) {
+    report.outcomes = Object.fromEntries(OUTCOMES.map(kind => [kind, 0]));
+    for (const claim of Array.isArray(claimList) ? claimList : []) {
+      if (!isObj(claim)) continue;
+      const where = `claims.json ${claim.id ?? '?'}`;
+      const outcome = claim.outcome;
+      if (!isObj(outcome) || !OUTCOMES.includes(outcome.kind)) { err('outcome', where, `needs outcome.kind, one of ${OUTCOMES.join('|')}`); continue; }
+      report.outcomes[outcome.kind]++;
+      const context = [claim.topic, claim.claim, claim.workload].filter(text).join(' ');
+      if (REASONED_OUTCOMES.has(outcome.kind)) {
+        const problem = vague(outcome.reason, context);
+        if (problem) err('outcome', where, `${outcome.kind} outcome reason: ${problem}`);
+      } else if (!text(outcome.ref)) err('outcome', where, `${outcome.kind} outcome needs ref (an existing record, or draft:ID for a reviewed payload)`);
+      if (claim.contribution === 'adds-new' && (outcome.kind === 'card' || outcome.kind === 'ballot')) {
+        if (text(claim.extends)) continue;
+        const problem = claim.why_new === undefined ? 'needs extends (the existing Jet mechanism it grows) or why_new' : vague(claim.why_new, context);
+        if (problem) err('outcome', where, `new mechanism: ${problem}`);
+      }
+    }
+  }
+
   return { errors, report };
 }
 
@@ -415,6 +441,7 @@ export function render({ errors, report }, { perRule = Infinity } = {}) {
     lines.push(`recall audit (seed ${JSON.stringify(report.audit.seed)}):`);
     for (const row of report.audit.segments) lines.push(`  ${row.id}: reviewer ${row.concepts} concepts, missed ${row.missed}, ledger ${row.ledger}`);
   }
+  if (report.outcomes) lines.push(`outcomes: ${Object.entries(report.outcomes).map(([kind, count]) => `${kind} ${count}`).join(', ')}`);
   if (errors.length) {
     const byRule = new Map();
     for (const error of errors) byRule.set(error.rule, [...(byRule.get(error.rule) ?? []), error]);

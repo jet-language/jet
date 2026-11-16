@@ -32,30 +32,42 @@ registry treats any occurrence as tracked.
 
 ## Compact front, retained evidence
 
-1. Plain verdict: strongest useful lesson, actual Jet deficit and deliberately
+1. **Takeaways per source**, first and in plain words (the eli5 skill): a
+   short summary of each source and its specific takeaways for Jet. The owner
+   reads this part; keep the whole front short enough to read in one sitting
+   and link the run directory for everything else.
+2. Plain verdict: strongest useful lesson, actual Jet deficit and deliberately
    unproposed ideas with reasons.
-2. Three to seven prioritized findings when sufficient; more to cover scope,
-   never an arbitrary cap hiding findings.
-3. One alignment table:
+3. The capability table when the source shows another language's or tool's
+   capabilities ([review](review.md#capability-table-and-demo-probes)).
+4. **New ideas**: every new feature, API, surface, syntax, architecture, tool
+   and concept, each with its outcome. Three to seven prioritized findings
+   when sufficient; more to cover scope, never an arbitrary cap hiding
+   findings.
+5. One alignment table:
 
 | Source mechanism | Current / planned (ratified-unbuilt) / in-flight / proposed | Incremental contribution | Existing / new / no-action disposition | Evidence and acceptance |
 | --- | --- | --- | --- | --- |
 
-4. Short owner questions **only for genuine remaining choices**. Scratch READY
-   and a reviewed payload are not approval or a posted/ratified decision.
-5. Coverage/confidence: the `check_coverage.mjs` output (per-source and
-   per-segment ledger/claim densities, justified low-density segments), every
-   recall audit's seed, sample, misses and outcome, versions read, retrieval
-   versus body review versus extraction, contradictions, binary/tree identity
-   and whether examples were exercised. Keep the exact owner-question matrix;
-   no generic victory paragraph substitutes for an answer.
-6. Retained evidence: `coverage.json`, `ledger.json` and normalized
-   `claims.json` (plus recall audits), essential exact snippets,
-   commands/oracles, primary locators, counterexamples, measurement limits,
-   source independence, rule-9 evidence and owner-feedback corrections. Retain
-   reviewer findings, resolution and identity; link large evidence rather than
-   dumping transcripts or repeated per-language praise.
-7. Strongest remaining unverified assumption, if any.
+6. **Order of work**: the outcomes in priority order with their dependency
+   chains, so whoever builds them can go straight through.
+7. Short owner questions **only for genuine remaining choices**, each as a
+   ballot. Scratch READY and a reviewed payload are not approval or a
+   posted/ratified decision.
+8. Coverage/confidence: the `check_coverage.mjs` output (per-source and
+   per-segment ledger/claim densities, justified low-density segments, outcome
+   counts), every recall audit's seed, sample, misses and outcome, versions
+   read, retrieval versus body review versus extraction, contradictions,
+   binary/tree identity and whether examples were exercised. Keep the exact
+   owner-question matrix; no generic victory paragraph substitutes for an
+   answer.
+9. Retained evidence: `coverage.json`, `ledger.json` and normalized
+   `claims.json` (plus recall audits), probe programs, essential exact
+   snippets, commands/oracles, primary locators, counterexamples, measurement
+   limits, source independence, rule-9 evidence and owner-feedback corrections.
+   Retain reviewer findings, resolution and identity; link large evidence
+   rather than dumping transcripts or repeated per-language praise.
+10. Strongest remaining unverified assumption, if any.
 
 Do not duplicate Tower phases/plans as a living catalog or commit a generated
 Jet-state snapshot. Checkout identity/direct refs belong in dated claims. Code

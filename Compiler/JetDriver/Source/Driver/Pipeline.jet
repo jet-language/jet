@@ -1011,6 +1011,11 @@ JetDriverComptimeRunIndex: struct {
     prefetched_refs: [[JetDriverComptimeFunctionRef]]{[[JetDriverComptimeFunctionRef]]{}}
     prefetched_has_refs: [Bool]{[Bool]{}}
     prefetched_marks: [Int]{[Int]{}}
+    // The functions the pass's prefetch walk checked whose checks waited on
+    // constants with no value, row by row with those waits: the walk drops
+    // such a check and does not follow it (jet_driver_comptime_prefetch_keep).
+    waited_jobs: [SemaComptimeFunctionJob]{[SemaComptimeFunctionJob]{}}
+    waited_on: [[String]]{[[String]]{}}
     // What the run's body walks have read of each nominal type's render
     // methods (jet_driver_comptime_owner_refs).
     render: SemaComptimeRenderMemo{SemaComptimeRenderMemo{}}
@@ -1740,7 +1745,7 @@ jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs
 }
 
 // Drops the checks and refs an earlier prefetch of the run kept that no
-// closure took.
+// closure took, and the functions it left waiting.
 jet_driver_comptime_prefetch_clear: fn(index: &JetDriverComptimeRunIndex) Never! {
     loop node in 0..<index.nodes.len() {
         if index.prefetched[node].len() > 0 {
@@ -1752,6 +1757,8 @@ jet_driver_comptime_prefetch_clear: fn(index: &JetDriverComptimeRunIndex) Never!
         }
         index.prefetched_marks[node] = -1
     }
+    index.waited_jobs = [SemaComptimeFunctionJob]{}
+    index.waited_on = [[String]]{}
 }
 
 // Whether `threads` admit the comptime prefetches, so a pass's items are
@@ -1774,17 +1781,73 @@ jet_driver_comptime_memory_plan: fn(program: SemaProgramTables, threads: Compile
 // Queues `jobs` on walk `walk` and keeps each check as soon as a thread
 // makes it (jet_driver_comptime_prefetch_keep), made while `values` held
 // `mark` values; when the walk `follows` its checks, it queues the functions
-// each kept check reaches too. Closes the walk once every queued job is
-// checked.
+// each kept check reaches too, and keeps the functions whose checks waited
+// (JetDriverComptimeRunIndex.waited_jobs). Closes the walk once every queued
+// job is checked.
 jet_driver_comptime_walk: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, version: Int, index: &JetDriverComptimeRunIndex, mark: Int, walk: &SemaComptimeWalk, jobs: [SemaComptimeFunctionJob], seen: &[Int:Bool], kept: &Int, follows: Bool) {
     sema_comptime_walk_push(walk, environment, program, version, jobs)
     loop {
-        done: sema_comptime_walk_take(walk)
+        done := sema_comptime_walk_take(walk)
         if done.len() == 0 -> break
         reached: jet_driver_comptime_prefetch_keep(program, index, done, mark, seen, kept)
-        if follows -> sema_comptime_walk_push(walk, environment, program, version, reached)
+        if follows {
+            sema_comptime_walk_push(walk, environment, program, version, reached)
+            jet_driver_comptime_prefetch_waited(index, done)
+        }
     }
     sema_comptime_walk_close(walk)
+}
+
+// Keeps the functions of `done`, which it empties, whose checks waited on a
+// constant with no value, with those waits, in the order the walk made them.
+jet_driver_comptime_prefetch_waited: fn(index: &JetDriverComptimeRunIndex, done: &[SemaComptimeWalkDone]) Never! {
+    done.reverse()
+    loop {
+        row: done.pop() ?? break
+        if row.check.waiting_dependencies.len() > 0 {
+            index.waited_jobs.push(row.job.move())
+            index.waited_on.push(row.check.waiting_dependencies.move())
+        }
+    }
+}
+
+// Whether a function check the pass's prefetch dropped waits on an item
+// `batch` holds.
+jet_driver_comptime_prefetch_awaits: fn(index: JetDriverComptimeRunIndex, batch: JetDriverComptimeBatch) -> Bool Never! {
+    loop waits in index.waited_on {
+        if jet_driver_comptime_batch_holds(batch, waits) -> return true
+    }
+    false
+}
+
+// Once a batch the pass took over landed ahead of the pass's items, makes
+// again on the compiler threads, following them as the pass's prefetch
+// does, the checks that prefetch dropped for waiting on a constant that has
+// a value now, and keeps them for the closures
+// (jet_driver_comptime_prefetched). The result is the number of checks kept.
+jet_driver_comptime_prefetch_landed: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], threads: CompilerThreads) -> Int {
+    waited_jobs: compiler_take_rows<SemaComptimeFunctionJob>(index.waited_jobs)
+    waited_on: compiler_take_rows<[String]>(index.waited_on)
+    seen := [Int:Bool]{}
+    jobs := [SemaComptimeFunctionJob]{}
+    loop (at, job) in waited_jobs {
+        if jet_driver_comptime_any_available(available, waited_on[at]) {
+            jet_driver_comptime_prefetch_add(index, seen, jobs, job.module_identity, job.function_key)
+        }
+    }
+    if jobs.len() == 0 -> return 0
+    workers: sema_comptime_walk_admit(threads, programs[0], jobs, grows: true)
+    if workers <= 1 || !jet_driver_comptime_memory_plan(programs[0], threads, memory_plan) {
+        return 0
+    }
+    walk := sema_comptime_walk_open(environments[0], programs[0], available, values, memory_plan[0], workers)
+    kept := 0
+    task.group jet_driver_comptime_prefetch_landed_threads {
+        walkers: task sema_comptime_walk_run(walk)
+        jet_driver_comptime_walk(environments[0], programs[0], sema_comptime_available_version(available), index, values.len(), walk, jobs, seen, kept, follows: true)
+        _ := walkers.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    kept
 }
 
 // The checks of one breadth-first level of a closure's queue
@@ -2497,19 +2560,16 @@ jet_driver_comptime_holds_run_site: fn(checked_functions: [SemaComptimeFunctionR
 // Moves the values computed ahead (SemaComptimeItemSource.ahead) out of
 // `pending` when it holds any other item, keeping the order of each, and
 // returns them for the next pass. So they are checked in a pass with no
-// other item pending, after the module values they may read have landed:
-// their closures' function checks then wait on nothing, and the pass's
-// prefetch makes them all on the compiler threads. Checked in an earlier
-// pass, a closure that waits on a module value is checked again the next
-// pass, one function at a time on the lead thread.
+// other item pending, after the module values they may read have landed
+// (the last module batch waits into their pass, and lands ahead of them
+// when one of their checks waits on it): their closures' function checks
+// then wait on nothing, and the pass's prefetch makes them all on the
+// compiler threads. Checked in an earlier pass, a closure that waits on a
+// module value is checked again the next pass, one function at a time on
+// the lead thread.
 jet_driver_comptime_hold_ahead: fn(pending: &[SemaComptimeItemSource]) -> [SemaComptimeItemSource] Never! {
     held := [SemaComptimeItemSource]{}
-    others: loop source in pending {
-        if !source.ahead {
-            break true
-        }
-    } ?? false
-    if !others -> return held
+    if jet_driver_comptime_all_ahead(pending) -> return held
     kept := [SemaComptimeItemSource]{}
     pending.reverse()
     loop {
@@ -2518,6 +2578,14 @@ jet_driver_comptime_hold_ahead: fn(pending: &[SemaComptimeItemSource]) -> [SemaC
     }
     pending = kept
     held
+}
+
+// Whether every item of `pending` is a value computed ahead.
+jet_driver_comptime_all_ahead: fn(pending: [SemaComptimeItemSource]) -> Bool Never! {
+    loop source in pending {
+        if !source.ahead -> return false
+    }
+    true
 }
 
 // Whether `batch` holds one of the items `keys`.
@@ -2970,8 +3038,12 @@ jet_driver_comptime_checked_text_source_add: fn(sources: &[SemaComptimeItemSourc
 // module is found through one identity map instead of copying every module
 // passed while searching, and edited without copying it out and back. An
 // incomplete result fails the merge before any module changes, and the
-// failure names the staged function and why it could not join. The caller
-// builds the bundle's name facts afterwards (jet_driver_merged_names).
+// failure names the staged function and why it could not join. A staged
+// Core function whose only errors are failure obligations joins: the body
+// pass that settles a staged function's obligations never checks a Core
+// body a program reads from the Core image, and the Core library's own
+// check, whose solve saw every Core body, already discharged them. The
+// caller builds the bundle's name facts afterwards (jet_driver_merged_names).
 jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: ModuleTable, functions: [SemaComptimeFunctionResult]) -> String? Never! {
     // Module slots: the first checked row of each module id, -1 for none.
     module_rows := (loop _ in 0..<module_count(table) -> -1)
@@ -2995,7 +3067,7 @@ jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: Modu
             keyed[row] = true
         }
         if held.get("{row}\n{function.key}") != None -> next
-        if !checked.complete {
+        if !checked.complete && !(checked.obligations_pending && module_is_core(checked.module_identity)) {
             reasons := ""
             loop reason in checked.incomplete_reasons {
                 reasons = if reasons == "" -> reason.copy() else -> "{reasons}; {reason}"
@@ -3257,6 +3329,35 @@ jet_driver_comptime_run: fn(
         jet_driver_trace_step_begin(request.trace_sink, "comptime.prefetch")
         prefetched: jet_driver_comptime_prefetch(environments, programs, available, run_index, memory_plan, values, prechecks, request.compiler_threads)
         jet_driver_trace_step_end(request.trace_sink, "comptime.prefetch", prefetched)
+        // A batch carried into a pass of values computed ahead (held below)
+        // lands ahead of them when a check the prefetch dropped waits on it:
+        // their closures then find those checks made on the compiler
+        // threads, not waiting, as in the pass after a landing. Those values
+        // report nothing, so the batch's reports keep their place.
+        if batch.entries.len() > 0 && jet_driver_comptime_all_ahead(pending) && jet_driver_comptime_prefetch_awaits(run_index, batch) {
+            flushed: jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
+            batch = jet_driver_comptime_batch_new()
+            if flushed.progressed -> made_progress = true
+            if flushed.stop == .Val(stopped) {
+                sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                return stopped
+            }
+            if jet_driver_module_values_refused(environments[0], programs[0], probe, available, flushed.refused, diagnostics) {
+                refused_any = true
+                stop_mark = diagnostics.len()
+            }
+            if values.len() > resolved_count {
+                if !jet_driver_comptime_apply_landed(environments[0], programs[0], available, staging.sites, values, resolved_count, trail, request.trace_sink) {
+                    sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                    return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+                }
+                resolved_count = values.len()
+            }
+            jet_driver_comptime_pass_sites(run_index, pending, batch)
+            jet_driver_trace_step_begin(request.trace_sink, "comptime.prefetch")
+            landed_prefetched: jet_driver_comptime_prefetch_landed(environments, programs, available, run_index, memory_plan, values, request.compiler_threads)
+            jet_driver_trace_step_end(request.trace_sink, "comptime.prefetch", landed_prefetched)
+        }
         prechecks.reverse()
         prechecked_typed: available.typed
         loop source in pending {
@@ -3669,8 +3770,11 @@ jet_driver_comptime_run: fn(
         // A batch that no waiting item names waits into the next pass when
         // this pass landed other values: the items that waited on those are
         // evaluated in the same program as the batch, so a run whose items
-        // wait on folded constants builds one program, not one per pass.
-        if batch.entries.len() > 0 && (!made_progress || next_pending.len() == 0 || jet_driver_comptime_batch_awaited(batch, wait_rows)) {
+        // wait on folded constants builds one program, not one per pass. It
+        // waits too into the pass of the values computed ahead, when nothing
+        // else is left: they join it unless they wait on it.
+        carried: next_pending.len() == 0 && held.len() > 0
+        if batch.entries.len() > 0 && !carried && (!made_progress || next_pending.len() == 0 || jet_driver_comptime_batch_awaited(batch, wait_rows)) {
             flushed := jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
             batch = jet_driver_comptime_batch_new()
             if flushed.progressed -> made_progress = true

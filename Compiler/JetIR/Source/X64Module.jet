@@ -27,6 +27,7 @@ use {
         X64ModuleDebug,
         X64ObjectModule,
         X64Reloc,
+        X64RelocTarget,
         X64RuntimeExport,
         X64VariableRange,
         X64_FUNCTION_ALIGN,
@@ -36,7 +37,8 @@ use {
     ]
 }
 
-// The module-wide rows every function's selection reads.
+// The module-wide rows the object writer reads: the IR data rows, then the
+// selector rows every function's selection named (ir_x64_tables_add).
 IRX64Tables: struct {
     // The IR data rows (same ids), then headers and texts.
     data: [X64Data]
@@ -50,21 +52,52 @@ IRX64Tables: struct {
     // Big-integer decimals -> the data row of the word that is their static
     // exact Int (ir_x64_static_int).
     ints: [String:Int]
-    // DWARF: the source files (row per distinct path) and a debug type per IR type row.
+    // DWARF: the source files (row per distinct path) and a debug type per
+    // IR type row (debug row r describes m.types[r]), then the rows they name.
     files: [String]
     file_rows: [String:Int]
     debug_types: [X64DebugType]
-    type_debug: [Int]
     // The data row of the byte caching whether the CPU has FMA3 (X64Select.jet
     // ir_x64_fma), -1 when no function calls jet_std_math_fma.
     fma: Int
-    // Per function row: whether its selection keeps an emission log
-    // (JET_X64_EMIT_LOG, ir_x64_compile_module_logged); empty for none.
-    logged: [Bool]
 }
 
-ir_x64_logged: fn(tables: IRX64Tables, row: Int) -> Bool Never! {
-    row < tables.logged.len() && tables.logged[row]
+// A data row a function's selection names besides the IR data rows: a
+// selector text, the String header of an IR data row, a big-integer
+// decimal's static Int word, the FMA byte.
+IRX64Use: enum {
+    Text(text: String)
+    Header(row: Int)
+    StaticInt(text: String)
+    Fma
+}
+
+// Use k of a function's selection is data row IR_X64_LOCAL_DATA + k in its
+// code until ir_x64_resolve points it at the module's row: above every
+// module row, so the two never meet.
+IR_X64_LOCAL_DATA: 1099511627776
+
+// One function's own selector rows (ir_x64_function_tables): each row it
+// names once, in the order the walk meets it, and the lookups its selection
+// reads. Its selection reads no module-wide table, so any thread selects
+// any function with no walk over the module first; the module gives the
+// uses their rows afterwards, in function order (ir_x64_tables_add), the
+// rows one walk over the whole module would give them.
+IRX64FunctionTables: struct {
+    uses: [IRX64Use]
+    // Per use: the byte length of its data.
+    lengths: [Int]
+    // Selector texts, IR data rows with a String header, big-integer
+    // decimals with a static Int -> local data row.
+    texts: [String:Int]
+    headers: [Int:Int]
+    ints: [String:Int]
+    // The local data row of the FMA byte, -1 when the function calls no
+    // jet_std_math_fma.
+    fma: Int
+    // Whether the selection keeps an emission log (JET_X64_EMIT_LOG,
+    // ir_x64_compile_module_logged).
+    logged: Bool
 }
 
 // Whether JET_X64_EMIT_LOG entry list `names` names function `f`: an entry
@@ -113,31 +146,13 @@ ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
 // that would free it. A decimal the carrier can't hold canonically (one in
 // the inline range, or not plain digits) keeps the runtime parse.
 ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
-    if tables.ints.get(text) != None {
+    if tables.ints.get(text) != None || !ir_x64_static_int_fits(text) {
         return
     }
     bytes := [Int]{}
     loop byte in text.bytes() -> bytes.push(Int{byte})
-    negative: bytes.len() > 0 && bytes[0] == 45
+    negative: bytes[0] == 45
     first: if negative -> 1 else -> 0
-    digits: bytes.len() - first
-    if digits < 19 || bytes[first] == 48 {
-        return
-    }
-    loop at in first..<bytes.len() {
-        if bytes[at] < 48 || bytes[at] > 57 {
-            return
-        }
-    }
-    // A 19-digit magnitude up to 2^62 - 1 (2^62 when negative) is an inline Int.
-    if digits == 19 {
-        bound: (if negative -> "4611686018427387904" else -> "4611686018427387903").bytes()
-        at := 0
-        loop at < 19 && bytes[first + at] == (Int{bound[at]}) -> at += 1
-        if at == 19 || bytes[first + at] < (Int{bound[at]}) {
-            return
-        }
-    }
     limbs := [U8]{}
     count := 0
     end := bytes.len()
@@ -168,6 +183,34 @@ ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
     tables.lengths.push(8)
     tables.data.push(X64Data{id: X64DataID{value: word_row}, bytes: tagged.move(), align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: carrier_row}, addend: 4611686018427387904}}})
     tables.ints[text] = word_row
+}
+
+// Whether ir_x64_static_int makes a static Int for decimal `text`: plain
+// digits, an optional `-`, no leading zero, outside the inline range.
+ir_x64_static_int_fits: fn(text: String) -> Bool Never! {
+    bytes := [Int]{}
+    loop byte in text.bytes() -> bytes.push(Int{byte})
+    negative: bytes.len() > 0 && bytes[0] == 45
+    first: if negative -> 1 else -> 0
+    digits: bytes.len() - first
+    if digits < 19 || bytes[first] == 48 {
+        return false
+    }
+    loop at in first..<bytes.len() {
+        if bytes[at] < 48 || bytes[at] > 57 {
+            return false
+        }
+    }
+    // A 19-digit magnitude up to 2^62 - 1 (2^62 when negative) is an inline Int.
+    if digits == 19 {
+        bound: (if negative -> "4611686018427387904" else -> "4611686018427387903").bytes()
+        at := 0
+        loop at < 19 && bytes[first + at] == (Int{bound[at]}) -> at += 1
+        if at == 19 || bytes[first + at] < (Int{bound[at]}) {
+            return false
+        }
+    }
+    true
 }
 
 // The shared rows the DWARF types of the IR type rows name.
@@ -207,7 +250,6 @@ ir_x64_debug_pointer: fn(tables: &IRX64Tables, target: Int) -> Int Never! {
 // aggregate stays opaque.
 ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
     loop row in 0..<m.types.len() {
-        tables.type_debug.push(row)
         tables.debug_types.push(X64DebugType{name: "", size: 0, kind: X64DebugTypeKind.Opaque})
     }
     word: ir_x64_debug_add(tables, X64DebugType{name: "I64", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Signed}})
@@ -283,8 +325,22 @@ ir_x64_debug_handle: fn(tables: &IRX64Tables, name: String, first: String, secon
     ir_x64_debug_pointer(tables, handle)
 }
 
+// The tables of all of `m` at once: what ir_x64_compile_module_logged
+// builds from the functions' selections, for a reader that selects no
+// function first (the Web back end, ir_x64_compile_function).
 ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
-    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, ints: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, type_debug: [Int]{}, fma: -1, logged: [Bool]{}}
+    tables := ir_x64_tables_start(m)
+    loop (row, f) in m.functions {
+        local: ir_x64_function_tables(m, row, [String]{})
+        _ := ir_x64_tables_add(tables, f, local.uses)
+    }
+    ir_x64_tables_finish(m, tables)
+    tables
+}
+
+// The module's tables before any function's uses: its IR data rows.
+ir_x64_tables_start: fn(m: IRModule) -> IRX64Tables Never! {
+    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, ints: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, fma: -1}
     loop (row, bytes) in m.data {
         // A static object (BuildStatic.jet) holds words, which the program
         // may write; a text row is read-only bytes (IR.jet ir_intern_text).
@@ -294,37 +350,59 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
         tables.lengths.push(bytes.len())
         tables.headers.push(-1)
     }
-    // The stop texts already in (ir_x64_add_stop_texts). A function from the
-    // same source file as the one before finds that file's text and file row
-    // in already.
-    stops := [Bool]{false, false, false, false}
-    loop (index, f) in m.functions {
-        if index == 0 || f.source_file != m.functions[index - 1].source_file {
-            _ := ir_x64_add_text(tables, f.source_file)
-            if f.source_file != "" && tables.file_rows.get(f.source_file) == None {
-                tables.file_rows[f.source_file] = tables.files.len()
-                tables.files.push(f.source_file)
-            }
-        }
-        loop at in 0..<f.op.len() {
-            ir_x64_add_stop_texts(tables, stops, m, f, at)
-            if f.op[at] == .ConstText {
-                row: f.a[at]
-                if row >= 0 && row < tables.headers.len() -> _ := ir_x64_text_header(tables, row)
-            }
-            if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() {
-                _ := ir_x64_add_text(tables, m.names[f.a[at]])
-                ir_x64_static_int(tables, m.names[f.a[at]])
-            }
-            if f.op[at] == .CallRuntime && tables.fma < 0 && f.a[at] >= 0 && f.a[at] < m.names.len() && m.names[f.a[at]] == "jet_std_math_fma" {
-                tables.fma = tables.data.len()
-                tables.lengths.push(1)
-                tables.data.push(X64Data{id: X64DataID{value: tables.fma}, bytes: [U8]{U8{0}}, align: 1, relocs: [X64DataReloc]{}})
-            }
-        }
+    tables
+}
+
+// Gives the uses of function `f`, the next in function order, their module
+// rows, adding its source file and the rows no function before it named;
+// returns the row of each use, for ir_x64_resolve.
+ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: [IRX64Use]) -> [Int] Never! {
+    if f.source_file != "" && tables.file_rows.get(f.source_file) == None {
+        tables.file_rows[f.source_file] = tables.files.len()
+        tables.files.push(f.source_file)
     }
-    // A static object's address words: a data row's address, or the
-    // String header a ConstText of the target row reads.
+    rows := [Int]{}
+    loop wanted in uses {
+        row: if wanted == {
+            .Text(text) -> ir_x64_add_text(tables, text)
+            .Header(data) -> ir_x64_text_header(tables, data)
+            .StaticInt(text) -> {
+                ir_x64_static_int(tables, text)
+                tables.ints.get(text) ?? -1
+            }
+            .Fma -> {
+                if tables.fma < 0 {
+                    tables.fma = tables.data.len()
+                    tables.lengths.push(1)
+                    tables.data.push(X64Data{id: X64DataID{value: tables.fma}, bytes: [U8]{U8{0}}, align: 1, relocs: [X64DataReloc]{}})
+                }
+                tables.fma
+            }
+        }
+        rows.push(row)
+    }
+    rows
+}
+
+// The rows of `uses` in tables that hold them all already (ir_x64_tables).
+ir_x64_use_rows: fn(tables: IRX64Tables, uses: [IRX64Use]) -> [Int] Never! {
+    rows := [Int]{}
+    loop wanted in uses {
+        row: if wanted == {
+            .Text(text) -> tables.texts.get(text) ?? -1
+            .Header(data) -> tables.headers[data]
+            .StaticInt(text) -> tables.ints.get(text) ?? -1
+            .Fma -> tables.fma
+        }
+        rows.push(row)
+    }
+    rows
+}
+
+// After every function's uses: a static object's address words (a data
+// row's address, or the String header a ConstText of the target row
+// reads) and the debug types.
+ir_x64_tables_finish: fn(m: IRModule, tables: &IRX64Tables) Never! {
     loop row in 0..<m.data.len() {
         relocs: m.data_relocs.get(row) ?? next
         loop reloc in relocs {
@@ -333,7 +411,72 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
         }
     }
     ir_x64_debug_types(m, tables)
+}
+
+// Points each data relocation of `function` at use k (data row
+// IR_X64_LOCAL_DATA + k) at `rows[k]`, the module's row of that use.
+ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
+    loop at in 0..<function.relocs.len() {
+        if function.relocs[at].target == .Data(id) && id.value >= IR_X64_LOCAL_DATA {
+            function.relocs[at].target = X64RelocTarget.Data{id: X64DataID{value: rows[id.value - IR_X64_LOCAL_DATA]}}
+        }
+    }
+}
+
+// The selector rows function row `row` of `m` names, in the order its
+// instructions name them: its source file's text, then per instruction the
+// texts of its numeric stops (ir_x64_add_stop_texts), a ConstText's String
+// header, a ConstBigInt's decimal and static Int, the FMA byte of a
+// jet_std_math_fma call. Its selection keeps an emission log when
+// JET_X64_EMIT_LOG entry list `names` names it (ir_x64_log_names).
+ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64FunctionTables Never! {
+    f: m.functions[row]
+    tables := IRX64FunctionTables{uses: [IRX64Use]{}, lengths: [Int]{}, texts: [String:Int]{}, headers: [Int:Int]{}, ints: [String:Int]{}, fma: -1, logged: ir_x64_log_names(f, names)}
+    _ := ir_x64_use_text(tables, f.source_file)
+    // The stop texts already in (ir_x64_add_stop_texts).
+    stops := [Bool]{false, false, false, false}
+    loop at in 0..<f.op.len() {
+        ir_x64_add_stop_texts(tables, stops, m, f, at)
+        if f.op[at] == .ConstText {
+            data: f.a[at]
+            if data >= 0 && data < m.data.len() && tables.headers.get(data) == None {
+                tables.headers[data] = ir_x64_add_use(tables, IRX64Use.Header{row: data}, 24)
+            }
+        }
+        if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() {
+            text: m.names[f.a[at]]
+            _ := ir_x64_use_text(tables, text)
+            if tables.ints.get(text) == None && ir_x64_static_int_fits(text) {
+                tables.ints[text] = ir_x64_add_use(tables, IRX64Use.StaticInt{text: text}, 8)
+            }
+        }
+        if f.op[at] == .CallRuntime && tables.fma < 0 && f.a[at] >= 0 && f.a[at] < m.names.len() && m.names[f.a[at]] == "jet_std_math_fma" {
+            tables.fma = ir_x64_add_use(tables, IRX64Use.Fma, 1)
+        }
+    }
     tables
+}
+
+// Adds use `wanted`, of `length` bytes; returns its local data row.
+ir_x64_add_use: fn(tables: &IRX64FunctionTables, wanted: &&IRX64Use, length: Int) -> Int Never! {
+    id: IR_X64_LOCAL_DATA + tables.uses.len()
+    tables.uses.push(wanted)
+    tables.lengths.push(length)
+    id
+}
+
+// The local data row of selector text `text`, added on first use.
+ir_x64_use_text: fn(tables: &IRX64FunctionTables, text: String) -> Int Never! {
+    found: tables.texts.get(text) ?? -1
+    if found >= 0 -> return found
+    id: ir_x64_add_use(tables, IRX64Use.Text{text: text}, text.bytes().len())
+    tables.texts[text] = id
+    id
+}
+
+// The byte length of local data row `id`.
+ir_x64_use_length: fn(tables: IRX64FunctionTables, id: Int) -> Int Never! {
+    tables.lengths[id - IR_X64_LOCAL_DATA]
 }
 
 // The process-lifetime String header [data, byte length, cap 0] over data
@@ -388,11 +531,13 @@ ir_x64_admit: fn(threads: CompilerThreads, count: Int, total: Int, ns_per_instru
 // Compiles every function of `program` (function row = X64CompiledFunction
 // id), collecting every function's selection errors, on as many threads as
 // x64 selection admission (ir_x64_admit) gives its instructions. Threads
-// claim functions heaviest first and each result lands in its function's
-// row, so the rows, errors and bytes are those of the one-thread loop for
-// any thread count. A thread that stops (an internal panic) costs only the
-// function it was selecting: that function gets an error row and fresh
-// threads select the rest.
+// claim functions heaviest first, each selecting against its own selector
+// rows (ir_x64_select_function), and each result lands in its function's
+// row; the module's tables then give the uses their rows in function order
+// (ir_x64_tables_add), so the rows, errors, tables and bytes are those of
+// the one-thread loop for any thread count. A thread that stops (an
+// internal panic) costs only the function it was selecting: that function
+// gets an error row and fresh threads select the rest.
 ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX64Result Never! {
     ir_x64_compile_module_logged(program, threads, [String]{})
 }
@@ -405,10 +550,8 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     m := program.move()
     ir_drop_early(m, threads)
     ir_tail_calls(m, threads)
-    tables := ir_x64_tables(m)
     log := [String]{}
     if names.len() > 0 {
-        loop f in m.functions -> tables.logged.push(ir_x64_log_names(f, names))
         loop line in m.struct_fields -> log.push(line.copy())
     }
     count: m.functions.len()
@@ -425,19 +568,22 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     variables := [[X64DebugVariable]]{}
     errors := [String]{}
     if workers <= 1 {
+        tables := ir_x64_tables_start(m)
         loop row in 0..<count {
-            compiled := ir_x64_compile_function(m, tables, row)
+            compiled := ir_x64_select_function(m, row, names)
+            ir_x64_resolve(compiled.function, ir_x64_tables_add(tables, m.functions[row], compiled.uses))
             errors.extend(compiler_take_rows<String>(compiled.errors))
             log.extend(compiler_take_rows<String>(compiled.log))
             functions.push(compiled.function.move())
             debug.push(compiled.debug.move())
             variables.push(compiled.variables.move())
         }
+        ir_x64_tables_finish(m, tables)
         return IRX64Result{program: m.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables.move(), threads: threads, log: log.move()}
     }
     seats := [IRX64Seat]{}
     loop _ in 0..<workers -> seats.push(IRX64Seat{row: -1})
-    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, tables: [IRX64Tables]{tables.move()}, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move()}}
+    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, names: names, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move()}}
     outputs := [[IRX64FunctionResult]]{}
     stops := [String]{}
     loop _ in 0..<count {
@@ -450,6 +596,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     // reversed into function order.
     row_errors := [[String]]{}
     row_logs := [[String]]{}
+    row_uses := [[IRX64Use]]{}
     row := count - 1
     loop row >= 0 {
         taken := outputs.pop() ?? panic("the x64 selection lost a function row")
@@ -458,12 +605,14 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
             selected := compiled.move()
             row_errors.push(compiler_take_rows<String>(selected.errors))
             row_logs.push(compiler_take_rows<String>(selected.log))
+            row_uses.push(compiler_take_rows<IRX64Use>(selected.uses))
             functions.push(selected.function.move())
             debug.push(selected.debug.move())
             variables.push(selected.variables.move())
         } else {
             row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
             row_logs.push([String]{})
+            row_uses.push([IRX64Use]{})
             functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
             debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
             variables.push([X64DebugVariable]{})
@@ -473,6 +622,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     functions.reverse()
     debug.reverse()
     variables.reverse()
+    row_uses.reverse()
     loop row_errors.len() > 0 {
         listed := row_errors.pop() ?? {
             break
@@ -486,17 +636,20 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
         log.extend(listed)
     }
     program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
-    tables_back := shells.tables.pop() ?? panic("the x64 selection inputs lost the tables")
-    IRX64Result{program: program_back.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables_back.move(), threads: threads, log: log.move()}
+    tables := ir_x64_tables_start(program_back)
+    loop (at, uses) in row_uses -> ir_x64_resolve(functions[at], ir_x64_tables_add(tables, program_back.functions[at], uses))
+    ir_x64_tables_finish(program_back, tables)
+    IRX64Result{program: program_back.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables.move(), threads: threads, log: log.move()}
 }
 
-// The selecting threads' inputs, read-only while they run: the module and
-// its tables (moved in and taken back after the join), the claim order
-// (heaviest first) and its next rank, which a thread takes with one atomic
-// add, and per seat the row its thread is selecting (-1 none).
+// The selecting threads' inputs, read-only while they run: the module
+// (moved in and taken back after the join), the JET_X64_EMIT_LOG names
+// (ir_x64_log_names), the claim order (heaviest first) and its next rank,
+// which a thread takes with one atomic add, and per seat the row its thread
+// is selecting (-1 none).
 IRX64Inputs: struct {
     programs: [IRModule]
-    tables: [IRX64Tables]
+    names: [String]
     order: [Int]
     next: Atomic<Int>
     seats: [IRX64Seat]
@@ -577,7 +730,7 @@ ir_x64_claimed: fn(inputs: Shared<IRX64Inputs>, seat: Int) -> [IRX64Selected] {
         if rank >= reads.value.order.len() -> break
         row: reads.value.order[rank]
         reads.value.seats[seat].row.store(row)
-        compiled := ir_x64_compile_function(reads.value.programs[0], reads.value.tables[0], row)
+        compiled := ir_x64_select_function(reads.value.programs[0], row, reads.value.names)
         selected.push(IRX64Selected{row: row, compiled: compiled.move()})
     }
     reads.value.seats[seat].row.store(-1)
@@ -597,7 +750,7 @@ ir_x64_stopped: fn(inputs: Shared<IRX64Inputs>, seat: Int, failure: TaskFailure,
 
 ir_x64_take_inputs: fn(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
     permit := inputs.guard_edit()
-    IRX64Inputs{programs: compiler_take_rows<IRModule>(permit.value.programs), tables: compiler_take_rows<IRX64Tables>(permit.value.tables), order: [Int]{}, next: 0, seats: [IRX64Seat]{}}
+    IRX64Inputs{programs: compiler_take_rows<IRModule>(permit.value.programs), names: [String]{}, order: [Int]{}, next: 0, seats: [IRX64Seat]{}}
 }
 
 // The relocatable object of `compiled` (moved in, every row moved on): its

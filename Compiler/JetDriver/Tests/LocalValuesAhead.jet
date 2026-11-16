@@ -80,8 +80,14 @@ AHEAD_CLOSURE_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nscaled: fn
 // landing computes it after `big`, so `late`'s body holds `big`.
 AHEAD_RUN_SITE_SOURCE: "fact: fn(n: Int) -> Int {{\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}}\n\nearly: fn() -> String {{\n    line: late()\n    line\n}}\n\nlate: fn() -> String {{\n    big: #run fact(5)\n    \"late {{big}}\"\n}}\n\nrun: fn() {{\n    print(early())\n}}\n"
 
-// The request that compiles `source`, its trace going to `path`.
-ahead_request: fn(path: String, source: String) -> JetDriverCompileRequest {
+// `ten`'s closure checks `plus_nine`, which reads `NINE`: the build that
+// computes `NINE` lands before `ten` is checked, and `ten` lands from a
+// build of its own.
+AHEAD_READS_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nNINE: #run square(3)\n\nplus_nine: fn(n: Int) -> Int {{\n    n + NINE\n}}\n\nrun: fn() {{\n    ten: plus_nine(1)\n    four: square(2)\n    print(\"{{ten}} {{four}} {{NINE}}\")\n}}\n"
+
+// The request that compiles `source` on `threads` compiler threads, its
+// trace going to `path`.
+ahead_request: fn(path: String, source: String, threads: Int) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{
             JetDriverAuthorizedSourceRoot{
@@ -95,7 +101,7 @@ ahead_request: fn(path: String, source: String) -> JetDriverCompileRequest {
         entry_root_identity: "local-values-ahead-root",
         entry_path: "/local-values-ahead/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Program)
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(threads), JetDriverCompileMode.Program)
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request.eval_config.native = Val(jet_cli_native_session_at(ahead_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
     request.trace_sink = Val(ahead_sink(AheadTrace{path: path}))
@@ -113,6 +119,17 @@ ahead_programs_built: fn(trace: String) -> Int {
     built
 }
 
+// The programs the comptime runs of `trace` built, all told.
+ahead_programs: fn(trace: String) -> Int {
+    built := 0
+    loop line in trace.split("\n") {
+        if line.starts_with("counters.comptime.programs_built = ") {
+            built += Int.parse(line.remove_prefix("counters.comptime.programs_built = ")) ?? panic("a programs_built counter is not a count: {line}")
+        }
+    }
+    built
+}
+
 // Whether the landing of `trace` checks comptime item `item`.
 ahead_landing_checks: fn(trace: String, item: String) -> Bool {
     landing := false
@@ -123,10 +140,26 @@ ahead_landing_checks: fn(trace: String, item: String) -> Bool {
     false
 }
 
-// Compiles `source` with `verify`, its trace going to `path`; returns the trace.
+// Whether `trace` first checks comptime item `item` after its first build.
+ahead_checked_after_build: fn(trace: String, item: String) -> Bool {
+    built := false
+    loop line in trace.split("\n") {
+        if line.starts_with("< comptime.build") -> built = true
+        if line.starts_with("> comptime.check {item} (") -> return built
+    }
+    false
+}
+
+// Compiles `source` with `verify` on one compiler thread, its trace going to
+// `path`; returns the trace.
 ahead_compile: fn(path: String, source: String, verify: Bool) -> String {
+    ahead_compile_on(path, source, verify, 1)
+}
+
+// Compiles `source` as ahead_compile does, on `threads` compiler threads.
+ahead_compile_on: fn(path: String, source: String, verify: Bool, threads: Int) -> String {
     ahead_files.write(path, "") ?? panic("cannot start the trace: {err}")
-    request := ahead_request(path, source)
+    request := ahead_request(path, source, threads)
     request.recheck_verify = verify
     front: jet_driver_lowering_inputs(request, None)
     trace: ahead_files.read(path) ?? panic("cannot read the trace: {err}")
@@ -142,9 +175,12 @@ ahead_compile: fn(path: String, source: String, verify: Bool) -> String {
 
 #Test("local_values_computed_ahead_land_without_a_build") {
     path: ahead_files.join(ahead_sys.temp_dir(), "jet-local-values-ahead-{ahead_process.current_pid()}.trace")
-    loop verify in ([Bool]{false, true}) {
-        trace: ahead_compile(path, AHEAD_SOURCE, verify)
-        assert(ahead_programs_built(trace) == 1, "recheck_verify {verify}: the landing built a program of its own:\n{trace}")
+    loop threads in ([Int]{1, 4}) {
+        loop verify in ([Bool]{false, true}) {
+            trace: ahead_compile_on(path, AHEAD_SOURCE, verify, threads)
+            assert(ahead_programs_built(trace) == 1, "recheck_verify {verify}, {threads} threads: the landing built a program of its own:\n{trace}")
+            assert(ahead_programs(trace) == 1, "recheck_verify {verify}, {threads} threads: the values computed ahead were not computed in the build of `NINE`:\n{trace}")
+        }
     }
     ahead_files.remove(path) ?? panic("cannot remove the trace: {err}")
 }
@@ -173,6 +209,24 @@ ahead_compile: fn(path: String, source: String, verify: Bool) -> String {
     loop verify in ([Bool]{false, true}) {
         trace: ahead_compile(path, AHEAD_RUN_SITE_SOURCE, verify)
         assert(ahead_landing_checks(trace, "line"), "recheck_verify {verify}: `line` was computed ahead of `big`:\n{trace}")
+    }
+    ahead_files.remove(path) ?? panic("cannot remove the trace: {err}")
+}
+
+// On one thread `ten`'s closure waits on `NINE` and is checked again once it
+// lands; on more, the prefetch finds `plus_nine` waiting on it, and `NINE`
+// lands before `ten` is checked.
+#Test("a_value_computed_ahead_that_reads_a_module_value_lands_after_it") {
+    path: ahead_files.join(ahead_sys.temp_dir(), "jet-local-values-reads-{ahead_process.current_pid()}.trace")
+    loop threads in ([Int]{1, 4}) {
+        loop verify in ([Bool]{false, true}) {
+            trace: ahead_compile_on(path, AHEAD_READS_SOURCE, verify, threads)
+            assert(ahead_programs_built(trace) == 1, "recheck_verify {verify}, {threads} threads: the landing built a program of its own:\n{trace}")
+            assert(ahead_programs(trace) == 2, "recheck_verify {verify}, {threads} threads: `ten` was not computed after `NINE` landed:\n{trace}")
+            if threads > 1 {
+                assert(ahead_checked_after_build(trace, "ten"), "recheck_verify {verify}, {threads} threads: `ten` was checked before `NINE` landed:\n{trace}")
+            }
+        }
     }
     ahead_files.remove(path) ?? panic("cannot remove the trace: {err}")
 }

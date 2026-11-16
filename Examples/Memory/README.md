@@ -59,7 +59,7 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 
 - [UnsafeSentries](Unsafe/UnsafeSentries.jet) — Default dev-tier sentries quarantine and poison an arena allocation before a raw pointer can read it again.
 - [UnsafeSentriesPackageOff](Unsafe/UnsafeSentriesPackageOff/) — Package policy mirrors source policy and disables only the runtime witness for this package.
-- [UnsafeSentriesProvenance](Unsafe/UnsafeSentriesProvenance.jet) — A raw write from an address with no allocation provenance is a located R0801 runtime fault in the default dev tier.
+- [UnsafeSentriesProvenance](Unsafe/UnsafeSentriesProvenance.jet) — A raw write from an address with no allocation provenance is a located R0801 runtime fault; `harden: true` keeps the sentry in a release build too.
 - [UnsafeSentriesSourceOff](Unsafe/UnsafeSentriesSourceOff.jet) — Source policy can turn off only the runtime witness.
 
 ## Views

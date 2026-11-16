@@ -1,11 +1,12 @@
 ---
-name: mine-for-jet-v2
+name: mine-for-jet-v3
 description: >-
-  Deep, state-first mining of named external sources for Jet: exhaustive micro
-  and macro extraction, canonical alignment, and independent review before publication.
+  Mine named external sources (repository, video, article, paper, docs, discussion)
+  for Jet: state-first, exhaustive micro and macro extraction, capability probes,
+  every claim distilled to one outcome, and independent review before publication.
 ---
 
-# Mine for Jet v2
+# Mine for Jet v3
 
 ## Purpose and completion bar
 
@@ -49,24 +50,36 @@ ledger written while reading, within one working context; split by segment
 range rather than skim.
 
 **Ballot quality is non-negotiable:** before drafting, reconcile current, planned
-(including ratified-unbuilt), in-flight, and proposed Jet state (read as below).
-Design downsides away; redesign until the recommendation has at most **two real
-residual losses, each concretely mitigated**. Aim for a researched, best-of-all-worlds,
+(including ratified-unbuilt), in-flight, and proposed Jet state (read as below),
+and every open and ratified ballot in the same area. Grow an existing mechanism
+before proposing a new one. Engineer every downside away; the target is a
+recommendation with **no real losses**. A loss survives only when every redesign
+attempt failed: name it with its cost, the attempts and its best mitigation, and
+never more than two. Aim for a researched, best-of-all-worlds,
 no-compromise design under rule 9: combine demonstrated strengths without
 surrendering Jet's governing outcomes; never claim literal perfection or conceal
 necessary trade-offs. The short surface must sell that design through its useful
 observable result. Ballots failing this bar are **rejected before posting** by
-the required fresh-context reviewer. No “slop at the wall”: fewer excellent ballots
-beat many weak ones. Findings needing no owner choice attach to existing work
-as cards or evidence, not new votes.
+the required fresh-context reviewer. No “slop at the wall”, and no missing
+ballot either: every owner-only choice gets one excellent ballot. Findings
+needing no owner choice, including idiomatic new Core APIs, attach to existing
+work as cards or evidence, not new votes.
+
+**The owner's bar** ([owner-bar](references/owner-bar.md)) records what he has
+had to correct across every past run: what to look for more, what to look for
+less, what a votable ballot is, and what the report must lead with. Read it
+before capture and again before drafting; reviewers reject against it.
 
 ## Scope and permission
 
 Name source URLs/paths, versions, kind, Jet subject, workload, supplied owner
 questions, and requested outcome before capture. Read `AGENTS.md`,
 `.agents/skills/_shared/audit-dispositions.md`, and relevant authoritative slices.
-Use the shared standing lens contextually; do not manufacture a competitive
-study for a focused question. No unrequested implementation or extra sources.
+Use the shared standing lens (`.agents/skills/_shared/standing-lens.md`)
+contextually; do not manufacture a competitive study for a focused question.
+No unrequested implementation or extra sources. This is Jet's only mining
+skill: a quick focused run uses the same method with fewer, conditional lanes,
+not a lighter skill.
 
 Normal mining retains its method-owned Tower obligations **only after alignment
 and independent review**. Explicit report-only is read-only with respect to
@@ -102,7 +115,7 @@ supersede a decision.
 Check the source registry before costly retrieval:
 
 ```sh
-Tools/agent/JetEnv.jet python3 .agents/skills/mine-for-jet-v2/scripts/check_sources.py \
+Tools/agent/JetEnv.jet python3 .agents/skills/mine-for-jet-v3/scripts/check_sources.py \
   --registry Docs/spec/reference/prior-art.md 'SOURCE_URL'
 ```
 
@@ -128,8 +141,13 @@ reuse captures, and use repository scripts rather than per-run ad-hoc Python.
 
 1. Follow [review](references/review.md) and [depth](references/depth.md):
    segment ledgers and lane matrix, owner-question matrix, normalized claims,
-   seven hard gates, dedupe and value ranking. Relevant audience, live-probe and
-   multi-source lanes remain conditional; no mandatory real-user study. Before
+   seven hard gates, dedupe and value ranking. When the source shows what
+   another language or tool can do, fill the **capability table** and rebuild
+   its demos as small Jet programs run on the default tier
+   ([review](references/review.md#capability-table-and-demo-probes)); each
+   wrong answer, internal error or missing API is a defect claim with its
+   program. Audience and multi-source lanes remain conditional; no mandatory
+   real-user study. Before
    hand-in, add the run's section to the Source index of
    `Docs/spec/reference/prior-art.md` in the checkout you hand in
    ([output](references/output.md#prior-art-registry)): every source with an
@@ -137,7 +155,7 @@ reuse captures, and use repository scripts rather than per-run ad-hoc Python.
    when the gate passes; it fails on a missing row or run ID:
 
    ```sh
-   Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs "$CAPTURE_ROOT"
+   Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v3/scripts/check_coverage.mjs "$CAPTURE_ROOT"
    ```
 
 2. Obtain the **required fresh-context reviewer** after extraction/dedupe and
@@ -150,6 +168,12 @@ reuse captures, and use repository scripts rather than per-run ad-hoc Python.
    blocked, not waived.
 3. Resolve substantive reviewer findings; dispositions are keep,
    attach-existing, redesign, reject-conflict, evidence-gap, or undecided.
+   Then **distil**: every claim gets exactly one `outcome` (criterion, card,
+   ballot, evidence, rejected or gap) and every new mechanism names the
+   existing one it `extends`, or says `why_new`
+   ([depth](references/depth.md#7-outcomes-at-publication)). `--audit` enforces
+   it and prints the counts. Distil before mining again: an unmapped claim
+   pile is an unfinished run, not a reason for another round.
 4. Follow [output](references/output.md) for compact synthesis, retained exact
    evidence, `audit-dispositions:v1`, and authorized Tower obligations. Retain
    normalized claims and essential reproducible witnesses with the report;

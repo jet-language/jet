@@ -12042,11 +12042,20 @@ sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTra
     }
     resolved_graph.derive_checked = [String:Bool]{}
     web_checks: sema_web_partition_active(resolved_graph)
-    sema_core_demand_index(resolved_graph, (resolved_graph.check_tests || resolved_graph.core_lowering_roots != None || resolved_graph.retained_core_demand) && (!resolved_graph.retain_programs || resolved_graph.retained_core_demand) && !resolved_graph.every_core_body && !web_checks)
+    upfront: sema_core_demand_index(resolved_graph, (resolved_graph.check_tests || resolved_graph.core_lowering_roots != None || resolved_graph.retained_core_demand) && (!resolved_graph.retain_programs || resolved_graph.retained_core_demand) && !resolved_graph.every_core_body && !web_checks)
     checked_modules: loop module_index in 0..<resolved_graph.modules.len() -> module_index
+    // The Core bodies this pass checks up front are read ahead on compiler
+    // threads, as a demand wave's are (sema_core_demand_pass), unless a
+    // per-function trace times each load at its turn.
+    timed := false
+    if trace_sink == .Val(sink) -> timed = sink.functions()
+    if !timed {
+        sema_core_bodies_ahead(resolved_graph, loop (key, _) in upfront -> key, upfront, hook_access, threads)
+    }
     // The body pass's facts serve the codec and derive waves after it while
     // the graph rows they read stay unchanged (sema_finalize_check_modules).
     body_graph := sema_finalize_check_modules(resolved_graph, values, comptime_functions, bodies.checked_types, checked_modules, true, hook_access, threads, "sema.bodies", trace_sink, bodies.carried, bodies.modules)
+    sema_core_bodies_ahead_drop(hook_access)
     // Demand: only the generated codecs a requirement reached
     // get bodies, checked into their modules' results before the failure solve,
     // and only the derived methods of compiler-owned modules a check reached.

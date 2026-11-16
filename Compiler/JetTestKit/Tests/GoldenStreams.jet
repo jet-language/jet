@@ -50,6 +50,7 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     assert_eq(kit_golden_failure_exit("Examples/ErrorsAndEffects/Errors/FatalExit", "entry report\n"), Val(1))
     assert_eq(kit_golden_failure_exit("Examples/unknown", "Error [jet.InvalidConstructionField]: missing fields\n"), Val(1))
     assert_eq(kit_golden_failure_exit("Examples/unknown", "unregistered report\n"), None)
+    assert_eq(kit_golden_failure_exit("tests/run/FailureFoundation/MintedFailureLeavesRun", "Error: NotFound(zed) (type: FindError)\n"), Val(1))
 }
 
 // The CLI double is a Jet script: its children's PATH leads with the
@@ -61,6 +62,24 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     if caller != "" && files.basename(caller) == "jet" {
         assert_eq(path, "{files.dirname(caller)}:{inherited}")
     } else { assert_eq(path, inherited) }
+}
+
+kit_test_golden_step: fn(argv: [String], action: String) -> KitStep {
+    KitStep{argv: argv, stdin: "", exit: "0", assertions: [], label: if action == "" -> "" else -> "server", action: action}
+}
+
+#Test("golden spawned `built` programs build first, and the direct tier runs the entry") {
+    built: kit_golden_spawned_built([kit_test_golden_step(["built", "--port=9000"], "spawn"), kit_test_golden_step(["curl", "x"], "")], kit_golden_tiers()[1], "/src/app.jet")
+    assert_eq(built.len(), 3)
+    assert_eq(built[0].argv.join(" "), "build")
+    assert_eq(built[1].argv.join(" "), "built --port=9000")
+    assert_eq(built[2].argv.join(" "), "curl x")
+    direct: kit_golden_spawned_built([kit_test_golden_step(["built", "--port=9000"], "spawn"), kit_test_golden_step(["curl", "x"], "")], kit_golden_tiers()[0], "/src/app.jet")
+    assert_eq(direct.len(), 3)
+    assert_eq(direct[1].argv.join(" "), "jet run /src/app.jet -- --port=9000")
+    assert_eq(direct[1].action, "spawn")
+    after_build: kit_golden_spawned_built([kit_test_golden_step(["build"], ""), kit_test_golden_step(["built", "--port=9000"], "spawn")], kit_golden_tiers()[1], "/src/app.jet")
+    assert_eq(after_build.len(), 2)
 }
 
 #Test("golden driver handles missing stream, compile-only, stdin, stderr and tier split") {

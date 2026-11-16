@@ -149,8 +149,27 @@ dated evidence, never a mutable second work ledger.
 6. **Coherence/boundaries:** preserve one meaning, safe useful defaults, expert
    descent, portability and all required tiers. Another validator/data tree/
    effect system or obsolete architecture is reject/redesign, not a feature.
-7. **Real owner choice:** ratified consequences and implementation choices
-   attach to existing owners. An external name alone never justifies a ballot.
+   Name the closest existing Jet mechanism and grow it; a mechanism beside it
+   needs a `why_new` that shows growing it cannot do the job.
+7. **Real owner choice:** ratified consequences, implementation choices and
+   idiomatic new Core APIs attach to existing owners. An external name alone
+   never justifies a ballot, and neither does a niche (Jet ships the tools to
+   build niches) or a first-party adapter for a third-party product.
+
+## Capability table and demo probes
+
+When a source shows what another language, library or tool can do, list every
+capability it shows, then probe Jet for each one with a small program on the
+default tier (single-file `jet check` or `jet run`, inside the agent slice):
+
+| Capability (source locator) | Jet today: yes / partial / no | Probe program and its exact outcome | How Jet does it better | Outcome |
+| --- | --- | --- | --- | --- |
+
+"Yes" needs a run that printed the right answer; a keyword in the registry is
+not a yes. Rebuild every demo the same way. A wrong answer, an internal
+compiler error, a missing API or a confusing diagnostic is a defect claim with
+its program, observed `exercised`. Keep the probe programs with the run; they
+become the cards' witnesses.
 
 ## Value ranking
 
@@ -174,10 +193,13 @@ Missing data is an explicit gap; mechanism proof is not user testimony. A token
 Redesign through existing semantics/types/authority to eliminate avoidable
 obligations. Combine demonstrated strengths and avoid proven mistakes: a
 best-of-all-worlds, no-compromise design for Jet's governing outcomes, not literal
-perfection. The recommended short surface has at most two genuine residual
-losses with concrete mitigations. More losses require redesign or visible owner-
-approved narrowing, never silently reduced scope. Shared work/inherent problem
-constraints are explained once, not padded as option-specific downsides.
+perfection. The target is a recommendation with no real losses. A loss
+survives only after every redesign attempt failed, with its cost, the attempts
+and a concrete mitigation, and never more than two; more require redesign or
+visible owner-approved narrowing, never silently reduced scope. Shared
+work/inherent problem constraints are explained once, not padded as
+option-specific downsides, and obvious or physically unavoidable costs are not
+listed as losses at all.
 
 Short surface: at most four plain situation sentences and approximately 250
 words total; no paths/decision IDs/internal jargon. At most three real legal
@@ -227,11 +249,14 @@ audit; any segment/lane unaccounted for; unanswered owner question;
 missing current/planned (including
 ratified-unbuilt)/in-flight/proposed reconciliation; unsupported rule-9 claims;
 non-best-of-all-worlds recommendations that surrender governing outcomes;
-more than two residual losses or any unmitigated loss; weak/jargon-heavy short
-surface that does not demonstrate/sell the useful result; fabricated evidence;
-duplicate/illegal owner choice; obsolete architecture; treating approval/review
-as exercised proof. Attach no-choice findings to existing work/evidence instead
-of generating low-quality ballots.
+any loss that a redesign could still remove, more than two residual losses, or
+an unmitigated loss; a new mechanism beside an existing one it could have
+grown; a ballot inconsistent with open or ratified ballots in the same area;
+weak/jargon-heavy short surface that does not demonstrate/sell the useful
+result; fabricated evidence; duplicate/illegal owner choice; obsolete
+architecture; treating approval/review as exercised proof; anything the
+[owner's bar](owner-bar.md) lists under "fewer of these". Attach no-choice
+findings to existing work/evidence instead of generating low-quality ballots.
 
 Dispositions: keep, attach-existing, redesign, reject-conflict, evidence-gap,
 undecided. Resolve all substantive findings before handoff and retain corrections.
