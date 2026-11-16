@@ -1,0 +1,22 @@
+# The registered paren-tuple1 plan (toolchain a0.0.45) rewrites every paren
+# record as a brace record: a record type in an alias, a field, a parameter,
+# an optional and a function result; a record value as a function's last
+# expression, in a table arm, after `if … ->` and `else ->`, after `??`, as a
+# collecting loop's body, as a list item and as a payload; a list's record
+# item type; a destructure; a Jet program quoted in a string; and a Markdown
+# file's ```jet fence. Calls, groupings, the two-name loop head, prose and a
+# shell fence keep their parens. A record inside an interpolation hole
+# stays as written and is reported, since the hole ends at its first `}`.
+# The old program is kept as `before.old`, read as a Jet source through
+# `--source-list`. A second run finds nothing left to rewrite.
+fixture: FixParenTuple/Input
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- paren-tuple1 --write guide.md --source-list sources.txt
+exit: 0
+stdout: = "EDIT guide.md 2\nSKIP before.old:30: a record inside an interpolation hole stays; bind it to a name first\nEDIT before.old 20\nTOTAL 22 sites in 2 files\n"
+file: before.old = FixParenTuple/before.out
+file: guide.md = FixParenTuple/guide.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- paren-tuple1 --write guide.md --source-list sources.txt
+exit: 0
+stdout: = "SKIP before.old:30: a record inside an interpolation hole stays; bind it to a name first\nTOTAL 0 sites in 0 files\n"
+file: before.old = FixParenTuple/before.out
+file: guide.md = FixParenTuple/guide.out

@@ -3,14 +3,14 @@
 // function's arrow, a `{…}` is the record result when a body, a contract or
 // another result part follows it, or when each member's type starts as a
 // type does; otherwise it stays the body.
-use {
-    jet_foundation.[Func]
-}
+use jet_foundation.[Func]
 
 brace_records_result_names: fn(function: Func) -> String {
     if function.return_type == .Val(.Tuple(fields)) {
         names := ""
-        loop field in fields -> names = if names == "" -> "{field.name}" else -> "{names},{field.name}"
+        loop field in fields {
+            names = if names == "" -> "{field.name}" else -> "{names},{field.name}"
+        }
         return names
     }
     "none"
@@ -51,7 +51,9 @@ run: fn() {
     assert_eq(brace_records_result_names(parser_test_function(program, "read")), "size,ok")
     alias := false
     loop item in program.items {
-        if item == .TypeAlias(value) && value.name == "Bounds" && value.target == .Tuple(_) -> alias = true
+        if item == .TypeAlias(value) && value.name == "Bounds" && value.target == .Tuple(_) {
+            alias = true
+        }
     }
     assert(alias, "`Bounds: {{min: Int, max: Int}}` is a type alias")
 }
@@ -72,10 +74,39 @@ run: fn() {
     assert(!alias, "`Origin: {{x: 0, y: 0}}` binds a record value")
 }
 
+#Test("a_record_value_stands_where_a_block_may") {
+    program: parser_test_program(
+        `pick: fn(flag: Bool, key: String, rows: [Int], size: {h: Int, w: Int}?) -> {a: Int, b: Int} {
+    named: if key == {
+        "x" -> {a: 1, b: 2}
+        else -> {a: 3, b: 4}
+    }
+    guarded: if flag -> {a: 5, b: 6} else -> named
+    fallback: size ?? {h: 0, w: 0}
+    pairs: loop row in rows -> {key: row, row: row}
+    empty: make<{key: String, value: Int}>()
+    record(fallback.h)
+    {a: guarded.a, b: pairs.len() + empty.len()}
+}
+`,
+    )
+    pick: parser_test_function(program, "pick")
+    assert_eq(pick.body.len(), 7)
+    if pick.body[6] == .Expr(tail) {
+        assert(tail == .StructLit(_, _, _, _, _, _, _, _), "the last line is the record value")
+    } else { panic("the record on its own line ends the body as a value") }
+}
+
 #Test("the_formatter_keeps_brace_and_paren_record_types") {
     formatted: parser_test_stable("a: fn() -> {{x: Int, y: Int}} {{ {{x: 1, y: 2}} }}\nb: fn() -> (x: Int, y: Int) {{ (x: 1, y: 2) }}\n")
     assert(formatted.contains("a: fn() -> {{x: Int, y: Int}} {{"), formatted)
     assert(formatted.contains("b: fn() -> (x: Int, y: Int) {{"), formatted)
+}
+
+#Test("the_formatter_keeps_brace_and_paren_destructures") {
+    formatted: parser_test_stable("run: fn() {{\n    {{min, max}}: bounds()\n    (lo, hi): bounds()\n    print(min + max + lo + hi)\n}}\n")
+    assert(formatted.contains("{{min, max}}: bounds()"), formatted)
+    assert(formatted.contains("(lo, hi): bounds()"), formatted)
 }
 
 #Test("an_empty_record_type_is_refused") {

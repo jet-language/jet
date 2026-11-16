@@ -1,0 +1,135 @@
+// A phone on a device that queues (`app.new(…).offline(.Queue)`) whose queue
+// and notice list outlast a restart. The first run saves task 1, then the
+// test host cuts the phone off (`app.disconnect`) and it renames task 2,
+// which the server doesn't have: once the link is back the server refuses
+// the rename, which leaves a notice. Cut off again, the phone renames task 1,
+// a write that answers nothing, and the run ends with it queued. The next
+// run of the same program starts with the same queue and notice list, read
+// back from the device store, and sends the queued rename to the server,
+// which commits it.
+use {
+    app
+    db: core.db
+    net: core.net
+    sys: core.sys
+    web: core.web
+}
+
+#Codable
+Card: struct {
+    id: Int
+    title: String
+}
+
+#Error
+BoardError: enum {
+    Missing(Int)
+    Failed(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+tasks_in: fn(store: db.Store) -> db.Table<Int, Card> {
+    store.table("tasks", key: fn(task: Card) { task.id })
+}
+
+Board: struct {
+    store: db.Store
+
+    // Saves task `id`, titled `title`.
+    #App.Public save: fn(self, id: Int, title: String) BoardError! {
+        _: tasks_in(self.store).put(Card{id: id, title: title}) ?? return Err(BoardError.Failed(err.message()))
+        Ok()
+    }
+
+    // Renames task `id`; `.Missing` when no task `id` is saved.
+    #App.Public rename: fn(self, id: Int, title: String) BoardError! {
+        tasks: tasks_in(self.store)
+        if tasks.get(id) == {
+            .Val(_) -> {}
+            .None -> return Err(BoardError.Missing(id))
+            .Err(failure) -> return Err(BoardError.Failed(failure.message()))
+        }
+        _: tasks.put(Card{id: id, title: title}) ?? return Err(BoardError.Failed(err.message()))
+        Ok()
+    }
+
+    // The title of task `id`, or `none`.
+    #App.Public title: fn(self, id: Int) -> String BoardError! {
+        if tasks_in(self.store).get(id) == {
+            .Val(task) -> Ok(task.title)
+            .None -> Ok("none")
+            .Err(failure) -> Err(BoardError.Failed(failure.message()))
+        }
+    }
+}
+
+// What a failed call gave, as text.
+said: fn(failure: BoardError) -> String {
+    if failure == {
+        .Missing(id) -> "task {id} is missing"
+        .Failed(why) -> "failed: {why}"
+        .Unreachable(why) -> "unreachable: {why}"
+    }
+}
+
+// The title of task 1, as `board` reads it.
+title_of: fn(board: app.Remote<Board>) -> String {
+    title: board.title(1) ?? return said(err)
+    title
+}
+
+// The device's queue and notice list.
+show: fn() {
+    print("pending: {app.pending()}")
+    loop notice in app.notices() -> print("notice: {notice.text}")
+}
+
+// A server for the board in `store` on the case's port that answers `sends`
+// calls; its address.
+serve: fn(store: db.Store, sends: Int) -> String {
+    served: web.app().mount("/api", Board{store: store.copy()})
+    port: sys.get("CREW_PORT") ?? panic("CREW_PORT names the server's port")
+    server: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen")
+    serving: task {
+        loop _ in 0..<sends { served.serve_once(server) ?? panic("serve") }
+    }
+    serving.detach()
+    "http://127.0.0.1:{port}/api"
+}
+
+run: fn() {
+    _: app.new("Crew").offline(.Queue)
+    if app.pending() > 0 {
+        print("after restart")
+        show()
+        // The server has task 1; the queued rename is all it gets, then the
+        // desk's read.
+        store: db.open_memory()
+        _: tasks_in(store).put(Card{id: 1, title: "plan"}) ?? panic("seed")
+        address: serve(store, 2)
+        app.reconnect("phone")
+        print("phone reconnected, pending: {app.pending()}")
+        desk: app.remote_at<Board>(address, client: "desk")
+        print("desk reads: {title_of(desk)}")
+        return
+    }
+    address: serve(db.open_memory(), 2)
+    phone: app.remote_at<Board>(address, client: "phone")
+    if phone.save(1, "plan") == .Err(failure) -> print("save 1: {said(failure)}")
+    app.disconnect("phone")
+    if phone.rename(2, "ship it") == .Err(failure) -> print("rename 2: {said(failure)}")
+    app.reconnect("phone")
+    app.disconnect("phone")
+    if phone.rename(1, "plan v2") == .Err(failure) -> print("rename 1: {said(failure)}")
+    print("before restart")
+    show()
+}

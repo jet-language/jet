@@ -1,0 +1,31 @@
+# Jobs are kept only in a core.db store's outbox, in the transaction of the
+# call that queued them, and every engine core.db opens keeps the contract.
+# Over a database file:
+# - an add that is refused after it queued rolls back, so its job never runs;
+# - a server that stops leaves its unfinished job unacknowledged;
+# - the job's row survives the restart, and the next server takes it again
+#   once the stopped server's hold has lapsed, running that job and only it.
+# An in-memory database keeps the same contract while it is open: its jobs
+# last as long as the rows that queued them. core.app has no public
+# job-store slot, so app code can name neither the calls an outbox joins
+# nor the hook that joins them.
+fixture: JobStoreContractPerEngine.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step stop: jet run main.jet -- file-stop
+exit: 0
+stdout: = "add 1: refused\nadd 2: 2\nadd 3: 3\nafter the stop, ran: 2, 3, notes: 2, rows added: 102, 103, jobs kept: 1\n"
+step restart: jet run main.jet -- file-restart
+exit: 0
+stdout: = "after the restart, ran: 3, notes: 2, 3, jobs kept: 0\n"
+step memory: jet run main.jet -- memory
+exit: 0
+stdout: = "add 1: refused\nadd 2: 2\nadd 3: 3\nafter the stop, ran: 2, 3, notes: 2, rows added: 102, 103, jobs kept: 1\n"
+
+step: jet check probes/job_store_slot.jet
+exit: nonzero
+stderr: ~ "`app.CALLS` is private to its module" # the calls an outbox joins
+stderr: ~ "job_store_slot.jet:7:15" # at their name
+stderr: ~ "`transactions.current` is private to its module" # the hook core.db joins them by
+stderr: ~ "job_store_slot.jet:9:30" # at its name
+stderr: ~ "2 problems found" # only those

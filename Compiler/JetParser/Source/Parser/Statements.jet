@@ -975,7 +975,9 @@ parser_select_after_field: fn() -> String Never! {
 
 parser_parse_guard_arm_body: fn(state: &JetParserState) -> [Stmt] {
     token: parser_current(state)
-    if token.kind == TOKEN_LBRACE -> return parser_parse_block(state).statements
+    if token.kind == TOKEN_LBRACE && !parser_brace_record_value_at(state, 0) {
+        return parser_parse_block(state).statements
+    }
     // A nested braced guard table closes itself; only a braceless nested
     // `if` leaves the owner of a following arm ambiguous.
     if token.kind == TOKEN_KW_IF && parser_kind_at(state, 1) != TOKEN_LBRACE {
@@ -989,9 +991,12 @@ parser_parse_guard_arm_body: fn(state: &JetParserState) -> [Stmt] {
     [Stmt]{statement}
 }
 
-// Q2: a dispatch arm body is a braced block or one braceless statement.
+// Q2: a dispatch arm body is a braced block or one braceless statement; a
+// record value `{x: 1, y: 2}` is such a statement.
 parser_parse_arm_body: fn(state: &JetParserState) -> [Stmt] {
-    if parser_current_kind(state) == TOKEN_LBRACE -> return parser_parse_block(state).statements
+    if parser_current_kind(state) == TOKEN_LBRACE && !parser_brace_record_value_at(state, 0) {
+        return parser_parse_block(state).statements
+    }
     state.arm_body_depth += 1
     statement: parser_parse_table_arm_statement(state)
     state.arm_body_depth -= 1

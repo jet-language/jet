@@ -508,6 +508,30 @@ tuple_rename_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     false
 }
 
+// `{x: 1, y: 2}` or `{min, max}` at line start is a record value, so it
+// begins a statement, such as a body's final value, rather than continuing
+// the line above: a `,` at its own level separates its members and its
+// first member is `name:` or a bare name.
+record_value_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
+    if kind_at(facts, index + 1) != K_IDENT -> return false
+    first: kind_at(facts, index + 2)
+    if first != K_COLON && first != K_COMMA -> return false
+    depth := 0
+    at := index
+    loop at * 4 < facts.len() {
+        kind: kind_at(facts, at)
+        if kind == K_EOF -> return false
+        if kind == K_LBRACE || kind == K_LPAREN || kind == K_LBRACKET -> depth += 1
+        if kind == K_RBRACE || kind == K_RPAREN || kind == K_RBRACKET {
+            depth -= 1
+            if depth == 0 -> return false
+        }
+        if kind == K_COMMA && depth == 1 -> return true
+        at += 1
+    }
+    false
+}
+
 // The token at `index` ends a statement at a line break. A postfix deref
 // `p.*` ends its line like the name it dereferences; any other trailing `*`
 // is a multiplication continued on the next line.
@@ -553,7 +577,7 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
                                 else -> false
                             }
                             if {
-                                kind == K_LBRACE && tuple_rename_starts_at(facts, index) -> {
+                                kind == K_LBRACE && (tuple_rename_starts_at(facts, index) || (previous != K_RBRACE && record_value_starts_at(facts, index))) -> {
                                     events.push(1)
                                     events.push(index)
                                     events.push(end)

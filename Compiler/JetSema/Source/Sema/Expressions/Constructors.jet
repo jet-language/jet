@@ -860,7 +860,9 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
 sema_expression_brace_record: fn(fields: [ExprField], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if fields.len() == 0 -> return false
     if fields.len() == 1 && fields[0].value == .Ident(_, value_span, _) {
-        if value_span.start == fields[0].name_span.start && value_span.end == fields[0].name_span.end -> return false
+        if value_span.start == fields[0].name_span.start && value_span.end == fields[0].name_span.end {
+            return false
+        }
     }
     expected_ty: expected ?? return true
     sema_expr_unwrap_tag(sema_expr_expected_type(expected_ty, environment, program)) == .Tuple(_)

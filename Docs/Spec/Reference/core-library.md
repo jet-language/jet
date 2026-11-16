@@ -5758,7 +5758,12 @@ store already ran is dropped there, and the job's row is deleted. A job is
 therefore run at least once, and its writes to stores happen once; other
 effects of a job method, such as a message it sends, should be safe to
 repeat. A call that used no store, and code outside a call, run the job at
-once without keeping it. A mounted service's job method takes read-only
+once without keeping it. Jobs are kept only in a core.db store's outbox:
+core.app has no public job-store slot, and the calls an outbox joins and the
+hook it joins them by are Core's own, so no app code can weaken the
+contract. Every engine core.db opens keeps it, a database file or an
+in-memory database; an in-memory database's jobs last as long as the rows
+that queued them. A mounted service's job method takes read-only
 `self`, a concrete signature and parameters whose types derive `Encode` and
 `Decode`; anything else is E2805 (`jet.InvalidRoute`) at its marker.
 
@@ -5832,8 +5837,15 @@ screen that made it may be gone. No answer, `SignedOut` or
 `UpdateRequired` stops the sending and keeps the write, so an expired
 session holds the queue. A Remote that runs its service directly
 (`remote(service)`) never queues. The queue and the notice list live in
-this process (inside `testing.world`, in the world's own store); they
-don't outlive it yet, on any target.
+the device store, so a native restart finds them as the run left them:
+each is one file, `<data>/<package>/app.queue` and `app.notices`, where
+`<data>` is `$XDG_DATA_HOME`, else `~/.local/share`, and `<package>` is
+the entry package's name (the entry file's stem without a manifest). Each
+change is written through atomically (a temporary file, fsync, rename,
+fsync of the directory) before the call that made it goes on. Inside
+`testing.world` they are the world's own store, and in a test build
+(`jet test`) one process-wide cell. The web target keeps them in this
+process only, for now.
 
 `graph.screen("/projects/:project/board", board, signed_in: false)` adds a
 screen. `board` is a named function. Each of its parameters that is an
@@ -5876,7 +5888,15 @@ push opens a state the same way: `app.notify(to:, title:, body:, open:
 state)` sends the notice to each device `to` registered, with
 `url_of(state)` as the address a tap opens. `app.go(state)` opens the
 screen of `state` at that address: it runs the screen's view with the state
-the address makes, and the screen is then the current one.
+the address makes, and the screen is then the current one. Each push has a
+key: inside a job's run, a webhook's call or a scheduled run, a hash of the
+run's key, `to` and the address, 32 base64url characters; elsewhere, a fresh
+one. It goes out as APNs's `apns-collapse-id`, as FCM's
+`android.notification.tag` on a message with no collapse key, and as Web
+Push's `Topic` header and the notification's `tag`. So a retried run sends
+each push with the key it had before, whatever order its query gives the
+rows in, and the repeat replaces the earlier copy; two pushes of one run
+never share a key.
 `app.current<BoardView>()` gives the current screen's state, made back from
 its address, when it is a `BoardView`, and None otherwise or before a
 screen opens. A value that is no struct declared outside Core is E2821
@@ -5956,7 +5976,7 @@ any site can make a browser send, never runs a method that may write.
 reply type with no policy carries no cache headers. `.cache` without the one
 type argument is E0119.
 
-The server also keeps a `.Public{max_age}` method's successful reply for
+The server keeps a `.Public{max_age}` method's successful reply for
 `max_age`, by the call's JSON array of arguments: a call with the same
 arguments within it is answered with the kept reply and its `Age`, and the
 method does not run. `max_age` is a Duration, measured on the monotonic
@@ -5966,15 +5986,25 @@ is kept for being a reply, not for its value, so `false`, `0` and `""` are
 kept like any other. A failed run, a call replayed under its
 `Idempotency-Key`, or a `max_age` of zero keeps nothing.
 
-Servers of one App that share a database file share these replies. Each
-database file `db.open` opens keeps them in its table `__jet_kept_replies`,
-keyed by the method's address and its arguments, with the instants each
-was kept and stays fresh through, in Unix milliseconds by the file's
-clock. A reply is kept in the App's first file still open; a server that
-keeps no fresh reply of its own answers with one that any open file keeps,
-with its `Age`, and does not run the method. Each keep drops the stale
-rows, so the table holds only fresh replies. No cache server runs, and an
-in-memory database shares nothing.
+Servers of one App that share a database file share these replies, the
+file being their one cache store. Each database file `db.open` opens keeps
+them in its table `__jet_kept_replies`, keyed by the method's address and
+its arguments, with the instants each was kept and stays fresh through, in
+Unix milliseconds by the file's clock. A reply is kept in the App's first
+file still open; a server answers with one that any open file keeps, with
+its `Age`, and does not run the method. Each keep drops the stale rows, so
+the table holds only fresh replies. No cache server runs, and an in-memory
+database shares nothing.
+
+A write committed to a table of a file drops every reply the file keeps, on
+every server, as each may have read what the write changed; the next call
+runs the method. A run that began no later than a write the file took,
+including a write of its own, keeps no reply in the file, so a method that
+writes keeps none. A server keeps a reply for itself only when no file takes
+it, as when the App opens none; a write committed to any database the server
+has open, a file or in memory, drops those, and a run that saw one keeps
+none. A file whose kept replies can't be read or written is passed over: the
+call runs the method and is answered as if no reply were kept.
 
 `app.Notice{text:, retry:}` is where a handler's failure goes. A control's
 handler has the type `fn() app.Notice!`, so its error type converts to a
@@ -5983,8 +6013,9 @@ the control, and `retry: true` offers to run the handler again. A notice
 with no control to sit beside, such as a failed background run or a queued
 write refused after its screen closed, joins the app's notice list, which
 `app.notices()` reads. The list keeps each notice, in order, until it is
-dismissed. The list lives in one process-wide cell, or in the World's own
-cell inside a deterministic world.
+dismissed. It lives where the write queue does: the device store on a
+native target, which keeps it across restarts, or the World's own cell
+inside a deterministic world.
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with

@@ -395,9 +395,13 @@ Notice: struct {
 // The app's notice list holds the notices that have no control to sit
 // beside: a failed background run, a queued write refused after its screen
 // closed. The frame shows the list on every screen and keeps each notice
-// until it is dismissed. The list lives in one process-wide cell, or in
-// the World's own cell inside a deterministic world, as length-prefixed
-// fields: each notice's text, then "1" or "0" for its retry.
+// until it is dismissed. The list lives in the device store, so it outlasts
+// a restart (`jet.runtime.web` device_load/device_replace: a file under the
+// platform data directory and the app's package name, written through
+// atomically); inside a deterministic world it is the World's own cell, and
+// in a program with no device store (a test build) one process-wide cell.
+// It is kept as length-prefixed fields: each notice's text, then "1" or "0"
+// for its retry.
 NoticeCell: struct {
     bytes: [U8]
 }
@@ -408,11 +412,15 @@ NOTICE_STORE: "app.notices"
 
 notice_cell_load: fn() -> [U8] {
     if world_rt.world_store_load(NOTICE_STORE) == .Val(bytes) -> return bytes
+    if rt_web.device_load(NOTICE_STORE) == .Val(bytes) -> return bytes
     NOTICE_CELL.bytes
 }
 
 notice_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
     if world_rt.world_store_replace(NOTICE_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    if rt_web.device_replace(NOTICE_STORE, expected, replacement) == .Val(replaced) {
         return replaced
     }
     cell := NOTICE_CELL.guard_edit()
@@ -615,20 +623,26 @@ priv QueuedWrite: struct {
     key: String
 }
 
-// The queue lives in one process-wide cell, or in the World's own cell
-// `app.queue` inside a deterministic world, as length-prefixed fields: each
-// write's client, address, "1" or "0" for local, method, body and key.
+// The queue lives where the notice list does (NoticeCell): in the device
+// store, so a restart finds it as the run left it; in the World's own cell
+// `app.queue` inside a deterministic world; else one process-wide cell. It
+// is kept as length-prefixed fields: each write's client, address, "1" or
+// "0" for local, method, body and key.
 priv QUEUE_CELL: Shared{LiveCell{bytes: [U8]{}}}
 
 priv QUEUE_STORE: "app.queue"
 
 priv queue_load: fn() -> [U8] Never! {
     if world_rt.world_store_load(QUEUE_STORE) == .Val(bytes) -> return bytes
+    if rt_web.device_load(QUEUE_STORE) == .Val(bytes) -> return bytes
     QUEUE_CELL.bytes
 }
 
 priv queue_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
     if world_rt.world_store_replace(QUEUE_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    if rt_web.device_replace(QUEUE_STORE, expected, replacement) == .Val(replaced) {
         return replaced
     }
     cell := QUEUE_CELL.guard_edit()
@@ -1641,7 +1655,7 @@ priv(package) callers: module {
 // a call that rolls back drops its jobs with its writes. Each run of a job
 // carries its key as its delivery, so a store that has run the job drops a
 // second run of it.
-CallJoin: struct {
+priv CallJoin: struct {
     // Commits (true) or rolls back (false) one store's transaction; false
     // when it couldn't do as asked.
     end: fn(Bool) -[]> Bool Never!
@@ -1655,7 +1669,7 @@ CallJoin: struct {
 // serving server takes the row (`take`) and runs the job again, as when the
 // server that ran it stopped. It also keeps the replies of calls that
 // carried a request key (`answered`).
-CallOutbox: struct {
+priv CallOutbox: struct {
     // Names the store among the open ones: the database file's path, or
     // one of its own for an in-memory database.
     store: String
@@ -1688,7 +1702,7 @@ CallOutbox: struct {
 
 // A row a server took from a store's outbox: its job's key, name and
 // encoded arguments, and the runs the job made so far, each failed.
-CallQueued: struct {
+priv CallQueued: struct {
     key: String
     name: String
     args: String
@@ -1697,14 +1711,14 @@ CallQueued: struct {
 
 // The function that decodes a job's arguments and runs it, which replies
 // `{"err":...}` when the job failed. Copies share the one function.
-CallJobCall: struct {
+priv CallJobCall: struct {
     call: fn(RemoteArgs) -> String [FieldError]!
 }
 
 // A job a call queued: its name (`<service module>.<Service>.<method>`), its
 // arguments as one encoded JSON array, the runs it gets after a first that
 // fails, and the function that runs it.
-CallJob: struct {
+priv CallJob: struct {
     name: String
     args: String
     retries: Int
@@ -1715,7 +1729,7 @@ CallJob: struct {
 // time it is delivered again, and the second (since the Unix epoch) the
 // server received it.
 #Equatable
-CallDelivery: struct {
+priv CallDelivery: struct {
     id: String
     at: Int
 }
@@ -1724,7 +1738,7 @@ CallDelivery: struct {
 // module>.<Service>.<method>`) and the second (since the Unix epoch) it was
 // due.
 #Equatable
-CallTick: struct {
+priv CallTick: struct {
     schedule: String
     due: Int
 }
@@ -1734,13 +1748,13 @@ CallTick: struct {
 // call again, and the second (since the Unix epoch) the server received it.
 // The account scopes the key, so one account's key never answers another's.
 #Equatable
-CallRequest: struct {
+priv CallRequest: struct {
     account: String
     key: String
     at: Int
 }
 
-CallRun: struct {
+priv CallRun: struct {
     task: TaskID
     id: Int
     joins: [CallJoin]
@@ -1753,12 +1767,12 @@ CallRun: struct {
     jobs: [CallJob]
 }
 
-CallRuns: struct {
+priv CallRuns: struct {
     runs: [CallRun]
     made: Int
 }
 
-CALLS: Shared{CallRuns{runs: [CallRun]{}, made: 0}}
+priv CALLS: Shared{CallRuns{runs: [CallRun]{}, made: 0}}
 
 priv(package) transactions: module {
     // The times a call runs, in all, while a busy store refuses it. Each
@@ -2513,7 +2527,8 @@ priv KeptReply: struct {
 // One store's kept replies, which core.db keeps in the table
 // `__jet_kept_replies` of each database file and names as the file opens
 // (`reply_cache.store`), so the servers of an App that share the file
-// share them.
+// share them. A write any server commits to the file drops them all, as a
+// kept reply may have read what it changed.
 priv KeptReplies: struct {
     // Names the store among the open ones, as CallOutbox.store does.
     store: String
@@ -2522,13 +2537,18 @@ priv KeptReplies: struct {
     // there is none, or the store couldn't read it.
     find: fn(String) -[]> KeptReply? Never!
     // Keeps a reply under a key for a max_age in milliseconds, in place of
-    // the one kept under it, and drops the stale ones; false when the store
-    // couldn't.
-    keep: fn(String, String, Int) -[]> Bool Never!
+    // the one kept under it, and drops the stale ones; a reply whose run
+    // began, the last milliseconds given ago, no later than a write the file
+    // took is not kept, as it may hold what the write changed. False when
+    // the store couldn't keep or judge it.
+    keep: fn(String, String, Int, Int) -[]> Bool Never!
 }
 
 // The stores named for kept replies, in the order they opened.
 priv KEPT_REGISTRY: Shared{[Shared<KeptReplies>]{}}
+
+// The writes committed to any store of this process (`reply_cache.written`).
+priv KEPT_WRITES: Shared{0}
 
 // The cache policies core.web answers endpoint replies under, and the
 // replies the servers that share the App's database files keep under them.
@@ -2565,14 +2585,29 @@ priv(package) reply_cache: module {
         None
     }
 
-    // Keeps `reply` under `key` for `max_age_ms` in the first named store
-    // that takes it; false when none does.
-    keep: fn(key: String, reply: String, max_age_ms: Int) -> Bool Never! {
+    // Keeps `reply`, whose run began `ran_ms` ago, under `key` for
+    // `max_age_ms` in the first named store that takes or judges it; false
+    // when none does.
+    keep: fn(key: String, reply: String, max_age_ms: Int, ran_ms: Int) -> Bool Never! {
         loop replies in kept_stores() {
             held: replies.guard_read()
-            if held.value.keep(key.copy(), reply.copy(), max_age_ms) -> return true
+            if held.value.keep(key.copy(), reply.copy(), max_age_ms, ran_ms) -> return true
         }
         false
+    }
+
+    // Counts a write committed to a store of this process (core.db). A reply
+    // this process keeps for itself is fresh only while the count is the one
+    // its run began at (`writes`).
+    written: fn() Never! {
+        held := KEPT_WRITES.guard_edit()
+        held.value += 1
+    }
+
+    // The writes committed to the stores of this process so far.
+    writes: fn() -> Int Never! {
+        held: KEPT_WRITES.guard_read()
+        held.value
     }
 }
 
@@ -2790,8 +2825,8 @@ priv head_test_inbox: fn(_: App, fields: [String:String]) -> HeadTestInbox? Neve
     assert(reply_cache.policy("app.CacheTestView") == .Val(.Private))
 }
 
-#Test("a kept reply goes to the first named store that takes it, and is found in any") {
-    refusing: KeptReplies{store: "app.Test refusing replies", find: fn(_: String) { KeptReply?{None} }, keep: fn(_: String, _: String, _: Int) { false }}
+#Test("a kept reply goes to the first named store that takes it, is found in any, and each committed write is counted") {
+    refusing: KeptReplies{store: "app.Test refusing replies", find: fn(_: String) { KeptReply?{None} }, keep: fn(_: String, _: String, _: Int, _: Int) { false }}
     held: Shared{[String:String]{}}
     kept: held.copy()
     found: held.copy()
@@ -2802,7 +2837,7 @@ priv head_test_inbox: fn(_: App, fields: [String:String]) -> HeadTestInbox? Neve
             reply: seen.value.get(key) ?? return KeptReply?{None}
             Val(KeptReply{reply: reply.copy(), age_ms: 0})
         },
-        keep: fn(key: String, reply: String, _: Int) {
+        keep: fn(key: String, reply: String, _: Int, _: Int) {
             guard := kept.guard_edit()
             guard.value[key] = reply
             true
@@ -2811,9 +2846,12 @@ priv head_test_inbox: fn(_: App, fields: [String:String]) -> HeadTestInbox? Neve
     reply_cache.store(refusing)
     reply_cache.store(taking)
     assert(reply_cache.find("/api/board [1]") == None)
-    assert(reply_cache.keep("/api/board [1]", "{{\"ok\":false}}", 1000))
+    assert(reply_cache.keep("/api/board [1]", "{{\"ok\":false}}", 1000, 0))
     assert_eq((reply_cache.find("/api/board [1]") ?? panic("the reply was not kept")).reply, "{{\"ok\":false}}")
     assert(reply_cache.find("/api/board [2]") == None)
+    before: reply_cache.writes()
+    reply_cache.written()
+    assert(reply_cache.writes() > before)
 }
 
 // How many times the resume test's source ran.

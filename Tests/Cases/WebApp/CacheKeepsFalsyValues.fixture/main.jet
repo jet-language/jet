@@ -1,19 +1,13 @@
 // A Board mounted at /api whose `closed`, `zero` and `blank` reply false, 0
 // and empty text, types the app graph caches `.Public` for ten minutes;
 // `note` replies a Note, which has no policy. Each method counts its runs in
-// the store. The client calls each method twice with the same arguments,
-// prints what both calls gave, and then how often each method ran.
+// memory, as a method that writes to a database keeps no reply. The client
+// calls each method twice with the same arguments, prints what both calls
+// gave, and then how often each method ran.
 use {
     app
-    db: core.db
     net: core.net
     web: core.web
-}
-
-#Codable
-Runs: struct {
-    name: String
-    runs: Int
 }
 
 #Codable
@@ -36,46 +30,38 @@ impl app.CallError -> BoardError {
     }
 }
 
-runs_in: fn(store: db.Store) -> db.Table<String, Runs> {
-    store.table("runs", key: fn(row: Runs) { row.name.copy() })
-}
-
 // How often the method `name` ran.
-ran: fn(store: db.Store, name: String) -> Int {
-    if runs_in(store).get(name) == {
-        .Val(found) -> found.runs
-        .None -> 0
-        .Err(_) -> -1
-    }
+ran: fn(runs: Shared<[String:Int]>, name: String) -> Int {
+    held: runs.guard_read()
+    held.value.get(name) ?? 0
 }
 
 // Counts a run of the method `name`.
-counted: fn(store: db.Store, name: String) -> Int BoardError! {
-    runs: ran(store, name) + 1
-    _: runs_in(store).put(Runs{name: name, runs: runs}) ?? return Err(BoardError.Failed(err.message()))
-    Ok(runs)
+counted: fn(runs: Shared<[String:Int]>, name: String) {
+    held := runs.guard_edit()
+    held.value[name] = (held.value.get(name) ?? 0) + 1
 }
 
 Board: struct {
-    store: db.Store
+    runs: Shared<[String:Int]>
 
     #App.Public closed: fn(self) -> Bool BoardError! {
-        _: counted(self.store, "closed") ?? return Err(err)
+        counted(self.runs, "closed")
         Ok(false)
     }
 
     #App.Public zero: fn(self) -> Int BoardError! {
-        _: counted(self.store, "zero") ?? return Err(err)
+        counted(self.runs, "zero")
         Ok(0)
     }
 
     #App.Public blank: fn(self) -> String BoardError! {
-        _: counted(self.store, "blank") ?? return Err(err)
+        counted(self.runs, "blank")
         Ok("")
     }
 
     #App.Public note: fn(self) -> Note BoardError! {
-        _: counted(self.store, "note") ?? return Err(err)
+        counted(self.runs, "note")
         Ok(Note{text: ""})
     }
 }
@@ -94,8 +80,8 @@ note: fn(board: app.Remote<Board>) -> String {
 
 run: fn() {
     _: app.new("Board").cache<Bool>(.Public{max_age: 10min}).cache<Int>(.Public{max_age: 10min}).cache<String>(.Public{max_age: 10min})
-    store: db.open_memory()
-    served: web.app().mount("/api", Board{store: store.copy()})
+    runs: Shared{[String:Int]{}}
+    served: web.app().mount("/api", Board{runs: runs.copy()})
     listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr()
     serving: task {
@@ -107,5 +93,5 @@ run: fn() {
     print("zero: {zero(app.remote_at<Board>(url))} then {zero(app.remote_at<Board>(url))}")
     print("blank: {blank(app.remote_at<Board>(url))} then {blank(app.remote_at<Board>(url))}")
     print("note: {note(app.remote_at<Board>(url))} then {note(app.remote_at<Board>(url))}")
-    print("runs: closed {ran(store, "closed")}, zero {ran(store, "zero")}, blank {ran(store, "blank")}, note {ran(store, "note")}")
+    print("runs: closed {ran(runs, "closed")}, zero {ran(runs, "zero")}, blank {ran(runs, "blank")}, note {ran(runs, "note")}")
 }

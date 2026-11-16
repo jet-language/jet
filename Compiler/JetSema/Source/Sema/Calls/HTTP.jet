@@ -506,6 +506,9 @@ sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: 
         candidate := candidates.pop() ?? panic("{owner}.{method} is not registered")
         params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("{owner}.{method} has no parameter list")
         filled := args.move()
+        if filled.len() > params.len() {
+            panic("{owner}.{method} takes {params.len()} arguments, and its registration passed {filled.len()}")
+        }
         loop index in filled.len()..<params.len() {
             reference: params[index].default_ref ?? panic("{owner}.{method} parameter `{params[index].name}` has no default")
             declared: sema_registration_resolve_default(graph, reference) ?? panic("{owner}.{method} parameter `{params[index].name}` lost its default")

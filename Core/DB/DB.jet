@@ -836,7 +836,8 @@ priv DBState: struct {
     priv wrote: fn(&self, table: String, rows: [String]?) Never! {
         if self.open == 0 {
             db_live_wrote(self.driver, table, rows)
-            return db_live_bump(self, table)
+            db_live_bump(self, table)
+            return db_kept_written(self)
         }
         loop at in 0..<self.written.len() {
             if self.written[at].table == table {
@@ -1522,6 +1523,7 @@ priv db_commit: fn(state: Shared<DBState>) DBError! {
         db_live_wrote(guard.value.driver, written.table, written.rows)
         if committed -> db_live_bump(guard.value, written.table)
     }
+    if committed && guard.value.written.len() > 0 -> db_kept_written(guard.value)
     guard.value.written = [DBWritten]{}
     if !committed -> return Err(db_error("could not commit, so the transaction was rolled back"))
     Ok()
@@ -1884,7 +1886,7 @@ priv db_kept_replies: fn(state: Shared<DBState>, store: String) -> app.KeptRepli
     app.KeptReplies{
         store: store.copy(),
         find: fn(key: String) { db_kept_find(state, key) },
-        keep: fn(key: String, reply: String, max_age_ms: Int) { db_kept_keep(state, key, reply, max_age_ms) },
+        keep: fn(key: String, reply: String, max_age_ms: Int, ran_ms: Int) { db_kept_keep(state, key, reply, max_age_ms, ran_ms) },
     }
 }
 
@@ -1905,20 +1907,41 @@ priv db_kept_find: fn(state: Shared<DBState>, key: String) -> app.KeptReply? Nev
     Val(app.KeptReply{reply: reply, age_ms: now - kept})
 }
 
-// Keeps `reply` under `key` for `max_age_ms`, in place of the row kept under
-// it, and drops each row stale by now, so the table holds only fresh
-// replies; false when the store couldn't.
-priv db_kept_keep: fn(state: Shared<DBState>, key: String, reply: String, max_age_ms: Int) -> Bool Never! {
+// Keeps `reply`, whose run began `ran_ms` ago, under `key` for
+// `max_age_ms`, in place of the row kept under it, and drops each row stale
+// by now, so the table holds only fresh replies. A run that began no later
+// than the last write the file took (the row under the key "",
+// `db_kept_written`) may hold what it changed, so its reply is judged and
+// not kept. False when the store couldn't keep or judge it.
+priv db_kept_keep: fn(state: Shared<DBState>, key: String, reply: String, max_age_ms: Int, ran_ms: Int) -> Bool Never! {
     guard := state.guard_edit()
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, 0) }) ?? return false
     if driver_closed(guard.value.driver) -> return false
     _: __driver_execute(guard.value.driver, DB_KEPT_REPLIES_TABLE, [DBValue]{}) ?? return false
     _: __driver_execute(guard.value.driver, "CREATE INDEX IF NOT EXISTS __jet_kept_replies_fresh ON __jet_kept_replies (fresh)", [DBValue]{}) ?? return false
     now: db_job_now()
+    written: __driver_query(guard.value.driver, "SELECT kept FROM __jet_kept_replies WHERE key = ''", [DBValue]{}) ?? return false
+    if written.len() > 0 && (row_int(written[0], "kept") ?? now) >= now - ran_ms -> return true
     _: __driver_execute(guard.value.driver, "DELETE FROM __jet_kept_replies WHERE fresh < ?", [DBValue]{.Int(now)}) ?? return false
     fresh: if max_age_ms > 9223372036854775807 - now -> 9223372036854775807 else -> now + max_age_ms
     values: [DBValue]{.Text(key.copy()), .Text(reply.copy()), .Int(now), .Int(fresh)}
     __driver_execute(guard.value.driver, "INSERT OR REPLACE INTO __jet_kept_replies (key, reply, kept, fresh) VALUES (?, ?, ?, ?)", values) == .Ok(_)
+}
+
+// Once a write to a table of the database `held` reads commits: counts it
+// for the replies this process keeps for itself (app.reply_cache.written),
+// drops every reply the file keeps, as each may have read what the write
+// changed, and marks the write's instant under the key "", so a run that
+// began before it keeps nothing (`db_kept_keep`). A file that keeps no
+// replies is left as it is.
+priv db_kept_written: fn(held: &DBState) Never! {
+    app.reply_cache.written()
+    if driver_closed(held.driver) || !table_exists(held.driver, "__jet_kept_replies") {
+        return
+    }
+    _: __driver_execute(held.driver, "DELETE FROM __jet_kept_replies", [DBValue]{}) ?? return
+    values: [DBValue]{.Int(db_job_now()), .Int(9223372036854775807)}
+    _: __driver_execute(held.driver, "INSERT INTO __jet_kept_replies (key, reply, kept, fresh) VALUES ('', '', ?, ?)", values) ?? return
 }
 
 #Codable
@@ -2137,11 +2160,11 @@ priv db_kept_stale: fn(store: Store, key: String) {
     _: __driver_execute(guard.value.driver, "INSERT OR REPLACE INTO __jet_kept_replies (key, reply, kept, fresh) VALUES (?, 'stale', 0, 1)", [DBValue]{.Text(key.copy())}) ?? panic("the stale reply writes")
 }
 
-#Test("a store keeps a reply under its key while it is fresh, and drops the stale ones as it keeps another") {
+#Test("a store keeps a reply under its key while it is fresh, drops the stale ones as it keeps another, and drops them all at a committed write") {
     store: open_memory()
     replies: db_kept_replies(store.state, "db.Test kept replies")
     assert(replies.find("/api/board [1]") == None)
-    assert(replies.keep("/api/board [1]", "{{\"ok\":false}}", 600000))
+    assert(replies.keep("/api/board [1]", "{{\"ok\":false}}", 600000, 0))
     found: replies.find("/api/board [1]") ?? panic("the kept reply reads")
     assert_eq(found.reply, "{{\"ok\":false}}")
     assert(found.age_ms >= 0 && found.age_ms < 600000)
@@ -2149,15 +2172,27 @@ priv db_kept_stale: fn(store: Store, key: String) {
     db_kept_stale(store, "/api/board [3]")
     assert(replies.find("/api/board [3]") == None)
     assert_eq(db_kept_count(store), 2)
-    assert(replies.keep("/api/board [1]", "{{\"ok\":true}}", 600000))
+    assert(replies.keep("/api/board [1]", "{{\"ok\":true}}", 600000, 0))
     assert_eq(db_kept_count(store), 1)
     assert_eq((replies.find("/api/board [1]") ?? panic("the kept reply reads")).reply, "{{\"ok\":true}}")
     // A max_age past the end of the store's clock keeps the reply, and does not wrap.
-    assert(replies.keep("/api/board [4]", "{{\"ok\":0}}", 9223372036854775807))
+    assert(replies.keep("/api/board [4]", "{{\"ok\":0}}", 9223372036854775807, 0))
     assert(replies.find("/api/board [4]") != None)
+    // A committed write drops every kept reply. A reply whose run began
+    // before the write is judged but not kept; one whose run began after it is.
+    writes: app.reply_cache.writes()
+    _: call_counts(store).put(CallCount{id: 1, count: 1}) ?? panic("the write commits")
+    assert(app.reply_cache.writes() > writes)
+    assert(replies.find("/api/board [1]") == None)
+    assert(replies.find("/api/board [4]") == None)
+    assert(replies.keep("/api/board [1]", "{{\"ok\":1}}", 600000, 60000))
+    assert(replies.find("/api/board [1]") == None)
+    core.tasks.sleep(2)
+    assert(replies.keep("/api/board [1]", "{{\"ok\":2}}", 600000, 0))
+    assert_eq((replies.find("/api/board [1]") ?? panic("the reply after the write is kept")).reply, "{{\"ok\":2}}")
     assert(store.close())
     assert(replies.find("/api/board [1]") == None)
-    assert(!replies.keep("/api/board [1]", "{{\"ok\":0}}", 600000))
+    assert(!replies.keep("/api/board [1]", "{{\"ok\":0}}", 600000, 0))
 }
 
 // How many jobs the store's outbox keeps, and each one's runs and last error.
@@ -2283,7 +2318,7 @@ priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:D
 // every binding whose source read it (app.live_reads).
 priv live_source: fn(table: String) -> String Never! { "core.db.live:{table}" }
 
-// ---- live queries across servers (#6868 c4) --------------------------------
+// ---- live queries across servers --------------------------------------------
 
 // The live registry is per process, so `db_live_wrote` re-runs only this
 // process's bindings. Other servers learn of a write through the version

@@ -1541,6 +1541,52 @@ parser_parse_parenthesized: fn(state: &JetParserState, depth: Int) -> ParsedExpr
     ParsedExpr{expr: Expr.TupleLit{fields: fields, span: span, ty: None, id: parser_node_id(state)}, span: span}
 }
 
+// Whether the `{` at offset `at` opens a record value where a braced block
+// may also stand, as after an arm's `->`: a `,` at its own level separates
+// its members, and each member is `name: value` or a bare name. A block never
+// holds such a comma, so `{ total: count }` stays a block.
+parser_brace_record_value_at: fn(state: &JetParserState, at: Int) -> Bool Never! {
+    if parser_kind_at(state, at) != TOKEN_LBRACE -> return false
+    offset := at + 1
+    depth := 0
+    commas := 0
+    member_start := true
+    loop {
+        kind: parser_kind_at(state, offset)
+        if kind == TOKEN_EOF -> return false
+        if depth == 0 {
+            if kind == TOKEN_RBRACE -> return commas > 0
+            if kind == TOKEN_SEMI {
+                if !member_start {
+                    end := offset
+                    loop parser_kind_at(state, end) == TOKEN_SEMI -> end += 1
+                    return parser_kind_at(state, end) == TOKEN_RBRACE && commas > 0
+                }
+                offset += 1
+                next
+            }
+            if member_start {
+                follower: parser_kind_at(state, offset + 1)
+                if kind != TOKEN_IDENT || (follower != TOKEN_COLON && follower != TOKEN_COMMA && follower != TOKEN_RBRACE && follower != TOKEN_SEMI) {
+                    return false
+                }
+                member_start = false
+                offset += 1
+                next
+            }
+            if kind == TOKEN_COMMA {
+                commas += 1
+                member_start = true
+                offset += 1
+                next
+            }
+        }
+        if kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+        if kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> depth -= 1
+        offset += 1
+    }
+}
+
 // The parameters after a lambda's `(`, up to (not including) its `)`: each a
 // name with an optional `: Type`.
 parser_parse_lambda_params: fn(state: &JetParserState, depth: Int) -> [LambdaParam] {
@@ -2220,6 +2266,7 @@ parser_turbofish_ahead: fn(state: &JetParserState, following: Int) -> Bool Never
         return false
     }
     nested := 0
+    skip_braces := 0
     loop index in state.position..<state.tokens.len() {
         token: state.tokens[index]
         if token.kind == TOKEN_LT -> nested += 1
@@ -2228,7 +2275,16 @@ parser_turbofish_ahead: fn(state: &JetParserState, following: Int) -> Bool Never
         if (token.kind == TOKEN_GT || token.kind == TOKEN_SHR) && nested <= 0 {
             return index + 1 < state.tokens.len() && state.tokens[index + 1].kind == following && state.tokens[index + 1].span.start == token.span.end
         }
-        if token.kind == TOKEN_SEMI || token.kind == TOKEN_LBRACE || token.kind == TOKEN_RBRACE || token.kind == TOKEN_EOF {
+        // A record type argument, `<{key: String, value: Dyn}>`, holds braces.
+        if token.kind == TOKEN_LBRACE && nested > 0 {
+            skip_braces += 1
+            next
+        }
+        if token.kind == TOKEN_RBRACE && skip_braces > 0 {
+            skip_braces -= 1
+            next
+        }
+        if skip_braces == 0 && (token.kind == TOKEN_SEMI || token.kind == TOKEN_LBRACE || token.kind == TOKEN_RBRACE || token.kind == TOKEN_EOF) {
             return false
         }
     }
@@ -2466,7 +2522,7 @@ parser_parse_variant_args: fn(state: &JetParserState, depth: Int, allow_struct_l
 }
 
 parser_parse_or_fallback: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> OrFallback {
-    if parser_current_kind(state) == TOKEN_LBRACE {
+    if parser_current_kind(state) == TOKEN_LBRACE && !parser_brace_record_value_at(state, 0) {
         block: parser_parse_value_block(state, depth + 1, false)
         return OrFallback.Block{body: block.statements, value: block.tail, span: block.span}
     }
