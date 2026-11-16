@@ -454,17 +454,23 @@ OP_PERCENT: "%"
 /// answer takes the dividend's sign, so `-7 %% 2` is -1. It partners `/`.
 OP_PERCENT_PERCENT: "%%"
 
+/// Bitwise and of two integers; as a prefix it marks a borrow.
 OP_AMP: "&"
 
-/// Peer alternatives use the single bar.
-/// This rule retires its arithmetic meaning.
+/// Bitwise or of two integers. Peer alternatives also use the single bar.
 OP_PIPE: "|"
 
 /// `^` is free: no grammar rule reads it (a take is `&&`).
 OP_CARET: "^"
 
-/// (ratified 2026-08-05): bitwise exclusive-or, the exclusive
-/// variant of `|`. Prefix `~` is the retired copy sigil; no rule accepts it.
+/// Bitwise exclusive-or of two integers; as a prefix, the complement
+/// (`~x` is `-x - 1` on Int, and keeps a fixed width's width).
+OP_TILDE: "~"
+
+/// Clears bits: `a &~ b` is `a & ~b`.
+OP_AMP_TILDE: "&~"
+
+/// Retired exclusive-or spelling; no rule accepts it.
 OP_TILDE_PIPE: "~|"
 
 OP_SHL: "<<"
@@ -529,6 +535,15 @@ OP_PERCENT_PERCENT_EQ: "%%="
 
 /// Retired spelling; no rule accepts it.
 OP_TILDE_PIPE_EQ: "~|="
+
+/// Integer bit updates: `x &= m`, `x |= m`, `x ~= m` and `x &~= m`.
+OP_AMP_EQ: "&="
+
+OP_PIPE_EQ: "|="
+
+OP_TILDE_EQ: "~="
+
+OP_AMP_TILDE_EQ: "&~="
 
 OP_SHL_EQ: "<<="
 

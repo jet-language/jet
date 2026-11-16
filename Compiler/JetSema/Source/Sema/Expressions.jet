@@ -1050,9 +1050,9 @@ sema_expr_binary_name: fn(op: BinOp) -> String Never! {
         .Mod -> "%"
         .Rem -> "rem"
         .Pow -> "pow"
-        .BitAnd -> "bit_and"
-        .BitOr -> "bit_or"
-        .BitXor -> "bit_xor"
+        .BitAnd -> "&"
+        .BitOr -> "|"
+        .BitXor -> "~"
         .Shl -> "<<"
         .Shr -> ">>"
         .Eq -> "=="
@@ -5358,11 +5358,16 @@ sema_expr_check_unary: fn(op: UnOp, operand: Expr, expected: Type?, span: Span, 
     // Rust checks the operand under the surrounding expectation; only a
     // Float carrier changes how a decimal literal operand elaborates.
     operand_expected := Type?{None}
+    float_literal: op == UnOp.Neg && sema_expr_expects_machine_float(expected) && sema_expr_decimal_literal_operand(operand, true)
+    // `~0` under a fixed width is that width's all-ones value, so the
+    // operand takes an integer expectation.
+    integer_complement: op == UnOp.Complement && (if expected == .Val(wanted) -> sema_expr_is_integer(wanted) else -> false)
     // copy: `operand_expected` is the operand's own expectation, while `expected` (the caller's
     // expectation, a read parameter) is still read below for the result. Under a Dyn
     // expectation the literal operand is a Float that wraps after negation.
-    if op == UnOp.Neg && sema_expr_expects_machine_float(expected) && sema_expr_decimal_literal_operand(operand, true) {
-        operand_expected = if expected == (Val(sema_dyn_type())) -> Val(Type.Float) else -> expected.copy()
+    if {
+        float_literal && expected == (Val(sema_dyn_type())) -> operand_expected = Val(Type.Float)
+        float_literal || integer_complement -> operand_expected = expected.copy()
     }
     value: sema_check_expression(operand, operand_expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if op == UnOp.Neg {
@@ -5396,6 +5401,18 @@ sema_expr_check_unary: fn(op: UnOp, operand: Expr, expected: Type?, span: Span, 
         result_ty := sema_expr_numeric_base(value.ty)
         return sema_expr_expected_owned(sema_tree_node(result_ty, TExprKind.Unary{op: TUnaryOp.Neg, operand: value}, span), expected, environment, program, diagnostics)
     }
+    if op == UnOp.Complement {
+        if sema_expr_is_integer(value.ty) {
+            flipped: sema_tree_node(sema_expr_numeric_base(value.ty), TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span)
+            return sema_expr_expected_owned(flipped, expected, environment, program, diagnostics)
+        }
+        if value.ty == Type.Bool {
+            diagnostics.push(sema_error("E0398", span, "`~` flips integer bits; `!` negates a Bool", "`~value` is the bitwise complement of an integer, and a Bool has no bits to flip", "write `!flag` to negate the Bool"))
+            return None
+        }
+        diagnostics.push(sema_error("E0109", span, "`~` needs an integer, but this is {sema_type_show(value.ty)}", "`~value` flips the bits of an Int or a fixed-width integer", "use an integer here"))
+        return None
+    }
     if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment, program)) {
         diagnostics.push(sema_dyn_condition_error(span))
         return None
@@ -5404,10 +5421,10 @@ sema_expr_check_unary: fn(op: UnOp, operand: Expr, expected: Type?, span: Span, 
         return sema_expr_expected_owned(sema_tree_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, diagnostics)
     }
     if sema_expr_is_integer(value.ty) {
-        diagnostics.push(sema_error("E0398", span, "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods", "write `value.bit_not()` for an integer, or compare the value to produce Bool"))
+        diagnostics.push(sema_error("E0398", span, "`!` negates a Bool; `~` flips integer bits", "`!value` needs a yes or no value, and an integer's bits flip with `~`", "write `~value` to flip the bits, or compare the value to produce Bool"))
         return None
     }
-    diagnostics.push(sema_error("E0109", span, "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods", "write `value.bit_not()` for an integer, or compare the value to produce Bool"))
+    diagnostics.push(sema_error("E0109", span, "`!` needs Bool, but this is {sema_type_show(value.ty)}", "`!value` negates a yes or no value", "compare the value to produce Bool"))
     None
 }
 

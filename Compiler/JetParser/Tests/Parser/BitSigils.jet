@@ -1,0 +1,91 @@
+// Integer bits are `&`, `|`, `~` (exclusive-or), `&~` (clear) and prefix
+// `~` (complement), with the updates `&=`, `|=`, `~=` and `&~=`.
+use jet_foundation.[BinOp, UnOp]
+
+#Test("bit sigils bind shifts, then and, then exclusive-or, then or, above the comparisons") {
+    parsed: parser_test_program(`run: fn() { value: 1 | 2 ~ 3 & 4 << 1 == 5 }`)
+    init: parser_test_binding(parser_test_function(parsed, "run")).init
+    init == .Binary(compare, or_side, _, _, _) ?? panic("comparison at the root")
+    assert(compare == BinOp.Eq)
+    or_side == .Binary(or_op, _, xor_side, _, _) ?? panic("`|` under the comparison")
+    assert(or_op == BinOp.BitOr)
+    xor_side == .Binary(xor_op, _, and_side, _, _) ?? panic("`~` under `|`")
+    assert(xor_op == BinOp.BitXor)
+    and_side == .Binary(and_op, _, shift, _, _) ?? panic("`&` under `~`")
+    assert(and_op == BinOp.BitAnd)
+    shift == .Binary(shift_op, _, _, _, _) ?? panic("`<<` under `&`")
+    assert(shift_op == BinOp.Shl)
+}
+
+#Test("and-not is an and whose right operand is complemented") {
+    parsed: parser_test_program(`run: fn() { value: flags &~ mask }`)
+    init: parser_test_binding(parser_test_function(parsed, "run")).init
+    init == .Binary(op, _, right, _, _) ?? panic("binary `&~`")
+    assert(op == BinOp.BitAnd)
+    right == .Unary(unary, operand, _, _) ?? panic("complemented right operand")
+    assert(unary == UnOp.Complement)
+    assert(operand == .Ident(_, _, _))
+}
+
+#Test("an and-not update stores the complemented mask") {
+    parsed: parser_test_program(
+        `run: fn() {
+    flags := 7
+    flags &~= 2
+}
+`,
+    )
+    body: parser_test_function(parsed, "run").body
+    body[1] == .Assign(_, op, _, value) ?? panic("compound update")
+    assert(op == Val(BinOp.BitAnd))
+    value == .Unary(unary, _, _, _) ?? panic("complemented mask")
+    assert(unary == UnOp.Complement)
+}
+
+#Test("an exclusive-or update in a condition is read as `!=` with an edit to it") {
+    source: `run: fn() {
+    count: 3
+    if count ~= 4 { print("differs") }
+}
+`
+    diagnostic: parser_test_diagnostic(parser_test_errors(source), "E0398")
+    edit: diagnostic.edit ?? panic("E0398 edits `~=` to `!=`")
+    assert_eq(edit.new_text, "!=")
+    span: diagnostic.span ?? panic("E0398 span")
+    assert_eq(span.start, parser_test_find(source, "~="))
+    assert_eq(span.end, span.start + 2)
+}
+
+#Test("fmt spells each bit sigil and keeps the grouping precedence needs") {
+    source: `run: fn() {
+    a := 12
+    b: 10
+    c: a & b | a ~ b
+    d: (a | b) & 3
+    e: a & ~b
+    f: ~a
+    g: (a ~ b) & ~(a | b)
+    a &= ~b
+    a ~= 6
+    a |= 1
+    a &~= 4
+}
+`
+    assert_eq(
+        parser_test_stable(source),
+        `run: fn() {
+    a := 12
+    b: 10
+    c: a & b | a ~ b
+    d: (a | b) & 3
+    e: a &~ b
+    f: ~a
+    g: (a ~ b) &~ (a | b)
+    a &~= b
+    a ~= 6
+    a |= 1
+    a &~= 4
+}
+`,
+    )
+}

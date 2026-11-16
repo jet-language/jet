@@ -168,6 +168,9 @@ JetParserState: struct {
     // Where the body of the typed literal being read starts
     // (parser_mark_head_body); quoted text there is the head's body.
     head_text_at: Int{-1}
+    // A loop header's step is being read: an update operator such as `~=`
+    // after its target is the step's own, not a mistyped comparison.
+    reading_loop_step: Bool{false}
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,

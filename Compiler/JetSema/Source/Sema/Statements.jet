@@ -1330,7 +1330,11 @@ sema_stmt_guard_text: fn(expr: Expr) -> String? {
         }
         .Unary(op, operand, _, _) -> {
             operand_text: sema_stmt_guard_text(operand) ?? return None
-            prefix: if op == UnOp.Not -> "!" else -> "-"
+            prefix: if op == {
+                .Neg -> "-"
+                .Not -> "!"
+                .Complement -> "~"
+            }
             return Val("{prefix}{operand_text}")
         }
         .Binary(op, left, right, _, _) -> {

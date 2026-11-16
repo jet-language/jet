@@ -1,0 +1,53 @@
+// Every bit call below prints the same value before and after the rewrite.
+Flags: struct {
+    bits: Int
+}
+
+low: fn(value: Int) -> Int { value.bit_and(3) }
+
+run: fn() {
+    a: 12
+    b: 10
+    c: 6
+    print(a.bit_and(b))
+    print(a.bit_or(b))
+    print(a.bit_xor(b))
+    print(a.bit_not())
+    print(a.bit_and(b.bit_not()))
+    print(a.bit_and(b).bit_or(c))
+    print(a.bit_or(b).bit_and(c))
+    print(a.bit_and(b.bit_or(c)))
+    print(a.bit_xor(b.bit_and(c)))
+    print(a.bit_and(b).pow(2))
+    print(-a.bit_and(b))
+    print(1 + a.bit_and(b))
+    print(a.bit_and(b) + 1)
+    print(a.bit_and(b + 1))
+    print(a.bit_and(b) == 8)
+    print(a.bit_or(b << 2))
+    print((a << 1).bit_or(1))
+    print(a.bit_and(b).bit_not())
+    print(a.bit_and(b.bit_or(c).bit_not()))
+    print(U8{0x0F}.bit_and(U8{0x3C}))
+    print(low(a).bit_or(16))
+    xs: [Int]{5, 9}
+    print(xs[0].bit_xor(xs[1]))
+    spread: a
+        .bit_or(b)
+    print(spread)
+    print("{a.bit_and(b)} and {a.bit_or(c)}")
+    x := 1
+    x = x.bit_or(4)
+    x = x.bit_and(c.bit_not())
+    x = x.bit_xor(3)
+    print(x)
+    y := 0
+    y = x.bit_or(8)
+    print(y)
+    flags := Flags{bits: 1}
+    flags.bits = flags.bits.bit_or(2)
+    print(flags.bits)
+    source: `total: 6.bit_or(1)`
+    print(source)
+    print("write `a.bit_and(b)` to keep the shared bits")
+}

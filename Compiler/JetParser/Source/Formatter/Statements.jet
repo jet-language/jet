@@ -929,6 +929,10 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
                     jfmt_write(f, ".{method}(")
                     jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
                     jfmt_write(f, ")")
+                } else if compound == BinOp.BitAnd && value == .Unary(.Complement, cleared, _, _) {
+                    // `x &= ~m` clears bits and prints as `x &~= m`.
+                    jfmt_write(f, " &~= ")
+                    jfmt_fmt_expr(f, cleared, JFMT_PREC_OR_FALLBACK)
                 } else {
                     jfmt_write(f, " {jfmt_compound_spell(compound)} ")
                     jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)

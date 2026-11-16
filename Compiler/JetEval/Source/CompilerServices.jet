@@ -23,6 +23,8 @@ use {
         Lexed,
         TOKEN_AMP,
         TOKEN_AMP_EQ,
+        TOKEN_AMP_TILDE,
+        TOKEN_AMP_TILDE_EQ,
         TOKEN_AND_AND,
         TOKEN_AT,
         TOKEN_BANG,
@@ -119,6 +121,7 @@ use {
         TOKEN_STAR_EQ,
         TOKEN_STRING,
         TOKEN_TILDE,
+        TOKEN_TILDE_EQ,
         TOKEN_TILDE_PIPE,
         TOKEN_TILDE_PIPE_EQ,
         TOKEN_TILDE_TILDE,
@@ -377,6 +380,9 @@ jet_eval_compiler_services_token_kind: fn(kind: Int) -> String? {
     if kind == TOKEN_DOLLAR -> return Val("punctuation.dollar")
     if kind == TOKEN_PIPE_GT -> return Val("operator.pipe")
     if kind == TOKEN_LT_GT -> return Val("operator.pipe_value")
+    if kind == TOKEN_TILDE_EQ -> return Val("operator.xor_assign")
+    if kind == TOKEN_AMP_TILDE -> return Val("operator.clear_bits")
+    if kind == TOKEN_AMP_TILDE_EQ -> return Val("operator.clear_bits_assign")
     None
 }
 

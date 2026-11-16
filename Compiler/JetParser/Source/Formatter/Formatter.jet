@@ -84,6 +84,8 @@ JFMT_PREC_CMP: 4
 
 JFMT_PREC_BIT_OR: 5
 
+JFMT_PREC_BIT_XOR: 6
+
 JFMT_PREC_BIT_AND: 7
 
 JFMT_PREC_SHIFT: 8
@@ -218,8 +220,9 @@ jfmt_prec_of_bin: fn(op: BinOp) -> Int Never! {
         .And -> JFMT_PREC_AND
         .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare -> JFMT_PREC_CMP
         .BitOr -> JFMT_PREC_BIT_OR
-        // Exclusive-or and power print as method calls (jfmt_bin_op_method).
-        .BitXor | .Pow -> JFMT_PREC_POSTFIX
+        .BitXor -> JFMT_PREC_BIT_XOR
+        // Power prints as a method call (jfmt_bin_op_method).
+        .Pow -> JFMT_PREC_POSTFIX
         .BitAnd -> JFMT_PREC_BIT_AND
         .Shl | .Shr -> JFMT_PREC_SHIFT
         .Add | .Sub -> JFMT_PREC_ADD
@@ -235,8 +238,8 @@ jfmt_prec_add_rhs: fn(prec: Int) -> Int Never! {
     }
 }
 
-// Rust `BinOp::spell`. Power and exclusive-or have no infix spelling: they
-// are the `pow` and `bit_xor` methods (jfmt_bin_op_method).
+// Rust `BinOp::spell`. Power has no infix spelling: it is the `pow` method
+// (jfmt_bin_op_method).
 jfmt_bin_op_spell: fn(op: BinOp) -> String Never! {
     if op == {
         .Add -> "+"
@@ -249,7 +252,7 @@ jfmt_bin_op_spell: fn(op: BinOp) -> String Never! {
         .Pow -> "pow"
         .BitAnd -> "&"
         .BitOr -> "|"
-        .BitXor -> "bit_xor"
+        .BitXor -> "~"
         .Shl -> "<<"
         .Shr -> ">>"
         .Eq -> "=="
@@ -268,8 +271,7 @@ jfmt_bin_op_spell: fn(op: BinOp) -> String Never! {
 jfmt_bin_op_method: fn(op: BinOp) -> String? Never! {
     if op == {
         .Pow -> Val("pow")
-        .BitXor -> Val("bit_xor")
-        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .BitAnd | .BitOr | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> None
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> None
     }
 }
 
@@ -284,9 +286,10 @@ jfmt_compound_spell: fn(op: BinOp) -> String Never! {
         .Rem -> "%%="
         .BitAnd -> "&="
         .BitOr -> "|="
+        .BitXor -> "~="
         .Shl -> "<<="
         .Shr -> ">>="
-        .Pow | .BitXor | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> ""
+        .Pow | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> ""
     }
 }
 

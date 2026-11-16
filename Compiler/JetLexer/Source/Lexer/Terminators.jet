@@ -215,6 +215,12 @@ K_PIPE_GT: 108
 
 K_LT_GT: 109
 
+K_TILDE_EQ: 110
+
+K_AMP_TILDE: 111
+
+K_AMP_TILDE_EQ: 112
+
 // Facts hold four ints per token, so `index * 4 < facts.len()` is the bound
 // check without a division on every call.
 kind_at: fn(facts: [Int], index: Int) -> Int Never! {
@@ -277,6 +283,8 @@ suppresses_terminator: fn(kind: Int) -> Bool Never! {
         K_AMP -> true
         K_PIPE -> true
         K_CARET -> true
+        K_TILDE -> true
+        K_AMP_TILDE -> true
         K_TILDE_PIPE -> true
         K_SHL -> true
         K_SHR -> true
@@ -467,11 +475,12 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
 }
 
 // `&name` / `&&name` / `name.move()` written together at line start marks
-// the place a call writes or takes, so it begins a statement. A continued
-// bitwise-and, logical-and or power line keeps a space after its operator.
+// the place a call writes or takes, so it begins a statement, and so does a
+// complement `~name` written together. A continued bitwise-and, exclusive-or,
+// logical-and or power line keeps a space after its operator.
 place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     mark: kind_at(facts, index)
-    if mark != K_AMP && mark != K_AND_AND && mark != K_CARET -> return false
+    if mark != K_AMP && mark != K_AND_AND && mark != K_CARET && mark != K_TILDE -> return false
     name: kind_at(facts, index + 1)
     if name != K_IDENT && name != K_SELF -> return false
     return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]

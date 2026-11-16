@@ -1,0 +1,52 @@
+// Every bit call below prints the same value before and after the rewrite.
+Flags: struct {
+    bits: Int
+}
+
+low: fn(value: Int) -> Int { value & 3 }
+
+run: fn() {
+    a: 12
+    b: 10
+    c: 6
+    print(a & b)
+    print(a | b)
+    print(a ~ b)
+    print(~a)
+    print(a &~ b)
+    print(a & b | c)
+    print((a | b) & c)
+    print(a & (b | c))
+    print(a ~ b & c)
+    print((a & b).pow(2))
+    print(-(a & b))
+    print(1 + (a & b))
+    print((a & b) + 1)
+    print(a & b + 1)
+    print(a & b == 8)
+    print(a | b << 2)
+    print((a << 1) | 1)
+    print(~(a & b))
+    print(a &~ (b | c))
+    print(U8{0x0F} & U8{0x3C})
+    print(low(a) | 16)
+    xs: [Int]{5, 9}
+    print(xs[0] ~ xs[1])
+    spread: a | b
+    print(spread)
+    print("{a & b} and {a | c}")
+    x := 1
+    x |= 4
+    x &~= c
+    x ~= 3
+    print(x)
+    y := 0
+    y = x | 8
+    print(y)
+    flags := Flags{bits: 1}
+    flags.bits |= 2
+    print(flags.bits)
+    source: `total: 6 | 1`
+    print(source)
+    print("write `a & b` to keep the shared bits")
+}

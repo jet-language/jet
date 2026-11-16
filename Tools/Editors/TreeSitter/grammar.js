@@ -24,7 +24,7 @@ const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freez
 const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arg", "As", "Bindgen", "CLI", "Close", "Codable", "Commutative", "Comparable", "Context", "ContextKey", "Credential", "Deadline", "Debug", "Deprecated", "DevPanel", "Doc", "Equatable", "Error", "FFI", "FX", "HTML", "Impure", "Inline", "Input", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "MaxDepth", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "On", "Overflow", "PII", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "Reactive", "Receipt", "Redact", "Region", "Rename", "Replayable", "Root", "Runtime", "SQL", "Scalar", "Scrub", "Secret", "Shared", "Shield", "SingleUse", "Specified", "State", "Static", "Target", "Test", "Through", "Todo", "Track", "Transact", "Undo", "UnitFamily", "Unsafe", "Waive"];
 const JET_HIGHLIGHT_TAKE_MARK = ["&&"];
 const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", ":", ":=", ":>", "<:"];
-const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "<>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "|", "|>", "||"];
+const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "&~", "&~=", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "<>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "|", "|=", "|>", "||", "~", "~="];
 const JET_MARKER_INBODY_SEPARATOR = ":";
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
