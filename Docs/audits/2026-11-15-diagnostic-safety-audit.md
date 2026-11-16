@@ -6,7 +6,7 @@ An error refuses a program for one of two reasons. A soundness error stops a mem
 
 Each row states its class in `safety_class` and why in `safety_reason`. A soundness row also states its `expert_path`: the opt-in that reaches the same program, or `none:` and why nothing can.
 
-Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 847 active error rows: 727 soundness and 120 opinion. The other ranges hold 0 active error rows with no class yet.
+Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 846 active error rows: 726 soundness and 120 opinion. The other ranges hold 0 active error rows with no class yet.
 
 ## Sealed floors
 
@@ -14,7 +14,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 
 | Code | Type | Reported at | Why no expert path reaches the program |
 |---|---|---|---|
-| E-APP-TARGET-FEATURE | AppFeatureNotOnTarget | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1517 | the target supports the feature |
+| E-APP-TARGET-FEATURE | AppFeatureNotOnTarget | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1525 | the target supports the feature |
 | E-OSTARGET-BUILD-CONTEXT | OsDispatchSubjectMismatch | Compiler/JetSema/Source/Sema/Statements.jet:11222 | dispatch on `#build.target.os` |
 | E-OSTARGET-DISPATCH-ARM | InvalidOsDispatchArm | Compiler/JetSema/Source/Sema/Statements.jet:11403 | each arm names OS variants, each OS once |
 | E-OSTARGET-DISPATCH-EXHAUSTIVE | NonExhaustiveOsDispatch | Compiler/JetSema/Source/Sema/Statements.jet:11261 | name every OS in the arms |
@@ -299,17 +299,17 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0962 | RejectOutsideTemplate | Compiler/JetSema/Source/Sema/Calls/Resolution.jet:137 | `reject` belongs in a marker's `expand` template |
 | E0963 | InvalidFixedListLength | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:571 | the length is an in-range compile-time integer |
 | E0964 | FixedListLengthChange | Compiler/JetSema/Source/Sema/Calls/Collections.jet:239 | a list whose length changes is a `[T]` |
-| E0966 | InvalidModuleContribution | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:60 | the contribution is a struct literal of its namespace's type |
-| E0967 | ModuleSourceConflict | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:150 | each source name has one ref |
-| E0968 | InvalidModuleSource | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:38 | sources are `target@provider` refs or bare paths |
-| E0969 | InvalidImportsDiscovery | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:45 | discovery is `find("<dir>")` with one literal path |
-| E0970 | ImportsDirectoryNotFound | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:50 | the directory exists relative to the declaring file |
-| E0972 | UnknownSystemField | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:81 | the record's fields are its declared set |
-| E0973 | UnknownPlatform | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:86 | the target is a known platform value |
-| E0974 | MissingSystemTarget | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:91 | every `System` names its target |
-| E0975 | InvalidServiceEnable | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:96 | `enable: Bool` is the service's first field |
-| E0976 | FrozenImageFormat | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:106 | active images are `.Oci` |
-| E0977 | InvalidImageFrom | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:111 | images are built `from: packages.<name>` |
+| E0966 | InvalidModuleContribution | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:54 | the contribution is a struct literal of its namespace's type |
+| E0967 | ModuleSourceConflict | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:144 | each source name has one ref |
+| E0968 | InvalidModuleSource | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:32 | sources are `target@provider` refs or bare paths |
+| E0969 | InvalidImportsDiscovery | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:39 | discovery is `find("<dir>")` with one literal path |
+| E0970 | ImportsDirectoryNotFound | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:44 | the directory exists relative to the declaring file |
+| E0972 | UnknownSystemField | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:75 | the record's fields are its declared set |
+| E0973 | UnknownPlatform | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:80 | the target is a known platform value |
+| E0974 | MissingSystemTarget | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:85 | every `System` names its target |
+| E0975 | InvalidServiceEnable | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:90 | `enable: Bool` is the service's first field |
+| E0976 | FrozenImageFormat | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:100 | active images are `.Oci` |
+| E0977 | InvalidImageFrom | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:105 | images are built `from: packages.<name>` |
 | E0978 | UnknownImageSystem | Jetpack/EnvModel/Source/ModuleEval/EnvPlanBuilder.jet:401 | images are built `from: packages.<name>` |
 | E0979 | MissingOsHost | Jetpack/JetOS/Source/LoadValidate.jet:22 | the target names a host, and both halves of `host@root` |
 | E0980 | UnknownOsHost | Jetpack/JetOS/Source/LoadValidate.jet:49 | the host names a system in `config.jet` |
@@ -320,8 +320,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0989 | CompileTimeIfNotConstant | Compiler/JetSema/Source/Sema/Registration/Derives.jet:1375 | a run-time condition uses a plain `if` |
 | E0992 | DispatchMissingComparison | Compiler/JetParser/Source/Formatter/Formatter.jet:1901 | value dispatch writes the comparison before the brace |
 | E0995 | MissingWorkspaceModule | Compiler/JetCli/Source/Cli/Entry.jet:965 | `workspace.jet` declares one `workspace` module |
-| E0996 | InvalidMembersList | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:451 | `members:` evaluates to `[String]` |
-| E0997 | MembersDirectoryNotFound | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:617 | the directory exists relative to `workspace.jet` |
+| E0996 | InvalidMembersList | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:466 | `members:` evaluates to `[String]` |
+| E0997 | MembersDirectoryNotFound | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:629 | the directory exists relative to `workspace.jet` |
 | E0998 | InvalidOverlayPolicy | Jetpack/CLI/Source/Commands/ExplainCommand.jet:85 | the overlay policy is written in its declared form |
 | E1001 | UnknownCoreModule | Compiler/JetDriver/Source/Driver/Loader.jet:5243 | Core's runtime units are imported only by Core sources |
 | E1002 | ReservedRootShadowed | Compiler/JetDriver/Source/Driver/Loader.jet:3556 | a local module takes a name outside the reserved roots |
@@ -354,7 +354,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1110 | TaskOutsideGroup | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:336 | tasks start in the innermost `task.group` or a `Group` parameter |
 | E1112 | EmptyTaskCombinator | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:891 | the combinator gets at least one branch |
 | E1113 | FrozenValueWrite | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:7283 | write a copy, not the frozen value |
-| E1114 | FreezeNotSnapshotable | Compiler/JetSema/Source/Sema/Calls/Direct.jet:2146 | `freeze` takes owned, cloneable values |
+| E1114 | FreezeNotSnapshotable | Compiler/JetSema/Source/Sema/Calls/Direct.jet:2169 | `freeze` takes owned, cloneable values |
 | E1116 | UnknownSharedMethod | Compiler/JetSema/Source/Sema/Calls/Methods.jet:69 | a shared value is read and written like a value |
 | E1117 | MixedTaskBranches | Compiler/JetParser/Source/Parser/Expressions.jet:1728 | the branches are all named or all positional |
 | E1119 | InvalidAlignment | Compiler/JetSema/Source/Sema/Registration/Checked.jet:2422 | the alignment is a supported power of two |
@@ -404,9 +404,9 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1238 | InvalidBuildRecipe | Jetpack/Recipe/Source/Build/RecipeValidate.jet:176 | recipes use declared tools, inputs and effects |
 | E1239 | DuplicateWorkspaceModule | Compiler/JetCli/Source/Cli/Entry.jet:961 | one file declares `workspace: module` |
 | E1240 | MissingRustToolchain | Jetpack/Recipe/Source/Toolchain/BuildToolchain.jet:113 | a pinned Rust toolchain is realized into the hangar |
-| E1242 | UnknownFleetSystem | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:34 | hosts name a captured system |
-| E1244 | UnknownFleetField | Jetpack/EnvModel/Source/ModuleEval/ModuleEval.jet:268 | a captured fleet states its `hosts` |
-| E1245 | MissingFleetHosts | Jetpack/EnvModel/Source/ModuleEval/ModuleEval.jet:271 | a captured fleet names its hosts |
+| E1242 | UnknownFleetSystem | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:28 | hosts name a captured system |
+| E1244 | UnknownFleetField | Jetpack/EnvModel/Source/ModuleEval/ModuleEval.jet:349 | a captured fleet states its `hosts` |
+| E1245 | MissingFleetHosts | Jetpack/EnvModel/Source/ModuleEval/ModuleEval.jet:352 | a captured fleet names its hosts |
 | E1246 | InvalidPackageSignature | Jetpack/Publication/Source/Registry/Verify.jet:75 | the package is fetched again from a trusted source |
 | E1247 | UnsignedPackage | Jetpack/Publication/Source/Registry/Verify.jet:85 | use a signed release or another registry |
 | E1249 | InvalidToolchainPin | Jetpack/Trust/Source/Pin/JetPin.jet:241 | the `jet:` field is a channel ref |
@@ -423,10 +423,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1263 | UnknownSecret | Jetpack/CLI/Source/Commands/SecretsCommand.jet:111 | the secret is added to the store |
 | E1264 | SecretWithoutEffect | Compiler/JetSema/Source/Sema/Effects/Checks.jet:4502 | the function declares the `Secret` effect |
 | E1265 | SecretAtBuildTime | Compiler/JetSema/Source/Sema/Calls/Core.jet:235 | secrets are read at run time |
-| E1266 | InvalidImageKind | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:121 | active images are `.Oci` |
-| E1267 | ImageFromNonExecutable | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:138 | the image is built from an executable package |
+| E1266 | InvalidImageKind | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:115 | active images are `.Oci` |
+| E1267 | ImageFromNonExecutable | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:132 | the image is built from an executable package |
 | E1268 | RemoteOciNotSupported | Jetpack/CLI/Source/Commands/ImageCommand.jet:308 | a local OCI layout validated by digest |
-| E1269 | InvalidOciField | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:144 | the field takes its fixed shape |
+| E1269 | InvalidOciField | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:138 | the field takes its fixed shape |
 | E1270 | InvalidAdapter | Jetpack/CLI/Source/Commands/AddRemoveCommands.jet:128 | `source:` is a ref and the recipe is valid |
 | E1271 | UnlockedSourceChannel | Jetpack/PackageModel/Source/Lock/Verify.jet:88 | the channel is locked while online |
 | E1272 | MissingNixOutput | Jetpack/CLI/Source/Realize/RealizeRefs.jet:455 | each ref has a pinned compatibility output |
@@ -434,7 +434,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1274 | MissingStoreRecord | Jetpack/CLI/Source/Commands/DiscoveryCommands.jet:226 | the package is realized here first |
 | E1276 | OfflineNeedsNetwork | Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:575 | the verb runs online |
 | E1292 | MissingRandomness | Jetpack/Publication/Source/Sign.jet:218 | the operating system provides randomness |
-| E1294 | UnknownJob | Compiler/JetIR/Source/Build.jet:1785 | the name is a `#Job fn` of the entry |
+| E1294 | UnknownJob | Compiler/JetIR/Source/Build.jet:1794 | the name is a `#Job fn` of the entry |
 | E1295 | UnknownGitRef | Jetpack/Environment/Source/Workspace/MemberSelect.jet:345 | the ref names a commit |
 | E1297 | ToolJobConflict | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:719 | the tool or the job takes another name |
 | E1298 | ToolProviderUnavailable | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:722 | use a provider with a handler |
@@ -456,13 +456,13 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1319 | UnmappedCliMarker | Compiler/JetSema/Source/Sema/Registration/Items.jet:4036 | `#Arg` sits on a mappable `#CLI` field |
 | E1320 | HangarRootChanged | Jetpack/CLI/Source/Hangar/ExternalRootCommands.jet:148 | the mutation is retried against the new state |
 | E1321 | InvalidOutput | Compiler/JetSema/Source/Sema/Outputs.jet:35 | the output uses a closed kind and a checked entry |
-| E1324 | DuplicateMemberDirectory | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:373 | each member path names its own directory |
-| E1325 | DuplicateMemberPackage | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:397 | each member has its own Package name |
-| E1326 | InvalidEnvironmentFile | Jetpack/EnvModel/Source/ModuleEval/EnvFields.jet:195 | the managed file has a safe path and one owner |
+| E1324 | DuplicateMemberDirectory | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:362 | each member path names its own directory |
+| E1325 | DuplicateMemberPackage | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:386 | each member has its own Package name |
+| E1326 | InvalidEnvironmentFile | Jetpack/EnvModel/Source/ModuleEval/EnvFields.jet:242 | the managed file has a safe path and one owner |
 | E1327 | UnknownEnvironment | Jetpack/EnvModel/Source/ModuleEval/EnvPlanBuilder.jet:407 | the image names a declared environment |
-| E1328 | InvalidReadinessProbe | Jetpack/EnvModel/Source/ModuleEval/DevServiceEval.jet:215 | the probe's arguments and notify path are valid |
+| E1328 | InvalidReadinessProbe | Jetpack/EnvModel/Source/ModuleEval/DevServiceEval.jet:228 | the probe's arguments and notify path are valid |
 | E1330 | InvalidTaskMetadata | Jetpack/CLI/Source/Jobs/JobRunner.jet:102 | task metadata stays deterministic and project-contained |
-| E1332 | EnvironmentDefinitionConflict | Jetpack/EnvModel/Source/ModuleEval/EnvFields.jet:185 | the conflict is resolved in source |
+| E1332 | EnvironmentDefinitionConflict | Jetpack/EnvModel/Source/ModuleEval/EnvFields.jet:232 | the conflict is resolved in source |
 | E1333 | InvalidEnvironmentFact | Jetpack/CLI/Source/Commands/ImageCommand.jet:126 | the fact matches the catalog |
 | E1334 | InvalidWorkspaceMember | Compiler/JetCli/Source/Cli/Project.jet:36 | members name Package directories |
 | E1335 | EnvironmentIntegrationConflict | Jetpack/CLI/Source/Env/ComposeEnv.jet:321 | integrations lower to one consistent set of facts |
@@ -529,7 +529,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2412 | UnknownDecodedField | Compiler/JetSema/Source/Sema/Registration/SerdeItems.jet:924 | the type leaves out `#Codable(unknown: .Deny)` |
 | E2414 | DefaultNotConstant | Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet:232 | the default is a compile-time constant |
 | E2415 | AmbiguousUnionShape | Compiler/JetSema/Source/Sema/Registration/Items.jet:4465 | members have distinct wire shapes |
-| E2416 | EnvDecodeFailed | Core/Web/Web.jet:672 | the environment variable is fixed |
+| E2416 | EnvDecodeFailed | Core/Web/Web.jet:675 | the environment variable is fixed |
 | E2417 | FailureDomainNotErrorType | Compiler/JetSema/Source/Sema/FailureLaw.jet:918 | the domain is an error type |
 | E2418 | ErrorConversionCycle | Compiler/JetSema/Source/Sema/FailureLaw.jet:930 | the conversions form no cycle |
 | E2419 | AmbiguousErrorConversion | Compiler/JetSema/Source/Sema/FailureLaw.jet:934 | one route per pair |
@@ -542,11 +542,11 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2426 | FunctionValueNotNever | Compiler/JetSema/Source/Sema/Expressions.jet:1455 | the function never completes |
 | E2427 | CallerSiteMisplaced | Compiler/JetSema/Source/Sema/Expressions.jet:4877 | `#caller` is a parameter default or sits in an `#Expand` macro |
 | E2474 | FormActionInputMismatch | Compiler/JetSema/Source/Sema/Calls/Http.jet:695 | the action accepts the form's type |
-| E2475 | UnknownTableColumn | Compiler/JetSema/Source/Sema/Calls/Direct.jet:2197 | the column names a row field |
+| E2475 | UnknownTableColumn | Compiler/JetSema/Source/Sema/Calls/Direct.jet:2220 | the column names a row field |
 | E2476 | LiveQueryNotTrackable | Compiler/JetSema/Source/Sema/Calls/Data.jet:393 | the query reads a `data.track` source |
 | E2501 | FileHandleDirectionMismatch | Compiler/JetSema/Source/Sema/Calls/StreamHandles.jet:619 | open the file in the direction used |
 | E2502 | LineStreamOutsideLoop | Compiler/JetSema/Source/Sema/Statements.jet:6410 | iterate the stream in the loop |
-| E2510 | ReduceMarkerOutsideReduce | Compiler/JetSema/Source/Sema/Calls/MathLanes.jet:93 | the marker is an argument of `.reduce` |
+| E2510 | ReduceMarkerOutsideReduce | Compiler/JetSema/Source/Sema/Calls/MathLanes.jet:92 | the marker is an argument of `.reduce` |
 | E2511 | UndefinedOperator | Compiler/JetSema/Source/Sema/Expressions.jet:5611 | matching shapes, or an operator hook |
 | E2512 | MatrixShapeMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:6180 | the matrices have matching inner sides |
 | E2520 | CoordinateSpaceMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:1860 | values are converted into one space first |
@@ -566,10 +566,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2712 | CheckedTextRejected | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:2215 | the literal passes the check |
 | E2804 | AmbiguousRoute | Compiler/JetSema/Source/Sema/Calls/HttpRouting.jet:455 | each route has its own pattern |
 | E2805 | InvalidRoute | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:348 | the route binds decodable inputs by name |
-| E2806 | MissingPageFunction | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1378 | declare `page: fn`, or start the file name with `_` |
+| E2806 | MissingPageFunction | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1386 | declare `page: fn`, or start the file name with `_` |
 | E2808 | RouteMethodTokenRefused | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:643 | a standard method, or an RFC 9110 token |
-| E2809 | AppPortUnavailable | Core/Web/Web.jet:717 | free the port or choose another |
-| E2811 | ImageSettingNotLiteral | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1532 | each setting is written where the app sets it |
+| E2809 | AppPortUnavailable | Core/Web/Web.jet:720 | free the port or choose another |
+| E2811 | ImageSettingNotLiteral | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1540 | each setting is written where the app sets it |
 | E2812 | ServerOnlyMethod | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:271 | a method is an endpoint only where its own marker says so |
 | E2813 | FieldErrorPathUnknown | Compiler/JetSema/Source/Sema/Calls/FieldErrors.jet:22 | `FieldError{path:, reason:}` builds an error by hand where no argument field fits |
 | E2814 | WebhookKeyNotSigningKey | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:796 | a webhook checks each delivery under the key its `#App.SigningKey` method gives |
@@ -640,7 +640,6 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3313 | MmioFactViolation | Compiler/JetFoundation/Source/Target/TargetMachine.jet:1649 | addresses lie in a declared region and accesses carry an `#Unsafe` reason |
 | E3314 | InvalidTargetFact | Compiler/JetFoundation/Source/Target/TargetMachine.jet:1662 | the target fact is fixed |
 | E3401 | ImpureCallInPureContext | Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet:109 | the function's row declares the effect |
-| E3402 | AmbientIoInPackageBuild | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:28 | declared build inputs |
 | E3403 | NondeterminismInPureEval | Compiler/JetSema/Source/Sema/Effects/Checks.jet:681 | the value is passed in |
 | E3412 | ComptimeNetUnavailable | Compiler/JetSema/Source/Sema/Effects/Checks.jet:728 | `core.net.fetch(url, sha256:)` |
 | E3413 | FetchHashMismatch | Compiler/JetDriver/Source/Driver/BuildAdapter.jet:1023 | the pin or the URL is fixed |
@@ -1562,7 +1561,6 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E3313 | MmioFactViolation | soundness | An MMIO access outside a declared region, or without a reason, could write anywhere in device memory. |
 | E3314 | InvalidTargetFact | soundness | Target facts are explicit inputs to sema, so an invalid one leaves memory, startup or execution undefined. |
 | E3401 | ImpureCallInPureContext | soundness | A pure function's effect row is part of its type, so an impure call would break it. |
-| E3402 | AmbientIoInPackageBuild | soundness | Package builds run without ambient I/O, so the call would reach outside the sandbox. |
 | E3403 | NondeterminismInPureEval | soundness | Pure evaluation must give one result on every machine, so non-determinism breaks it. |
 | E3405 | DebugTraceInRelease | opinion | The trace would print and change nothing else, and Jet keeps development traces out of shipped artifacts. |
 | E3410 | ComptimeEffectWithoutImpure | soundness | The call touches the host at compile time, so without the gate a build would read state no cache or sandbox tracks. |
