@@ -5507,6 +5507,10 @@ tasks never read or change the process registry. The module source is
 | `caller() -> auth.AccountID` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
 | `enqueue(fn() { self.job(args...) })` | — | Queue one call of the service's `#App.Job` method `job`, with its arguments evaluated and encoded here; it runs after the call that queued it commits. See below. |
 | `endpoints<S>() -> [String]` | names | The methods of the service `S` that `#App.SignedIn` or `#App.Public` marks, in the order `S` declares them. A job, a schedule, a webhook, a signing key and an unmarked method are server-only and never listed. |
+| `new(title: String) -> App` | graph | Start the app graph titled `title`, with no screens. |
+| `graph.screen(path, view, signed_in: Bool = false) -> App` | graph | Add the screen `view` shows at `path` to the graph, and give back the graph. See below. |
+| `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
+| `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. It may read the database, fetch over `Net` and wait
@@ -5730,6 +5734,32 @@ Remote calls one, and `app.endpoints<S>()` lists none. A method that
 calls one, each runs as the system (`db.Who.System`), which no row policy
 limits, and `jet inspect choices` lists it as a `rights` row under its
 marker.
+
+The app graph is the program's screens. `app.new(title)` starts it, and
+`graph.screen("/projects/:project/board", board)` adds one. `board` is a named
+function. Its one parameter that is no `app.Remote<S>` is the screen's state:
+a struct declared outside Core with no type parameters, whose fields each
+derive `Encode`. The state is the screen's address. Each `:name` segment of
+the path is the field `name`. A field marked `#App.Query` (`#App.Query q:
+String`) goes after `?`. Every other field must be a path segment. A path that
+is not a string literal starting with `/`, a field in neither place, a
+segment that names no field or names a query field, and a state that two
+screens register are E2820 (`jet.InvalidScreen`). `signed_in: true` marks a
+screen only a signed-in caller opens. Every target runs the one graph, so its
+screens are every target's route set.
+
+`app.url_of(state)` gives the address of the screen whose state is `state`'s
+type. Each path field's value is percent-encoded into its segment, and each
+query field with a non-empty value follows `?` as `name=value`, in field
+order. A string field gives its own text, and any other field its JSON. A
+push opens a state the same way: `app.notify(to:, title:, body:, open:
+state)` sends the notice to each device `to` registered, with
+`url_of(state)` as the address a tap opens. A value that is no struct
+declared outside Core is E2821 (`jet.StateWithoutScreen`) in any program. In
+a program that registers screens, so is a state that no screen opens. A
+program that registers no screen, such as a library checked on its own, is
+not checked against a graph. Running `url_of` before the process has built
+its graph stops the program.
 
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:

@@ -1,0 +1,24 @@
+// Two screens: a board, whose project is a path segment and whose filter is
+// a query field, and a task. `url_of` gives each state's address.
+use app
+
+BoardView: struct {
+    project: String
+    #App.Query q: String
+}
+
+TaskView: struct {
+    id: Int
+}
+
+board: fn(view: BoardView) -> String Never! { view.q }
+
+task: fn(view: TaskView) -> Int Never! { view.id }
+
+run: fn() {
+    graph: app.new("Crew").screen("/projects/:project/board", board).screen("/tasks/:id", task, signed_in: true)
+    print(graph.title)
+    print(app.url_of(BoardView{project: "p 1/2", q: ""}))
+    print(app.url_of(BoardView{project: "p1", q: "login & fix"}))
+    print(app.url_of(TaskView{id: 42}))
+}

@@ -87,9 +87,10 @@ sema_live_rejected: fn() -> SemaDirectSpecialCheck Never! {
 }
 
 // Whether `module_name.member` is one of the live-binding calls, `enqueue`
-// (sema_call_enqueue) or `endpoints` (sema_call_app_endpoints).
+// (sema_call_enqueue), `endpoints` (sema_call_app_endpoints), or `url_of`
+// or `notify`, which take a screen state's address (sema_call_app_address).
 sema_live_member: fn(module_name: String, member: String) -> Bool Never! {
-    module_name == "app" && (member == "live" || member == "subscribe" || member == "push" || member == "invalidate" || member == "enqueue" || member == "endpoints")
+    module_name == "app" && (member == "live" || member == "subscribe" || member == "push" || member == "invalidate" || member == "enqueue" || member == "endpoints" || member == "url_of" || member == "notify")
 }
 
 // A live-binding call through a Core module alias (`use app`).
@@ -108,11 +109,11 @@ sema_call_try_live: fn(module_name: String, member: String, alias: String, alias
 // `alias.member(source, args...)`, where `alias` names `app`
 // and the import is already recorded.
 sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if member == "enqueue" {
-        return sema_call_enqueue(alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
-    if member == "endpoints" {
-        return sema_call_app_endpoints(alias, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if member == {
+        "enqueue" -> return sema_call_enqueue(alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "endpoints" -> return sema_call_app_endpoints(alias, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "url_of" | "notify" -> return sema_call_app_address(member, alias, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        else -> {}
     }
     callee: "{alias}.{member}"
     positional := [CallArg]{}

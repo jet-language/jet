@@ -12492,6 +12492,13 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         complete = false
         diagnostics.push(diagnostic)
     }
+    if trace_sink == .Val(sink) -> sink.begin("sema.app_routes", "", -1, -1)
+    app_routes: sema_app_route_diagnostics(final_graph, modules, threads)
+    if trace_sink == .Val(sink) -> sink.end("sema.app_routes", app_routes.len())
+    loop diagnostic in app_routes {
+        complete = false
+        diagnostics.push(diagnostic)
+    }
     // Bundle-owned structure verdicts share the same checked references on
     // success and failure; consumers never reconstruct them from source text.
     // The liveness verdicts were read with the side checks, before the effect

@@ -22718,6 +22718,59 @@ ServerOnlyMethodMarkedEndpoint: struct {
     }
 }
 
+InvalidScreen: struct {
+    path: String
+    found: String
+
+    impl Diagnostic {
+        code: "E2820"
+        safety_class: .Soundness
+        safety_reason: "A screen whose path and state make no one address would open from a link, a push or a mail with fields the address never carried, or the screen of another state at the same address."
+        expert_path: "none: a state whose fields each are a `:field` segment of the path or an `#App.Query` field is the address every target opens"
+        stage: [.Compile]
+        meaning: "A `.screen` registration whose path and view's state make no one address"
+        detail: true
+
+        what: fn(self) -> String {
+            "`.screen(\"{self.path}\", …)` registers no screen: {self.found}."
+        }
+
+        why: fn(self) -> String {
+            "A screen's state is its address: each of its fields is a `:field` segment of the path or, marked `#App.Query`, goes after `?`, and every target opens the screen from that address, so the state has one screen and each field a place in the address."
+        }
+
+        fix: fn(self) -> String {
+            "Write the path as a string literal starting with `/`, give the view one parameter besides its `app.Remote<S>` ones, a struct whose fields each derive `Encode`, name each field that isn't `#App.Query` once as a `:field` segment, and register each state at one screen."
+        }
+    }
+}
+
+StateWithoutScreen: struct {
+    state: String
+
+    impl Diagnostic {
+        code: "E2821"
+        safety_class: .Soundness
+        safety_reason: "An address taken of a state that no screen of the program's graph opens is a link, a push or a mail that opens nothing on any target the program builds."
+        expert_path: "none: registering a screen whose view takes the state gives it the address every target opens"
+        stage: [.Compile]
+        meaning: "An address taken, with `url_of` or a push's `open:`, of a state that no screen of the program's app graph opens"
+        detail: true
+
+        what: fn(self) -> String {
+            "No screen of the app graph opens `{self.state}`."
+        }
+
+        why: fn(self) -> String {
+            "Every target runs the program's one app graph, and only a `.screen` whose view takes `{self.state}` gives it an address, so a link, push or mail that opens it would open nothing on any target."
+        }
+
+        fix: fn(self) -> String {
+            "Register a screen whose view takes `{self.state}` in the graph, as `.screen(\"/path/:field\", view)`, or open the state of a screen the graph registers."
+        }
+    }
+}
+
 AppFeatureNotOnTarget: struct {
     feature: String
     required: String

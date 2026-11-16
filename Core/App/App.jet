@@ -29,6 +29,7 @@ use {
     world_rt: jet.runtime.testing
     log_rt: jet.runtime.log
     push_wire: __core_app_push
+    url: core.net.url
 }
 
 SYNC_MAX_SESSION: 256
@@ -1163,43 +1164,145 @@ priv PUSH_NOTES: Shared{PushNotes{skipped: 0, failed: 0, last: [String]{}}}
 
 priv C_PUSH_NOTES_KEPT: 32
 
-// A push to each device the account `to` registered, as the compiler lowers
-// `app.notify(to:, title:, body:, open:)`: `open` is the wire form of the
-// state a tap opens. Inside a job, a webhook's call or a scheduled run, each
-// push's key is made from the run's key, `to` and `open`, so a run that
-// runs again replaces the pushes it sent; outside one, each push has a
-// fresh key. A device whose push service is not set up is skipped. A push
-// its service refuses is dropped, and when the service says the device is
-// gone, the device is forgotten. Each skip and failure is counted
-// (`jet.push.skipped`, `jet.push.failed`) and kept with its service,
-// account and reason (`push.outcomes`): the published signature declares
-// only Net, so no log record can carry them.
-__notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) Never! -[Net]> {
-    account: to.raw()
-    devices: push.devices(account)
-    if devices.len() == 0 {
-        return
+// The app graph: the screens every target shows, each at the address of the
+// state it opens. `new` starts it, and the `.screen` calls of the one package
+// that builds it add the screens. Every target runs this one graph, so its
+// screens are every target's route set. The compiler lowers `.screen`,
+// `app.url_of` and `app.notify` to the graph's `__` members below.
+App: struct {
+    title: String
+
+    // `.screen(path, view, signed_in:)` as the compiler lowers it, once it
+    // has checked `view`'s state `V` against `path`: `state` names `V`, and
+    // `query` lists its `#App.Query` fields. The screen joins the process's
+    // route set, where `__url_of` finds its address.
+    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool) -> App Never! {
+        held := APP_ROUTES.guard_edit()
+        held.value[state.copy()] = AppScreen{path: path, state: state, query: query, signed_in: signed_in}
+        self.copy()
     }
-    run: push_run_key()
-    key: if run != "" -> push_wire.push_collapse_key(run, account, open_route) else -> {
-        push_wire.push_fresh_key() ?? {
-            loop device in devices -> push_note(false, device.service, account, err.reason)
+
+    // The address of the screen whose state is `V`, as the compiler lowers
+    // `url_of(view)` and a push's `open:`. `names` are `V`'s fields, in
+    // order, and `values` their address text (`__address_arg`). Each `:name`
+    // segment of the screen's path is its field's value, and each query
+    // field with a value joins the query, in field order; both are
+    // percent-encoded. The compiler refuses a state that no screen of the
+    // program's graph opens, so a state with no screen here is one whose
+    // graph this process has not built.
+    __url_of: fn<V>(state: String, names: [String], values: [String]) -> String Never! {
+        held: APP_ROUTES.guard_read()
+        screen: held.value.get(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before taking an address")
+        parts := [String]{}
+        loop segment in screen.path.split("/") {
+            if !segment.starts_with(":") {
+                parts.push(segment)
+                next
+            }
+            name: segment.removeprefix(":")
+            index: names.index_of(name) ?? panic("`{state}` has no field `{name}` for the path `{screen.path}`")
+            parts.push(url.percent_encode(values[index]))
+        }
+        address := parts.join("/")
+        separator := "?"
+        loop field in screen.query {
+            index: names.index_of(field) ?? next
+            if values[index] == "" -> next
+            address = "{address}{separator}{url.percent_encode(field)}={url.percent_encode(values[index])}"
+            separator = "&"
+        }
+        address
+    }
+
+    // A state field's text in an address: a string's own text, and any
+    // other value's JSON.
+    __address_arg: fn<A: Encode>(value: A) -> String Never! {
+        text: live_json.to_string<A>(value) ?? return ""
+        tree: live_json.parse(text) ?? return text
+        live_json.at<String>(tree, "") ?? text
+    }
+
+    // A push to each device the account `to` registered, as the compiler
+    // lowers `app.notify(to:, title:, body:, open:)`: `open_route` is the
+    // address of the state a tap opens (`__url_of`). Inside a job, a
+    // webhook's call or a scheduled run, each push's key is made from the
+    // run's key, `to` and `open_route`, so a run that runs again replaces the
+    // pushes it sent; outside one, each push has a fresh key. A device whose
+    // push service is not set up is skipped. A push its service refuses is
+    // dropped, and when the service says the device is gone, the device is
+    // forgotten. Each skip and failure is counted (`jet.push.skipped`,
+    // `jet.push.failed`) and kept with its service, account and reason
+    // (`push.outcomes`): the published signature declares only Net, so no
+    // log record can carry them.
+    __notify: fn(to: auth.AccountID, title: String, body: String, open_route: String) Never! -[Net]> {
+        account: to.raw()
+        devices: push.devices(account)
+        if devices.len() == 0 {
             return
         }
-    }
-    now: push_wire.push_now()
-    loop device in devices {
-        if !push_wire.push_configured(device.service) {
-            push_note(true, device.service, account, "no {push_wire.push_service_label(device.service)} settings")
-            next
+        run: push_run_key()
+        key: if run != "" -> push_wire.push_collapse_key(run, account, open_route) else -> {
+            push_wire.push_fresh_key() ?? {
+                loop device in devices -> push_note(false, device.service, account, err.reason)
+                return
+            }
         }
-        outcome: push_wire.push_deliver(device.service, device.token, device.key, device.auth, key, title, body, open_route, now)
-        if outcome.reason == "" -> next
-        if outcome.gone {
-            push.forget(device.service, device.token)
-            push_note(false, device.service, account, "{outcome.reason}; the device is forgotten")
-        } else { push_note(false, device.service, account, outcome.reason) }
+        now: push_wire.push_now()
+        loop device in devices {
+            if !push_wire.push_configured(device.service) {
+                push_note(true, device.service, account, "no {push_wire.push_service_label(device.service)} settings")
+                next
+            }
+            outcome: push_wire.push_deliver(device.service, device.token, device.key, device.auth, key, title, body, open_route, now)
+            if outcome.reason == "" -> next
+            if outcome.gone {
+                push.forget(device.service, device.token)
+                push_note(false, device.service, account, "{outcome.reason}; the device is forgotten")
+            } else { push_note(false, device.service, account, outcome.reason) }
+        }
     }
+}
+
+// A field of a screen's state that the address carries after `?`:
+// `#App.Query q: String{""}` is `?q=…`. Every other field of the state is
+// the `:name` segment of its screen's path that has its name.
+Query: struct {
+    impl Marker {
+        sites: [.Field]
+    }
+}
+
+// Starts the app graph, titled `title`.
+new: fn(title: String) -> App Never! { App{title: title} }
+
+// One screen of the route set: the path its state's fields fill, the state's
+// name, its `#App.Query` fields, and whether only a signed-in caller opens it.
+priv AppScreen: struct {
+    path: String
+    state: String
+    query: [String]
+    signed_in: Bool
+}
+
+// The route set: the screen of each state, by the state's name.
+priv APP_ROUTES: Shared{[String:AppScreen]{}}
+
+// A board's state, for the route-set test: its project is a path segment and
+// its filter the query.
+priv RouteTestBoard: struct {
+    project: String
+    q: String
+}
+
+#Test("a screen's state is its address: path fields fill their segments, and query fields with a value join the query") {
+    graph: new("Crew").__screen<RouteTestBoard>("/projects/:project/board", "app.RouteTestBoard", [String]{"q"}, true)
+    assert_eq(graph.title, "Crew")
+    names: [String]{"project", "q"}
+    assert_eq(App.__url_of<RouteTestBoard>("app.RouteTestBoard", names, [String]{App.__address_arg<String>("p 1/2"), App.__address_arg<String>("")}), "/projects/p%201%2F2/board")
+    assert_eq(App.__url_of<RouteTestBoard>("app.RouteTestBoard", names, [String]{App.__address_arg<String>("p1"), App.__address_arg<String>("login & fix")}), "/projects/p1/board?q=login%20%26%20fix")
+    assert_eq(App.__address_arg<Int>(42), "42")
+    assert_eq(App.__address_arg<Bool>(true), "true")
+    assert_eq(App.__address_arg<String>("say \"hi\""), "say \"hi\"")
 }
 
 // The key of the run this task is in: its delivery's ID for a job or a

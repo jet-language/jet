@@ -2857,7 +2857,7 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
         forget: fn(_: String, _: String) { true },
     }
     calls.push.store(devices)
-    calls.__notify(auth.AccountID.from_string("acct_unset"), "Due today", "Ship v2", "{{\"TaskView\":{{\"id\":7}}}}")
+    calls.App.__notify(auth.AccountID.from_string("acct_unset"), "Due today", "Ship v2", "/tasks/7")
     notes: calls.push.outcomes()
     assert(notes.len() > 0)
     assert_eq(notes[notes.len() - 1], "skipped fcm acct_unset: no FCM settings")
