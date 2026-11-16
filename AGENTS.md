@@ -255,9 +255,11 @@ manifest and keep any loss on a card.
 ## Biggest wins first
 
 This is a standing owner order, repeated many times, and it binds every plan,
-dispatch and landing for every goal. Work on a goal is done in order of its
+dispatch and landing inside a goal. Work on a goal is done in order of its
 expected gain on the goal's metric, largest first, and the largest steps start
-first even when they are architectural, long or hard.
+first even when they are architectural, long or hard. It ranks the work inside
+a goal; it never reorders the goals, which only the owner orders (see Owner
+gates and work state).
 
 - **Rank before work.** Before any agent starts on a goal, its plan on the card
   lists every candidate step with its estimated share of the gap, measured from
@@ -298,10 +300,14 @@ owner-only choice goes on a ballot and the work moves to independent criteria
 meanwhile. Workers send their questions to the orchestrator, and it answers them
 the same way.
 
-The orchestrator stays on the open goals in rank order, G1 and G2 first, until
-every criterion is met. Implementers write the code, land it on LaneCheck and
-report the commit; the orchestrator tests it in batches and sends every failure
-back to its implementer to fix.
+The orchestrator works the open goals in the owner's goal order, which Tower
+records on the goals, until every criterion is met. This is a standing owner
+order: three of the four agents always work the first unfinished goal in that
+order and the fourth works the goal after it, and when a goal is done the
+staffing moves one goal along. Work the owner puts ahead of the goal order
+takes the agents the owner gives it until it is done. Implementers write the
+code, land it on LaneCheck and report the commit; the orchestrator tests it in
+batches and sends every failure back to its implementer to fix.
 
 Tower is the only work ledger. Every incomplete stream has exactly one card
 recording its phase, plan, dependencies, criteria, and handoff state. Workers
