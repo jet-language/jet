@@ -122,8 +122,8 @@ vocabulary](vocabulary.md).
   D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
   `expand` runs at each site its `sites` names, and `target` is the record a
-  derive reads there: a struct's or enum's TypeInfo, a field's or variant's
-  FieldInfo, a method's MethodInfo, a function's FunctionInfo, an impl's
+  derive reads there: a struct's or enum's TypeInfo, a field's FieldInfo, an
+  enum case's CaseInfo, a method's MethodInfo, a function's FunctionInfo, an impl's
   TypeInfo, a code module's ModuleInfo (`name`, `identity`, `types`,
   `functions`, its written `markers` and its `comments`), the package's
   PackageInfo for a

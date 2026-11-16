@@ -368,9 +368,8 @@ the same answers, as
 [`FieldFacts`](../../../Examples/Metaprogramming/Reflection/FieldFacts/run.jet)
 shows: a marker body, a marker that adds a method to the type it marks, a
 comptime constant, ordinary code through `Rock.reflect()` and fn build each
-print a field's type, default span and offset. An enum case's `FieldInfo`
-names its payload as a TypeId: `Unit` for none, the payload type for one,
-and the written record `{x: Float, y: Float}` for named fields. A template
+print a field's type, default span and offset. An enum has no stored fields,
+so its `fields` is empty; its cases are its `cases` (below). A template
 compares a field's type by its `name` (`field.type.name == "Float"`) or,
 across modules, by its `identity`. A TypeInfo's own `identity` is the TypeId
 of the type it describes, the one a field of that type reads as its `type`,
@@ -385,11 +384,17 @@ the group path. Each `CaseInfo` also carries its `wire_name`, the name
 serialization writes (the case's own `#Rename` text, else its name in the
 enum's `#Rename(.Case)` casing); its `payload`, a `CasePayload`: `.Unit`,
 `.Single(TypeId)` for one positional value, or `.Named([FieldInfo])` for
-named fields in declaration order; its `discriminant`, the number the case
-writes (`Write = 4` reads `Val(4)`, a case that writes none reads `None`);
-its `markers`; and the `span` of its name. Reading a case builds no payload
-value
+named fields in declaration order; its `index` among the enum's leaf cases;
+its `discriminant`, the number the case writes (`Write = 4` reads `Val(4)`,
+a case that writes none reads `None`); its `markers`; the `span` of its
+name; and its `location` and `documentation`, as every declaration record
+has (below). Reading a case builds no payload value
 ([`EnumCases`](../../../Examples/Metaprogramming/Reflection/EnumCases.jet)).
+A derive or a marker template reads an enum's cases from `cases`: `#loop
+case in target.reflect().cases` binds each `CaseInfo`, `.#{case}` matches the
+case it names (a grouped one as `Fire.Burn`), and `case.reflect().fields`
+lists its payload fields, a lone unnamed payload as the field `value`. A
+marker on a case expands with that case's `CaseInfo` as its `target`.
 
 A case has no visibility of its own; its enum's applies. Because an enum's
 `TypeInfo` holds its whole case catalog, `T.reflect()` on an enum checks every
@@ -461,8 +466,8 @@ never makes the closure escape. A `:=` name, which can be rebound to another
 value, does not reflect as a closure.
 
 Every declaration record names where its declaration is written: the
-`location` of a `TypeInfo`, a `FieldInfo` (a field or an enum case), a
-`MethodInfo` and a `FunctionInfo` is a `SourceLocation?` whose `file`, `line`
+`location` of a `TypeInfo`, a `FieldInfo`, a `CaseInfo`, a `MethodInfo` and
+a `FunctionInfo` is a `SourceLocation?` whose `file`, `line`
 and `column` place the declaration's name, and whose `module` is the module
 that declares it; `function` is empty. A function reflects as a type does:
 `helper.reflect()` is its `FunctionInfo`. A generic type named with its
@@ -620,7 +625,7 @@ case there. [`enum_case_meta`](../../../tests/run/reflect/enum_case_meta.jet)
 walks each kind of case. `jet inspect expand --facts reflect` lists each call
 with the type, field and case tree it retains.
 
-`info.marker(T)` on a `TypeInfo`, `FieldInfo`, `MethodInfo` or `FunctionInfo`
+`info.marker(T)` on a `TypeInfo`, `FieldInfo`, `CaseInfo`, `MethodInfo` or `FunctionInfo`
 (and, in a marker body, on a module's `ModuleInfo`) reads the marker
 `T` written on the reflected item as a `T?`: a `T` whose fields are the
 marker's arguments, or `None` when the item does not carry it. `T` names a
