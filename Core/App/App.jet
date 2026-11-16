@@ -333,6 +333,111 @@ new_id: fn() -[Rand, Time]> String Never! {
     assert(made >= before && made <= after)
 }
 
+// Where a handler's failure goes. A control's handler has the type
+// `fn() app.Notice!`, so its error type converts to a Notice; the frame
+// shows the notice beside the control, announces it, and keeps it until
+// it is dismissed. `retry` offers to run the handler again.
+#Error
+Notice: struct {
+    text: String
+    retry: Bool{false}
+}
+
+// The app's notice list holds the notices that have no control to sit
+// beside: a failed background run, a queued write refused after its screen
+// closed. The frame shows the list on every screen and keeps each notice
+// until it is dismissed. The list lives in one process-wide cell, or in
+// the World's own cell inside a deterministic world, as length-prefixed
+// fields: each notice's text, then "1" or "0" for its retry.
+NoticeCell: struct {
+    bytes: [U8]
+}
+
+NOTICE_CELL: Shared{NoticeCell{bytes: [U8]{}}}
+
+NOTICE_STORE: "app.notices"
+
+notice_cell_load: fn() -> [U8] {
+    if world_rt.world_store_load(NOTICE_STORE) == .Val(bytes) -> return bytes
+    NOTICE_CELL.bytes
+}
+
+notice_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
+    if world_rt.world_store_replace(NOTICE_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    cell := NOTICE_CELL.guard_edit()
+    if cell.value.bytes != expected -> return false
+    cell.value.bytes = replacement.move()
+    true
+}
+
+// Adds `notice` to the end of the app's notice list.
+__keep_notice: fn(notice: Notice) {
+    loop {
+        seen: notice_cell_load()
+        kept := seen.copy()
+        live_put(kept, notice.text)
+        live_put(kept, if notice.retry -> "1" else -> "0")
+        if notice_cell_replace(seen, kept) {
+            return
+        }
+    }
+}
+
+// The app's notice list, oldest first.
+__notices: fn() -> [Notice] { notice_decode(notice_cell_load()) }
+
+// Removes the notice at position `at` of the app's notice list; nothing
+// when there is none.
+__dismiss: fn(at: Int) {
+    loop {
+        seen: notice_cell_load()
+        notices: notice_decode(seen)
+        if at < 0 || at >= notices.len() {
+            return
+        }
+        kept := [U8]{}
+        loop index in 0..<notices.len() {
+            if index == at -> next
+            live_put(kept, notices[index].text)
+            live_put(kept, if notices[index].retry -> "1" else -> "0")
+        }
+        if notice_cell_replace(seen, kept) {
+            return
+        }
+    }
+}
+
+// The notices of an encoded list; malformed bytes are an empty list.
+notice_decode: fn(raw: [U8]) -> [Notice] {
+    fields: live_fields(raw) ?? return [Notice]{}
+    notices := [Notice]{}
+    at := 0
+    loop at + 1 < fields.len() {
+        notices.push(Notice{text: fields[at], retry: fields[at + 1] == "1"})
+        at += 2
+    }
+    notices
+}
+
+#Test("a kept notice stays in the app's notice list, in order, until it is dismissed") {
+    before: __notices().len()
+    __keep_notice(Notice{text: "Couldn't sync the board.", retry: true})
+    __keep_notice(Notice{text: "That task no longer exists."})
+    kept: __notices()
+    assert_eq(kept.len(), before + 2)
+    assert_eq(kept[before].text, "Couldn't sync the board.")
+    assert(kept[before].retry, "the first notice offers a retry")
+    assert_eq(kept[before + 1].text, "That task no longer exists.")
+    assert(!kept[before + 1].retry, "a notice offers no retry unless it says so")
+    __dismiss(before)
+    __dismiss(kept.len())
+    left: __notices()
+    assert_eq(left.len(), before + 1)
+    assert_eq(left[before].text, "That task no longer exists.")
+}
+
 // The largest reply a remote call reads.
 REMOTE_MAX_REPLY: 16777216
 

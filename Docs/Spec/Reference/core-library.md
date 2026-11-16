@@ -5917,6 +5917,14 @@ with its `Age`, and does not run the method. Each keep drops the stale
 rows, so the table holds only fresh replies. No cache server runs, and an
 in-memory database shares nothing.
 
+`app.Notice{text:, retry:}` is where a handler's failure goes. A control's
+handler has the type `fn() app.Notice!`, so its error type converts to a
+Notice (`impl TaskError -> app.Notice`). The frame shows the notice beside
+the control, and `retry: true` offers to run the handler again. A notice
+with no control to sit beside, such as a failed background run or a queued
+write refused after its screen closed, joins the app's notice list. The list
+keeps each notice, in order, until it is dismissed. The list lives in one
+process-wide cell, or in the World's own cell inside a deterministic world.
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with
