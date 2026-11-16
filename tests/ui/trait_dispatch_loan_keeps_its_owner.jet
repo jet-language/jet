@@ -1,0 +1,30 @@
+// A trait method that lends its receiver (`-> Point? from self`) keeps that
+// loan through dynamic dispatch, as a struct method does: the list can't be
+// given away while the result still looks into its element.
+Point: struct {
+    x: Int
+    y: Int
+}
+
+Shown: trait {
+    point: fn(self) -> Point? from self {
+        None
+    }
+}
+
+impl Int.Shown {
+
+}
+
+impl Point.Shown {
+    point: fn(self) -> Point? from self { Val(self) }
+}
+
+consume: fn(items: &&[Shown]) -> Int { items.len() }
+
+run: fn() {
+    items: [Shown]{14, Point{x: 1, y: 2}}
+    got: items[1].point()
+    print(consume(items))
+    print(got != None)
+}

@@ -1,0 +1,37 @@
+// A trait method that lends its receiver (`-> Point? from self`) keeps that
+// loan through dynamic dispatch: each result reads its own element while the
+// list stays put, and the list is free to give away once no result is live.
+Point: struct {
+    x: Int
+    y: Int
+}
+
+Shown: trait {
+    point: fn(self) -> Point? from self {
+        None
+    }
+}
+
+impl Int.Shown {
+
+}
+
+impl Point.Shown {
+    point: fn(self) -> Point? from self { Val(self) }
+}
+
+consume: fn(items: &&[Shown]) -> Int { items.len() }
+
+run: fn() {
+    items: [Shown]{14, Point{x: 41, y: 42}}
+    loop item in items {
+        got: item.point()
+        if got == {
+            .Val(p) -> { print(p.x) }
+            .None -> print("none")
+        }
+    }
+    last: items[1].point()
+    if last == .Val(p) -> print(p.y)
+    print(consume(items))
+}

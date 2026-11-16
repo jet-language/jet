@@ -10,6 +10,7 @@ use {
         SemIndex,
         SemParam,
         semindex_access_name,
+        semindex_display_text,
         semindex_doc_text,
         semindex_policy_display,
         semindex_zone_name,
@@ -299,14 +300,14 @@ jet_cli_expand_text: fn(index: SemIndex, lens: JetCLIExpandLensSpec, facts: [Jet
     text := "effect roles\n  {jet_cli_effect_projection_line(index.effect_projection)}\n{lens.name} — {lens.summary} ({facts.len()} fact{plural})\n"
     if facts.len() == 0 -> text = "{text}  (none in this program)\n"
     loop fact in facts -> text = "{text}  {fact.text}\n"
-    "{text}{check_text}"
+    semindex_display_text(index, "{text}{check_text}")
 }
 
 jet_cli_expand_json: fn(index: SemIndex, selection: String, lenses: [JetCLIStatusValue], check: JetCLIStatusValue) -> String {
     payload: jet_cli_semindex_payload(index)
     head: semindex_doc_text(payload.bytes(), 0, payload.bytes().len() - 1)
     expand: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("selection", jet_cli_status_text(selection)), jet_cli_status_field("lenses", jet_cli_status_array(lenses))})
-    expanded: "{head},\"expand\":{jet_cli_status_json(expand)}}}"
+    expanded: "{head},\"expand\":{semindex_display_text(index, jet_cli_status_json(expand))}}}"
     "{jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("semindex", JetCLIStatusValue.Float{text: expanded}), jet_cli_status_field("check", check)})}\n"
 }
 

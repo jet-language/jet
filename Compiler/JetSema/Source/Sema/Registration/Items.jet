@@ -2076,7 +2076,7 @@ sema_registration_trait_method_signature: fn(method: TraitMethodSig, raw_protoco
     }
     param_contract: if has_contract -> Val(contract) else -> None
     metadata: Val(FunctionCallMetadata{names: names, defaults: defaults, variadic: variadic, conventions: conventions, policies: CallablePolicyChain{policies: [CallablePolicy]{}}})
-    Type.Fn{params: params, ret: Val(return_type), effect_bound: effect_bound, param_contract: param_contract, call_metadata: metadata, return_view_provenance: method.return_view_provenance}
+    Type.Fn{params: params, ret: Val(return_type), effect_bound: effect_bound, param_contract: param_contract, call_metadata: metadata, return_view_provenance: sema_signature_view_provenance(method.return_view_provenance, method.declared_return_view_provenance, method.return_type)}
 }
 
 sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: String, owner: Symbol, symbols: &SymbolTable, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> SemaRegistrationTraitMethod {

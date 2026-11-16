@@ -1,0 +1,21 @@
+Small: struct {
+    value: Int
+
+    impl Literal.Int {
+        #run from_literal: fn(value: Int) -> Small {
+            if value > 100 -> panic("too big for Small")
+            Small{value: value}
+        }
+    }
+
+    #run doubled: fn(value: Int) -> Small { Small.from_literal(value * 2) }
+}
+
+FROM_MODULE: #run Small.doubled(4)
+
+run: fn() {
+    from_binding: #run Small.from_literal(7)
+    from_method: #run Small.doubled(5)
+    from_block: #run { Small.doubled(from_binding.value).value + 1 }
+    print("{from_binding.value} {from_method.value} {FROM_MODULE.value} {from_block}")
+}

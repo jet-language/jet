@@ -1,0 +1,64 @@
+// A board whose `add` queues two jobs: `note`, which takes arguments and
+// can fail, and `tick`, which takes none and can't. `add` is called directly,
+// outside any call's transaction, so each job runs at once, on a task of its
+// own.
+use {
+    app
+    tasks: core.tasks
+}
+
+#Error
+BoardError: enum {
+    Failed(String)
+}
+
+Board: struct {
+    seen: Shared<[String]>
+
+    // Queues note `id` and a tick.
+    #App.Public add: fn(self, id: Int) -> Int BoardError! {
+        app.enqueue(fn() { self.note(id, "added {id}") })
+        app.enqueue(fn() { self.tick() })
+        Ok(id)
+    }
+
+    // Records note `id`.
+    #App.Job note: fn(self, id: Int, text: String) -> Int BoardError! {
+        if id < 0 -> return Err(BoardError.Failed("no note has a negative id"))
+        seen := self.seen.guard_edit()
+        seen.value.push("note {id}: {text}")
+        Ok(id)
+    }
+
+    // Records a tick.
+    #App.Job tick: fn(self) -> Int {
+        seen := self.seen.guard_edit()
+        seen.value.push("tick")
+        seen.value.len()
+    }
+}
+
+// How many runs `seen` records.
+runs: fn(seen: Shared<[String]>) -> Int {
+    kept: seen.guard_read()
+    kept.value.len()
+}
+
+run: fn() {
+    seen: Shared{[String]{}}
+    board: Board{seen: seen.copy()}
+    added: board.add(7) ?? {
+        print("add failed")
+        return
+    }
+    print("added {added}")
+    loop _ in 0..<500 {
+        if runs(seen.copy()) == 2 -> break
+        tasks.sleep(10)
+    }
+    kept: seen.guard_read()
+    // The two jobs run on tasks of their own, in either order.
+    lines := kept.value.copy()
+    lines.sort()
+    loop line in lines -> print(line)
+}

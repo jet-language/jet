@@ -32,8 +32,15 @@ sema_call_reflection_leaf_name: fn(name: String) -> String Never! {
 // (sema_call_reflection_level_args): its stored struct fields and enum cases
 // as a preorder tree. None, with its E0112 reported at `value_span`, when a
 // stored field or case payload can't be captured, or the value holds what a
-// capture can't copy: a capture holds the whole value or refuses it.
+// capture can't copy: a capture holds the whole value or refuses it. A field
+// the capture can't hold is named first, since it says more than the whole
+// value's copy gate (a secret-bearing field also makes its value one owner's).
 sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [TExpr]? {
+    args := [TExpr]{}
+    sema_call_reflection_names(ty, span, environment, program, args)
+    if !sema_call_reflection_level_args(ty, span, value_span, environment, program, scopes, [String]{}, args, diagnostics) {
+        return None
+    }
     held := ""
     facts: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, environment.generic_params, false)
     if facts.holds_resource -> held = "resource state, which has one owner"
@@ -45,16 +52,11 @@ sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, envir
         diagnostics.push(sema_error("E0112", value_span, "`reflect.of` can't capture {sema_type_show(ty)}", "a capture keeps its own copy of the whole value, and {sema_type_show(ty)} holds {held}", "reflect the parts of the value that hold plain data instead"))
         return None
     }
-    args := [TExpr]{}
-    sema_call_reflection_names(ty, span, environment, program, args)
-    if !sema_call_reflection_level_args(ty, span, value_span, environment, program, scopes, [String]{}, args, diagnostics) {
-        return None
-    }
     Val(args)
 }
 
 // The names a reflected value of `ty` carries: its type name and canonical
-// path (`module.Type`, the identity of the TypeId `T.reflect()` reads), then
+// path (sema_call_reflection_row_names, the text `T.reflect().path` reads), then
 // the count of the declared types an erased trait value of `ty` may hold and
 // each one's checked key (TTypeDef.key), type name and path, so the IR names
 // a trait value by the type whose payload key its box holds
@@ -202,7 +204,7 @@ sema_call_reflection_field_capturable: fn(ty: Type, environment: SemaScopeEnviro
     false
 }
 
-// A nominal type reflects as its declared name and `module.Name` path
+// A nominal type reflects as its leaf name and canonical path
 // (sema_call_reflection_row_names); any other type as its written spelling
 // for both.
 sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> (type_name: String, path: String) {
@@ -215,12 +217,15 @@ sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment,
     (type_name: shown, path: shown)
 }
 
-// The nominal at `row` reflects as its declared name and `module.Name` path
-// (the module path as an identifier: `reflect-value.jet` is `reflect_value`).
+// The nominal at `row` reflects as its leaf name and its canonical path
+// (sema_name_type_path, the module path as an identifier: `reflect-value.jet`
+// is `reflect_value`): a type lifted from an inline module is `Point` at
+// `app.geo.Point`, never its generated name.
 sema_call_reflection_row_names: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> (type_name: String, path: String) Never! {
-    name: graph.modules[row.module_index].nominals[row.row].symbol.name
-    if graph.modules[row.module_index].module_path == "" -> return (type_name: name, path: name)
-    (type_name: name, path: "{graph.modules[row.module_index].module_path.replace("-", "_")}.{name}")
+    registered: graph.modules[row.module_index]
+    name: registered.nominals[row.row].symbol.name
+    leaf: sema_name_type_leaf(registered.program.items, name)
+    (type_name: leaf, path: sema_name_type_path(registered.module_path.replace("-", "_"), registered.program.items, name))
 }
 
 sema_call_reflection_text: fn(text: String, span: Span) -> TExpr Never! {
@@ -620,7 +625,7 @@ sema_call_reflection_metadata_owner: fn(ty: Type) -> String? {
 
 sema_call_reflection_metadata_method: fn(owner: String, method: String) -> Bool Never! {
     if owner == "TypeInfo" -> return method == "has_method" || method == "marker"
-    if owner == "FieldInfo" || owner == "MethodInfo" || owner == "FunctionInfo" {
+    if owner == "FieldInfo" || owner == "CaseInfo" || owner == "MethodInfo" || owner == "FunctionInfo" {
         return method == "marker"
     }
     false
@@ -636,7 +641,7 @@ sema_call_reflection_marker_name: fn(expression: Expr) -> String? Never! {
     None
 }
 
-// `info.marker(T)` on a TypeInfo, FieldInfo, MethodInfo or FunctionInfo: the marker `T`
+// `info.marker(T)` on a TypeInfo, FieldInfo, CaseInfo, MethodInfo or FunctionInfo: the marker `T`
 // written on the reflected item, read as a `T` whose fields are its
 // arguments, or None when the item does not carry it. `T` names a marker
 // struct (one with an `impl Marker` block) visible here or a Prelude marker

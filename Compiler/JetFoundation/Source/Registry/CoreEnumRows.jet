@@ -1,8 +1,10 @@
-// The Core enum leaves for `core_enum_variants`, in Core.rows module
-// declaration order: the first row naming a type is its canonical variant
-// list, and every module that exports the leaf must declare the same variants
-// (the build stops otherwise). A generic leaf is not an enum row.
-CORE_ENUM_ROWS: #run core_enum_rows(CORE_DECLARATIONS)
+// The Core enum leaves for `core_enum_cases`, in Core.rows module declaration
+// order: each `Name:plain(A|B)` list, which Tools/agent/CoreEnumCases.jet
+// writes from the enum a Core source declares (its `--check` fails a stale
+// list). The first row naming a type is its canonical case list, and every
+// module that exports the leaf must declare the same cases (the build stops
+// otherwise). A generic leaf is not an enum row.
+CORE_ENUM_CASE_ROWS: #run core_enum_case_rows(CORE_DECLARATIONS)
 
 // Source-owned Core nominals (`source_module … types { … }`) in Core.rows order.
 CORE_SOURCE_OWNED_TYPES: #run core_source_owned_types(CORE_DECLARATIONS)
@@ -13,7 +15,7 @@ CORE_SOURCE_OWNED_TYPES: #run core_source_owned_types(CORE_DECLARATIONS)
 // loads whenever the record's owner does: `owner_module` is the Core module
 // that declares the owner, or "" for the compiler's own records (TypeInfo,
 // FieldInfo, …), which every program has. A Core enum needs no source (its
-// variants are CORE_ENUM_ROWS), and a function type holds no layout of its
+// variants are CORE_ENUM_CASE_ROWS), and a function type holds no layout of its
 // parameters.
 CoreRecordSourceDemand: struct {
     owner_module: String
@@ -26,7 +28,7 @@ CoreRecordSourceDemand: struct {
 // core.prelude}).
 CORE_RECORD_SOURCE_DEMANDS: #run core_record_source_demands(CORE_DECLARATIONS, CORE_RECORD_FIELD_ROWS)
 
-core_enum_rows: fn(declared: CoreDeclarations) -> [CoreModuleTypeExport] {
+core_enum_case_rows: fn(declared: CoreDeclarations) -> [CoreModuleTypeExport] {
     rows := [CoreModuleTypeExport]{}
     seen := [String:String]{}
     loop entry in declared.modules {

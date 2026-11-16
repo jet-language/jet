@@ -69,6 +69,45 @@ program calls at run time
 The program makes each function value where it reads the module value, so
 such a value is never placed in static data.
 
+A compile-time value must be data: the build keeps it and hands it to later
+compile-time code and to the program. A runtime handle such as a
+[reader](../vocabulary.md#reader) or a [stream](../vocabulary.md#stream) lives
+only in the run that made it, so a `#run` value whose type holds one is E1018
+at its name
+([`comptime_dependency_handle_value.jet`](../../../tests/ui/comptime_dependency_handle_value.jet)).
+Work that needs the handle uses it inside one `#run`, such as a function it
+calls, and keeps the data that work returns
+([`sequential_comptime_reads_advance_one_reader`](../../../tests/cases/comptime_diff/sequential_comptime_reads_advance_one_reader.case)).
+
+A `#run fn` runs while building, and never with the program. A literal
+hook (`#run from_literal`) is computed while building for each literal that
+takes it, and its value replaces the literal. A hook that panics stops the
+build (E3010), and a hook that reaches an effect such as printing is refused
+(E3410)
+([`comptime_no_silent_fallback_literal_hook`](../../../tests/cases/comptime_no_silent_fallback/comptime_no_silent_fallback_literal_hook.case)).
+Only code that runs while building calls a `#run fn`: a `#run` value, a
+`#run { … }` block, another `#run fn` body, `build: fn` and a module value.
+A call from run-time code is E1019 at the call. The fix computes the value
+with `value: #run T.f(…)`
+([`comptime_no_silent_fallback_run_fn_call.jet`](../../../tests/ui/comptime_no_silent_fallback_run_fn_call.jet),
+[`comptime_no_silent_fallback_run_fn_call`](../../../tests/cases/comptime_no_silent_fallback/comptime_no_silent_fallback_run_fn_call.case)).
+
+A compile-time value that can't be computed is reported once, at the value
+that owns the problem, and the values and code that read it report nothing
+more. Each case has a UI snapshot:
+
+| Problem | Code | Reported at | Snapshot |
+| --- | --- | --- | --- |
+| a value reads itself | E0338 | its expression | [`comptime_dependency_self_cycle.jet`](../../../tests/ui/comptime_dependency_self_cycle.jet) |
+| values read each other, also through a function | E0338, naming each value around the cycle | the value the cycle closes on | [`comptime_dependency_cycle_through_function.jet`](../../../tests/ui/comptime_dependency_cycle_through_function.jet) |
+| a value calls something that doesn't exist | E0102 | the call | [`comptime_dependency_missing.jet`](../../../tests/ui/comptime_dependency_missing.jet) |
+| a value reaches an effect such as printing | E3410 | the call | [`comptime_dependency_impure.jet`](../../../tests/ui/comptime_dependency_impure.jet) |
+| a value reads a module value the build can't compute | E0643 | the module value | [`comptime_dependency_runtime_value.jet`](../../../tests/ui/comptime_dependency_runtime_value.jet) |
+| a value it reads panics | E3010 | the call that panicked | [`comptime_dependency_panics.jet`](../../../tests/ui/comptime_dependency_panics.jet) |
+| a value holds a runtime handle | E1018 | its name | [`comptime_dependency_handle_value.jet`](../../../tests/ui/comptime_dependency_handle_value.jet) |
+| a value holds a function that running code made, such as a closure | E1020 | the call that made it | [`comptime_dependency_closure_value.jet`](../../../tests/ui/comptime_dependency_closure_value.jet) |
+| code reads the value as another type | E0112 | the code that reads it | [`comptime_dependency_consumer_type.jet`](../../../tests/ui/comptime_dependency_consumer_type.jet) |
+
 `@if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See
@@ -368,9 +407,8 @@ the same answers, as
 [`FieldFacts`](../../../Examples/Metaprogramming/Reflection/FieldFacts/run.jet)
 shows: a marker body, a marker that adds a method to the type it marks, a
 comptime constant, ordinary code through `Rock.reflect()` and fn build each
-print a field's type, default span and offset. An enum case's `FieldInfo`
-names its payload as a TypeId: `Unit` for none, the payload type for one,
-and the written record `{x: Float, y: Float}` for named fields. A template
+print a field's type, default span and offset. An enum has no stored fields,
+so its `fields` is empty; its cases are its `cases` (below). A template
 compares a field's type by its `name` (`field.type.name == "Float"`) or,
 across modules, by its `identity`. A TypeInfo's own `identity` is the TypeId
 of the type it describes, the one a field of that type reads as its `type`,
@@ -380,16 +418,23 @@ of type `Ore`.
 An enum's `cases` is a `[CaseInfo]`, one per leaf case in declaration order;
 every other type's is empty. A case inside a group is one leaf: in
 `P: enum { Quit, Action { Text(String) } }` the case `Action.Text` has the
-`name` `Text` and the `path` `main.P.Action.Text`, the module, the enum and
-the group path. Each `CaseInfo` also carries its `wire_name`, the name
+`name` `Text` and the `path` `main.P.Action.Text`, the enum's canonical path
+(`main.geo.P` for an enum in the inline module `geo`) and the group path.
+Each `CaseInfo` also carries its `wire_name`, the name
 serialization writes (the case's own `#Rename` text, else its name in the
 enum's `#Rename(.Case)` casing); its `payload`, a `CasePayload`: `.Unit`,
 `.Single(TypeId)` for one positional value, or `.Named([FieldInfo])` for
-named fields in declaration order; its `discriminant`, the number the case
-writes (`Write = 4` reads `Val(4)`, a case that writes none reads `None`);
-its `markers`; and the `span` of its name. Reading a case builds no payload
-value
+named fields in declaration order; its `index` among the enum's leaf cases;
+its `discriminant`, the number the case writes (`Write = 4` reads `Val(4)`,
+a case that writes none reads `None`); its `markers`; the `span` of its
+name; and its `location` and `documentation`, as every declaration record
+has (below). Reading a case builds no payload value
 ([`EnumCases`](../../../Examples/Metaprogramming/Reflection/EnumCases.jet)).
+A derive or a marker template reads an enum's cases from `cases`: `#loop
+case in target.reflect().cases` binds each `CaseInfo`, `.#{case}` matches the
+case it names (a grouped one as `Fire.Burn`), and `case.reflect().fields`
+lists its payload fields, a lone unnamed payload as the field `value`. A
+marker on a case expands with that case's `CaseInfo` as its `target`.
 
 A case has no visibility of its own; its enum's applies. Because an enum's
 `TypeInfo` holds its whole case catalog, `T.reflect()` on an enum checks every
@@ -461,8 +506,8 @@ never makes the closure escape. A `:=` name, which can be rebound to another
 value, does not reflect as a closure.
 
 Every declaration record names where its declaration is written: the
-`location` of a `TypeInfo`, a `FieldInfo` (a field or an enum case), a
-`MethodInfo` and a `FunctionInfo` is a `SourceLocation?` whose `file`, `line`
+`location` of a `TypeInfo`, a `FieldInfo`, a `CaseInfo`, a `MethodInfo` and
+a `FunctionInfo` is a `SourceLocation?` whose `file`, `line`
 and `column` place the declaration's name, and whose `module` is the module
 that declares it; `function` is empty. A function reflects as a type does:
 `helper.reflect()` is its `FunctionInfo`. A generic type named with its
@@ -583,18 +628,22 @@ run: fn() {
 ```
 
 `reflect.of(value)` is legal where value interpolation is legal. Its
-`type_name`, `path`, and `display` operations are always available; `path`
-is the type's identity, the same text as `T.reflect().identity`. An erased
-trait value (`[Shape]{Square{side: 2}}[0]`) reflects as the concrete value its
-box holds: its `type_name` and `path` name the declared type whose payload key
-the box carries, so `path` equals that type's `T.reflect().identity`. The key
-is a hash of the type's identity alone, so it does not change in a build that
-adds a module. A value of a builtin or generic implementer keeps the trait's
-own names. `fields()` is populated for a struct and is empty for a
-non-struct value. A struct field's `value()` lists that struct's own fields,
-so `.fields()[i].value()` walks a nested value level by level. A generic
-reflection value retains the substituted field type, as the same example
-shows for `Box<Int>`.
+`type_name`, `path`, and `display` operations are always available;
+`type_name` is the type's leaf name and `path` its canonical path, the same
+text as `T.reflect().name` and `T.reflect().path`. The path is the one the
+name ledger gives the type: the module path, each inline module, then the
+name, so `Point` declared in the inline module `geo` of `app.jet` is
+`app.geo.Point` and never a name the compiler generates for it
+([`ReflectPaths`](../../../Examples/Metaprogramming/Reflection/ReflectPaths.jet)).
+An erased trait value (`[Shape]{Square{side: 2}}[0]`) reflects as the concrete
+value its box holds: its `type_name` and `path` name the declared type whose
+payload key the box carries. The key is a hash of the type's identity alone,
+so it does not change in a build that adds a module. A value of a builtin or
+generic implementer keeps the trait's own names. `fields()` is populated for
+a struct and is empty for a non-struct value. A struct field's `value()`
+lists that struct's own fields, so `.fields()[i].value()` walks a nested value
+level by level. A generic reflection value retains the substituted field
+type, as the same example shows for `Box<Int>`.
 
 A `Value` keeps the captured value typed, not only its display text:
 `int()`, `float()`, `bool()`, `char()` and `string()` return `Some` with the
@@ -620,7 +669,7 @@ case there. [`enum_case_meta`](../../../tests/run/reflect/enum_case_meta.jet)
 walks each kind of case. `jet inspect expand --facts reflect` lists each call
 with the type, field and case tree it retains.
 
-`info.marker(T)` on a `TypeInfo`, `FieldInfo`, `MethodInfo` or `FunctionInfo`
+`info.marker(T)` on a `TypeInfo`, `FieldInfo`, `CaseInfo`, `MethodInfo` or `FunctionInfo`
 (and, in a marker body, on a module's `ModuleInfo`) reads the marker
 `T` written on the reflected item as a `T?`: a `T` whose fields are the
 marker's arguments, or `None` when the item does not carry it. `T` names a

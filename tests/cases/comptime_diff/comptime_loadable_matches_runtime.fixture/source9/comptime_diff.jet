@@ -3,10 +3,10 @@ use {
     loadable: core.reactive.loadable
 }
 
-COMPTIME_VALUE: #run loadable.loaded(7).or_else(0)
+COMPTIME_VALUE: #run { loadable.reason(loadable.failed<Int, String>("offline")) ?? "" }
 
 run: fn() {
-    r: loadable.loaded(7).or_else(0)
+    r: loadable.reason(loadable.failed<Int, String>("offline")) ?? ""
     comptime_diff_frame("{COMPTIME_VALUE}", "{r}")
 }
 

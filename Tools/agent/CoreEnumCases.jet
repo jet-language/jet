@@ -1,0 +1,301 @@
+#!/usr/bin/env jet
+// Write the case lists of the Core enum leaves in Compiler/Prelude/Core.rows
+// from the enums the Core sources declare. A `module` line lists each type
+// its module exports (`types { … }`); an enum leaf is `Name:plain(A|B)`, its
+// cases in declaration order. The compiler reads those lists
+// (Registry/CoreEnumRows.jet CORE_ENUM_CASE_ROWS) for the cases of a Core enum
+// whose module a program has not loaded, so no program loads a Core module
+// for them. When a source of the line's module (its `source_module` rows and
+// the parts Compiler/Prelude/CoreSourceParts.tsv attaches to it) declares
+// `Name: enum { … }`, this tool writes the list from that declaration. The
+// cases are the upper-case names at the body's top level before its first
+// method, read the way the compiler build reads them
+// (Compiler/JetFoundation/Source/CoreDeclarations/Sources.jet). A list whose
+// enum no Core source declares is the compiler-owned residue
+// (Registry/CoreEnumPayloadRows.jet) and is left as it is written.
+// Usage (from the repository root): jet Tools/agent/CoreEnumCases.jet
+// [--check|--write]; --check fails when a list differs from its declaration,
+// and --write rewrites the lists.
+use {
+    files: core.files
+    process: core.process
+}
+
+ROWS_PATH: "Compiler/Prelude/Core.rows"
+
+PARTS_PATH: "Compiler/Prelude/CoreSourceParts.tsv"
+
+TYPES_OPEN: " types {{ "
+
+LIST_OPEN: ":plain("
+
+#Error
+CoreEnumCasesError: struct {
+    message: String
+}
+
+cases_fail: fn(message: String) -> CoreEnumCasesError Never! {
+    CoreEnumCasesError{message: "core enum cases: {message}"}
+}
+
+// One enum leaf whose written list differs from its declaration.
+StaleList: struct {
+    module_name: String
+    name: String
+    written: String
+    declared: String
+    path: String
+}
+
+// The rewritten Core.rows text and the lists it changed.
+CaseLists: struct {
+    text: String
+    stale: [StaleList]
+    written: Int
+    residue: Int
+}
+
+space_byte: fn(code: Int) -> Bool Never! {
+    code == 32 || code == 9 || code == 10 || code == 11 || code == 12 || code == 13
+}
+
+upper_byte: fn(code: Int) -> Bool Never! { code >= 65 && code <= 90 }
+
+lower_byte: fn(code: Int) -> Bool Never! { code >= 97 && code <= 122 }
+
+word_byte: fn(code: Int) -> Bool Never! {
+    lower_byte(code) || upper_byte(code) || (code >= 48 && code <= 57) || code == 95
+}
+
+byte_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
+    String.from_bytes(bytes.slice(start, end)) ?? ""
+}
+
+code_at: fn(bytes: [U8], at: Int) -> Int Never! { Int{bytes[at]} }
+
+skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
+    at := start
+    loop at < bytes.len() && space_byte(code_at(bytes, at)) -> at += 1
+    at
+}
+
+// Each Core module's source paths: its `source_module` rows in Core.rows
+// (`source_module <module> path <path> …`), then each part CoreSourceParts.tsv
+// attaches to it (columns: module, owner, path, …).
+module_sources: fn(rows: String, parts: String) -> [String:[String]] Never! {
+    sources := [String:[String]]{}
+    loop line in rows.lines() {
+        if !line.starts_with("source_module ") -> next
+        words: line.split(" ").to_list()
+        if words.len() < 4 || words[2] != "path" -> next
+        if !sources.has_key(words[1]) -> sources[words[1]] = [String]{}
+        sources[words[1]].push(words[3])
+    }
+    loop line in parts.lines() {
+        if line == "" || line.starts_with("#") -> next
+        columns: line.split("\t").to_list()
+        if columns.len() < 3 -> next
+        if !sources.has_key(columns[1]) -> sources[columns[1]] = [String]{}
+        sources[columns[1]].push(columns[2])
+    }
+    sources
+}
+
+// Whether `name:` at byte `at` starts a declaration: only spaces, tabs and an
+// optional `pub` stand before it on its line.
+declaration_start: fn(bytes: [U8], at: Int) -> Bool Never! {
+    back := at
+    loop back > 0 && (code_at(bytes, back - 1) == 32 || code_at(bytes, back - 1) == 9) -> back -= 1
+    if back == 0 || code_at(bytes, back - 1) == 10 -> return true
+    if back == at || back < 3 || byte_text(bytes, back - 3, back) != "pub" -> return false
+    start := back - 3
+    loop start > 0 && (code_at(bytes, start - 1) == 32 || code_at(bytes, start - 1) == 9) {
+        start -= 1
+    }
+    start == 0 || code_at(bytes, start - 1) == 10
+}
+
+// The cases `text` declares for the enum `name` (`name: enum { … }` at a line
+// start), or None when it declares no such enum.
+declared_cases: fn(text: String, name: String) -> [String]? {
+    bytes: text.bytes()
+    needle: "{name}:"
+    start := 0
+    loop {
+        found: byte_text(bytes, start, bytes.len()).find(needle)
+        if found < 0 -> return None
+        at: start + found
+        start = at + 1
+        if !declaration_start(bytes, at) -> next
+        keyword: skip_space(bytes, at + needle.bytes().len())
+        if keyword + 4 > bytes.len() || byte_text(bytes, keyword, keyword + 4) != "enum" -> next
+        brace: skip_space(bytes, keyword + 4)
+        if brace >= bytes.len() || code_at(bytes, brace) != 123 -> next
+        return Val(body_cases(bytes, brace + 1))
+    }
+}
+
+// The cases of the enum body that opens at byte `open`: the upper-case names
+// at its top level, comments dropped, until its first `fn` or `impl`.
+body_cases: fn(bytes: [U8], open: Int) -> [String] Never! {
+    end := open
+    depth := 1
+    loop depth > 0 && end < bytes.len() {
+        code: code_at(bytes, end)
+        if code == 123 -> depth += 1
+        if code == 125 -> depth -= 1
+        end += 1
+    }
+    body_end: end - 1
+    cases := [String]{}
+    nesting := 0
+    index := open
+    loop index < body_end {
+        code: code_at(bytes, index)
+        if code == 47 && index + 1 < body_end && code_at(bytes, index + 1) == 47 {
+            loop index < body_end && code_at(bytes, index) != 10 -> index += 1
+            next
+        }
+        if code == 40 || code == 91 || code == 123 {
+            nesting += 1
+            index += 1
+            next
+        }
+        if code == 41 || code == 93 || code == 125 {
+            nesting -= 1
+            index += 1
+            next
+        }
+        if nesting != 0 || !(lower_byte(code) || upper_byte(code) || code == 95) {
+            index += 1
+            next
+        }
+        word_end := index + 1
+        loop word_end < body_end && word_byte(code_at(bytes, word_end)) -> word_end += 1
+        word: byte_text(bytes, index, word_end)
+        if word == "fn" || word == "impl" -> break
+        if upper_byte(code) -> cases.push(word)
+        index = word_end
+    }
+    cases
+}
+
+// The cases the sources of `module_name` declare for `name`, and the path of
+// the source that declares them; None when no source of the module does.
+module_cases: fn(texts: [String:String], sources: [String:[String]], module_name: String, name: String) -> (cases: [String], path: String)? {
+    paths: sources.get(module_name) ?? [String]{}
+    loop path in paths {
+        text: texts.get(path) ?? next
+        cases: declared_cases(text, name) ?? next
+        return Val((cases: cases, path: path))
+    }
+    None
+}
+
+// One `module` line with each enum leaf's list written from its declaration.
+module_line: fn(line: String, texts: [String:String], sources: [String:[String]], lists: &CaseLists) -> String CoreEnumCasesError! {
+    words: line.split(" ").to_list()
+    module_name: if words.len() > 1 -> words[1] else -> ""
+    opened: line.partition(TYPES_OPEN)
+    if opened.sep == "" -> return Ok(line)
+    closed: opened.tail.partition(" }}")
+    if closed.sep == "" {
+        return Err(cases_fail("{ROWS_PATH}: the types of module {module_name} are not closed with ` }}`"))
+    }
+    entries := [String]{}
+    loop entry in closed.head.split(", ").to_list() {
+        listed: entry.partition(LIST_OPEN)
+        if listed.sep == "" || !listed.tail.ends_with(")") {
+            entries.push(entry)
+            next
+        }
+        name: listed.head
+        written: listed.tail.removesuffix(")")
+        found: module_cases(texts, sources, module_name, name) ?? {
+            lists.residue += 1
+            entries.push(entry)
+            next
+        }
+        if found.cases.len() == 0 {
+            return Err(cases_fail("{found.path} declares the enum {name} of {module_name} with no cases"))
+        }
+        declared: found.cases.join("|")
+        lists.written += 1
+        if declared != written {
+            lists.stale.push(StaleList{module_name: module_name, name: name, written: written, declared: declared, path: found.path})
+        }
+        entries.push("{name}{LIST_OPEN}{declared})")
+    }
+    Ok("{opened.head}{TYPES_OPEN}{entries.join(", ")} }}{closed.tail}")
+}
+
+// Core.rows (`rows`) with every list a Core source declares written from it.
+case_lists: fn(rows: String, texts: [String:String], sources: [String:[String]]) -> CaseLists CoreEnumCasesError! {
+    lists := CaseLists{text: "", stale: [StaleList]{}, written: 0, residue: 0}
+    out := [String]{}
+    loop line in rows.split("\n") {
+        if !line.starts_with("module ") {
+            out.push(line)
+            next
+        }
+        out.push(module_line(line, texts, sources, lists) ?? return Err(err))
+    }
+    lists.text = out.join("\n")
+    Ok(lists)
+}
+
+core_enum_cases_main: fn(args: [String]) -[FS]> String CoreEnumCasesError! {
+    mode: if args.len() == 0 -> "--check" else -> args[0]
+    if args.len() > 1 || (mode != "--check" && mode != "--write") {
+        return Err(cases_fail("usage: jet Tools/agent/CoreEnumCases.jet [--check|--write]"))
+    }
+    rows: files.read(ROWS_PATH) ?? return Err(cases_fail("cannot read {ROWS_PATH}: {err}"))
+    parts: files.read(PARTS_PATH) ?? return Err(cases_fail("cannot read {PARTS_PATH}: {err}"))
+    sources: module_sources(rows, parts)
+    texts := [String:String]{}
+    loop module_name in sources.keys().to_list() {
+        paths: sources.get(module_name) ?? [String]{}
+        loop path in paths {
+            if texts.get(path) != None -> next
+            texts[path] = files.read(path) ?? return Err(cases_fail("cannot read {path}, a source of {module_name}: {err}"))
+        }
+    }
+    lists: case_lists(rows, texts, sources) ?? return Err(err)
+    if lists.stale.len() > 0 && mode == "--check" {
+        problems: loop stale in lists.stale -> "{ROWS_PATH}: {stale.module_name} lists {stale.name}:plain({stale.written}) but {stale.path} declares {stale.declared}"
+        return Err(cases_fail("{problems.join("\n")}\nrun jet Tools/agent/CoreEnumCases.jet --write"))
+    }
+    if lists.stale.len() > 0 {
+        files.write(ROWS_PATH, lists.text) ?? return Err(cases_fail("cannot write {ROWS_PATH}: {err}"))
+        return Ok("core enum cases written ({lists.stale.len()} of {lists.written} lists changed, {lists.residue} compiler-owned)")
+    }
+    Ok("core enum cases check passed ({lists.written} lists from the Core sources, {lists.residue} compiler-owned)")
+}
+
+run: fn() { print(core_enum_cases_main(process.args()) ?? process.fail(1, err.message)) }
+
+#Test("an enum's cases are its top-level upper-case names before its first method") {
+    text: "// Mode: enum {{ Wrong }}\npub Mode: enum {{\n    Fast // the default\n    Slow(after: Int)\n    Named {{ inner: Kind }}\n\n    impl Show {{ Hidden }}\n}}\nOther: struct {{}}\n"
+    assert_eq((declared_cases(text, "Mode") ?? [String]{}).join("|"), "Fast|Slow|Named")
+    assert(declared_cases(text, "Other") == None)
+    assert(declared_cases(text, "Absent") == None)
+}
+
+#Test("a module line's lists follow the declarations of the module's sources") {
+    sources: module_sources("source_module core.demo path Core/Demo/Demo.jet alias demo owns {{ }}\n", "# module\towner\tpath\n__core_demo_part\tcore.demo\tCore/Demo/Part.jet\t__core_demo_part\t\t\n")
+    texts := [String:String]{}
+    texts["Core/Demo/Demo.jet"] = "Mode: enum {{\n    Fast\n    Slow\n}}\n"
+    texts["Core/Demo/Part.jet"] = "Kind: enum {{\n    One\n}}\n"
+    rows: "// head\nmodule core.demo exports {{ Mode, Kind, Gone }} types {{ Mode:plain(Fast), Kind:plain(One), Gone:plain(A|B), Box:plain }} depends_on []\n"
+    lists: case_lists(rows, texts, sources) ?? panic(err.message)
+    assert(lists.text.contains("types {{ Mode:plain(Fast|Slow), Kind:plain(One), Gone:plain(A|B), Box:plain }} depends_on []"))
+    assert_eq(lists.stale.len(), 1)
+    assert_eq(lists.stale[0].name, "Mode")
+    assert_eq(lists.written, 2)
+    assert_eq(lists.residue, 1)
+}
+
+#Test("every Core.rows enum list matches its declaration") {
+    passed: core_enum_cases_main([String]{"--check"}) ?? panic(err.message)
+    assert(passed.starts_with("core enum cases check passed"))
+}

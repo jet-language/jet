@@ -122,8 +122,8 @@ vocabulary](vocabulary.md).
   D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
   `expand` runs at each site its `sites` names, and `target` is the record a
-  derive reads there: a struct's or enum's TypeInfo, a field's or variant's
-  FieldInfo, a method's MethodInfo, a function's FunctionInfo, an impl's
+  derive reads there: a struct's or enum's TypeInfo, a field's FieldInfo, an
+  enum case's CaseInfo, a method's MethodInfo, a function's FunctionInfo, an impl's
   TypeInfo, a code module's ModuleInfo (`name`, `identity`, `types`,
   `functions`, its written `markers` and its `comments`), the package's
   PackageInfo for a
@@ -1906,7 +1906,10 @@ statement ends; one made in a branch or a loop condition of the statement
 closes right after the call that reads it. The result of a call that returns a
 view (`-> Directory from self | picked`) is borrowed, not owned: passed on,
 bound with `:`, wrapped in a carrier, or taken apart, it closes nothing, and
-its owner closes it. `x.copy()` is the one copy spelling
+its owner closes it. A trait method's `from` clause holds through the trait
+the same way: a call on a trait value or a bounded type parameter returns a
+borrowed view, and its owner can't be moved or changed while the view lives
+(E0212). `x.copy()` is the one copy spelling
 (D-COPY-WORD1=A); it is a compiler-owned method that no type can redefine, and
 it creates an independent owned value. `.clone()` is not user-typable Jet
 syntax. Copying a value that Jet cannot
@@ -3715,7 +3718,10 @@ Automatic discovery skips a declaration whose declared name begins with `_`:
 ordinary visibility rules. The name, not the filename or scan order, controls
 discovery; `jet project parts --skipped` lists omitted declarations. Duplicate
 declared names conflict even when one is omitted from discovery
-(D-SHAPE-MODULEINTERNAL1=A).
+(D-SHAPE-MODULEINTERNAL1=A). `jet project parts` names each part by its path in
+the name ledger, the spelling hover, reflection and diagnostics use: a file is
+its module path (`one.jet` is `one`) and a declared module follows it
+(`shapes.jet`'s `geo: module` is `shapes.geo`).
 
 The reserved role namespaces are `env` (an `Env` development environment),
 `system` (a `System` JetOS host), and `image` (an OCI image or JetOS installer

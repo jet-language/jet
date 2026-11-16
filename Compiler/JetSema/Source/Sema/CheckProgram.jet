@@ -10085,6 +10085,13 @@ sema_comptime_declare_prepared_locals: fn(source: SemaComptimeItemSource, module
     }
 }
 
+// The owner frame a module value's check runs in (sema_check_comptime_item_in).
+// Its code runs while building, even when the refused value is checked again
+// as ordinary code to find its real errors.
+sema_comptime_item_owner_key: fn(source_key: String) -> String Never! { "{source_key}#init" }
+
+sema_comptime_item_owner: fn(owner_key: String) -> Bool Never! { owner_key.ends_with("#init") }
+
 // Read-only half of the item check: the environment is borrowed, so reading
 // its registration graph never copies the graph (a writable parameter would).
 // D2: this one check is where a source's constant dependencies come from
@@ -10119,7 +10126,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
         // intrinsic call sites are recorded (sema_effect_record_intrinsic_fact
         // records only under an owner) and its purity can be read.
         if source.module_value || source.runtime_check {
-            _ := sema_scope_enter(probe.slots[at].table, state, "{source.key}#init")
+            _ := sema_scope_enter(probe.slots[at].table, state, sema_comptime_item_owner_key(source.key))
         }
         if source.prepared.len() > 0 {
             sema_comptime_declare_prepared_locals(source, source.module_identity, module_text(resolved_graph.module_table, source.module_identity), program, context, probe.slots[at].table, state)
@@ -10167,6 +10174,13 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: false}
         }
         expression: checked ?? return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: false}
+        // A module value is data the build keeps: a runtime handle has none.
+        if source.kind == SemaComptimeItemKind.Constant && !source.runtime_check {
+            if sema_comptime_value_runtime_handle(expression.ty, environment, program) == .Val(handle) {
+                diagnostics.push(sema_comptime_runtime_handle_diagnostic(source.name, handle, source.span))
+                return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: true}
+            }
+        }
         checked_expected := source.expected_type
         if checked_expected != None {
             required: checked_expected ?? expression.ty

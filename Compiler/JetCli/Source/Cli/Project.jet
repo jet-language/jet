@@ -1,14 +1,19 @@
 // Adapted from origin/port/compiler Compiler/JetDriver/Source/ProjectParts.jet
 // run_project_parts. Discovery uses the CLI's canonical authority source walk;
-// parsing uses the driver's inline-package-aware parser.
+// parsing uses the driver's inline-package-aware parser. A part is named by
+// its canonical path, as the name ledger, hover and reflection spell it: the
+// file's module path (jet_driver_module_display, the path registration gives
+// the module), then the declared module's name (`shapes.jet`'s `geo` is
+// `shapes.geo`).
 use {
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
-    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile]
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, jet_driver_module_display]
     cli_files: core.files
 }
 
 JetCLIProjectPart: struct {
     name: String
+    module_path: String
     path: String
     automatic: Bool
 }
@@ -64,14 +69,15 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
                 .File(_, _) -> {}
             }
         }
+        module_path: jet_driver_module_display(file.relative_path)
         loop item in program.items {
             if item == {
                 .Module(declared) -> {
-                    declarations.push(JetCLIProjectPart{name: declared.name, path: file.relative_path, automatic: declared.auto_discovered})
+                    declarations.push(JetCLIProjectPart{name: declared.name, module_path: "{module_path}.{declared.name}", path: file.relative_path, automatic: declared.auto_discovered})
                     if !names.contains(declared.name) -> names.push(declared.name)
                 }
                 .CodeModule(declared) -> {
-                    declarations.push(JetCLIProjectPart{name: declared.name, path: file.relative_path, automatic: !declared.name.starts_with("_")})
+                    declarations.push(JetCLIProjectPart{name: declared.name, module_path: "{module_path}.{declared.name}", path: file.relative_path, automatic: !declared.name.starts_with("_")})
                     if !names.contains(declared.name) -> names.push(declared.name)
                 }
                 .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -89,35 +95,39 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
     }
     loop name in names {
         paths := [String]{}
+        module_paths := [String]{}
         loop declaration in declarations {
             if declaration.name != name -> next
             paths.push(declaration.path)
+            module_paths.push(declaration.module_path)
             state: if {
                 declaration.automatic -> "automatic"
                 explicit.contains(name) -> "explicit"
                 else -> "skipped"
             }
             if skipped_only && state != "skipped" -> next
-            part_values.push(jet_cli_project_part_value("project.{name}", declaration.path, state))
-            output = "{output}{jet_cli_pad(state, 9)} {jet_cli_pad("project.{name}", 24)} {declaration.path}\n"
+            part_values.push(jet_cli_project_part_value(declaration.module_path, declaration.path, state))
+            output = "{output}{jet_cli_pad(state, 9)} {jet_cli_pad(declaration.module_path, 24)} {declaration.path}\n"
         }
+        // Two files declaring one module name share the leaf, so the
+        // conflict names each declaration by its path.
         if paths.len() > 1 {
             conflict_values.push(
                 jet_cli_status_object(
                     [JetCLIStatusField]{
-                        jet_cli_status_field("name", jet_cli_status_text("project.{name}")),
+                        jet_cli_status_field("name", jet_cli_status_text(name)),
+                        jet_cli_status_field("modules", jet_cli_status_texts(module_paths)),
                         jet_cli_status_field("paths", jet_cli_status_texts(paths)),
                     },
                 ),
             )
-            diagnostics.push(diagnostic_from_registry("E0606", None, "project module `project.{name}` is declared more than once", "a project module name must resolve to one declaration", "keep one `{name}: module` declaration; found {paths.join(", ")}"))
+            diagnostics.push(diagnostic_from_registry("E0606", None, "project module `{name}` is declared more than once", "a project module name must resolve to one declaration", "keep one `{name}: module` declaration; found {module_paths.join(", ")}"))
         }
     }
     if !skipped_only {
         loop path in sources {
             if declared_paths.contains(path) -> next
-            stem: if path.ends_with(".jet") -> path.slice(0..<(path.len() - 4)) else -> path
-            name: "project.{stem.replace("/", ".")}"
+            name: jet_driver_module_display(path)
             part_values.push(jet_cli_project_part_value(name, path, "automatic"))
             output = "{output}{jet_cli_pad("automatic", 9)} {jet_cli_pad(name, 24)} {path}\n"
         }

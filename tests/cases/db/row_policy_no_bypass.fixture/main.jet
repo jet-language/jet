@@ -6,6 +6,7 @@
 // for the system are the contrast.
 use {
     app
+    auth: core.auth
     crypto: core.crypto
     db: core.db
     hex: core.encoding.hex
@@ -18,9 +19,13 @@ use {
 #Codable
 Note: struct {
     id: Int
-    owner: String
+    owner: auth.AccountID
     text: String
 }
+
+ann: fn() -> auth.AccountID { auth.AccountID.from_string("ann") }
+
+eve: fn() -> auth.AccountID { auth.AccountID.from_string("eve") }
 
 #Error
 NoteError: enum {
@@ -117,7 +122,10 @@ deleted: fn(id: Int) -[DB.Read, DB.Write]> String {
     }
 }
 
-acting: fn() -> String { app.maybe_caller() ?? "no one" }
+acting: fn() -> String {
+    if app.maybe_caller() == .Val(account) -> return account.raw()
+    "no one"
+}
 
 Event: struct {
     action: String
@@ -190,33 +198,33 @@ keep: fn(store: db.Store) {
 
 run: fn() (NetError | HTTPError | TaskFailure)! {
     keep(db.open_memory())
-    step("ann adds her plan", app.as_caller("ann", fn() { added(Note{id: 1, owner: "ann", text: "plan"}) }))
-    step("ann adds her diary", app.as_caller("ann", fn() { added(Note{id: 2, owner: "ann", text: "diary"}) }))
-    step("ann reads her notes", app.as_caller("ann", fn() { texts_now() }))
+    step("ann adds her plan", app.as_caller(ann(), fn() { added(Note{id: 1, owner: ann(), text: "plan"}) }))
+    step("ann adds her diary", app.as_caller(ann(), fn() { added(Note{id: 2, owner: ann(), text: "diary"}) }))
+    step("ann reads her notes", app.as_caller(ann(), fn() { texts_now() }))
 
     // A direct read or write.
-    step("eve reads every note", app.as_caller("eve", fn() { texts_now() }))
-    step("eve reads note 1", app.as_caller("eve", fn() { note_read(1) }))
-    step("eve takes note 1", app.as_caller("eve", fn() { replaced(Note{id: 1, owner: "eve", text: "taken"}) }))
-    step("eve adds a note in ann's name", app.as_caller("eve", fn() { added(Note{id: 3, owner: "ann", text: "forged"}) }))
-    step("eve deletes note 2", app.as_caller("eve", fn() { deleted(2) }))
+    step("eve reads every note", app.as_caller(eve(), fn() { texts_now() }))
+    step("eve reads note 1", app.as_caller(eve(), fn() { note_read(1) }))
+    step("eve takes note 1", app.as_caller(eve(), fn() { replaced(Note{id: 1, owner: eve(), text: "taken"}) }))
+    step("eve adds a note in ann's name", app.as_caller(eve(), fn() { added(Note{id: 3, owner: ann(), text: "forged"}) }))
+    step("eve deletes note 2", app.as_caller(eve(), fn() { deleted(2) }))
     step("no one acts here", acting())
     step("no one reads every note", texts_now())
-    step("no one adds a note", added(Note{id: 4, owner: "eve", text: "unsigned"}))
+    step("no one adds a note", added(Note{id: 4, owner: eve(), text: "unsigned"}))
 
     // A live query runs as the caller that bound it, whoever reads it.
-    eve_live: app.as_caller("eve", fn() { app.live(note_texts) })
-    ann_live: app.as_caller("ann", fn() { app.live(note_texts) })
+    eve_live: app.as_caller(eve(), fn() { app.live(note_texts) })
+    ann_live: app.as_caller(ann(), fn() { app.live(note_texts) })
     step("eve's live query", shown(app.state(eve_live)))
     step("ann's live query", shown(app.state(ann_live)))
-    step("ann adds her list", app.as_caller("ann", fn() { added(Note{id: 5, owner: "ann", text: "list"}) }))
-    step("eve's live query after ann writes, read in ann's run", app.as_caller("ann", fn() { shown(app.state(eve_live)) }))
+    step("ann adds her list", app.as_caller(ann(), fn() { added(Note{id: 5, owner: ann(), text: "list"}) }))
+    step("eve's live query after ann writes, read in ann's run", app.as_caller(ann(), fn() { shown(app.state(eve_live)) }))
     step("ann's live query after her write, read by no one", shown(app.state(ann_live)))
     step("a live query no one bound", shown(app.state(app.live(note_texts))))
 
     // A task spawned as a job's worker is spawned acts for no one.
-    step("a task eve spawns", app.as_caller("eve", fn() { spawned_reads() ?? "the task did not start" }))
-    step("a task ann spawns", app.as_caller("ann", fn() { spawned_reads() ?? "the task did not start" }))
+    step("a task eve spawns", app.as_caller(eve(), fn() { spawned_reads() ?? "the task did not start" }))
+    step("a task ann spawns", app.as_caller(ann(), fn() { spawned_reads() ?? "the task did not start" }))
     job: task { app.as_system(fn() { texts_now() }) }
     step("a job that runs as the system", job.join() ?? "the job failed")
 
@@ -226,7 +234,7 @@ run: fn() (NetError | HTTPError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
     serving: task {
-        app.as_caller<Int>("ann", fn() {
+        app.as_caller<Int>(ann(), fn() {
             answered := 0
             loop _ in 0..<4 {
                 if served.serve_once(listener) == .Ok(_) -> answered += 1
@@ -237,8 +245,8 @@ run: fn() (NetError | HTTPError | TaskFailure)! {
     // Each lambda owns what it captures, so each gets its own address.
     public_api: "http://{addr}/api"
     signed_in_api: "http://{addr}/api"
-    step("eve's public request acts for", app.as_caller("eve", fn() { public_call(app.remote_at<Desk>(public_api)) }))
-    step("eve's signed-in request", app.as_caller("eve", fn() { signed_in_call(app.remote_at<Desk>(signed_in_api)) }))
+    step("eve's public request acts for", app.as_caller(eve(), fn() { public_call(app.remote_at<Desk>(public_api)) }))
+    step("eve's signed-in request", app.as_caller(eve(), fn() { signed_in_call(app.remote_at<Desk>(signed_in_api)) }))
     step("a delivery under a guessed key", deliver(addr, "jet", "a guess", "{{\"action\":\"opened\"}}"))
     step("a delivery under the desk's key", deliver(addr, "jet", "only the desk knows", "{{\"action\":\"opened\"}}"))
     answered: serving.join()

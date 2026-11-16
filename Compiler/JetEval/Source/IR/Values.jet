@@ -286,6 +286,10 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
 }
 
 jet_eval_ir_transport_fail: fn(s: &JetEvalIRState, ty: Type) -> TComptimeValue? Never! {
+    if ty == .Fn(_, _, _, _, _, _) {
+        jet_eval_ir_function_value_refused(s, type_name(ty))
+        return None
+    }
     jet_eval_ir_unsupported(s, "materializing an IR value of type {type_name(ty)}")
     None
 }

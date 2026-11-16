@@ -1,0 +1,17 @@
+# A trait method that lends its receiver (`-> Point? from self`) keeps the
+# loan through dynamic dispatch. Each result is read while the list stays put,
+# and the list is given away only after the last result is done, so the
+# program checks clean and each tier prints the element's own fields.
+fixture: a_loan_returned_through_trait_dispatch_keeps_its_owner.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run -O0 run.jet
+exit: 0
+stdout: = a_loan_returned_through_trait_dispatch_keeps_its_owner.out
+step: jet run -O1 run.jet
+exit: 0
+stdout: = a_loan_returned_through_trait_dispatch_keeps_its_owner.out
+step: jet run -O2 run.jet
+exit: 0
+stdout: = a_loan_returned_through_trait_dispatch_keeps_its_owner.out

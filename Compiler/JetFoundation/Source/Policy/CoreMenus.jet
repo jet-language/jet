@@ -65,11 +65,10 @@ foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots
 // Project the menu-shaped leaf metadata of Core.rows's specialized
 // `module core.compiler.lang … types { … }` declaration for the applied-rule
 // catalog. The generated CORE_MODULE_EXPORTS row names the module's type
-// exports and CORE_ENUM_ROWS carries each enum leaf's variants, both generated
-// from that declaration (the same projection native CoreModuleExports reads);
-// an exported leaf without an enum row is `plain`. `#Meta(maturity: …)` takes
-// the Maturity enum of core.meta, which declares it beside the Module record
-// whose `maturity` field it is.
+// exports and CORE_ENUM_CASE_ROWS carries each enum leaf's cases, both
+// generated from that declaration; an exported leaf without an enum row is
+// `plain`. `#Meta(maturity: …)` takes the Maturity enum of core.meta, which
+// declares it beside the Module record whose `maturity` field it is.
 //
 // IntType is intentionally absent from core.compiler.lang. Its variants come
 // from the canonical Source fixed-width integer registry, which mirrors the
@@ -82,7 +81,7 @@ foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String
     loop name in declaration.type_exports {
         if name != "IntType" {
             kind := CoreLeafKind.Plain
-            if core_module_enum_variants(module_name, name) == .Val(enum_variants) {
+            if core_module_enum_cases(module_name, name) == .Val(enum_variants) {
                 kind = CoreLeafKind.Enum{variants: enum_variants}
             }
             variants: foundation_core_menu_variants(name, kind, effect_roots, builtin_tags) ?? return None
@@ -95,7 +94,7 @@ foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String
             )
         }
     }
-    maturity: core_module_enum_variants("core.meta", "Maturity") ?? return None
+    maturity: core_module_enum_cases("core.meta", "Maturity") ?? return None
     menus.push(
         TAppliedRuleArgumentMenu{
             name: "Maturity",

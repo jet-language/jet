@@ -1,0 +1,18 @@
+Row: struct {
+    name: String
+    size: Int
+}
+
+ROWS: [Row]{Row{name: "alpha", size: 3}, Row{name: "beta", size: 4}}
+
+#loop row in ROWS {
+    getter: "{row.name}_size"
+    #{getter}: fn() -> Int { row.size }
+}
+
+TOTAL: #run { alpha_size() + beta_size() }
+
+run: fn() {
+    total: #run { alpha_size() * beta_size() }
+    print("{TOTAL} {total}")
+}

@@ -241,8 +241,10 @@ priv HTTPMuxState: struct {
     routes: [HTTPRoute]
     layers: [Shared<HTTPLayerCell>]
     request_seq: Int
-    // What the first server that serves this table starts (`__on_serve`).
+    // What the first server that serves this table starts (`__on_serve`),
+    // and what that server runs once it stops serving (`__on_stop`).
     starts: [fn() -[Time]> Never!]
+    stops: [fn(Int) -[Time]> Never!]
 }
 
 /// One route table: routes and middleware layers. A `web.app()` owns one and
@@ -354,10 +356,11 @@ HTTPServer: struct {
     // from cancellation, so a delivered signal (which cancels every task)
     // stops accepting while the requests in flight are answered. Serving
     // then waits up to one connection deadline for them; the report counts
-    // the connections still open after that as cancelled.
+    // the connections still open after that as cancelled. What the app runs
+    // as it stops (`__on_stop`) has the rest of that time.
     serve: fn(self) -[Net, FS.Read, Time]> HTTPShutdownReport HTTPError! {
         if !server_begin(self) -> return Err(.IO{operation: "HTTP server can only be served once"})
-        mux_serving(self.__mux)
+        stops: mux_serving(self.__mux)
         accepted := 0
         overloaded := 0
         failure := HTTPError?{None}
@@ -421,6 +424,7 @@ HTTPServer: struct {
         // one. Then the listener closes, so the port is free (a connect is
         // refused), and the server reads Closed once it reports.
         server_mark_stopping(self)
+        left_ms := 0
         #Shield {
             drain_end: rt.clock_mono_ns() + drain_budget(self.__state, self.__deadline)
             loop __live(self.__state) > 0 && rt.clock_mono_ns() < drain_end {
@@ -437,8 +441,14 @@ HTTPServer: struct {
                     }
                 } else { core.tasks.sleep(C_DRAIN_POLL_MS) }
             }
+            left_ms = (drain_end - rt.clock_mono_ns()) /% 1000000
         }
         server_close_listener(self)
+        // What the app runs as it stops, such as waiting for the jobs that
+        // run, has what is left of the drain budget, and no cancel stops it.
+        #Shield {
+            loop stop in stops -> stop(if left_ms < 0 -> 0 else -> left_ms)
+        }
         report: drain_close(self.__state, accepted, overloaded)
         server_finish(self, report)
         server_signal_done(self.__done).drop("the server holds its own finish end")
@@ -703,7 +713,7 @@ priv accept_transient_code: fn(os_code: Int?) -> Bool Never! {
 // An empty route table: a `web.app()`'s, and the one an `http.router()`
 // routes with.
 priv mux_new: fn() -> HTTPMux Never! {
-    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0, starts: [fn() -[Time]> Never!]{}}}}
+    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0, starts: [fn() -[Time]> Never!]{}, stops: [fn(Int) -[Time]> Never!]{}}}}
 }
 
 // Has the first server that serves `mux`, by `serve` or `serve_once`, run
@@ -714,18 +724,54 @@ __on_serve: fn(mux: HTTPMux, start: &&fn() -[Time]> Never!) Never! {
     guard.value.starts.push(start.move())
 }
 
-// Runs, and drops, what `__on_serve` left on `mux`.
-priv mux_serving: fn(mux: HTTPMux) Never! -[Time]> {
+// Has the server that runs what `__on_serve` left on `mux` run `stop` once
+// it stops serving, after its drain, with the milliseconds left of the
+// drain budget: a web app's jobs wait so long for the jobs that run. A
+// `serve_once` connection runs none, as nothing drains it.
+__on_stop: fn(mux: HTTPMux, stop: &&fn(Int) -[Time]> Never!) Never! {
     guard := mux.__state.guard_edit()
+    guard.value.stops.push(stop.move())
+}
+
+// Runs, and drops, what `__on_serve` left on `mux`, in the order it was
+// left, and hands over, and drops, what `__on_stop` left there. The starts
+// run after the table's guard is let go, so a start may use the table.
+priv mux_serving: fn(mux: HTTPMux) -[Time]> [fn(Int) -[Time]> Never!] Never! {
+    starts := mux_starts_taken(mux)
     loop {
-        start: guard.value.starts.remove(0, .Slot) ?? return
+        start: starts.pop() ?? break
         start()
     }
+    mux_stops_taken(mux)
+}
+
+// Takes what `__on_serve` left on `mux`, last first, and leaves none, so a
+// later server starts nothing.
+priv mux_starts_taken: fn(mux: HTTPMux) -> [fn() -[Time]> Never!] Never! {
+    guard := mux.__state.guard_edit()
+    taken := [fn() -[Time]> Never!]{}
+    loop {
+        start: guard.value.starts.pop() ?? break
+        taken.push(start)
+    }
+    taken
+}
+
+// Takes what `__on_stop` left on `mux`, in the order it was left, and
+// leaves none.
+priv mux_stops_taken: fn(mux: HTTPMux) -> [fn(Int) -[Time]> Never!] Never! {
+    guard := mux.__state.guard_edit()
+    taken := [fn(Int) -[Time]> Never!]{}
+    loop {
+        stop: guard.value.stops.pop() ?? break
+        taken.insert(0, stop)
+    }
+    taken
 }
 
 // Answer one connection the listener accepts (`app.serve_once(listener)`).
 priv server_serve_once: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
-    mux_serving(mux)
+    _: mux_serving(mux)
     stream: listener.accept(deadline: Duration{ns: C_ACCEPT_ONCE_NS}) ?? {
         if accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})

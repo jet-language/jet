@@ -6,6 +6,7 @@ use {
     jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, module_is_core, number_argument_value, symbol_none]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
+    jet_sema.[sema_type_def_instance_type]
 }
 
 ir_build_function: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
@@ -9185,7 +9186,7 @@ ir_comptime_enum: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot_t
         if target < 0 || target >= members.len() {
             return ir_fail_slot(b, span, "variant {variant} constant member {position}")
         }
-        slot: ir_comptime(m, p, b, types[target], arg.value, span)
+        slot: ir_comptime(m, p, b, sema_type_def_instance_type(p.types[row], slot_args, types[target]), arg.value, span)
         if ir_failed(b) -> return -1
         values.push(slot)
         targets.push(members[target])

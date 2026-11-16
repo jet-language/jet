@@ -11,17 +11,30 @@ use {
         CtValue,
         Expr,
         Func,
+        Item,
         JET_CONFIG_VALUE_NAME,
         Span,
         comptime_walk_identifiers,
         expr_span,
+        jet_config_eval_diagnostic,
         jet_config_eval_error,
         jet_config_literal,
         name_index,
         name_intern,
         name_table_sized,
     ]
-    jet_lexer.[TOKEN_LPAREN, TOKEN_RPAREN, Token, lex_config]
+    jet_lexer.[
+        STRING_PART_INTERPOLATION,
+        TOKEN_IDENT,
+        TOKEN_LPAREN,
+        TOKEN_RPAREN,
+        TOKEN_STRING,
+        Token,
+        TokenTables,
+        lex_config,
+        token_decoded,
+        token_string_parts,
+    ]
 }
 
 // The typed program for one config value. Each global the expression reads
@@ -152,4 +165,109 @@ jet_config_call_close: fn(callee_end: Int, args: [CallArg], tokens: [Token]) -> 
         }
     }
     None
+}
+
+// The module values of a config source as one program the compiler checks
+// whole: the source's text with every function, type and immutable module
+// value kept in place and every other byte blanked, line breaks kept, so a
+// span in the program is the same span in the source. An environment read
+// `$NAME` is respelled in place, its `$` replaced by a letter that makes a
+// name no token of the source spells, and that name is declared after the
+// source with the read's value from `environment`. The last line,
+// `JET_CONFIG_VALUE: 0`, names the program's module among the values the
+// check computes.
+jet_config_module_values_program: fn(items: [Item], source: String, environment: [String:CtValue]) -> String ComptimeEvalError! {
+    bytes: source.bytes()
+    out := [U8]{}
+    newline: U8{10}
+    blank: U8{32}
+    loop byte in bytes -> out.push(if byte == newline -> newline else -> blank)
+    kept := [Span]{}
+    loop item in items {
+        span: jet_config_module_values_item_span(item) ?? next
+        if span.start < 0 || span.end > bytes.len() || span.start > span.end -> next
+        loop index in span.start..<span.end -> out[index] = bytes[index]
+        kept.push(span)
+    }
+    lexed: lex_config(bytes)
+    spelled := [String:Bool]{}
+    reads := [Span]{}
+    jet_config_module_values_names(lexed.tokens, lexed.tables, spelled, reads)
+    // Each read's first byte in the program: the letter that stands for `$`.
+    declared := [String:U8]{}
+    lines := [String]{}
+    loop read in reads {
+        if !jet_config_module_values_kept(kept, read) -> next
+        name: source.slice(read.start..<read.end)
+        if declared.get(name) == .Val(known) {
+            out[read.start] = known
+            next
+        }
+        rest: name.removeprefix("$")
+        chosen := ""
+        prefixes: [String]{"Q", "X", "Z", "J", "K", "V", "W", "Y"}
+        loop prefix in prefixes {
+            candidate: "{prefix}{rest}"
+            if spelled.get(candidate) == None {
+                chosen = candidate
+                break
+            }
+        }
+        if chosen == "" {
+            return Err(ComptimeEvalError{diagnostic: jet_config_eval_diagnostic(Val(read), "the environment read `{name}` has no free name to stand for it in the module values' program")})
+        }
+        value: environment.get(name) ?? CtValue.Str{value: ""}
+        literal: jet_config_literal(value) ?? return Err(ComptimeEvalError{diagnostic: jet_config_eval_diagnostic(Val(read), "the environment read `{name}` holds a value the module values' program can't spell")})
+        lines.push("{chosen}: {literal}")
+        first: chosen.bytes()[0]
+        out[read.start] = first
+        declared[name] = first
+        spelled[chosen] = true
+    }
+    lines.push("{JET_CONFIG_VALUE_NAME}: 0")
+    lines.push("")
+    text: String.from_bytes(out) ?? return Err(ComptimeEvalError{diagnostic: jet_config_eval_diagnostic(None, "the module values' source is not valid text")})
+    declarations: lines.join("\n")
+    Ok("{text}\n{declarations}")
+}
+
+// The span of an item the module values' program keeps: a function, a type,
+// or an immutable module value. Mutable module state is no value.
+jet_config_module_values_item_span: fn(item: Item) -> Span? Never! {
+    if item == {
+        .Func(value) -> Val(value.span)
+        .Const(value) -> if value.mutable -> None else -> Val(value.span)
+        .Struct(value) -> Val(value.span)
+        .Enum(value) -> Val(value.span)
+        .Distinct(value) -> Val(value.span)
+        .TypeAlias(value) -> Val(value.span)
+        .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
+    }
+}
+
+// Every identifier `tokens` spell, interpolations included, into `spelled`,
+// and the span of each environment read `$NAME` into `reads`.
+jet_config_module_values_names: fn(tokens: [Token], tables: TokenTables, spelled: &[String:Bool], reads: &[Span]) Never! {
+    loop token in tokens {
+        if token.kind == TOKEN_IDENT {
+            name: token_decoded(tables, token)
+            if name.starts_with("$") -> reads.push(token.span)
+            spelled[name] = true
+        }
+        if token.kind == TOKEN_STRING {
+            loop part in token_string_parts(tables, token) {
+                if part.kind == STRING_PART_INTERPOLATION {
+                    jet_config_module_values_names(part.tokens, tables, spelled, reads)
+                }
+            }
+        }
+    }
+}
+
+// Whether `span` lies inside one of the `kept` item spans.
+jet_config_module_values_kept: fn(kept: [Span], span: Span) -> Bool Never! {
+    loop item in kept {
+        if span.start >= item.start && span.end <= item.end -> return true
+    }
+    false
 }

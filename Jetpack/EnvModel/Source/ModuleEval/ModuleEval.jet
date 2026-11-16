@@ -17,6 +17,9 @@ use {
         Span,
         SystemFieldValue,
         ast_comptime_value_show,
+        diagnostic_from_registry,
+        jet_config_eval_diagnostic,
+        jet_config_plain_literal,
     ]
     jet_lexer.[
         STRING_PART_INTERPOLATION,
@@ -157,25 +160,54 @@ envmodel_collect_funcs: fn(items: [Item]) -> [String:Func] Never! {
     funcs
 }
 
-// Resolve module-level immutable comptime values before any namespace field
-// runs. Module fields are allowed to use these values, but they must enter
-// through the same dependency, purity, and deterministic-value path as
-// sibling fields. In particular, a self-reference is a real cycle, not an
-// unresolved-name fallback.
+// Resolve the module values before any namespace field runs: every immutable
+// `NAME: value`, with or without `#run`, as the compiler computes every one
+// while building. When each is a plain literal, the literal is its value.
+// Otherwise the sibling compiler checks the source's own declarations as one
+// program and computes every value at once (module_values_evaluate): a
+// typed value, a cycle, an impure `#run` or any other refusal is the
+// compiler's own, at its span in this source. A value the environment can't
+// read as data (a function, say) is refused at its name. The environment
+// reads stay readable beside the module values.
 envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue]) -> [String:CtValue] EnvModelEvalError! {
-    definitions := [String:NamedFieldExpr]{}
+    names := [String]{}
+    name_spans := [Span]{}
+    literals := [CtValue?]{}
     loop item in items {
-        if item == {
-            .Const(definition) -> {
-                if definition.is_comptime {
-                    definitions[definition.name.removeprefix(COMPTIME_MARK)] = NamedFieldExpr{span: definition.name_span, expr: definition.value}
-                }
+        if item == .Const(definition) {
+            if !definition.mutable {
+                names.push(definition.name.removeprefix(COMPTIME_MARK))
+                name_spans.push(definition.name_span)
+                literals.push(jet_config_plain_literal(definition.value))
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    computed: envmodel_evaluate_named_fields(definitions, environment_globals, scope, None, "module-level comptime values must have a deterministic dependency order", "break the cycle by making one value independent or by moving the shared computation into a pure function")
-    Ok(computed.values)
+    globals := environment_globals
+    all_plain := true
+    loop (index, name) in names {
+        if literals[index] == {
+            .Val(value) -> { globals[name] = value }
+            .None -> { all_plain = false }
+        }
+    }
+    if all_plain -> return Ok(globals)
+    outcome: module_values_evaluate(items, scope.source, scope.base_dir, environment_globals) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(name_spans[0]), "the module values could not be evaluated: {err.detail}")})
+    if outcome == {
+        .Refused(diagnostic) -> {
+            span: diagnostic.span ?? name_spans[0]
+            return Err(EnvModelEvalError{diagnostic: diagnostic_from_registry(diagnostic.code, Val(span), diagnostic.what, diagnostic.why, diagnostic.fix)})
+        }
+        .Values(values, _) -> {
+            computed := [String:CtValue]{}
+            loop named in values -> computed[named.name] = named.value
+            // Every name is read back from the compiler, literals included.
+            loop (index, name) in names {
+                value: computed.get(name) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(name_spans[index]), "the module value `{name}` holds a value an environment can't read as data, such as a function")})
+                globals[name] = value
+            }
+            return Ok(globals)
+        }
+    }
 }
 
 envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalScope, globals: [String:CtValue]) -> EvaluatedModule EnvModelEvalError! {

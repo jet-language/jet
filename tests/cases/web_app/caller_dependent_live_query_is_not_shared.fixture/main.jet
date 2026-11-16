@@ -6,6 +6,7 @@
 // server's per-second cap like any other.
 use {
     app
+    auth: core.auth
     core.reactive.loadable.[Loadable]
     core.time
 }
@@ -55,7 +56,7 @@ shown: fn(state: Loadable<String, BoardError>) -> String {
 
 // The binding `account` makes of the crewboard's tasks.
 bind: fn(account: String) -> app.Live<String, BoardError> {
-    app.as_caller(account, fn() { app.live(my_tasks, "crewboard") })
+    app.as_caller(auth.AccountID.from_string(account), fn() { app.live(my_tasks, "crewboard") })
 }
 
 run: fn() {

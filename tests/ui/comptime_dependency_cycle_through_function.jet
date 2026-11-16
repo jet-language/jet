@@ -1,0 +1,13 @@
+// `FIRST` reads `SECOND` through a function it calls, `SECOND` reads
+// `THIRD`, and `THIRD` reads `FIRST`, so none has a first value to compute
+// while building. The cycle is reported once, with every name around it, at
+// the value it closes on (E0338).
+doubled_second: fn() -> Int { SECOND * 2 }
+
+FIRST: #run doubled_second()
+
+SECOND: #run { THIRD + 1 }
+
+THIRD: #run { FIRST - 3 }
+
+run: fn() { print(FIRST) }

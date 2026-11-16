@@ -97,14 +97,12 @@ core_type_modules_in: fn(keys: [String], key_rows: [Int], modules: [[String]], l
     modules[row]
 }
 
-// Rust `CoreModuleExports::core_enum_variants`: the canonical variant names of
-// a Core enum leaf. Payload shape stays with the checked source declaration.
-core_enum_variants: fn(name: String) -> [String]? { core_enum_variants_in(CORE_ENUM_ROWS, name) }
-
-core_enum_variants_in: fn(rows: [CoreModuleTypeExport], name: String) -> [String]? {
-    loop row in rows {
+// The case names of a Core enum leaf, in declaration order (CORE_ENUM_CASE_ROWS).
+// Payload shape stays with the checked source declaration.
+core_enum_cases: fn(name: String) -> [String]? {
+    loop row in CORE_ENUM_CASE_ROWS {
         if row.name != name -> next
-        if row.kind == .Enum(variants) -> return Val(variants)
+        if row.kind == .Enum(cases) -> return Val(cases)
     }
     None
 }
@@ -395,7 +393,7 @@ core_enum_variant_payload: fn(name: String, variant: String) -> [Type]? {
         family = true
     }
     if family -> return None
-    declared: core_enum_variants(name) ?? return None
+    declared: core_enum_cases(name) ?? return None
     if declared.contains(variant) -> Val([Type]{}) else -> None
 }
 
@@ -410,14 +408,14 @@ core_enum_variant_labels: fn(name: String, variant: String) -> [String]? {
     None
 }
 
-// The variants of the enum `name` that the Core module `module_name` exports:
-// the module's catalog row authenticates the export, and the generator keeps
-// every enum leaf's variant list identical across the modules that export it.
+// The cases of the enum `name` that the Core module `module_name` exports:
+// the module's catalog row authenticates the export, and the build keeps
+// every enum leaf's case list identical across the modules that export it.
 // `None` when that module does not export `name` or `name` is not an enum.
-core_module_enum_variants: fn(module_name: String, name: String) -> [String]? {
+core_module_enum_cases: fn(module_name: String, name: String) -> [String]? {
     if !core_module_has_type(module_name, name) -> return None
     if core_enum_payload_variants(name) == .Val(variants) -> return Val(variants)
-    core_enum_variants(name)
+    core_enum_cases(name)
 }
 
 // One field of a builtin Core record; rows are authored in CoreRecordRows.jet

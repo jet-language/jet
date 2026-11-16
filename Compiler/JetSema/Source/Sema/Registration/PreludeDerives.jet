@@ -6,7 +6,7 @@
 SEMA_PRELUDE_DERIVE_SOURCE_PATH: "jet:canonical-prelude/Prelude/Derives.jet"
 SEMA_PRELUDE_DERIVE_SOURCE: #run { ```// Built-in derive providers are ordinary Prelude markers: each `expand`
 // template writes the capability's members directly, read with the same
-// template expansion as package source, including reflected enum variant
+// template expansion as package source, including reflected enum case
 // payloads. `#{name}` is the derived type; a generic type keeps its
 // parameters.
 //
@@ -25,7 +25,7 @@ Equatable: struct {
         expand: fn(self, target: Target) {
             equal: fn(self, rhs: #{name}) -> Bool {
                 #if target.kind == "enum" {
-                    #loop left in target.reflect().fields {
+                    #loop left in target.reflect().cases {
                         if self == {
                             .#{left} -> {
                                 if rhs == {
@@ -80,13 +80,13 @@ Comparable: struct {
             compare: fn(self, rhs: #{name}) -> Ordering {
                 #if target.kind == "enum" {
                     rhs_variant_index := 0
-                    #loop right in target.reflect().fields {
+                    #loop right in target.reflect().cases {
                         if rhs == {
                             .#{right} -> { rhs_variant_index = right.index }
                             else -> {}
                         }
                     }
-                    #loop left in target.reflect().fields {
+                    #loop left in target.reflect().cases {
                         if self == {
                             .#{left} -> {
                                 if rhs_variant_index > left.index -> return .Less

@@ -1,0 +1,132 @@
+// A board whose `add` queues three `work` jobs, each of which waits its
+// number of milliseconds, unless the board is not slow, and then writes its
+// note: job 1 at once, job 2 after 300 ms, and job 3 after a minute.
+//
+// `-- stop` serves the board, adds, and once note 1 is written and job 3
+// started, shuts the server down with two seconds of grace. Shutting down
+// waits that long for the running jobs: job 2 ends within it and deletes its
+// row, while job 3 doesn't, so its call never commits and its row stays.
+// `-- restart` serves a board that isn't slow: once the row of job 3 is no
+// longer held, the server takes it and runs job 3, and only job 3, again.
+use {
+    app
+    db: core.db
+    process: core.process
+    time: core.time
+    web: core.web
+}
+
+#Codable
+Note: struct {
+    id: Int
+    text: String
+}
+
+#Error
+BoardError: enum {
+    Failed(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+notes_in: fn(store: db.Store) -> db.Table<Int, Note> {
+    store.table("notes", key: fn(note: Note) { note.id })
+}
+
+// The notes written, by ID.
+noted: fn(store: db.Store) -> String {
+    ids := [String]{}
+    loop id in 1..<4 {
+        if notes_in(store).get(id) == .Val(_) -> ids.push("{id}")
+    }
+    if ids.len() == 0 -> "none" else -> ids.join(", ")
+}
+
+ran_of: fn(ran: Shared<[Int]>) -> String {
+    held: ran.guard_read()
+    ids := [String]{}
+    loop id in held.value -> ids.push("{id}")
+    if ids.len() == 0 -> "none" else -> ids.join(", ")
+}
+
+ran_count: fn(ran: Shared<[Int]>) -> Int { ran.guard_read().value.len() }
+
+ran_add: fn(ran: Shared<[Int]>, id: Int) {
+    held := ran.guard_edit()
+    held.value.push(id)
+}
+
+Board: struct {
+    store: db.Store
+    // Whether each job waits its time before writing its note.
+    slow: Bool
+    // The jobs started in this process, by ID.
+    ran: Shared<[Int]>
+
+    // Queues jobs 1, 2 and 3.
+    #App.Public add: fn(self) -> Int BoardError! {
+        _: notes_in(self.store).put(Note{id: 0, text: "added"}) ?? return Err(BoardError.Failed(err.message()))
+        app.enqueue(fn() { self.work(1, 0) })
+        app.enqueue(fn() { self.work(2, 300) })
+        app.enqueue(fn() { self.work(3, 60000) })
+        Ok(3)
+    }
+
+    // Waits `ms` milliseconds when the board is slow, then writes note `id`.
+    #App.Job work: fn(self, id: Int, ms: Int) -> Int BoardError! {
+        ran_add(self.ran, id)
+        if self.slow -> time.sleep(Duration{ns: ms * 1000000})
+        _: notes_in(self.store).put(Note{id: id, text: "job {id}"}) ?? return Err(BoardError.Failed(err.message()))
+        Ok(id)
+    }
+}
+
+// Queues the jobs through `board`: whether its call committed.
+add_jobs: fn(board: app.Remote<Board>) -> Bool Never! {
+    _: board.add() ?? return false
+    true
+}
+
+stop: fn() {
+    store: db.open("board.db")
+    ran: Shared{[Int]{}}
+    server: web.app().mount(Board{store: store.copy(), slow: true, ran: ran.copy()}).bind("127.0.0.1:0") ?? panic("bind the board")
+    serving: task { server.serve() }
+    serving.detach()
+    if !add_jobs(app.remote(Board{store: store.copy(), slow: true, ran: ran.copy()})) {
+        panic("the add commits")
+    }
+    loop _ in 0..<1000 {
+        if noted(store) != "none" && ran_count(ran) == 3 -> break
+        time.sleep(10ms)
+    }
+    _: server.shutdown(grace: 2000ms) ?? panic("the server shuts down")
+    print("after the shutdown, notes: {noted(store)}")
+}
+
+restart: fn() {
+    store: db.open("board.db")
+    ran: Shared{[Int]{}}
+    server: web.app().mount(Board{store: store.copy(), slow: false, ran: ran.copy()}).bind("127.0.0.1:0") ?? panic("bind the board")
+    serving: task { server.serve() }
+    serving.detach()
+    loop _ in 0..<3000 {
+        if noted(store) == "1, 2, 3" -> break
+        time.sleep(10ms)
+    }
+    // A row still kept would be taken by the same tick as job 3's.
+    time.sleep(1500ms)
+    print("after the restart, ran: {ran_of(ran)}, notes: {noted(store)}")
+}
+
+run: fn() {
+    if process.args().contains("stop") -> stop() else -> restart()
+}

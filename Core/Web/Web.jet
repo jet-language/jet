@@ -405,6 +405,20 @@ App: struct {
         self.copy()
     }
 
+    // An `#App.Job` method of `app.mount(service)` (sema lowers each here):
+    // declares job `name`, run with `run` and retried `retries` times, so
+    // that once a server first serves the app (`__on_serve`), the process
+    // takes the job's rows no server holds from each store it knows, as a
+    // server that stopped left them, and runs them. Once that server stops
+    // (`__on_stop`), it waits what is left of its drain for the jobs that
+    // run, and leaves the rest unfinished, to run again.
+    __job: fn(self, name: String, retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
+        calls.jobs.know(name, retries, run)
+        http_server.__on_serve(app_table(self), fn() { calls.jobs.serve() })
+        http_server.__on_stop(app_table(self), fn(wait_ms: Int) { calls.jobs.stop(wait_ms) })
+        self.copy()
+    }
+
     // `app.get(path, handler)` and its sibling verbs, `app.custom(method,
     // path, handler)` and each marked method of `app.mount(value)` land here
     // with the route's checked contract (sema lowers each). `at` is the
@@ -1507,14 +1521,26 @@ priv AppSchedule: struct {
     run: fn(RemoteArgs) -> String [FieldError]!
 }
 
-// Starts the schedules `waiting` holds (`calls.schedules`), each once: it
-// takes each out, so a later start finds none.
+// Starts the schedules `waiting` holds (`calls.schedules`), each once, in
+// the order they were left: it takes each out, so a later start finds none,
+// and starts them after letting `waiting` go.
 priv app_schedules_start: fn(waiting: Shared<[AppSchedule]>) Never! {
-    guard := waiting.guard_edit()
+    schedules := app_schedules_taken(waiting)
     loop {
-        schedule: guard.value.remove(0, .Slot) ?? return
+        schedule: schedules.pop() ?? return
         calls.schedules.start(schedule.name, schedule.cron, schedule.run)
     }
+}
+
+// Takes the schedules `waiting` holds, last first, and leaves none.
+priv app_schedules_taken: fn(waiting: Shared<[AppSchedule]>) -> [AppSchedule] Never! {
+    guard := waiting.guard_edit()
+    taken := [AppSchedule]{}
+    loop {
+        schedule: guard.value.pop() ?? break
+        taken.push(schedule)
+    }
+    taken
 }
 
 // An endpoint's method: the last segment of its row's path.

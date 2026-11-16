@@ -1,0 +1,19 @@
+Small: struct {
+    value: Int
+
+    impl Literal.Int {
+        #run from_literal: fn(value: Int) -> Small {
+            if value > 100 -> panic("too big for Small")
+            Small{value: value}
+        }
+    }
+
+    #run doubled: fn(value: Int) -> Small { Small.from_literal(value * 2) }
+}
+
+twice: fn(value: Int) -> Int { Small.doubled(value).value }
+
+run: fn() {
+    small: Small.from_literal(500)
+    print("{small.value} {twice(3)}")
+}

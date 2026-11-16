@@ -11,6 +11,7 @@ use {
         derivation_record_json,
         failure_contract_shown_type,
         failure_contract_source,
+        name_facts_leaf,
         type_name,
     ]
     jet_semindex.[
@@ -36,6 +37,7 @@ use {
         semindex_build,
         semindex_callable,
         semindex_callable_ret,
+        semindex_display_text,
         semindex_failure_contract_name,
         semindex_failure_source_name,
         semindex_policy_display,
@@ -206,12 +208,21 @@ jet_cli_sem_json_trait_contract: fn(contract: SemTraitContract) -> String Never!
     "{{\"trait\":{jet_cli_json_string(contract.trait_name)},\"associated_types\":[{associated.join(",")}],\"methods\":{jet_cli_sem_json_strings(contract.methods)}}}"
 }
 
-jet_cli_sem_json_def: fn(definition: SemDefinition) -> String {
+// A lifted type's leaf is its ledger leaf (`M3GeoPoint` is `Point`); any
+// other leaf stays as written.
+jet_cli_sem_json_leaf: fn(index: SemIndex, name: String) -> String Never! {
+    shown: semindex_display_text(index, name)
+    if shown == name -> return shown
+    name_facts_leaf(shown)
+}
+
+// The payload spells every field but the leaf (jet_cli_semindex_payload).
+jet_cli_sem_json_def: fn(definition: SemDefinition, index: SemIndex) -> String {
     def: definition.def
     callable: if def.kind == .Function(value) -> if value.signature_facts_available -> jet_cli_sem_json_callable_signature(value, definition.view_provenance) else -> "null" else -> "null"
     contracts: loop contract in definition.trait_contracts -> jet_cli_sem_json_trait_contract(contract)
     identity: jet_cli_sem_json_unavailable(SemUnavailable{required_stage: "Resolved", reason: "the semindex producer does not receive a checker-issued DeclarationHandle"})
-    "{{\"identity\":{jet_cli_json_string(def.identity)},\"metadata_declaration_identity\":{identity},\"name\":{jet_cli_json_string(def.qualified_name)},\"leaf_name\":{jet_cli_json_string(def.name)},\"module\":{jet_cli_json_string(def.module_path)},\"span\":{jet_cli_sem_json_span(def.def_span)},\"detail\":{jet_cli_sem_json_kind(def.kind, def.local_stage)},\"view_provenance\":{jet_cli_sem_json_view_map(definition.view_provenance)},\"callable_signature\":{callable},\"derives\":{jet_cli_sem_json_strings(definition.derives)},\"nominal_base\":{jet_cli_sem_json_optional(definition.nominal_base)},\"trait_contracts\":[{contracts.join(",")}]}}"
+    "{{\"identity\":{jet_cli_json_string(def.identity)},\"metadata_declaration_identity\":{identity},\"name\":{jet_cli_json_string(def.qualified_name)},\"leaf_name\":{jet_cli_json_string(jet_cli_sem_json_leaf(index, def.name))},\"module\":{jet_cli_json_string(def.module_path)},\"span\":{jet_cli_sem_json_span(def.def_span)},\"detail\":{jet_cli_sem_json_kind(def.kind, def.local_stage)},\"view_provenance\":{jet_cli_sem_json_view_map(definition.view_provenance)},\"callable_signature\":{callable},\"derives\":{jet_cli_sem_json_strings(definition.derives)},\"nominal_base\":{jet_cli_sem_json_optional(definition.nominal_base)},\"trait_contracts\":[{contracts.join(",")}]}}"
 }
 
 jet_cli_sem_json_ref: fn(reference: SemRef) -> String Never! {
@@ -282,9 +293,11 @@ jet_cli_sem_json_effect_projection: fn(projection: SemEffectProjection) -> Strin
 }
 
 // The `semindex` payload of `SemIndex::to_status_envelope`. Standalone
-// source carries no package projection or workspace overlay policy.
+// source carries no package projection or workspace overlay policy. Every
+// field spells a lifted type by its ledger path (`geo.Point`), the identity
+// keys included, so no generated name reaches the document.
 jet_cli_semindex_payload: fn(index: SemIndex) -> String {
-    definitions: loop definition in index.definitions -> jet_cli_sem_json_def(definition)
+    definitions: loop definition in index.definitions -> jet_cli_sem_json_def(definition, index)
     facts: loop fact in index.definition_facts -> jet_cli_sem_json_definition_fact(fact)
     derivations: loop record in index.derivations -> derivation_record_json(record)
     instances: loop instance in index.instances -> jet_cli_sem_json_instance(instance)
@@ -295,7 +308,7 @@ jet_cli_semindex_payload: fn(index: SemIndex) -> String {
     effects: loop fact in index.effects -> jet_cli_sem_json_effect(fact)
     arithmetic: loop fact in index.arithmetic -> jet_cli_sem_json_arithmetic(fact)
     members: loop member in index.members -> jet_cli_sem_json_member(member)
-    "{{\"schema_version\":{SEMINDEX_SCHEMA_VERSION},\"definitions\":[{definitions.join(",")}],\"definition_facts\":[{facts.join(",")}],\"derivations\":[{derivations.join(",")}],\"instances\":[{instances.join(",")}],\"outputs\":[{outputs.join(",")}],\"state_graphs\":[{graphs.join(",")}],\"package_facts\":null,\"workspace_overlays\":null,\"effect_projection\":{jet_cli_sem_json_effect_projection(index.effect_projection)},\"references\":[{references.join(",")}],\"calls\":[{calls.join(",")}],\"effects\":[{effects.join(",")}],\"arithmetic\":[{arithmetic.join(",")}],\"members\":[{members.join(",")}]}}"
+    semindex_display_text(index, "{{\"schema_version\":{SEMINDEX_SCHEMA_VERSION},\"definitions\":[{definitions.join(",")}],\"definition_facts\":[{facts.join(",")}],\"derivations\":[{derivations.join(",")}],\"instances\":[{instances.join(",")}],\"outputs\":[{outputs.join(",")}],\"state_graphs\":[{graphs.join(",")}],\"package_facts\":null,\"workspace_overlays\":null,\"effect_projection\":{jet_cli_sem_json_effect_projection(index.effect_projection)},\"references\":[{references.join(",")}],\"calls\":[{calls.join(",")}],\"effects\":[{effects.join(",")}],\"arithmetic\":[{arithmetic.join(",")}],\"members\":[{members.join(",")}]}}")
 }
 
 // `SemIndex::to_status_envelope().json()`: the `inspect.semindex` status
@@ -314,7 +327,8 @@ jet_cli_effect_projection_line: fn(projection: SemEffectProjection) -> String Ne
     "required effects: {jet_cli_effect_names(projection.required)}; granted effects: {jet_cli_effect_names(projection.granted)}; denied effects: {jet_cli_effect_names(projection.denied)}; authority: {projection.authority}"
 }
 
-// `run_semindex` text mode.
+// `run_semindex` text mode, a lifted type spelled by its ledger path as in
+// the JSON document.
 jet_cli_semindex_text: fn(index: SemIndex) -> String {
     out := "semantic index (schema v{SEMINDEX_SCHEMA_VERSION})\n"
     out = "{out}  definitions: {index.definitions.len()}\n"
@@ -354,5 +368,5 @@ jet_cli_semindex_text: fn(index: SemIndex) -> String {
             loop method in contract.methods -> out = "{out}      {method}\n"
         }
     }
-    "{out}note: pass --json for the full stable document\n"
+    semindex_display_text(index, "{out}note: pass --json for the full stable document\n")
 }

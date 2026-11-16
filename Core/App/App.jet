@@ -12,6 +12,7 @@ package: {
 // Live bindings live in one process-wide registry below; sync sessions are
 // records of that registry under LIVE_SYNC_SOURCE.
 use {
+    auth: core.auth
     unicode: core.text
     http: core.http
     crypto: core.crypto
@@ -616,7 +617,7 @@ live_running: fn(task: TaskID) -> Int? {
 // and as no one, never as the system, when there is none. A live binding
 // runs as the caller that made it.
 Acting: enum {
-    Account(String)
+    Account(auth.AccountID)
     System
 }
 
@@ -637,7 +638,7 @@ ACTING: Shared{ActingRuns{runs: [ActingRun]{}}}
 // Runs `run` acting for the account `account` and gives what it gives; the
 // account is `maybe_caller()` within it. `run` handles its own failures, so
 // a caller with any failure contract may call this.
-as_caller: fn<R>(account: String, run: fn() -> R Never!) -> R Never! {
+as_caller: fn<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never! {
     acting_within(Val(Acting.Account(account.copy())), run)
 }
 
@@ -648,7 +649,7 @@ as_system: fn<R>(run: fn() -> R Never!) -> R Never! { acting_within(Val(Acting.S
 
 // The account this task acts for: None when it acts for the system or for
 // no one.
-maybe_caller: fn() -> String? Never! {
+maybe_caller: fn() -> auth.AccountID? Never! {
     if acting_now(tasks.current_task()) == .Val(.Account(account)) -> return Val(account)
     None
 }
@@ -657,7 +658,9 @@ maybe_caller: fn() -> String? Never! {
 // accepts a call only on a path that starts at an `#App.SignedIn` method or
 // inside `as_caller`. A path the compiler can't follow (a function value
 // another task runs) that reaches it acting for no account stops here.
-caller: fn() -> String Never! { maybe_caller() ?? panic("app.caller() ran acting for no account") }
+caller: fn() -> auth.AccountID Never! {
+    maybe_caller() ?? panic("app.caller() ran acting for no account")
+}
 
 priv acting_within: fn<R>(acting: Acting?, run: fn() -> R Never!) -> R Never! {
     me: tasks.current_task()
@@ -697,7 +700,7 @@ priv acting_now: fn(task: TaskID) -> Acting? {
 // A binding's registry name for the caller `acting`: empty for no one.
 priv acting_tag: fn(acting: Acting?) -> String {
     if acting == {
-        .Val(.Account(account)) -> "account:{account}"
+        .Val(.Account(account)) -> "account:{account.raw()}"
         .Val(.System) -> "system"
         .None -> ""
     }
@@ -712,7 +715,7 @@ priv(package) callers: module {
     }
 
     // The account this task acts for: None for the system or no one.
-    account: fn() -> String? Never! { maybe_caller() }
+    account: fn() -> auth.AccountID? Never! { maybe_caller() }
 
     // This task acts for the system until `end`, as a row policy's own
     // reads do.
@@ -723,25 +726,27 @@ priv(package) callers: module {
 }
 
 #Test("a task acts for its innermost run's caller, and a task it spawns for no one") {
-    assert_eq(maybe_caller(), String?{None})
-    seen: as_caller<String>("ann", fn() {
+    ann: auth.AccountID.from_string("ann")
+    ben: auth.AccountID.from_string("ben")
+    assert_eq(maybe_caller(), auth.AccountID?{None})
+    seen: as_caller<String>(ann, fn() {
         assert(as_system(fn() { callers.system() }))
-        assert_eq(as_system(fn() { maybe_caller() }), String?{None})
-        assert_eq(as_caller("ben", fn() { maybe_caller() }), Val("ben"))
-        spawned: task { maybe_caller() ?? "no one" }
+        assert_eq(as_system(fn() { maybe_caller() }), auth.AccountID?{None})
+        assert_eq(as_caller(ben, fn() { maybe_caller() }), Val(ben))
+        spawned: task { (maybe_caller() ?? auth.AccountID.from_string("no one")).raw() }
         assert_eq(spawned.join() ?? panic("the spawned task runs"), "no one")
         assert(!callers.system())
-        maybe_caller() ?? "no one"
+        (maybe_caller() ?? auth.AccountID.from_string("no one")).raw()
     })
     assert_eq(seen, "ann")
-    assert_eq(maybe_caller(), String?{None})
-    as_caller("ben", fn() {
-        assert_eq(maybe_caller(), Val("ben"))
-        assert_eq(caller(), "ben")
+    assert_eq(maybe_caller(), auth.AccountID?{None})
+    as_caller(ben, fn() {
+        assert_eq(maybe_caller(), Val(ben))
+        assert_eq(caller(), ben)
         assert(!callers.system())
     })
-    assert_eq(maybe_caller(), String?{None})
-    assert_eq(acting_tag(Val(Acting.Account("ann"))), "account:ann")
+    assert_eq(maybe_caller(), auth.AccountID?{None})
+    assert_eq(acting_tag(Val(Acting.Account(ann))), "account:ann")
     assert_eq(acting_tag(None), "")
 }
 
@@ -760,9 +765,11 @@ priv(package) callers: module {
 // carries its due run (`schedule`), which core.db records the same way, so
 // a run another server has done is dropped as well. A job the call queues
 // (`enqueue`) waits for it: `end` keeps the job in the outbox of the first
-// store the call joined, in that store's transaction, and once the call
-// commits, runs it on a task of its own (`job_run`); a call that rolls back
-// drops its jobs with its writes.
+// store the call joined, in that store's transaction, under a key of its
+// own, and once the call commits, runs it on a task of its own (`job_run`);
+// a call that rolls back drops its jobs with its writes. Each run of a job
+// carries its key as its delivery, so a store that has run the job drops a
+// second run of it.
 CallJoin: struct {
     // Commits (true) or rolls back (false) one store's transaction; false
     // when it couldn't do as asked.
@@ -771,30 +778,60 @@ CallJoin: struct {
 }
 
 // One store's outbox: the jobs committed calls queued there that haven't
-// run yet, a row each.
+// run yet, a row each, found by the job's key. Each row is taken until a
+// time (Unix milliseconds): the server that runs its job takes it again
+// each tick while the job runs (`hold`), and once that time has passed, a
+// serving server takes the row (`take`) and runs the job again, as when the
+// server that ran it stopped.
 CallOutbox: struct {
+    // Names the store among the open ones: the database file's path, or
+    // one of its own for an in-memory database.
+    store: String
+    // The time it is by the store's clock, in Unix milliseconds.
+    now: fn() -[]> Int Never!
     // Keeps job `name` with its encoded arguments, in the transaction of
-    // the call this task runs; the job's row, or 0 when the store couldn't
-    // keep it.
-    keep: fn(String, String) -[]> Int Never!
-    // Deletes row `row`, in the transaction of the call this task runs, as
-    // its job runs there: 1; 0 when the row has gone, as another run did the
-    // job; -1 when the store couldn't delete it.
-    done: fn(Int) -[]> Int Never!
-    // Records on row `row` that its job ran `runs` times and failed each
-    // time, the last with `error`; false when the store couldn't.
-    failed: fn(Int, Int, String) -[]> Bool Never!
+    // the call this task runs, taken until `until`; the job's key, a new
+    // random one, or "" when the store couldn't keep it.
+    keep: fn(String, String, Int) -[]> String Never!
+    // Deletes the row of key `key`, in the transaction of the call this
+    // task runs, as its job runs there: 1; 0 when the row has gone, as
+    // another run did the job; -1 when the store couldn't delete it.
+    done: fn(String) -[]> Int Never!
+    // Records on the row of key `key` that its job ran `runs` times and
+    // failed each time, the last with `error`, and takes it until `until`;
+    // false when the store couldn't.
+    failed: fn(String, Int, String, Int) -[]> Bool Never!
+    // Takes each row of a job named in `names` that is not taken at `now`,
+    // until `until`, and gives each; None once the store has closed.
+    take: fn([String], Int, Int) -[]> [CallQueued]? Never!
+    // Takes the rows of keys `keys` until `until`; false when the store
+    // couldn't.
+    hold: fn([String], Int) -[]> Bool Never!
+}
+
+// A row a server took from a store's outbox: its job's key, name and
+// encoded arguments, and the runs the job made so far, each failed.
+CallQueued: struct {
+    key: String
+    name: String
+    args: String
+    runs: Int
+}
+
+// The function that decodes a job's arguments and runs it, which replies
+// `{"err":...}` when the job failed. Copies share the one function.
+CallJobCall: struct {
+    call: fn(RemoteArgs) -> String [FieldError]!
 }
 
 // A job a call queued: its name (`<service module>.<Service>.<method>`), its
 // arguments as one encoded JSON array, the runs it gets after a first that
-// fails, and the function that decodes the arguments and runs it, which
-// replies `{"err":...}` when the job failed.
+// fails, and the function that runs it.
 CallJob: struct {
     name: String
     args: String
     retries: Int
-    run: fn(RemoteArgs) -> String [FieldError]!
+    run: Shared<CallJobCall>
 }
 
 // A webhook delivery a call runs: the ID its sender gives it, the same each
@@ -971,15 +1008,15 @@ priv(package) transactions: module {
             loop joined in ended.joins -> _: joined.end(false)
             return !ended.refused
         }
-        rows := [Int]{}
+        keys := [String]{}
         if ended.joins.len() > 0 {
             loop job in ended.jobs {
-                row: ended.joins[0].outbox.keep(job.name, job.args)
-                if row == 0 {
+                key: ended.joins[0].outbox.keep(job.name, job.args, ended.joins[0].outbox.now() + JOB_HOLD_MS)
+                if key == "" {
                     loop joined in ended.joins -> _: joined.end(false)
                     return false
                 }
-                rows.push(row)
+                keys.push(key)
             }
         }
         loop (index, joined) in ended.joins {
@@ -988,15 +1025,15 @@ priv(package) transactions: module {
             return false
         }
         if ended.joins.len() == 0 {
-            loop job in ended.jobs.move() -> job_start(job, None, 0)
+            loop job in ended.jobs.move() -> job_start(job, "", None, 0)
             return true
         }
         // The jobs' runs share the first store's outbox.
         first := ended.joins.remove(0, .Slot) ?? return true
-        outbox: Shared{first.outbox.move()}
+        outbox: jobs_store(first.outbox.move(), false)
         at := 0
         loop job in ended.jobs.move() {
-            job_start(job, Val(outbox.copy()), rows[at])
+            job_start(job, keys[at].copy(), Val(outbox.copy()), 0)
             at += 1
         }
         true
@@ -1046,8 +1083,8 @@ priv RemoteArgs: struct {
 // the job runs once the call commits (`transactions`); queued outside one,
 // it runs at once, on a task of its own.
 __enqueue: fn(name: String, args: [String], retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) Never! {
-    job: CallJob{name: name, args: "[{args.join(",")}]", retries: retries, run: run.move()}
-    call: transactions.current() ?? return job_start(job, None, 0)
+    job: CallJob{name: name, args: "[{args.join(",")}]", retries: retries, run: Shared{CallJobCall{call: run.move()}}}
+    call: transactions.current() ?? return job_start(job, "", None, 0)
     transactions.enqueue(call, job)
 }
 
@@ -1067,53 +1104,366 @@ priv job_backoff_ms: fn(failures: Int) -> Int Never! {
     wait
 }
 
-// Runs `job` on a task of its own; `outbox` keeps it as row `row` (None: it
-// is kept nowhere).
-priv job_start: fn(job: &&CallJob, outbox: &&Shared<CallOutbox>?, row: Int) Never! {
-    runner: task { job_run(job, outbox, row) }
+// How long a store's row stays taken for the server that runs its job, in
+// milliseconds. That server takes it again each tick while the job runs or
+// waits to run again, so the time passes only once the server has stopped
+// or can't reach the store; then a serving server takes the row and runs the
+// job again.
+priv JOB_HOLD_MS: 5000
+
+// How often the task of each store a server takes jobs from takes the rows
+// of its running jobs again and the rows no server holds, in milliseconds.
+priv JOB_TICK_MS: 1000
+
+// The time a row of a job that failed every run it gets is taken until:
+// never again.
+priv JOB_NEVER: 9223372036854775807
+
+// A job a mounted service declares (`App.__job`), which a serving server
+// takes from a store's outbox by its name and runs.
+priv CallJobRunner: struct {
+    name: String
+    retries: Int
+    run: Shared<CallJobCall>
+}
+
+// A store whose outbox the process runs jobs from: the keys of the jobs it
+// runs from there, the keys of the ones a stop left (`jobs.stop`), which
+// still run but no longer hold their rows, and whether core.db named the
+// store as it opened (`jobs.store`). A store it didn't name is forgotten
+// once no job of it runs.
+priv JobStore: struct {
+    store: String
+    outbox: Shared<CallOutbox>
+    running: [String]
+    left: [String]
+    named: Bool
+}
+
+// The process's jobs: the jobs mounted services declare, the stores it runs
+// jobs from, how many times a server began serving an App that declares
+// jobs, which take the rows no server holds while any serves, and whether
+// the task that tends the stores (`jobs_tend`) runs.
+priv JobRuntime: struct {
+    runners: [CallJobRunner]
+    stores: [JobStore]
+    serving: Int
+    tended: Bool
+}
+
+priv JOBS: Shared{JobRuntime{runners: [CallJobRunner]{}, stores: [JobStore]{}, serving: 0, tended: false}}
+
+// The jobs of a served App: core.web declares each `#App.Job` method of a
+// mounted service (`know`) and tells when the App serves (`serve`); core.db
+// names each database file whose outbox keeps jobs as it opens (`store`).
+priv(package) jobs: module {
+    // Declares job `name`, run with `run` and retried `retries` times, so a
+    // serving server takes its rows by its name. The first declaration of a
+    // name stands.
+    know: fn(name: String, retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) Never! {
+        runtime := JOBS.guard_edit()
+        loop known in runtime.value.runners {
+            if known.name == name {
+                return
+            }
+        }
+        runtime.value.runners.push(CallJobRunner{name: name.copy(), retries: retries, run: Shared{CallJobCall{call: run.move()}}})
+    }
+
+    // Names a store whose outbox keeps jobs, so a serving server takes the
+    // rows no server holds from it.
+    store: fn(outbox: &&CallOutbox) Never! { _: jobs_store(outbox, true) }
+
+    // A server began serving an App that declares jobs: from now on, each
+    // tick takes the rows no server holds from each store.
+    serve: fn() Never! {
+        runtime := JOBS.guard_edit()
+        runtime.value.serving += 1
+        jobs_tend_start(runtime.value)
+    }
+
+    // A server that began serving an App that declares jobs stopped, with
+    // `wait_ms` milliseconds left. Once no server serves such an App, no
+    // tick takes rows, and the stop waits up to `wait_ms` for the jobs that
+    // run, and leaves the ones that still do (`jobs_leave`): none of them
+    // deletes its row or records a failure, and their rows are no longer
+    // held, so a serving server runs them again once their time passes.
+    stop: fn(wait_ms: Int) Never! {
+        if !jobs_unserve() {
+            return
+        }
+        end: rt.clock_mono_ns() + wait_ms * 1000000
+        loop jobs_busy() && rt.clock_mono_ns() < end -> tasks.sleep(10)
+        jobs_leave()
+    }
+}
+
+// One server less serves an App that declares jobs: whether none does now.
+priv jobs_unserve: fn() -> Bool Never! {
+    runtime := JOBS.guard_edit()
+    if runtime.value.serving > 0 -> runtime.value.serving -= 1
+    runtime.value.serving == 0
+}
+
+// Whether a job the process runs from a store still runs.
+priv jobs_busy: fn() -> Bool Never! {
+    runtime: JOBS.guard_read()
+    loop store in runtime.value.stores {
+        if store.running.len() > 0 -> return true
+    }
+    false
+}
+
+// Leaves each job the process runs from a store: it no longer holds its
+// row, and its run neither deletes the row nor records a failure there.
+priv jobs_leave: fn() Never! {
+    runtime := JOBS.guard_edit()
+    loop index in 0..<runtime.value.stores.len() {
+        loop key in runtime.value.stores[index].running {
+            runtime.value.stores[index].left.push(key.copy())
+        }
+        runtime.value.stores[index].running = [String]{}
+    }
+}
+
+// Whether a stop left the job of key `key` the process runs from `outbox`.
+priv jobs_left: fn(outbox: Shared<CallOutbox>?, key: String) -> Bool Never! {
+    kept: outbox ?? return false
+    store: jobs_store_name(kept)
+    runtime: JOBS.guard_read()
+    loop known in runtime.value.stores {
+        if known.store == store -> return known.left.contains(key)
+    }
+    false
+}
+
+// The outbox the process runs jobs from for the store `outbox` names: the
+// one it has, or `outbox`, which it then has; `named` when core.db names
+// the store.
+priv jobs_store: fn(outbox: &&CallOutbox, named: Bool) -> Shared<CallOutbox> Never! {
+    runtime := JOBS.guard_edit()
+    loop index in 0..<runtime.value.stores.len() {
+        if runtime.value.stores[index].store != outbox.store -> next
+        if named -> runtime.value.stores[index].named = true
+        return runtime.value.stores[index].outbox.copy()
+    }
+    name: outbox.store.copy()
+    kept: Shared{outbox.move()}
+    runtime.value.stores.push(JobStore{store: name, outbox: kept.copy(), running: [String]{}, left: [String]{}, named: named})
+    kept
+}
+
+// Starts the task that tends the stores (`jobs_tend`) unless it runs.
+priv jobs_tend_start: fn(runtime: &JobRuntime) Never! {
+    if runtime.tended {
+        return
+    }
+    runtime.tended = true
+    tending: task { jobs_tend() }
+    tending.detach()
+}
+
+// What one tick does on store `store`: take the rows of `running` again,
+// and, while a server serves an App that declares jobs, take the rows of
+// jobs named in `names` that no server holds.
+priv JobTick: struct {
+    store: String
+    outbox: Shared<CallOutbox>
+    running: [String]
+    names: [String]
+}
+
+// What the next tick does on each store; None when it has nothing to do, as
+// no job runs and no server serves an App that declares jobs, and then the
+// task that tends the stores ends (`tended` is false again).
+priv jobs_ticks: fn() -> [JobTick]? Never! {
+    runtime := JOBS.guard_edit()
+    names := [String]{}
+    if runtime.value.serving > 0 {
+        loop known in runtime.value.runners -> names.push(known.name.copy())
+    }
+    ticks := [JobTick]{}
+    loop store in runtime.value.stores {
+        if store.running.len() == 0 && names.len() == 0 -> next
+        ticks.push(JobTick{store: store.store.copy(), outbox: store.outbox.copy(), running: store.running.copy(), names: names.copy()})
+    }
+    if ticks.len() == 0 && names.len() == 0 {
+        runtime.value.tended = false
+        return None
+    }
+    Val(ticks)
+}
+
+// The task that tends the stores: each tick, it takes the rows of the jobs
+// the process runs again, so no other server takes them, and while a server
+// serves an App that declares jobs, it takes the rows no server holds and
+// runs their jobs. A store that has closed is forgotten.
+priv jobs_tend: fn() Never! {
+    loop {
+        ticks: jobs_ticks() ?? return
+        loop tick in ticks -> jobs_tick(tick)
+        tasks.sleep(JOB_TICK_MS)
+    }
+}
+
+// Runs one tick on its store.
+priv jobs_tick: fn(tick: JobTick) Never! {
+    taken: jobs_tick_rows(tick) ?? return jobs_forget(tick.store)
+    loop queued in taken {
+        job: jobs_declared(queued) ?? next
+        job_start(job, queued.key.copy(), Val(tick.outbox.copy()), queued.runs)
+    }
+}
+
+// Takes the rows of `tick` on its store, and gives the rows it took that no
+// server held; None once the store has closed.
+priv jobs_tick_rows: fn(tick: JobTick) -> [CallQueued]? Never! {
+    kept: tick.outbox.guard_read()
+    now: kept.value.now()
+    if tick.running.len() > 0 -> _: kept.value.hold(tick.running, now + JOB_HOLD_MS)
+    if tick.names.len() == 0 -> return Val([CallQueued]{})
+    kept.value.take(tick.names, now, now + JOB_HOLD_MS)
+}
+
+// The job of the row `queued`, run by its declared runner; None when no
+// mounted service declares it.
+priv jobs_declared: fn(queued: CallQueued) -> CallJob? Never! {
+    runtime: JOBS.guard_read()
+    loop known in runtime.value.runners {
+        if known.name == queued.name {
+            return Val(CallJob{name: queued.name.copy(), args: queued.args.copy(), retries: known.retries, run: known.run.copy()})
+        }
+    }
+    None
+}
+
+// Forgets store `store`, which has closed.
+priv jobs_forget: fn(store: String) Never! {
+    runtime := JOBS.guard_edit()
+    loop index in 0..<runtime.value.stores.len() {
+        if runtime.value.stores[index].store == store {
+            _: runtime.value.stores.remove(index, .Slot)
+            return
+        }
+    }
+}
+
+// Marks the job of key `key` as running from store `store` (`running`), or
+// as no longer running, whether a stop left it or not; a store core.db
+// didn't name is forgotten once no job of it runs.
+priv jobs_running: fn(store: String, key: String, running: Bool) Never! {
+    runtime := JOBS.guard_edit()
+    loop index in 0..<runtime.value.stores.len() {
+        if runtime.value.stores[index].store != store -> next
+        if running {
+            runtime.value.stores[index].running.push(key.copy())
+            return jobs_tend_start(runtime.value)
+        }
+        loop at in 0..<runtime.value.stores[index].running.len() {
+            if runtime.value.stores[index].running[at] == key {
+                _: runtime.value.stores[index].running.remove(at, .Slot)
+                break
+            }
+        }
+        loop at in 0..<runtime.value.stores[index].left.len() {
+            if runtime.value.stores[index].left[at] == key {
+                _: runtime.value.stores[index].left.remove(at, .Slot)
+                break
+            }
+        }
+        done: runtime.value.stores[index].running.len() == 0 && runtime.value.stores[index].left.len() == 0
+        if done && !runtime.value.stores[index].named {
+            _: runtime.value.stores.remove(index, .Slot)
+        }
+        return
+    }
+}
+
+// The name of the store `outbox` keeps jobs in.
+priv jobs_store_name: fn(outbox: Shared<CallOutbox>) -> String Never! {
+    kept: outbox.guard_read()
+    kept.value.store.copy()
+}
+
+// Runs `job` on a task of its own; `outbox` keeps it under key `key` (None:
+// it is kept nowhere), after `runs` runs that failed.
+priv job_start: fn(job: &&CallJob, key: &&String, outbox: &&Shared<CallOutbox>?, runs: Int) Never! {
+    if outbox == .Val(store) -> jobs_running(jobs_store_name(store), key, true)
+    runner: task { job_run(job, key, outbox, runs) }
     runner.detach()
 }
 
-// Runs `job` until a run succeeds, each run as the system and in a call of
-// its own, which also deletes the job's row from `outbox`. A run that fails
-// runs again after a backoff, up to `job.retries` more times; the row then
-// records the last failure and stays.
-priv job_run: fn(job: CallJob, outbox: Shared<CallOutbox>?, row: Int) Never! {
-    runs := 0
-    loop {
-        runs += 1
-        failure: job_attempt(job, outbox, row)
-        if failure == "" {
-            return
-        }
-        if runs > job.retries {
-            if outbox == .Val(store) {
-                kept: store.guard_read()
-                _: kept.value.failed(row, runs, failure)
-            }
-            return
-        }
-        tasks.sleep(job_backoff_ms(runs))
-    }
-}
-
-// One run of `job` in a call of its own: "" when it ran, or when another run
-// had done it already (its row is gone); otherwise why it failed.
-priv job_attempt: fn(job: CallJob, outbox: Shared<CallOutbox>?, row: Int) -> String Never! {
-    call: transactions.begin() ?? panic("a job's task runs no other call")
-    reply: as_system<String>(fn() { job_reply(job.run, job.args) })
-    failed: reply.starts_with("{{\"err\":")
-    removed := 1
-    if !failed {
+// Runs `job`, after `runs` runs that failed, until a run succeeds, each run
+// as the system and in a call of its own, which also deletes the job's row
+// from `outbox`. A run that fails runs again after a backoff, up to
+// `job.retries` more runs in all; each failure is recorded on the row, so a
+// server that takes it later goes on from there. After the last, the row
+// keeps the last failure, and no server takes it again. A job a stop left
+// (`jobs.stop`) runs no more, and records nothing on its row.
+priv job_run: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?, runs: Int) Never! {
+    failures := runs
+    loop !jobs_left(outbox, key) {
+        failures += 1
+        failure: job_attempt(job, key, outbox)
+        if failure == "" || jobs_left(outbox, key) -> break
+        last: failures > job.retries
         if outbox == .Val(store) {
             kept: store.guard_read()
-            removed = kept.value.done(row)
+            until: if last -> JOB_NEVER else -> kept.value.now() + job_backoff_ms(failures) + JOB_HOLD_MS
+            _: kept.value.failed(key, failures, failure, until)
+        }
+        if last -> break
+        tasks.sleep(job_backoff_ms(failures))
+    }
+    if outbox == .Val(store) -> jobs_running(jobs_store_name(store), key, false)
+}
+
+// One run of `job` in a call of its own, under its key `key` as the call's
+// delivery: "" when it ran, or when another run had done it already (its
+// row is gone, or a store it uses has run it); otherwise why it failed. A
+// run a store has run already rolls back, and its row is deleted then. A
+// run that a stop left before it ended rolls back, and its row stays.
+priv job_attempt: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?) -> String Never! {
+    call: transactions.begin() ?? panic("a job's task runs no other call")
+    if outbox == .Val(store) {
+        kept: store.guard_read()
+        transactions.deliver(call, CallDelivery{id: "job:{key}", at: kept.value.now() /% 1000})
+    }
+    reply: as_system<String>(fn() {
+        held: job.run.guard_read()
+        job_reply(held.value.call, job.args)
+    })
+    failed: reply.starts_with("{{\"err\":")
+    left: jobs_left(outbox, key)
+    removed := 1
+    if !failed && !left {
+        if outbox == .Val(store) {
+            kept: store.guard_read()
+            removed = kept.value.done(key)
         }
     }
-    committed: transactions.end(call, !failed && removed == 1)
+    repeated: transactions.repeated(call)
+    committed: transactions.end(call, !failed && !left && removed == 1)
+    if repeated {
+        if outbox == .Val(store) -> return job_done(store, key)
+        return ""
+    }
     if failed -> return reply
     if removed < 0 -> return "the store couldn't delete the job's row"
     if !committed -> return "the job's call couldn't commit"
+    ""
+}
+
+// Deletes the row of key `key` from `outbox`, in a call of its own, as a
+// store the job uses has run it already: "" once it is gone, otherwise why
+// not.
+priv job_done: fn(outbox: Shared<CallOutbox>, key: String) -> String Never! {
+    call: transactions.begin() ?? panic("a job's task runs no other call")
+    kept: outbox.guard_read()
+    removed: kept.value.done(key)
+    if !transactions.end(call, removed >= 0) || removed < 0 {
+        return "the store couldn't delete the job's row"
+    }
     ""
 }
 
@@ -1375,7 +1725,15 @@ priv cron_due_after: fn(line: CronLine, minute: Int) -> Int? {
 // An outbox that keeps nothing, for the calls of the test below, which queue
 // no job.
 priv outbox_unused: fn() -> CallOutbox Never! {
-    CallOutbox{keep: fn(_: String, _: String) { 0 }, done: fn(_: Int) { 0 }, failed: fn(_: Int, _: Int, _: String) { false }}
+    CallOutbox{
+        store: "unused",
+        now: fn() { 0 },
+        keep: fn(_: String, _: String, _: Int) { "" },
+        done: fn(_: String) { 0 },
+        failed: fn(_: String, _: Int, _: String, _: Int) { false },
+        take: fn(_: [String], _: Int, _: Int) { None },
+        hold: fn(_: [String], _: Int) { false },
+    }
 }
 
 #Test("a call commits or rolls back every transaction joined to it, runs again when one refused it, and rolls back a delivery run already") {
@@ -1426,25 +1784,29 @@ priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
     log.value.copy()
 }
 
-#Test("a committed call keeps each job it queued in its first store's outbox and runs it after the commit, again after a failure; a rolled-back call runs none") {
+#Test("a committed call keeps each job it queued in its first store's outbox and runs it after the commit, again after a failure, recording each; a rolled-back call runs none") {
     seen: Shared{[String]{}}
     outbox: fn() -> CallOutbox {
         CallOutbox{
-            keep: fn(name: String, args: String) {
+            store: "app.Test outbox",
+            now: fn() { 0 },
+            keep: fn(name: String, args: String, _: Int) {
                 log := seen.guard_edit()
                 log.value.push("keep {name} {args}")
-                7
+                "key {name}"
             },
-            done: fn(row: Int) {
+            done: fn(key: String) {
                 log := seen.guard_edit()
-                log.value.push("done {row}")
+                log.value.push("done {key}")
                 1
             },
-            failed: fn(row: Int, runs: Int, error: String) {
+            failed: fn(key: String, runs: Int, error: String, _: Int) {
                 log := seen.guard_edit()
-                log.value.push("failed {row} after {runs}: {error}")
+                log.value.push("failed {key} after {runs}: {error}")
                 true
             },
+            take: fn(_: [String], _: Int, _: Int) { Val([CallQueued]{}) },
+            hold: fn(_: [String], _: Int) { true },
         }
     }
     tries: Shared{0}
@@ -1472,12 +1834,12 @@ priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
     __enqueue("app.Test.failing", [String]{}, 1, failing)
     assert(transactions.end(committed, true))
     loop _ in 0..<1000 {
-        if jobs_seen(seen).len() >= 4 -> break
+        if jobs_seen(seen).len() >= 6 -> break
         tasks.sleep(10)
     }
     log := jobs_seen(seen)
     log.sort()
-    assert_eq(log.join(", "), "done 7, failed 7 after 2: {{\"err\":\"always\"}}, keep app.Test.failing [], keep app.Test.flaky [2]")
+    assert_eq(log.join(", "), "done key app.Test.flaky, failed key app.Test.failing after 1: {{\"err\":\"always\"}}, failed key app.Test.failing after 2: {{\"err\":\"always\"}}, failed key app.Test.flaky after 1: {{\"err\":\"once\"}}, keep app.Test.failing [], keep app.Test.flaky [2]")
     assert_eq(job_backoff_ms(1), 500)
     assert_eq(job_backoff_ms(3), 2000)
     assert_eq(job_backoff_ms(40), JOB_BACKOFF_MOST_MS)

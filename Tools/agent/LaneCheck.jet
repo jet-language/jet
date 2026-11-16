@@ -47,8 +47,10 @@
 // (#6605), which refuses any #Unsafe region Docs/spec/safety.md does not
 // record, and any recorded row the checkout no longer has, the vocabulary
 // rows in --check mode, which refuse a package Source/Vocabulary.jet that
-// differs from the package's Vocabulary.tsv, the diagnostic census in --check
-// mode (Tools/agent/DiagnosticCensus.jet), which refuses a stale
+// differs from the package's Vocabulary.tsv, the Core enum cases in --check
+// mode (Tools/agent/CoreEnumCases.jet), which refuse a Core.rows enum case
+// list that differs from the enum its Core source declares, the diagnostic
+// census in --check mode (Tools/agent/DiagnosticCensus.jet), which refuses a stale
 // tests/diagnostics_census.tsv and any active code that is dead or shown by no
 // ui snapshot, report fixture or case unless the shrink-only
 // tests/diagnostics_census_baseline.tsv admits it, the compiler-data ratchet
@@ -125,6 +127,7 @@ run: fn() {
     unsafe_ratchet(repo)
     vocabulary_rows(repo)
     body_tree_rows(repo)
+    core_enum_cases(repo)
     diagnostic_census(repo)
     compiler_data(repo)
     script_pairing(repo)
@@ -200,6 +203,16 @@ body_tree_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
         return
     }
     check_refused(process.combined_output(rows).trim_end(), "a generated flat-body enum in Compiler/JetFoundation/Source/Facts differs from its declaration in Compiler/JetSema/Source/Sema/Tree.jet (see above; regenerate with jet Tools/agent/BodyTreeRows.jet --write)")
+}
+
+// The Core enum case lists check with $JET, else the `jet` on PATH; it never writes.
+core_enum_cases: fn(repo: String) -[Env, Exec, FS, IO]> () {
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
+    cases: tool_cmd([String]{jet, "Tools/agent/CoreEnumCases.jet", "--check"}, repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/CoreEnumCases.jet: {err}")
+    if cases.code == 0 && cases.signal == None {
+        return
+    }
+    check_refused(process.combined_output(cases).trim_end(), "a Core.rows enum case list differs from the enum its Core source declares (see above; regenerate with jet Tools/agent/CoreEnumCases.jet --write)")
 }
 
 // The diagnostic census check with $JET, else the `jet` on PATH; it never writes.

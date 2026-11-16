@@ -568,7 +568,6 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "name" -> Val(string)
             field == "type" -> Val(sema_fact_named("TypeId"))
             field == "index" -> Val(Type.Int)
-            field == "fields" -> Val(sema_fact_list_of("FieldInfo"))
             field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
             field == "dimensions" -> Val(sema_fact_list_of("DimensionInfo"))
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
@@ -584,10 +583,13 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     if type_name == "CaseInfo" {
         return if {
             field == "name" || field == "path" || field == "wire_name" -> Val(string)
+            field == "index" -> Val(Type.Int)
             field == "payload" -> Val(sema_fact_named("CasePayload"))
             field == "discriminant" -> Val(Type.Option{inner: Type.Int})
             field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
             field == "span" -> Val(sema_fact_named("SourceSpan"))
+            field == "location" -> Val(sema_fact_optional("SourceLocation"))
+            field == "documentation" -> Val(sema_fact_list_of("CommentInfo"))
             else -> None
         }
     }

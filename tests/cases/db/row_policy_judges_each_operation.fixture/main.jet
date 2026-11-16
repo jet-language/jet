@@ -3,6 +3,7 @@
 // operation it judged, and the program prints those notes after each step.
 use {
     app
+    auth: core.auth
     db: core.db
 }
 
@@ -10,21 +11,27 @@ use {
 Project: struct {
     id: Int
     name: String
-    created_by: String
+    created_by: auth.AccountID
 }
 
 #[Codable, Comparable]
 MemberKey: struct {
     project: Int
-    account: String
+    account: auth.AccountID
 }
 
 #Codable
 Member: struct {
     project: Int
-    account: String
+    account: auth.AccountID
     owner: Bool
 }
+
+mia: fn() -> auth.AccountID { auth.AccountID.from_string("mia") }
+
+ben: fn() -> auth.AccountID { auth.AccountID.from_string("ben") }
+
+carol: fn() -> auth.AccountID { auth.AccountID.from_string("carol") }
 
 // Every judgement since the last step, in order.
 JUDGED: Shared{[String]{}}
@@ -46,7 +53,7 @@ op_name: fn(op: db.Op) -> String {
     }
 }
 
-account_of: fn(who: db.Who) -> String? {
+account_of: fn(who: db.Who) -> auth.AccountID? {
     if who == {
         .Account(account) -> Val(account)
         .System -> None
@@ -55,7 +62,7 @@ account_of: fn(who: db.Who) -> String? {
 }
 
 note: fn(op: db.Op, who: db.Who, row: String) {
-    caller: account_of(who) ?? "no account"
+    caller: if account_of(who) == .Val(account) -> account.raw() else -> "no account"
     judged := JUDGED.guard_edit()
     judged.value.push("{op_name(op)} {row} as {caller}")
 }
@@ -66,7 +73,7 @@ member_text: fn(row: Member) -> String {
 }
 
 // The account's member row in `project`, read with the system's rights.
-member_of: fn(store: db.Store, project: Int, account: String) -[DB.Read]> Member? db.DBError! {
+member_of: fn(store: db.Store, project: Int, account: auth.AccountID) -[DB.Read]> Member? db.DBError! {
     members_in(store).get(MemberKey{project: project, account: account})
 }
 
@@ -87,7 +94,7 @@ project_policy: fn(row: Project, op: db.Op, who: db.Who, store: db.Store) -[DB.R
 // The creator rule: `account` created `project`, which has no members yet.
 // The project row may be a write earlier in the same transaction; the member
 // row being judged is not written yet, so it is not counted.
-first_owner: fn(store: db.Store, project: Int, account: String) -[DB.Read]> Bool db.DBError! {
+first_owner: fn(store: db.Store, project: Int, account: auth.AccountID) -[DB.Read]> Bool db.DBError! {
     if projects_in(store).get(project) == {
         .Val(found) -> {
             if found.created_by != account -> return Ok(false)
@@ -200,24 +207,24 @@ run: fn() {
     keep(store)
 
     transaction: store.begin() ?? panic("begin")
-    created: app.as_caller("mia", fn() { project_wrote(projects().add(Project{id: 1, name: "jet", created_by: "mia"})) })
-    owned: app.as_caller("mia", fn() { member_wrote(members().add(Member{project: 1, account: "mia", owner: true})) })
+    created: app.as_caller(mia(), fn() { project_wrote(projects().add(Project{id: 1, name: "jet", created_by: mia()})) })
+    owned: app.as_caller(mia(), fn() { member_wrote(members().add(Member{project: 1, account: mia(), owner: true})) })
     transaction.commit() ?? panic("commit")
     step("mia creates project 1 and becomes its first owner in one transaction", "{created}, {owned}")
 
-    step("ben adds himself as an owner of project 1", app.as_caller("ben", fn() { member_wrote(members().add(Member{project: 1, account: "ben", owner: true})) }))
-    step("mia adds ben as a member", app.as_caller("mia", fn() { member_wrote(members().add(Member{project: 1, account: "ben", owner: false})) }))
-    step("ben makes himself an owner", app.as_caller("ben", fn() { member_wrote(members().put(Member{project: 1, account: "ben", owner: true})) }))
-    step("mia blanks the project's name", app.as_caller("mia", fn() { project_wrote(projects().put(Project{id: 1, name: "", created_by: "mia"})) }))
-    step("mia renames the project", app.as_caller("mia", fn() { project_wrote(projects().put(Project{id: 1, name: "jet2", created_by: "mia"})) }))
-    step("carol puts a project under a new key", app.as_caller("carol", fn() { project_wrote(projects().put(Project{id: 2, name: "solo", created_by: "carol"})) }))
+    step("ben adds himself as an owner of project 1", app.as_caller(ben(), fn() { member_wrote(members().add(Member{project: 1, account: ben(), owner: true})) }))
+    step("mia adds ben as a member", app.as_caller(mia(), fn() { member_wrote(members().add(Member{project: 1, account: ben(), owner: false})) }))
+    step("ben makes himself an owner", app.as_caller(ben(), fn() { member_wrote(members().put(Member{project: 1, account: ben(), owner: true})) }))
+    step("mia blanks the project's name", app.as_caller(mia(), fn() { project_wrote(projects().put(Project{id: 1, name: "", created_by: mia()})) }))
+    step("mia renames the project", app.as_caller(mia(), fn() { project_wrote(projects().put(Project{id: 1, name: "jet2", created_by: mia()})) }))
+    step("carol puts a project under a new key", app.as_caller(carol(), fn() { project_wrote(projects().put(Project{id: 2, name: "solo", created_by: carol()})) }))
 
-    step("carol reads project 1", app.as_caller("carol", fn() { project_read(projects(), 1) }))
-    step("ben reads project 1", app.as_caller("ben", fn() { project_read(projects(), 1) }))
-    step("carol reads the members", app.as_caller("carol", fn() { members_read(members()) }))
-    step("ben reads the members", app.as_caller("ben", fn() { members_read(members()) }))
+    step("carol reads project 1", app.as_caller(carol(), fn() { project_read(projects(), 1) }))
+    step("ben reads project 1", app.as_caller(ben(), fn() { project_read(projects(), 1) }))
+    step("carol reads the members", app.as_caller(carol(), fn() { members_read(members()) }))
+    step("ben reads the members", app.as_caller(ben(), fn() { members_read(members()) }))
 
-    step("carol removes mia", app.as_caller("carol", fn() { member_deleted(members(), MemberKey{project: 1, account: "mia"}) }))
-    step("ben leaves the project", app.as_caller("ben", fn() { member_deleted(members(), MemberKey{project: 1, account: "ben"}) }))
+    step("carol removes mia", app.as_caller(carol(), fn() { member_deleted(members(), MemberKey{project: 1, account: mia()}) }))
+    step("ben leaves the project", app.as_caller(ben(), fn() { member_deleted(members(), MemberKey{project: 1, account: ben()}) }))
     step("the system reads the members", app.as_system(fn() { members_read(members()) }))
 }

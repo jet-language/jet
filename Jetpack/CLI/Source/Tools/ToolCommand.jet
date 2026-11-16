@@ -355,10 +355,12 @@ cli_tool_install: fn(verification: &StoreVerification, cache: &WorkspaceDeclarat
     plan := RunPlan.empty(project_dir, cli_cwd_table(cache))
     plan.refs.push(spec.copy())
     env := cli_compose_env_scoped(verification, theme, roots, parsed.flags, plan, RealizeScope.UserProfile, false) ?? return cli_exit_for(theme, err)
-    lease: env.cache_leases.remove(0, .Slot) ?? {
+    // A positional remove stops on an empty list rather than giving None.
+    if env.cache_leases.is_empty() {
         theme.error("`{spec.raw}` has no bin directory to install", "tool install projects package binaries onto PATH; this realization produced no `bin/`.", "pick a package that ships executables, or use `jetpack use <package> -- <command>` for a one-shot.")
         return EXIT_USAGE
     }
+    lease: env.cache_leases.remove(0, .Slot) ?? return EXIT_USAGE
     receipt: lease.profile_install_receipt() ?? {
         theme.error("couldn't pin verified tool realization", "{err}", "retry realization; Jetpack will not publish an unverified profile member.")
         return EXIT_USAGE

@@ -1,0 +1,24 @@
+# One `#run` makes a Reader and reads it twice: each read advances the same
+# cursor, as the same reads do at run time. The compile-time value and the
+# run-time value print as hex, one line each, and must be byte-identical.
+# A Reader is a runtime handle with no data form, so a compile-time value
+# holding one, at module level or in a body, is refused (E1018): the reads
+# can't be split across `#run` sites.
+fixture: sequential_comptime_reads_advance_one_reader.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build source0/comptime_diff.jet
+exit: 0
+step aot0: built
+exit: 0
+stdout: lines = 2 # one compile-time line and one run-time line
+capture: comptime0 = text stdout.line(0)
+capture: runtime0 = text stdout.line(1)
+cap:comptime0: = "{cap:runtime0}"
+cap:comptime0: = "377c397c31"
+step: jet check source1/comptime_diff.jet --json
+exit: nonzero
+json: stdout doc $.reports has {"code":"E1018"}
+step: jet check source2/comptime_diff.jet --json
+exit: nonzero
+json: stdout doc $.reports has {"code":"E1018"}

@@ -395,6 +395,9 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     targets := [IRTraitTarget]{}
     returned := Type.Named{name: "Unit"}
     seen := [String:Bool]{}
+    // Whether an implementation returns a view (`-> T from self`), whose
+    // result the call marks lent.
+    lent := false
     candidates: p.trait_methods.get("{ir_short_name(ir_symbol_key(p, owner))}|{method.name}") ?? [Int]{}
     loop index in candidates {
         if p.functions[index].generic_params.len() > 0 -> next
@@ -407,6 +410,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
         if targets.len() == 0 {
             returned = ir_executable_return(p.functions[index]) ?? Type.Named{name: "Unit"}
         }
+        if p.functions[index].return_view_provenance != None -> lent = true
         targets.push(IRTraitTarget{key: p.functions[index].key.copy(), concrete: implementer, access: ir_receiver_access(p.functions[index].kind)})
     }
     consumes := targets.len() > 0
@@ -481,7 +485,12 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     ir_close_arms(m, b, tests, arm_states, arm_leaves, true)
     // A consumed box went to the implementation; any other fresh one ends here.
     if consumes -> b.fresh[boxed] = false else -> ir_release(m, b, boxed)
-    if result >= 0 -> b.fresh[result] = ir_has_drop(m, b, result)
+    // A result an implementation lends (`-> T from self`) closes nothing, as a
+    // direct call's lent result does (ir_call_row_emit): its owner closes it.
+    if result >= 0 {
+        b.fresh[result] = ir_has_drop(m, b, result)
+        if lent -> b.lent[result] = true
+    }
     ir_trait_propagate(m, p, b, method, result, ty, span)
 }
 

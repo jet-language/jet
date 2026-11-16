@@ -55,6 +55,14 @@ Claims: struct {
     issued_at: Int?
 }
 
+/// An account, by the id its account store gave it. Every account in Core is
+/// one: `app.caller()`, `app.as_caller`, a row policy's `db.Who.Account` and
+/// a table column. It codes as its id, so a stored or sent account is that
+/// String; `AccountID.from_string(id)` makes one and `.raw()` gives the id
+/// back.
+#[Codable, Comparable, Printable]
+AccountID: distinct String
+
 /// A validated session. Neither its display nor its debug view prints the id
 /// or cookie bytes.
 Session: struct {

@@ -6913,6 +6913,13 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnv
         sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, context)
         return None
     }
+    // A prepared value is data the later compile-time code reads; a
+    // runtime handle has none to keep.
+    if sema_comptime_value_runtime_handle(init.ty, environment, program) == .Val(handle) {
+        diagnostics.push(sema_comptime_runtime_handle_diagnostic(binding.name, handle, binding.name_span))
+        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, context)
+        return None
+    }
     value := sema_expr_comptime_value(init, context)
     if value == None -> value = sema_fact_constant_path_value(init, context)
     ty := init.ty

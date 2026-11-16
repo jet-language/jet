@@ -1,0 +1,20 @@
+use comptime_diff_hex: core.encoding.hex
+
+run: fn() {
+    comptime_value: #run read_twice()
+    runtime_value: read_twice()
+    comptime_diff_frame("{comptime_value}", "{runtime_value}")
+}
+
+// Both reads advance the one cursor the function makes.
+read_twice: fn() -> String {
+    reader: Reader.over([U8]{7, 9, 11})
+    first: reader.read_u8() ?? panic("first")
+    second: reader.read_u8() ?? panic("second")
+    "{first}|{second}|{reader.remaining()}"
+}
+
+comptime_diff_frame: fn(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

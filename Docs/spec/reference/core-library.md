@@ -1735,8 +1735,10 @@ tell a draining server from a dead one. Then the listener closes, so the port
 is free and a new connect is refused (`local_addr()` then fails with an
 `HTTPError.IO`). Connections still
 open then count as `cancelled`, and one whose handler is still running never
-sends its response: its socket closes when the handler returns. Every caller
-of `serve` and `shutdown` receives the same
+sends its response: its socket closes when the handler returns. A web app
+that mounts `#App.Job` methods then waits what is left of that time for the
+jobs its process runs, and leaves any still running unfinished (`#App.Job`).
+Every caller of `serve` and `shutdown` receives the same
 `HTTPShutdownReport{accepted, overloaded, completed, cancelled}`; a second
 `serve` is an `HTTPError.IO`. The connection deadline bounds each
 connection's reads and writes (30 seconds by default).
@@ -2227,6 +2229,15 @@ empty, so a world and its tasks never read or change the process store.
 | `session_show(session)` | `String` | Render a redacted session summary; cookie bytes are not printed. |
 | `auth(users_table)` / `auth_oauth(auth, providers)` | `Auth` | An app's auth configuration: its users table and the comma- or space-separated OAuth providers, deduplicated and bounded. |
 | `auth_routes(auth)` / `auth_show(auth)` | `String` | Render the routes the configuration serves, or its summary. |
+
+`AccountID` is an account, by the id its account store gave it, and the one
+type Core names an account by: `app.caller()`, `app.maybe_caller()` and
+`app.as_caller` give and take it, a row policy is asked as
+`db.Who.Account(AccountID)`, and a table column holds it. It is a distinct
+`String`: `AccountID.from_string(id)` makes one, `.raw()` gives the id back,
+two are equal when their ids are, it keys a map and orders by its id, and it
+encodes, decodes and prints as the id itself, so a stored or sent account is
+that `String`.
 
 JWT accepts only HS256 and requires a key of at least 32 bytes. PASETO accepts
 only `v4.public`, a 32-byte key, a non-empty normalized audience, and canonical
@@ -5484,10 +5495,10 @@ tasks never read or change the process registry. The module source is
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
 | `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
-| `as_caller<R>(account: String, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
+| `as_caller<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
 | `as_system<R>(run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for the server itself, which no row policy limits, as a job or a schedule does. |
-| `maybe_caller() -> String?` | account | The account this task acts for: `None` for the system or no one. |
-| `caller() -> String` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
+| `maybe_caller() -> auth.AccountID?` | account | The account this task acts for: `None` for the system or no one. |
+| `caller() -> auth.AccountID` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
 | `enqueue(fn() { self.job(args...) })` | — | Queue one call of the service's `#App.Job` method `job`, with its arguments evaluated and encoded here; it runs after the call that queued it commits. See below. |
 | `endpoints<S>() -> [String]` | names | The methods of the service `S` that `#App.SignedIn` or `#App.Public` marks, in the order `S` declares them. A job, a schedule, a webhook, a signing key and an unmarked method are server-only and never listed. |
 
@@ -5650,16 +5661,38 @@ with each argument in its place and of a type that derives `Encode` and
 `Decode`; anything else is E2817 (`jet.EnqueueNotOneJobCall`). The arguments
 are evaluated and encoded where `enqueue` is called. Inside a call, the job
 is kept in the call's transaction, as a row of the `__jet_jobs` table of the
-first store the call used: a call that rolls back queues nothing, and once
-it commits each of its jobs runs, on a task of its own, as the system
-(`as_system`), and in a call of its own, which also deletes the job's row.
-A run that fails, its method's error or a failed commit, runs again after
-half a second, then after twice the wait before, an hour at most, up to
-`#App.Job(retries: n)` more times, five unless set; a job that failed every
-run keeps its row, which records its runs and the last failure. A job is
-therefore run at least once, and a job method should be safe to run again.
-A call that used no store, and code outside a call, run the job at once
-without keeping it.
+first store the call used, under a random key of its own: a call that rolls
+back queues nothing, and once it commits each of its jobs runs, on a task of
+its own, as the system (`as_system`), and in a call of its own, which also
+deletes the job's row. A run that fails, its method's error or a failed
+commit, runs again after half a second, then after twice the wait before, an
+hour at most, up to `#App.Job(retries: n)` more times, five unless set; each
+failure is recorded on the row, and a job that failed every run keeps its
+row, with its runs and the last failure, and runs no more.
+
+The row is the job's delivery. The process that runs a job holds its row,
+renewing a five-second lease each second while the job runs or waits to run
+again. A server that serves an App mounting the job's service takes, each
+second, the rows of its jobs whose lease has run out from each store it
+knows: one that its process used for a job, and each database file `open`
+found keeping jobs. So a job whose server stopped before deleting its row,
+as after a crash or a restart, runs again on a serving server, which goes on
+from the failures the row records. Once no server of the process serves
+such an App any more, its last server to stop, after its drain, waits what
+is left of the drain budget (the `shutdown` grace, or one connection
+deadline) for the jobs the process runs, and takes no more rows. A job
+still running then is left unfinished: its call rolls back, it records no
+failure, and its row is no longer held, so it runs again on the next start
+or another serving server. Each run of a kept job is a delivery
+whose ID is the job's key: each store it uses records the key with its
+writes, as a webhook delivery's ID is recorded, so a run again of a job a
+store already ran is dropped there, and the job's row is deleted. A job is
+therefore run at least once, and its writes to stores happen once; other
+effects of a job method, such as a message it sends, should be safe to
+repeat. A call that used no store, and code outside a call, run the job at
+once without keeping it. A mounted service's job method takes read-only
+`self`, a concrete signature and parameters whose types derive `Encode` and
+`Decode`; anything else is E2805 (`jet.InvalidRoute`) at its marker.
 
 A method marked `#App.Every(cron: "0 8 * * 1-5")` is a schedule: it runs at
 each minute its cron line allows, in UTC, once a server first serves its
@@ -6536,7 +6569,8 @@ is not covered: the key columns stay as the table was created.
 
 A row policy, attached with `table.guard(policy)`, is a function from a row,
 the operation (`Op`: `Read`, `Insert`, `Update` or `Delete`), the caller
-(`Who`: `Account(id)`, `System` or `Anonymous`) and a store to a `Bool`.
+(`Who`: `Account(id)`, an `auth.AccountID`, `System` or `Anonymous`) and a
+store to a `Bool`.
 The table asks it about every call, as the caller the calling task acts for:
 `Account(id)` inside `app.as_caller(id, run)`, and `Anonymous` in a task
 that acts for no one, which is every task that runs neither `as_caller` nor

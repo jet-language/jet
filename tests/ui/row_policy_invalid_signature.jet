@@ -16,7 +16,7 @@ Member: struct {
 
 project_policy: fn(row: Project, op: db.Op, who: db.Who, _store: db.Store) -[DB.Read]> Bool db.DBError! {
     if who == {
-        .Account(account) -> Ok(op == db.Op.Read || row.created_by == account)
+        .Account(account) -> Ok(op == db.Op.Read || row.created_by == account.raw())
         .System -> Ok(true)
         .Anonymous -> Ok(false)
     }

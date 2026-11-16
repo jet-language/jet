@@ -261,9 +261,12 @@ sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -
                     if at >= 0 && at < values.len() -> return Val(values[at])
                 }
             }
+            // `info[.Circle]`: a field row, else an enum's case row.
             if position == .Enum(_, variant, selector_args) {
                 if selector_args.len() == 0 {
-                    return sema_derive_named_row(owner, "fields", variant)
+                    field_row: sema_derive_named_row(owner, "fields", variant)
+                    if field_row != None -> return field_row
+                    return sema_derive_named_row(owner, "cases", variant)
                 }
             }
             CtValue?{None}
@@ -543,11 +546,15 @@ sema_derive_named_row: fn(owner: CtValue, rows: String, name: String) -> CtValue
 // `handle.reflect().read` over a reflected handle without a direct
 // field reads the handle's homed fact row of that name; the fact value keeps
 // its detail under the same name. A callable's `effects` is the EffectInfo
-// its signature carries.
+// its signature carries; a case's `fields` are its payload fields
+// (sema_derive_case_fields).
 sema_derive_fact_read: fn(owner: CtValue, read: String) -> CtValue? Never! {
     if read == "effects" {
         signature: sema_derive_struct_field(owner, "signature") ?? return None
         return sema_derive_struct_field(signature, "effects")
+    }
+    if read == "fields" && sema_derive_is_variant(owner) {
+        return Val(CtValue.List{values: sema_derive_case_fields(owner)})
     }
     fact: sema_derive_named_row(owner, "facts", read) ?? return None
     value: sema_derive_struct_field(fact, "value") ?? return None
@@ -687,7 +694,13 @@ sema_derive_expand_name: fn(expansion: &SemaDeriveExpansion, name: String, span:
         }
         .Struct(_, _) -> {
             if !explicit -> return name.copy()
-            if sema_derive_struct_field(value, "name") == .Val(.Str(text)) {
+            // A case is spelled as its enum writes it, `Fire.Burn` for a
+            // grouped one.
+            spelled := sema_derive_reflected_name(value)
+            if sema_derive_is_variant(value) {
+                spelled = sema_derive_case_spelling(expansion, value)
+            }
+            if spelled == .Val(text) {
                 if expansion.definition_module != "" -> expansion.pasted.push(text.copy())
                 return text
             }
@@ -756,7 +769,7 @@ sema_derive_expand_types: fn(expansion: &SemaDeriveExpansion, types: [Type]) -> 
 
 // ---------------------------------------------------------------------------
 // Reflected enum payload bindings. A `.#{left}` arm binds every payload field of
-// the reflected variant under a side-qualified local (`left_Circle_radius`),
+// the reflected case under a side-qualified local (`left_Circle_radius`),
 // and `self.#{field}` / `rhs.#{field}` inside that arm read the same locals.
 
 sema_derive_reflected_name: fn(value: CtValue) -> String? Never! {
@@ -764,8 +777,9 @@ sema_derive_reflected_name: fn(value: CtValue) -> String? Never! {
     None
 }
 
+// A reflected enum case: one of an enum TypeInfo's `cases`.
 sema_derive_is_variant: fn(value: CtValue) -> Bool Never! {
-    sema_derive_struct_field(value, "index") != None
+    sema_derive_named_type(value) == "CaseInfo"
 }
 
 sema_derive_reflected_variant_name: fn(value: CtValue) -> String? Never! {
@@ -773,25 +787,60 @@ sema_derive_reflected_variant_name: fn(value: CtValue) -> String? Never! {
     sema_derive_reflected_name(value)
 }
 
+// A case's payload fields as a template reads them (`left.reflect().fields`):
+// a named payload's FieldInfo rows, one row named `value` for a positional
+// payload, as `Case.fields()` names it at run time, and none for a unit case.
+sema_derive_case_fields: fn(value: CtValue) -> [CtValue] Never! {
+    payload: sema_derive_struct_field(value, "payload") ?? return [CtValue]{}
+    if payload == .Enum(_, variant, args) {
+        if args.len() != 1 -> return [CtValue]{}
+        if variant == "Single" {
+            return [CtValue]{sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", "value"), NamedCtValue{name: "type", value: args[0].value}})}
+        }
+        if args[0].value == .List(rows) -> return rows
+    }
+    [CtValue]{}
+}
+
 sema_derive_field_info_payload: fn(value: CtValue) -> [CtValue]? Never! {
     if !sema_derive_is_variant(value) -> return None
-    if sema_derive_struct_field(value, "fields") == .Val(.List(payload)) {
-        if payload.len() == 0 -> return None
-        return Val(payload)
+    payload: sema_derive_case_fields(value)
+    if payload.len() == 0 -> return None
+    Val(payload)
+}
+
+// A case's spelling inside the enum `owner` reflects (`Fire.Burn` for a
+// grouped case): its path past the enum's path.
+sema_derive_case_spelling_in: fn(owner: CtValue, value: CtValue) -> String? Never! {
+    if sema_derive_struct_field(owner, "path") == .Val(.Str(type_path)) {
+        if sema_derive_struct_field(value, "path") == .Val(.Str(case_path)) {
+            prefix: "{type_path}."
+            if case_path.starts_with(prefix) -> return Val(case_path.removeprefix(prefix))
+        }
     }
     None
 }
 
-// The `fields` list of a `TypeInfo` value is searched in place: copying it
-// out would copy the whole reflected type once per variant arm.
+// A case's spelling read through the enum in scope that lists it, else its
+// leaf name.
+sema_derive_case_spelling: fn(expansion: SemaDeriveExpansion, value: CtValue) -> String? Never! {
+    loop entry in expansion.scope {
+        if sema_derive_named_type(entry.value) != "TypeInfo" -> next
+        if sema_derive_case_spelling_in(entry.value, value) == .Val(text) -> return Val(text)
+    }
+    sema_derive_reflected_name(value)
+}
+
+// The `cases` list of a `TypeInfo` value is searched in place: copying it
+// out would copy the whole reflected type once per case arm.
 sema_derive_type_info_variant_payload: fn(value: CtValue, variant: String) -> [CtValue]? Never! {
     if value == .Struct(type_name, fields) {
         if type_name != "TypeInfo" -> return None
         loop field in fields {
-            if field.name != "fields" -> next
-            if field.value == .List(variants) {
-                loop info in variants {
-                    if (sema_derive_reflected_name(info) ?? "") == variant {
+            if field.name != "cases" -> next
+            if field.value == .List(cases) {
+                loop info in cases {
+                    if (sema_derive_case_spelling_in(value, info) ?? "") == variant {
                         return sema_derive_field_info_payload(info)
                     }
                 }
@@ -813,7 +862,8 @@ sema_derive_variant_payload_fields: fn(expansion: SemaDeriveExpansion, variant: 
     loop entry in expansion.scope {
         payload := sema_derive_type_info_variant_payload(entry.value, key)
         if payload != None -> return payload
-        if (sema_derive_reflected_name(entry.value) ?? "") == key {
+        if !sema_derive_is_variant(entry.value) -> next
+        if (sema_derive_case_spelling(expansion, entry.value) ?? "") == key {
             payload = sema_derive_field_info_payload(entry.value)
             if payload != None -> return payload
         }
@@ -824,12 +874,9 @@ sema_derive_variant_payload_fields: fn(expansion: SemaDeriveExpansion, variant: 
 sema_derive_payload_binding_owner: fn(expansion: SemaDeriveExpansion, variant: String) -> String Never! {
     key: sema_derive_bare(variant)
     loop entry in expansion.scope {
-        reflected: sema_derive_reflected_name(entry.value) ?? next
-        if (reflected == key || entry.name == key) && sema_derive_is_variant(entry.value) {
-            if sema_derive_reflected_variant_name(entry.value) == .Val(name) {
-                return "{entry.name}_{name}"
-            }
-            return entry.name
+        name: sema_derive_reflected_variant_name(entry.value) ?? next
+        if entry.name == key || (sema_derive_case_spelling(expansion, entry.value) ?? "") == key {
+            return "{entry.name}_{name}"
         }
     }
     key
@@ -1839,7 +1886,7 @@ sema_derive_binding_failure: fn(expansion: SemaDeriveExpansion, span: Span, init
         }
         if field == .Val(name) {
             if sema_derive_static_value(expansion, base) == .Val(owner) {
-                if sema_derive_struct_field(owner, "fields") != None && sema_derive_named_row(owner, "fields", name) == None {
+                if sema_derive_struct_field(owner, "fields") != None && sema_derive_named_row(owner, "fields", name) == None && sema_derive_named_row(owner, "cases", name) == None {
                     return sema_error("E0302", span, "the reflected layout has no field `{name}`", "typed selectors must name a field declared by the reflected type", "use one of the names in `T.reflect().fields`")
                 }
             }
@@ -2159,8 +2206,8 @@ sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?)
     sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), NamedCtValue{name: "type", value: sema_derive_type_id(sema_derive_type_text(ty))}, NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}, NamedCtValue{name: "default", value: default_info}})
 }
 
-sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], base: String?) -> CtValue {
-    rows := [NamedCtValue]{sema_derive_ct_str("name", name), sema_derive_ct_str("path", name), NamedCtValue{name: "fields", value: CtValue.List{values: fields}}}
+sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], base: String?) -> CtValue {
+    rows := [NamedCtValue]{sema_derive_ct_str("name", name), sema_derive_ct_str("path", name), NamedCtValue{name: "fields", value: CtValue.List{values: fields}}, NamedCtValue{name: "cases", value: CtValue.List{values: cases}}}
     if base == .Val(text) -> rows.push(sema_derive_ct_str("base", text))
     rows.push(sema_derive_ct_str("kind", kind))
     sema_derive_ct_struct("TypeInfo", rows)
@@ -2176,54 +2223,49 @@ sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
         }
         fields.push(sema_derive_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, definition.fields[field_index].is_pub, default))
     }
-    sema_derive_type_info(definition.name, "struct", fields, None)
+    sema_derive_type_info(definition.name, "struct", fields, [CtValue]{}, None)
 }
 
 // A KeyBy type's derive input: its members compare its `key()` values.
 sema_derive_key_type_info: fn(name: String) -> CtValue {
-    sema_derive_type_info(name, "key", [CtValue]{}, None)
+    sema_derive_type_info(name, "key", [CtValue]{}, [CtValue]{}, None)
 }
 
-// Variant rows are `FieldInfo`s with an `index` and nested payload rows, so a
-// template binds every heterogeneous payload through one primitive.
+// An enum lists its leaf cases as CaseInfo rows under `cases`, as the
+// comptime TypeInfo does, and has no stored fields. A case's `path` runs
+// through the enum's, so a template spells a grouped case `Fire.Burn`.
 sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
-    variants := [CtValue]{}
+    cases := [CtValue]{}
     loop (index, variant) in definition.variants {
-        payload := [CtValue]{}
-        ty := "Unit"
-        if variant.payload == {
-            .Unit -> {}
-            .Single(payload_type, _) -> {
-                ty = sema_derive_type_text(payload_type)
-                payload.push(sema_derive_field_info("value", payload_type, definition.is_pub, None))
-            }
-            .Named(fields) -> {
-                parts := [String]{}
-                loop field in fields {
-                    parts.push("{field.name}: {sema_derive_type_text(field.ty)}")
-                    payload.push(sema_derive_field_info(field.name, field.ty, definition.is_pub, None))
+        payload: if variant.payload == {
+            .Unit -> CtValue.Enum{type_name: "CasePayload", variant: "Unit", args: [CtEnumArg]{}}
+            .Single(payload_type, _) -> CtValue.Enum{type_name: "CasePayload", variant: "Single", args: [CtEnumArg]{CtEnumArg{label: None, value: sema_derive_type_id(sema_derive_type_text(payload_type))}}}
+            .Named(named) -> {
+                fields := [CtValue]{}
+                loop field in named {
+                    fields.push(sema_derive_field_info(field.name, field.ty, definition.is_pub, None))
                 }
-                ty = "{{{parts.join(", ")}}}"
+                CtValue.Enum{type_name: "CasePayload", variant: "Named", args: [CtEnumArg]{CtEnumArg{label: None, value: CtValue.List{values: fields}}}}
             }
         }
-        variants.push(
+        leaf: if variant.name.cut_last(".") == .Val(parts) -> parts.after else -> variant.name
+        cases.push(
             sema_derive_ct_struct(
-                "FieldInfo",
+                "CaseInfo",
                 [NamedCtValue]{
-                    sema_derive_ct_str("name", variant.name),
-                    NamedCtValue{name: "type", value: sema_derive_type_id(ty)},
+                    sema_derive_ct_str("name", leaf),
+                    sema_derive_ct_str("path", "{definition.name}.{variant.name}"),
                     NamedCtValue{name: "index", value: CtValue.Int{value: index}},
-                    NamedCtValue{name: "fields", value: CtValue.List{values: payload}},
-                    NamedCtValue{name: "is_pub", value: CtValue.Bool{value: definition.is_pub}},
+                    NamedCtValue{name: "payload", value: payload},
                 },
             ),
         )
     }
-    sema_derive_type_info(definition.name, "enum", variants, None)
+    sema_derive_type_info(definition.name, "enum", [CtValue]{}, cases, None)
 }
 
 sema_derive_distinct_type_info: fn(definition: DistinctDef) -> CtValue {
-    sema_derive_type_info(definition.name, "distinct", [CtValue]{}, Val(sema_derive_type_text(definition.base)))
+    sema_derive_type_info(definition.name, "distinct", [CtValue]{}, [CtValue]{}, Val(sema_derive_type_text(definition.base)))
 }
 
 sema_derive_replace_provider_type: fn(ty: Type, type_param: String, owner_type: Type) -> Type Never! {

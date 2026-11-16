@@ -5,7 +5,9 @@ use {
 }
 
 Crew: struct {
-    #App.Public whoever: fn(self) -> String { app.maybe_caller() ?? "anyone" }
+    #App.Public whoever: fn(self) -> String {
+        if app.maybe_caller() == .Val(who) -> who.raw() else -> "anyone"
+    }
 }
 
 tick: fn() -> String {

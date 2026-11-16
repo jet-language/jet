@@ -1,0 +1,9 @@
+// `ADD3` holds a closure that `adder` made while building. The build keeps a
+// function as a compile-time value only when the value names it, so the
+// closure, which has no data form, is refused at the call that made it
+// (E1020).
+adder: fn(n: Int) -> fn(Int) -> Int { fn(x: Int) -> Int { x + n } }
+
+ADD3: #run adder(3)
+
+run: fn() { print(ADD3(1)) }
