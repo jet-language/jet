@@ -586,11 +586,11 @@ __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
 
 // `invalidate(source, args...)`: exactly that argument list re-runs.
 __live_invalidate: fn(source: String, args: [String]) Never! {
-    live_invalidate(source, Val(live_key(args)))
+    live_invalidate(source, Val(live_key(args)), None)
 }
 
 // `invalidate(source)`: every binding of `source` re-runs.
-__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None) }
+__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None, None) }
 
 // One argument's part of a binding's identity, and one argument of a queued
 // job's call: the argument encoded, or `_`, which no JSON reads, when it
@@ -599,7 +599,10 @@ __live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(va
 
 // A binding's read set, for core.db: while a task runs a binding's source,
 // each table it reads joins that binding's read set, so a write to the table
-// re-runs the binding as it re-runs the table's own bindings.
+// re-runs the binding as it re-runs the table's own bindings. A read the
+// compiler narrowed to the rows a SQL condition holds for joins it as the
+// table narrowed so, `<source>?<condition and values as a JSON list>`, and a
+// write re-runs it only when the condition holds for a row the write changed.
 priv(package) live_reads: module {
     // Whether this task is running a binding's source, so a database read
     // it makes belongs to that binding's read set.
@@ -608,19 +611,64 @@ priv(package) live_reads: module {
     // Adds `source` (a table's `core.db.live:<table>`) to the read set of
     // the binding this task runs. Recorded before the read runs, so a write
     // committed after the read always reaches the binding.
-    record: fn(source: String) Never! {
-        id: live_running(tasks.current_task()) ?? return
-        loop {
-            seen: live_cell_load()
-            registry := live_decode(seen) ?? return
-            index: live_index(registry, id) ?? return
-            if registry.records[index].source == source || registry.records[index].reads.contains(source) {
-                return
+    record: fn(source: String) Never! { live_read_record(source, source) }
+
+    // Adds `source` narrowed by the SQL `condition` over a stored row, with
+    // `values` bound to its `?`s in order, to the read set of the binding
+    // this task runs, unless it read all of `source` already.
+    record_where: fn(source: String, condition: String, values: [String]) Never! {
+        fields := [String]{condition.copy()}
+        fields.extend(values.copy())
+        encoded: live_json.to_string<[String]>(fields) ?? return live_read_record(source, source)
+        live_read_record(source, "{source}?{encoded}")
+    }
+
+    // The narrowed reads of `source` in the bindings' read sets, each once:
+    // its read-set entry, its condition and the values it binds.
+    narrowed: fn(source: String) -> [(entry: String, condition: String, values: [String])] Never! {
+        out := [(entry: String, condition: String, values: [String])]{}
+        registry: live_decode(live_cell_load()) ?? return out
+        prefix: "{source}?"
+        seen := [String]{}
+        loop record in registry.records {
+            loop read in record.reads {
+                if !read.starts_with(prefix) || seen.contains(read) -> next
+                seen.push(read.copy())
+                tree: live_json.parse(read.slice(prefix.len(), read.len())) ?? next
+                fields: tree.decode<[String]>() ?? next
+                if fields.len() == 0 -> next
+                values := [String]{}
+                loop at in 1..<fields.len() -> values.push(fields[at].copy())
+                out.push((entry: read.copy(), condition: fields[0].copy(), values: values))
             }
-            registry.records[index].reads.push(source.copy())  // copy: a lost race retries with the same source
-            if live_cell_replace(seen, live_encode(registry)) {
-                return
-            }
+        }
+        out
+    }
+
+    // Marks for a re-run every binding of `source`, every binding that read
+    // all of it, and every one whose read set holds one of the narrowed reads
+    // `held` (`narrowed`): those whose condition holds for a changed row.
+    invalidate: fn(source: String, held: [String]) Never! {
+        live_invalidate(source, None, Val(held))
+    }
+}
+
+// Adds `entry`, a read of `source`, to the read set of the binding this task
+// runs (`live_reads`), unless that binding is `source`'s own or read all of
+// `source` already.
+live_read_record: fn(source: String, entry: String) {
+    id: live_running(tasks.current_task()) ?? return
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return
+        index: live_index(registry, id) ?? return
+        reads: registry.records[index].reads
+        if registry.records[index].source == source || reads.contains(source) || reads.contains(entry) {
+            return
+        }
+        registry.records[index].reads.push(entry.copy())  // copy: a lost race retries with the same entry
+        if live_cell_replace(seen, live_encode(registry)) {
+            return
         }
     }
 }
@@ -2563,8 +2611,10 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
 // hub: topic `live:<id>`, the event `live_event` (with the rest of its hold
 // when the binding is held). Only connections that watch that binding
 // (`watch`) receive it; one that starts watching later first receives the
-// topic's latest.
-live_invalidate: fn(source: String, key: String?) {
+// topic's latest. A whole-source invalidation also marks every binding that
+// read `source`: of those that read it narrowed (`live_reads`), only the ones
+// whose narrowed read is in `reached`, when it is given.
+live_invalidate: fn(source: String, key: String?, reached: [String]?) {
     loop {
         seen: live_cell_load()
         registry := live_decode(seen) ?? return
@@ -2576,7 +2626,9 @@ live_invalidate: fn(source: String, key: String?) {
             // whole-source one also reaches every binding that read it.
             if registry.records[index].source == source {
                 if key == .Val(only) && registry.records[index].key != only -> next
-            } else if key != None || !registry.records[index].reads.contains(source) { next }
+            } else if key != None || !live_read_hit(registry.records[index].reads, source, reached) {
+                next
+            }
             registry.records[index].dirty = true
             registry.records[index].generation += 1
             id: registry.records[index].id
@@ -2594,6 +2646,19 @@ live_invalidate: fn(source: String, key: String?) {
             return
         }
     }
+}
+
+// Whether a binding with read set `reads` read `source`: all of it, or
+// narrowed by a read in `held` (every narrowed read when it is None).
+live_read_hit: fn(reads: [String], source: String, held: [String]?) -> Bool {
+    if reads.contains(source) -> return true
+    prefix: "{source}?"
+    loop read in reads {
+        if !read.starts_with(prefix) -> next
+        if held == .Val(narrowed) && !narrowed.contains(read) -> next
+        return true
+    }
+    false
 }
 
 // The live hub's event for binding `id`: re-read it, or, while it is held,

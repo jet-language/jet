@@ -808,7 +808,7 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
 
 // One SQLite connection shared by a Store and every scope derived from
 // it. `close` shuts the driver down in place for all of them. `path` is the
-// location it was opened at, for display. `written` names the tables written
+// location it was opened at, for display. `written` holds the tables written
 // since the last begin or commit, so a rollback can re-run their live bindings.
 // `open` numbers the transaction open on it (0: none), out of `began` so far.
 // `call` is the mounted method's call (app.transactions) whose transaction
@@ -820,22 +820,80 @@ priv DBState: struct {
     // Names the store among the open ones, as its job outbox
     // (app.CallOutbox): its path, or for an in-memory database, one of its own.
     store: String
-    written: [String]
+    written: [DBWritten]
     ended: Condition
     open: Int{0}
     began: Int{0}
     call: Int{0}
 
-    // A write that changed `table` marks every live binding that reads it for
-    // a re-run once the write is committed: at once outside a transaction,
-    // and at the commit or rollback inside one. A binding re-run on another
+    // A write that changed `table` marks the live bindings that read it for a
+    // re-run once the write is committed: at once outside a transaction, and
+    // at the commit or rollback inside one. A binding re-run on another
     // connection before the commit reads the old rows, so a mark made before
-    // the commit would leave that old result stored as current.
-    priv wrote: fn(&self, table: String) Never! {
-        if self.open != 0 {
-            if !self.written.contains(table) -> self.written.push(table.copy())
-        } else { app.__live_invalidate_all(live_source(table)) }
+    // the commit would leave that old result stored as current. `rows` are
+    // the stored rows the write replaced, removed or added, or None when it
+    // does not name them (DBWritten).
+    priv wrote: fn(&self, table: String, rows: [String]?) Never! {
+        if self.open == 0 -> return db_live_wrote(self.driver, table, rows)
+        loop at in 0..<self.written.len() {
+            if self.written[at].table == table {
+                if self.written[at].rows == .Val(held) && rows == .Val(more) {
+                    joined := held.copy()
+                    joined.extend(more.copy())
+                    self.written[at].rows = Val(joined)
+                } else { self.written[at].rows = None }
+                return
+            }
+        }
+        self.written.push(DBWritten{table: table.copy(), rows: rows})
     }
+}
+
+// A table written in the open transaction. `rows` are the stored rows (each
+// its `jet_row` text) its writes replaced, removed or added, or None once a
+// write did not name them, as a SQL statement does not.
+priv DBWritten: struct {
+    table: String
+    rows: [String]?
+}
+
+// The live bindings to re-run after a write to `table` (DBState.wrote): every
+// binding that read the whole table, and each one whose read of it was
+// narrowed by a condition over the field columns (`__query_filter`) that
+// holds for one of `rows` that the write changed, before or after it. With no
+// `rows` named, every binding that read the table re-runs.
+priv db_live_wrote: fn(driver: &DBDriver, table: String, rows: [String]?) Never! {
+    source: live_source(table)
+    changed: rows ?? return app.__live_invalidate_all(source)
+    reads: app.live_reads.narrowed(source)
+    if reads.len() == 0 -> return app.live_reads.invalidate(source, [String]{})
+    // Each changed row as a one-row table of its field columns.
+    selects := [(sql: String, values: [DBValue])]{}
+    loop row in changed {
+        tree: json.parse(row) ?? Dyn.Null
+        columns := [String]{}
+        values := [DBValue]{}
+        loop field in table_fields(tree) {
+            columns.push("? AS \"{field.column}\"")
+            values.push(field.value.copy())
+        }
+        from: if columns.len() == 0 -> "" else -> " FROM (SELECT {columns.join(", ")})"
+        selects.push((sql: "SELECT 1 AS held{from}", values: values))
+    }
+    held := [String]{}
+    loop read in reads {
+        loop select in selects {
+            bound := select.values.copy()
+            loop value in read.values -> bound.push(.Text(value.copy()))
+            // A condition the engine can't judge re-runs its binding.
+            if __driver_query(driver, "{select.sql} WHERE {read.condition}", bound) == .Ok(found) && found.len() == 0 {
+                next
+            }
+            held.push(read.entry.copy())
+            break
+        }
+    }
+    app.live_reads.invalidate(source, held)
 }
 
 Store: struct {
@@ -993,6 +1051,11 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: Val(policy.move())}
     }
 
+    // This table again, over the same store, for a query to read later.
+    priv again: fn(self) -> Table<K, T> Never! {
+        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: self.policy}
+    }
+
     // The row whose key is `key`, or None, also when the policy refuses to
     // let the caller read it.
     get: fn(self, key: K) -[DB.Read]> T? DBError! {
@@ -1067,27 +1130,38 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
         db_join(guard.value, self.state, call) ?? return Err(err)
         if !table_exists(guard.value.driver, self.name) -> return Ok()
+        stored: __driver_query(guard.value.driver, "SELECT {TABLE_ROW_COLUMN} FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+        gone: table_texts(stored) ?? return Err(err)
         changed: __driver_execute(guard.value.driver, "DELETE FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
-        if changed > 0 -> guard.value.wrote(self.name)
+        if changed > 0 -> guard.value.wrote(self.name, Val(gone))
         Ok()
     }
 
     // Every row the caller may read, in key order, as a data query. The
-    // policy judges the rows in key order too.
+    // query is read as it is collected, judged by the row policy as the
+    // caller this task acts for now, in key order too. A filter the compiler
+    // writes as SQL over the field columns (`__query_filter`) narrows what the
+    // read selects, and a live binding's read set to the rows it holds for.
     query: fn(self) -[DB.Read]> Query<T> DBError! {
-        rows: table_rows<K, T>(self, "", [DBValue]{}) ?? return Err(err)
-        keyed := [(key: K, row: T)]{}
-        loop stored in rows {
-            row: table_decode<T>(stored) ?? return Err(err)
-            keyed.push((key: self.key_of(row.copy()), row: row))
-        }
-        keyed.sort_by(fn(left: (key: K, row: T), right: (key: K, row: T)) { left.key <=> right.key })
-        out := [T]{}
-        loop entry in keyed {
-            allowed: table_allows<K, T>(self, entry.row.copy(), Op.Read) ?? return Err(err)
-            if allowed -> out.push(entry.row.copy())
-        }
-        Ok(data.query(out))
+        if !sql_identifier(self.name.bytes()) -> return Err(table_name_error(self.name))
+        who: table_who()
+        table: self.again()
+        deferred: data.__query_narrowed<T>("table", fn(condition: String, values: [String]) {
+            stored_rows: table_rows<K, T>(table, condition, table_bound(values), Val(values.copy())) ?? return Err(table_data_error(err))
+            keyed := [(key: K, row: T)]{}
+            loop stored in stored_rows {
+                row: table_decode<T>(stored) ?? return Err(table_data_error(err))
+                keyed.push((key: table.key_of(row.copy()), row: row))
+            }
+            keyed.sort_by(fn(left: (key: K, row: T), right: (key: K, row: T)) { left.key <=> right.key })
+            out := [T]{}
+            loop entry in keyed {
+                allowed: table_judge<K, T>(table, entry.row.copy(), Op.Read, who) ?? return Err(table_data_error(err))
+                if allowed -> out.push(entry.row.copy())
+            }
+            Ok(out)
+        })
+        Ok(deferred)
     }
 
     // Rewrites each stored row that an older version of its row type wrote
@@ -1100,7 +1174,7 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     // finishes. It is a schema step, so it runs as the system: the row policy
     // judges none of it.
     upgrade: fn(self) -[DB.Read, DB.Write]> Int DBError! {
-        rows: table_rows<K, T>(self, "", [DBValue]{}) ?? return Err(err)
+        rows: table_rows<K, T>(self, "", [DBValue]{}, None) ?? return Err(err)
         rewritten := 0
         loop stored in rows {
             text: row_text(stored, TABLE_ROW_COLUMN) ?? return Err(err)
@@ -1108,14 +1182,20 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
             cells: table_cells(self.name, self.key_of(row.copy()).encode()) ?? return Err(err)
             encoded: json.to_string(row.encode_stored()) ?? return Err(db_error("the row for table `{self.name}` does not encode: {err}"))
             if encoded != text {
-                values := [DBValue]{.Text(encoded)}
-                loop value in table_values(cells) -> values.push(value)
                 guard := self.state.guard_edit()
                 call: app.transactions.current() ?? 0
                 guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
                 db_join(guard.value, self.state, call) ?? return Err(err)
-                _: __driver_execute(guard.value.driver, "UPDATE \"{self.name}\" SET {TABLE_ROW_COLUMN} = ? WHERE {table_match(cells)}", values) ?? return Err(err)
-                guard.value.wrote(self.name)
+                kept: table_columns(guard.value.driver, self.name, table_fields(row.encode_stored())) ?? return Err(err)
+                sets := [String]{"{TABLE_ROW_COLUMN} = ?"}
+                values := [DBValue]{.Text(encoded.copy())}
+                loop field in kept {
+                    sets.push("\"{field.column}\" = ?")
+                    values.push(field.value.copy())
+                }
+                loop value in table_values(cells) -> values.push(value)
+                _: __driver_execute(guard.value.driver, "UPDATE \"{self.name}\" SET {sets.join(", ")} WHERE {table_match(cells)}", values) ?? return Err(err)
+                guard.value.wrote(self.name, Val([String]{text, encoded}))
                 rewritten += 1
             }
         }
@@ -1125,36 +1205,83 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
 
 // The stored rows `filter` (a WHERE clause, empty for every row) selects,
 // read without the row policy. The connection is held only for the read, so
-// a policy that reads through the same store can run after it.
-priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, filter: String, values: [DBValue]) -[DB.Read]> [[String:DBValue]] DBError! {
+// a policy that reads through the same store can run after it. `narrowed`
+// says `filter` is a condition over the field columns alone
+// (`__query_filter`) with these values, so the read joins a running
+// binding's read set as the table narrowed by it (`table_read`).
+priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, filter: String, values: [DBValue], narrowed: [String]?) -[DB.Read]> [[String:DBValue]] DBError! {
     if !sql_identifier(table.name.bytes()) -> return Err(table_name_error(table.name))
     guard := table.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
-    clause: if filter.len() == 0 -> "" else -> " WHERE {filter}"
-    table_read(guard.value.driver, table.name, "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\"{clause}", values)
+    every: "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\""
+    if filter.len() == 0 -> return table_read(guard.value.driver, table.name, every, values, None)
+    if narrowed == .Val(bound) {
+        read: (condition: filter.copy(), values: bound.copy())
+        if table_read(guard.value.driver, table.name, "{every} WHERE {filter}", values.copy(), Val(read)) == .Ok(rows) {
+            return Ok(rows)
+        }
+        // A condition over a field column no write has added yet reads the
+        // whole table, whose filter still decides each row.
+        return table_read(guard.value.driver, table.name, every, [DBValue]{}, None)
+    }
+    table_read(guard.value.driver, table.name, "{every} WHERE {filter}", values, None)
 }
 
 // The stored row under the key `cells`, read without the row policy.
 priv table_stored: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, cells: [(column: String, value: DBValue)]) -[DB.Read]> T? DBError! {
-    rows: table_rows<K, T>(table, table_match(cells), table_values(cells)) ?? return Err(err)
+    rows: table_rows<K, T>(table, table_match(cells), table_values(cells), None) ?? return Err(err)
     if rows.len() == 0 -> return Ok(None)
     row: table_decode<T>(rows[0]) ?? return Err(err)
     Ok(Val(row))
 }
 
-// Whether the table's row policy lets the caller this task acts for do `op`
-// to `row`. A table with no policy, or a task acting for the system, allows
-// every operation. The policy runs as the system, so the tables it reads
-// don't ask their own policies, and gets a store on the same connection.
-priv table_allows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, op: Op) -[DB.Read]> Bool DBError! {
-    judge: table.policy ?? return Ok(true)
-    if app.callers.system() -> return Ok(true)
-    who: if app.callers.account() == {
+// The stored rows' `jet_row` texts.
+priv table_texts: fn(rows: [[String:DBValue]]) -> [String] DBError! {
+    out := [String]{}
+    loop stored in rows {
+        text: row_text(stored, TABLE_ROW_COLUMN) ?? return Err(err)
+        out.push(text)
+    }
+    Ok(out)
+}
+
+// The values a `__query_filter` condition binds, each as text: the
+// condition casts the ones it compares as numbers.
+priv table_bound: fn(values: [String]) -> [DBValue] Never! {
+    out := [DBValue]{}
+    loop value in values -> out.push(.Text(value.copy()))
+    out
+}
+
+// A table's read failure as its query's collect reports it.
+priv table_data_error: fn(failure: DBError) -> data.DataError Never! {
+    data.data_error(data.DataErrorKind.IO, failure.message(), "table.query")
+}
+
+// Whom a row policy asks of the caller this task acts for.
+priv table_who: fn() -> Who Never! {
+    if app.callers.system() -> return Who.System
+    if app.callers.account() == {
         .Val(account) -> Who.Account(account)
         .None -> Who.Anonymous
     }
+}
+
+// Whether the table's row policy lets the caller this task acts for do `op`
+// to `row`.
+priv table_allows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, op: Op) -[DB.Read]> Bool DBError! {
+    table_judge<K, T>(table, row, op, table_who())
+}
+
+// Whether the table's row policy lets `who` do `op` to `row`. A table with
+// no policy, or the system, allows every operation. The policy runs as the
+// system, so the tables it reads don't ask their own policies, and gets a
+// store on the same connection.
+priv table_judge: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, op: Op, who: Who) -[DB.Read]> Bool DBError! {
+    judge: table.policy ?? return Ok(true)
+    if who == Who.System -> return Ok(true)
     app.callers.begin_system()
     allowed: judge(row, op, who, Store{state: table.state.copy()}) ?? {
         app.callers.end()
@@ -1165,31 +1292,77 @@ priv table_allows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(tabl
 }
 
 // `add` (replace false) and `put` (replace true): creates the table on its
-// first write, then inserts the row's storage encoding under its key columns.
+// first write, then inserts the row's storage encoding under its key columns,
+// with its field columns (`table_fields`).
 priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, replace: Bool) -[DB.Write]> T DBError! {
     key: table.key_of(row.copy())
     cells: table_cells(table.name, key.encode()) ?? return Err(err)
-    encoded: json.to_string(row.encode_stored()) ?? return Err(db_error("the row for table `{table.name}` does not encode: {err}"))
+    stored: row.encode_stored()
+    encoded: json.to_string(stored) ?? return Err(db_error("the row for table `{table.name}` does not encode: {err}"))
+    fields: table_fields(stored)
     columns := [String]{}
     loop cell in cells -> columns.push("\"{cell.column}\"")
     names: columns.join(", ")
+    created := [String]{}
+    loop field in fields -> created.push(", \"{field.column}\"")
     guard := table.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
-    _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS \"{table.name}\" ({names}, {TABLE_ROW_COLUMN} TEXT NOT NULL, PRIMARY KEY ({names}))", [DBValue]{}) ?? return Err(err)
-    if !replace {
-        held: __driver_query(guard.value.driver, "SELECT 1 AS held FROM \"{table.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
-        if held.len() > 0 -> return Err(DBError.Exists)
-    }
+    _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS \"{table.name}\" ({names}, {TABLE_ROW_COLUMN} TEXT NOT NULL{created.join("")}, PRIMARY KEY ({names}))", [DBValue]{}) ?? return Err(err)
+    kept: table_columns(guard.value.driver, table.name, fields) ?? return Err(err)
+    held: __driver_query(guard.value.driver, "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+    if !replace && held.len() > 0 -> return Err(DBError.Exists)
+    changed := table_texts(held) ?? return Err(err)
+    changed.push(encoded.copy())
     values := table_values(cells)
     values.push(DBValue.Text(encoded))
+    columns.push(TABLE_ROW_COLUMN)
+    loop field in kept {
+        columns.push("\"{field.column}\"")
+        values.push(field.value.copy())
+    }
     marks := [String]{}
     loop _ in 0..<values.len() -> marks.push("?")
     verb: if replace -> "INSERT OR REPLACE" else -> "INSERT"
-    _: __driver_execute(guard.value.driver, "{verb} INTO \"{table.name}\" ({names}, {TABLE_ROW_COLUMN}) VALUES ({marks.join(", ")})", values) ?? return Err(err)
-    guard.value.wrote(table.name)
+    _: __driver_execute(guard.value.driver, "{verb} INTO \"{table.name}\" ({columns.join(", ")}) VALUES ({marks.join(", ")})", values) ?? return Err(err)
+    guard.value.wrote(table.name, Val(changed))
     Ok(row)
+}
+
+// The stored row's field columns, which a filter written as SQL compares
+// (`__query_filter`): one per top-level scalar field of its encoding, named
+// `jet_row.<field>`. A row that is not a record has none.
+priv table_fields: fn(row: Dyn) -> [(column: String, value: DBValue)] Never! {
+    cells := [(column: String, value: DBValue)]{}
+    if !(row == .Object(_)) -> return cells
+    loop entry in stream.object_entries(row) {
+        if !sql_identifier(entry.key.bytes()) -> next
+        if entry.value == {
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Text(_) -> {
+                cells.push((column: "{TABLE_ROW_COLUMN}.{entry.key}", value: table_value(entry.value)))
+            }
+            .Bytes(_) | .Number(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
+        }
+    }
+    cells
+}
+
+// The field columns of `fields` that table `name` has. A table has those of
+// the first row written to it, as it was created; one created before it kept
+// field columns has none, and a condition over a column it lacks reads the
+// whole table (`table_rows`).
+priv table_columns: fn(driver: &DBDriver, name: String, fields: [(column: String, value: DBValue)]) -> [(column: String, value: DBValue)] DBError! {
+    known: __driver_query(driver, "PRAGMA table_info(\"{name}\")", [DBValue]{}) ?? return Err(err)
+    names := [String]{}
+    loop column in known -> names.push(row_text(column, "name") ?? "")
+    kept := [(column: String, value: DBValue)]{}
+    loop field in fields {
+        if names.contains(field.column) {
+            kept.push((column: field.column.copy(), value: field.value.copy()))
+        }
+    }
+    Ok(kept)
 }
 
 // The key columns and values of an encoded key: one per field of a record
@@ -1249,9 +1422,14 @@ priv table_exists: fn(driver: &DBDriver, name: String) -> Bool Never! {
 // A read of a typed table: a table no write has created yet holds no rows.
 // Made while a live binding's source runs, it joins that binding's read set
 // first (app.live_reads), even before the table exists, so the write that
-// creates it re-runs the binding.
-priv table_read: fn(driver: &DBDriver, name: String, sql: String, values: [DBValue]) -> [[String:DBValue]] DBError! {
-    if app.live_reads.running() -> app.live_reads.record(live_source(name))
+// creates it re-runs the binding: as the whole table, or as the table
+// narrowed by the stored-row `condition` that selects what it reads.
+priv table_read: fn(driver: &DBDriver, name: String, sql: String, values: [DBValue], narrowed: (condition: String, values: [String])?) -> [[String:DBValue]] DBError! {
+    if app.live_reads.running() {
+        if narrowed == .Val(read) {
+            app.live_reads.record_where(live_source(name), read.condition, read.values)
+        } else { app.live_reads.record(live_source(name)) }
+    }
     if !table_exists(driver, name) -> return Ok([[String:DBValue]]{})
     __driver_query(driver, sql, values)
 }
@@ -1282,7 +1460,7 @@ priv db_open: fn(path: String, failure: String) -> Store Never! {
         store = ":memory: {opened.value}"
     }
     jobs: path != ":memory:" && table_exists(driver, "__jet_jobs")
-    state: Shared{DBState{driver: driver.move(), path: path.copy(), store: store.copy(), written: [String]{}, ended: Condition.new()}}
+    state: Shared{DBState{driver: driver.move(), path: path.copy(), store: store.copy(), written: [DBWritten]{}, ended: Condition.new()}}
     if jobs -> app.jobs.store(db_outbox(state, store))
     if path != ":memory:" -> app.push.store(db_push_devices(state, store))
     Store{state: state}
@@ -1305,7 +1483,7 @@ priv db_begin: fn(state: Shared<DBState>, immediate: Bool) -> DBTransaction DBEr
     if !began {
         return Err(db_error("could not begin a transaction: one is already open, or the database is busy"))
     }
-    guard.value.written = [String]{}
+    guard.value.written = [DBWritten]{}
     guard.value.began += 1
     guard.value.open = guard.value.began
     Ok(DBTransaction{state: state.copy(), number: guard.value.open})
@@ -1333,8 +1511,10 @@ priv db_commit: fn(state: Shared<DBState>) DBError! {
     }
     committed: __driver_commit(guard.value.driver)
     if !committed -> _: __driver_rollback(guard.value.driver)
-    loop table in guard.value.written -> app.__live_invalidate_all(live_source(table))
-    guard.value.written = [String]{}
+    loop written in guard.value.written {
+        db_live_wrote(guard.value.driver, written.table, written.rows)
+    }
+    guard.value.written = [DBWritten]{}
     if !committed -> return Err(db_error("could not commit, so the transaction was rolled back"))
     Ok()
 }
@@ -1350,8 +1530,10 @@ priv db_rollback: fn(state: Shared<DBState>) DBError! {
         return Err(db_error("could not roll back: the database is closed"))
     }
     rolled: __driver_rollback(guard.value.driver)
-    loop table in guard.value.written -> app.__live_invalidate_all(live_source(table))
-    guard.value.written = [String]{}
+    loop written in guard.value.written {
+        db_live_wrote(guard.value.driver, written.table, written.rows)
+    }
+    guard.value.written = [DBWritten]{}
     if !rolled -> return Err(db_error("could not roll back the transaction"))
     Ok()
 }
@@ -1393,7 +1575,7 @@ priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
         app.transactions.refuse(call)
         return Err(db_error("the database is busy, so the call runs again"))
     }
-    held.written = [String]{}
+    held.written = [DBWritten]{}
     held.began += 1
     held.open = held.began
     held.call = call
@@ -1981,7 +2163,7 @@ priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBEr
     db_join(guard.value, scope.state, call) ?? return Err(err)
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
     if sql_table(scoped) == .Val(table) && (changed > 0 || sql_schema(scoped)) {
-        guard.value.wrote(table)
+        guard.value.wrote(table, None)
     }
     Ok(changed)
 }
@@ -2006,6 +2188,78 @@ priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:D
 // its SELECT reads; a write to that table re-runs every binding over it, and
 // every binding whose source read it (app.live_reads).
 priv live_source: fn(table: String) -> String Never! { "core.db.live:{table}" }
+
+#Codable
+priv LiveTestChore: struct {
+    id: Int
+    team: String
+}
+
+// The ids of `binding`'s rows, and how many times its source ran.
+priv live_test_ids: fn(binding: Live<[Int], DBError>, runs: Shared<Int>) -> String {
+    shown := [String]{}
+    if app.state(binding) == {
+        .Loaded(list) -> {
+            loop id in list -> shown.push("{id}")
+        }
+        .Failed(failure) -> shown.push("failed: {failure}")
+        .Idle | .Loading -> shown.push("pending")
+    }
+    "[{shown.join(",")}] runs={runs.guard_read().value}"
+}
+
+// The ids of the rows `query` collects.
+priv live_test_chores: fn(query: Query<LiveTestChore>) -> [Int] DBError! {
+    rows: query.collect() ?? return Err(db_error("the chores collect: {err.reason}"))
+    ids := [Int]{}
+    loop row in rows -> ids.push(row.id)
+    Ok(ids)
+}
+
+// The chores of `team`, through a filter written as SQL when `narrowed`,
+// else read whole.
+priv live_test_team: fn(chores: Table<Int, LiveTestChore>, team: String, narrowed: Bool) -> Query<LiveTestChore> Never! {
+    query: chores.query() ?? panic("the chores read")
+    condition: if narrowed -> "\"jet_row.team\" = ?" else -> ""
+    data.__query_filter<LiveTestChore>(query, condition, [String]{team.copy()}, fn(row) { row.team == team })
+}
+
+#Test("a live query narrowed by a filter written as SQL re-runs only for a write that changes a row it holds for, before or after") {
+    store: open_memory()
+    chores: store.table("live_test_chores", key: fn(row: LiveTestChore) { row.id })
+    _: chores.add(LiveTestChore{id: 1, team: "jet"}) ?? panic("add 1: {err}")
+    narrow_runs: Shared{0}
+    whole_runs: Shared{0}
+    narrow_query: live_test_team(chores, "jet", true)
+    narrow: app.__live_bind<[Int], DBError>("db.test.narrow", [String]{}, fn() {
+        narrow_runs.guard_edit().value += 1
+        live_test_chores(narrow_query)
+    })
+    whole_query: live_test_team(chores, "jet", false)
+    whole: app.__live_bind<[Int], DBError>("db.test.whole", [String]{}, fn() {
+        whole_runs.guard_edit().value += 1
+        live_test_chores(whole_query)
+    })
+    seen: fn() -> String { "{live_test_ids(narrow, narrow_runs)} {live_test_ids(whole, whole_runs)}" }
+    assert_eq(seen(), "[1] runs=1 [1] runs=1")
+    _: chores.add(LiveTestChore{id: 2, team: "mars"}) ?? panic("add 2")
+    assert_eq(seen(), "[1] runs=1 [1] runs=2")
+    _: chores.put(LiveTestChore{id: 2, team: "jet"}) ?? panic("move 2 in")
+    assert_eq(seen(), "[1,2] runs=2 [1,2] runs=3")
+    _: chores.put(LiveTestChore{id: 2, team: "mars"}) ?? panic("move 2 out")
+    assert_eq(seen(), "[1] runs=3 [1] runs=4")
+    chores.delete(2) ?? panic("delete 2")
+    assert_eq(seen(), "[1] runs=3 [1] runs=5")
+    first: store.begin() ?? panic("begin")
+    _: chores.add(LiveTestChore{id: 3, team: "mars"}) ?? panic("add 3")
+    first.commit() ?? panic("commit 3")
+    assert_eq(seen(), "[1] runs=3 [1] runs=6")
+    second: store.begin() ?? panic("begin again")
+    _: chores.add(LiveTestChore{id: 4, team: "mars"}) ?? panic("add 4")
+    _: chores.add(LiveTestChore{id: 5, team: "jet"}) ?? panic("add 5")
+    second.commit() ?? panic("commit 4 and 5")
+    assert_eq(seen(), "[1,5] runs=4 [1,5] runs=7")
+}
 
 // The table `sql` reads or writes: the target of SELECT, INSERT, UPDATE or
 // DELETE, or of CREATE, ALTER or DROP TABLE. None when it names no table.

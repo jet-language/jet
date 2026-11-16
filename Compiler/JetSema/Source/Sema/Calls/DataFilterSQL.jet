@@ -1,0 +1,254 @@
+// A `Query.filter` predicate written as SQL over a database table's field
+// columns (`core.data.__query_filter`). A table keeps one column per
+// top-level scalar field of its row's stored encoding, named
+// `jet_row.<field>` (Core/DB/DB.jet table_fields); a condition over them
+// narrows what the table reads and the rows a live query over it re-runs
+// for. The predicate still decides each row the table gives, so the
+// condition only has to hold for every row the predicate keeps.
+//
+// The compiler writes a predicate so when its body is comparisons of one of
+// the row's fields with a value, joined by `&&` and `||`. A field is an
+// `Int`, `String` or `Bool` field of a `#Codable` struct that has no
+// `migration` block, stored under its own name (no `#Rename`); an `Int`
+// field compares with `==`, `!=`, `<`, `<=`, `>` and `>=`, the others with
+// `==` and `!=`. A value is a literal, or a name or field path that does
+// not read the row; the call binds its text, read before the predicate
+// takes what it captures. Any other predicate gets the empty condition, and
+// its table reads every row.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    BinOp,
+    CallArg,
+    Diagnostic,
+    Expr,
+    Lambda,
+    Span,
+    StrFormat,
+    StrPart,
+    TTypeDef,
+    Type,
+    UnOp,
+]
+
+// The column a table keeps the stored row in; each field column's name is
+// it, a `.`, and the field's name (Core/DB/DB.jet TABLE_ROW_COLUMN).
+SEMA_DATA_FILTER_ROW_COLUMN: "jet_row"
+
+// A filter predicate as SQL: the condition, "" when the predicate is not
+// one the compiler writes so, and the values its `?`s bind, in order.
+SemaDataFilterSQL: struct {
+    condition: String
+    values: [Expr]
+}
+
+// A field the condition can compare: its name, how its column compares
+// with the text a `?` binds, and whether it is ordered the same way in SQL
+// (an `Int`, not a `String` or `Bool`).
+SemaDataFilterField: struct {
+    name: String
+    bound: String
+    ordered: Bool
+}
+
+sema_data_filter_none: fn() -> SemaDataFilterSQL Never! {
+    SemaDataFilterSQL{condition: "", values: [Expr]{}}
+}
+
+// `callback`, the predicate of a filter over `row`, written as SQL.
+sema_data_filter_sql: fn(callback: Expr, row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaDataFilterSQL Never! {
+    if callback == .Lambda(lambda, _) {
+        return sema_data_filter_lambda(lambda, row, environment, program)
+    }
+    sema_data_filter_none()
+}
+
+sema_data_filter_lambda: fn(lambda: Lambda, row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaDataFilterSQL Never! {
+    if lambda.params.len() != 1 -> return sema_data_filter_none()
+    if lambda.body == .Expr(value) {
+        return sema_data_filter_body(value, lambda.params[0].name, row, environment, program)
+    }
+    if lambda.body == .Block(statements) && statements.len() == 1 && statements[0] == .Expr(value) {
+        return sema_data_filter_body(value, lambda.params[0].name, row, environment, program)
+    }
+    sema_data_filter_none()
+}
+
+sema_data_filter_body: fn(predicate: Expr, parameter: String, row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaDataFilterSQL Never! {
+    fields: sema_data_filter_fields(row, environment, program)
+    if fields.len() == 0 -> return sema_data_filter_none()
+    values := [Expr]{}
+    condition: sema_data_filter_condition(predicate, parameter, fields, values) ?? return sema_data_filter_none()
+    SemaDataFilterSQL{condition: condition, values: values}
+}
+
+// The fields of `row` a condition can compare; none when `row` is not a
+// derived `#Codable` struct without a migration block.
+sema_data_filter_fields: fn(row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaDataFilterField] Never! {
+    out := [SemaDataFilterField]{}
+    if row == .Named(name) {
+        definition: sema_serde_type_definition(environment, program, name) ?? return out
+        if !sema_data_filter_derived(definition) || sema_data_filter_migrated(program, definition.name) {
+            return out
+        }
+        if definition.kind == .Struct(fields, _) {
+            loop field in fields {
+                if field.skip || field.computed -> next
+                if (field.shape_names.json ?? field.shape_names.text) != field.name -> next
+                // A bound value is text: an Int is cast, a Bool compares as
+                // the 1 or 0 its column holds.
+                if field.ty == Type.Int {
+                    out.push(SemaDataFilterField{name: field.name.copy(), bound: "CAST(? AS INTEGER)", ordered: true})
+                }
+                if field.ty == Type.String {
+                    out.push(SemaDataFilterField{name: field.name.copy(), bound: "?", ordered: false})
+                }
+                if field.ty == Type.Bool {
+                    out.push(SemaDataFilterField{name: field.name.copy(), bound: "(? = 'true')", ordered: false})
+                }
+            }
+        }
+    }
+    out
+}
+
+// Whether `definition` has derived codecs, which store each field under
+// its name.
+sema_data_filter_derived: fn(definition: TTypeDef) -> Bool Never! {
+    sema_serde_has_name(definition.derives, "Codable") || (sema_serde_has_name(definition.derives, "Encode") && sema_serde_has_name(definition.derives, "Decode"))
+}
+
+// Whether a `migration` block names `type_name` in any module: a table may
+// hold rows of an older shape, whose field columns say what that shape
+// stored. Unknown without the registration graph, so then true.
+sema_data_filter_migrated: fn(program: SemaProgramTables, type_name: String) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
+        loop module_index in 0..<graph.modules.len() {
+            loop item in graph.modules[module_index].program.items {
+                if item == .Migration(block) && block.type_name == type_name -> return true
+            }
+        }
+        return false
+    }
+    true
+}
+
+// `predicate` as a condition over `fields` of the row `parameter` names,
+// with the values it binds pushed on `values`; None when it is not one.
+sema_data_filter_condition: fn(predicate: Expr, parameter: String, fields: [SemaDataFilterField], values: &[Expr]) -> String? Never! {
+    if predicate == .Paren(inner, _, _) {
+        return sema_data_filter_condition(inner, parameter, fields, values)
+    }
+    if predicate == .Binary(op, left, right, _, _) {
+        return sema_data_filter_binary(op, left, right, parameter, fields, values)
+    }
+    None
+}
+
+sema_data_filter_binary: fn(op: BinOp, left: Expr, right: Expr, parameter: String, fields: [SemaDataFilterField], values: &[Expr]) -> String? Never! {
+    if op == BinOp.And || op == BinOp.Or {
+        first: sema_data_filter_condition(left, parameter, fields, values) ?? return None
+        second: sema_data_filter_condition(right, parameter, fields, values) ?? return None
+        word: if op == BinOp.And -> "AND" else -> "OR"
+        return Val("({first}) {word} ({second})")
+    }
+    if sema_data_filter_field(left, parameter, fields) == .Val(field) && sema_data_filter_value(right, parameter) {
+        return sema_data_filter_compare(field, op, right, values)
+    }
+    if sema_data_filter_field(right, parameter, fields) == .Val(field) && sema_data_filter_value(left, parameter) {
+        flipped: if op == {
+            .Lt -> BinOp.Gt
+            .Gt -> BinOp.Lt
+            .Le -> BinOp.Ge
+            .Ge -> BinOp.Le
+            .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Compare | .And | .Or -> op
+        }
+        return sema_data_filter_compare(field, flipped, left, values)
+    }
+    None
+}
+
+// `field` compared by `op` with `value`, whose text binds the `?`.
+sema_data_filter_compare: fn(field: SemaDataFilterField, op: BinOp, value: Expr, values: &[Expr]) -> String? Never! {
+    word: if op == {
+        .Eq -> "="
+        .Ne -> "<>"
+        .Lt -> "<"
+        .Le -> "<="
+        .Gt -> ">"
+        .Ge -> ">="
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare | .And | .Or -> ""
+    }
+    if word == "" -> return None
+    if !field.ordered && word != "=" && word != "<>" -> return None
+    values.push(value.copy())
+    Val("\"{SEMA_DATA_FILTER_ROW_COLUMN}.{field.name}\" {word} {field.bound}")
+}
+
+// The field of `fields` that `expression` reads off the row `parameter`
+// names, if it is one.
+sema_data_filter_field: fn(expression: Expr, parameter: String, fields: [SemaDataFilterField]) -> SemaDataFilterField? Never! {
+    if expression == .Paren(inner, _, _) -> return sema_data_filter_field(inner, parameter, fields)
+    if expression == .Field(base, member, _, _) && base == .Ident(name, _, _) && name == parameter {
+        loop field in fields {
+            if field.name == member -> return Val(field.copy())
+        }
+    }
+    None
+}
+
+// Whether `expression` is a value the call can read once, before the
+// predicate: a literal, or a name or field path other than the row.
+sema_data_filter_value: fn(expression: Expr, parameter: String) -> Bool Never! {
+    if expression == .Int(_, _, _, _, _) -> return true
+    if expression == .Bool(_, _, _) -> return true
+    if expression == .Paren(inner, _, _) -> return sema_data_filter_value(inner, parameter)
+    if expression == .Unary(op, operand, _, _) {
+        return op == UnOp.Neg && operand == .Int(_, _, _, _, _)
+    }
+    if expression == .Str(parts, _, _) {
+        loop part in parts {
+            if part == .Interp(inner, _) && !sema_data_filter_value(inner, parameter) {
+                return false
+            }
+        }
+        return true
+    }
+    sema_data_filter_path(expression, parameter)
+}
+
+// Whether `expression` is a name other than the row's, or a field path off
+// one.
+sema_data_filter_path: fn(expression: Expr, parameter: String) -> Bool Never! {
+    if expression == .Ident(name, _, _) -> return name != parameter
+    if expression == .Field(base, _, _, _) -> return sema_data_filter_path(base, parameter)
+    false
+}
+
+// The values of `sql` as the text each `?` binds: `"{value}"`.
+sema_data_filter_texts: fn(sql: SemaDataFilterSQL, span: Span) -> Expr Never! {
+    texts := [Expr]{}
+    loop value in sql.values {
+        texts.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value.copy(), format: StrFormat.Display}}, span: span, id: AST_NODE_GENERATED})
+    }
+    Expr.ListLit{elements: texts, span: span, id: AST_NODE_GENERATED}
+}
+
+// Pushes the arguments a filter passes before its predicate `callback` over
+// `row`: the predicate as SQL and the list of its values' text, read here.
+// Values that do not check give the empty condition, and the predicate
+// reports what is wrong with them.
+sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, source_args: &[CallArg], argument_types: &[Type], typed: &[TExpr]) {
+    sql := sema_data_filter_sql(callback, row, environment, program)
+    texts := sema_data_filter_texts(sql, span)
+    text_list: Type.List{element: Type.String}
+    probe := [Diagnostic]{}
+    bound := sema_check_expression(texts, Val(text_list), environment, program, scopes, state, tail_store, context, probe)
+    if bound == None || sema_has_error_since(probe, 0) {
+        sql = sema_data_filter_none()
+        texts = sema_data_filter_texts(sql, span)
+        bound = Val(sema_tree_node(text_list, TExprKind.ListLit{values: [TExpr]{}}, span))
+    }
+    condition: Expr.Str{parts: [StrPart]{StrPart.Lit{text: sql.condition.copy()}}, span: span, id: AST_NODE_GENERATED}
+    _: sema_data_query_push_argument(sema_call_http_core_synthetic_arg(condition, span), Val(sema_call_http_core_string(sql.condition, span)), source_args, argument_types, typed)
+    _: sema_data_query_push_argument(sema_call_http_core_synthetic_arg(texts, span), bound, source_args, argument_types, typed)
+}

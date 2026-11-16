@@ -1691,6 +1691,15 @@ Context: the task context fields and keys each function's own body reads
 reads them, for example ``context: main.jet:3 in tick: reads `deadline`,
 `thread` ``. `context.scratch` is not listed: it names the arena values are
 made in. Reading the context is no effect, so the effect row never shows it.
+Live reads: each `Query.filter` in the program's own code, at its function's
+line, and whether the compiler wrote its predicate as SQL over a table's
+field columns. A predicate that compares the row's `Int`, `String` or `Bool`
+fields with values, joined by `&&` and `||`, on a `#Codable` row with no
+`#Rename` and no `migration` block, is written so, for example ``live reads:
+app.jet:9 in mine: filter reads by SQL `"jet_row.team" = ?`: a table reads
+only the rows it holds for, and a live query over it re-runs only for a
+write that changes one``. Any other filter reads the whole table, and a live
+query over it re-runs for every write to it.
 In the editor (`jet self lsp`), hovering on a line shows the choices made at
 that line, each as `<kind>: <choice>`. Inlining is shown only by `jet inspect
 choices`, because an editor check does not optimize.

@@ -396,8 +396,18 @@ Group: struct<K, V> {
 // Row-list queries that only filter and sort may be collected again; every
 // other computation (map, extrema, joins, grouped reducers) is one-shot and
 // derived filter/sort queries share that one-shot state.
+//
+// `run(condition, values)` materializes the rows. A source that can select
+// its rows by a SQL condition (a database table, `__query_narrowed`) reads
+// only the rows `condition` holds for, with `values` bound to its `?`s in
+// order; `""` selects every row. A filter whose predicate the compiler wrote
+// as such a condition passes it on to its own query, joined to the one it
+// was given, and every other filter passes on the one it was given. Each
+// filter still applies its predicate to the rows it gets, so a condition
+// only ever narrows what is read. Every other step reads every row of its
+// query and ignores the condition.
 priv QueryCell: struct<T> {
-    run: fn() -> [T] DataError!
+    run: fn(String, [String]) -> [T] DataError!
 }
 
 priv QueryState: struct {
@@ -730,6 +740,10 @@ track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
 }
 
 priv query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn() -> [T] DataError!) -> Query<T> Never! {
+    query_narrowing<T>(steps, one_shot, limits, fn(_condition: String, _values: [String]) { run() })
+}
+
+priv query_narrowing: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn(String, [String]) -> [T] DataError!) -> Query<T> Never! {
     Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{QueryCell<T>{run: run.move()}}}
 }
 
@@ -741,7 +755,10 @@ priv query_steps: fn(steps: [String], step: String) -> [String] Never! {
 
 // The rows a query produces, without the output bound of `collect`; a
 // one-shot computation runs at most once.
-priv query_rows: fn<T>(query: Query<T>) -> [T] DataError! {
+priv query_rows: fn<T>(query: Query<T>) -> [T] DataError! { query_read<T>(query, "", [String]{}) }
+
+// The rows a query produces that the SQL `condition` may hold for (QueryCell).
+priv query_read: fn<T>(query: Query<T>, condition: String, values: [String]) -> [T] DataError! {
     if query.__one_shot {
         state := query.__state.guard_edit()
         if state.value.consumed {
@@ -750,7 +767,13 @@ priv query_rows: fn<T>(query: Query<T>) -> [T] DataError! {
         state.value.consumed = true
     }
     cell: query.__cell.guard_read()
-    cell.value.run()
+    cell.value.run(condition, values)
+}
+
+// A reusable query over a source that reads its rows narrowed by a SQL
+// condition (QueryCell): a database table's `query()`.
+__query_narrowed: fn<T>(step: String, read: &&fn(String, [String]) -> [T] DataError!) -> Query<T> Never! {
+    query_narrowing<T>([String]{step}, false, DataLimits.safe(), read)
 }
 
 // `data.query(rows)`: a reusable scan of an in-memory row list.
@@ -1075,9 +1098,16 @@ __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
     Ok(rows)
 }
 
-__query_filter: fn<T>(query: Query<T>, predicate: &&fn(T) -> Bool) -> Query<T> Never! {
-    query_make<T>(query_steps(query.__steps, "filter"), false, query.__limits.copy(), fn() {
-        rows: query_rows<T>(query) ?? return Err(err)
+// `condition` is the predicate written as SQL over a table's field columns,
+// with `values` bound to its `?`s in order, or `""` when the compiler could
+// not write it so, and then `values` is unused (QueryCell). They come before
+// the predicate, which may take the locals they read.
+__query_filter: fn<T>(query: Query<T>, condition: String, values: [String], predicate: &&fn(T) -> Bool) -> Query<T> Never! {
+    query_narrowing<T>(query_steps(query.__steps, "filter"), false, query.__limits.copy(), fn(outer: String, bound: [String]) {
+        joined := if condition == "" -> [String]{} else -> values.copy()
+        joined.extend(bound.copy())
+        narrowed: if condition == "" -> outer.copy() else if outer == "" -> condition.copy() else -> "({condition}) AND ({outer})"
+        rows: query_read<T>(query, narrowed, joined) ?? return Err(err)
         out := [T]{}
         loop row in rows {
             keep: predicate(row.copy()) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
@@ -1453,7 +1483,7 @@ __query_test_sales: fn() -> [QueryTestSale] Never! {
 
 #Test("deferred queries filter, sort, map and group rows in key order") {
     rows: __query_test_sales()
-    big: __query_filter<QueryTestSale>(query<QueryTestSale>(rows), fn(sale) { sale.cents >= 80 })
+    big: __query_filter<QueryTestSale>(query<QueryTestSale>(rows), "", [String]{}, fn(sale) { sale.cents >= 80 })
     assert_eq(__query_plan<QueryTestSale>(big), [String]{"scan", "filter"})
     sorted: __query_collect<QueryTestSale>(__query_sort_by<QueryTestSale>(big, fn(sale) { sale.item })) ?? panic("sort_by")
     assert_eq(sorted.len(), 3)
@@ -1485,6 +1515,25 @@ __query_test_sales: fn() -> [QueryTestSale] Never! {
     unmatched: __query_collect<DataJoin<QueryTestSale, QueryTestSale?>>(__query_left_join<QueryTestSale, QueryTestSale>(query<QueryTestSale>(rows), query<QueryTestSale>([QueryTestSale]{}), fn(sale) { sale.item }, fn(sale) { sale.item })) ?? panic("unmatched left_join")
     assert_eq(unmatched.len(), 4)
     assert(unmatched[1].right == None)
+}
+
+#Test("a filter written as SQL narrows its source's read, and its predicate still decides each row") {
+    asked: Shared{[String]{}}
+    source: __query_narrowed<QueryTestSale>("table", fn(condition: String, values: [String]) {
+        seen := asked.guard_edit()
+        seen.value.push("{condition} {values.join(",")}")
+        Ok(__query_test_sales())
+    })
+    cheap: __query_filter<QueryTestSale>(source, "price < CAST(? AS INTEGER)", [String]{"100"}, fn(sale) { sale.cents < 100 })
+    core: __query_filter<QueryTestSale>(cheap, "item = ?", [String]{"core"}, fn(sale) { sale.item == "core" })
+    loose: __query_filter<QueryTestSale>(core, "", [String]{}, fn(sale) { sale.cents > 50 })
+    assert_eq(__query_plan<QueryTestSale>(loose), [String]{"table", "filter", "filter", "filter"})
+    rows: __query_collect<QueryTestSale>(loose) ?? panic("the narrowed query collects")
+    assert_eq(rows.len(), 1)
+    assert_eq(rows[0].cents, 90)
+    sorted: __query_sort_by<QueryTestSale>(source, fn(sale) { sale.item })
+    _: __query_collect<QueryTestSale>(__query_filter<QueryTestSale>(sorted, "price > CAST(? AS INTEGER)", [String]{"50"}, fn(sale) { sale.cents > 50 })) ?? panic("the sorted query collects")
+    assert_eq(asked.guard_read().value, [String]{"(price < CAST(? AS INTEGER)) AND (item = ?) 100,core", " "})
 }
 
 #Test("schema columns keep their order, nullability and column identity") {

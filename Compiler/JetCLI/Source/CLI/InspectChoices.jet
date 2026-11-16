@@ -37,6 +37,13 @@
 // - Context: the task context fields and keys each function's own body
 //   reads (`context.<field>`, `context.get(key)`). Reading the context is
 //   no effect, so the function's effect row never shows it.
+// - Live reads: each `Query.filter` in the program's own code, and whether
+//   the compiler wrote its predicate as SQL over a table's field columns
+//   (the condition JetSema DataFilterSQL.jet passes to
+//   `core.data.__query_filter`). A table reads only the rows the condition
+//   holds for, and a live query over it re-runs only for a write that
+//   changes such a row; any other predicate reads the whole table, and its
+//   live query re-runs for every write to it.
 use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
     jet_foundation.[CompilerThreads, FnBody, body_node, build_options_stock, module_is_core]
@@ -44,7 +51,7 @@ use {
 }
 
 // The choice kinds the report lists, in order; a kind with no row says none.
-JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection", "copies", "placement", "exposure", "rights", "context"}
+JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection", "copies", "placement", "exposure", "rights", "context", "live reads"}
 
 // One automatic choice: its kind, the function it was made in, and what was
 // chosen with its reason.
@@ -242,6 +249,31 @@ jet_cli_context_key_name: fn(key: String) -> String Never! {
     "`{parts[parts.len() - 1]}`"
 }
 
+// The live read choices of the program's own `functions`, at the function's
+// line: each filter, with the SQL condition its table reads by, or why it
+// reads the whole table.
+jet_cli_live_read_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+    loop function in functions {
+        if function.synthetic || module_is_core(function.module_identity) -> next
+        loop node in function.tree.nodes {
+            if node.kind == .CoreCall(record, args, _, _, _, _) && (record.source_target ?? "") == "core.data.__query_filter" && args.len() == 4 {
+                condition := ""
+                if body_node(function.tree, args[1]).kind == .StrLit(parts) {
+                    loop part in parts {
+                        if part == .Literal(text) -> condition = "{condition}{text}"
+                    }
+                }
+                text := "filter reads by SQL `{condition}`: a table reads only the rows it holds for, and a live query over it re-runs only for a write that changes one"
+                if condition == "" {
+                    text = "filter reads the whole table: its predicate is not comparisons of a `#Codable` row's `Int`, `String` or `Bool` fields with values joined by `&&` and `||`, so a live query over it re-runs for every write to the table"
+                }
+                choice: jet_cli_function_choice("live reads", function, text)
+                if !jet_cli_choice_seen(out, choice) -> out.push(choice)
+            }
+        }
+    }
+}
+
 jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String, profile: String, json: Bool) -> String Never! {
     if !json {
         text := "choices: scope={scope} source={file} profile={profile}\n"
@@ -310,6 +342,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             jet_cli_exposure_choices(inputs.functions, choices)
             jet_cli_rights_choices(inputs.functions, choices)
             jet_cli_context_choices(inputs.functions, choices)
+            jet_cli_live_read_choices(inputs.functions, choices)
             if inputs.entry_key != None {
                 threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
                 build := build_options_stock("build")

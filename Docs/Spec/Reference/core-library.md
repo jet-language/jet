@@ -6555,7 +6555,7 @@ subquery from another table) is refused.
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
 | `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row or insert-or-replace one. An `add` whose key is held is `DBError.Exists` when the caller may read the row that holds it and `DBError.Denied` when it may not. |
 | `table.delete(key: K) DBError! -[DB.Read, DB.Write]>` | — | Remove the row with that key, if any. |
-| `table.query() -[DB.Read]> Query<T> DBError!` | query | Read every row the caller may read, in key order, as a `core.data` query. |
+| `table.query() -[DB.Read]> Query<T> DBError!` | query | Every row the caller may read, in key order, as a `core.data` query, read when it is collected; a filter the compiler writes as SQL narrows what it reads. |
 | `table.guard(policy: fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T>` | table | The table judged by a row policy on every read and write. |
 | `pool(url: String, max: Int) -[DB]> DBPool DBError!` | pool | Create a bounded connection pool (`DBPool` → `DBLease`, `DBPoolReceipt`). |
 | `policy(table: String, expression: String) -[DB]> RowPolicy DBError!` | policy | Compile a checked row-access policy. |
@@ -6607,12 +6607,28 @@ table; reading a table that was never written finds no rows. `get` and
 `query` carry `DB.Read`, and `add`,
 `put` and `delete` carry `DB.Read` and `DB.Write` (a write may run the
 table's row policy, which reads), so a function that writes a table must
-allow `DB.Write` (E0740 otherwise). A `get` or `query` made while an
+allow `DB.Write` (E0740 otherwise). A `get`, or a `query` collected, while an
 `app.live` binding's query function runs adds the table to that binding's
 read set, even before the table exists. An `add` or `put`, or a `delete`
 that removes a row, re-runs every binding that reads the table once the write
 is committed: immediately outside a transaction, and at the commit (or
 rollback) inside one, as for a scope's `execute`.
+
+The table also keeps one column per top-level `Int`, `Float`, `Bool`,
+`String` or null field of the first row written to it, named
+`jet_row.<field>`, which every write keeps current. A `query().filter(...)`
+whose predicate compares the row's `Int`, `String` or `Bool` fields with
+values, joined by `&&` and `||`, on a `#Codable` row with no `#Rename` and no
+`migration` block, is written by the compiler as SQL over those columns
+(D-DB-TABLE1); the values are read once, when `filter` is called. Its read
+selects only the rows the condition holds for, and its live binding's read
+set is narrowed to them: a write re-runs it only when the row it changes held
+for the condition before the write or holds for it after. The predicate still
+decides every row read, so a filter means the same either way. Any other
+filter reads the whole table, and a write to the table re-runs its binding; a
+table whose columns lack a field the condition names, such as one created
+before them, is read whole too. `jet inspect choices` lists each filter under
+`live reads` with which it is.
 
 A row type's `migration` block is its table's history (D-DATA-EVOLVE1). A
 read decodes a row an older version of the type stored through the block, as

@@ -1,0 +1,19 @@
+# A live query whose filter the compiler writes as SQL narrows its read set
+# to the rows the filter holds for: a write re-runs it only when the row it
+# changes held for the filter before the write or holds for it after, so a
+# write to another team's row leaves it current while a row joining or
+# leaving the team re-runs it. A filter that is no SQL, a method call here,
+# reads the whole table, and every write to the table re-runs it.
+# `jet inspect choices` lists each filter under `live reads` with which it is.
+fixture: LiveQueryReadSetNarrowing.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = live_query_read_set_narrowing.stdout.expected
+step choices: jet inspect choices main.jet
+exit: 0
+stdout: ~ ' in team_chores: filter reads by SQL `"jet_row.team" = ?`' # field compared with a value
+stdout: ~ " in titled_chores: filter reads the whole table" # a method call is no SQL
+step json: jet inspect choices main.jet --json
+exit: 0
+json: stdout doc $.kinds[8] = "live reads"
