@@ -252,6 +252,34 @@ comparing it with the plain spelling it replaces. Ratification waits until the
 surface strictly beats the plain form. Record the pair in the canonical
 manifest and keep any loss on a card.
 
+## Biggest wins first
+
+This is a standing owner order, repeated many times, and it binds every plan,
+dispatch and landing for every goal. Work on a goal is done in order of its
+expected gain on the goal's metric, largest first, and the largest steps start
+first even when they are architectural, long or hard.
+
+- **Rank before work.** Before any agent starts on a goal, its plan on the card
+  lists every candidate step with its estimated share of the gap, measured from
+  a profile wherever one can be taken (for compile speed: CPU microseconds per
+  line and wall seconds), sorted largest first. A step whose combined ceiling
+  cannot reach the goal's target is named as such; it never stands in for one
+  that can.
+- **Staff the top.** The steps that carry most of the gap get the agents first.
+  An architectural step is never deferred behind tactical work because it is
+  larger, slower to land or riskier. Tail work (any item worth less than a
+  tenth of the largest open item) waits until every larger item is landed or in
+  flight, unless it unblocks one.
+- **Every submission states its gain.** Each submission names the metric it
+  moves and its expected gain. The orchestrator ranks the queue by that gain,
+  refuses a submission that states none, and reports the measured gain against
+  the estimate at every check-in.
+- **Re-rank on evidence.** When a measurement shows the ranking was wrong, the
+  plan is re-ranked and the agents are moved the same hour.
+
+A plan that is not ranked, or a dispatch that puts a smaller item ahead of a
+larger one, is an orchestrator failure and is fixed at once.
+
 ## Owner gates and work state
 
 Before coding, identify the choices only the owner can make: new syntax, public
@@ -297,15 +325,25 @@ the `rust` branch, a frozen dead-end leaf kept as a reference and a
 re-bootstrap safety net. Nobody commits to it or merges it into `dev` or
 `master`. While `rust` exists, no other branch exists and every change lands
 directly on `dev`; if the owner retires `rust`, the one other branch may be a
-single `staging` branch whose commits merge into `dev`. `master` holds the
-board and `dev` holds the code; both are pushed after every commit, so
-`origin` never lags. Only the orchestrator, or the one Lander it names (see
-Delegation), commits, directly on `dev` in the dev worktree, one commit per
-landed submission that stages only that submission's paths.
+single `staging` branch whose commits merge into `dev`. This is a standing
+owner order: `dev` holds all the work and is the staging ground where every
+change is proven first; `master` holds the board plus all the code of the
+latest successful compiler. Each batch compiler that builds from the `dev` tip
+and passes its self-check is merged into `master` at once (the merge takes
+`dev`'s code and `master`'s board), so no proven work lives only on `dev` and
+no work at all lives only in a worktree. Both branches are pushed after every
+commit, board commits included, so `origin` never lags. Only the orchestrator,
+or the one Lander it names (see Delegation), commits, directly on `dev` in the
+dev worktree, one commit per landed submission that stages only that
+submission's paths, and merges proven `dev` commits into `master`.
 Every worktree has one named, live owner: the dev worktree (the orchestrator),
 the Lander's trees, and at most one per standing agent within the team cap.
 This is a standing owner order: besides the master checkout, at most six
-worktrees exist at any time, and no work in them is ever lost. An agent never
+worktrees exist at any time, and no work in them is ever lost. Ten worktrees,
+the master checkout included, is a hard cap that the repository's git hooks
+enforce: `post-checkout` removes an eleventh tree as it is added, and
+`reference-transaction` refuses every ref update while more than ten exist.
+Only the owner's explicit written permission raises the cap. An agent never
 opens a second worktree; it moves its one worktree forward to the `dev` tip
 for each new task.
 Each one except the dev worktree is a detached checkout of `dev`, kept at a
@@ -315,11 +353,10 @@ closed as soon as its owner is done with its work: the work is integrated
 into `dev` (and its board state into `master`) or recorded on its card first,
 then the worktree is removed. Stale, orphaned and superseded worktrees are
 removed the same way whenever found and at every milestone. The master
-checkout tracks `master` only: it is the board's checkout. Its other files
-are an untracked mirror of
-`dev`'s tip, refreshed after every push to `dev`, so sessions and tools
-started there read the current code and rules; nothing is ever committed from
-the mirror, and work reads and runs code from the dev worktree. Never create
+checkout tracks `master`: its board files are the live board, and its code is
+the latest successful compiler's, refreshed by each merge from `dev`. Nothing
+but the board and those merges is ever committed there, and work reads and
+runs code from the dev worktree. Never create
 any other branch, worktree, or other
 ref (`refs/keep`, `refs/salvage`, `refs/archive`, private lineages), for any
 purpose: experiments, candidates, measurements, and proofs included. Work
