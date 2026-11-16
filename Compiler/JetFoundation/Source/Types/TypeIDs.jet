@@ -1,0 +1,431 @@
+// The type id space (Docs/spec/compiler-data.md): each distinct type is one
+// row of a `TypeColumns` table, hash-consed, so equal types are equal ids
+// and a type is copied, compared and hashed as one U32. Id 0 is no type.
+//
+// A row is a kind tag and scalar operands: `a` and `b` (a child type id, a
+// `Name` of the compilation's NameTable, or a number, by kind), `side` (a
+// row of the kind's side table, which its owner interns, so equal payloads
+// are equal rows), and a span of the shared `children` column. By kind:
+//
+// | Kind | a | b | side | children |
+// |---|---|---|---|---|
+// | List, Shared, Option | element | | | |
+// | Map | key | value | key span row | |
+// | Result | ok | err | | |
+// | Fn | result (0: none) | | metadata row | parameters |
+// | Named | name | | | |
+// | Apply | name | | | arguments |
+// | TraitObject | | | | bound names |
+// | Tuple | | | | field name, field type, in turn |
+// | FixedList | element | | length measure row | |
+// | IntN | 1 when signed | bits | | |
+// | InlineRange | base | | bounds row | |
+// | Tagged | inner | | tag row | |
+// | Union | | | | members |
+// | Case | name | payload | | |
+// | Quantity | base | | dimension row | |
+// | Measure | | | measure row | |
+//
+// The compilation's table holds the types every phase shares. A parallel
+// phase lends it read-only to its workers; each worker interns the types it
+// makes in a local table of its own (`type_columns_local`), whose ids carry
+// TYPE_LOCAL_BIT so they never equal a compilation id, through
+// `type_intern_over`, which first looks in the compilation table. The
+// phase's merge adds each worker's table to the compilation's in a fixed
+// order (`type_columns_merge`), so one input always gets the same ids.
+
+TypeID: struct {
+    id: U32
+}
+
+TYPE_LOCAL_BIT: U32{0x80000000}
+
+TYPE_ROW_BITS: U32{0x7fffffff}
+
+TypeKind: enum {
+    Int
+    Float
+    Bool
+    String
+    Char
+    List
+    Map
+    Shared
+    Option
+    Result
+    Fn
+    Named
+    Apply
+    TraitObject
+    Tuple
+    FixedList
+    IntN
+    InlineRange
+    Float32
+    Tagged
+    Union
+    Case
+    Quantity
+    Measure
+}
+
+TypeColumns: struct {
+    // Each row's TypeKind tag (type_kind_code); row 0, no type, holds 0.
+    kind: [U8]
+    a: [U32]
+    b: [U32]
+    side: [U32]
+    // Row `n`'s children are children[first[n]..<first[n] + count[n]].
+    first: [Int]
+    count: [Int]
+    children: [U32]
+    // Each row's type_row_hash: a probe compares rows only on equal hashes,
+    // and a grow never hashes a row again.
+    hashes: [Int]
+    // Open-addressing slots: 0 is empty, otherwise the row plus one.
+    slots: [Int]
+    // 0 for the compilation's table, TYPE_LOCAL_BIT for a local one: the
+    // bits every id of the table carries.
+    base: U32
+}
+
+TYPE_COLUMNS_INITIAL_SLOTS: 1024
+
+TYPE_COLUMNS_LOCAL_SLOTS: 64
+
+// The compilation's table; its row 0 is no type (`type_none`).
+type_columns: fn() -> TypeColumns Never! { type_columns_based(U32{0}, TYPE_COLUMNS_INITIAL_SLOTS) }
+
+// A worker's local table, whose ids carry TYPE_LOCAL_BIT.
+type_columns_local: fn() -> TypeColumns Never! {
+    type_columns_based(TYPE_LOCAL_BIT, TYPE_COLUMNS_LOCAL_SLOTS)
+}
+
+type_columns_based: fn(base: U32, capacity: Int) -> TypeColumns Never! {
+    slots := [Int]{}
+    loop _ in 0..<capacity -> slots.push(0)
+    table := TypeColumns{kind: [U8]{}, a: [U32]{}, b: [U32]{}, side: [U32]{}, first: [Int]{}, count: [Int]{}, children: [U32]{}, hashes: [Int]{}, slots: slots, base: base}
+    // Row 0 is no type; a local table keeps the row unused, so local row
+    // `n` is id `n` with the local bit and no local id is the bit alone.
+    table.kind.push(U8{0})
+    table.a.push(U32{0})
+    table.b.push(U32{0})
+    table.side.push(U32{0})
+    table.first.push(0)
+    table.count.push(0)
+    table.hashes.push(0)
+    table
+}
+
+type_none: fn() -> TypeID Never! { TypeID{id: U32{0}} }
+
+type_is_none: fn(id: TypeID) -> Bool Never! { id.id == U32{0} }
+
+type_is_local: fn(id: TypeID) -> Bool Never! { id.id.bit_and(TYPE_LOCAL_BIT) != U32{0} }
+
+// The row of `id` in its table: the compilation's, or the local one its
+// TYPE_LOCAL_BIT names.
+type_row: fn(id: TypeID) -> Int Never! { Int{id.id.bit_and(TYPE_ROW_BITS)} }
+
+type_columns_count: fn(table: TypeColumns) -> Int Never! { table.kind.len() }
+
+type_kind: fn(table: TypeColumns, id: TypeID) -> TypeKind Never! {
+    type_kind_of_code(table.kind[type_row(id)])
+}
+
+type_a: fn(table: TypeColumns, id: TypeID) -> U32 Never! { table.a[type_row(id)] }
+
+type_b: fn(table: TypeColumns, id: TypeID) -> U32 Never! { table.b[type_row(id)] }
+
+type_side: fn(table: TypeColumns, id: TypeID) -> U32 Never! { table.side[type_row(id)] }
+
+type_child_count: fn(table: TypeColumns, id: TypeID) -> Int Never! { table.count[type_row(id)] }
+
+// Child `index` (below type_child_count) of `id`.
+type_child: fn(table: TypeColumns, id: TypeID, index: Int) -> U32 Never! {
+    table.children[table.first[type_row(id)] + index]
+}
+
+// The readers of an id that may be a worker's local one: `local` when it
+// carries TYPE_LOCAL_BIT, else `shared`.
+type_kind_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> TypeKind Never! {
+    if type_is_local(id) -> type_kind(local, id) else -> type_kind(shared, id)
+}
+
+type_a_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> U32 Never! {
+    if type_is_local(id) -> type_a(local, id) else -> type_a(shared, id)
+}
+
+type_b_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> U32 Never! {
+    if type_is_local(id) -> type_b(local, id) else -> type_b(shared, id)
+}
+
+type_side_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> U32 Never! {
+    if type_is_local(id) -> type_side(local, id) else -> type_side(shared, id)
+}
+
+type_child_count_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID) -> Int Never! {
+    if type_is_local(id) -> type_child_count(local, id) else -> type_child_count(shared, id)
+}
+
+type_child_over: fn(shared: TypeColumns, local: TypeColumns, id: TypeID, index: Int) -> U32 Never! {
+    if type_is_local(id) -> type_child(local, id, index) else -> type_child(shared, id, index)
+}
+
+type_hash_word: fn(hash: U32, word: U32) -> U32 Never! {
+    wrapping((hash.bit_xor(word)) * U32{0x01000193})
+}
+
+// The kind's one-byte tag, as the kind column holds it; 0 is no type's.
+type_kind_code: fn(kind: TypeKind) -> U8 Never! {
+    if kind == {
+        .Int -> U8{1}
+        .Float -> U8{2}
+        .Bool -> U8{3}
+        .String -> U8{4}
+        .Char -> U8{5}
+        .List -> U8{6}
+        .Map -> U8{7}
+        .Shared -> U8{8}
+        .Option -> U8{9}
+        .Result -> U8{10}
+        .Fn -> U8{11}
+        .Named -> U8{12}
+        .Apply -> U8{13}
+        .TraitObject -> U8{14}
+        .Tuple -> U8{15}
+        .FixedList -> U8{16}
+        .IntN -> U8{17}
+        .InlineRange -> U8{18}
+        .Float32 -> U8{19}
+        .Tagged -> U8{20}
+        .Union -> U8{21}
+        .Case -> U8{22}
+        .Quantity -> U8{23}
+        .Measure -> U8{24}
+    }
+}
+
+// The kind a type_kind_code tag stands for.
+type_kind_of_code: fn(code: U8) -> TypeKind Never! {
+    value: Int{code}
+    if value == {
+        1 -> TypeKind.Int
+        2 -> TypeKind.Float
+        3 -> TypeKind.Bool
+        4 -> TypeKind.String
+        5 -> TypeKind.Char
+        6 -> TypeKind.List
+        7 -> TypeKind.Map
+        8 -> TypeKind.Shared
+        9 -> TypeKind.Option
+        10 -> TypeKind.Result
+        11 -> TypeKind.Fn
+        12 -> TypeKind.Named
+        13 -> TypeKind.Apply
+        14 -> TypeKind.TraitObject
+        15 -> TypeKind.Tuple
+        16 -> TypeKind.FixedList
+        17 -> TypeKind.IntN
+        18 -> TypeKind.InlineRange
+        19 -> TypeKind.Float32
+        20 -> TypeKind.Tagged
+        21 -> TypeKind.Union
+        22 -> TypeKind.Case
+        23 -> TypeKind.Quantity
+        24 -> TypeKind.Measure
+        else -> panic("no type has a kind")
+    }
+}
+
+type_row_hash: fn(kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> Int Never! {
+    hash := type_hash_word(U32{0x811c9dc5}, U32{type_kind_code(kind)})
+    hash = type_hash_word(hash, a)
+    hash = type_hash_word(hash, b)
+    hash = type_hash_word(hash, side)
+    hash = type_hash_word(hash, U32{children.len()})
+    loop child in children -> hash = type_hash_word(hash, child)
+    Int{hash}
+}
+
+// Whether row `row` of `table` is the row the operands give.
+type_row_equal: fn(table: TypeColumns, row: Int, hash: Int, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> Bool Never! {
+    if table.hashes[row] != hash || table.kind[row] != type_kind_code(kind) || table.a[row] != a || table.b[row] != b || table.side[row] != side {
+        return false
+    }
+    if table.count[row] != children.len() -> return false
+    first: table.first[row]
+    loop (index, child) in children {
+        if table.children[first + index] != child -> return false
+    }
+    true
+}
+
+// The slot of the row the operands give (whose type_row_hash is `hash`): the
+// one holding it, or the empty one a new row takes.
+type_slot: fn(table: TypeColumns, hash: Int, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> Int Never! {
+    mask: table.slots.len() - 1
+    slot := hash.bit_and(mask)
+    loop table.slots[slot] != 0 {
+        if type_row_equal(table, table.slots[slot] - 1, hash, kind, a, b, side, children) {
+            return slot
+        }
+        slot = (slot + 1).bit_and(mask)
+    }
+    slot
+}
+
+// The id of the type the operands give in `table`, added on first sight.
+// The child ids and the operand ids must be of the compilation's table or
+// of `table`.
+type_intern: fn(table: &TypeColumns, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
+    hash: type_row_hash(kind, a, b, side, children)
+    slot: type_slot(table, hash, kind, a, b, side, children)
+    if table.slots[slot] != 0 -> return TypeID{id: U32{table.slots[slot] - 1}.bit_or(table.base)}
+    row: table.kind.len()
+    table.kind.push(type_kind_code(kind))
+    table.a.push(a)
+    table.b.push(b)
+    table.side.push(side)
+    table.first.push(table.children.len())
+    table.count.push(children.len())
+    loop child in children -> table.children.push(child)
+    table.hashes.push(hash)
+    table.slots[slot] = row + 1
+    if (row + 1) * 2 > table.slots.len() -> type_columns_grow(table)
+    TypeID{id: U32{row}.bit_or(table.base)}
+}
+
+// The id of the type the operands give when `table` holds it; never adds.
+type_find: fn(table: TypeColumns, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID? Never! {
+    slot: type_slot(table, type_row_hash(kind, a, b, side, children), kind, a, b, side, children)
+    if table.slots[slot] == 0 -> return None
+    Val(TypeID{id: U32{table.slots[slot] - 1}.bit_or(table.base)})
+}
+
+// A worker's intern: the compilation's id when `shared` holds the type,
+// else the id in the worker's `local` table.
+type_intern_over: fn(shared: TypeColumns, local: &TypeColumns, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
+    if type_find(shared, kind, a, b, side, children) == .Val(id) -> return id
+    type_intern(local, kind, a, b, side, children)
+}
+
+type_columns_grow: fn(table: &TypeColumns) Never! {
+    capacity: table.slots.len() * 2
+    mask: capacity - 1
+    slots := [Int]{}
+    loop _ in 0..<capacity -> slots.push(0)
+    loop row in 1..<table.kind.len() {
+        slot := table.hashes[row].bit_and(mask)
+        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slots[slot] = row + 1
+    }
+    table.slots = slots.move()
+}
+
+// Whether operand `a` of a `kind` row is a type id (not a name or number).
+type_a_is_type: fn(kind: TypeKind) -> Bool Never! {
+    if kind == {
+        .List | .Map | .Shared | .Option | .Result | .Fn | .FixedList | .InlineRange | .Tagged | .Quantity -> true
+        .Int | .Float | .Bool | .String | .Char | .Named | .Apply | .TraitObject | .Tuple | .IntN | .Float32 | .Union | .Case | .Measure -> false
+    }
+}
+
+// Whether operand `b` of a `kind` row is a type id.
+type_b_is_type: fn(kind: TypeKind) -> Bool Never! {
+    if kind == {
+        .Map | .Result | .Case -> true
+        .Int | .Float | .Bool | .String | .Char | .List | .Shared | .Option | .Fn | .Named | .Apply | .TraitObject | .Tuple | .FixedList | .IntN | .InlineRange | .Float32 | .Tagged | .Union | .Quantity | .Measure -> false
+    }
+}
+
+// Whether child `index` of a `kind` row is a type id: a Tuple's children
+// alternate field names and field types, a TraitObject's are names.
+type_child_is_type: fn(kind: TypeKind, index: Int) -> Bool Never! {
+    if kind == {
+        .Fn | .Apply | .Union -> true
+        .Tuple -> index % 2 == 1
+        .Int | .Float | .Bool | .String | .Char | .List | .Map | .Shared | .Option | .Result | .Named | .TraitObject | .FixedList | .IntN | .InlineRange | .Float32 | .Tagged | .Case | .Quantity | .Measure -> false
+    }
+}
+
+// `word`, a type id operand, renumbered: a local id through `local_ids`
+// (each local row's compilation id), a compilation id as it is.
+type_merged_word: fn(word: U32, local_ids: [TypeID]) -> U32 Never! {
+    id: TypeID{id: word}
+    if !type_is_local(id) -> return word
+    local_ids[type_row(id)].id
+}
+
+// Adds every row of the worker's `local` table to the compilation's `into`,
+// in local row order, and returns each local row's compilation id (row 0:
+// no type). A local row names only compilation ids and earlier local rows,
+// so one pass renumbers it. Merging the workers in a fixed order gives
+// every type the same id on any thread count.
+type_columns_merge: fn(into: &TypeColumns, local: TypeColumns) -> [TypeID] Never! {
+    ids := [TypeID]{type_none()}
+    loop row in 1..<local.kind.len() {
+        kind: type_kind_of_code(local.kind[row])
+        a: if type_a_is_type(kind) -> type_merged_word(local.a[row], ids) else -> local.a[row]
+        b: if type_b_is_type(kind) -> type_merged_word(local.b[row], ids) else -> local.b[row]
+        children := [U32]{}
+        first: local.first[row]
+        loop index in 0..<local.count[row] {
+            child: local.children[first + index]
+            children.push(if type_child_is_type(kind, index) -> type_merged_word(child, ids) else -> child)
+        }
+        ids.push(type_intern(into, kind, a, b, local.side[row], children))
+    }
+    ids
+}
+
+#Test("equal types are one id, and children and operands tell types apart") {
+    table := type_columns()
+    int: type_intern(table, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{})
+    list: type_intern(table, TypeKind.List, int.id, U32{0}, U32{0}, [U32]{})
+    again: type_intern(table, TypeKind.List, int.id, U32{0}, U32{0}, [U32]{})
+    assert_eq(list, again)
+    function: type_intern(table, TypeKind.Fn, int.id, U32{0}, U32{0}, [U32]{int.id, list.id})
+    swapped: type_intern(table, TypeKind.Fn, int.id, U32{0}, U32{0}, [U32]{list.id, int.id})
+    assert(function != swapped)
+    assert_eq(type_kind(table, function), TypeKind.Fn)
+    assert_eq(type_child_count(table, function), 2)
+    assert_eq(type_child(table, function, 1), list.id)
+    assert_eq(type_find(table, TypeKind.Fn, int.id, U32{0}, U32{0}, [U32]{int.id, list.id}), Val(function))
+    assert_eq(type_find(table, TypeKind.Option, int.id, U32{0}, U32{0}, [U32]{}), None)
+    assert(!type_is_local(function) && !type_is_none(function))
+}
+
+#Test("the table grows past its slots and keeps every id") {
+    table := type_columns()
+    ids := [TypeID]{}
+    loop bits in 0..<3000 {
+        ids.push(type_intern(table, TypeKind.IntN, U32{1}, U32{bits}, U32{0}, [U32]{}))
+    }
+    loop bits in 0..<3000 {
+        assert_eq(type_intern(table, TypeKind.IntN, U32{1}, U32{bits}, U32{0}, [U32]{}), ids[bits])
+    }
+    assert_eq(type_columns_count(table), 3001)
+}
+
+#Test("a worker's local types merge to the ids a serial intern gives") {
+    shared := type_columns()
+    int: type_intern(shared, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{})
+    local := type_columns_local()
+    // The shared type is found, not copied; new ones are local.
+    assert_eq(type_intern_over(shared, local, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{}), int)
+    list: type_intern_over(shared, local, TypeKind.List, int.id, U32{0}, U32{0}, [U32]{})
+    assert(type_is_local(list))
+    pair: type_intern_over(shared, local, TypeKind.Tuple, U32{0}, U32{0}, U32{0}, [U32]{U32{7}, list.id, U32{8}, int.id})
+    assert_eq(type_kind_over(shared, local, pair), TypeKind.Tuple)
+    assert_eq(type_child_over(shared, local, pair, 1), list.id)
+    ids: type_columns_merge(shared, local)
+    serial := type_columns()
+    serial_int: type_intern(serial, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{})
+    serial_list: type_intern(serial, TypeKind.List, serial_int.id, U32{0}, U32{0}, [U32]{})
+    serial_pair: type_intern(serial, TypeKind.Tuple, U32{0}, U32{0}, U32{0}, [U32]{U32{7}, serial_list.id, U32{8}, serial_int.id})
+    assert_eq(ids[type_row(list)], serial_list)
+    assert_eq(ids[type_row(pair)], serial_pair)
+    // The field names stay names: only the type children were renumbered.
+    assert_eq(type_child(shared, ids[type_row(pair)], 0), U32{7})
+}
