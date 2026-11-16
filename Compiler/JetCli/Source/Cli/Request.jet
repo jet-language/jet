@@ -103,7 +103,7 @@ use {
         jet_eval_default_config,
         jet_eval_native_session,
     ]
-    jet_backend.[X64ImageFile, X64_SELF_EXECUTABLE, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_pack, x64_self_read, x64_self_read_into]
+    jet_backend.[X64ExecutableResult, X64ImageFile, X64_SELF_EXECUTABLE, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_pack, x64_self_read, x64_self_read_into]
     jet_ir.[IRLibraryExportRow, IRLibraryResult, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent, sema_core_bodies_read]
@@ -198,8 +198,8 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // `#Export(c)`. `lifecycle` is the lifecycle list's path
 // (JET_FRONT_LIBRARY_LIFECYCLE). Each lowering phase is a span of
 // `trace_sink` under the names the native route uses (Host.jet), and the web
-// partition, Core library and pack links are `runtime.web`, `runtime.core`
-// and `runtime.pack`.
+// partition, Core library and pack links are `runtime.web`, `runtime.core`,
+// `runtime.pack.alone` and `runtime.pack`.
 //
 // JET_FRONT_CORE_OBJECT_OUTPUT: the Core code library (CoreLibrary.jet), from
 // its own Core check, which the runtime image links beside the runtime. Its
@@ -208,7 +208,8 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // machine code waits, for the runtime's thread receipt, since Core starts
 // threads through the runtime. Then it compiles on a task of its own
 // (jet_cli_core_library_made) while the runtime's machine code, web
-// partition and object are made here (jet_cli_runtime_object). The
+// partition and object are made here (jet_cli_runtime_object) and the pack
+// links from that object (jet_cli_runtime_pack_linked). The
 // compiler's identity, which both compiles read, is settled before either
 // starts. The runtime's IR build follows its front end at once, so the front
 // end's compile state drops on a detached task meanwhile
@@ -225,7 +226,8 @@ jet_cli_runtime_library: fn(request: &&JetDriverCompileRequest, prefix: String, 
         .Built(result, library, interface_text, threads, receipt) -> {
             object: jet_cli_runtime_object(library, interface_text, threads, receipt, prefix, trace_sink)
             if object.problem != "" -> return jet_driver_compile_escaped_failure(object.problem)
-            jet_cli_runtime_packed(result, prefix, object.bytes.move(), [U8]?{None}, compiler_threads, trace_sink)
+            pack: jet_cli_runtime_pack_linked(prefix, object.bytes.move(), trace_sink)
+            jet_cli_runtime_packed(result, prefix, pack.move(), [U8]?{None}, compiler_threads, trace_sink)
         }
     }
 }
@@ -247,28 +249,37 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
     if runtime.move() == {
         .Stopped(result) -> result
         .Built(result, library, interface_text, threads, receipt) -> {
-            objects := [JetCLIRuntimeObject]{}
+            problems := [String]{}
+            packs := [JetCLIRuntimePackLinked?]{}
             cores := [JetCLICoreLibrary]{}
             task.group jet_cli_runtime_core_beside {
                 making: task jet_cli_core_library_made(core_ir, core_prefix, receipt, trace_sink)
-                objects.push(jet_cli_runtime_object(library, interface_text, threads, receipt, prefix, trace_sink))
+                object: jet_cli_runtime_object(library, interface_text, threads, receipt, prefix, trace_sink)
+                // The pack is linked here while the Core object compiles; its
+                // findings and file are written after the Core object's
+                // problem is known (jet_cli_runtime_pack).
+                if object.problem == "" {
+                    packs.push(jet_cli_runtime_pack_linked(prefix, object.bytes.move(), trace_sink))
+                }
+                problems.push(object.problem.move())
                 cores.push(making.join() ?? JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core library's machine code stopped: {compiler_threads_failure_text(err)}"})
             }
-            object: objects.pop() ?? panic("the runtime library lost its object")
+            object_problem: problems.pop() ?? panic("the runtime library lost its object's problem")
             core: cores.pop() ?? panic("the runtime library lost the Core object")
-            if object.problem != "" -> return jet_driver_compile_escaped_failure(object.problem)
+            if object_problem != "" -> return jet_driver_compile_escaped_failure(object_problem)
             if core.problem != "" -> return jet_driver_compile_escaped_failure(core.problem)
-            jet_cli_runtime_packed(result, prefix, object.bytes.move(), Val(core.bytes.move()), compiler_threads, trace_sink)
+            pack: packs.pop() ?? panic("the runtime library lost its pack")
+            jet_cli_runtime_packed(result, prefix, pack.move(), Val(core.bytes.move()), compiler_threads, trace_sink)
         }
     }
 }
 
-// The runtime `result` lowered to `object`, with the Core library's object
-// `core` (None: no Core object): the pack and the image, on `threads`
-// (jet_cli_runtime_pack).
-jet_cli_runtime_packed: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], core: &&[U8]?, threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
+// The runtime `result` with its pack `pack` (jet_cli_runtime_pack_linked)
+// and the Core library's object `core` (None: no Core object): the pack and
+// the image, on `threads` (jet_cli_runtime_pack).
+jet_cli_runtime_packed: fn(result: &&JetDriverCompileResult, prefix: String, pack: &&JetCLIRuntimePackLinked?, core: &&[U8]?, threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     if trace_sink == .Val(sink) -> sink.begin("runtime.pack", "", -1, -1)
-    packed: jet_cli_runtime_pack(result, prefix, object, core, threads)
+    packed: jet_cli_runtime_pack(result, prefix, pack, core, threads)
     if trace_sink == .Val(sink) -> sink.end("runtime.pack", -1)
     packed
 }
@@ -399,28 +410,46 @@ jet_cli_runtime_lint_issue: fn(finding: IRLintFinding) -> String Never! {
     "{finding.function}: IR Lint after {finding.pass}, {finding.rule}: {finding.message}"
 }
 
-// JET_FRONT_RUNTIME_PACK_OUTPUT: links the runtime library object `object`
-// alone into the runtime pack, with no C archive (#6693), and
-// JET_FRONT_RUNTIME_IMAGE_OUTPUT: the pack prelinked at the run base, which
-// `jet run` binds programs to (Image/RuntimePack.jet x64_link_runtime_image),
-// linked on `threads`.
+// The runtime pack: the runtime library object `object` linked alone, with
+// no C archive (#6693), when JET_FRONT_RUNTIME_PACK_OUTPUT names its path;
+// None otherwise. The link writes nothing (jet_cli_runtime_pack writes the
+// pack and its findings), and it reads nothing of the Core library's, so
+// the runtime library with Core links it while the Core object still
+// compiles (jet_cli_runtime_with_core), as the `runtime.pack.alone` span.
+JetCLIRuntimePackLinked: struct {
+    path: String
+    linked: X64ExecutableResult
+}
+
+jet_cli_runtime_pack_linked: fn(prefix: String, object: &&[U8], trace_sink: JetCLITraceSink?) -> JetCLIRuntimePackLinked? {
+    path: cli_sys.get(ENV_JET_FRONT_RUNTIME_PACK_OUTPUT) ?? return None
+    if trace_sink == .Val(sink) -> sink.begin("runtime.pack.alone", "", -1, -1)
+    linked: x64_link_runtime_pack([String]{"{prefix}.o"}, [[U8]]{object.move()}, [String]{})
+    if trace_sink == .Val(sink) -> sink.end("runtime.pack.alone", linked.bytes.len())
+    Val(JetCLIRuntimePackLinked{path: path, linked: linked})
+}
+
+// Writes the runtime pack `pack` (jet_cli_runtime_pack_linked; None: none
+// asked for), and with JET_FRONT_RUNTIME_IMAGE_OUTPUT links the image: the
+// pack prelinked at the run base, which `jet run` binds programs to
+// (Image/RuntimePack.jet x64_link_runtime_image), on `threads`.
 // With the Core object `core` (jet_cli_core_library) the image prelinks the
 // runtime object and it together, so a program bound to the image can call
 // a Core function by its symbol; the pack, which a full link reads, stays
 // the runtime's alone.
-jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], core: &&[U8]?, threads: CompilerThreads) -> JetDriverCompileResult {
-    if cli_sys.get(ENV_JET_FRONT_RUNTIME_PACK_OUTPUT) == .Val(pack_path) {
-        linked := x64_link_runtime_pack([String]{"{prefix}.o"}, [[U8]]{object.move()}, [String]{})
+jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, pack: &&JetCLIRuntimePackLinked?, core: &&[U8]?, threads: CompilerThreads) -> JetDriverCompileResult {
+    if pack.move() == .Val(made) {
+        linked := made.linked.move()
         if linked.errors.len() > 0 {
             cli_files.write("{prefix}.pack-issues", linked.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack findings: {err}")
             return jet_driver_compile_escaped_failure("runtime pack linking failed; see {prefix}.pack-issues")
         }
-        cli_files.write_bytes(pack_path, linked.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack: {err}")
+        cli_files.write_bytes(made.path, linked.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack: {err}")
         if cli_sys.get(ENV_JET_FRONT_RUNTIME_IMAGE_OUTPUT) == .Val(image_path) {
             prelinked := [U8]{}
             if core.move() == .Val(code) {
                 // The runtime object moved into the pack link; it is read
-                // back from the file written above.
+                // back from the file the runtime build wrote.
                 runtime_object := cli_files.read_bytes("{prefix}.o") ?? return jet_driver_compile_escaped_failure("cannot read the runtime object back: {err}")
                 both := x64_link_runtime_pack([String]{"{prefix}.o", "the Core library object"}, [[U8]]{runtime_object.move(), code}, [String]{})
                 if both.errors.len() > 0 {
@@ -429,7 +458,7 @@ jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, objec
                 }
                 prelinked = both.bytes.move()
             } else { prelinked = linked.bytes.move() }
-            image: x64_link_runtime_image(pack_path, prelinked.move(), threads)
+            image: x64_link_runtime_image(made.path, prelinked.move(), threads)
             if image.errors.len() > 0 {
                 cli_files.write("{prefix}.pack-issues", image.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime image findings: {err}")
                 return jet_driver_compile_escaped_failure("runtime image linking failed; see {prefix}.pack-issues")
