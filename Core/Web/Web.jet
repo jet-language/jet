@@ -179,6 +179,20 @@ priv AppMount: struct {
     security: [String]
 }
 
+// An endpoint, webhook or mount that `app.mount` registered, whose rows the
+// app adds once it serves (`app_service_routes`), with the place of the call
+// that registered it. It is the endpoint (`__remote_public`, or
+// `__remote_signed_in` when `signed_in`), the webhook, or the mounted
+// handler, whichever is set.
+priv AppService: struct {
+    path: String
+    at: SourceLocation
+    remote: AppRemote?
+    signed_in: Bool
+    hook: AppWebhook?
+    mounted: AppHandler?
+}
+
 priv AppState: struct {
     routes: [AppRoute]
     actions: [AppAction]
@@ -211,6 +225,10 @@ priv AppState: struct {
     // The endpoint and webhook rows, which a served app with a trace
     // export spans (`app_trace_install`).
     traced: [AppTraced]
+    // The endpoints, webhooks and mounts registered since the app last
+    // served, whose rows serving adds; in a cell of its own, since their
+    // handlers can't be copied.
+    services: Shared<[AppService]>
 }
 
 // The compiler's web rules key on this marker, not on this module's name: the
@@ -335,12 +353,7 @@ App: struct {
         security := [String]{}
         if policy != "" -> security.push(policy.copy())
         mounted: app_handler(handler)
-        reads: mounted.copy()
-        writes: mounted.copy()
-        base: app_trim_slashes(prefix)
-        table: app_table(self)
-        http_server.route_add(table, "GET", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(reads, request)) }), "", at)
-        http_server.route_add(table, "POST", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(writes, request)) }), "", at)
+        app_service_add(self, AppService{path: app_trim_slashes(prefix), at: at, remote: None, signed_in: false, hook: None, mounted: Val(mounted.copy())})
         guard := self.__state.guard_edit()
         guard.value.mounts.push(AppMount{prefix: prefix, handler: mounted, effects: effects, security: security})
         self.copy()
@@ -357,10 +370,7 @@ App: struct {
     __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, reply: String, at: SourceLocation{#caller}) -> App Never! {
         endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: reply, kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
-        table: app_table(self)
-        answers: http_server.__handler(fn(request: HTTPRequest) { Ok(if request.method == "GET" -> app_remote_get_response(endpoint, request) else -> app_remote_response(endpoint, request)) })
-        http_server.route_add(table, "POST", path, answers.copy(), "", at)
-        http_server.route_add(table, "GET", path, answers, "", at)
+        app_service_add(self, AppService{path: path.copy(), at: at, remote: Val(endpoint), signed_in: false, hook: None, mounted: None})
         self.copy()
     }
 
@@ -370,7 +380,7 @@ App: struct {
     __remote_signed_in: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
         endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: "", kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
-        http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_signed_in_response(endpoint, request)) }), "", at)
+        app_service_add(self, AppService{path: path.copy(), at: at, remote: Val(endpoint), signed_in: true, hook: None, mounted: None})
         self.copy()
     }
 
@@ -384,7 +394,7 @@ App: struct {
         if params != "" -> names = params.split(",").to_list()
         hook: AppWebhook{signature: signature, params: names, key: key, answer: answer}
         app_traced(self, path, "")
-        http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_webhook_response(hook, request)) }), "", at)
+        app_service_add(self, AppService{path: path.copy(), at: at, remote: None, signed_in: false, hook: Val(hook), mounted: None})
         self.copy()
     }
 
@@ -587,12 +597,13 @@ App: struct {
     // A server over the table on `address`; the labelled `tls:` option
     // serves HTTPS and `deadline:` bounds each connection's reads and writes.
     // A failed bind is the caller's error to handle. It reads files because
-    // it adds the app graph's screens, whose views may read files when they
-    // answer, as every handler may.
+    // it adds the rows of the app's endpoints, webhooks and mounts and of the
+    // app graph's screens, whose handlers may read files when they answer.
     bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net, FS.Read]> HTTPServer HTTPError! {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
+        app_service_routes(self)
         app_screen_routes(self)
         http_server.server_bind(address, app_table(self), tls, deadline)
     }
@@ -602,6 +613,7 @@ App: struct {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
+        app_service_routes(self)
         app_screen_routes(self)
         http_server.server_serve_once(listener, app_table(self))
     }
@@ -636,6 +648,7 @@ app: fn() -> App Never! {
             dev: false,
             image_handler: None,
             traced: [AppTraced]{},
+            services: Shared{[AppService]{}},
         }},
     }
 }
@@ -659,6 +672,8 @@ bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Setting
     settings: app_settings<Settings>(prefix)
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, app_build_failure("{err}"))
     app_image_route(app)
+    app_service_routes(app)
+    app_screen_routes(app)
     _: app_trace_start(app)
     http_server.server_bind(address, app_table(app), tls, deadline)
 }
@@ -702,6 +717,65 @@ priv app_state: fn(app: App) -> AppState Never! {
 priv app_table: fn(app: App) -> HTTPMux Never! {
     guard: app.__state.guard_read()
     guard.value.table.copy()
+}
+
+// Holds `service` until the app serves, which adds its rows
+// (`app_service_routes`).
+priv app_service_add: fn(app: App, service: &&AppService) Never! {
+    held: app_services(app)
+    guard := held.guard_edit()
+    guard.value.push(service)
+}
+
+priv app_services: fn(app: App) -> Shared<[AppService]> Never! {
+    guard: app.__state.guard_read()
+    guard.value.services.copy()
+}
+
+// Takes the endpoints, webhooks and mounts registered since the app last
+// served, last first, and leaves none, so each adds its rows once.
+priv app_services_taken: fn(app: App) -> [AppService] Never! {
+    held: app_services(app)
+    guard := held.guard_edit()
+    taken := [AppService]{}
+    loop {
+        service: guard.value.pop() ?? break
+        taken.push(service)
+    }
+    taken
+}
+
+// Adds the rows of each endpoint, webhook and mount the app registered since
+// it last served, in the order it registered them. Their handlers are made
+// here, by a serving call, and not where `app.mount` registers them: a
+// handler may read files and use the network when it answers, which serving
+// does, so code that only builds the app needs neither.
+priv app_service_routes: fn(app: App) Never! {
+    table: app_table(app)
+    services := app_services_taken(app)
+    loop {
+        service: services.pop() ?? return
+        path: service.path.copy()
+        at: service.at
+        if service.remote == .Val(_) {
+            endpoint: service.remote.move() ?? next
+            if service.signed_in {
+                http_server.route_add(table, "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_signed_in_response(endpoint, request)) }), "", at)
+                next
+            }
+            answers: http_server.__handler(fn(request: HTTPRequest) { Ok(if request.method == "GET" -> app_remote_get_response(endpoint, request) else -> app_remote_response(endpoint, request)) })
+            http_server.route_add(table, "POST", path, answers.copy(), "", at)
+            http_server.route_add(table, "GET", path, answers, "", at)
+        } else if service.hook == .Val(_) {
+            hook: service.hook.move() ?? next
+            http_server.route_add(table, "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_webhook_response(hook, request)) }), "", at)
+        } else if service.mounted == .Val(mounted) {
+            reads: mounted.copy()
+            writes: mounted.copy()
+            http_server.route_add(table, "GET", "{path}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(reads, request)) }), "", at)
+            http_server.route_add(table, "POST", "{path}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(app_mount_response(writes, request)) }), "", at)
+        }
+    }
 }
 
 // The port a served app listens on and what chose it.
@@ -750,6 +824,7 @@ priv app_serve: fn(app: App, chosen: AppPort) -[Env, IO, Net, FS.Read, Time]> Ne
     app_image_route(app)
     app_push_route(app)
     app_crawl_routes(app)
+    app_service_routes(app)
     app_screen_routes(app)
     if !app_has_root_catch_all(table) {
         fallback: app.copy()
@@ -2124,6 +2199,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
     live: auth.password_login("web-test-ann", "ann's hash", now * 1000, 60000) ?? panic("ann signs in: {err}")
     ended: auth.password_login("web-test-ann", "ann's hash", (now - 60) * 1000, 1) ?? panic("ann signed in before: {err}")
     served: app().__remote_signed_in("/api/me", fn(args: RemoteArgs) { Ok(args.__reply_value<String>((calls.maybe_caller() ?? auth.AccountID.from_string("no one")).raw())) }, 0, 0)
+    app_service_routes(served)
     table: app_table(served)
     id: auth.session_id(live)
     assert_eq(app_signed_in_test(table, now, "", "Bearer {id}", "theme=dark; jet_session=not-it"), "200 {{\"ok\":\"web-test-ann\"}}")
@@ -2157,6 +2233,7 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
 #Test("a public reply cached `.Public` carries its max-age and ETag and is answered 304 to a GET that names the ETag; no one keeps a `.Private` or signed-in reply") {
     _: calls.new("Cache").__cache<String>("web-test.Cached", calls.CachePolicy.Public{max_age: 10min})
     served: app().__remote_public("/api/cached", fn(args: RemoteArgs) { Ok(args.__reply_value<Bool>(false)) }, 0, 0, "web-test.Cached")
+    app_service_routes(served)
     table: app_table(served)
     posted: http_server.__dispatch(table, web_http.server_request("POST", "/api/cached", web_http.body_text("[]"), web_http.headers()))
     assert_eq(posted.status, 200)
@@ -2179,6 +2256,7 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
     assert_eq(refused.status, 405)
     assert_eq(refused.header("allow"), Val("POST"))
     signed: app().__remote_signed_in("/api/me", fn(args: RemoteArgs) { Ok(args.__reply_value<Bool>(false)) }, 0, 0)
+    app_service_routes(signed)
     unsigned: http_server.__dispatch(app_table(signed), web_http.server_request("POST", "/api/me", web_http.body_text("[]"), web_http.headers()))
     assert_eq(unsigned.status, 401)
     assert_eq(unsigned.header("cache-control"), Val("private, no-store"))
@@ -2202,6 +2280,7 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
         0,
         "web-test.Kept",
     )
+    app_service_routes(served)
     table: app_table(served)
     replies: [String]{"{{\"ok\":false}}", "{{\"ok\":0}}", "{{\"ok\":\"\"}}"}
     loop (kind, reply) in replies {
@@ -3680,6 +3759,7 @@ priv app_push_test_status: fn(authorization: String, at: Int, body: String) -[Ne
 
 #Test("with no collector named an app runs no trace layer; with one, an endpoint call is one span") {
     served: app().__remote_public("/api/status", fn(args: RemoteArgs) { Ok(args.__reply_value<String>("up")) }, 0, 0, "String")
+    app_service_routes(served)
     table: app_table(served)
     // No collector named: nothing is installed, so a request runs no layer.
     assert(!(app_trace_settings([String:String]{}) == .Val(_)))
