@@ -2213,6 +2213,26 @@ App: struct {
         self.copy()
     }
 
+    // Makes the app installable from a browser: a server of the graph
+    // answers a web app manifest that names the app `name` in `color`
+    // (0xRRGGBB), with icons of 192 and 512 pixels and a maskable one of 512
+    // made from the one `icon` file, and every page it serves links the
+    // manifest. The last call holds.
+    installable: fn(self, name: String, icon: String, color: Int) -> App Never! {
+        if name == "" {
+            panic("`.installable` needs the app's name: an installed app shows it under its icon")
+        }
+        if icon == "" {
+            panic("`.installable` needs the path of the app's icon, a PNG or JPEG file")
+        }
+        if color < 0 || color > 0xFFFFFF {
+            panic("`.installable(color: {color})` is no color: write it as 0xRRGGBB, as 0x2a5bd7")
+        }
+        held := APP_GRAPH.guard_edit()
+        held.value.install = Val(AppInstall{name: name, icon: icon, color: color})
+        self.copy()
+    }
+
     // `.screen(path, view, signed_in:)` as the compiler lowers it, once it
     // has checked `view`'s state `V` against `path`: `state` names `V`,
     // `query` lists its `#App.Query` fields, and `open` opens the screen at
@@ -2342,6 +2362,12 @@ App: struct {
     __screens: fn(self) -> [AppScreen] Never! {
         held: APP_GRAPH.guard_read()
         held.value.screens.copy()
+    }
+
+    // What `.installable` set, None when the graph is not installable.
+    __install: fn(self) -> AppInstall? Never! {
+        held: APP_GRAPH.guard_read()
+        held.value.install.copy()
     }
 
     // Opens `screen` at the address whose field texts are `fields`, by field
@@ -2484,7 +2510,7 @@ Query: struct {
 // heads or queue yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None, route_data: [Int]{}}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -2961,22 +2987,32 @@ priv AppCurrent: struct {
     fields: [String:String]
 }
 
+// How a browser installs the app (`App.installable`): the name an installed
+// app shows, the path of its icon (a PNG or JPEG, relative to the working
+// directory like every app path) and its color as 0xRRGGBB.
+AppInstall: struct {
+    name: String
+    icon: String
+    color: Int
+}
+
 // The process's app graph: its title, its services by the name of each
 // (`.api`), the endpoints of the services it mounts by `{service}/{method}`,
-// its screens in the order it adds them, its offline mode, the screen open
-// now and that screen's route data: the ids of the live bindings its view
-// read.
+// its screens in the order it adds them, its offline mode, how a browser
+// installs it, the screen open now and that screen's route data: the ids of
+// the live bindings its view read.
 priv AppGraph: struct {
     title: String
     apis: [String:AppAPI]
     endpoints: [String:AppEndpoint]
     screens: [AppScreen]
     offline: Offline
+    install: AppInstall?
     current: AppCurrent?
     route_data: [Int]
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None, route_data: [Int]{}}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}}}
 
 // The most bytes one call's body to the service `service` (its key) may
 // hold, when the app graph's `.api<S>(path, max_upload:)` names it.

@@ -12,6 +12,7 @@ package: {
 use {
     core
     core.http.[HTTPError, HTTPRequest, HTTPResponse, HTTPRouter]
+    core.color.[Color]
     core.image.[ImageError, ImageFormat, Limits]
     auth: core.auth
     codec: core.image
@@ -724,6 +725,7 @@ App: struct {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
+        app_install_routes(self)
         app_uploads_clean(app_service_routes(self))
         app_screen_routes(self)
         http_server.server_bind(address, app_table(self), tls, deadline)
@@ -734,6 +736,7 @@ App: struct {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
+        app_install_routes(self)
         app_uploads_clean(app_service_routes(self))
         app_screen_routes(self)
         http_server.server_serve_once(listener, app_table(self))
@@ -955,6 +958,7 @@ priv app_serve: fn(app: App, chosen: AppPort) -[Env, IO, Net, FS.Read, Time]> Ne
     app_image_route(app)
     app_push_route(app)
     app_crawl_routes(app)
+    app_install_routes(app)
     app_uploads_clean(app_service_routes(app))
     app_screen_routes(app)
     if !app_has_root_catch_all(table) {
@@ -1346,6 +1350,221 @@ priv app_robots_response: fn(request: HTTPRequest) -> HTTPResponse Never! {
     if calls.sitemap.given() -> lines.push("Sitemap: {app_crawl_origin(request)}/sitemap.xml")
     fields: core.http.headers_set(core.http.headers(), "content-type", "text/plain; charset=utf-8")
     http_server.response_body(200, core.http.body_text("{lines.join("\n")}\n"), fields)
+}
+
+// ── Install ─────────────────────────────────────────────────────────────
+//
+// An app graph made installable (`.installable(name:, icon:, color:)`) is
+// served with a web app manifest at `/manifest.webmanifest`, which every
+// page links (`app_install_tags`), and the manifest's icons, each made from
+// the graph's one icon file: 192 and 512 pixels, the image fitted and
+// centered on a transparent square, and a maskable 512, the image inside the
+// inner 80% (the safe zone a platform's mask never cuts) on the app's color.
+// An icon's address holds a key of every input that decides its bytes
+// (`image_key`), so it answers with immutable caching as an image variant
+// does; the manifest is revalidated, so an edited icon gets new addresses.
+// An icon is made the first time it is asked for, by `install_icon_bytes`.
+
+// The address of the manifest, and the prefix of its icons' addresses.
+priv C_APP_MANIFEST: "/manifest.webmanifest"
+
+priv C_APP_ICONS: "/__jet/icons/"
+
+// One icon of the manifest: its size in pixels, the 0xRRGGBB color a
+// maskable icon fills its square with (None for one that is transparent
+// around the image), and its address.
+priv InstallIcon: struct {
+    size: Int
+    fill: Int?
+    path: String
+}
+
+// Registers GET `/manifest.webmanifest` (app_manifest_response) and GET
+// `/__jet/icons/:icon` (app_icon_response) when the app graph is
+// installable, each unless the app routes that path itself or did this
+// before. An icon file that can't be read, or is no PNG or JPEG, stops the
+// app before it serves.
+priv app_install_routes: fn(app: App) -[Net, FS.Read]> Never! {
+    install: calls.App.__graph().__install() ?? return
+    data: core.files.read_bytes(install.icon) ?? panic("the app's icon `{install.icon}` can't be read: {err}")
+    if codec.inspect(data, C_IMAGE_LIMITS) == .Err(problem) {
+        panic("the app's icon `{install.icon}` is no icon `.installable` can use: {install_icon_problem(problem)}")
+    }
+    table: app_table(app)
+    taken := [String]{}
+    loop route in http_server.mux_routes(table) {
+        if route.method == "GET" -> taken.push(route.pattern.copy())
+    }
+    if !taken.contains(C_APP_MANIFEST) {
+        http_server.route_add(table, "GET", C_APP_MANIFEST, http_server.__handler(fn(request: HTTPRequest) { Ok(app_manifest_response(request)) }), "", #here)
+    }
+    icons: "{C_APP_ICONS}:icon"
+    if !taken.contains(icons) {
+        served: app.copy()
+        http_server.route_add(table, "GET", icons, http_server.__handler(fn(request: HTTPRequest) { Ok(app_icon_response(served, request)) }), "", #here)
+    }
+}
+
+priv install_icon_problem: fn(problem: ImageError) -> String Never! {
+    if problem == {
+        .Malformed -> "it is not a PNG or JPEG file it can read"
+        .Unsupported -> "it is a GIF, or a JPEG that is not baseline or extended sequential"
+        .TooLarge -> "it is larger than an image may be"
+    }
+}
+
+// The tags every page's `<head>` ends with when the app graph is
+// installable: the link to its manifest and its theme color.
+priv app_install_tags: fn() -> String Never! {
+    install: calls.App.__graph().__install() ?? return ""
+    "<link rel=\"manifest\" href=\"{C_APP_MANIFEST}\"><meta name=\"theme-color\" content=\"{install_color(install.color).to_hex()}\">"
+}
+
+priv install_color: fn(color: Int) -> Color Never! {
+    Color{r: U8{(color >> 16) & 255}, g: U8{(color >> 8) & 255}, b: U8{color & 255}, a: U8{255}}
+}
+
+// The icons of the icon file whose bytes are `data`, as the manifest lists
+// them.
+priv install_icons: fn(install: calls.AppInstall, data: [U8]) -> [InstallIcon] Never! {
+    digest: crypto.sha256(data).hex()
+    icons := [InstallIcon]{}
+    icons.push(install_icon(digest, 192, None))
+    icons.push(install_icon(digest, 512, None))
+    icons.push(install_icon(digest, 512, Val(install.color)))
+    icons
+}
+
+priv install_icon: fn(digest: String, size: Int, fill: Int?) -> InstallIcon Never! {
+    made: if fill == .Val(color) -> "{C_IMAGE_ENCODER} maskable {color}" else -> "{C_IMAGE_ENCODER} icon"
+    key: image_key(digest, size, .PNG, 0, made)
+    InstallIcon{size: size, fill: fill, path: "{C_APP_ICONS}{key.slice(0, 16)}.{size}.png"}
+}
+
+// The PNG of `icon` made from the image `data`: the image scaled by area
+// average to fit the icon's square, or for a maskable icon the inner 80% of
+// it, keeping its proportions, and centered; around it the square is
+// transparent, or the maskable icon's color, which the image's own
+// transparency shows through to.
+priv install_icon_bytes: fn(data: [U8], icon: InstallIcon) -> [U8] ImageError! {
+    decoded: codec.decode(data, C_IMAGE_LIMITS) ?? return Err(err)
+    box: if icon.fill == None -> icon.size else -> icon.size * 4 /% 5
+    longest: if decoded.width > decoded.height -> decoded.width else -> decoded.height
+    width: install_icon_side(decoded.width, box, longest)
+    height: install_icon_side(decoded.height, box, longest)
+    scaled: codec.resize(decoded, width, height, .Area, C_IMAGE_LIMITS) ?? return Err(err)
+    shade: icon.fill ?? 0
+    opaque: if icon.fill == None -> 0 else -> 255
+    back: [Int]{(shade >> 16) & 255, (shade >> 8) & 255, shade & 255, opaque}
+    left: (icon.size - width) /% 2
+    top: (icon.size - height) /% 2
+    pixels := [U8]{}
+    loop y in 0..<icon.size {
+        loop x in 0..<icon.size {
+            if x < left || x >= left + width || y < top || y >= top + height {
+                loop channel in 0..<4 -> pixels.push(U8{back[channel]})
+                next
+            }
+            at: ((y - top) * width + (x - left)) * 4
+            if icon.fill == None {
+                loop channel in 0..<4 -> pixels.push(scaled.pixels[at + channel])
+                next
+            }
+            alpha: Int{scaled.pixels[at + 3]}
+            loop channel in 0..<3 {
+                pixels.push(U8{(Int{scaled.pixels[at + channel]} * alpha + back[channel] * (255 - alpha) + 127) /% 255})
+            }
+            pixels.push(U8{255})
+        }
+    }
+    codec.encode(codec.Image{width: icon.size, height: icon.size, pixels: pixels}, .PNG, C_IMAGE_LIMITS)
+}
+
+// A side of `side` pixels of an image whose longest side is `longest`,
+// scaled so that side is `box`, rounded, and at least 1.
+priv install_icon_side: fn(side: Int, box: Int, longest: Int) -> Int Never! {
+    scaled: (side * box + longest /% 2) /% longest
+    if scaled < 1 -> 1 else -> scaled
+}
+
+// The web app manifest: the app's name, its color as theme and background,
+// standalone from the site's root, and its icons; the not-found page when
+// the icon file can't be read any more.
+priv app_manifest_response: fn(request: HTTPRequest) -[FS.Read]> HTTPResponse Never! {
+    install: calls.App.__graph().__install() ?? return http_server.response_body(404, core.http.body_text(""), core.http.headers())
+    data: core.files.read_bytes(install.icon) ?? return http_server.response_body(404, core.http.body_text(""), core.http.headers())
+    color: app_json_string(install_color(install.color).to_hex())
+    name: app_json_string(install.name)
+    icons := [String]{}
+    loop icon in install_icons(install, data) {
+        purpose: if icon.fill == None -> "" else -> ",\"purpose\":\"maskable\""
+        icons.push("{{\"src\":{app_json_string(icon.path)},\"sizes\":\"{icon.size}x{icon.size}\",\"type\":\"image/png\"{purpose}}}")
+    }
+    document: "{{\"name\":{name},\"short_name\":{name},\"start_url\":\"/\",\"scope\":\"/\",\"display\":\"standalone\",\"theme_color\":{color},\"background_color\":{color},\"icons\":[{icons.join(",")}]}}"
+    typed: core.http.headers_set(core.http.headers(), "content-type", "application/manifest+json")
+    fields: core.http.headers_set(typed, "cache-control", "no-cache")
+    http_server.response_body(200, core.http.body_text(document), fields)
+}
+
+// The icon at `request`'s address, made from the icon file as it is now
+// and kept once made; else the app's not-found page.
+priv app_icon_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    path: "{C_APP_ICONS}{request.param("icon") ?? ""}"
+    if app_image_cached(app, path) == .Val(answer) -> return answer
+    install: calls.App.__graph().__install() ?? return app_not_found_response(app, request)
+    data: core.files.read_bytes(install.icon) ?? return app_not_found_response(app, request)
+    loop icon in install_icons(install, data) {
+        if icon.path != path -> next
+        bytes: install_icon_bytes(data, icon) ?? return app_not_found_response(app, request)
+        answer: image_response(bytes, .PNG)
+        guard := app.__state.guard_edit()
+        guard.value.image_bytes[path] = bytes
+        return answer
+    }
+    app_not_found_response(app, request)
+}
+
+#Test("an installable graph's pages link its manifest, and its icons fit the image in their square, a maskable one inside the safe zone on the app's color") {
+    red := [U8]{}
+    loop _ in 0..<8 {
+        red.push(U8{255})
+        red.push(U8{0})
+        red.push(U8{0})
+        red.push(U8{255})
+    }
+    source: codec.encode(codec.Image{width: 4, height: 2, pixels: red}, .PNG, C_IMAGE_LIMITS) ?? panic("encode: {err}")
+    plain: install_icon("digest", 192, None)
+    icon: codec.decode(install_icon_bytes(source, plain) ?? panic("icon: {err}"), C_IMAGE_LIMITS) ?? panic("decode: {err}")
+    assert_eq(icon.width, 192)
+    assert_eq(icon.height, 192)
+    // 4 by 2 fits as 192 by 96, centered: rows 48 to 143 are the image.
+    assert_eq(Int{icon.pixels[3]}, 0)
+    middle: (96 * 192 + 96) * 4
+    assert_eq(Int{icon.pixels[middle]}, 255)
+    assert_eq(Int{icon.pixels[middle + 1]}, 0)
+    assert_eq(Int{icon.pixels[middle + 3]}, 255)
+    above: (40 * 192 + 96) * 4
+    assert_eq(Int{icon.pixels[above + 3]}, 0)
+    maskable: install_icon("digest", 512, Val(0x2a5bd7))
+    assert(maskable.path != install_icon("digest", 512, None).path)
+    assert(maskable.path.starts_with("/__jet/icons/") && maskable.path.ends_with(".512.png"))
+    masked: codec.decode(install_icon_bytes(source, maskable) ?? panic("maskable: {err}"), C_IMAGE_LIMITS) ?? panic("decode: {err}")
+    assert_eq(masked.width, 512)
+    // The image is 409 by 205 inside the safe zone; the corners and the
+    // margin beside it are the app's color, opaque.
+    loop at in ([Int]{0, (256 * 512 + 40) * 4}) {
+        assert_eq(Int{masked.pixels[at]}, 0x2a)
+        assert_eq(Int{masked.pixels[at + 1]}, 0x5b)
+        assert_eq(Int{masked.pixels[at + 2]}, 0xd7)
+        assert_eq(Int{masked.pixels[at + 3]}, 255)
+    }
+    center: (256 * 512 + 256) * 4
+    assert_eq(Int{masked.pixels[center]}, 255)
+    assert_eq(Int{masked.pixels[center + 2]}, 0)
+    _: calls.new("Shop").installable(name: "Shop", icon: "brand/icon.png", color: 0x2a5bd7)
+    assert_eq(app_install_tags(), "<link rel=\"manifest\" href=\"/manifest.webmanifest\"><meta name=\"theme-color\" content=\"#2a5bd7\">")
+    _: calls.new("Shop")
+    assert_eq(app_install_tags(), "")
 }
 
 // The states of a crawl test's public guide screen and signed-in inbox.
@@ -1874,10 +2093,11 @@ priv app_html: fn(status: Int, rendered: WebPage, route_data: String) -> HTTPRes
     app_document(status, "<meta charset=\"utf-8\"><title>{rendered.title}</title>", "{rendered.body}{route_data}")
 }
 
-// An HTML page of the markup `head` in its `<head>` and `body` in its
+// An HTML page of the markup `head` in its `<head>`, then the install tags
+// of an installable app graph (app_install_tags), and `body` in its
 // `<body>`.
 priv app_document: fn(status: Int, head: String, body: String) -> HTTPResponse Never! {
-    document: "<!doctype html><html><head>{head}</head><body>{body}</body></html>"
+    document: "<!doctype html><html><head>{head}{app_install_tags()}</head><body>{body}</body></html>"
     fields: core.http.headers_set(core.http.headers(), "content-type", "text/html; charset=utf-8")
     payload: core.http.body_text(document)
     http_server.response_body(status, payload, fields)

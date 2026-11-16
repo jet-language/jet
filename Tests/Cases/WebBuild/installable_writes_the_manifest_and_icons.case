@@ -1,0 +1,13 @@
+# `.installable(name:, icon:, color:)` on the app graph: every page the app
+# serves, a signed-in screen's 401 page too, links the web app manifest and
+# carries the theme color. The manifest names the app in its color,
+# standalone from the site's root, with three icons made from the one icon
+# file (brand/icon.png, 48 by 32, orange): 192 and 512 pixels, the image
+# fitted on a transparent square, and a maskable 512 whose image sits inside
+# the safe zone on the app's color. Each icon is a PNG at an address naming
+# its bytes, answered with immutable caching; the manifest is revalidated.
+fixture: InstallableWritesTheManifestAndIcons.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "/boards/b1: 200 | manifest linked: true | theme color: true\n/inbox/mine: 401 | manifest linked: true | theme color: true\nmanifest: 200 application/manifest+json | no-cache\nname: Crewboard | short: Crewboard | start: / | display: standalone | theme: #2a5bd7 | background: #2a5bd7\nicon 192x192 any: 200 image/png | public, max-age=31536000, immutable | 192x192 PNG\n  corner 0,0,0,0 | beside 255,128,0,255 | middle 255,128,0,255\nicon 512x512 any: 200 image/png | public, max-age=31536000, immutable | 512x512 PNG\n  corner 0,0,0,0 | beside 255,128,0,255 | middle 255,128,0,255\nicon 512x512 maskable: 200 image/png | public, max-age=31536000, immutable | 512x512 PNG\n  corner 42,91,215,255 | beside 42,91,215,255 | middle 255,128,0,255\nan unknown icon: 404\n"

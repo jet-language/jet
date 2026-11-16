@@ -1,0 +1,89 @@
+// An app graph made installable: every page it serves links the web app
+// manifest, the manifest names the app in its color with three icons, and
+// each icon is made from the one icon file (48 by 32, orange): 192 and 512
+// pixels fitted on a transparent square, and a maskable 512 with the image
+// inside the safe zone on the app's color. Each icon is a PNG answered with
+// immutable caching; the manifest is revalidated.
+use {
+    app
+    client: core.http.client
+    core.http.[HTTPResponse]
+    image: core.image
+    net: core.net
+    web: core.web
+}
+
+Home: struct {
+    board: String
+}
+
+home: fn(view: Home) -> String Never! { "board {view.board}" }
+
+Inbox: struct {
+    box: String
+}
+
+inbox: fn(view: Inbox) -> String Never! { view.box }
+
+ManifestIcon: struct {
+    src: String
+    sizes: String
+    purpose: String?
+}
+
+Manifest: struct {
+    name: String
+    short_name: String
+    start_url: String
+    display: String
+    theme_color: String
+    background_color: String
+    icons: [ManifestIcon]
+}
+
+// Serves one GET of `path` and gives its answer.
+fetch: fn(served: web.App, path: String) -> HTTPResponse {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr: listener.local_addr()
+    serving: task { served.serve_once(listener) ?? panic("serve") }
+    answered: client.get("http://{addr}{path}") ?? panic("get {path}")
+    serving.join() ?? panic("serve task")
+    answered
+}
+
+// The RGBA bytes of the pixel at `x`, `y` of `shown`.
+pixel: fn(shown: image.Image, x: Int, y: Int) -> String {
+    at: (y * shown.width + x) * 4
+    "{shown.pixels[at]},{shown.pixels[at + 1]},{shown.pixels[at + 2]},{shown.pixels[at + 3]}"
+}
+
+run: fn() {
+    _: app.new("Crewboard")
+        .screen("/boards/:board", home)
+        .screen("/inbox/:box", inbox, signed_in: true)
+        .installable(name: "Crewboard", icon: "brand/icon.png", color: 0x2a5bd7)
+    served: web.app()
+    loop path in ([String]{"/boards/b1", "/inbox/mine"}) {
+        page: fetch(served.copy(), path)
+        text: page.text() ?? "unreadable"
+        print("{path}: {page.status} | manifest linked: {text.contains("<link rel=\"manifest\" href=\"/manifest.webmanifest\">")} | theme color: {text.contains("<meta name=\"theme-color\" content=\"#2a5bd7\">")}")
+    }
+    answered: fetch(served.copy(), "/manifest.webmanifest")
+    print("manifest: {answered.status} {answered.header("content-type") ?? "no type"} | {answered.header("cache-control") ?? "no cache"}")
+    manifest: answered.json<Manifest>() ?? panic("manifest json: {err}")
+    print("name: {manifest.name} | short: {manifest.short_name} | start: {manifest.start_url} | display: {manifest.display} | theme: {manifest.theme_color} | background: {manifest.background_color}")
+    limits: image.Limits{max_input_bytes: 10000000, max_pixels: 1000000, max_output_bytes: 10000000}
+    loop icon in manifest.icons {
+        got: fetch(served.copy(), icon.src)
+        bytes: got.body().bytes(10000000) ?? panic("icon bytes: {err}")
+        shown: image.decode(bytes, limits) ?? panic("icon decode: {err}")
+        info: image.inspect(bytes, limits) ?? panic("icon inspect: {err}")
+        middle: shown.width /% 2
+        // A twentieth of the way in on the middle row: the image of an icon
+        // that fills its width, the margin of a maskable one.
+        beside: shown.width /% 20
+        print("icon {icon.sizes} {icon.purpose ?? "any"}: {got.status} {got.header("content-type") ?? "no type"} | {got.header("cache-control") ?? "no cache"} | {shown.width}x{shown.height} {info.format}")
+        print("  corner {pixel(shown, 0, 0)} | beside {pixel(shown, beside, middle)} | middle {pixel(shown, middle, middle)}")
+    }
+    print("an unknown icon: {fetch(served, "/__jet/icons/0000000000000000.192.png").status}")
+}
